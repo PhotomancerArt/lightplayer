@@ -1,10 +1,9 @@
 //! Public runtime state shape for texture nodes.
 
-use crate::{Revision, ValueSlot};
+use crate::{Revision, Slotted, ValueSlot};
 
 /// Runtime metadata exposed by a texture node.
-#[derive(lpc_slot_macros::SlotRecord)]
-#[slot(root, default_policy = "read_only_transient")]
+#[derive(Default, Slotted)]
 pub struct TextureState {
     pub width: ValueSlot<i32>,
     pub height: ValueSlot<i32>,

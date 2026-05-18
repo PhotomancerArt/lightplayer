@@ -1,12 +1,11 @@
-kind = "project"
-uid = "perf-fastmath"
+kind = "Project"
 name = "perf-fastmath"
 
 [nodes.output]
 artifact = "./output.toml"
 
 [nodes.clock]
-kind = "clock"
+artifact = "./clock.toml"
 
 [nodes.texture]
 artifact = "./texture.toml"

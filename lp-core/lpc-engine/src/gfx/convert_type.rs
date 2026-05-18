@@ -29,7 +29,11 @@ pub fn model_type_to_lps_type(ty: &LpType) -> LpsType {
         LpType::Mat2x2 => LpsType::Mat2,
         LpType::Mat3x3 => LpsType::Mat3,
         LpType::Mat4x4 => LpsType::Mat4,
-        LpType::String | LpType::Resource | LpType::Product(_) => {
+        LpType::Any
+        | LpType::String
+        | LpType::Resource
+        | LpType::Product(_)
+        | LpType::Enum { .. } => {
             panic!("model type cannot be mapped to shader ABI type: {ty:?}")
         }
         LpType::Array(element, len) => LpsType::Array {

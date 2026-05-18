@@ -11,8 +11,9 @@ use lpc_model::nodes::output::OutputDef;
 use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
-    Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingEndpoint, BusSlotRef, Dim2u,
-    Dim2uSlot, MapSlot, OptionSlot, RenderOrderSlot, SlotPath, SourcePathSlot, ValueSlot,
+    Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingRef, BusSlotRef, Dim2u,
+    Dim2uSlot, EnumSlot, FixtureSamplingConfig, MapSlot, OptionSlot, RenderOrder, RenderOrderSlot,
+    SlotPath, SourcePath, SourcePathSlot, ValueSlot,
 };
 use lpfs::LpFs;
 
@@ -58,6 +59,13 @@ pub fn create_project_structure(dir: &Path, name: Option<&str>) -> Result<()> {
 /// Creates the default project structure with a rainbow rotating color wheel shader.
 /// The filesystem should already be chrooted to the project directory.
 pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
+    fs.write_file(
+        "/clock.toml".as_path(),
+        br#"kind = "Clock"
+"#,
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to write clock.toml: {e}"))?;
+
     // Create texture node
     let texture_config = TextureDef {
         size: Dim2uSlot::new(Dim2u {
@@ -67,7 +75,7 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
         bindings: bus_input_binding_defs("visual.out"),
     };
     let texture_toml = with_kind(
-        "texture",
+        "Texture",
         toml::to_string(&texture_config).context("Failed to serialize texture def to TOML")?,
     );
     fs.write_file("/texture.toml".as_path(), texture_toml.as_bytes())
@@ -75,14 +83,15 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
 
     // Create shader node
     let shader_config = ShaderDef {
-        glsl_path: SourcePathSlot::new(String::from("shader.glsl")),
-        render_order: RenderOrderSlot::new(0),
+        glsl_path: SourcePathSlot::new(SourcePath::from("shader.glsl")),
+        render_order: RenderOrderSlot::new(RenderOrder(0)),
         bindings: bus_output_binding_defs("visual.out"),
         glsl_opts: lpc_model::GlslOpts::default(),
+        param_defs: lpc_model::MapSlot::default(),
         consumed_slots: default_visual_consumed_slots(),
     };
     let shader_toml = with_kind(
-        ShaderDef::KIND,
+        "Shader",
         toml::to_string(&shader_config).context("Failed to serialize shader def to TOML")?,
     );
     fs.write_file("/shader.toml".as_path(), shader_toml.as_bytes())
@@ -163,7 +172,7 @@ vec4 render(vec2 pos) {
         options: OptionSlot::none(),
     };
     let output_toml = with_kind(
-        "output",
+        "Output",
         toml::to_string(&output_config).context("Failed to serialize output def to TOML")?,
     );
     fs.write_file("/output.toml".as_path(), output_toml.as_bytes())
@@ -176,15 +185,15 @@ vec4 render(vec2 pos) {
             height: 16,
         }),
         bindings: fixture_binding_defs(),
-        sampling: lpc_model::FixtureSamplingConfig::TextureArea,
-        mapping: MappingConfig::path_points(MapSlot::default(), 2.0),
+        sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
+        mapping: EnumSlot::new(MappingConfig::path_points(MapSlot::default(), 2.0)),
         color_order: ValueSlot::new(ColorOrder::Rgb),
         transform: Affine2dSlot::new(Affine2d::identity()),
         brightness: OptionSlot::none(),
         gamma_correction: OptionSlot::none(),
     };
     let fixture_toml = with_kind(
-        "fixture",
+        "Fixture",
         toml::to_string(&fixture_config).context("Failed to serialize fixture def to TOML")?,
     );
     fs.write_file("/fixture.toml".as_path(), fixture_toml.as_bytes())
@@ -195,14 +204,14 @@ vec4 render(vec2 pos) {
 
 fn write_project_toml(fs: &dyn LpFs, name: &str) -> Result<()> {
     let project_toml = format!(
-        r#"kind = "project"
+        r#"kind = "Project"
 name = "{name}"
 
 [nodes.output]
 artifact = "./output.toml"
 
 [nodes.clock]
-kind = "clock"
+artifact = "./clock.toml"
 
 [nodes.texture]
 artifact = "./texture.toml"
@@ -235,7 +244,7 @@ fn default_visual_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
 fn bus_input_binding_defs(slot: &str) -> BindingDefs {
     single_binding_defs(
         "input",
-        BindingDef::source(BindingEndpoint::Bus(BusSlotRef::new(
+        BindingDef::source(BindingRef::Bus(BusSlotRef::new(
             SlotPath::parse(slot).expect("valid bus slot path"),
         ))),
     )
@@ -244,7 +253,7 @@ fn bus_input_binding_defs(slot: &str) -> BindingDefs {
 fn bus_output_binding_defs(slot: &str) -> BindingDefs {
     single_binding_defs(
         "output",
-        BindingDef::target(BindingEndpoint::Bus(BusSlotRef::new(
+        BindingDef::target(BindingRef::Bus(BusSlotRef::new(
             SlotPath::parse(slot).expect("valid bus slot path"),
         ))),
     )
@@ -254,13 +263,13 @@ fn fixture_binding_defs() -> BindingDefs {
     let mut entries = std::collections::BTreeMap::new();
     entries.insert(
         String::from("input"),
-        BindingDef::source(BindingEndpoint::Bus(BusSlotRef::new(
+        BindingDef::source(BindingRef::Bus(BusSlotRef::new(
             SlotPath::parse("visual.out").expect("valid visual bus slot"),
         ))),
     );
     entries.insert(
         String::from("output"),
-        BindingDef::target(BindingEndpoint::Bus(BusSlotRef::new(
+        BindingDef::target(BindingRef::Bus(BusSlotRef::new(
             SlotPath::parse("control.out").expect("valid control bus slot"),
         ))),
     );
@@ -357,8 +366,8 @@ mod tests {
         assert_eq!(texture_config.width(), 64);
         assert_eq!(texture_config.height(), 64);
         assert!(matches!(
-            texture_config.bindings.entries()["input"].source,
-            Some(BindingEndpoint::Bus(_))
+            texture_config.bindings.entries()["input"].source_ref(),
+            Some(BindingRef::Bus(_))
         ));
 
         // Verify shader node content
@@ -366,10 +375,10 @@ mod tests {
         let shader_config: ShaderDef =
             toml::from_str(std::str::from_utf8(&shader_toml).expect("UTF-8"))
                 .expect("shader node TOML");
-        assert_eq!(shader_config.glsl_path.value(), "shader.glsl");
+        assert_eq!(shader_config.glsl_path.value().0, "shader.glsl");
         assert!(matches!(
-            shader_config.bindings.entries()["output"].target,
-            Some(BindingEndpoint::Bus(_))
+            shader_config.bindings.entries()["output"].target_ref(),
+            Some(BindingRef::Bus(_))
         ));
 
         // Verify GLSL exists

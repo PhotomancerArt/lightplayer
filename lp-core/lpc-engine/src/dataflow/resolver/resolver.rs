@@ -87,9 +87,13 @@ pub(crate) fn model_value_to_lps_value_f32(
                 fields: result_fields,
             })
         }
-        LpValue::String(_) | LpValue::Resource(_) | LpValue::Product(_) => Err(ResolveError::new(
-            alloc::format!("model value cannot be resolved as shader value: {value:?}"),
-        )),
+        LpValue::Unset
+        | LpValue::String(_)
+        | LpValue::Enum { .. }
+        | LpValue::Resource(_)
+        | LpValue::Product(_) => Err(ResolveError::new(alloc::format!(
+            "model value cannot be resolved as shader value: {value:?}"
+        ))),
     }
 }
 

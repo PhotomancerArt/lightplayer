@@ -1,28 +1,27 @@
-//! Derive macros for LightPlayer slot records.
+//! Derive macros for LightPlayer slot records and values.
 //!
 //! `lpc-slot-macros` is the proc-macro side of the slot data model. It keeps
 //! Rust-authored records ergonomic while still making them available through
 //! the dynamic slot interfaces used by the engine, wire sync, and UI.
 //!
-//! The main derive is [`SlotRecord`](derive@SlotRecord). It turns a named-field
+//! The main derive is [`Slotted`](derive@Slotted). It turns a named-field
 //! struct into a slot record by generating:
 //!
 //! - `SlotRecordShape`, so the type can describe its slot shape.
 //! - `SlotRecordAccess`, so generic code can walk field data by index.
 //! - `SlotMapValueAccess` and `FieldSlot`, so the record can be nested inside
 //!   other slot records or typed maps.
-//! - For `#[slot(root)]` records, `SlotAccess`, `StaticSlotShape`, and
-//!   `StaticSlotAccess`, making the struct a registry-addressable slot root.
+//! - `SlotAccess`, `StaticSlotShape`, and `StaticSlotAccess`, making the struct
+//!   a registry-addressable slot object.
 //!
-//! A minimal root record looks like:
+//! A minimal slot record looks like:
 //!
 //! ```ignore
-//! #[derive(lpc_slot_macros::SlotRecord)]
-//! #[slot(root)]
+//! use lpc_model::Slotted;
+//!
+//! #[derive(Slotted)]
 //! pub struct TextureDef {
 //!     pub size: Dim2uSlot,
-//!     #[slot(skip)]
-//!     pub cached_debug_label: String,
 //! }
 //! ```
 //!
@@ -36,21 +35,19 @@
 //!
 //! Supported container attributes:
 //!
-//! - `#[slot(root)]`: make the record a static slot root.
+//! - No container marker is required for a slot-modeled type; `Slotted`
+//!   derives static shape support for every record.
 //! - `#[slot(shape_id = "...")]`: override the generated static shape id.
-//! - `#[slot(view)]`: mark a root for build-time slot-view generation. The
-//!   proc macro only accepts this marker; `lpc-slot-codegen` discovers it from
-//!   source files during `build.rs` and emits the actual `*View` type.
+//! Build-time slot-view generation discovers every `Slotted` and emits the
+//! corresponding `*View` type.
 //!
 //! Supported field attributes:
 //!
 //! - `#[slot(name = "...")]`: use a different slot field name.
-//! - `#[slot(skip)]`: omit the field from shape and data access.
 //! - `#[slot(value = expr)]`: use an explicit `LpType` value leaf shape.
 //! - `#[slot(leaf = expr)]`: use an explicit semantic slot-value shape.
 //! - `#[slot(record)]`: force nested record shape/access.
-//! - `#[slot(enum)]`: use `SlotEnumShape` for enum-like slot data.
-//! - `#[slot(option_ref = "...")]`: shape an option around another shape root.
+//! - `#[slot(option_ref = "...")]`: shape an option around another registered shape.
 //! - `#[slot(map(key = "...", value_ref = "..."))]`: shape a map whose values
 //!   reference another shape root.
 //! - `#[slot(consumed)]`: mark the field as a consumed dataflow slot.
@@ -61,9 +58,18 @@
 use proc_macro::TokenStream;
 
 mod attr;
-mod record;
+mod slotted;
+mod slotted_enum;
+mod slotted_record;
+mod slotted_wrapper;
+mod value;
 
-#[proc_macro_derive(SlotRecord, attributes(slot))]
-pub fn derive_slot_record(input: TokenStream) -> TokenStream {
-    record::derive(input.into()).into()
+#[proc_macro_derive(Slotted, attributes(slot, default))]
+pub fn derive_slotted(input: TokenStream) -> TokenStream {
+    slotted::derive(input.into()).into()
+}
+
+#[proc_macro_derive(SlotValue, attributes(slot_value))]
+pub fn derive_slot_value(input: TokenStream) -> TokenStream {
+    value::derive(input.into()).into()
 }

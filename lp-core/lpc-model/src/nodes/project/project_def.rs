@@ -1,30 +1,20 @@
 use alloc::string::String;
 
 use crate::node::node_invocation::NodeInvocation;
-use crate::{MapSlot, OptionSlot, ValueSlot};
+use crate::{MapSlot, OptionSlot, Slotted, ValueSlot};
 
 /// Authored root project node definition.
 ///
-/// A project is a node artifact with `kind = "project"`. Its `nodes` table is
+/// A project is a node artifact with `kind = "Project"`. Its `nodes` table is
 /// the explicit source of child node invocations; the runtime no longer
 /// discovers children from filesystem directories.
-#[derive(
-    Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, lpc_slot_macros::SlotRecord,
-)]
-#[slot(root)]
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize, Slotted)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ProjectDef {
-    #[slot(skip)]
-    #[serde(default = "default_kind")]
-    pub kind: String,
     #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
     pub name: OptionSlot<ValueSlot<String>>,
     #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
     pub nodes: MapSlot<String, NodeInvocation>,
-}
-
-fn default_kind() -> String {
-    String::from(ProjectDef::KIND)
 }
 
 impl ProjectDef {
@@ -35,7 +25,7 @@ impl ProjectDef {
     }
 
     pub fn is_project_kind(&self) -> bool {
-        self.kind == Self::KIND
+        true
     }
 
     pub fn name(&self) -> Option<&str> {
@@ -45,12 +35,12 @@ impl ProjectDef {
 
 #[cfg(test)]
 mod tests {
-    use crate::nodes::project::project_def::ProjectDef;
+    use crate::{NodeDef, SlotShapeRegistry};
 
     #[test]
     fn project_def_deserializes_named_nodes() {
         let toml = r#"
-            kind = "project"
+            kind = "Project"
             name = "basic"
 
             [nodes.texture]
@@ -59,11 +49,20 @@ mod tests {
             [nodes.shader]
             artifact = "./shader.toml"
         "#;
-        let def: ProjectDef = toml::from_str(toml).unwrap();
+        let def = NodeDef::read_toml(&registry(), toml).unwrap();
+        let NodeDef::Project(def) = def else {
+            panic!("expected project def");
+        };
         assert!(def.is_project_kind());
         assert_eq!(def.name(), Some("basic"));
         assert_eq!(def.nodes.entries.len(), 2);
         assert!(def.nodes.entries.contains_key("texture"));
         assert!(def.nodes.entries.contains_key("shader"));
+    }
+
+    fn registry() -> SlotShapeRegistry {
+        let mut registry = SlotShapeRegistry::default();
+        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("shapes");
+        registry
     }
 }

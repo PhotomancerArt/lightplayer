@@ -13,10 +13,12 @@ extern crate self as lpc_model;
 #[cfg(feature = "std")]
 extern crate std;
 
-pub use lpc_slot_macros::SlotRecord;
+pub use lpc_slot_macros::{SlotValue, Slotted};
 
 #[doc(hidden)]
 pub mod __private {
+    pub use alloc::boxed::Box;
+    pub use alloc::string::String;
     pub use alloc::vec::Vec;
 }
 
@@ -25,6 +27,7 @@ pub mod __private {
 pub mod binding;
 pub mod node;
 pub mod slot;
+pub mod slot_codec;
 pub mod value;
 
 // --- Shared surface (non-wire) ---------------------------------------------------------------
@@ -53,10 +56,10 @@ pub mod sync;
 pub use value::constraint;
 pub use value::kind;
 
-pub use artifact::{ArtifactLocator, SrcArtifactLibRef};
+pub use artifact::{ArtifactLocator, ArtifactReadRoot, SrcArtifactLibRef};
 pub use binding::{
-    BindingDef, BindingDefError, BindingDefs, BindingEndpoint, BindingEndpointError, BusSlotRef,
-    BusSlotRefError, NodeSlotRef, NodeSlotRefError,
+    BindingDef, BindingDefError, BindingDefView, BindingDefs, BindingRef, BindingRefError,
+    BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError,
 };
 pub use bus::ChannelName;
 pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRange};
@@ -66,52 +69,56 @@ pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRan
 /// meaning owns its storage shape.
 pub use kind::Kind;
 pub use value::WithRevision;
-pub use value::{LpType, LpValue, ModelStructMember};
+pub use value::{LpType, LpValue, ModelEnumVariant, ModelStructMember};
 
 pub use config::DEFAULT_SERIAL_BAUD_RATE;
 pub use lpfs::lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 pub use node::node_prop_spec::NodePropSpec;
 pub use node::tree_path::{NodePathSegment, PathError, TreePath};
 pub use node::{
-    NodeDef, NodeId, NodeInvocation, NodeKind, NodeName, NodeNameError, RelativeNodeRef,
-    RelativeNodeRefError, RelativeNodeRefSrc,
+    NodeArtifact, NodeDef, NodeId, NodeInvocation, NodeInvocationView, NodeKind, NodeName,
+    NodeNameError, RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc,
 };
 pub use nodes::{
     AddSubMode, ClockControls, ClockDef, ClockDefView, ClockState, ColorOrder, ComputeShaderDef,
     ComputeShaderDefView, DivMode, FixtureDef, FixtureDefView, FixtureSamplingConfig, FixtureState,
-    FluidDef, FluidDefView, FluidEmitter, FluidState, GlslOpts, MappingConfig, MulMode,
-    NodeDefParseError, OutputDef, OutputDefView, OutputDriverOptionsConfig, PathSpec, ProjectDef,
-    RingOrder, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef, ShaderSlotDef,
-    ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef,
-    TextureDef, TextureDefView, TextureFormat, TextureState, generate_compute_shader_header,
+    FixtureStateView, FluidDef, FluidDefView, FluidEmitter, FluidState, GlslOpts, GlslOptsView,
+    MappingConfig, MulMode, NodeDefParseError, OutputDef, OutputDefView, OutputDriverOptionsConfig,
+    OutputDriverOptionsConfigView, PathSpec, ProjectDef, ProjectDefView, RingOrder, ScalarHint,
+    ScalarHintView, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,
+    ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
+    ShaderSlotMappingKind, ShaderState, ShaderStateView, ShaderValueShapeRef, TextureDef,
+    TextureDefView, TextureFormat, TextureState, TextureStateView, generate_compute_shader_header,
 };
 pub use product::{ControlExtent, ControlProduct, ProductKind, ProductRef, VisualProduct};
 pub use project::{ProjectConfig, Revision};
 pub use project::{advance_revision, current_revision, set_current_revision};
-pub use resource::{ResourceDomain, ResourceRef, RuntimeBufferId};
+pub use resource::{ResourceDomain, ResourceRef, RuntimeBufferId, runtime_buffer_resource_shape};
 pub use server::server_config::ServerConfig;
 pub use slot::{
-    Affine2d, Affine2dSlot, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue, ControlProductSlot,
-    Dim2u, Dim2uSlot, FromLpValue, OrderedF32, PositiveF32Slot, RatioSlot, RelativeNodeRefSlot,
-    RenderOrderSlot, ResourceRefSlot, SlotEnumOption, SlotMapValueAccess, SlotMapValueAccessMut,
-    SlotValue, SlotValueShape, SourcePathSlot, ToLpValue, ValueEditorHint, ValueRootError,
-    VisualProductSlot, XySlot, affine2d_shape, artifact_path_shape, color_order_shape,
-    control_product_shape, dim2u_shape, positive_f32_shape, ratio_shape, relative_node_ref_shape,
-    render_order_shape, resource_ref_shape, runtime_buffer_resource_shape, source_path_shape,
-    u32_list_shape, visual_product_shape, xy_shape,
+    Affine2d, Affine2dSlot, ArtifactPath, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue,
+    ControlProductSlot, Dim2u, Dim2uSlot, FromLpValue, OrderedF32, PositiveF32, PositiveF32Slot,
+    Ratio, RatioSlot, RelativeNodeRefSlot, RenderOrder, RenderOrderSlot, ResourceRefSlot,
+    SlotEnumOption, SlotMapValueAccess, SlotValue, SlotValueShape, SourcePath, SourcePathSlot,
+    ToLpValue, ValueEditorHint, ValueRootError, VisualProductSlot, Xy, XySlot,
 };
 pub use slot::{
-    FieldSlot, FieldSlotMut, MapSlot, MapSlotAccess, MapSlotAccessMut, MapSlotKeyLike, OptionSlot,
-    SlotAccess, SlotAccessMut, SlotAccessor, SlotAccessorError, SlotAccessorStep, SlotData,
-    SlotDataAccess, SlotDataAccessMut, SlotDirection, SlotEnum, SlotEnumAccess, SlotEnumAccessMut,
-    SlotEnumShape, SlotFieldReader, SlotFieldShape, SlotLookupError, SlotMapDyn, SlotMapKey,
-    SlotMapKeyShape, SlotMerge, SlotMeta, SlotName, SlotNameError, SlotOptionAccess,
-    SlotOptionAccessMut, SlotOptionDyn, SlotOptionReader, SlotOwner, SlotPath, SlotPathError,
-    SlotPathSegment, SlotPersistence, SlotPolicy, SlotReadContext, SlotRecord, SlotRecordAccess,
-    SlotRecordAccessMut, SlotRecordShape, SlotRef, SlotSemantics, SlotShape, SlotShapeEntry,
-    SlotShapeId, SlotShapeIdError, SlotShapeRegistry, SlotShapeRegistryError,
-    SlotShapeRegistrySnapshot, SlotValueAccess, SlotValueMut, SlotVariantShape, StaticSlotAccess,
-    StaticSlotShape, ValueRef, ValueSlot, lookup_slot_data, lookup_slot_data_and_shape,
-    lookup_slot_data_mut,
+    DynamicSlotObject, EnumSlot, FieldSlot, FieldSlotMut, MapSlot, MapSlotAccess, MapSlotAccessMut,
+    MapSlotKeyLike, MapSlotMutAccess, OptionSlot, SlotAccess, SlotAccessMut, SlotAccessor,
+    SlotAccessorError, SlotAccessorStep, SlotData, SlotDataAccess, SlotDataAccessMut,
+    SlotDataMutAccess, SlotDirection, SlotEnum, SlotEnumAccess, SlotEnumAccessMut,
+    SlotEnumDefaultVariant, SlotEnumMutAccess, SlotEnumShape, SlotFactory, SlotFactoryError,
+    SlotFactoryFn, SlotFieldReader, SlotFieldShape, SlotLookupError, SlotMapDyn, SlotMapKey,
+    SlotMapKeyShape, SlotMapValueAccessMut, SlotMapValueMutAccess, SlotMerge, SlotMeta,
+    SlotMutAccess, SlotMutationError, SlotName, SlotNameError, SlotOptionAccess,
+    SlotOptionAccessMut, SlotOptionDyn, SlotOptionMutAccess, SlotOptionReader, SlotOwner, SlotPath,
+    SlotPathError, SlotPathSegment, SlotPolicy, SlotReadContext, SlotRecord, SlotRecordAccess,
+    SlotRecordAccessMut, SlotRecordMutAccess, SlotRecordShape, SlotRef, SlotSemantics, SlotShape,
+    SlotShapeEntry, SlotShapeId, SlotShapeIdError, SlotShapeRegistry, SlotShapeRegistryError,
+    SlotShapeRegistrySnapshot, SlotValueAccess, SlotValueMut, SlotValueMutAccess, SlotVariantShape,
+    SlottedEnum, SlottedEnumMut, StaticSlotAccess, StaticSlotShape, ValueRef, ValueSlot,
+    create_dynamic_slot_data, insert_slot_map_entry_default, lookup_slot_data,
+    lookup_slot_data_and_shape, lookup_slot_data_mut, set_slot_option_some_default, set_slot_value,
+    set_slot_variant_default, slot_data_revision,
 };
 pub use value::value_path::ValuePath;

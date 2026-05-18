@@ -11,9 +11,8 @@ use serde::{
 };
 
 use super::{
-    FieldSlot, FieldSlotMut, MapSlotAccess, MapSlotAccessMut, SlotDataAccess, SlotDataAccessMut,
-    SlotMapKey, SlotOptionAccess, SlotOptionAccessMut, SlotValue, SlotValueAccess, SlotValueMut,
-    ToLpValue,
+    FieldSlot, MapSlotAccess, SlotDataAccess, SlotMapKey, SlotOptionAccess, SlotValue,
+    SlotValueAccess, ToLpValue,
 };
 
 /// A typed revision-tracked slot leaf for Rust-authored structs.
@@ -105,17 +104,6 @@ impl<T: ToLpValue> SlotValueAccess for ValueSlot<T> {
     }
 }
 
-impl<T: crate::FromLpValue> SlotValueMut for ValueSlot<T> {
-    fn set_lp_value(
-        &mut self,
-        revision: Revision,
-        value: LpValue,
-    ) -> Result<(), crate::ValueRootError> {
-        self.set_with_version(revision, T::from_lp_value(&value)?);
-        Ok(())
-    }
-}
-
 impl<T: SlotValue> FieldSlot for ValueSlot<T> {
     fn slot_field_shape() -> SlotShape {
         SlotShape::leaf(T::value_shape())
@@ -123,15 +111,6 @@ impl<T: SlotValue> FieldSlot for ValueSlot<T> {
 
     fn slot_field_data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Value(self)
-    }
-}
-
-impl<T: SlotValue> FieldSlotMut for ValueSlot<T>
-where
-    Self: SlotValueMut,
-{
-    fn slot_field_data_mut(&mut self) -> SlotDataAccessMut<'_> {
-        SlotDataAccessMut::Value(self)
     }
 }
 
@@ -300,19 +279,6 @@ where
     }
 }
 
-impl<K, V> MapSlotAccessMut for MapSlot<K, V>
-where
-    K: MapSlotKeyLike,
-    V: SlotMapValueAccessMut,
-{
-    fn get_mut(&mut self, key: &SlotMapKey) -> Option<SlotDataAccessMut<'_>> {
-        let typed_key = K::from_slot_map_key(key)?;
-        self.entries
-            .get_mut(&typed_key)
-            .map(SlotMapValueAccessMut::slot_data_mut)
-    }
-}
-
 impl<K, V> FieldSlot for MapSlot<K, V>
 where
     K: MapSlotKeyLike,
@@ -331,16 +297,6 @@ where
     }
 }
 
-impl<K, V> FieldSlotMut for MapSlot<K, V>
-where
-    K: MapSlotKeyLike,
-    V: FieldSlot + SlotMapValueAccess + SlotMapValueAccessMut,
-{
-    fn slot_field_data_mut(&mut self) -> SlotDataAccessMut<'_> {
-        SlotDataAccessMut::Map(self)
-    }
-}
-
 /// A map value that can be exposed through slot traversal.
 pub trait SlotMapValueAccess {
     fn slot_data(&self) -> SlotDataAccess<'_>;
@@ -349,17 +305,6 @@ pub trait SlotMapValueAccess {
 impl<T: SlotValueAccess> SlotMapValueAccess for T {
     fn slot_data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Value(self)
-    }
-}
-
-/// A map value that can be mutated through slot traversal.
-pub trait SlotMapValueAccessMut {
-    fn slot_data_mut(&mut self) -> SlotDataAccessMut<'_>;
-}
-
-impl<T: SlotValueMut> SlotMapValueAccessMut for T {
-    fn slot_data_mut(&mut self) -> SlotDataAccessMut<'_> {
-        SlotDataAccessMut::Value(self)
     }
 }
 
@@ -468,12 +413,6 @@ impl<T: SlotMapValueAccess> SlotOptionAccess for OptionSlot<T> {
     }
 }
 
-impl<T: SlotMapValueAccessMut> SlotOptionAccessMut for OptionSlot<T> {
-    fn data_mut(&mut self) -> Option<SlotDataAccessMut<'_>> {
-        self.data.as_mut().map(SlotMapValueAccessMut::slot_data_mut)
-    }
-}
-
 impl<T> FieldSlot for OptionSlot<T>
 where
     T: FieldSlot + SlotMapValueAccess,
@@ -487,15 +426,6 @@ where
 
     fn slot_field_data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Option(self)
-    }
-}
-
-impl<T> FieldSlotMut for OptionSlot<T>
-where
-    T: FieldSlot + SlotMapValueAccess + SlotMapValueAccessMut,
-{
-    fn slot_field_data_mut(&mut self) -> SlotDataAccessMut<'_> {
-        SlotDataAccessMut::Option(self)
     }
 }
 

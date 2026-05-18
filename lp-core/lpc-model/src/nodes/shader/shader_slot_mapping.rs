@@ -5,14 +5,14 @@
 //! mapped into shader-visible ABI storage.
 
 use crate::{
-    LpValue, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, ToLpValue, ValueEditorHint,
+    LpValue, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, Slotted, ToLpValue, ValueEditorHint,
     ValueRootError,
 };
 use alloc::string::{String, ToString};
 use serde::{Deserialize, Serialize};
 
 /// Mapping from a semantic shader slot into shader-visible ABI storage.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
 pub struct ShaderSlotMappingDef {
     pub kind: crate::ValueSlot<ShaderSlotMappingKind>,
     pub len: crate::ValueSlot<u32>,
@@ -28,6 +28,12 @@ impl ShaderSlotMappingDef {
             key: crate::ValueSlot::new(String::from(key)),
             empty_key: crate::ValueSlot::new(empty_key),
         }
+    }
+}
+
+impl Default for ShaderSlotMappingDef {
+    fn default() -> Self {
+        Self::sentinel(0, "", 0)
     }
 }
 

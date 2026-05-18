@@ -1,7 +1,7 @@
 use super::{BindingDef, BindingDefError};
 use crate::{
-    FieldSlot, FieldSlotMut, MapSlot, SlotDataAccess, SlotDataAccessMut, SlotMapKeyShape, SlotMeta,
-    SlotShape, SlotValueShape,
+    FieldSlot, FieldSlotMut, MapSlot, SlotDataAccess, SlotDataMutAccess, SlotMapKeyShape, SlotMeta,
+    SlotShape, StaticSlotShape,
 };
 use alloc::collections::BTreeMap;
 use alloc::string::String;
@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 /// Authored bindings attached to a node definition.
 ///
 /// The map key is the node-owned slot name. Each value declares whether that
-/// slot consumes from a `source` or produces to a `target`.
+/// slot consumes from a literal `value`, consumes from a `source`, or produces
+/// to a `target`.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(transparent)]
@@ -48,21 +49,7 @@ impl FieldSlot for BindingDefs {
         SlotShape::Map {
             meta: SlotMeta::empty(),
             key: SlotMapKeyShape::String,
-            value: alloc::boxed::Box::new(SlotShape::Value {
-                shape: SlotValueShape::raw(crate::LpType::Struct {
-                    name: Some(String::from("BindingDef")),
-                    fields: alloc::vec![
-                        crate::ModelStructMember {
-                            name: String::from("direction"),
-                            ty: crate::LpType::String,
-                        },
-                        crate::ModelStructMember {
-                            name: String::from("endpoint"),
-                            ty: crate::LpType::String,
-                        },
-                    ],
-                }),
-            }),
+            value: alloc::boxed::Box::new(SlotShape::reference(BindingDef::SHAPE_ID)),
         }
     }
 
@@ -72,8 +59,8 @@ impl FieldSlot for BindingDefs {
 }
 
 impl FieldSlotMut for BindingDefs {
-    fn slot_field_data_mut(&mut self) -> SlotDataAccessMut<'_> {
-        SlotDataAccessMut::Map(&mut self.0)
+    fn slot_field_data_mut(&mut self) -> SlotDataMutAccess<'_> {
+        SlotDataMutAccess::Map(&mut self.0)
     }
 }
 
@@ -101,7 +88,7 @@ impl core::error::Error for BindingDefsError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{BindingEndpoint, SlotDataAccess};
+    use crate::{BindingRef, SlotDataAccess};
 
     #[derive(Deserialize, Serialize)]
     struct Wrapper {
@@ -116,8 +103,8 @@ target = "bus#visual.out"
 "#;
         let decoded: Wrapper = toml::from_str(toml).unwrap();
         assert!(matches!(
-            decoded.bindings.entries()["output"].target,
-            Some(BindingEndpoint::Bus(_))
+            decoded.bindings.entries()["output"].target_ref(),
+            Some(BindingRef::Bus(_))
         ));
 
         let encoded = toml::to_string(&decoded).unwrap();
@@ -130,7 +117,7 @@ target = "bus#visual.out"
         let mut entries = BTreeMap::new();
         entries.insert(
             String::from("output"),
-            BindingDef::target(BindingEndpoint::parse_ref("bus#visual.out").unwrap()),
+            BindingDef::target(BindingRef::parse("bus#visual.out").unwrap()),
         );
         let defs = BindingDefs::new(entries);
 
@@ -140,13 +127,7 @@ target = "bus#visual.out"
     #[test]
     fn validate_reports_slot_name_for_invalid_binding() {
         let mut entries = BTreeMap::new();
-        entries.insert(
-            String::from("bad"),
-            BindingDef {
-                source: None,
-                target: None,
-            },
-        );
+        entries.insert(String::from("bad"), BindingDef::default());
         let defs = BindingDefs::new(entries);
 
         assert!(matches!(

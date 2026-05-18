@@ -1,93 +1,11 @@
 use crate::{
-    FieldSlot, FieldSlotMut, FromLpValue, LpType, LpValue, RelativeNodeRef, Revision,
-    SlotDataAccess, SlotDataAccessMut, SlotMeta, SlotShape, SlotShapeId, SlotValue,
-    SlotValueAccess, SlotValueMut, SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError,
-    WithRevision, current_revision,
+    LpType, LpValue, RelativeNodeRef, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, ToLpValue,
+    ValueEditorHint, ValueRootError, ValueSlot,
 };
 use alloc::string::ToString;
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// Revision-tracked relative node reference.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RelativeNodeRefSlot {
-    inner: WithRevision<RelativeNodeRef>,
-}
-
-impl RelativeNodeRefSlot {
-    pub fn new(value: RelativeNodeRef) -> Self {
-        Self::with_version(current_revision(), value)
-    }
-
-    pub fn with_version(revision: Revision, value: RelativeNodeRef) -> Self {
-        Self {
-            inner: WithRevision::new(revision, value),
-        }
-    }
-
-    pub fn set(&mut self, value: RelativeNodeRef) {
-        self.inner.set(current_revision(), value);
-    }
-
-    pub fn revision(&self) -> Revision {
-        self.inner.changed_at()
-    }
-
-    pub fn value(&self) -> &RelativeNodeRef {
-        self.inner.value()
-    }
-}
-
-impl SlotValueAccess for RelativeNodeRefSlot {
-    fn changed_at(&self) -> Revision {
-        self.inner.changed_at()
-    }
-
-    fn value(&self) -> LpValue {
-        self.inner.value().to_lp_value()
-    }
-}
-
-impl Serialize for RelativeNodeRefSlot {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.inner.value().serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for RelativeNodeRefSlot {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Ok(Self::new(RelativeNodeRef::deserialize(deserializer)?))
-    }
-}
-
-impl FieldSlot for RelativeNodeRefSlot {
-    fn slot_field_shape() -> SlotShape {
-        SlotShape::leaf(relative_node_ref_shape())
-    }
-
-    fn slot_field_data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Value(self)
-    }
-}
-
-impl SlotValueMut for RelativeNodeRefSlot {
-    fn set_lp_value(&mut self, revision: Revision, value: LpValue) -> Result<(), ValueRootError> {
-        self.inner
-            .set(revision, RelativeNodeRef::from_lp_value(&value)?);
-        Ok(())
-    }
-}
-
-impl FieldSlotMut for RelativeNodeRefSlot {
-    fn slot_field_data_mut(&mut self) -> SlotDataAccessMut<'_> {
-        SlotDataAccessMut::Value(self)
-    }
-}
+pub type RelativeNodeRefSlot = ValueSlot<RelativeNodeRef>;
 
 impl ToLpValue for RelativeNodeRef {
     fn to_lp_value(&self) -> LpValue {
@@ -108,18 +26,14 @@ impl crate::FromLpValue for RelativeNodeRef {
 }
 
 impl SlotValue for RelativeNodeRef {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.relative_node_ref");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("RelativeNodeRef");
 
     fn value_shape() -> SlotValueShape {
-        relative_node_ref_shape()
-    }
-}
-
-pub fn relative_node_ref_shape() -> SlotValueShape {
-    SlotValueShape {
-        id: SlotShapeId::from_static_name("slot.leaf.relative_node_ref"),
-        ty: LpType::String,
-        meta: SlotMeta::empty(),
-        editor: ValueEditorHint::NodeRef,
+        SlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: LpType::String,
+            meta: SlotMeta::empty(),
+            editor: ValueEditorHint::NodeRef,
+        }
     }
 }

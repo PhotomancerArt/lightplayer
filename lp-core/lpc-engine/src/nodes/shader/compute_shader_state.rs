@@ -78,7 +78,7 @@ impl ComputeShaderState {
                 policy: Default::default(),
             });
         }
-        registry.replace_root_named(
+        registry.replace_shape_named(
             self.shape_id,
             self.shape_name.clone(),
             SlotShape::Record {
@@ -97,6 +97,14 @@ impl SlotAccess for ComputeShaderState {
 
     fn data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Record(self)
+    }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
+    fn into_any(self: alloc::boxed::Box<Self>) -> alloc::boxed::Box<dyn core::any::Any> {
+        self
     }
 }
 
@@ -176,8 +184,9 @@ fn value_shape_for_ref(
         return Ok(SlotShape::value(ty));
     }
 
-    let (id, entry) = registry
-        .entry_by_name(value_ref.as_str())
+    let id = SlotShapeId::from_static_name(value_ref.as_str());
+    let entry = registry
+        .entry(&id)
         .ok_or_else(|| ComputeStateError::UnknownNativeShape(value_ref.as_str().to_string()))?;
     match entry.value() {
         SlotShape::Value { .. } => Ok(SlotShape::reference(id)),

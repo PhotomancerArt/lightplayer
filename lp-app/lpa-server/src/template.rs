@@ -2,9 +2,9 @@
 //!
 //! Provides functions to create default project templates that work with any LpFs implementation.
 //!
-//! Node definitions are authored as static TOML matching [`lpc_source::node`] serde
-//! shape (same bytes as `toml::to_string` on the host). `toml` is not used here so `lpa-server`
-//! stays compatible with `no_std` firmware builds where unified `toml` features can pull `std`.
+//! Node definitions are authored as static SlotCodec TOML. `toml` is not used
+//! here so `lpa-server` stays compatible with `no_std` firmware builds where
+//! unified `toml` features can pull `std`.
 
 extern crate alloc;
 
@@ -13,13 +13,13 @@ use alloc::format;
 use lpc_model::AsLpPath;
 use lpfs::LpFs;
 
-const PROJECT_TOML: &[u8] = br#"kind = "project"
+const PROJECT_TOML: &[u8] = br#"kind = "Project"
 
 [nodes.output]
 artifact = "./output.toml"
 
 [nodes.clock]
-kind = "clock"
+artifact = "./clock.toml"
 
 [nodes.texture]
 artifact = "./texture.toml"
@@ -31,14 +31,20 @@ artifact = "./shader.toml"
 artifact = "./fixture.toml"
 "#;
 
+/// TOML for the default clock node.
+const CLOCK_NODE_TOML: &[u8] = br#"kind = "Clock"
+"#;
+
 /// TOML for a 64×64 texture node.
-const TEXTURE_NODE_TOML: &[u8] = br#"kind = "texture"
+const TEXTURE_NODE_TOML: &[u8] = br#"kind = "Texture"
+
+[size]
 width = 64
 height = 64
 "#;
 
 /// TOML for the default shader node.
-const SHADER_NODE_TOML: &[u8] = br#"kind = "shader/visual"
+const SHADER_NODE_TOML: &[u8] = br#"kind = "Shader"
 glsl_path = "shader.glsl"
 render_order = 0
 
@@ -56,15 +62,17 @@ description = "Project clock time in seconds"
 "#;
 
 /// TOML for GPIO strip output.
-const OUTPUT_NODE_TOML: &[u8] = br#"kind = "output"
+const OUTPUT_NODE_TOML: &[u8] = br#"kind = "Output"
 pin = 4
 "#;
 
 /// TOML for the default fixture.
-const FIXTURE_NODE_TOML: &[u8] = br#"kind = "fixture"
+const FIXTURE_NODE_TOML: &[u8] = br#"kind = "Fixture"
 color_order = "rgb"
 brightness = 64
 gamma_correction = true
+sampling = "direct"
+transform = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
 
 [bindings.input]
 source = "bus#visual.out"
@@ -72,23 +80,12 @@ source = "bus#visual.out"
 [bindings.output]
 target = "bus#control.out"
 
-[transform]
-m00 = 1.0
-m01 = 0.0
-m10 = 0.0
-m11 = 1.0
-tx = 0.0
-ty = 0.0
-
-[sampling]
-kind = "direct"
-
 [render_size]
 width = 16
 height = 16
 
 [mapping]
-kind = "path_points"
+kind = "PathPoints"
 paths = {}
 sample_diameter = 2.0
 "#;
@@ -100,6 +97,9 @@ sample_diameter = 2.0
 pub fn create_default_project_template(fs: &dyn LpFs) -> Result<(), ServerError> {
     fs.write_file("/project.toml".as_path(), PROJECT_TOML)
         .map_err(|e| ServerError::Filesystem(format!("Failed to write project.toml: {e}")))?;
+
+    fs.write_file("/clock.toml".as_path(), CLOCK_NODE_TOML)
+        .map_err(|e| ServerError::Filesystem(format!("Failed to write clock.toml: {e}")))?;
 
     fs.write_file("/texture.toml".as_path(), TEXTURE_NODE_TOML)
         .map_err(|e| ServerError::Filesystem(format!("Failed to write texture.toml: {e}")))?;

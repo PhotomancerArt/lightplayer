@@ -1,17 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use alloc::string::String;
-
-use crate::{BindingDefs, ClockControls};
+use crate::{BindingDefs, ClockControls, Slotted};
 
 /// Authored clock node definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
-#[slot(root, view)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Slotted)]
 pub struct ClockDef {
-    #[slot(skip)]
-    #[serde(default = "default_kind")]
-    pub kind: String,
-
     /// Authored slot bindings for clock outputs.
     #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     pub bindings: BindingDefs,
@@ -19,20 +12,6 @@ pub struct ClockDef {
     /// Runtime clock controls.
     #[serde(default)]
     pub controls: ClockControls,
-}
-
-fn default_kind() -> String {
-    String::from(ClockDef::KIND)
-}
-
-impl Default for ClockDef {
-    fn default() -> Self {
-        Self {
-            kind: default_kind(),
-            bindings: BindingDefs::default(),
-            controls: ClockControls::default(),
-        }
-    }
 }
 
 impl ClockDef {
@@ -52,7 +31,7 @@ mod tests {
     fn clock_def_parses_minimal_inline_node() {
         let def = NodeDef::from_toml_str(
             r#"
-kind = "clock"
+kind = "Clock"
 "#,
         )
         .expect("clock def");
@@ -60,7 +39,6 @@ kind = "clock"
         let NodeDef::Clock(def) = def else {
             panic!("clock def");
         };
-        assert_eq!(def.kind, "clock");
         assert!(*def.controls.running.value());
         assert_eq!(*def.controls.rate.value(), 1.0);
     }

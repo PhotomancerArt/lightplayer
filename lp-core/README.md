@@ -2,9 +2,9 @@
 
 Core LightPlayer engine crates.
 
-`lp-core` is about the internals of one LightPlayer engine: the authored
-source model it loads, the runtime that ticks it, the wire/view shapes used to
-observe it, and small shared utilities used by those pieces.
+`lp-core` is about the internals of one LightPlayer engine: the slot-native
+model it loads, the runtime that ticks it, the wire/view shapes used to observe
+it, and small shared utilities used by those pieces.
 
 Application-level orchestration lives outside this directory. Code that starts
 servers, opens transports, talks to firmware, or coordinates one or more
@@ -13,9 +13,7 @@ engines belongs in `lp-app`, `lp-fw`, or another app-facing layer.
 ## Crates
 
 - `lpc-model` — shared core vocabulary: ids, paths, frame ids, kinds,
-  `ModelValue`, and `ModelType`.
-- `lpc-source` — authored/on-disk source model: artifacts, slots, source
-  bindings, value specs, TOML loading, and schema migration.
+  `LpValue`, `LpType`, slots, authored project/node definitions, and SlotCodec.
 - `lpc-wire` — engine/client wire contract: messages, tree deltas, project
   requests, transport errors, JSON helpers, and partial state serialization.
 - `lpc-engine` — runtime for one loaded engine/project, including node trees,
@@ -27,13 +25,11 @@ engines belongs in `lp-app`, `lp-fw`, or another app-facing layer.
 ## Naming boundaries (M4.3b)
 
 Each `lpc-*` crate uses a consistent prefix policy so parallel concepts in
-model, source, wire, view, and engine do not collide:
+model, wire, view, and engine do not collide:
 
 - **`lpc-model`** — foundational shared nouns stay unprefixed (`NodeId`,
-  `TreePath`, …). Portable value/type shapes use `Model*` (`ModelValue`,
-  `ModelType`, `ModelStructMember`). No `Wire*` types here.
-- **`lpc-source`** — exported authored schema types use `Src*` (`SrcArtifact`,
-  `SrcBinding`, …). No short root aliases; call sites use the `Src*` names.
+  `TreePath`, …). Portable value/type shapes use `Lp*`/`Model*` where useful
+  (`LpValue`, `LpType`, `ModelStructMember`). No `Wire*` types here.
 - **`lpc-wire`** — `Message`, `ClientRequest`, and similar already imply the
   wire; use `Wire*` only to disambiguate payload nouns (`WireTreeDelta`,
   `LegacyWireNodeSpecifier`, `WireSlotIndex`, …).
@@ -46,9 +42,9 @@ model, source, wire, view, and engine do not collide:
 
 ## Dependency Shape
 
-`lpc-model`, `lpc-source`, `lpc-wire`, and `lpc-view` should stay free of
-shader runtime dependencies. `lpc-engine` owns the boundary to `lps-*` crates
-because compiling and executing GLSL is engine behavior.
+`lpc-model`, `lpc-wire`, and `lpc-view` should stay free of shader runtime
+dependencies. `lpc-engine` owns the boundary to `lps-*` crates because
+compiling and executing GLSL is engine behavior.
 
 Most crates here are `no_std`-compatible so the same engine core can run on
 host tools and embedded firmware.

@@ -43,7 +43,7 @@ pub fn option(some: SlotShape) -> SlotShape {
     }
 }
 
-/// Reference a registered root shape.
+/// Reference a registered shape.
 pub fn reference(id: SlotShapeId) -> SlotShape {
     SlotShape::reference(id)
 }

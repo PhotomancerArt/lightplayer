@@ -8,11 +8,10 @@ use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
 use crate::nodes::shader::{GlslOpts, ShaderSlotDef};
-use crate::{AsLpPathBuf, BindingDefs, LpPathBuf, MapSlot, SourcePathSlot};
+use crate::{BindingDefs, LpPathBuf, MapSlot, Slotted, SourcePath, SourcePathSlot};
 
 /// Authored serial compute shader definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
-#[slot(root, view)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
 pub struct ComputeShaderDef {
     /// Path to the GLSL source, relative to this artifact file.
     pub glsl_path: SourcePathSlot,
@@ -41,7 +40,7 @@ pub struct ComputeShaderDef {
 impl Default for ComputeShaderDef {
     fn default() -> Self {
         Self {
-            glsl_path: SourcePathSlot::new(String::from("main.glsl")),
+            glsl_path: SourcePathSlot::new(SourcePath(String::from("main.glsl"))),
             bindings: BindingDefs::default(),
             glsl_opts: GlslOpts::default(),
             consumed_slots: MapSlot::default(),
@@ -74,7 +73,7 @@ mod tests {
     fn compute_shader_def_parses_consumed_and_produced_slots() {
         let def: ComputeShaderDef = toml::from_str(
             r#"
-kind = "shader/compute"
+kind = "ComputeShader"
 glsl_path = "emitters.glsl"
 
 [consumed.time]
@@ -105,7 +104,7 @@ mapping = { kind = "sentinel", len = 4, key = "id", empty_key = 0 }
     fn node_def_parses_compute_shader_variant() {
         let def = NodeDef::from_toml_str(
             r#"
-kind = "shader/compute"
+kind = "ComputeShader"
 glsl_path = "emitters.glsl"
 "#,
         )

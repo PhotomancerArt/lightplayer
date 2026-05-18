@@ -1,192 +1,31 @@
 //! Parent-owned instruction to instantiate a child node.
 //!
-//! A parent either references an artifact-backed node definition or embeds the
-//! child definition inline at the invocation site. Artifact references remain
-//! the normal sharable form; inline definitions are useful for small built-ins
-//! such as a project-local clock.
+//! The parent says "instantiate the node definition located at this
+//! [`ArtifactLocator`] here". Inline node definitions and artifact-plus-local
+//! field merges are reserved for richer invocation forms.
 
-use crate::ArtifactPathSlot;
 use crate::artifact::artifact_loc::ArtifactLocator;
-use crate::{
-    FieldSlot, LpType, LpValue, ModelStructMember, NodeDef, Revision, SlotDataAccess, SlotMeta,
-    SlotShape, SlotValueAccess, SlotValueMut, SlotValueShape, ValueRootError,
-};
-use alloc::string::{String, ToString};
-use alloc::vec;
+use crate::{ArtifactPath, ArtifactPathSlot, Slotted};
+use alloc::string::ToString;
 
 /// Parent-owned child node invocation.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(untagged)]
-pub enum NodeInvocation {
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize, Slotted)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+pub struct NodeInvocation {
     /// Artifact to load for this child node definition.
-    Artifact { artifact: ArtifactPathSlot },
-    /// Inline child node definition owned by this invocation.
-    Inline(NodeDef),
+    pub artifact: ArtifactPathSlot,
 }
 
 impl NodeInvocation {
-    /// New artifact-backed invocation.
+    /// New artifact-only invocation with no overrides.
     pub fn new(artifact: ArtifactLocator) -> Self {
-        Self::Artifact {
-            artifact: ArtifactPathSlot::new(artifact.to_string()),
+        Self {
+            artifact: ArtifactPathSlot::new(ArtifactPath(artifact.to_string())),
         }
     }
 
-    /// New inline invocation.
-    pub fn inline(def: NodeDef) -> Self {
-        Self::Inline(def)
-    }
-
-    pub fn artifact_locator(&self) -> Option<Result<ArtifactLocator, &'static str>> {
-        match self {
-            Self::Artifact { artifact } => Some(ArtifactLocator::parse(artifact.value())),
-            Self::Inline(_) => None,
-        }
-    }
-
-    pub fn artifact_path_text(&self) -> Option<&str> {
-        match self {
-            Self::Artifact { artifact } => Some(artifact.value().as_str()),
-            Self::Inline(_) => None,
-        }
-    }
-
-    pub fn inline_def(&self) -> Option<&NodeDef> {
-        match self {
-            Self::Artifact { .. } => None,
-            Self::Inline(def) => Some(def),
-        }
-    }
-}
-
-impl SlotValueAccess for NodeInvocation {
-    fn changed_at(&self) -> Revision {
-        match self {
-            Self::Artifact { artifact } => artifact.changed_at(),
-            Self::Inline(_) => Revision::default(),
-        }
-    }
-
-    fn value(&self) -> LpValue {
-        match self {
-            Self::Artifact { artifact } => LpValue::Struct {
-                name: Some(String::from("NodeInvocation")),
-                fields: vec![
-                    (
-                        String::from("form"),
-                        LpValue::String(String::from("artifact")),
-                    ),
-                    (
-                        String::from("artifact"),
-                        LpValue::String(artifact.value().clone()),
-                    ),
-                ],
-            },
-            Self::Inline(def) => LpValue::Struct {
-                name: Some(String::from("NodeInvocation")),
-                fields: vec![
-                    (
-                        String::from("form"),
-                        LpValue::String(String::from("inline")),
-                    ),
-                    (
-                        String::from("node_kind"),
-                        LpValue::String(String::from(def.kind_name())),
-                    ),
-                ],
-            },
-        }
-    }
-}
-
-impl SlotValueMut for NodeInvocation {
-    fn set_lp_value(&mut self, _revision: Revision, value: LpValue) -> Result<(), ValueRootError> {
-        let LpValue::Struct { fields, .. } = value else {
-            return Err(ValueRootError::new(
-                "node invocation value must be a struct",
-            ));
-        };
-        let form = struct_string_field(&fields, "form")?;
-        match form {
-            "artifact" => {
-                let artifact = struct_string_field(&fields, "artifact")?;
-                *self = NodeInvocation::new(ArtifactLocator::parse(artifact).map_err(|err| {
-                    ValueRootError::new(alloc::format!("invalid artifact locator: {err}"))
-                })?);
-                Ok(())
-            }
-            "inline" => Err(ValueRootError::new(
-                "inline node invocation mutation is not implemented yet",
-            )),
-            other => Err(ValueRootError::new(alloc::format!(
-                "unknown node invocation form {other:?}"
-            ))),
-        }
-    }
-}
-
-impl FieldSlot for NodeInvocation {
-    fn slot_field_shape() -> SlotShape {
-        SlotShape::leaf(node_invocation_shape())
-    }
-
-    fn slot_field_data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Value(self)
-    }
-}
-
-fn struct_string_field<'a>(
-    fields: &'a [(String, LpValue)],
-    name: &str,
-) -> Result<&'a str, ValueRootError> {
-    fields
-        .iter()
-        .find_map(|(field_name, value)| {
-            if field_name == name
-                && let LpValue::String(value) = value
-            {
-                return Some(value.as_str());
-            }
-            None
-        })
-        .ok_or_else(|| ValueRootError::new(alloc::format!("missing string field {name:?}")))
-}
-
-fn node_invocation_shape() -> SlotValueShape {
-    SlotValueShape {
-        id: crate::SlotShapeId::from_static_name("lp::node::Invocation"),
-        ty: LpType::Struct {
-            name: Some(String::from("NodeInvocation")),
-            fields: vec![
-                ModelStructMember {
-                    name: String::from("form"),
-                    ty: LpType::String,
-                },
-                ModelStructMember {
-                    name: String::from("artifact"),
-                    ty: LpType::String,
-                },
-                ModelStructMember {
-                    name: String::from("node_kind"),
-                    ty: LpType::String,
-                },
-            ],
-        },
-        meta: SlotMeta::empty(),
-        editor: Default::default(),
-    }
-}
-
-#[cfg(feature = "schema-gen")]
-impl schemars::JsonSchema for NodeInvocation {
-    fn schema_name() -> alloc::borrow::Cow<'static, str> {
-        alloc::borrow::Cow::Borrowed("NodeInvocation")
-    }
-
-    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        <alloc::collections::BTreeMap<String, String> as schemars::JsonSchema>::json_schema(
-            generator,
-        )
+    pub fn artifact_locator(&self) -> Result<ArtifactLocator, &'static str> {
+        ArtifactLocator::parse(self.artifact.value().as_str())
     }
 }
 
@@ -225,21 +64,8 @@ mod tests {
         "#;
         let invocation: NodeInvocation = toml::from_str(toml).unwrap();
         assert_eq!(
-            invocation.artifact_locator().unwrap().unwrap(),
+            invocation.artifact_locator().unwrap(),
             ArtifactLocator::path("./texture.toml")
         );
-    }
-
-    #[test]
-    fn node_invocation_toml_inline_form_loads() {
-        let toml = r#"
-            kind = "output"
-            pin = 18
-        "#;
-        let invocation: NodeInvocation = toml::from_str(toml).unwrap();
-        let Some(NodeDef::Output(def)) = invocation.inline_def() else {
-            panic!("inline output def");
-        };
-        assert_eq!(def.pin(), 18);
     }
 }

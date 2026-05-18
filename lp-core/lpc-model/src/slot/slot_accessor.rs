@@ -46,9 +46,9 @@ impl SlotAccessor {
         path: SlotPath,
         registry: &SlotShapeRegistry,
     ) -> Result<Self, SlotAccessorError> {
-        let shape = registry
-            .get(&root)
-            .ok_or_else(|| SlotAccessorError::new(format!("missing slot root shape {root}")))?;
+        let shape = registry.get(&root).ok_or_else(|| {
+            SlotAccessorError::new(format!("missing slot path root shape {root}"))
+        })?;
         let mut shape = resolve_ref_shape(shape, registry)?;
         let mut steps = Vec::new();
 
@@ -149,7 +149,7 @@ impl SlotAccessor {
         self.check_registry_revision(registry)?;
         if root.shape_id() != self.root {
             return Err(SlotAccessorError::new(format!(
-                "slot accessor root {} does not match data root {}",
+                "slot accessor path root {} does not match data shape {}",
                 self.root,
                 root.shape_id()
             )));
@@ -205,7 +205,7 @@ impl SlotAccessor {
     ) -> Result<&'a SlotShape, SlotAccessorError> {
         self.check_registry_revision(registry)?;
         let mut shape = registry.get(&self.root).ok_or_else(|| {
-            SlotAccessorError::new(format!("missing slot root shape {}", self.root))
+            SlotAccessorError::new(format!("missing slot path root shape {}", self.root))
         })?;
         shape = resolve_ref_shape(shape, registry)?;
         for step in &self.steps {
@@ -273,7 +273,7 @@ mod tests {
         let mut registry = SlotShapeRegistry::default();
         crate::slot_shapes::register_all_static_slot_shapes(&mut registry)
             .expect("static slot shapes");
-        OptionRoot::ensure_registered(&mut registry).expect("option root shape");
+        OptionRoot::ensure_registered(&mut registry).expect("option shape");
 
         let accessor = SlotAccessor::compile_value(
             OptionRoot::SHAPE_ID,
@@ -283,7 +283,7 @@ mod tests {
         .expect("item.some accessor");
 
         let root = OptionRoot {
-            item: OptionSlot::some(ValueSlot::new(64)),
+            item: OptionSlot::some(ValueSlot::new(64_u32)),
         };
         let data = accessor.access(&root, &registry).expect("access data");
         assert!(matches!(
@@ -299,9 +299,8 @@ mod tests {
         ));
     }
 
-    #[derive(crate::SlotRecord)]
-    #[slot(root)]
+    #[derive(crate::Slotted)]
     struct OptionRoot {
-        item: OptionSlot<ValueSlot<u32>>,
+        pub item: OptionSlot<ValueSlot<u32>>,
     }
 }

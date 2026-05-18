@@ -1,11 +1,11 @@
-kind = "project"
+kind = "Project"
 name = "basic"
 
 [nodes.output]
 artifact = "./output.toml"
 
 [nodes.clock]
-kind = "clock"
+artifact = "./clock.toml"
 
 [nodes.shader]
 artifact = "./shader.toml"

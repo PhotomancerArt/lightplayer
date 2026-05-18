@@ -1,17 +1,16 @@
 use crate::{
-    FieldSlot, FieldSlotMut, FromLpValue, LpType, LpValue, Revision, SlotDataAccess,
-    SlotDataAccessMut, SlotEnumOption, SlotMeta, SlotShape, SlotShapeId, SlotValue,
-    SlotValueAccess, SlotValueMut, SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError,
-    WithRevision, current_revision,
+    FromLpValue, LpType, LpValue, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape,
+    ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };
 use alloc::string::{String, ToString};
 use alloc::vec;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 /// RGB channel order for fixture/output color packing.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ColorOrderValue {
     Rgb,
+    #[default]
     Grb,
     Rbg,
     Gbr,
@@ -66,86 +65,7 @@ impl<'de> Deserialize<'de> for ColorOrderValue {
 }
 
 /// Revision-tracked RGB channel order.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ColorOrderSlot {
-    inner: WithRevision<ColorOrderValue>,
-}
-
-impl ColorOrderSlot {
-    pub fn new(value: ColorOrderValue) -> Self {
-        Self::with_version(current_revision(), value)
-    }
-
-    pub fn with_version(revision: Revision, value: ColorOrderValue) -> Self {
-        Self {
-            inner: WithRevision::new(revision, value),
-        }
-    }
-
-    pub fn set(&mut self, value: ColorOrderValue) {
-        self.inner.set(current_revision(), value);
-    }
-
-    pub fn revision(&self) -> Revision {
-        self.inner.changed_at()
-    }
-
-    pub fn value(&self) -> &ColorOrderValue {
-        self.inner.value()
-    }
-}
-
-impl SlotValueAccess for ColorOrderSlot {
-    fn changed_at(&self) -> Revision {
-        self.inner.changed_at()
-    }
-
-    fn value(&self) -> LpValue {
-        self.inner.value().to_lp_value()
-    }
-}
-
-impl Serialize for ColorOrderSlot {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        self.inner.value().serialize(serializer)
-    }
-}
-
-impl<'de> Deserialize<'de> for ColorOrderSlot {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        Ok(Self::new(ColorOrderValue::deserialize(deserializer)?))
-    }
-}
-
-impl FieldSlot for ColorOrderSlot {
-    fn slot_field_shape() -> SlotShape {
-        SlotShape::leaf(color_order_shape())
-    }
-
-    fn slot_field_data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Value(self)
-    }
-}
-
-impl SlotValueMut for ColorOrderSlot {
-    fn set_lp_value(&mut self, revision: Revision, value: LpValue) -> Result<(), ValueRootError> {
-        self.inner
-            .set(revision, ColorOrderValue::from_lp_value(&value)?);
-        Ok(())
-    }
-}
-
-impl FieldSlotMut for ColorOrderSlot {
-    fn slot_field_data_mut(&mut self) -> SlotDataAccessMut<'_> {
-        SlotDataAccessMut::Value(self)
-    }
-}
+pub type ColorOrderSlot = ValueSlot<ColorOrderValue>;
 
 impl ToLpValue for ColorOrderValue {
     fn to_lp_value(&self) -> LpValue {
@@ -166,27 +86,23 @@ impl FromLpValue for ColorOrderValue {
 }
 
 impl SlotValue for ColorOrderValue {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.color_order");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("ColorOrderValue");
 
     fn value_shape() -> SlotValueShape {
-        color_order_shape()
-    }
-}
-
-pub fn color_order_shape() -> SlotValueShape {
-    SlotValueShape {
-        id: SlotShapeId::from_static_name("slot.leaf.color_order"),
-        ty: LpType::String,
-        meta: SlotMeta::empty(),
-        editor: ValueEditorHint::Dropdown {
-            options: vec![
-                SlotEnumOption::new("rgb", "RGB"),
-                SlotEnumOption::new("grb", "GRB"),
-                SlotEnumOption::new("rbg", "RBG"),
-                SlotEnumOption::new("gbr", "GBR"),
-                SlotEnumOption::new("brg", "BRG"),
-                SlotEnumOption::new("bgr", "BGR"),
-            ],
-        },
+        SlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: LpType::String,
+            meta: SlotMeta::empty(),
+            editor: ValueEditorHint::Dropdown {
+                options: vec![
+                    SlotEnumOption::new("rgb", "RGB"),
+                    SlotEnumOption::new("grb", "GRB"),
+                    SlotEnumOption::new("rbg", "RBG"),
+                    SlotEnumOption::new("gbr", "GBR"),
+                    SlotEnumOption::new("brg", "BRG"),
+                    SlotEnumOption::new("bgr", "BGR"),
+                ],
+            },
+        }
     }
 }

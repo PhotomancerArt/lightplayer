@@ -23,7 +23,7 @@ use crate::products::visual::{
 
 use super::{MsaFluidSolver, sample_rgba16_nearest_q16, stamp_emitter};
 
-/// Runtime node for `kind = "fluid"` artifacts.
+/// Runtime node for `kind = "Fluid"` artifacts.
 pub struct FluidNode {
     state: FluidState,
     def_view: Option<FluidDefView>,
@@ -310,7 +310,7 @@ mod tests {
         fs.write_file(
             "/project.toml".as_path(),
             br#"
-kind = "project"
+kind = "Project"
 
 [nodes.fluid]
 artifact = "./fluid.toml"
@@ -320,7 +320,7 @@ artifact = "./fluid.toml"
         fs.write_file(
             "/fluid.toml".as_path(),
             br#"
-kind = "fluid"
+kind = "Fluid"
 size = { width = 8, height = 8 }
 solver_iterations = 1
 step_hz = 25.0
@@ -389,7 +389,7 @@ intensity = 2.0
         fs.write_file(
             "/project.toml".as_path(),
             br#"
-kind = "project"
+kind = "Project"
 
 [nodes.compute]
 artifact = "./compute.toml"
@@ -402,7 +402,7 @@ artifact = "./fluid.toml"
         fs.write_file(
             "/compute.toml".as_path(),
             br#"
-kind = "shader/compute"
+kind = "ComputeShader"
 glsl_path = "compute.glsl"
 
 [bindings.emitters]
@@ -439,7 +439,7 @@ void tick() {
         fs.write_file(
             "/fluid.toml".as_path(),
             br#"
-kind = "fluid"
+kind = "Fluid"
 size = { width = 8, height = 8 }
 solver_iterations = 1
 step_hz = 25.0

@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    BindingDefs, Dim2u, Dim2uSlot, FluidEmitter, MapSlot, PositiveF32Slot, RatioSlot, ValueSlot,
+    BindingDefs, Dim2u, Dim2uSlot, FluidEmitter, MapSlot, PositiveF32, PositiveF32Slot, Ratio,
+    RatioSlot, Slotted, ValueSlot,
 };
 
 /// Authored fluid simulation node definition.
@@ -9,8 +10,7 @@ use crate::{
 /// `emitters` is real authored/default slot data and a consumed dataflow slot.
 /// Most projects bind it from compute/input nodes, but inline emitter maps are
 /// useful for simple scenes and tests.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
-#[slot(root, view)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
 pub struct FluidDef {
     /// Authored slot bindings for fluid inputs and visual output.
     #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
@@ -80,15 +80,15 @@ fn default_solver_iterations() -> ValueSlot<u32> {
 }
 
 fn default_step_hz() -> PositiveF32Slot {
-    PositiveF32Slot::new(25.0)
+    PositiveF32Slot::new(PositiveF32(25.0))
 }
 
 fn default_fade_speed() -> RatioSlot {
-    RatioSlot::new(0.1)
+    RatioSlot::new(Ratio(0.1))
 }
 
 fn default_viscosity() -> PositiveF32Slot {
-    PositiveF32Slot::new(0.00003)
+    PositiveF32Slot::new(PositiveF32(0.00003))
 }
 
 #[cfg(test)]
@@ -100,7 +100,7 @@ mod tests {
     fn fluid_def_parses_inline_emitters() {
         let def = NodeDef::from_toml_str(
             r#"
-kind = "fluid"
+kind = "Fluid"
 
 [emitters.1]
 id = 1

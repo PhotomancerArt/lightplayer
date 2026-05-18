@@ -24,19 +24,15 @@ impl FromLpValue for ControlProduct {
 }
 
 impl SlotValue for ControlProduct {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.control_product");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("ControlProduct");
 
     fn value_shape() -> SlotValueShape {
-        control_product_shape()
-    }
-}
-
-pub fn control_product_shape() -> SlotValueShape {
-    SlotValueShape {
-        id: ControlProduct::SHAPE_ID,
-        ty: LpType::Product(ProductKind::Control),
-        meta: SlotMeta::empty(),
-        editor: ValueEditorHint::ControlProduct,
+        SlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: LpType::Product(ProductKind::Control),
+            meta: SlotMeta::empty(),
+            editor: ValueEditorHint::ControlProduct,
+        }
     }
 }
 
@@ -54,7 +50,7 @@ mod tests {
             product
         );
         assert_eq!(
-            control_product_shape().ty,
+            ControlProduct::value_shape().ty,
             LpType::Product(ProductKind::Control)
         );
     }

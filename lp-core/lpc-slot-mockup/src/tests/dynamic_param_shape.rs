@@ -69,10 +69,10 @@ fn two_shader_instances_can_have_distinct_dynamic_param_shapes() {
 
     let mut registry = SlotShapeRegistry::default();
     registry
-        .register_root(primary_node.shape_id(), primary_node.shape())
+        .register_shape(primary_node.shape_id(), primary_node.shape())
         .unwrap();
     registry
-        .register_root(secondary_node.shape_id(), secondary_node.shape())
+        .register_shape(secondary_node.shape_id(), secondary_node.shape())
         .unwrap();
 
     println!("server loaded two shader node instances");

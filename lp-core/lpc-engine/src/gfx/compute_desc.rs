@@ -104,8 +104,9 @@ fn lps_type_for_slot_value(
         return Ok(model_type_to_lps_type(&ty));
     }
 
+    let id = lpc_model::SlotShapeId::from_static_name(value_ref.as_str());
     let shape = registry
-        .get_by_name(value_ref.as_str())
+        .get(&id)
         .ok_or_else(|| ComputeDescError::UnknownNativeShape(String::from(value_ref.as_str())))?;
     match shape {
         SlotShape::Value { shape } => Ok(model_type_to_lps_type(&shape.ty)),

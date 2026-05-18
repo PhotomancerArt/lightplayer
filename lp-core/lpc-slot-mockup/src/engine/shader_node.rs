@@ -1,8 +1,9 @@
 use crate::source::ShaderDef;
 use lpc_model::{
-    LpType, LpValue, ModelStructMember, Revision, SlotAccess, SlotData, SlotDataAccess, SlotName,
-    SlotOptionDyn, SlotRecord, SlotRecordAccess, SlotShape, SlotShapeId, WithRevision,
-    current_revision,
+    __private::Box,
+    LpType, LpValue, ModelStructMember, Revision, SlotAccess, SlotData, SlotDataAccess,
+    SlotDataMutAccess, SlotMutAccess, SlotName, SlotOptionDyn, SlotRecord, SlotRecordAccess,
+    SlotRecordMutAccess, SlotShape, SlotShapeId, WithRevision, current_revision,
     slot::shape::{field, option, record, value},
 };
 
@@ -131,6 +132,14 @@ impl SlotAccess for ShaderNode {
     fn data(&self) -> SlotDataAccess<'_> {
         SlotDataAccess::Record(self)
     }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn core::any::Any> {
+        self
+    }
 }
 
 impl SlotRecordAccess for ShaderNode {
@@ -138,6 +147,22 @@ impl SlotRecordAccess for ShaderNode {
         match index {
             0 => Some(SlotDataAccess::Record(&self.params)),
             1 => Some(SlotDataAccess::Option(&self.compile_error)),
+            _ => None,
+        }
+    }
+}
+
+impl SlotMutAccess for ShaderNode {
+    fn data_mut(&mut self) -> SlotDataMutAccess<'_> {
+        SlotDataMutAccess::Record(self)
+    }
+}
+
+impl SlotRecordMutAccess for ShaderNode {
+    fn field_mut(&mut self, index: usize) -> Option<SlotDataMutAccess<'_>> {
+        match index {
+            0 => Some(SlotDataMutAccess::Record(&mut self.params)),
+            1 => Some(SlotDataMutAccess::Option(&mut self.compile_error)),
             _ => None,
         }
     }
@@ -152,6 +177,7 @@ fn lp_type_for_data(data: &SlotData) -> LpType {
 
 fn lp_type_for_value(value: &LpValue) -> LpType {
     match value {
+        LpValue::Unset => panic!("unset shader param values need an explicit type"),
         LpValue::String(_) => LpType::String,
         LpValue::I32(_) => LpType::I32,
         LpValue::U32(_) => LpType::U32,
@@ -188,6 +214,7 @@ fn lp_type_for_value(value: &LpValue) -> LpType {
                 })
                 .collect(),
         },
+        LpValue::Enum { .. } => panic!("shader param enum values need an explicit type"),
         LpValue::Resource(_) => LpType::Resource,
         LpValue::Product(product) => match product {
             lpc_model::ProductRef::Visual(_) => LpType::Product(lpc_model::ProductKind::Visual),

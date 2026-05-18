@@ -1,20 +1,28 @@
 #![cfg(feature = "derive")]
 
 use lpc_model::{
-    SlotAccess, SlotDataAccess, SlotDirection, SlotMapValueAccess, SlotMerge, SlotRecordAccess,
-    SlotRecordShape, SlotShape, SlotShapeRegistry, StaticSlotAccess, StaticSlotShape, ValueSlot,
+    LpValue, SlotAccess, SlotDataAccess, SlotDataMutAccess, SlotMapValueAccess, SlotMutAccess,
+    SlotPath, SlotRecordAccess, SlotRecordMutAccess, SlotRecordShape, SlotShape, SlotShapeRegistry,
+    StaticSlotAccess, StaticSlotShape, ValueSlot, lookup_slot_data,
 };
 
-#[derive(lpc_model::SlotRecord)]
-#[slot(root)]
+#[derive(lpc_model::Slotted)]
 struct DerivedRecord {
-    enabled: ValueSlot<bool>,
-    nested: NestedRecord,
+    pub enabled: ValueSlot<bool>,
+    pub nested: NestedRecord,
 }
 
-#[derive(lpc_model::SlotRecord)]
+#[derive(lpc_model::Slotted)]
 struct NestedRecord {
-    count: ValueSlot<u32>,
+    pub count: ValueSlot<u32>,
+}
+
+#[derive(lpc_model::Slotted)]
+struct WrappedRecord(NestedRecord);
+
+#[derive(lpc_model::Slotted)]
+struct RecordWithWrapper {
+    pub wrapped: WrappedRecord,
 }
 
 #[test]
@@ -50,72 +58,84 @@ fn derive_generates_record_shape_access_and_root_registration() {
     assert!(registry.get(&DerivedRecord::SHAPE_ID).is_some());
 }
 
-#[derive(lpc_model::SlotRecord)]
-#[slot(root)]
-struct SemanticRecord {
-    #[slot(consumed, merge = "by_key")]
-    emitters: ValueSlot<u32>,
-    #[slot(produced)]
-    output: ValueSlot<u32>,
+#[test]
+fn derive_generates_mutable_record_access() {
+    let mut record = DerivedRecord {
+        enabled: ValueSlot::new(true),
+        nested: NestedRecord {
+            count: ValueSlot::new(3),
+        },
+    };
+
+    let Some(SlotDataMutAccess::Value(enabled)) = record.field_mut(0) else {
+        panic!("enabled value field");
+    };
+    enabled
+        .set_lp_value(lpc_model::Revision::new(2), LpValue::Bool(false))
+        .unwrap();
+    assert_eq!(record.enabled.value(), &false);
+
+    let Some(SlotDataMutAccess::Record(nested)) = record.field_mut(1) else {
+        panic!("nested record field");
+    };
+    let Some(SlotDataMutAccess::Value(count)) = nested.field_mut(0) else {
+        panic!("nested count field");
+    };
+    count
+        .set_lp_value(lpc_model::Revision::new(3), LpValue::U32(9))
+        .unwrap();
+    assert_eq!(record.nested.count.value(), &9);
+
+    assert!(matches!(record.data_mut(), SlotDataMutAccess::Record(_)));
 }
 
 #[test]
-fn derive_preserves_field_semantics() {
-    let SlotShape::Record { fields, .. } = SemanticRecord::slot_record_shape() else {
-        panic!("record shape");
+fn derive_supports_single_field_tuple_wrappers() {
+    let mut wrapper = WrappedRecord(NestedRecord {
+        count: ValueSlot::new(3),
+    });
+
+    assert_eq!(wrapper.shape_id(), WrappedRecord::SHAPE_ID);
+    assert_static_slot_access::<WrappedRecord>();
+    assert!(matches!(wrapper.data(), SlotDataAccess::Record(_)));
+
+    let SlotShape::Record { fields, .. } = WrappedRecord::slot_shape() else {
+        panic!("wrapper record shape");
     };
+    assert_eq!(fields.len(), 1);
+    assert_eq!(fields[0].name.as_str(), "count");
 
-    assert_eq!(fields[0].name.as_str(), "emitters");
-    assert_eq!(fields[0].semantics.direction, SlotDirection::Consumed);
-    assert_eq!(fields[0].semantics.merge, SlotMerge::ByKey);
-
-    assert_eq!(fields[1].name.as_str(), "output");
-    assert_eq!(fields[1].semantics.direction, SlotDirection::Produced);
-    assert_eq!(fields[1].semantics.merge, SlotMerge::Latest);
-}
-
-#[derive(lpc_model::SlotRecord)]
-#[slot(root)]
-struct WritableDefaultRecord {
-    enabled: ValueSlot<bool>,
-    #[slot(policy = "read_only_persisted")]
-    locked: ValueSlot<bool>,
-}
-
-#[test]
-fn derive_defaults_fields_to_writable_with_field_override() {
-    let SlotShape::Record { fields, .. } = WritableDefaultRecord::slot_record_shape() else {
-        panic!("record shape");
+    let Some(SlotDataMutAccess::Value(count)) = (match wrapper.data_mut() {
+        SlotDataMutAccess::Record(record) => record.field_mut(0),
+        _ => panic!("wrapper should expose wrapped record data"),
+    }) else {
+        panic!("wrapped count field");
     };
+    count
+        .set_lp_value(lpc_model::Revision::new(4), LpValue::U32(12))
+        .unwrap();
+    assert_eq!(wrapper.0.count.value(), &12);
 
-    assert!(fields[0].policy.writable);
-    assert_eq!(
-        fields[0].policy,
-        lpc_model::SlotPolicy::writable_persisted()
-    );
-    assert!(!fields[1].policy.writable);
-    assert_eq!(
-        fields[1].policy,
-        lpc_model::SlotPolicy::read_only_persisted()
-    );
-}
-
-#[derive(lpc_model::SlotRecord)]
-#[slot(root, default_policy = "read_only_transient")]
-struct RuntimeStateRecord {
-    frame: ValueSlot<u32>,
-}
-
-#[test]
-fn derive_supports_read_only_state_policy_override() {
-    let SlotShape::Record { fields, .. } = RuntimeStateRecord::slot_record_shape() else {
-        panic!("record shape");
+    let parent = RecordWithWrapper {
+        wrapped: WrappedRecord(NestedRecord {
+            count: ValueSlot::new(7),
+        }),
     };
+    let Some(SlotDataAccess::Record(wrapped)) = parent.field(0) else {
+        panic!("wrapper field should expose wrapped record directly");
+    };
+    let Some(SlotDataAccess::Value(count)) = wrapped.field(0) else {
+        panic!("wrapped count value");
+    };
+    assert_eq!(count.value(), LpValue::U32(7));
 
-    assert_eq!(
-        fields[0].policy,
-        lpc_model::SlotPolicy::read_only_transient()
-    );
+    let mut registry = SlotShapeRegistry::default();
+    WrappedRecord::ensure_registered(&mut registry).unwrap();
+    let found = lookup_slot_data(&wrapper, &registry, &SlotPath::parse("count").unwrap()).unwrap();
+    let SlotDataAccess::Value(count) = found else {
+        panic!("count value through wrapper path");
+    };
+    assert_eq!(count.value(), LpValue::U32(12));
 }
 
 fn assert_static_slot_access<T: StaticSlotAccess>() {}

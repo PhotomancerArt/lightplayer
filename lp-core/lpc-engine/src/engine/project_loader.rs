@@ -5,14 +5,14 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use lpc_model::LpType;
 use lpc_model::generate_compute_shader_header;
 use lpc_model::nodes::project::project_def::ProjectDef;
-use lpc_model::{ArtifactLocator, NodeInvocation, NodeKind};
+use lpc_model::{ArtifactLocator, ArtifactReadRoot, NodeInvocation, NodeKind};
 use lpc_model::{
-    BindingDefs, BindingEndpoint, ChannelName, Kind, LpType, LpValue, NodeDef, NodeId, NodeName,
-    Revision, ShaderDef, ShaderSlotKind, SlotPath,
+    BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, Kind, LpValue, NodeDef, NodeId,
+    NodeName, Revision, ShaderDef, ShaderSlotKind, SlotPath, SlotShapeRegistry,
 };
-use lpc_source::ArtifactReadRoot;
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lpfs::lp_path::{LpPath, LpPathBuf};
 
@@ -85,10 +85,9 @@ impl ProjectLoader {
         R::Err: core::fmt::Debug,
     {
         let project_path = resolve_project_locator(&project_locator)?;
-        let project_def = load_project_def(root, &project_path)?;
-
         let project_root = services.project_root().clone();
         let mut runtime = Engine::with_services(project_root.clone(), services);
+        let project_def = load_project_def(root, &project_path, runtime.slot_shapes())?;
         let frame = Revision::new(1);
         let root_id = runtime.tree().root();
         let project_artifact = runtime
@@ -131,50 +130,28 @@ impl ProjectLoader {
                     path: project_path.as_str().to_string(),
                     reason: format!("{e}"),
                 })?;
-            let (artifact_path, config, artifact_id, has_artifact_path) =
-                if let Some(artifact_locator) = invocation.artifact_locator() {
-                    let artifact_locator =
-                        artifact_locator.map_err(|e| ProjectLoadError::InvalidSourcePath {
-                            path: project_path.as_str().to_string(),
-                            reason: format!(
-                                "invalid artifact locator `{}`: {e}",
-                                invocation.artifact_path_text().unwrap_or("<missing>")
-                            ),
-                        })?;
-                    let artifact_path =
-                        resolve_child_artifact_locator(&project_path, &artifact_locator)?;
-                    let config = load_node_def(root, artifact_path.as_path())?;
-                    let artifact_id = runtime
-                        .artifacts_mut()
-                        .acquire_location(ArtifactLocation::file(artifact_path.clone()), frame);
-                    runtime
-                        .artifacts_mut()
-                        .load_with(&artifact_id, frame, |_location| Ok(config.clone()))
-                        .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                            path: artifact_path.as_str().to_string(),
-                            reason: format!("load node artifact payload: {e:?}"),
-                        })?;
-                    (artifact_path, config, artifact_id, true)
-                } else if let Some(config) = invocation.inline_def().cloned() {
-                    let artifact_path = project_path.clone();
-                    let artifact_id = runtime.artifacts_mut().acquire_location(
-                        ArtifactLocation::inline_node(project_path.clone(), name.clone()),
-                        frame,
-                    );
-                    runtime
-                        .artifacts_mut()
-                        .load_with(&artifact_id, frame, |_location| Ok(config.clone()))
-                        .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                            path: project_path.as_str().to_string(),
-                            reason: format!("load inline node payload `{name}`: {e:?}"),
-                        })?;
-                    (artifact_path, config, artifact_id, false)
-                } else {
-                    return Err(ProjectLoadError::InvalidSourcePath {
+            let artifact_locator =
+                invocation
+                    .artifact_locator()
+                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
                         path: project_path.as_str().to_string(),
-                        reason: format!("node invocation `{name}` has no artifact or inline def"),
-                    });
-                };
+                        reason: format!(
+                            "invalid artifact locator `{}`: {e}",
+                            invocation.artifact.value().as_str()
+                        ),
+                    })?;
+            let artifact_path = resolve_child_artifact_locator(&project_path, &artifact_locator)?;
+            let config = load_node_def(root, artifact_path.as_path(), runtime.slot_shapes())?;
+            let artifact_id = runtime
+                .artifacts_mut()
+                .acquire_location(ArtifactLocation::file(artifact_path.clone()), frame);
+            runtime
+                .artifacts_mut()
+                .load_with(&artifact_id, frame, |_location| Ok(config.clone()))
+                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                    path: artifact_path.as_str().to_string(),
+                    reason: format!("load node artifact payload: {e:?}"),
+                })?;
             let ty = node_kind_name(&config, artifact_path.as_path())?;
             let leaf_id = runtime
                 .tree_mut()
@@ -191,9 +168,7 @@ impl ProjectLoader {
                 )
                 .map_err(ProjectLoadError::Tree)?;
 
-            if has_artifact_path {
-                runtime.insert_artifact_node(artifact_path.clone(), leaf_id);
-            }
+            runtime.insert_artifact_node(artifact_path.clone(), leaf_id);
             loaded_nodes.push(LoadedNode {
                 name: node_name,
                 artifact_path,
@@ -422,8 +397,8 @@ impl ProjectLoader {
                         node.id,
                         Box::new(FixtureNode::new(
                             node.id,
-                            config.mapping.clone(),
-                            config.sampling,
+                            config.mapping.value().clone(),
+                            *config.sampling.value(),
                             frame,
                         )),
                         frame,
@@ -455,13 +430,17 @@ impl ProjectLoader {
     }
 }
 
-fn load_project_def<R>(root: &R, path: &LpPathBuf) -> Result<ProjectDef, ProjectLoadError>
+fn load_project_def<R>(
+    root: &R,
+    path: &LpPathBuf,
+    registry: &SlotShapeRegistry,
+) -> Result<ProjectDef, ProjectLoadError>
 where
     R: ArtifactReadRoot + ?Sized,
     R::Err: core::fmt::Debug,
 {
     let text = read_utf8_file(root, path.as_path())?;
-    match NodeDef::from_toml_str(&text) {
+    match NodeDef::read_toml(registry, &text) {
         Ok(NodeDef::Project(def)) => Ok(def),
         Ok(other) => Err(ProjectLoadError::UnknownKind {
             path: path.as_str().to_string(),
@@ -480,13 +459,17 @@ where
     }
 }
 
-fn load_node_def<R>(root: &R, path: &LpPath) -> Result<NodeDef, ProjectLoadError>
+fn load_node_def<R>(
+    root: &R,
+    path: &LpPath,
+    registry: &SlotShapeRegistry,
+) -> Result<NodeDef, ProjectLoadError>
 where
     R: ArtifactReadRoot + ?Sized,
     R::Err: core::fmt::Debug,
 {
     let text = read_utf8_file(root, path)?;
-    match NodeDef::from_toml_str(&text) {
+    match NodeDef::read_toml(registry, &text) {
         Ok(NodeDef::Project(_)) => Err(ProjectLoadError::UnknownKind {
             path: path.as_str().to_string(),
             suffix: "project".to_string(),
@@ -610,12 +593,21 @@ fn demand_input_path() -> SlotPath {
     SlotPath::parse("in").expect("valid demand input path")
 }
 
-fn binding_source<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<&'a BindingEndpoint> {
-    bindings.entries().get(slot)?.source.as_ref()
+enum AuthoredBindingSource<'a> {
+    Value(&'a LpValue),
+    Ref(&'a AuthoredBindingRef),
 }
 
-fn binding_target<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<&'a BindingEndpoint> {
-    bindings.entries().get(slot)?.target.as_ref()
+fn binding_source<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<AuthoredBindingSource<'a>> {
+    let binding = bindings.entries().get(slot)?;
+    if let Some(value) = binding.value_literal() {
+        return Some(AuthoredBindingSource::Value(value));
+    }
+    binding.source_ref().map(AuthoredBindingSource::Ref)
+}
+
+fn binding_target<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<&'a AuthoredBindingRef> {
+    bindings.entries().get(slot)?.target_ref()
 }
 
 fn register_source_binding(
@@ -788,14 +780,30 @@ fn register_visual_default_time_binding(
 fn binding_source_endpoint(
     loaded_nodes: &[LoadedNode],
     current: &LoadedNode,
-    endpoint: &BindingEndpoint,
+    endpoint: AuthoredBindingSource<'_>,
 ) -> Result<BindingSource, ProjectLoadError> {
     match endpoint {
-        BindingEndpoint::Literal(value) => Ok(BindingSource::Literal(value.clone())),
-        BindingEndpoint::Bus(bus) => Ok(BindingSource::BusChannel(ChannelName(
+        AuthoredBindingSource::Value(value) => Ok(BindingSource::Literal(value.clone())),
+        AuthoredBindingSource::Ref(binding_ref) => {
+            binding_ref_source(loaded_nodes, current, binding_ref)
+        }
+    }
+}
+
+fn binding_ref_source(
+    loaded_nodes: &[LoadedNode],
+    current: &LoadedNode,
+    binding_ref: &AuthoredBindingRef,
+) -> Result<BindingSource, ProjectLoadError> {
+    match binding_ref {
+        AuthoredBindingRef::Unset => Err(ProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: String::from("binding source cannot be unset"),
+        }),
+        AuthoredBindingRef::Bus(bus) => Ok(BindingSource::BusChannel(ChannelName(
             bus.slot().to_string(),
         ))),
-        BindingEndpoint::Node(node_slot) => {
+        AuthoredBindingRef::Node(node_slot) => {
             let node = resolve_node_loc(loaded_nodes, current, node_slot.node(), "binding source")?;
             Ok(BindingSource::ProducedSlot {
                 node: node.id,
@@ -808,17 +816,17 @@ fn binding_source_endpoint(
 fn binding_target_endpoint(
     loaded_nodes: &[LoadedNode],
     current: &LoadedNode,
-    endpoint: &BindingEndpoint,
+    endpoint: &AuthoredBindingRef,
 ) -> Result<BindingTarget, ProjectLoadError> {
     match endpoint {
-        BindingEndpoint::Literal(_) => Err(ProjectLoadError::InvalidSourcePath {
+        AuthoredBindingRef::Unset => Err(ProjectLoadError::InvalidSourcePath {
             path: current.artifact_path.as_str().to_string(),
-            reason: String::from("binding target cannot be a literal"),
+            reason: String::from("binding target cannot be unset"),
         }),
-        BindingEndpoint::Bus(bus) => Ok(BindingTarget::BusChannel(ChannelName(
+        AuthoredBindingRef::Bus(bus) => Ok(BindingTarget::BusChannel(ChannelName(
             bus.slot().to_string(),
         ))),
-        BindingEndpoint::Node(node_slot) => {
+        AuthoredBindingRef::Node(node_slot) => {
             let node = resolve_node_loc(loaded_nodes, current, node_slot.node(), "binding target")?;
             Ok(BindingTarget::ConsumedSlot {
                 node: node.id,
@@ -945,10 +953,10 @@ mod tests {
         fs.write_file(
             "/project.toml".as_path(),
             br#"
-kind = "project"
+kind = "Project"
 
 [nodes.clock]
-kind = "clock"
+artifact = "./clock.toml"
 
 [nodes.shader]
 artifact = "./shader.toml"
@@ -956,9 +964,15 @@ artifact = "./shader.toml"
         )
         .expect("project.toml");
         fs.write_file(
+            "/clock.toml".as_path(),
+            br#"kind = "Clock"
+"#,
+        )
+        .expect("clock.toml");
+        fs.write_file(
             "/shader.toml".as_path(),
             br#"
-kind = "shader/visual"
+kind = "Shader"
 glsl_path = "shader.glsl"
 render_order = 0
 
@@ -1056,7 +1070,7 @@ default = 0.0
         fs.write_file(
             "/project.toml".as_path(),
             br#"
-kind = "project"
+kind = "Project"
 
 [nodes.broken]
 artifact = "./broken.toml"
@@ -1099,7 +1113,7 @@ artifact = "./broken.toml"
         fs.write_file(
             "/project.toml".as_path(),
             br#"
-kind = "project"
+kind = "Project"
 
 [nodes.weird]
 artifact = "./weird.toml"
@@ -1127,10 +1141,11 @@ artifact = "./weird.toml"
         fs.write_file(
             "/fixture.toml".as_path(),
             br#"
-kind = "fixture"
+kind = "Fixture"
 color_order = "rgb"
 brightness = 255
 gamma_correction = false
+transform = [[1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
 
 [bindings.input]
 source = "..missing#output"
@@ -1138,20 +1153,12 @@ source = "..missing#output"
 [bindings.output]
 target = "bus#control.out"
 
-[transform]
-m00 = 1.0
-m01 = 0.0
-m10 = 1.0
-m11 = 1.0
-tx = 0.0
-ty = 0.0
-
 [mapping]
-kind = "path_points"
+kind = "PathPoints"
 sample_diameter = 2.0
 
 [mapping.paths.0]
-kind = "ring_array"
+kind = "RingArray"
 center = [0.5, 0.5]
 diameter = 1.0
 start_ring_inclusive = 0
@@ -1187,10 +1194,11 @@ order = "inner_first"
         fs.write_file(
             "/fixture.toml".as_path(),
             br#"
-kind = "fixture"
+kind = "Fixture"
 color_order = "rgb"
 brightness = 255
 gamma_correction = false
+transform = [[1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
 
 [bindings.input]
 source = "/texture#output"
@@ -1198,20 +1206,12 @@ source = "/texture#output"
 [bindings.output]
 target = "bus#control.out"
 
-[transform]
-m00 = 1.0
-m01 = 0.0
-m10 = 1.0
-m11 = 1.0
-tx = 0.0
-ty = 0.0
-
 [mapping]
-kind = "path_points"
+kind = "PathPoints"
 sample_diameter = 2.0
 
 [mapping.paths.0]
-kind = "ring_array"
+kind = "RingArray"
 center = [0.5, 0.5]
 diameter = 1.0
 start_ring_inclusive = 0
@@ -1247,7 +1247,7 @@ order = "inner_first"
         fs.write_file(
             "/project.toml".as_path(),
             br#"
-kind = "project"
+kind = "Project"
 
 [nodes.compute]
 artifact = "./compute.toml"
@@ -1257,7 +1257,7 @@ artifact = "./compute.toml"
         fs.write_file(
             "/compute.toml".as_path(),
             br#"
-kind = "shader/compute"
+kind = "ComputeShader"
 glsl_path = "compute.glsl"
 
 [consumed.time]
@@ -1432,7 +1432,7 @@ value = "f32"
         fs.write_file(
             "/project.toml".as_path(),
             br#"
-kind = "project"
+kind = "Project"
 name = "basic"
 
 [nodes.output]
@@ -1452,7 +1452,7 @@ artifact = "./fixture.toml"
         fs.write_file(
             "/texture.toml".as_path(),
             br#"
-kind = "texture"
+kind = "Texture"
 [size]
 width = 16
 height = 16
@@ -1465,7 +1465,7 @@ source = "bus#visual.out"
         fs.write_file(
             "/shader.toml".as_path(),
             br#"
-kind = "shader/visual"
+kind = "Shader"
 glsl_path = "shader.glsl"
 render_order = 0
 
@@ -1482,7 +1482,7 @@ target = "bus#visual.out"
         fs.write_file(
             "/output.toml".as_path(),
             br#"
-kind = "output"
+kind = "Output"
 pin = 4
 
 [bindings.input]
@@ -1493,10 +1493,11 @@ source = "bus#control.out"
         fs.write_file(
             "/fixture.toml".as_path(),
             br#"
-kind = "fixture"
+kind = "Fixture"
 color_order = "rgb"
 brightness = 255
 gamma_correction = false
+transform = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
 
 [bindings.input]
 source = "bus#visual.out"
@@ -1504,20 +1505,12 @@ source = "bus#visual.out"
 [bindings.output]
 target = "bus#control.out"
 
-[transform]
-m00 = 1.0
-m01 = 0.0
-m10 = 0.0
-m11 = 1.0
-tx = 0.0
-ty = 0.0
-
 [mapping]
-kind = "path_points"
+kind = "PathPoints"
 sample_diameter = 2.0
 
 [mapping.paths.0]
-kind = "ring_array"
+kind = "RingArray"
 center = [0.5, 0.5]
 diameter = 1.0
 start_ring_inclusive = 0

@@ -524,10 +524,16 @@ mod tests {
         fs.write_file(
             "/project.toml".as_path(),
             br#"
-kind = "project"
+kind = "Project"
 
 [nodes.clock]
-kind = "clock"
+artifact = "./clock.toml"
+"#,
+        )
+        .unwrap();
+        fs.write_file(
+            "/clock.toml".as_path(),
+            br#"kind = "Clock"
 "#,
         )
         .unwrap();
@@ -539,7 +545,7 @@ kind = "clock"
         fs.write_file(
             "/project.toml".as_path(),
             br#"
-kind = "project"
+kind = "Project"
 
 [nodes.output]
 artifact = "./output.toml"

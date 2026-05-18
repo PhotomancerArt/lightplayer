@@ -1,12 +1,11 @@
-kind = "project"
-uid = "basic2"
+kind = "Project"
 name = "basic2"
 
 [nodes.output]
 artifact = "./output.toml"
 
 [nodes.clock]
-kind = "clock"
+artifact = "./clock.toml"
 
 [nodes.texture]
 artifact = "./texture.toml"

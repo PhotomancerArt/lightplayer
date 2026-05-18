@@ -12,7 +12,7 @@ use crate::NodeId;
 /// The axis names deliberately avoid DMX universe vocabulary. Outputs may map
 /// rows to DMX/E1.31/Art-Net universes, GPIO ports, PixLite outputs, or another
 /// hardware-specific shape.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ControlExtent {
     pub rows: u32,
@@ -35,7 +35,7 @@ impl ControlExtent {
 }
 
 /// Logical control product produced by a node output.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ControlProduct {
     node: NodeId,

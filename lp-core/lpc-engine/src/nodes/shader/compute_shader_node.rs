@@ -65,6 +65,7 @@ impl ComputeShaderNode {
         let compile_opts = ShaderCompileOptions {
             q32_options: map_model_q32_options(&self.def.glsl_opts),
             max_errors: Some(20),
+            ..Default::default()
         };
         let desc = compute_desc_from_model_def(
             self.glsl_source.as_str(),

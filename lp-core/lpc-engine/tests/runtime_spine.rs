@@ -15,8 +15,9 @@ use lpc_engine::dataflow::resolver::{
 };
 use lpc_engine::node::{MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext};
 use lpc_model::node::node_invocation::NodeInvocation;
-use lpc_model::{Kind, LpValue, NodeDef, NodeId, Revision, TextureDef, bus::ChannelName};
-use lpc_source::ArtifactLocator;
+use lpc_model::{
+    ArtifactLocator, Kind, LpValue, NodeDef, NodeId, Revision, TextureDef, bus::ChannelName,
+};
 use lps_shared::LpsValueF32;
 
 // --- Tests (concise scenarios; helpers below) ---

@@ -2,7 +2,7 @@
 
 use crate::{
     FromLpValue, LpType, LpValue, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape,
-    ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
+    Slotted, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };
 use alloc::string::ToString;
 use serde::{Deserialize, Serialize};
@@ -98,7 +98,7 @@ impl DivMode {
 }
 
 /// GLSL compilation options (per-shader-node)
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, lpc_model::SlotRecord)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Slotted)]
 pub struct GlslOpts {
     #[serde(default)]
     pub add_sub: ValueSlot<AddSubMode>,
@@ -106,16 +106,6 @@ pub struct GlslOpts {
     pub mul: ValueSlot<MulMode>,
     #[serde(default)]
     pub div: ValueSlot<DivMode>,
-}
-
-impl Default for GlslOpts {
-    fn default() -> Self {
-        Self {
-            add_sub: ValueSlot::new(AddSubMode::Wrapping),
-            mul: ValueSlot::new(MulMode::Wrapping),
-            div: ValueSlot::new(DivMode::Reciprocal),
-        }
-    }
 }
 
 impl ToLpValue for AddSubMode {
@@ -131,7 +121,7 @@ impl FromLpValue for AddSubMode {
 }
 
 impl SlotValue for AddSubMode {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.glsl_add_sub_mode");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("AddSubMode");
 
     fn value_shape() -> SlotValueShape {
         mode_shape(
@@ -154,7 +144,7 @@ impl FromLpValue for MulMode {
 }
 
 impl SlotValue for MulMode {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.glsl_mul_mode");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("MulMode");
 
     fn value_shape() -> SlotValueShape {
         mode_shape(
@@ -177,7 +167,7 @@ impl FromLpValue for DivMode {
 }
 
 impl SlotValue for DivMode {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.glsl_div_mode");
+    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("DivMode");
 
     fn value_shape() -> SlotValueShape {
         mode_shape(

@@ -16,7 +16,6 @@ use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 use super::lp_gfx::LpGraphics;
 use super::lp_shader::{LpComputeShader, LpShader, ShaderCompileOptions};
 use crate::engine::error::Error;
-use crate::gfx::uniforms::build_uniforms;
 
 /// Host shader graphics backed by `lpvm-wasm` + wasmtime.
 pub struct Graphics {
@@ -151,6 +150,7 @@ impl LpShader for HostShader {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::gfx::uniforms::build_uniforms;
     use crate::gfx::{LpGraphics, ShaderCompileOptions};
 
     #[test]

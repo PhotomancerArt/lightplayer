@@ -120,14 +120,13 @@ impl<E: LpvmEngine> LpsEngine<E> {
             abi,
         } = desc;
 
-        let naga = lps_frontend::compile(glsl).map_err(|e| LpsError::Parse(format!("{e}")))?;
-        let lower_options = lps_frontend::LowerOptions {
+        let lower_options = lps_glsl::CompileOptions {
             texture_specs: Default::default(),
             texel_fetch_bounds: compiler_config.texture.texel_fetch_bounds,
         };
-        let (ir, meta) = lps_frontend::lower_with_options(&naga, &lower_options)
-            .map_err(|e| LpsError::Lower(format!("{e}")))?;
-        drop(naga);
+        let output =
+            lps_glsl::compile(glsl, &lower_options).map_err(|e| LpsError::Parse(e.render(glsl)))?;
+        let (ir, meta) = (output.ir, output.meta);
 
         let tick_fn_index = validate_compute_tick_sig(&meta)?;
         validate_compute_abi(&meta, &abi)?;

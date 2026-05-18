@@ -6,10 +6,11 @@
 
 use crate::{
     FieldSlot, FieldSlotMut, FromLpValue, LpType, LpValue, ModelStructMember, SlotDataAccess,
-    SlotDataAccessMut, SlotMeta, SlotShape, SlotShapeId, SlotValue, SlotValueAccess, SlotValueMut,
-    SlotValueShape, StaticSlotShape, ToLpValue, ValueEditorHint, ValueRootError,
+    SlotDataAccessMut, SlotMeta, SlotMutationError, SlotShape, SlotShapeId, SlotValue,
+    SlotValueAccess, SlotValueMut, SlotValueShape, StaticSlotShape, ToLpValue, ValueEditorHint,
+    ValueRootError,
 };
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec;
 use serde::{Deserialize, Serialize};
 
@@ -39,6 +40,12 @@ impl FluidEmitter {
             velocity: 0.0,
             intensity: 1.0,
         }
+    }
+}
+
+impl Default for FluidEmitter {
+    fn default() -> Self {
+        Self::new(0)
     }
 }
 
@@ -111,12 +118,17 @@ impl FieldSlot for FluidEmitter {
 }
 
 impl SlotValueMut for FluidEmitter {
+    fn changed_at(&self) -> crate::Revision {
+        crate::current_revision()
+    }
+
     fn set_lp_value(
         &mut self,
         _revision: crate::Revision,
         value: LpValue,
-    ) -> Result<(), ValueRootError> {
-        *self = FluidEmitter::from_lp_value(&value)?;
+    ) -> Result<(), SlotMutationError> {
+        *self = FluidEmitter::from_lp_value(&value)
+            .map_err(|error| SlotMutationError::wrong_type(error.to_string()))?;
         Ok(())
     }
 }

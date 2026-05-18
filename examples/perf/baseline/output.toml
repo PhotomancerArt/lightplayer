@@ -1,4 +1,4 @@
-kind = "output"
+kind = "Output"
 pin = 4
 
 [bindings.input]

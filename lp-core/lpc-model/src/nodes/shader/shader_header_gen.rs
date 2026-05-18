@@ -176,7 +176,8 @@ fn lp_type_for_ref(
     if let Some(ty) = value_ref.as_lp_type() {
         return Ok(ty);
     }
-    let shape = registry.get_by_name(value_ref.as_str()).ok_or_else(|| {
+    let id = crate::SlotShapeId::from_static_name(value_ref.as_str());
+    let shape = registry.get(&id).ok_or_else(|| {
         ShaderHeaderGenError::UnknownNativeShape(String::from(value_ref.as_str()))
     })?;
     match shape {

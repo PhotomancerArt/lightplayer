@@ -191,9 +191,9 @@ fn display_options_from_output_config(cfg: &OutputDef) -> Option<OutputDriverOpt
 
 fn driver_options_from_cfg(cfg: &OutputDriverOptionsConfig) -> OutputDriverOptions {
     OutputDriverOptions {
-        lum_power: *cfg.lum_power.value(),
+        lum_power: cfg.lum_power.value().0,
         white_point: *cfg.white_point.value(),
-        brightness: (*cfg.brightness.value()).clamp(0.0, 1.0),
+        brightness: cfg.brightness.value().0.clamp(0.0, 1.0),
         interpolation_enabled: *cfg.interpolation_enabled.value(),
         dithering_enabled: *cfg.dithering_enabled.value(),
         lut_enabled: *cfg.lut_enabled.value(),

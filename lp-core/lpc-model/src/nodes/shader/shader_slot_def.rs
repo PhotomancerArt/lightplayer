@@ -7,7 +7,7 @@
 
 use crate::{
     FromLpValue, LpType, LpValue, OptionSlot, SlotMeta, SlotShapeId, SlotValue, SlotValueShape,
-    ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
+    Slotted, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };
 use alloc::string::{String, ToString};
 use serde::{Deserialize, Serialize};
@@ -15,7 +15,7 @@ use serde::{Deserialize, Serialize};
 use super::ShaderSlotMappingDef;
 
 /// Authored definition for one shader consumed or produced slot.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
 pub struct ShaderSlotDef {
     pub kind: ValueSlot<ShaderSlotKind>,
     pub value: ValueSlot<ShaderValueShapeRef>,
@@ -74,9 +74,16 @@ impl ShaderSlotDef {
     }
 }
 
+impl Default for ShaderSlotDef {
+    fn default() -> Self {
+        Self::value_f32("", "", 0.0, None)
+    }
+}
+
 /// Top-level shader slot shape kind.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ShaderSlotKind {
+    #[default]
     Value,
     Map,
 }
@@ -99,8 +106,9 @@ impl ShaderSlotKind {
 }
 
 /// Supported map key types for M1 shader slots.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum ShaderMapKeyDef {
+    #[default]
     U32,
 }
 
@@ -157,6 +165,12 @@ impl ShaderValueShapeRef {
             "vec4" => Some(LpType::Vec4),
             _ => None,
         }
+    }
+}
+
+impl Default for ShaderValueShapeRef {
+    fn default() -> Self {
+        Self::builtin("f32")
     }
 }
 

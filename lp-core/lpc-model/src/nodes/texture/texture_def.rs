@@ -1,9 +1,8 @@
-use crate::{BindingDefs, Dim2u, Dim2uSlot};
+use crate::{BindingDefs, Dim2u, Dim2uSlot, Slotted};
 use serde::{Deserialize, Serialize};
 
 /// Authored texture node definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, lpc_slot_macros::SlotRecord)]
-#[slot(root, view)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Slotted)]
 pub struct TextureDef {
     pub size: Dim2uSlot,
     /// Authored slot bindings for texture materialization.

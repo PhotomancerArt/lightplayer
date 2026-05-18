@@ -1,10 +1,10 @@
 //! Public runtime state shape for fluid nodes.
 
-use crate::{VisualProduct, VisualProductSlot};
+use crate::{Slotted, VisualProduct, VisualProductSlot};
 
 /// Runtime state exposed by a fluid node.
-#[derive(lpc_slot_macros::SlotRecord)]
-#[slot(root, default_policy = "read_only_transient")]
+#[derive(Default, Slotted)]
+#[slot(default_policy = "read_only_transient")]
 pub struct FluidState {
     /// Renderable visual output produced by this fluid node.
     #[slot(produced)]

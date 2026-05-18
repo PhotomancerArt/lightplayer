@@ -255,6 +255,7 @@ fn sync_mapping_config_from_def(
     ctx: &mut TickContext<'_>,
 ) -> Result<(), NodeError> {
     match mapping {
+        MappingConfig::Unset => {}
         MappingConfig::PathPoints {
             paths,
             sample_diameter,
@@ -271,7 +272,7 @@ fn sync_mapping_config_from_def(
                 let Some(path) = paths.entries.get_mut(&path_key) else {
                     continue;
                 };
-                sync_path_spec_from_def(path_key, path, ctx)?;
+                sync_path_spec_from_def(path_key, path.value_mut(), ctx)?;
             }
         }
     }
@@ -863,6 +864,7 @@ fn fixture_control_extent(config: &MappingConfig) -> ControlExtent {
 
 fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
     match config {
+        MappingConfig::Unset => 0,
         MappingConfig::PathPoints { paths, .. } => {
             let mut total = 0u32;
             for path in paths.entries.values() {
@@ -872,7 +874,7 @@ fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
                     ring_lamp_counts,
                     order,
                     ..
-                } = path;
+                } = path.value();
 
                 let start_ring = *start_ring_inclusive.value();
                 let end_ring = *end_ring_exclusive.value();

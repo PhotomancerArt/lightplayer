@@ -2,7 +2,6 @@
 
 mod access_sync;
 mod mutation;
-mod slot_data_json;
 mod slot_shape_registry_json;
 mod sync;
 
@@ -14,7 +13,6 @@ pub use mutation::{
     WireSlotMutationId, WireSlotMutationOp, WireSlotMutationRejection, WireSlotMutationRequest,
     WireSlotMutationResponse, WireSlotMutationResult,
 };
-pub use slot_data_json::write_slot_data_json;
 pub use slot_shape_registry_json::write_slot_shape_registry_snapshot_json;
 pub use sync::{
     WireSlotChange, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot, WireSlotRootsSnapshot,

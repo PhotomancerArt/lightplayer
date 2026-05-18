@@ -10,4 +10,4 @@ pub mod resource_ref;
 
 pub use crate::resources::buffer::RuntimeBufferId;
 pub use resource_domain::ResourceDomain;
-pub use resource_ref::ResourceRef;
+pub use resource_ref::{ResourceRef, runtime_buffer_resource_shape};

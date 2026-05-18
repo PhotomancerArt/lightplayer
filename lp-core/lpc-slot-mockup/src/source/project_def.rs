@@ -1,19 +1,21 @@
 use std::collections::BTreeMap;
 
-use lpc_model::{ArtifactPathSlot, MapSlot};
+use lpc_model::{ArtifactPath, ArtifactPathSlot, MapSlot, OptionSlot, Slotted, ValueSlot};
 
-#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
-#[slot(root)]
+#[derive(Default, Slotted)]
 pub struct ProjectDef {
-    nodes: MapSlot<String, NodeInvocationDef>,
+    pub name: OptionSlot<ValueSlot<String>>,
+    pub nodes: MapSlot<String, NodeInvocationDef>,
 }
 
-#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
+#[derive(Default, Slotted)]
 pub struct NodeInvocationDef {
-    artifact: ArtifactPathSlot,
+    pub artifact: ArtifactPathSlot,
 }
 
 impl ProjectDef {
+    pub const KIND: &'static str = "project";
+
     pub fn new() -> Self {
         let mut nodes = BTreeMap::new();
         nodes.insert(
@@ -34,21 +36,20 @@ impl ProjectDef {
         );
 
         Self {
+            name: OptionSlot::some(ValueSlot::new("basic".to_string())),
             nodes: MapSlot::new(nodes),
         }
     }
 }
 
-impl Default for ProjectDef {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
 impl NodeInvocationDef {
-    fn new(artifact: &str) -> Self {
+    pub fn new(artifact: &str) -> Self {
         Self {
-            artifact: ArtifactPathSlot::new(artifact.to_string()),
+            artifact: ArtifactPathSlot::new(ArtifactPath(artifact.to_string())),
         }
+    }
+
+    pub fn artifact(&self) -> &str {
+        self.artifact.value().as_str()
     }
 }

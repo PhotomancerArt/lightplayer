@@ -7,7 +7,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use lpc_model::{
     ChannelName, Kind, MapSlot, NodeId, NodeName, Revision, SlotAccess, SlotMapKey, SlotPath,
-    SlotPathSegment, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape, TreePath,
+    SlotPathSegment, SlotShapeRegistry, SlotShapeRegistryError, Slotted, StaticSlotShape, TreePath,
     ValueSlot,
 };
 use lpc_wire::{WireChildKind, WireSlotIndex};
@@ -365,10 +365,9 @@ pub(crate) struct DummyShaderNode {
     tick_count: Arc<AtomicU32>,
 }
 
-#[derive(lpc_model::SlotRecord)]
-#[slot(root)]
+#[derive(Default, Slotted)]
 pub(crate) struct DummyShaderState {
-    outputs: MapSlot<u32, ValueSlot<f32>>,
+    pub outputs: MapSlot<u32, ValueSlot<f32>>,
 }
 
 impl DummyShaderNode {
@@ -413,7 +412,7 @@ impl NodeRuntime for DummyShaderNode {
         &self,
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
-        DummyShaderState::ensure_registered(registry).map(|_| ())
+        DummyShaderState::ensure_default_registered::<DummyShaderState>(registry).map(|_| ())
     }
 }
 

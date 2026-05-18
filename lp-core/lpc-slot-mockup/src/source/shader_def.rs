@@ -1,101 +1,180 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    MapSlot, RelativeNodeRef, RelativeNodeRefSlot, RenderOrderSlot, Revision, ShaderSlotDef,
-    ShaderValueShapeRef, SourcePathSlot, ValueSlot,
+    AddSubMode, BindingDefs, DivMode, GlslOpts, LpValue, MapSlot, MulMode, OptionSlot, PositiveF32,
+    PositiveF32Slot, Ratio, RatioSlot, RenderOrder, RenderOrderSlot, Revision, Slotted, SourcePath,
+    SourcePathSlot, ValueSlot,
 };
 
-#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
-#[slot(root)]
+#[derive(Default, Slotted)]
 pub struct ShaderDef {
-    glsl_path: SourcePathSlot,
-    texture_loc: RelativeNodeRefSlot,
-    render_order: RenderOrderSlot,
-    compiler_options: CompilerOptions,
-    #[serde(rename = "consumed")]
-    pub consumed_slots: MapSlot<String, ShaderSlotDef>,
+    pub glsl_path: SourcePathSlot,
+    pub render_order: RenderOrderSlot,
+    pub bindings: BindingDefs,
+    pub glsl_opts: GlslOpts,
+    pub param_defs: MapSlot<String, ShaderParamDef>,
 }
 
-#[derive(lpc_model::SlotRecord, serde::Serialize, serde::Deserialize)]
-pub struct CompilerOptions {
-    add_sub: ValueSlot<String>,
-    mul: ValueSlot<String>,
-    div: ValueSlot<String>,
+#[derive(Clone, Debug, Default, PartialEq, Slotted)]
+pub struct ShaderParamDef {
+    pub label: ValueSlot<String>,
+    pub description: ValueSlot<String>,
+    pub value_type: ValueSlot<String>,
+    pub default: RatioSlot,
+    pub min: OptionSlot<ScalarHint>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Slotted)]
+pub struct ScalarHint {
+    pub value: PositiveF32Slot,
 }
 
 impl ShaderDef {
+    pub const KIND: &'static str = "shader";
+
     pub fn new() -> Self {
-        let mut consumed_slots = BTreeMap::new();
-        consumed_slots.insert(
+        let mut param_defs = BTreeMap::new();
+        param_defs.insert(
             String::from("exposure"),
-            ShaderSlotDef::value_f32("Exposure", "Output exposure multiplier", 1.0, Some(0.0)),
+            ShaderParamDef::new("Exposure", "Output exposure multiplier", 1.0, Some(0.0)),
         );
-        consumed_slots.insert(
+        param_defs.insert(
             String::from("speed"),
-            ShaderSlotDef::value_f32("Speed", "Animation speed", 0.25, Some(0.0)),
+            ShaderParamDef::new("Speed", "Animation speed", 0.25, Some(0.0)),
         );
 
         Self {
-            glsl_path: SourcePathSlot::new(String::from("shader.glsl")),
-            texture_loc: RelativeNodeRefSlot::new(RelativeNodeRef::parse("..texture").unwrap()),
-            render_order: RenderOrderSlot::new(0),
-            compiler_options: CompilerOptions::default(),
-            consumed_slots: MapSlot::new(consumed_slots),
+            glsl_path: SourcePathSlot::new(SourcePath(String::from("main.glsl"))),
+            render_order: RenderOrderSlot::new(RenderOrder(0)),
+            bindings: BindingDefs::default(),
+            glsl_opts: GlslOpts {
+                add_sub: ValueSlot::new(AddSubMode::Wrapping),
+                mul: ValueSlot::new(MulMode::Wrapping),
+                div: ValueSlot::new(DivMode::Reciprocal),
+            },
+            param_defs: MapSlot::new(param_defs),
         }
     }
 
-    pub fn add_consumed_slot(&mut self, name: &str, default: f32) {
-        self.consumed_slots.insert(
+    pub fn glsl_path(&self) -> &str {
+        self.glsl_path.value().as_str()
+    }
+
+    pub fn render_order(&self) -> i32 {
+        self.render_order.value().0
+    }
+
+    pub fn glsl_opts(&self) -> &GlslOpts {
+        &self.glsl_opts
+    }
+
+    pub fn bindings(&self) -> &BindingDefs {
+        &self.bindings
+    }
+
+    pub fn add_param_def(&mut self, name: &str, default: f32) {
+        self.param_defs.insert(
             name.to_string(),
-            ShaderSlotDef::value_f32(name, "Dynamically authored shader parameter", default, None),
+            ShaderParamDef::new(name, "Dynamically authored shader parameter", default, None),
         );
     }
 
-    pub fn set_param_value_shape(&mut self, name: &str, value_shape: &str) {
-        let param = self
-            .consumed_slots
-            .entries
-            .get_mut(name)
-            .expect("param def");
-        param.value.set(ShaderValueShapeRef::builtin(value_shape));
+    pub fn set_param_value_type(&mut self, name: &str, value_type: &str) {
+        let param = self.param_defs.entries.get_mut(name).expect("param def");
+        param.set_value_type(value_type);
     }
 
     pub fn set_param_label(&mut self, name: &str, label: &str) {
-        let param = self
-            .consumed_slots
-            .entries
-            .get_mut(name)
-            .expect("param def");
-        param.label.set(label.to_string());
+        let param = self.param_defs.entries.get_mut(name).expect("param def");
+        param.set_label(label);
     }
 
     pub fn param_label_revision(&self, name: &str) -> Option<Revision> {
-        self.consumed_slots
+        self.param_defs
             .entries
             .get(name)
-            .map(|param| param.label.revision())
+            .map(ShaderParamDef::label_revision)
     }
 
     pub fn param_default_revision(&self, name: &str) -> Option<Revision> {
-        self.consumed_slots
+        self.param_defs
             .entries
             .get(name)
-            .and_then(|param| param.default.data.as_ref().map(ValueSlot::revision))
+            .map(ShaderParamDef::default_revision)
     }
 }
 
-impl Default for ShaderDef {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl Default for CompilerOptions {
-    fn default() -> Self {
+impl ShaderParamDef {
+    pub fn new(label: &str, description: &str, default: f32, min: Option<f32>) -> Self {
         Self {
-            add_sub: ValueSlot::new(String::from("saturating")),
-            mul: ValueSlot::new(String::from("saturating")),
-            div: ValueSlot::new(String::from("saturating")),
+            label: ValueSlot::new(label.to_string()),
+            description: ValueSlot::new(description.to_string()),
+            value_type: ValueSlot::new(String::from("f32")),
+            default: RatioSlot::new(Ratio(default)),
+            min: match min {
+                Some(value) => OptionSlot::some(ScalarHint::new(value)),
+                None => OptionSlot::none(),
+            },
         }
+    }
+
+    pub fn default_value(&self) -> LpValue {
+        LpValue::F32(self.default.value().0)
+    }
+
+    pub fn label(&self) -> &str {
+        self.label.value()
+    }
+
+    pub fn description(&self) -> &str {
+        self.description.value()
+    }
+
+    pub fn value_type(&self) -> &str {
+        self.value_type.value()
+    }
+
+    pub fn default_scalar(&self) -> f32 {
+        self.default.value().0
+    }
+
+    pub fn min(&self) -> Option<&ScalarHint> {
+        self.min.data.as_ref()
+    }
+
+    fn set_value_type(&mut self, value_type: &str) {
+        self.value_type.set(value_type.to_string());
+    }
+
+    pub fn set_value_type_for_codec(&mut self, value_type: &str) {
+        self.set_value_type(value_type);
+    }
+
+    fn set_label(&mut self, label: &str) {
+        self.label.set(label.to_string());
+    }
+
+    fn label_revision(&self) -> Revision {
+        self.label.revision()
+    }
+
+    fn default_revision(&self) -> Revision {
+        self.default.revision()
+    }
+}
+
+impl ScalarHint {
+    pub fn new(value: f32) -> Self {
+        Self {
+            value: PositiveF32Slot::new(PositiveF32(value)),
+        }
+    }
+
+    pub fn mock(value: f32) -> Self {
+        Self::new(value)
+    }
+
+    pub fn value(&self) -> f32 {
+        self.value.value().0
     }
 }

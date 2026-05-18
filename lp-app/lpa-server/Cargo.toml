@@ -23,7 +23,6 @@ std = [
 lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false }
-lpc-source = { path = "../../lp-core/lpc-source", default-features = false }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 hashbrown = { workspace = true }

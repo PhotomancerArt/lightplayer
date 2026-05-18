@@ -1,4 +1,4 @@
-use lpc_model::{LpValue, Revision, SlotMapKey};
+use lpc_model::{LpValue, Revision, SlotData, SlotMapKey};
 
 use super::fixture::{
     Harness, assert_map_has_key, assert_shader_param, assert_shader_param_lacks, select,
@@ -10,27 +10,26 @@ fn incremental_changes_patch_client_state() {
     harness.sync_full();
     harness.print_client_tree("engine.shader_node");
 
-    println!("server updating source.fixture#mapping.path_points.path.ring_array.ring_lamp_counts");
+    println!(
+        "server updating source.fixture#mapping.PathPoints.paths[0].RingArray.ring_lamp_counts"
+    );
     harness
         .runtime
         .set_fixture_ring_lamp_counts(Revision::new(2), vec![1, 8, 12, 16]);
     harness.print_server_tree("source.fixture");
     harness.sync_diff("source.fixture", Revision::new(1));
     harness.print_client_tree("source.fixture");
+    let ring_lamp_counts = select(
+        harness.client.roots.get("source.fixture").unwrap(),
+        "mapping.PathPoints.paths[0].RingArray.ring_lamp_counts",
+    );
+    assert_map_has_key(ring_lamp_counts, "", SlotMapKey::U32(3));
     assert_eq!(
-        select(
-            harness.client.roots.get("source.fixture").unwrap(),
-            "mapping.path_points.path.ring_array.ring_lamp_counts",
-        ),
-        &lpc_model::SlotData::Value(lpc_model::WithRevision::new(
+        select(ring_lamp_counts, "[3]"),
+        &SlotData::Value(lpc_model::WithRevision::new(
             Revision::new(2),
-            LpValue::Array(vec![
-                LpValue::U32(1),
-                LpValue::U32(8),
-                LpValue::U32(12),
-                LpValue::U32(16)
-            ])
-        )),
+            LpValue::U32(16),
+        ))
     );
 
     println!("server updating source.shader#consumed_slots[gain].default to 0.5");
@@ -87,7 +86,7 @@ fn incremental_changes_patch_client_state() {
     assert_eq!(
         select(
             harness.client.roots.get("source.fixture").unwrap(),
-            "mapping.disabled",
+            "mapping.Disabled",
         ),
         &lpc_model::SlotData::Unit {
             revision: Revision::new(8),

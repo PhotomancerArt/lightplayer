@@ -1,10 +1,9 @@
 //! Public runtime state shape for fixture nodes.
 
-use crate::{ControlExtent, ControlProduct, ControlProductSlot, NodeId};
+use crate::{ControlExtent, ControlProduct, ControlProductSlot, NodeId, Slotted};
 
 /// Runtime state exposed by a fixture node.
-#[derive(lpc_slot_macros::SlotRecord)]
-#[slot(root, default_policy = "read_only_transient")]
+#[derive(Default, Slotted)]
 pub struct FixtureState {
     /// Renderable control output produced by this fixture node.
     pub output: ControlProductSlot,
