@@ -20,6 +20,8 @@ pub struct HardwareManifestFile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub url: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub board_label: Vec<HardwareBoardLabelFile>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub gpio: Vec<HardwareResourceFile>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub resource: Vec<HardwareResourceFile>,
@@ -40,6 +42,7 @@ impl HardwareManifestFile {
             product: product.clone(),
             description: None,
             url: None,
+            board_label: Vec::new(),
             gpio: Vec::new(),
             resource: Vec::new(),
         }
@@ -82,6 +85,20 @@ impl HardwareManifestFile {
         }
 
         let mut seen = BTreeSet::new();
+        for label in &self.board_label {
+            if label.label.trim().is_empty() {
+                return Err(HardwareManifestFileError::Invalid {
+                    message: "board_label label must not be empty".into(),
+                });
+            }
+            if !seen.insert(label.label.trim().to_string()) {
+                return Err(HardwareManifestFileError::Invalid {
+                    message: alloc::format!("duplicate board label: {}", label.label),
+                });
+            }
+        }
+
+        let mut seen = BTreeSet::new();
         for resource in self.gpio.iter().chain(self.resource.iter()) {
             let address = HardwareAddress::new(resource.address.clone())?;
             if !seen.insert(address.clone()) {
@@ -116,6 +133,38 @@ impl HardwareManifestFile {
             .map(HardwareResourceFile::to_resource)
             .collect()
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HardwareBoardLabelFile {
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpio: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<HardwareBoardLabelStatus>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+impl HardwareBoardLabelFile {
+    pub fn new(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            gpio: None,
+            status: None,
+            note: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum HardwareBoardLabelStatus {
+    Unassigned,
+    Assigned,
+    Verified,
+    NotFound,
+    Skipped,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -241,6 +290,7 @@ aliases = ["GPIO18", "IO18"]
             product: "product".into(),
             description: None,
             url: None,
+            board_label: Vec::new(),
             gpio: alloc::vec![
                 HardwareResourceFile::new("/gpio/1", "GPIO1", [HardwareCapability::GpioOutput]),
                 HardwareResourceFile::new("/gpio/1", "GPIO1", [HardwareCapability::GpioInput]),

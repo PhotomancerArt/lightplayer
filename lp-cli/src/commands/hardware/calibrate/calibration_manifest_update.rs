@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::Result;
 use lpc_shared::hardware::{
     HardwareCapability, HardwareManifestFile, hardware_manifest_file::HardwareResourceFile,
 };
@@ -105,13 +105,6 @@ fn ensure_alias(resource: &mut HardwareResourceFile, alias: &str) {
     if !resource.aliases.iter().any(|existing| existing == alias) {
         resource.aliases.push(alias.into());
     }
-}
-
-pub fn validate_board_label(label: &str) -> Result<()> {
-    if label.trim().is_empty() {
-        bail!("board label must not be empty");
-    }
-    Ok(())
 }
 
 #[cfg(test)]

@@ -15,7 +15,10 @@ pub use hardware_claim::HardwareClaim;
 pub use hardware_error::HardwareError;
 pub use hardware_lease::{HardwareLease, HardwareLeaseId};
 pub use hardware_manifest::HardwareManifest;
-pub use hardware_manifest_file::{HardwareManifestFile, HardwareManifestFileError};
+pub use hardware_manifest_file::{
+    HardwareBoardLabelFile, HardwareBoardLabelStatus, HardwareManifestFile,
+    HardwareManifestFileError,
+};
 pub use hardware_registry::HardwareRegistry;
 pub use hardware_resource::HardwareResource;
 pub use hardware_target::HardwareTarget;

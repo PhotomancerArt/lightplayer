@@ -4,7 +4,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub struct BoardManifestStore {
-    repo_root: PathBuf,
     boards_dir: PathBuf,
 }
 
@@ -15,14 +14,7 @@ impl BoardManifestStore {
             Some(path) => path,
             None => repo_root.join("lp-core/lpc-shared/boards"),
         };
-        Ok(Self {
-            repo_root,
-            boards_dir,
-        })
-    }
-
-    pub fn repo_root(&self) -> &Path {
-        &self.repo_root
+        Ok(Self { boards_dir })
     }
 
     pub fn boards_dir(&self) -> &Path {
