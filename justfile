@@ -438,7 +438,8 @@ calibrate-gpio board="seeed/xiao-esp32-c6" label="": install-rv32-target
         port="${candidates[0]}"
     fi
     echo "Using ESPFLASH_PORT=$port"
-    cargo build -p fw-esp32 --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+    cd lp-fw/fw-esp32 && cargo build --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+    cd ../..
     espflash flash --chip esp32c6 --port "$port" --after hard-reset target/{{ rv32_target }}/{{ fw_esp32_profile }}/fw-esp32
     sleep 1
     args=(hardware calibrate esp32c6 --board "{{ board }}" --port "serial:$port")
