@@ -47,6 +47,7 @@ pub fn handle_calibrate(args: CalibrateArgs) -> Result<()> {
         );
     }
 
+    print_manifest_summary(&manifest);
     print_intro(&label, &manifest);
 
     let timeout = Duration::from_millis(args.timeout_ms.max(1));
@@ -251,6 +252,50 @@ fn print_intro(label: &str, manifest: &HardwareManifestFile) {
     println!(
         "Press Enter for no/next, y when the square wave is present, p for previous, q to quit."
     );
+}
+
+fn print_manifest_summary(manifest: &HardwareManifestFile) {
+    let mut mapped = Vec::new();
+    let mut provisional = Vec::new();
+    let mut reserved = Vec::new();
+
+    let mut resources: Vec<_> = manifest
+        .gpio
+        .iter()
+        .filter_map(|resource| {
+            super::calibration_manifest_update::parse_gpio_address(&resource.address)
+                .map(|gpio| (gpio, resource))
+        })
+        .collect();
+    resources.sort_by_key(|(gpio, _)| *gpio);
+
+    for (gpio, resource) in resources {
+        let item = format!("/gpio/{gpio}: {}", resource.display_label);
+        if let Some(reason) = &resource.reserved_reason {
+            reserved.push(format!("{item} ({reason})"));
+        } else if is_provisional_gpio_label(gpio, &resource.display_label) {
+            provisional.push(item);
+        } else {
+            mapped.push(item);
+        }
+    }
+
+    println!("Current GPIO manifest summary:");
+    print_summary_group("mapped", &mapped);
+    print_summary_group("provisional", &provisional);
+    print_summary_group("reserved", &reserved);
+}
+
+fn print_summary_group(name: &str, items: &[String]) {
+    if items.is_empty() {
+        println!("  {name}: none");
+    } else {
+        println!("  {name}: {}", items.join(", "));
+    }
+}
+
+fn is_provisional_gpio_label(gpio: u32, label: &str) -> bool {
+    label == format!("GPIO{gpio}") || label == format!("IO{gpio}") || label == gpio.to_string()
 }
 
 fn print_next_label_intro(label: &str) {
