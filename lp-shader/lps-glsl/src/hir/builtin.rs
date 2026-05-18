@@ -48,6 +48,7 @@ pub(super) fn builtin_kind(name: &str) -> Option<BuiltinKind> {
         "min" => BuiltinKind::Min,
         "mix" => BuiltinKind::Mix,
         "mod" => BuiltinKind::Mod,
+        "modf" => BuiltinKind::Modf,
         "not" => BuiltinKind::Not,
         "normalize" => BuiltinKind::Normalize,
         "notEqual" => BuiltinKind::NotEqual,
@@ -71,6 +72,7 @@ pub(super) fn builtin_has_out_args(kind: BuiltinKind) -> bool {
     matches!(
         kind,
         BuiltinKind::ImulExtended
+            | BuiltinKind::Modf
             | BuiltinKind::UaddCarry
             | BuiltinKind::UmulExtended
             | BuiltinKind::UsubBorrow
@@ -230,6 +232,7 @@ pub(super) fn type_builtin_args(
         | BuiltinKind::Smoothstep => 3,
         BuiltinKind::BitfieldInsert => 4,
         BuiltinKind::ImulExtended
+        | BuiltinKind::Modf
         | BuiltinKind::UaddCarry
         | BuiltinKind::UmulExtended
         | BuiltinKind::UsubBorrow => unreachable!("out-arg builtins return before arity checks"),
@@ -495,6 +498,7 @@ pub(super) fn type_builtin_args(
             Ok((alloc::vec![x, y, a], ty))
         }
         BuiltinKind::ImulExtended
+        | BuiltinKind::Modf
         | BuiltinKind::UaddCarry
         | BuiltinKind::UmulExtended
         | BuiltinKind::UsubBorrow => unreachable!("out-arg builtins return before type checks"),

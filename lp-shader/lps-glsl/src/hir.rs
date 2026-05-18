@@ -36,6 +36,226 @@ pub use types::{
 };
 pub use typing::{scalar_base_type, scalar_ir_types, scalar_lane_count};
 
+#[derive(Debug)]
+pub struct HirBuildJob<'src> {
+    source: &'src str,
+    tokens: Vec<Token>,
+    index: TopLevelIndex,
+    options: CompileOptions,
+    state: HirBuildState,
+}
+
+#[derive(Debug)]
+enum HirBuildState {
+    Header {
+        bodies: Vec<(String, ParsedFunctionBody)>,
+    },
+    Functions(Box<HirBuildFunctionState>),
+    ShaderInit(Box<HirBuildFunctionState>),
+    Done,
+}
+
+#[derive(Debug)]
+struct HirBuildFunctionState {
+    array_size_consts: ArraySizeConsts,
+    structs: StructTypes,
+    uniforms: BTreeMap<String, UniformInfo>,
+    uniforms_type: Option<LpsType>,
+    global_vars: BTreeMap<String, GlobalInfo>,
+    globals_type: Option<LpsType>,
+    global_inits: Vec<GlobalInit>,
+    functions_sigs: Vec<FunctionSig>,
+    imports: ImportRegistry,
+    globals: BTreeMap<String, GlobalConst>,
+    body_map: BTreeMap<String, ParsedFunctionBody>,
+    functions: Vec<HirFunction>,
+    function_meta: Vec<LpsFnSig>,
+    next_function: usize,
+}
+
+pub enum HirBuildStepResult {
+    Pending,
+    Finished(HirModule),
+}
+
+impl<'src> HirBuildJob<'src> {
+    pub fn new(
+        source: &'src str,
+        tokens: Vec<Token>,
+        index: TopLevelIndex,
+        bodies: Vec<(String, ParsedFunctionBody)>,
+        options: CompileOptions,
+    ) -> Self {
+        Self {
+            source,
+            tokens,
+            index,
+            options,
+            state: HirBuildState::Header { bodies },
+        }
+    }
+
+    pub fn step(&mut self) -> Result<HirBuildStepResult, Diagnostic> {
+        let state = core::mem::replace(&mut self.state, HirBuildState::Done);
+        match state {
+            HirBuildState::Header { bodies } => {
+                let array_size_consts =
+                    build_array_size_consts(self.source, &self.tokens, &self.index)?;
+                let structs = build_struct_types(&self.index, &array_size_consts)?;
+                let (uniforms, uniforms_type, uniforms_size) =
+                    build_uniforms(&self.index, &structs, &array_size_consts)?;
+                let (global_vars, globals_type, global_inits) = build_global_vars(
+                    self.source,
+                    &self.tokens,
+                    &self.index,
+                    &structs,
+                    &array_size_consts,
+                    uniforms_size,
+                )?;
+                let functions_sigs =
+                    build_function_sigs(&self.index, &structs, &array_size_consts)?;
+                let mut imports = ImportRegistry::default();
+                let globals = build_global_consts(
+                    self.source,
+                    &self.tokens,
+                    &self.index,
+                    &uniforms,
+                    &global_vars,
+                    &functions_sigs,
+                    &structs,
+                    &array_size_consts,
+                    &mut imports,
+                    &self.options.texture_specs,
+                )?;
+                self.state = HirBuildState::Functions(Box::new(HirBuildFunctionState {
+                    array_size_consts,
+                    structs,
+                    uniforms,
+                    uniforms_type,
+                    global_vars,
+                    globals_type,
+                    global_inits,
+                    functions_sigs,
+                    imports,
+                    globals,
+                    body_map: bodies.into_iter().collect(),
+                    functions: Vec::new(),
+                    function_meta: Vec::new(),
+                    next_function: 0,
+                }));
+                Ok(HirBuildStepResult::Pending)
+            }
+            HirBuildState::Functions(mut state) => {
+                if state.next_function < state.functions_sigs.len() {
+                    self.type_next_function(&mut state)?;
+                    state.next_function += 1;
+                    self.state = HirBuildState::Functions(state);
+                } else {
+                    self.state = HirBuildState::ShaderInit(state);
+                }
+                Ok(HirBuildStepResult::Pending)
+            }
+            HirBuildState::ShaderInit(mut state) => {
+                if let Some(init) = synthesize_shader_init(
+                    self.source,
+                    &self.tokens,
+                    &state.global_inits,
+                    &state.functions_sigs,
+                    &state.uniforms,
+                    &state.globals,
+                    &state.global_vars,
+                    &state.structs,
+                    &state.array_size_consts,
+                    &mut state.imports,
+                    &self.options.texture_specs,
+                )? {
+                    state.function_meta.push(LpsFnSig {
+                        name: String::from("__shader_init"),
+                        return_type: LpsType::Void,
+                        parameters: Vec::new(),
+                        kind: LpsFnKind::Synthetic,
+                    });
+                    state.functions.push(init);
+                }
+                self.state = HirBuildState::Done;
+                Ok(HirBuildStepResult::Finished(state.finish(&self.options)))
+            }
+            HirBuildState::Done => Err(Diagnostic::error(
+                Span::new(0, 0),
+                "HIR build job already finished",
+            )),
+        }
+    }
+
+    fn type_next_function(&self, state: &mut HirBuildFunctionState) -> Result<(), Diagnostic> {
+        let function_index = state.next_function;
+        let sig = &state.functions_sigs[function_index];
+        state.function_meta.push(LpsFnSig {
+            name: sig.name.clone(),
+            return_type: sig.return_ty.clone(),
+            parameters: sig
+                .params
+                .iter()
+                .map(|p| FnParam {
+                    name: p.name.clone().unwrap_or_default(),
+                    ty: p.ty.clone(),
+                    qualifier: p.qualifier,
+                })
+                .collect(),
+            kind: LpsFnKind::UserDefined,
+        });
+
+        let decl = &self.index.functions[function_index];
+        let parsed_body = state
+            .body_map
+            .remove(sig.name.as_str())
+            .ok_or_else(|| Diagnostic::error(decl.body_span, "missing parsed function body"))?;
+        let mut ctx = TypeCtx::new(
+            sig,
+            &state.functions_sigs,
+            &state.uniforms,
+            &state.globals,
+            &state.global_vars,
+            &state.structs,
+            &state.array_size_consts,
+            &mut state.imports,
+            &self.options.texture_specs,
+        );
+        let body = ctx.type_block(&parsed_body.statements, &sig.return_ty)?;
+        state.functions.push(HirFunction {
+            name: sig.name.clone(),
+            return_ty: sig.return_ty.clone(),
+            params: sig.params.clone(),
+            body,
+        });
+        Ok(())
+    }
+}
+
+impl HirBuildFunctionState {
+    fn finish(self, options: &CompileOptions) -> HirModule {
+        HirModule {
+            functions: self.functions,
+            meta: LpsModuleSig {
+                functions: self.function_meta,
+                uniforms_type: self.uniforms_type,
+                globals_type: self.globals_type,
+                texture_specs: options.texture_specs.clone(),
+                ..Default::default()
+            },
+            uniforms: self.uniforms,
+            globals: self.global_vars,
+            imports: self.imports.into_vec(),
+            texture_specs: options.texture_specs.clone(),
+            texel_fetch_bounds: options.texel_fetch_bounds,
+        }
+    }
+}
+
+#[allow(
+    dead_code,
+    reason = "kept as the synchronous HIR builder for tests and future callers"
+)]
 pub fn build_hir(
     source: &str,
     tokens: &[Token],

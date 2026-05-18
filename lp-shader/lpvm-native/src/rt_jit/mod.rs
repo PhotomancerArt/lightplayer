@@ -7,6 +7,7 @@
 mod buffer;
 mod builtins;
 mod call;
+mod compile_job;
 mod compiler;
 mod engine;
 mod host_memory;
@@ -15,6 +16,7 @@ mod module;
 
 pub use buffer::JitBuffer;
 pub use builtins::BuiltinTable;
+pub use compile_job::NativeJitCompileJob;
 pub use compiler::compile_module_jit;
 pub use engine::NativeJitEngine;
 pub use instance::NativeJitInstance;

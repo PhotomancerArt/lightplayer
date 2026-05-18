@@ -37,6 +37,7 @@ macro_rules! traced_msg {
 }
 
 mod buffer;
+mod compile_job;
 mod data_error;
 mod debug;
 mod engine;
@@ -49,6 +50,10 @@ mod set_uniform;
 mod vmcontext;
 
 pub use buffer::{LpvmBuffer, LpvmPtr};
+pub use compile_job::{
+    BoxedLpvmCompileJob, DynLpvmCompileJob, LpvmCompileBudget, LpvmCompileJob,
+    LpvmCompileStepResult,
+};
 pub use data_error::DataError;
 pub use debug::{FunctionDebugInfo, ModuleDebugInfo};
 pub use engine::LpvmEngine;

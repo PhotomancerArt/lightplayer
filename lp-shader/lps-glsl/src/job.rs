@@ -1,6 +1,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use crate::hir::{HirBuildJob, HirBuildStepResult, HirModule};
 use crate::{
     CompileOptions, CompileOutput, Diagnostic, Span, TopLevelIndex, body::ParsedFunctionBody, lex,
 };
@@ -48,7 +49,8 @@ pub enum CompileStage {
     Lex,
     Index,
     Body,
-    Lower,
+    BuildHir,
+    LowerLpir,
     Done,
 }
 
@@ -59,6 +61,8 @@ pub struct CompileJob<'src> {
     tokens: Option<alloc::vec::Vec<crate::Token>>,
     index: Option<TopLevelIndex>,
     bodies: Option<Vec<(String, ParsedFunctionBody)>>,
+    hir_job: Option<HirBuildJob<'src>>,
+    hir: Option<HirModule>,
     stage: CompileStage,
 }
 
@@ -70,6 +74,8 @@ impl<'src> CompileJob<'src> {
             tokens: None,
             index: None,
             bodies: None,
+            hir_job: None,
+            hir: None,
             stage: CompileStage::Lex,
         }
     }
@@ -151,31 +157,61 @@ impl<'src> CompileJob<'src> {
                     }
                 }
                 self.bodies = Some(bodies);
-                self.stage = CompileStage::Lower;
+                self.stage = CompileStage::BuildHir;
                 CompileStepResult::Pending
             }
-            CompileStage::Lower => {
-                let (Some(index), Some(bodies)) = (self.index.as_ref(), self.bodies.take()) else {
+            CompileStage::BuildHir => {
+                if self.hir_job.is_none() {
+                    let (Some(tokens), Some(index), Some(bodies)) =
+                        (self.tokens.take(), self.index.take(), self.bodies.take())
+                    else {
+                        self.stage = CompileStage::Done;
+                        return CompileStepResult::Failed(Diagnostic::error(
+                            Span::new(0, 0),
+                            "compile job missing HIR input",
+                        ));
+                    };
+                    self.hir_job = Some(HirBuildJob::new(
+                        self.source,
+                        tokens,
+                        index,
+                        bodies,
+                        self.options.clone(),
+                    ));
+                }
+                let Some(job) = self.hir_job.as_mut() else {
                     self.stage = CompileStage::Done;
                     return CompileStepResult::Failed(Diagnostic::error(
                         Span::new(0, 0),
-                        "compile job missing typed body input",
+                        "compile job missing HIR build job",
                     ));
                 };
-                let Some(tokens) = self.tokens.as_ref() else {
+                match job.step() {
+                    Ok(HirBuildStepResult::Pending) => CompileStepResult::Pending,
+                    Ok(HirBuildStepResult::Finished(hir)) => {
+                        self.hir_job = None;
+                        self.hir = Some(hir);
+                        self.stage = CompileStage::LowerLpir;
+                        CompileStepResult::Pending
+                    }
+                    Err(err) => {
+                        self.stage = CompileStage::Done;
+                        CompileStepResult::Failed(err)
+                    }
+                }
+            }
+            CompileStage::LowerLpir => {
+                let Some(hir) = self.hir.take() else {
                     self.stage = CompileStage::Done;
                     return CompileStepResult::Failed(Diagnostic::error(
                         Span::new(0, 0),
-                        "compile job missing token tape for lowering",
+                        "compile job missing HIR for LPIR lowering",
                     ));
                 };
-                let result =
-                    crate::hir::build_hir(self.source, tokens, index, bodies, &self.options)
-                        .and_then(crate::lower::lower_hir)
-                        .map(|lowered| CompileOutput {
-                            ir: lowered.ir,
-                            meta: lowered.meta,
-                        });
+                let result = crate::lower::lower_hir(hir).map(|lowered| CompileOutput {
+                    ir: lowered.ir,
+                    meta: lowered.meta,
+                });
                 self.stage = CompileStage::Done;
                 match result {
                     Ok(output) => CompileStepResult::Finished(output),

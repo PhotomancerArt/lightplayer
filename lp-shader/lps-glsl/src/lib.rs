@@ -146,7 +146,14 @@ mod tests {
             job.step(CompileBudget::single_step()),
             CompileStepResult::Pending
         ));
-        assert_eq!(job.stage(), CompileStage::Lower);
+        assert_eq!(job.stage(), CompileStage::BuildHir);
+        while job.stage() == CompileStage::BuildHir {
+            assert!(matches!(
+                job.step(CompileBudget::single_step()),
+                CompileStepResult::Pending
+            ));
+        }
+        assert_eq!(job.stage(), CompileStage::LowerLpir);
         let output = match job.step(CompileBudget::single_step()) {
             CompileStepResult::Finished(output) => output,
             other => panic!("expected compile output, got {other:?}"),
@@ -155,7 +162,6 @@ mod tests {
         lpir::validate_module(&output.ir).expect("valid LPIR");
         assert!(output.meta.functions.iter().any(|f| f.name == "render"));
         assert!(output.meta.uniforms_type.is_some());
-        assert!(job.index().is_some());
     }
 
     #[test]

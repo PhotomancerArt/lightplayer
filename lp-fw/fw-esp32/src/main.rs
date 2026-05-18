@@ -114,6 +114,7 @@ mod board;
     feature = "test_msafluid",
     feature = "test_fluid_demo",
     feature = "test_jit_math_perf",
+    feature = "test_shader_compile_incremental",
 )))]
 mod boot;
 mod jit_fns;
@@ -128,6 +129,7 @@ mod logger;
         feature = "test_msafluid",
         feature = "test_fluid_demo",
         feature = "test_jit_math_perf",
+        feature = "test_shader_compile_incremental",
     )),
     feature = "test_rmt",
     feature = "test_dither",
@@ -147,6 +149,7 @@ mod serial;
     feature = "test_msafluid",
     feature = "test_fluid_demo",
     feature = "test_jit_math_perf",
+    feature = "test_shader_compile_incremental",
 )))]
 mod server_loop;
 #[cfg(not(any(
@@ -158,6 +161,7 @@ mod server_loop;
     feature = "test_msafluid",
     feature = "test_fluid_demo",
     feature = "test_jit_math_perf",
+    feature = "test_shader_compile_incremental",
 )))]
 mod time;
 #[cfg(all(
@@ -171,6 +175,7 @@ mod time;
         feature = "test_msafluid",
         feature = "test_fluid_demo",
         feature = "test_jit_math_perf",
+        feature = "test_shader_compile_incremental",
     )),
 ))]
 mod transport;
@@ -186,6 +191,7 @@ mod transport;
         feature = "test_msafluid",
         feature = "test_fluid_demo",
         feature = "test_jit_math_perf",
+        feature = "test_shader_compile_incremental",
     )),
 ))]
 mod flash_storage;
@@ -200,6 +206,7 @@ mod flash_storage;
         feature = "test_msafluid",
         feature = "test_fluid_demo",
         feature = "test_jit_math_perf",
+        feature = "test_shader_compile_incremental",
     )),
 ))]
 mod lp_fs_flash;
@@ -213,6 +220,7 @@ mod lp_fs_flash;
     feature = "test_msafluid",
     feature = "test_fluid_demo",
     feature = "test_jit_math_perf",
+    feature = "test_shader_compile_incremental",
 )))]
 use lpfs::lp_path::AsLpPath;
 #[cfg(not(any(
@@ -224,6 +232,7 @@ use lpfs::lp_path::AsLpPath;
     feature = "test_msafluid",
     feature = "test_fluid_demo",
     feature = "test_jit_math_perf",
+    feature = "test_shader_compile_incremental",
 )))]
 use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
@@ -280,6 +289,11 @@ mod tests {
     pub mod jit_math_perf;
 }
 
+#[cfg(feature = "test_shader_compile_incremental")]
+mod tests {
+    pub mod incremental_shader_compile;
+}
+
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[cfg(not(any(
@@ -291,6 +305,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
     feature = "test_msafluid",
     feature = "test_fluid_demo",
     feature = "test_jit_math_perf",
+    feature = "test_shader_compile_incremental",
 )))]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
     Some((
@@ -349,6 +364,12 @@ async fn main(spawner: embassy_executor::Spawner) {
         run_jit_math_perf(spawner).await;
     }
 
+    #[cfg(feature = "test_shader_compile_incremental")]
+    {
+        use tests::incremental_shader_compile::run_incremental_shader_compile;
+        run_incremental_shader_compile(spawner).await;
+    }
+
     #[cfg(not(any(
         feature = "test_rmt",
         feature = "test_dither",
@@ -358,6 +379,7 @@ async fn main(spawner: embassy_executor::Spawner) {
         feature = "test_msafluid",
         feature = "test_fluid_demo",
         feature = "test_jit_math_perf",
+        feature = "test_shader_compile_incremental",
     )))]
     {
         // TODO: esp_println writes directly to USB-Serial-JTAG hardware, bypassing

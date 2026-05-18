@@ -36,6 +36,7 @@ lp-riscv-inst = { path = "../lp-riscv/lp-riscv-inst" }
 serialport = "4.8"
 dialoguer = "0.11"
 chrono = "0.4"
+fw-checks = { path = "../lp-fw/fw-checks", features = ["std", "check-shader-compile"] }
 lpir = { path = "../lp-shader/lpir" }
 lps-frontend = { path = "../lp-shader/lps-frontend" }
 lps-shared = { path = "../lp-shader/lps-shared" }

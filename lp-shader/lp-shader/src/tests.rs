@@ -15,7 +15,8 @@ use lpvm_wasm::WasmOptions;
 use lpvm_wasm::rt_wasmtime::WasmLpvmEngine;
 
 use crate::{
-    CompilePxDesc, LpsEngine, LpsError, LpsPxShader, LpsTexture2DDescriptor, ShaderFrontend,
+    CompilePxDesc, LpsEngine, LpsError, LpsPxShader, LpsTexture2DDescriptor, ShaderCompileBudget,
+    ShaderCompileStage, ShaderCompileStageDetail, ShaderCompileStepResult, ShaderFrontend,
     px_shader::{RecordingUniformBackend, px_shader_from_parts_for_test},
     texture_binding,
 };
@@ -229,6 +230,91 @@ fn compile_px_desc_lps_glsl_basic_shader() {
         .expect("compile_px_desc lps-glsl basic shader");
     assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);
     assert_eq!(shader.render_sig().name, "render");
+}
+
+#[test]
+fn start_compile_px_job_lps_glsl_progresses_through_frontend_and_prepare() {
+    let engine = test_engine();
+    let desc = CompilePxDesc::new(
+        "vec4 render(vec2 pos) { return vec4(pos.x, pos.y, 0.0, 1.0); }",
+        TextureStorageFormat::Rgba16Unorm,
+        lpir::CompilerConfig::default(),
+    )
+    .with_frontend(ShaderFrontend::LpsGlsl);
+
+    let mut job = engine.start_compile_px_job(desc);
+    let mut saw_frontend = false;
+    let mut saw_build_hir = false;
+    let mut saw_lower_lpir = false;
+    let mut saw_prepare = false;
+
+    for _ in 0..128 {
+        match job.stage_detail() {
+            ShaderCompileStageDetail::Frontend(lps_glsl::CompileStage::BuildHir) => {
+                saw_build_hir = true;
+            }
+            ShaderCompileStageDetail::Frontend(lps_glsl::CompileStage::LowerLpir) => {
+                saw_lower_lpir = true;
+            }
+            _ => {}
+        }
+        match job.stage() {
+            ShaderCompileStage::Frontend => saw_frontend = true,
+            ShaderCompileStage::Prepare => saw_prepare = true,
+            ShaderCompileStage::Backend | ShaderCompileStage::Done => {}
+        }
+
+        match job.step(ShaderCompileBudget::single_step()) {
+            ShaderCompileStepResult::Pending => {}
+            ShaderCompileStepResult::Finished(shader) => {
+                assert!(saw_frontend);
+                assert!(saw_build_hir);
+                assert!(saw_lower_lpir);
+                assert!(saw_prepare);
+                assert_eq!(shader.render_sig().name, "render");
+                return;
+            }
+            ShaderCompileStepResult::Failed(err) => {
+                panic!("stepped compile should succeed, got {err:?}");
+            }
+        }
+    }
+
+    panic!("stepped compile did not finish within step budget");
+}
+
+#[test]
+fn start_compile_px_job_wasm_falls_back_without_backend_stage() {
+    let engine = test_engine();
+    let desc = CompilePxDesc::new(
+        "vec4 render(vec2 pos) { return vec4(1.0, 0.5, 0.25, 1.0); }",
+        TextureStorageFormat::Rgba16Unorm,
+        lpir::CompilerConfig::default(),
+    )
+    .with_frontend(ShaderFrontend::LpsGlsl);
+
+    let mut job = engine.start_compile_px_job(desc);
+    let mut saw_backend = false;
+
+    for _ in 0..128 {
+        if job.stage() == ShaderCompileStage::Backend {
+            saw_backend = true;
+        }
+
+        match job.step(ShaderCompileBudget::single_step()) {
+            ShaderCompileStepResult::Pending => {}
+            ShaderCompileStepResult::Finished(shader) => {
+                assert!(!saw_backend, "wasm engine should compile synchronously");
+                assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);
+                return;
+            }
+            ShaderCompileStepResult::Failed(err) => {
+                panic!("fallback compile should succeed, got {err:?}");
+            }
+        }
+    }
+
+    panic!("fallback compile did not finish within step budget");
 }
 
 #[test]

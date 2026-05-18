@@ -1,19 +1,21 @@
 //! [`LpvmEngine`] for RV32 JIT (linked in firmware, no ELF).
 
+use alloc::boxed::Box;
 use alloc::sync::Arc;
 
 use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
-use lpvm::{LpvmEngine, LpvmMemory};
+use lpvm::{BoxedLpvmCompileJob, LpvmEngine, LpvmMemory};
 
 use crate::error::NativeError;
 use crate::isa::IsaTarget;
 use crate::native_options::NativeCompileOptions;
 
 use super::builtins::BuiltinTable;
+use super::compile_job::NativeJitCompileJob;
 use super::compiler::compile_module_jit;
 use super::host_memory::NativeHostMemory;
-use super::module::{NativeJitModule, NativeJitModuleInner};
+use super::module::{NativeJitModule, NativeJitModuleInner, build_entry_info};
 
 /// Compiles LPIR to a single in-memory RV32 image with patched builtin calls.
 pub struct NativeJitEngine {
@@ -43,7 +45,8 @@ impl LpvmEngine for NativeJitEngine {
     type Error = NativeError;
 
     fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
-        let (buffer, entry_offsets, _debug_info) = compile_module_jit(
+        let entry_info = build_entry_info(ir, meta, IsaTarget::Rv32imac)?;
+        let (buffer, entry_offsets) = compile_module_jit(
             ir,
             meta,
             &self.builtin_table,
@@ -52,12 +55,11 @@ impl LpvmEngine for NativeJitEngine {
         )?;
         Ok(NativeJitModule {
             inner: Arc::new(NativeJitModuleInner {
-                ir: ir.clone(),
                 meta: meta.clone(),
                 buffer,
                 entry_offsets,
+                entry_info,
                 options: self.options.clone(),
-                isa: IsaTarget::Rv32imac,
             }),
         })
     }
@@ -70,18 +72,34 @@ impl LpvmEngine for NativeJitEngine {
     ) -> Result<Self::Module, Self::Error> {
         let mut opts = self.options.clone();
         opts.config = config.clone();
-        let (buffer, entry_offsets, _debug_info) =
+        let entry_info = build_entry_info(ir, meta, IsaTarget::Rv32imac)?;
+        let (buffer, entry_offsets) =
             compile_module_jit(ir, meta, &self.builtin_table, &opts, IsaTarget::Rv32imac)?;
         Ok(NativeJitModule {
             inner: Arc::new(NativeJitModuleInner {
-                ir: ir.clone(),
                 meta: meta.clone(),
                 buffer,
                 entry_offsets,
+                entry_info,
                 options: opts,
-                isa: IsaTarget::Rv32imac,
             }),
         })
+    }
+
+    fn start_compile_job<'a>(
+        &'a self,
+        ir: LpirModule,
+        meta: LpsModuleSig,
+        config: lpir::CompilerConfig,
+    ) -> Option<BoxedLpvmCompileJob<'a, Self::Module, Self::Error>> {
+        Some(Box::new(NativeJitCompileJob::new(
+            ir,
+            meta,
+            Arc::clone(&self.builtin_table),
+            self.options.clone(),
+            config,
+            IsaTarget::Rv32imac,
+        )))
     }
 
     fn memory(&self) -> &dyn LpvmMemory {
