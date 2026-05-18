@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow, bail};
 use dialoguer::{Confirm, Input, Select};
 use lpc_shared::hardware::{HardwareManifestFile, HardwareTarget};
-use std::io::{IsTerminal, stdin};
+use std::io::{IsTerminal, stdin, stdout};
 use std::time::Duration;
 
 use crate::commands::hardware::args::{CalibrateArgs, HardwareTargetArg};
@@ -14,6 +14,15 @@ use super::calibration_manifest_update::{
 use super::calibration_resume::{CalibrationResumeState, load_resume, resume_path, save_resume};
 use super::calibration_serial::{SerialCalibrationTransport, ensure_firmware_ready};
 
+const ANSI_BOLD: &str = "\x1b[1m";
+const ANSI_DIM: &str = "\x1b[2m";
+const ANSI_GREEN: &str = "\x1b[32m";
+const ANSI_YELLOW: &str = "\x1b[33m";
+const ANSI_RED: &str = "\x1b[31m";
+const ANSI_CYAN: &str = "\x1b[36m";
+const ANSI_RESET: &str = "\x1b[0m";
+const PROVISIONAL_PER_LINE: usize = 4;
+
 pub fn handle_calibrate(args: CalibrateArgs) -> Result<()> {
     let store = BoardManifestStore::discover(args.repo, args.boards_dir)?;
     let target_arg = args.target.unwrap_or(HardwareTargetArg::Esp32c6);
@@ -24,6 +33,7 @@ pub fn handle_calibrate(args: CalibrateArgs) -> Result<()> {
     };
     let mut manifest = store.load(&board_id)?;
     validate_manifest_target(&manifest, target)?;
+    print_manifest_summary(&manifest);
 
     let one_label_run = args.label.is_some();
     let mut label = match args.label {
@@ -47,8 +57,7 @@ pub fn handle_calibrate(args: CalibrateArgs) -> Result<()> {
         );
     }
 
-    print_manifest_summary(&manifest);
-    print_intro(&label, &manifest);
+    print_intro(&label);
 
     let timeout = Duration::from_millis(args.timeout_ms.max(1));
     let mut transport = SerialCalibrationTransport::open(args.port.as_deref(), timeout)?;
@@ -243,15 +252,18 @@ fn prompt_next_board_label() -> Result<Option<String>> {
     }
 }
 
-fn print_intro(label: &str, manifest: &HardwareManifestFile) {
+fn print_intro(label: &str) {
+    println!();
     println!(
-        "Calibrating {} ({}) for board label {label}.",
-        manifest.id, manifest.product
+        "{}",
+        paint(ANSI_BOLD, &format!("Calibrating label {label}"))
     );
-    println!("Attach the scope to that board label.");
+    println!("Scope that pad, then press Enter to scan.");
     println!(
-        "Press Enter for no/next, y when the square wave is present, p for previous, q to quit."
+        "{}",
+        paint(ANSI_DIM, "Keys: Enter=no/next, y=yes, p=previous, q=quit.")
     );
+    println!();
 }
 
 fn print_manifest_summary(manifest: &HardwareManifestFile) {
@@ -270,27 +282,67 @@ fn print_manifest_summary(manifest: &HardwareManifestFile) {
     resources.sort_by_key(|(gpio, _)| *gpio);
 
     for (gpio, resource) in resources {
-        let item = format!("/gpio/{gpio}: {}", resource.display_label);
         if let Some(reason) = &resource.reserved_reason {
-            reserved.push(format!("{item} ({reason})"));
+            reserved.push(format!(
+                "/gpio/{gpio}  {}  ({reason})",
+                resource.display_label
+            ));
         } else if is_provisional_gpio_label(gpio, &resource.display_label) {
-            provisional.push(item);
+            provisional.push(format!("/gpio/{gpio} {}", resource.display_label));
         } else {
-            mapped.push(item);
+            mapped.push(format!("{} -> /gpio/{gpio}", resource.display_label));
         }
     }
 
-    println!("Current GPIO manifest summary:");
-    print_summary_group("mapped", &mapped);
-    print_summary_group("provisional", &provisional);
-    print_summary_group("reserved", &reserved);
+    println!();
+    println!(
+        "{} {}",
+        paint(ANSI_BOLD, "Board:"),
+        paint(
+            ANSI_CYAN,
+            &format!("{}  {} {}", manifest.id, manifest.vendor, manifest.product)
+        )
+    );
+    println!("{} {}", paint(ANSI_BOLD, "Target:"), manifest.target);
+    println!();
+    print_mapped_summary(&mapped);
+    print_reserved_summary(&reserved);
+    print_provisional_summary(&provisional);
+    println!();
 }
 
-fn print_summary_group(name: &str, items: &[String]) {
+fn print_mapped_summary(items: &[String]) {
+    println!("{}", paint(ANSI_GREEN, "Known mappings"));
     if items.is_empty() {
-        println!("  {name}: none");
+        println!("  {}", paint(ANSI_DIM, "none yet"));
     } else {
-        println!("  {name}: {}", items.join(", "));
+        for item in items {
+            println!("  {item}");
+        }
+    }
+    println!();
+}
+
+fn print_reserved_summary(items: &[String]) {
+    println!("{}", paint(ANSI_RED, "Dangerous / reserved"));
+    if items.is_empty() {
+        println!("  {}", paint(ANSI_DIM, "none marked"));
+    } else {
+        for item in items {
+            println!("  {item}");
+        }
+    }
+    println!();
+}
+
+fn print_provisional_summary(items: &[String]) {
+    println!("{}", paint(ANSI_YELLOW, "Still provisional"));
+    if items.is_empty() {
+        println!("  {}", paint(ANSI_DIM, "none"));
+        return;
+    }
+    for chunk in items.chunks(PROVISIONAL_PER_LINE) {
+        println!("  {}", chunk.join("    "));
     }
 }
 
@@ -299,10 +351,17 @@ fn is_provisional_gpio_label(gpio: u32, label: &str) -> bool {
 }
 
 fn print_next_label_intro(label: &str) {
-    println!("Move the scope to board label {label}.");
+    println!();
     println!(
-        "Press Enter for no/next, y when the square wave is present, p for previous, q to quit."
+        "{}",
+        paint(ANSI_BOLD, &format!("Calibrating label {label}"))
     );
+    println!("Move the scope to that pad, then press Enter to scan.");
+    println!(
+        "{}",
+        paint(ANSI_DIM, "Keys: Enter=no/next, y=yes, p=previous, q=quit.")
+    );
+    println!();
 }
 
 fn pulse_candidate(
@@ -389,6 +448,14 @@ fn is_serial_disconnect(error: &anyhow::Error) -> bool {
         || text.contains("i/o error")
         || text.contains("input/output")
         || text.contains("device not configured")
+}
+
+fn paint(code: &str, text: &str) -> String {
+    if stdout().is_terminal() {
+        format!("{code}{text}{ANSI_RESET}")
+    } else {
+        text.to_string()
+    }
 }
 
 #[cfg(test)]

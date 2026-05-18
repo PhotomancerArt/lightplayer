@@ -97,7 +97,7 @@ mod tests {
             CalibrationEvent::Open { gpio: 18 }
         );
         assert_eq!(
-            CalibrationEvent::parse("CAL PULSE gpio=4"),
+            CalibrationEvent::parse("CAL PULSE gpio=4 duty=70"),
             CalibrationEvent::Pulse { gpio: 4 }
         );
         assert_eq!(

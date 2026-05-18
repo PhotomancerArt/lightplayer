@@ -16,7 +16,12 @@ use crate::serial::Esp32UsbSerialIo;
 const READ_BUF_LEN: usize = 64;
 const LINE_BUF_LEN: usize = 64;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_millis(200);
-const TOGGLE_INTERVAL: Duration = Duration::from_micros(500);
+const DUTY_PERIOD_US: u64 = 4_000;
+const DUTY_STEP_INTERVAL: Duration = Duration::from_millis(200);
+const DUTY_MIN_PERCENT: u8 = 10;
+const DUTY_MAX_PERCENT: u8 = 90;
+const DUTY_STEP_PERCENT: u8 = 10;
+const PULSE_LOOP_DELAY: Duration = Duration::from_micros(100);
 
 pub async fn run_gpio_calibration_test(_: embassy_executor::Spawner) -> ! {
     let (sw_int, timg0, _rmt_peripheral, usb_device, gpio18, _flash, gpio4, _wifi) = init_board();
@@ -33,7 +38,10 @@ pub async fn run_gpio_calibration_test(_: embassy_executor::Spawner) -> ! {
     let mut parser = LineParser::new();
     let mut active_pulse: Option<ActivePulse> = None;
     let mut level_high = false;
-    let mut last_toggle = Instant::now();
+    let mut cycle_start = Instant::now();
+    let mut duty_percent = DUTY_MIN_PERCENT;
+    let mut duty_direction_up = true;
+    let mut last_duty_change = Instant::now();
     let mut last_heartbeat = Instant::now();
 
     loop {
@@ -68,10 +76,17 @@ pub async fn run_gpio_calibration_test(_: embassy_executor::Spawner) -> ! {
                     }
                     active_pulse = Some(ActivePulse::open(gpio));
                     level_high = false;
-                    last_toggle = Instant::now();
-                    last_heartbeat = Instant::now();
+                    duty_percent = DUTY_MIN_PERCENT;
+                    duty_direction_up = true;
+                    let now = Instant::now();
+                    cycle_start = now;
+                    last_duty_change = now;
+                    last_heartbeat = now;
                     write_line(&mut serial, &format!("CAL OPEN gpio={gpio}"));
-                    write_line(&mut serial, &format!("CAL PULSE gpio={gpio}"));
+                    write_line(
+                        &mut serial,
+                        &format!("CAL PULSE gpio={gpio} duty={duty_percent}"),
+                    );
                 }
                 Command::Invalid => write_line(&mut serial, "CAL ERR invalid-command"),
             }
@@ -80,18 +95,40 @@ pub async fn run_gpio_calibration_test(_: embassy_executor::Spawner) -> ! {
         if let Some(pulse) = active_pulse.as_mut() {
             let gpio = pulse.gpio();
             let now = Instant::now();
-            if now.duration_since(last_toggle) >= TOGGLE_INTERVAL {
-                level_high = !level_high;
-                pulse.set_level(level_high);
-                last_toggle = now;
+            if now.duration_since(last_duty_change) >= DUTY_STEP_INTERVAL {
+                if duty_direction_up {
+                    duty_percent = duty_percent.saturating_add(DUTY_STEP_PERCENT);
+                    if duty_percent >= DUTY_MAX_PERCENT {
+                        duty_percent = DUTY_MAX_PERCENT;
+                        duty_direction_up = false;
+                    }
+                } else {
+                    duty_percent = duty_percent.saturating_sub(DUTY_STEP_PERCENT);
+                    if duty_percent <= DUTY_MIN_PERCENT {
+                        duty_percent = DUTY_MIN_PERCENT;
+                        duty_direction_up = true;
+                    }
+                }
+                last_duty_change = now;
+            }
+
+            let elapsed_us = now.duration_since(cycle_start).as_micros() % DUTY_PERIOD_US;
+            let high_us = DUTY_PERIOD_US * u64::from(duty_percent) / 100;
+            let next_level_high = elapsed_us < high_us;
+            if next_level_high != level_high {
+                level_high = next_level_high;
+                pulse.set_level(next_level_high);
             }
             if now.duration_since(last_heartbeat) >= HEARTBEAT_INTERVAL {
-                write_line(&mut serial, &format!("CAL PULSE gpio={gpio}"));
+                write_line(
+                    &mut serial,
+                    &format!("CAL PULSE gpio={gpio} duty={duty_percent}"),
+                );
                 last_heartbeat = now;
             }
         }
 
-        Timer::after(Duration::from_millis(1)).await;
+        Timer::after(PULSE_LOOP_DELAY).await;
     }
 }
 
