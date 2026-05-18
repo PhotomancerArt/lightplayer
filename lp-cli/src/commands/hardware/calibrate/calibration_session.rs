@@ -9,7 +9,8 @@ use crate::commands::hardware::manifest::board_manifest_store::BoardManifestStor
 
 use super::calibration_command::{CalibrationEvent, PromptCommand};
 use super::calibration_manifest_update::{
-    GpioCandidate, apply_dangerous, apply_mapping, gpio_candidates, validate_board_label,
+    GpioCandidate, apply_dangerous, apply_mapping, gpio_candidates, is_provisional_gpio_label,
+    validate_board_label,
 };
 use super::calibration_resume::{CalibrationResumeState, load_resume, resume_path, save_resume};
 use super::calibration_serial::{SerialCalibrationTransport, ensure_firmware_ready};
@@ -48,6 +49,9 @@ pub fn handle_calibrate(args: CalibrateArgs) -> Result<()> {
     let mut state = load_resume(&resume_path)?
         .filter(|state| state.board_id == board_id && state.target == target)
         .unwrap_or_else(|| CalibrationResumeState::new(board_id.clone(), target, label.clone()));
+    if state.board_label != label {
+        state.current_index = 0;
+    }
     state.board_label = label.clone();
 
     let mut candidates = gpio_candidates(&manifest);
@@ -99,23 +103,24 @@ pub fn handle_calibrate(args: CalibrateArgs) -> Result<()> {
                     apply_mapping(&mut manifest, candidate.gpio, &label)?;
                     store.save(&manifest, true)?;
                     state.record_mapping(candidate.gpio, &label);
-                    index += 1;
-                    state.current_index = index.min(candidates.len().saturating_sub(1));
+                    candidates = gpio_candidates(&manifest);
+                    index = 0;
+                    state.current_index = 0;
                     save_resume(&resume_path, &state)?;
                     println!();
                     println!("Recorded {label} as {}.", candidate.address);
                     if one_label_run {
                         return Ok(());
                     }
-                    if index >= candidates.len() {
-                        println!("Reached the end of GPIO candidates.");
+                    if candidates.is_empty() {
+                        println!("All remaining GPIO candidates are now mapped or reserved.");
                         return Ok(());
                     }
                     match prompt_next_board_label()? {
                         Some(next_label) => {
                             label = next_label;
                             state.board_label = label.clone();
-                            state.current_index = index;
+                            state.current_index = 0;
                             save_resume(&resume_path, &state)?;
                             print_next_label_intro(&label);
                         }
@@ -347,10 +352,6 @@ fn print_provisional_summary(items: &[String]) {
     for chunk in items.chunks(PROVISIONAL_PER_LINE) {
         println!("  {}", chunk.join("    "));
     }
-}
-
-fn is_provisional_gpio_label(gpio: u32, label: &str) -> bool {
-    label == format!("GPIO{gpio}") || label == format!("IO{gpio}") || label == gpio.to_string()
 }
 
 fn print_next_label_intro(label: &str) {

@@ -18,10 +18,12 @@ pub fn gpio_candidates(manifest: &HardwareManifestFile) -> Vec<GpioCandidate> {
         .iter()
         .filter(|resource| resource.reserved_reason.is_none())
         .filter_map(|resource| {
-            parse_gpio_address(&resource.address).map(|gpio| GpioCandidate {
-                gpio,
-                address: resource.address.clone(),
-                display_label: resource.display_label.clone(),
+            parse_gpio_address(&resource.address).and_then(|gpio| {
+                is_provisional_gpio_label(gpio, &resource.display_label).then(|| GpioCandidate {
+                    gpio,
+                    address: resource.address.clone(),
+                    display_label: resource.display_label.clone(),
+                })
             })
         })
         .collect();
@@ -63,6 +65,10 @@ pub fn apply_dangerous(manifest: &mut HardwareManifestFile, gpio: u32) -> Result
 
 pub fn parse_gpio_address(address: &str) -> Option<u32> {
     address.strip_prefix("/gpio/")?.parse().ok()
+}
+
+pub fn is_provisional_gpio_label(gpio: u32, label: &str) -> bool {
+    label == format!("GPIO{gpio}") || label == format!("IO{gpio}") || label == gpio.to_string()
 }
 
 fn find_or_insert_gpio<'a>(
@@ -144,5 +150,33 @@ mod tests {
         let resource = &manifest.gpio[0];
         assert_eq!(resource.address, "/gpio/12");
         assert_eq!(resource.reserved_reason.as_deref(), Some(DANGEROUS_REASON));
+    }
+
+    #[test]
+    fn candidates_skip_mapped_and_reserved_pins() {
+        let mut manifest =
+            HardwareManifestFile::new("seeed/xiao", HardwareTarget::Esp32c6, "seeed", "xiao");
+        manifest.gpio.push(HardwareResourceFile::new(
+            "/gpio/0",
+            "D0",
+            [
+                HardwareCapability::GpioOutput,
+                HardwareCapability::GpioInput,
+            ],
+        ));
+        manifest.gpio.push(HardwareResourceFile::new(
+            "/gpio/1",
+            "GPIO1",
+            [
+                HardwareCapability::GpioOutput,
+                HardwareCapability::GpioInput,
+            ],
+        ));
+        apply_dangerous(&mut manifest, 2).unwrap();
+
+        let candidates = gpio_candidates(&manifest);
+
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].gpio, 1);
     }
 }
