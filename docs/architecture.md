@@ -70,6 +70,8 @@ it is not currently packaged as a user-facing deployable CLI:
 - **Debug UI** - Visual interface for inspecting node states, outputs, and project structure
 - **Hardware Manifests** - Interactive CRUD and validation for board profiles under
   `lp-core/lpc-shared/boards`
+- **Hardware Calibration** - Host-driven GPIO square-wave calibration that maps board-visible
+  silkscreen labels to internal HAL GPIO addresses
 
 The CLI uses `lp-client` with WebSocket transport for local development, and can also connect to
 remote servers.

@@ -12,7 +12,7 @@ pub struct HardwareCli {
 pub enum HardwareSubcommand {
     /// Manage checked-in board manifests.
     Manifest(ManifestArgs),
-    /// Stub for firmware-assisted board calibration.
+    /// Calibrate board-visible GPIO labels with ESP32 firmware.
     Calibrate(CalibrateArgs),
 }
 
@@ -88,16 +88,34 @@ pub struct DeleteManifestArgs {
 
 #[derive(Debug, Args)]
 pub struct CalibrateArgs {
-    pub target: String,
+    /// Hardware target running the calibration firmware.
+    #[arg(value_enum)]
+    pub target: HardwareTargetArg,
+    /// Board manifest id, for example seeed/xiao-esp32-c6.
     #[arg(long)]
     pub board: String,
+    /// Serial port path, auto, or serial:auto.
     #[arg(long)]
     pub port: Option<String>,
+    /// Repository root. Defaults to searching upward from the current directory.
+    #[arg(long)]
+    pub repo: Option<PathBuf>,
+    /// Board manifest directory. Defaults to lp-core/lpc-shared/boards under the repo root.
+    #[arg(long)]
+    pub boards_dir: Option<PathBuf>,
+    /// Firmware response timeout before a pin is treated as crash-suspect.
+    #[arg(long, default_value_t = 1000)]
+    pub timeout_ms: u64,
+    /// Board-visible label currently connected to the scope.
+    #[arg(long)]
+    pub label: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum HardwareTargetArg {
+    #[value(name = "esp32c6")]
     Esp32c6,
+    #[value(name = "rv32imac_emu")]
     Rv32imacEmu,
 }
 

@@ -4,16 +4,25 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 pub struct BoardManifestStore {
+    repo_root: PathBuf,
     boards_dir: PathBuf,
 }
 
 impl BoardManifestStore {
     pub fn discover(repo: Option<PathBuf>, boards_dir: Option<PathBuf>) -> Result<Self> {
+        let repo_root = find_repo_root(repo)?;
         let boards_dir = match boards_dir {
             Some(path) => path,
-            None => find_repo_root(repo)?.join("lp-core/lpc-shared/boards"),
+            None => repo_root.join("lp-core/lpc-shared/boards"),
         };
-        Ok(Self { boards_dir })
+        Ok(Self {
+            repo_root,
+            boards_dir,
+        })
+    }
+
+    pub fn repo_root(&self) -> &Path {
+        &self.repo_root
     }
 
     pub fn boards_dir(&self) -> &Path {

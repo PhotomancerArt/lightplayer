@@ -158,6 +158,7 @@ mod board;
     feature = "test_rmt",
     feature = "test_dither",
     feature = "test_gpio",
+    feature = "test_gpio_calibrate",
     feature = "test_usb",
     feature = "test_json",
     feature = "test_msafluid",
@@ -174,6 +175,7 @@ mod logger;
         feature = "test_rmt",
         feature = "test_dither",
         feature = "test_gpio",
+        feature = "test_gpio_calibrate",
         feature = "test_usb",
         feature = "test_json",
         feature = "test_msafluid",
@@ -195,6 +197,7 @@ mod serial;
     feature = "test_rmt",
     feature = "test_dither",
     feature = "test_gpio",
+    feature = "test_gpio_calibrate",
     feature = "test_usb",
     feature = "test_json",
     feature = "test_msafluid",
@@ -208,6 +211,7 @@ mod server_loop;
     feature = "test_rmt",
     feature = "test_dither",
     feature = "test_gpio",
+    feature = "test_gpio_calibrate",
     feature = "test_usb",
     feature = "test_json",
     feature = "test_msafluid",
@@ -223,6 +227,7 @@ mod time;
         feature = "test_rmt",
         feature = "test_dither",
         feature = "test_gpio",
+        feature = "test_gpio_calibrate",
         feature = "test_usb",
         feature = "test_json",
         feature = "test_msafluid",
@@ -240,6 +245,7 @@ mod transport;
         feature = "test_rmt",
         feature = "test_dither",
         feature = "test_gpio",
+        feature = "test_gpio_calibrate",
         feature = "test_usb",
         feature = "test_json",
         feature = "test_msafluid",
@@ -256,6 +262,7 @@ mod flash_storage;
         feature = "test_rmt",
         feature = "test_dither",
         feature = "test_gpio",
+        feature = "test_gpio_calibrate",
         feature = "test_usb",
         feature = "test_json",
         feature = "test_msafluid",
@@ -271,6 +278,7 @@ mod lp_fs_flash;
     feature = "test_rmt",
     feature = "test_dither",
     feature = "test_gpio",
+    feature = "test_gpio_calibrate",
     feature = "test_usb",
     feature = "test_json",
     feature = "test_msafluid",
@@ -284,6 +292,7 @@ use lpfs::lp_path::AsLpPath;
     feature = "test_rmt",
     feature = "test_dither",
     feature = "test_gpio",
+    feature = "test_gpio_calibrate",
     feature = "test_usb",
     feature = "test_json",
     feature = "test_msafluid",
@@ -318,6 +327,11 @@ mod tests {
 #[cfg(feature = "test_gpio")]
 mod tests {
     pub mod test_gpio;
+}
+
+#[cfg(feature = "test_gpio_calibrate")]
+mod tests {
+    pub mod test_gpio_calibrate;
 }
 
 #[cfg(feature = "test_usb")]
@@ -363,6 +377,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
     feature = "test_rmt",
     feature = "test_dither",
     feature = "test_gpio",
+    feature = "test_gpio_calibrate",
     feature = "test_usb",
     feature = "test_json",
     feature = "test_msafluid",
@@ -384,6 +399,12 @@ async fn main(spawner: embassy_executor::Spawner) {
     {
         use tests::test_gpio::run_gpio_test;
         run_gpio_test(spawner).await;
+    }
+
+    #[cfg(feature = "test_gpio_calibrate")]
+    {
+        use tests::test_gpio_calibrate::run_gpio_calibration_test;
+        run_gpio_calibration_test(spawner).await;
     }
 
     #[cfg(feature = "test_rmt")]
@@ -444,6 +465,7 @@ async fn main(spawner: embassy_executor::Spawner) {
         feature = "test_rmt",
         feature = "test_dither",
         feature = "test_gpio",
+        feature = "test_gpio_calibrate",
         feature = "test_usb",
         feature = "test_json",
         feature = "test_msafluid",

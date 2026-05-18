@@ -398,6 +398,10 @@ fwtest-rmt-esp32c6: install-rv32-target
 fwtest-dithering-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32 && cargo run --features test_dither,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
 
+# Run host-driven GPIO calibration firmware on ESP32-C6
+fwtest-gpio-calibrate-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo run --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+
 # Run firmware on ESP32-C6 device using the test_json feature (validates ser-write-json)
 fwtest-json-esp32c6: install-rv32-target
     cd lp-fw/fw-esp32 && cargo run --features test_json,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}

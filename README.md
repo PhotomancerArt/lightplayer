@@ -84,6 +84,17 @@ Hardware manifests can be browsed and edited with:
 cargo run -p lp-cli -- hardware manifest
 ```
 
+GPIO label calibration is host-driven. Flash the simple calibration firmware, attach a scope to the
+board label you want to identify, then run the CLI loop:
+
+```bash
+just fwtest-gpio-calibrate-esp32c6
+cargo run -p lp-cli -- hardware calibrate esp32c6 --board seeed/xiao-esp32-c6 --port serial:auto
+```
+
+During calibration, Enter means no/next, `y` records the visible board label for the active HAL
+GPIO, `p` goes back one candidate, and `q` quits with resume state under `target/hardware-calibration`.
+
 ## Firmware (`lp-fw/`)
 
 - **`fw-core`** Core firmware abstractions (serial I/O, transport, logging infrastructure)
