@@ -40,15 +40,14 @@ pub(crate) fn discover_static_registered_shapes(
                     second: path,
                 });
             }
-            if has_record {
-                shapes.push(StaticRegisteredShape {
-                    type_path: super::type_path::infer_type_path(
-                        src_dir,
-                        &path,
-                        &item.ident.to_string(),
-                    )?,
-                });
-            }
+            shapes.push(StaticRegisteredShape {
+                type_path: super::type_path::infer_type_path(
+                    src_dir,
+                    &path,
+                    &item.ident.to_string(),
+                )?,
+                has_default_factory: has_record,
+            });
         }
     }
 

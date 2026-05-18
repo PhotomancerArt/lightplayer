@@ -139,7 +139,7 @@ fn clock_scrub_offset_shape() -> SlotValueShape {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SlotPersistence;
+    use crate::slot::SlotPersistence;
 
     #[test]
     fn clock_controls_fields_are_writable_transient() {

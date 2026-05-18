@@ -4,21 +4,15 @@
 //! be represented as `MapSlot<u32, FluidEmitter>` or equivalent map-shaped slot
 //! data so each emitter has stable identity at the slot layer.
 
-use crate::{
-    FieldSlot, FieldSlotMut, FromLpValue, LpType, LpValue, ModelStructMember, SlotDataAccess,
-    SlotDataAccessMut, SlotMeta, SlotMutationError, SlotShape, SlotShapeId, SlotValue,
-    SlotValueAccess, SlotValueMut, SlotValueShape, StaticSlotShape, ToLpValue, ValueEditorHint,
-    ValueRootError,
-};
-use alloc::string::{String, ToString};
-use alloc::vec;
+use crate::SlotValue;
 use serde::{Deserialize, Serialize};
 
 /// Native shape name used by authored shader slot defs.
 pub const FLUID_EMITTER_SHAPE_NAME: &str = "lp::fluid::Emitter";
 
 /// One fluid emission source.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, SlotValue)]
+#[slot_value(shape_id = "lp::fluid::Emitter")]
 pub struct FluidEmitter {
     pub id: u32,
     pub pos: [f32; 2],
@@ -49,191 +43,10 @@ impl Default for FluidEmitter {
     }
 }
 
-impl ToLpValue for FluidEmitter {
-    fn to_lp_value(&self) -> LpValue {
-        LpValue::Struct {
-            name: Some(String::from("FluidEmitter")),
-            fields: vec![
-                (String::from("id"), LpValue::U32(self.id)),
-                (String::from("pos"), LpValue::Vec2(self.pos)),
-                (String::from("dir"), LpValue::Vec2(self.dir)),
-                (String::from("radius"), LpValue::F32(self.radius)),
-                (String::from("color"), LpValue::Vec3(self.color)),
-                (String::from("velocity"), LpValue::F32(self.velocity)),
-                (String::from("intensity"), LpValue::F32(self.intensity)),
-            ],
-        }
-    }
-}
-
-impl FromLpValue for FluidEmitter {
-    fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
-        let LpValue::Struct { fields, .. } = value else {
-            return Err(ValueRootError::new("expected FluidEmitter struct"));
-        };
-
-        Ok(Self {
-            id: expect_u32(fields, "id")?,
-            pos: expect_vec2(fields, "pos")?,
-            dir: expect_vec2(fields, "dir")?,
-            radius: expect_f32(fields, "radius")?,
-            color: expect_vec3(fields, "color")?,
-            velocity: expect_f32(fields, "velocity")?,
-            intensity: expect_f32(fields, "intensity")?,
-        })
-    }
-}
-
-impl SlotValue for FluidEmitter {
-    const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name(FLUID_EMITTER_SHAPE_NAME);
-
-    fn value_shape() -> SlotValueShape {
-        SlotValueShape {
-            id: <Self as SlotValue>::SHAPE_ID,
-            ty: fluid_emitter_lp_type(),
-            meta: SlotMeta::empty(),
-            editor: ValueEditorHint::Plain,
-        }
-    }
-}
-
-impl SlotValueAccess for FluidEmitter {
-    fn changed_at(&self) -> crate::Revision {
-        crate::current_revision()
-    }
-
-    fn value(&self) -> LpValue {
-        self.to_lp_value()
-    }
-}
-
-impl FieldSlot for FluidEmitter {
-    fn slot_field_shape() -> SlotShape {
-        SlotShape::leaf(<Self as SlotValue>::value_shape())
-    }
-
-    fn slot_field_data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Value(self)
-    }
-}
-
-impl SlotValueMut for FluidEmitter {
-    fn changed_at(&self) -> crate::Revision {
-        crate::current_revision()
-    }
-
-    fn set_lp_value(
-        &mut self,
-        _revision: crate::Revision,
-        value: LpValue,
-    ) -> Result<(), SlotMutationError> {
-        *self = FluidEmitter::from_lp_value(&value)
-            .map_err(|error| SlotMutationError::wrong_type(error.to_string()))?;
-        Ok(())
-    }
-}
-
-impl FieldSlotMut for FluidEmitter {
-    fn slot_field_data_mut(&mut self) -> SlotDataAccessMut<'_> {
-        SlotDataAccessMut::Value(self)
-    }
-}
-
-impl StaticSlotShape for FluidEmitter {
-    const SHAPE_ID: SlotShapeId = <Self as SlotValue>::SHAPE_ID;
-
-    fn slot_shape() -> SlotShape {
-        SlotShape::leaf(<Self as SlotValue>::value_shape())
-    }
-
-    fn shape_name() -> Option<&'static str> {
-        Some(FLUID_EMITTER_SHAPE_NAME)
-    }
-}
-
-pub fn fluid_emitter_lp_type() -> LpType {
-    LpType::Struct {
-        name: Some(String::from("FluidEmitter")),
-        fields: vec![
-            ModelStructMember {
-                name: String::from("id"),
-                ty: LpType::U32,
-            },
-            ModelStructMember {
-                name: String::from("pos"),
-                ty: LpType::Vec2,
-            },
-            ModelStructMember {
-                name: String::from("dir"),
-                ty: LpType::Vec2,
-            },
-            ModelStructMember {
-                name: String::from("radius"),
-                ty: LpType::F32,
-            },
-            ModelStructMember {
-                name: String::from("color"),
-                ty: LpType::Vec3,
-            },
-            ModelStructMember {
-                name: String::from("velocity"),
-                ty: LpType::F32,
-            },
-            ModelStructMember {
-                name: String::from("intensity"),
-                ty: LpType::F32,
-            },
-        ],
-    }
-}
-
-fn field<'a>(fields: &'a [(String, LpValue)], name: &str) -> Result<&'a LpValue, ValueRootError> {
-    fields
-        .iter()
-        .find_map(|(field_name, value)| (field_name == name).then_some(value))
-        .ok_or_else(|| ValueRootError::new(alloc::format!("missing FluidEmitter.{name}")))
-}
-
-fn expect_u32(fields: &[(String, LpValue)], name: &str) -> Result<u32, ValueRootError> {
-    match field(fields, name)? {
-        LpValue::U32(value) => Ok(*value),
-        other => Err(ValueRootError::new(alloc::format!(
-            "expected FluidEmitter.{name} u32, got {other:?}"
-        ))),
-    }
-}
-
-fn expect_f32(fields: &[(String, LpValue)], name: &str) -> Result<f32, ValueRootError> {
-    match field(fields, name)? {
-        LpValue::F32(value) => Ok(*value),
-        other => Err(ValueRootError::new(alloc::format!(
-            "expected FluidEmitter.{name} f32, got {other:?}"
-        ))),
-    }
-}
-
-fn expect_vec2(fields: &[(String, LpValue)], name: &str) -> Result<[f32; 2], ValueRootError> {
-    match field(fields, name)? {
-        LpValue::Vec2(value) => Ok(*value),
-        other => Err(ValueRootError::new(alloc::format!(
-            "expected FluidEmitter.{name} vec2, got {other:?}"
-        ))),
-    }
-}
-
-fn expect_vec3(fields: &[(String, LpValue)], name: &str) -> Result<[f32; 3], ValueRootError> {
-    match field(fields, name)? {
-        LpValue::Vec3(value) => Ok(*value),
-        other => Err(ValueRootError::new(alloc::format!(
-            "expected FluidEmitter.{name} vec3, got {other:?}"
-        ))),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::SlotShapeRegistry;
+    use crate::{FromLpValue, SlotShapeRegistry, StaticSlotShape, ToLpValue};
 
     #[test]
     fn fluid_emitter_round_trips_through_lp_value() {
@@ -260,9 +73,10 @@ mod tests {
         FluidEmitter::ensure_registered(&mut registry).expect("registered");
 
         assert_eq!(
-            registry.id_for_name(FLUID_EMITTER_SHAPE_NAME),
-            Some(<FluidEmitter as SlotValue>::SHAPE_ID)
+            registry
+                .entry(&<FluidEmitter as SlotValue>::SHAPE_ID)
+                .and_then(|entry| entry.name()),
+            Some(FLUID_EMITTER_SHAPE_NAME)
         );
-        assert!(registry.get_by_name(FLUID_EMITTER_SHAPE_NAME).is_some());
     }
 }

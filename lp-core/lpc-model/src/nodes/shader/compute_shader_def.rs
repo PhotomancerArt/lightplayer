@@ -119,7 +119,12 @@ glsl_path = "emitters.glsl"
         FluidEmitter::ensure_registered(&mut registry).expect("fluid emitter");
         ComputeShaderDef::ensure_registered(&mut registry).expect("compute shader");
 
-        assert!(registry.get_by_name("lp::fluid::Emitter").is_some());
+        assert_eq!(
+            registry
+                .entry(&FluidEmitter::SHAPE_ID)
+                .and_then(|entry| entry.name()),
+            Some("lp::fluid::Emitter")
+        );
         assert!(registry.contains(&ComputeShaderDef::SHAPE_ID));
     }
 }

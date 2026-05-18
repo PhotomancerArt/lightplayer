@@ -242,7 +242,7 @@ mod tests {
         );
 
         let def = ComputeShaderDef {
-            glsl_path: SourcePathSlot::new(String::from("emitters.glsl")),
+            glsl_path: SourcePathSlot::new("emitters.glsl".into()),
             bindings: crate::BindingDefs::default(),
             glsl_opts: crate::GlslOpts::default(),
             consumed_slots: MapSlot::new(consumed),
@@ -270,7 +270,7 @@ mod tests {
             ),
         );
         let def = ComputeShaderDef {
-            glsl_path: SourcePathSlot::new(String::from("emitters.glsl")),
+            glsl_path: SourcePathSlot::new("emitters.glsl".into()),
             bindings: crate::BindingDefs::default(),
             glsl_opts: crate::GlslOpts::default(),
             consumed_slots: MapSlot::default(),

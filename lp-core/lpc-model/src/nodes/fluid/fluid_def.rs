@@ -125,7 +125,12 @@ intensity = 1.0
     fn fluid_emitters_shape_is_consumed_and_merged_by_key() {
         let mut registry = SlotShapeRegistry::default();
         crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("static shapes");
-        assert!(registry.get_by_name("lp::fluid::Emitter").is_some());
+        assert_eq!(
+            registry
+                .entry(&FluidEmitter::SHAPE_ID)
+                .and_then(|entry| entry.name()),
+            Some("lp::fluid::Emitter")
+        );
 
         let SlotShape::Record { fields, .. } = FluidDef::slot_shape() else {
             panic!("record shape");

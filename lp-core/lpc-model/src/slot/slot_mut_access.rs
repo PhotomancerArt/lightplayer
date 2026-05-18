@@ -201,6 +201,33 @@ where
     }
 }
 
+impl<T> SlotValueMutAccess for T
+where
+    T: SlotValue,
+{
+    fn changed_at(&self) -> Revision {
+        crate::current_revision()
+    }
+
+    fn set_lp_value(
+        &mut self,
+        _revision: Revision,
+        value: LpValue,
+    ) -> Result<(), SlotMutationError> {
+        *self = T::from_lp_value(&value)?;
+        Ok(())
+    }
+}
+
+impl<T> FieldSlotMut for T
+where
+    T: SlotValue,
+{
+    fn slot_field_data_mut(&mut self) -> SlotDataMutAccess<'_> {
+        SlotDataMutAccess::Value(self)
+    }
+}
+
 impl<T> FieldSlotMut for super::ValueSlot<T>
 where
     T: SlotValue,

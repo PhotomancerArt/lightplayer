@@ -1,7 +1,7 @@
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{
-    Data, DeriveInput, Expr, Fields, Ident, LitFloat, Result, Token, Type, Visibility,
+    Data, DeriveInput, Expr, Fields, Ident, LitFloat, LitStr, Result, Token, Type, Visibility,
     parenthesized, parse::Parse, parse::ParseStream, parse2,
 };
 
@@ -17,7 +17,10 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
     let ident = input.ident;
     let attrs = SlotValueAttrs::parse(&input.attrs)?;
     let editor = attrs.editor.unwrap_or(EditorSpec::Plain).tokens();
-    let shape_id = ident.to_string();
+    let shape_id = attrs
+        .shape_id
+        .map(|value| value.value())
+        .unwrap_or_else(|| ident.to_string());
 
     let (lp_type, to_lp_value, from_lp_value) = match input.data {
         Data::Struct(data) => match data.fields {
@@ -146,6 +149,18 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
                 }
             }
         }
+
+        impl ::lpc_model::StaticSlotShape for #ident {
+            const SHAPE_ID: ::lpc_model::SlotShapeId = <Self as ::lpc_model::SlotValue>::SHAPE_ID;
+
+            fn slot_shape() -> ::lpc_model::SlotShape {
+                ::lpc_model::SlotShape::leaf(<Self as ::lpc_model::SlotValue>::value_shape())
+            }
+
+            fn shape_name() -> Option<&'static str> {
+                Some(#shape_id)
+            }
+        }
     })
 }
 
@@ -217,11 +232,15 @@ fn array_is_f32_len(ty: &Type, expected_len: usize) -> bool {
 
 struct SlotValueAttrs {
     editor: Option<EditorSpec>,
+    shape_id: Option<LitStr>,
 }
 
 impl SlotValueAttrs {
     fn parse(attrs: &[syn::Attribute]) -> Result<Self> {
-        let mut parsed = Self { editor: None };
+        let mut parsed = Self {
+            editor: None,
+            shape_id: None,
+        };
         for attr in attrs
             .iter()
             .filter(|attr| attr.path().is_ident("slot_value"))
@@ -230,6 +249,10 @@ impl SlotValueAttrs {
                 if meta.path.is_ident("editor") {
                     let value = meta.value()?;
                     parsed.editor = Some(value.parse()?);
+                    Ok(())
+                } else if meta.path.is_ident("shape_id") {
+                    let value = meta.value()?;
+                    parsed.shape_id = Some(value.parse()?);
                     Ok(())
                 } else {
                     Err(meta.error("unsupported slot_value attribute"))

@@ -104,6 +104,26 @@ impl<T: ToLpValue> SlotValueAccess for ValueSlot<T> {
     }
 }
 
+impl<T: SlotValue> SlotValueAccess for T {
+    fn changed_at(&self) -> Revision {
+        current_revision()
+    }
+
+    fn value(&self) -> LpValue {
+        self.to_lp_value()
+    }
+}
+
+impl<T: SlotValue> FieldSlot for T {
+    fn slot_field_shape() -> SlotShape {
+        SlotShape::leaf(T::value_shape())
+    }
+
+    fn slot_field_data(&self) -> SlotDataAccess<'_> {
+        SlotDataAccess::Value(self)
+    }
+}
+
 impl<T: SlotValue> FieldSlot for ValueSlot<T> {
     fn slot_field_shape() -> SlotShape {
         SlotShape::leaf(T::value_shape())
