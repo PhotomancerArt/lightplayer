@@ -1,7 +1,7 @@
 use anyhow::{Result, anyhow, bail};
 use dialoguer::{Confirm, Input};
 use lpc_shared::hardware::{HardwareManifestFile, HardwareTarget};
-use std::io::IsTerminal;
+use std::io::{IsTerminal, stdin};
 use std::time::Duration;
 
 use crate::commands::hardware::args::CalibrateArgs;
@@ -50,7 +50,14 @@ pub fn handle_calibrate(args: CalibrateArgs) -> Result<()> {
     let mut index = state.current_index.min(candidates.len().saturating_sub(1));
     loop {
         let candidate = candidates[index].clone();
-        match pulse_candidate(&mut transport, &candidate, timeout)? {
+        let pulse_status = match pulse_candidate(&mut transport, &candidate, timeout) {
+            Err(error) if is_serial_disconnect(&error) => PulseStatus::LostConnection {
+                message: error.to_string(),
+            },
+            Err(error) => return Err(error),
+            Ok(status) => status,
+        };
+        match pulse_status {
             PulseStatus::Alive => match prompt_square_wave(&candidate)? {
                 PromptCommand::Next => {
                     transport.send_line("STOP")?;
@@ -91,11 +98,18 @@ pub fn handle_calibrate(args: CalibrateArgs) -> Result<()> {
                     return Ok(());
                 }
             },
-            PulseStatus::Timeout => {
-                println!(
-                    "{} did not produce calibration logs within {}ms. The device may have reset or this pin may be dangerous.",
-                    candidate.address, args.timeout_ms
-                );
+            PulseStatus::Timeout | PulseStatus::LostConnection { .. } => {
+                if let PulseStatus::LostConnection { message } = &pulse_status {
+                    println!(
+                        "{} lost USB serial while being tested ({message}). The device may have reset or this pin may be dangerous.",
+                        candidate.address
+                    );
+                } else {
+                    println!(
+                        "{} did not produce calibration logs within {}ms. The device may have reset or this pin may be dangerous.",
+                        candidate.address, args.timeout_ms
+                    );
+                }
                 if Confirm::new()
                     .with_prompt(format!(
                         "Mark {} as dangerous and skip it in future calibration?",
@@ -124,11 +138,7 @@ pub fn handle_calibrate(args: CalibrateArgs) -> Result<()> {
                 }
                 state.current_index = index.min(candidates.len().saturating_sub(1));
                 save_resume(&resume_path, &state)?;
-                println!(
-                    "Reconnect or reset the board if needed; waiting for calibration firmware..."
-                );
-                transport.reconnect(timeout)?;
-                ensure_firmware_ready(&mut transport, timeout)?;
+                wait_for_manual_reset(&mut transport, timeout)?;
             }
         }
     }
@@ -212,10 +222,47 @@ fn prompt_square_wave(candidate: &GpioCandidate) -> Result<PromptCommand> {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum PulseStatus {
     Alive,
     Timeout,
+    LostConnection { message: String },
+}
+
+fn wait_for_manual_reset(
+    transport: &mut SerialCalibrationTransport,
+    timeout: Duration,
+) -> Result<()> {
+    loop {
+        println!(
+            "macOS cannot reliably power-cycle this USB port from here. Manually reset or replug the board, then press Enter."
+        );
+        if !stdin().is_terminal() {
+            bail!("device disconnected and manual reset is required, but stdin is not interactive");
+        }
+        let _: String = Input::new()
+            .with_prompt("Press Enter after the board is visible again")
+            .allow_empty(true)
+            .interact_text()?;
+        match transport
+            .reconnect(timeout)
+            .and_then(|_| ensure_firmware_ready(transport, timeout))
+        {
+            Ok(()) => return Ok(()),
+            Err(error) => {
+                println!("Still waiting for calibration firmware: {error}");
+            }
+        }
+    }
+}
+
+fn is_serial_disconnect(error: &anyhow::Error) -> bool {
+    let text = error.to_string().to_ascii_lowercase();
+    text.contains("broken pipe")
+        || text.contains("no such file")
+        || text.contains("i/o error")
+        || text.contains("input/output")
+        || text.contains("device not configured")
 }
 
 #[cfg(test)]
