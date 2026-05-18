@@ -22,6 +22,7 @@ const ANSI_RED: &str = "\x1b[31m";
 const ANSI_CYAN: &str = "\x1b[36m";
 const ANSI_RESET: &str = "\x1b[0m";
 const PROVISIONAL_PER_LINE: usize = 4;
+const MANUAL_RESET_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub fn handle_calibrate(args: CalibrateArgs) -> Result<()> {
     let store = BoardManifestStore::discover(args.repo, args.boards_dir)?;
@@ -101,6 +102,7 @@ pub fn handle_calibrate(args: CalibrateArgs) -> Result<()> {
                     index += 1;
                     state.current_index = index.min(candidates.len().saturating_sub(1));
                     save_resume(&resume_path, &state)?;
+                    println!();
                     println!("Recorded {label} as {}.", candidate.address);
                     if one_label_run {
                         return Ok(());
@@ -238,6 +240,7 @@ fn prompt_next_board_label() -> Result<Option<String>> {
     if !stdin().is_terminal() {
         return Ok(None);
     }
+    println!();
     loop {
         let label: String = Input::new()
             .with_prompt("Next board label to calibrate (blank/q to quit)")
@@ -416,9 +419,10 @@ enum PulseStatus {
 
 fn wait_for_manual_reset(
     transport: &mut SerialCalibrationTransport,
-    timeout: Duration,
+    _timeout: Duration,
 ) -> Result<()> {
     loop {
+        println!();
         println!(
             "macOS cannot reliably power-cycle this USB port from here. Manually reset or replug the board, then press Enter."
         );
@@ -430,12 +434,20 @@ fn wait_for_manual_reset(
             .allow_empty(true)
             .interact_text()?;
         match transport
-            .reconnect(timeout)
-            .and_then(|_| ensure_firmware_ready(transport, timeout))
+            .reconnect(MANUAL_RESET_TIMEOUT)
+            .and_then(|_| ensure_firmware_ready(transport, MANUAL_RESET_TIMEOUT))
         {
-            Ok(()) => return Ok(()),
+            Ok(()) => {
+                println!("Calibration firmware is responding again.");
+                println!();
+                return Ok(());
+            }
             Err(error) => {
+                println!();
                 println!("Still waiting for calibration firmware: {error}");
+                println!(
+                    "The /dev entry can appear before the firmware is ready; a hard reset or replug may still be needed."
+                );
             }
         }
     }
