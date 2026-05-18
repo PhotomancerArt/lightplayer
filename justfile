@@ -365,7 +365,7 @@ fw_esp32_elf := "target/" + rv32_target + "/" + fw_esp32_profile + "/fw-esp32"
 # Requires: ESP32-C6 device connected via USB. Builds the default lps-glsl frontend path.
 demo-esp32c6-host: install-rv32-target test-native-rainbow
     cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32_profile }} --features esp32c6,server
-    espflash flash --chip esp32c6 -T lp-fw/fw-esp32/partitions.csv {{ fw_esp32_elf }}
+    espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32/partitions.csv {{ fw_esp32_elf }}
     cargo run --package lp-cli -- dev examples/basic --push serial:auto
 
 # Fast compile-only gate for the native frontend demo shader.
@@ -375,7 +375,7 @@ test-native-rainbow:
 # Requires: ESP32-C6 device connected via USB. Builds the explicit Naga reference frontend.
 demo-esp32c6-host-naga: install-rv32-target
     cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32_profile }} --features esp32c6,server,naga
-    espflash flash --chip esp32c6 -T lp-fw/fw-esp32/partitions.csv {{ fw_esp32_elf }}
+    espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32/partitions.csv {{ fw_esp32_elf }}
     cargo run --package lp-cli -- dev examples/basic --push serial:auto
 
 # Run firmware on ESP32-C6 device (empty fs; use demo-esp32c6-host to flash + upload a project first)
