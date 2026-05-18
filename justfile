@@ -419,11 +419,29 @@ fwtest-gpio-calibrate-esp32c6: install-rv32-target
     echo "Using ESPFLASH_PORT=$port"
     cd lp-fw/fw-esp32 && ESPFLASH_PORT="$port" cargo run --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
 
-# Run the host-side GPIO calibration prompt
-calibrate-gpio board="seeed/xiao-esp32-c6" label="":
+# Flash GPIO calibration firmware, then run the host-side GPIO calibration prompt
+calibrate-gpio board="seeed/xiao-esp32-c6" label="": install-rv32-target
     #!/usr/bin/env bash
     set -euo pipefail
-    args=(hardware calibrate esp32c6 --board "{{ board }}" --port serial:auto)
+    port="${ESPFLASH_PORT:-}"
+    if [[ -z "$port" ]]; then
+        candidates=()
+        for pattern in /dev/cu.usbmodem* /dev/cu.usbserial* /dev/ttyACM* /dev/ttyUSB*; do
+            for candidate in $pattern; do
+                [[ -e "$candidate" ]] && candidates+=("$candidate")
+            done
+        done
+        if [[ "${#candidates[@]}" -eq 0 ]]; then
+            echo "No ESP32 serial port found. Set ESPFLASH_PORT=/dev/..." >&2
+            exit 1
+        fi
+        port="${candidates[0]}"
+    fi
+    echo "Using ESPFLASH_PORT=$port"
+    cargo build -p fw-esp32 --features test_gpio_calibrate,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
+    espflash flash --chip esp32c6 --port "$port" --after hard-reset target/{{ rv32_target }}/{{ fw_esp32_profile }}/fw-esp32
+    sleep 1
+    args=(hardware calibrate esp32c6 --board "{{ board }}" --port "serial:$port")
     if [[ -n "{{ label }}" ]]; then
         args+=(--label "{{ label }}")
     fi
