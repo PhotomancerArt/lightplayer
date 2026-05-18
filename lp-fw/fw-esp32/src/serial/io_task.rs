@@ -375,6 +375,7 @@ fn process_read_buffer(read_buffer: &mut Vec<u8>, router: &MessageRouter) {
     feature = "test_json",
     feature = "test_msafluid",
     feature = "test_fluid_demo",
+    feature = "test_espnow",
 )))]
 pub fn get_message_channels() -> (
     &'static Channel<CriticalSectionRawMutex, String, 32>,
@@ -411,6 +412,7 @@ pub fn get_server_json_chunk_channel()
     feature = "test_json",
     feature = "test_msafluid",
     feature = "test_fluid_demo",
+    feature = "test_espnow",
 )))]
 pub fn log_write_to_outgoing(msg: &str) {
     use alloc::string::ToString;

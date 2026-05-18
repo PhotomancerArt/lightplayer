@@ -25,7 +25,7 @@ use crate::serial::Esp32UsbSerialIo;
 /// Sends 16-bit data through the pipeline (interpolation, dithering, LUT, brightness)
 /// and outputs to LEDs via RMT.
 pub async fn run_dithering_test(_: embassy_executor::Spawner) -> ! {
-    let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, _flash, _gpio4) = init_board();
+    let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, _flash, _gpio4, _wifi) = init_board();
     start_runtime(timg0, sw_int);
 
     let usb_serial = esp_hal::usb_serial_jtag::UsbSerialJtag::new(usb_device);

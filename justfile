@@ -151,7 +151,7 @@ build-ci: build-host build-rv32-builtins build-rv32-emu-guest-test-app
 
 # riscv32: builtins only (for filetests; no ESP32 firmware)
 build-rv32-builtins: install-rv32-target
-    cargo build --target {{ rv32_target }} -p lps-builtins-emu-app --release
+    ./scripts/build-builtins.sh
 
 [parallel]
 build: build-host build-rv32
@@ -372,7 +372,7 @@ demo-esp32c6-host example="basic": install-rv32-target
     cargo run --package lp-cli -- dev examples/{{ example }} --push "serial:$PORT"
 
 # Fast compile-only gate for the native frontend demo shader.
-test-native-rainbow:
+test-native-rainbow: build-rv32-builtins
     cargo run -p lps-filetests-app -- test --target rv32lpn.q32 --concise lps-glsl/rainbow.glsl
 
 # Requires: ESP32-C6 device connected via USB. Builds the explicit Naga reference frontend.
@@ -428,6 +428,10 @@ fwtest-shader-compile-incremental-esp32c6: install-rv32-target
 # Run the shader compile stress harness on ESP32-C6, save serial output to a trace file, and stop once the harness reports DONE.
 fwtest-shader-compile-stress-trace-esp32c6: install-rv32-target
     cargo run -p lp-cli -- fwcheck run esp32c6 shader-compile-stress
+
+# Run firmware with test_espnow: 1Hz simulated button events over ESP-NOW
+fwtest-espnow-esp32c6: install-rv32-target
+    cd lp-fw/fw-esp32 && cargo run --no-default-features --features test_espnow,esp32c6 --target {{ rv32_target }} --profile {{ fw_esp32_profile }}
 
 cargo-update:
     cargo update -p regalloc2 \

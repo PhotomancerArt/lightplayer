@@ -47,7 +47,7 @@ const VISCOSITY: f32 = 0.00003;
 // ---- Entry point ----------------------------------------------------
 
 pub async fn run_fluid_demo(_: embassy_executor::Spawner) -> ! {
-    let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, _flash, _gpio4) = init_board();
+    let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, _flash, _gpio4, _wifi) = init_board();
     start_runtime(timg0, sw_int);
 
     let usb_serial = UsbSerialJtag::new(usb_device);

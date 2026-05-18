@@ -15,7 +15,7 @@ use lpc_shared::{DisplayPipeline, OutputError};
 use crate::output::{LedChannel, LedTransaction};
 use esp_hal::Blocking;
 use esp_hal::gpio::interconnect::PeripheralOutput;
-use esp_hal::rmt::{Error as RmtError, Rmt};
+use esp_hal::rmt::{ConfigError as RmtConfigError, Rmt};
 
 /// Channel state for an opened output channel
 struct ChannelState {
@@ -68,7 +68,11 @@ impl Esp32OutputProvider {
     ///
     /// This function takes ownership of RMT and GPIO pin and creates a LedChannel.
     /// For now, hardcoded to GPIO18.
-    pub fn init_rmt<O>(rmt: Rmt<'static, Blocking>, pin: O, num_leds: usize) -> Result<(), RmtError>
+    pub fn init_rmt<O>(
+        rmt: Rmt<'static, Blocking>,
+        pin: O,
+        num_leds: usize,
+    ) -> Result<(), RmtConfigError>
     where
         O: PeripheralOutput<'static>,
     {

@@ -159,7 +159,7 @@ fn process_read_buffer(read_buffer: &mut Vec<u8>, router: &MessageRouter) {
 /// - I/O task (handles serial communication)
 pub async fn run_usb_test(spawner: embassy_executor::Spawner) -> ! {
     // Initialize board (clock, heap, runtime) and get hardware peripherals
-    let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, _flash, _gpio4) = init_board();
+    let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, _flash, _gpio4, _wifi) = init_board();
     start_runtime(timg0, sw_int);
 
     // Initialize RMT driver for LED blinking
@@ -173,10 +173,10 @@ pub async fn run_usb_test(spawner: embassy_executor::Spawner) -> ! {
     let router = MessageRouter::new(&INCOMING_MSG, &OUTGOING_MSG);
 
     // Spawn I/O task (handles serial communication)
-    spawner.spawn(io_task(usb_device)).ok();
+    spawner.spawn(io_task(usb_device).unwrap());
 
     // Spawn heartbeat task (sends status every second)
-    spawner.spawn(heartbeat_task()).ok();
+    spawner.spawn(heartbeat_task());
 
     // Main loop: blink LED, handle messages, increment frame counter
     let mut led_state = false;

@@ -19,7 +19,7 @@ ser-write-json = { version = "0.3", optional = true, default-features = false, f
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false }
 log = { workspace = true, default-features = false }
-embassy-sync = "0.7.2"
+embassy-sync = "0.8.0"
 serde = { workspace = true, default-features = false, features = ["derive", "alloc"] }
 
 [dev-dependencies]

@@ -182,6 +182,9 @@ panic = "unwind"
 debug = 1
 strip = "none"
 
+[profile.release-esp32.package.esp-radio]
+opt-level = 3
+
 # Profile for fw-emu: opt-level=3 avoids Cranelift codegen bugs in emulator (InvalidMemoryAccess).
 # Used by test_scene_render_fw_emu via ensure_binary_built(..with_profile("release-emu")).
 [profile.release-emu]
@@ -209,9 +212,24 @@ opt-level = 3
 codegen-units = 4
 # Note: lto is inherited from workspace [profile.release]
 
-# Patch esp-println to use our fork with custom writer support
+# Patch the ESP stack to the local esp-hal checkout.
 [patch.crates-io]
-esp-println = { path = "lp-fw/esp-println-fork" }
+esp-println = { path = "../oss/esp-hal/esp-println" }
+esp-alloc = { path = "../oss/esp-hal/esp-alloc" }
+esp-backtrace = { path = "../oss/esp-hal/esp-backtrace" }
+esp-bootloader-esp-idf = { path = "../oss/esp-hal/esp-bootloader-esp-idf" }
+esp-config = { path = "../oss/esp-hal/esp-config" }
+esp-hal = { path = "../oss/esp-hal/esp-hal" }
+esp-hal-procmacros = { path = "../oss/esp-hal/esp-hal-procmacros" }
+esp-metadata-generated = { path = "../oss/esp-hal/esp-metadata-generated" }
+esp-phy = { path = "../oss/esp-hal/esp-phy" }
+esp-radio = { path = "../oss/esp-hal/esp-radio" }
+esp-radio-rtos-driver = { path = "../oss/esp-hal/esp-radio-rtos-driver" }
+esp-riscv-rt = { path = "../oss/esp-hal/esp-riscv-rt" }
+esp-rom-sys = { path = "../oss/esp-hal/esp-rom-sys" }
+esp-rtos = { path = "../oss/esp-hal/esp-rtos" }
+esp-storage = { path = "../oss/esp-hal/esp-storage" }
+esp-sync = { path = "../oss/esp-hal/esp-sync" }
 # no_std pp-rs fork for naga `glsl-in` on bare-metal (https://github.com/light-player/pp-rs)
 pp-rs = { path = "third_party/pp-rs" }
 

@@ -59,7 +59,7 @@ fn test_gpio(num: u8, pin: &mut esp_hal::gpio::Output<'static>) {
 /// Pin 12 is excluded as it crashes the device.
 pub async fn run_gpio_test(_: embassy_executor::Spawner) -> ! {
     // Initialize board (clock, heap, runtime) and get hardware peripherals
-    let (sw_int, timg0, _rmt_peripheral, usb_device, _gpio18, _flash, _gpio4) = init_board();
+    let (sw_int, timg0, _rmt_peripheral, usb_device, _gpio18, _flash, _gpio4, _wifi) = init_board();
     start_runtime(timg0, sw_int);
 
     // Initialize USB-serial for logging

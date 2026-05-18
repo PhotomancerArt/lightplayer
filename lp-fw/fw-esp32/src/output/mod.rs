@@ -6,6 +6,7 @@
     feature = "test_json",
     feature = "test_msafluid",
     feature = "test_fluid_demo",
+    feature = "test_espnow",
 )))]
 mod provider;
 mod rmt;
@@ -18,6 +19,7 @@ mod rmt;
     feature = "test_json",
     feature = "test_msafluid",
     feature = "test_fluid_demo",
+    feature = "test_espnow",
 )))]
 pub use provider::Esp32OutputProvider;
 // Public API - will be used when provider is updated

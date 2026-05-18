@@ -10,7 +10,7 @@ use alloc::vec;
 use esp_hal::Blocking;
 use esp_hal::gpio::interconnect::PeripheralOutput;
 use esp_hal::interrupt::{InterruptHandler, Priority};
-use esp_hal::rmt::{Channel, Error as RmtError, Rmt, Tx, TxChannelCreator};
+use esp_hal::rmt::{Channel, ConfigError as RmtConfigError, Rmt, Tx, TxChannelCreator};
 use smart_leds::RGB8;
 
 use crate::output::rmt::config::{BUFFER_SIZE, RMT_CH_IDX, create_rmt_config};
@@ -81,7 +81,11 @@ impl<'ch> LedChannel<'ch> {
     /// ```
     // Public API - will be used when provider is updated
     #[allow(dead_code, reason = "public API reserved for future use")]
-    pub fn new<O>(mut rmt: Rmt<'ch, Blocking>, pin: O, num_leds: usize) -> Result<Self, RmtError>
+    pub fn new<O>(
+        mut rmt: Rmt<'ch, Blocking>,
+        pin: O,
+        num_leds: usize,
+    ) -> Result<Self, RmtConfigError>
     where
         O: PeripheralOutput<'ch>,
     {
@@ -92,7 +96,7 @@ impl<'ch> LedChannel<'ch> {
 
         // Configure the RMT channel (takes ownership of channel0)
         let config = create_rmt_config();
-        let channel = rmt.channel0.configure_tx(pin, config)?;
+        let channel = rmt.channel0.configure_tx(&config)?.with_pin(pin);
 
         // Allocate LED buffer
         let led_buffer = vec![RGB8 { r: 0, g: 0, b: 0 }; num_leds].into_boxed_slice();

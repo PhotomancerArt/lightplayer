@@ -164,6 +164,7 @@ mod board;
     feature = "test_fluid_demo",
     feature = "test_jit_math_perf",
     feature = "test_shader_compile_incremental",
+    feature = "test_espnow",
 )))]
 mod boot;
 mod jit_fns;
@@ -179,6 +180,7 @@ mod logger;
         feature = "test_fluid_demo",
         feature = "test_jit_math_perf",
         feature = "test_shader_compile_incremental",
+        feature = "test_espnow",
     )),
     feature = "test_rmt",
     feature = "test_dither",
@@ -199,6 +201,7 @@ mod serial;
     feature = "test_fluid_demo",
     feature = "test_jit_math_perf",
     feature = "test_shader_compile_incremental",
+    feature = "test_espnow",
 )))]
 mod server_loop;
 #[cfg(not(any(
@@ -211,6 +214,7 @@ mod server_loop;
     feature = "test_fluid_demo",
     feature = "test_jit_math_perf",
     feature = "test_shader_compile_incremental",
+    feature = "test_espnow",
 )))]
 mod time;
 #[cfg(all(
@@ -225,6 +229,7 @@ mod time;
         feature = "test_fluid_demo",
         feature = "test_jit_math_perf",
         feature = "test_shader_compile_incremental",
+        feature = "test_espnow",
     )),
 ))]
 mod transport;
@@ -241,6 +246,7 @@ mod transport;
         feature = "test_fluid_demo",
         feature = "test_jit_math_perf",
         feature = "test_shader_compile_incremental",
+        feature = "test_espnow",
     )),
 ))]
 mod flash_storage;
@@ -256,6 +262,7 @@ mod flash_storage;
         feature = "test_fluid_demo",
         feature = "test_jit_math_perf",
         feature = "test_shader_compile_incremental",
+        feature = "test_espnow",
     )),
 ))]
 mod lp_fs_flash;
@@ -270,6 +277,7 @@ mod lp_fs_flash;
     feature = "test_fluid_demo",
     feature = "test_jit_math_perf",
     feature = "test_shader_compile_incremental",
+    feature = "test_espnow",
 )))]
 use lpfs::lp_path::AsLpPath;
 #[cfg(not(any(
@@ -282,6 +290,7 @@ use lpfs::lp_path::AsLpPath;
     feature = "test_fluid_demo",
     feature = "test_jit_math_perf",
     feature = "test_shader_compile_incremental",
+    feature = "test_espnow",
 )))]
 use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
@@ -343,6 +352,11 @@ mod tests {
     pub mod incremental_shader_compile;
 }
 
+#[cfg(feature = "test_espnow")]
+mod tests {
+    pub mod test_espnow;
+}
+
 esp_bootloader_esp_idf::esp_app_desc!();
 
 #[cfg(not(any(
@@ -355,6 +369,7 @@ esp_bootloader_esp_idf::esp_app_desc!();
     feature = "test_fluid_demo",
     feature = "test_jit_math_perf",
     feature = "test_shader_compile_incremental",
+    feature = "test_espnow",
 )))]
 fn esp32_memory_stats() -> Option<(u32, u32)> {
     Some((
@@ -419,6 +434,12 @@ async fn main(spawner: embassy_executor::Spawner) {
         run_incremental_shader_compile(spawner).await;
     }
 
+    #[cfg(feature = "test_espnow")]
+    {
+        use tests::test_espnow::run_espnow_test;
+        run_espnow_test(spawner).await;
+    }
+
     #[cfg(not(any(
         feature = "test_rmt",
         feature = "test_dither",
@@ -429,6 +450,7 @@ async fn main(spawner: embassy_executor::Spawner) {
         feature = "test_fluid_demo",
         feature = "test_jit_math_perf",
         feature = "test_shader_compile_incremental",
+        feature = "test_espnow",
     )))]
     {
         // TODO: esp_println writes directly to USB-Serial-JTAG hardware, bypassing
@@ -437,7 +459,8 @@ async fn main(spawner: embassy_executor::Spawner) {
 
         // Initialize board (clock, heap, runtime) and get hardware peripherals
         esp_println::println!("[INIT] Initializing board...");
-        let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, flash, _gpio4) = init_board();
+        let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, flash, _gpio4, _wifi) =
+            init_board();
         esp_println::println!("[INIT] Board initialized, starting runtime...");
         start_runtime(timg0, sw_int);
         esp_println::println!("[INIT] Runtime started");
@@ -449,7 +472,7 @@ async fn main(spawner: embassy_executor::Spawner) {
 
         // Spawn I/O task (handles serial communication)
         esp_println::println!("[INIT] Spawning I/O task...");
-        spawner.spawn(io_task(usb_device)).ok();
+        spawner.spawn(io_task(usb_device).unwrap());
         esp_println::println!("[INIT] I/O task spawned");
 
         // Initialize log crate to write to outgoing serial (host will see these)

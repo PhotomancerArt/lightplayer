@@ -13,6 +13,7 @@ pub mod init;
         feature = "test_usb",
         feature = "test_msafluid",
         feature = "test_fluid_demo",
+        feature = "test_espnow",
     )),
     feature = "test_json",
 ))]

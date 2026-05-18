@@ -35,18 +35,25 @@ test_msafluid = []  # MSAFluid perf harness (solver + cycle timing; phase 02 wir
 test_fluid_demo = []  # RGB MSAFluid demo on the basic ring fixture (gpio4, 241 leds, DisplayPipeline)
 test_jit_math_perf = ["lps-builtins"]  # JIT Q32 math perf harness (cycle timing; no pipeline)
 test_shader_compile_incremental = ["dep:fw-checks", "dep:lp-shader", "dep:lpvm-native", "dep:lpir", "dep:lps-shared", "lps-builtins"]  # Incremental native shader compile harness on ESP32-C6
+test_espnow = [
+    "esp-radio",
+    "esp-radio/esp32c6",
+    "esp-rtos/esp-alloc",
+    "esp-rtos/esp-radio",
+]  # ESP-NOW broadcast/receive smoke test with simulated 1Hz button events
 
 [dependencies]
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic"] }
-embassy-executor = "0.9.1"
-embassy-time = "0.4.0"
-embassy-sync = "0.7.2"
-esp-backtrace = { version = "0.18.1", features = ["println"] }
-esp-bootloader-esp-idf = { version = "0.2.0" }
-esp-hal = { version = "1.0.0", features = ["log-04", "unstable"] }
-esp-rtos = { version = "0.2.0", features = ["embassy", "log-04"] }
-esp-println = { version = "0.16.1", default-features = false, features = ["esp32c6", "jtag-serial", "log"] }
-esp-alloc = { version = "0.8.0", features = ["internal-heap-stats"] }
+embassy-executor = "0.10.0"
+embassy-time = "0.5.0"
+embassy-sync = "0.8.0"
+esp-backtrace = { version = "0.19.0", features = ["println"] }
+esp-bootloader-esp-idf = { version = "0.5.0" }
+esp-hal = { version = "1.1.0", features = ["log-04", "unstable"] }
+esp-rtos = { version = "0.3.0", features = ["embassy", "log-04"] }
+esp-radio = { version = "0.18.0", optional = true, features = ["esp-now", "log-04", "unstable", "wifi"] }
+esp-println = { version = "0.17.0", default-features = false, features = ["esp32c6", "jtag-serial", "log-04"] }
+esp-alloc = { version = "0.10.0", features = ["internal-heap-stats"] }
 
 fw-core = { path = "../fw-core", default-features = false, features = ["esp32"] }
 fw-checks = { path = "../fw-checks", default-features = false, features = ["check-shader-compile"], optional = true }
@@ -75,7 +82,7 @@ embedded-io-async = "0.6"
 log = { workspace = true, default-features = false }
 
 embedded-storage = "0.3"
-esp-storage = { version = "0.8", features = ["esp32c6"] }
+esp-storage = { version = "0.9", features = ["esp32c6"] }
 littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"] }
 
 [lints]
