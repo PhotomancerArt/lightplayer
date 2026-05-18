@@ -37,13 +37,16 @@ impl LpvmEngine for NativeEmuEngine {
 
     fn compile(&self, ir: &LpirModule, meta: &LpsModuleSig) -> Result<Self::Module, Self::Error> {
         // 1. Compile module
-        let opts = self.options.clone();
+        let mut opts = self.options.clone();
+        opts.debug_info = true;
         let compiled = compile_module(ir, meta, opts.float_mode, opts, IsaTarget::Rv32imac)?;
 
         // 2. Build ModuleDebugInfo from compiled functions
         let mut debug_info = ModuleDebugInfo::new();
         for func in &compiled.functions {
-            debug_info.add_function(func.debug_info.clone());
+            if let Some(info) = &func.debug_info {
+                debug_info.add_function(info.clone());
+            }
         }
 
         // 3. Link to ELF

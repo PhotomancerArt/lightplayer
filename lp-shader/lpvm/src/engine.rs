@@ -4,6 +4,7 @@ use lpir::CompilerConfig;
 use lpir::lpir_module::LpirModule;
 use lps_shared::LpsModuleSig;
 
+use crate::compile_job::BoxedLpvmCompileJob;
 use crate::memory::LpvmMemory;
 use crate::module::LpvmModule;
 
@@ -40,6 +41,19 @@ pub trait LpvmEngine {
         _config: &CompilerConfig,
     ) -> Result<Self::Module, Self::Error> {
         self.compile(ir, meta)
+    }
+
+    /// Start a resumable compile job when the backend supports incremental compilation.
+    ///
+    /// Default implementation returns `None`, allowing callers to fall back to synchronous
+    /// [`Self::compile_with_config`].
+    fn start_compile_job<'a>(
+        &'a self,
+        _ir: LpirModule,
+        _meta: LpsModuleSig,
+        _config: CompilerConfig,
+    ) -> Option<BoxedLpvmCompileJob<'a, Self::Module, Self::Error>> {
+        None
     }
 
     /// Shared memory allocator for this engine (textures, cross-shader data).

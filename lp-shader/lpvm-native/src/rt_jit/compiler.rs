@@ -7,14 +7,13 @@ use alloc::vec::Vec;
 use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
 
-use crate::compile::compile_module;
+use crate::compile::{CompiledModule, compile_module};
 use crate::error::NativeError;
 use crate::isa::IsaTarget;
 use crate::jit_symbol_sizes::{derive_sizes, sort_by_offset};
 use crate::link::link_jit;
 use crate::native_options::NativeCompileOptions;
 use lp_perf::{EVENT_SHADER_LINK, JitSymbolEntry, emit_jit_map_load};
-use lpvm::ModuleDebugInfo;
 
 use super::buffer::JitBuffer;
 use super::builtins::BuiltinTable;
@@ -40,7 +39,7 @@ pub fn compile_module_jit(
     builtin_table: &BuiltinTable,
     options: &NativeCompileOptions,
     isa: IsaTarget,
-) -> Result<(JitBuffer, BTreeMap<String, usize>, ModuleDebugInfo), NativeError> {
+) -> Result<(JitBuffer, BTreeMap<String, usize>), NativeError> {
     let float_mode = options.float_mode;
 
     // 1. Compile module
@@ -54,13 +53,15 @@ pub fn compile_module_jit(
         compiled.functions.len()
     );
 
-    // 2. Build ModuleDebugInfo from compiled functions
-    let mut debug_info = ModuleDebugInfo::new();
-    for func in &compiled.functions {
-        debug_info.add_function(func.debug_info.clone());
-    }
+    link_compiled_module_jit(compiled, builtin_table, isa)
+}
 
-    // 3. Link JIT image with builtin resolution
+pub(crate) fn link_compiled_module_jit(
+    compiled: CompiledModule,
+    builtin_table: &BuiltinTable,
+    isa: IsaTarget,
+) -> Result<(JitBuffer, BTreeMap<String, usize>), NativeError> {
+    // 2. Link JIT image with builtin resolution
     lp_perf::emit_begin!(EVENT_SHADER_LINK);
     let link_result = link_jit(&compiled, isa, |sym| {
         // First check builtins
@@ -73,7 +74,7 @@ pub fn compile_module_jit(
     lp_perf::emit_end!(EVENT_SHADER_LINK);
     let linked = link_result.map_err(|e| NativeError::Internal(format!("JIT link failed: {e}")))?;
 
-    // 4. Create JitBuffer from linked code
+    // 3. Create JitBuffer from linked code
     let buffer = JitBuffer::from_code(linked.code);
 
     let buffer_len = u32::try_from(buffer.len())
@@ -81,7 +82,7 @@ pub fn compile_module_jit(
     let base = unsafe { buffer.entry_ptr(0) } as usize as u32;
     emit_jit_symbols(base, buffer_len, &linked.entries);
 
-    Ok((buffer, linked.entries, debug_info))
+    Ok((buffer, linked.entries))
 }
 
 /// Builds [`JitSymbolEntry`] records (names in `name_buf`) and notifies the profiler sink.

@@ -1,0 +1,27 @@
+[package]
+name = "fw-checks"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = []
+std = ["serde/std", "serde_json/std"]
+check-shader-compile = []
+check-jit-math-perf = []
+check-json = []
+check-oom = []
+check-rmt = []
+check-dither = []
+check-fluid-demo = []
+check-msafluid = []
+
+[dependencies]
+serde = { workspace = true, default-features = false, features = ["alloc", "derive"] }
+serde_json = { workspace = true, default-features = false, features = ["alloc"] }
+log = { workspace = true, default-features = false }
+
+[lints]
+workspace = true

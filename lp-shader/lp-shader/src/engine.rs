@@ -9,14 +9,14 @@ use lpvm::AllocError;
 use lpvm::LpvmEngine;
 
 use crate::compile_compute_desc::CompileComputeDesc;
-use crate::compile_px_desc::{CompilePxDesc, ShaderFrontend, TextureBindingSpecs};
+use crate::compile_job::{ShaderCompileBudget, ShaderCompileJob, ShaderCompileStepResult};
+use crate::compile_px_desc::{CompilePxDesc, TextureBindingSpecs};
 use crate::compute_abi::{validate_compute_abi, validate_compute_tick_sig};
 use crate::compute_shader::LpsComputeShader;
 use crate::error::LpsError;
 use crate::px_shader::LpsPxShader;
 use crate::sample_buf::{LpsSamplePointBuf, LpsSampleRgba16Buf};
 use crate::texture_buf::LpsTextureBuf;
-use crate::texture_interface::validate_texture_interface;
 
 /// Shader compilation and shared-memory texture allocation.
 pub struct LpsEngine<E: LpvmEngine> {
@@ -62,48 +62,24 @@ impl<E: LpvmEngine> LpsEngine<E> {
     where
         E::Module: 'static,
     {
-        let CompilePxDesc {
-            glsl,
-            output_format,
-            compiler_config,
-            textures,
-            frontend,
-        } = desc;
+        let mut job = self.start_compile_px_job(desc);
+        loop {
+            match job.step(ShaderCompileBudget::default()) {
+                ShaderCompileStepResult::Pending => {}
+                ShaderCompileStepResult::Finished(shader) => return Ok(shader),
+                ShaderCompileStepResult::Failed(err) => return Err(err),
+            }
+        }
+    }
 
-        let (mut ir, mut meta) = lower_glsl(glsl, &textures, &compiler_config, frontend)?;
-
-        validate_texture_interface(&meta, &textures)?;
-
-        let render_fn_index = validate_render_sig(&meta, output_format)?;
-
-        let render_texture_fn_name = crate::synth::synthesise_render_texture(
-            &mut ir,
-            &mut meta,
-            render_fn_index,
-            output_format,
-        )
-        .map_err(|e| LpsError::Compile(format!("synth render_texture: {e:?}")))?;
-        let render_samples_fn_name = if output_format == TextureStorageFormat::Rgba16Unorm {
-            Some(
-                crate::synth::synthesise_render_samples_rgba16(&mut ir, &mut meta, render_fn_index)
-                    .map_err(|e| LpsError::Compile(format!("synth render_samples: {e:?}")))?,
-            )
-        } else {
-            None
-        };
-
-        let module = self
-            .engine
-            .compile_with_config(&ir, &meta, &compiler_config)
-            .map_err(|e| LpsError::Compile(format!("{e}")))?;
-        LpsPxShader::new(
-            module,
-            meta,
-            output_format,
-            render_fn_index,
-            render_texture_fn_name,
-            render_samples_fn_name,
-        )
+    pub fn start_compile_px_job<'a>(
+        &'a self,
+        desc: CompilePxDesc<'a>,
+    ) -> ShaderCompileJob<'a, 'a, E>
+    where
+        E::Module: 'static,
+    {
+        ShaderCompileJob::new(&self.engine, desc)
     }
 
     /// Compile GLSL into a serial compute shader.
@@ -203,28 +179,8 @@ impl<E: LpvmEngine> LpsEngine<E> {
     }
 }
 
-fn lower_glsl(
-    glsl: &str,
-    textures: &TextureBindingSpecs,
-    compiler_config: &CompilerConfig,
-    frontend: ShaderFrontend,
-) -> Result<(LpirModule, LpsModuleSig), LpsError> {
-    match frontend {
-        ShaderFrontend::Naga => lower_glsl_with_naga(glsl, textures, compiler_config),
-        ShaderFrontend::LpsGlsl => {
-            let options = lps_glsl::CompileOptions {
-                texture_specs: textures.clone(),
-                texel_fetch_bounds: compiler_config.texture.texel_fetch_bounds,
-            };
-            let output =
-                lps_glsl::compile(glsl, &options).map_err(|e| LpsError::Parse(e.render(glsl)))?;
-            Ok((output.ir, output.meta))
-        }
-    }
-}
-
 #[cfg(feature = "naga")]
-fn lower_glsl_with_naga(
+pub(crate) fn lower_glsl_with_naga(
     glsl: &str,
     textures: &TextureBindingSpecs,
     compiler_config: &CompilerConfig,
@@ -239,7 +195,7 @@ fn lower_glsl_with_naga(
 }
 
 #[cfg(not(feature = "naga"))]
-fn lower_glsl_with_naga(
+pub(crate) fn lower_glsl_with_naga(
     _glsl: &str,
     _textures: &TextureBindingSpecs,
     _compiler_config: &CompilerConfig,
@@ -250,7 +206,7 @@ fn lower_glsl_with_naga(
 }
 
 /// Validate the `render` function signature against the output format.
-fn validate_render_sig(
+pub(crate) fn validate_render_sig(
     meta: &LpsModuleSig,
     output_format: TextureStorageFormat,
 ) -> Result<usize, LpsError> {

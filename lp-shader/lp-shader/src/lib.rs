@@ -14,6 +14,7 @@
 extern crate alloc;
 
 mod compile_compute_desc;
+mod compile_job;
 mod compile_px_desc;
 mod compute_abi;
 mod compute_shader;
@@ -27,6 +28,10 @@ mod texture_buf;
 mod texture_interface;
 
 pub use compile_compute_desc::CompileComputeDesc;
+pub use compile_job::{
+    ShaderCompileBudget, ShaderCompileJob, ShaderCompileStage, ShaderCompileStageDetail,
+    ShaderCompileStepResult,
+};
 pub use compile_px_desc::{CompilePxDesc, ShaderFrontend, TextureBindingSpecs, texture_binding};
 pub use compute_abi::{ComputeAbi, ComputeOutputAbi};
 pub use compute_shader::LpsComputeShader;

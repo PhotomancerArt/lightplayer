@@ -18,6 +18,41 @@ impl<'a> TypeCtx<'a> {
         args: &[ParsedExpr],
     ) -> Result<HirExpr, Diagnostic> {
         match kind {
+            BuiltinKind::Modf => {
+                if args.len() != 2 {
+                    return Err(Diagnostic::error(span, "builtin expects 2 arguments"));
+                }
+                let value = self.type_expr(&args[0])?;
+                if value.ty.is_matrix() || scalar_base_type(&value.ty) != Some(LpsType::Float) {
+                    return Err(Diagnostic::error(
+                        args[0].span,
+                        "modf expects float scalar/vector lanes",
+                    ));
+                }
+                let ty = value.ty.clone();
+                let integer = self.type_assign_target(&args[1])?;
+                if integer.ty() != &ty {
+                    return Err(Diagnostic::error(
+                        args[1].span,
+                        "out argument type must match builtin argument type",
+                    ));
+                }
+
+                Ok(HirExpr {
+                    span,
+                    ty: ty.clone(),
+                    kind: HirExprKind::Builtin {
+                        kind,
+                        args: vec![value],
+                        writebacks: vec![HirUserCallWriteback {
+                            arg_index: 1,
+                            target: integer,
+                            ty,
+                            copy_in: false,
+                        }],
+                    },
+                })
+            }
             BuiltinKind::UaddCarry | BuiltinKind::UsubBorrow => {
                 if args.len() != 3 {
                     return Err(Diagnostic::error(span, "builtin expects 3 arguments"));

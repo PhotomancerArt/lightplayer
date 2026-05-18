@@ -9,7 +9,7 @@ mod error;
 mod messages;
 mod server;
 
-use commands::{create, dev, profile, serve, shader_debug, shader_lpir, upload};
+use commands::{create, dev, fwcheck, profile, serve, shader_debug, shader_lpir, upload};
 
 #[derive(Parser)]
 #[command(name = "lp-cli")]
@@ -55,6 +55,8 @@ enum Cli {
     },
     /// Run a profiling session or compare profiles (`profile diff` is a stub in m0).
     Profile(profile::ProfileCli),
+    /// Run firmware checks on hardware or firmware targets.
+    Fwcheck(fwcheck::FwcheckCli),
     /// Compile a GLSL file to LPIR text (stdout). Uses the same Naga → LPIR path as the JIT.
     ShaderLpir {
         /// Path to a `.glsl` file (filetest-style snippet; LPFX preamble is applied like `lps-frontend::compile`)
@@ -100,6 +102,7 @@ fn main() -> Result<()> {
             }
             None => profile::handle_profile(cli.run),
         },
+        Cli::Fwcheck(cli) => fwcheck::handle_fwcheck(cli),
         Cli::ShaderLpir {
             path,
             stats,
