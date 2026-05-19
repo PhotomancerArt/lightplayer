@@ -102,6 +102,11 @@ fn print_panic_frames() {
         esp_println::print!(" 0x{:08x}", frame);
     }
     esp_println::println!();
+    esp_println::print!("decode: just decode-backtrace");
+    for frame in frames.iter().take(count) {
+        esp_println::print!(" 0x{:08x}", frame);
+    }
+    esp_println::println!();
 }
 
 /// Custom OOM handler that panics normally so catch_unwind can recover.

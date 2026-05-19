@@ -360,7 +360,7 @@ mod tests {
 
         let mut next = OutputDef::new(4);
         next.options = OptionSlot::some(OutputDriverOptionsConfig {
-            brightness: lpc_model::RatioSlot::new(0.25),
+            brightness: lpc_model::RatioSlot::new(lpc_model::Ratio(0.25)),
             ..OutputDriverOptionsConfig::default()
         });
         services.update_output_sink_config(buffer_id, &next);

@@ -8,6 +8,7 @@ use lpc_model::{
 
 use super::{
     WireSlotChange, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot, WireSlotRootsSnapshot,
+    wire_slot_data_from_slot_data,
 };
 
 /// Build a full slot sync payload from borrowed slot roots.
@@ -24,7 +25,11 @@ pub fn build_slot_full_sync<'a>(
                 WireSlotRootSnapshot {
                     name: name.to_string(),
                     shape: shape_id,
-                    data: snapshot_slot_root(&shape_id, root.data(), registry),
+                    data: wire_slot_data_from_slot_data(&snapshot_slot_root(
+                        &shape_id,
+                        root.data(),
+                        registry,
+                    )),
                 }
             })
             .collect(),
@@ -44,7 +49,11 @@ pub fn build_slot_roots_snapshot<'a>(
                 WireSlotRootSnapshot {
                     name: name.to_string(),
                     shape: shape_id,
-                    data: snapshot_slot_root(&shape_id, root.data(), registry),
+                    data: wire_slot_data_from_slot_data(&snapshot_slot_root(
+                        &shape_id,
+                        root.data(),
+                        registry,
+                    )),
                 }
             })
             .collect(),

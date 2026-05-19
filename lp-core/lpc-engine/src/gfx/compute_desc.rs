@@ -167,7 +167,7 @@ mod tests {
         );
 
         let def = ComputeShaderDef {
-            glsl_path: SourcePathSlot::new(String::from("emitters.glsl")),
+            glsl_path: SourcePathSlot::new(String::from("emitters.glsl").into()),
             bindings: BindingDefs::default(),
             glsl_opts: lpc_model::GlslOpts::default(),
             consumed_slots: MapSlot::new(consumed),

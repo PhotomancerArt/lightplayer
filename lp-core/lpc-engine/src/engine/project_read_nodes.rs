@@ -5,8 +5,10 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::{NodeId, SlotAccess};
-use lpc_wire::{NodeReadQuery, NodeReadResult, WireSlotRootSnapshot, WireSlotRootsSnapshot};
-use lpc_wire::{ReadLevel, snapshot_slot_root};
+use lpc_wire::{
+    NodeReadQuery, NodeReadResult, ReadLevel, WireSlotRootSnapshot, WireSlotRootsSnapshot,
+    snapshot_slot_root, wire_slot_data_from_slot_data,
+};
 
 use crate::artifact::ArtifactState;
 use crate::node::{NodeEntryState, tree_deltas_since};
@@ -46,7 +48,11 @@ impl Engine {
                 roots.push(WireSlotRootSnapshot {
                     name: node_def_root_name(entry.id),
                     shape: def.shape_id(),
-                    data: snapshot_slot_root(&def.shape_id(), def.data(), self.slot_shapes()),
+                    data: wire_slot_data_from_slot_data(&snapshot_slot_root(
+                        &def.shape_id(),
+                        def.data(),
+                        self.slot_shapes(),
+                    )),
                 });
             }
 
@@ -56,7 +62,11 @@ impl Engine {
                 roots.push(WireSlotRootSnapshot {
                     name: node_state_root_name(entry.id),
                     shape: state.shape_id(),
-                    data: snapshot_slot_root(&state.shape_id(), state.data(), self.slot_shapes()),
+                    data: wire_slot_data_from_slot_data(&snapshot_slot_root(
+                        &state.shape_id(),
+                        state.data(),
+                        self.slot_shapes(),
+                    )),
                 });
             }
         }

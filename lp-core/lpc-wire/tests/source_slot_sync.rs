@@ -51,33 +51,24 @@ fn real_source_defs_sync_as_slot_roots() {
     let project_data = root_data(&sync, "project");
     assert_eq!(
         select(
-            project_data,
+            &project_data,
             ProjectDef::SHAPE_ID.slot_shape_from(&registry),
             &registry,
             "nodes[shader]"
         ),
-        &SlotData::Value(lpc_model::WithRevision::new(
-            project.nodes.entries["shader"].changed_at(),
-            LpValue::Struct {
-                name: Some(String::from("NodeInvocation")),
-                fields: vec![
-                    (
-                        String::from("form"),
-                        LpValue::String(String::from("artifact"))
-                    ),
-                    (
-                        String::from("artifact"),
-                        LpValue::String(String::from("./shader.toml"))
-                    ),
-                ],
-            },
+        &SlotData::Record(lpc_model::SlotRecord::with_revision(
+            project.nodes.entries["shader"].artifact.changed_at(),
+            vec![SlotData::Value(lpc_model::WithRevision::new(
+                project.nodes.entries["shader"].artifact.changed_at(),
+                LpValue::String(String::from("./shader.toml")),
+            ))],
         )),
     );
 
     let shader_data = root_data(&sync, "shader");
     assert_value(
         select(
-            shader_data,
+            &shader_data,
             ShaderDef::SHAPE_ID.slot_shape_from(&registry),
             &registry,
             "glsl_path",
@@ -86,7 +77,7 @@ fn real_source_defs_sync_as_slot_roots() {
     );
     assert_value(
         select(
-            shader_data,
+            &shader_data,
             ShaderDef::SHAPE_ID.slot_shape_from(&registry),
             &registry,
             "bindings[output].target.some",
@@ -95,7 +86,7 @@ fn real_source_defs_sync_as_slot_roots() {
     );
     assert_value(
         select(
-            shader_data,
+            &shader_data,
             ShaderDef::SHAPE_ID.slot_shape_from(&registry),
             &registry,
             "glsl_opts.add_sub",
@@ -129,7 +120,7 @@ min = 0.0
     let shader_data = root_data(&sync, "shader");
     assert_value(
         select(
-            shader_data,
+            &shader_data,
             ShaderDef::SHAPE_ID.slot_shape_from(&registry),
             &registry,
             "consumed_slots[speed].label",
@@ -144,7 +135,7 @@ min = 0.0
     let output_data = root_data(&output_sync, "output");
     assert_value(
         select(
-            output_data,
+            &output_data,
             OutputDef::SHAPE_ID.slot_shape_from(&registry),
             &registry,
             "options.some.brightness",
@@ -159,7 +150,7 @@ min = 0.0
     let fixture_data = root_data(&fixture_sync, "fixture");
     assert!(matches!(
         select(
-            fixture_data,
+            &fixture_data,
             FixtureDef::SHAPE_ID.slot_shape_from(&registry),
             &registry,
             "mapping.PathPoints.paths[0].RingArray.ring_lamp_counts[8]"
@@ -206,13 +197,16 @@ fn read_basic_fixture(name: &str) -> FixtureDef {
     }
 }
 
-fn root_data<'a>(sync: &'a lpc_wire::WireSlotFullSync, name: &str) -> &'a SlotData {
-    &sync
-        .roots
-        .iter()
-        .find(|root| root.name == name)
-        .unwrap()
-        .data
+fn root_data(sync: &lpc_wire::WireSlotFullSync, name: &str) -> SlotData {
+    lpc_wire::wire_slot_data_to_slot_data(
+        &sync
+            .roots
+            .iter()
+            .find(|root| root.name == name)
+            .unwrap()
+            .data,
+    )
+    .unwrap()
 }
 
 fn assert_value(data: &SlotData, expected: LpValue) {

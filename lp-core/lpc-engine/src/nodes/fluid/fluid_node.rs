@@ -346,6 +346,7 @@ intensity = 2.0
             .tree()
             .lookup_sibling(root, NodeName::parse("fluid").unwrap())
             .expect("fluid node");
+        engine.tick(16).expect("tick fluid");
 
         let (production, _) = resolve_with_engine_host(
             &mut engine,
@@ -408,12 +409,12 @@ glsl_path = "compute.glsl"
 [bindings.emitters]
 target = "bus#fluid.emitters"
 
-[consumed.time]
+[consumed_slots.time]
 kind = "value"
 value = "f32"
 default = 0.5
 
-[produced.emitters]
+[produced_slots.emitters]
 kind = "map"
 key = "u32"
 value = "lp::fluid::Emitter"
@@ -460,6 +461,7 @@ source = "bus#fluid.emitters"
             .tree()
             .lookup_sibling(root, NodeName::parse("fluid").unwrap())
             .expect("fluid node");
+        engine.tick(16).expect("tick fluid graph");
 
         let (production, _) = resolve_with_engine_host(
             &mut engine,

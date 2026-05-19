@@ -69,7 +69,7 @@ impl PanicPayload {
 
     /// Format as error string for NodeStatus::Error.
     ///
-    /// Format: "panic: <msg> (at <file>:<line>) [0x00001234, 0x00005678, ...]"
+    /// Format: "panic: <msg> (at <file>:<line>) [0x00001234, 0x00005678, ...]; decode: just decode-backtrace 0x00001234 ..."
     pub fn format_error(&self) -> String {
         let mut s = String::new();
         if let Some(oom) = self.oom {
@@ -101,6 +101,10 @@ impl PanicPayload {
                 push_fmt(&mut s, format_args!("0x{:08x}", self.frames[i]));
             }
             s.push(']');
+            s.push_str("; decode: just decode-backtrace");
+            for i in 0..self.frame_count {
+                push_fmt(&mut s, format_args!(" 0x{:08x}", self.frames[i]));
+            }
         }
         s
     }
@@ -264,6 +268,19 @@ mod tests {
         assert!(error.contains("context=load project"));
         assert!(error.contains("panic: memory allocation of 81920 bytes failed"));
         assert!(error.contains("fw.rs:104"));
+    }
+
+    #[test]
+    fn panic_payload_formats_decode_command_for_frames() {
+        let mut payload = PanicPayload::new("boom", Some("fw.rs"), Some(104));
+        payload.frames[0] = 0x4208c8fa;
+        payload.frames[1] = 0x42097332;
+        payload.frame_count = 2;
+
+        let error = payload.format_error();
+
+        assert!(error.contains("[0x4208c8fa, 0x42097332]"));
+        assert!(error.contains("decode: just decode-backtrace 0x4208c8fa 0x42097332"));
     }
 
     #[test]

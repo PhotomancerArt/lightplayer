@@ -100,7 +100,7 @@ fn two_shader_instances_can_have_distinct_dynamic_param_shapes() {
         ],
     );
     let mut client = SlotMirrorView::default();
-    client.apply_full_sync(sync);
+    client.apply_full_sync(sync).unwrap();
 
     println!("client tree: engine.shader_primary");
     let primary_lines = print_data_root(

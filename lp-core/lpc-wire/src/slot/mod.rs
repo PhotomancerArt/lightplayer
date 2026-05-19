@@ -15,5 +15,6 @@ pub use mutation::{
 };
 pub use slot_shape_registry_json::write_slot_shape_registry_snapshot_json;
 pub use sync::{
-    WireSlotChange, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot, WireSlotRootsSnapshot,
+    WireSlotChange, WireSlotData, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot,
+    WireSlotRootsSnapshot, wire_slot_data_from_slot_data, wire_slot_data_to_slot_data,
 };

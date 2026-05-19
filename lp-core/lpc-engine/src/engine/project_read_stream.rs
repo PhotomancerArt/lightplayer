@@ -239,9 +239,7 @@ mod tests {
     use alloc::vec::Vec;
     use lpc_model::{Revision, SlotShapeId, TreePath, WithRevision};
     use lpc_wire::json::json_write::ChunkCountingWrite;
-    use lpc_wire::{
-        ProjectReadResponse, ResourcePayloadRead, ResourceReadQuery, ResourceReadResult,
-    };
+    use lpc_wire::{ProjectReadResponse, ResourcePayloadRead, ResourceReadQuery};
     use serde_json::Value;
 
     use crate::engine::test_support::{DummyShaderState, EngineTestBuilder, output};
@@ -273,12 +271,37 @@ mod tests {
 
     #[test]
     fn streaming_project_read_slot_payloads_read_through_slot_codec() {
-        let h = EngineTestBuilder::new()
+        let mut h = EngineTestBuilder::new()
             .shader("shader", output("outputs[0]", 0.75))
             .build();
         let request = ProjectReadRequest::default_debug(None);
 
-        assert_detailed_slot_roots_read_through_registry(&h.engine, request);
+        assert_detailed_slot_roots_read_through_registry(&mut h.engine, request);
+    }
+
+    #[test]
+    fn streaming_project_read_slot_payloads_deserialize_and_apply_to_view() {
+        let mut h = EngineTestBuilder::new()
+            .shader("shader", output("outputs[0]", 0.75))
+            .build();
+        let request = ProjectReadRequest::default_debug(None);
+        let streamed = h
+            .engine
+            .write_project_read_json(request, Vec::new())
+            .expect("stream project read");
+        let decoded: ProjectReadResponse =
+            lpc_wire::json::from_slice(&streamed).expect("decode streamed project read");
+        let mut view = lpc_view::ProjectView::new();
+
+        lpc_view::apply_project_read_response(&mut view, decoded).expect("apply project read");
+
+        assert!(!view.slots.roots.is_empty());
+        assert!(
+            view.slots
+                .roots
+                .keys()
+                .any(|root| root.starts_with("node."))
+        );
     }
 
     #[test]
@@ -325,7 +348,7 @@ mod tests {
     }
 
     fn assert_detailed_slot_roots_read_through_registry(
-        engine: &Engine,
+        engine: &mut Engine,
         request: ProjectReadRequest,
     ) {
         let streamed = engine

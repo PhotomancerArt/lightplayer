@@ -976,7 +976,7 @@ kind = "Shader"
 glsl_path = "shader.glsl"
 render_order = 0
 
-[consumed.time]
+[consumed_slots.time]
 kind = "value"
 value = "f32"
 default = 0.0
@@ -1130,8 +1130,8 @@ artifact = "./weird.toml"
             Ok(_) => panic!("expected load error"),
         };
         assert!(
-            matches!(err, ProjectLoadError::TomlParse { .. }),
-            "expected TomlParse, got {err:?}"
+            matches!(err, ProjectLoadError::UnknownKind { .. }),
+            "expected UnknownKind, got {err:?}"
         );
     }
 
@@ -1260,12 +1260,12 @@ artifact = "./compute.toml"
 kind = "ComputeShader"
 glsl_path = "compute.glsl"
 
-[consumed.time]
+[consumed_slots.time]
 kind = "value"
 value = "f32"
 default = 0.25
 
-[produced.phase]
+[produced_slots.phase]
 kind = "value"
 value = "f32"
 "#,
@@ -1305,8 +1305,9 @@ value = "f32"
     #[test]
     fn fluid_example_loads_compute_fluid_fixture_flow() {
         let fs = examples_fluid_fs();
+        let fs: &dyn LpFs = &fs;
         let services = EngineServices::new(TreePath::parse("/fluid.show").expect("path"));
-        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load fluid example");
+        let mut rt = ProjectLoader::load_from_root(fs, services).expect("load fluid example");
         rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
         let root = rt.tree().root();
 
@@ -1344,6 +1345,7 @@ value = "f32"
             panic!("compute emitters should be a map");
         };
         assert!(!map.entries.is_empty());
+        rt.tick(16).expect("tick fluid graph");
 
         let (fluid_output, _) = resolve_with_engine_host(
             &mut rt,

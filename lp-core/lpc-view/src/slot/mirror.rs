@@ -1,4 +1,5 @@
 use alloc::collections::BTreeMap;
+use alloc::format;
 use alloc::string::{String, ToString};
 use lpc_model::{
     LpValue, SlotData, SlotPath, SlotShapeId, SlotShapeRegistry, SlotShapeRegistrySnapshot,
@@ -6,7 +7,7 @@ use lpc_model::{
 use lpc_wire::{
     WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp, WireSlotMutationRejection,
     WireSlotMutationRequest, WireSlotMutationResponse, WireSlotMutationResult, WireSlotPatch,
-    WireSlotRootsSnapshot,
+    WireSlotRootSnapshot, WireSlotRootsSnapshot, wire_slot_data_to_slot_data,
 };
 
 use super::apply::{
@@ -29,18 +30,23 @@ impl SlotMirrorView {
         Self::default()
     }
 
-    pub fn apply_full_sync(&mut self, sync: WireSlotFullSync) {
+    pub fn apply_full_sync(&mut self, sync: WireSlotFullSync) -> Result<(), SlotMirrorError> {
         self.registry.apply_snapshot(sync.registry);
-        self.apply_roots_snapshot(WireSlotRootsSnapshot { roots: sync.roots });
+        self.apply_roots_snapshot(WireSlotRootsSnapshot { roots: sync.roots })
     }
 
-    pub fn apply_roots_snapshot(&mut self, sync: WireSlotRootsSnapshot) {
+    pub fn apply_roots_snapshot(
+        &mut self,
+        sync: WireSlotRootsSnapshot,
+    ) -> Result<(), SlotMirrorError> {
         self.root_shapes.clear();
         self.roots.clear();
         for root in sync.roots {
+            let data = self.read_wire_slot_root(&root)?;
             self.root_shapes.insert(root.name.clone(), root.shape);
-            self.roots.insert(root.name, root.data);
+            self.roots.insert(root.name, data);
         }
+        Ok(())
     }
 
     pub fn apply_registry_snapshot(&mut self, snapshot: SlotShapeRegistrySnapshot) {
@@ -119,6 +125,28 @@ impl SlotMirrorView {
     pub fn error(&self, id: WireSlotMutationId) -> Option<&WireSlotMutationRejection> {
         self.errors.get(&id)
     }
+
+    fn read_wire_slot_root(
+        &self,
+        root: &WireSlotRootSnapshot,
+    ) -> Result<SlotData, SlotMirrorError> {
+        let slot_codec_error = match self
+            .registry
+            .read_slot_json_data(root.shape, root.data.get())
+        {
+            Ok(data) => {
+                return Ok(data);
+            }
+            Err(error) => error,
+        };
+
+        wire_slot_data_to_slot_data(&root.data).map_err(|serde_error| {
+            SlotMirrorError::InvalidRootData(format!(
+                "root `{}` shape {} did not decode as SlotCodec ({}) or SlotData ({})",
+                root.name, root.shape, slot_codec_error, serde_error
+            ))
+        })
+    }
 }
 
 #[cfg(test)]
@@ -128,7 +156,7 @@ mod tests {
     use lpc_model::{
         LpType, Revision, SlotFieldShape, SlotMeta, SlotName, SlotRecord, SlotShape, WithRevision,
     };
-    use lpc_wire::{WireSlotChange, WireSlotRootSnapshot};
+    use lpc_wire::{WireSlotChange, WireSlotRootSnapshot, wire_slot_data_from_slot_data};
 
     #[test]
     fn set_value_mutation_tracks_pending_without_local_write() {
@@ -254,9 +282,10 @@ mod tests {
             roots: vec![WireSlotRootSnapshot {
                 name: String::from("engine.shader_node"),
                 shape: shape_id,
-                data: shader_node_data(),
+                data: wire_slot_data_from_slot_data(&shader_node_data()),
             }],
-        });
+        })
+        .unwrap();
         view
     }
 

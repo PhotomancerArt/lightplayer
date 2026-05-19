@@ -48,16 +48,15 @@ pub(crate) fn derive_record(
             )
         });
 
-        if selected_policy.is_none_or(|policy| !attr::policy_is_read_only(policy))
-            && let Some(access) =
-                attr::field_access_tokens(&field_attr.shape, &field_ty, &field_ident)
+        if let Some(access) = attr::field_access_tokens(&field_attr.shape, &field_ty, &field_ident)
         {
             let index = syn::Index::from(access_index);
             access_arms.push(quote! {
                 #index => Some(#access),
             });
-            if let Some(mut_access) =
-                attr::field_mut_access_tokens(&field_attr.shape, &field_ty, &field_ident)
+            if selected_policy.is_none_or(|policy| !attr::policy_is_read_only(policy))
+                && let Some(mut_access) =
+                    attr::field_mut_access_tokens(&field_attr.shape, &field_ty, &field_ident)
             {
                 mut_access_arms.push(quote! {
                     #index => Some(#mut_access),

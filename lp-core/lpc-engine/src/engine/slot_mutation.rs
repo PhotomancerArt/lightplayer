@@ -387,7 +387,7 @@ mod tests {
             panic!("output def");
         };
         let options = def.options().expect("output options");
-        assert!((*options.brightness.value() - 0.75).abs() < 0.001);
+        assert!((options.brightness.value().0 - 0.75).abs() < 0.001);
     }
 
     #[test]
@@ -435,20 +435,8 @@ mod tests {
         let request = mutation_request(
             &engine,
             &root,
-            "bindings[input]",
-            LpValue::Struct {
-                name: Some(String::from("BindingDef")),
-                fields: Vec::from([
-                    (
-                        String::from("direction"),
-                        LpValue::String(String::from("source")),
-                    ),
-                    (
-                        String::from("endpoint"),
-                        LpValue::String(String::from("bus#control.out")),
-                    ),
-                ]),
-            },
+            "bindings[input].source.some",
+            LpValue::String(String::from("bus#control.next")),
         );
 
         let responses = engine.mutate_project_slots(Vec::from([request]));
@@ -465,8 +453,12 @@ mod tests {
         };
         let binding = def.bindings.entries().get("input").expect("input binding");
         assert_eq!(
-            binding.source.as_ref().map(ToString::to_string),
-            Some(String::from("bus#control.out"))
+            binding
+                .source
+                .data
+                .as_ref()
+                .map(|source| source.value().to_string()),
+            Some(String::from("bus#control.next"))
         );
         assert!(binding.target.is_none());
     }
@@ -555,7 +547,7 @@ artifact = "./output.toml"
         fs.write_file(
             "/output.toml".as_path(),
             br#"
-kind = "output"
+kind = "Output"
 pin = 4
 
 [bindings.input]

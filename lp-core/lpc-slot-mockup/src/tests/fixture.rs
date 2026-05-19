@@ -35,7 +35,7 @@ impl Harness {
         for root in &sync.roots {
             println!("  {} shape={}", root.name, root.shape);
         }
-        self.client.apply_full_sync(sync);
+        self.client.apply_full_sync(sync).unwrap();
         println!("client full sync applied");
     }
 

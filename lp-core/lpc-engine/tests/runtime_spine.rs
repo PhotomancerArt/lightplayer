@@ -70,8 +70,9 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
     let config = NodeInvocation::new(ArtifactLocator::path("e.lp"));
 
     let mut mgr = ArtifactStore::new();
+    let locator = config.artifact_locator().unwrap();
     let ar = mgr.acquire_location(
-        ArtifactLocation::try_from_src_spec(&config.artifact_locator().unwrap().unwrap()).unwrap(),
+        ArtifactLocation::try_from_src_spec(&locator).unwrap(),
         Revision::new(0),
     );
     mgr.load_with(&ar, Revision::new(40), |_location| Ok(texture_def(7, 7)))

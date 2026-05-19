@@ -5,7 +5,7 @@
 //! additions, removals, and replacements before applying slot data patches.
 
 use crate::{
-    Revision, SlotFactory, SlotFactoryError, SlotMutAccess, SlotShape, SlotShapeId,
+    Revision, SlotData, SlotFactory, SlotFactoryError, SlotMutAccess, SlotShape, SlotShapeId,
     current_revision,
 };
 use alloc::boxed::Box;
@@ -527,6 +527,18 @@ impl SlotShapeRegistry {
         json: &str,
     ) -> Result<Box<dyn SlotMutAccess>, crate::slot_codec::SyntaxError> {
         self.read_slot_from(id, crate::slot_codec::JsonSyntaxSource::new(json)?)
+    }
+
+    pub fn read_slot_json_data(
+        &self,
+        id: SlotShapeId,
+        json: &str,
+    ) -> Result<SlotData, crate::slot_codec::SyntaxError> {
+        let mut reader = crate::slot_codec::SlotReader::new(
+            crate::slot_codec::JsonSyntaxSource::new(json)?,
+            self,
+        );
+        crate::slot_codec::read_dynamic_slot_data(self, id, reader.value())
     }
 
     pub fn read_slot_toml(

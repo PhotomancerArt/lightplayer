@@ -2,6 +2,32 @@ use alloc::string::String;
 use alloc::vec::Vec;
 use lpc_model::{SlotData, SlotPath, SlotShapeId, SlotShapeRegistrySnapshot};
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct WireSlotData(
+    #[cfg_attr(feature = "schema-gen", schemars(with = "serde_json::Value"))]
+    alloc::boxed::Box<RawValue>,
+);
+
+impl WireSlotData {
+    pub fn get(&self) -> &str {
+        self.0.get()
+    }
+}
+
+impl core::fmt::Debug for WireSlotData {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("WireSlotData").field(&self.get()).finish()
+    }
+}
+
+impl PartialEq for WireSlotData {
+    fn eq(&self, other: &Self) -> bool {
+        self.get() == other.get()
+    }
+}
 
 /// Complete slot sync payload for a client-side slot mirror.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -27,7 +53,7 @@ pub struct WireSlotRootsSnapshot {
 pub struct WireSlotRootSnapshot {
     pub name: String,
     pub shape: SlotShapeId,
-    pub data: SlotData,
+    pub data: WireSlotData,
 }
 
 /// Incremental slot data patch.
@@ -45,6 +71,14 @@ pub struct WireSlotPatch {
 #[serde(rename_all = "snake_case")]
 pub enum WireSlotChange {
     Replace(SlotData),
+}
+
+pub fn wire_slot_data_from_slot_data(data: &SlotData) -> WireSlotData {
+    WireSlotData(serde_json::value::to_raw_value(data).expect("SlotData serializes as JSON"))
+}
+
+pub fn wire_slot_data_to_slot_data(data: &WireSlotData) -> Result<SlotData, serde_json::Error> {
+    serde_json::from_str(data.get())
 }
 
 #[cfg(test)]

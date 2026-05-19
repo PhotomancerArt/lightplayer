@@ -13,6 +13,7 @@ use lps_shared::LpsValueF32;
 
 use crate::dataflow::resolver::{QueryKey, resolver::model_value_to_lps_value_f32};
 use crate::gfx::{LpComputeShader, ShaderCompileOptions, compute_desc_from_model_def};
+use crate::node::catch_node_panic::catch_panic;
 use crate::node::{DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext};
 
 use super::compute_materialize::materialize_produced_slot;
@@ -58,6 +59,9 @@ impl ComputeShaderNode {
         if self.shader.is_some() {
             return Ok(());
         }
+        if let Some(error) = &self.compilation_error {
+            return Err(NodeError::msg(format!("compute shader compile: {error}")));
+        }
 
         let graphics = ctx
             .graphics()
@@ -81,7 +85,14 @@ impl ComputeShaderNode {
             self.glsl_source.len()
         );
         self.compilation_error = None;
-        match graphics.compile_compute_shader(desc) {
+        lpc_shared::backtrace::set_oom_context("compute shader node: compile");
+        let compile_result = catch_panic("panic during compute shader compilation", || {
+            graphics.compile_compute_shader(desc)
+        })
+        .and_then(|result| result.map_err(|error| format!("{error}")));
+        lpc_shared::backtrace::clear_oom_context();
+
+        match compile_result {
             Ok(shader) => {
                 self.shader = Some(shader);
                 log::info!(
@@ -91,7 +102,7 @@ impl ComputeShaderNode {
                 Ok(())
             }
             Err(error) => {
-                self.compilation_error = Some(format!("{error}"));
+                self.compilation_error = Some(error.clone());
                 self.shader = None;
                 Err(NodeError::msg(format!("compute shader compile: {error}")))
             }
@@ -168,6 +179,7 @@ impl ComputeShaderNode {
 
         if compile_changed {
             self.shader = None;
+            self.compilation_error = None;
         }
         Ok(())
     }
@@ -395,7 +407,7 @@ void tick() {{
         );
 
         ComputeShaderDef {
-            glsl_path: lpc_model::SourcePathSlot::new(String::from("emitters.glsl")),
+            glsl_path: lpc_model::SourcePathSlot::new(String::from("emitters.glsl").into()),
             bindings: BindingDefs::default(),
             glsl_opts: lpc_model::GlslOpts::default(),
             consumed_slots: MapSlot::new(consumed),

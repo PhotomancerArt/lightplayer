@@ -17,6 +17,7 @@ use lps_shared::TextureBuffer;
 use crate::dataflow::resolver::{QueryKey, resolver::model_value_to_lps_value_f32};
 use crate::gfx::uniforms::{VisualUniform, build_uniforms};
 use crate::gfx::{LpShader, ShaderCompileOptions};
+use crate::node::catch_node_panic::catch_panic;
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, RenderContext, RenderNode,
     TickContext,
@@ -71,6 +72,9 @@ impl ShaderNode {
         if self.shader.is_some() {
             return Ok(());
         }
+        if let Some(error) = &self.compilation_error {
+            return Err(NodeError::msg(format!("shader compile: {error}")));
+        }
 
         let graphics = ctx
             .graphics()
@@ -89,28 +93,12 @@ impl ShaderNode {
         };
 
         let compile_start_ms = ctx.now_ms();
-        #[cfg(feature = "panic-recovery")]
-        let compile_result: Result<Box<dyn LpShader>, String> = {
-            use core::panic::AssertUnwindSafe;
-            use lpc_shared::backtrace::PanicPayload;
-            use unwinding::panic::catch_unwind;
-            match catch_unwind(AssertUnwindSafe(|| {
-                graphics.compile_shader(self.glsl_source.as_str(), &compile_opts)
-            })) {
-                Ok(inner) => inner.map_err(|e| format!("{e}")),
-                Err(payload) => {
-                    if let Some(panic) = payload.downcast_ref::<PanicPayload>() {
-                        Err(panic.format_error())
-                    } else {
-                        Err(String::from("panic during shader compilation"))
-                    }
-                }
-            }
-        };
-        #[cfg(not(feature = "panic-recovery"))]
-        let compile_result: Result<Box<dyn LpShader>, String> = graphics
-            .compile_shader(self.glsl_source.as_str(), &compile_opts)
-            .map_err(|e| format!("{e}"));
+        lpc_shared::backtrace::set_oom_context("shader node: compile");
+        let compile_result = catch_panic("panic during shader compilation", || {
+            graphics.compile_shader(self.glsl_source.as_str(), &compile_opts)
+        })
+        .and_then(|result| result.map_err(|error| format!("{error}")));
+        lpc_shared::backtrace::clear_oom_context();
         let compile_elapsed_ms = compile_start_ms.and_then(|start| ctx.elapsed_ms(start));
         lp_perf::emit_end!(lp_perf::EVENT_SHADER_COMPILE);
 
@@ -168,6 +156,7 @@ impl ShaderNode {
                 div: lpc_model::ValueSlot::with_version(ctx.revision(), next_div),
             };
             self.shader = None;
+            self.compilation_error = None;
         }
         Ok(())
     }
@@ -176,16 +165,21 @@ impl ShaderNode {
         &mut self,
         ctx: &mut TickContext<'_>,
     ) -> Result<(), NodeError> {
+        let mut compile_changed = false;
         let keys: Vec<String> = self.consumed_slots.entries.keys().cloned().collect();
         for key in keys {
             let Some(slot) = self.consumed_slots.entries.get_mut(&key) else {
                 continue;
             };
-            sync_shader_slot_def_from_authored(
+            compile_changed |= sync_shader_slot_def_from_authored(
                 ctx,
                 &alloc::format!("consumed_slots[{key}]"),
                 slot,
             )?;
+        }
+        if compile_changed {
+            self.shader = None;
+            self.compilation_error = None;
         }
         Ok(())
     }

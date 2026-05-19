@@ -12,6 +12,7 @@ pub enum SlotMirrorError {
     UnknownRoot,
     UnknownPath,
     MissingShape(SlotShapeId),
+    InvalidRootData(String),
     NotAValue,
     WrongType,
 }
@@ -22,6 +23,7 @@ impl core::fmt::Display for SlotMirrorError {
             Self::UnknownRoot => f.write_str("unknown slot root"),
             Self::UnknownPath => f.write_str("unknown slot path"),
             Self::MissingShape(id) => write!(f, "missing slot shape: {id}"),
+            Self::InvalidRootData(error) => write!(f, "invalid slot root data: {error}"),
             Self::NotAValue => f.write_str("slot path does not target a value"),
             Self::WrongType => f.write_str("slot value type does not match shape"),
         }
