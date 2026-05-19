@@ -4,16 +4,18 @@
 
 extern crate alloc;
 
+use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::rc::Rc;
-use alloc::vec::Vec;
+use alloc::string::ToString;
 use core::cell::RefCell;
 
 use lp_riscv_emu_guest::println;
 use lpc_shared::OutputError;
 use lpc_shared::hardware::{
-    HardwareAddress, HardwareCapability, HardwareClaim, HardwareLease, HardwareRegistry,
+    HardwareAddress, HardwareEndpointError, HardwareRegistry, HardwareSystem, Ws281xConfig,
+    Ws281xOutput,
 };
 use lpc_shared::output::{OutputChannelHandle, OutputFormat, OutputProvider};
 
@@ -22,15 +24,25 @@ use lpc_shared::output::{OutputChannelHandle, OutputFormat, OutputProvider};
 /// For now, uses print logging to indicate output changes.
 /// Output syscalls will be added later if needed.
 pub struct SyscallOutputProvider {
-    hardware_registry: Rc<HardwareRegistry>,
-    channels: RefCell<BTreeMap<OutputChannelHandle, HardwareLease>>,
+    hardware_system: Rc<HardwareSystem>,
+    channels: RefCell<BTreeMap<OutputChannelHandle, Box<dyn Ws281xOutput>>>,
     next_handle: RefCell<u32>,
 }
 
 impl SyscallOutputProvider {
+    #[allow(
+        dead_code,
+        reason = "kept for tests and older callers that construct only a registry"
+    )]
     pub fn new_with_hardware_registry(hardware_registry: Rc<HardwareRegistry>) -> Self {
-        Self {
+        Self::new_with_hardware_system(Rc::new(HardwareSystem::with_virtual_drivers(
             hardware_registry,
+        )))
+    }
+
+    pub fn new_with_hardware_system(hardware_system: Rc<HardwareSystem>) -> Self {
+        Self {
+            hardware_system,
             channels: RefCell::new(BTreeMap::new()),
             next_handle: RefCell::new(1),
         }
@@ -57,11 +69,11 @@ impl OutputProvider for SyscallOutputProvider {
             });
         }
 
-        let lease = self.claim_ws281x_output(pin)?;
+        let output = self.open_ws281x_output(pin, byte_count, options)?;
         let handle_id = *self.next_handle.borrow();
         *self.next_handle.borrow_mut() += 1;
         let handle = OutputChannelHandle::new(handle_id as i32);
-        self.channels.borrow_mut().insert(handle, lease);
+        self.channels.borrow_mut().insert(handle, output);
 
         println!(
             "[output] open: pin={}, bytes={}, format={:?}, handle={:?}",
@@ -72,44 +84,50 @@ impl OutputProvider for SyscallOutputProvider {
     }
 
     fn write(&self, handle: OutputChannelHandle, data: &[u16]) -> Result<(), OutputError> {
-        if !self.channels.borrow().contains_key(&handle) {
-            return Err(OutputError::InvalidHandle {
+        let mut channels = self.channels.borrow_mut();
+        let output = channels
+            .get_mut(&handle)
+            .ok_or_else(|| OutputError::InvalidHandle {
                 handle: handle.as_i32(),
-            });
-        }
+            })?;
+        output.write(data)?;
         println!("[output] write: handle={:?}, len={}", handle, data.len());
         Ok(())
     }
 
     fn close(&self, handle: OutputChannelHandle) -> Result<(), OutputError> {
-        let lease = self.channels.borrow_mut().remove(&handle).ok_or_else(|| {
-            OutputError::InvalidHandle {
+        self.channels
+            .borrow_mut()
+            .remove(&handle)
+            .ok_or_else(|| OutputError::InvalidHandle {
                 handle: handle.as_i32(),
-            }
-        })?;
-        self.hardware_registry
-            .release(&lease)
-            .map_err(|error| OutputError::Hardware { error })?;
+            })?;
         println!("[output] close: handle={:?}", handle);
         Ok(())
     }
 }
 
 impl SyscallOutputProvider {
-    fn claim_ws281x_output(&self, pin: u32) -> Result<HardwareLease, OutputError> {
-        let gpio = HardwareAddress::gpio(pin);
-        let rmt = HardwareAddress::rmt_ws281x(0);
-        self.hardware_registry
-            .ensure_capability(&gpio, HardwareCapability::GpioOutput)
-            .map_err(|error| OutputError::Hardware { error })?;
-        self.hardware_registry
-            .ensure_capability(&rmt, HardwareCapability::Rmt)
-            .map_err(|error| OutputError::Hardware { error })?;
-        self.hardware_registry
-            .ensure_capability(&rmt, HardwareCapability::Ws281xOutput)
-            .map_err(|error| OutputError::Hardware { error })?;
-        self.hardware_registry
-            .claim_bundle(HardwareClaim::new("fw-emu-output", Vec::from([gpio, rmt])))
-            .map_err(|error| OutputError::Hardware { error })
+    fn open_ws281x_output(
+        &self,
+        pin: u32,
+        byte_count: u32,
+        options: Option<lpc_shared::output::OutputDriverOptions>,
+    ) -> Result<Box<dyn Ws281xOutput>, OutputError> {
+        self.hardware_system
+            .open_ws281x_by_address(
+                &HardwareAddress::gpio(pin),
+                Ws281xConfig::new(byte_count, options),
+            )
+            .map_err(endpoint_error_to_output_error)
+    }
+}
+
+fn endpoint_error_to_output_error(error: HardwareEndpointError) -> OutputError {
+    match error {
+        HardwareEndpointError::Hardware { error } => OutputError::Hardware { error },
+        other => OutputError::InvalidConfig {
+            reason: other.to_string(),
+        },
     }
 }

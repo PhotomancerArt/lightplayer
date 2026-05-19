@@ -50,9 +50,14 @@ impl HardwareManifest {
             [HardwareCapability::Rmt, HardwareCapability::Ws281xOutput],
             "RMT WS281x 0",
         ));
+        resources.push(HardwareResource::new(
+            HardwareAddress::radio(0),
+            [HardwareCapability::Radio],
+            "Virtual Radio 0",
+        ));
         Self::new("virtual-single-rmt", "Virtual Single-RMT Board", resources)
             .with_target(HardwareTarget::Rv32imacEmu)
-            .with_description("Virtual board profile for tests and emulation with GPIO resources and one shared WS281x/RMT resource.")
+            .with_description("Virtual board profile for tests and emulation with GPIO resources, one shared WS281x/RMT resource, and one radio endpoint.")
     }
 
     pub fn board_id(&self) -> &str {

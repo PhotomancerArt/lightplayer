@@ -333,10 +333,10 @@ use {
     core::cell::RefCell,
     hardware::manifest_loader::load_hardware_manifest,
     lpa_server::{Graphics, LpGraphics, LpServer},
-    lpc_shared::hardware::HardwareRegistry,
+    lpc_shared::hardware::{HardwareRegistry, HardwareSystem},
     lpc_shared::output::OutputProvider,
     lpfs::LpFsMemory,
-    output::Esp32OutputProvider,
+    output::{Esp32OutputProvider, Esp32RmtWs281xDriver},
     serial::io_task,
     server_loop::run_server_loop,
     time::Esp32TimeProvider,
@@ -619,10 +619,15 @@ async fn main(spawner: embassy_executor::Spawner) {
             hardware_manifest.board_name()
         );
         let hardware_registry = Rc::new(HardwareRegistry::new(hardware_manifest));
+        let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
+        hardware_system.add_ws281x_driver(Box::new(Esp32RmtWs281xDriver::new(Rc::clone(
+            &hardware_registry,
+        ))));
+        let hardware_system = Rc::new(hardware_system);
 
         // Initialize output provider
         esp_println::println!("[INIT] Creating output provider...");
-        let output_provider = Esp32OutputProvider::new(Rc::clone(&hardware_registry));
+        let output_provider = Esp32OutputProvider::new(Rc::clone(&hardware_system));
 
         // Initialize RMT channel with GPIO18 (hardcoded for now)
         // Use 256 LEDs as a reasonable default (will work for demo project which has 241 LEDs)

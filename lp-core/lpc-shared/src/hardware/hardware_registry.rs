@@ -3,8 +3,8 @@ use alloc::string::{String, ToString};
 use core::cell::RefCell;
 
 use super::{
-    HardwareAddress, HardwareCapability, HardwareClaim, HardwareError, HardwareLease,
-    HardwareLeaseId, HardwareManifest,
+    HardwareAddress, HardwareCapability, HardwareClaim, HardwareEndpointStatus, HardwareError,
+    HardwareLease, HardwareLeaseId, HardwareManifest,
 };
 
 #[derive(Debug, Clone)]
@@ -93,6 +93,25 @@ impl HardwareRegistry {
             .active_by_address
             .get(address)
             .map(|claim| claim.claimant.clone())
+    }
+
+    pub fn endpoint_status_for(&self, address: &HardwareAddress) -> HardwareEndpointStatus {
+        match self.manifest.resource(address) {
+            Some(resource) => {
+                if let Some(reason) = resource.reserved_reason() {
+                    HardwareEndpointStatus::Reserved {
+                        reason: reason.into(),
+                    }
+                } else if let Some(claimant) = self.claimant_for(address) {
+                    HardwareEndpointStatus::InUse { claimant }
+                } else {
+                    HardwareEndpointStatus::Available
+                }
+            }
+            None => HardwareEndpointStatus::Unavailable {
+                reason: alloc::format!("unknown hardware resource: {address}"),
+            },
+        }
     }
 
     pub fn ensure_capability(

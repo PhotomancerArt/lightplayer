@@ -22,6 +22,10 @@ impl HardwareAddress {
         Self(format!("/rmt/ws281x{channel}"))
     }
 
+    pub fn radio(index: u8) -> Self {
+        Self(format!("/radio/{index}"))
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -54,6 +58,11 @@ mod tests {
     #[test]
     fn normalizes_gpio_address() {
         assert_eq!(HardwareAddress::gpio(18).as_str(), "/gpio/18");
+    }
+
+    #[test]
+    fn normalizes_radio_address() {
+        assert_eq!(HardwareAddress::radio(0).as_str(), "/radio/0");
     }
 
     #[test]

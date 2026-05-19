@@ -1,14 +1,16 @@
 use crate::error::OutputError;
 use crate::hardware::{
-    HardwareAddress, HardwareCapability, HardwareClaim, HardwareLease, HardwareManifest,
-    HardwareRegistry,
+    HardwareAddress, HardwareEndpointError, HardwareManifest, HardwareRegistry, HardwareSystem,
+    Ws281xConfig, Ws281xOutput,
 };
 use crate::output::provider::{
     OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
 };
+use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::rc::Rc;
+use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
@@ -23,7 +25,7 @@ struct ChannelState {
     byte_count: u32,
     #[allow(dead_code, reason = "Stored for future protocol-specific handling")]
     format: OutputFormat,
-    lease: HardwareLease,
+    output: Box<dyn Ws281xOutput>,
     data: Vec<u16>,
 }
 
@@ -38,7 +40,7 @@ struct MemoryOutputProviderState {
 /// Tracks opened channels, prevents duplicate opens on the same pin,
 /// and stores written data for verification.
 pub struct MemoryOutputProvider {
-    hardware_registry: Rc<HardwareRegistry>,
+    hardware_system: Rc<HardwareSystem>,
     state: RefCell<MemoryOutputProviderState>,
 }
 
@@ -53,8 +55,14 @@ impl MemoryOutputProvider {
     }
 
     pub fn with_hardware_registry(hardware_registry: Rc<HardwareRegistry>) -> Self {
-        Self {
+        Self::with_hardware_system(Rc::new(HardwareSystem::with_virtual_drivers(
             hardware_registry,
+        )))
+    }
+
+    pub fn with_hardware_system(hardware_system: Rc<HardwareSystem>) -> Self {
+        Self {
+            hardware_system,
             state: RefCell::new(MemoryOutputProviderState {
                 channels: BTreeMap::new(),
                 next_handle: 0,
@@ -78,7 +86,8 @@ impl MemoryOutputProvider {
 
     /// Check if a pin is open
     pub fn is_pin_open(&self, pin: u32) -> bool {
-        self.hardware_registry
+        self.hardware_system
+            .registry()
             .is_claimed(&HardwareAddress::gpio(pin))
     }
 
@@ -121,7 +130,7 @@ impl OutputProvider for MemoryOutputProvider {
             });
         }
 
-        let lease = self.claim_ws281x_output(pin)?;
+        let output = self.open_ws281x_output(pin, byte_count, options)?;
 
         let mut state = self.state.borrow_mut();
 
@@ -138,7 +147,7 @@ impl OutputProvider for MemoryOutputProvider {
             pin,
             byte_count,
             format,
-            lease,
+            output,
             data: vec![0u16; u16_count],
         };
 
@@ -167,12 +176,17 @@ impl OutputProvider for MemoryOutputProvider {
             let new_len = (data.len() / 3) * 3; // round down to full LEDs
             channel_state.data.resize(new_len, 0);
             channel_state.byte_count = new_len as u32;
+            channel_state
+                .output
+                .resize(Ws281xConfig::new(channel_state.byte_count, None))?;
         } else if data.len() < expected_len {
             return Err(OutputError::DataLengthMismatch {
                 expected: expected_len as u32,
                 actual: data.len(),
             });
         }
+
+        channel_state.output.write(data)?;
 
         // Store data
         let len = channel_state.data.len();
@@ -185,38 +199,40 @@ impl OutputProvider for MemoryOutputProvider {
         let mut state = self.state.borrow_mut();
 
         // Remove channel from channels
-        let channel = state
-            .channels
-            .remove(&handle)
-            .ok_or_else(|| OutputError::InvalidHandle {
-                handle: handle.as_i32(),
-            })?;
-        drop(state);
-
-        self.hardware_registry
-            .release(&channel.lease)
-            .map_err(|error| OutputError::Hardware { error })?;
+        let _channel =
+            state
+                .channels
+                .remove(&handle)
+                .ok_or_else(|| OutputError::InvalidHandle {
+                    handle: handle.as_i32(),
+                })?;
 
         Ok(())
     }
 }
 
 impl MemoryOutputProvider {
-    fn claim_ws281x_output(&self, pin: u32) -> Result<HardwareLease, OutputError> {
-        let gpio = HardwareAddress::gpio(pin);
-        let rmt = HardwareAddress::rmt_ws281x(0);
-        self.hardware_registry
-            .ensure_capability(&gpio, HardwareCapability::GpioOutput)
-            .map_err(|error| OutputError::Hardware { error })?;
-        self.hardware_registry
-            .ensure_capability(&rmt, HardwareCapability::Rmt)
-            .map_err(|error| OutputError::Hardware { error })?;
-        self.hardware_registry
-            .ensure_capability(&rmt, HardwareCapability::Ws281xOutput)
-            .map_err(|error| OutputError::Hardware { error })?;
-        self.hardware_registry
-            .claim_bundle(HardwareClaim::new("memory-output", vec![gpio, rmt]))
-            .map_err(|error| OutputError::Hardware { error })
+    fn open_ws281x_output(
+        &self,
+        pin: u32,
+        byte_count: u32,
+        options: Option<OutputDriverOptions>,
+    ) -> Result<Box<dyn Ws281xOutput>, OutputError> {
+        self.hardware_system
+            .open_ws281x_by_address(
+                &HardwareAddress::gpio(pin),
+                Ws281xConfig::new(byte_count, options),
+            )
+            .map_err(endpoint_error_to_output_error)
+    }
+}
+
+fn endpoint_error_to_output_error(error: HardwareEndpointError) -> OutputError {
+    match error {
+        HardwareEndpointError::Hardware { error } => OutputError::Hardware { error },
+        other => OutputError::InvalidConfig {
+            reason: other.to_string(),
+        },
     }
 }
 
