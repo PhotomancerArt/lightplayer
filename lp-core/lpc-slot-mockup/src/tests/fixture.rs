@@ -143,23 +143,6 @@ pub fn describe_change(patch: &WireSlotPatch) -> String {
     }
 }
 
-pub fn describe_data(data: &SlotData) -> String {
-    match data {
-        SlotData::Unit { .. } => "unit".to_string(),
-        SlotData::Value(value) => format!("{:?}", value.value()),
-        SlotData::Record(record) => format!("record[{}]", record.fields.len()),
-        SlotData::Map(map) => format!("map[{}]", map.entries.len()),
-        SlotData::Enum(en) => format!("enum {}", en.variant),
-        SlotData::Option(option) => {
-            if option.data.is_some() {
-                "option some".to_string()
-            } else {
-                "option none".to_string()
-            }
-        }
-    }
-}
-
 pub fn assert_shader_param(data: &SlotData, name: &str, expected: lpc_model::LpValue) {
     let SlotData::Record(shader_node) = data else {
         panic!("shader node record");
@@ -192,12 +175,12 @@ fn shader_param_index(name: &str) -> usize {
 }
 
 pub fn assert_shader_param_def_type(data: &SlotData, name: &str, expected: &str) {
-    let selected = select(data, &format!("consumed_slots[{name}]"));
+    let selected = select(data, &format!("param_defs[{name}]"));
     let SlotData::Record(param_def) = selected else {
         panic!("shader param def record");
     };
-    let SlotData::Value(value_shape) = &param_def.fields[1] else {
-        panic!("shader slot def value");
+    let SlotData::Value(value_shape) = &param_def.fields[2] else {
+        panic!("shader param def value_type");
     };
     assert_eq!(
         value_shape.value(),
@@ -206,12 +189,12 @@ pub fn assert_shader_param_def_type(data: &SlotData, name: &str, expected: &str)
 }
 
 pub fn assert_shader_param_def_label(data: &SlotData, name: &str, expected: &str) {
-    let selected = select(data, &format!("consumed_slots[{name}]"));
+    let selected = select(data, &format!("param_defs[{name}]"));
     let SlotData::Record(param_def) = selected else {
         panic!("shader param def record");
     };
-    let SlotData::Value(label) = &param_def.fields[6] else {
-        panic!("shader slot def label");
+    let SlotData::Value(label) = &param_def.fields[0] else {
+        panic!("shader param def label");
     };
     assert_eq!(
         label.value(),
@@ -239,7 +222,7 @@ pub fn select<'a>(data: &'a SlotData, path: &str) -> &'a SlotData {
                     panic!("expected record field segment {segment:?}");
                 };
                 let index = match segment.as_str() {
-                    "source.shader.consumed_slots" | "consumed_slots" => 4,
+                    "source.shader.param_defs" | "param_defs" => 4,
                     "engine.shader_node.params" | "params" => 0,
                     "engine.fixture_node.touches" | "touches" => 0,
                     "mapping" => 3,

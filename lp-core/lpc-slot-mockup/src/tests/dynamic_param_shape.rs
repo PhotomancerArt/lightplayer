@@ -22,7 +22,7 @@ fn shader_param_type_change_syncs_registry_and_dynamic_value() {
     harness.print_client_tree("source.shader");
     harness.print_client_tree("engine.shader_node");
 
-    println!("server updating source.shader#consumed_slots[exposure].value to vec3");
+    println!("server updating source.shader#param_defs[exposure].value to vec3");
     println!("server updating engine.shader_node params record shape");
     println!("server updating engine.shader_node#params.exposure to Vec3([0.25, 0.5, 0.75])");
     harness
@@ -62,7 +62,7 @@ fn two_shader_instances_can_have_distinct_dynamic_param_shapes() {
 
     let primary_def = ShaderDef::new();
     let mut secondary_def = ShaderDef::new();
-    secondary_def.add_consumed_slot("gain", 0.5);
+    secondary_def.add_param_def("gain", 0.5);
 
     let primary_node = ShaderNode::from_def_with_shape_id(&primary_def, primary_shape_id);
     let secondary_node = ShaderNode::from_def_with_shape_id(&secondary_def, secondary_shape_id);

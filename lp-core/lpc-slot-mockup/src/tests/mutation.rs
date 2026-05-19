@@ -53,14 +53,14 @@ fn client_mutation_accepts_source_value() {
     let mut harness = Harness::new();
     harness.sync_full();
 
-    println!("client requesting source.shader#consumed_slots[exposure].label = Brightness");
+    println!("client requesting source.shader#param_defs[exposure].label = Brightness");
     let mutation_id = WireSlotMutationId::new(2);
     let request = harness
         .client
         .prepare_set_value(
             mutation_id,
             "source.shader",
-            SlotPath::parse("consumed_slots[exposure].label").unwrap(),
+            SlotPath::parse("param_defs[exposure].label").unwrap(),
             LpValue::String("Brightness".to_string()),
         )
         .unwrap();

@@ -15,12 +15,12 @@ fn full_sync_copies_server_roots_to_client() {
     let shader = harness.client.roots.get("source.shader").unwrap();
     assert_map_has_key(
         shader,
-        "consumed_slots",
+        "param_defs",
         SlotMapKey::String("exposure".to_string()),
     );
     assert_map_has_key(
         shader,
-        "consumed_slots",
+        "param_defs",
         SlotMapKey::String("speed".to_string()),
     );
 
