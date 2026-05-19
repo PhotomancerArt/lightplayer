@@ -337,9 +337,7 @@ impl<N> NodeTree<N> {
 mod tests {
     use super::NodeTree;
     use crate::artifact::ArtifactId;
-    use crate::dataflow::binding::{
-        BindingDraft, BindingError, BindingPriority, BindingSource, BindingTarget,
-    };
+    use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
     use crate::node::test_placeholder_spine;
     use alloc::string::String;
     use alloc::vec::Vec;
@@ -502,7 +500,7 @@ mod tests {
     }
 
     #[test]
-    fn tree_rejects_duplicate_bus_provider_priority() {
+    fn tree_allows_duplicate_bus_provider_priority_for_merge_consumers() {
         let mut tree = make_tree();
         let a = add_test_child(&mut tree, "a");
         let b = add_test_child(&mut tree, "b");
@@ -517,12 +515,8 @@ mod tests {
         };
 
         tree.add_binding(draft(a), Revision::new(2)).unwrap();
-        let err = tree.add_binding(draft(b), Revision::new(3)).unwrap_err();
-        assert!(matches!(
-            err,
-            BindingError::DuplicateProviderPriority { .. }
-        ));
-        assert_eq!(tree.providers_for_bus(&channel).len(), 1);
+        tree.add_binding(draft(b), Revision::new(3)).unwrap();
+        assert_eq!(tree.providers_for_bus(&channel).len(), 2);
     }
 
     #[test]

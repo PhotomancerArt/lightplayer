@@ -38,9 +38,23 @@ pub fn generate_compute_shader_header(
                     .expect("write string");
             }
             ShaderSlotKind::Map => {
-                return Err(ShaderHeaderGenError::Unsupported(
-                    "consumed map shader headers are not supported",
-                ));
+                let mapping = slot
+                    .mapping
+                    .data
+                    .as_ref()
+                    .ok_or(ShaderHeaderGenError::MissingMapping)?;
+                match mapping.kind.value() {
+                    ShaderSlotMappingKind::Sentinel => {
+                        validate_key_field(slot.value.value(), registry, mapping.key.value())?;
+                        writeln!(&mut out, "// consumed: {name}").expect("write string");
+                        writeln!(
+                            &mut out,
+                            "layout(binding = {binding}) uniform {ty} {name}[{}];",
+                            mapping.len.value()
+                        )
+                        .expect("write string");
+                    }
+                }
             }
         }
     }

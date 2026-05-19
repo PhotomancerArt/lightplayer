@@ -240,9 +240,14 @@ pub fn flatten_q32_arg(param: &FnParam, arg: &LpsValueQ32) -> Result<Vec<i32>, C
             "LpsType::Texture2D expects LpsValueQ32::Texture2D (typed host value)".to_string(),
         )),
 
+        (LpsType::Struct { members, .. }, LpsValueQ32::Struct { fields, .. }) => {
+            flatten_q32_struct(param, members, fields)
+        }
         (LpsType::Struct { .. }, _) | (_, LpsValueQ32::Struct { .. }) => {
-            Err(CallError::Unsupported(traced_msg!(
-                "struct parameters are not supported by Level-1 call() yet"
+            Err(CallError::TypeMismatch(format!(
+                "argument type mismatch: expected {:?}, got {:?}",
+                param.ty,
+                got_ty_name(arg)
             )))
         }
 
@@ -438,6 +443,54 @@ fn dense_q32_flatten_array(param: &FnParam, arg: &LpsValueQ32) -> Result<Vec<i32
     let mut out = Vec::new();
     for it in items.iter() {
         out.extend(flatten_q32_arg(&sub, it)?);
+    }
+    Ok(out)
+}
+
+fn flatten_q32_struct(
+    param: &FnParam,
+    members: &[lps_shared::StructMember],
+    fields: &[(String, LpsValueQ32)],
+) -> Result<Vec<i32>, CallError> {
+    let total_words = (type_size(&param.ty, LayoutRules::Std430) + 3) / 4;
+    let mut out = alloc::vec![0; total_words];
+    let mut byte_off = 0usize;
+    for (i, member) in members.iter().enumerate() {
+        let align = type_alignment(&member.ty, LayoutRules::Std430);
+        byte_off = round_up(byte_off, align);
+        let field_name = member
+            .name
+            .clone()
+            .unwrap_or_else(|| alloc::format!("_{i}"));
+        let Some((_, value)) = fields.iter().find(|(name, _)| name == &field_name) else {
+            return Err(CallError::TypeMismatch(format!(
+                "struct argument missing field {field_name:?}"
+            )));
+        };
+        let sub = FnParam {
+            name: field_name,
+            ty: member.ty.clone(),
+            qualifier: param.qualifier,
+        };
+        let words = flatten_q32_arg(&sub, value)?;
+        let member_size = type_size(&member.ty, LayoutRules::Std430);
+        let member_words = (member_size + 3) / 4;
+        if words.len() != member_words {
+            return Err(CallError::TypeMismatch(format!(
+                "struct field encoded {} words, expected {}",
+                words.len(),
+                member_words
+            )));
+        }
+        let start = byte_off / 4;
+        let end = start + member_words;
+        if end > out.len() {
+            return Err(CallError::Unsupported(traced_msg!(
+                "struct argument field write out of bounds"
+            )));
+        }
+        out[start..end].copy_from_slice(&words);
+        byte_off += member_size;
     }
     Ok(out)
 }

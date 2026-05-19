@@ -591,12 +591,16 @@ impl ResolveHost for EngineResolveHost<'_> {
     }
 
     fn merge_policy_for_consumed_slot(&self, node: NodeId, slot: &SlotPath) -> SlotMerge {
-        self.tree
-            .get(node)
-            .and_then(|entry| {
-                self.read_authored_def_slot_semantics(&entry.def_handle, slot)
-                    .ok()
-            })
+        let Some(entry) = self.tree.get(node) else {
+            return SlotMerge::Latest;
+        };
+        if let Ok(Some(policy)) =
+            self.read_shader_consumed_slot_merge_policy(&entry.def_handle, slot)
+        {
+            return policy;
+        }
+        self.read_authored_def_slot_semantics(&entry.def_handle, slot)
+            .ok()
             .filter(|semantics| semantics.direction == SlotDirection::Consumed)
             .map_or(SlotMerge::Latest, |semantics| semantics.merge)
     }
@@ -712,6 +716,29 @@ impl EngineResolveHost<'_> {
         Ok(lpc_wire::snapshot_slot_shape(shape, data, self.slot_shapes))
     }
 
+    fn read_shader_consumed_slot_merge_policy(
+        &self,
+        handle: &crate::node::NodeDefHandle,
+        slot: &SlotPath,
+    ) -> Result<Option<SlotMerge>, SessionResolveError> {
+        let Some(SlotPathSegment::Field(name)) = slot.segments().first() else {
+            return Ok(None);
+        };
+        if slot.segments().len() != 1 {
+            return Ok(None);
+        }
+        let def = self.loaded_node_def(handle)?;
+        let shader_slot = match def {
+            NodeDef::Shader(config) => config.consumed_slots.entries.get(name.as_str()),
+            NodeDef::ComputeShader(config) => config.consumed_slots.entries.get(name.as_str()),
+            _ => None,
+        };
+        Ok(shader_slot.map(|slot| match slot.kind.value() {
+            lpc_model::ShaderSlotKind::Map => SlotMerge::ByKey,
+            lpc_model::ShaderSlotKind::Value => SlotMerge::Latest,
+        }))
+    }
+
     fn read_authored_def_slot_semantics(
         &self,
         handle: &crate::node::NodeDefHandle,
@@ -763,6 +790,33 @@ impl EngineResolveHost<'_> {
                 SessionResolveError::other(format!("node def has no slot field {name}"))
             })?;
         Ok(field.semantics)
+    }
+
+    fn loaded_node_def(
+        &self,
+        handle: &crate::node::NodeDefHandle,
+    ) -> Result<&NodeDef, SessionResolveError> {
+        if !handle.is_artifact_root() {
+            return Err(SessionResolveError::other(format!(
+                "non-root node def handles are not supported yet: {}",
+                handle.path()
+            )));
+        }
+        let entry = self.artifacts.entry(&handle.artifact()).ok_or_else(|| {
+            SessionResolveError::other(format!(
+                "node def artifact {:?} is not loaded",
+                handle.artifact()
+            ))
+        })?;
+        match &entry.state {
+            ArtifactState::Loaded(def)
+            | ArtifactState::Prepared(def)
+            | ArtifactState::Idle(def) => Ok(def),
+            other => Err(SessionResolveError::other(format!(
+                "node def artifact {:?} has no loaded payload: {other:?}",
+                handle.artifact()
+            ))),
+        }
     }
 
     fn render_node_texture(
@@ -1354,7 +1408,6 @@ mod tests {
     use alloc::string::String;
     use lps_shared::LpsValueF32;
 
-    use crate::dataflow::binding::BindingError;
     use crate::engine::test_support::{
         EngineTestBuilder, bus, literal, output, path, produced_slot, trace_has_value_origin_path,
     };
@@ -1535,19 +1588,17 @@ mod tests {
     }
 
     #[test]
-    fn equal_priority_bus_bindings_error() {
-        let builder = EngineTestBuilder::new()
+    fn equal_priority_bus_bindings_are_ambiguous_when_resolved_directly() {
+        let mut h = EngineTestBuilder::new()
             .bind_bus_with_priority("video", literal(0.25), 7)
-            .expect("first binding");
-
-        let err = match builder.bind_bus_with_priority("video", literal(0.9), 7) {
-            Ok(_) => panic!("equal priority bus providers should fail"),
-            Err(e) => e,
-        };
+            .expect("first binding")
+            .bind_bus_with_priority("video", literal(0.9), 7)
+            .expect("second binding")
+            .build();
 
         assert!(matches!(
-            err,
-            BindingError::DuplicateProviderPriority { .. }
+            h.resolve_bus("video"),
+            Err(SessionResolveError::AmbiguousBusBinding { .. })
         ));
     }
 

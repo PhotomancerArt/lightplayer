@@ -33,9 +33,23 @@ pub fn compute_desc_from_model_def<'a>(
                 desc = desc.with_consumed(name.clone(), ty);
             }
             ShaderSlotKind::Map => {
-                return Err(ComputeDescError::Unsupported(String::from(
-                    "consumed map slots do not have a shader ABI projection yet",
-                )));
+                ensure_u32_map_key(slot)?;
+                let mapping = slot
+                    .mapping
+                    .data
+                    .as_ref()
+                    .ok_or(ComputeDescError::MissingMapping { slot: name.clone() })?;
+                match mapping.kind.value() {
+                    ShaderSlotMappingKind::Sentinel => {
+                        desc = desc.with_consumed(
+                            name.clone(),
+                            LpsType::Array {
+                                element: alloc::boxed::Box::new(ty),
+                                len: *mapping.len.value(),
+                            },
+                        );
+                    }
+                }
             }
         }
     }
@@ -135,11 +149,13 @@ fn ensure_u32_map_key(slot: &ShaderSlotDef) -> Result<(), ComputeDescError> {
 #[cfg(all(test, not(any(target_arch = "riscv32", target_arch = "wasm32"))))]
 mod tests {
     use super::*;
+    use alloc::boxed::Box;
     use alloc::collections::BTreeMap;
     use alloc::format;
 
     use lpc_model::{
-        BindingDefs, FluidEmitter, MapSlot, ShaderSlotMappingDef, SourcePathSlot, StaticSlotShape,
+        BindingDefs, CONTROL_MESSAGE_SHAPE_NAME, ControlMessage, FluidEmitter, MapSlot,
+        ShaderSlotMappingDef, SourcePathSlot, StaticSlotShape, ValueSlot,
         generate_compute_shader_header,
     };
     use lps_shared::LpsValueF32;
@@ -217,9 +233,88 @@ void tick() {{
         );
     }
 
+    #[test]
+    fn compute_desc_accepts_consumed_sentinel_maps() {
+        let mut registry = SlotShapeRegistry::default();
+        ControlMessage::ensure_registered(&mut registry).expect("control message");
+
+        let mut consumed = BTreeMap::new();
+        consumed.insert(
+            String::from("events"),
+            ShaderSlotDef::map_u32_native(
+                CONTROL_MESSAGE_SHAPE_NAME,
+                ShaderSlotMappingDef::sentinel(2, "id", 0),
+            ),
+        );
+
+        let mut produced = BTreeMap::new();
+        produced.insert(
+            String::from("phase"),
+            ShaderSlotDef {
+                kind: ValueSlot::new(lpc_model::ShaderSlotKind::Value),
+                value: ValueSlot::new(lpc_model::ShaderValueShapeRef::builtin("f32")),
+                key: lpc_model::OptionSlot::none(),
+                default: lpc_model::OptionSlot::none(),
+                min: lpc_model::OptionSlot::none(),
+                mapping: lpc_model::OptionSlot::none(),
+                label: ValueSlot::default(),
+                description: ValueSlot::default(),
+            },
+        );
+
+        let def = ComputeShaderDef {
+            glsl_path: SourcePathSlot::new(String::from("events.glsl").into()),
+            bindings: BindingDefs::default(),
+            glsl_opts: lpc_model::GlslOpts::default(),
+            consumed_slots: MapSlot::new(consumed),
+            produced_slots: MapSlot::new(produced),
+        };
+
+        let header = generate_compute_shader_header(&def, &registry).expect("header");
+        assert!(header.contains("layout(binding = 0) uniform ControlMessage events[2];"));
+        let glsl = format!(
+            r#"{header}
+void tick() {{
+    phase = float(events[0].seq + events[1].seq);
+}}
+"#
+        );
+
+        let desc =
+            compute_desc_from_model_def(&glsl, &def, &registry, lpir::CompilerConfig::default())
+                .expect("compute desc");
+        let engine = lp_shader::LpsEngine::new(
+            WasmLpvmEngine::new(WasmOptions::default()).expect("wasm engine"),
+        );
+        let shader = engine.compile_compute_desc(desc).expect("compile compute");
+
+        shader
+            .tick(&[(
+                "events",
+                LpsValueF32::Array(Box::new([message(3, 5), message(7, 11)])),
+            )])
+            .expect("tick");
+        assert!(
+            shader
+                .get_output("phase")
+                .expect("phase")
+                .approx_eq_default(&LpsValueF32::F32(16.0))
+        );
+    }
+
     fn field<'a>(fields: &'a [(String, LpsValueF32)], name: &str) -> Option<&'a LpsValueF32> {
         fields
             .iter()
             .find_map(|(field_name, value)| (field_name == name).then_some(value))
+    }
+
+    fn message(id: u32, seq: u32) -> LpsValueF32 {
+        LpsValueF32::Struct {
+            name: Some(String::from("ControlMessage")),
+            fields: alloc::vec![
+                (String::from("id"), LpsValueF32::U32(id)),
+                (String::from("seq"), LpsValueF32::U32(seq)),
+            ],
+        }
     }
 }

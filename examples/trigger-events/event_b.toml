@@ -1,0 +1,11 @@
+kind = "ComputeShader"
+glsl_path = "event_b.glsl"
+
+[bindings.events]
+target = "bus#trigger"
+
+[produced_slots.events]
+kind = "map"
+key = "u32"
+value = "lp::control::Message"
+mapping = { kind = "sentinel", len = 8, key = "id", empty_key = 0 }

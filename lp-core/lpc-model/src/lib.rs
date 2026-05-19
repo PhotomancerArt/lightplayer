@@ -35,6 +35,7 @@ pub mod value;
 
 pub mod bus;
 pub mod config;
+pub mod control;
 pub mod slot_shapes {
     include!(concat!(env!("OUT_DIR"), "/slot_shapes.rs"));
 }
@@ -74,6 +75,7 @@ pub use value::WithRevision;
 pub use value::{LpType, LpValue, ModelEnumVariant, ModelStructMember};
 
 pub use config::DEFAULT_SERIAL_BAUD_RATE;
+pub use control::{CONTROL_MESSAGE_SHAPE_NAME, ControlMessage, TriggerEvent};
 pub use hardware_endpoint_spec::{HardwareEndpointSpec, HardwareEndpointSpecError};
 pub use lpfs::lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 pub use node::node_prop_spec::NodePropSpec;

@@ -6,18 +6,19 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    AddSubMode, ComputeShaderDef, DivMode, MulMode, NodeId, ShaderSlotKind, SlotAccess, SlotPath,
+    AddSubMode, ComputeShaderDef, DivMode, MulMode, NodeId, SlotAccess, SlotPath,
     SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
 };
 use lps_shared::LpsValueF32;
 
-use crate::dataflow::resolver::{QueryKey, resolver::model_value_to_lps_value_f32};
+use crate::dataflow::resolver::QueryKey;
 use crate::gfx::{LpComputeShader, ShaderCompileOptions, compute_desc_from_model_def};
 use crate::node::catch_node_panic::catch_panic;
 use crate::node::{DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext};
 
 use super::compute_materialize::materialize_produced_slot;
 use super::compute_shader_state::{ComputeShaderState, ComputeStateError};
+use super::shader_input_materialize::materialize_shader_input;
 use super::shader_node::{
     map_model_q32_options, read_authored_value, set_slot_if_changed,
     sync_shader_slot_def_from_authored,
@@ -115,11 +116,6 @@ impl ComputeShaderNode {
     ) -> Result<Vec<(String, LpsValueF32)>, NodeError> {
         let mut inputs = Vec::new();
         for (name, slot) in &self.def.consumed_slots.entries {
-            if *slot.kind.value() != ShaderSlotKind::Value {
-                return Err(NodeError::msg(format!(
-                    "compute consumed slot {name:?} is a map; consumed maps are not supported yet"
-                )));
-            }
             let value = resolve_or_default_input(ctx, name, slot)?;
             inputs.push((name.clone(), value));
         }
@@ -240,18 +236,20 @@ fn resolve_or_default_input(
 ) -> Result<LpsValueF32, NodeError> {
     let slot_path = SlotPath::parse(name)
         .map_err(|e| NodeError::msg(format!("invalid compute consumed slot {name:?}: {e}")))?;
-    let model_value = match ctx.resolve(QueryKey::ConsumedSlot {
+    let production = match ctx.resolve(QueryKey::ConsumedSlot {
         node: ctx.node_id(),
         slot: slot_path,
     }) {
-        Ok(production) => production
-            .value_leaf()
-            .map(|value| value.value().clone())
-            .ok_or_else(|| NodeError::msg(format!("compute input {name:?} is not a value")))?,
-        Err(_) => slot.default_value(),
+        Ok(production) => Some(production),
+        Err(_) => None,
     };
-    model_value_to_lps_value_f32(&model_value)
-        .map_err(|e| NodeError::msg(format!("compute input {name:?}: {e}")))
+    materialize_shader_input(
+        name,
+        slot,
+        production.as_ref().map(|production| production.data()),
+        ctx.slot_shapes(),
+    )
+    .map_err(|e| NodeError::msg(format!("compute input {name:?}: {e}")))
 }
 
 #[cfg(all(test, not(any(target_arch = "riscv32", target_arch = "wasm32"))))]

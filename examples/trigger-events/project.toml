@@ -1,0 +1,20 @@
+kind = "Project"
+name = "trigger-events"
+
+[nodes.output]
+artifact = "./output.toml"
+
+[nodes.clock]
+artifact = "./clock.toml"
+
+[nodes.event_a]
+artifact = "./event_a.toml"
+
+[nodes.event_b]
+artifact = "./event_b.toml"
+
+[nodes.shader]
+artifact = "./shader.toml"
+
+[nodes.fixture]
+artifact = "./fixture.toml"

@@ -857,7 +857,7 @@ mod tests {
 
     use alloc::sync::Arc;
     use lpc_model::TreePath;
-    use lpc_model::{NodeName, ProductRef, SlotData};
+    use lpc_model::{NodeName, ProductRef, SlotData, SlotMapKey};
     use lpc_wire::{
         ProjectProbeRequest, ProjectProbeResult, ProjectReadRequest, ProjectReadResult,
         RenderProductProbeRequest, RenderProductProbeResult, WireTextureFormat,
@@ -879,6 +879,12 @@ mod tests {
 
     fn examples_fluid_fs() -> LpFsStd {
         LpFsStd::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/fluid"))
+    }
+
+    fn examples_trigger_events_fs() -> LpFsStd {
+        LpFsStd::new(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/trigger-events"),
+        )
     }
 
     #[test]
@@ -1427,6 +1433,97 @@ value = "f32"
                 .iter()
                 .any(|root| root.name == format!("node.{}.state", fluid.0)),
             "fluid state should be visible in debug read"
+        );
+    }
+
+    #[test]
+    fn trigger_events_example_merges_bus_maps_into_visual_shader() {
+        let fs = examples_trigger_events_fs();
+        let fs: &dyn LpFs = &fs;
+        let services = EngineServices::new(TreePath::parse("/trigger_events.show").expect("path"));
+        let mut rt =
+            ProjectLoader::load_from_root(fs, services).expect("load trigger events example");
+        rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        let root = rt.tree().root();
+
+        let event_a = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("event_a").unwrap())
+            .expect("event_a node");
+        let event_b = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("event_b").unwrap())
+            .expect("event_b node");
+        let shader = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("shader").unwrap())
+            .expect("shader node");
+
+        for (node, expected_keys) in [(event_a, [1, 4]), (event_b, [2, 6])] {
+            let (events, _) = resolve_with_engine_host(
+                &mut rt,
+                QueryKey::ProducedSlot {
+                    node,
+                    slot: SlotPath::parse("events").expect("events"),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("compute event map");
+            let SlotData::Map(map) = events.data() else {
+                panic!("compute events should be a map");
+            };
+            for key in expected_keys {
+                assert!(
+                    map.entries.contains_key(&SlotMapKey::U32(key)),
+                    "compute event map should contain id {key}"
+                );
+            }
+        }
+
+        rt.tick(16).expect("tick trigger graph");
+
+        let (shader_output, _) = resolve_with_engine_host(
+            &mut rt,
+            QueryKey::ProducedSlot {
+                node: shader,
+                slot: SlotPath::parse("output").expect("output"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("shader output");
+        let LpValue::Product(ProductRef::Visual(product)) =
+            shader_output.value_leaf().expect("visual product").value()
+        else {
+            panic!("shader output should be a visual product");
+        };
+        let texture = rt
+            .render_texture_for_test(
+                *product,
+                &RenderTextureRequest {
+                    width: 64,
+                    height: 64,
+                    format: TextureStorageFormat::Rgba16Unorm,
+                    time_seconds: 0.0,
+                },
+            )
+            .expect("trigger events texture");
+        let max_rgb = texture
+            .try_raw_bytes()
+            .expect("bytes")
+            .chunks_exact(8)
+            .flat_map(|px| {
+                [
+                    u16::from_le_bytes([px[0], px[1]]),
+                    u16::from_le_bytes([px[2], px[3]]),
+                    u16::from_le_bytes([px[4], px[5]]),
+                ]
+            })
+            .max()
+            .unwrap_or(0);
+
+        assert!(
+            max_rgb > 10_000,
+            "trigger event circles should render bright RGB pixels"
         );
     }
 

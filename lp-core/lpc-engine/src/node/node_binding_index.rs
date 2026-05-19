@@ -58,7 +58,6 @@ impl NodeBindingIndex {
             }
         }
 
-        index.validate_bus_priorities(entries)?;
         Ok(index)
     }
 
@@ -70,27 +69,6 @@ impl NodeBindingIndex {
 
     pub(super) fn bus_targets(&self, channel: &ChannelName) -> &[BindingRef] {
         self.bus_targets.get(channel).map_or(&[], Vec::as_slice)
-    }
-
-    fn validate_bus_priorities<N>(
-        &self,
-        entries: &[Option<NodeEntry<N>>],
-    ) -> Result<(), BindingError> {
-        for (channel, refs) in &self.bus_targets {
-            let mut priorities = BTreeMap::new();
-            for binding_ref in refs {
-                let Some(binding) = binding_by_ref(entries, *binding_ref) else {
-                    continue;
-                };
-                if priorities.insert(binding.priority, ()).is_some() {
-                    return Err(BindingError::DuplicateProviderPriority {
-                        channel: channel.clone(),
-                        priority: binding.priority,
-                    });
-                }
-            }
-        }
-        Ok(())
     }
 }
 

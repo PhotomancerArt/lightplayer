@@ -24,6 +24,8 @@ use crate::node::{
 };
 use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use crate::products::visual::{VisualSampleBufferRequest, VisualSampleTarget};
+
+use super::shader_input_materialize::materialize_shader_input;
 /// Default max semantic errors forwarded from the GLSL to LPIR front end.
 const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 
@@ -187,11 +189,6 @@ impl ShaderNode {
     fn update_visual_uniforms(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let mut uniforms = Vec::new();
         for (name, slot) in &self.consumed_slots.entries {
-            if *slot.kind.value() != ShaderSlotKind::Value {
-                return Err(NodeError::msg(format!(
-                    "visual shader consumed slot {name:?} is a map; visual shader maps are not supported yet"
-                )));
-            }
             uniforms.push((name.clone(), resolve_or_default_input(ctx, name, slot)?));
         }
         self.visual_uniforms = uniforms;
@@ -534,20 +531,20 @@ fn resolve_or_default_input(
 ) -> Result<LpsValueF32, NodeError> {
     let slot_path = SlotPath::parse(name)
         .map_err(|e| NodeError::msg(format!("invalid visual consumed slot {name:?}: {e}")))?;
-    let model_value = match ctx.resolve(QueryKey::ConsumedSlot {
+    let production = match ctx.resolve(QueryKey::ConsumedSlot {
         node: ctx.node_id(),
         slot: slot_path,
     }) {
-        Ok(production) => production
-            .value_leaf()
-            .map(|value| value.value().clone())
-            .ok_or_else(|| {
-                NodeError::msg(format!("visual shader input {name:?} is not a value"))
-            })?,
-        Err(_) => slot.default_value(),
+        Ok(production) => Some(production),
+        Err(_) => None,
     };
-    model_value_to_lps_value_f32(&model_value)
-        .map_err(|e| NodeError::msg(format!("visual shader input {name:?}: {e}")))
+    materialize_shader_input(
+        name,
+        slot,
+        production.as_ref().map(|production| production.data()),
+        ctx.slot_shapes(),
+    )
+    .map_err(|e| NodeError::msg(format!("visual shader input {name:?}: {e}")))
 }
 
 fn validate_shader_visual_product(

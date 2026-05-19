@@ -1,5 +1,5 @@
 kind = "Output"
-pin = 4
+endpoint = "ws281x:rmt:D4"
 
 [bindings.input]
 source = "bus#control.out"
