@@ -206,10 +206,20 @@ impl RenderNode for FluidNode {
             .chunks_exact(2)
             .zip(target.samples.data_mut().chunks_exact_mut(4))
         {
-            sample.copy_from_slice(&sample_rgba16_nearest_q16(solver, point[0], point[1]));
+            let x = pixel_q16_to_normalized_q16(point[0], request.output_width);
+            let y = pixel_q16_to_normalized_q16(point[1], request.output_height);
+            sample.copy_from_slice(&sample_rgba16_nearest_q16(solver, x, y));
         }
         Ok(())
     }
+}
+
+fn pixel_q16_to_normalized_q16(coord: i32, extent: u32) -> i32 {
+    if extent == 0 {
+        return 0;
+    }
+    let normalized = i64::from(coord) / i64::from(extent);
+    normalized.clamp(0, 65535) as i32
 }
 
 fn resolve_emitters(ctx: &mut TickContext<'_>) -> Result<Vec<FluidEmitter>, NodeError> {
@@ -302,6 +312,13 @@ mod tests {
 
         assert_eq!(emitters.len(), 1);
         assert_eq!(emitters[0].id, 4);
+    }
+
+    #[test]
+    fn fluid_sampling_converts_pixel_space_points_to_normalized_solver_space() {
+        assert_eq!(pixel_q16_to_normalized_q16(0, 16), 0);
+        assert_eq!(pixel_q16_to_normalized_q16(8 * 65536, 16), 32768);
+        assert_eq!(pixel_q16_to_normalized_q16(16 * 65536, 16), 65535);
     }
 
     #[test]
