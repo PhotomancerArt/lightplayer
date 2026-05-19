@@ -2,8 +2,9 @@
 
 use lpc_model::{
     EnumSlot, LpValue, PositiveF32, PositiveF32Slot, Revision, SlotDataAccess, SlotDataMutAccess,
-    SlotEnumAccess, SlotEnumDefaultVariant, SlotEnumShape, SlotRecordMutAccess, SlotShape, Slotted,
-    SlottedEnum, ValueSlot,
+    SlotEnumAccess, SlotEnumDefaultVariant, SlotEnumEncoding, SlotEnumShape, SlotName,
+    SlotRecordMutAccess, SlotShape, SlotShapeId, SlotShapeRegistry, Slotted, SlottedEnum,
+    ValueSlot,
 };
 
 #[derive(Clone, Debug, PartialEq, Slotted)]
@@ -39,6 +40,25 @@ enum RenamedMode {
     #[default]
     #[slot(name = "special")]
     Special,
+}
+
+#[derive(Clone, Debug, PartialEq, Slotted)]
+#[slot(enum_encoding = "external", rename_all = "snake_case")]
+enum ExternalMode {
+    #[default]
+    OptionA(ValueSlot<u32>),
+    FancyPoint {
+        x: ValueSlot<i32>,
+        y: ValueSlot<i32>,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Slotted)]
+#[slot(enum_encoding = "external", rename_all = "snake_case")]
+enum ExternalRenamedMode {
+    #[default]
+    #[slot(name = "hand_named")]
+    OptionA(ValueSlot<u32>),
 }
 
 #[test]
@@ -133,4 +153,62 @@ fn enum_derive_supports_variant_name_escape_hatch() {
     let mode = EnumSlot::new(RenamedMode::default());
 
     assert_eq!(SlotEnumAccess::variant(&mode), "special");
+}
+
+#[test]
+fn enum_derive_supports_external_encoding_and_snake_case_names() {
+    let SlotShape::Enum {
+        encoding, variants, ..
+    } = ExternalMode::slot_enum_shape()
+    else {
+        panic!("enum shape");
+    };
+
+    assert_eq!(encoding, SlotEnumEncoding::External);
+    assert_eq!(variants[0].name.as_str(), "option_a");
+    assert_eq!(variants[1].name.as_str(), "fancy_point");
+}
+
+#[test]
+fn enum_derive_variant_name_overrides_rename_all() {
+    let SlotShape::Enum {
+        encoding, variants, ..
+    } = ExternalRenamedMode::slot_enum_shape()
+    else {
+        panic!("enum shape");
+    };
+
+    assert_eq!(encoding, SlotEnumEncoding::External);
+    assert_eq!(variants[0].name.as_str(), "hand_named");
+}
+
+#[test]
+fn external_enum_derive_round_trips_through_toml_slot_codec() {
+    let shape_id = SlotShapeId::from_static_name("test.ExternalMode");
+    let mut registry = SlotShapeRegistry::default();
+    registry
+        .register_dynamic_shape(shape_id, ExternalMode::slot_enum_shape())
+        .unwrap();
+    let data = lpc_model::SlotData::Enum(lpc_model::SlotEnum::new(
+        SlotName::parse("option_a").unwrap(),
+        lpc_model::SlotData::Value(lpc_model::WithRevision::new(
+            Revision::default(),
+            LpValue::U32(7),
+        )),
+    ));
+
+    let toml = registry
+        .write_slot_toml_data(shape_id, data.access())
+        .unwrap();
+    assert_eq!(toml["option_a"].as_integer(), Some(7));
+
+    let read = registry.read_slot_toml(shape_id, &toml).unwrap();
+    let SlotDataAccess::Enum(en) = read.data() else {
+        panic!("expected enum");
+    };
+    assert_eq!(en.variant(), "option_a");
+    let SlotDataAccess::Value(value) = en.data() else {
+        panic!("expected value payload");
+    };
+    assert_eq!(value.value(), LpValue::U32(7));
 }

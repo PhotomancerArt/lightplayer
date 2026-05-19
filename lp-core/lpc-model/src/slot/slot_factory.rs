@@ -340,6 +340,7 @@ mod tests {
                 shape_id,
                 SlotShape::Enum {
                     meta: SlotMeta::empty(),
+                    encoding: crate::SlotEnumEncoding::default(),
                     variants: vec![
                         variant(
                             "disabled",

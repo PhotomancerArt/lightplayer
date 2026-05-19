@@ -4,8 +4,8 @@ use alloc::vec::Vec;
 
 use crate::{
     ControlProduct, LpType, LpValue, ModelEnumVariant, ModelStructMember, ProductKind, ProductRef,
-    ResourceDomain, ResourceRef, SlotAccess, SlotDataAccess, SlotFieldShape, SlotMapKey, SlotShape,
-    SlotShapeId, SlotShapeRegistry, VisualProduct,
+    ResourceDomain, ResourceRef, SlotAccess, SlotDataAccess, SlotEnumEncoding, SlotFieldShape,
+    SlotMapKey, SlotShape, SlotShapeId, SlotShapeRegistry, SlotVariantShape, VisualProduct,
 };
 
 use super::{SlotValueWriter, SlotWrite, SlotWriteError, SlotWriter, write_lp_value};
@@ -157,22 +157,10 @@ where
                 data_kind(other)
             ))),
         },
-        SlotShape::Enum { variants, .. } => match data {
-            SlotDataAccess::Enum(en) => {
-                let variant_name = en.variant();
-                let variant = variants
-                    .iter()
-                    .find(|variant| variant.name.as_str() == variant_name)
-                    .ok_or_else(|| {
-                        json_data_error(SlotDataWriteError::UnknownVariant {
-                            variant: variant_name.to_string(),
-                        })
-                    })?;
-                let mut object = value.object()?;
-                object.prop("kind")?.string(variant_name)?;
-                write_enum_payload_json(&mut object, &variant.shape, en.data(), registry)?;
-                object.finish()
-            }
+        SlotShape::Enum {
+            encoding, variants, ..
+        } => match data {
+            SlotDataAccess::Enum(en) => write_enum_json(value, encoding, variants, en, registry),
             other => Err(json_mismatch(format!(
                 "slot shape expected enum data, got {}",
                 data_kind(other)
@@ -260,6 +248,38 @@ where
     }
 }
 
+fn write_enum_json<W>(
+    value: SlotValueWriter<'_, W>,
+    encoding: &SlotEnumEncoding,
+    variants: &[SlotVariantShape],
+    en: &dyn crate::SlotEnumAccess,
+    registry: &SlotShapeRegistry,
+) -> Result<(), SlotWriteError<W::Error>>
+where
+    W: SlotWrite,
+{
+    let variant_name = en.variant();
+    let variant = find_variant(variants, variant_name).map_err(json_data_error)?;
+    match encoding {
+        SlotEnumEncoding::Tagged { field } => {
+            let mut object = value.object()?;
+            object.prop(field.as_str())?.string(variant_name)?;
+            write_enum_payload_json(&mut object, &variant.shape, en.data(), registry)?;
+            object.finish()
+        }
+        SlotEnumEncoding::External => {
+            let mut object = value.object()?;
+            write_shape_json(
+                object.prop(variant_name)?,
+                &variant.shape,
+                en.data(),
+                registry,
+            )?;
+            object.finish()
+        }
+    }
+}
+
 fn should_omit_json_field(
     shape: &SlotShape,
     data: SlotDataAccess<'_>,
@@ -341,23 +361,10 @@ fn write_shape_toml(
                 data_kind(other)
             ))),
         },
-        SlotShape::Enum { variants, .. } => match data {
-            SlotDataAccess::Enum(en) => {
-                let variant_name = en.variant();
-                let variant = variants
-                    .iter()
-                    .find(|variant| variant.name.as_str() == variant_name)
-                    .ok_or_else(|| SlotDataWriteError::UnknownVariant {
-                        variant: variant_name.to_string(),
-                    })?;
-                let mut table = toml::Table::new();
-                table.insert(
-                    "kind".to_string(),
-                    toml::Value::String(variant_name.to_string()),
-                );
-                write_enum_payload_toml(&mut table, &variant.shape, en.data(), registry)?;
-                Ok(toml_table(table))
-            }
+        SlotShape::Enum {
+            encoding, variants, ..
+        } => match data {
+            SlotDataAccess::Enum(en) => write_enum_toml(encoding, variants, en, registry),
             other => Err(SlotDataWriteError::mismatch(format!(
                 "slot shape expected enum data, got {}",
                 data_kind(other)
@@ -433,6 +440,47 @@ fn write_enum_payload_toml(
             "dynamic enum writer only supports record and unit variant payloads",
         )),
     }
+}
+
+fn write_enum_toml(
+    encoding: &SlotEnumEncoding,
+    variants: &[SlotVariantShape],
+    en: &dyn crate::SlotEnumAccess,
+    registry: &SlotShapeRegistry,
+) -> Result<toml::Value, SlotDataWriteError> {
+    let variant_name = en.variant();
+    let variant = find_variant(variants, variant_name)?;
+    match encoding {
+        SlotEnumEncoding::Tagged { field } => {
+            let mut table = toml::Table::new();
+            table.insert(
+                field.as_str().to_string(),
+                toml::Value::String(variant_name.to_string()),
+            );
+            write_enum_payload_toml(&mut table, &variant.shape, en.data(), registry)?;
+            Ok(toml_table(table))
+        }
+        SlotEnumEncoding::External => {
+            let mut table = toml::Table::new();
+            table.insert(
+                variant_name.to_string(),
+                write_shape_toml(&variant.shape, en.data(), registry)?,
+            );
+            Ok(toml_table(table))
+        }
+    }
+}
+
+fn find_variant<'a>(
+    variants: &'a [SlotVariantShape],
+    variant_name: &str,
+) -> Result<&'a SlotVariantShape, SlotDataWriteError> {
+    variants
+        .iter()
+        .find(|variant| variant.name.as_str() == variant_name)
+        .ok_or_else(|| SlotDataWriteError::UnknownVariant {
+            variant: variant_name.to_string(),
+        })
 }
 
 fn write_lp_value_toml(ty: &LpType, value: &LpValue) -> Result<toml::Value, SlotDataWriteError> {
@@ -768,7 +816,7 @@ mod tests {
     use crate::{
         LpType, LpValue, ModelEnumVariant, ProductKind, ProductRef, Revision, SlotData, SlotMapDyn,
         SlotName, SlotOptionDyn, SlotRecord, SlotVariantShape, WithRevision,
-        slot::shape::{field, map, option, record, unit, value},
+        slot::shape::{enum_external, field, map, option, record, unit, value},
     };
     use alloc::boxed::Box;
     use alloc::collections::BTreeMap;
@@ -819,6 +867,30 @@ mod tests {
         let json = write_json(&registry, shape_id, data.access());
 
         assert_eq!(json, r#"{"kind":"square","size":0.5}"#);
+    }
+
+    #[test]
+    fn dynamic_slot_writer_writes_external_value_enums_to_json() {
+        let (registry, shape_id, data) = external_value_enum_fixture();
+        let json = write_json(&registry, shape_id, data.access());
+
+        assert_eq!(json, r#"{"file":"compute.glsl"}"#);
+    }
+
+    #[test]
+    fn dynamic_slot_writer_writes_external_record_enums_to_json() {
+        let (registry, shape_id, data) = external_record_enum_fixture();
+        let json = write_json(&registry, shape_id, data.access());
+
+        assert_eq!(json, r#"{"point":{"x":10,"y":11}}"#);
+    }
+
+    #[test]
+    fn dynamic_slot_writer_writes_external_unit_enums_to_json() {
+        let (registry, shape_id, data) = external_unit_enum_fixture();
+        let json = write_json(&registry, shape_id, data.access());
+
+        assert_eq!(json, r#"{"disabled":{}}"#);
     }
 
     #[test]
@@ -911,6 +983,23 @@ mod tests {
 
         assert_eq!(toml["kind"].as_str(), Some("square"));
         assert_eq!(toml["size"].as_float(), Some(0.5));
+    }
+
+    #[test]
+    fn dynamic_slot_writer_writes_external_value_enums_to_toml() {
+        let (registry, shape_id, data) = external_value_enum_fixture();
+        let toml = write_slot_data_toml_value(&registry, shape_id, data.access()).unwrap();
+
+        assert_eq!(toml["file"].as_str(), Some("compute.glsl"));
+    }
+
+    #[test]
+    fn dynamic_slot_writer_writes_external_record_enums_to_toml() {
+        let (registry, shape_id, data) = external_record_enum_fixture();
+        let toml = write_slot_data_toml_value(&registry, shape_id, data.access()).unwrap();
+
+        assert_eq!(toml["point"]["x"].as_integer(), Some(10));
+        assert_eq!(toml["point"]["y"].as_integer(), Some(11));
     }
 
     #[test]
@@ -1031,6 +1120,7 @@ mod tests {
                 shape_id,
                 SlotShape::Enum {
                     meta: crate::SlotMeta::empty(),
+                    encoding: crate::SlotEnumEncoding::default(),
                     variants: vec![
                         SlotVariantShape::new("disabled", unit()).unwrap(),
                         SlotVariantShape::new(
@@ -1048,6 +1138,74 @@ mod tests {
                 Revision::default(),
                 LpValue::F32(0.5),
             ))])),
+        ));
+        (registry, shape_id, data)
+    }
+
+    fn external_value_enum_fixture() -> (SlotShapeRegistry, SlotShapeId, SlotData) {
+        let shape_id = SlotShapeId::from_static_name("test.WriterExternalValueEnum");
+        let mut registry = SlotShapeRegistry::default();
+        registry
+            .register_dynamic_shape(
+                shape_id,
+                enum_external(vec![
+                    SlotVariantShape::new("file", value(LpType::String)).unwrap(),
+                    SlotVariantShape::new("inline", value(LpType::String)).unwrap(),
+                ]),
+            )
+            .unwrap();
+        let data = SlotData::Enum(crate::SlotEnum::new(
+            SlotName::parse("file").unwrap(),
+            SlotData::Value(WithRevision::new(
+                Revision::default(),
+                LpValue::String("compute.glsl".to_string()),
+            )),
+        ));
+        (registry, shape_id, data)
+    }
+
+    fn external_record_enum_fixture() -> (SlotShapeRegistry, SlotShapeId, SlotData) {
+        let shape_id = SlotShapeId::from_static_name("test.WriterExternalRecordEnum");
+        let mut registry = SlotShapeRegistry::default();
+        registry
+            .register_dynamic_shape(
+                shape_id,
+                enum_external(vec![
+                    SlotVariantShape::new(
+                        "point",
+                        record(vec![
+                            field("x", value(LpType::I32)),
+                            field("y", value(LpType::I32)),
+                        ]),
+                    )
+                    .unwrap(),
+                ]),
+            )
+            .unwrap();
+        let data = SlotData::Enum(crate::SlotEnum::new(
+            SlotName::parse("point").unwrap(),
+            SlotData::Record(SlotRecord::new(vec![
+                SlotData::Value(WithRevision::new(Revision::default(), LpValue::I32(10))),
+                SlotData::Value(WithRevision::new(Revision::default(), LpValue::I32(11))),
+            ])),
+        ));
+        (registry, shape_id, data)
+    }
+
+    fn external_unit_enum_fixture() -> (SlotShapeRegistry, SlotShapeId, SlotData) {
+        let shape_id = SlotShapeId::from_static_name("test.WriterExternalUnitEnum");
+        let mut registry = SlotShapeRegistry::default();
+        registry
+            .register_dynamic_shape(
+                shape_id,
+                enum_external(vec![SlotVariantShape::new("disabled", unit()).unwrap()]),
+            )
+            .unwrap();
+        let data = SlotData::Enum(crate::SlotEnum::new(
+            SlotName::parse("disabled").unwrap(),
+            SlotData::Unit {
+                revision: Revision::default(),
+            },
         ));
         (registry, shape_id, data)
     }

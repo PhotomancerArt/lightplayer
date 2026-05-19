@@ -4,8 +4,13 @@ use syn::{Fields, Result};
 
 use crate::{attr, slotted::validate_slot_name};
 
-pub(crate) fn derive_enum(ident: syn::Ident, data: syn::DataEnum) -> Result<TokenStream> {
+pub(crate) fn derive_enum(
+    ident: syn::Ident,
+    data: syn::DataEnum,
+    container_attrs: attr::ContainerAttrs,
+) -> Result<TokenStream> {
     let variant_count = data.variants.len();
+    let encoding_tokens = enum_encoding_tokens(container_attrs.enum_encoding);
     let mut only_variant_slot_name = None::<String>;
     let mut variant_shapes = Vec::new();
     let mut variant_arms = Vec::new();
@@ -21,10 +26,11 @@ pub(crate) fn derive_enum(ident: syn::Ident, data: syn::DataEnum) -> Result<Toke
         let variant_ident = variant.ident;
         let variant_attrs = attr::parse_variant(&variant.attrs)?;
 
-        let slot_name = variant_attrs
-            .name
-            .as_ref()
-            .map_or_else(|| variant_ident.to_string(), syn::LitStr::value);
+        let slot_name = if let Some(name) = &variant_attrs.name {
+            name.value()
+        } else {
+            variant_slot_name(&variant_ident, container_attrs.rename_all)
+        };
         validate_slot_name(&slot_name, variant_ident.span())?;
         if variant_count == 1 {
             only_variant_slot_name = Some(slot_name.clone());
@@ -209,6 +215,7 @@ pub(crate) fn derive_enum(ident: syn::Ident, data: syn::DataEnum) -> Result<Toke
             fn slot_enum_shape() -> ::lpc_model::SlotShape {
                 ::lpc_model::SlotShape::Enum {
                     meta: ::lpc_model::SlotMeta::empty(),
+                    encoding: #encoding_tokens,
                     variants: ::lpc_model::__private::Vec::from([
                         #(#variant_shapes),*
                     ]),
@@ -259,4 +266,37 @@ pub(crate) fn derive_enum(ident: syn::Ident, data: syn::DataEnum) -> Result<Toke
             }
         }
     })
+}
+
+fn enum_encoding_tokens(encoding: Option<attr::EnumEncodingAttr>) -> TokenStream {
+    match encoding.unwrap_or(attr::EnumEncodingAttr::Tagged) {
+        attr::EnumEncodingAttr::Tagged => quote! { ::lpc_model::SlotEnumEncoding::default() },
+        attr::EnumEncodingAttr::External => quote! { ::lpc_model::SlotEnumEncoding::External },
+    }
+}
+
+fn variant_slot_name(ident: &syn::Ident, rename_all: Option<attr::RenameAllAttr>) -> String {
+    let raw = ident.to_string();
+    match rename_all {
+        Some(attr::RenameAllAttr::SnakeCase) => to_snake_case(&raw),
+        None => raw,
+    }
+}
+
+fn to_snake_case(input: &str) -> String {
+    let mut out = String::new();
+    let mut prev_was_lower_or_digit = false;
+    for ch in input.chars() {
+        if ch.is_ascii_uppercase() {
+            if prev_was_lower_or_digit {
+                out.push('_');
+            }
+            out.push(ch.to_ascii_lowercase());
+            prev_was_lower_or_digit = false;
+        } else {
+            out.push(ch);
+            prev_was_lower_or_digit = ch.is_ascii_lowercase() || ch.is_ascii_digit();
+        }
+    }
+    out
 }
