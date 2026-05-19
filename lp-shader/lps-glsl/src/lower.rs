@@ -142,8 +142,27 @@ struct LowerValue {
 fn lower_statements(ctx: &mut LowerCtx<'_>, statements: &[HirStmt]) -> Result<(), Diagnostic> {
     for stmt in statements {
         lower_stmt(ctx, stmt)?;
+        if stmt_terminates_block(stmt) {
+            break;
+        }
     }
     Ok(())
+}
+
+fn stmt_terminates_block(stmt: &HirStmt) -> bool {
+    match stmt {
+        HirStmt::Return { .. } | HirStmt::Break | HirStmt::Continue => true,
+        HirStmt::If { accept, reject, .. } => {
+            !reject.is_empty()
+                && statements_terminate_block(accept)
+                && statements_terminate_block(reject)
+        }
+        _ => false,
+    }
+}
+
+fn statements_terminate_block(statements: &[HirStmt]) -> bool {
+    statements.iter().any(stmt_terminates_block)
 }
 
 fn lower_stmt(ctx: &mut LowerCtx<'_>, stmt: &HirStmt) -> Result<(), Diagnostic> {
