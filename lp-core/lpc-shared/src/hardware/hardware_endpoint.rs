@@ -1,10 +1,13 @@
 use alloc::string::String;
 
+use lpc_model::HardwareEndpointSpec;
+
 use super::{HardwareAddress, HardwareEndpointId, HardwareEndpointKind, HardwareEndpointStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HardwareEndpoint {
     id: HardwareEndpointId,
+    spec: HardwareEndpointSpec,
     kind: HardwareEndpointKind,
     driver_id: String,
     address: HardwareAddress,
@@ -15,6 +18,7 @@ pub struct HardwareEndpoint {
 impl HardwareEndpoint {
     pub fn new(
         id: HardwareEndpointId,
+        spec: HardwareEndpointSpec,
         kind: HardwareEndpointKind,
         driver_id: impl Into<String>,
         address: HardwareAddress,
@@ -23,6 +27,7 @@ impl HardwareEndpoint {
     ) -> Self {
         Self {
             id,
+            spec,
             kind,
             driver_id: driver_id.into(),
             address,
@@ -33,6 +38,10 @@ impl HardwareEndpoint {
 
     pub fn id(&self) -> &HardwareEndpointId {
         &self.id
+    }
+
+    pub fn spec(&self) -> &HardwareEndpointSpec {
+        &self.spec
     }
 
     pub fn kind(&self) -> HardwareEndpointKind {

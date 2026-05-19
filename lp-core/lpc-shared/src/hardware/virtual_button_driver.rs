@@ -9,7 +9,8 @@ use core::cell::RefCell;
 use super::{
     ButtonConfig, ButtonDebouncer, ButtonDriver, ButtonEvent, ButtonInput, HardwareAddress,
     HardwareCapability, HardwareClaim, HardwareDriver, HardwareEndpoint, HardwareEndpointError,
-    HardwareEndpointId, HardwareEndpointKind, HardwareLease, HardwareRegistry,
+    HardwareEndpointId, HardwareEndpointKind, HardwareEndpointSpec, HardwareLease,
+    HardwareRegistry,
 };
 
 pub struct VirtualButtonDriver {
@@ -72,8 +73,10 @@ impl ButtonDriver for VirtualButtonDriver {
                 continue;
             }
             let address = resource.address().clone();
+            let spec = button_gpio_spec(resource.display_label());
             endpoints.push(HardwareEndpoint::new(
                 self.endpoint_id(&address),
+                spec,
                 HardwareEndpointKind::Button,
                 self.driver_id(),
                 address,
@@ -103,6 +106,11 @@ impl ButtonDriver for VirtualButtonDriver {
             Rc::clone(&self.pressed_by_address),
         )))
     }
+}
+
+fn button_gpio_spec(config: &str) -> HardwareEndpointSpec {
+    HardwareEndpointSpec::parse(alloc::format!("button:gpio:{config}"))
+        .expect("manifest display label should form a valid endpoint spec")
 }
 
 struct VirtualButtonInput {

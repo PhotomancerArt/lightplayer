@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{BindingDefs, OptionSlot, Ratio, RatioSlot, Slotted, ValueSlot};
+use crate::{BindingDefs, HardwareEndpointSpec, OptionSlot, Ratio, RatioSlot, Slotted, ValueSlot};
 
-/// Authored GPIO output node definition.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Slotted)]
+pub const DEFAULT_OUTPUT_ENDPOINT_SPEC: &str = "ws281x:rmt:D10";
+
+/// Authored hardware output node definition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
 pub struct OutputDef {
-    pub pin: ValueSlot<u32>,
+    pub endpoint: ValueSlot<HardwareEndpointSpec>,
     /// Authored slot bindings for output inputs.
     #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     pub bindings: BindingDefs,
@@ -17,16 +19,20 @@ pub struct OutputDef {
 impl OutputDef {
     pub const KIND: &'static str = "output";
 
-    pub fn new(pin: u32) -> Self {
+    pub fn new(endpoint: HardwareEndpointSpec) -> Self {
         Self {
-            pin: ValueSlot::new(pin),
+            endpoint: ValueSlot::new(endpoint),
             bindings: BindingDefs::default(),
             options: OptionSlot::none(),
         }
     }
 
-    pub fn pin(&self) -> u32 {
-        *self.pin.value()
+    pub fn default_endpoint() -> HardwareEndpointSpec {
+        HardwareEndpointSpec::from_static(DEFAULT_OUTPUT_ENDPOINT_SPEC)
+    }
+
+    pub fn endpoint(&self) -> &HardwareEndpointSpec {
+        self.endpoint.value()
     }
 
     pub fn kind(&self) -> crate::NodeKind {
@@ -35,6 +41,12 @@ impl OutputDef {
 
     pub fn options(&self) -> Option<&OutputDriverOptionsConfig> {
         self.options.data.as_ref()
+    }
+}
+
+impl Default for OutputDef {
+    fn default() -> Self {
+        Self::new(Self::default_endpoint())
     }
 }
 
@@ -87,19 +99,20 @@ mod tests {
     use super::*;
     use crate::node::kind::NodeKind;
     use crate::{NodeDef, OutputDefView, SlotPath, SlotShapeRegistry, StaticSlotShape};
+    use alloc::format;
 
     #[test]
     fn test_output_def_kind() {
-        let def = OutputDef::new(18);
+        let def = OutputDef::new(HardwareEndpointSpec::from_static("ws281x:rmt:D10"));
         assert_eq!(def.kind(), NodeKind::Output);
-        assert_eq!(def.pin(), 18);
+        assert_eq!(def.endpoint().as_str(), "ws281x:rmt:D10");
     }
 
     #[test]
-    fn test_output_def_flat_toml_deserialize() {
+    fn test_output_def_endpoint_toml_deserialize() {
         let toml = r#"
 kind = "Output"
-pin = 18
+endpoint = "ws281x:rmt:D10"
 
 [options]
 brightness = 0.25
@@ -109,11 +122,23 @@ dithering_enabled = false
         let NodeDef::Output(def) = def else {
             panic!("expected output def");
         };
-        assert_eq!(def.pin(), 18);
+        assert_eq!(def.endpoint().as_str(), "ws281x:rmt:D10");
         let opts = def.options().unwrap();
         assert!((opts.brightness.value().0 - 0.25).abs() < 0.001);
         assert!(!*opts.dithering_enabled.value());
         assert!(*opts.interpolation_enabled.value());
+    }
+
+    #[test]
+    fn output_def_rejects_legacy_pin_toml() {
+        let toml = r#"
+kind = "Output"
+pin = 18
+"#;
+
+        let err = NodeDef::read_toml(&registry(), toml).unwrap_err();
+
+        assert!(format!("{err}").contains("pin"));
     }
 
     #[test]
@@ -125,7 +150,10 @@ dithering_enabled = false
 
         assert_eq!(view.registry_revision(), registry.revision());
         assert!(view.is_valid_for(&registry));
-        assert_eq!(view.pin().path(), &SlotPath::parse("pin").unwrap());
+        assert_eq!(
+            view.endpoint().path(),
+            &SlotPath::parse("endpoint").unwrap()
+        );
         assert_eq!(view.options().path(), &SlotPath::parse("options").unwrap());
     }
 

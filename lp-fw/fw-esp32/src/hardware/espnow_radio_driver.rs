@@ -17,14 +17,15 @@ use esp_radio::esp_now::{
 use esp_radio::wifi::{ControllerConfig, WifiController};
 use lpc_shared::hardware::{
     HardwareAddress, HardwareCapability, HardwareClaim, HardwareDriver, HardwareEndpoint,
-    HardwareEndpointError, HardwareEndpointId, HardwareEndpointKind, HardwareEndpointStatus,
-    HardwareLease, HardwareRegistry, RADIO_MAX_PACKET_LEN, RadioChannelId, RadioConfig,
-    RadioDevice, RadioDeviceId, RadioDrainReport, RadioDriver, RadioEventId, RadioMessage,
-    RadioMessageKind,
+    HardwareEndpointError, HardwareEndpointId, HardwareEndpointKind, HardwareEndpointSpec,
+    HardwareEndpointStatus, HardwareLease, HardwareRegistry, RADIO_MAX_PACKET_LEN, RadioChannelId,
+    RadioConfig, RadioDevice, RadioDeviceId, RadioDrainReport, RadioDriver, RadioEventId,
+    RadioMessage, RadioMessageKind,
 };
 
 const DRIVER_ID: &str = "esp32-espnow-radio0";
 const DISPLAY_LABEL: &str = "ESP32 ESP-NOW Radio 0";
+const ENDPOINT_SPEC: &str = "radio:espnow:0";
 pub const DEFAULT_ESPNOW_CHANNEL: u8 = 11;
 const RADIO_QUEUE_CAPACITY: usize = 16;
 const SEEN_RING_LEN: usize = 32;
@@ -77,7 +78,7 @@ impl Esp32EspNowRadioDriver {
     }
 
     fn endpoint_id(&self) -> HardwareEndpointId {
-        HardwareEndpointId::for_driver_address(self.driver_id(), &self.address)
+        HardwareEndpointId::for_driver_spec(self.driver_id(), &endpoint_spec())
     }
 
     fn endpoint_status(&self) -> HardwareEndpointStatus {
@@ -106,6 +107,7 @@ impl RadioDriver for Esp32EspNowRadioDriver {
 
         vec![HardwareEndpoint::new(
             self.endpoint_id(),
+            endpoint_spec(),
             HardwareEndpointKind::Radio,
             self.driver_id(),
             self.address.clone(),
@@ -415,6 +417,10 @@ fn station_device_id() -> RadioDeviceId {
     let mac = interface_mac_address(InterfaceMacAddress::Station);
     let bytes = mac.as_bytes();
     RadioDeviceId::new(u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]))
+}
+
+fn endpoint_spec() -> HardwareEndpointSpec {
+    HardwareEndpointSpec::from_static(ENDPOINT_SPEC)
 }
 
 fn validate_channel(channel: u8) -> Result<(), HardwareEndpointError> {

@@ -52,6 +52,7 @@ pub use hardware_registry::HardwareRegistry;
 pub use hardware_resource::HardwareResource;
 pub use hardware_system::HardwareSystem;
 pub use hardware_target::HardwareTarget;
+pub use lpc_model::HardwareEndpointSpec;
 pub use radio_channel::{RadioChannelId, RadioDeviceId, RadioDrainReport, RadioEventId};
 pub use radio_driver::{RadioConfig, RadioDevice, RadioDriver};
 pub use radio_message::{

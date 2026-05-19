@@ -98,3 +98,14 @@
 - **Why:** It matches the near-term big red button hardware and keeps setup easy.
 - **Rejected alternatives:** General input mode matrix up front; external resistor assumptions.
 - **Revisit when:** Sensor/encoder/input expansion needs appear.
+
+#### Authored Hardware Endpoints Are Exact Specs
+
+- **Decision:** Node-authored hardware references use exact `cap:driver:config` endpoint strings,
+  such as `ws281x:rmt:D10`, with no legacy numeric output pin fallback.
+- **Why:** Nodes should request a firmware-agnostic capability endpoint while drivers own the
+  hardware-specific implementation and allocation details.
+- **Rejected alternatives:** Keep `pin = ...` sugar; use path-like endpoint strings; decode driver
+  config into a richer model before there is a second concrete shape.
+- **Revisit when:** Multiple driver config formats are in active use or endpoint selection needs
+  structured UI metadata beyond the terse spec string.

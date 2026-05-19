@@ -14,8 +14,9 @@ use esp_hal::gpio::interconnect::PeripheralOutput;
 use esp_hal::rmt::{ConfigError as RmtConfigError, Rmt};
 use lpc_shared::hardware::{
     HardwareAddress, HardwareCapability, HardwareClaim, HardwareDriver, HardwareEndpoint,
-    HardwareEndpointError, HardwareEndpointId, HardwareEndpointKind, HardwareEndpointStatus,
-    HardwareLease, HardwareRegistry, Ws281xConfig, Ws281xDriver, Ws281xOutput,
+    HardwareEndpointError, HardwareEndpointId, HardwareEndpointKind, HardwareEndpointSpec,
+    HardwareEndpointStatus, HardwareLease, HardwareRegistry, Ws281xConfig, Ws281xDriver,
+    Ws281xOutput,
 };
 use lpc_shared::output::OutputDriverOptions;
 use lpc_shared::{DisplayPipeline, OutputError};
@@ -26,6 +27,7 @@ const DRIVER_ID: &str = "esp32-rmt-ws281x0";
 const DISPLAY_LABEL: &str = "ESP32 RMT WS281x 0";
 const OUTPUT_GPIO: u32 = 18;
 const MAX_LEDS: usize = 256;
+const ENDPOINT_SPEC: &str = "ws281x:rmt:D10";
 
 // Unsafe static to store the currently initialized GPIO18-backed LED channel.
 // This is needed because LedChannel has lifetime constraints that do not fit the
@@ -68,7 +70,7 @@ impl Esp32RmtWs281xDriver {
     }
 
     fn endpoint_id(&self) -> HardwareEndpointId {
-        HardwareEndpointId::for_driver_address(self.driver_id(), &self.gpio_address)
+        HardwareEndpointId::for_driver_spec(self.driver_id(), &endpoint_spec())
     }
 
     fn endpoint_status(&self) -> HardwareEndpointStatus {
@@ -130,6 +132,7 @@ impl Ws281xDriver for Esp32RmtWs281xDriver {
 
         vec![HardwareEndpoint::new(
             self.endpoint_id(),
+            endpoint_spec(),
             HardwareEndpointKind::Ws281x,
             self.driver_id(),
             self.gpio_address.clone(),
@@ -263,6 +266,10 @@ fn rmt_channel_is_initialized() -> bool {
         let channel_ptr = core::ptr::addr_of!(LED_CHANNEL);
         (*channel_ptr).is_some()
     }
+}
+
+fn endpoint_spec() -> HardwareEndpointSpec {
+    HardwareEndpointSpec::from_static(ENDPOINT_SPEC)
 }
 
 fn transmit_rmt_buffer(rmt_buffer: &[u8]) -> Result<(), OutputError> {

@@ -4,9 +4,9 @@ use alloc::vec::Vec;
 
 use super::{
     ButtonConfig, ButtonDriver, ButtonInput, HardwareAddress, HardwareEndpoint,
-    HardwareEndpointError, HardwareEndpointId, HardwareEndpointKind, HardwareRegistry, RadioConfig,
-    RadioDevice, RadioDriver, VirtualButtonDriver, VirtualRadioDriver, VirtualWs281xDriver,
-    Ws281xConfig, Ws281xDriver, Ws281xOutput,
+    HardwareEndpointError, HardwareEndpointId, HardwareEndpointKind, HardwareEndpointSpec,
+    HardwareRegistry, RadioConfig, RadioDevice, RadioDriver, VirtualButtonDriver,
+    VirtualRadioDriver, VirtualWs281xDriver, Ws281xConfig, Ws281xDriver, Ws281xOutput,
 };
 
 pub struct HardwareSystem {
@@ -93,6 +93,21 @@ impl HardwareSystem {
             EndpointAddressMatch::Missing => Err(HardwareEndpointError::UnknownEndpoint {
                 kind: HardwareEndpointKind::Ws281x,
                 endpoint_id: HardwareEndpointId::new(address.as_str()),
+            }),
+        }
+    }
+
+    pub fn open_ws281x_by_spec(
+        &self,
+        spec: &HardwareEndpointSpec,
+        config: Ws281xConfig,
+    ) -> Result<Box<dyn Ws281xOutput>, HardwareEndpointError> {
+        match endpoint_for_spec(self.ws281x_endpoints(), spec) {
+            EndpointAddressMatch::Available(endpoint) => self.open_ws281x(endpoint.id(), config),
+            EndpointAddressMatch::Unavailable(endpoint) => self.open_ws281x(endpoint.id(), config),
+            EndpointAddressMatch::Missing => Err(HardwareEndpointError::UnknownEndpoint {
+                kind: HardwareEndpointKind::Ws281x,
+                endpoint_id: HardwareEndpointId::new(spec.as_str()),
             }),
         }
     }
@@ -229,6 +244,28 @@ fn endpoint_for_address(
     }
 }
 
+fn endpoint_for_spec(
+    endpoints: Vec<HardwareEndpoint>,
+    spec: &HardwareEndpointSpec,
+) -> EndpointAddressMatch {
+    let mut first_match = None;
+    for endpoint in endpoints {
+        if endpoint.spec() != spec {
+            continue;
+        }
+        if endpoint.is_available() {
+            return EndpointAddressMatch::Available(endpoint);
+        }
+        if first_match.is_none() {
+            first_match = Some(endpoint);
+        }
+    }
+    match first_match {
+        Some(endpoint) => EndpointAddressMatch::Unavailable(endpoint),
+        None => EndpointAddressMatch::Missing,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -263,6 +300,42 @@ mod tests {
 
         assert!(!registry.is_claimed(&HardwareAddress::gpio(18)));
         assert!(!registry.is_claimed(&HardwareAddress::rmt_ws281x(0)));
+    }
+
+    #[test]
+    fn virtual_system_opens_ws281x_by_endpoint_spec() {
+        let registry = Rc::new(HardwareRegistry::new(
+            HardwareManifest::virtual_single_rmt_gpio_board(),
+        ));
+        let system = HardwareSystem::with_virtual_drivers(Rc::clone(&registry));
+        let spec = HardwareEndpointSpec::from_static("ws281x:rmt:D10");
+        let output = system
+            .open_ws281x_by_spec(&spec, Ws281xConfig::new(3, None))
+            .unwrap();
+
+        assert!(registry.is_claimed(&HardwareAddress::gpio(18)));
+        assert!(registry.is_claimed(&HardwareAddress::rmt_ws281x(0)));
+
+        drop(output);
+
+        assert!(!registry.is_claimed(&HardwareAddress::gpio(18)));
+        assert!(!registry.is_claimed(&HardwareAddress::rmt_ws281x(0)));
+    }
+
+    #[test]
+    fn virtual_system_reports_unknown_ws281x_endpoint_spec() {
+        let registry = Rc::new(HardwareRegistry::new(
+            HardwareManifest::virtual_single_rmt_gpio_board(),
+        ));
+        let system = HardwareSystem::with_virtual_drivers(registry);
+        let spec = HardwareEndpointSpec::from_static("ws281x:rmt:NOPE");
+
+        let result = system.open_ws281x_by_spec(&spec, Ws281xConfig::new(3, None));
+
+        assert!(matches!(
+            result,
+            Err(HardwareEndpointError::UnknownEndpoint { .. })
+        ));
     }
 
     #[test]

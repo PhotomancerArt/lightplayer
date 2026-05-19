@@ -1485,7 +1485,7 @@ target = "bus#visual.out"
             "/output.toml".as_path(),
             br#"
 kind = "Output"
-pin = 4
+endpoint = "ws281x:rmt:D10"
 
 [bindings.input]
 source = "bus#control.out"

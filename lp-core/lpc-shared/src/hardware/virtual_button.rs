@@ -58,15 +58,16 @@ mod tests {
     use crate::output::{MemoryOutputProvider, OutputFormat, OutputProvider};
 
     use super::*;
-    use crate::hardware::{HardwareManifest, HardwareResource};
+    use crate::hardware::{HardwareEndpointSpec, HardwareManifest, HardwareResource};
 
     #[test]
     fn button_claim_blocks_output_on_same_gpio() {
         let registry = Rc::new(HardwareRegistry::new(test_manifest()));
         let _button = VirtualButton::open_gpio(Rc::clone(&registry), 4, 30).unwrap();
         let output = MemoryOutputProvider::with_hardware_registry(registry);
+        let endpoint = endpoint("ws281x:rmt:GPIO4");
 
-        let result = output.open(4, 3, OutputFormat::Ws2811, None);
+        let result = output.open(&endpoint, 3, OutputFormat::Ws2811, None);
 
         assert!(matches!(
             result,
@@ -80,7 +81,9 @@ mod tests {
     fn output_claim_blocks_button_on_same_gpio() {
         let registry = Rc::new(HardwareRegistry::new(test_manifest()));
         let output = MemoryOutputProvider::with_hardware_registry(Rc::clone(&registry));
-        let handle = output.open(4, 3, OutputFormat::Ws2811, None).unwrap();
+        let handle = output
+            .open(&endpoint("ws281x:rmt:GPIO4"), 3, OutputFormat::Ws2811, None)
+            .unwrap();
 
         let result = VirtualButton::open_gpio(registry, 4, 30);
 
@@ -95,7 +98,14 @@ mod tests {
     fn output_and_button_can_use_different_resources() {
         let registry = Rc::new(HardwareRegistry::new(test_manifest()));
         let output = MemoryOutputProvider::with_hardware_registry(Rc::clone(&registry));
-        let handle = output.open(18, 3, OutputFormat::Ws2811, None).unwrap();
+        let handle = output
+            .open(
+                &endpoint("ws281x:rmt:GPIO18"),
+                3,
+                OutputFormat::Ws2811,
+                None,
+            )
+            .unwrap();
 
         let button = VirtualButton::open_gpio(Rc::clone(&registry), 4, 30).unwrap();
 
@@ -164,5 +174,9 @@ mod tests {
                 ),
             ],
         )
+    }
+
+    fn endpoint(spec: &'static str) -> HardwareEndpointSpec {
+        HardwareEndpointSpec::from_static(spec)
     }
 }

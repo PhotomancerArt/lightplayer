@@ -11,7 +11,7 @@ use core::fmt;
 
 use hashbrown::HashMap;
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
-use lpc_model::{Revision, TreePath};
+use lpc_model::{HardwareEndpointSpec, Revision, TreePath};
 use lpc_shared::error::OutputError;
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::time::TimeProvider;
@@ -21,7 +21,7 @@ use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 /// Per-sink channel state for [`EngineServices`] output flushing.
 #[derive(Debug)]
 struct OutputSinkBinding {
-    pin: u32,
+    endpoint: HardwareEndpointSpec,
     display_options: Option<OutputDriverOptions>,
     channel_handle: Option<OutputChannelHandle>,
     last_byte_count: Option<u32>,
@@ -54,7 +54,7 @@ pub struct EngineServices {
     project_root: TreePath,
     output_provider: Option<Box<dyn OutputProvider>>,
     time_provider: Option<Rc<dyn TimeProvider>>,
-    /// Fixture-written buffers paired with GPIO output configuration.
+    /// Fixture-written buffers paired with authored output endpoint configuration.
     output_sinks: HashMap<RuntimeBufferId, OutputSinkBinding>,
 }
 
@@ -87,13 +87,13 @@ impl EngineServices {
     }
 
     /// Register an output sink: fixture pushes u16 RGB channel bytes into `buffer_id`; flush writes
-    /// them through [`OutputProvider`] for `config`'s GPIO pin.
+    /// them through [`OutputProvider`] for `config`'s hardware endpoint.
     ///
     /// Insert the backing [`crate::resource::RuntimeBuffer`] with
     /// [`WithRevision::new`](lpc_model::WithRevision::new)([`Revision::default`], …)
     /// so untouched sinks do not match the post-tick revision until the fixture mutates them.
     pub fn register_output_sink(&mut self, buffer_id: RuntimeBufferId, config: &OutputDef) {
-        let pin = pin_from_output_config(config);
+        let endpoint = endpoint_from_output_config(config);
         let display_options = display_options_from_output_config(config);
         if let Some(mut existing) = self.output_sinks.remove(&buffer_id) {
             self.close_output_sink(&mut existing);
@@ -101,7 +101,7 @@ impl EngineServices {
         self.output_sinks.insert(
             buffer_id,
             OutputSinkBinding {
-                pin,
+                endpoint,
                 display_options,
                 channel_handle: None,
                 last_byte_count: None,
@@ -110,13 +110,15 @@ impl EngineServices {
     }
 
     pub fn update_output_sink_config(&mut self, buffer_id: RuntimeBufferId, config: &OutputDef) {
-        let pin = pin_from_output_config(config);
+        let endpoint = endpoint_from_output_config(config);
         let display_options = display_options_from_output_config(config);
         let Some(existing) = self.output_sinks.get(&buffer_id) else {
             self.register_output_sink(buffer_id, config);
             return;
         };
-        if existing.pin == pin && output_options_eq(&existing.display_options, &display_options) {
+        if existing.endpoint == endpoint
+            && output_options_eq(&existing.display_options, &display_options)
+        {
             return;
         }
 
@@ -125,7 +127,7 @@ impl EngineServices {
             .remove(&buffer_id)
             .expect("output sink existed above");
         self.close_output_sink(&mut existing);
-        existing.pin = pin;
+        existing.endpoint = endpoint;
         existing.display_options = display_options;
         existing.last_byte_count = None;
         self.output_sinks.insert(buffer_id, existing);
@@ -181,8 +183,8 @@ impl Drop for EngineServices {
     }
 }
 
-fn pin_from_output_config(config: &OutputDef) -> u32 {
-    config.pin()
+fn endpoint_from_output_config(config: &OutputDef) -> HardwareEndpointSpec {
+    config.endpoint().clone()
 }
 
 fn display_options_from_output_config(cfg: &OutputDef) -> Option<OutputDriverOptions> {
@@ -281,7 +283,7 @@ fn ensure_channel_open(
     let bc = sink.last_byte_count.unwrap_or(3).max(byte_count).max(3);
     let handle = provider
         .open(
-            sink.pin,
+            &sink.endpoint,
             bc,
             OutputFormat::Ws2811,
             sink.display_options.clone(),
@@ -300,7 +302,7 @@ mod tests {
     use alloc::vec;
 
     use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
-    use lpc_model::{OptionSlot, Revision, TreePath, WithRevision};
+    use lpc_model::{HardwareEndpointSpec, OptionSlot, Revision, TreePath, WithRevision};
     use lpc_shared::error::OutputError;
     use lpc_shared::output::{
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
@@ -323,19 +325,22 @@ mod tests {
             Revision::new(1),
             RuntimeBuffer::output_channels_u16(6, vec![0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6]),
         ));
-        services.register_output_sink(buffer_id, &OutputDef::new(4));
+        let endpoint = endpoint("ws281x:rmt:D10");
+        services.register_output_sink(buffer_id, &OutputDef::new(endpoint.clone()));
 
         services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
             .expect("flush opens output channel");
-        assert!(provider.is_pin_open(4));
+        assert!(provider.is_endpoint_open(&endpoint));
+        assert!(provider.is_pin_open(18));
 
         drop(services);
 
         assert!(
-            !provider.is_pin_open(4),
-            "dropping runtime services should release output pins"
+            !provider.is_endpoint_open(&endpoint),
+            "dropping runtime services should release output endpoints"
         );
+        assert!(!provider.is_pin_open(18));
     }
 
     #[test]
@@ -351,13 +356,16 @@ mod tests {
             Revision::new(1),
             RuntimeBuffer::output_channels_u16(6, vec![0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6]),
         ));
-        services.register_output_sink(buffer_id, &OutputDef::new(4));
+        let endpoint = endpoint("ws281x:rmt:D10");
+        services.register_output_sink(buffer_id, &OutputDef::new(endpoint.clone()));
         services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
             .expect("initial flush");
-        let first_handle = provider.get_handle_for_pin(4).expect("first handle");
+        let first_handle = provider
+            .get_handle_for_endpoint(&endpoint)
+            .expect("first handle");
 
-        let mut next = OutputDef::new(4);
+        let mut next = OutputDef::new(endpoint.clone());
         next.options = OptionSlot::some(OutputDriverOptionsConfig {
             brightness: lpc_model::RatioSlot::new(lpc_model::Ratio(0.25)),
             ..OutputDriverOptionsConfig::default()
@@ -367,7 +375,9 @@ mod tests {
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
             .expect("flush after config update");
 
-        let second_handle = provider.get_handle_for_pin(4).expect("second handle");
+        let second_handle = provider
+            .get_handle_for_endpoint(&endpoint)
+            .expect("second handle");
         assert_ne!(first_handle, second_handle);
         assert_eq!(provider.open_channel_count(), 1);
     }
@@ -383,19 +393,21 @@ mod tests {
         let mut buffers = RuntimeBufferStore::new();
         let first = output_buffer(&mut buffers, Revision::new(1));
         let second = output_buffer(&mut buffers, Revision::new(1));
-        services.register_output_sink(first, &OutputDef::new(4));
-        services.register_output_sink(second, &OutputDef::new(4));
+        let endpoint = endpoint("ws281x:rmt:D10");
+        services.register_output_sink(first, &OutputDef::new(endpoint.clone()));
+        services.register_output_sink(second, &OutputDef::new(endpoint.clone()));
 
         let err = services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
-            .expect_err("duplicate GPIO should fail");
+            .expect_err("duplicate endpoint should fail");
 
         assert!(matches!(
             err,
             super::OutputFlushError::Provider(OutputError::Hardware { .. })
         ));
         assert_eq!(provider.open_channel_count(), 1);
-        assert!(provider.is_pin_open(4));
+        assert!(provider.is_endpoint_open(&endpoint));
+        assert!(provider.is_pin_open(18));
     }
 
     #[test]
@@ -409,8 +421,10 @@ mod tests {
         let mut buffers = RuntimeBufferStore::new();
         let first = output_buffer(&mut buffers, Revision::new(1));
         let second = output_buffer(&mut buffers, Revision::new(1));
-        services.register_output_sink(first, &OutputDef::new(4));
-        services.register_output_sink(second, &OutputDef::new(5));
+        let first_endpoint = endpoint("ws281x:rmt:D10");
+        let second_endpoint = endpoint("ws281x:rmt:GPIO19");
+        services.register_output_sink(first, &OutputDef::new(first_endpoint.clone()));
+        services.register_output_sink(second, &OutputDef::new(second_endpoint.clone()));
 
         let err = services
             .flush_dirty_output_sinks(Revision::new(1), &buffers)
@@ -418,7 +432,15 @@ mod tests {
 
         assert!(err.to_string().contains("/rmt/ws281x0"));
         assert_eq!(provider.open_channel_count(), 1);
-        assert_ne!(provider.is_pin_open(4), provider.is_pin_open(5));
+        assert_ne!(
+            provider.is_endpoint_open(&first_endpoint),
+            provider.is_endpoint_open(&second_endpoint)
+        );
+        assert_ne!(provider.is_pin_open(18), provider.is_pin_open(19));
+    }
+
+    fn endpoint(spec: &'static str) -> HardwareEndpointSpec {
+        HardwareEndpointSpec::from_static(spec)
     }
 
     fn output_buffer(store: &mut RuntimeBufferStore, revision: Revision) -> RuntimeBufferId {
@@ -433,12 +455,12 @@ mod tests {
     impl OutputProvider for SharedMemoryOutputProvider {
         fn open(
             &self,
-            pin: u32,
+            endpoint: &HardwareEndpointSpec,
             byte_count: u32,
             format: OutputFormat,
             options: Option<OutputDriverOptions>,
         ) -> Result<OutputChannelHandle, OutputError> {
-            self.0.open(pin, byte_count, format, options)
+            self.0.open(endpoint, byte_count, format, options)
         }
 
         fn write(&self, handle: OutputChannelHandle, data: &[u16]) -> Result<(), OutputError> {

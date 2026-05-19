@@ -1,5 +1,6 @@
 use crate::display_pipeline::DisplayPipelineOptions;
 use crate::error::OutputError;
+use crate::hardware::HardwareEndpointSpec;
 
 /// Options for output driver (DisplayPipeline). Alias for DisplayPipelineOptions.
 pub type OutputDriverOptions = DisplayPipelineOptions;
@@ -37,18 +38,18 @@ pub trait OutputProvider {
     /// Open an output channel
     ///
     /// # Arguments
-    /// * `pin` - GPIO pin number
+    /// * `endpoint` - Authored hardware endpoint spec, such as `ws281x:rmt:D10`
     /// * `byte_count` - Total number of bytes to allocate for this channel
     /// * `format` - Output format/protocol
     ///
     /// # Returns
     /// Returns `OutputChannelHandle` on success, or `OutputError` if:
-    /// - Pin is already open
+    /// - Endpoint is already open
     /// - Invalid parameters
     /// - Hardware initialization failed
     fn open(
         &self,
-        pin: u32,
+        endpoint: &HardwareEndpointSpec,
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,

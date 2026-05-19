@@ -9,8 +9,9 @@ use crate::error::OutputError;
 
 use super::{
     HardwareAddress, HardwareCapability, HardwareClaim, HardwareDriver, HardwareEndpoint,
-    HardwareEndpointError, HardwareEndpointId, HardwareEndpointKind, HardwareEndpointStatus,
-    HardwareLease, HardwareRegistry, Ws281xConfig, Ws281xDriver, Ws281xOutput,
+    HardwareEndpointError, HardwareEndpointId, HardwareEndpointKind, HardwareEndpointSpec,
+    HardwareEndpointStatus, HardwareLease, HardwareRegistry, Ws281xConfig, Ws281xDriver,
+    Ws281xOutput,
 };
 
 pub struct VirtualWs281xDriver {
@@ -31,8 +32,8 @@ impl VirtualWs281xDriver {
         }
     }
 
-    fn endpoint_id(&self, address: &HardwareAddress) -> HardwareEndpointId {
-        HardwareEndpointId::for_driver_address(self.driver_id(), address)
+    fn endpoint_id(&self, spec: &HardwareEndpointSpec) -> HardwareEndpointId {
+        HardwareEndpointId::for_driver_spec(self.driver_id(), spec)
     }
 
     fn endpoint_status(&self, gpio: &HardwareAddress) -> HardwareEndpointStatus {
@@ -102,8 +103,10 @@ impl Ws281xDriver for VirtualWs281xDriver {
                 continue;
             }
             let address = resource.address().clone();
+            let spec = ws281x_rmt_spec(resource.display_label());
             endpoints.push(HardwareEndpoint::new(
-                self.endpoint_id(&address),
+                self.endpoint_id(&spec),
+                spec,
                 HardwareEndpointKind::Ws281x,
                 self.driver_id(),
                 address,
@@ -221,4 +224,9 @@ fn endpoint_error_to_output_error(error: HardwareEndpointError) -> OutputError {
             reason: other.to_string(),
         },
     }
+}
+
+fn ws281x_rmt_spec(config: &str) -> HardwareEndpointSpec {
+    HardwareEndpointSpec::parse(format!("ws281x:rmt:{config}"))
+        .expect("manifest display label should form a valid endpoint spec")
 }

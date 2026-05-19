@@ -8,9 +8,9 @@ use core::cell::RefCell;
 
 use super::{
     HardwareAddress, HardwareCapability, HardwareClaim, HardwareDriver, HardwareEndpoint,
-    HardwareEndpointError, HardwareEndpointId, HardwareEndpointKind, HardwareLease,
-    HardwareRegistry, RadioChannelId, RadioConfig, RadioDevice, RadioDeviceId, RadioDrainReport,
-    RadioDriver, RadioEventId, RadioMessage, RadioMessageKind,
+    HardwareEndpointError, HardwareEndpointId, HardwareEndpointKind, HardwareEndpointSpec,
+    HardwareLease, HardwareRegistry, RadioChannelId, RadioConfig, RadioDevice, RadioDeviceId,
+    RadioDrainReport, RadioDriver, RadioEventId, RadioMessage, RadioMessageKind,
 };
 
 const VIRTUAL_RADIO_DEVICE_ID: RadioDeviceId = RadioDeviceId::new(0);
@@ -42,7 +42,7 @@ impl VirtualRadioDriver {
     }
 
     fn endpoint_id(&self) -> HardwareEndpointId {
-        HardwareEndpointId::for_driver_address(self.driver_id(), &self.address)
+        HardwareEndpointId::for_driver_spec(self.driver_id(), &endpoint_spec())
     }
 }
 
@@ -67,6 +67,7 @@ impl RadioDriver for VirtualRadioDriver {
 
         vec![HardwareEndpoint::new(
             self.endpoint_id(),
+            endpoint_spec(),
             HardwareEndpointKind::Radio,
             self.driver_id(),
             self.address.clone(),
@@ -118,6 +119,10 @@ impl RadioDriver for VirtualRadioDriver {
             Rc::clone(&self.state),
         )))
     }
+}
+
+fn endpoint_spec() -> HardwareEndpointSpec {
+    HardwareEndpointSpec::from_static("radio:virtual:0")
 }
 
 #[derive(Default)]
@@ -385,8 +390,7 @@ mod tests {
         let registry = Rc::new(HardwareRegistry::new(test_manifest()));
         let driver = VirtualRadioDriver::new(Rc::clone(&registry), 0);
         let first_radio = open_test_radio(&driver);
-        let endpoint_id =
-            HardwareEndpointId::for_driver_address(driver.driver_id(), &HardwareAddress::radio(0));
+        let endpoint_id = driver.endpoint_id();
 
         let result = driver.open(&endpoint_id, RadioConfig::default());
 
@@ -420,8 +424,7 @@ mod tests {
     }
 
     fn open_test_radio(driver: &VirtualRadioDriver) -> Box<dyn RadioDevice> {
-        let endpoint_id =
-            HardwareEndpointId::for_driver_address(driver.driver_id(), &HardwareAddress::radio(0));
+        let endpoint_id = driver.endpoint_id();
         driver
             .open(&endpoint_id, RadioConfig::default())
             .expect("radio opens")

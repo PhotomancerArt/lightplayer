@@ -21,8 +21,8 @@ use crate::resource::RuntimeBufferId;
 use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
 use lpc_model::nodes::output::OutputDef;
 use lpc_model::{
-    Dim2u, Kind, LpValue, Revision, ShaderState, SlotAccess, SlotPath, SlotShapeRegistry,
-    SlotShapeRegistryError, StaticSlotShape, ToLpValue, TreePath,
+    Dim2u, HardwareEndpointSpec, Kind, LpValue, Revision, ShaderState, SlotAccess, SlotPath,
+    SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape, ToLpValue, TreePath,
 };
 use lpc_shared::output::{
     MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
@@ -37,12 +37,12 @@ struct RcMemoryOutput(Rc<MemoryOutputProvider>);
 impl OutputProvider for RcMemoryOutput {
     fn open(
         &self,
-        pin: u32,
+        endpoint: &HardwareEndpointSpec,
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,
     ) -> Result<OutputChannelHandle, lpc_shared::error::OutputError> {
-        self.0.open(pin, byte_count, format, options)
+        self.0.open(endpoint, byte_count, format, options)
     }
 
     fn write(
@@ -56,6 +56,10 @@ impl OutputProvider for RcMemoryOutput {
     fn close(&self, handle: OutputChannelHandle) -> Result<(), lpc_shared::error::OutputError> {
         self.0.close(handle)
     }
+}
+
+fn endpoint(spec: &'static str) -> HardwareEndpointSpec {
+    HardwareEndpointSpec::from_static(spec)
 }
 
 struct CountingGraphics {
@@ -271,7 +275,7 @@ fn attach_output_demand_root(
     artifact: crate::artifact::ArtifactId,
     frame: Revision,
     name: &str,
-    pin: u32,
+    endpoint: HardwareEndpointSpec,
 ) -> (lpc_model::NodeId, RuntimeBufferId) {
     let out_id = rt
         .tree_mut()
@@ -294,7 +298,7 @@ fn attach_output_demand_root(
         .runtime_output_sink_buffer_id(out_id)
         .expect("output sink buffer");
     rt.services_mut()
-        .register_output_sink(sink, &OutputDef::new(pin));
+        .register_output_sink(sink, &OutputDef::new(endpoint));
     rt.add_binding(
         BindingDraft {
             source: BindingSource::Literal(LpValue::F32(0.0)),
@@ -320,7 +324,7 @@ fn attach_idle_output_sink(
     artifact: crate::artifact::ArtifactId,
     frame: Revision,
     name: &str,
-    pin: u32,
+    endpoint: HardwareEndpointSpec,
 ) -> (lpc_model::NodeId, RuntimeBufferId) {
     let out_id = rt
         .tree_mut()
@@ -343,7 +347,7 @@ fn attach_idle_output_sink(
         .runtime_output_sink_buffer_id(out_id)
         .expect("output sink buffer");
     rt.services_mut()
-        .register_output_sink(sink, &OutputDef::new(pin));
+        .register_output_sink(sink, &OutputDef::new(endpoint));
     (out_id, sink)
 }
 
@@ -375,7 +379,7 @@ fn bind_output_to_fixture(
 #[test]
 fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
     let mem = Rc::new(MemoryOutputProvider::new());
-    let pin = 42u32;
+    let endpoint = endpoint("ws281x:rmt:D10");
 
     let path = TreePath::parse("/show.t").expect("path");
     let mut services = EngineServices::new(path.clone());
@@ -474,15 +478,24 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
     )
     .unwrap();
 
-    let (out_id, _sink) =
-        attach_output_demand_root(&mut rt, root, spine.clone(), artifact, frame, "out", pin);
+    let (out_id, _sink) = attach_output_demand_root(
+        &mut rt,
+        root,
+        spine.clone(),
+        artifact,
+        frame,
+        "out",
+        endpoint.clone(),
+    );
     bind_output_to_fixture(&mut rt, out_id, fix_id, frame);
 
     rt.tick(10).expect("tick");
     rt.tick(10)
         .expect("second tick reuses fixture render target");
 
-    let handle = mem.get_handle_for_pin(pin).expect("channel opened");
+    let handle = mem
+        .get_handle_for_endpoint(&endpoint)
+        .expect("channel opened");
     let got = mem.get_data(handle).expect("written");
     assert_eq!(got.len(), 3);
     assert_eq!(got[0], 65535);
@@ -503,8 +516,8 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
 #[test]
 fn engine_output_idle_registered_sink_skips_second_pin() {
     let mem = Rc::new(MemoryOutputProvider::new());
-    let pin_written = 40u32;
-    let pin_idle = 41u32;
+    let endpoint_written = endpoint("ws281x:rmt:D10");
+    let endpoint_idle = endpoint("ws281x:rmt:GPIO19");
 
     let path = TreePath::parse("/show.t").expect("path");
     let mut services = EngineServices::new(path.clone());
@@ -609,7 +622,7 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
         artifact,
         frame,
         "out_written",
-        pin_written,
+        endpoint_written.clone(),
     );
     bind_output_to_fixture(&mut rt, out_id, fix_id, frame);
     let (_idle_out_id, _sink_idle) = attach_idle_output_sink(
@@ -619,18 +632,18 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
         artifact,
         frame,
         "out_idle",
-        pin_idle,
+        endpoint_idle.clone(),
     );
 
     rt.tick(10).expect("tick");
 
     assert!(
-        mem.is_pin_open(pin_written),
-        "written sink should open its pin",
+        mem.is_endpoint_open(&endpoint_written),
+        "written sink should open its endpoint",
     );
     assert!(
-        !mem.is_pin_open(pin_idle),
-        "idle sink buffer never updated this frame — should not flush or open",
+        !mem.is_endpoint_open(&endpoint_idle),
+        "idle sink buffer never updated this frame; should not flush or open",
     );
 }
 
@@ -733,8 +746,16 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
     )
     .unwrap();
 
-    let (out_id, sink) =
-        attach_output_demand_root(&mut rt, root, spine.clone(), artifact, frame, "out", 99);
+    let endpoint = endpoint("ws281x:rmt:D10");
+    let (out_id, sink) = attach_output_demand_root(
+        &mut rt,
+        root,
+        spine.clone(),
+        artifact,
+        frame,
+        "out",
+        endpoint.clone(),
+    );
     bind_output_to_fixture(&mut rt, out_id, fix_id, frame);
 
     rt.tick(10).expect("tick");
@@ -746,7 +767,7 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
         "output demand should bump buffer version to current frame before flush runs",
     );
 
-    let handle = mem.get_handle_for_pin(99).expect("opened");
+    let handle = mem.get_handle_for_endpoint(&endpoint).expect("opened");
     let got = mem.get_data(handle).expect("data");
     assert_eq!(got[1], 65535);
 }

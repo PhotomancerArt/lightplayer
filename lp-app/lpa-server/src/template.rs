@@ -63,7 +63,7 @@ description = "Project clock time in seconds"
 
 /// TOML for GPIO strip output.
 const OUTPUT_NODE_TOML: &[u8] = br#"kind = "Output"
-pin = 4
+endpoint = "ws281x:rmt:D10"
 "#;
 
 /// TOML for the default fixture.

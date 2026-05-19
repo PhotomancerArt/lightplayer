@@ -43,7 +43,7 @@ impl MockRuntime {
             project: ProjectDef::new(),
             shader_node,
             fixture_def: FixtureDef::new(),
-            output_def: OutputDef::new(),
+            output_def: OutputDef::default(),
             texture_def: TextureDef::new(),
             fixture_node: FixtureNode::new(),
             output_node: OutputNode::new(),

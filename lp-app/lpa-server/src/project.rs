@@ -9,6 +9,7 @@ use core::cell::RefCell;
 use lpc_engine::{Engine, EngineServices, LpGraphics, ProjectLoader};
 use lpc_model::{LpPath, LpPathBuf, TreePath};
 use lpc_shared::backtrace;
+use lpc_shared::hardware::HardwareEndpointSpec;
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::time::TimeProvider;
 use lpfs::{FsVersion, LpFs};
@@ -110,12 +111,12 @@ struct SharedOutputProvider(Rc<RefCell<dyn OutputProvider>>);
 impl OutputProvider for SharedOutputProvider {
     fn open(
         &self,
-        pin: u32,
+        endpoint: &HardwareEndpointSpec,
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,
     ) -> Result<OutputChannelHandle, lpc_shared::error::OutputError> {
-        self.0.borrow().open(pin, byte_count, format, options)
+        self.0.borrow().open(endpoint, byte_count, format, options)
     }
 
     fn write(

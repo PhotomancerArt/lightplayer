@@ -9,10 +9,10 @@ use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, ArtifactLocator, AsLpPath, BindingDef, BindingDefs, BindingRef,
-    BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureSamplingConfig, MapSlot, NodeDef,
-    NodeInvocation, NodeSlotRef, OptionSlot, ProjectDef, Ratio, RatioSlot, RelativeNodeRef,
-    RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry, SourcePath, SourcePathSlot,
-    ValueSlot,
+    BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureSamplingConfig, HardwareEndpointSpec, MapSlot,
+    NodeDef, NodeInvocation, NodeSlotRef, OptionSlot, ProjectDef, Ratio, RatioSlot,
+    RelativeNodeRef, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry, SourcePath,
+    SourcePathSlot, ValueSlot,
 };
 use lpfs::LpFs;
 use lpfs::lp_path::LpPathBuf;
@@ -57,7 +57,7 @@ pub struct ShaderBuilder {
 
 /// Builder for output nodes
 pub struct OutputBuilder {
-    pin: u32,
+    endpoint: HardwareEndpointSpec,
     options: OutputDriverOptionsConfig,
 }
 
@@ -115,10 +115,10 @@ impl ProjectBuilder {
         }
     }
 
-    /// Start building an output node (defaults to GPIO pin 0, no interpolation/dithering/LUT, full brightness)
+    /// Start building an output node (defaults to `ws281x:rmt:D10`, no interpolation/dithering/LUT, full brightness)
     pub fn output(&mut self) -> OutputBuilder {
         OutputBuilder {
-            pin: 0,
+            endpoint: OutputDef::default_endpoint(),
             options: OutputDriverOptionsConfig {
                 white_point: ValueSlot::new([1.0, 1.0, 1.0]),
                 brightness: RatioSlot::new(Ratio(1.0)),
@@ -160,7 +160,7 @@ impl ProjectBuilder {
         self.shader(texture_path).add(self)
     }
 
-    /// Add an output node with defaults (GPIO pin 0)
+    /// Add an output node with defaults.
     pub fn output_basic(&mut self) -> LpPathBuf {
         self.output().add(self)
     }
@@ -318,9 +318,15 @@ impl ShaderBuilder {
 }
 
 impl OutputBuilder {
-    /// Set the GPIO pin
-    pub fn gpio_pin(mut self, pin: u32) -> Self {
-        self.pin = pin;
+    /// Set the hardware endpoint spec.
+    pub fn endpoint(mut self, endpoint: HardwareEndpointSpec) -> Self {
+        self.endpoint = endpoint;
+        self
+    }
+
+    /// Set the hardware endpoint spec from text.
+    pub fn endpoint_str(mut self, endpoint: &str) -> Self {
+        self.endpoint = HardwareEndpointSpec::parse(endpoint).expect("valid output endpoint spec");
         self
     }
 
@@ -333,7 +339,7 @@ impl OutputBuilder {
         let path = artifact_path_for_node(&node_name);
 
         let config = OutputDef {
-            pin: ValueSlot::new(self.pin),
+            endpoint: ValueSlot::new(self.endpoint),
             bindings: bus_input_binding_defs("control.out"),
             options: OptionSlot::some(self.options),
         };

@@ -14,10 +14,10 @@ use core::cell::RefCell;
 use lp_riscv_emu_guest::println;
 use lpc_shared::OutputError;
 use lpc_shared::hardware::{
-    HardwareAddress, HardwareEndpointError, HardwareRegistry, HardwareSystem, Ws281xConfig,
+    HardwareEndpointError, HardwareEndpointSpec, HardwareRegistry, HardwareSystem, Ws281xConfig,
     Ws281xOutput,
 };
-use lpc_shared::output::{OutputChannelHandle, OutputFormat, OutputProvider};
+use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 
 /// Syscall-based OutputProvider implementation
 ///
@@ -52,10 +52,10 @@ impl SyscallOutputProvider {
 impl OutputProvider for SyscallOutputProvider {
     fn open(
         &self,
-        pin: u32,
+        endpoint: &HardwareEndpointSpec,
         byte_count: u32,
         format: OutputFormat,
-        options: Option<lpc_shared::output::OutputDriverOptions>,
+        options: Option<OutputDriverOptions>,
     ) -> Result<OutputChannelHandle, OutputError> {
         let _ = options;
         if byte_count == 0 {
@@ -69,15 +69,15 @@ impl OutputProvider for SyscallOutputProvider {
             });
         }
 
-        let output = self.open_ws281x_output(pin, byte_count, options)?;
+        let output = self.open_ws281x_output(endpoint, byte_count, options)?;
         let handle_id = *self.next_handle.borrow();
         *self.next_handle.borrow_mut() += 1;
         let handle = OutputChannelHandle::new(handle_id as i32);
         self.channels.borrow_mut().insert(handle, output);
 
         println!(
-            "[output] open: pin={}, bytes={}, format={:?}, handle={:?}",
-            pin, byte_count, format, handle
+            "[output] open: endpoint={}, bytes={}, format={:?}, handle={:?}",
+            endpoint, byte_count, format, handle
         );
 
         Ok(handle)
@@ -110,15 +110,12 @@ impl OutputProvider for SyscallOutputProvider {
 impl SyscallOutputProvider {
     fn open_ws281x_output(
         &self,
-        pin: u32,
+        endpoint: &HardwareEndpointSpec,
         byte_count: u32,
-        options: Option<lpc_shared::output::OutputDriverOptions>,
+        options: Option<OutputDriverOptions>,
     ) -> Result<Box<dyn Ws281xOutput>, OutputError> {
         self.hardware_system
-            .open_ws281x_by_address(
-                &HardwareAddress::gpio(pin),
-                Ws281xConfig::new(byte_count, options),
-            )
+            .open_ws281x_by_spec(endpoint, Ws281xConfig::new(byte_count, options))
             .map_err(endpoint_error_to_output_error)
     }
 }

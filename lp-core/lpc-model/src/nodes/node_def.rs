@@ -427,7 +427,7 @@ target = "bus#visual.out"
             &registry,
             r#"
 kind = "Output"
-pin = 18
+endpoint = "ws281x:rmt:D10"
 
 [options]
 brightness = 0.5
@@ -551,7 +551,7 @@ size = { width = 1, height = 2 }
             &registry,
             r##"
 kind = "Output"
-pin = 18
+endpoint = "ws281x:rmt:D10"
 
 [bindings.main]
 value = 0.25
@@ -568,7 +568,7 @@ value = 0.25
             &registry,
             r##"
 kind = "Output"
-pin = 18
+endpoint = "ws281x:rmt:D10"
 
 [bindings.main]
 target = "bus#control.out"

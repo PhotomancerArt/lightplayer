@@ -36,13 +36,18 @@ impl HardwareManifest {
     pub fn virtual_single_rmt_gpio_board() -> Self {
         let mut resources = Vec::new();
         for pin in 0..=255 {
+            let display_label = if pin == 18 {
+                alloc::format!("D10")
+            } else {
+                alloc::format!("GPIO{pin}")
+            };
             resources.push(HardwareResource::new(
                 HardwareAddress::gpio(pin),
                 [
                     HardwareCapability::GpioOutput,
                     HardwareCapability::GpioInput,
                 ],
-                alloc::format!("GPIO{pin}"),
+                display_label,
             ));
         }
         resources.push(HardwareResource::new(

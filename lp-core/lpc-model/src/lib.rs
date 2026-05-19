@@ -43,6 +43,7 @@ pub mod slot_views {
 }
 
 pub mod artifact;
+pub mod hardware_endpoint_spec;
 pub mod nodes;
 pub mod product;
 pub mod products;
@@ -73,6 +74,7 @@ pub use value::WithRevision;
 pub use value::{LpType, LpValue, ModelEnumVariant, ModelStructMember};
 
 pub use config::DEFAULT_SERIAL_BAUD_RATE;
+pub use hardware_endpoint_spec::{HardwareEndpointSpec, HardwareEndpointSpecError};
 pub use lpfs::lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 pub use node::node_prop_spec::NodePropSpec;
 pub use node::tree_path::{NodePathSegment, PathError, TreePath};

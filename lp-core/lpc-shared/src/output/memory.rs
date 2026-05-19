@@ -1,7 +1,7 @@
 use crate::error::OutputError;
 use crate::hardware::{
-    HardwareAddress, HardwareEndpointError, HardwareManifest, HardwareRegistry, HardwareSystem,
-    Ws281xConfig, Ws281xOutput,
+    HardwareAddress, HardwareEndpointError, HardwareEndpointSpec, HardwareManifest,
+    HardwareRegistry, HardwareSystem, Ws281xConfig, Ws281xOutput,
 };
 use crate::output::provider::{
     OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
@@ -17,7 +17,7 @@ use core::cell::RefCell;
 
 /// Channel state for in-memory provider
 struct ChannelState {
-    pin: u32,
+    endpoint: HardwareEndpointSpec,
     #[allow(
         dead_code,
         reason = "Stored for validation; may be used for protocol-specific handling"
@@ -84,18 +84,26 @@ impl MemoryOutputProvider {
         self.state.borrow().channels.len()
     }
 
-    /// Check if a pin is open
+    /// Check if a GPIO pin is currently claimed by an opened channel.
     pub fn is_pin_open(&self, pin: u32) -> bool {
         self.hardware_system
             .registry()
             .is_claimed(&HardwareAddress::gpio(pin))
     }
 
-    /// Get the handle for a given pin (for testing)
-    pub fn get_handle_for_pin(&self, pin: u32) -> Option<OutputChannelHandle> {
+    /// Check if an endpoint is currently opened.
+    pub fn is_endpoint_open(&self, endpoint: &HardwareEndpointSpec) -> bool {
+        self.get_handle_for_endpoint(endpoint).is_some()
+    }
+
+    /// Get the handle for a given endpoint (for testing)
+    pub fn get_handle_for_endpoint(
+        &self,
+        endpoint: &HardwareEndpointSpec,
+    ) -> Option<OutputChannelHandle> {
         let state = self.state.borrow();
         for (handle, channel_state) in state.channels.iter() {
-            if channel_state.pin == pin {
+            if channel_state.endpoint == *endpoint {
                 return Some(*handle);
             }
         }
@@ -111,7 +119,7 @@ impl MemoryOutputProvider {
 impl OutputProvider for MemoryOutputProvider {
     fn open(
         &self,
-        pin: u32,
+        endpoint: &HardwareEndpointSpec,
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,
@@ -130,7 +138,7 @@ impl OutputProvider for MemoryOutputProvider {
             });
         }
 
-        let output = self.open_ws281x_output(pin, byte_count, options)?;
+        let output = self.open_ws281x_output(endpoint, byte_count, options)?;
 
         let mut state = self.state.borrow_mut();
 
@@ -144,7 +152,7 @@ impl OutputProvider for MemoryOutputProvider {
 
         // Create channel state
         let channel_state = ChannelState {
-            pin,
+            endpoint: endpoint.clone(),
             byte_count,
             format,
             output,
@@ -214,15 +222,12 @@ impl OutputProvider for MemoryOutputProvider {
 impl MemoryOutputProvider {
     fn open_ws281x_output(
         &self,
-        pin: u32,
+        endpoint: &HardwareEndpointSpec,
         byte_count: u32,
         options: Option<OutputDriverOptions>,
     ) -> Result<Box<dyn Ws281xOutput>, OutputError> {
         self.hardware_system
-            .open_ws281x_by_address(
-                &HardwareAddress::gpio(pin),
-                Ws281xConfig::new(byte_count, options),
-            )
+            .open_ws281x_by_spec(endpoint, Ws281xConfig::new(byte_count, options))
             .map_err(endpoint_error_to_output_error)
     }
 }
@@ -240,6 +245,10 @@ fn endpoint_error_to_output_error(error: HardwareEndpointError) -> OutputError {
 mod tests {
     use super::*;
 
+    fn endpoint(spec: &'static str) -> HardwareEndpointSpec {
+        HardwareEndpointSpec::from_static(spec)
+    }
+
     #[test]
     fn test_memory_provider_creation() {
         let provider = MemoryOutputProvider::new();
@@ -249,13 +258,17 @@ mod tests {
     #[test]
     fn opening_two_outputs_on_different_pins_contends_for_rmt() {
         let provider = MemoryOutputProvider::new();
+        let first_endpoint = endpoint("ws281x:rmt:D10");
+        let second_endpoint = endpoint("ws281x:rmt:GPIO19");
         let first = provider
-            .open(18, 3, OutputFormat::Ws2811, None)
+            .open(&first_endpoint, 3, OutputFormat::Ws2811, None)
             .expect("first output opens");
 
-        let result = provider.open(19, 3, OutputFormat::Ws2811, None);
+        let result = provider.open(&second_endpoint, 3, OutputFormat::Ws2811, None);
 
         assert!(matches!(result, Err(OutputError::Hardware { .. })));
+        assert!(provider.is_endpoint_open(&first_endpoint));
+        assert!(!provider.is_endpoint_open(&second_endpoint));
         assert!(provider.is_pin_open(18));
         assert!(!provider.is_pin_open(19));
 

@@ -17,7 +17,7 @@ use esp_hal::gpio::interconnect::PeripheralOutput;
 use esp_hal::rmt::{ConfigError as RmtConfigError, Rmt};
 use lpc_shared::OutputError;
 use lpc_shared::hardware::{
-    HardwareAddress, HardwareEndpointError, HardwareSystem, Ws281xConfig, Ws281xOutput,
+    HardwareEndpointError, HardwareEndpointSpec, HardwareSystem, Ws281xConfig, Ws281xOutput,
 };
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 
@@ -58,14 +58,14 @@ impl Esp32OutputProvider {
 impl OutputProvider for Esp32OutputProvider {
     fn open(
         &self,
-        pin: u32,
+        endpoint: &HardwareEndpointSpec,
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,
     ) -> Result<OutputChannelHandle, OutputError> {
         let options = options.unwrap_or_default();
         log::debug!(
-            "Esp32OutputProvider::open: pin={pin}, byte_count={byte_count}, format={format:?}"
+            "Esp32OutputProvider::open: endpoint={endpoint}, byte_count={byte_count}, format={format:?}"
         );
 
         if format != OutputFormat::Ws2811 {
@@ -83,8 +83,8 @@ impl OutputProvider for Esp32OutputProvider {
 
         let output = self
             .hardware_system
-            .open_ws281x_by_address(
-                &HardwareAddress::gpio(pin),
+            .open_ws281x_by_spec(
+                endpoint,
                 Ws281xConfig::new(byte_count, Some(options.clone())),
             )
             .map_err(endpoint_error_to_output_error)?;
@@ -94,7 +94,7 @@ impl OutputProvider for Esp32OutputProvider {
         let handle = OutputChannelHandle::new(handle_id);
 
         log::info!(
-            "Esp32OutputProvider::open: Opened channel handle={handle_id}, pin={pin}, byte_count={byte_count}"
+            "Esp32OutputProvider::open: Opened channel handle={handle_id}, endpoint={endpoint}, byte_count={byte_count}"
         );
 
         self.channels
