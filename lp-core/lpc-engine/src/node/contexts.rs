@@ -62,6 +62,7 @@ pub struct TickContext<'r> {
     resolver: &'r mut dyn TickResolver,
     slot_shapes: &'r SlotShapeRegistry,
     graphics: Option<Arc<dyn LpGraphics>>,
+    time_provider: Option<Rc<dyn TimeProvider>>,
     frame_time_seconds: f32,
 }
 
@@ -82,6 +83,7 @@ impl<'r> TickContext<'r> {
             resolver,
             slot_shapes,
             None,
+            None,
             0.0,
         )
     }
@@ -95,6 +97,7 @@ impl<'r> TickContext<'r> {
         resolver: &'r mut dyn TickResolver,
         slot_shapes: &'r SlotShapeRegistry,
         graphics: Option<Arc<dyn LpGraphics>>,
+        time_provider: Option<Rc<dyn TimeProvider>>,
         frame_time_seconds: f32,
     ) -> Self {
         Self {
@@ -105,6 +108,7 @@ impl<'r> TickContext<'r> {
             resolver,
             slot_shapes,
             graphics,
+            time_provider,
             frame_time_seconds,
         }
     }
@@ -197,6 +201,18 @@ impl<'r> TickContext<'r> {
     /// Graphics backend for shader compile and output buffers, when the engine has one installed.
     pub fn graphics(&self) -> Option<&dyn LpGraphics> {
         self.graphics.as_ref().map(|g| g.as_ref())
+    }
+
+    pub fn now_ms(&self) -> Option<u64> {
+        self.time_provider
+            .as_ref()
+            .map(|provider| provider.now_ms())
+    }
+
+    pub fn elapsed_ms(&self, start_ms: u64) -> Option<u64> {
+        self.time_provider
+            .as_ref()
+            .map(|provider| provider.elapsed_ms(start_ms))
     }
 
     /// Materializes a visual product into a full texture through the active engine session.

@@ -16,6 +16,7 @@ lps-shared = { path = "../lps-shared" }
 lps-builtins = { path = "../lps-builtins" }
 lpvm = { path = "../lpvm" }
 wasm-encoder = "0.245"
+wasmparser = "0.245"
 log = { workspace = true, default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

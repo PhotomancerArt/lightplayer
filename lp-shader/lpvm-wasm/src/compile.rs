@@ -45,16 +45,35 @@ pub fn compile_lpir(
     validate_metadata(ir, meta)?;
     let (wasm_bytes, shadow_stack_base, env_memory) =
         emit::emit_module(ir, options).map_err(WasmError::emit)?;
+    let inst_count = count_wasm_insts(&wasm_bytes)?;
     let exports = collect_exports(ir, meta, options);
     Ok(WasmArtifact {
         module: WasmModule {
             bytes: wasm_bytes,
+            inst_count,
             exports,
             shadow_stack_base,
             env_memory,
         },
         signatures: meta.clone(),
     })
+}
+
+fn count_wasm_insts(wasm_bytes: &[u8]) -> Result<usize, WasmError> {
+    let mut inst_count = 0usize;
+    for payload in wasmparser::Parser::new(0).parse_all(wasm_bytes) {
+        let payload = payload.map_err(|err| WasmError::emit(format!("{err}")))?;
+        if let wasmparser::Payload::CodeSectionEntry(body) = payload {
+            let operators = body
+                .get_operators_reader()
+                .map_err(|err| WasmError::emit(format!("{err}")))?;
+            for op in operators {
+                op.map_err(|err| WasmError::emit(format!("{err}")))?;
+                inst_count = inst_count.saturating_add(1);
+            }
+        }
+    }
+    Ok(inst_count)
 }
 
 fn validate_metadata(ir: &LpirModule, meta: &LpsModuleSig) -> Result<(), WasmError> {

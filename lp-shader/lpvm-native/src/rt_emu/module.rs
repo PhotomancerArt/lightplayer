@@ -83,4 +83,8 @@ impl LpvmModule for NativeEmuModule {
     fn lpir_module(&self) -> Option<&LpirModule> {
         Some(&self.ir)
     }
+
+    fn code_size_bytes(&self) -> Option<usize> {
+        Some(self.load.code_end as usize)
+    }
 }

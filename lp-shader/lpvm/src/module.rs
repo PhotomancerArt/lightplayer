@@ -37,4 +37,15 @@ pub trait LpvmModule {
     fn lpir_module(&self) -> Option<&LpirModule> {
         None
     }
+
+    /// Final emitted code size in bytes, when the backend exposes a compact code artifact.
+    fn code_size_bytes(&self) -> Option<usize> {
+        None
+    }
+
+    /// Final emitted instruction count, when the backend can report one.
+    fn final_instruction_count(&self) -> Option<usize> {
+        self.debug_info()
+            .map(|debug| debug.functions.values().map(|func| func.inst_count).sum())
+    }
 }

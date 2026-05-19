@@ -2,6 +2,8 @@ use crate::engine::error::Error;
 use alloc::string::{String, ToString};
 use lps_shared::LpsValueF32;
 
+pub type ShaderCompileStats = lp_shader::LpsCompileStats;
+
 /// Backend-agnostic compile options understood by `lp-engine`.
 pub struct ShaderCompileOptions {
     /// Q32 arithmetic options (saturating/wrapping add/sub/mul/div).
@@ -57,6 +59,10 @@ pub trait LpShader: Send + Sync {
     }
 
     fn has_render(&self) -> bool;
+
+    fn compile_stats(&self) -> Option<ShaderCompileStats> {
+        None
+    }
 }
 
 /// Compiled serial compute shader.
@@ -69,6 +75,10 @@ pub trait LpComputeShader {
     fn tick(&mut self, inputs: &[(&str, LpsValueF32)]) -> Result<(), Error>;
 
     fn get_output(&mut self, path: &str) -> Result<LpsValueF32, Error>;
+
+    fn compile_stats(&self) -> Option<ShaderCompileStats> {
+        None
+    }
 }
 
 impl LpComputeShader for lp_shader::LpsComputeShader {
@@ -82,5 +92,9 @@ impl LpComputeShader for lp_shader::LpsComputeShader {
         lp_shader::LpsComputeShader::get_output(self, path).map_err(|e| Error::Other {
             message: e.to_string(),
         })
+    }
+
+    fn compile_stats(&self) -> Option<ShaderCompileStats> {
+        Some(lp_shader::LpsComputeShader::compile_stats(self))
     }
 }

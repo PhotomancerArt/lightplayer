@@ -183,7 +183,16 @@ debug = 1
 strip = "none"
 
 [profile.release-esp32.package.esp-radio]
-opt-level = 3
+opt-level = "s"
+
+[profile.release-esp32.package.esp-phy]
+opt-level = "z"
+
+[profile.release-esp32.package.esp-radio-rtos-driver]
+opt-level = "z"
+
+[profile.release-esp32.package.esp-wifi-sys-esp32c6]
+opt-level = "z"
 
 # Profile for fw-emu: opt-level=3 avoids Cranelift codegen bugs in emulator (InvalidMemoryAccess).
 # Used by test_scene_render_fw_emu via ensure_binary_built(..with_profile("release-emu")).
@@ -196,21 +205,10 @@ codegen-units = 4
 [profile.release-emu.package.fw-emu]
 debug = 1
 
-# Hot-path crates: optimize for speed instead of size
-# These crates are in the critical rendering path and benefit from speed optimizations
-[profile.release.package.lpc-engine]
-# Optimize for speed (hot path in rendering loop)
-opt-level = 3
-# Keep multiple codegen units for faster compilation and better parallelization
-codegen-units = 4
-# Note: lto is inherited from workspace [profile.release]
-
+# Hot-path builtins are size-sensitive but still execute per pixel.
 [profile.release.package.lps-builtins]
-# Optimize for speed (hot path in shader execution)
 opt-level = 3
-# Keep multiple codegen units for faster compilation and better parallelization
 codegen-units = 4
-# Note: lto is inherited from workspace [profile.release]
 
 # Patch the ESP stack to the local esp-hal checkout.
 [patch.crates-io]

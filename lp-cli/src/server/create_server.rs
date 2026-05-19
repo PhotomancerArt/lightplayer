@@ -43,7 +43,7 @@ pub fn create_server(
     // If init is None, use default config (for backward compatibility)
 
     // Create output provider
-    let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
+    let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new_permissive()));
 
     // Create LpServer (takes ownership of filesystem)
     // We need to clone the filesystem reference before passing it to LpServer

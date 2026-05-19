@@ -10,10 +10,16 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::rc::Rc;
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum EndpointValidation {
+    HardwareSystem,
+    Permissive,
+}
 
 /// Channel state for in-memory provider
 struct ChannelState {
@@ -41,6 +47,7 @@ struct MemoryOutputProviderState {
 /// and stores written data for verification.
 pub struct MemoryOutputProvider {
     hardware_system: Rc<HardwareSystem>,
+    endpoint_validation: EndpointValidation,
     state: RefCell<MemoryOutputProviderState>,
 }
 
@@ -48,6 +55,20 @@ impl MemoryOutputProvider {
     /// Create a new memory output provider
     pub fn new() -> Self {
         Self::with_hardware_manifest(HardwareManifest::virtual_single_rmt_gpio_board())
+    }
+
+    /// Create a memory provider that accepts any authored hardware endpoint.
+    ///
+    /// This is intended for desktop demos and local dev sessions where output is
+    /// just an in-memory sink. Real hardware and emulation paths should keep the
+    /// strict manifest-backed constructors.
+    pub fn new_permissive() -> Self {
+        Self::with_validation(
+            Rc::new(HardwareSystem::with_virtual_drivers(Rc::new(
+                HardwareRegistry::new(HardwareManifest::virtual_single_rmt_gpio_board()),
+            ))),
+            EndpointValidation::Permissive,
+        )
     }
 
     pub fn with_hardware_manifest(manifest: HardwareManifest) -> Self {
@@ -61,8 +82,16 @@ impl MemoryOutputProvider {
     }
 
     pub fn with_hardware_system(hardware_system: Rc<HardwareSystem>) -> Self {
+        Self::with_validation(hardware_system, EndpointValidation::HardwareSystem)
+    }
+
+    fn with_validation(
+        hardware_system: Rc<HardwareSystem>,
+        endpoint_validation: EndpointValidation,
+    ) -> Self {
         Self {
             hardware_system,
+            endpoint_validation,
             state: RefCell::new(MemoryOutputProviderState {
                 channels: BTreeMap::new(),
                 next_handle: 0,
@@ -226,10 +255,72 @@ impl MemoryOutputProvider {
         byte_count: u32,
         options: Option<OutputDriverOptions>,
     ) -> Result<Box<dyn Ws281xOutput>, OutputError> {
-        self.hardware_system
-            .open_ws281x_by_spec(endpoint, Ws281xConfig::new(byte_count, options))
-            .map_err(endpoint_error_to_output_error)
+        match self.endpoint_validation {
+            EndpointValidation::HardwareSystem => self
+                .hardware_system
+                .open_ws281x_by_spec(endpoint, Ws281xConfig::new(byte_count, options))
+                .map_err(endpoint_error_to_output_error),
+            EndpointValidation::Permissive => {
+                let _ = (endpoint, options);
+                validate_ws281x_byte_count(byte_count)?;
+                Ok(Box::new(MemoryWs281xOutput::new(byte_count)))
+            }
+        }
     }
+}
+
+struct MemoryWs281xOutput {
+    byte_count: u32,
+    data: Vec<u16>,
+}
+
+impl MemoryWs281xOutput {
+    fn new(byte_count: u32) -> Self {
+        Self {
+            byte_count,
+            data: vec![0; u16_len_for_byte_count(byte_count)],
+        }
+    }
+}
+
+impl Ws281xOutput for MemoryWs281xOutput {
+    fn write(&mut self, data: &[u16]) -> Result<(), OutputError> {
+        let expected_len = self.data.len();
+        if data.len() > expected_len {
+            let new_len = (data.len() / 3) * 3;
+            self.data.resize(new_len, 0);
+            self.byte_count = new_len as u32;
+        } else if data.len() < expected_len {
+            return Err(OutputError::DataLengthMismatch {
+                expected: expected_len as u32,
+                actual: data.len(),
+            });
+        }
+
+        let len = self.data.len();
+        self.data.copy_from_slice(&data[..len]);
+        Ok(())
+    }
+
+    fn resize(&mut self, config: Ws281xConfig) -> Result<(), OutputError> {
+        validate_ws281x_byte_count(config.byte_count())?;
+        self.byte_count = config.byte_count();
+        self.data.resize(u16_len_for_byte_count(self.byte_count), 0);
+        Ok(())
+    }
+}
+
+fn validate_ws281x_byte_count(byte_count: u32) -> Result<(), OutputError> {
+    if byte_count < 3 {
+        return Err(OutputError::InvalidConfig {
+            reason: String::from("WS281x byte_count must be at least 3"),
+        });
+    }
+    Ok(())
+}
+
+fn u16_len_for_byte_count(byte_count: u32) -> usize {
+    ((byte_count / 3) as usize) * 3
 }
 
 fn endpoint_error_to_output_error(error: HardwareEndpointError) -> OutputError {
@@ -253,6 +344,33 @@ mod tests {
     fn test_memory_provider_creation() {
         let provider = MemoryOutputProvider::new();
         assert_eq!(provider.open_channel_count(), 0);
+    }
+
+    #[test]
+    fn strict_provider_rejects_unknown_endpoint_specs() {
+        let provider = MemoryOutputProvider::new();
+        let unknown_endpoint = endpoint("ws281x:rmt:D4");
+
+        let result = provider.open(&unknown_endpoint, 3, OutputFormat::Ws2811, None);
+
+        assert!(matches!(result, Err(OutputError::InvalidConfig { .. })));
+        assert!(!provider.is_endpoint_open(&unknown_endpoint));
+    }
+
+    #[test]
+    fn permissive_provider_accepts_any_endpoint_spec() {
+        let provider = MemoryOutputProvider::new_permissive();
+        let demo_endpoint = endpoint("ws281x:rmt:D4");
+
+        let handle = provider
+            .open(&demo_endpoint, 3, OutputFormat::Ws2811, None)
+            .expect("permissive demo output opens");
+        provider
+            .write(handle, &[1, 2, 3])
+            .expect("permissive demo output writes");
+
+        assert!(provider.is_endpoint_open(&demo_endpoint));
+        assert_eq!(provider.get_data(handle), Some(vec![1, 2, 3]));
     }
 
     #[test]

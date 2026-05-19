@@ -12,6 +12,7 @@ use lps_shared::{
 };
 use lpvm::{LpvmBuffer, LpvmInstance, LpvmModule};
 
+use crate::LpsCompileStats;
 use crate::error::LpsError;
 use crate::sample_buf::{LpsSamplePointBuf, LpsSampleRgba16Buf};
 use crate::texture_buf::LpsTextureBuf;
@@ -93,6 +94,7 @@ pub struct LpsPxShader {
     inner: RefCell<Box<dyn PxShaderBackend>>,
     output_format: TextureStorageFormat,
     meta: LpsModuleSig,
+    compile_stats: LpsCompileStats,
     /// Format-specific synthesised entry, e.g. `"__render_texture_rgba16"`.
     render_texture_fn_name: String,
     /// Synthesised point-sampling entry, currently available for RGBA16 shaders.
@@ -109,6 +111,7 @@ impl LpsPxShader {
     pub(crate) fn new<M: LpvmModule + 'static>(
         module: M,
         meta: LpsModuleSig,
+        ir: &lpir::LpirModule,
         output_format: TextureStorageFormat,
         render_fn_index: usize,
         render_texture_fn_name: String,
@@ -140,6 +143,7 @@ impl LpsPxShader {
             )));
         }
 
+        let compile_stats = LpsCompileStats::from_module(ir, &module);
         let instance = module
             .instantiate()
             .map_err(|e| LpsError::Compile(format!("instantiate: {e}")))?;
@@ -152,6 +156,7 @@ impl LpsPxShader {
             inner: RefCell::new(inner),
             output_format,
             meta,
+            compile_stats,
             render_texture_fn_name,
             render_samples_fn_name,
             render_fn_index,
@@ -162,6 +167,12 @@ impl LpsPxShader {
     #[must_use]
     pub fn meta(&self) -> &LpsModuleSig {
         &self.meta
+    }
+
+    /// Statistics captured while compiling this shader.
+    #[must_use]
+    pub fn compile_stats(&self) -> LpsCompileStats {
+        self.compile_stats
     }
 
     /// Output format this shader was compiled for.
@@ -398,6 +409,7 @@ pub(crate) fn px_shader_from_parts_for_test(
         inner: RefCell::new(inner),
         output_format,
         meta,
+        compile_stats: LpsCompileStats::default(),
         render_texture_fn_name,
         render_samples_fn_name: Some(String::from(crate::synth::RENDER_SAMPLES_RGBA16_FN)),
         render_fn_index,

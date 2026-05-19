@@ -441,6 +441,7 @@ impl EngineResolveHost<'_> {
         };
 
         let gfx = self.graphics.clone();
+        let time_provider = self.time_provider.clone();
         let time_s = self.frame_time_seconds;
         let slot_shapes = self.slot_shapes;
         let tick_result = {
@@ -457,6 +458,7 @@ impl EngineResolveHost<'_> {
                 resolver_dyn,
                 slot_shapes,
                 gfx,
+                time_provider,
                 time_s,
             );
             catch_node_panic(|| node_runtime.tick(&mut tick_ctx))
@@ -1294,6 +1296,7 @@ fn tick_tree_node(
     };
 
     let gfx = host.graphics.clone();
+    let time_provider = host.time_provider.clone();
     let time_s = host.frame_time_seconds;
     let slot_shapes = host.slot_shapes;
     let tick_result = {
@@ -1310,6 +1313,7 @@ fn tick_tree_node(
             resolver_dyn,
             slot_shapes,
             gfx,
+            time_provider,
             time_s,
         );
         catch_node_panic(|| node_runtime.tick(&mut tick_ctx))

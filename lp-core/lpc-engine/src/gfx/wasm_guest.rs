@@ -13,7 +13,7 @@ use lpvm_wasm::WasmOptions;
 use lpvm_wasm::rt_browser::BrowserLpvmEngine;
 
 use super::lp_gfx::LpGraphics;
-use super::lp_shader::{LpComputeShader, LpShader, ShaderCompileOptions};
+use super::lp_shader::{LpComputeShader, LpShader, ShaderCompileOptions, ShaderCompileStats};
 use crate::engine::error::Error;
 
 /// Wasm32 guest shader graphics backed by `lpvm-wasm` + browser host.
@@ -143,5 +143,9 @@ impl LpShader for WasmGuestShader {
 
     fn has_render(&self) -> bool {
         true
+    }
+
+    fn compile_stats(&self) -> Option<ShaderCompileStats> {
+        Some(self.px.compile_stats())
     }
 }

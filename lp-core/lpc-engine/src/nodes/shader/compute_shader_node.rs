@@ -20,7 +20,7 @@ use super::compute_materialize::materialize_produced_slot;
 use super::compute_shader_state::{ComputeShaderState, ComputeStateError};
 use super::shader_input_materialize::materialize_shader_input;
 use super::shader_node::{
-    map_model_q32_options, read_authored_value, set_slot_if_changed,
+    format_compile_stats, map_model_q32_options, read_authored_value, set_slot_if_changed,
     sync_shader_slot_def_from_authored,
 };
 
@@ -86,25 +86,41 @@ impl ComputeShaderNode {
             self.glsl_source.len()
         );
         self.compilation_error = None;
+        let compile_start_ms = ctx.now_ms();
         lpc_shared::backtrace::set_oom_context("compute shader node: compile");
         let compile_result = catch_panic("panic during compute shader compilation", || {
             graphics.compile_compute_shader(desc)
         })
         .and_then(|result| result.map_err(|error| format!("{error}")));
         lpc_shared::backtrace::clear_oom_context();
+        let compile_elapsed_ms = compile_start_ms.and_then(|start| ctx.elapsed_ms(start));
 
         match compile_result {
             Ok(shader) => {
+                let stats = shader.compile_stats();
                 self.shader = Some(shader);
                 log::info!(
-                    "[compute-shader-node] compilation succeeded (node={:?})",
-                    self.node_id
+                    "[compute-shader-node] compilation succeeded (node={:?}, {})",
+                    self.node_id,
+                    format_compile_stats(compile_elapsed_ms, stats)
                 );
                 Ok(())
             }
             Err(error) => {
                 self.compilation_error = Some(error.clone());
                 self.shader = None;
+                if let Some(compile_elapsed_ms) = compile_elapsed_ms {
+                    log::warn!(
+                        "[compute-shader-node] compilation failed (node={:?}, elapsed={}ms): {error}",
+                        self.node_id,
+                        compile_elapsed_ms
+                    );
+                } else {
+                    log::warn!(
+                        "[compute-shader-node] compilation failed (node={:?}): {error}",
+                        self.node_id
+                    );
+                }
                 Err(NodeError::msg(format!("compute shader compile: {error}")))
             }
         }

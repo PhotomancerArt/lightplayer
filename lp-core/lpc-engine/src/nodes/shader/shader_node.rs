@@ -2,7 +2,7 @@
 
 use alloc::boxed::Box;
 use alloc::format;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpc_model::{
@@ -16,7 +16,7 @@ use lps_shared::TextureBuffer;
 
 use crate::dataflow::resolver::{QueryKey, resolver::model_value_to_lps_value_f32};
 use crate::gfx::uniforms::{VisualUniform, build_uniforms};
-use crate::gfx::{LpShader, ShaderCompileOptions};
+use crate::gfx::{LpShader, ShaderCompileOptions, ShaderCompileStats};
 use crate::node::catch_node_panic::catch_panic;
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, RenderContext, RenderNode,
@@ -106,19 +106,13 @@ impl ShaderNode {
 
         match compile_result {
             Ok(shader) => {
+                let stats = shader.compile_stats();
                 self.shader = Some(shader);
-                if let Some(compile_elapsed_ms) = compile_elapsed_ms {
-                    log::info!(
-                        "[shader-node] compilation succeeded (node={:?}, elapsed={}ms)",
-                        self.node_id,
-                        compile_elapsed_ms
-                    );
-                } else {
-                    log::info!(
-                        "[shader-node] compilation succeeded (node={:?})",
-                        self.node_id
-                    );
-                }
+                log::info!(
+                    "[shader-node] compilation succeeded (node={:?}, {})",
+                    self.node_id,
+                    format_compile_stats(compile_elapsed_ms, stats)
+                );
                 Ok(())
             }
             Err(error) => {
@@ -233,6 +227,31 @@ impl NodeRuntime for ShaderNode {
     fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
         Some(self)
     }
+}
+
+pub(super) fn format_compile_stats(
+    elapsed_ms: Option<u64>,
+    stats: Option<ShaderCompileStats>,
+) -> String {
+    let elapsed = elapsed_ms
+        .map(|ms| format!("{ms}ms"))
+        .unwrap_or_else(|| String::from("unknown"));
+    let Some(stats) = stats else {
+        return format!("elapsed={elapsed}, stats=unavailable");
+    };
+    let final_inst_count = stats
+        .final_inst_count
+        .map(|count| count.to_string())
+        .unwrap_or_else(|| String::from("unknown"));
+    let final_code_size = stats
+        .final_code_size_bytes
+        .map(|bytes| format!("{bytes} bytes"))
+        .unwrap_or_else(|| String::from("unknown"));
+
+    format!(
+        "elapsed={elapsed}, lpir_inst_count={}, lpir_func_count={}, lpir_import_count={}, final_inst_count={final_inst_count}, final_code_size={final_code_size}",
+        stats.lpir_inst_count, stats.lpir_function_count, stats.lpir_import_count,
+    )
 }
 
 pub(super) fn sync_shader_slot_def_from_authored(

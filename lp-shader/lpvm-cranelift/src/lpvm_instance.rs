@@ -252,6 +252,10 @@ impl LpvmModule for CraneliftModule {
     fn instantiate(&self) -> Result<Self::Instance, Self::Error> {
         Ok(CraneliftInstance::new(self))
     }
+
+    fn lpir_module(&self) -> Option<&lpir::LpirModule> {
+        Some(self.0.lpir_module())
+    }
 }
 
 impl LpvmInstance for CraneliftInstance {

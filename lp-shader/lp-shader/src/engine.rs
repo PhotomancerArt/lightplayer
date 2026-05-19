@@ -110,7 +110,7 @@ impl<E: LpvmEngine> LpsEngine<E> {
             .engine
             .compile_with_config(&ir, &meta, &compiler_config)
             .map_err(|e| LpsError::Compile(format!("{e}")))?;
-        LpsComputeShader::new(module, meta, tick_fn_index)
+        LpsComputeShader::new(module, meta, &ir, tick_fn_index)
     }
 
     /// Allocate a texture in the engine's shared memory.

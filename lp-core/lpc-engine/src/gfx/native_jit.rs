@@ -11,7 +11,7 @@ use lp_shader::{CompilePxDesc, LpsEngine, LpsPxShader, LpsTextureBuf};
 use lpvm_native::{BuiltinTable, NativeCompileOptions, NativeJitEngine};
 
 use super::lp_gfx::LpGraphics;
-use super::lp_shader::{LpComputeShader, LpShader, ShaderCompileOptions};
+use super::lp_shader::{LpComputeShader, LpShader, ShaderCompileOptions, ShaderCompileStats};
 use crate::engine::error::Error;
 
 /// Graphics backend using in-process RV32 JIT (no Cranelift, no ELF link).
@@ -146,5 +146,9 @@ impl LpShader for NativeJitShader {
 
     fn has_render(&self) -> bool {
         true
+    }
+
+    fn compile_stats(&self) -> Option<ShaderCompileStats> {
+        Some(self.px.compile_stats())
     }
 }

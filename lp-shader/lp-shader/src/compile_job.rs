@@ -68,6 +68,7 @@ enum ShaderCompileState<'src, 'engine, E: LpvmEngine> {
         meta: LpsModuleSig,
     },
     Backend {
+        ir: LpirModule,
         meta: LpsModuleSig,
         render_fn_index: usize,
         render_texture_fn_name: alloc::string::String,
@@ -218,6 +219,7 @@ where
                     self.compiler_config.clone(),
                 ) {
                     self.state = ShaderCompileState::Backend {
+                        ir,
                         meta,
                         render_fn_index,
                         render_texture_fn_name,
@@ -234,6 +236,7 @@ where
                             match LpsPxShader::new(
                                 module,
                                 meta,
+                                &ir,
                                 self.output_format,
                                 render_fn_index,
                                 render_texture_fn_name,
@@ -252,6 +255,7 @@ where
                 }
             }
             ShaderCompileState::Backend {
+                ir,
                 meta,
                 render_fn_index,
                 render_texture_fn_name,
@@ -260,6 +264,7 @@ where
             } => match job.step(LpvmCompileBudget::steps(budget.backend_steps)) {
                 LpvmCompileStepResult::Pending => {
                     self.state = ShaderCompileState::Backend {
+                        ir,
                         meta,
                         render_fn_index,
                         render_texture_fn_name,
@@ -275,6 +280,7 @@ where
                     match LpsPxShader::new(
                         module,
                         meta,
+                        &ir,
                         self.output_format,
                         render_fn_index,
                         render_texture_fn_name,

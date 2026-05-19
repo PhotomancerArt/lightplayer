@@ -7,6 +7,7 @@ use core::cell::RefCell;
 use lps_shared::{LpsModuleSig, LpsValueF32};
 use lpvm::{LpvmInstance, LpvmModule};
 
+use crate::LpsCompileStats;
 use crate::compute_abi::COMPUTE_TICK_FN;
 use crate::error::LpsError;
 
@@ -46,6 +47,7 @@ impl<M: LpvmModule + 'static> ComputeShaderBackend for BackendAdapter<M> {
 pub struct LpsComputeShader {
     inner: RefCell<Box<dyn ComputeShaderBackend>>,
     meta: LpsModuleSig,
+    compile_stats: LpsCompileStats,
     tick_fn_index: usize,
 }
 
@@ -53,8 +55,10 @@ impl LpsComputeShader {
     pub(crate) fn new<M: LpvmModule + 'static>(
         module: M,
         meta: LpsModuleSig,
+        ir: &lpir::LpirModule,
         tick_fn_index: usize,
     ) -> Result<Self, LpsError> {
+        let compile_stats = LpsCompileStats::from_module(ir, &module);
         let instance = module
             .instantiate()
             .map_err(|e| LpsError::Compile(format!("instantiate: {e}")))?;
@@ -65,6 +69,7 @@ impl LpsComputeShader {
         Ok(Self {
             inner: RefCell::new(inner),
             meta,
+            compile_stats,
             tick_fn_index,
         })
     }
@@ -73,6 +78,12 @@ impl LpsComputeShader {
     #[must_use]
     pub fn meta(&self) -> &LpsModuleSig {
         &self.meta
+    }
+
+    /// Statistics captured while compiling this shader.
+    #[must_use]
+    pub fn compile_stats(&self) -> LpsCompileStats {
+        self.compile_stats
     }
 
     /// Index of `tick` in [`Self::meta`].

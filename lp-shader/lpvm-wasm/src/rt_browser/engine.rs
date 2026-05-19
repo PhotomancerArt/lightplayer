@@ -57,6 +57,7 @@ impl BrowserLpvmEngine {
 
 pub struct BrowserLpvmModule {
     pub(crate) wasm_bytes: Vec<u8>,
+    pub(crate) wasm_inst_count: usize,
     pub(crate) env_memory: Option<EnvMemorySpec>,
     pub(crate) runtime: Arc<BrowserLpvmSharedRuntime>,
     pub(crate) signatures: LpsModuleSig,
@@ -89,6 +90,7 @@ impl LpvmEngine for BrowserLpvmEngine {
             .collect();
         Ok(BrowserLpvmModule {
             wasm_bytes: wm.bytes.clone(),
+            wasm_inst_count: wm.inst_count,
             env_memory: wm.env_memory,
             runtime: Arc::clone(&self.runtime),
             signatures: artifact.signatures().clone(),
@@ -114,5 +116,17 @@ impl lpvm::LpvmModule for BrowserLpvmModule {
 
     fn instantiate(&self) -> Result<Self::Instance, Self::Error> {
         BrowserLpvmInstance::new(self)
+    }
+
+    fn lpir_module(&self) -> Option<&LpirModule> {
+        Some(&self.lpir)
+    }
+
+    fn code_size_bytes(&self) -> Option<usize> {
+        Some(self.wasm_bytes.len())
+    }
+
+    fn final_instruction_count(&self) -> Option<usize> {
+        Some(self.wasm_inst_count)
     }
 }

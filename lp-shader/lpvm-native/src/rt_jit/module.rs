@@ -121,6 +121,14 @@ impl LpvmModule for NativeJitModule {
 
         Ok(instance)
     }
+
+    fn code_size_bytes(&self) -> Option<usize> {
+        Some(self.inner.buffer.len())
+    }
+
+    fn final_instruction_count(&self) -> Option<usize> {
+        Some(self.inner.buffer.len() / 4)
+    }
 }
 
 pub(crate) fn build_entry_info(

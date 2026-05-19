@@ -103,6 +103,7 @@ impl EnvMemorySpec {
 #[derive(Debug, Clone)]
 pub struct WasmModule {
     pub bytes: Vec<u8>,
+    pub inst_count: usize,
     pub exports: Vec<WasmExport>,
     /// When set, WASM global index 0 is the shadow stack pointer; reset before each exported call.
     pub shadow_stack_base: Option<i32>,

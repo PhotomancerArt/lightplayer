@@ -58,6 +58,7 @@ pub struct WasmLpvmModule {
     pub(crate) engine: Engine,
     pub(crate) runtime: Arc<WasmLpvmSharedRuntime>,
     pub(crate) wasm_bytes: Vec<u8>,
+    pub(crate) wasm_inst_count: usize,
     pub(crate) signatures: LpsModuleSig,
     pub(crate) exports: HashMap<String, crate::module::WasmExport>,
     pub(crate) shadow_stack_base: Option<i32>,
@@ -114,6 +115,7 @@ impl LpvmEngine for WasmLpvmEngine {
             engine: self.engine.clone(),
             runtime: Arc::clone(&self.runtime),
             wasm_bytes: bytes,
+            wasm_inst_count: artifact.wasm_module().inst_count,
             signatures: artifact.signatures().clone(),
             exports,
             shadow_stack_base: artifact.wasm_module().shadow_stack_base,
@@ -144,6 +146,7 @@ impl LpvmEngine for WasmLpvmEngine {
             engine: self.engine.clone(),
             runtime: Arc::clone(&self.runtime),
             wasm_bytes: bytes,
+            wasm_inst_count: artifact.wasm_module().inst_count,
             signatures: artifact.signatures().clone(),
             exports,
             shadow_stack_base: artifact.wasm_module().shadow_stack_base,
@@ -167,5 +170,17 @@ impl lpvm::LpvmModule for WasmLpvmModule {
 
     fn instantiate(&self) -> Result<Self::Instance, Self::Error> {
         WasmLpvmInstance::new(self)
+    }
+
+    fn lpir_module(&self) -> Option<&LpirModule> {
+        Some(&self.lpir)
+    }
+
+    fn code_size_bytes(&self) -> Option<usize> {
+        Some(self.wasm_bytes.len())
+    }
+
+    fn final_instruction_count(&self) -> Option<usize> {
+        Some(self.wasm_inst_count)
     }
 }
