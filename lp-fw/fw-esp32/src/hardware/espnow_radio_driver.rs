@@ -9,18 +9,18 @@ use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use esp_hal::efuse::{InterfaceMacAddress, interface_mac_address};
+use esp_hal::efuse::{interface_mac_address, InterfaceMacAddress};
 use esp_hal::peripherals::WIFI;
 use esp_radio::esp_now::{
-    BROADCAST_ADDRESS, EspNowError, EspNowManager, EspNowReceiver, EspNowSender, ReceivedData,
+    EspNowError, EspNowManager, EspNowReceiver, EspNowSender, ReceivedData, BROADCAST_ADDRESS,
 };
 use esp_radio::wifi::{ControllerConfig, WifiController};
 use lpc_shared::hardware::{
     HardwareAddress, HardwareCapability, HardwareClaim, HardwareDriver, HardwareEndpoint,
     HardwareEndpointError, HardwareEndpointId, HardwareEndpointKind, HardwareEndpointSpec,
-    HardwareEndpointStatus, HardwareLease, HardwareRegistry, RADIO_MAX_PACKET_LEN, RadioChannelId,
-    RadioConfig, RadioDevice, RadioDeviceId, RadioDrainReport, RadioDriver, RadioEventId,
-    RadioMessage, RadioMessageKind,
+    HardwareEndpointStatus, HardwareLease, HardwareRegistry, RadioChannelId, RadioConfig,
+    RadioDevice, RadioDeviceId, RadioDrainReport, RadioDriver, RadioEventId, RadioMessage,
+    RadioMessageKind, RADIO_MAX_PACKET_LEN,
 };
 
 const DRIVER_ID: &str = "esp32-espnow-radio0";
@@ -256,7 +256,10 @@ impl Esp32EspNowRadioDevice {
             return;
         }
 
-        self.queues.entry(channel).or_default().push(message);
+        let Some(queue) = self.queues.get_mut(&channel) else {
+            return;
+        };
+        queue.push(message);
     }
 
     fn close(&mut self) {
@@ -271,7 +274,7 @@ impl Esp32EspNowRadioDevice {
 impl RadioDevice for Esp32EspNowRadioDevice {
     fn subscribe_channel(&mut self, channel: RadioChannelId) -> Result<(), HardwareEndpointError> {
         self.subscriptions.insert(channel);
-        self.queues.entry(channel).or_default();
+        self.queues.entry(channel).or_insert_with(RadioQueue::new);
         Ok(())
     }
 
@@ -331,6 +334,14 @@ struct RadioQueue {
 }
 
 impl RadioQueue {
+    fn new() -> Self {
+        Self {
+            messages: VecDeque::with_capacity(RADIO_QUEUE_CAPACITY),
+            dropped_count: 0,
+            overflowed: false,
+        }
+    }
+
     fn push(&mut self, message: RadioMessage) {
         if self.messages.len() >= RADIO_QUEUE_CAPACITY {
             let _ = self.messages.pop_front();
@@ -352,11 +363,7 @@ impl RadioQueue {
 
 impl Default for RadioQueue {
     fn default() -> Self {
-        Self {
-            messages: VecDeque::new(),
-            dropped_count: 0,
-            overflowed: false,
-        }
+        Self::new()
     }
 }
 

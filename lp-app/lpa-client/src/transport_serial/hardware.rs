@@ -6,9 +6,25 @@
 use log;
 use lpc_wire::WireServerMessage;
 use lpc_wire::{TransportError, messages::ClientMessage};
+use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
+
+/// Optional observer for complete serial lines.
+pub trait SerialLineObserver: Send + Sync + 'static {
+    fn observe_line(&self, line: &str);
+}
+
+/// Options for the hardware serial transport.
+#[derive(Clone, Default)]
+pub struct HardwareSerialOptions {
+    /// Reset the ESP32 after opening the serial port, so boot logs are captured
+    /// by this transport.
+    pub reset_after_open: bool,
+    /// Receives every complete serial line, including protocol lines.
+    pub line_observer: Option<Arc<dyn SerialLineObserver>>,
+}
 
 /// Serial I/O thread loop
 ///
@@ -20,6 +36,7 @@ fn serial_thread_loop(
     mut client_rx: mpsc::UnboundedReceiver<ClientMessage>,
     server_tx: mpsc::UnboundedSender<WireServerMessage>,
     mut shutdown_rx: oneshot::Receiver<()>,
+    options: HardwareSerialOptions,
 ) {
     // Open serial port
     let mut port = match open_serial_port(&port_name, baud_rate) {
@@ -30,6 +47,14 @@ fn serial_thread_loop(
             return;
         }
     };
+
+    if options.reset_after_open {
+        if let Err(e) = reset_after_open(port.as_mut()) {
+            log::error!("Serial thread: Failed to reset device after opening {port_name}: {e}");
+            drop(server_tx);
+            return;
+        }
+    }
 
     let mut read_buffer = Vec::new();
     let mut connection_lost = false;
@@ -115,6 +140,11 @@ fn serial_thread_loop(
                     continue;
                 }
             };
+            let line_str = line_str.trim_end_matches('\r');
+
+            if let Some(observer) = &options.line_observer {
+                observer.observe_line(line_str);
+            }
 
             // Check for M! prefix
             if let Some(json_str) = line_str.strip_prefix("M!") {
@@ -155,6 +185,18 @@ fn serial_thread_loop(
     log::debug!("Serial thread: Exiting");
 }
 
+fn reset_after_open(port: &mut dyn serialport::SerialPort) -> serialport::Result<()> {
+    // Same USB-JTAG-serial reset sequence espflash uses after flashing ESP32-C6.
+    port.write_data_terminal_ready(false)?;
+    thread::sleep(Duration::from_millis(100));
+    port.write_request_to_send(true)?;
+    port.write_data_terminal_ready(false)?;
+    port.write_request_to_send(true)?;
+    thread::sleep(Duration::from_millis(100));
+    port.write_request_to_send(false)?;
+    Ok(())
+}
+
 /// Open serial port with specified settings
 fn open_serial_port(
     port_name: &str,
@@ -192,6 +234,19 @@ pub fn create_hardware_serial_transport_pair(
     port_name: &str,
     baud_rate: u32,
 ) -> Result<super::AsyncSerialClientTransport, TransportError> {
+    create_hardware_serial_transport_pair_with_options(
+        port_name,
+        baud_rate,
+        HardwareSerialOptions::default(),
+    )
+}
+
+/// Create a hardware serial transport pair with boot reset/capture options.
+pub fn create_hardware_serial_transport_pair_with_options(
+    port_name: &str,
+    baud_rate: u32,
+    options: HardwareSerialOptions,
+) -> Result<super::AsyncSerialClientTransport, TransportError> {
     use super::AsyncSerialClientTransport;
 
     // Create channels for bidirectional communication
@@ -204,7 +259,14 @@ pub fn create_hardware_serial_transport_pair(
     let thread_handle = thread::Builder::new()
         .name("lp-hardware-serial".to_string())
         .spawn(move || {
-            serial_thread_loop(port_name, baud_rate, client_rx, server_tx, shutdown_rx);
+            serial_thread_loop(
+                port_name,
+                baud_rate,
+                client_rx,
+                server_tx,
+                shutdown_rx,
+                options,
+            );
         })
         .map_err(|e| TransportError::Other(format!("Failed to spawn serial thread: {e}")))?;
 

@@ -185,6 +185,9 @@ strip = "none"
 [profile.release-esp32.package.esp-radio]
 opt-level = "s"
 
+[profile.release-esp32.package.lps-glsl]
+opt-level = "s"
+
 [profile.release-esp32.package.esp-phy]
 opt-level = "z"
 

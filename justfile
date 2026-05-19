@@ -371,6 +371,11 @@ demo-esp32c6-host example="basic": install-rv32-target
     ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32/partitions.csv {{ fw_esp32_elf }}; \
     cargo run --package lp-cli -- dev examples/{{ example }} --push "serial:$PORT"
 
+# Run an ESP32-C6 demo as an automated hardware check: capture boot serial,
+# push the project, and exit once the loaded project responds.
+demo-esp32c6-check example="basic": install-rv32-target
+    cargo run --package lp-cli -- fwcheck demo esp32c6 {{ example }}
+
 # Fast compile-only gate for the native frontend demo shader.
 test-native-rainbow: build-rv32-builtins
     cargo run -p lps-filetests-app -- test --target rv32lpn.q32 --concise lps-glsl/rainbow.glsl
@@ -383,6 +388,10 @@ demo-esp32c6-host-naga example="basic": install-rv32-target
     echo "Using ESPFLASH_PORT=$PORT"; \
     ESPFLASH_PORT="$PORT" espflash flash --chip esp32c6 --partition-table lp-fw/fw-esp32/partitions.csv {{ fw_esp32_elf }}; \
     cargo run --package lp-cli -- dev examples/{{ example }} --push "serial:$PORT"
+
+# Same as demo-esp32c6-check, but builds the explicit Naga frontend.
+demo-esp32c6-check-naga example="basic": install-rv32-target
+    cargo run --package lp-cli -- fwcheck demo esp32c6 {{ example }} --features server,naga
 
 # Run firmware on ESP32-C6 device (empty fs; use demo-esp32c6-host to flash + upload a project first)
 demo-esp32c6-standalone: build-fw-esp32

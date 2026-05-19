@@ -13,4 +13,7 @@ pub use client::AsyncSerialClientTransport;
 #[cfg(feature = "serial")]
 pub use emulator::{BacktraceInfo, create_emulator_serial_transport_pair};
 #[cfg(feature = "serial")]
-pub use hardware::create_hardware_serial_transport_pair;
+pub use hardware::{
+    HardwareSerialOptions, SerialLineObserver, create_hardware_serial_transport_pair,
+    create_hardware_serial_transport_pair_with_options,
+};

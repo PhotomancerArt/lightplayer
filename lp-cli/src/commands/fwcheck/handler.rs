@@ -1,10 +1,21 @@
 use std::io::{IsTerminal, Read, Write};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use fw_checks::{FW_CHECK_JSON_PREFIX, FwCheckConfig, FwCheckTarget, all_checks, find_check};
+use lpa_client::transport_serial::{
+    HardwareSerialOptions, SerialLineObserver, create_hardware_serial_transport_pair_with_options,
+};
+use lpa_client::{ClientTransport, LpClient};
+use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
+use lpfs::{LpFs, LpFsStd};
+use tokio::time::sleep;
 
-use super::args::{FwcheckCli, FwcheckCommand, FwcheckRunArgs, FwcheckTargetArg};
+use crate::commands::dev::{push_project_async, validation};
+
+use super::args::{FwcheckCli, FwcheckCommand, FwcheckDemoArgs, FwcheckRunArgs, FwcheckTargetArg};
 use super::{port, process, report, trace_dir};
 
 struct Style {
@@ -12,6 +23,10 @@ struct Style {
 }
 
 struct CaptureResult {
+    report_text: String,
+}
+
+struct DemoResult {
     report_text: String,
 }
 
@@ -38,6 +53,7 @@ pub fn handle_fwcheck(cli: FwcheckCli) -> Result<()> {
             Ok(())
         }
         FwcheckCommand::Run(args) => run_check(args),
+        FwcheckCommand::Demo(args) => run_demo(args),
     }
 }
 
@@ -54,6 +70,14 @@ fn run_check(args: FwcheckRunArgs) -> Result<()> {
     match target {
         FwCheckTarget::Esp32C6 => run_esp32c6(check, &args),
         FwCheckTarget::FwEmu => bail!("fw-emu fwcheck runner is not implemented yet"),
+    }
+}
+
+fn run_demo(args: FwcheckDemoArgs) -> Result<()> {
+    let target = target_from_arg(args.target);
+    match target {
+        FwCheckTarget::Esp32C6 => run_esp32c6_demo(&args),
+        FwCheckTarget::FwEmu => bail!("fw-emu project demo runner is not implemented yet"),
     }
 }
 
@@ -106,12 +130,227 @@ fn run_esp32c6(check: FwCheckConfig, args: &FwcheckRunArgs) -> Result<()> {
     Ok(())
 }
 
+fn run_esp32c6_demo(args: &FwcheckDemoArgs) -> Result<()> {
+    let root = std::env::current_dir().context("current directory")?;
+    let project_dir = resolve_project_dir(&root, &args.project)?;
+    let (project_uid, _project_name) = validation::validate_local_project(&project_dir)?;
+    let project_slug = slug_from_project_dir(&project_dir);
+    let port = port::resolve_esp32_port(args.port.as_deref())?;
+    let trace = trace_dir::create_trace_dir(
+        "esp32c6",
+        &format!("demo-{project_slug}"),
+        args.note.as_deref(),
+    )?;
+    let features = features_from_arg(&args.features);
+    let style = Style::detect();
+
+    println!("{}", style.heading("Firmware Demo Check"));
+    println!("project: {}", project_dir.display());
+    println!("target:  esp32c6");
+    println!("fw:      fw-esp32 --features {features}");
+    println!("port:    {port}");
+    println!("trace:   {}", trace.dir.display());
+    println!();
+
+    let ((), build_elapsed) = run_step(&style, "Build firmware", args.verbose, || {
+        process::cargo_build_fw_esp32(&root, &features, args.verbose)
+    })?;
+    let ((), flash_elapsed) = run_step(&style, "Flash firmware", args.verbose, || {
+        process::flash_esp32_no_reset(&root, &port, args.verbose)
+    })?;
+    let (demo, run_elapsed) = run_step(&style, "Boot, push, and verify project", true, || {
+        run_demo_capture(
+            &port,
+            &project_dir,
+            &project_uid,
+            args.timeout_secs,
+            args.settle_secs,
+            &trace,
+        )
+    })?;
+
+    println!();
+    println!("{}", style.heading("Summary"));
+    println!("{}", demo.report_text.trim_end());
+    println!();
+    println!("{}", style.heading("Artifacts"));
+    println!("trace:  {}", trace.trace_txt.display());
+    println!("report: {}", trace.report_txt.display());
+    println!();
+    println!(
+        "{} build={} flash={} run={}",
+        style.dim("host steps:"),
+        fmt_duration(build_elapsed),
+        fmt_duration(flash_elapsed),
+        fmt_duration(run_elapsed),
+    );
+    Ok(())
+}
+
 fn features_for_esp32(check: FwCheckConfig) -> String {
-    let mut features = check.firmware_features.to_vec();
-    if !features.contains(&"esp32c6") {
-        features.push("esp32c6");
+    ensure_esp32c6_feature(check.firmware_features.iter().copied())
+}
+
+fn features_from_arg(features: &str) -> String {
+    ensure_esp32c6_feature(
+        features
+            .split(',')
+            .map(str::trim)
+            .filter(|feature| !feature.is_empty()),
+    )
+}
+
+fn ensure_esp32c6_feature<'a>(features: impl IntoIterator<Item = &'a str>) -> String {
+    let mut out: Vec<&str> = features.into_iter().collect();
+    if !out.contains(&"esp32c6") {
+        out.push("esp32c6");
     }
-    features.join(",")
+    out.join(",")
+}
+
+fn run_demo_capture(
+    port_name: &str,
+    project_dir: &Path,
+    project_uid: &str,
+    timeout_secs: u64,
+    settle_secs: u64,
+    trace: &trace_dir::TraceDir,
+) -> Result<DemoResult> {
+    let capture = Arc::new(SerialCapture::new(&trace.trace_txt)?);
+    let observer: Arc<dyn SerialLineObserver> = capture.clone();
+    let options = HardwareSerialOptions {
+        reset_after_open: true,
+        line_observer: Some(observer),
+    };
+    let transport = create_hardware_serial_transport_pair_with_options(
+        port_name,
+        DEFAULT_SERIAL_BAUD_RATE,
+        options,
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to create serial transport: {e}"))?;
+    let transport: Box<dyn ClientTransport> = Box::new(transport);
+    let shared_transport = Arc::new(tokio::sync::Mutex::new(transport));
+    let client = LpClient::new_shared(Arc::clone(&shared_transport));
+    let local_fs: Arc<dyn LpFs + Send + Sync> = Arc::new(LpFsStd::new(project_dir.to_owned()));
+    let runtime = tokio::runtime::Runtime::new()?;
+
+    let result = runtime.block_on(async {
+        let run = run_demo_capture_async(
+            &client,
+            &capture,
+            local_fs,
+            project_uid,
+            settle_secs,
+            shared_transport,
+        );
+        match tokio::time::timeout(Duration::from_secs(timeout_secs), run).await {
+            Ok(result) => result,
+            Err(_) => bail!("timed out after {timeout_secs}s waiting for project to run"),
+        }
+    });
+
+    capture.flush()?;
+    let report_text = match result {
+        Ok(report_text) => report_text,
+        Err(err) => {
+            let report_text = format!("status: failed\nerror: {err:#}\n");
+            std::fs::write(&trace.report_txt, &report_text)
+                .with_context(|| format!("write report {}", trace.report_txt.display()))?;
+            return Err(err);
+        }
+    };
+    std::fs::write(&trace.report_txt, &report_text)
+        .with_context(|| format!("write report {}", trace.report_txt.display()))?;
+    Ok(DemoResult { report_text })
+}
+
+async fn run_demo_capture_async(
+    client: &LpClient,
+    capture: &Arc<SerialCapture>,
+    local_fs: Arc<dyn LpFs + Send + Sync>,
+    project_uid: &str,
+    settle_secs: u64,
+    shared_transport: Arc<tokio::sync::Mutex<Box<dyn ClientTransport>>>,
+) -> Result<String> {
+    wait_for_boot_ready(capture).await?;
+
+    if let Err(e) = run_client_step(capture, "stop all projects", client.stop_all_projects()).await
+    {
+        eprintln!("Warning: Failed to stop all projects: {e}");
+        eprintln!("Continuing with project push...");
+    }
+
+    run_client_step(
+        capture,
+        "push project",
+        push_project_async(client, local_fs.as_ref(), project_uid),
+    )
+    .await?;
+
+    let project_path = format!("projects/{project_uid}");
+    let handle = run_client_step(capture, "load project", client.project_load(&project_path))
+        .await
+        .with_context(|| format!("load {project_path}"))?;
+
+    run_client_step(
+        capture,
+        "read loaded project state",
+        client.project_read_default_debug(handle),
+    )
+    .await?;
+
+    sleep(Duration::from_secs(settle_secs)).await;
+    capture.check_failure()?;
+
+    let loaded = run_client_step(
+        capture,
+        "list loaded projects",
+        client.project_list_loaded(),
+    )
+    .await?
+    .len();
+    capture.check_failure()?;
+
+    let mut transport = shared_transport.lock().await;
+    let _ = transport.close().await;
+
+    Ok(format!(
+        "status: ok\nproject: {project_path}\nloaded_projects: {loaded}\nsettled_for: {settle_secs}s\n",
+    ))
+}
+
+async fn wait_for_boot_ready(capture: &Arc<SerialCapture>) -> Result<()> {
+    loop {
+        fail_after_grace_if_needed(capture).await?;
+        if capture.boot_ready() {
+            return Ok(());
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+}
+
+async fn run_client_step<T, F>(capture: &Arc<SerialCapture>, label: &str, future: F) -> Result<T>
+where
+    F: std::future::Future<Output = Result<T>>,
+{
+    tokio::pin!(future);
+    loop {
+        tokio::select! {
+            result = &mut future => return result,
+            _ = sleep(Duration::from_millis(50)) => {
+                fail_after_grace_if_needed(capture).await.with_context(|| format!("{label} failed"))?;
+            }
+        }
+    }
+}
+
+async fn fail_after_grace_if_needed(capture: &Arc<SerialCapture>) -> Result<()> {
+    if let Some(line) = capture.failure_message() {
+        sleep(Duration::from_secs(2)).await;
+        capture.flush()?;
+        bail!("device reported failure: {line}");
+    }
+    Ok(())
 }
 
 fn capture_serial(
@@ -176,6 +415,121 @@ fn capture_serial(
     let report_text = std::fs::read_to_string(&trace.report_txt)
         .with_context(|| format!("read report {}", trace.report_txt.display()))?;
     Ok(CaptureResult { report_text })
+}
+
+struct SerialCapture {
+    trace_file: Mutex<std::fs::File>,
+    failure: Mutex<Option<String>>,
+    boot_ready: std::sync::atomic::AtomicBool,
+}
+
+impl SerialCapture {
+    fn new(path: &Path) -> Result<Self> {
+        let trace_file = std::fs::File::create(path)
+            .with_context(|| format!("create trace {}", path.display()))?;
+        Ok(Self {
+            trace_file: Mutex::new(trace_file),
+            failure: Mutex::new(None),
+            boot_ready: std::sync::atomic::AtomicBool::new(false),
+        })
+    }
+
+    fn boot_ready(&self) -> bool {
+        self.boot_ready.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn check_failure(&self) -> Result<()> {
+        if let Some(line) = self.failure_message() {
+            bail!("device reported failure: {line}");
+        }
+        Ok(())
+    }
+
+    fn failure_message(&self) -> Option<String> {
+        self.failure.lock().expect("serial failure mutex").clone()
+    }
+
+    fn flush(&self) -> Result<()> {
+        self.trace_file
+            .lock()
+            .expect("serial trace mutex")
+            .flush()
+            .context("flush serial trace")
+    }
+}
+
+impl SerialLineObserver for SerialCapture {
+    fn observe_line(&self, line: &str) {
+        if let Ok(mut file) = self.trace_file.lock() {
+            writeln!(file, "{line}").ok();
+        }
+        if line.contains("[INIT] fw-esp32 initialized, starting server loop") {
+            self.boot_ready
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        if is_device_failure_line(line) {
+            let mut failure = self.failure.lock().expect("serial failure mutex");
+            if failure.is_none() {
+                *failure = Some(line.to_owned());
+            }
+        }
+    }
+}
+
+fn is_device_failure_line(line: &str) -> bool {
+    line.contains("OOM")
+        || line.contains("panicked at")
+        || line.contains("Exception '")
+        || line.contains("fatal:")
+}
+
+fn resolve_project_dir(root: &Path, project: &Path) -> Result<PathBuf> {
+    let direct = if project.is_absolute() {
+        project.to_path_buf()
+    } else {
+        root.join(project)
+    };
+    if direct.exists() {
+        return direct
+            .canonicalize()
+            .with_context(|| format!("resolve project directory {}", direct.display()));
+    }
+
+    if project.components().count() == 1 {
+        let example = root.join("examples").join(project);
+        if example.exists() {
+            return example
+                .canonicalize()
+                .with_context(|| format!("resolve project directory {}", example.display()));
+        }
+    }
+
+    bail!(
+        "project directory not found: {} (also tried examples/{})",
+        direct.display(),
+        project.display()
+    );
+}
+
+fn slug_from_project_dir(project_dir: &Path) -> String {
+    project_dir
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(sanitize_slug)
+        .filter(|slug| !slug.is_empty())
+        .unwrap_or_else(|| "project".to_owned())
+}
+
+fn sanitize_slug(input: &str) -> String {
+    let mut out = String::new();
+    for ch in input.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+        } else if matches!(ch, '-' | '_' | '.') && !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    out.trim_matches('-').to_owned()
 }
 
 fn normalize_serial_text(bytes: &[u8]) -> String {

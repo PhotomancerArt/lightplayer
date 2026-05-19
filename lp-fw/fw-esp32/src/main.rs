@@ -47,6 +47,13 @@ fn panic_handler(info: &PanicInfo) -> ! {
     print_panic_frames();
     esp_println::println!();
 
+    if is_esp_sync_reentrant_lock_panic(info) {
+        esp_println::println!(
+            "fatal: esp-sync lock reentry while panicking; aborting without heap allocation"
+        );
+        loop {}
+    }
+
     let payload: alloc::boxed::Box<dyn core::any::Any + Send> = {
         #[cfg(feature = "server")]
         {
@@ -88,6 +95,11 @@ fn panic_handler(info: &PanicInfo) -> ! {
     // begin_panic returns if no catch_unwind was found on the stack.
     esp_println::println!("unwinding failed: code={}", code.0);
     loop {}
+}
+
+fn is_esp_sync_reentrant_lock_panic(info: &PanicInfo) -> bool {
+    info.location()
+        .is_some_and(|loc| loc.file().contains("esp-sync/src/lib.rs"))
 }
 
 fn print_panic_frames() {
