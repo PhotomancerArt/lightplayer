@@ -167,7 +167,7 @@ vec4 render(vec2 pos) {
 
     // Create output node
     let output_config = OutputDef {
-        endpoint: ValueSlot::new(HardwareEndpointSpec::from_static("ws281x:rmt:D4")),
+        endpoint: ValueSlot::new(HardwareEndpointSpec::from_static("ws281x:rmt:D10")),
         bindings: bus_input_binding_defs("control.out"),
         options: OptionSlot::none(),
     };

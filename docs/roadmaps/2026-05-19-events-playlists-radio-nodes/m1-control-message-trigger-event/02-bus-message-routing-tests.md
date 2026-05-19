@@ -49,7 +49,7 @@ Relevant files:
 - `lp-core/lpc-engine/src/dataflow/resolver/resolve_session.rs`
 - `lp-core/lpc-engine/src/dataflow/resolver/resolver.rs`
 - `lp-core/lpc-engine/tests/runtime_spine.rs`
-- `examples/trigger-events/...`
+- `examples/events/...`
 
 Expected test shape:
 
@@ -66,7 +66,7 @@ Expected test shape:
   read the fixed event array uniform.
 - Add a compute consumed-map test using the same helper, even if the example only needs compute
   producers and a visual consumer. This prevents the two shader paths from drifting.
-- Add `examples/trigger-events` with two compute producers, one visual consumer, a basic fixture,
+- Add `examples/events` with two compute producers, one visual consumer, a basic fixture,
   and an output.
 - The example visual shader should support eight event slots and draw one colored circle per
   non-empty slot. The circles should be simple and deterministic, with color/position/intensity

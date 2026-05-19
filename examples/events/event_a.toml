@@ -4,6 +4,14 @@ glsl_path = "event_a.glsl"
 [bindings.events]
 target = "bus#trigger"
 
+[bindings.time]
+source = "bus#time.seconds"
+
+[consumed_slots.time]
+kind = "value"
+value = "f32"
+default = 0.0
+
 [produced_slots.events]
 kind = "map"
 key = "u32"

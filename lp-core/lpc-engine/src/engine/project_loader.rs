@@ -857,7 +857,7 @@ mod tests {
 
     use alloc::sync::Arc;
     use lpc_model::TreePath;
-    use lpc_model::{NodeName, ProductRef, SlotData, SlotMapKey};
+    use lpc_model::{NodeName, ProductRef, SlotData};
     use lpc_wire::{
         ProjectProbeRequest, ProjectProbeResult, ProjectReadRequest, ProjectReadResult,
         RenderProductProbeRequest, RenderProductProbeResult, WireTextureFormat,
@@ -881,10 +881,8 @@ mod tests {
         LpFsStd::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/fluid"))
     }
 
-    fn examples_trigger_events_fs() -> LpFsStd {
-        LpFsStd::new(
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/trigger-events"),
-        )
+    fn examples_events_fs() -> LpFsStd {
+        LpFsStd::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/events"))
     }
 
     #[test]
@@ -1437,51 +1435,20 @@ value = "f32"
     }
 
     #[test]
-    fn trigger_events_example_merges_bus_maps_into_visual_shader() {
-        let fs = examples_trigger_events_fs();
+    fn events_example_merges_bus_maps_into_visual_shader() {
+        let fs = examples_events_fs();
         let fs: &dyn LpFs = &fs;
-        let services = EngineServices::new(TreePath::parse("/trigger_events.show").expect("path"));
-        let mut rt =
-            ProjectLoader::load_from_root(fs, services).expect("load trigger events example");
+        let services = EngineServices::new(TreePath::parse("/events.show").expect("path"));
+        let mut rt = ProjectLoader::load_from_root(fs, services).expect("load events example");
         rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
         let root = rt.tree().root();
 
-        let event_a = rt
-            .tree()
-            .lookup_sibling(root, NodeName::parse("event_a").unwrap())
-            .expect("event_a node");
-        let event_b = rt
-            .tree()
-            .lookup_sibling(root, NodeName::parse("event_b").unwrap())
-            .expect("event_b node");
         let shader = rt
             .tree()
             .lookup_sibling(root, NodeName::parse("shader").unwrap())
             .expect("shader node");
 
-        for (node, expected_keys) in [(event_a, [1, 4]), (event_b, [2, 6])] {
-            let (events, _) = resolve_with_engine_host(
-                &mut rt,
-                QueryKey::ProducedSlot {
-                    node,
-                    slot: SlotPath::parse("events").expect("events"),
-                },
-                ResolveLogLevel::Off,
-            )
-            .expect("compute event map");
-            let SlotData::Map(map) = events.data() else {
-                panic!("compute events should be a map");
-            };
-            for key in expected_keys {
-                assert!(
-                    map.entries.contains_key(&SlotMapKey::U32(key)),
-                    "compute event map should contain id {key}"
-                );
-            }
-        }
-
         rt.tick(16).expect("tick trigger graph");
-
         let (shader_output, _) = resolve_with_engine_host(
             &mut rt,
             QueryKey::ProducedSlot {
@@ -1496,20 +1463,36 @@ value = "f32"
         else {
             panic!("shader output should be a visual product");
         };
-        let texture = rt
-            .render_texture_for_test(
-                *product,
-                &RenderTextureRequest {
-                    width: 64,
-                    height: 64,
-                    format: TextureStorageFormat::Rgba16Unorm,
-                    time_seconds: 0.0,
-                },
-            )
-            .expect("trigger events texture");
-        let max_rgb = texture
-            .try_raw_bytes()
-            .expect("bytes")
+        let first = render_test_texture_bytes(&mut rt, *product);
+        assert_bright_event_pixels(&first);
+
+        rt.tick(500).expect("advance trigger graph");
+        let second = render_test_texture_bytes(&mut rt, *product);
+        assert_bright_event_pixels(&second);
+        assert_ne!(
+            first, second,
+            "event example should blink as scheduled events fire and clear"
+        );
+    }
+
+    fn render_test_texture_bytes(rt: &mut Engine, product: lpc_model::VisualProduct) -> Vec<u8> {
+        rt.render_texture_for_test(
+            product,
+            &RenderTextureRequest {
+                width: 64,
+                height: 64,
+                format: TextureStorageFormat::Rgba16Unorm,
+                time_seconds: 0.0,
+            },
+        )
+        .expect("events texture")
+        .try_raw_bytes()
+        .expect("bytes")
+        .to_vec()
+    }
+
+    fn assert_bright_event_pixels(bytes: &[u8]) {
+        let max_rgb = bytes
             .chunks_exact(8)
             .flat_map(|px| {
                 [

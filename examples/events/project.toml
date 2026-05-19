@@ -1,5 +1,5 @@
 kind = "Project"
-name = "trigger-events"
+name = "events"
 
 [nodes.output]
 artifact = "./output.toml"

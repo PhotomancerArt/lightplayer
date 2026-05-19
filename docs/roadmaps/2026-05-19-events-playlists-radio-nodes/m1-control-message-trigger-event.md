@@ -41,7 +41,7 @@ Out of scope:
 - Slotted `ControlMessage` / `TriggerEvent` model type.
 - Bus/resolver tests for `bus#trigger` message routing.
 - Shared compute/visual consumed-map support for fixed sentinel-mapped event arrays.
-- `examples/trigger-events` with two compute event producers and a visual shader that draws up to
+- `examples/events` with two compute event producers and a visual shader that draws up to
   eight event circles.
 - Plan summary and validation notes.
 

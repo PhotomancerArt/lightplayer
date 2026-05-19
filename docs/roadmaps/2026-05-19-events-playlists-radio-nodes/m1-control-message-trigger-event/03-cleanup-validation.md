@@ -44,7 +44,7 @@ Expected changes:
   - `TriggerEvent` relationship,
   - bus routing validation,
   - shared compute/visual consumed-map support,
-  - `examples/trigger-events`,
+  - `examples/events`,
   - deferred address/args.
 - Search for accidental address/args implementation and remove it from M1 if present.
 

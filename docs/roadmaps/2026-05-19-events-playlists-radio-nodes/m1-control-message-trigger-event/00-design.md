@@ -22,7 +22,7 @@ lp-core/lpc-engine/src/
   dataflow/
     resolver/...               # only if message bus routing needs a small fix
 
-examples/trigger-events/
+examples/events/
   project.toml
   clock.toml
   event_a.toml

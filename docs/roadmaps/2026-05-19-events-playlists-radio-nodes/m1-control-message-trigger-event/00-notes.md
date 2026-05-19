@@ -120,7 +120,7 @@ Decision: add a checked-in example project, not only unit tests.
 
 Expected shape:
 
-- `examples/trigger-events/project.toml`
+- `examples/events/project.toml`
 - two compute shader nodes that each publish a sentinel-mapped `events` output to `bus#trigger`
 - one visual shader node that consumes `bus#trigger` as an 8-slot sentinel-mapped event array
 - the visual shader renders one colored circle per active event slot, using `id` and `seq` to vary

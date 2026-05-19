@@ -12,7 +12,7 @@ Implemented M1 as the smallest usable control-event path:
 - Added compute shader descriptor/header support for consumed sentinel maps.
 - Added LPVM struct argument flattening so array-of-struct shader inputs can be passed through the
   existing call path.
-- Added `examples/trigger-events`, where two compute shaders produce `ControlMessage` maps into
+- Added `examples/events`, where two compute shaders produce `ControlMessage` maps into
   `bus#trigger` and a visual shader consumes the merged map to draw active event circles.
 - Updated checked-in examples and the CLI project template to use authored hardware endpoint specs
   instead of the removed legacy `pin` field.
@@ -24,7 +24,7 @@ cargo fmt --check
 cargo test -p lpc-model control_message
 cargo test -p lpc-engine shader_input_materialize
 cargo test -p lpc-engine compute_desc_accepts_consumed_sentinel_maps
-cargo test -p lpc-engine trigger_events_example_merges_bus_maps_into_visual_shader
+cargo test -p lpc-engine events_example_merges_bus_maps_into_visual_shader
 cargo test -p lp-cli --test examples_valid
 cargo test -p lpc-engine --test runtime_spine
 cargo test -p lpc-engine engine_services
