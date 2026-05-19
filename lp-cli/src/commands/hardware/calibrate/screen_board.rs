@@ -3,14 +3,24 @@ use dialoguer::{Input, Select};
 
 use super::app::{App, Route};
 use super::model::{self, LabelStatus};
-use super::ui::{BOLD, CYAN, DIM, GREEN, RED, YELLOW, paint, section};
+use super::ui::{BOLD, CYAN, DIM, GREEN, RED, YELLOW, paint, section, shortcut};
 
 pub fn show(app: &mut App) -> Result<Route> {
     print_board(app);
-    let default = model::next_unresolved_label(&app.manifest);
+    let default = model::next_unassigned_label(&app.manifest);
     let prompt = match &default {
-        Some(label) => format!("Enter=calibrate {label}, l=list, p=pick label, q=quit"),
-        None => "Enter=edit label list, p=pick label, q=quit".to_string(),
+        Some(label) => format!(
+            "Enter=calibrate {label}, {}, {}, {}",
+            shortcut('l', "ist"),
+            shortcut('p', "ick label"),
+            shortcut('q', "uit")
+        ),
+        None => format!(
+            "Enter=edit label list, {}, {}, {}",
+            shortcut('l', "ist"),
+            shortcut('p', "ick label"),
+            shortcut('q', "uit")
+        ),
     };
     let command: String = Input::new()
         .with_prompt(prompt)
@@ -92,7 +102,14 @@ fn print_board(app: &App) {
     println!();
     println!(
         "{}",
-        paint(DIM, "Commands: v=verify assigned, r=retry not-found.")
+        paint(
+            DIM,
+            &format!(
+                "Commands: {}, {}.",
+                shortcut('v', "erify assigned"),
+                shortcut('r', "etry not-found")
+            )
+        )
     );
 }
 

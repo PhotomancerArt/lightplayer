@@ -4,7 +4,7 @@ use dialoguer::Input;
 use super::app::{App, PulseStatus, Route, is_serial_disconnect};
 use super::calibration_manifest_update::GpioCandidate;
 use super::model::{self, LabelStatus};
-use super::ui::{BOLD, DIM, GREEN, YELLOW, paint, section};
+use super::ui::{BOLD, DIM, GREEN, YELLOW, paint, section, shortcut};
 
 pub fn show(app: &mut App, label: String) -> Result<Route> {
     model::ensure_label(&mut app.manifest, &label)?;
@@ -13,10 +13,19 @@ pub fn show(app: &mut App, label: String) -> Result<Route> {
         let row = model::row(&app.manifest, &label);
         print_pin(&row);
         let prompt = match row.status {
-            LabelStatus::Assigned | LabelStatus::Verified => {
-                "Enter=test assignment, r=remap/search, u=unassign, b=board, q=quit"
-            }
-            _ => "Enter=search, s=skip, b=board, q=quit",
+            LabelStatus::Assigned | LabelStatus::Verified => format!(
+                "Enter=test assignment, {}, {}, {}, {}",
+                shortcut('r', "emap/search"),
+                shortcut('u', "nassign"),
+                shortcut('b', "oard"),
+                shortcut('q', "uit")
+            ),
+            _ => format!(
+                "Enter=search, {}, {}, {}",
+                shortcut('s', "kip"),
+                shortcut('b', "oard"),
+                shortcut('q', "uit")
+            ),
         };
         let command: String = Input::new()
             .with_prompt(prompt)

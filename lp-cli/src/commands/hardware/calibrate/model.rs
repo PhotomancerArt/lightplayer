@@ -34,8 +34,8 @@ impl LabelStatus {
         }
     }
 
-    pub fn is_unresolved(self) -> bool {
-        matches!(self, Self::Unassigned | Self::NotFound | Self::Skipped)
+    pub fn is_unassigned(self) -> bool {
+        matches!(self, Self::Unassigned)
     }
 }
 
@@ -103,10 +103,10 @@ pub fn row(manifest: &HardwareManifestFile, label: &str) -> LabelRow {
     }
 }
 
-pub fn next_unresolved_label(manifest: &HardwareManifestFile) -> Option<String> {
+pub fn next_unassigned_label(manifest: &HardwareManifestFile) -> Option<String> {
     rows(manifest)
         .into_iter()
-        .find(|row| row.status.is_unresolved())
+        .find(|row| row.status.is_unassigned())
         .map(|row| row.label)
 }
 
@@ -361,6 +361,22 @@ mod tests {
         let row = row(&manifest, "D3");
         assert_eq!(row.status, LabelStatus::Assigned);
         assert_eq!(row.gpio, Some(21));
+    }
+
+    #[test]
+    fn next_unassigned_label_ignores_not_found_and_skipped() {
+        let mut manifest =
+            HardwareManifestFile::new("seeed/xiao", HardwareTarget::Esp32c6, "seeed", "xiao");
+        replace_label_list(
+            &mut manifest,
+            vec!["D0".into(), "D1".into(), "D2".into(), "D3".into()],
+        )
+        .unwrap();
+        record_mapping(&mut manifest, "D0", 0, false).unwrap();
+        mark_not_found(&mut manifest, "D1").unwrap();
+        mark_skipped(&mut manifest, "D2").unwrap();
+
+        assert_eq!(next_unassigned_label(&manifest), Some("D3".into()));
     }
 
     #[test]

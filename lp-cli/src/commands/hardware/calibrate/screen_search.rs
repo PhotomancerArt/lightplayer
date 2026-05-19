@@ -5,7 +5,7 @@ use super::app::{App, PulseStatus, Route, is_serial_disconnect};
 use super::calibration_command::PromptCommand;
 use super::calibration_manifest_update::{apply_dangerous, gpio_candidates};
 use super::model;
-use super::ui::{BOLD, DIM, paint, section};
+use super::ui::{BOLD, DIM, paint, section, shortcut};
 
 pub fn show(app: &mut App, label: String) -> Result<Route> {
     model::ensure_label(&mut app.manifest, &label)?;
@@ -114,7 +114,14 @@ fn print_intro(label: &str) {
         "{}",
         paint(
             DIM,
-            "Keys: Enter=no/next, y=found, p=previous, s=skip label, b=board, q=quit."
+            &format!(
+                "Keys: Enter=no/next, {}, {}, {}, {}, {}.",
+                shortcut('y', "es/found"),
+                shortcut('p', "revious"),
+                shortcut('s', "kip label"),
+                shortcut('b', "oard"),
+                shortcut('q', "uit")
+            )
         )
     );
     println!();
@@ -148,7 +155,11 @@ fn prompt_not_found(label: &str) -> Result<NotFoundCommand> {
     println!("{}", paint(BOLD, &format!("{label} was not found.")));
     loop {
         let answer: String = Input::new()
-            .with_prompt("Enter=mark not found, r=retry, b=board")
+            .with_prompt(format!(
+                "Enter=mark not found, {}, {}",
+                shortcut('r', "etry"),
+                shortcut('b', "oard")
+            ))
             .allow_empty(true)
             .interact_text()?;
         match answer.trim().to_ascii_lowercase().as_str() {

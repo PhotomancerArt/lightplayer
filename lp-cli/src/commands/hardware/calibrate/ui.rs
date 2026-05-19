@@ -16,6 +16,13 @@ pub fn paint(code: &str, text: &str) -> String {
     }
 }
 
+pub fn shortcut(key: char, rest: &str) -> String {
+    format!(
+        "[{}]{rest}",
+        paint(CYAN, &key.to_ascii_uppercase().to_string())
+    )
+}
+
 pub fn section(title: &str) {
     println!();
     println!("{}", paint(BOLD, title));

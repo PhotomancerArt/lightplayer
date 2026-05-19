@@ -25,6 +25,39 @@ label = "D3"
 gpio = "/gpio/21"
 status = "assigned"
 
+[[board_label]]
+label = "D4"
+status = "not-found"
+
+[[board_label]]
+label = "D5"
+status = "not-found"
+
+[[board_label]]
+label = "D6"
+gpio = "/gpio/16"
+status = "assigned"
+
+[[board_label]]
+label = "D7"
+gpio = "/gpio/17"
+status = "assigned"
+
+[[board_label]]
+label = "D8"
+gpio = "/gpio/19"
+status = "assigned"
+
+[[board_label]]
+label = "D9"
+gpio = "/gpio/20"
+status = "assigned"
+
+[[board_label]]
+label = "D10"
+gpio = "/gpio/18"
+status = "assigned"
+
 [[gpio]]
 address = "/gpio/0"
 display_label = "D0"
@@ -182,49 +215,64 @@ aliases = ["IO15"]
 
 [[gpio]]
 address = "/gpio/16"
-display_label = "GPIO16"
+display_label = "d6"
 capabilities = [
     "gpio-output",
     "gpio-input",
 ]
-aliases = ["IO16"]
+aliases = [
+    "IO16",
+    "GPIO16",
+]
 
 [[gpio]]
 address = "/gpio/17"
-display_label = "GPIO17"
+display_label = "d7"
 capabilities = [
     "gpio-output",
     "gpio-input",
 ]
-aliases = ["IO17"]
+aliases = [
+    "IO17",
+    "GPIO17",
+]
 
 [[gpio]]
 address = "/gpio/18"
-display_label = "GPIO18"
+display_label = "d10"
 capabilities = [
     "gpio-output",
     "gpio-input",
 ]
-aliases = ["IO18"]
+aliases = [
+    "IO18",
+    "GPIO18",
+]
 location = "known WS281x output header"
 
 [[gpio]]
 address = "/gpio/19"
-display_label = "GPIO19"
+display_label = "d8"
 capabilities = [
     "gpio-output",
     "gpio-input",
 ]
-aliases = ["IO19"]
+aliases = [
+    "IO19",
+    "GPIO19",
+]
 
 [[gpio]]
 address = "/gpio/20"
-display_label = "GPIO20"
+display_label = "d9"
 capabilities = [
     "gpio-output",
     "gpio-input",
 ]
-aliases = ["IO20"]
+aliases = [
+    "IO20",
+    "GPIO20",
+]
 
 [[gpio]]
 address = "/gpio/21"

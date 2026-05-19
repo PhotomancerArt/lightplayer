@@ -3,13 +3,17 @@ use dialoguer::Input;
 
 use super::app::{App, Route};
 use super::model;
-use super::ui::{BOLD, DIM, paint, section};
+use super::ui::{BOLD, DIM, paint, section, shortcut};
 
 pub fn show(app: &mut App) -> Result<Route> {
     loop {
         print_labels(app);
         let input: String = Input::new()
-            .with_prompt("Labels/ranges, + add, d delete, b back")
+            .with_prompt(format!(
+                "Labels/ranges, + add, {}, {}",
+                shortcut('d', "elete"),
+                shortcut('b', "ack")
+            ))
             .allow_empty(true)
             .interact_text()?;
         let input = input.trim();
