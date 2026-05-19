@@ -36,6 +36,7 @@ impl ProjectDef {
 #[cfg(test)]
 mod tests {
     use crate::{NodeDef, SlotShapeRegistry};
+    use alloc::string::ToString;
 
     #[test]
     fn project_def_deserializes_named_nodes() {
@@ -44,10 +45,10 @@ mod tests {
             name = "basic"
 
             [nodes.texture]
-            artifact = "./texture.toml"
+            def = { path = "./texture.toml" }
 
             [nodes.shader]
-            artifact = "./shader.toml"
+            def = { path = "./shader.toml" }
         "#;
         let def = NodeDef::read_toml(&registry(), toml).unwrap();
         let NodeDef::Project(def) = def else {
@@ -58,6 +59,34 @@ mod tests {
         assert_eq!(def.nodes.entries.len(), 2);
         assert!(def.nodes.entries.contains_key("texture"));
         assert!(def.nodes.entries.contains_key("shader"));
+    }
+
+    #[test]
+    fn project_def_rejects_legacy_artifact_field() {
+        let toml = r#"
+            kind = "Project"
+
+            [nodes.texture]
+            artifact = "./texture.toml"
+        "#;
+        let err = NodeDef::read_toml(&registry(), toml).unwrap_err();
+        assert!(err.to_string().contains("def"));
+    }
+
+    #[test]
+    fn project_def_deserializes_inline_node() {
+        let toml = r#"
+            kind = "Project"
+
+            [nodes.clock]
+            def = { kind = "Clock" }
+        "#;
+        let def = NodeDef::read_toml(&registry(), toml).unwrap();
+        let NodeDef::Project(def) = def else {
+            panic!("expected project def");
+        };
+        let clock = def.nodes.entries.get("clock").expect("clock");
+        assert!(matches!(clock.inline_def(), Some(NodeDef::Clock(_))));
     }
 
     fn registry() -> SlotShapeRegistry {

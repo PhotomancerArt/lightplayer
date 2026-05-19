@@ -14,10 +14,9 @@ pub mod relative_node_ref;
 pub mod tree_path;
 
 pub use crate::nodes::node_def::{NodeArtifact, NodeDef};
-pub use crate::slot_views::NodeInvocationView;
 pub use kind::NodeKind;
 pub use node_id::NodeId;
-pub use node_invocation::NodeInvocation;
+pub use node_invocation::{NodeDefRef, NodeInvocation};
 pub use node_name::{NodeName, NodeNameError};
 pub use relative_node_ref::{RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc};
 pub use tree_path::TreePath;

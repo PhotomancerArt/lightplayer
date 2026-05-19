@@ -13,7 +13,7 @@ use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingRef, BusSlotRef, Dim2u,
     Dim2uSlot, EnumSlot, FixtureSamplingConfig, MapSlot, OptionSlot, RenderOrder, RenderOrderSlot,
-    SlotPath, SourcePath, SourcePathSlot, ValueSlot,
+    ShaderSource, SlotPath, ValueSlot,
 };
 use lpfs::LpFs;
 
@@ -83,7 +83,7 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
 
     // Create shader node
     let shader_config = ShaderDef {
-        glsl_path: SourcePathSlot::new(SourcePath::from("shader.glsl")),
+        source: EnumSlot::new(ShaderSource::path("shader.glsl")),
         render_order: RenderOrderSlot::new(RenderOrder(0)),
         bindings: bus_output_binding_defs("visual.out"),
         glsl_opts: lpc_model::GlslOpts::default(),
@@ -208,19 +208,19 @@ fn write_project_toml(fs: &dyn LpFs, name: &str) -> Result<()> {
 name = "{name}"
 
 [nodes.output]
-artifact = "./output.toml"
+def = {{ path = "./output.toml" }}
 
 [nodes.clock]
-artifact = "./clock.toml"
+def = {{ path = "./clock.toml" }}
 
 [nodes.texture]
-artifact = "./texture.toml"
+def = {{ path = "./texture.toml" }}
 
 [nodes.shader]
-artifact = "./shader.toml"
+def = {{ path = "./shader.toml" }}
 
 [nodes.fixture]
-artifact = "./fixture.toml"
+def = {{ path = "./fixture.toml" }}
 "#
     );
     fs.write_file("/project.toml".as_path(), project_toml.as_bytes())
@@ -375,7 +375,10 @@ mod tests {
         let shader_config: ShaderDef =
             toml::from_str(std::str::from_utf8(&shader_toml).expect("UTF-8"))
                 .expect("shader node TOML");
-        assert_eq!(shader_config.glsl_path.value().0, "shader.glsl");
+        assert_eq!(
+            shader_config.shader_source().path_value().unwrap().as_str(),
+            "shader.glsl"
+        );
         assert!(matches!(
             shader_config.bindings.entries()["output"].target_ref(),
             Some(BindingRef::Bus(_))

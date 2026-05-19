@@ -14,7 +14,7 @@ fn dynamic_slot_codec_reads_project_json_through_registry() {
     let object = registry
         .read_slot_json(
             ProjectDef::SHAPE_ID,
-            r#"{"name":"basic","nodes":{"shader":{"artifact":"./shader.toml"}}}"#,
+            r#"{"name":"basic","nodes":{"shader":{"def":{"path":"./shader.toml"}}}}"#,
         )
         .unwrap();
     let Ok(project) = object.into_any().downcast::<ProjectDef>() else {
@@ -23,7 +23,7 @@ fn dynamic_slot_codec_reads_project_json_through_registry() {
 
     assert_eq!(project.name.data.as_ref().unwrap().value(), "basic");
     assert_eq!(
-        project.nodes.entries.get("shader").unwrap().artifact(),
+        project.nodes.entries.get("shader").unwrap().def_path(),
         "./shader.toml"
     );
 }
@@ -37,7 +37,7 @@ fn dynamic_slot_codec_writes_project_json_through_registry() {
     let json = std::str::from_utf8(&json).unwrap();
 
     assert!(json.contains(r#""name":"basic""#));
-    assert!(json.contains(r#""shader":{"artifact":"./shader.toml"}"#));
+    assert!(json.contains(r#""shader":{"def":{"path":"./shader.toml"}}"#));
 }
 
 #[test]
@@ -64,7 +64,7 @@ fn dynamic_slot_codec_reads_project_toml_through_registry() {
 name = "basic"
 
 [nodes.shader]
-artifact = "./shader.toml"
+def = { path = "./shader.toml" }
 "#,
     )
     .unwrap();
@@ -78,7 +78,7 @@ artifact = "./shader.toml"
 
     assert_eq!(project.name.data.as_ref().unwrap().value(), "basic");
     assert_eq!(
-        project.nodes.entries.get("shader").unwrap().artifact(),
+        project.nodes.entries.get("shader").unwrap().def_path(),
         "./shader.toml"
     );
 }
@@ -92,7 +92,7 @@ fn dynamic_slot_codec_writes_project_toml_through_registry() {
 
     assert_eq!(value["name"].as_str(), Some("basic"));
     assert_eq!(
-        value["nodes"]["shader"]["artifact"].as_str(),
+        value["nodes"]["shader"]["def"]["path"].as_str(),
         Some("./shader.toml")
     );
 }
@@ -119,7 +119,8 @@ fn dynamic_slot_codec_reads_json_event_sources() {
     let object = registry
         .read_slot_from(
             ProjectDef::SHAPE_ID,
-            JsonSyntaxSource::new(r#"{"nodes":{"shader":{"artifact":"./shader.toml"}}}"#).unwrap(),
+            JsonSyntaxSource::new(r#"{"nodes":{"shader":{"def":{"path":"./shader.toml"}}}}"#)
+                .unwrap(),
         )
         .unwrap();
     let Ok(project) = object.into_any().downcast::<ProjectDef>() else {
@@ -127,7 +128,7 @@ fn dynamic_slot_codec_reads_json_event_sources() {
     };
 
     assert_eq!(
-        project.nodes.entries.get("shader").unwrap().artifact(),
+        project.nodes.entries.get("shader").unwrap().def_path(),
         "./shader.toml"
     );
 }
@@ -283,16 +284,16 @@ fn assert_project_matches_default(project: &ProjectDef) {
         Some("basic")
     );
     assert_eq!(project.nodes.entries.len(), 4);
-    assert_eq!(project.nodes.entries["output"].artifact(), "./output.toml");
+    assert_eq!(project.nodes.entries["output"].def_path(), "./output.toml");
     assert_eq!(
-        project.nodes.entries["texture"].artifact(),
+        project.nodes.entries["texture"].def_path(),
         "./texture.toml"
     );
     assert_eq!(
-        project.nodes.entries["fixture"].artifact(),
+        project.nodes.entries["fixture"].def_path(),
         "./fixture.toml"
     );
-    assert_eq!(project.nodes.entries["shader"].artifact(), "./shader.toml");
+    assert_eq!(project.nodes.entries["shader"].def_path(), "./shader.toml");
 }
 
 fn record_value(record: &dyn lpc_model::SlotRecordAccess, index: usize) -> LpValue {

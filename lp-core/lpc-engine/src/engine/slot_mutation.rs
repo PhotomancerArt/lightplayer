@@ -519,7 +519,7 @@ mod tests {
 kind = "Project"
 
 [nodes.clock]
-artifact = "./clock.toml"
+def = { path = "./clock.toml" }
 "#,
         )
         .unwrap();
@@ -540,7 +540,7 @@ artifact = "./clock.toml"
 kind = "Project"
 
 [nodes.output]
-artifact = "./output.toml"
+def = { path = "./output.toml" }
 "#,
         )
         .unwrap();

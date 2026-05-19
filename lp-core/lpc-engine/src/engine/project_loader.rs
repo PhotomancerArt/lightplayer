@@ -8,10 +8,10 @@ use alloc::vec::Vec;
 use lpc_model::LpType;
 use lpc_model::generate_compute_shader_header;
 use lpc_model::nodes::project::project_def::ProjectDef;
-use lpc_model::{ArtifactLocator, ArtifactReadRoot, NodeInvocation, NodeKind};
+use lpc_model::{ArtifactLocator, ArtifactReadRoot, NodeDefRef, NodeInvocation, NodeKind};
 use lpc_model::{
     BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, Kind, LpValue, NodeDef, NodeId,
-    NodeName, Revision, ShaderDef, ShaderSlotKind, SlotPath, SlotShapeRegistry,
+    NodeName, Revision, ShaderDef, ShaderSlotKind, ShaderSource, SlotPath, SlotShapeRegistry,
 };
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lpfs::lp_path::{LpPath, LpPathBuf};
@@ -59,6 +59,7 @@ impl core::error::Error for ProjectLoadError {}
 struct LoadedNode {
     name: NodeName,
     artifact_path: LpPathBuf,
+    source_base_path: LpPathBuf,
     id: NodeId,
     config: NodeDef,
 }
@@ -130,21 +131,27 @@ impl ProjectLoader {
                     path: project_path.as_str().to_string(),
                     reason: format!("{e}"),
                 })?;
-            let artifact_locator =
-                invocation
-                    .artifact_locator()
-                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                        path: project_path.as_str().to_string(),
-                        reason: format!(
-                            "invalid artifact locator `{}`: {e}",
-                            invocation.artifact.value().as_str()
-                        ),
-                    })?;
-            let artifact_path = resolve_child_artifact_locator(&project_path, &artifact_locator)?;
-            let config = load_node_def(root, artifact_path.as_path(), runtime.slot_shapes())?;
-            let artifact_id = runtime
-                .artifacts_mut()
-                .acquire_location(ArtifactLocation::file(artifact_path.clone()), frame);
+            let (artifact_path, source_base_path, config, artifact_id) = match &invocation.def {
+                NodeDefRef::Path(artifact_locator) => {
+                    let artifact_path =
+                        resolve_child_artifact_locator(&project_path, artifact_locator)?;
+                    let config =
+                        load_node_def(root, artifact_path.as_path(), runtime.slot_shapes())?;
+                    let artifact_id = runtime
+                        .artifacts_mut()
+                        .acquire_location(ArtifactLocation::file(artifact_path.clone()), frame);
+                    (artifact_path.clone(), artifact_path, config, artifact_id)
+                }
+                NodeDefRef::Inline(def) => {
+                    let artifact_path = inline_node_artifact_path(&project_path, &node_name);
+                    let config = (**def).clone();
+                    let artifact_id = runtime.artifacts_mut().acquire_location(
+                        ArtifactLocation::inline_node(project_path.clone(), node_name.as_str()),
+                        frame,
+                    );
+                    (artifact_path, project_path.clone(), config, artifact_id)
+                }
+            };
             runtime
                 .artifacts_mut()
                 .load_with(&artifact_id, frame, |_location| Ok(config.clone()))
@@ -172,6 +179,7 @@ impl ProjectLoader {
             loaded_nodes.push(LoadedNode {
                 name: node_name,
                 artifact_path,
+                source_base_path,
                 id: leaf_id,
                 config,
             });
@@ -278,9 +286,8 @@ impl ProjectLoader {
 
         for node in loaded_nodes {
             if let NodeDef::Shader(config) = &node.config {
-                let shader_path =
-                    resolve_path_relative_to_file(&node.artifact_path, &config.glsl_path_buf())?;
-                let glsl_source = read_utf8_file(root, shader_path.as_path())?;
+                let glsl_source =
+                    read_shader_source(root, &node.source_base_path, config.shader_source())?;
                 runtime
                     .attach_runtime_node(
                         node.id,
@@ -315,9 +322,8 @@ impl ProjectLoader {
 
         for node in loaded_nodes {
             if let NodeDef::ComputeShader(config) = &node.config {
-                let shader_path =
-                    resolve_path_relative_to_file(&node.artifact_path, &config.glsl_path_buf())?;
-                let source = read_utf8_file(root, shader_path.as_path())?;
+                let source =
+                    read_shader_source(root, &node.source_base_path, config.shader_source())?;
                 let header = generate_compute_shader_header(config, runtime.slot_shapes())
                     .map_err(|e| ProjectLoadError::InvalidSourcePath {
                         path: node.artifact_path.as_str().to_string(),
@@ -546,6 +552,33 @@ fn resolve_path_relative_to_file(
                 containing_file.as_str()
             ),
         })
+}
+
+fn inline_node_artifact_path(project_path: &LpPathBuf, node_name: &NodeName) -> LpPathBuf {
+    LpPathBuf::from(format!(
+        "{}#nodes.{}",
+        project_path.as_str(),
+        node_name.as_str()
+    ))
+}
+
+fn read_shader_source<R>(
+    root: &R,
+    containing_file: &LpPathBuf,
+    source: &ShaderSource,
+) -> Result<String, ProjectLoadError>
+where
+    R: ArtifactReadRoot + ?Sized,
+    R::Err: core::fmt::Debug,
+{
+    match source {
+        ShaderSource::Path(path) => {
+            let shader_path =
+                resolve_path_relative_to_file(containing_file, &path.value().as_path_buf())?;
+            read_utf8_file(root, shader_path.as_path())
+        }
+        ShaderSource::Glsl(source) => Ok(source.value().clone()),
+    }
 }
 
 fn node_kind_name(config: &NodeDef, path: &LpPath) -> Result<NodeName, ProjectLoadError> {
@@ -956,10 +989,10 @@ mod tests {
 kind = "Project"
 
 [nodes.clock]
-artifact = "./clock.toml"
+def = { path = "./clock.toml" }
 
 [nodes.shader]
-artifact = "./shader.toml"
+def = { path = "./shader.toml" }
 "#,
         )
         .expect("project.toml");
@@ -973,7 +1006,7 @@ artifact = "./shader.toml"
             "/shader.toml".as_path(),
             br#"
 kind = "Shader"
-glsl_path = "shader.glsl"
+source = { path = "shader.glsl" }
 render_order = 0
 
 [consumed_slots.time]
@@ -1065,6 +1098,68 @@ default = 0.0
     }
 
     #[test]
+    fn project_loader_loads_inline_shader_def_and_source() {
+        let fs = LpFsMemory::new();
+        fs.write_file(
+            "/project.toml".as_path(),
+            br#"
+kind = "Project"
+
+[nodes.shader.def]
+kind = "Shader"
+source = { glsl = "vec4 render(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }" }
+"#,
+        )
+        .expect("project.toml");
+
+        let services = EngineServices::new(TreePath::parse("/inline.show").expect("path"));
+        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load");
+        rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        let root = rt.tree().root();
+        let shader = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("shader").unwrap())
+            .expect("shader node");
+
+        rt.tick(16).expect("tick");
+        let production = resolve_with_engine_host(
+            &mut rt,
+            QueryKey::ProducedSlot {
+                node: shader,
+                slot: crate::nodes::shader_output_path(),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("resolve shader output")
+        .0;
+        let LpValue::Product(ProductRef::Visual(product)) =
+            production.value_leaf().expect("visual product").value()
+        else {
+            panic!("shader output should be a visual product");
+        };
+
+        let texture = rt
+            .render_texture_for_test(
+                *product,
+                &RenderTextureRequest {
+                    width: 2,
+                    height: 2,
+                    format: TextureStorageFormat::Rgba16Unorm,
+                    time_seconds: 0.0,
+                },
+            )
+            .expect("render inline shader");
+        assert!(
+            texture
+                .try_raw_bytes()
+                .expect("bytes")
+                .chunks_exact(8)
+                .any(|px| px[0] != 0 || px[1] != 0),
+            "inline shader should produce nonzero red output"
+        );
+    }
+
+    #[test]
     fn malformed_node_toml_returns_error() {
         let fs = LpFsMemory::new();
         fs.write_file(
@@ -1073,7 +1168,7 @@ default = 0.0
 kind = "Project"
 
 [nodes.broken]
-artifact = "./broken.toml"
+def = { path = "./broken.toml" }
 "#,
         )
         .expect("project.toml");
@@ -1116,7 +1211,7 @@ artifact = "./broken.toml"
 kind = "Project"
 
 [nodes.weird]
-artifact = "./weird.toml"
+def = { path = "./weird.toml" }
 "#,
         )
         .expect("project.toml");
@@ -1250,7 +1345,7 @@ order = "inner_first"
 kind = "Project"
 
 [nodes.compute]
-artifact = "./compute.toml"
+def = { path = "./compute.toml" }
 "#,
         )
         .expect("project.toml");
@@ -1258,7 +1353,7 @@ artifact = "./compute.toml"
             "/compute.toml".as_path(),
             br#"
 kind = "ComputeShader"
-glsl_path = "compute.glsl"
+source = { path = "compute.glsl" }
 
 [consumed_slots.time]
 kind = "value"
@@ -1438,16 +1533,16 @@ kind = "Project"
 name = "basic"
 
 [nodes.output]
-artifact = "./output.toml"
+def = { path = "./output.toml" }
 
 [nodes.texture]
-artifact = "./texture.toml"
+def = { path = "./texture.toml" }
 
 [nodes.shader]
-artifact = "./shader.toml"
+def = { path = "./shader.toml" }
 
 [nodes.fixture]
-artifact = "./fixture.toml"
+def = { path = "./fixture.toml" }
 "#,
         )
         .expect("project.toml");
@@ -1468,7 +1563,7 @@ source = "bus#visual.out"
             "/shader.toml".as_path(),
             br#"
 kind = "Shader"
-glsl_path = "shader.glsl"
+source = { path = "shader.glsl" }
 render_order = 0
 
 [bindings.output]

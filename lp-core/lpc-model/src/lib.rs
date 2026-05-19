@@ -77,8 +77,8 @@ pub use lpfs::lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 pub use node::node_prop_spec::NodePropSpec;
 pub use node::tree_path::{NodePathSegment, PathError, TreePath};
 pub use node::{
-    NodeArtifact, NodeDef, NodeId, NodeInvocation, NodeInvocationView, NodeKind, NodeName,
-    NodeNameError, RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc,
+    NodeArtifact, NodeDef, NodeDefRef, NodeId, NodeInvocation, NodeKind, NodeName, NodeNameError,
+    RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc,
 };
 pub use nodes::{
     AddSubMode, ClockControls, ClockDef, ClockDefView, ClockState, ColorOrder, ComputeShaderDef,
@@ -88,8 +88,9 @@ pub use nodes::{
     OutputDriverOptionsConfigView, PathSpec, ProjectDef, ProjectDefView, RingOrder, ScalarHint,
     ScalarHintView, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,
     ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
-    ShaderSlotMappingKind, ShaderState, ShaderStateView, ShaderValueShapeRef, TextureDef,
-    TextureDefView, TextureFormat, TextureState, TextureStateView, generate_compute_shader_header,
+    ShaderSlotMappingKind, ShaderSource, ShaderState, ShaderStateView, ShaderValueShapeRef,
+    TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView,
+    generate_compute_shader_header,
 };
 pub use product::{ControlExtent, ControlProduct, ProductKind, ProductRef, VisualProduct};
 pub use project::{ProjectConfig, Revision};

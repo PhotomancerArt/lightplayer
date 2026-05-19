@@ -330,7 +330,7 @@ mod tests {
 kind = "Project"
 
 [nodes.fluid]
-artifact = "./fluid.toml"
+def = { path = "./fluid.toml" }
 "#,
         )
         .expect("project");
@@ -410,10 +410,10 @@ intensity = 2.0
 kind = "Project"
 
 [nodes.compute]
-artifact = "./compute.toml"
+def = { path = "./compute.toml" }
 
 [nodes.fluid]
-artifact = "./fluid.toml"
+def = { path = "./fluid.toml" }
 "#,
         )
         .expect("project");
@@ -421,7 +421,7 @@ artifact = "./fluid.toml"
             "/compute.toml".as_path(),
             br#"
 kind = "ComputeShader"
-glsl_path = "compute.glsl"
+source = { path = "compute.glsl" }
 
 [bindings.emitters]
 target = "bus#fluid.emitters"

@@ -310,10 +310,11 @@ impl Engine {
         Ok(())
     }
 
-    /// Accept filesystem changes on the core server path.
+    /// Accept filesystem changes for direct engine embedders.
     ///
-    /// Source reload is follow-up work; this hook exists so server version
-    /// tracking can advance without a separate project-runtime wrapper.
+    /// The server-owned project wrapper currently reloads the project from its
+    /// filesystem on changes so node definition and shader source updates use
+    /// the same loader path as initial load.
     pub fn handle_fs_changes(&mut self, _changes: &[FsChange]) -> Result<(), EngineError> {
         Ok(())
     }

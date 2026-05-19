@@ -16,19 +16,19 @@ use lpfs::LpFs;
 const PROJECT_TOML: &[u8] = br#"kind = "Project"
 
 [nodes.output]
-artifact = "./output.toml"
+def = { path = "./output.toml" }
 
 [nodes.clock]
-artifact = "./clock.toml"
+def = { path = "./clock.toml" }
 
 [nodes.texture]
-artifact = "./texture.toml"
+def = { path = "./texture.toml" }
 
 [nodes.shader]
-artifact = "./shader.toml"
+def = { path = "./shader.toml" }
 
 [nodes.fixture]
-artifact = "./fixture.toml"
+def = { path = "./fixture.toml" }
 "#;
 
 /// TOML for the default clock node.
@@ -45,7 +45,7 @@ height = 64
 
 /// TOML for the default shader node.
 const SHADER_NODE_TOML: &[u8] = br#"kind = "Shader"
-glsl_path = "shader.glsl"
+source = { path = "shader.glsl" }
 render_order = 0
 
 [glsl_opts]

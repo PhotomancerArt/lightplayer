@@ -4,8 +4,7 @@ use lpc_model::nodes::output::OutputDef;
 use lpc_model::nodes::project::project_def::ProjectDef;
 use lpc_model::nodes::shader::ShaderDef;
 use lpc_model::{
-    LpValue, SlotAccess, SlotData, SlotMapKey, SlotShape, SlotShapeRegistry, SlotValueAccess,
-    StaticSlotShape,
+    LpValue, SlotAccess, SlotData, SlotMapKey, SlotShape, SlotShapeRegistry, StaticSlotShape,
 };
 use lpc_wire::build_slot_full_sync;
 
@@ -49,20 +48,14 @@ fn real_source_defs_sync_as_slot_roots() {
     }
 
     let project_data = root_data(&sync, &registry, "project");
-    assert_eq!(
+    assert_value(
         select(
             &project_data,
             ProjectDef::SHAPE_ID.slot_shape_from(&registry),
             &registry,
-            "nodes[shader]"
+            "nodes[shader].def",
         ),
-        &SlotData::Record(lpc_model::SlotRecord::with_revision(
-            project.nodes.entries["shader"].artifact.changed_at(),
-            vec![SlotData::Value(lpc_model::WithRevision::new(
-                project.nodes.entries["shader"].artifact.changed_at(),
-                LpValue::String(String::from("./shader.toml")),
-            ))],
-        )),
+        LpValue::String(String::from("shader.toml")),
     );
 
     let shader_data = root_data(&sync, &registry, "shader");
@@ -71,7 +64,7 @@ fn real_source_defs_sync_as_slot_roots() {
             &shader_data,
             ShaderDef::SHAPE_ID.slot_shape_from(&registry),
             &registry,
-            "glsl_path",
+            "source.path",
         ),
         LpValue::String(String::from("shader.glsl")),
     );
@@ -96,9 +89,9 @@ fn real_source_defs_sync_as_slot_roots() {
 
     let shader_with_params: ShaderDef = toml::from_str(
         r#"
-kind = "Shader"
-glsl_path = "shader.glsl"
 render_order = 0
+
+source = { path = "shader.glsl" }
 
 [bindings.output]
 target = "bus#visual.out"
