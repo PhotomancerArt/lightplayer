@@ -56,9 +56,9 @@ impl DisplayPipeline {
         let mut dither_overflow = Vec::with_capacity(num_leds as usize);
         dither_overflow.resize(num_leds as usize, [0i8; 3]);
         let mut lut = [[0u32; LUT_LEN]; 3];
-        build_lut(&mut lut[0], options.white_point[0], options.lum_power);
-        build_lut(&mut lut[1], options.white_point[1], options.lum_power);
-        build_lut(&mut lut[2], options.white_point[2], options.lum_power);
+        build_lut(&mut lut[0], options.white_point[0]);
+        build_lut(&mut lut[1], options.white_point[1]);
+        build_lut(&mut lut[2], options.white_point[2]);
         let brightness_u8 = (options.brightness.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
         Ok(Self {
             num_leds,
@@ -277,6 +277,23 @@ mod tests {
         let mut out = [0u8; 6];
         pipeline.tick(500, &mut out);
         assert!(out[0] > 0 || out[1] > 0 || out[2] > 0);
+    }
+
+    #[test]
+    fn lut_preserves_linear_midpoint() {
+        let mut opts = DisplayPipelineOptions::default();
+        opts.white_point = [1.0, 1.0, 1.0];
+        opts.dithering_enabled = false;
+        opts.interpolation_enabled = false;
+        opts.lut_enabled = true;
+        let mut pipeline = DisplayPipeline::new(1, opts).unwrap();
+        let data: [u16; 3] = [32768, 32768, 32768];
+        pipeline.write_frame(0, &data);
+        let mut out = [0u8; 3];
+
+        pipeline.tick(0, &mut out);
+
+        assert_eq!(out, [128, 128, 128]);
     }
 
     #[test]

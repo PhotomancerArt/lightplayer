@@ -70,7 +70,6 @@ pub async fn run_fluid_demo(_: embassy_executor::Spawner) -> ! {
 
     // DisplayPipeline (interpolation + LUT + dither).
     let options = DisplayPipelineOptions {
-        lum_power: 2.0,
         white_point: [1.0, 1.0, 1.0],
         brightness: BRIGHTNESS,
         interpolation_enabled: true,

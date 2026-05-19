@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    BindingDefs, OptionSlot, PositiveF32, PositiveF32Slot, Ratio, RatioSlot, Slotted, ValueSlot,
-};
+use crate::{BindingDefs, OptionSlot, Ratio, RatioSlot, Slotted, ValueSlot};
 
 /// Authored GPIO output node definition.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Slotted)]
@@ -43,9 +41,6 @@ impl OutputDef {
 /// Authored output driver options for the display pipeline.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
 pub struct OutputDriverOptionsConfig {
-    /// Gamma exponent for luminance curve.
-    #[serde(default = "default_lum_power_slot")]
-    pub lum_power: PositiveF32Slot,
     /// RGB white point balance.
     #[serde(default = "default_white_point_slot")]
     pub white_point: ValueSlot<[f32; 3]>,
@@ -58,7 +53,7 @@ pub struct OutputDriverOptionsConfig {
     /// Enable temporal dithering.
     #[serde(default = "default_true_slot")]
     pub dithering_enabled: ValueSlot<bool>,
-    /// Enable gamma + white point LUT.
+    /// Enable white point LUT.
     #[serde(default = "default_true_slot")]
     pub lut_enabled: ValueSlot<bool>,
 }
@@ -66,7 +61,6 @@ pub struct OutputDriverOptionsConfig {
 impl Default for OutputDriverOptionsConfig {
     fn default() -> Self {
         Self {
-            lum_power: default_lum_power_slot(),
             white_point: default_white_point_slot(),
             brightness: default_brightness_slot(),
             interpolation_enabled: default_true_slot(),
@@ -74,10 +68,6 @@ impl Default for OutputDriverOptionsConfig {
             lut_enabled: default_true_slot(),
         }
     }
-}
-
-fn default_lum_power_slot() -> PositiveF32Slot {
-    PositiveF32Slot::new(PositiveF32(2.0))
 }
 
 fn default_white_point_slot() -> ValueSlot<[f32; 3]> {

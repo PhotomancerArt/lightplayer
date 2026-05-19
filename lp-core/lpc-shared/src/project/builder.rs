@@ -10,9 +10,9 @@ use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, ArtifactLocator, AsLpPath, BindingDef, BindingDefs, BindingRef,
     BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureSamplingConfig, MapSlot, NodeDef,
-    NodeInvocation, NodeSlotRef, OptionSlot, PositiveF32, PositiveF32Slot, ProjectDef, Ratio,
-    RatioSlot, RelativeNodeRef, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry,
-    SourcePath, SourcePathSlot, ValueSlot,
+    NodeInvocation, NodeSlotRef, OptionSlot, ProjectDef, Ratio, RatioSlot, RelativeNodeRef,
+    RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry, SourcePath, SourcePathSlot,
+    ValueSlot,
 };
 use lpfs::LpFs;
 use lpfs::lp_path::LpPathBuf;
@@ -120,7 +120,6 @@ impl ProjectBuilder {
         OutputBuilder {
             pin: 0,
             options: OutputDriverOptionsConfig {
-                lum_power: PositiveF32Slot::new(PositiveF32(2.0)),
                 white_point: ValueSlot::new([1.0, 1.0, 1.0]),
                 brightness: RatioSlot::new(Ratio(1.0)),
                 interpolation_enabled: ValueSlot::new(false),

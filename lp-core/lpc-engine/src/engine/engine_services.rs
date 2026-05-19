@@ -191,7 +191,6 @@ fn display_options_from_output_config(cfg: &OutputDef) -> Option<OutputDriverOpt
 
 fn driver_options_from_cfg(cfg: &OutputDriverOptionsConfig) -> OutputDriverOptions {
     OutputDriverOptions {
-        lum_power: cfg.lum_power.value().0,
         white_point: *cfg.white_point.value(),
         brightness: cfg.brightness.value().0.clamp(0.0, 1.0),
         interpolation_enabled: *cfg.interpolation_enabled.value(),
@@ -207,8 +206,7 @@ fn output_options_eq(
     match (left, right) {
         (None, None) => true,
         (Some(left), Some(right)) => {
-            left.lum_power == right.lum_power
-                && left.white_point == right.white_point
+            left.white_point == right.white_point
                 && left.brightness == right.brightness
                 && left.interpolation_enabled == right.interpolation_enabled
                 && left.dithering_enabled == right.dithering_enabled

@@ -216,18 +216,19 @@ F32 LinearSrgb.
 |                                                     | gradient's authoring space.                        |
 | `LinearSrgb` F32 → Unorm16 linear                   | At texture-write boundary (shader output).         |
 | Unorm16 linear → F32                                | At texture sample (fixture / next stage).          |
-| `LinearSrgb` F32 → device format (e.g. sRGB Unorm8) | At the output device boundary, including any       |
-|                                                     | per-fixture white balance and gamma correction.    |
+| `LinearSrgb` F32 → fixture control samples          | At the fixture boundary, including LED gamma       |
+|                                                     | correction when enabled for that fixture.          |
+| Fixture control samples → output transport          | At the output device boundary: interpolation,      |
+|                                                     | dithering, global brightness, and transport pack.  |
 
 ## 8. Output stage responsibilities
 
 The fixture / output device layer owns _all_ hardware-specific
 color work:
 
-- **Final gamma encoding** for the wire format. LEDs are linear-PWM,
-  so display-encoded sRGB bytes (Unorm8) need to be decoded back to
-  linear before driving PWM, _or_ the linear values get encoded for
-  hardware that expects sRGB. Either way, the math lands here.
+- **Final gamma correction lives on the fixture.** LEDs are
+  linear-PWM, so the physical LED transfer curve is a fixture
+  property, not an output transport property.
 - **Brightness / white balance / per-fixture color correction.**
 - **Channel synthesis (RGBW, RGBAW, etc.).** The W channel for an
   RGBW strip is computed from the canonical RGB the engine produced.
@@ -312,7 +313,7 @@ When written, these crates / files implement this contract:
   `Gradient` Kind storage recipes.
 - `lp-shader/lpvm/src/runtime/color.rs` — colorspace conversion at
   uniform-binding time.
-- Per-fixture drivers under `lp-engine/fixtures/` — output-stage
+- Per-fixture drivers under `lp-engine/fixtures/` — fixture-stage
   gamma, white balance, channel synthesis.
 
 ## See also
