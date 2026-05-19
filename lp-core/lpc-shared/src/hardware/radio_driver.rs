@@ -1,7 +1,10 @@
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 
-use super::{HardwareDriver, HardwareEndpoint, HardwareEndpointError, HardwareEndpointId};
+use super::{
+    HardwareDriver, HardwareEndpoint, HardwareEndpointError, HardwareEndpointId, RadioChannelId,
+    RadioDrainReport, RadioMessage, RadioMessageKind,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RadioConfig {
@@ -24,33 +27,24 @@ impl Default for RadioConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RadioPacket {
-    peer: [u8; 6],
-    payload: Vec<u8>,
-}
-
-impl RadioPacket {
-    pub fn new(peer: [u8; 6], payload: impl Into<Vec<u8>>) -> Self {
-        Self {
-            peer,
-            payload: payload.into(),
-        }
-    }
-
-    pub fn peer(&self) -> [u8; 6] {
-        self.peer
-    }
-
-    pub fn payload(&self) -> &[u8] {
-        &self.payload
-    }
-}
-
 pub trait RadioDevice {
-    fn send(&mut self, peer: [u8; 6], payload: &[u8]) -> Result<(), HardwareEndpointError>;
+    fn subscribe_channel(&mut self, channel: RadioChannelId) -> Result<(), HardwareEndpointError>;
 
-    fn receive(&mut self) -> Result<Option<RadioPacket>, HardwareEndpointError>;
+    fn unsubscribe_channel(&mut self, channel: RadioChannelId)
+    -> Result<(), HardwareEndpointError>;
+
+    fn send_channel(
+        &mut self,
+        channel: RadioChannelId,
+        kind: RadioMessageKind,
+        payload: &[u8],
+    ) -> Result<(), HardwareEndpointError>;
+
+    fn drain_channel(
+        &mut self,
+        channel: RadioChannelId,
+        out: &mut Vec<RadioMessage>,
+    ) -> Result<RadioDrainReport, HardwareEndpointError>;
 }
 
 pub trait RadioDriver: HardwareDriver {

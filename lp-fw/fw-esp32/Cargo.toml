@@ -8,7 +8,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["esp32c6", "server"]
+default = ["esp32c6", "server", "radio"]
 esp32c6 = [
     "esp-backtrace/esp32c6",
     "esp-bootloader-esp-idf/esp32c6",
@@ -23,6 +23,13 @@ server = [
     "lpfs",
     "ser-write-json",
 ]  # Enable server dependencies (lpa-server, lpc-shared, lpc-model, lpc-wire, lpfs)
+radio = [
+    "lpc-shared",
+    "esp-radio",
+    "esp-radio/esp32c6",
+    "esp-rtos/esp-alloc",
+    "esp-rtos/esp-radio",
+]  # Root-owned ESP-NOW radio capability
 naga = ["lpa-server/naga"]
 test_rmt = []  # Test RMT driver with simple patterns (no pipeline)
 test_dither = []  # Test DisplayPipeline (use with default features; server brings lpc-shared)
@@ -37,12 +44,7 @@ test_msafluid = []  # MSAFluid perf harness (solver + cycle timing; phase 02 wir
 test_fluid_demo = []  # RGB MSAFluid demo on the basic ring fixture (gpio4, 241 leds, DisplayPipeline)
 test_jit_math_perf = ["lps-builtins"]  # JIT Q32 math perf harness (cycle timing; no pipeline)
 test_shader_compile_incremental = ["dep:fw-checks", "dep:lp-shader", "dep:lpvm-native", "dep:lpir", "dep:lps-shared", "lps-builtins"]  # Incremental native shader compile harness on ESP32-C6
-test_espnow = [
-    "esp-radio",
-    "esp-radio/esp32c6",
-    "esp-rtos/esp-alloc",
-    "esp-rtos/esp-radio",
-]  # ESP-NOW broadcast/receive smoke test with simulated 1Hz button events
+test_espnow = ["radio"]  # ESP-NOW broadcast/receive smoke test with simulated 1Hz button events
 
 [dependencies]
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic"] }

@@ -19,7 +19,9 @@ pub mod hardware_registry;
 pub mod hardware_resource;
 pub mod hardware_system;
 pub mod hardware_target;
+pub mod radio_channel;
 pub mod radio_driver;
+pub mod radio_message;
 pub mod virtual_button;
 pub mod virtual_button_driver;
 pub mod virtual_radio_driver;
@@ -50,7 +52,12 @@ pub use hardware_registry::HardwareRegistry;
 pub use hardware_resource::HardwareResource;
 pub use hardware_system::HardwareSystem;
 pub use hardware_target::HardwareTarget;
-pub use radio_driver::{RadioConfig, RadioDevice, RadioDriver, RadioPacket};
+pub use radio_channel::{RadioChannelId, RadioDeviceId, RadioDrainReport, RadioEventId};
+pub use radio_driver::{RadioConfig, RadioDevice, RadioDriver};
+pub use radio_message::{
+    RADIO_MAX_PACKET_LEN, RADIO_MAX_PAYLOAD_LEN, RADIO_WIRE_HEADER_LEN, RADIO_WIRE_MAGIC,
+    RADIO_WIRE_VERSION, RadioMessage, RadioMessageKind, RadioPacketError,
+};
 pub use virtual_button::VirtualButton;
 pub use virtual_button_driver::VirtualButtonDriver;
 pub use virtual_radio_driver::VirtualRadioDriver;

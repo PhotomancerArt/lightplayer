@@ -184,6 +184,7 @@ mod boot;
         feature = "test_espnow",
     )),
     feature = "test_button",
+    feature = "test_espnow",
 ))]
 mod hardware;
 mod jit_fns;
@@ -298,6 +299,23 @@ mod flash_storage;
 ))]
 mod lp_fs_flash;
 
+#[cfg(all(
+    feature = "radio",
+    not(any(
+        feature = "test_rmt",
+        feature = "test_dither",
+        feature = "test_gpio",
+        feature = "test_gpio_calibrate",
+        feature = "test_button",
+        feature = "test_usb",
+        feature = "test_json",
+        feature = "test_msafluid",
+        feature = "test_fluid_demo",
+        feature = "test_jit_math_perf",
+        feature = "test_espnow",
+    )),
+))]
+use hardware::espnow_radio_driver::Esp32EspNowRadioDriver;
 #[cfg(not(any(
     feature = "test_rmt",
     feature = "test_dither",
@@ -522,8 +540,7 @@ async fn main(spawner: embassy_executor::Spawner) {
 
         // Initialize board (clock, heap, runtime) and get hardware peripherals
         esp_println::println!("[INIT] Initializing board...");
-        let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, flash, _gpio4, _wifi) =
-            init_board();
+        let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, flash, _gpio4, wifi) = init_board();
         esp_println::println!("[INIT] Board initialized, starting runtime...");
         start_runtime(timg0, sw_int);
         esp_println::println!("[INIT] Runtime started");
@@ -623,6 +640,19 @@ async fn main(spawner: embassy_executor::Spawner) {
         hardware_system.add_ws281x_driver(Box::new(Esp32RmtWs281xDriver::new(Rc::clone(
             &hardware_registry,
         ))));
+        #[cfg(feature = "radio")]
+        {
+            let radio_driver = Esp32EspNowRadioDriver::new(Rc::clone(&hardware_registry), wifi)
+                .expect("Failed to initialize ESP-NOW radio");
+            log::info!(
+                "[fw-esp32] ESP-NOW radio ready: device_id={:?} channel={}",
+                radio_driver.device_id(),
+                radio_driver.default_channel()
+            );
+            hardware_system.add_radio_driver(Box::new(radio_driver));
+        }
+        #[cfg(not(feature = "radio"))]
+        let _ = wifi;
         let hardware_system = Rc::new(hardware_system);
 
         // Initialize output provider

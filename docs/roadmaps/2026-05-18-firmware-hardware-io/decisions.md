@@ -71,6 +71,18 @@
   independent consumers up front.
 - **Revisit when:** Multiple runtime features need concurrent access to radio messages.
 
+#### ESP-NOW Driver Polls Through One Open Handle
+
+- **Decision:** The initial ESP-NOW driver owns Wi-Fi at firmware root and uses the opened
+  `RadioDevice` handle to broadcast synchronously and drain the ESP-NOW receive queue
+  opportunistically.
+- **Why:** The current API is single consumer and node work is still ahead, so a background task
+  would add routing machinery before there is a second consumer to serve.
+- **Rejected alternatives:** Spawn an ESP-NOW worker immediately; expose `esp-radio` objects to
+  firmware nodes.
+- **Revisit when:** Radio nodes or other services need receive latency independent of drain calls,
+  or more than one radio consumer.
+
 #### Radio Packets Carry Channel IDs
 
 - **Decision:** Every radio packet carries LightPlayer magic, source device ID, and a `u32` channel

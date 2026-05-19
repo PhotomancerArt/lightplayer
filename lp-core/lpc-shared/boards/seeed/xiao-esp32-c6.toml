@@ -293,3 +293,8 @@ capabilities = [
     "rmt",
     "ws281x-output",
 ]
+
+[[resource]]
+address = "/radio/0"
+display_label = "ESP-NOW Radio 0"
+capabilities = ["radio"]

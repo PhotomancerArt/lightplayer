@@ -1,5 +1,7 @@
 #[cfg(feature = "test_button")]
 pub mod button;
+#[cfg(feature = "radio")]
+pub mod espnow_radio_driver;
 #[cfg(not(any(
     feature = "test_rmt",
     feature = "test_dither",
