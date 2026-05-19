@@ -1,14 +1,17 @@
 use alloc::collections::BTreeMap;
+use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 use lpc_model::{
     Revision, SlotAccess, SlotData, SlotDataAccess, SlotMapDyn, SlotName, SlotOptionDyn, SlotPath,
     SlotShape, SlotShapeId, SlotShapeRegistry, WithRevision,
+    slot_codec::SlotWriter,
+    slot_sync_codec::{write_slot_snapshot_shape_value, write_slot_snapshot_value},
 };
 
 use super::{
-    WireSlotChange, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot, WireSlotRootsSnapshot,
-    wire_slot_data_from_slot_data,
+    WireSlotChange, WireSlotData, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot,
+    WireSlotRootsSnapshot,
 };
 
 /// Build a full slot sync payload from borrowed slot roots.
@@ -25,11 +28,7 @@ pub fn build_slot_full_sync<'a>(
                 WireSlotRootSnapshot {
                     name: name.to_string(),
                     shape: shape_id,
-                    data: wire_slot_data_from_slot_data(&snapshot_slot_root(
-                        &shape_id,
-                        root.data(),
-                        registry,
-                    )),
+                    data: wire_slot_data_from_slot_access(registry, shape_id, root.data()),
                 }
             })
             .collect(),
@@ -49,11 +48,7 @@ pub fn build_slot_roots_snapshot<'a>(
                 WireSlotRootSnapshot {
                     name: name.to_string(),
                     shape: shape_id,
-                    data: wire_slot_data_from_slot_data(&snapshot_slot_root(
-                        &shape_id,
-                        root.data(),
-                        registry,
-                    )),
+                    data: wire_slot_data_from_slot_access(registry, shape_id, root.data()),
                 }
             })
             .collect(),
@@ -181,7 +176,11 @@ fn collect_diff_shape(
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path,
-                    change: WireSlotChange::Replace(SlotData::Unit { revision: frame }),
+                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape(
+                        registry,
+                        shape,
+                        SlotDataAccess::Unit(frame),
+                    )),
                 });
             }
         }
@@ -190,10 +189,9 @@ fn collect_diff_shape(
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path,
-                    change: WireSlotChange::Replace(SlotData::Value(WithRevision::new(
-                        value.changed_at(),
-                        value.value(),
-                    ))),
+                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape(
+                        registry, shape, data,
+                    )),
                 });
             }
         }
@@ -202,7 +200,9 @@ fn collect_diff_shape(
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path: path.clone(),
-                    change: WireSlotChange::Replace(snapshot_slot_shape(shape, data, registry)),
+                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape(
+                        registry, shape, data,
+                    )),
                 });
             }
             for (index, field) in fields.iter().enumerate() {
@@ -224,7 +224,9 @@ fn collect_diff_shape(
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path: path.clone(),
-                    change: WireSlotChange::Replace(snapshot_slot_shape(shape, data, registry)),
+                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape(
+                        registry, shape, data,
+                    )),
                 });
             }
             for key in map.keys() {
@@ -250,7 +252,9 @@ fn collect_diff_shape(
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path: path.clone(),
-                    change: WireSlotChange::Replace(snapshot_slot_shape(shape, data, registry)),
+                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape(
+                        registry, shape, data,
+                    )),
                 });
             }
             collect_diff_shape(
@@ -268,7 +272,9 @@ fn collect_diff_shape(
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path: path.clone(),
-                    change: WireSlotChange::Replace(snapshot_slot_shape(shape, data, registry)),
+                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape(
+                        registry, shape, data,
+                    )),
                 });
             }
             if let Some(child) = option.data() {
@@ -285,4 +291,31 @@ fn collect_diff_shape(
         }
         _ => panic!("slot shape/data mismatch"),
     }
+}
+
+pub fn wire_slot_data_from_slot_access(
+    registry: &SlotShapeRegistry,
+    shape_id: SlotShapeId,
+    data: SlotDataAccess<'_>,
+) -> WireSlotData {
+    let mut writer = SlotWriter::new(Vec::new());
+    write_slot_snapshot_value(registry, shape_id, data, writer.value())
+        .expect("slot sync snapshot writes to vec");
+    raw_wire_slot_data(writer.into_inner())
+}
+
+fn wire_slot_data_from_slot_shape(
+    registry: &SlotShapeRegistry,
+    shape: &SlotShape,
+    data: SlotDataAccess<'_>,
+) -> WireSlotData {
+    let mut writer = SlotWriter::new(Vec::new());
+    write_slot_snapshot_shape_value(registry, shape, data, writer.value())
+        .expect("slot sync snapshot writes to vec");
+    raw_wire_slot_data(writer.into_inner())
+}
+
+fn raw_wire_slot_data(bytes: Vec<u8>) -> WireSlotData {
+    WireSlotData::from_json_string(String::from_utf8(bytes).expect("slot sync JSON is UTF-8"))
+        .expect("slot sync codec writes valid JSON")
 }

@@ -48,7 +48,7 @@ fn real_source_defs_sync_as_slot_roots() {
         println!("  {} shape={}", root.name, root.shape);
     }
 
-    let project_data = root_data(&sync, "project");
+    let project_data = root_data(&sync, &registry, "project");
     assert_eq!(
         select(
             &project_data,
@@ -65,7 +65,7 @@ fn real_source_defs_sync_as_slot_roots() {
         )),
     );
 
-    let shader_data = root_data(&sync, "shader");
+    let shader_data = root_data(&sync, &registry, "shader");
     assert_value(
         select(
             &shader_data,
@@ -117,7 +117,7 @@ min = 0.0
         &registry,
         [("shader", &shader_with_params as &dyn lpc_model::SlotAccess)],
     );
-    let shader_data = root_data(&sync, "shader");
+    let shader_data = root_data(&sync, &registry, "shader");
     assert_value(
         select(
             &shader_data,
@@ -132,7 +132,7 @@ min = 0.0
         &registry,
         [("output", &output as &dyn lpc_model::SlotAccess)],
     );
-    let output_data = root_data(&output_sync, "output");
+    let output_data = root_data(&output_sync, &registry, "output");
     assert_value(
         select(
             &output_data,
@@ -147,7 +147,7 @@ min = 0.0
         &registry,
         [("fixture", &fixture as &dyn lpc_model::SlotAccess)],
     );
-    let fixture_data = root_data(&fixture_sync, "fixture");
+    let fixture_data = root_data(&fixture_sync, &registry, "fixture");
     assert!(matches!(
         select(
             &fixture_data,
@@ -197,16 +197,14 @@ fn read_basic_fixture(name: &str) -> FixtureDef {
     }
 }
 
-fn root_data(sync: &lpc_wire::WireSlotFullSync, name: &str) -> SlotData {
-    lpc_wire::wire_slot_data_to_slot_data(
-        &sync
-            .roots
-            .iter()
-            .find(|root| root.name == name)
-            .unwrap()
-            .data,
-    )
-    .unwrap()
+fn root_data(
+    sync: &lpc_wire::WireSlotFullSync,
+    registry: &SlotShapeRegistry,
+    name: &str,
+) -> SlotData {
+    let root = sync.roots.iter().find(|root| root.name == name).unwrap();
+    lpc_model::slot_sync_codec::read_slot_snapshot_json(registry, root.shape, root.data.get())
+        .unwrap()
 }
 
 fn assert_value(data: &SlotData, expected: LpValue) {

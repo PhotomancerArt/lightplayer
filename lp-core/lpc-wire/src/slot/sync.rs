@@ -1,6 +1,6 @@
 use alloc::string::String;
 use alloc::vec::Vec;
-use lpc_model::{SlotData, SlotPath, SlotShapeId, SlotShapeRegistrySnapshot};
+use lpc_model::{SlotPath, SlotShapeId, SlotShapeRegistrySnapshot};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
@@ -12,6 +12,10 @@ pub struct WireSlotData(
 );
 
 impl WireSlotData {
+    pub fn from_json_string(json: String) -> Result<Self, serde_json::Error> {
+        serde_json::value::RawValue::from_string(json).map(Self)
+    }
+
     pub fn get(&self) -> &str {
         self.0.get()
     }
@@ -70,32 +74,26 @@ pub struct WireSlotPatch {
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum WireSlotChange {
-    Replace(SlotData),
-}
-
-pub fn wire_slot_data_from_slot_data(data: &SlotData) -> WireSlotData {
-    WireSlotData(serde_json::value::to_raw_value(data).expect("SlotData serializes as JSON"))
-}
-
-pub fn wire_slot_data_to_slot_data(data: &WireSlotData) -> Result<SlotData, serde_json::Error> {
-    serde_json::from_str(data.get())
+    Replace(WireSlotData),
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use alloc::vec;
-    use lpc_model::{LpValue, Revision, SlotShapeRegistry, WithRevision};
+    use lpc_model::SlotShapeRegistry;
 
     #[test]
     fn slot_patch_round_trips() {
         let patch = WireSlotPatch {
             root: String::from("engine.shader_node"),
             path: SlotPath::parse("params.exposure").unwrap(),
-            change: WireSlotChange::Replace(SlotData::Value(WithRevision::new(
-                Revision::new(7),
-                LpValue::F32(2.0),
-            ))),
+            change: WireSlotChange::Replace(
+                WireSlotData::from_json_string(String::from(
+                    r#"{"kind":"value","changed_at":7,"value":2.0}"#,
+                ))
+                .unwrap(),
+            ),
         };
 
         let json = serde_json::to_string(&patch).unwrap();

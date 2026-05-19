@@ -252,6 +252,10 @@ where
         self.writer.write_display(value)
     }
 
+    pub fn i64(self, value: i64) -> Result<(), SlotWriteError<W::Error>> {
+        self.writer.write_display(value)
+    }
+
     pub fn bool(self, value: bool) -> Result<(), SlotWriteError<W::Error>> {
         self.writer
             .write_raw(if value { b"true" } else { b"false" })

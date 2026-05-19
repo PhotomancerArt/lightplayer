@@ -474,6 +474,14 @@ where
             .map_err(|_| SyntaxError::new(path, span, "expected i32"))
     }
 
+    pub fn i64(self) -> Result<i64, SyntaxError> {
+        let span = self.span;
+        let path = self.reader.path.clone();
+        let text = read_number_text(self.reader, span, "i64")?;
+        text.parse()
+            .map_err(|_| SyntaxError::new(path, span, "expected i64"))
+    }
+
     pub fn bool(self) -> Result<bool, SyntaxError> {
         match self.reader.next_event()? {
             Some(SyntaxEvent::Bool { value, .. }) => Ok(value),
@@ -496,6 +504,14 @@ where
                 Ok(value)
             }
             event => Err(self.reader.error_at(event.span(), "expected string")),
+        }
+    }
+
+    pub fn null(self) -> Result<(), SyntaxError> {
+        match self.reader.next_event()? {
+            Some(SyntaxEvent::Null { .. }) => Ok(()),
+            Some(event) => Err(self.reader.error_at(event.span(), "expected null")),
+            None => Err(self.reader.error("expected null, found end of input")),
         }
     }
 

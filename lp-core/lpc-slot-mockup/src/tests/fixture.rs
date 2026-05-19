@@ -139,7 +139,7 @@ pub fn print_patches(patches: &[WireSlotPatch]) {
 
 pub fn describe_change(patch: &WireSlotPatch) -> String {
     match &patch.change {
-        WireSlotChange::Replace(data) => format!("replace {}", describe_data(data)),
+        WireSlotChange::Replace(data) => format!("replace {}", data.get()),
     }
 }
 

@@ -3,11 +3,12 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use lpc_model::{
     LpValue, SlotData, SlotPath, SlotShapeId, SlotShapeRegistry, SlotShapeRegistrySnapshot,
+    slot_sync_codec::read_slot_snapshot_json,
 };
 use lpc_wire::{
     WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp, WireSlotMutationRejection,
     WireSlotMutationRequest, WireSlotMutationResponse, WireSlotMutationResult, WireSlotPatch,
-    WireSlotRootSnapshot, WireSlotRootsSnapshot, wire_slot_data_to_slot_data,
+    WireSlotRootSnapshot, WireSlotRootsSnapshot,
 };
 
 use super::apply::{
@@ -130,20 +131,10 @@ impl SlotMirrorView {
         &self,
         root: &WireSlotRootSnapshot,
     ) -> Result<SlotData, SlotMirrorError> {
-        let slot_codec_error = match self
-            .registry
-            .read_slot_json_data(root.shape, root.data.get())
-        {
-            Ok(data) => {
-                return Ok(data);
-            }
-            Err(error) => error,
-        };
-
-        wire_slot_data_to_slot_data(&root.data).map_err(|serde_error| {
+        read_slot_snapshot_json(&self.registry, root.shape, root.data.get()).map_err(|error| {
             SlotMirrorError::InvalidRootData(format!(
-                "root `{}` shape {} did not decode as SlotCodec ({}) or SlotData ({})",
-                root.name, root.shape, slot_codec_error, serde_error
+                "root `{}` shape {} did not decode as slot sync snapshot ({})",
+                root.name, root.shape, error
             ))
         })
     }
@@ -156,7 +147,9 @@ mod tests {
     use lpc_model::{
         LpType, Revision, SlotFieldShape, SlotMeta, SlotName, SlotRecord, SlotShape, WithRevision,
     };
-    use lpc_wire::{WireSlotChange, WireSlotRootSnapshot, wire_slot_data_from_slot_data};
+    use lpc_wire::{
+        WireSlotChange, WireSlotData, WireSlotRootSnapshot, wire_slot_data_from_slot_access,
+    };
 
     #[test]
     fn set_value_mutation_tracks_pending_without_local_write() {
@@ -240,10 +233,12 @@ mod tests {
         view.apply_patches(&[WireSlotPatch {
             root: String::from("engine.shader_node"),
             path: SlotPath::parse("params.exposure").unwrap(),
-            change: WireSlotChange::Replace(SlotData::Value(WithRevision::new(
-                Revision::new(4),
-                LpValue::F32(2.0),
-            ))),
+            change: WireSlotChange::Replace(
+                WireSlotData::from_json_string(String::from(
+                    r#"{"kind":"value","changed_at":4,"value":2.0}"#,
+                ))
+                .unwrap(),
+            ),
         }])
         .unwrap();
 
@@ -282,7 +277,11 @@ mod tests {
             roots: vec![WireSlotRootSnapshot {
                 name: String::from("engine.shader_node"),
                 shape: shape_id,
-                data: wire_slot_data_from_slot_data(&shader_node_data()),
+                data: wire_slot_data_from_slot_access(
+                    &registry,
+                    shape_id,
+                    shader_node_data().access(),
+                ),
             }],
         })
         .unwrap();

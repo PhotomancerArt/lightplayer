@@ -28,6 +28,7 @@ pub mod binding;
 pub mod node;
 pub mod slot;
 pub mod slot_codec;
+pub mod slot_sync_codec;
 pub mod value;
 
 // --- Shared surface (non-wire) ---------------------------------------------------------------
