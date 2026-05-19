@@ -3,8 +3,8 @@
 use alloc::string::ToString;
 use alloc::vec::Vec;
 use lpc_model::{
-    LpType, LpValue, NodeDef, NodeId, Revision, SlotAccess, SlotDataAccess, SlotDataAccessMut,
-    SlotPath, SlotPathSegment, SlotPolicy, SlotShape, lookup_slot_data_mut,
+    LpType, LpValue, NodeDef, NodeId, SlotAccess, SlotDataAccess, SlotDataAccessMut, SlotPath,
+    SlotPathSegment, SlotPolicy, SlotShape, lookup_slot_data_mut,
 };
 use lpc_wire::{
     WireSlotMutationOp, WireSlotMutationRejection, WireSlotMutationRequest,
@@ -61,32 +61,6 @@ impl Engine {
             mutation_target_info(def, self.slot_shapes(), &request.path)?
         };
 
-        if target_info.shape_version != request.expected_shape_version {
-            log::warn!(
-                "slot mutation shape conflict root={} path={} expected={} current={}",
-                request.root,
-                request.path,
-                request.expected_shape_version.0,
-                target_info.shape_version.0,
-            );
-            return Err(WireSlotMutationRejection::ShapeConflict {
-                current_version: target_info.shape_version,
-            });
-        }
-
-        if target_info.data_version != request.expected_data_version {
-            log::warn!(
-                "slot mutation data conflict root={} path={} expected={} current={}",
-                request.root,
-                request.path,
-                request.expected_data_version.0,
-                target_info.data_version.0,
-            );
-            return Err(WireSlotMutationRejection::DataConflict {
-                current_version: target_info.data_version,
-            });
-        }
-
         if !target_info.writable {
             return Err(WireSlotMutationRejection::UnsupportedTarget);
         }
@@ -133,8 +107,6 @@ impl Engine {
 }
 
 struct MutationTargetInfo {
-    shape_version: Revision,
-    data_version: Revision,
     ty: LpType,
     writable: bool,
 }
@@ -165,10 +137,6 @@ fn mutation_target_info(
     path: &SlotPath,
 ) -> Result<MutationTargetInfo, WireSlotMutationRejection> {
     let shape_id = def.shape_id();
-    let shape_version = registry
-        .entry(&shape_id)
-        .ok_or(WireSlotMutationRejection::UnknownRoot)?
-        .changed_at();
     let shape = registry
         .get(&shape_id)
         .ok_or(WireSlotMutationRejection::UnknownRoot)?;
@@ -180,15 +148,12 @@ fn mutation_target_info(
         SlotPolicy::default(),
     )?;
     Ok(MutationTargetInfo {
-        shape_version,
-        data_version: target.data_version,
         ty: target.ty,
         writable: target.writable,
     })
 }
 
 struct ResolvedMutationTargetInfo {
-    data_version: Revision,
     ty: LpType,
     writable: bool,
 }
@@ -209,9 +174,8 @@ fn resolve_mutation_target_info(
 
     let Some((head, tail)) = segments.split_first() else {
         return match (shape, data) {
-            (SlotShape::Value { shape }, SlotDataAccess::Value(value)) => {
+            (SlotShape::Value { shape }, SlotDataAccess::Value(_value)) => {
                 Ok(ResolvedMutationTargetInfo {
-                    data_version: value.changed_at(),
                     ty: shape.ty.clone(),
                     writable: inherited_policy.writable,
                 })
@@ -330,7 +294,7 @@ fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
 mod tests {
     use super::*;
     use alloc::string::{String, ToString};
-    use lpc_model::{AsLpPath, NodeName, TreePath};
+    use lpc_model::{AsLpPath, NodeName, Revision, TreePath};
     use lpc_wire::WireSlotMutationId;
     use lpfs::{LpFs, LpFsMemory};
 
@@ -391,21 +355,26 @@ mod tests {
     }
 
     #[test]
-    fn stale_mutation_is_rejected() {
+    fn stale_mutation_versions_are_accepted() {
         let fs = clock_project();
         let services = EngineServices::new(TreePath::parse("/clock.show").unwrap());
         let mut engine = ProjectLoader::load_from_root(&fs, services).unwrap();
         let clock = node_id(&engine, "clock");
         let root = alloc::format!("node.{}.def", clock.0);
         let mut request = mutation_request(&engine, &root, "controls.rate", LpValue::F32(2.0));
+        request.expected_shape_version = Revision::new(999);
         request.expected_data_version = Revision::new(999);
 
         let responses = engine.mutate_project_slots(Vec::from([request]));
 
-        assert!(matches!(
-            responses[0].result,
-            WireSlotMutationResult::Rejected(WireSlotMutationRejection::DataConflict { .. })
-        ));
+        assert!(matches!(responses[0].result, WireSlotMutationResult::Accepted));
+        let def = engine
+            .loaded_node_def(engine.tree().get(clock).unwrap().artifact())
+            .unwrap();
+        let NodeDef::Clock(def) = def else {
+            panic!("clock def");
+        };
+        assert!((*def.controls.rate.value() - 2.0).abs() < 0.001);
     }
 
     #[test]
@@ -500,13 +469,13 @@ mod tests {
             .loaded_node_def(engine.tree().get(node_id).unwrap().artifact())
             .unwrap();
         let path = SlotPath::parse(path).unwrap();
-        let info = mutation_target_info(def, engine.slot_shapes(), &path).unwrap();
+        mutation_target_info(def, engine.slot_shapes(), &path).unwrap();
         WireSlotMutationRequest {
             id: WireSlotMutationId::new(1),
             root: String::from(root),
             path,
-            expected_shape_version: info.shape_version,
-            expected_data_version: info.data_version,
+            expected_shape_version: Revision::default(),
+            expected_data_version: Revision::default(),
             op: WireSlotMutationOp::SetValue(value),
         }
     }
