@@ -101,4 +101,3 @@ For records without `Default`, codegen can require every field or fail codegen f
 ### How much policy remains?
 
 Suggested answer: policy may name codec surfaces and discriminated wrappers, but it must not list every record field or every per-field read/write expression. If there is an omitted/transient field before the slot metadata supports that, list only that exception by type/field name and keep it discoverable.
-

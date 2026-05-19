@@ -9,6 +9,7 @@
 //! | `cfg(target_arch = "wasm32")`           | [`wasm_guest`]        | `lpvm-wasm::rt_browser`            |
 //! | catchall (host)                         | [`host`]              | `lpvm-wasm::rt_wasmtime`           |
 
+pub mod compute_desc;
 pub mod lp_gfx;
 pub mod lp_shader;
 pub(crate) mod uniforms;
@@ -23,10 +24,11 @@ pub mod native_jit;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm_guest;
 
+pub use compute_desc::{ComputeDescError, compute_desc_from_model_def};
 pub use convert_type::model_type_to_lps_type;
 pub use convert_value::{LpsValueToModelConversionError, lps_value_f32_to_model_value};
 pub use lp_gfx::LpGraphics;
-pub use lp_shader::{LpShader, ShaderCompileOptions};
+pub use lp_shader::{LpComputeShader, LpShader, ShaderCompileOptions};
 
 #[cfg(not(any(target_arch = "riscv32", target_arch = "wasm32")))]
 pub use host::Graphics;

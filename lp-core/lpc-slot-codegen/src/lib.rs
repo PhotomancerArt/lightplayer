@@ -82,13 +82,16 @@ pub struct Wrapped(Nested);
             vec![
                 StaticRegisteredShape {
                     type_path: String::from("crate::source::Nested"),
+                    has_default_factory: true,
                 },
                 StaticRegisteredShape {
                     type_path: String::from("crate::source::ShaderDef"),
+                    has_default_factory: true,
                 },
                 StaticRegisteredShape {
                     type_path: String::from("crate::source::Wrapped"),
-                }
+                    has_default_factory: true,
+                },
             ]
         );
     }
@@ -113,6 +116,34 @@ pub struct ProjectDef {}
             shapes,
             vec![StaticRegisteredShape {
                 type_path: String::from("crate::node::project::ProjectDef"),
+                has_default_factory: true,
+            }]
+        );
+    }
+
+    #[test]
+    fn discovers_slot_values_as_non_creatable_shapes() {
+        let dir = TempDir::new().unwrap();
+        let src = dir.path().join("src");
+        fs::create_dir_all(src.join("source")).unwrap();
+        fs::write(
+            src.join("source").join("fluid_emitter.rs"),
+            r#"
+#[derive(SlotValue)]
+pub struct FluidEmitter {
+    pub id: u32,
+}
+"#,
+        )
+        .unwrap();
+
+        let shapes = discover_static_registered_shapes(&src).unwrap();
+
+        assert_eq!(
+            shapes,
+            vec![StaticRegisteredShape {
+                type_path: String::from("crate::source::FluidEmitter"),
+                has_default_factory: false,
             }]
         );
     }
@@ -144,9 +175,11 @@ pub struct Artifact(NodeDef);
             vec![
                 StaticRegisteredShape {
                     type_path: String::from("crate::source::Artifact"),
+                    has_default_factory: true,
                 },
                 StaticRegisteredShape {
                     type_path: String::from("crate::source::NodeDef"),
+                    has_default_factory: true,
                 },
             ]
         );
@@ -211,6 +244,7 @@ pub struct FixtureDef {
     fn generated_code_contains_bootstrap_functions_and_type_paths() {
         let shapes = vec![StaticRegisteredShape {
             type_path: String::from("crate::source::ShaderDef"),
+            has_default_factory: true,
         }];
 
         let code = render_slot_shapes(&shapes);
@@ -219,6 +253,21 @@ pub struct FixtureDef {
         assert!(code.contains("ensure_static_slot_shape"));
         assert!(code.contains("<crate::source::ShaderDef as ::lpc_model::StaticSlotShape>"));
         assert!(code.contains("MissingReferencedShape"));
+    }
+
+    #[test]
+    fn generated_slot_value_shape_registers_without_default_factory() {
+        let shapes = vec![StaticRegisteredShape {
+            type_path: String::from("crate::source::FluidEmitter"),
+            has_default_factory: false,
+        }];
+
+        let code = render_slot_shapes(&shapes);
+
+        assert!(code.contains(
+            "<crate::source::FluidEmitter as ::lpc_model::StaticSlotShape>::ensure_registered(registry)?"
+        ));
+        assert!(!code.contains("SlotFactory::for_default::<crate::source::FluidEmitter>"));
     }
 
     #[test]

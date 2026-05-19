@@ -152,4 +152,3 @@ Complex cases should be local and visible:
 - No workspace-wide production adoption.
 - No binary size optimization pass beyond avoiding obviously verbose generated
   code.
-

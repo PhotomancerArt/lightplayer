@@ -39,4 +39,3 @@
 - **Why:** Streams cannot do unordered random field lookup without buffering.
 - **Rejected alternatives:** Order-dependent record fields; random-access
   reader API.
-

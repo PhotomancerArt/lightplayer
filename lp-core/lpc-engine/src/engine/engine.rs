@@ -4,17 +4,18 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::format;
 use alloc::rc::Rc;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use alloc::sync::Arc;
 use alloc::vec::Vec;
 use hashbrown::HashMap;
 
 use lpc_model::{
-    ControlProduct, LpValue, NodeId, Revision, SlotAccessor, SlotDataAccess, SlotPath,
-    SlotShapeRegistry, TreePath, WithRevision, advance_revision, current_revision,
-    lookup_slot_data,
+    ControlProduct, NodeDef, NodeId, Revision, SlotAccess, SlotAccessor, SlotData, SlotDirection,
+    SlotMerge, SlotPath, SlotPathSegment, SlotSemantics, SlotShape, SlotShapeRegistry, TreePath,
+    WithRevision, advance_revision, current_revision, lookup_slot_data_and_shape,
 };
 use lpc_shared::time::TimeProvider;
+use lpc_wire::WireNodeStatus;
 use lpfs::FsChange;
 use lpfs::lp_path::{LpPath, LpPathBuf};
 
@@ -25,6 +26,8 @@ use crate::dataflow::resolver::{
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
 };
 use crate::gfx::LpGraphics;
+use crate::node::NodeEntry;
+use crate::node::catch_node_panic::catch_node_panic;
 use crate::node::{
     ControlRenderContext, ControlRenderServices, NodeCall, NodeCallKey, NodeError,
     NodeResourceInitContext, NodeRuntime, RenderContext, TickContext,
@@ -89,6 +92,10 @@ impl Engine {
 
     pub fn revision(&self) -> Revision {
         self.revision
+    }
+
+    pub(super) fn set_revision(&mut self, revision: Revision) {
+        self.revision = revision;
     }
 
     pub fn frame_num(&self) -> FrameNum {
@@ -219,6 +226,7 @@ impl Engine {
         let result = (|| {
             self.tick_nodes(delta_ms)?;
             let revision = self.revision;
+            self.refresh_output_sink_configs();
             let buffers = &self.runtime_buffers;
             self.services
                 .flush_dirty_output_sinks(revision, buffers)
@@ -229,6 +237,23 @@ impl Engine {
         })();
         lp_perf::emit_end!(lp_perf::EVENT_FRAME);
         result
+    }
+
+    fn refresh_output_sink_configs(&mut self) {
+        let mut updates = Vec::new();
+        for entry in self.tree.entries() {
+            let Some(buffer_id) = self.runtime_output_sink_buffer_id(entry.id) else {
+                continue;
+            };
+            let Some(NodeDef::Output(def)) = self.loaded_node_def(entry.artifact()) else {
+                continue;
+            };
+            updates.push((buffer_id, def.clone()));
+        }
+
+        for (buffer_id, def) in updates {
+            self.services.update_output_sink_config(buffer_id, &def);
+        }
     }
 
     fn tick_nodes(&mut self, delta_ms: u32) -> Result<(), EngineError> {
@@ -293,8 +318,7 @@ impl Engine {
         Ok(())
     }
 
-    #[cfg(test)]
-    pub(crate) fn render_texture_for_test(
+    pub(crate) fn render_texture_product(
         &mut self,
         product: VisualProduct,
         request: &RenderTextureRequest,
@@ -313,6 +337,15 @@ impl Engine {
             frame_time_seconds: time_s,
         };
         host.render_node_texture(product, request)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn render_texture_for_test(
+        &mut self,
+        product: VisualProduct,
+        request: &RenderTextureRequest,
+    ) -> Result<TextureRenderProduct, SessionResolveError> {
+        self.render_texture_product(product, request)
     }
 
     #[cfg(test)]
@@ -426,7 +459,7 @@ impl EngineResolveHost<'_> {
                 gfx,
                 time_s,
             );
-            node_runtime.tick(&mut tick_ctx)
+            catch_node_panic(|| node_runtime.tick(&mut tick_ctx))
         };
 
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
@@ -436,12 +469,21 @@ impl EngineResolveHost<'_> {
 
         match tick_result {
             Ok(()) => {
+                set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
                 self.producers_ticked.insert(node_id);
                 Ok(())
             }
-            Err(e) => Err(SessionResolveError::other(format!(
-                "produce: tick failed: {e:?}"
-            ))),
+            Err(e) => {
+                let message = e.to_string();
+                set_entry_status_if_changed(
+                    entry,
+                    WireNodeStatus::Error(message.clone()),
+                    revision,
+                );
+                Err(SessionResolveError::other(format!(
+                    "produce: tick failed: {message}"
+                )))
+            }
         }
     }
 }
@@ -525,6 +567,18 @@ impl ResolveHost for EngineResolveHost<'_> {
             .map(|(binding_ref, entry)| (binding_ref, entry.clone()))
     }
 
+    fn bindings_for_consumed_slot(
+        &self,
+        node: NodeId,
+        slot: &SlotPath,
+    ) -> Vec<(BindingRef, crate::dataflow::binding::BindingEntry)> {
+        self.tree
+            .bindings_for_consumed_slot(node, slot)
+            .into_iter()
+            .map(|(binding_ref, entry)| (binding_ref, entry.clone()))
+            .collect()
+    }
+
     fn providers_for_bus(
         &self,
         channel: &lpc_model::ChannelName,
@@ -534,6 +588,17 @@ impl ResolveHost for EngineResolveHost<'_> {
             .into_iter()
             .map(|(binding_ref, entry)| (binding_ref, entry.clone()))
             .collect()
+    }
+
+    fn merge_policy_for_consumed_slot(&self, node: NodeId, slot: &SlotPath) -> SlotMerge {
+        self.tree
+            .get(node)
+            .and_then(|entry| {
+                self.read_authored_def_slot_semantics(&entry.def_handle, slot)
+                    .ok()
+            })
+            .filter(|semantics| semantics.direction == SlotDirection::Consumed)
+            .map_or(SlotMerge::Latest, |semantics| semantics.merge)
     }
 
     fn render_texture(
@@ -569,25 +634,20 @@ impl EngineResolveHost<'_> {
         &self,
         node: &dyn NodeRuntime,
         slot: &SlotPath,
-    ) -> Result<WithRevision<LpValue>, SessionResolveError> {
+    ) -> Result<SlotData, SessionResolveError> {
         let state = node.runtime_state_slots().ok_or_else(|| {
             SessionResolveError::other("node does not expose runtime state slots")
         })?;
-        let data = lookup_slot_data(state, self.slot_shapes, slot)
+        let (data, shape) = lookup_slot_data_and_shape(state, self.slot_shapes, slot)
             .map_err(|e| SessionResolveError::other(format!("runtime state lookup: {e}")))?;
-        let SlotDataAccess::Value(value) = data else {
-            return Err(SessionResolveError::other(format!(
-                "runtime state slot {slot:?} is not a value"
-            )));
-        };
-        Ok(WithRevision::new(value.changed_at(), value.value()))
+        Ok(lpc_wire::snapshot_slot_shape(shape, data, self.slot_shapes))
     }
 
     fn read_authored_def_product(
         &self,
         handle: &crate::node::NodeDefHandle,
         slot: &SlotPath,
-    ) -> Result<WithRevision<LpValue>, SessionResolveError> {
+    ) -> Result<SlotData, SessionResolveError> {
         if !handle.is_artifact_root() {
             return Err(SessionResolveError::other(format!(
                 "non-root node def handles are not supported yet: {}",
@@ -611,21 +671,16 @@ impl EngineResolveHost<'_> {
                 )));
             }
         };
-        let data = lookup_slot_data(def, self.slot_shapes, slot)
+        let (data, shape) = lookup_slot_data_and_shape(def, self.slot_shapes, slot)
             .map_err(|e| SessionResolveError::other(format!("authored def lookup: {e}")))?;
-        let SlotDataAccess::Value(value) = data else {
-            return Err(SessionResolveError::other(format!(
-                "authored def slot {slot:?} is not a value"
-            )));
-        };
-        Ok(WithRevision::new(value.changed_at(), value.value()))
+        Ok(lpc_wire::snapshot_slot_shape(shape, data, self.slot_shapes))
     }
 
     fn read_authored_def_product_by_accessor(
         &self,
         handle: &crate::node::NodeDefHandle,
         accessor: &SlotAccessor,
-    ) -> Result<WithRevision<LpValue>, SessionResolveError> {
+    ) -> Result<SlotData, SessionResolveError> {
         if !handle.is_artifact_root() {
             return Err(SessionResolveError::other(format!(
                 "non-root node def handles are not supported yet: {}",
@@ -652,13 +707,62 @@ impl EngineResolveHost<'_> {
         let data = accessor
             .access(def, self.slot_shapes)
             .map_err(|e| SessionResolveError::other(format!("authored def accessor: {e}")))?;
-        let SlotDataAccess::Value(value) = data else {
+        let (_, shape) = lookup_slot_data_and_shape(def, self.slot_shapes, accessor.path())
+            .map_err(|e| SessionResolveError::other(format!("authored def accessor shape: {e}")))?;
+        Ok(lpc_wire::snapshot_slot_shape(shape, data, self.slot_shapes))
+    }
+
+    fn read_authored_def_slot_semantics(
+        &self,
+        handle: &crate::node::NodeDefHandle,
+        slot: &SlotPath,
+    ) -> Result<SlotSemantics, SessionResolveError> {
+        if !handle.is_artifact_root() {
             return Err(SessionResolveError::other(format!(
-                "authored def slot {:?} is not a value",
-                accessor.path()
+                "non-root node def handles are not supported yet: {}",
+                handle.path()
+            )));
+        }
+        let entry = self.artifacts.entry(&handle.artifact()).ok_or_else(|| {
+            SessionResolveError::other(format!(
+                "node def artifact {:?} is not loaded",
+                handle.artifact()
+            ))
+        })?;
+        let def = match &entry.state {
+            ArtifactState::Loaded(def)
+            | ArtifactState::Prepared(def)
+            | ArtifactState::Idle(def) => def,
+            other => {
+                return Err(SessionResolveError::other(format!(
+                    "node def artifact {:?} has no loaded payload: {other:?}",
+                    handle.artifact()
+                )));
+            }
+        };
+        let mut shape = self.slot_shapes.get(&def.shape_id()).ok_or_else(|| {
+            SessionResolveError::other(format!("missing node def shape {}", def.shape_id()))
+        })?;
+        while let SlotShape::Ref { id } = shape {
+            shape = self.slot_shapes.get(id).ok_or_else(|| {
+                SessionResolveError::other(format!("missing referenced node def shape {id}"))
+            })?;
+        }
+        let Some(SlotPathSegment::Field(name)) = slot.segments().first() else {
+            return Err(SessionResolveError::other(format!(
+                "slot path {slot} does not start with a field"
             )));
         };
-        Ok(WithRevision::new(value.changed_at(), value.value()))
+        let SlotShape::Record { fields, .. } = shape else {
+            return Err(SessionResolveError::other("node def shape is not a record"));
+        };
+        let field = fields
+            .iter()
+            .find(|field| field.name == *name)
+            .ok_or_else(|| {
+                SessionResolveError::other(format!("node def has no slot field {name}"))
+            })?;
+        Ok(field.semantics)
     }
 
     fn render_node_texture(
@@ -721,7 +825,7 @@ impl EngineResolveHost<'_> {
                 self.time_provider.clone(),
                 self.frame_time_seconds,
             );
-            render_node.render_texture(product, request, &mut ctx)
+            catch_node_panic(|| render_node.render_texture(product, request, &mut ctx))
         };
 
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
@@ -729,7 +833,21 @@ impl EngineResolveHost<'_> {
         })?;
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
 
-        result.map_err(|e| SessionResolveError::other(format!("render: {e:?}")))
+        match result {
+            Ok(product) => {
+                set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
+                Ok(product)
+            }
+            Err(e) => {
+                let message = e.to_string();
+                set_entry_status_if_changed(
+                    entry,
+                    WireNodeStatus::Error(message.clone()),
+                    revision,
+                );
+                Err(SessionResolveError::other(format!("render: {message}")))
+            }
+        }
     }
 
     fn render_node_texture_into(
@@ -793,7 +911,7 @@ impl EngineResolveHost<'_> {
                 self.time_provider.clone(),
                 self.frame_time_seconds,
             );
-            render_node.render_texture_into(product, request, target, &mut ctx)
+            catch_node_panic(|| render_node.render_texture_into(product, request, target, &mut ctx))
         };
 
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
@@ -801,7 +919,21 @@ impl EngineResolveHost<'_> {
         })?;
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
 
-        result.map_err(|e| SessionResolveError::other(format!("render: {e:?}")))
+        match result {
+            Ok(()) => {
+                set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
+                Ok(())
+            }
+            Err(e) => {
+                let message = e.to_string();
+                set_entry_status_if_changed(
+                    entry,
+                    WireNodeStatus::Error(message.clone()),
+                    revision,
+                );
+                Err(SessionResolveError::other(format!("render: {message}")))
+            }
+        }
     }
 
     fn sample_node_visual_into(
@@ -865,7 +997,7 @@ impl EngineResolveHost<'_> {
                 self.time_provider.clone(),
                 self.frame_time_seconds,
             );
-            render_node.sample_visual_into(product, request, target, &mut ctx)
+            catch_node_panic(|| render_node.sample_visual_into(product, request, target, &mut ctx))
         };
 
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
@@ -873,7 +1005,23 @@ impl EngineResolveHost<'_> {
         })?;
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
 
-        result.map_err(|e| SessionResolveError::other(format!("sample visual: {e:?}")))
+        match result {
+            Ok(()) => {
+                set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
+                Ok(())
+            }
+            Err(e) => {
+                let message = e.to_string();
+                set_entry_status_if_changed(
+                    entry,
+                    WireNodeStatus::Error(message.clone()),
+                    revision,
+                );
+                Err(SessionResolveError::other(format!(
+                    "sample visual: {message}"
+                )))
+            }
+        }
     }
 
     fn render_node_control(
@@ -937,7 +1085,7 @@ impl EngineResolveHost<'_> {
                 self.frame_time_seconds,
                 self,
             );
-            control_node.render_control(product, request, target, &mut ctx)
+            catch_node_panic(|| control_node.render_control(product, request, target, &mut ctx))
         };
 
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
@@ -945,7 +1093,23 @@ impl EngineResolveHost<'_> {
         })?;
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
 
-        result.map_err(|e| SessionResolveError::other(format!("control render: {e:?}")))
+        match result {
+            Ok(layout) => {
+                set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
+                Ok(layout)
+            }
+            Err(e) => {
+                let message = e.to_string();
+                set_entry_status_if_changed(
+                    entry,
+                    WireNodeStatus::Error(message.clone()),
+                    revision,
+                );
+                Err(SessionResolveError::other(format!(
+                    "control render: {message}"
+                )))
+            }
+        }
     }
 }
 
@@ -991,6 +1155,16 @@ fn restore_node_after_failed_render(
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
     }
     Err(err)
+}
+
+fn set_entry_status_if_changed<N>(
+    entry: &mut NodeEntry<N>,
+    status: WireNodeStatus,
+    revision: Revision,
+) {
+    if entry.status.value() != &status {
+        entry.set_status(status, revision);
+    }
 }
 
 fn restore_node_after_failed_render_unit(
@@ -1084,7 +1258,7 @@ fn tick_tree_node(
             gfx,
             time_s,
         );
-        node_runtime.tick(&mut tick_ctx)
+        catch_node_panic(|| node_runtime.tick(&mut tick_ctx))
     };
 
     let entry = host
@@ -1094,8 +1268,18 @@ fn tick_tree_node(
     entry.set_state(NodeEntryState::Alive(node_runtime), restore_frame);
 
     match tick_result {
-        Ok(()) => Ok(()),
-        Err(e) => Err(EngineError::node(node_id, e)),
+        Ok(()) => {
+            set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
+            Ok(())
+        }
+        Err(e) => {
+            let message = e.to_string();
+            set_entry_status_if_changed(entry, WireNodeStatus::Error(message.clone()), revision);
+            Err(EngineError::Node {
+                node: node_id,
+                message,
+            })
+        }
     }
 }
 
@@ -1174,8 +1358,10 @@ mod tests {
     use crate::engine::test_support::{
         EngineTestBuilder, bus, literal, output, path, produced_slot, trace_has_value_origin_path,
     };
+    use crate::node::test_placeholder_spine;
     use crate::products::visual::VisualProduct;
     use crate::resource::RuntimeBuffer;
+    use lpc_wire::{WireChildKind, WireSlotIndex};
 
     #[test]
     fn engine_new_has_frame_state_empty_bindings_resolver_and_tree_root() {
@@ -1201,6 +1387,56 @@ mod tests {
         assert_eq!(eng.frame_num(), FrameNum::new(2));
         assert!(eng.revision() > first_tick_revision);
         assert_eq!(eng.frame_time().total_ms, 15);
+    }
+
+    #[test]
+    fn tick_error_sets_node_status_and_restores_runtime() {
+        let mut eng = Engine::new(TreePath::parse("/show.t").expect("path"));
+        let root = eng.tree().root();
+        let (cfg, artifact) = test_placeholder_spine();
+        let node = eng
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("bad").expect("name"),
+                lpc_model::NodeName::parse("shader").expect("kind"),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                cfg,
+                artifact,
+                Revision::new(1),
+            )
+            .expect("add node");
+        eng.attach_runtime_node(node, Box::new(FailingNode), Revision::new(1))
+            .expect("attach node");
+        eng.add_binding(
+            crate::dataflow::binding::BindingDraft {
+                source: crate::dataflow::binding::BindingSource::Literal(lpc_model::LpValue::F32(
+                    1.0,
+                )),
+                target: crate::dataflow::binding::BindingTarget::ConsumedSlot {
+                    node,
+                    slot: default_demand_input_path(),
+                },
+                priority: crate::dataflow::binding::BindingPriority::new(0),
+                kind: lpc_model::Kind::Color,
+                owner: node,
+            },
+            Revision::new(1),
+        )
+        .expect("bind demand input");
+        eng.add_demand_root(node);
+
+        let err = eng.tick(10).expect_err("tick should fail");
+        assert!(err.to_string().contains("intentional tick failure"));
+
+        let entry = eng.tree().get(node).expect("entry");
+        assert!(matches!(entry.state.value(), NodeEntryState::Alive(_)));
+        assert!(matches!(
+            entry.status.value(),
+            WireNodeStatus::Error(message) if message == "intentional tick failure"
+        ));
     }
 
     #[test]
@@ -1276,7 +1512,10 @@ mod tests {
                 .expect("value")
                 .eq(&second.as_value().expect("value"))
         );
-        assert_eq!(first.product.changed_at(), second.product.changed_at());
+        assert_eq!(
+            first.value_leaf().expect("value").changed_at(),
+            second.value_leaf().expect("value").changed_at()
+        );
 
         assert_eq!(h.shader_ticks("shader"), 1);
     }
@@ -1360,10 +1599,10 @@ mod tests {
     #[test]
     fn visual_product_handle_is_node_owned_value() {
         let product = VisualProduct::new(NodeId::new(7), 0);
-        let value = LpValue::Product(lpc_model::ProductRef::visual(product));
+        let value = lpc_model::LpValue::Product(lpc_model::ProductRef::visual(product));
         assert_eq!(
             value,
-            LpValue::Product(lpc_model::ProductRef::Visual(product))
+            lpc_model::LpValue::Product(lpc_model::ProductRef::Visual(product))
         );
     }
 
@@ -1379,5 +1618,25 @@ mod tests {
         let got = buffers.get(id).expect("inserted buffer");
         assert_eq!(got.changed_at(), frame);
         assert_eq!(got.value(), &payload);
+    }
+
+    struct FailingNode;
+
+    impl NodeRuntime for FailingNode {
+        fn tick(&mut self, _ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+            Err(NodeError::msg("intentional tick failure"))
+        }
+
+        fn destroy(&mut self, _ctx: &mut crate::node::DestroyCtx<'_>) -> Result<(), NodeError> {
+            Ok(())
+        }
+
+        fn handle_memory_pressure(
+            &mut self,
+            _level: crate::node::PressureLevel,
+            _ctx: &mut crate::node::MemPressureCtx<'_>,
+        ) -> Result<(), NodeError> {
+            Ok(())
+        }
     }
 }

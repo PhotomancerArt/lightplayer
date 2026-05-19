@@ -7,18 +7,23 @@ mod enum_slot;
 mod slot_access;
 mod slot_accessor;
 mod slot_data;
+mod slot_direction;
 mod slot_enum_shape;
 mod slot_factory;
 mod slot_lookup;
+mod slot_merge;
 mod slot_meta;
 mod slot_mut_access;
 mod slot_mutation;
 mod slot_name;
 mod slot_owner;
 mod slot_path;
+mod slot_persistence;
+mod slot_policy;
 mod slot_reader;
 mod slot_record_shape;
 mod slot_ref;
+mod slot_semantics;
 mod slot_shape;
 mod slot_shape_builder;
 mod slot_shape_registry;
@@ -34,16 +39,24 @@ pub use slot_access::{
 };
 pub use slot_accessor::{SlotAccessor, SlotAccessorError, SlotAccessorStep};
 pub use slot_data::{SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn, SlotRecord};
+pub use slot_direction::SlotDirection;
 pub use slot_enum_shape::SlotEnumShape;
 pub use slot_factory::{
     DynamicSlotObject, SlotFactory, SlotFactoryError, SlotFactoryFn, create_dynamic_slot_data,
 };
-pub use slot_lookup::{SlotLookupError, lookup_slot_data};
+pub use slot_lookup::{
+    SlotLookupError, lookup_slot_data, lookup_slot_data_and_shape, lookup_slot_data_mut,
+};
+pub use slot_merge::SlotMerge;
 pub use slot_meta::SlotMeta;
 pub use slot_mut_access::{
-    FieldSlotMut, MapSlotMutAccess, SlotDataMutAccess, SlotEnumDefaultVariant, SlotEnumMutAccess,
-    SlotMapValueMutAccess, SlotMutAccess, SlotMutationError, SlotOptionMutAccess,
-    SlotRecordMutAccess, SlotValueMutAccess,
+    FieldSlotMut, MapSlotMutAccess, MapSlotMutAccess as MapSlotAccessMut, SlotDataMutAccess,
+    SlotDataMutAccess as SlotDataAccessMut, SlotEnumDefaultVariant, SlotEnumMutAccess,
+    SlotEnumMutAccess as SlotEnumAccessMut, SlotMapValueMutAccess,
+    SlotMapValueMutAccess as SlotMapValueAccessMut, SlotMutAccess, SlotMutAccess as SlotAccessMut,
+    SlotMutationError, SlotOptionMutAccess, SlotOptionMutAccess as SlotOptionAccessMut,
+    SlotRecordMutAccess, SlotRecordMutAccess as SlotRecordAccessMut, SlotValueMutAccess,
+    SlotValueMutAccess as SlotValueMut,
 };
 pub use slot_mutation::{
     insert_slot_map_entry_default, set_slot_option_some_default, set_slot_value,
@@ -52,9 +65,12 @@ pub use slot_mutation::{
 pub use slot_name::{SlotName, SlotNameError};
 pub use slot_owner::SlotOwner;
 pub use slot_path::{SlotPath, SlotPathError, SlotPathSegment};
+pub use slot_persistence::SlotPersistence;
+pub use slot_policy::SlotPolicy;
 pub use slot_reader::{SlotFieldReader, SlotOptionReader, SlotReadContext};
 pub use slot_record_shape::SlotRecordShape;
 pub use slot_ref::SlotRef;
+pub use slot_semantics::SlotSemantics;
 pub use slot_shape::{
     SlotFieldShape, SlotMapKeyShape, SlotShape, SlotShapeId, SlotShapeIdError, SlotVariantShape,
 };
@@ -64,7 +80,8 @@ pub use slot_value::{
 };
 pub mod shape {
     pub use super::slot_shape_builder::{
-        field, id, leaf, map, option, record, reference, unit, value, variant,
+        field, field_with_policy, field_with_semantics, field_with_semantics_and_policy, id, leaf,
+        map, option, record, reference, unit, value, variant,
     };
 }
 pub use slot_shape_registry::{

@@ -3,12 +3,14 @@
 use lpc_model::{
     SlotAccess,
     slot_codec::{SlotWriteError, SlotWriter},
+    slot_sync_codec::write_slot_snapshot_value,
 };
 use lpc_wire::json::json_write::JsonWrite;
 use lpc_wire::json::json_writer::{JsonValue, JsonWriter, JsonWriterError};
 use lpc_wire::{
     NodeReadQuery, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery, ProjectReadRequest,
-    ProjectReadResult, ShapeReadQuery, write_project_read_result_json,
+    ProjectReadResult, RuntimeReadQuery, ServerRuntimeStatus, ShapeReadQuery,
+    WireSlotMutationRequest, WireSlotMutationResponse, write_project_read_result_json,
     write_slot_shape_registry_snapshot_json,
 };
 
@@ -26,7 +28,7 @@ impl Engine {
     /// allocating the whole response envelope and uses streaming base64 for
     /// runtime-buffer payload fields.
     pub fn write_project_read_json<W>(
-        &self,
+        &mut self,
         request: ProjectReadRequest,
         out: W,
     ) -> Result<W, JsonWriterError<W::Error>>
@@ -42,8 +44,15 @@ impl lpc_shared::transport::ProjectReadJsonSource for Engine {
         self.revision()
     }
 
+    fn apply_project_mutations(
+        &mut self,
+        mutations: alloc::vec::Vec<WireSlotMutationRequest>,
+    ) -> alloc::vec::Vec<WireSlotMutationResponse> {
+        self.mutate_project_slots(mutations)
+    }
+
     fn write_project_read_result_json<W>(
-        &self,
+        &mut self,
         since: Option<lpc_model::Revision>,
         query: ProjectReadQuery,
         out: W,
@@ -58,6 +67,9 @@ impl lpc_shared::transport::ProjectReadJsonSource for Engine {
             ProjectReadQuery::Nodes(query) => {
                 return self.write_project_node_read_result_json(since, query, out);
             }
+            ProjectReadQuery::Runtime(query) => {
+                return self.write_project_runtime_read_result_json(query, None, out);
+            }
             ProjectReadQuery::Resources(_) => {}
         }
 
@@ -65,7 +77,9 @@ impl lpc_shared::transport::ProjectReadJsonSource for Engine {
             ProjectReadQuery::Resources(query) => {
                 ProjectReadResult::Resources(self.read_project_resources(query))
             }
-            ProjectReadQuery::Shapes(_) | ProjectReadQuery::Nodes(_) => {
+            ProjectReadQuery::Shapes(_)
+            | ProjectReadQuery::Nodes(_)
+            | ProjectReadQuery::Runtime(_) => {
                 unreachable!("handled above")
             }
         };
@@ -75,7 +89,7 @@ impl lpc_shared::transport::ProjectReadJsonSource for Engine {
     }
 
     fn write_project_probe_result_json<W>(
-        &self,
+        &mut self,
         probe: ProjectProbeRequest,
         out: W,
     ) -> Result<W, JsonWriterError<W::Error>>
@@ -98,7 +112,7 @@ impl lpc_shared::transport::ProjectReadJsonSource for Engine {
 
 impl Engine {
     fn write_project_shape_read_result_json<W>(
-        &self,
+        &mut self,
         query: ShapeReadQuery,
         out: W,
     ) -> Result<W, JsonWriterError<W::Error>>
@@ -109,14 +123,41 @@ impl Engine {
         let mut result = writer.object()?;
         let mut shapes = result.prop("shapes")?.object()?;
         shapes.prop("level")?.serde(&query.level)?;
-        write_slot_shape_registry_snapshot_json(shapes.prop("registry")?, self.slot_shapes())?;
+        if let Some(limit) = query.limit {
+            let (snapshot, next) = self
+                .slot_shapes()
+                .snapshot_page(query.after, usize::try_from(limit).unwrap_or(usize::MAX));
+            shapes.prop("registry")?.serde(&snapshot)?;
+            shapes.prop("complete")?.bool(next.is_none())?;
+            if let Some(next) = next {
+                shapes.prop("next")?.serde(&next)?;
+            }
+        } else {
+            write_slot_shape_registry_snapshot_json(shapes.prop("registry")?, self.slot_shapes())?;
+            shapes.prop("complete")?.bool(true)?;
+        }
         shapes.finish()?;
         result.finish()?;
         Ok(writer.into_inner())
     }
 
+    pub fn write_project_runtime_read_result_json<W>(
+        &mut self,
+        query: RuntimeReadQuery,
+        server: Option<ServerRuntimeStatus>,
+        out: W,
+    ) -> Result<W, JsonWriterError<W::Error>>
+    where
+        W: JsonWrite,
+    {
+        let result = ProjectReadResult::Runtime(self.read_project_runtime(query, server));
+        let mut writer = JsonWriter::new(out);
+        write_project_read_result_json(&mut writer, &result)?;
+        Ok(writer.into_inner())
+    }
+
     fn write_project_node_read_result_json<W>(
-        &self,
+        &mut self,
         since: Option<lpc_model::Revision>,
         query: NodeReadQuery,
         out: W,
@@ -143,7 +184,7 @@ impl Engine {
                     let mut root = roots.item()?.object()?;
                     root.prop("name")?.string(&node_def_root_name(entry.id))?;
                     root.prop("shape")?.serde(&def.shape_id())?;
-                    self.write_slot_codec_json_value(root.prop("data")?, def)?;
+                    self.write_slot_sync_json_value(root.prop("data")?, def)?;
                     root.finish()?;
                 }
 
@@ -153,7 +194,7 @@ impl Engine {
                     let mut root = roots.item()?.object()?;
                     root.prop("name")?.string(&node_state_root_name(entry.id))?;
                     root.prop("shape")?.serde(&state.shape_id())?;
-                    self.write_slot_codec_json_value(root.prop("data")?, state)?;
+                    self.write_slot_sync_json_value(root.prop("data")?, state)?;
                     root.finish()?;
                 }
             }
@@ -168,7 +209,7 @@ impl Engine {
         Ok(writer.into_inner())
     }
 
-    fn write_slot_codec_json_value<W>(
+    fn write_slot_sync_json_value<W>(
         &self,
         value: JsonValue<'_, W>,
         root: &dyn SlotAccess,
@@ -177,9 +218,13 @@ impl Engine {
         W: JsonWrite,
     {
         let mut writer = SlotWriter::new(value);
-        self.slot_shapes()
-            .write_slot_json_value(root.shape_id(), root.data(), writer.value())
-            .map_err(slot_write_error_to_json_error)
+        write_slot_snapshot_value(
+            self.slot_shapes(),
+            root.shape_id(),
+            root.data(),
+            writer.value(),
+        )
+        .map_err(slot_write_error_to_json_error)
     }
 }
 
@@ -197,22 +242,19 @@ mod tests {
     use super::*;
     use alloc::vec;
     use alloc::vec::Vec;
-    use lpc_model::{Revision, SlotShapeId, TreePath, WithRevision};
+    use lpc_model::{Revision, TreePath, WithRevision};
     use lpc_wire::json::json_write::ChunkCountingWrite;
-    use lpc_wire::{
-        ProjectReadResponse, ResourcePayloadRead, ResourceReadQuery, ResourceReadResult,
-    };
-    use serde_json::Value;
+    use lpc_wire::{ProjectReadResponse, ResourcePayloadRead, ResourceReadQuery};
 
-    use crate::engine::test_support::{DummyShaderState, EngineTestBuilder, output};
+    use crate::engine::test_support::{EngineTestBuilder, output};
     use crate::resource::RuntimeBuffer;
 
     #[test]
     fn streaming_project_read_matches_full_debug_response() {
-        let h = EngineTestBuilder::new().output_node("output").build();
+        let mut h = EngineTestBuilder::new().output_node("output").build();
         let request = ProjectReadRequest::default_debug(None);
 
-        assert_streams_to_full_response(&h.engine, request);
+        assert_streams_to_full_response(&mut h.engine, request);
     }
 
     #[test]
@@ -228,17 +270,42 @@ mod tests {
             payloads: ResourcePayloadRead::All,
         });
 
-        assert_streams_to_full_response(&engine, request);
+        assert_streams_to_full_response(&mut engine, request);
     }
 
     #[test]
-    fn streaming_project_read_slot_payloads_read_through_slot_codec() {
-        let h = EngineTestBuilder::new()
+    fn streaming_project_read_slot_payloads_read_through_sync_codec() {
+        let mut h = EngineTestBuilder::new()
             .shader("shader", output("outputs[0]", 0.75))
             .build();
         let request = ProjectReadRequest::default_debug(None);
 
-        assert_detailed_slot_roots_read_through_registry(&h.engine, request);
+        assert_detailed_slot_roots_read_through_sync_codec(&mut h.engine, request);
+    }
+
+    #[test]
+    fn streaming_project_read_slot_payloads_deserialize_and_apply_to_view() {
+        let mut h = EngineTestBuilder::new()
+            .shader("shader", output("outputs[0]", 0.75))
+            .build();
+        let request = ProjectReadRequest::default_debug(None);
+        let streamed = h
+            .engine
+            .write_project_read_json(request, Vec::new())
+            .expect("stream project read");
+        let decoded: ProjectReadResponse =
+            lpc_wire::json::from_slice(&streamed).expect("decode streamed project read");
+        let mut view = lpc_view::ProjectView::new();
+
+        lpc_view::apply_project_read_response(&mut view, decoded).expect("apply project read");
+
+        assert!(!view.slots.roots.is_empty());
+        assert!(
+            view.slots
+                .roots
+                .keys()
+                .any(|root| root.starts_with("node."))
+        );
     }
 
     #[test]
@@ -257,11 +324,11 @@ mod tests {
             .unwrap();
         let decoded: ProjectReadResponse = lpc_wire::json::from_slice(out.bytes()).unwrap();
 
-        assert_eq!(decoded.results.len(), 3);
+        assert_eq!(decoded.results.len(), 4);
         assert!(out.chunk_count() > 1);
     }
 
-    fn assert_streams_to_full_response(engine: &Engine, request: ProjectReadRequest) {
+    fn assert_streams_to_full_response(engine: &mut Engine, request: ProjectReadRequest) {
         let full = engine.read_project(request.clone());
         let streamed = engine
             .write_project_read_json(request, Vec::new())
@@ -271,70 +338,53 @@ mod tests {
 
         assert_eq!(decoded, full);
 
-        let ProjectReadResult::Resources(ResourceReadResult {
-            runtime_buffer_payloads,
-            ..
-        }) = decoded.results.last().expect("resources result")
-        else {
-            panic!("last result should be resources");
-        };
-        for payload in runtime_buffer_payloads {
+        let resources = decoded
+            .results
+            .iter()
+            .find_map(|result| match result {
+                ProjectReadResult::Resources(resources) => Some(resources),
+                _ => None,
+            })
+            .expect("resources result");
+        for payload in &resources.runtime_buffer_payloads {
             assert!(!payload.bytes.is_empty());
         }
     }
 
-    fn assert_detailed_slot_roots_read_through_registry(
-        engine: &Engine,
+    fn assert_detailed_slot_roots_read_through_sync_codec(
+        engine: &mut Engine,
         request: ProjectReadRequest,
     ) {
         let streamed = engine
             .write_project_read_json(request, Vec::new())
             .expect("stream project read");
-        let json: Value = serde_json::from_slice(&streamed).expect("decode project read JSON");
-        let roots = detailed_node_slot_roots(&json);
+        let decoded: ProjectReadResponse =
+            lpc_wire::json::from_slice(&streamed).expect("decode project read");
+        let roots = detailed_node_slot_roots(&decoded);
 
         assert!(!roots.is_empty(), "expected detailed node slot roots");
 
-        let mut read_dummy_shader_state = false;
         for root in roots {
-            let shape = slot_shape_id(root.get("shape").expect("slot root shape"));
-            let data = root.get("data").expect("slot root data");
-            let data_json = serde_json::to_string(data).expect("encode slot root data");
-            let decoded = engine
-                .slot_shapes()
-                .read_slot_json(shape, &data_json)
-                .expect("slot root data should read through SlotCodec");
-
-            assert_eq!(decoded.shape_id(), shape);
-            read_dummy_shader_state |= decoded.as_any().is::<DummyShaderState>();
+            lpc_model::slot_sync_codec::read_slot_snapshot_json(
+                engine.slot_shapes(),
+                root.shape,
+                root.data.get(),
+            )
+            .expect("slot root data should read through slot sync codec");
         }
-
-        assert!(
-            read_dummy_shader_state,
-            "expected at least one runtime state root to downcast after SlotCodec read"
-        );
     }
 
-    fn detailed_node_slot_roots(json: &Value) -> &[Value] {
-        let results = json
-            .get("results")
-            .and_then(Value::as_array)
-            .expect("project read results");
-        let nodes = results
+    fn detailed_node_slot_roots(
+        response: &ProjectReadResponse,
+    ) -> &[lpc_wire::WireSlotRootSnapshot] {
+        response
+            .results
             .iter()
-            .find_map(|result| result.get("nodes"))
-            .expect("nodes result");
-        nodes
-            .get("slots")
-            .and_then(|slots| slots.get("roots"))
-            .and_then(Value::as_array)
+            .find_map(|result| match result {
+                ProjectReadResult::Nodes(nodes) => nodes.slots.as_ref(),
+                _ => None,
+            })
+            .map(|slots| slots.roots.as_slice())
             .expect("detailed node slot roots")
-    }
-
-    fn slot_shape_id(value: &Value) -> SlotShapeId {
-        let raw = value
-            .as_u64()
-            .expect("slot shape id should be encoded as a u32");
-        SlotShapeId::new(u32::try_from(raw).expect("slot shape id should fit in u32"))
     }
 }

@@ -85,4 +85,3 @@ Avoid generated helper functions like `read_dim2u`, `write_glsl_opts`, or per-fi
 cargo test -p lpc-slot-codegen
 cargo test -p lpc-slot-mockup
 ```
-

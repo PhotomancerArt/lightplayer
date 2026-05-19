@@ -44,4 +44,3 @@ cargo check -p lpc-model --no-default-features
 cargo check -p lpc-wire --no-default-features
 git diff --check
 ```
-

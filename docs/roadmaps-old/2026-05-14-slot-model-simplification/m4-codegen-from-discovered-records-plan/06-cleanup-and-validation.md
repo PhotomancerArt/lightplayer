@@ -72,4 +72,3 @@ Search checks:
 rg "from_codec|_from_codec" lp-core/lpc-slot-mockup/src lp-core/lpc-slot-codegen/src
 rg "mockup_source_codec_module|SlotCodecType|SlotCodecField" lp-core/lpc-slot-codegen/src
 ```
-

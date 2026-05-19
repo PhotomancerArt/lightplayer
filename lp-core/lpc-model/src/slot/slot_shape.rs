@@ -1,4 +1,4 @@
-use crate::{LpType, SlotName, SlotNameError, SlotValueShape};
+use crate::{LpType, SlotName, SlotNameError, SlotPolicy, SlotSemantics, SlotValueShape};
 use alloc::boxed::Box;
 use alloc::vec::Vec;
 use core::fmt;
@@ -183,14 +183,51 @@ pub enum SlotMapKeyShape {
 pub struct SlotFieldShape {
     pub name: SlotName,
     pub shape: SlotShape,
+    #[serde(default, skip_serializing_if = "SlotSemantics::is_default")]
+    pub semantics: SlotSemantics,
+    #[serde(default, skip_serializing_if = "SlotPolicy::is_default")]
+    pub policy: SlotPolicy,
 }
 
 impl SlotFieldShape {
     pub fn new(name: &str, shape: SlotShape) -> Result<Self, SlotNameError> {
+        Self::with_semantics(name, shape, SlotSemantics::default())
+    }
+
+    pub fn with_policy(
+        name: &str,
+        shape: SlotShape,
+        policy: SlotPolicy,
+    ) -> Result<Self, SlotNameError> {
+        Self::with_semantics_and_policy(name, shape, SlotSemantics::default(), policy)
+    }
+
+    pub fn with_semantics(
+        name: &str,
+        shape: SlotShape,
+        semantics: SlotSemantics,
+    ) -> Result<Self, SlotNameError> {
+        Self::with_semantics_and_policy(name, shape, semantics, SlotPolicy::default())
+    }
+
+    pub fn with_semantics_and_policy(
+        name: &str,
+        shape: SlotShape,
+        semantics: SlotSemantics,
+        policy: SlotPolicy,
+    ) -> Result<Self, SlotNameError> {
         Ok(Self {
             name: SlotName::parse(name)?,
             shape,
+            semantics,
+            policy,
         })
+    }
+}
+
+impl SlotSemantics {
+    pub fn is_default(self: &Self) -> bool {
+        *self == Self::default()
     }
 }
 

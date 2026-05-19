@@ -162,4 +162,3 @@ the name `from_codec` exposes codec scaffolding in the domain.
 
 Suggested answer: yes, remove codec-only constructors. Keep or rename only
 human/domain constructors that are genuinely useful outside generated codecs.
-

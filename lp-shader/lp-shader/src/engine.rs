@@ -8,8 +8,11 @@ use lps_shared::{LpsModuleSig, LpsType, TextureBuffer, TextureStorageFormat};
 use lpvm::AllocError;
 use lpvm::LpvmEngine;
 
+use crate::compile_compute_desc::CompileComputeDesc;
 use crate::compile_job::{ShaderCompileBudget, ShaderCompileJob, ShaderCompileStepResult};
 use crate::compile_px_desc::{CompilePxDesc, TextureBindingSpecs};
+use crate::compute_abi::{validate_compute_abi, validate_compute_tick_sig};
+use crate::compute_shader::LpsComputeShader;
 use crate::error::LpsError;
 use crate::px_shader::LpsPxShader;
 use crate::sample_buf::{LpsSamplePointBuf, LpsSampleRgba16Buf};
@@ -77,6 +80,37 @@ impl<E: LpvmEngine> LpsEngine<E> {
         E::Module: 'static,
     {
         ShaderCompileJob::new(&self.engine, desc)
+    }
+
+    /// Compile GLSL into a serial compute shader.
+    pub fn compile_compute_desc(
+        &self,
+        desc: CompileComputeDesc<'_>,
+    ) -> Result<LpsComputeShader, LpsError>
+    where
+        E::Module: 'static,
+    {
+        let CompileComputeDesc {
+            glsl,
+            compiler_config,
+            abi,
+        } = desc;
+
+        let lower_options = lps_glsl::CompileOptions {
+            texture_specs: Default::default(),
+            texel_fetch_bounds: compiler_config.texture.texel_fetch_bounds,
+        };
+        let output =
+            lps_glsl::compile(glsl, &lower_options).map_err(|e| LpsError::Parse(e.render(glsl)))?;
+        let (ir, meta) = (output.ir, output.meta);
+
+        let tick_fn_index = validate_compute_tick_sig(&meta)?;
+        validate_compute_abi(&meta, &abi)?;
+        let module = self
+            .engine
+            .compile_with_config(&ir, &meta, &compiler_config)
+            .map_err(|e| LpsError::Compile(format!("{e}")))?;
+        LpsComputeShader::new(module, meta, tick_fn_index)
     }
 
     /// Allocate a texture in the engine's shared memory.

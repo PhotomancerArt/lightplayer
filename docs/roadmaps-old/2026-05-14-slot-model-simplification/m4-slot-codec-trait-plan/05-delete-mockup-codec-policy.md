@@ -64,4 +64,3 @@ cargo test -p lpc-slot-codegen
 cargo test -p lpc-slot-mockup
 rg "mockup_codec_policy|MockupCodecRecord|MockupCodecField|MockupCodecConstructor" lp-core/lpc-slot-codegen/src lp-core/lpc-slot-mockup/src -n
 ```
-

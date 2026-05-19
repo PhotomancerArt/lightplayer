@@ -36,4 +36,3 @@ Keep serde impls and slot shape/access impls.
 cargo test -p lpc-model
 cargo test -p lpc-slot-mockup dynamic_slot_codec
 ```
-

@@ -51,4 +51,3 @@ Out of scope:
 
 Full plan: production adoption touches loading, messages, tests, and size
 measurement, so it needs phased implementation and validation.
-

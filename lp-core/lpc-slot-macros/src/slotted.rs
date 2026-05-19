@@ -15,7 +15,7 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
     let input = parse2::<DeriveInput>(input)?;
     let ident = input.ident;
     let container_attrs = attr::parse_container(&input.attrs)?;
-    let shape_id = if let Some(shape_id) = container_attrs.shape_id {
+    let shape_id = if let Some(shape_id) = &container_attrs.shape_id {
         quote! { ::lpc_model::SlotShapeId::from_static_name(#shape_id) }
     } else {
         quote! {
@@ -27,7 +27,9 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
 
     match input.data {
         Data::Struct(data) => match data.fields {
-            Fields::Named(fields) => crate::slotted_record::derive_record(ident, shape_id, fields),
+            Fields::Named(fields) => {
+                crate::slotted_record::derive_record(ident, shape_id, fields, container_attrs)
+            }
             Fields::Unnamed(fields) => {
                 crate::slotted_wrapper::derive_wrapper(ident, shape_id, fields)
             }

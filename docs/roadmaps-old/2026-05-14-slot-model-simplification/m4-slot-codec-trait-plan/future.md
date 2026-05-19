@@ -23,4 +23,3 @@
 - **Idea:** Audit generated slot and codec code for monomorphization-heavy patterns and move repeated logic behind shared helpers.
 - **Why not now:** Premature until the trait shape stops moving.
 - **Useful context:** Embedded binary size is the primary motivation for this work.
-

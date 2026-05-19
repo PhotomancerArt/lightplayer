@@ -9,10 +9,12 @@ use alloc::{format, rc::Rc, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 use lpc_engine::LpGraphics;
 use lpc_model::{AsLpPath, LpPath, LpPathBuf};
+use lpc_shared::backtrace;
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_wire::{
-    WireServerMessage, WireServerMsgBody as ServerMessagePayload,
+    ProjectReadRequest, WireServerMessage, WireServerMsgBody as ServerMessagePayload,
+    WireSlotMutationRequest, WireSlotMutationResponse, WireSlotMutationResult,
     messages::ClientMessage,
     server::{AvailableProject, FsRequest, FsResponse},
 };
@@ -139,6 +141,7 @@ fn handle_load_project(
     graphics: Arc<dyn LpGraphics>,
     path: &LpPath,
 ) -> Result<ServerMessagePayload, ServerError> {
+    backtrace::set_oom_context("server handler: load project");
     log::info!("Loading project: {}", path.as_str());
     log_memory(memory_stats, "load_project before");
     let handle = project_manager.load_project(
@@ -149,8 +152,12 @@ fn handle_load_project(
         time_provider,
         graphics,
     )?;
+    backtrace::set_oom_context("server handler: load project memory log");
     log_memory(memory_stats, "load_project after");
-    Ok(ServerMessagePayload::LoadProject { handle })
+    backtrace::set_oom_context("server handler: load project response");
+    let response = ServerMessagePayload::LoadProject { handle };
+    backtrace::clear_oom_context();
+    Ok(response)
 }
 
 /// Handle an UnloadProject request
@@ -168,7 +175,7 @@ fn handle_unload_project(
 fn handle_project_request(
     project_manager: &mut ProjectManager,
     handle: lpc_wire::WireProjectHandle,
-    request: lpc_wire::WireProjectRequest,
+    request: ProjectReadRequest,
     theoretical_fps: Option<f32>,
 ) -> Result<ServerMessagePayload, ServerError> {
     let project = project_manager
@@ -176,10 +183,48 @@ fn handle_project_request(
         .ok_or_else(|| ServerError::ProjectNotFound(format!("handle {}", handle.id())))?;
     let _ = theoretical_fps;
 
-    match request {
-        lpc_wire::WireProjectRequest::Read(request) => Ok(ServerMessagePayload::ProjectRequest {
-            response: project.engine().read_project(request),
-        }),
+    log_project_mutations(&request.mutations);
+    let response = project.engine_mut().read_project(request);
+    log_project_mutation_responses(&response.mutations);
+    Ok(ServerMessagePayload::ProjectRequest { response })
+}
+
+fn log_project_mutations(mutations: &[WireSlotMutationRequest]) {
+    if mutations.is_empty() {
+        return;
+    }
+    log::info!("received {} project slot mutation(s)", mutations.len());
+    for mutation in mutations {
+        log::info!(
+            "slot mutation id={} root={} path={} op={:?}",
+            mutation.id.id(),
+            mutation.root,
+            mutation.path,
+            mutation.op,
+        );
+        log::info!(
+            "slot mutation id={} expected shape_rev={} data_rev={}",
+            mutation.id.id(),
+            mutation.expected_shape_version.0,
+            mutation.expected_data_version.0,
+        );
+    }
+}
+
+fn log_project_mutation_responses(responses: &[WireSlotMutationResponse]) {
+    for response in responses {
+        match &response.result {
+            WireSlotMutationResult::Accepted => {
+                log::info!("slot mutation id={} accepted", response.id.id());
+            }
+            WireSlotMutationResult::Rejected(rejection) => {
+                log::warn!(
+                    "slot mutation id={} rejected: {:?}",
+                    response.id.id(),
+                    rejection,
+                );
+            }
+        }
     }
 }
 

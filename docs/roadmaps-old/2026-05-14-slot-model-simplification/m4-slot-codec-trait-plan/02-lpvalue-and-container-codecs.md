@@ -109,4 +109,3 @@ cargo test -p lpc-model slot_codec
 cargo test -p lpc-model value_slot
 cargo check -p lpc-model --no-default-features
 ```
-

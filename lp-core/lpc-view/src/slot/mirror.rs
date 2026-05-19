@@ -1,12 +1,14 @@
 use alloc::collections::BTreeMap;
+use alloc::format;
 use alloc::string::{String, ToString};
 use lpc_model::{
     LpValue, SlotData, SlotPath, SlotShapeId, SlotShapeRegistry, SlotShapeRegistrySnapshot,
+    slot_sync_codec::read_slot_snapshot_json,
 };
 use lpc_wire::{
     WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp, WireSlotMutationRejection,
     WireSlotMutationRequest, WireSlotMutationResponse, WireSlotMutationResult, WireSlotPatch,
-    WireSlotRootsSnapshot,
+    WireSlotRootSnapshot, WireSlotRootsSnapshot,
 };
 
 use super::apply::{
@@ -29,22 +31,31 @@ impl SlotMirrorView {
         Self::default()
     }
 
-    pub fn apply_full_sync(&mut self, sync: WireSlotFullSync) {
+    pub fn apply_full_sync(&mut self, sync: WireSlotFullSync) -> Result<(), SlotMirrorError> {
         self.registry.apply_snapshot(sync.registry);
-        self.apply_roots_snapshot(WireSlotRootsSnapshot { roots: sync.roots });
+        self.apply_roots_snapshot(WireSlotRootsSnapshot { roots: sync.roots })
     }
 
-    pub fn apply_roots_snapshot(&mut self, sync: WireSlotRootsSnapshot) {
+    pub fn apply_roots_snapshot(
+        &mut self,
+        sync: WireSlotRootsSnapshot,
+    ) -> Result<(), SlotMirrorError> {
         self.root_shapes.clear();
         self.roots.clear();
         for root in sync.roots {
+            let data = self.read_wire_slot_root(&root)?;
             self.root_shapes.insert(root.name.clone(), root.shape);
-            self.roots.insert(root.name, root.data);
+            self.roots.insert(root.name, data);
         }
+        Ok(())
     }
 
     pub fn apply_registry_snapshot(&mut self, snapshot: SlotShapeRegistrySnapshot) {
         self.registry.apply_snapshot(snapshot);
+    }
+
+    pub fn apply_registry_page(&mut self, snapshot: SlotShapeRegistrySnapshot) {
+        self.registry.apply_partial_snapshot(snapshot);
     }
 
     pub fn apply_patches(&mut self, patches: &[WireSlotPatch]) -> Result<(), SlotMirrorError> {
@@ -115,6 +126,18 @@ impl SlotMirrorView {
     pub fn error(&self, id: WireSlotMutationId) -> Option<&WireSlotMutationRejection> {
         self.errors.get(&id)
     }
+
+    fn read_wire_slot_root(
+        &self,
+        root: &WireSlotRootSnapshot,
+    ) -> Result<SlotData, SlotMirrorError> {
+        read_slot_snapshot_json(&self.registry, root.shape, root.data.get()).map_err(|error| {
+            SlotMirrorError::InvalidRootData(format!(
+                "root `{}` shape {} did not decode as slot sync snapshot ({})",
+                root.name, root.shape, error
+            ))
+        })
+    }
 }
 
 #[cfg(test)]
@@ -124,7 +147,9 @@ mod tests {
     use lpc_model::{
         LpType, Revision, SlotFieldShape, SlotMeta, SlotName, SlotRecord, SlotShape, WithRevision,
     };
-    use lpc_wire::{WireSlotChange, WireSlotRootSnapshot};
+    use lpc_wire::{
+        WireSlotChange, WireSlotData, WireSlotRootSnapshot, wire_slot_data_from_slot_access,
+    };
 
     #[test]
     fn set_value_mutation_tracks_pending_without_local_write() {
@@ -208,10 +233,12 @@ mod tests {
         view.apply_patches(&[WireSlotPatch {
             root: String::from("engine.shader_node"),
             path: SlotPath::parse("params.exposure").unwrap(),
-            change: WireSlotChange::Replace(SlotData::Value(WithRevision::new(
-                Revision::new(4),
-                LpValue::F32(2.0),
-            ))),
+            change: WireSlotChange::Replace(
+                WireSlotData::from_json_string(String::from(
+                    r#"{"kind":"value","changed_at":4,"value":2.0}"#,
+                ))
+                .unwrap(),
+            ),
         }])
         .unwrap();
 
@@ -250,9 +277,14 @@ mod tests {
             roots: vec![WireSlotRootSnapshot {
                 name: String::from("engine.shader_node"),
                 shape: shape_id,
-                data: shader_node_data(),
+                data: wire_slot_data_from_slot_access(
+                    &registry,
+                    shape_id,
+                    shader_node_data().access(),
+                ),
             }],
-        });
+        })
+        .unwrap();
         view
     }
 
@@ -267,12 +299,18 @@ mod tests {
                         fields: vec![SlotFieldShape {
                             name: SlotName::parse("exposure").unwrap(),
                             shape: SlotShape::value(LpType::F32),
+                            semantics: Default::default(),
+                            policy: Default::default(),
                         }],
                     },
+                    semantics: Default::default(),
+                    policy: Default::default(),
                 },
                 SlotFieldShape {
                     name: SlotName::parse("compile_error").unwrap(),
                     shape: SlotShape::value(LpType::String),
+                    semantics: Default::default(),
+                    policy: Default::default(),
                 },
             ],
         }

@@ -46,13 +46,17 @@ pub fn apply_project_read_response(
         match result {
             ProjectReadResult::Shapes(shapes) => {
                 if let Some(registry) = shapes.registry {
-                    view.slots.apply_registry_snapshot(registry);
+                    if shapes.complete {
+                        view.slots.apply_registry_snapshot(registry);
+                    } else {
+                        view.slots.apply_registry_page(registry);
+                    }
                 }
             }
             ProjectReadResult::Nodes(nodes) => {
                 apply_tree_deltas(&mut view.tree, &nodes.tree_deltas, revision)?;
                 if let Some(slots) = nodes.slots {
-                    view.slots.apply_roots_snapshot(slots);
+                    view.slots.apply_roots_snapshot(slots)?;
                 }
             }
             ProjectReadResult::Resources(resources) => {
@@ -60,7 +64,11 @@ pub fn apply_project_read_response(
                 view.resource_cache
                     .apply_runtime_buffer_payloads(&resources.runtime_buffer_payloads);
             }
+            ProjectReadResult::Runtime(_) => {}
         }
+    }
+    for mutation in response.mutations {
+        view.slots.apply_mutation_response(mutation);
     }
     view.revision = revision;
     Ok(())
@@ -98,6 +106,7 @@ mod tests {
                 slots: None,
             })],
             probes: vec![],
+            mutations: vec![],
         };
 
         apply_project_read_response(&mut view, response).unwrap();
@@ -117,6 +126,7 @@ mod tests {
                 runtime_buffer_payloads: vec![],
             })],
             probes: vec![],
+            mutations: vec![],
         };
 
         apply_project_read_response(&mut view, response).unwrap();

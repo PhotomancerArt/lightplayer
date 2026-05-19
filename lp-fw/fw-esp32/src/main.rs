@@ -21,10 +21,17 @@ extern crate unwinding;
 
 use core::alloc::Layout;
 use core::panic::PanicInfo;
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
-static OOM_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
+const OOM_STATE_NORMAL: u8 = 0;
+const OOM_STATE_UNWINDING: u8 = 1;
+const OOM_STATE_RECURSIVE: u8 = 2;
+
+static OOM_STATE: AtomicU8 = AtomicU8::new(OOM_STATE_NORMAL);
 static OOM_ALLOC_SIZE: AtomicUsize = AtomicUsize::new(0);
+static OOM_ALLOC_ALIGN: AtomicUsize = AtomicUsize::new(0);
+static OOM_FREE_BYTES: AtomicUsize = AtomicUsize::new(0);
+static OOM_USED_BYTES: AtomicUsize = AtomicUsize::new(0);
 
 /// Custom panic handler that starts stack unwinding via the `unwinding` crate.
 ///
@@ -37,42 +44,37 @@ static OOM_ALLOC_SIZE: AtomicUsize = AtomicUsize::new(0);
 fn panic_handler(info: &PanicInfo) -> ! {
     esp_println::println!("\n\n====================== PANIC ======================");
     esp_println::println!("{info}");
+    print_panic_frames();
     esp_println::println!();
-
-    if OOM_IN_PROGRESS.load(Ordering::Relaxed) {
-        esp_println::println!(
-            "OOM while handling allocation failure: requested={} free={} used={}",
-            OOM_ALLOC_SIZE.load(Ordering::Relaxed),
-            esp_alloc::HEAP.free(),
-            esp_alloc::HEAP.used(),
-        );
-        loop {}
-    }
 
     let payload: alloc::boxed::Box<dyn core::any::Any + Send> = {
         #[cfg(feature = "server")]
         {
-            use core::fmt::Write;
-            let message = {
-                let mut buf = alloc::string::String::new();
-                let _ = write!(buf, "{}", info.message());
-                if buf.is_empty() {
-                    alloc::string::String::from("panic occurred (no message)")
-                } else {
-                    buf
-                }
-            };
             let (file, line) = if let Some(loc) = info.location() {
-                (
-                    Some(alloc::string::String::from(loc.file())),
-                    Some(loc.line()),
-                )
+                (Some(loc.file()), Some(loc.line()))
             } else {
                 (None, None)
             };
-            alloc::boxed::Box::new(lpc_shared::backtrace::PanicPayload::new(
-                message, file, line,
-            ))
+            if OOM_STATE.load(Ordering::Relaxed) == OOM_STATE_UNWINDING {
+                alloc::boxed::Box::new(lpc_shared::backtrace::PanicPayload::new_oom(
+                    info.message(),
+                    file,
+                    line,
+                    lpc_shared::backtrace::OomInfo {
+                        requested: OOM_ALLOC_SIZE.load(Ordering::Relaxed),
+                        align: OOM_ALLOC_ALIGN.load(Ordering::Relaxed),
+                        free: OOM_FREE_BYTES.load(Ordering::Relaxed),
+                        used: OOM_USED_BYTES.load(Ordering::Relaxed),
+                        context: lpc_shared::backtrace::oom_context(),
+                    },
+                ))
+            } else {
+                alloc::boxed::Box::new(lpc_shared::backtrace::PanicPayload::new(
+                    info.message(),
+                    file,
+                    line,
+                ))
+            }
         }
         #[cfg(not(feature = "server"))]
         {
@@ -80,6 +82,7 @@ fn panic_handler(info: &PanicInfo) -> ! {
             alloc::boxed::Box::new(Dummy)
         }
     };
+    OOM_STATE.store(OOM_STATE_NORMAL, Ordering::Relaxed);
     let code = unwinding::panic::begin_panic(payload);
 
     // begin_panic returns if no catch_unwind was found on the stack.
@@ -87,19 +90,65 @@ fn panic_handler(info: &PanicInfo) -> ! {
     loop {}
 }
 
+fn print_panic_frames() {
+    let mut frames = [0; lpc_shared::backtrace::MAX_FRAMES];
+    let count = lpc_shared::backtrace::capture_frames(&mut frames);
+    if count == 0 {
+        return;
+    }
+
+    esp_println::print!("frames:");
+    for frame in frames.iter().take(count) {
+        esp_println::print!(" 0x{:08x}", frame);
+    }
+    esp_println::println!();
+    esp_println::print!("decode: just decode-backtrace");
+    for frame in frames.iter().take(count) {
+        esp_println::print!(" 0x{:08x}", frame);
+    }
+    esp_println::println!();
+}
+
 /// Custom OOM handler that panics normally so catch_unwind can recover.
 /// The default alloc_error_handler uses nounwind panic and cannot be caught.
 #[alloc_error_handler]
 fn on_alloc_error(layout: Layout) -> ! {
+    if OOM_STATE
+        .compare_exchange(
+            OOM_STATE_NORMAL,
+            OOM_STATE_UNWINDING,
+            Ordering::Relaxed,
+            Ordering::Relaxed,
+        )
+        .is_err()
+    {
+        OOM_STATE.store(OOM_STATE_RECURSIVE, Ordering::Relaxed);
+        esp_println::println!("\n\n====================== OOM ======================");
+        esp_println::println!(
+            "allocation failed while building OOM panic payload: requested={} align={} original_requested={} original_free={} original_used={}",
+            layout.size(),
+            layout.align(),
+            OOM_ALLOC_SIZE.load(Ordering::Relaxed),
+            OOM_FREE_BYTES.load(Ordering::Relaxed),
+            OOM_USED_BYTES.load(Ordering::Relaxed),
+        );
+        loop {}
+    }
+
+    let free = esp_alloc::HEAP.free();
+    let used = esp_alloc::HEAP.used();
     OOM_ALLOC_SIZE.store(layout.size(), Ordering::Relaxed);
-    OOM_IN_PROGRESS.store(true, Ordering::Relaxed);
+    OOM_ALLOC_ALIGN.store(layout.align(), Ordering::Relaxed);
+    OOM_FREE_BYTES.store(free, Ordering::Relaxed);
+    OOM_USED_BYTES.store(used, Ordering::Relaxed);
     esp_println::println!("\n\n====================== OOM ======================");
     esp_println::println!(
-        "allocation failed: requested={} align={} free={} used={}",
+        "allocation failed: requested={} align={} free={} used={} context={}",
         layout.size(),
         layout.align(),
-        esp_alloc::HEAP.free(),
-        esp_alloc::HEAP.used(),
+        free,
+        used,
+        lpc_shared::backtrace::oom_context().unwrap_or("<unset>"),
     );
     panic!("memory allocation of {} bytes failed", layout.size());
 }

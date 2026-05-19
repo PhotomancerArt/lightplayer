@@ -4,6 +4,9 @@ name = "basic"
 [nodes.output]
 artifact = "./output.toml"
 
+[nodes.clock]
+artifact = "./clock.toml"
+
 [nodes.shader]
 artifact = "./shader.toml"
 

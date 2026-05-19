@@ -109,6 +109,28 @@ impl EngineServices {
         );
     }
 
+    pub fn update_output_sink_config(&mut self, buffer_id: RuntimeBufferId, config: &OutputDef) {
+        let pin = pin_from_output_config(config);
+        let display_options = display_options_from_output_config(config);
+        let Some(existing) = self.output_sinks.get(&buffer_id) else {
+            self.register_output_sink(buffer_id, config);
+            return;
+        };
+        if existing.pin == pin && output_options_eq(&existing.display_options, &display_options) {
+            return;
+        }
+
+        let mut existing = self
+            .output_sinks
+            .remove(&buffer_id)
+            .expect("output sink existed above");
+        self.close_output_sink(&mut existing);
+        existing.pin = pin;
+        existing.display_options = display_options;
+        existing.last_byte_count = None;
+        self.output_sinks.insert(buffer_id, existing);
+    }
+
     /// Flush sinks whose backing buffer [`WithRevision::revision`] equals `revision`.
     ///
     /// Temporarily removes the boxed [`OutputProvider`] from `self` so sinks can be mutated without
@@ -169,12 +191,28 @@ fn display_options_from_output_config(cfg: &OutputDef) -> Option<OutputDriverOpt
 
 fn driver_options_from_cfg(cfg: &OutputDriverOptionsConfig) -> OutputDriverOptions {
     OutputDriverOptions {
-        lum_power: cfg.lum_power.value().0,
         white_point: *cfg.white_point.value(),
         brightness: cfg.brightness.value().0.clamp(0.0, 1.0),
         interpolation_enabled: *cfg.interpolation_enabled.value(),
         dithering_enabled: *cfg.dithering_enabled.value(),
         lut_enabled: *cfg.lut_enabled.value(),
+    }
+}
+
+fn output_options_eq(
+    left: &Option<OutputDriverOptions>,
+    right: &Option<OutputDriverOptions>,
+) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => {
+            left.white_point == right.white_point
+                && left.brightness == right.brightness
+                && left.interpolation_enabled == right.interpolation_enabled
+                && left.dithering_enabled == right.dithering_enabled
+                && left.lut_enabled == right.lut_enabled
+        }
+        _ => false,
     }
 }
 
@@ -260,8 +298,8 @@ mod tests {
     use alloc::rc::Rc;
     use alloc::vec;
 
-    use lpc_model::nodes::output::OutputDef;
-    use lpc_model::{Revision, TreePath, WithRevision};
+    use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
+    use lpc_model::{OptionSlot, Revision, TreePath, WithRevision};
     use lpc_shared::error::OutputError;
     use lpc_shared::output::{
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
@@ -297,6 +335,40 @@ mod tests {
             !provider.is_pin_open(4),
             "dropping runtime services should release output pins"
         );
+    }
+
+    #[test]
+    fn output_sink_config_update_reopens_channel_on_next_flush() {
+        let provider = Rc::new(MemoryOutputProvider::new());
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
+            &provider,
+        )))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let buffer_id = buffers.insert(WithRevision::new(
+            Revision::new(1),
+            RuntimeBuffer::output_channels_u16(6, vec![0, 1, 0, 2, 0, 3, 0, 4, 0, 5, 0, 6]),
+        ));
+        services.register_output_sink(buffer_id, &OutputDef::new(4));
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("initial flush");
+        let first_handle = provider.get_handle_for_pin(4).expect("first handle");
+
+        let mut next = OutputDef::new(4);
+        next.options = OptionSlot::some(OutputDriverOptionsConfig {
+            brightness: lpc_model::RatioSlot::new(lpc_model::Ratio(0.25)),
+            ..OutputDriverOptionsConfig::default()
+        });
+        services.update_output_sink_config(buffer_id, &next);
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("flush after config update");
+
+        let second_handle = provider.get_handle_for_pin(4).expect("second handle");
+        assert_ne!(first_handle, second_handle);
+        assert_eq!(provider.open_channel_count(), 1);
     }
 
     struct SharedMemoryOutputProvider(Rc<MemoryOutputProvider>);

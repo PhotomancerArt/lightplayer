@@ -4,9 +4,9 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use crate::{
-    SlotDataMutAccess, SlotFactoryError, SlotMapKey, SlotMapKeyShape, SlotMutAccess,
-    SlotMutationError, SlotShape, SlotShapeId, SlotShapeRegistry, SlotVariantShape,
-    current_revision,
+    DynamicSlotObject, SlotData, SlotDataMutAccess, SlotFactoryError, SlotMapKey, SlotMapKeyShape,
+    SlotMutAccess, SlotMutationError, SlotShape, SlotShapeId, SlotShapeRegistry, SlotVariantShape,
+    create_dynamic_slot_data, current_revision,
 };
 
 use super::{ObjectReader, SyntaxError, SyntaxEventSource, ValueReader, read_lp_value};
@@ -27,6 +27,23 @@ where
         .map_err(factory_error_to_syntax)?;
     apply_reader_to_slot(object.data_mut(), shape, registry, value)?;
     Ok(object)
+}
+
+pub fn read_dynamic_slot_data<S>(
+    registry: &SlotShapeRegistry,
+    shape_id: SlotShapeId,
+    value: ValueReader<'_, '_, S>,
+) -> Result<SlotData, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    let shape = registry
+        .get(&shape_id)
+        .ok_or_else(|| syntax_error(format!("missing slot shape: {shape_id}")))?;
+    let data = create_dynamic_slot_data(registry, shape).map_err(factory_error_to_syntax)?;
+    let mut object = DynamicSlotObject::new(shape_id, data);
+    apply_reader_to_slot(object.data_mut(), shape, registry, value)?;
+    Ok(object.into_data())
 }
 
 pub fn apply_reader_to_slot<S>(

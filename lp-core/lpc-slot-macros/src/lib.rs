@@ -30,7 +30,7 @@
 //!
 //! ```ignore
 //! #[slot(name = "params", map(key = "string", value_ref = "shader.param_def"))]
-//! pub param_defs: SlotMap<String, ShaderParamDef>,
+//! pub consumed_slots: SlotMap<String, ShaderSlotDef>,
 //! ```
 //!
 //! Supported container attributes:
@@ -49,7 +49,11 @@
 //! - `#[slot(record)]`: force nested record shape/access.
 //! - `#[slot(option_ref = "...")]`: shape an option around another registered shape.
 //! - `#[slot(map(key = "...", value_ref = "..."))]`: shape a map whose values
-//!   reference another registered shape.
+//!   reference another shape root.
+//! - `#[slot(consumed)]`: mark the field as a consumed dataflow slot.
+//! - `#[slot(produced)]`: mark the field as a produced dataflow slot.
+//! - `#[slot(merge = "latest" | "error" | "by_key")]`: set the receiver-owned
+//!   merge policy for aggregate consumed slots.
 
 use proc_macro::TokenStream;
 

@@ -39,4 +39,3 @@ Delete when unused:
 cargo test -p lpc-slot-mockup storage_codec
 cargo check -p lpc-engine
 ```
-

@@ -9,24 +9,33 @@ use alloc::format;
 use alloc::string::{String, ToString};
 
 use crate::node::kind::NodeKind;
+use crate::nodes::clock::ClockDef;
 use crate::nodes::fixture::FixtureDef;
+use crate::nodes::fluid::FluidDef;
 use crate::nodes::output::OutputDef;
 use crate::nodes::project::ProjectDef;
-use crate::nodes::shader::ShaderDef;
+use crate::nodes::shader::{ComputeShaderDef, ShaderDef};
 use crate::nodes::texture::TextureDef;
 use crate::{
-    EnumSlot, SlotAccess, SlotDataAccess, SlotShapeId, SlotShapeRegistry, Slotted, StaticSlotShape,
+    EnumSlot, SlotAccess, SlotDataAccess, SlotDataMutAccess, SlotMutAccess, SlotShapeId,
+    SlotShapeRegistry, Slotted, StaticSlotShape,
 };
 
 const PROJECT_VARIANT: &str = "Project";
+const CLOCK_VARIANT: &str = "Clock";
 const TEXTURE_VARIANT: &str = "Texture";
 const SHADER_VARIANT: &str = "Shader";
+const COMPUTE_SHADER_VARIANT: &str = "ComputeShader";
+const FLUID_VARIANT: &str = "Fluid";
 const OUTPUT_VARIANT: &str = "Output";
 const FIXTURE_VARIANT: &str = "Fixture";
 const NODE_DEF_VARIANT_NAMES: &[&str] = &[
     PROJECT_VARIANT,
+    CLOCK_VARIANT,
     TEXTURE_VARIANT,
     SHADER_VARIANT,
+    COMPUTE_SHADER_VARIANT,
+    FLUID_VARIANT,
     OUTPUT_VARIANT,
     FIXTURE_VARIANT,
 ];
@@ -40,8 +49,11 @@ const NODE_DEF_VARIANT_NAMES: &[&str] = &[
 pub enum NodeDef {
     #[default]
     Project(ProjectDef),
+    Clock(ClockDef),
     Texture(TextureDef),
     Shader(ShaderDef),
+    ComputeShader(ComputeShaderDef),
+    Fluid(FluidDef),
     Output(OutputDef),
     Fixture(FixtureDef),
 }
@@ -85,8 +97,11 @@ impl NodeDef {
     pub fn kind(&self) -> NodeKind {
         match self {
             Self::Project(_) => NodeKind::Project,
+            Self::Clock(_) => NodeKind::Clock,
             Self::Texture(_) => NodeKind::Texture,
             Self::Shader(_) => NodeKind::Shader,
+            Self::ComputeShader(_) => NodeKind::ComputeShader,
+            Self::Fluid(_) => NodeKind::Fluid,
             Self::Output(_) => NodeKind::Output,
             Self::Fixture(_) => NodeKind::Fixture,
         }
@@ -96,8 +111,11 @@ impl NodeDef {
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::Project(_) => ProjectDef::KIND,
+            Self::Clock(_) => ClockDef::KIND,
             Self::Texture(_) => TextureDef::KIND,
             Self::Shader(_) => ShaderDef::KIND,
+            Self::ComputeShader(_) => ComputeShaderDef::KIND,
+            Self::Fluid(_) => FluidDef::KIND,
             Self::Output(_) => OutputDef::KIND,
             Self::Fixture(_) => FixtureDef::KIND,
         }
@@ -107,8 +125,11 @@ impl NodeDef {
     pub fn variant_name(&self) -> &'static str {
         match self {
             Self::Project(_) => PROJECT_VARIANT,
+            Self::Clock(_) => CLOCK_VARIANT,
             Self::Texture(_) => TEXTURE_VARIANT,
             Self::Shader(_) => SHADER_VARIANT,
+            Self::ComputeShader(_) => COMPUTE_SHADER_VARIANT,
+            Self::Fluid(_) => FLUID_VARIANT,
             Self::Output(_) => OUTPUT_VARIANT,
             Self::Fixture(_) => FIXTURE_VARIANT,
         }
@@ -128,9 +149,30 @@ impl NodeDef {
         }
     }
 
+    pub fn as_clock(&self) -> Option<&ClockDef> {
+        match self {
+            Self::Clock(def) => Some(def),
+            _ => None,
+        }
+    }
+
     pub fn as_shader(&self) -> Option<&ShaderDef> {
         match self {
             Self::Shader(def) => Some(def),
+            _ => None,
+        }
+    }
+
+    pub fn as_compute_shader(&self) -> Option<&ComputeShaderDef> {
+        match self {
+            Self::ComputeShader(def) => Some(def),
+            _ => None,
+        }
+    }
+
+    pub fn as_fluid(&self) -> Option<&FluidDef> {
+        match self {
+            Self::Fluid(def) => Some(def),
             _ => None,
         }
     }
@@ -154,6 +196,17 @@ impl NodeDef {
         NodeArtifact::read_toml(registry, text).map(NodeArtifact::into_node_def)
     }
 
+    /// Read authored TOML using the model crate's generated static shape registry.
+    pub fn from_toml_str(text: &str) -> Result<Self, NodeDefParseError> {
+        let mut registry = SlotShapeRegistry::default();
+        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).map_err(|error| {
+            NodeDefParseError::Toml {
+                error: error.to_string(),
+            }
+        })?;
+        Self::read_toml(&registry, text)
+    }
+
     /// Write this node definition as authored TOML through the slot registry.
     pub fn write_toml(&self, registry: &SlotShapeRegistry) -> Result<String, NodeDefWriteError> {
         NodeArtifact::new(self.clone()).write_toml(registry)
@@ -164,8 +217,11 @@ impl SlotAccess for NodeDef {
     fn shape_id(&self) -> SlotShapeId {
         match self {
             Self::Project(def) => def.shape_id(),
+            Self::Clock(def) => def.shape_id(),
             Self::Texture(def) => def.shape_id(),
             Self::Shader(def) => def.shape_id(),
+            Self::ComputeShader(def) => def.shape_id(),
+            Self::Fluid(def) => def.shape_id(),
             Self::Output(def) => def.shape_id(),
             Self::Fixture(def) => def.shape_id(),
         }
@@ -174,8 +230,11 @@ impl SlotAccess for NodeDef {
     fn data(&self) -> SlotDataAccess<'_> {
         match self {
             Self::Project(def) => def.data(),
+            Self::Clock(def) => def.data(),
             Self::Texture(def) => def.data(),
             Self::Shader(def) => def.data(),
+            Self::ComputeShader(def) => def.data(),
+            Self::Fluid(def) => def.data(),
             Self::Output(def) => def.data(),
             Self::Fixture(def) => def.data(),
         }
@@ -187,6 +246,21 @@ impl SlotAccess for NodeDef {
 
     fn into_any(self: Box<Self>) -> Box<dyn core::any::Any> {
         self
+    }
+}
+
+impl SlotMutAccess for NodeDef {
+    fn data_mut(&mut self) -> SlotDataMutAccess<'_> {
+        match self {
+            Self::Project(def) => def.data_mut(),
+            Self::Clock(def) => def.data_mut(),
+            Self::Texture(def) => def.data_mut(),
+            Self::Shader(def) => def.data_mut(),
+            Self::ComputeShader(def) => def.data_mut(),
+            Self::Fluid(def) => def.data_mut(),
+            Self::Output(def) => def.data_mut(),
+            Self::Fixture(def) => def.data_mut(),
+        }
     }
 }
 

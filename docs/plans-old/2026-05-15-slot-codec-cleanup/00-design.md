@@ -61,4 +61,3 @@ SlotAccess + shape registry -> dynamic_slot_writer -> JSON/TOML
 
 There should be no generated per-record serialization machinery in the mockup.
 The mockup is only a pressure test for the generic system.
-

@@ -70,4 +70,3 @@ cargo test -p lpc-slot-mockup
 cargo test -p lpc-engine project_loader
 git diff --check
 ```
-

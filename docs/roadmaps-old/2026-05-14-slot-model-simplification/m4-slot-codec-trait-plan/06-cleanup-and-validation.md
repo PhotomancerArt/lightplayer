@@ -67,4 +67,3 @@ cargo test -p lpc-slot-codegen
 cargo test -p lpc-slot-mockup
 cargo check -p lpc-model --no-default-features
 ```
-

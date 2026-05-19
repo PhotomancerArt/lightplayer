@@ -13,6 +13,14 @@ impl NodeError {
     }
 }
 
+impl core::fmt::Display for NodeError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Message(message) => f.write_str(message),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

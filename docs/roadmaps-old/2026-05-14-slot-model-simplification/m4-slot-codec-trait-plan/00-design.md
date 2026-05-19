@@ -185,4 +185,3 @@ These impls still use the same `SlotCodec` trait, so generated record code can t
 - Generated record codec impls are driven from discovered slot fields.
 - Primitive/container behavior is owned by reusable `SlotCodec` impls in `lpc-model`.
 - Remaining mockup-specific codec configuration is only about surface roots/discriminators/exceptions.
-

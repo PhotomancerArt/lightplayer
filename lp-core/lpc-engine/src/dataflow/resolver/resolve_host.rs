@@ -11,7 +11,7 @@ use crate::products::control::{
 use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use crate::resource::{RuntimeBuffer, RuntimeBufferId};
 use alloc::vec::Vec;
-use lpc_model::{ChannelName, NodeId, Revision, SlotPath};
+use lpc_model::{ChannelName, NodeId, Revision, SlotMerge, SlotPath};
 
 use crate::dataflow::binding::{BindingEntry, BindingRef};
 
@@ -29,6 +29,20 @@ pub trait ResolveHost {
         _slot: &SlotPath,
     ) -> Option<(BindingRef, BindingEntry)> {
         None
+    }
+
+    fn bindings_for_consumed_slot(
+        &self,
+        node: NodeId,
+        slot: &SlotPath,
+    ) -> Vec<(BindingRef, BindingEntry)> {
+        self.binding_for_consumed_slot(node, slot)
+            .into_iter()
+            .collect()
+    }
+
+    fn merge_policy_for_consumed_slot(&self, _node: NodeId, _slot: &SlotPath) -> SlotMerge {
+        SlotMerge::Latest
     }
 
     fn providers_for_bus(&self, _channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {

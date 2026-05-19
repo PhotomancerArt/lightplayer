@@ -41,6 +41,7 @@ mod compile_job;
 mod data_error;
 mod debug;
 mod engine;
+mod global_data;
 mod instance;
 mod lpvm_abi;
 mod lpvm_data_q32;
@@ -57,6 +58,7 @@ pub use compile_job::{
 pub use data_error::DataError;
 pub use debug::{FunctionDebugInfo, ModuleDebugInfo};
 pub use engine::LpvmEngine;
+pub use global_data::{GlobalDataSpan, decode_global_read, encode_global_write, global_data_span};
 pub use instance::LpvmInstance;
 pub use lps_shared::layout::{array_stride, round_up, type_alignment, type_size};
 pub use lps_shared::lps_value_f32::LpsValueF32;
@@ -64,7 +66,7 @@ pub use lps_shared::lps_value_q32::{LpsValueQ32, lps_value_f32_to_q32, q32_to_lp
 pub use lps_shared::path::{LpsPathSeg, PathParseError, parse_path};
 pub use lps_shared::path_resolve::{LpsTypePathExt, PathError};
 pub use lps_shared::value_path::{LpsValuePathError, LpsValuePathExt};
-pub use lps_shared::{LayoutRules, LpsType, StructMember};
+pub use lps_shared::{LayoutRules, LpsFnSig, LpsType, StructMember};
 pub use lpvm_abi::{
     CallError, CallResult, GlslReturn, decode_q32_return, flat_q32_words_from_f32_args,
     flatten_q32_arg, flatten_q32_return, glsl_component_count, unflatten_q32_args,
@@ -125,6 +127,17 @@ pub fn validate_render_samples_sig_ir(ir: &IrFunction) -> Result<(), &'static st
     }
     if p2 != Some(IrType::I32) {
         return Err("render-samples param 2 must be I32 count");
+    }
+    Ok(())
+}
+
+/// Verify a serial compute entry has the expected user-facing signature.
+pub fn validate_compute_tick_sig(sig: &LpsFnSig) -> Result<(), &'static str> {
+    if !sig.parameters.is_empty() {
+        return Err("compute tick must take no parameters");
+    }
+    if sig.return_type != LpsType::Void {
+        return Err("compute tick must return void");
     }
     Ok(())
 }

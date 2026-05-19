@@ -61,4 +61,3 @@ Out of scope:
 Full plan: the API shape is foundational and will affect every later milestone,
 so this needs design notes, phase files, and focused validation before coding
 spreads into macros or production loaders.
-

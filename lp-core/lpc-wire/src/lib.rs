@@ -22,27 +22,28 @@ pub use messages::{
     ExplainSlotProbeRequest, ExplainSlotProbeResult, NodeReadQuery, NodeReadResult,
     NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery,
     ProjectReadRequest, ProjectReadResponse, ProjectReadResponseWriter, ProjectReadResult,
-    ReadLevel, RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead,
-    ResourceReadQuery, ResourceReadResult, ShapeReadQuery, ShapeReadResult, SlotExplanation,
+    ProjectRuntimeStatus, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
+    ResourcePayloadRead, ResourceReadQuery, ResourceReadResult, RuntimeReadQuery,
+    RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery, ShapeReadResult, SlotExplanation,
     write_project_read_response, write_project_read_result_json, write_project_read_server_message,
     write_server_message,
 };
 pub use project::{
     WireChannelSampleFormat, WireColorLayout, WireNodeStatus, WireProjectHandle,
-    WireProjectRequest, WireResourceAvailability, WireResourceKindSummary,
-    WireResourceMetadataSummary, WireResourceSummary, WireRuntimeBufferKind,
-    WireRuntimeBufferMetadataPayload, WireRuntimeBufferPayload, WireTextureFormat,
+    WireResourceAvailability, WireResourceKindSummary, WireResourceMetadataSummary,
+    WireResourceSummary, WireRuntimeBufferKind, WireRuntimeBufferMetadataPayload,
+    WireRuntimeBufferPayload, WireTextureFormat,
 };
 pub use server::{
     AvailableProject, ClientMsgBody, FsRequest, FsResponse, LoadedProject, MemoryStats,
     SampleStats, ServerConfig, ServerMsgBody,
 };
 pub use slot::{
-    WireSlotChange, WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp,
+    WireSlotChange, WireSlotData, WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp,
     WireSlotMutationRejection, WireSlotMutationRequest, WireSlotMutationResponse,
     WireSlotMutationResult, WireSlotPatch, WireSlotRootSnapshot, WireSlotRootsSnapshot,
     build_slot_full_sync, build_slot_roots_snapshot, collect_slot_diff, snapshot_slot_root,
-    snapshot_slot_shape, write_slot_shape_registry_snapshot_json,
+    snapshot_slot_shape, wire_slot_data_from_slot_access, write_slot_shape_registry_snapshot_json,
 };
 pub use transport_error::TransportError;
 pub use tree::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};

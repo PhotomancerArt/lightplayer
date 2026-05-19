@@ -7,7 +7,8 @@ use js_sys::{Function, Reflect, WebAssembly};
 use lpir::FloatMode;
 use lps_shared::{LpsModuleSig, LpsType, LpsValueQ32, ParamQualifier};
 use lpvm::{
-    LpsValueF32, LpvmBuffer, LpvmInstance, encode_uniform_write, encode_uniform_write_q32,
+    LpsValueF32, LpvmBuffer, LpvmInstance, decode_global_read, encode_global_write,
+    encode_uniform_write, encode_uniform_write_q32, global_data_span, validate_compute_tick_sig,
     validate_render_samples_sig_ir, validate_render_texture_sig_ir,
 };
 use wasm_bindgen::{JsCast, JsValue};
@@ -112,6 +113,37 @@ impl BrowserLpvmInstance {
         );
         view.copy_from(data);
         Ok(())
+    }
+
+    fn vmctx_read_bytes(&mut self, offset: usize, len: usize) -> Result<Vec<u8>, WasmError> {
+        let total = self.signatures.vmctx_buffer_size();
+        let end = offset
+            .checked_add(len)
+            .ok_or_else(|| WasmError::runtime("vmctx read: offset overflow"))?;
+        if end > total {
+            return Err(WasmError::runtime(format!(
+                "vmctx read out of bounds: end {end} total {total}"
+            )));
+        }
+        let mem = self
+            .memory
+            .as_ref()
+            .ok_or_else(|| WasmError::runtime("no linear memory for vmctx read"))?;
+        let ab: js_sys::ArrayBuffer = mem
+            .buffer()
+            .dyn_into()
+            .map_err(|_| WasmError::runtime("memory.buffer is not ArrayBuffer"))?;
+        let mem_len = ab.byte_length() as usize;
+        if end > mem_len {
+            return Err(WasmError::runtime(format!(
+                "linear memory too small: need {end} have {mem_len}"
+            )));
+        }
+        let view =
+            js_sys::Uint8Array::new_with_byte_offset_and_length(&ab, offset as u32, len as u32);
+        let mut bytes = vec![0u8; len];
+        view.copy_to(&mut bytes);
+        Ok(bytes)
     }
 
     fn resolve_render_texture(&mut self, fn_name: &str) -> Result<Function, WasmError> {
@@ -455,5 +487,41 @@ impl LpvmInstance for BrowserLpvmInstance {
         let (off, bytes) = encode_uniform_write_q32(&self.signatures, path, value)
             .map_err(|e| WasmError::runtime(format!("set_uniform_q32: {e}")))?;
         self.vmctx_write_bytes(off, &bytes)
+    }
+
+    fn set_global(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error> {
+        let (off, bytes) = encode_global_write(&self.signatures, path, value, self.float_mode)
+            .map_err(|e| WasmError::runtime(format!("set_global: {e}")))?;
+        self.vmctx_write_bytes(off, &bytes)
+    }
+
+    fn get_global(&mut self, path: &str) -> Result<LpsValueF32, Self::Error> {
+        let span = global_data_span(&self.signatures, path)
+            .map_err(|e| WasmError::runtime(format!("get_global: {e}")))?;
+        let bytes = self.vmctx_read_bytes(span.offset, span.len)?;
+        decode_global_read(&span.ty, &bytes, self.float_mode)
+            .map_err(|e| WasmError::runtime(format!("get_global: {e}")))
+    }
+
+    fn call_compute_tick(&mut self, name: &str) -> Result<(), Self::Error> {
+        let fn_sig = self
+            .signatures
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .ok_or_else(|| WasmError::runtime(format!("function '{name}' not found")))?;
+        validate_compute_tick_sig(fn_sig)
+            .map_err(|e| WasmError::runtime(format!("{name}: {e}")))?;
+        let func_val = Reflect::get(&self.exports_obj, &JsValue::from_str(name))
+            .map_err(|e| WasmError::runtime(format!("get export {name}: {e:?}")))?;
+        let func: Function = func_val
+            .dyn_into()
+            .map_err(|_| WasmError::runtime(format!("`{name}` is not a function")))?;
+        self.prepare_call()?;
+        let args = js_sys::Array::new();
+        args.push(&JsValue::from_f64(0.0));
+        func.apply(&JsValue::NULL, &args)
+            .map_err(|e| WasmError::runtime(format!("WASM trap: {e:?}")))?;
+        Ok(())
     }
 }

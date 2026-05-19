@@ -25,4 +25,3 @@
 - **Why not now:** First make the mockup codegen model clean enough to measure.
 - **Useful context:** Embedded code size is a primary motivation for the custom
   serializer.
-

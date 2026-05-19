@@ -3,15 +3,21 @@
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::String;
+use alloc::vec::Vec;
 
 use lpc_model::{
-    AddSubMode, DivMode, GlslOpts, MulMode, NodeId, ShaderState, SlotAccess, SlotPath,
-    SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
+    AddSubMode, DivMode, GlslOpts, MapSlot, MulMode, NodeId, ShaderMapKeyDef, ShaderSlotDef,
+    ShaderSlotKind, ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef, SlotAccess, SlotPath,
+    SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape, ValueSlot,
 };
 use lpc_model::{ShaderDef, SlotAccessor};
+use lps_shared::LpsValueF32;
 use lps_shared::TextureBuffer;
 
+use crate::dataflow::resolver::{QueryKey, resolver::model_value_to_lps_value_f32};
+use crate::gfx::uniforms::{VisualUniform, build_uniforms};
 use crate::gfx::{LpShader, ShaderCompileOptions};
+use crate::node::catch_node_panic::catch_panic;
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, RenderContext, RenderNode,
     TickContext,
@@ -25,7 +31,9 @@ const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 pub struct ShaderNode {
     node_id: NodeId,
     glsl_source: String,
+    consumed_slots: MapSlot<String, ShaderSlotDef>,
     glsl_opts: GlslOpts,
+    visual_uniforms: Vec<VisualUniform>,
     config_accessors: Option<ShaderConfigAccessors>,
     shader: Option<Box<dyn LpShader>>,
     compilation_error: Option<String>,
@@ -33,11 +41,14 @@ pub struct ShaderNode {
 }
 
 impl ShaderNode {
-    pub fn new(node_id: NodeId, glsl_source: String) -> Self {
+    pub fn new(node_id: NodeId, def: ShaderDef, glsl_source: String) -> Self {
+        let visual_uniforms = default_uniforms(&def.consumed_slots);
         Self {
             node_id,
             glsl_source,
-            glsl_opts: GlslOpts::default(),
+            consumed_slots: def.consumed_slots,
+            glsl_opts: def.glsl_opts,
+            visual_uniforms,
             config_accessors: None,
             shader: None,
             compilation_error: None,
@@ -61,6 +72,9 @@ impl ShaderNode {
         if self.shader.is_some() {
             return Ok(());
         }
+        if let Some(error) = &self.compilation_error {
+            return Err(NodeError::msg(format!("shader compile: {error}")));
+        }
 
         let graphics = ctx
             .graphics()
@@ -79,21 +93,12 @@ impl ShaderNode {
         };
 
         let compile_start_ms = ctx.now_ms();
-        #[cfg(feature = "panic-recovery")]
-        let compile_result: Result<Box<dyn LpShader>, String> = {
-            use core::panic::AssertUnwindSafe;
-            use unwinding::panic::catch_unwind;
-            match catch_unwind(AssertUnwindSafe(|| {
-                graphics.compile_shader(self.glsl_source.as_str(), &compile_opts)
-            })) {
-                Ok(inner) => inner.map_err(|e| format!("{e}")),
-                Err(_) => Err(String::from("OOM during shader compilation")),
-            }
-        };
-        #[cfg(not(feature = "panic-recovery"))]
-        let compile_result: Result<Box<dyn LpShader>, String> = graphics
-            .compile_shader(self.glsl_source.as_str(), &compile_opts)
-            .map_err(|e| format!("{e}"));
+        lpc_shared::backtrace::set_oom_context("shader node: compile");
+        let compile_result = catch_panic("panic during shader compilation", || {
+            graphics.compile_shader(self.glsl_source.as_str(), &compile_opts)
+        })
+        .and_then(|result| result.map_err(|error| format!("{error}")));
+        lpc_shared::backtrace::clear_oom_context();
         let compile_elapsed_ms = compile_start_ms.and_then(|start| ctx.elapsed_ms(start));
         lp_perf::emit_end!(lp_perf::EVENT_SHADER_COMPILE);
 
@@ -151,7 +156,45 @@ impl ShaderNode {
                 div: lpc_model::ValueSlot::with_version(ctx.revision(), next_div),
             };
             self.shader = None;
+            self.compilation_error = None;
         }
+        Ok(())
+    }
+
+    fn update_consumed_slots_from_view(
+        &mut self,
+        ctx: &mut TickContext<'_>,
+    ) -> Result<(), NodeError> {
+        let mut compile_changed = false;
+        let keys: Vec<String> = self.consumed_slots.entries.keys().cloned().collect();
+        for key in keys {
+            let Some(slot) = self.consumed_slots.entries.get_mut(&key) else {
+                continue;
+            };
+            compile_changed |= sync_shader_slot_def_from_authored(
+                ctx,
+                &alloc::format!("consumed_slots[{key}]"),
+                slot,
+            )?;
+        }
+        if compile_changed {
+            self.shader = None;
+            self.compilation_error = None;
+        }
+        Ok(())
+    }
+
+    fn update_visual_uniforms(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+        let mut uniforms = Vec::new();
+        for (name, slot) in &self.consumed_slots.entries {
+            if *slot.kind.value() != ShaderSlotKind::Value {
+                return Err(NodeError::msg(format!(
+                    "visual shader consumed slot {name:?} is a map; visual shader maps are not supported yet"
+                )));
+            }
+            uniforms.push((name.clone(), resolve_or_default_input(ctx, name, slot)?));
+        }
+        self.visual_uniforms = uniforms;
         Ok(())
     }
 }
@@ -159,6 +202,8 @@ impl ShaderNode {
 impl NodeRuntime for ShaderNode {
     fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         self.update_config_from_view(ctx)?;
+        self.update_consumed_slots_from_view(ctx)?;
+        self.update_visual_uniforms(ctx)?;
         self.state
             .output
             .set_with_version(ctx.revision(), VisualProduct::new(self.node_id, 0));
@@ -191,6 +236,123 @@ impl NodeRuntime for ShaderNode {
     fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
         Some(self)
     }
+}
+
+pub(super) fn sync_shader_slot_def_from_authored(
+    ctx: &mut TickContext<'_>,
+    base_path: &str,
+    slot: &mut ShaderSlotDef,
+) -> Result<bool, NodeError> {
+    let mut changed = false;
+    let Some(kind) = try_read_authored_value(ctx, &alloc::format!("{base_path}.kind"))? else {
+        return Ok(false);
+    };
+    changed |= set_slot_if_changed(&mut slot.kind, kind);
+    let Some(value) =
+        try_read_authored_value::<ShaderValueShapeRef>(ctx, &alloc::format!("{base_path}.value"))?
+    else {
+        return Ok(changed);
+    };
+    changed |= set_slot_if_changed(&mut slot.value, value);
+    if let Some(key) = slot.key.data.as_mut() {
+        if let Some(value) = try_read_authored_value::<ShaderMapKeyDef>(
+            ctx,
+            &alloc::format!("{base_path}.key.some"),
+        )? {
+            changed |= set_slot_if_changed(key, value);
+        }
+    }
+    if let Some(default) = slot.default.data.as_mut() {
+        if let Some(value) =
+            try_read_authored_value::<f32>(ctx, &alloc::format!("{base_path}.default.some"))?
+        {
+            changed |= set_slot_if_changed(default, value);
+        }
+    }
+    if let Some(min) = slot.min.data.as_mut() {
+        if let Some(value) =
+            try_read_authored_value::<f32>(ctx, &alloc::format!("{base_path}.min.some"))?
+        {
+            changed |= set_slot_if_changed(min, value);
+        }
+    }
+    if let Some(mapping) = slot.mapping.data.as_mut() {
+        if let Some(value) = try_read_authored_value::<ShaderSlotMappingKind>(
+            ctx,
+            &alloc::format!("{base_path}.mapping.some.kind"),
+        )? {
+            changed |= set_slot_if_changed(&mut mapping.kind, value);
+        }
+        if let Some(value) =
+            try_read_authored_value::<u32>(ctx, &alloc::format!("{base_path}.mapping.some.len"))?
+        {
+            changed |= set_slot_if_changed(&mut mapping.len, value);
+        }
+        if let Some(value) =
+            try_read_authored_value::<String>(ctx, &alloc::format!("{base_path}.mapping.some.key"))?
+        {
+            changed |= set_slot_if_changed(&mut mapping.key, value);
+        }
+        if let Some(value) = try_read_authored_value::<u32>(
+            ctx,
+            &alloc::format!("{base_path}.mapping.some.empty_key"),
+        )? {
+            changed |= set_slot_if_changed(&mut mapping.empty_key, value);
+        }
+    }
+    if let Some(value) =
+        try_read_authored_value::<String>(ctx, &alloc::format!("{base_path}.label"))?
+    {
+        changed |= set_slot_if_changed(&mut slot.label, value);
+    }
+    if let Some(value) =
+        try_read_authored_value::<String>(ctx, &alloc::format!("{base_path}.description"))?
+    {
+        changed |= set_slot_if_changed(&mut slot.description, value);
+    }
+    Ok(changed)
+}
+
+pub(super) fn read_authored_value<T: lpc_model::FromLpValue>(
+    ctx: &mut TickContext<'_>,
+    path: &str,
+) -> Result<T, NodeError> {
+    ctx.resolve_consumed_slot_value(&SlotPath::parse(path).map_err(|e| {
+        NodeError::msg(alloc::format!("invalid authored shader path {path:?}: {e}"))
+    })?)
+}
+
+fn try_read_authored_value<T: lpc_model::FromLpValue>(
+    ctx: &mut TickContext<'_>,
+    path: &str,
+) -> Result<Option<T>, NodeError> {
+    let slot = SlotPath::parse(path).map_err(|e| {
+        NodeError::msg(alloc::format!("invalid authored shader path {path:?}: {e}"))
+    })?;
+    let production = match ctx.resolve(QueryKey::ConsumedSlot {
+        node: ctx.node_id(),
+        slot,
+    }) {
+        Ok(production) => production,
+        Err(_) => return Ok(None),
+    };
+    let value = production
+        .value_leaf()
+        .ok_or_else(|| NodeError::msg("resolved shader path is not a value"))?;
+    T::from_lp_value(value.value())
+        .map(Some)
+        .map_err(|e| NodeError::msg(alloc::format!("shader path {path:?}: {e}")))
+}
+
+pub(super) fn set_slot_if_changed<T>(slot: &mut ValueSlot<T>, value: T) -> bool
+where
+    T: PartialEq,
+{
+    if slot.value() == &value {
+        return false;
+    }
+    slot.set(value);
+    true
 }
 
 struct ShaderConfigAccessors {
@@ -308,6 +470,7 @@ impl RenderNode for ShaderNode {
         }
 
         self.ensure_compiled(ctx)?;
+        let uniforms = build_uniforms(request.width, request.height, &self.visual_uniforms);
         let shader = self
             .shader
             .as_mut()
@@ -316,7 +479,7 @@ impl RenderNode for ShaderNode {
             return Err(NodeError::msg("compiled shader has no render() entry"));
         }
         shader
-            .render(target, request.time_seconds)
+            .render(target, &uniforms)
             .map_err(|e| NodeError::msg(format!("shader render: {e}")))
     }
 
@@ -337,20 +500,54 @@ impl RenderNode for ShaderNode {
         }
 
         self.ensure_compiled(ctx)?;
+        let uniforms = build_uniforms(1, request.points.count(), &self.visual_uniforms);
         let shader = self
             .shader
             .as_mut()
             .ok_or_else(|| NodeError::msg("shader missing after compile"))?;
         shader
-            .sample_rgba16(
-                request.points,
-                target.samples,
-                request.output_width,
-                request.output_height,
-                request.time_seconds,
-            )
+            .sample_rgba16(request.points, target.samples, &uniforms)
             .map_err(|e| NodeError::msg(format!("shader sample: {e}")))
     }
+}
+
+fn default_uniforms(slots: &MapSlot<String, ShaderSlotDef>) -> Vec<VisualUniform> {
+    slots
+        .entries
+        .iter()
+        .filter_map(|(name, slot)| {
+            if *slot.kind.value() == ShaderSlotKind::Value {
+                model_value_to_lps_value_f32(&slot.default_value())
+                    .ok()
+                    .map(|value| (name.clone(), value))
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn resolve_or_default_input(
+    ctx: &mut TickContext<'_>,
+    name: &str,
+    slot: &ShaderSlotDef,
+) -> Result<LpsValueF32, NodeError> {
+    let slot_path = SlotPath::parse(name)
+        .map_err(|e| NodeError::msg(format!("invalid visual consumed slot {name:?}: {e}")))?;
+    let model_value = match ctx.resolve(QueryKey::ConsumedSlot {
+        node: ctx.node_id(),
+        slot: slot_path,
+    }) {
+        Ok(production) => production
+            .value_leaf()
+            .map(|value| value.value().clone())
+            .ok_or_else(|| {
+                NodeError::msg(format!("visual shader input {name:?} is not a value"))
+            })?,
+        Err(_) => slot.default_value(),
+    };
+    model_value_to_lps_value_f32(&model_value)
+        .map_err(|e| NodeError::msg(format!("visual shader input {name:?}: {e}")))
 }
 
 fn validate_shader_visual_product(
@@ -372,7 +569,7 @@ fn validate_shader_visual_product(
     Ok(())
 }
 
-fn map_model_q32_options(opts: &GlslOpts) -> lps_q32::q32_options::Q32Options {
+pub(super) fn map_model_q32_options(opts: &GlslOpts) -> lps_q32::q32_options::Q32Options {
     lps_q32::q32_options::Q32Options {
         add_sub: match opts.add_sub.value() {
             AddSubMode::Saturating => lps_q32::q32_options::AddSubMode::Saturating,
@@ -391,6 +588,8 @@ fn map_model_q32_options(opts: &GlslOpts) -> lps_q32::q32_options::Q32Options {
 
 #[cfg(test)]
 mod tests {
+    use alloc::collections::BTreeMap;
+    use alloc::string::String;
     use alloc::sync::Arc;
     use alloc::vec;
     use core::sync::atomic::{AtomicU32, Ordering};
@@ -406,12 +605,24 @@ mod tests {
     use crate::nodes::TextureNode;
     use crate::products::visual::{VisualProduct, VisualSampleBatch, VisualSamplePoint};
     use lpc_model::{
-        ArtifactLocator, NodeDef, NodeInvocation, Revision, SlotDataAccess, StaticSlotShape,
-        TextureDef, TreePath,
+        ArtifactLocator, MapSlot, NodeDef, NodeInvocation, Revision, SlotDataAccess,
+        StaticSlotShape, TextureDef, TreePath,
     };
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     const DEMO_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float time; vec4 render(vec2 pos) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }";
+
+    fn shader_def_with_time() -> ShaderDef {
+        let mut consumed_slots = BTreeMap::new();
+        consumed_slots.insert(
+            String::from("time"),
+            ShaderSlotDef::value_f32("Time", "Seconds", 0.5, None),
+        );
+        ShaderDef {
+            consumed_slots: MapSlot::new(consumed_slots),
+            ..ShaderDef::default()
+        }
+    }
 
     fn build_texture_and_shader_engine() -> (Engine, NodeId, NodeId, VisualProduct) {
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
@@ -435,7 +646,7 @@ mod tests {
         engine
             .artifacts_mut()
             .load_with(&shader_artifact, frame, |_| {
-                Ok(NodeDef::Shader(ShaderDef::default()))
+                Ok(NodeDef::Shader(shader_def_with_time()))
             })
             .expect("load shader artifact");
 
@@ -474,7 +685,7 @@ mod tests {
             )
             .expect("shader");
 
-        let sh = ShaderNode::new(sh_id, String::from(DEMO_GLSL));
+        let sh = ShaderNode::new(sh_id, shader_def_with_time(), String::from(DEMO_GLSL));
         engine
             .attach_runtime_node(sh_id, Box::new(sh), frame)
             .expect("attach shader");
@@ -486,7 +697,7 @@ mod tests {
 
     #[test]
     fn shader_render_output_is_on_runtime_state_slot_root() {
-        let node = ShaderNode::new(NodeId::new(1), String::new());
+        let node = ShaderNode::new(NodeId::new(1), ShaderDef::default(), String::new());
 
         let state = node.runtime_state_slots().expect("shader state slots");
         assert_eq!(state.shape_id(), ShaderState::SHAPE_ID);
@@ -515,7 +726,7 @@ mod tests {
         let prod = resolve_with_engine_host(&mut engine, q, ResolveLogLevel::Off)
             .expect("resolve")
             .0;
-        let got_id = match prod.product.get() {
+        let got_id = match prod.value_leaf().expect("value").get() {
             lpc_model::LpValue::Product(lpc_model::ProductRef::Visual(product)) => *product,
             other => panic!("expected visual product, got {other:?}"),
         };
@@ -656,7 +867,7 @@ mod tests {
         fn render(
             &mut self,
             texture: &mut lp_shader::LpsTextureBuf,
-            _time: f32,
+            _uniforms: &LpsValueF32,
         ) -> Result<(), Error> {
             texture.data_mut().fill(0);
             Ok(())

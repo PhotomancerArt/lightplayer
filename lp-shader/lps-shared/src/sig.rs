@@ -84,9 +84,8 @@ impl LpsModuleSig {
     /// Compute the total VMContext buffer size:
     /// header + uniforms + globals + snapshot
     pub fn vmctx_buffer_size(&self) -> usize {
-        let uniforms_size = self.uniforms_size();
         let globals_size = self.globals_size();
-        VMCTX_HEADER_SIZE + uniforms_size + 2 * globals_size
+        self.snapshot_offset() + globals_size
     }
 
     /// Offset to the uniforms region (after header).
@@ -96,12 +95,26 @@ impl LpsModuleSig {
 
     /// Offset to the globals region (after header + uniforms).
     pub fn globals_offset(&self) -> usize {
-        VMCTX_HEADER_SIZE + self.uniforms_size()
+        let mut offset = VMCTX_HEADER_SIZE + self.uniforms_size();
+        if let Some(ty) = &self.globals_type {
+            offset = crate::layout::round_up(offset, first_struct_member_alignment(ty));
+        }
+        offset
     }
 
     /// Offset to the globals snapshot region (after globals).
     pub fn snapshot_offset(&self) -> usize {
-        VMCTX_HEADER_SIZE + self.uniforms_size() + self.globals_size()
+        self.globals_offset() + self.globals_size()
+    }
+}
+
+fn first_struct_member_alignment(ty: &LpsType) -> usize {
+    match ty {
+        LpsType::Struct { members, .. } => members
+            .first()
+            .map(|m| crate::layout::type_alignment(&m.ty, LayoutRules::Std430))
+            .unwrap_or(1),
+        _ => crate::layout::type_alignment(ty, LayoutRules::Std430),
     }
 }
 
@@ -151,5 +164,32 @@ mod tests {
     fn layout_rules_std430_implemented() {
         assert!(LayoutRules::Std430.is_implemented());
         assert!(!LayoutRules::Std140.is_implemented());
+    }
+
+    #[test]
+    fn globals_offset_accounts_for_alignment_after_uniforms() {
+        let m = LpsModuleSig {
+            uniforms_type: Some(LpsType::Struct {
+                name: Some(String::from("__uniforms")),
+                members: vec![crate::StructMember {
+                    name: Some(String::from("time")),
+                    ty: LpsType::Float,
+                }],
+            }),
+            globals_type: Some(LpsType::Struct {
+                name: Some(String::from("__globals")),
+                members: vec![crate::StructMember {
+                    name: Some(String::from("out_pos")),
+                    ty: LpsType::Vec2,
+                }],
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(m.uniforms_offset(), VMCTX_HEADER_SIZE);
+        assert_eq!(m.uniforms_size(), 4);
+        assert_eq!(m.globals_offset(), 24);
+        assert_eq!(m.snapshot_offset(), 32);
+        assert_eq!(m.vmctx_buffer_size(), 40);
     }
 }

@@ -34,14 +34,20 @@ pub(crate) fn render_slot_shapes(shapes: &[StaticRegisteredShape]) -> String {
         }
         out.push_str(&shape.type_path);
         out.push_str(" as ::lpc_model::StaticSlotShape>::SHAPE_ID {\n");
-        out.push_str("        let inserted = <");
-        out.push_str(&shape.type_path);
-        out.push_str(" as ::lpc_model::StaticSlotShape>::ensure_registered_with_factory(\n");
-        out.push_str("            registry,\n");
-        out.push_str("            ::lpc_model::SlotFactory::for_default::<");
-        out.push_str(&shape.type_path);
-        out.push_str(">(),\n");
-        out.push_str("        )?;\n");
+        if shape.has_default_factory {
+            out.push_str("        let inserted = <");
+            out.push_str(&shape.type_path);
+            out.push_str(" as ::lpc_model::StaticSlotShape>::ensure_registered_with_factory(\n");
+            out.push_str("            registry,\n");
+            out.push_str("            ::lpc_model::SlotFactory::for_default::<");
+            out.push_str(&shape.type_path);
+            out.push_str(">(),\n");
+            out.push_str("        )?;\n");
+        } else {
+            out.push_str("        let inserted = <");
+            out.push_str(&shape.type_path);
+            out.push_str(" as ::lpc_model::StaticSlotShape>::ensure_registered(registry)?;\n");
+        }
         out.push_str("        ensure_referenced_static_slot_shapes(registry, id)?;\n");
         out.push_str("        Ok(inserted)\n");
     }

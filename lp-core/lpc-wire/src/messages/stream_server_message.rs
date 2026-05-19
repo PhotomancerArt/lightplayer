@@ -60,8 +60,11 @@ mod tests {
             results: vec![ProjectReadResult::Shapes(ShapeReadResult {
                 level: ReadLevel::Ids,
                 registry: None,
+                complete: true,
+                next: None,
             })],
             probes: vec![],
+            mutations: vec![],
         };
         let bytes = write_project_read_server_message(JsonWriter::new(Vec::new()), 42, &response)
             .expect("write server message");

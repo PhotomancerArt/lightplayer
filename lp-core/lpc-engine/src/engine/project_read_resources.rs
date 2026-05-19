@@ -178,7 +178,7 @@ fn runtime_buffer_metadata_payload(
 fn texture_format(format: RuntimeTextureFormat) -> WireTextureFormat {
     match format {
         RuntimeTextureFormat::Rgba16 => WireTextureFormat::Rgba16,
-        RuntimeTextureFormat::Rgb8 => WireTextureFormat::Rgb8,
+        RuntimeTextureFormat::Rgb8 => WireTextureFormat::Srgb8,
     }
 }
 

@@ -12,8 +12,8 @@ source = "bus#visual.out"
 target = "bus#control.out"
 
 [render_size]
-width = 16
-height = 16
+width = 10
+height = 10
 
 [mapping]
 kind = "PathPoints"

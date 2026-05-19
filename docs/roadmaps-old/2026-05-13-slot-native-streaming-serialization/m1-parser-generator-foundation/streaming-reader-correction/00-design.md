@@ -170,4 +170,3 @@ Expected one of: TextureDef, OutputDef, FixtureDef.
 ### `SyntaxNode`
 
 Remove it. Do not keep a reference/debug tree in this corrective plan.
-

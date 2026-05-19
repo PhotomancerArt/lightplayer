@@ -77,4 +77,3 @@ cargo test -p lpc-slot-mockup generated_shape_codec_invalid_discriminator_report
 cargo test -p lpc-slot-mockup manual_shape_codec_invalid_discriminator_reports_valid_values
 cargo test -p lpc-slot-mockup
 ```
-

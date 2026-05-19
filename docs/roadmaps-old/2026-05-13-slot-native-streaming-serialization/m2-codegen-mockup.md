@@ -51,4 +51,3 @@ Out of scope:
 
 Full plan: macro/codegen work has high leverage and can create subtle behavior
 drift, so it should be planned and validated in phases against the mockup.
-

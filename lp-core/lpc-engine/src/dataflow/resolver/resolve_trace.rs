@@ -5,6 +5,7 @@ use crate::dataflow::resolver::query_key::QueryKey;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 use core::fmt;
+use lpc_model::{SlotMapKey, SlotMerge};
 
 /// How much optional trace data to retain.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
@@ -27,6 +28,18 @@ pub enum ResolveTraceEvent {
     },
     ProduceStart(QueryKey),
     ProduceEnd(QueryKey),
+    SelectMergePolicy {
+        query: QueryKey,
+        policy: SlotMerge,
+    },
+    MergeInput {
+        query: QueryKey,
+        binding: BindingRef,
+    },
+    MergeReplaceKey {
+        query: QueryKey,
+        key: SlotMapKey,
+    },
     CycleDetected {
         query: QueryKey,
     },

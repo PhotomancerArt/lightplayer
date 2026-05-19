@@ -9,3 +9,10 @@ target = "bus#visual.out"
 add_sub = "wrapping"
 mul = "wrapping"
 div = "reciprocal"
+
+[consumed_slots.time]
+kind = "value"
+value = "f32"
+default = 0.0
+label = "Time"
+description = "Project clock time in seconds"

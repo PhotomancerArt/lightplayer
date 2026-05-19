@@ -104,6 +104,15 @@ pub trait LpvmInstance {
     /// Set a uniform by path with Q32-encoded values (raw fixed-point lanes).
     fn set_uniform_q32(&mut self, path: &str, value: &LpsValueQ32) -> Result<(), Self::Error>;
 
+    /// Set a private global by dot/bracket path with F32-level values.
+    fn set_global(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error>;
+
+    /// Read a private global by dot/bracket path as an F32-level value.
+    fn get_global(&mut self, path: &str) -> Result<LpsValueF32, Self::Error>;
+
+    /// Call a zero-argument, void, serial compute entry without resetting globals.
+    fn call_compute_tick(&mut self, name: &str) -> Result<(), Self::Error>;
+
     /// Optional backend diagnostics (e.g. emulator registers); `None` if unavailable.
     fn debug_state(&self) -> Option<String> {
         None

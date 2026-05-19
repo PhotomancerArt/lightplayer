@@ -77,4 +77,3 @@ This is explicitly enabled for the enum, not a general untagged inference system
 cargo test -p lpc-slot-mockup generated_shape_codec
 cargo test -p lpc-slot-codegen
 ```
-

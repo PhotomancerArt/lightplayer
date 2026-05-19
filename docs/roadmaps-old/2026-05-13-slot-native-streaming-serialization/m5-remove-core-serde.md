@@ -51,4 +51,3 @@ Out of scope:
 
 Full plan: dependency removal can easily affect features and targets, so it
 should be planned, measured, and validated carefully.
-

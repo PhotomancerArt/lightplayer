@@ -9,7 +9,7 @@ use super::scalar::{scalar_base_type, scalar_lane_count};
 const RULES: LayoutRules = LayoutRules::Std430;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct TypeShape {
+pub(crate) struct TypeShape {
     pub(super) ty: LpsType,
     pub(super) kind: TypeShapeKind,
     pub(super) lane_count: usize,
@@ -18,7 +18,7 @@ pub(super) struct TypeShape {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) enum TypeShapeKind {
+pub(crate) enum TypeShapeKind {
     Void,
     Scalar,
     Vector {
@@ -42,7 +42,7 @@ pub(super) enum TypeShapeKind {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct FieldShape {
+pub(crate) struct FieldShape {
     pub(super) name: String,
     pub(super) ty: LpsType,
     pub(super) lane_offset: usize,
@@ -51,7 +51,7 @@ pub(super) struct FieldShape {
 }
 
 impl TypeShape {
-    pub(super) fn new(ty: &LpsType) -> Self {
+    pub(crate) fn new(ty: &LpsType) -> Self {
         let kind = match ty {
             LpsType::Void => TypeShapeKind::Void,
             LpsType::Float | LpsType::Int | LpsType::UInt | LpsType::Bool => TypeShapeKind::Scalar,
@@ -118,14 +118,14 @@ impl TypeShape {
         }
     }
 
-    pub(super) fn field(&self, name: &str) -> Option<&FieldShape> {
+    pub(crate) fn field(&self, name: &str) -> Option<&FieldShape> {
         let TypeShapeKind::Struct { fields } = &self.kind else {
             return None;
         };
         fields.iter().find(|field| field.name == name)
     }
 
-    pub(super) fn array_element(&self) -> Option<(&LpsType, u32, usize)> {
+    pub(crate) fn array_element(&self) -> Option<(&LpsType, u32, usize)> {
         match &self.kind {
             TypeShapeKind::Array {
                 element,
@@ -136,7 +136,7 @@ impl TypeShape {
         }
     }
 
-    pub(super) fn matrix_column(&self) -> Option<&LpsType> {
+    pub(crate) fn matrix_column(&self) -> Option<&LpsType> {
         match &self.kind {
             TypeShapeKind::Matrix { column_ty, .. } => Some(column_ty),
             _ => None,

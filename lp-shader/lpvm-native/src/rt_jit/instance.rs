@@ -7,9 +7,10 @@ use alloc::vec::Vec;
 use lpir::FloatMode;
 use lps_shared::{LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF32};
 use lpvm::{
-    CallError, LpvmBuffer, LpvmInstance, decode_q32_return, encode_uniform_write,
-    encode_uniform_write_q32, flat_q32_words_from_f32_args, glsl_component_count,
-    q32_to_lps_value_f32,
+    CallError, LpvmBuffer, LpvmInstance, decode_global_read, decode_q32_return,
+    encode_global_write, encode_uniform_write, encode_uniform_write_q32,
+    flat_q32_words_from_f32_args, global_data_span, glsl_component_count, q32_to_lps_value_f32,
+    validate_compute_tick_sig,
 };
 
 use crate::error::NativeError;
@@ -300,6 +301,29 @@ impl NativeJitInstance {
         }
         Ok(())
     }
+
+    fn vmctx_read_bytes(&self, offset: usize, len: usize) -> Result<Vec<u8>, NativeError> {
+        let total = self.module.inner.meta.vmctx_buffer_size();
+        let end = offset.checked_add(len).ok_or_else(|| {
+            NativeError::Call(CallError::Unsupported(String::from(
+                "vmctx read: offset overflow",
+            )))
+        })?;
+        if end > total {
+            return Err(NativeError::Call(CallError::Unsupported(alloc::format!(
+                "vmctx read out of bounds: end {end} total {total}"
+            ))));
+        }
+        let mut bytes = alloc::vec![0u8; len];
+        unsafe {
+            core::ptr::copy_nonoverlapping(
+                (self.vmctx_guest as *const u8).add(offset),
+                bytes.as_mut_ptr(),
+                len,
+            );
+        }
+        Ok(bytes)
+    }
 }
 
 fn pack_regs_direct(words: &[i32]) -> (i32, i32, i32, i32, i32, i32, i32, i32) {
@@ -581,5 +605,43 @@ impl LpvmInstance for NativeJitInstance {
                 )))
             })?;
         self.vmctx_write_bytes(off, &bytes)
+    }
+
+    fn set_global(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error> {
+        let (off, bytes) = encode_global_write(
+            &self.module.inner.meta,
+            path,
+            value,
+            self.module.inner.options.float_mode,
+        )
+        .map_err(|e| {
+            NativeError::Call(CallError::Unsupported(alloc::format!("set_global: {e}")))
+        })?;
+        self.vmctx_write_bytes(off, &bytes)
+    }
+
+    fn get_global(&mut self, path: &str) -> Result<LpsValueF32, Self::Error> {
+        let span = global_data_span(&self.module.inner.meta, path).map_err(|e| {
+            NativeError::Call(CallError::Unsupported(alloc::format!("get_global: {e}")))
+        })?;
+        let bytes = self.vmctx_read_bytes(span.offset, span.len)?;
+        decode_global_read(&span.ty, &bytes, self.module.inner.options.float_mode).map_err(|e| {
+            NativeError::Call(CallError::Unsupported(alloc::format!("get_global: {e}")))
+        })
+    }
+
+    fn call_compute_tick(&mut self, name: &str) -> Result<(), Self::Error> {
+        let sig = self
+            .module
+            .inner
+            .meta
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+        validate_compute_tick_sig(sig)
+            .map_err(|e| NativeError::Call(CallError::Unsupported(format!("{name}: {e}"))))?;
+        self.invoke_flat(name, &[])?;
+        Ok(())
     }
 }

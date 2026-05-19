@@ -5,11 +5,15 @@ use syn::{
 
 pub(crate) struct ContainerAttrs {
     pub(crate) shape_id: Option<LitStr>,
+    pub(crate) default_policy: Option<SlotPolicyAttr>,
 }
 
 pub(crate) struct FieldAttrs {
     pub(crate) name: Option<LitStr>,
     pub(crate) shape: FieldShapeAttr,
+    pub(crate) direction: FieldDirectionAttr,
+    pub(crate) merge: FieldMergeAttr,
+    pub(crate) policy: Option<SlotPolicyAttr>,
 }
 
 pub(crate) struct VariantAttrs {
@@ -26,13 +30,43 @@ pub(crate) enum FieldShapeAttr {
     OptionRef(LitStr),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FieldDirectionAttr {
+    Local,
+    Consumed,
+    Produced,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum FieldMergeAttr {
+    Latest,
+    Error,
+    ByKey,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SlotPolicyAttr {
+    ReadOnlyPersisted,
+    WritablePersisted,
+    ReadOnlyTransient,
+    WritableTransient,
+}
+
 pub(crate) fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
-    let mut parsed = ContainerAttrs { shape_id: None };
+    let mut parsed = ContainerAttrs {
+        shape_id: None,
+        default_policy: None,
+    };
     for attr in slot_attrs(attrs) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("shape_id") {
                 let value = meta.value()?;
                 parsed.shape_id = Some(value.parse()?);
+                Ok(())
+            } else if meta.path.is_ident("default_policy") {
+                let value = meta.value()?;
+                let value: LitStr = value.parse()?;
+                parsed.default_policy = Some(parse_policy(&value)?);
                 Ok(())
             } else if meta.path.is_ident("root") {
                 Ok(())
@@ -49,6 +83,9 @@ pub(crate) fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
 pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
     let mut name = None;
     let mut shape = None;
+    let mut direction = FieldDirectionAttr::Local;
+    let mut merge = FieldMergeAttr::Latest;
+    let mut policy = None;
     for attr in slot_attrs(attrs) {
         attr.parse_nested_meta(|meta| {
             if meta.path.is_ident("name") {
@@ -65,6 +102,28 @@ pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
                 Ok(())
             } else if meta.path.is_ident("record") {
                 shape = Some(FieldShapeAttr::Record);
+                Ok(())
+            } else if meta.path.is_ident("consumed") {
+                if direction != FieldDirectionAttr::Local {
+                    return Err(meta.error("slot field can only have one direction"));
+                }
+                direction = FieldDirectionAttr::Consumed;
+                Ok(())
+            } else if meta.path.is_ident("produced") {
+                if direction != FieldDirectionAttr::Local {
+                    return Err(meta.error("slot field can only have one direction"));
+                }
+                direction = FieldDirectionAttr::Produced;
+                Ok(())
+            } else if meta.path.is_ident("merge") {
+                let value = meta.value()?;
+                let value: LitStr = value.parse()?;
+                merge = parse_merge(&value)?;
+                Ok(())
+            } else if meta.path.is_ident("policy") {
+                let value = meta.value()?;
+                let value: LitStr = value.parse()?;
+                policy = Some(parse_policy(&value)?);
                 Ok(())
             } else if meta.path.is_ident("option_ref") {
                 let value = meta.value()?;
@@ -87,6 +146,9 @@ pub(crate) fn parse_field(attrs: &[Attribute]) -> Result<FieldAttrs> {
     Ok(FieldAttrs {
         name,
         shape: shape.unwrap_or(FieldShapeAttr::Infer),
+        direction,
+        merge,
+        policy,
     })
 }
 
@@ -243,6 +305,49 @@ pub(crate) fn field_binding_mut_access_tokens(
     }
 }
 
+pub(crate) fn field_semantics_tokens(
+    direction: FieldDirectionAttr,
+    merge: FieldMergeAttr,
+) -> TokenStream {
+    let direction_tokens = match direction {
+        FieldDirectionAttr::Local => quote::quote! { ::lpc_model::SlotDirection::Local },
+        FieldDirectionAttr::Consumed => quote::quote! { ::lpc_model::SlotDirection::Consumed },
+        FieldDirectionAttr::Produced => quote::quote! { ::lpc_model::SlotDirection::Produced },
+    };
+    let merge_tokens = match merge {
+        FieldMergeAttr::Latest => quote::quote! { ::lpc_model::SlotMerge::Latest },
+        FieldMergeAttr::Error => quote::quote! { ::lpc_model::SlotMerge::Error },
+        FieldMergeAttr::ByKey => quote::quote! { ::lpc_model::SlotMerge::ByKey },
+    };
+    quote::quote! {
+        ::lpc_model::SlotSemantics::new(#direction_tokens, #merge_tokens)
+    }
+}
+
+pub(crate) fn field_policy_tokens(policy: SlotPolicyAttr) -> TokenStream {
+    match policy {
+        SlotPolicyAttr::ReadOnlyPersisted => {
+            quote::quote! { ::lpc_model::SlotPolicy::read_only_persisted() }
+        }
+        SlotPolicyAttr::WritablePersisted => {
+            quote::quote! { ::lpc_model::SlotPolicy::writable_persisted() }
+        }
+        SlotPolicyAttr::ReadOnlyTransient => {
+            quote::quote! { ::lpc_model::SlotPolicy::read_only_transient() }
+        }
+        SlotPolicyAttr::WritableTransient => {
+            quote::quote! { ::lpc_model::SlotPolicy::writable_transient() }
+        }
+    }
+}
+
+pub(crate) fn policy_is_read_only(policy: SlotPolicyAttr) -> bool {
+    matches!(
+        policy,
+        SlotPolicyAttr::ReadOnlyPersisted | SlotPolicyAttr::ReadOnlyTransient
+    )
+}
+
 fn slot_attrs(attrs: &[Attribute]) -> impl Iterator<Item = &Attribute> {
     attrs.iter().filter(|attr| attr.path().is_ident("slot"))
 }
@@ -288,5 +393,30 @@ fn map_key_tokens(key: &LitStr) -> TokenStream {
             let message = format!("unsupported slot map key shape: {other}");
             quote::quote! { compile_error!(#message) }
         }
+    }
+}
+
+fn parse_merge(value: &LitStr) -> Result<FieldMergeAttr> {
+    match value.value().as_str() {
+        "latest" => Ok(FieldMergeAttr::Latest),
+        "error" => Ok(FieldMergeAttr::Error),
+        "by_key" => Ok(FieldMergeAttr::ByKey),
+        _ => Err(syn::Error::new_spanned(
+            value,
+            "unsupported slot merge policy; expected \"latest\", \"error\", or \"by_key\"",
+        )),
+    }
+}
+
+fn parse_policy(value: &LitStr) -> Result<SlotPolicyAttr> {
+    match value.value().as_str() {
+        "read_only_persisted" => Ok(SlotPolicyAttr::ReadOnlyPersisted),
+        "writable_persisted" => Ok(SlotPolicyAttr::WritablePersisted),
+        "read_only_transient" => Ok(SlotPolicyAttr::ReadOnlyTransient),
+        "writable_transient" => Ok(SlotPolicyAttr::WritableTransient),
+        _ => Err(syn::Error::new_spanned(
+            value,
+            "unsupported slot policy; expected \"read_only_persisted\", \"writable_persisted\", \"read_only_transient\", or \"writable_transient\"",
+        )),
     }
 }

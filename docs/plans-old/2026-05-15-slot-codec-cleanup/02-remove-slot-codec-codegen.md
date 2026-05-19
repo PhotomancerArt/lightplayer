@@ -44,4 +44,3 @@ Update:
 cargo test -p lpc-slot-codegen
 cargo test -p lpc-slot-mockup dynamic_slot_codec
 ```
-

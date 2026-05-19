@@ -5,11 +5,13 @@ use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
+use lpc_model::LpType;
+use lpc_model::generate_compute_shader_header;
 use lpc_model::nodes::project::project_def::ProjectDef;
 use lpc_model::{ArtifactLocator, ArtifactReadRoot, NodeInvocation, NodeKind};
 use lpc_model::{
     BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, Kind, LpValue, NodeDef, NodeId,
-    NodeName, Revision, SlotPath, SlotShapeRegistry,
+    NodeName, Revision, ShaderDef, ShaderSlotKind, SlotPath, SlotShapeRegistry,
 };
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lpfs::lp_path::{LpPath, LpPathBuf};
@@ -17,7 +19,10 @@ use lpfs::lp_path::{LpPath, LpPathBuf};
 use crate::artifact::ArtifactLocation;
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::node::{NodeDefHandle, TreeError};
-use crate::nodes::{CorePlaceholderNode, FixtureNode, OutputNode, ShaderNode, TextureNode};
+use crate::nodes::{
+    ClockNode, ComputeShaderNode, CorePlaceholderNode, FixtureNode, FluidNode, OutputNode,
+    ShaderNode, TextureNode,
+};
 
 use super::{Engine, EngineServices};
 
@@ -131,8 +136,8 @@ impl ProjectLoader {
                     .map_err(|e| ProjectLoadError::InvalidSourcePath {
                         path: project_path.as_str().to_string(),
                         reason: format!(
-                            "invalid artifact locator `{:?}`: {e}",
-                            invocation.artifact.value()
+                            "invalid artifact locator `{}`: {e}",
+                            invocation.artifact.value().as_str()
                         ),
                     })?;
             let artifact_path = resolve_child_artifact_locator(&project_path, &artifact_locator)?;
@@ -187,6 +192,34 @@ impl ProjectLoader {
         R: ArtifactReadRoot + ?Sized,
         R::Err: core::fmt::Debug,
     {
+        for node in loaded_nodes {
+            if let NodeDef::Clock(config) = &node.config {
+                runtime
+                    .attach_runtime_node(node.id, Box::new(ClockNode::new(node.id)), frame)
+                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                        path: node.artifact_path.as_str().to_string(),
+                        reason: format!("attach clock runtime: {e}"),
+                    })?;
+                register_target_binding(
+                    runtime,
+                    loaded_nodes,
+                    node,
+                    "seconds",
+                    &config.bindings,
+                    frame,
+                )?;
+                register_target_binding(
+                    runtime,
+                    loaded_nodes,
+                    node,
+                    "delta_seconds",
+                    &config.bindings,
+                    frame,
+                )?;
+                register_clock_default_time_binding(runtime, node, &config.bindings, frame)?;
+            }
+        }
+
         for node in loaded_nodes {
             if let NodeDef::Texture(_config) = &node.config {
                 runtime
@@ -251,13 +284,101 @@ impl ProjectLoader {
                 runtime
                     .attach_runtime_node(
                         node.id,
-                        Box::new(ShaderNode::new(node.id, glsl_source)),
+                        Box::new(ShaderNode::new(node.id, config.clone(), glsl_source)),
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidSourcePath {
                         path: node.artifact_path.as_str().to_string(),
                         reason: format!("attach shader runtime: {e}"),
                     })?;
+                register_target_binding(
+                    runtime,
+                    loaded_nodes,
+                    node,
+                    "output",
+                    &config.bindings,
+                    frame,
+                )?;
+                for name in config.consumed_slots.entries.keys() {
+                    register_optional_source_binding(
+                        runtime,
+                        loaded_nodes,
+                        node,
+                        name.as_str(),
+                        &config.bindings,
+                        frame,
+                    )?;
+                }
+                register_visual_default_time_binding(runtime, node, config, frame)?;
+            }
+        }
+
+        for node in loaded_nodes {
+            if let NodeDef::ComputeShader(config) = &node.config {
+                let shader_path =
+                    resolve_path_relative_to_file(&node.artifact_path, &config.glsl_path_buf())?;
+                let source = read_utf8_file(root, shader_path.as_path())?;
+                let header = generate_compute_shader_header(config, runtime.slot_shapes())
+                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                        path: node.artifact_path.as_str().to_string(),
+                        reason: format!("generate compute shader header: {e}"),
+                    })?;
+                let glsl_source = format!("{header}\n{source}");
+                runtime
+                    .attach_runtime_node(
+                        node.id,
+                        Box::new(ComputeShaderNode::new(
+                            node.id,
+                            config.clone(),
+                            glsl_source,
+                            frame,
+                        )),
+                        frame,
+                    )
+                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                        path: node.artifact_path.as_str().to_string(),
+                        reason: format!("attach compute shader runtime: {e}"),
+                    })?;
+
+                for name in config.consumed_slots.entries.keys() {
+                    register_optional_source_binding(
+                        runtime,
+                        loaded_nodes,
+                        node,
+                        name.as_str(),
+                        &config.bindings,
+                        frame,
+                    )?;
+                }
+                for name in config.produced_slots.entries.keys() {
+                    register_target_binding(
+                        runtime,
+                        loaded_nodes,
+                        node,
+                        name.as_str(),
+                        &config.bindings,
+                        frame,
+                    )?;
+                }
+            }
+        }
+
+        for node in loaded_nodes {
+            if let NodeDef::Fluid(config) = &node.config {
+                runtime
+                    .attach_runtime_node(node.id, Box::new(FluidNode::new(node.id)), frame)
+                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                        path: node.artifact_path.as_str().to_string(),
+                        reason: format!("attach fluid runtime: {e}"),
+                    })?;
+                register_optional_source_binding(
+                    runtime,
+                    loaded_nodes,
+                    node,
+                    "emitters",
+                    &config.bindings,
+                    frame,
+                )?;
                 register_target_binding(
                     runtime,
                     loaded_nodes,
@@ -428,7 +549,12 @@ fn resolve_path_relative_to_file(
 }
 
 fn node_kind_name(config: &NodeDef, path: &LpPath) -> Result<NodeName, ProjectLoadError> {
-    NodeName::parse(config.kind_name()).map_err(|e| ProjectLoadError::InvalidNodeName {
+    let name = match config {
+        NodeDef::ComputeShader(_) => "compute_shader",
+        NodeDef::Shader(_) => "shader",
+        _ => config.kind_name(),
+    };
+    NodeName::parse(name).map_err(|e| ProjectLoadError::InvalidNodeName {
         path: path.as_str().to_string(),
         reason: format!("{e}"),
     })
@@ -512,7 +638,7 @@ fn register_source_binding(
                     slot: target_slot,
                 },
                 priority: BindingPriority::new(0),
-                kind: Kind::Color,
+                kind: binding_kind_for_slot(slot_name),
                 owner: current.id,
             },
             frame,
@@ -522,6 +648,20 @@ fn register_source_binding(
             reason: format!("register {slot_name} source binding: {e}"),
         })?;
     Ok(())
+}
+
+fn register_optional_source_binding(
+    engine: &mut Engine,
+    loaded_nodes: &[LoadedNode],
+    current: &LoadedNode,
+    slot_name: &str,
+    bindings: &BindingDefs,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
+    if binding_source(bindings, slot_name).is_none() {
+        return Ok(());
+    }
+    register_source_binding(engine, loaded_nodes, current, slot_name, bindings, frame)
 }
 
 fn register_target_binding(
@@ -549,8 +689,8 @@ fn register_target_binding(
                     slot: source_slot,
                 },
                 target,
-                priority: BindingPriority::new(0),
-                kind: Kind::Color,
+                priority: BindingPriority::authored(),
+                kind: binding_kind_for_slot(slot_name),
                 owner: current.id,
             },
             frame,
@@ -558,6 +698,81 @@ fn register_target_binding(
         .map_err(|e| ProjectLoadError::InvalidSourcePath {
             path: current.artifact_path.as_str().to_string(),
             reason: format!("register {slot_name} target binding: {e}"),
+        })?;
+    Ok(())
+}
+
+fn binding_kind_for_slot(slot_name: &str) -> Kind {
+    match slot_name {
+        "time" | "seconds" | "delta_seconds" => Kind::Instant,
+        _ => Kind::Color,
+    }
+}
+
+fn register_clock_default_time_binding(
+    engine: &mut Engine,
+    current: &LoadedNode,
+    bindings: &BindingDefs,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
+    if binding_target(bindings, "seconds").is_some() {
+        return Ok(());
+    }
+    engine
+        .add_binding(
+            BindingDraft {
+                source: BindingSource::ProducedSlot {
+                    node: current.id,
+                    slot: SlotPath::parse("seconds").expect("clock seconds slot path"),
+                },
+                target: BindingTarget::BusChannel(ChannelName(String::from("time.seconds"))),
+                priority: BindingPriority::default_fallback(),
+                kind: Kind::Instant,
+                owner: current.id,
+            },
+            frame,
+        )
+        .map_err(|e| ProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: format!("register clock default time binding: {e}"),
+        })?;
+    Ok(())
+}
+
+fn register_visual_default_time_binding(
+    engine: &mut Engine,
+    current: &LoadedNode,
+    config: &ShaderDef,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
+    if binding_source(&config.bindings, "time").is_some() {
+        return Ok(());
+    }
+    let Some(slot) = config.consumed_slots.entries.get("time") else {
+        return Ok(());
+    };
+    if *slot.kind.value() != ShaderSlotKind::Value
+        || slot.value.value().as_lp_type() != Some(LpType::F32)
+    {
+        return Ok(());
+    }
+    engine
+        .add_binding(
+            BindingDraft {
+                source: BindingSource::BusChannel(ChannelName(String::from("time.seconds"))),
+                target: BindingTarget::ConsumedSlot {
+                    node: current.id,
+                    slot: SlotPath::parse("time").expect("visual shader time slot path"),
+                },
+                priority: BindingPriority::default_fallback(),
+                kind: Kind::Instant,
+                owner: current.id,
+            },
+            frame,
+        )
+        .map_err(|e| ProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: format!("register visual shader default time binding: {e}"),
         })?;
     Ok(())
 }
@@ -638,17 +853,32 @@ where
 
 #[cfg(test)]
 mod tests {
-    use lpc_model::NodeName;
+    extern crate std;
+
+    use alloc::sync::Arc;
     use lpc_model::TreePath;
+    use lpc_model::{NodeName, ProductRef, SlotData};
+    use lpc_wire::{
+        ProjectProbeRequest, ProjectProbeResult, ProjectReadRequest, ProjectReadResult,
+        RenderProductProbeRequest, RenderProductProbeResult, WireTextureFormat,
+    };
     use lpfs::lp_path::AsLpPath;
-    use lpfs::{LpFs, LpFsMemory};
+    use lpfs::{LpFs, LpFsMemory, LpFsStd};
+    use lps_shared::TextureStorageFormat;
 
     use super::*;
+    use crate::dataflow::resolver::{QueryKey, ResolveLogLevel};
+    use crate::engine::resolve_with_engine_host;
+    use crate::products::visual::RenderTextureRequest;
 
     fn flat_project() -> LpFsMemory {
         let fs = LpFsMemory::new();
         write_flat_basic_files(&fs);
         fs
+    }
+
+    fn examples_fluid_fs() -> LpFsStd {
+        LpFsStd::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/fluid"))
     }
 
     #[test]
@@ -718,6 +948,123 @@ mod tests {
     }
 
     #[test]
+    fn project_loader_loads_inline_clock_and_default_time_bus() {
+        let fs = LpFsMemory::new();
+        fs.write_file(
+            "/project.toml".as_path(),
+            br#"
+kind = "Project"
+
+[nodes.clock]
+artifact = "./clock.toml"
+
+[nodes.shader]
+artifact = "./shader.toml"
+"#,
+        )
+        .expect("project.toml");
+        fs.write_file(
+            "/clock.toml".as_path(),
+            br#"kind = "Clock"
+"#,
+        )
+        .expect("clock.toml");
+        fs.write_file(
+            "/shader.toml".as_path(),
+            br#"
+kind = "Shader"
+glsl_path = "shader.glsl"
+render_order = 0
+
+[consumed_slots.time]
+kind = "value"
+value = "f32"
+default = 0.0
+"#,
+        )
+        .expect("shader.toml");
+        fs.write_file(
+            "/shader.glsl".as_path(),
+            b"vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }",
+        )
+        .expect("shader.glsl");
+
+        let services = EngineServices::new(TreePath::parse("/clock.show").expect("path"));
+        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load");
+        let root = rt.tree().root();
+        let clock = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("clock").unwrap())
+            .expect("clock node");
+        assert!(
+            rt.tree()
+                .get(clock)
+                .expect("clock")
+                .state
+                .value()
+                .is_alive()
+        );
+        let shader = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("shader").unwrap())
+            .expect("shader node");
+
+        rt.tick(1000).expect("first tick");
+        let first = resolve_with_engine_host(
+            &mut rt,
+            QueryKey::Bus(ChannelName(String::from("time.seconds"))),
+            ResolveLogLevel::Off,
+        )
+        .expect("resolve time bus")
+        .0;
+        assert_eq!(
+            *first.value_leaf().expect("time value").value(),
+            LpValue::F32(0.0)
+        );
+        let shader_first = resolve_with_engine_host(
+            &mut rt,
+            QueryKey::ConsumedSlot {
+                node: shader,
+                slot: SlotPath::parse("time").expect("time slot"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("resolve visual shader time")
+        .0;
+        assert_eq!(
+            *shader_first.value_leaf().expect("time value").value(),
+            LpValue::F32(0.0)
+        );
+
+        rt.tick(1000).expect("second tick");
+        let second = resolve_with_engine_host(
+            &mut rt,
+            QueryKey::Bus(ChannelName(String::from("time.seconds"))),
+            ResolveLogLevel::Off,
+        )
+        .expect("resolve time bus")
+        .0;
+        assert_eq!(
+            *second.value_leaf().expect("time value").value(),
+            LpValue::F32(1.0)
+        );
+        let shader_second = resolve_with_engine_host(
+            &mut rt,
+            QueryKey::ConsumedSlot {
+                node: shader,
+                slot: SlotPath::parse("time").expect("time slot"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("resolve visual shader time")
+        .0;
+        assert_eq!(
+            *shader_second.value_leaf().expect("time value").value(),
+            LpValue::F32(1.0)
+        );
+    }
+
+    #[test]
     fn malformed_node_toml_returns_error() {
         let fs = LpFsMemory::new();
         fs.write_file(
@@ -761,7 +1108,7 @@ artifact = "./broken.toml"
     }
 
     #[test]
-    fn unknown_child_kind_returns_error() {
+    fn unknown_child_kind_returns_toml_parse_error() {
         let fs = LpFsMemory::new();
         fs.write_file(
             "/project.toml".as_path(),
@@ -891,6 +1238,195 @@ order = "inner_first"
                     if error.contains("node locations use dot syntax")
             ),
             "expected invalid slash node ref parse error, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn project_loader_attaches_compute_shader_node() {
+        let fs = LpFsMemory::new();
+        fs.write_file(
+            "/project.toml".as_path(),
+            br#"
+kind = "Project"
+
+[nodes.compute]
+artifact = "./compute.toml"
+"#,
+        )
+        .expect("project.toml");
+        fs.write_file(
+            "/compute.toml".as_path(),
+            br#"
+kind = "ComputeShader"
+glsl_path = "compute.glsl"
+
+[consumed_slots.time]
+kind = "value"
+value = "f32"
+default = 0.25
+
+[produced_slots.phase]
+kind = "value"
+value = "f32"
+"#,
+        )
+        .expect("compute.toml");
+        fs.write_file(
+            "/compute.glsl".as_path(),
+            b"void tick() { phase = time + 2.0; }",
+        )
+        .expect("compute.glsl");
+
+        let root_path = TreePath::parse("/p.show").expect("path");
+        let services = EngineServices::new(root_path);
+        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load");
+        rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        let node = rt
+            .artifact_node_id(LpPath::new("/compute.toml"))
+            .expect("compute node");
+
+        let production = resolve_with_engine_host(
+            &mut rt,
+            QueryKey::ProducedSlot {
+                node,
+                slot: SlotPath::parse("phase").expect("phase"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("resolve phase")
+        .0;
+
+        assert_eq!(
+            *production.value_leaf().expect("value").value(),
+            LpValue::F32(2.25)
+        );
+    }
+
+    #[test]
+    fn fluid_example_loads_compute_fluid_fixture_flow() {
+        let fs = examples_fluid_fs();
+        let fs: &dyn LpFs = &fs;
+        let services = EngineServices::new(TreePath::parse("/fluid.show").expect("path"));
+        let mut rt = ProjectLoader::load_from_root(fs, services).expect("load fluid example");
+        rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        let root = rt.tree().root();
+
+        let compute = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("compute").unwrap())
+            .expect("compute node");
+        let fluid = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("fluid").unwrap())
+            .expect("fluid node");
+        let fixture = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("fixture").unwrap())
+            .expect("fixture node");
+        let output = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("output").unwrap())
+            .expect("output node");
+
+        for id in [compute, fluid, fixture, output] {
+            assert!(rt.tree().get(id).expect("entry").state.value().is_alive());
+        }
+
+        let (emitters, _) = resolve_with_engine_host(
+            &mut rt,
+            QueryKey::ProducedSlot {
+                node: compute,
+                slot: SlotPath::parse("emitters").expect("emitters"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("compute emitters");
+        let SlotData::Map(map) = emitters.data() else {
+            panic!("compute emitters should be a map");
+        };
+        assert!(!map.entries.is_empty());
+        rt.tick(16).expect("tick fluid graph");
+
+        let (fluid_output, _) = resolve_with_engine_host(
+            &mut rt,
+            QueryKey::ProducedSlot {
+                node: fluid,
+                slot: SlotPath::parse("output").expect("output"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("fluid output");
+        let LpValue::Product(ProductRef::Visual(product)) =
+            fluid_output.value_leaf().expect("visual product").value()
+        else {
+            panic!("fluid output should be a visual product");
+        };
+        let texture = rt
+            .render_texture_for_test(
+                *product,
+                &RenderTextureRequest {
+                    width: 16,
+                    height: 16,
+                    format: TextureStorageFormat::Rgba16Unorm,
+                    time_seconds: 0.0,
+                },
+            )
+            .expect("fluid texture");
+        assert!(
+            texture
+                .try_raw_bytes()
+                .expect("bytes")
+                .chunks_exact(8)
+                .any(|px| px[..6].iter().any(|byte| *byte != 0)),
+            "fluid visual should contain nonzero RGB data"
+        );
+
+        let probe_response = rt.read_project(ProjectReadRequest {
+            since: None,
+            queries: alloc::vec::Vec::new(),
+            probes: alloc::vec![ProjectProbeRequest::RenderProduct(
+                RenderProductProbeRequest {
+                    product: *product,
+                    width: 16,
+                    height: 16,
+                    format: WireTextureFormat::Srgb8,
+                },
+            )],
+            mutations: alloc::vec::Vec::new(),
+        });
+        let Some(ProjectProbeResult::RenderProduct(RenderProductProbeResult::Texture {
+            format,
+            bytes,
+            ..
+        })) = probe_response.probes.first()
+        else {
+            panic!("fluid visual probe should return a texture");
+        };
+        assert_eq!(*format, WireTextureFormat::Srgb8);
+        assert_eq!(bytes.len(), 16 * 16 * 3);
+        assert!(
+            bytes.iter().any(|byte| *byte != 0),
+            "fluid visual probe should contain nonzero display bytes"
+        );
+
+        let response = rt.read_project(ProjectReadRequest::default_debug(None));
+        let ProjectReadResult::Nodes(nodes) = &response.results[1] else {
+            panic!("node read result");
+        };
+        let slots = nodes.slots.as_ref().expect("slot roots");
+        assert!(
+            slots
+                .roots
+                .iter()
+                .any(|root| root.name == format!("node.{}.state", compute.0)),
+            "compute state should be visible in debug read"
+        );
+        assert!(
+            slots
+                .roots
+                .iter()
+                .any(|root| root.name == format!("node.{}.state", fluid.0)),
+            "fluid state should be visible in debug read"
         );
     }
 

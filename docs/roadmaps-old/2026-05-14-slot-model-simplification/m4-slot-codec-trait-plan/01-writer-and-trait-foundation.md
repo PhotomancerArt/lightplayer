@@ -85,4 +85,3 @@ Add small tests proving a trivial manual `SlotCodec` impl can read and write one
 cargo test -p lpc-model slot_codec
 cargo test -p lpc-wire
 ```
-

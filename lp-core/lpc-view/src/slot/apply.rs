@@ -1,8 +1,9 @@
 use alloc::collections::BTreeMap;
-use alloc::string::String;
+use alloc::string::{String, ToString};
 use lpc_model::{
     LpType, LpValue, ModelStructMember, Revision, SlotData, SlotMapKey, SlotMapKeyShape, SlotPath,
     SlotPathSegment, SlotShape, SlotShapeId, SlotShapeRegistry,
+    slot_sync_codec::read_slot_snapshot_shape_json,
 };
 use lpc_wire::{WireSlotChange, WireSlotPatch};
 
@@ -12,6 +13,7 @@ pub enum SlotMirrorError {
     UnknownRoot,
     UnknownPath,
     MissingShape(SlotShapeId),
+    InvalidRootData(String),
     NotAValue,
     WrongType,
 }
@@ -22,6 +24,7 @@ impl core::fmt::Display for SlotMirrorError {
             Self::UnknownRoot => f.write_str("unknown slot root"),
             Self::UnknownPath => f.write_str("unknown slot path"),
             Self::MissingShape(id) => write!(f, "missing slot shape: {id}"),
+            Self::InvalidRootData(error) => write!(f, "invalid slot root data: {error}"),
             Self::NotAValue => f.write_str("slot path does not target a value"),
             Self::WrongType => f.write_str("slot value type does not match shape"),
         }
@@ -122,7 +125,10 @@ fn apply_replace_shape(
 
     if path.is_root() {
         match change {
-            WireSlotChange::Replace(replacement) => *data = replacement.clone(),
+            WireSlotChange::Replace(replacement) => {
+                *data = read_slot_snapshot_shape_json(registry, shape, replacement.get())
+                    .map_err(|error| SlotMirrorError::InvalidRootData(error.to_string()))?;
+            }
         }
         return Ok(());
     }

@@ -47,4 +47,3 @@
 - **Rejected alternatives:** Relying on named-struct `SlotValue` derive for
   affine transforms.
 - **Revisit when:** We introduce broader matrix/transform value conventions.
-

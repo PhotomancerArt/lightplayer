@@ -54,4 +54,3 @@ Out of scope:
 
 Full plan: this is real model churn across several crates and should be split
 into small, reviewable phases.
-

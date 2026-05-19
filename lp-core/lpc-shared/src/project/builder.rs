@@ -5,14 +5,14 @@ use core::cell::RefCell;
 use lpc_model::GlslOpts;
 use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec, RingOrder};
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
-use lpc_model::nodes::shader::ShaderDef;
+use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, ArtifactLocator, AsLpPath, BindingDef, BindingDefs, BindingRef,
     BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureSamplingConfig, MapSlot, NodeDef,
-    NodeInvocation, NodeSlotRef, OptionSlot, PositiveF32, PositiveF32Slot, ProjectDef, Ratio,
-    RatioSlot, RelativeNodeRef, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry,
-    SourcePath, SourcePathSlot, ValueSlot,
+    NodeInvocation, NodeSlotRef, OptionSlot, ProjectDef, Ratio, RatioSlot, RelativeNodeRef,
+    RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry, SourcePath, SourcePathSlot,
+    ValueSlot,
 };
 use lpfs::LpFs;
 use lpfs::lp_path::LpPathBuf;
@@ -120,7 +120,6 @@ impl ProjectBuilder {
         OutputBuilder {
             pin: 0,
             options: OutputDriverOptionsConfig {
-                lum_power: PositiveF32Slot::new(PositiveF32(2.0)),
                 white_point: ValueSlot::new([1.0, 1.0, 1.0]),
                 brightness: RatioSlot::new(Ratio(1.0)),
                 interpolation_enabled: ValueSlot::new(false),
@@ -300,6 +299,7 @@ impl ShaderBuilder {
             bindings: bus_output_binding_defs("visual.out"),
             glsl_opts: GlslOpts::default(),
             param_defs: MapSlot::default(),
+            consumed_slots: default_visual_consumed_slots(),
         };
 
         let toml = authored_node_toml(&slot_shape_registry(), &NodeDef::Shader(config));
@@ -436,6 +436,15 @@ fn bus_output_binding_defs(slot: &str) -> BindingDefs {
             SlotPath::parse(slot).expect("valid bus slot path"),
         ))),
     )
+}
+
+fn default_visual_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
+    let mut slots = BTreeMap::new();
+    slots.insert(
+        String::from("time"),
+        ShaderSlotDef::value_f32("Time", "Project clock time in seconds", 0.0, None),
+    );
+    MapSlot::new(slots)
 }
 
 fn fixture_binding_defs(texture_loc: RelativeNodeRef) -> BindingDefs {

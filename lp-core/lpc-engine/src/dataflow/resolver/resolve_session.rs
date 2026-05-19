@@ -1,5 +1,7 @@
 //! [`EngineSession`] — per-frame demand resolution and engine-dispatched work.
 
+use alloc::collections::BTreeMap;
+use alloc::format;
 use alloc::vec::Vec;
 
 use crate::dataflow::binding::{BindingEntry, BindingRef, BindingSource};
@@ -10,7 +12,7 @@ use crate::dataflow::resolver::resolve_host::ResolveHost;
 use crate::dataflow::resolver::resolve_trace::{ResolveTrace, ResolveTraceEvent};
 use crate::dataflow::resolver::resolver::Resolver;
 use crate::dataflow::resolver::resolver::materialize_literal_product;
-use lpc_model::{ChannelName, NodeId, Revision, SlotPath};
+use lpc_model::{ChannelName, NodeId, Revision, SlotData, SlotMapDyn, SlotMerge, SlotPath};
 
 /// Active engine session for one frame (or nested test scope).
 ///
@@ -128,6 +130,28 @@ impl<'a> EngineSession<'a> {
         slot: &SlotPath,
         query: &QueryKey,
     ) -> Result<Production, SessionResolveError> {
+        let policy = host.merge_policy_for_consumed_slot(node, slot);
+        if self.trace.is_logging_enabled() {
+            self.trace
+                .record_event(ResolveTraceEvent::SelectMergePolicy {
+                    query: query.clone(),
+                    policy,
+                });
+        }
+        match policy {
+            SlotMerge::Latest => self.resolve_latest_consumed_slot(host, node, slot, query),
+            SlotMerge::Error => self.resolve_error_merge_consumed_slot(host, node, slot, query),
+            SlotMerge::ByKey => self.resolve_by_key_consumed_slot(host, node, slot, query),
+        }
+    }
+
+    fn resolve_latest_consumed_slot(
+        &mut self,
+        host: &mut (impl ResolveHost + ?Sized),
+        node: NodeId,
+        slot: &SlotPath,
+        query: &QueryKey,
+    ) -> Result<Production, SessionResolveError> {
         if let Some(entry) = host.binding_for_consumed_slot(node, slot) {
             if self.trace.is_logging_enabled() {
                 self.trace.record_event(ResolveTraceEvent::SelectBinding {
@@ -156,6 +180,53 @@ impl<'a> EngineSession<'a> {
         r
     }
 
+    fn resolve_error_merge_consumed_slot(
+        &mut self,
+        host: &mut (impl ResolveHost + ?Sized),
+        node: NodeId,
+        slot: &SlotPath,
+        query: &QueryKey,
+    ) -> Result<Production, SessionResolveError> {
+        let entries = host.bindings_for_consumed_slot(node, slot);
+        if entries.len() > 1 {
+            return Err(SessionResolveError::other(format!(
+                "multiple bindings for non-mergeable consumed slot node={node:?} slot={slot}"
+            )));
+        }
+        self.resolve_latest_consumed_slot(host, node, slot, query)
+    }
+
+    fn resolve_by_key_consumed_slot(
+        &mut self,
+        host: &mut (impl ResolveHost + ?Sized),
+        node: NodeId,
+        slot: &SlotPath,
+        query: &QueryKey,
+    ) -> Result<Production, SessionResolveError> {
+        let entries = host.bindings_for_consumed_slot(node, slot);
+        if entries.is_empty() {
+            return self.resolve_latest_consumed_slot(host, node, slot, query);
+        }
+
+        let mut inputs = Vec::new();
+        for (binding_ref, entry) in entries {
+            if self.trace.is_logging_enabled() {
+                self.trace.record_event(ResolveTraceEvent::MergeInput {
+                    query: query.clone(),
+                    binding: binding_ref,
+                });
+            }
+            inputs.extend(self.resolve_binding_source_for_merge(
+                host,
+                query,
+                binding_ref,
+                &entry.source,
+            )?);
+        }
+
+        merge_maps_by_key(inputs, query, &self.trace)
+    }
+
     fn resolve_binding_source(
         &mut self,
         host: &mut (impl ResolveHost + ?Sized),
@@ -165,7 +236,7 @@ impl<'a> EngineSession<'a> {
         match source {
             BindingSource::Literal(spec) => {
                 let product = materialize_literal_product(spec, self.revision);
-                Ok(Production::new(product, ProductionSource::Literal))
+                Ok(Production::leaf(product, ProductionSource::Literal))
             }
             BindingSource::ProducedSlot { node, slot } => {
                 let key = QueryKey::ProducedSlot {
@@ -188,6 +259,81 @@ impl<'a> EngineSession<'a> {
             }
         }
     }
+
+    fn resolve_binding_source_for_merge(
+        &mut self,
+        host: &mut (impl ResolveHost + ?Sized),
+        query: &QueryKey,
+        binding_ref: BindingRef,
+        source: &BindingSource,
+    ) -> Result<Vec<Production>, SessionResolveError> {
+        match source {
+            BindingSource::BusChannel(channel) => {
+                let bus_query = QueryKey::Bus(channel.clone());
+                self.trace
+                    .try_push_active(&bus_query)
+                    .map_err(SessionResolveError::from)?;
+                let result = (|| {
+                    let mut providers = host.providers_for_bus(channel);
+                    providers.sort_by_key(|(provider_ref, entry)| (entry.priority, *provider_ref));
+                    let mut result = Vec::new();
+                    for (provider_ref, provider) in providers {
+                        if self.trace.is_logging_enabled() {
+                            self.trace.record_event(ResolveTraceEvent::MergeInput {
+                                query: query.clone(),
+                                binding: provider_ref,
+                            });
+                        }
+                        result.extend(self.resolve_binding_source_for_merge(
+                            host,
+                            query,
+                            provider_ref,
+                            &provider.source,
+                        )?);
+                    }
+                    Ok(result)
+                })();
+                self.trace.exit(&bus_query);
+                result
+            }
+            _ => {
+                let mut production = self.resolve_binding_source(host, binding_ref, source)?;
+                production.source = ProductionSource::BusBinding {
+                    binding: binding_ref,
+                };
+                Ok(alloc::vec![production])
+            }
+        }
+    }
+}
+
+fn merge_maps_by_key(
+    inputs: Vec<Production>,
+    query: &QueryKey,
+    trace: &ResolveTrace,
+) -> Result<Production, SessionResolveError> {
+    let mut keys_revision = Revision::default();
+    let mut entries = BTreeMap::new();
+    for input in inputs {
+        let SlotData::Map(map) = input.data().clone() else {
+            return Err(SessionResolveError::other(format!(
+                "merge by key expected map input for {query:?}"
+            )));
+        };
+        keys_revision = core::cmp::max(keys_revision, map.keys_revision);
+        for (key, data) in map.entries {
+            if entries.insert(key.clone(), data).is_some() && trace.is_logging_enabled() {
+                trace.record_event(ResolveTraceEvent::MergeReplaceKey {
+                    query: query.clone(),
+                    key,
+                });
+            }
+        }
+    }
+    Ok(Production::new(
+        SlotData::Map(SlotMapDyn::with_revision(keys_revision, entries)),
+        ProductionSource::Merged,
+    ))
 }
 
 fn select_highest_priority_bus_provider(
@@ -223,9 +369,10 @@ mod tests {
     use crate::dataflow::binding::BindingPriority;
     use crate::dataflow::binding::BindingTarget;
     use crate::dataflow::resolver::resolve_trace::ResolveLogLevel;
+    use alloc::collections::BTreeMap;
     use alloc::string::String;
     use lpc_model::Kind;
-    use lpc_model::{ChannelName, LpValue, WithRevision};
+    use lpc_model::{ChannelName, LpValue, SlotMapKey, WithRevision};
     use lps_shared::LpsValueF32;
 
     fn ch(s: &str) -> ChannelName {
@@ -294,6 +441,23 @@ mod tests {
             })
         }
 
+        fn bindings_for_consumed_slot(
+            &self,
+            node: NodeId,
+            slot: &SlotPath,
+        ) -> Vec<(BindingRef, BindingEntry)> {
+            self.entries
+                .iter()
+                .filter_map(|(binding_ref, entry)| {
+                    matches!(
+                        &entry.target,
+                        BindingTarget::ConsumedSlot { node: n, slot: p } if *n == node && p == slot
+                    )
+                    .then(|| (*binding_ref, entry.clone()))
+                })
+                .collect()
+        }
+
         fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
             self.entries
                 .iter()
@@ -336,6 +500,14 @@ mod tests {
             self.bindings.binding_for_consumed_slot(node, slot)
         }
 
+        fn bindings_for_consumed_slot(
+            &self,
+            node: NodeId,
+            slot: &SlotPath,
+        ) -> Vec<(BindingRef, BindingEntry)> {
+            self.bindings.bindings_for_consumed_slot(node, slot)
+        }
+
         fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
             self.bindings.providers_for_bus(channel)
         }
@@ -366,7 +538,10 @@ mod tests {
                 .expect("value")
                 .eq(&b.as_value().expect("value"))
         );
-        assert_eq!(a.product.changed_at(), b.product.changed_at());
+        assert_eq!(
+            a.value_leaf().expect("value").changed_at(),
+            b.value_leaf().expect("value").changed_at()
+        );
         assert_eq!(host.produce_calls, 1);
     }
 
@@ -543,6 +718,219 @@ mod tests {
             .resolve(&mut host, QueryKey::Bus(a))
             .expect_err("cycle");
         assert!(matches!(err, SessionResolveError::Cycle { .. }));
+    }
+
+    struct MapMergeHost {
+        bindings: TestBindings,
+        receiver: NodeId,
+        receiver_slot: SlotPath,
+    }
+
+    impl MapMergeHost {
+        fn new(bindings: TestBindings, receiver: NodeId, receiver_slot: SlotPath) -> Self {
+            Self {
+                bindings,
+                receiver,
+                receiver_slot,
+            }
+        }
+    }
+
+    impl ResolveHost for MapMergeHost {
+        fn produce(
+            &mut self,
+            query: &QueryKey,
+            session: &mut ResolveSession<'_>,
+        ) -> Result<Production, SessionResolveError> {
+            let QueryKey::ProducedSlot { node, .. } = query else {
+                return Err(SessionResolveError::other("unexpected map merge query"));
+            };
+            let entries = match node.0 {
+                1 => [(1, 10), (2, 20)].into_iter().collect(),
+                2 => [(2, 200), (3, 300)].into_iter().collect(),
+                _ => return Err(SessionResolveError::other("unknown map producer")),
+            };
+            Ok(Production::new(
+                map_data(session.revision(), entries),
+                ProductionSource::ProducedSlot {
+                    node: *node,
+                    slot: path("emitters"),
+                },
+            ))
+        }
+
+        fn bindings_for_consumed_slot(
+            &self,
+            node: NodeId,
+            slot: &SlotPath,
+        ) -> Vec<(BindingRef, BindingEntry)> {
+            self.bindings.bindings_for_consumed_slot(node, slot)
+        }
+
+        fn binding_for_consumed_slot(
+            &self,
+            node: NodeId,
+            slot: &SlotPath,
+        ) -> Option<(BindingRef, BindingEntry)> {
+            self.bindings.binding_for_consumed_slot(node, slot)
+        }
+
+        fn providers_for_bus(&self, channel: &ChannelName) -> Vec<(BindingRef, BindingEntry)> {
+            self.bindings.providers_for_bus(channel)
+        }
+
+        fn merge_policy_for_consumed_slot(&self, node: NodeId, slot: &SlotPath) -> SlotMerge {
+            if node == self.receiver && slot == &self.receiver_slot {
+                SlotMerge::ByKey
+            } else {
+                SlotMerge::Latest
+            }
+        }
+    }
+
+    fn map_data(revision: Revision, pairs: BTreeMap<u32, u32>) -> SlotData {
+        SlotData::Map(SlotMapDyn::with_revision(
+            revision,
+            pairs
+                .into_iter()
+                .map(|(key, value)| {
+                    (
+                        SlotMapKey::U32(key),
+                        SlotData::Value(WithRevision::new(revision, LpValue::U32(value))),
+                    )
+                })
+                .collect(),
+        ))
+    }
+
+    fn map_u32(map: &SlotData, key: u32) -> u32 {
+        let SlotData::Map(map) = map else {
+            panic!("map");
+        };
+        let Some(SlotData::Value(value)) = map.entries.get(&SlotMapKey::U32(key)) else {
+            panic!("key {key}");
+        };
+        let LpValue::U32(value) = value.value() else {
+            panic!("u32");
+        };
+        *value
+    }
+
+    #[test]
+    fn consumed_slot_merge_by_key_combines_direct_map_bindings() {
+        let mut resolver = Resolver::new();
+        let mut bindings = TestBindings::default();
+        let frame = Revision::new(6);
+        let receiver = NodeId::new(99);
+        let receiver_slot = path("emitters");
+        for producer in [NodeId::new(1), NodeId::new(2)] {
+            bindings.add(
+                BindingDraft {
+                    source: BindingSource::ProducedSlot {
+                        node: producer,
+                        slot: path("emitters"),
+                    },
+                    target: BindingTarget::ConsumedSlot {
+                        node: receiver,
+                        slot: receiver_slot.clone(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Amplitude,
+                    owner: receiver,
+                },
+                frame,
+            );
+        }
+
+        let mut host = MapMergeHost::new(bindings, receiver, receiver_slot.clone());
+        let trace = ResolveTrace::new(ResolveLogLevel::Basic);
+        let mut session = ResolveSession::new(frame, &mut resolver, trace);
+        let production = session
+            .resolve(
+                &mut host,
+                QueryKey::ConsumedSlot {
+                    node: receiver,
+                    slot: receiver_slot,
+                },
+            )
+            .expect("merged map");
+
+        assert_eq!(map_u32(production.data(), 1), 10);
+        assert_eq!(map_u32(production.data(), 2), 200);
+        assert_eq!(map_u32(production.data(), 3), 300);
+        assert_eq!(production.source, ProductionSource::Merged);
+        assert!(session.trace().events().iter().any(|event| matches!(
+            event,
+            ResolveTraceEvent::SelectMergePolicy {
+                policy: SlotMerge::ByKey,
+                ..
+            }
+        )));
+        assert!(session.trace().events().iter().any(|event| matches!(
+            event,
+            ResolveTraceEvent::MergeReplaceKey {
+                key: SlotMapKey::U32(2),
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn consumed_slot_merge_by_key_expands_bus_providers() {
+        let mut resolver = Resolver::new();
+        let mut bindings = TestBindings::default();
+        let frame = Revision::new(7);
+        let receiver = NodeId::new(99);
+        let receiver_slot = path("emitters");
+        let bus = ch("fluid.emitters");
+        bindings.add(
+            BindingDraft {
+                source: BindingSource::BusChannel(bus.clone()),
+                target: BindingTarget::ConsumedSlot {
+                    node: receiver,
+                    slot: receiver_slot.clone(),
+                },
+                priority: BindingPriority::new(0),
+                kind: Kind::Amplitude,
+                owner: receiver,
+            },
+            frame,
+        );
+        for (producer, priority) in [(NodeId::new(1), 1), (NodeId::new(2), 10)] {
+            bindings.add(
+                BindingDraft {
+                    source: BindingSource::ProducedSlot {
+                        node: producer,
+                        slot: path("emitters"),
+                    },
+                    target: BindingTarget::BusChannel(bus.clone()),
+                    priority: BindingPriority::new(priority),
+                    kind: Kind::Amplitude,
+                    owner: producer,
+                },
+                frame,
+            );
+        }
+
+        let mut host = MapMergeHost::new(bindings, receiver, receiver_slot.clone());
+        let mut session = ResolveSession::new(
+            frame,
+            &mut resolver,
+            ResolveTrace::new(ResolveLogLevel::Off),
+        );
+        let production = session
+            .resolve(
+                &mut host,
+                QueryKey::ConsumedSlot {
+                    node: receiver,
+                    slot: receiver_slot,
+                },
+            )
+            .expect("merged bus map");
+
+        assert_eq!(map_u32(production.data(), 1), 10);
+        assert_eq!(map_u32(production.data(), 2), 200);
+        assert_eq!(map_u32(production.data(), 3), 300);
     }
 
     struct TraceHost {

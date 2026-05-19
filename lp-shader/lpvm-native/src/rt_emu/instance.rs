@@ -11,9 +11,10 @@ use lpir::FloatMode;
 use lpir::lpir_module::IrFunction;
 use lps_shared::{LayoutRules, LpsType, LpsValueQ32, ParamQualifier, lps_value_f32::LpsValueF32};
 use lpvm::{
-    CallError, LpvmBuffer, LpvmInstance, decode_q32_return, encode_uniform_write,
-    encode_uniform_write_q32, flat_q32_words_from_f32_args, glsl_component_count,
-    q32_to_lps_value_f32, validate_render_samples_sig_ir, validate_render_texture_sig_ir,
+    CallError, LpvmBuffer, LpvmInstance, decode_global_read, decode_q32_return,
+    encode_global_write, encode_uniform_write, encode_uniform_write_q32,
+    flat_q32_words_from_f32_args, global_data_span, glsl_component_count, q32_to_lps_value_f32,
+    validate_compute_tick_sig, validate_render_samples_sig_ir, validate_render_texture_sig_ir,
 };
 use lpvm_cranelift::{CompileOptions, signature_for_ir_func, signature_uses_struct_return};
 use lpvm_emu::{GUEST_VMCTX_BYTES, riscv32_lpvm_reference_isa, write_guest_vmctx_header};
@@ -398,6 +399,37 @@ impl NativeEmuInstance {
         storage[dst_addr..dst_addr + data.len()].copy_from_slice(data);
         Ok(())
     }
+
+    fn vmctx_read_bytes(&self, offset: usize, len: usize) -> Result<Vec<u8>, NativeError> {
+        let total = self.module.meta.vmctx_buffer_size();
+        let end = offset.checked_add(len).ok_or_else(|| {
+            NativeError::Call(CallError::Unsupported(String::from(
+                "vmctx read: offset overflow",
+            )))
+        })?;
+        if end > total {
+            return Err(NativeError::Call(CallError::Unsupported(alloc::format!(
+                "vmctx read out of bounds: end {end} total {total}"
+            ))));
+        }
+        let shared_start = self.module.arena.shared_start() as usize;
+        let vmctx_base = self.vmctx_guest as usize;
+        let src_addr = vmctx_base
+            .checked_add(offset)
+            .and_then(|a| a.checked_sub(shared_start))
+            .ok_or_else(|| {
+                NativeError::Call(CallError::Unsupported(String::from(
+                    "vmctx read: address overflow",
+                )))
+            })?;
+        let storage = self.module.arena.lock_storage();
+        if src_addr + len > storage.len() {
+            return Err(NativeError::Call(CallError::Unsupported(String::from(
+                "vmctx read: arena too small",
+            ))));
+        }
+        Ok(storage[src_addr..src_addr + len].to_vec())
+    }
 }
 
 impl LpvmInstance for NativeEmuInstance {
@@ -598,6 +630,43 @@ impl LpvmInstance for NativeEmuInstance {
                 )))
             })?;
         self.vmctx_write_bytes(off, &bytes)
+    }
+
+    fn set_global(&mut self, path: &str, value: &LpsValueF32) -> Result<(), Self::Error> {
+        let (off, bytes) = encode_global_write(
+            &self.module.meta,
+            path,
+            value,
+            self.module.options.float_mode,
+        )
+        .map_err(|e| {
+            NativeError::Call(CallError::Unsupported(alloc::format!("set_global: {e}")))
+        })?;
+        self.vmctx_write_bytes(off, &bytes)
+    }
+
+    fn get_global(&mut self, path: &str) -> Result<LpsValueF32, Self::Error> {
+        let span = global_data_span(&self.module.meta, path).map_err(|e| {
+            NativeError::Call(CallError::Unsupported(alloc::format!("get_global: {e}")))
+        })?;
+        let bytes = self.vmctx_read_bytes(span.offset, span.len)?;
+        decode_global_read(&span.ty, &bytes, self.module.options.float_mode).map_err(|e| {
+            NativeError::Call(CallError::Unsupported(alloc::format!("get_global: {e}")))
+        })
+    }
+
+    fn call_compute_tick(&mut self, name: &str) -> Result<(), Self::Error> {
+        let sig = self
+            .module
+            .meta
+            .functions
+            .iter()
+            .find(|f| f.name == name)
+            .ok_or_else(|| CallError::MissingMetadata(name.into()))?;
+        validate_compute_tick_sig(sig)
+            .map_err(|e| NativeError::Call(CallError::Unsupported(format!("{name}: {e}"))))?;
+        self.invoke_flat(name, &[], CycleModel::default())?;
+        Ok(())
     }
 
     fn debug_state(&self) -> Option<String> {

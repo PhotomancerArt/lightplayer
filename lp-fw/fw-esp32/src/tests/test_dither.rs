@@ -49,7 +49,6 @@ pub async fn run_dithering_test(_: embassy_executor::Spawner) -> ! {
     info!("Creating DisplayPipeline with interpolation, dithering, LUT, brightness=1.0");
 
     let options = DisplayPipelineOptions {
-        lum_power: 2.0,
         white_point: [0.9, 1.0, 1.0],
         brightness: 1.0, // Full range; ramp encodes 0-25% in data
         interpolation_enabled: true,

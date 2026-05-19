@@ -81,4 +81,3 @@ Tests to add/update:
 cargo test -p lpc-slot-codegen
 cargo test -p lpc-slot-mockup generated_shape_codec
 ```
-

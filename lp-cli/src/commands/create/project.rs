@@ -3,11 +3,12 @@
 //! Functions for creating new projects with sensible defaults.
 
 use anyhow::{Context, Result};
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig};
 use lpc_model::nodes::output::OutputDef;
-use lpc_model::nodes::shader::ShaderDef;
+use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingRef, BusSlotRef, Dim2u,
@@ -58,6 +59,13 @@ pub fn create_project_structure(dir: &Path, name: Option<&str>) -> Result<()> {
 /// Creates the default project structure with a rainbow rotating color wheel shader.
 /// The filesystem should already be chrooted to the project directory.
 pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
+    fs.write_file(
+        "/clock.toml".as_path(),
+        br#"kind = "Clock"
+"#,
+    )
+    .map_err(|e| anyhow::anyhow!("Failed to write clock.toml: {e}"))?;
+
     // Create texture node
     let texture_config = TextureDef {
         size: Dim2uSlot::new(Dim2u {
@@ -79,7 +87,8 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
         render_order: RenderOrderSlot::new(RenderOrder(0)),
         bindings: bus_output_binding_defs("visual.out"),
         glsl_opts: lpc_model::GlslOpts::default(),
-        param_defs: MapSlot::default(),
+        param_defs: lpc_model::MapSlot::default(),
+        consumed_slots: default_visual_consumed_slots(),
     };
     let shader_toml = with_kind(
         "Shader",
@@ -201,6 +210,9 @@ name = "{name}"
 [nodes.output]
 artifact = "./output.toml"
 
+[nodes.clock]
+artifact = "./clock.toml"
+
 [nodes.texture]
 artifact = "./texture.toml"
 
@@ -218,6 +230,15 @@ artifact = "./fixture.toml"
 
 fn with_kind(kind: &str, body: String) -> String {
     format!("kind = \"{kind}\"\n{body}")
+}
+
+fn default_visual_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
+    let mut slots = BTreeMap::new();
+    slots.insert(
+        String::from("time"),
+        ShaderSlotDef::value_f32("Time", "Project clock time in seconds", 0.0, None),
+    );
+    MapSlot::new(slots)
 }
 
 fn bus_input_binding_defs(slot: &str) -> BindingDefs {

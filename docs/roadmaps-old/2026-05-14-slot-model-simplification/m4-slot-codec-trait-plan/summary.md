@@ -50,4 +50,3 @@ cargo check -p lpc-model --no-default-features
 ```
 
 All passed.
-

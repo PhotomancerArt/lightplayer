@@ -11,6 +11,7 @@ pub(crate) fn derive_record(
     ident: syn::Ident,
     shape_id: TokenStream,
     fields: syn::FieldsNamed,
+    container_attrs: attr::ContainerAttrs,
 ) -> Result<TokenStream> {
     let mut shape_fields = Vec::new();
     let mut access_arms = Vec::new();
@@ -33,8 +34,18 @@ pub(crate) fn derive_record(
         let field_ty = field.ty;
 
         let shape = attr::field_shape_tokens(&field_attr.shape, &field_ty);
+        let semantics = attr::field_semantics_tokens(field_attr.direction, field_attr.merge);
+        let selected_policy = field_attr.policy.or(container_attrs.default_policy);
+        let policy = selected_policy
+            .map(attr::field_policy_tokens)
+            .unwrap_or_else(|| quote! { ::lpc_model::SlotPolicy::default() });
         shape_fields.push(quote! {
-            ::lpc_model::slot::shape::field(#field_name, #shape)
+            ::lpc_model::slot::shape::field_with_semantics_and_policy(
+                #field_name,
+                #shape,
+                #semantics,
+                #policy,
+            )
         });
 
         if let Some(access) = attr::field_access_tokens(&field_attr.shape, &field_ty, &field_ident)
@@ -43,8 +54,9 @@ pub(crate) fn derive_record(
             access_arms.push(quote! {
                 #index => Some(#access),
             });
-            if let Some(mut_access) =
-                attr::field_mut_access_tokens(&field_attr.shape, &field_ty, &field_ident)
+            if selected_policy.is_none_or(|policy| !attr::policy_is_read_only(policy))
+                && let Some(mut_access) =
+                    attr::field_mut_access_tokens(&field_attr.shape, &field_ty, &field_ident)
             {
                 mut_access_arms.push(quote! {
                     #index => Some(#mut_access),

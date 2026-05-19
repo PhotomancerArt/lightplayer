@@ -130,6 +130,18 @@ impl FixtureNode {
             self.direct_points = Some((mapping_ver, points));
         }
     }
+
+    fn sync_mapping_from_def(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+        let mut next = self.mapping.clone();
+        sync_mapping_config_from_def(&mut next, ctx)?;
+        if next != self.mapping {
+            self.mapping = next;
+            self.mapping_version = ctx.revision();
+            self.precomputed = None;
+            self.direct_points = None;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -162,16 +174,27 @@ impl NodeRuntime for FixtureNode {
             })
             .map_err(|e| NodeError::msg(format!("resolve fixture input: {}", e.message)))?;
 
-        let visual_product = match prod.product.get() {
+        let visual_product = match prod
+            .value_leaf()
+            .ok_or_else(|| {
+                NodeError::msg("fixture input resolved to aggregate data, expected visual product")
+            })?
+            .get()
+        {
             lpc_model::LpValue::Product(lpc_model::ProductRef::Visual(product)) => *product,
             _ => return Err(NodeError::msg("fixture expected visual product from input")),
         };
 
-        let def = self.def_view(ctx)?;
-        let render_size: Dim2u = def.render_size().get(ctx)?;
-        let color_order: ColorOrder = def.color_order().get(ctx)?;
-        let brightness = u8::try_from(def.brightness().get_or(ctx, 64u32)?).unwrap_or(u8::MAX);
-        let gamma_correction = def.gamma_correction().get_or(ctx, true)?;
+        let (render_size, color_order, brightness, gamma_correction) = {
+            let def = self.def_view(ctx)?;
+            (
+                def.render_size().get::<_, Dim2u>(ctx)?,
+                def.color_order().get::<_, ColorOrder>(ctx)?,
+                u8::try_from(def.brightness().get_or(ctx, 64u32)?).unwrap_or(u8::MAX),
+                def.gamma_correction().get_or(ctx, true)?,
+            )
+        };
+        self.sync_mapping_from_def(ctx)?;
         let width = render_size.width;
         let height = render_size.height;
 
@@ -225,6 +248,127 @@ impl NodeRuntime for FixtureNode {
     fn control_node(&mut self) -> Option<&mut dyn ControlNode> {
         Some(self)
     }
+}
+
+fn sync_mapping_config_from_def(
+    mapping: &mut MappingConfig,
+    ctx: &mut TickContext<'_>,
+) -> Result<(), NodeError> {
+    match mapping {
+        MappingConfig::Unset => {}
+        MappingConfig::PathPoints {
+            paths,
+            sample_diameter,
+            ..
+        } => {
+            let Some(next_sample_diameter) =
+                try_read_def_value(ctx, "mapping.path_points.sample_diameter")?
+            else {
+                return Ok(());
+            };
+            sample_diameter.set(next_sample_diameter);
+            let path_keys: Vec<u32> = paths.entries.keys().copied().collect();
+            for path_key in path_keys {
+                let Some(path) = paths.entries.get_mut(&path_key) else {
+                    continue;
+                };
+                sync_path_spec_from_def(path_key, path.value_mut(), ctx)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn sync_path_spec_from_def(
+    path_key: u32,
+    path: &mut PathSpec,
+    ctx: &mut TickContext<'_>,
+) -> Result<(), NodeError> {
+    match path {
+        PathSpec::RingArray {
+            center,
+            diameter,
+            start_ring_inclusive,
+            end_ring_exclusive,
+            ring_lamp_counts,
+            offset_angle,
+            order,
+            ..
+        } => {
+            let prefix = alloc::format!("mapping.path_points.paths[{path_key}].ring_array");
+            let Some(next_center) = try_read_def_value(ctx, &alloc::format!("{prefix}.center"))?
+            else {
+                return Ok(());
+            };
+            center.set(next_center);
+            let Some(next_diameter) =
+                try_read_def_value(ctx, &alloc::format!("{prefix}.diameter"))?
+            else {
+                return Ok(());
+            };
+            diameter.set(next_diameter);
+            start_ring_inclusive.set(read_def_value(
+                ctx,
+                &alloc::format!("{prefix}.start_ring_inclusive"),
+            )?);
+            end_ring_exclusive.set(read_def_value(
+                ctx,
+                &alloc::format!("{prefix}.end_ring_exclusive"),
+            )?);
+            let count_keys: Vec<u32> = ring_lamp_counts.entries.keys().copied().collect();
+            for count_key in count_keys {
+                let Some(count) = ring_lamp_counts.entries.get_mut(&count_key) else {
+                    continue;
+                };
+                count.set(read_def_value(
+                    ctx,
+                    &alloc::format!("{prefix}.ring_lamp_counts[{count_key}]"),
+                )?);
+            }
+            offset_angle.set(read_def_value(
+                ctx,
+                &alloc::format!("{prefix}.offset_angle"),
+            )?);
+            order.set(read_def_value(ctx, &alloc::format!("{prefix}.order"))?);
+        }
+    }
+    Ok(())
+}
+
+fn read_def_value<T: lpc_model::FromLpValue>(
+    ctx: &mut TickContext<'_>,
+    path: &str,
+) -> Result<T, NodeError> {
+    let Some(value) = try_read_def_value(ctx, path)? else {
+        return Err(NodeError::msg(alloc::format!(
+            "authored fixture path {path:?} is unavailable"
+        )));
+    };
+    Ok(value)
+}
+
+fn try_read_def_value<T: lpc_model::FromLpValue>(
+    ctx: &mut TickContext<'_>,
+    path: &str,
+) -> Result<Option<T>, NodeError> {
+    let slot = SlotPath::parse(path).map_err(|e| {
+        NodeError::msg(alloc::format!(
+            "invalid authored fixture path {path:?}: {e}"
+        ))
+    })?;
+    let production = match ctx.resolve(QueryKey::ConsumedSlot {
+        node: ctx.node_id(),
+        slot,
+    }) {
+        Ok(production) => production,
+        Err(_) => return Ok(None),
+    };
+    let value = production
+        .value_leaf()
+        .ok_or_else(|| NodeError::msg("resolved fixture path is not a value"))?;
+    T::from_lp_value(value.value())
+        .map(Some)
+        .map_err(|e| NodeError::msg(alloc::format!("fixture path {path:?}: {e}")))
 }
 
 #[derive(Clone, Copy)]

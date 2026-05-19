@@ -9,7 +9,7 @@
 
 extern crate alloc;
 
-use alloc::{format, string::String, vec::Vec};
+use alloc::{string::String, vec::Vec};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Timer};
@@ -26,11 +26,11 @@ use crate::board::esp32c6::usb_connection::UsbConnectionMonitor;
 static INCOMING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
 static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
 
-/// Server messages for transport serialization (capacity 1 = backpressure)
+/// Server messages for transport serialization (capacity 1 = backpressure).
 ///
-/// When StreamingMessageRouterTransport is used, server loop sends ServerMessage here.
-/// Large project-read responses are streamed field-by-field; small messages use the
-/// simpler full-message serializer.
+/// Large project-read responses use [`OUTGOING_SERVER_JSON_CHUNK`] instead.
+/// This channel is only for small responses such as heartbeat, load/unload, and
+/// filesystem acknowledgements.
 #[cfg(feature = "server")]
 static OUTGOING_SERVER_MSG: Channel<CriticalSectionRawMutex, lpc_wire::WireServerMessage, 1> =
     Channel::new();
@@ -272,19 +272,19 @@ async fn drain_outgoing_server_msg<W: Write>(tx: &mut W, connected: bool) {
 
 #[cfg(feature = "server")]
 async fn timed_write_server_msg<W: Write>(tx: &mut W, msg: lpc_wire::WireServerMessage) -> bool {
-    let id = msg.id;
-    match msg.msg {
-        lpc_wire::server::ServerMsgBody::ProjectRequest { response } => {
-            timed_write_project_read_server_msg(tx, id, response).await
-        }
-        msg => timed_write_full_server_msg(tx, lpc_wire::WireServerMessage { id, msg }).await,
-    }
+    let Some(msg) = into_small_server_msg(msg) else {
+        log::error!(
+            "project-read response reached small serial message path; use streaming JSON chunks"
+        );
+        return false;
+    };
+    timed_write_full_server_msg(tx, msg).await
 }
 
 #[cfg(feature = "server")]
 async fn timed_write_full_server_msg<W: Write>(
     tx: &mut W,
-    msg: lpc_wire::WireServerMessage,
+    msg: lpc_wire::ServerMessage<lpc_wire::NoDomain>,
 ) -> bool {
     let mut buf = [0u8; 4 * 1024];
     let mut writer = StackJsonWriter::new(&mut buf);
@@ -301,177 +301,42 @@ async fn timed_write_full_server_msg<W: Write>(
 }
 
 #[cfg(feature = "server")]
-async fn timed_write_project_read_server_msg<W: Write>(
-    tx: &mut W,
-    id: u64,
-    response: lpc_wire::ProjectReadResponse,
-) -> bool {
-    let header = format!(
-        "M!{{\"id\":{},\"msg\":{{\"projectRequest\":{{\"response\":{{\"revision\":{},\"results\":[",
-        id,
-        response.revision.as_i64(),
-    );
-    if !timed_write(tx, header.as_bytes()).await {
-        return false;
-    }
+fn into_small_server_msg(
+    msg: lpc_wire::WireServerMessage,
+) -> Option<lpc_wire::ServerMessage<lpc_wire::NoDomain>> {
+    use lpc_wire::ServerMsgBody;
 
-    for (index, result) in response.results.iter().enumerate() {
-        if index > 0 && !timed_write(tx, b",").await {
-            return false;
+    let id = msg.id;
+    let msg = match msg.msg {
+        ServerMsgBody::Filesystem(response) => ServerMsgBody::Filesystem(response),
+        ServerMsgBody::LoadProject { handle } => ServerMsgBody::LoadProject { handle },
+        ServerMsgBody::UnloadProject => ServerMsgBody::UnloadProject,
+        ServerMsgBody::ProjectRequest { .. } => return None,
+        ServerMsgBody::ListAvailableProjects { projects } => {
+            ServerMsgBody::ListAvailableProjects { projects }
         }
-        if !timed_write_project_read_result(tx, result).await {
-            return false;
+        ServerMsgBody::ListLoadedProjects { projects } => {
+            ServerMsgBody::ListLoadedProjects { projects }
         }
-    }
+        ServerMsgBody::StopAllProjects => ServerMsgBody::StopAllProjects,
+        ServerMsgBody::Log { level, message } => ServerMsgBody::Log { level, message },
+        ServerMsgBody::Heartbeat {
+            fps,
+            frame_count,
+            loaded_projects,
+            uptime_ms,
+            memory,
+        } => ServerMsgBody::Heartbeat {
+            fps,
+            frame_count,
+            loaded_projects,
+            uptime_ms,
+            memory,
+        },
+        ServerMsgBody::Error { error } => ServerMsgBody::Error { error },
+    };
 
-    if !timed_write(tx, b"],\"probes\":[").await {
-        return false;
-    }
-    for (index, probe) in response.probes.iter().enumerate() {
-        if index > 0 && !timed_write(tx, b",").await {
-            return false;
-        }
-        if !timed_write_serde_json(tx, probe).await {
-            return false;
-        }
-    }
-
-    timed_write(tx, b"]}}}}\n").await
-}
-
-#[cfg(feature = "server")]
-async fn timed_write_project_read_result<W: Write>(
-    tx: &mut W,
-    result: &lpc_wire::ProjectReadResult,
-) -> bool {
-    match result {
-        lpc_wire::ProjectReadResult::Resources(resources) => {
-            timed_write_resource_read_result(tx, resources).await
-        }
-        _ => timed_write_serde_json(tx, result).await,
-    }
-}
-
-#[cfg(feature = "server")]
-async fn timed_write_resource_read_result<W: Write>(
-    tx: &mut W,
-    resources: &lpc_wire::ResourceReadResult,
-) -> bool {
-    if !timed_write(tx, b"{\"resources\":{\"level\":").await {
-        return false;
-    }
-    if !timed_write_serde_json(tx, &resources.level).await {
-        return false;
-    }
-    if !timed_write(tx, b",\"summaries\":[").await {
-        return false;
-    }
-    for (index, summary) in resources.summaries.iter().enumerate() {
-        if index > 0 && !timed_write(tx, b",").await {
-            return false;
-        }
-        if !timed_write_serde_json(tx, summary).await {
-            return false;
-        }
-    }
-    if !timed_write(tx, b"],\"runtime_buffer_payloads\":[").await {
-        return false;
-    }
-    for (index, payload) in resources.runtime_buffer_payloads.iter().enumerate() {
-        if index > 0 && !timed_write(tx, b",").await {
-            return false;
-        }
-        if !timed_write_runtime_buffer_payload(tx, payload).await {
-            return false;
-        }
-    }
-    timed_write(tx, b"]}}").await
-}
-
-#[cfg(feature = "server")]
-async fn timed_write_runtime_buffer_payload<W: Write>(
-    tx: &mut W,
-    payload: &lpc_wire::WireRuntimeBufferPayload,
-) -> bool {
-    if !timed_write(tx, b"{\"ref\":").await {
-        return false;
-    }
-    if !timed_write_serde_json(tx, &payload.resource_ref).await {
-        return false;
-    }
-    let revision = format!(",\"revision\":{},\"metadata\":", payload.revision.as_i64());
-    if !timed_write(tx, revision.as_bytes()).await {
-        return false;
-    }
-    if !timed_write_serde_json(tx, &payload.metadata).await {
-        return false;
-    }
-    if !timed_write(tx, b",\"bytes\":").await {
-        return false;
-    }
-    if !timed_write_base64_json_string(tx, &payload.bytes).await {
-        return false;
-    }
-    timed_write(tx, b"}").await
-}
-
-#[cfg(feature = "server")]
-async fn timed_write_serde_json<W, T>(tx: &mut W, value: &T) -> bool
-where
-    W: Write,
-    T: serde::Serialize,
-{
-    let mut buf = [0u8; 32 * 1024];
-    let mut writer = StackJsonWriter::new(&mut buf);
-    if ser_write_json::ser::to_writer(&mut writer, value).is_err() {
-        return false;
-    }
-    timed_write_all(tx, writer.bytes()).await
-}
-
-#[cfg(feature = "server")]
-async fn timed_write_base64_json_string<W: Write>(tx: &mut W, bytes: &[u8]) -> bool {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    const OUT_CAP: usize = 252;
-
-    if !timed_write(tx, b"\"").await {
-        return false;
-    }
-
-    let mut out = [0u8; OUT_CAP];
-    let mut out_len = 0usize;
-    for chunk in bytes.chunks(3) {
-        if out_len + 4 > out.len() {
-            if !timed_write(tx, &out[..out_len]).await {
-                return false;
-            }
-            out_len = 0;
-        }
-
-        let b0 = chunk[0];
-        let b1 = *chunk.get(1).unwrap_or(&0);
-        let b2 = *chunk.get(2).unwrap_or(&0);
-
-        out[out_len] = TABLE[(b0 >> 2) as usize];
-        out[out_len + 1] = TABLE[(((b0 & 0b0000_0011) << 4) | (b1 >> 4)) as usize];
-        out[out_len + 2] = if chunk.len() > 1 {
-            TABLE[(((b1 & 0b0000_1111) << 2) | (b2 >> 6)) as usize]
-        } else {
-            b'='
-        };
-        out[out_len + 3] = if chunk.len() > 2 {
-            TABLE[(b2 & 0b0011_1111) as usize]
-        } else {
-            b'='
-        };
-        out_len += 4;
-    }
-
-    if out_len > 0 && !timed_write(tx, &out[..out_len]).await {
-        return false;
-    }
-
-    timed_write(tx, b"\"").await
+    Some(lpc_wire::ServerMessage { id, msg })
 }
 
 /// Process read buffer and extract complete lines

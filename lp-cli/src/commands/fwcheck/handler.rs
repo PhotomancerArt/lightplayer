@@ -33,6 +33,10 @@ pub fn handle_fwcheck(cli: FwcheckCli) -> Result<()> {
             }
             Ok(())
         }
+        FwcheckCommand::Port(args) => {
+            println!("{}", port::resolve_esp32_port(args.port.as_deref())?);
+            Ok(())
+        }
         FwcheckCommand::Run(args) => run_check(args),
     }
 }

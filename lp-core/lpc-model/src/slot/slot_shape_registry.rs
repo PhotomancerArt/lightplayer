@@ -5,7 +5,7 @@
 //! additions, removals, and replacements before applying slot data patches.
 
 use crate::{
-    Revision, SlotFactory, SlotFactoryError, SlotMutAccess, SlotShape, SlotShapeId,
+    Revision, SlotData, SlotFactory, SlotFactoryError, SlotMutAccess, SlotShape, SlotShapeId,
     current_revision,
 };
 use alloc::boxed::Box;
@@ -460,6 +460,36 @@ impl SlotShapeRegistry {
         }
     }
 
+    pub fn snapshot_page(
+        &self,
+        after: Option<SlotShapeId>,
+        limit: usize,
+    ) -> (SlotShapeRegistrySnapshot, Option<SlotShapeId>) {
+        let mut shapes = BTreeMap::new();
+        let mut last_included = None;
+        let mut next = None;
+        let limit = limit.max(1);
+        let iter = self
+            .shapes
+            .iter()
+            .filter(|(id, _)| after.is_none_or(|after| **id > after));
+        for (id, entry) in iter {
+            if shapes.len() >= limit {
+                next = last_included;
+                break;
+            }
+            shapes.insert(*id, entry.clone());
+            last_included = Some(*id);
+        }
+        (
+            SlotShapeRegistrySnapshot {
+                ids_revision: self.ids_revision,
+                shapes,
+            },
+            next,
+        )
+    }
+
     pub fn apply_snapshot(&mut self, snapshot: SlotShapeRegistrySnapshot) {
         self.ids_revision = snapshot.ids_revision;
         self.shapes = snapshot.shapes;
@@ -468,6 +498,16 @@ impl SlotShapeRegistry {
             .keys()
             .map(|id| (*id, SlotFactory::unsupported()))
             .collect();
+    }
+
+    pub fn apply_partial_snapshot(&mut self, snapshot: SlotShapeRegistrySnapshot) {
+        self.ids_revision = snapshot.ids_revision;
+        for (id, entry) in snapshot.shapes {
+            self.shapes.insert(id, entry);
+            self.factories
+                .entry(id)
+                .or_insert_with(SlotFactory::unsupported);
+        }
     }
 
     pub fn create_default(
@@ -490,6 +530,18 @@ impl SlotShapeRegistry {
         json: &str,
     ) -> Result<Box<dyn SlotMutAccess>, crate::slot_codec::SyntaxError> {
         self.read_slot_from(id, crate::slot_codec::JsonSyntaxSource::new(json)?)
+    }
+
+    pub fn read_slot_json_data(
+        &self,
+        id: SlotShapeId,
+        json: &str,
+    ) -> Result<SlotData, crate::slot_codec::SyntaxError> {
+        let mut reader = crate::slot_codec::SlotReader::new(
+            crate::slot_codec::JsonSyntaxSource::new(json)?,
+            self,
+        );
+        crate::slot_codec::read_dynamic_slot_data(self, id, reader.value())
     }
 
     pub fn read_slot_toml(
@@ -593,6 +645,7 @@ mod tests {
     use crate::{LpType, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotVariantShape};
     use alloc::boxed::Box;
     use alloc::vec;
+    use alloc::vec::Vec;
 
     #[test]
     fn ensure_shape_inserts_new_shape() {
@@ -668,6 +721,35 @@ mod tests {
             panic!("expected unsupported factory");
         };
         assert_eq!(error, SlotFactoryError::UnsupportedFactory(id));
+    }
+
+    #[test]
+    fn snapshot_page_cursor_collects_all_entries_with_limit_one() {
+        let mut registry = SlotShapeRegistry::default();
+        let ids = [
+            SlotShapeId::new(10),
+            SlotShapeId::new(20),
+            SlotShapeId::new(30),
+            SlotShapeId::new(40),
+        ];
+        for id in ids {
+            registry
+                .register_dynamic_shape(id, SlotShape::value(LpType::Bool))
+                .unwrap();
+        }
+
+        let mut cursor = None;
+        let mut collected = Vec::new();
+        loop {
+            let (snapshot, next) = registry.snapshot_page(cursor, 1);
+            collected.extend(snapshot.shapes.keys().copied());
+            if next.is_none() {
+                break;
+            }
+            cursor = next;
+        }
+
+        assert_eq!(collected, ids);
     }
 
     #[test]

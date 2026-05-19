@@ -31,13 +31,19 @@ pub enum WireResourceKindSummary {
     RuntimeBuffer(WireRuntimeBufferKind),
 }
 
-/// Texture-ish pixel layout for summaries and payloads.
+/// Texture-ish pixel layout for summaries, payloads, and diagnostic previews.
+///
+/// `Rgba16` is LightPlayer's native linear visual format. `Srgb8` is a
+/// display-oriented preview format used when exact linear sample fidelity would
+/// waste bandwidth.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum WireTextureFormat {
+    /// Native linear RGBA, little-endian `u16` channels.
     Rgba16,
-    Rgb8,
+    /// Display-encoded RGB8 preview data.
+    Srgb8,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

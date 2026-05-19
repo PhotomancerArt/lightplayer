@@ -111,6 +111,32 @@ name = "aux"
     }
 
     #[test]
+    fn toml_source_emits_kind_before_payload_fields() {
+        let mut table = toml::Table::new();
+        table.insert("bindings".to_string(), Value::Table(toml::Table::new()));
+        table.insert(
+            "kind".to_string(),
+            Value::String("ComputeShader".to_string()),
+        );
+        table.insert(
+            "glsl_path".to_string(),
+            Value::String("compute.glsl".to_string()),
+        );
+        let value = Value::Table(table);
+        let registry = SlotShapeRegistry::default();
+        let mut reader = SlotReader::new(TomlSyntaxSource::new(&value).unwrap(), &registry);
+        let mut object = reader.object().unwrap();
+        let mut seen = Vec::new();
+
+        while let Some(mut prop) = object.next_prop().unwrap() {
+            seen.push(prop.name().to_string());
+            prop.value().skip_value().unwrap();
+        }
+
+        assert_eq!(seen[0], "kind");
+    }
+
+    #[test]
     fn strings_are_chunked_and_reassembled() {
         let long = "x".repeat(syntax::STRING_CHUNK_SIZE + 7);
         let registry = SlotShapeRegistry::default();
@@ -304,7 +330,7 @@ name = "aux"
         }
     }
 }
-pub use dynamic_slot_reader::{apply_reader_to_slot, read_dynamic_slot};
+pub use dynamic_slot_reader::{apply_reader_to_slot, read_dynamic_slot, read_dynamic_slot_data};
 pub use dynamic_slot_writer::{
     SlotDataWriteError, write_dynamic_slot_json, write_dynamic_slot_toml,
     write_slot_data_json_value, write_slot_data_toml_value,

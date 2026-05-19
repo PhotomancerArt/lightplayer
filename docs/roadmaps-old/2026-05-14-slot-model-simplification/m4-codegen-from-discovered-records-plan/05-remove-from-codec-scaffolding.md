@@ -80,4 +80,3 @@ concepts, if any.
 cargo test -p lpc-slot-codegen
 cargo test -p lpc-slot-mockup
 ```
-

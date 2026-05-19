@@ -4,6 +4,10 @@
 //! - Engine cache types (`ResolverCache` / [`QueryKey`] / [`Production`])
 //! - Error types for resolution failures (`ResolveError`, [`SessionResolveError`])
 //! - Engine session ([`EngineSession`], [`ResolveHost`]) and [`TickResolver`] bridge ([`SessionHostResolver`])
+//!
+//! `Production` is aggregate-capable slot data. Leaf shader-compatible values
+//! remain available through convenience helpers, but the resolver can also
+//! carry maps, records, options, and receiver-owned merge results.
 
 pub mod production;
 pub mod query_key;

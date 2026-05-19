@@ -1,6 +1,4 @@
-use lpc_model::{
-    BindingDefs, OptionSlot, PositiveF32, PositiveF32Slot, Ratio, RatioSlot, Slotted, ValueSlot,
-};
+use lpc_model::{BindingDefs, OptionSlot, Ratio, RatioSlot, Slotted, ValueSlot};
 
 #[derive(Default, Slotted)]
 pub struct OutputDef {
@@ -11,7 +9,6 @@ pub struct OutputDef {
 
 #[derive(Clone, Debug, PartialEq, Slotted)]
 pub struct OutputDriverOptionsConfig {
-    pub lum_power: PositiveF32Slot,
     pub white_point: ValueSlot<[f32; 3]>,
     pub brightness: RatioSlot,
     pub interpolation_enabled: ValueSlot<bool>,
@@ -42,7 +39,6 @@ impl OutputDef {
 impl Default for OutputDriverOptionsConfig {
     fn default() -> Self {
         Self {
-            lum_power: default_lum_power_slot(),
             white_point: default_white_point_slot(),
             brightness: default_brightness_slot(),
             interpolation_enabled: default_true_slot(),
@@ -53,10 +49,6 @@ impl Default for OutputDriverOptionsConfig {
 }
 
 impl OutputDriverOptionsConfig {
-    pub fn lum_power(&self) -> f32 {
-        self.lum_power.value().0
-    }
-
     pub fn white_point(&self) -> [f32; 3] {
         *self.white_point.value()
     }
@@ -76,10 +68,6 @@ impl OutputDriverOptionsConfig {
     pub fn lut_enabled(&self) -> bool {
         *self.lut_enabled.value()
     }
-}
-
-fn default_lum_power_slot() -> PositiveF32Slot {
-    PositiveF32Slot::new(PositiveF32(2.0))
 }
 
 fn default_white_point_slot() -> ValueSlot<[f32; 3]> {

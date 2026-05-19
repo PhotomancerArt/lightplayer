@@ -18,6 +18,9 @@ const PROJECT_TOML: &[u8] = br#"kind = "Project"
 [nodes.output]
 artifact = "./output.toml"
 
+[nodes.clock]
+artifact = "./clock.toml"
+
 [nodes.texture]
 artifact = "./texture.toml"
 
@@ -26,6 +29,10 @@ artifact = "./shader.toml"
 
 [nodes.fixture]
 artifact = "./fixture.toml"
+"#;
+
+/// TOML for the default clock node.
+const CLOCK_NODE_TOML: &[u8] = br#"kind = "Clock"
 "#;
 
 /// TOML for a 64×64 texture node.
@@ -45,6 +52,13 @@ render_order = 0
 add_sub = "saturating"
 mul = "saturating"
 div = "saturating"
+
+[consumed.time]
+kind = "value"
+value = "f32"
+default = 0.0
+label = "Time"
+description = "Project clock time in seconds"
 "#;
 
 /// TOML for GPIO strip output.
@@ -83,6 +97,9 @@ sample_diameter = 2.0
 pub fn create_default_project_template(fs: &dyn LpFs) -> Result<(), ServerError> {
     fs.write_file("/project.toml".as_path(), PROJECT_TOML)
         .map_err(|e| ServerError::Filesystem(format!("Failed to write project.toml: {e}")))?;
+
+    fs.write_file("/clock.toml".as_path(), CLOCK_NODE_TOML)
+        .map_err(|e| ServerError::Filesystem(format!("Failed to write clock.toml: {e}")))?;
 
     fs.write_file("/texture.toml".as_path(), TEXTURE_NODE_TOML)
         .map_err(|e| ServerError::Filesystem(format!("Failed to write texture.toml: {e}")))?;

@@ -39,4 +39,3 @@ It should create a small real API that later codegen can target.
   event and reader semantics before optimizing away the tree.
 - No proc-macro/codegen changes in M1.
 - No production loader replacement in M1.
-

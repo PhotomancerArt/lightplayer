@@ -1,7 +1,7 @@
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
-use crate::nodes::shader::{GlslOpts, ShaderParamDef};
+use crate::nodes::shader::{GlslOpts, ShaderParamDef, ShaderSlotDef};
 use crate::{BindingDefs, LpPathBuf, MapSlot, RenderOrderSlot, Slotted, SourcePathSlot};
 
 /// Authored shader node definition.
@@ -19,6 +19,13 @@ pub struct ShaderDef {
     pub glsl_opts: GlslOpts,
     #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
     pub param_defs: MapSlot<String, ShaderParamDef>,
+    /// Shader-consumed slots exposed to the resolver and GLSL uniform block.
+    #[serde(
+        default,
+        rename = "consumed",
+        skip_serializing_if = "MapSlot::is_empty"
+    )]
+    pub consumed_slots: MapSlot<String, ShaderSlotDef>,
 }
 
 impl ShaderDef {
@@ -55,6 +62,7 @@ mod tests {
             bindings: BindingDefs::default(),
             glsl_opts: GlslOpts::default(),
             param_defs: MapSlot::default(),
+            consumed_slots: MapSlot::default(),
         };
         assert_eq!(def.kind(), NodeKind::Shader);
     }
