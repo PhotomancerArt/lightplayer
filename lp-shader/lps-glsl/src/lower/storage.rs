@@ -66,30 +66,6 @@ pub(super) fn store_local(
     }
 }
 
-pub(super) fn store_local_lanes(
-    ctx: &mut LowerCtx<'_>,
-    span: Span,
-    local: usize,
-    lanes: &[usize],
-    value: &LowerValue,
-) -> Result<(), Diagnostic> {
-    if lanes.len() != value.lanes.len() {
-        return Err(Diagnostic::error(span, "lane assignment width mismatch"));
-    }
-    let storage =
-        ctx.locals.get(local).cloned().ok_or_else(|| {
-            Diagnostic::error(span, format!("local index {local} is out of range"))
-        })?;
-    match storage {
-        LocalStorage::Flat(dst) => copy_selected_lanes(ctx, span, &dst, lanes, value),
-        LocalStorage::Slot { ty, addr, .. } => {
-            let dst = load_value_from_addr(ctx, span, addr, &ty)?;
-            copy_selected_lanes(ctx, span, &dst, lanes, value)?;
-            store_value_to_addr(ctx, span, addr, &dst)
-        }
-    }
-}
-
 pub(super) fn local_is_slot(ctx: &LowerCtx<'_>, local: usize) -> bool {
     matches!(ctx.locals.get(local), Some(LocalStorage::Slot { .. }))
 }
@@ -242,29 +218,10 @@ fn copy_lanes_to_value(
     if dst.lanes.len() != src.lanes.len() {
         return Err(Diagnostic::error(span, "copy lane count mismatch"));
     }
-    copy_selected_lanes(
-        ctx,
-        span,
-        dst,
-        &(0..dst.lanes.len()).collect::<Vec<_>>(),
-        src,
-    )
-}
-
-fn copy_selected_lanes(
-    ctx: &mut LowerCtx<'_>,
-    span: Span,
-    dst: &LowerValue,
-    lanes: &[usize],
-    value: &LowerValue,
-) -> Result<(), Diagnostic> {
-    for (dst_lane, src_lane) in lanes.iter().zip(value.lanes.iter()) {
-        let Some(dst) = dst.lanes.get(*dst_lane) else {
-            return Err(Diagnostic::error(span, "assignment lane out of range"));
-        };
+    for (dst, src) in dst.lanes.iter().zip(src.lanes.iter()) {
         ctx.fb.push(LpirOp::Copy {
             dst: *dst,
-            src: *src_lane,
+            src: *src,
         });
     }
     Ok(())

@@ -139,7 +139,7 @@ impl<'src> HirBuildJob<'src> {
                     functions_sigs,
                     imports,
                     globals,
-                    body_map: bodies.into_iter().collect(),
+                    body_map: function_body_map(bodies),
                     functions: Vec::new(),
                     function_meta: Vec::new(),
                     next_function: 0,
@@ -290,7 +290,7 @@ pub fn build_hir(
         &mut imports,
         &options.texture_specs,
     )?;
-    let body_map = bodies.into_iter().collect::<BTreeMap<_, _>>();
+    let body_map = function_body_map(bodies);
     let mut functions = Vec::new();
     let mut function_meta = Vec::new();
 
@@ -759,6 +759,16 @@ struct GlobalInit {
     ty: LpsType,
     byte_offset: u32,
     init_span: Span,
+}
+
+fn function_body_map(
+    bodies: Vec<(String, ParsedFunctionBody)>,
+) -> BTreeMap<String, ParsedFunctionBody> {
+    let mut body_map = BTreeMap::new();
+    for (name, body) in bodies {
+        body_map.insert(name, body);
+    }
+    body_map
 }
 
 fn build_global_vars(

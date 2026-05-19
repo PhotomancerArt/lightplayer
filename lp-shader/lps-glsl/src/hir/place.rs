@@ -26,7 +26,6 @@ pub(crate) struct HirPlace {
     pub(crate) root: PlaceRoot,
     pub(crate) segments: Vec<PlaceSegment>,
     pub(crate) ty: LpsType,
-    pub(crate) lanes: Option<Vec<usize>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -77,7 +76,6 @@ pub(crate) enum PlaceSegment {
 
 impl HirPlace {
     pub(super) fn local(local: usize, ty: LpsType) -> Self {
-        let lanes = (0..scalar_lane_count(&ty)).collect();
         Self {
             root: PlaceRoot::Local {
                 local,
@@ -85,12 +83,10 @@ impl HirPlace {
             },
             segments: Vec::new(),
             ty,
-            lanes: Some(lanes),
         }
     }
 
     pub(super) fn param(param: usize, ty: LpsType) -> Self {
-        let lanes = (0..scalar_lane_count(&ty)).collect();
         Self {
             root: PlaceRoot::Param {
                 param,
@@ -98,12 +94,10 @@ impl HirPlace {
             },
             segments: Vec::new(),
             ty,
-            lanes: Some(lanes),
         }
     }
 
     pub(super) fn uniform(name: String, byte_offset: u32, ty: LpsType) -> Self {
-        let lanes = (0..scalar_lane_count(&ty)).collect();
         Self {
             root: PlaceRoot::Uniform {
                 name,
@@ -112,12 +106,10 @@ impl HirPlace {
             },
             segments: Vec::new(),
             ty,
-            lanes: Some(lanes),
         }
     }
 
     pub(super) fn global(name: String, byte_offset: u32, ty: LpsType) -> Self {
-        let lanes = (0..scalar_lane_count(&ty)).collect();
         Self {
             root: PlaceRoot::Global {
                 name,
@@ -126,7 +118,6 @@ impl HirPlace {
             },
             segments: Vec::new(),
             ty,
-            lanes: Some(lanes),
         }
     }
 
@@ -141,35 +132,15 @@ impl HirPlace {
                 lane_count: field.lane_count,
                 byte_offset: field.byte_offset,
             });
-            if let Some(lanes) = &self.lanes {
-                let Some(projected) =
-                    lanes.get(field.lane_offset..field.lane_offset + field.lane_count)
-                else {
-                    return Err(Diagnostic::error(span, "field lane out of range"));
-                };
-                self.lanes = Some(projected.to_vec());
-            }
             return Ok(());
         }
         let (relative_lanes, ty) = swizzle_lanes(span, &self.ty, name)?;
         self.ty = ty.clone();
         self.segments.push(PlaceSegment::Swizzle {
             fields: String::from(name),
-            lanes: relative_lanes.clone(),
+            lanes: relative_lanes,
             ty,
         });
-        if let Some(lanes) = &self.lanes {
-            let projected = relative_lanes
-                .iter()
-                .map(|lane| {
-                    lanes
-                        .get(*lane)
-                        .copied()
-                        .ok_or_else(|| Diagnostic::error(span, "swizzle lane out of range"))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            self.lanes = Some(projected);
-        }
         Ok(())
     }
 
@@ -178,7 +149,6 @@ impl HirPlace {
         let shape = TypeShape::new(&self.ty);
         if let Some(column_ty) = shape.matrix_column().cloned() {
             self.ty = column_ty.clone();
-            self.lanes = None;
             self.segments.push(PlaceSegment::Index {
                 index: Box::new(index),
                 ty: column_ty,
@@ -188,7 +158,6 @@ impl HirPlace {
         if let Some((element, _, _)) = shape.array_element() {
             let ty = element.clone();
             self.ty = ty.clone();
-            self.lanes = None;
             self.segments.push(PlaceSegment::Index {
                 index: Box::new(index),
                 ty,
@@ -197,7 +166,6 @@ impl HirPlace {
         }
         if let Some(base) = scalar_base_type(&self.ty) {
             self.ty = base.clone();
-            self.lanes = None;
             self.segments.push(PlaceSegment::Index {
                 index: Box::new(index),
                 ty: base,
@@ -208,10 +176,6 @@ impl HirPlace {
             span,
             "index base must be vector, matrix, or array",
         ))
-    }
-
-    pub(crate) fn single_root_lane_path(&self) -> Option<Vec<usize>> {
-        self.lanes.clone()
     }
 }
 
@@ -298,7 +262,6 @@ mod tests {
         let mut place = local_place(0, ty);
         place.push_field(Span::new(0, 1), "b").unwrap();
         assert_eq!(place.ty, LpsType::Vec2);
-        assert_eq!(place.lanes, Some(vec![1, 2]));
         let [
             PlaceSegment::Field {
                 byte_offset,
@@ -318,7 +281,10 @@ mod tests {
         let mut place = local_place(0, LpsType::Vec4);
         place.push_field(Span::new(0, 2), "zy").unwrap();
         assert_eq!(place.ty, LpsType::Vec2);
-        assert_eq!(place.lanes, Some(vec![2, 1]));
+        let [PlaceSegment::Swizzle { lanes, .. }] = place.segments.as_slice() else {
+            panic!("expected one swizzle segment");
+        };
+        assert_eq!(lanes, &[2, 1]);
     }
 
     #[test]
@@ -330,7 +296,6 @@ mod tests {
         let mut place = local_place(0, ty);
         place.push_index(int_expr(1)).unwrap();
         assert_eq!(place.ty, LpsType::Vec3);
-        assert_eq!(place.lanes, None);
         assert_eq!(place.segments.len(), 1);
     }
 

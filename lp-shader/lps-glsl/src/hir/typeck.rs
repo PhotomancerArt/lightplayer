@@ -568,10 +568,7 @@ impl<'a> TypeCtx<'a> {
         name: &str,
         args: &[ParsedExpr],
     ) -> Result<HirExpr, Diagnostic> {
-        let args = args
-            .iter()
-            .map(|arg| self.type_expr(arg))
-            .collect::<Result<Vec<_>, _>>()?;
+        let args = self.type_expr_args(args)?;
         let target_ty = self.type_constructor_target(name, span, &args)?;
         let args = coerce_constructor_args(span, &target_ty, args)?;
         Ok(HirExpr {
@@ -666,10 +663,7 @@ impl<'a> TypeCtx<'a> {
             return self.type_texture_call(span, args);
         }
 
-        let args = args
-            .iter()
-            .map(|arg| self.type_expr(arg))
-            .collect::<Result<Vec<_>, _>>()?;
+        let args = self.type_expr_args(args)?;
 
         if let Some(kind) = builtin_kind(name) {
             let (args, ty) = type_builtin_args(span, kind, args)?;
@@ -725,6 +719,14 @@ impl<'a> TypeCtx<'a> {
             span,
             format!("unsupported call `{name}`"),
         ))
+    }
+
+    fn type_expr_args(&mut self, args: &[ParsedExpr]) -> Result<Vec<HirExpr>, Diagnostic> {
+        let mut typed = Vec::with_capacity(args.len());
+        for arg in args {
+            typed.push(self.type_expr(arg)?);
+        }
+        Ok(typed)
     }
 
     fn type_texel_fetch_call(
