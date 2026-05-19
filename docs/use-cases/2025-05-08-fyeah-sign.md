@@ -20,6 +20,9 @@ lights.
 
 Ideally wireless communication.
 
+Two esp32c6 boards each with one strip running lightplayer. one with the button, one on the sign
+communicating wirelessly.
+
 ## Feature needs
 
 - GPIO input

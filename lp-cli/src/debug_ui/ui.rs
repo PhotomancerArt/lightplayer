@@ -400,12 +400,12 @@ mod tests {
 
         let mut first_page_registry = SlotShapeRegistry::default();
         first_page_registry
-            .register_root(first_id, SlotShape::value(LpType::Bool))
+            .register_shape(first_id, SlotShape::value(LpType::Bool))
             .unwrap();
 
         let mut final_page_registry = SlotShapeRegistry::default();
         final_page_registry
-            .register_root(second_id, SlotShape::value(LpType::U32))
+            .register_shape(second_id, SlotShape::value(LpType::U32))
             .unwrap();
 
         let mut view = ProjectView::new();
