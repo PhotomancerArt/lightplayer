@@ -57,6 +57,7 @@ pub struct EmitContext<'a> {
     label_offsets: Vec<Option<usize>>,
     branch_fixups: Vec<BranchFixup>,
     jal_fixups: Vec<JalFixup>,
+    collect_debug_lines: bool,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -83,19 +84,29 @@ impl<'a> EmitContext<'a> {
         symbols: &'a ModuleSymbols,
         vreg_pool: &'a [VReg],
         expected_insts: usize,
+        collect_debug_lines: bool,
     ) -> Self {
-        // Estimate ~4 bytes per instruction + prologue/epilogue (~64 bytes)
-        let code_cap = expected_insts.saturating_mul(4).saturating_add(64);
+        // VInsts are not 1:1 with machine instructions: spill edits, wide
+        // immediates, calls, branches, and prologue/epilogue can all emit
+        // multiple RV32 words. Reserving a realistic buffer up front avoids
+        // late code Vec growth when the embedded heap is already fragmented by
+        // lowering and register allocation.
+        let code_cap = expected_insts.saturating_mul(12).saturating_add(256);
         Self {
             code: Vec::with_capacity(code_cap),
             relocs: Vec::new(),
-            debug_lines: Vec::with_capacity(expected_insts),
+            debug_lines: if collect_debug_lines {
+                Vec::with_capacity(expected_insts)
+            } else {
+                Vec::new()
+            },
             frame,
             symbols,
             vreg_pool,
             label_offsets: Vec::new(),
             branch_fixups: Vec::new(),
             jal_fixups: Vec::new(),
+            collect_debug_lines,
         }
     }
 
@@ -103,7 +114,9 @@ impl<'a> EmitContext<'a> {
     fn push_u32(&mut self, w: u32, src_op: Option<u32>) {
         let offset = self.code.len() as u32;
         self.code.extend_from_slice(&w.to_le_bytes());
-        if let Some(op) = src_op {
+        if self.collect_debug_lines
+            && let Some(op) = src_op
+        {
             self.debug_lines.push((offset, Some(op)));
         }
     }
@@ -901,13 +914,14 @@ pub(crate) fn emit_function(
     frame: FrameLayout,
     symbols: &ModuleSymbols,
     is_sret: bool,
+    collect_debug_lines: bool,
 ) -> Result<Rv32EmitOutput, AllocError> {
     log::debug!(
         "[native-fa] emit_function: starting with {} vinsts, {} edits",
         vinsts.len(),
         output.edits.len()
     );
-    let mut ctx = EmitContext::new(frame, symbols, vreg_pool, vinsts.len());
+    let mut ctx = EmitContext::new(frame, symbols, vreg_pool, vinsts.len(), collect_debug_lines);
 
     log::debug!("[native-fa] emit_function: emitting prologue...");
     ctx.emit_prologue(is_sret)?;

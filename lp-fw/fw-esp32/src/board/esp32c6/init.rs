@@ -21,9 +21,10 @@ pub fn init_board() -> (
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
     let peripherals = esp_hal::init(config);
 
-    // Allocate heap. Reserve headroom for main task stack (Cranelift JIT lowering is stack-heavy).
-    // It's a balance between stack and heap, and this was chosen based on empirical testing.
-    esp_alloc::heap_allocator!(size: 320_000);
+    // Allocate heap while leaving enough RAM for the main task stack. Project loading
+    // and on-device shader compilation use deep filesystem/compiler call stacks; too
+    // large a heap reservation shrinks that stack and corrupts execution before OOM.
+    esp_alloc::heap_allocator!(size: 312_000);
 
     // Extract peripherals we need before moving others
     let rmt = peripherals.RMT;

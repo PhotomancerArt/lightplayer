@@ -40,14 +40,20 @@ pub fn cargo_build_fw_esp32(root: &Path, features: &str, verbose: bool) -> Resul
 }
 
 pub fn flash_esp32(root: &Path, port: &str, verbose: bool) -> Result<()> {
-    flash_esp32_with_after(root, port, "hard-reset", verbose)
+    flash_esp32_with_after(root, port, "hard-reset", &[], verbose)
 }
 
-pub fn flash_esp32_no_reset(root: &Path, port: &str, verbose: bool) -> Result<()> {
-    flash_esp32_with_after(root, port, "no-reset", verbose)
+pub fn flash_esp32_no_reset_erase_lpfs(root: &Path, port: &str, verbose: bool) -> Result<()> {
+    flash_esp32_with_after(root, port, "no-reset", &["--erase-parts", "lpfs"], verbose)
 }
 
-fn flash_esp32_with_after(root: &Path, port: &str, after: &str, verbose: bool) -> Result<()> {
+fn flash_esp32_with_after(
+    root: &Path,
+    port: &str,
+    after: &str,
+    extra_args: &[&str],
+    verbose: bool,
+) -> Result<()> {
     let elf = root.join("target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32");
     let mut command = Command::new("espflash");
     command
@@ -62,6 +68,7 @@ fn flash_esp32_with_after(root: &Path, port: &str, after: &str, verbose: bool) -
             "--after",
             after,
         ])
+        .args(extra_args)
         .arg(elf);
     run_status(command, "espflash flash", verbose)
 }

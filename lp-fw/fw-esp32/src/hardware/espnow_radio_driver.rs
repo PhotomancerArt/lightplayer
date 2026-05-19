@@ -9,18 +9,18 @@ use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
 
-use esp_hal::efuse::{interface_mac_address, InterfaceMacAddress};
+use esp_hal::efuse::{InterfaceMacAddress, interface_mac_address};
 use esp_hal::peripherals::WIFI;
 use esp_radio::esp_now::{
-    EspNowError, EspNowManager, EspNowReceiver, EspNowSender, ReceivedData, BROADCAST_ADDRESS,
+    BROADCAST_ADDRESS, EspNowError, EspNowManager, EspNowReceiver, EspNowSender, ReceivedData,
 };
 use esp_radio::wifi::{ControllerConfig, WifiController};
 use lpc_shared::hardware::{
     HardwareAddress, HardwareCapability, HardwareClaim, HardwareDriver, HardwareEndpoint,
     HardwareEndpointError, HardwareEndpointId, HardwareEndpointKind, HardwareEndpointSpec,
-    HardwareEndpointStatus, HardwareLease, HardwareRegistry, RadioChannelId, RadioConfig,
-    RadioDevice, RadioDeviceId, RadioDrainReport, RadioDriver, RadioEventId, RadioMessage,
-    RadioMessageKind, RADIO_MAX_PACKET_LEN,
+    HardwareEndpointStatus, HardwareLease, HardwareRegistry, RADIO_MAX_PACKET_LEN, RadioChannelId,
+    RadioConfig, RadioDevice, RadioDeviceId, RadioDrainReport, RadioDriver, RadioEventId,
+    RadioMessage, RadioMessageKind,
 };
 
 const DRIVER_ID: &str = "esp32-espnow-radio0";

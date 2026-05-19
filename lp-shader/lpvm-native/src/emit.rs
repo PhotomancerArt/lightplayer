@@ -56,7 +56,7 @@ pub fn emit_lowered_ex(
         "[native-fa] emit_lowered_ex: allocation complete, {} spill slots",
         alloc_result.spill_slots
     );
-    emit_lowered_with_alloc(lowered, func_abi, alloc_result, caller_sret_bytes)
+    emit_lowered_with_alloc(lowered, func_abi, alloc_result, caller_sret_bytes, true)
 }
 
 /// Emit using an existing [`AllocResult`] (avoids running the allocator twice).
@@ -65,6 +65,7 @@ pub fn emit_lowered_with_alloc(
     func_abi: &crate::abi::FuncAbi,
     alloc_result: AllocResult,
     caller_sret_bytes: u32,
+    collect_debug_lines: bool,
 ) -> Result<EmittedCode, NativeError> {
     let mut used_callee_saved = alloc_result.used_callee_saved;
     if let Some(p) = func_abi.sret_preservation_reg() {
@@ -91,6 +92,7 @@ pub fn emit_lowered_with_alloc(
         frame,
         &lowered.symbols,
         func_abi.is_sret(),
+        collect_debug_lines,
     )
     .map_err(NativeError::RegAlloc)?;
 

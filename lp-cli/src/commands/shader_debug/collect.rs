@@ -79,6 +79,7 @@ pub fn collect_fa_data(
             &func_abi,
             alloc_result,
             module_abi.max_callee_sret_bytes(),
+            true,
         )
         .map_err(|e| anyhow::anyhow!("emit: {e:?}"))?;
 

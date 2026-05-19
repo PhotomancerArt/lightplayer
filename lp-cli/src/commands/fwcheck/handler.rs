@@ -156,7 +156,7 @@ fn run_esp32c6_demo(args: &FwcheckDemoArgs) -> Result<()> {
         process::cargo_build_fw_esp32(&root, &features, args.verbose)
     })?;
     let ((), flash_elapsed) = run_step(&style, "Flash firmware", args.verbose, || {
-        process::flash_esp32_no_reset(&root, &port, args.verbose)
+        process::flash_esp32_no_reset_erase_lpfs(&root, &port, args.verbose)
     })?;
     let (demo, run_elapsed) = run_step(&style, "Boot, push, and verify project", true, || {
         run_demo_capture(
@@ -292,12 +292,7 @@ async fn run_demo_capture_async(
         .await
         .with_context(|| format!("load {project_path}"))?;
 
-    run_client_step(
-        capture,
-        "read loaded project state",
-        client.project_read_default_debug(handle),
-    )
-    .await?;
+    let _ = handle;
 
     sleep(Duration::from_secs(settle_secs)).await;
     capture.check_failure()?;

@@ -193,6 +193,7 @@ pub(crate) fn compile_function_emit_stage(
         &state.func_abi,
         alloc_result,
         session.abi.max_callee_sret_bytes(),
+        session.options.debug_info,
     )?;
     log::debug!(
         "[native-fa] compile_function: emitted {} bytes for {}",
