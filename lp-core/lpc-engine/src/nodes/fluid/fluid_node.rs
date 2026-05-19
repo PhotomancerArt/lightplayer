@@ -21,7 +21,7 @@ use crate::products::visual::{
     RenderTextureRequest, TextureRenderProduct, VisualSampleBufferRequest, VisualSampleTarget,
 };
 
-use super::{MsaFluidSolver, sample_rgba16_nearest_q16, stamp_emitter};
+use super::{MsaFluidSolver, sample_rgba16_bilinear_q16, stamp_emitter};
 
 /// Runtime node for `kind = "Fluid"` artifacts.
 pub struct FluidNode {
@@ -208,7 +208,7 @@ impl RenderNode for FluidNode {
         {
             let x = pixel_q16_to_normalized_q16(point[0], request.output_width);
             let y = pixel_q16_to_normalized_q16(point[1], request.output_height);
-            sample.copy_from_slice(&sample_rgba16_nearest_q16(solver, x, y));
+            sample.copy_from_slice(&sample_rgba16_bilinear_q16(solver, x, y));
         }
         Ok(())
     }
@@ -264,7 +264,7 @@ fn write_texture_pixels(solver: &MsaFluidSolver, width: u32, height: u32, pixels
         let y_q16 = (((y as u64) << 16) / height as u64) as i32;
         for x in 0..width {
             let x_q16 = (((x as u64) << 16) / width as u64) as i32;
-            let rgba = sample_rgba16_nearest_q16(solver, x_q16, y_q16);
+            let rgba = sample_rgba16_bilinear_q16(solver, x_q16, y_q16);
             let offset = ((y * width + x) as usize) * 8;
             pixels[offset..offset + 2].copy_from_slice(&rgba[0].to_le_bytes());
             pixels[offset + 2..offset + 4].copy_from_slice(&rgba[1].to_le_bytes());
