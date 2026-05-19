@@ -36,6 +36,11 @@ pub struct FluidDef {
     #[serde(default = "default_viscosity")]
     pub viscosity: PositiveF32Slot,
 
+    /// Simulation time in seconds.
+    #[slot(consumed)]
+    #[serde(default = "default_time")]
+    pub time: ValueSlot<f32>,
+
     /// Stable-key emitter map consumed by the fluid simulation.
     #[slot(
         consumed,
@@ -55,6 +60,7 @@ impl Default for FluidDef {
             step_hz: default_step_hz(),
             fade_speed: default_fade_speed(),
             viscosity: default_viscosity(),
+            time: default_time(),
             emitters: MapSlot::default(),
         }
     }
@@ -89,6 +95,10 @@ fn default_fade_speed() -> RatioSlot {
 
 fn default_viscosity() -> PositiveF32Slot {
     PositiveF32Slot::new(PositiveF32(0.00003))
+}
+
+fn default_time() -> ValueSlot<f32> {
+    ValueSlot::new(0.0)
 }
 
 #[cfg(test)]
@@ -142,5 +152,19 @@ intensity = 1.0
 
         assert_eq!(emitters.semantics.direction, SlotDirection::Consumed);
         assert_eq!(emitters.semantics.merge, SlotMerge::ByKey);
+    }
+
+    #[test]
+    fn fluid_time_shape_is_consumed_latest() {
+        let SlotShape::Record { fields, .. } = FluidDef::slot_shape() else {
+            panic!("record shape");
+        };
+        let time = fields
+            .iter()
+            .find(|field| field.name.as_str() == "time")
+            .expect("time field");
+
+        assert_eq!(time.semantics.direction, SlotDirection::Consumed);
+        assert_eq!(time.semantics.merge, SlotMerge::Latest);
     }
 }

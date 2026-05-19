@@ -10,8 +10,9 @@ use lpc_model::generate_compute_shader_header;
 use lpc_model::nodes::project::project_def::ProjectDef;
 use lpc_model::{ArtifactLocator, ArtifactReadRoot, NodeDefRef, NodeInvocation, NodeKind};
 use lpc_model::{
-    BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, Kind, LpValue, NodeDef, NodeId,
-    NodeName, Revision, ShaderDef, ShaderSlotKind, ShaderSource, SlotPath, SlotShapeRegistry,
+    BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, FluidDef, Kind, LpValue, NodeDef,
+    NodeId, NodeName, Revision, ShaderDef, ShaderSlotKind, ShaderSource, SlotPath,
+    SlotShapeRegistry,
 };
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lpfs::lp_path::{LpPath, LpPathBuf};
@@ -377,6 +378,15 @@ impl ProjectLoader {
                         path: node.artifact_path.as_str().to_string(),
                         reason: format!("attach fluid runtime: {e}"),
                     })?;
+                register_optional_source_binding(
+                    runtime,
+                    loaded_nodes,
+                    node,
+                    "time",
+                    &config.bindings,
+                    frame,
+                )?;
+                register_fluid_default_time_binding(runtime, loaded_nodes, node, config, frame)?;
                 register_optional_source_binding(
                     runtime,
                     loaded_nodes,
@@ -808,6 +818,50 @@ fn register_visual_default_time_binding(
             reason: format!("register visual shader default time binding: {e}"),
         })?;
     Ok(())
+}
+
+fn register_fluid_default_time_binding(
+    engine: &mut Engine,
+    loaded_nodes: &[LoadedNode],
+    current: &LoadedNode,
+    config: &FluidDef,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
+    if binding_source(&config.bindings, "time").is_some() || !has_default_time_bus(loaded_nodes) {
+        return Ok(());
+    }
+    engine
+        .add_binding(
+            BindingDraft {
+                source: BindingSource::BusChannel(ChannelName(String::from("time.seconds"))),
+                target: BindingTarget::ConsumedSlot {
+                    node: current.id,
+                    slot: SlotPath::parse("time").expect("fluid time slot path"),
+                },
+                priority: BindingPriority::default_fallback(),
+                kind: Kind::Instant,
+                owner: current.id,
+            },
+            frame,
+        )
+        .map_err(|e| ProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: format!("register fluid default time binding: {e}"),
+        })?;
+    Ok(())
+}
+
+fn has_default_time_bus(loaded_nodes: &[LoadedNode]) -> bool {
+    loaded_nodes.iter().any(|node| match &node.config {
+        NodeDef::Clock(config) => {
+            binding_target(&config.bindings, "seconds").is_none_or(is_time_seconds_bus_target)
+        }
+        _ => false,
+    })
+}
+
+fn is_time_seconds_bus_target(target: &AuthoredBindingRef) -> bool {
+    matches!(target, AuthoredBindingRef::Bus(bus) if bus.slot().to_string() == "time.seconds")
 }
 
 fn binding_source_endpoint(
