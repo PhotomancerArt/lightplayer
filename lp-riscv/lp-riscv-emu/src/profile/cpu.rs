@@ -10,6 +10,8 @@ use crate::emu::cycle_model::InstClass;
 
 use super::{Collector, FinishCtx, GateAction, PcSymbolizer};
 
+const RAM_START: u32 = 0x8000_0000;
+
 /// Synthetic program counter for the logical root (before any call).
 pub const ROOT_PC: u32 = 0;
 
@@ -43,11 +45,23 @@ pub struct CallEdge {
     pub inclusive_cycles: u64,
 }
 
+#[derive(Clone, Debug)]
+pub struct StackSample {
+    pub used_bytes: u32,
+    pub pc: u32,
+    pub function_pc: u32,
+    pub sp: u32,
+    pub stack_top: u32,
+    pub callstack: Vec<u32>,
+}
+
 /// Aggregates per-function and per-edge cycle stats while a profile gate is active.
 pub struct CpuCollector {
     shadow_stack: Vec<Frame>,
     pub func_stats: HashMap<u32, FuncStats>,
     pub call_edges: HashMap<(u32, u32), CallEdge>,
+    pub max_stack: Option<StackSample>,
+    pub max_stack_by_func: HashMap<u32, StackSample>,
     active: bool,
     pub total_cycles_attributed: u64,
     pub cycle_model_label: &'static str,
@@ -60,6 +74,8 @@ impl CpuCollector {
             shadow_stack: Vec::with_capacity(64),
             func_stats: HashMap::new(),
             call_edges: HashMap::new(),
+            max_stack: None,
+            max_stack_by_func: HashMap::new(),
             active: false,
             total_cycles_attributed: 0,
             cycle_model_label,
@@ -99,6 +115,43 @@ impl CpuCollector {
             .or_default();
         edge.count += 1;
         edge.inclusive_cycles += inclusive;
+    }
+
+    fn record_stack_sample(&mut self, pc: u32, sp: u32, stack_top: u32) {
+        if !self.active || sp < RAM_START || sp > stack_top {
+            return;
+        }
+
+        let used_bytes = stack_top.saturating_sub(sp);
+        let function_pc = self.current_pc();
+        let sample = StackSample {
+            used_bytes,
+            pc,
+            function_pc,
+            sp,
+            stack_top,
+            callstack: self
+                .shadow_stack
+                .iter()
+                .map(|frame| frame.callee_pc)
+                .collect(),
+        };
+
+        if self
+            .max_stack
+            .as_ref()
+            .is_none_or(|max| sample.used_bytes > max.used_bytes)
+        {
+            self.max_stack = Some(sample.clone());
+        }
+
+        let func_sample = self
+            .max_stack_by_func
+            .entry(function_pc)
+            .or_insert_with(|| sample.clone());
+        if sample.used_bytes > func_sample.used_bytes {
+            *func_sample = sample;
+        }
     }
 
     /// Per-instruction accounting (callgrind-style):
@@ -188,6 +241,19 @@ impl Collector for CpuCollector {
         self.on_instruction_inner(pc, target_pc, class, cycles);
     }
 
+    fn on_instruction_with_state(
+        &mut self,
+        pc: u32,
+        target_pc: u32,
+        class: InstClass,
+        cycles: u32,
+        sp: u32,
+        stack_top: u32,
+    ) {
+        self.record_stack_sample(pc, sp, stack_top);
+        self.on_instruction_inner(pc, target_pc, class, cycles);
+    }
+
     fn finish(&mut self, _ctx: &FinishCtx<'_>) -> std::io::Result<()> {
         Ok(())
     }
@@ -224,6 +290,17 @@ fn format_pc_for_report(pc: u32, sym: Option<&dyn PcSymbolizer>) -> String {
     }
 }
 
+fn format_stack_sample(sample: &StackSample, sym: Option<&dyn PcSymbolizer>) -> String {
+    format!(
+        "{} bytes at {} in {} (sp=0x{:08x}, stack_top=0x{:08x})",
+        sample.used_bytes,
+        format_pc_for_report(sample.pc, sym),
+        format_pc_for_report(sample.function_pc, sym),
+        sample.sp,
+        sample.stack_top,
+    )
+}
+
 /// Sum per-PC stats into buckets keyed by containing symbol start (`entry_lo_for_pc`).
 ///
 /// Summed `inclusive_cycles` can over-count real functions that were split into multiple
@@ -255,6 +332,52 @@ impl CpuCollector {
             self.total_cycles_attributed
         )?;
         writeln!(w, "profiled_instructions={}", self.profiled_instructions)?;
+        writeln!(w)?;
+
+        writeln!(w, "Stack high water:")?;
+        match &self.max_stack {
+            Some(sample) => {
+                writeln!(w, "  {}", format_stack_sample(sample, sym))?;
+                if !sample.callstack.is_empty() {
+                    writeln!(w, "  Active call stack (leaf first):")?;
+                    for pc in sample.callstack.iter().rev().take(16) {
+                        writeln!(w, "    {}", format_pc_for_report(*pc, sym))?;
+                    }
+                }
+            }
+            None => writeln!(w, "  no stack samples")?,
+        }
+        writeln!(w)?;
+
+        writeln!(w, "Top 20 by max observed stack:")?;
+        let mut stack_rows: Vec<StackSample> = self.max_stack_by_func.values().cloned().collect();
+        stack_rows.sort_by_key(|sample| std::cmp::Reverse(sample.used_bytes));
+        if let Some(s) = sym {
+            let mut collapsed: HashMap<u32, StackSample> = HashMap::new();
+            for sample in stack_rows {
+                let canon = s.entry_lo_for_pc(sample.function_pc);
+                let entry = collapsed.entry(canon).or_insert_with(|| {
+                    let mut sample = sample.clone();
+                    sample.function_pc = canon;
+                    sample
+                });
+                if sample.used_bytes > entry.used_bytes {
+                    let mut sample = sample;
+                    sample.function_pc = canon;
+                    *entry = sample;
+                }
+            }
+            stack_rows = collapsed.into_values().collect();
+            stack_rows.sort_by_key(|sample| std::cmp::Reverse(sample.used_bytes));
+        }
+        for sample in stack_rows.into_iter().take(20) {
+            writeln!(
+                w,
+                "  {:>8}  {}",
+                sample.used_bytes,
+                format_pc_for_report(sample.function_pc, sym),
+            )?;
+        }
         writeln!(w)?;
 
         let aggregated: Option<HashMap<u32, (u64, u64)>> =
@@ -511,6 +634,27 @@ mod tests {
 
         assert_eq!(cpu.call_edges[&(0x1000, 0x2000)].count, 3);
         assert_eq!(cpu.func_stats[&0x2000].calls_in, 3);
+    }
+
+    #[test]
+    fn records_stack_high_water_by_active_function() {
+        let mut cpu = CpuCollector::new("esp32c6");
+        cpu.on_gate_action(GateAction::Enable);
+
+        cpu.on_instruction_with_state(
+            0x1000,
+            0x2000,
+            InstClass::JalCall,
+            2,
+            0x8000_1ff0,
+            0x8000_2000,
+        );
+        cpu.on_instruction_with_state(0x2000, 0x2004, InstClass::Alu, 1, 0x8000_1f00, 0x8000_2000);
+
+        let max = cpu.max_stack.as_ref().expect("max stack sample");
+        assert_eq!(max.used_bytes, 0x100);
+        assert_eq!(max.function_pc, 0x2000);
+        assert_eq!(cpu.max_stack_by_func[&0x2000].used_bytes, 0x100);
     }
 
     #[test]

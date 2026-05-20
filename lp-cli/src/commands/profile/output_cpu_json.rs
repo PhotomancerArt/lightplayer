@@ -1,5 +1,6 @@
 //! Canonical `cpu-profile.json` for m3 diff (schema-versioned).
 
+use std::collections::HashMap;
 use std::path::Path;
 
 use lp_riscv_emu::profile::{CpuCollector, PcSymbolizer};
@@ -53,10 +54,61 @@ pub fn build(cpu: &CpuCollector, symbols: &dyn PcSymbolizer) -> Value {
         ka.cmp(&kb)
     });
 
+    let max_stack = cpu.max_stack.as_ref().map(|sample| {
+        json!({
+            "used_bytes": sample.used_bytes,
+            "pc": pc_key(sample.pc),
+            "name": symbols.symbolize(sample.pc),
+            "function": pc_key(sample.function_pc),
+            "function_name": symbols.symbolize(sample.function_pc),
+            "sp": pc_key(sample.sp),
+            "stack_top": pc_key(sample.stack_top),
+            "callstack": sample.callstack.iter().map(|pc| {
+                json!({
+                    "pc": pc_key(*pc),
+                    "name": symbols.symbolize(*pc),
+                })
+            }).collect::<Vec<_>>(),
+        })
+    });
+
+    let mut stack_samples_by_symbol = HashMap::new();
+    for sample in cpu.max_stack_by_func.values() {
+        let function = symbols.entry_lo_for_pc(sample.function_pc);
+        let entry = stack_samples_by_symbol
+            .entry(function)
+            .or_insert_with(|| sample.clone());
+        if sample.used_bytes > entry.used_bytes {
+            *entry = sample.clone();
+        }
+    }
+
+    let mut stack_by_func = Vec::new();
+    for (function, sample) in stack_samples_by_symbol {
+        stack_by_func.push(json!({
+            "used_bytes": sample.used_bytes,
+            "pc": pc_key(sample.pc),
+            "name": symbols.symbolize(sample.pc),
+            "function": pc_key(function),
+            "function_name": symbols.symbolize(function),
+            "sp": pc_key(sample.sp),
+        }));
+    }
+    stack_by_func.sort_by(|a, b| {
+        b["used_bytes"]
+            .as_u64()
+            .unwrap_or(0)
+            .cmp(&a["used_bytes"].as_u64().unwrap_or(0))
+    });
+
     json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "cycle_model": cpu.cycle_model_label,
         "total_cycles_attributed": cpu.total_cycles_attributed,
+        "stack": {
+            "max": max_stack,
+            "by_function": stack_by_func,
+        },
         "func_stats": Value::Object(func_stats),
         "call_edges": edges,
     })
@@ -71,13 +123,13 @@ mod tests {
     use crate::commands::profile::symbolize::Symbolizer;
 
     #[test]
-    fn schema_version_is_1() {
+    fn schema_version_is_2() {
         let mut cpu = CpuCollector::new("esp32c6");
         cpu.on_gate_action(GateAction::Enable);
         cpu.on_instruction(0x1000, 0x1004, InstClass::Alu, 1);
         let sym = Symbolizer::new(&[], &[]);
         let v = build(&cpu, &sym);
-        assert_eq!(v["schema_version"], 1);
+        assert_eq!(v["schema_version"], 2);
     }
 
     #[test]
@@ -139,5 +191,16 @@ mod tests {
         let s = serde_json::to_string(&v).unwrap();
         let v2: Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v, v2);
+    }
+
+    #[test]
+    fn includes_stack_high_water() {
+        let mut cpu = CpuCollector::new("esp32c6");
+        cpu.on_gate_action(GateAction::Enable);
+        cpu.on_instruction_with_state(0x1000, 0x1004, InstClass::Alu, 1, 0x8000_1f00, 0x8000_2000);
+        let sym = Symbolizer::new(&[], &[]);
+        let v = build(&cpu, &sym);
+        assert_eq!(v["stack"]["max"]["used_bytes"], 0x100);
+        assert_eq!(v["stack"]["by_function"][0]["used_bytes"], 0x100);
     }
 }

@@ -224,6 +224,19 @@ pub trait Collector: Send + Any {
     /// (`new_pc` from the decoder, or `pc + inst_size` when `new_pc` is `None`).
     fn on_instruction(&mut self, _pc: u32, _target_pc: u32, _class: InstClass, _cycles: u32) {}
 
+    /// Like [`Self::on_instruction`], with guest machine state sampled after execution.
+    fn on_instruction_with_state(
+        &mut self,
+        pc: u32,
+        target_pc: u32,
+        class: InstClass,
+        cycles: u32,
+        _sp: u32,
+        _stack_top: u32,
+    ) {
+        self.on_instruction(pc, target_pc, class, cycles);
+    }
+
     fn on_perf_event(&mut self, _evt: &PerfEvent) {}
 
     fn finish(&mut self, ctx: &FinishCtx<'_>) -> std::io::Result<()>;
@@ -402,9 +415,17 @@ impl ProfileSession {
         }
     }
 
-    pub fn dispatch_instruction(&mut self, pc: u32, target_pc: u32, class: InstClass, cycles: u32) {
+    pub fn dispatch_instruction(
+        &mut self,
+        pc: u32,
+        target_pc: u32,
+        class: InstClass,
+        cycles: u32,
+        sp: u32,
+        stack_top: u32,
+    ) {
         for c in &mut self.collectors {
-            c.on_instruction(pc, target_pc, class, cycles);
+            c.on_instruction_with_state(pc, target_pc, class, cycles, sp, stack_top);
         }
     }
 
@@ -791,7 +812,7 @@ mod tests {
         let mut session =
             ProfileSession::new(tmp.path().to_path_buf(), &test_metadata(), collectors).unwrap();
 
-        session.dispatch_instruction(want.0, want.1, want.2, want.3);
+        session.dispatch_instruction(want.0, want.1, want.2, want.3, 0x8000_1000, 0x8000_2000);
 
         let v = shared.lock().expect("test mutex");
         assert_eq!(&v[..], &[want, want]);

@@ -237,7 +237,14 @@ impl Riscv32Emulator {
                 let target_pc = exec_result
                     .new_pc
                     .unwrap_or(pc.wrapping_add(exec_result.inst_size as u32));
-                profile.dispatch_instruction(pc, target_pc, class, cost as u32);
+                profile.dispatch_instruction(
+                    pc,
+                    target_pc,
+                    class,
+                    cost as u32,
+                    self.regs[lp_riscv_inst::Gpr::Sp.num() as usize] as u32,
+                    self.memory.ram_end(),
+                );
             }
         }
         #[cfg(not(feature = "std"))]
