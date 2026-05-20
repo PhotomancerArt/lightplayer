@@ -138,16 +138,12 @@ fn render_node_header(
                 if response.clicked() {
                     *selection = Some(InspectorSelection::Node(id));
                 }
+                render_kind_chip(ui, kind, accent);
                 ui.monospace(format!("#{}", id.0));
                 render_status_chip(ui, status_label(&entry.status), accent);
                 render_status_chip(ui, state_label(&entry.state), state_color(&entry.state));
             });
             ui.horizontal_wrapped(|ui| {
-                ui.label(
-                    egui::RichText::new(kind)
-                        .color(ui.visuals().weak_text_color())
-                        .small(),
-                );
                 ui.label(
                     egui::RichText::new(entry.path.to_string())
                         .color(ui.visuals().weak_text_color())
@@ -168,113 +164,207 @@ fn render_node_type_badge(ui: &mut egui::Ui, kind: &'static str, accent: egui::C
     let painter = ui.painter();
     painter.circle_filled(rect.center(), 17.0, accent.gamma_multiply(0.18));
     painter.circle_stroke(rect.center(), 17.0, egui::Stroke::new(1.5_f32, accent));
-    let icon_color = accent;
+    let stroke = egui::Stroke::new(1.8_f32, accent);
     match kind {
-        "Clock" => {
-            painter.circle_stroke(rect.center(), 8.0, egui::Stroke::new(1.6_f32, icon_color));
-            painter.line_segment(
-                [rect.center(), rect.center() + egui::vec2(0.0, -5.0)],
-                egui::Stroke::new(1.6_f32, icon_color),
-            );
-            painter.line_segment(
-                [rect.center(), rect.center() + egui::vec2(5.0, 3.0)],
-                egui::Stroke::new(1.6_f32, icon_color),
-            );
-        }
-        "Fluid" => {
-            for offset in [-5.0, 0.0, 5.0] {
-                let y = rect.center().y + offset;
-                painter.line_segment(
-                    [
-                        egui::pos2(rect.left() + 9.0, y),
-                        egui::pos2(rect.left() + 29.0, y - 3.0),
-                    ],
-                    egui::Stroke::new(1.5_f32, icon_color),
-                );
-            }
-        }
-        "Output" => {
-            painter.line_segment(
-                [
-                    egui::pos2(rect.left() + 10.0, rect.center().y),
-                    egui::pos2(rect.left() + 26.0, rect.center().y),
-                ],
-                egui::Stroke::new(2.0_f32, icon_color),
-            );
-            painter.line_segment(
-                [
-                    egui::pos2(rect.left() + 21.0, rect.center().y - 6.0),
-                    egui::pos2(rect.left() + 27.0, rect.center().y),
-                ],
-                egui::Stroke::new(2.0_f32, icon_color),
-            );
-            painter.line_segment(
-                [
-                    egui::pos2(rect.left() + 21.0, rect.center().y + 6.0),
-                    egui::pos2(rect.left() + 27.0, rect.center().y),
-                ],
-                egui::Stroke::new(2.0_f32, icon_color),
-            );
-        }
-        "Fixture" => {
-            for offset in [-7.0, 0.0, 7.0] {
-                painter.circle_filled(
-                    egui::pos2(rect.center().x + offset, rect.center().y),
-                    3.0,
-                    icon_color,
-                );
-            }
-        }
-        "Texture" => {
-            let tile = 7.0;
-            for x in 0..2 {
-                for y in 0..2 {
-                    let fill = if (x + y) % 2 == 0 {
-                        icon_color
-                    } else {
-                        icon_color.gamma_multiply(0.32)
-                    };
-                    painter.rect_filled(
-                        egui::Rect::from_min_size(
-                            egui::pos2(
-                                rect.center().x - tile + x as f32 * tile,
-                                rect.center().y - tile + y as f32 * tile,
-                            ),
-                            egui::vec2(tile, tile),
-                        ),
-                        1.0,
-                        fill,
-                    );
-                }
-            }
-        }
-        "Shader" | "ComputeShader" => {
-            let points = [
-                egui::pos2(rect.center().x, rect.top() + 10.0),
-                egui::pos2(rect.right() - 10.0, rect.center().y),
-                egui::pos2(rect.center().x, rect.bottom() - 10.0),
-                egui::pos2(rect.left() + 10.0, rect.center().y),
-            ];
-            painter.add(egui::Shape::convex_polygon(
-                points.to_vec(),
-                icon_color.gamma_multiply(0.25),
-                egui::Stroke::new(1.6_f32, icon_color),
-            ));
-        }
-        _ => {
-            painter.rect_stroke(
-                rect.shrink(10.0),
-                3.0,
-                egui::Stroke::new(1.6_f32, icon_color),
+        "Project" => render_project_icon(painter, rect, accent),
+        "Clock" => render_clock_icon(painter, rect, stroke),
+        "Texture" => render_texture_icon(painter, rect, accent),
+        "Shader" => render_shader_icon(painter, rect, stroke),
+        "ComputeShader" => render_compute_icon(painter, rect, stroke),
+        "Fluid" => render_fluid_icon(painter, rect, stroke),
+        "Output" => render_output_icon(painter, rect, stroke),
+        "Fixture" => render_fixture_icon(painter, rect, accent),
+        _ => render_generic_node_icon(painter, rect, accent),
+    }
+}
+
+fn render_project_icon(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
+    let stroke = egui::Stroke::new(1.5_f32, color);
+    let top = egui::Rect::from_center_size(
+        egui::pos2(rect.center().x, rect.top() + 13.0),
+        egui::vec2(9.0, 7.0),
+    );
+    let left = egui::Rect::from_center_size(
+        egui::pos2(rect.center().x - 7.0, rect.bottom() - 12.0),
+        egui::vec2(8.0, 6.0),
+    );
+    let right = egui::Rect::from_center_size(
+        egui::pos2(rect.center().x + 7.0, rect.bottom() - 12.0),
+        egui::vec2(8.0, 6.0),
+    );
+    painter.line_segment([top.center_bottom(), left.center_top()], stroke);
+    painter.line_segment([top.center_bottom(), right.center_top()], stroke);
+    for node in [top, left, right] {
+        painter.rect_filled(node, 2.0, color.gamma_multiply(0.2));
+        painter.rect_stroke(node, 2.0, stroke);
+    }
+}
+
+fn render_clock_icon(painter: &egui::Painter, rect: egui::Rect, stroke: egui::Stroke) {
+    painter.circle_stroke(rect.center(), 8.0, stroke);
+    painter.line_segment(
+        [rect.center(), rect.center() + egui::vec2(0.0, -5.0)],
+        stroke,
+    );
+    painter.line_segment(
+        [rect.center(), rect.center() + egui::vec2(5.0, 3.0)],
+        stroke,
+    );
+}
+
+fn render_texture_icon(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
+    let origin = rect.center() - egui::vec2(9.0, 9.0);
+    let tile = 6.0;
+    for x in 0..3 {
+        for y in 0..3 {
+            let fill = if (x + y) % 2 == 0 {
+                color
+            } else {
+                color.gamma_multiply(0.25)
+            };
+            painter.rect_filled(
+                egui::Rect::from_min_size(
+                    origin + egui::vec2(x as f32 * tile, y as f32 * tile),
+                    egui::vec2(tile - 1.0, tile - 1.0),
+                ),
+                1.0,
+                fill,
             );
         }
     }
+}
 
-    let bubble = egui::Rect::from_center_size(
-        rect.right_bottom() - egui::vec2(7.0, 7.0),
-        egui::vec2(9.0, 9.0),
+fn render_shader_icon(painter: &egui::Painter, rect: egui::Rect, stroke: egui::Stroke) {
+    let c = rect.center();
+    painter.line_segment(
+        [
+            egui::pos2(c.x - 3.0, c.y - 8.0),
+            egui::pos2(c.x - 10.0, c.y),
+        ],
+        stroke,
     );
-    painter.circle_filled(bubble.center(), 4.5, accent);
+    painter.line_segment(
+        [
+            egui::pos2(c.x - 10.0, c.y),
+            egui::pos2(c.x - 3.0, c.y + 8.0),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            egui::pos2(c.x + 3.0, c.y - 8.0),
+            egui::pos2(c.x + 10.0, c.y),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            egui::pos2(c.x + 10.0, c.y),
+            egui::pos2(c.x + 3.0, c.y + 8.0),
+        ],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            egui::pos2(c.x + 2.0, c.y - 9.0),
+            egui::pos2(c.x - 2.0, c.y + 9.0),
+        ],
+        stroke,
+    );
+}
+
+fn render_compute_icon(painter: &egui::Painter, rect: egui::Rect, stroke: egui::Stroke) {
+    let chip = egui::Rect::from_center_size(rect.center(), egui::vec2(16.0, 14.0));
+    painter.rect_stroke(chip, 2.0, stroke);
+    for offset in [-5.0, 0.0, 5.0] {
+        painter.line_segment(
+            [
+                egui::pos2(chip.left() - 4.0, rect.center().y + offset),
+                egui::pos2(chip.left(), rect.center().y + offset),
+            ],
+            stroke,
+        );
+        painter.line_segment(
+            [
+                egui::pos2(chip.right(), rect.center().y + offset),
+                egui::pos2(chip.right() + 4.0, rect.center().y + offset),
+            ],
+            stroke,
+        );
+    }
+    painter.circle_filled(rect.center(), 2.5, stroke.color);
+}
+
+fn render_fluid_icon(painter: &egui::Painter, rect: egui::Rect, stroke: egui::Stroke) {
+    let c = rect.center();
+    for y in [-5.0, 1.0, 7.0] {
+        painter.add(egui::Shape::line(
+            vec![
+                egui::pos2(c.x - 10.0, c.y + y),
+                egui::pos2(c.x - 5.0, c.y + y - 3.0),
+                egui::pos2(c.x, c.y + y),
+                egui::pos2(c.x + 5.0, c.y + y + 3.0),
+                egui::pos2(c.x + 10.0, c.y + y),
+            ],
+            stroke,
+        ));
+    }
+}
+
+fn render_output_icon(painter: &egui::Painter, rect: egui::Rect, stroke: egui::Stroke) {
+    let c = rect.center();
+    painter.line_segment(
+        [egui::pos2(c.x - 10.0, c.y), egui::pos2(c.x + 5.0, c.y)],
+        stroke,
+    );
+    painter.line_segment(
+        [egui::pos2(c.x, c.y - 5.0), egui::pos2(c.x + 6.0, c.y)],
+        stroke,
+    );
+    painter.line_segment(
+        [egui::pos2(c.x, c.y + 5.0), egui::pos2(c.x + 6.0, c.y)],
+        stroke,
+    );
+    painter.line_segment(
+        [
+            egui::pos2(c.x + 10.0, c.y - 8.0),
+            egui::pos2(c.x + 10.0, c.y + 8.0),
+        ],
+        stroke,
+    );
+}
+
+fn render_fixture_icon(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
+    let c = rect.center();
+    let stroke = egui::Stroke::new(1.4_f32, color);
+    painter.line_segment(
+        [
+            egui::pos2(c.x - 10.0, c.y + 7.0),
+            egui::pos2(c.x + 10.0, c.y + 7.0),
+        ],
+        stroke,
+    );
+    for (x, radius) in [(-8.0, 3.0), (0.0, 4.0), (8.0, 3.0)] {
+        let center = egui::pos2(c.x + x, c.y - 1.0);
+        painter.circle_filled(center, radius, color.gamma_multiply(0.35));
+        painter.circle_stroke(center, radius, stroke);
+    }
+}
+
+fn render_generic_node_icon(painter: &egui::Painter, rect: egui::Rect, color: egui::Color32) {
+    painter.circle_filled(rect.center(), 5.5, color);
+    painter.circle_stroke(rect.center(), 10.0, egui::Stroke::new(1.6_f32, color));
+}
+
+fn render_kind_chip(ui: &mut egui::Ui, label: &str, color: egui::Color32) {
+    egui::Frame::default()
+        .fill(color.gamma_multiply(0.28))
+        .stroke(egui::Stroke::new(1.0_f32, color.gamma_multiply(0.75)))
+        .inner_margin(egui::Margin::symmetric(7.0, 2.0))
+        .rounding(4.0)
+        .show(ui, |ui| {
+            ui.label(egui::RichText::new(label).small().strong().color(color));
+        });
 }
 
 fn render_status_chip(ui: &mut egui::Ui, label: &str, color: egui::Color32) {
@@ -526,6 +616,20 @@ fn node_label(entry: &lpc_view::tree::TreeEntryView) -> String {
 }
 
 fn node_kind_label(view: &ProjectView, id: NodeId) -> &'static str {
+    let Some(entry) = view.tree.nodes.get(&id) else {
+        return "Node";
+    };
+    if entry.parent.is_none() {
+        return "Project";
+    }
+    if let Some(kind) = entry
+        .path
+        .0
+        .last()
+        .and_then(|segment| node_kind_from_path_tag(segment.ty.as_str()))
+    {
+        return kind;
+    }
     let Some((_, data)) = root_shape_and_data(view, id, "def") else {
         return "Node";
     };
@@ -542,6 +646,20 @@ fn node_kind_label(view: &ProjectView, id: NodeId) -> &'static str {
             _ => "Node",
         },
         _ => "Node",
+    }
+}
+
+fn node_kind_from_path_tag(tag: &str) -> Option<&'static str> {
+    match tag {
+        "project" | "show" => Some("Project"),
+        "clock" => Some("Clock"),
+        "texture" => Some("Texture"),
+        "shader" => Some("Shader"),
+        "compute" | "compute_shader" => Some("ComputeShader"),
+        "fluid" | "vis" => Some("Fluid"),
+        "output" => Some("Output"),
+        "fixture" => Some("Fixture"),
+        _ => None,
     }
 }
 
