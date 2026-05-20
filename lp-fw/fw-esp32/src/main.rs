@@ -458,6 +458,216 @@ fn esp32_memory_stats() -> Option<(u32, u32)> {
     ))
 }
 
+#[cfg(not(any(
+    feature = "test_rmt",
+    feature = "test_dither",
+    feature = "test_gpio",
+    feature = "test_gpio_calibrate",
+    feature = "test_button",
+    feature = "test_usb",
+    feature = "test_json",
+    feature = "test_msafluid",
+    feature = "test_fluid_demo",
+    feature = "test_jit_math_perf",
+    feature = "test_shader_compile_incremental",
+    feature = "test_espnow",
+)))]
+struct FirmwareApp {
+    server: LpServer,
+    transport: transport::StreamingMessageRouterTransport,
+    time_provider: Esp32TimeProvider,
+}
+
+#[cfg(not(any(
+    feature = "test_rmt",
+    feature = "test_dither",
+    feature = "test_gpio",
+    feature = "test_gpio_calibrate",
+    feature = "test_button",
+    feature = "test_usb",
+    feature = "test_json",
+    feature = "test_msafluid",
+    feature = "test_fluid_demo",
+    feature = "test_jit_math_perf",
+    feature = "test_shader_compile_incremental",
+    feature = "test_espnow",
+)))]
+#[inline(never)]
+fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
+    // TODO: esp_println writes directly to USB-Serial-JTAG hardware, bypassing
+    // io_task's connection monitor. May block if no USB host is connected during
+    // boot. Hasn't been observed yet but worth investigating if boot hangs occur.
+
+    // Initialize board (clock, heap, runtime) and get hardware peripherals
+    esp_println::println!("[INIT] Initializing board...");
+    let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, flash, _gpio4, gpio20, wifi) =
+        init_board();
+    esp_println::println!("[INIT] Board initialized, starting runtime...");
+    start_runtime(timg0, sw_int);
+    esp_println::println!("[INIT] Runtime started");
+
+    // Note: USB serial is handled by I/O task for transport
+    // Logging will go through the transport serial (non-M! messages)
+    // or can be disabled if USB host is not connected
+    esp_println::println!("[INIT] fw-esp32 starting...");
+
+    // Spawn I/O task (handles serial communication)
+    esp_println::println!("[INIT] Spawning I/O task...");
+    spawner.spawn(io_task(usb_device).unwrap());
+    esp_println::println!("[INIT] I/O task spawned");
+
+    // Initialize log crate to write to outgoing serial (host will see these)
+    crate::logger::init(serial::io_task::log_write_to_outgoing);
+
+    log::info!("[fw-esp32] Shader backend: native JIT (lpvm-native rt_jit)");
+
+    #[cfg(feature = "test_oom")]
+    {
+        // Test 1: simple panic (not OOM) — validates basic unwinding
+        esp_println::println!("[test_oom] Test 1: catching simple panic...");
+        let r1 = unwinding::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
+            panic!("test panic");
+        }));
+        match r1 {
+            Ok(_) => esp_println::println!("[test_oom] Test 1 FAIL: panic was not caught"),
+            Err(_) => esp_println::println!("[test_oom] Test 1 OK: simple panic caught"),
+        }
+
+        // Test 2: OOM inside catch_unwind
+        esp_println::println!("[test_oom] Test 2: catching OOM...");
+        let r2 = unwinding::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
+            let mut vecs: alloc::vec::Vec<alloc::vec::Vec<u8>> = alloc::vec::Vec::new();
+            loop {
+                vecs.push(alloc::vec![0u8; 64 * 1024]);
+            }
+        }));
+        match r2 {
+            Ok(_) => esp_println::println!("[test_oom] Test 2 FAIL: did not OOM"),
+            Err(_) => esp_println::println!("[test_oom] Test 2 OK: OOM caught, recovery works"),
+        }
+
+        esp_println::println!("[test_oom] Tests complete, continuing boot...");
+    }
+
+    // Create serial transport. Project-read responses stream through io_task;
+    // small messages use the simpler full-message serializer.
+    esp_println::println!("[INIT] Creating StreamingMessageRouterTransport...");
+    let transport = transport::StreamingMessageRouterTransport::from_io_channels();
+    esp_println::println!("[INIT] StreamingMessageRouterTransport created");
+
+    // Initialize RMT peripheral for output
+    // Use 80MHz clock rate (standard for ESP32-C6)
+    esp_println::println!("[INIT] Initializing RMT peripheral at 80MHz...");
+    let rmt = esp_hal::rmt::Rmt::new(rmt_peripheral, esp_hal::time::Rate::from_mhz(80))
+        .expect("Failed to initialize RMT");
+    esp_println::println!("[INIT] RMT peripheral initialized");
+
+    // Create filesystem before hardware providers so /hardware.toml can override board policy.
+    let base_fs: Box<dyn lpfs::LpFs> = {
+        #[cfg(not(feature = "memory_fs"))]
+        {
+            let flash_storage = esp_storage::FlashStorage::new(flash);
+            match lp_fs_flash::LpFsFlash::init(flash_storage) {
+                Ok(fs) => {
+                    esp_println::println!("[INIT] Flash filesystem mounted");
+                    Box::new(fs)
+                }
+                Err(e) => {
+                    esp_println::println!("[WARN] Flash FS failed: {e}, falling back to memory");
+                    Box::new(LpFsMemory::new())
+                }
+            }
+        }
+        #[cfg(feature = "memory_fs")]
+        {
+            let _ = flash;
+            esp_println::println!("[INIT] Creating in-memory filesystem...");
+            Box::new(LpFsMemory::new())
+        }
+    };
+    #[cfg(feature = "memory_fs")]
+    esp_println::println!("[INIT] In-memory filesystem created");
+
+    let hardware_manifest = load_hardware_manifest(base_fs.as_ref());
+    log::info!(
+        "[fw-esp32] Hardware manifest: {} ({})",
+        hardware_manifest.board_id(),
+        hardware_manifest.board_name()
+    );
+    let hardware_registry = Rc::new(HardwareRegistry::new(hardware_manifest));
+    let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
+    hardware_system.add_ws281x_driver(Box::new(Esp32RmtWs281xDriver::new(Rc::clone(
+        &hardware_registry,
+    ))));
+    hardware_system.add_button_driver(Box::new(Esp32Gpio20ButtonDriver::new(
+        Rc::clone(&hardware_registry),
+        gpio20,
+    )));
+    #[cfg(feature = "radio")]
+    {
+        let radio_driver = Esp32EspNowRadioDriver::new(Rc::clone(&hardware_registry), wifi)
+            .expect("Failed to initialize ESP-NOW radio");
+        log::info!(
+            "[fw-esp32] ESP-NOW radio ready: device_id={:?} channel={}",
+            radio_driver.device_id(),
+            radio_driver.default_channel()
+        );
+        hardware_system.add_radio_driver(Box::new(radio_driver));
+    }
+    #[cfg(not(feature = "radio"))]
+    let _ = wifi;
+    let hardware_system = Rc::new(hardware_system);
+
+    // Initialize output provider
+    esp_println::println!("[INIT] Creating output provider...");
+    let output_provider = Esp32OutputProvider::new(Rc::clone(&hardware_system));
+
+    // Initialize RMT channel with GPIO18 (hardcoded for now)
+    // Use 256 LEDs as a reasonable default (will work for demo project which has 241 LEDs)
+    const NUM_LEDS: usize = 256;
+    esp_println::println!(
+        "[INIT] Initializing RMT channel with GPIO18, {} LEDs...",
+        NUM_LEDS
+    );
+    Esp32OutputProvider::init_rmt(rmt, gpio18, NUM_LEDS).expect("Failed to initialize RMT channel");
+    esp_println::println!("[INIT] RMT channel initialized");
+
+    let output_provider: Rc<RefCell<dyn OutputProvider>> = Rc::new(RefCell::new(output_provider));
+    esp_println::println!("[INIT] Output provider created");
+
+    // Create server (with time provider for shader comp timing). RV32 uses lpvm-native rt_jit.
+    esp_println::println!("[INIT] Creating LpServer instance...");
+    let time_provider_rc = Rc::new(Esp32TimeProvider::new());
+    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
+    let button_service: Rc<dyn ButtonService> = hardware_system.clone();
+    let radio_service: Rc<dyn lpa_server::RadioService> = hardware_system.clone();
+    let mut server = LpServer::new_with_hardware_services(
+        output_provider,
+        base_fs,
+        "projects/".as_path(),
+        Some(esp32_memory_stats),
+        Some(time_provider_rc),
+        Some(button_service),
+        Some(radio_service),
+        graphics,
+    );
+    esp_println::println!("[INIT] LpServer created");
+
+    // Auto-load project at boot (from config or lexical-first)
+    boot::auto_load_project(&mut server);
+
+    // Create time provider
+    esp_println::println!("[INIT] Creating time provider...");
+    let time_provider = Esp32TimeProvider::new();
+    esp_println::println!("[INIT] Time provider created");
+
+    FirmwareApp {
+        server,
+        transport,
+        time_provider,
+    }
+}
+
 #[esp_rtos::main]
 async fn main(spawner: embassy_executor::Spawner) {
     #[cfg(feature = "test_gpio")]
@@ -547,180 +757,10 @@ async fn main(spawner: embassy_executor::Spawner) {
         feature = "test_espnow",
     )))]
     {
-        // TODO: esp_println writes directly to USB-Serial-JTAG hardware, bypassing
-        // io_task's connection monitor. May block if no USB host is connected during
-        // boot. Hasn't been observed yet but worth investigating if boot hangs occur.
-
-        // Initialize board (clock, heap, runtime) and get hardware peripherals
-        esp_println::println!("[INIT] Initializing board...");
-        let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, flash, _gpio4, gpio20, wifi) =
-            init_board();
-        esp_println::println!("[INIT] Board initialized, starting runtime...");
-        start_runtime(timg0, sw_int);
-        esp_println::println!("[INIT] Runtime started");
-
-        // Note: USB serial is handled by I/O task for transport
-        // Logging will go through the transport serial (non-M! messages)
-        // or can be disabled if USB host is not connected
-        esp_println::println!("[INIT] fw-esp32 starting...");
-
-        // Spawn I/O task (handles serial communication)
-        esp_println::println!("[INIT] Spawning I/O task...");
-        spawner.spawn(io_task(usb_device).unwrap());
-        esp_println::println!("[INIT] I/O task spawned");
-
-        // Initialize log crate to write to outgoing serial (host will see these)
-        crate::logger::init(serial::io_task::log_write_to_outgoing);
-
-        log::info!("[fw-esp32] Shader backend: native JIT (lpvm-native rt_jit)");
-
-        #[cfg(feature = "test_oom")]
-        {
-            // Test 1: simple panic (not OOM) — validates basic unwinding
-            esp_println::println!("[test_oom] Test 1: catching simple panic...");
-            let r1 = unwinding::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
-                panic!("test panic");
-            }));
-            match r1 {
-                Ok(_) => esp_println::println!("[test_oom] Test 1 FAIL: panic was not caught"),
-                Err(_) => esp_println::println!("[test_oom] Test 1 OK: simple panic caught"),
-            }
-
-            // Test 2: OOM inside catch_unwind
-            esp_println::println!("[test_oom] Test 2: catching OOM...");
-            let r2 = unwinding::panic::catch_unwind(core::panic::AssertUnwindSafe(|| {
-                let mut vecs: alloc::vec::Vec<alloc::vec::Vec<u8>> = alloc::vec::Vec::new();
-                loop {
-                    vecs.push(alloc::vec![0u8; 64 * 1024]);
-                }
-            }));
-            match r2 {
-                Ok(_) => esp_println::println!("[test_oom] Test 2 FAIL: did not OOM"),
-                Err(_) => esp_println::println!("[test_oom] Test 2 OK: OOM caught, recovery works"),
-            }
-
-            esp_println::println!("[test_oom] Tests complete, continuing boot...");
-        }
-
-        // Create serial transport. Project-read responses stream through io_task;
-        // small messages use the simpler full-message serializer.
-        esp_println::println!("[INIT] Creating StreamingMessageRouterTransport...");
-        let transport = transport::StreamingMessageRouterTransport::from_io_channels();
-        esp_println::println!("[INIT] StreamingMessageRouterTransport created");
-
-        // Initialize RMT peripheral for output
-        // Use 80MHz clock rate (standard for ESP32-C6)
-        esp_println::println!("[INIT] Initializing RMT peripheral at 80MHz...");
-        let rmt = esp_hal::rmt::Rmt::new(rmt_peripheral, esp_hal::time::Rate::from_mhz(80))
-            .expect("Failed to initialize RMT");
-        esp_println::println!("[INIT] RMT peripheral initialized");
-
-        // Create filesystem before hardware providers so /hardware.toml can override board policy.
-        let base_fs: Box<dyn lpfs::LpFs> = {
-            #[cfg(not(feature = "memory_fs"))]
-            {
-                let flash_storage = esp_storage::FlashStorage::new(flash);
-                match lp_fs_flash::LpFsFlash::init(flash_storage) {
-                    Ok(fs) => {
-                        esp_println::println!("[INIT] Flash filesystem mounted");
-                        Box::new(fs)
-                    }
-                    Err(e) => {
-                        esp_println::println!(
-                            "[WARN] Flash FS failed: {e}, falling back to memory"
-                        );
-                        Box::new(LpFsMemory::new())
-                    }
-                }
-            }
-            #[cfg(feature = "memory_fs")]
-            {
-                let _ = flash;
-                esp_println::println!("[INIT] Creating in-memory filesystem...");
-                Box::new(LpFsMemory::new())
-            }
-        };
-        #[cfg(feature = "memory_fs")]
-        esp_println::println!("[INIT] In-memory filesystem created");
-
-        let hardware_manifest = load_hardware_manifest(base_fs.as_ref());
-        log::info!(
-            "[fw-esp32] Hardware manifest: {} ({})",
-            hardware_manifest.board_id(),
-            hardware_manifest.board_name()
-        );
-        let hardware_registry = Rc::new(HardwareRegistry::new(hardware_manifest));
-        let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
-        hardware_system.add_ws281x_driver(Box::new(Esp32RmtWs281xDriver::new(Rc::clone(
-            &hardware_registry,
-        ))));
-        hardware_system.add_button_driver(Box::new(Esp32Gpio20ButtonDriver::new(
-            Rc::clone(&hardware_registry),
-            gpio20,
-        )));
-        #[cfg(feature = "radio")]
-        {
-            let radio_driver = Esp32EspNowRadioDriver::new(Rc::clone(&hardware_registry), wifi)
-                .expect("Failed to initialize ESP-NOW radio");
-            log::info!(
-                "[fw-esp32] ESP-NOW radio ready: device_id={:?} channel={}",
-                radio_driver.device_id(),
-                radio_driver.default_channel()
-            );
-            hardware_system.add_radio_driver(Box::new(radio_driver));
-        }
-        #[cfg(not(feature = "radio"))]
-        let _ = wifi;
-        let hardware_system = Rc::new(hardware_system);
-
-        // Initialize output provider
-        esp_println::println!("[INIT] Creating output provider...");
-        let output_provider = Esp32OutputProvider::new(Rc::clone(&hardware_system));
-
-        // Initialize RMT channel with GPIO18 (hardcoded for now)
-        // Use 256 LEDs as a reasonable default (will work for demo project which has 241 LEDs)
-        const NUM_LEDS: usize = 256;
-        esp_println::println!(
-            "[INIT] Initializing RMT channel with GPIO18, {} LEDs...",
-            NUM_LEDS
-        );
-        Esp32OutputProvider::init_rmt(rmt, gpio18, NUM_LEDS)
-            .expect("Failed to initialize RMT channel");
-        esp_println::println!("[INIT] RMT channel initialized");
-
-        let output_provider: Rc<RefCell<dyn OutputProvider>> =
-            Rc::new(RefCell::new(output_provider));
-        esp_println::println!("[INIT] Output provider created");
-
-        // Create server (with time provider for shader comp timing). RV32 uses lpvm-native rt_jit.
-        esp_println::println!("[INIT] Creating LpServer instance...");
-        let time_provider_rc = Rc::new(Esp32TimeProvider::new());
-        let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
-        let button_service: Rc<dyn ButtonService> = hardware_system.clone();
-        let radio_service: Rc<dyn lpa_server::RadioService> = hardware_system.clone();
-        let mut server = LpServer::new_with_hardware_services(
-            output_provider,
-            base_fs,
-            "projects/".as_path(),
-            Some(esp32_memory_stats),
-            Some(time_provider_rc),
-            Some(button_service),
-            Some(radio_service),
-            graphics,
-        );
-        esp_println::println!("[INIT] LpServer created");
-
-        // Auto-load project at boot (from config or lexical-first)
-        boot::auto_load_project(&mut server);
-
-        // Create time provider
-        esp_println::println!("[INIT] Creating time provider...");
-        let time_provider = Esp32TimeProvider::new();
-        esp_println::println!("[INIT] Time provider created");
-
+        let app = boot_firmware(spawner);
         esp_println::println!("[INIT] fw-esp32 initialized, starting server loop...");
 
         // Run server loop (never returns)
-        run_server_loop(server, transport, time_provider).await;
+        run_server_loop(app.server, app.transport, app.time_provider).await;
     }
 }

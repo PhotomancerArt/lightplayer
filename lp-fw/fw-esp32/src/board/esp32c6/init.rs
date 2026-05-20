@@ -25,7 +25,7 @@ pub fn init_board() -> (
     // Allocate heap while leaving enough RAM for the main task stack. Project loading
     // and on-device shader compilation use deep filesystem/compiler call stacks; too
     // large a heap reservation shrinks that stack and corrupts execution before OOM.
-    esp_alloc::heap_allocator!(size: 312_000);
+    esp_alloc::heap_allocator!(size: 300_000);
 
     // Extract peripherals we need before moving others
     let rmt = peripherals.RMT;
