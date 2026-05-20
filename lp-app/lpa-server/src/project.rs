@@ -112,18 +112,17 @@ impl Project {
     }
 
     /// Get mutable access to the loaded engine.
-    pub fn engine_mut(&mut self) -> Result<&mut Engine, ServerError> {
-        let name = self.name.clone();
+    pub fn engine_mut(&mut self) -> &mut Engine {
         self.runtime
             .as_mut()
-            .ok_or_else(|| ServerError::Core(format!("project {name} has no loaded runtime")))
+            .expect("project runtime is only absent while reloading")
     }
 
     /// Get immutable access to the loaded engine.
-    pub fn engine(&self) -> Result<&Engine, ServerError> {
-        self.runtime.as_ref().ok_or_else(|| {
-            ServerError::Core(format!("project {} has no loaded runtime", self.name))
-        })
+    pub fn engine(&self) -> &Engine {
+        self.runtime
+            .as_ref()
+            .expect("project runtime is only absent while reloading")
     }
 
     /// Reload the project from the filesystem.

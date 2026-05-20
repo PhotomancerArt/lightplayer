@@ -192,7 +192,7 @@ fn handle_project_request(
     let _ = theoretical_fps;
 
     log_project_mutations(&request.mutations);
-    let response = project.engine_mut()?.read_project(request);
+    let response = project.engine_mut().read_project(request);
     log_project_mutation_responses(&response.mutations);
     Ok(ServerMessagePayload::ProjectRequest { response })
 }
