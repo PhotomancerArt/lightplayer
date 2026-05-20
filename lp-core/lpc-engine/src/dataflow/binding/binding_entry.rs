@@ -1,5 +1,3 @@
-use alloc::vec::Vec;
-
 use lpc_model::{ChannelName, Kind, LpValue, NodeId, Revision, SlotPath};
 
 /// Stable address of a binding owned by a node entry.
@@ -82,15 +80,33 @@ impl core::fmt::Display for BindingPriority {
     }
 }
 
-pub(crate) fn channels_touched(source: &BindingSource, target: &BindingTarget) -> Vec<ChannelName> {
-    let mut channels = Vec::new();
-    if let BindingSource::BusChannel(c) = source {
-        channels.push(c.clone());
+pub(crate) fn channels_touched<'a>(
+    source: &'a BindingSource,
+    target: &'a BindingTarget,
+) -> ChannelsTouched<'a> {
+    let source = match source {
+        BindingSource::BusChannel(channel) => Some(channel),
+        _ => None,
+    };
+    let target = match target {
+        BindingTarget::BusChannel(channel) => Some(channel),
+        _ => None,
+    };
+    ChannelsTouched {
+        source,
+        target: target.filter(|target| source != Some(*target)),
     }
-    if let BindingTarget::BusChannel(c) = target {
-        channels.push(c.clone());
+}
+
+pub(crate) struct ChannelsTouched<'a> {
+    source: Option<&'a ChannelName>,
+    target: Option<&'a ChannelName>,
+}
+
+impl<'a> Iterator for ChannelsTouched<'a> {
+    type Item = &'a ChannelName;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        self.source.take().or_else(|| self.target.take())
     }
-    channels.sort();
-    channels.dedup();
-    channels
 }

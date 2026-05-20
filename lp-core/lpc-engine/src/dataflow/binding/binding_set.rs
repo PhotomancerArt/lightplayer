@@ -31,8 +31,8 @@ impl BindingSet {
         self.entries.iter()
     }
 
-    pub(crate) fn remove_last(&mut self) -> Option<BindingEntry> {
-        self.entries.pop()
+    pub fn len(&self) -> usize {
+        self.entries.len()
     }
 
     pub fn is_empty(&self) -> bool {

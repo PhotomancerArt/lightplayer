@@ -15,50 +15,62 @@ use super::NodeEntry;
 pub(super) struct NodeBindingIndex {
     consumed_targets: BTreeMap<(NodeId, SlotPath), Vec<BindingRef>>,
     bus_targets: BTreeMap<ChannelName, Vec<BindingRef>>,
+    channel_kinds: BTreeMap<ChannelName, Kind>,
 }
 
 impl NodeBindingIndex {
     pub(super) fn rebuild<N>(entries: &[Option<NodeEntry<N>>]) -> Result<Self, BindingError> {
         let mut index = Self::default();
-        let mut channel_kinds: BTreeMap<ChannelName, Kind> = BTreeMap::new();
 
         for entry in entries.iter().filter_map(|entry| entry.as_ref()) {
             for (binding_index, binding) in entry.bindings.value().iter().enumerate() {
                 let binding_ref = BindingRef::new(entry.id, binding_index);
-                for channel in channels_touched(&binding.source, &binding.target) {
-                    if let Some(established) = channel_kinds.get(&channel) {
-                        if *established != binding.kind {
-                            return Err(BindingError::KindMismatch {
-                                channel,
-                                established: *established,
-                                attempted: binding.kind,
-                            });
-                        }
-                    } else {
-                        channel_kinds.insert(channel, binding.kind);
-                    }
-                }
-
-                match &binding.target {
-                    BindingTarget::ConsumedSlot { node, slot } => {
-                        index
-                            .consumed_targets
-                            .entry((*node, slot.clone()))
-                            .or_default()
-                            .push(binding_ref);
-                    }
-                    BindingTarget::BusChannel(channel) => {
-                        index
-                            .bus_targets
-                            .entry(channel.clone())
-                            .or_default()
-                            .push(binding_ref);
-                    }
-                }
+                index.insert_binding(binding_ref, binding)?;
             }
         }
 
         Ok(index)
+    }
+
+    pub(super) fn insert_binding(
+        &mut self,
+        binding_ref: BindingRef,
+        binding: &BindingEntry,
+    ) -> Result<(), BindingError> {
+        for channel in channels_touched(&binding.source, &binding.target) {
+            if let Some(established) = self.channel_kinds.get(channel) {
+                if *established != binding.kind {
+                    return Err(BindingError::KindMismatch {
+                        channel: channel.clone(),
+                        established: *established,
+                        attempted: binding.kind,
+                    });
+                }
+            }
+        }
+
+        for channel in channels_touched(&binding.source, &binding.target) {
+            self.channel_kinds
+                .entry(channel.clone())
+                .or_insert(binding.kind);
+        }
+
+        match &binding.target {
+            BindingTarget::ConsumedSlot { node, slot } => {
+                self.consumed_targets
+                    .entry((*node, slot.clone()))
+                    .or_default()
+                    .push(binding_ref);
+            }
+            BindingTarget::BusChannel(channel) => {
+                self.bus_targets
+                    .entry(channel.clone())
+                    .or_default()
+                    .push(binding_ref);
+            }
+        }
+
+        Ok(())
     }
 
     pub(super) fn consumed_targets(&self, node: NodeId, slot: &SlotPath) -> &[BindingRef] {

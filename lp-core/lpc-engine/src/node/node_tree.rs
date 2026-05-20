@@ -210,16 +210,19 @@ impl<N> NodeTree<N> {
         Ok(())
     }
 
-    /// Add one runtime binding to its owning node and rebuild derived indexes.
+    /// Add one runtime binding to its owning node and update derived indexes.
     pub fn add_binding(
         &mut self,
         draft: BindingDraft,
         revision: Revision,
     ) -> Result<BindingRef, BindingError> {
         let owner = draft.owner;
-        let entry = self
-            .get_mut(owner)
-            .ok_or(BindingError::UnknownOwner { owner })?;
+        let index = self
+            .get(owner)
+            .ok_or(BindingError::UnknownOwner { owner })?
+            .bindings
+            .value()
+            .len();
         let binding = BindingEntry {
             source: draft.source,
             target: draft.target,
@@ -228,21 +231,18 @@ impl<N> NodeTree<N> {
             version: revision,
             owner,
         };
-        let index = entry.bindings.get_mut().push(binding);
+
+        let binding_ref = BindingRef::new(owner, index);
+        self.binding_index.insert_binding(binding_ref, &binding)?;
+
+        let entry = self
+            .get_mut(owner)
+            .expect("binding owner was validated before index insertion");
+        let pushed = entry.bindings.get_mut().push(binding);
+        debug_assert_eq!(pushed, index);
         entry.bindings.mark_updated(revision);
 
-        if let Err(err) = self.rebuild_binding_index() {
-            let entry = self
-                .get_mut(owner)
-                .expect("binding owner was validated before insertion");
-            entry.bindings.get_mut().remove_last();
-            entry.bindings.mark_updated(revision);
-            self.rebuild_binding_index()
-                .expect("rolling back failed binding should restore valid index");
-            return Err(err);
-        }
-
-        Ok(BindingRef::new(owner, index))
+        Ok(binding_ref)
     }
 
     /// Iterate over all node-owned bindings.
