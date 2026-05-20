@@ -12,6 +12,11 @@ const LPFS_PARTITION_OFFSET: u32 = 0x310000;
 const BLOCK_SIZE: u32 = 4096;
 /// 960KB partition = 240 blocks
 const BLOCK_COUNT: u32 = 240;
+/// LittleFS read/program cache. Keep this below the erase block size so opening a
+/// file does not need a transient 4KB heap allocation.
+const CACHE_SIZE: u32 = 512;
+/// Lookahead bitmap size. Must be a multiple of 8.
+const LOOKAHEAD_SIZE: u32 = 64;
 
 /// Flash storage adapter implementing littlefs Storage over esp_storage.
 ///
@@ -52,5 +57,8 @@ impl Storage for LpFlashStorage {
 
 /// littlefs configuration for the lpfs partition.
 pub fn lpfs_config() -> Config {
-    Config::new(BLOCK_SIZE, BLOCK_COUNT)
+    let mut config = Config::new(BLOCK_SIZE, BLOCK_COUNT);
+    config.cache_size = CACHE_SIZE;
+    config.lookahead_size = LOOKAHEAD_SIZE;
+    config
 }

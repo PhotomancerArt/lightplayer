@@ -3,7 +3,7 @@
 //! Wraps `littlefs_rust::Filesystem<LpFlashStorage>` and implements the
 //! `LpFs` trait for use with LpServer.
 
-use alloc::{format, rc::Rc, string::ToString, vec::Vec};
+use alloc::{format, rc::Rc, string::ToString, vec, vec::Vec};
 use core::cell::RefCell;
 use hashbrown::HashMap;
 
@@ -11,7 +11,7 @@ use lpfs::lp_path::{LpPath, LpPathBuf};
 use lpfs::{ChangeType, FsChange, FsError, FsVersion, LpFs, LpFsMemory, LpFsView};
 
 use crate::flash_storage::{LpFlashStorage, lpfs_config};
-use littlefs_rust::{Error as LfsError, FileType as LfsFileType, Filesystem};
+use littlefs_rust::{Error as LfsError, FileType as LfsFileType, Filesystem, OpenFlags};
 
 /// Flash-backed filesystem implementing LpFs.
 ///
@@ -152,6 +152,13 @@ impl LpFsFlash {
     }
 }
 
+fn map_lfs_read_error(path: &LpPath, error: LfsError) -> FsError {
+    match error {
+        LfsError::NoEntry => FsError::NotFound(path.as_str().to_string()),
+        other => FsError::Filesystem(format!("read {}: {other}", path.as_str())),
+    }
+}
+
 impl LpFs for LpFsFlash {
     fn read_file(&self, path: &LpPath) -> Result<Vec<u8>, FsError> {
         if !path.is_absolute() {
@@ -161,11 +168,38 @@ impl LpFs for LpFsFlash {
             )));
         }
         let lfs_path = Self::to_lfs_path(path);
+        let size = {
+            let inner = self.inner.borrow();
+            let meta = inner
+                .fs
+                .stat(lfs_path)
+                .map_err(|e| map_lfs_read_error(path, e))?;
+            if meta.file_type != LfsFileType::File {
+                return Err(FsError::Filesystem(format!(
+                    "{} is not a file",
+                    path.as_str()
+                )));
+            }
+            meta.size as usize
+        };
+
+        let mut buf = vec![0u8; size];
+        if size == 0 {
+            return Ok(buf);
+        }
+
         let inner = self.inner.borrow();
-        inner
+        let file = inner
             .fs
-            .read_to_vec(lfs_path)
-            .map_err(|e| FsError::NotFound(format!("{}: {}", path.as_str(), e)))
+            .open(lfs_path, OpenFlags::READ)
+            .map_err(|e| map_lfs_read_error(path, e))?;
+        let n = file
+            .read(&mut buf)
+            .map_err(|e| FsError::Filesystem(format!("read {}: {e}", path.as_str())))?;
+        file.close()
+            .map_err(|e| FsError::Filesystem(format!("close {}: {e}", path.as_str())))?;
+        buf.truncate(n as usize);
+        Ok(buf)
     }
 
     fn write_file(&self, path: &LpPath, data: &[u8]) -> Result<(), FsError> {
