@@ -3,7 +3,7 @@ use alloc::vec::Vec;
 use lpir::{IrType, LpirOp, TexelFetchBoundsMode, VReg};
 use lps_shared::{TextureFilter, TextureShapeHint, TextureStorageFormat, TextureWrap};
 
-use crate::hir::{HirExpr, HirTextureOperand, ImportKey};
+use crate::hir::{ExprId, HirTextureOperand, ImportKey};
 use crate::{Diagnostic, Span};
 
 use super::super::{LowerCtx, LowerValue, lower_expr};
@@ -24,10 +24,10 @@ pub(in crate::lower) fn lower_texel_fetch(
     ctx: &mut LowerCtx<'_>,
     span: Span,
     sampler: &HirTextureOperand,
-    coord: &HirExpr,
-    lod: &HirExpr,
+    coord: ExprId,
+    lod: ExprId,
 ) -> Result<LowerValue, Diagnostic> {
-    validate_lod_zero(lod)?;
+    validate_lod_zero(ctx, lod)?;
     let spec = ctx
         .texture_specs
         .get(sampler.path.as_str())
@@ -69,7 +69,7 @@ pub(in crate::lower) fn lower_texture_sample(
     ctx: &mut LowerCtx<'_>,
     span: Span,
     sampler: &HirTextureOperand,
-    coord: &HirExpr,
+    coord: ExprId,
     import: &ImportKey,
 ) -> Result<LowerValue, Diagnostic> {
     let spec = *ctx
@@ -153,7 +153,8 @@ pub(in crate::lower) fn lower_texture_sample(
     })
 }
 
-fn validate_lod_zero(lod: &HirExpr) -> Result<(), Diagnostic> {
+fn validate_lod_zero(ctx: &LowerCtx<'_>, lod: ExprId) -> Result<(), Diagnostic> {
+    let lod = ctx.arena.expr(lod);
     match &lod.kind {
         crate::hir::HirExprKind::IntLiteral(0) => Ok(()),
         crate::hir::HirExprKind::UIntLiteral(0) => Ok(()),

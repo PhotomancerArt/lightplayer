@@ -11,6 +11,7 @@ use crate::body::{
 };
 use crate::{CompileOptions, Diagnostic, Span, Token, TopLevelIndex, TypeRef};
 
+mod arena;
 mod array_size;
 mod builtin;
 mod builtin_out;
@@ -24,6 +25,7 @@ mod typeck;
 mod types;
 mod typing;
 
+pub(crate) use arena::{ExprId, ExprList, HirArena, PlaceId};
 use array_size::{ArraySizeConsts, eval_array_size_expr};
 use function::{FunctionSig, GlobalConst, ImportRegistry};
 pub(crate) use place::{HirPlace, PlaceRoot, PlaceSegment};
@@ -31,9 +33,8 @@ pub(crate) use shape::TypeShape;
 use typeck::TypeCtx;
 use types::StructTypes;
 pub use types::{
-    BuiltinKind, GlobalInfo, HirAssignTarget, HirExpr, HirExprKind, HirFunction, HirFunctionBody,
-    HirModule, HirOutArg, HirParam, HirStmt, HirTextureOperand, HirUserCallWriteback, ImportKey,
-    UniformInfo,
+    BuiltinKind, GlobalInfo, HirExpr, HirExprKind, HirFunction, HirFunctionBody, HirModule,
+    HirOutArg, HirParam, HirStmt, HirTextureOperand, HirUserCallWriteback, ImportKey, UniformInfo,
 };
 pub use typing::{scalar_base_type, scalar_ir_types, scalar_lane_count};
 
@@ -879,7 +880,13 @@ fn build_global_consts(
         );
         let expr = ctx.type_expr(&parsed)?;
         let expr = ctx.coerce_expr(expr, &ty)?;
-        globals.insert(konst.name.clone(), GlobalConst { expr });
+        globals.insert(
+            konst.name.clone(),
+            GlobalConst {
+                arena: core::mem::take(&mut ctx.arena),
+                expr,
+            },
+        );
     }
     Ok(globals)
 }
@@ -925,22 +932,27 @@ fn synthesize_shader_init(
         let parsed = parse_expr_tokens(source, tokens, init.init_span)?;
         let expr = ctx.type_expr(&parsed)?;
         let value = ctx.coerce_expr(expr, &init.ty)?;
-        statements.push(HirStmt::Expr(HirExpr {
-            span: init.init_span,
-            ty: value.ty.clone(),
-            kind: HirExprKind::Assign {
-                target: HirAssignTarget {
-                    place: HirPlace::global(init.name.clone(), init.byte_offset, init.ty.clone()),
-                },
-                value: Box::new(value),
-            },
-        }));
+        let target = ctx.arena.push_place(HirPlace::global(
+            init.name.clone(),
+            init.byte_offset,
+            init.ty.clone(),
+        ));
+        let ty = ctx.arena.expr_ty(value).clone();
+        let assign = ctx
+            .arena
+            .push_expr(init.init_span, ty, HirExprKind::Assign { target, value });
+        statements.push(HirStmt::Expr(assign));
     }
     let locals = core::mem::take(&mut ctx.locals);
+    let arena = core::mem::take(&mut ctx.arena);
     Ok(Some(HirFunction {
         name: sig.name.clone(),
         return_ty: sig.return_ty.clone(),
         params: Vec::new(),
-        body: HirFunctionBody { locals, statements },
+        body: HirFunctionBody {
+            locals,
+            statements,
+            arena,
+        },
     }))
 }

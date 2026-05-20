@@ -1,5 +1,3 @@
-use alloc::boxed::Box;
-
 use lps_shared::LpsType;
 
 use crate::Span;
@@ -138,19 +136,6 @@ pub(super) fn fold_cast(span: Span, target: &LpsType, expr: &HirExpr) -> Option<
         (LpsType::Bool, HirExprKind::IntLiteral(value)) => Some(bool_literal(span, *value != 0)),
         (LpsType::Bool, HirExprKind::UIntLiteral(value)) => Some(bool_literal(span, *value != 0)),
         _ => None,
-    }
-}
-
-pub(super) fn cast_expr(span: Span, target: LpsType, expr: HirExpr) -> HirExpr {
-    if let Some(folded) = fold_cast(span, &target, &expr) {
-        return folded;
-    }
-    HirExpr {
-        span,
-        ty: target,
-        kind: HirExprKind::Cast {
-            expr: Box::new(expr),
-        },
     }
 }
 

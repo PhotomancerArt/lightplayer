@@ -12,8 +12,8 @@ use lps_shared::{LpsModuleSig, LpsType, ParamQualifier, TextureBindingSpec};
 
 use crate::body::UnaryOp;
 use crate::hir::{
-    HirExpr, HirExprKind, HirFunction, HirModule, HirStmt, ImportKey, scalar_base_type,
-    scalar_ir_types, scalar_lane_count,
+    ExprId, ExprList, HirArena, HirExprKind, HirFunction, HirModule, HirStmt, ImportKey,
+    scalar_base_type, scalar_ir_types, scalar_lane_count,
 };
 use crate::{Diagnostic, Span};
 
@@ -110,6 +110,7 @@ fn lower_function(
         vmctx,
         params,
         locals,
+        arena: &function.body.arena,
         import_map,
         param_qualifiers: function.params.iter().map(|p| p.qualifier).collect(),
         texture_specs: &module.texture_specs,
@@ -127,6 +128,7 @@ struct LowerCtx<'a> {
     vmctx: VReg,
     params: Vec<LowerValue>,
     locals: Vec<LocalStorage>,
+    arena: &'a HirArena,
     import_map: &'a BTreeMap<ImportKey, CalleeRef>,
     param_qualifiers: Vec<ParamQualifier>,
     texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
@@ -149,12 +151,13 @@ fn lower_statements(ctx: &mut LowerCtx<'_>, statements: &[HirStmt]) -> Result<()
 fn lower_stmt(ctx: &mut LowerCtx<'_>, stmt: &HirStmt) -> Result<(), Diagnostic> {
     match stmt {
         HirStmt::Let { local, init } => {
-            let value = lower_expr(ctx, init)?;
-            store_local(ctx, init.span, *local, &value)
+            let span = ctx.arena.expr_span(*init);
+            let value = lower_expr(ctx, *init)?;
+            store_local(ctx, span, *local, &value)
         }
         HirStmt::Assign { local, value } => {
-            let span = value.span;
-            let value = lower_expr(ctx, value)?;
+            let span = ctx.arena.expr_span(*value);
+            let value = lower_expr(ctx, *value)?;
             store_local(ctx, span, *local, &value)
         }
         HirStmt::If {
@@ -162,8 +165,8 @@ fn lower_stmt(ctx: &mut LowerCtx<'_>, stmt: &HirStmt) -> Result<(), Diagnostic> 
             accept,
             reject,
         } => {
-            let cond = lower_expr(ctx, condition)?;
-            let cond = single_lane(condition.span, &cond)?;
+            let cond = lower_expr(ctx, *condition)?;
+            let cond = single_lane(ctx.arena.expr_span(*condition), &cond)?;
             ctx.fb.push_if(cond);
             lower_statements(ctx, accept)?;
             if !reject.is_empty() {
@@ -181,8 +184,8 @@ fn lower_stmt(ctx: &mut LowerCtx<'_>, stmt: &HirStmt) -> Result<(), Diagnostic> 
         } => {
             lower_statements(ctx, init)?;
             ctx.fb.push_loop();
-            let cond = lower_expr(ctx, condition)?;
-            let cond = single_lane(condition.span, &cond)?;
+            let cond = lower_expr(ctx, *condition)?;
+            let cond = single_lane(ctx.arena.expr_span(*condition), &cond)?;
             ctx.fb.push(LpirOp::BrIfNot { cond });
             lower_statements(ctx, body)?;
             ctx.fb.push_continuing();
@@ -192,8 +195,8 @@ fn lower_stmt(ctx: &mut LowerCtx<'_>, stmt: &HirStmt) -> Result<(), Diagnostic> 
         }
         HirStmt::While { condition, body } => {
             ctx.fb.push_loop();
-            let cond = lower_expr(ctx, condition)?;
-            let cond = single_lane(condition.span, &cond)?;
+            let cond = lower_expr(ctx, *condition)?;
+            let cond = single_lane(ctx.arena.expr_span(*condition), &cond)?;
             ctx.fb.push(LpirOp::BrIfNot { cond });
             lower_statements(ctx, body)?;
             ctx.fb.push_continuing();
@@ -204,8 +207,8 @@ fn lower_stmt(ctx: &mut LowerCtx<'_>, stmt: &HirStmt) -> Result<(), Diagnostic> 
             ctx.fb.push_loop();
             lower_statements(ctx, body)?;
             ctx.fb.push_continuing();
-            let cond = lower_expr(ctx, condition)?;
-            let cond = single_lane(condition.span, &cond)?;
+            let cond = lower_expr(ctx, *condition)?;
+            let cond = single_lane(ctx.arena.expr_span(*condition), &cond)?;
             ctx.fb.push(LpirOp::BrIfNot { cond });
             ctx.fb.end_loop();
             Ok(())
@@ -219,11 +222,11 @@ fn lower_stmt(ctx: &mut LowerCtx<'_>, stmt: &HirStmt) -> Result<(), Diagnostic> 
             Ok(())
         }
         HirStmt::Expr(expr) => {
-            let _ = lower_expr(ctx, expr)?;
+            let _ = lower_expr(ctx, *expr)?;
             Ok(())
         }
         HirStmt::Return { expr, span } => {
-            let lanes = return_lanes(ctx, *span, expr.as_ref())?;
+            let lanes = return_lanes(ctx, *span, *expr)?;
             ctx.fb.push_return(&lanes);
             Ok(())
         }
@@ -233,7 +236,7 @@ fn lower_stmt(ctx: &mut LowerCtx<'_>, stmt: &HirStmt) -> Result<(), Diagnostic> 
 fn return_lanes(
     ctx: &mut LowerCtx<'_>,
     span: Span,
-    expr: Option<&HirExpr>,
+    expr: Option<ExprId>,
 ) -> Result<Vec<VReg>, Diagnostic> {
     let lanes = match expr {
         Some(expr) => lower_expr(ctx, expr)?.lanes,
@@ -245,7 +248,8 @@ fn return_lanes(
     Ok(lanes)
 }
 
-fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diagnostic> {
+fn lower_expr(ctx: &mut LowerCtx<'_>, expr: ExprId) -> Result<LowerValue, Diagnostic> {
+    let expr = ctx.arena.expr(expr);
     match &expr.kind {
         HirExprKind::BoolLiteral(v) => {
             let dst = ctx.fb.alloc_vreg(IrType::I32);
@@ -299,23 +303,25 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             }
         }
         HirExprKind::Local { index } => local_value(ctx, expr.span, *index),
-        HirExprKind::Uniform {
-            name: _,
-            byte_offset,
-        } => lower_uniform_load(ctx, expr.span, *byte_offset, &expr.ty),
-        HirExprKind::Global {
-            name: _,
-            byte_offset,
-        } => lower_global_load(ctx, expr.span, *byte_offset, &expr.ty),
+        HirExprKind::Uniform { byte_offset } => {
+            lower_uniform_load(ctx, expr.span, *byte_offset, &expr.ty)
+        }
+        HirExprKind::Global { byte_offset } => {
+            lower_global_load(ctx, expr.span, *byte_offset, &expr.ty)
+        }
         HirExprKind::Constructor { args } => {
             let mut lanes = Vec::new();
-            if expr.ty.is_matrix() && args.len() == 1 && args[0].ty.is_matrix() {
-                let value = lower_expr(ctx, &args[0])?;
+            let args = ctx.arena.expr_list(*args).to_vec();
+            if expr.ty.is_matrix() && args.len() == 1 && ctx.arena.expr_ty(args[0]).is_matrix() {
+                let value = lower_expr(ctx, args[0])?;
                 let Some((dst_cols, dst_rows)) = expr.ty.matrix_dims() else {
                     return Err(Diagnostic::error(expr.span, "invalid matrix constructor"));
                 };
-                let Some((src_cols, src_rows)) = args[0].ty.matrix_dims() else {
-                    return Err(Diagnostic::error(args[0].span, "invalid source matrix"));
+                let Some((src_cols, src_rows)) = ctx.arena.expr_ty(args[0]).matrix_dims() else {
+                    return Err(Diagnostic::error(
+                        ctx.arena.expr_span(args[0]),
+                        "invalid source matrix",
+                    ));
                 };
                 for col in 0..dst_cols {
                     for row in 0..dst_rows {
@@ -338,10 +344,12 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
                         }
                     }
                 }
-            } else if expr.ty.is_matrix() && args.len() == 1 && scalar_lane_count(&args[0].ty) == 1
+            } else if expr.ty.is_matrix()
+                && args.len() == 1
+                && scalar_lane_count(ctx.arena.expr_ty(args[0])) == 1
             {
-                let value = lower_expr(ctx, &args[0])?;
-                let diagonal = single_lane(args[0].span, &value)?;
+                let value = lower_expr(ctx, args[0])?;
+                let diagonal = single_lane(ctx.arena.expr_span(args[0]), &value)?;
                 let Some((cols, rows)) = expr.ty.matrix_dims() else {
                     return Err(Diagnostic::error(expr.span, "invalid matrix constructor"));
                 };
@@ -361,10 +369,10 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
                 }
             } else if args.len() == 1
                 && scalar_lane_count(&expr.ty) > 1
-                && scalar_lane_count(&args[0].ty) == 1
+                && scalar_lane_count(ctx.arena.expr_ty(args[0])) == 1
             {
-                let value = lower_expr(ctx, &args[0])?;
-                let lane = single_lane(args[0].span, &value)?;
+                let value = lower_expr(ctx, args[0])?;
+                let lane = single_lane(ctx.arena.expr_span(args[0]), &value)?;
                 lanes.resize(scalar_lane_count(&expr.ty), lane);
             } else {
                 for arg in args {
@@ -378,11 +386,11 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             })
         }
         HirExprKind::Cast { expr: inner } => {
-            let inner = lower_expr(ctx, inner)?;
+            let inner = lower_expr(ctx, *inner)?;
             lower_cast(ctx, expr.span, inner, &expr.ty)
         }
         HirExprKind::Swizzle { base, lanes } => {
-            let base = lower_expr(ctx, base)?;
+            let base = lower_expr(ctx, *base)?;
             let out = lanes.iter().map(|i| base.lanes[*i]).collect::<Vec<_>>();
             Ok(LowerValue {
                 ty: expr.ty.clone(),
@@ -390,15 +398,22 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             })
         }
         HirExprKind::Index { base, index } => {
-            let base = lower_expr(ctx, base)?;
-            let index = lower_expr(ctx, index)?;
+            let base = lower_expr(ctx, *base)?;
+            let index = lower_expr(ctx, *index)?;
             lower_index(ctx, expr.span, base, index, &expr.ty)
         }
         HirExprKind::Builtin {
             kind,
             args,
             writebacks,
-        } => lower_builtin(ctx, expr.span, *kind, args, writebacks, &expr.ty),
+        } => lower_builtin(
+            ctx,
+            expr.span,
+            *kind,
+            ctx.arena.expr_list(*args),
+            writebacks,
+            &expr.ty,
+        ),
         HirExprKind::UserCall {
             function,
             args,
@@ -406,7 +421,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
         } => {
             let mut writeback_slots = Vec::new();
             let mut arg_lanes = vec![ctx.vmctx];
-            for (arg_index, arg) in args.iter().enumerate() {
+            for (arg_index, arg) in ctx.arena.expr_list(*args).iter().copied().enumerate() {
                 if let Some(writeback) = writebacks.iter().find(|w| w.arg_index == arg_index) {
                     let (_slot, addr) =
                         alloc_slot_addr(ctx, flat_value_byte_size(&writeback.ty), IrType::Pointer);
@@ -431,7 +446,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             );
             for (writeback, addr) in writeback_slots {
                 let value = load_value_from_addr(ctx, expr.span, addr, &writeback.ty)?;
-                assign_target(ctx, expr.span, &writeback.target, value)?;
+                assign_target(ctx, expr.span, writeback.target, value)?;
             }
             Ok(LowerValue {
                 ty: expr.ty.clone(),
@@ -446,9 +461,11 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
                 return lower_import_call_with_out(ctx, expr.span, callee, args, out, &expr.ty);
             }
             if matches!(import, ImportKey::Glsl { .. }) && scalar_lane_count(&expr.ty) > 1 {
-                let args = args
+                let args = ctx
+                    .arena
+                    .expr_list(*args)
                     .iter()
-                    .map(|arg| lower_expr(ctx, arg))
+                    .map(|arg| lower_expr(ctx, *arg))
                     .collect::<Result<Vec<_>, _>>()?;
                 let mut results = Vec::new();
                 for i in 0..scalar_lane_count(&expr.ty) {
@@ -469,7 +486,7 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             if matches!(import, ImportKey::Vm { .. }) {
                 arg_lanes.push(ctx.vmctx);
             }
-            for arg in args {
+            for arg in ctx.arena.expr_list(*args).iter().copied() {
                 arg_lanes.extend(lower_expr(ctx, arg)?.lanes);
             }
             let results = scalar_ir_types(&expr.ty)?
@@ -486,14 +503,14 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             sampler,
             coord,
             lod,
-        } => lower_texel_fetch(ctx, expr.span, sampler, coord, lod),
+        } => lower_texel_fetch(ctx, expr.span, sampler, *coord, *lod),
         HirExprKind::Texture {
             sampler,
             coord,
             import,
-        } => lower_texture_sample(ctx, expr.span, sampler, coord, import),
+        } => lower_texture_sample(ctx, expr.span, sampler, *coord, import),
         HirExprKind::Unary { op, expr: inner } => {
-            let inner = lower_expr(ctx, inner)?;
+            let inner = lower_expr(ctx, *inner)?;
             match (op, inner.ty.clone()) {
                 (UnaryOp::Neg, ty) if scalar_base_type(&ty) == Some(LpsType::Float) => {
                     let lanes = inner
@@ -538,32 +555,32 @@ fn lower_expr(ctx: &mut LowerCtx<'_>, expr: &HirExpr) -> Result<LowerValue, Diag
             }
         }
         HirExprKind::Binary { op, lhs, rhs } => {
-            let lhs = lower_expr(ctx, lhs)?;
-            let rhs = lower_expr(ctx, rhs)?;
+            let lhs = lower_expr(ctx, *lhs)?;
+            let rhs = lower_expr(ctx, *rhs)?;
             lower_binary(ctx, expr.span, *op, lhs, rhs, &expr.ty)
         }
         HirExprKind::Sequence { first, second } => {
-            let _ = lower_expr(ctx, first)?;
-            lower_expr(ctx, second)
+            let _ = lower_expr(ctx, *first)?;
+            lower_expr(ctx, *second)
         }
         HirExprKind::Conditional {
             condition,
             accept,
             reject,
         } => {
-            let condition = lower_expr(ctx, condition)?;
-            let accept = lower_expr(ctx, accept)?;
-            let reject = lower_expr(ctx, reject)?;
+            let condition = lower_expr(ctx, *condition)?;
+            let accept = lower_expr(ctx, *accept)?;
+            let reject = lower_expr(ctx, *reject)?;
             lower_select(ctx, expr.span, condition, accept, reject, &expr.ty)
         }
-        HirExprKind::PlaceRead { target } => read_assign_target(ctx, expr.span, target),
+        HirExprKind::PlaceRead { target } => read_assign_target(ctx, expr.span, *target),
         HirExprKind::Assign { target, value } => {
-            let value = lower_expr(ctx, value)?;
-            assign_target(ctx, expr.span, target, value.clone())?;
+            let value = lower_expr(ctx, *value)?;
+            assign_target(ctx, expr.span, *target, value.clone())?;
             Ok(value)
         }
         HirExprKind::IncDec { target, op, prefix } => {
-            lower_inc_dec(ctx, expr.span, target, *op, *prefix)
+            lower_inc_dec(ctx, expr.span, *target, *op, *prefix)
         }
     }
 }
@@ -572,7 +589,7 @@ fn lower_import_call_with_out(
     ctx: &mut LowerCtx<'_>,
     span: Span,
     callee: CalleeRef,
-    args: &[HirExpr],
+    args: &ExprList,
     out: &crate::hir::HirOutArg,
     result_ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
@@ -581,11 +598,12 @@ fn lower_import_call_with_out(
 
     let mut arg_lanes = Vec::new();
     let mut value_arg = 0usize;
+    let args = ctx.arena.expr_list(*args);
     for arg_index in 0..(args.len() + 1) {
         if arg_index == out.arg_index {
             arg_lanes.push(addr);
         } else {
-            let arg = args.get(value_arg).ok_or_else(|| {
+            let arg = args.get(value_arg).copied().ok_or_else(|| {
                 Diagnostic::error(span, "internal lpfn out argument lowering mismatch")
             })?;
             arg_lanes.extend(lower_expr(ctx, arg)?.lanes);

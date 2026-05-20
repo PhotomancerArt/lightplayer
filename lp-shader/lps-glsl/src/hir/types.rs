@@ -1,11 +1,10 @@
-use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
 use lps_shared::{LpsModuleSig, LpsType, ParamQualifier, TextureBindingSpec};
 
-use super::place::HirPlace;
+use super::arena::{ExprId, ExprList, HirArena, PlaceId};
 use crate::Span;
 use crate::body::{BinaryOp, IncDecOp, UnaryOp};
 
@@ -72,6 +71,7 @@ pub struct HirParam {
 pub struct HirFunctionBody {
     pub locals: Vec<HirLocal>,
     pub statements: Vec<HirStmt>,
+    pub arena: HirArena,
 }
 
 #[derive(Debug, Clone)]
@@ -84,36 +84,36 @@ pub struct HirLocal {
 pub enum HirStmt {
     Let {
         local: usize,
-        init: HirExpr,
+        init: ExprId,
     },
     Assign {
         local: usize,
-        value: HirExpr,
+        value: ExprId,
     },
     If {
-        condition: HirExpr,
+        condition: ExprId,
         accept: Vec<HirStmt>,
         reject: Vec<HirStmt>,
     },
     For {
         init: Vec<HirStmt>,
-        condition: HirExpr,
+        condition: ExprId,
         continuing: Vec<HirStmt>,
         body: Vec<HirStmt>,
     },
     While {
-        condition: HirExpr,
+        condition: ExprId,
         body: Vec<HirStmt>,
     },
     DoWhile {
         body: Vec<HirStmt>,
-        condition: HirExpr,
+        condition: ExprId,
     },
     Break,
     Continue,
-    Expr(HirExpr),
+    Expr(ExprId),
     Return {
-        expr: Option<HirExpr>,
+        expr: Option<ExprId>,
         span: Span,
     },
 }
@@ -138,79 +138,77 @@ pub enum HirExprKind {
         index: usize,
     },
     Uniform {
-        name: String,
         byte_offset: u32,
     },
     Global {
-        name: String,
         byte_offset: u32,
     },
     Constructor {
-        args: Vec<HirExpr>,
+        args: ExprList,
     },
     Cast {
-        expr: Box<HirExpr>,
+        expr: ExprId,
     },
     Swizzle {
-        base: Box<HirExpr>,
+        base: ExprId,
         lanes: Vec<usize>,
     },
     Index {
-        base: Box<HirExpr>,
-        index: Box<HirExpr>,
+        base: ExprId,
+        index: ExprId,
     },
     Builtin {
         kind: BuiltinKind,
-        args: Vec<HirExpr>,
+        args: ExprList,
         writebacks: Vec<HirUserCallWriteback>,
     },
     UserCall {
         function: usize,
-        args: Vec<HirExpr>,
+        args: ExprList,
         writebacks: Vec<HirUserCallWriteback>,
     },
     ImportCall {
         import: ImportKey,
-        args: Vec<HirExpr>,
+        args: ExprList,
         out: Option<HirOutArg>,
     },
     TexelFetch {
         sampler: HirTextureOperand,
-        coord: Box<HirExpr>,
-        lod: Box<HirExpr>,
+        coord: ExprId,
+        lod: ExprId,
     },
     Texture {
         sampler: HirTextureOperand,
-        coord: Box<HirExpr>,
+        coord: ExprId,
         import: ImportKey,
     },
     Unary {
         op: UnaryOp,
-        expr: Box<HirExpr>,
+        expr: ExprId,
     },
     Binary {
         op: BinaryOp,
-        lhs: Box<HirExpr>,
-        rhs: Box<HirExpr>,
+        lhs: ExprId,
+        rhs: ExprId,
     },
     Sequence {
-        first: Box<HirExpr>,
-        second: Box<HirExpr>,
+        first: ExprId,
+        second: ExprId,
     },
     Conditional {
-        condition: Box<HirExpr>,
-        accept: Box<HirExpr>,
-        reject: Box<HirExpr>,
+        condition: ExprId,
+        accept: ExprId,
+        reject: ExprId,
     },
     PlaceRead {
-        target: HirAssignTarget,
+        target: PlaceId,
     },
     Assign {
-        target: HirAssignTarget,
-        value: Box<HirExpr>,
+        target: PlaceId,
+        value: ExprId,
     },
     IncDec {
-        target: HirAssignTarget,
+        target: PlaceId,
         op: IncDecOp,
         prefix: bool,
     },
@@ -232,20 +230,9 @@ pub struct HirTextureOperand {
 #[derive(Debug, Clone)]
 pub struct HirUserCallWriteback {
     pub arg_index: usize,
-    pub target: HirAssignTarget,
+    pub target: PlaceId,
     pub ty: LpsType,
     pub copy_in: bool,
-}
-
-#[derive(Debug, Clone)]
-pub struct HirAssignTarget {
-    pub(crate) place: HirPlace,
-}
-
-impl HirAssignTarget {
-    pub(super) fn ty(&self) -> &LpsType {
-        &self.place.ty
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

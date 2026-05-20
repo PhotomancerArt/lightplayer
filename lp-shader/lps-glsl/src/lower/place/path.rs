@@ -125,7 +125,7 @@ fn apply_segment(
             ..
         } => apply_field(place, span, *lane_offset, *lane_count, *byte_offset, ty),
         PlaceSegment::Swizzle { lanes, ty, .. } => apply_swizzle(place, span, lanes, ty),
-        PlaceSegment::Index { index, ty } => apply_index(ctx, span, place, index, ty),
+        PlaceSegment::Index { index, ty } => apply_index(ctx, span, place, *index, ty),
     }
 }
 
@@ -206,7 +206,7 @@ fn apply_index(
     ctx: &mut LowerCtx<'_>,
     span: Span,
     place: LoweredPlace,
-    index: &crate::hir::HirExpr,
+    index: crate::hir::ExprId,
     ty: &LpsType,
 ) -> Result<Option<LoweredPlace>, Diagnostic> {
     let place_ty = place_ty(&place);
@@ -227,7 +227,7 @@ fn apply_array_index(
     ctx: &mut LowerCtx<'_>,
     span: Span,
     place: LoweredPlace,
-    index: &crate::hir::HirExpr,
+    index: crate::hir::ExprId,
     ty: &LpsType,
     element: &LpsType,
     len: usize,
@@ -235,7 +235,7 @@ fn apply_array_index(
 ) -> Result<Option<LoweredPlace>, Diagnostic> {
     match place {
         LoweredPlace::Flat(flat) => {
-            let Some(index) = constant_index(index) else {
+            let Some(index) = constant_index(ctx.arena.expr(index)) else {
                 return Ok(None);
             };
             if index >= len {
@@ -253,7 +253,7 @@ fn apply_array_index(
             })))
         }
         LoweredPlace::Memory(memory) => {
-            if let Some(index) = constant_index(index) {
+            if let Some(index) = constant_index(ctx.arena.expr(index)) {
                 if index >= len {
                     return Ok(None);
                 }
@@ -282,16 +282,16 @@ fn apply_array_index(
 }
 
 fn apply_flat_index(
-    _ctx: &mut LowerCtx<'_>,
+    ctx: &mut LowerCtx<'_>,
     _span: Span,
     place: LoweredPlace,
-    index: &crate::hir::HirExpr,
+    index: crate::hir::ExprId,
     ty: &LpsType,
 ) -> Result<Option<LoweredPlace>, Diagnostic> {
     let LoweredPlace::Flat(flat) = place else {
         return Ok(None);
     };
-    let Some(index) = constant_index(index) else {
+    let Some(index) = constant_index(ctx.arena.expr(index)) else {
         return Ok(None);
     };
     let width = crate::hir::scalar_lane_count(ty);

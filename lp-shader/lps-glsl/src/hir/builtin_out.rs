@@ -1,13 +1,12 @@
 use alloc::format;
-use alloc::vec;
-
 use lps_shared::LpsType;
 
 use crate::body::ParsedExpr;
 use crate::{Diagnostic, Span};
 
+use super::arena::ExprId;
 use super::typeck::TypeCtx;
-use super::types::{BuiltinKind, HirExpr, HirExprKind, HirUserCallWriteback};
+use super::types::{BuiltinKind, HirExprKind, HirUserCallWriteback};
 use super::typing::{coerce_arithmetic_pair, scalar_base_type};
 
 impl<'a> TypeCtx<'a> {
@@ -16,42 +15,44 @@ impl<'a> TypeCtx<'a> {
         span: Span,
         kind: BuiltinKind,
         args: &[ParsedExpr],
-    ) -> Result<HirExpr, Diagnostic> {
+    ) -> Result<ExprId, Diagnostic> {
         match kind {
             BuiltinKind::Modf => {
                 if args.len() != 2 {
                     return Err(Diagnostic::error(span, "builtin expects 2 arguments"));
                 }
                 let value = self.type_expr(&args[0])?;
-                if value.ty.is_matrix() || scalar_base_type(&value.ty) != Some(LpsType::Float) {
+                let value_ty = self.arena.expr_ty(value).clone();
+                if value_ty.is_matrix() || scalar_base_type(&value_ty) != Some(LpsType::Float) {
                     return Err(Diagnostic::error(
                         args[0].span,
                         "modf expects float scalar/vector lanes",
                     ));
                 }
-                let ty = value.ty.clone();
+                let ty = value_ty;
                 let integer = self.type_assign_target(&args[1])?;
-                if integer.ty() != &ty {
+                if self.arena.place(integer).ty != ty {
                     return Err(Diagnostic::error(
                         args[1].span,
                         "out argument type must match builtin argument type",
                     ));
                 }
 
-                Ok(HirExpr {
+                let args = self.arena.push_expr_list([value]);
+                Ok(self.arena.push_expr(
                     span,
-                    ty: ty.clone(),
-                    kind: HirExprKind::Builtin {
+                    ty.clone(),
+                    HirExprKind::Builtin {
                         kind,
-                        args: vec![value],
-                        writebacks: vec![HirUserCallWriteback {
+                        args,
+                        writebacks: alloc::vec![HirUserCallWriteback {
                             arg_index: 1,
                             target: integer,
                             ty,
                             copy_in: false,
                         }],
                     },
-                })
+                ))
             }
             BuiltinKind::UaddCarry | BuiltinKind::UsubBorrow => {
                 if args.len() != 3 {
@@ -59,31 +60,32 @@ impl<'a> TypeCtx<'a> {
                 }
                 let lhs = self.type_expr(&args[0])?;
                 let rhs = self.type_expr(&args[1])?;
-                let (lhs, rhs, ty) = coerce_arithmetic_pair(span, lhs, rhs)?;
+                let (lhs, rhs, ty) = coerce_arithmetic_pair(&mut self.arena, span, lhs, rhs)?;
                 require_integer_lane_type(span, kind, &ty, LpsType::UInt)?;
 
                 let carry = self.type_assign_target(&args[2])?;
-                if carry.ty() != &ty {
+                if self.arena.place(carry).ty != ty {
                     return Err(Diagnostic::error(
                         args[2].span,
                         "out argument type must match builtin argument type",
                     ));
                 }
 
-                Ok(HirExpr {
+                let args = self.arena.push_expr_list([lhs, rhs]);
+                Ok(self.arena.push_expr(
                     span,
-                    ty: ty.clone(),
-                    kind: HirExprKind::Builtin {
+                    ty.clone(),
+                    HirExprKind::Builtin {
                         kind,
-                        args: vec![lhs, rhs],
-                        writebacks: vec![HirUserCallWriteback {
+                        args,
+                        writebacks: alloc::vec![HirUserCallWriteback {
                             arg_index: 2,
                             target: carry,
                             ty,
                             copy_in: false,
                         }],
                     },
-                })
+                ))
             }
             BuiltinKind::UmulExtended | BuiltinKind::ImulExtended => {
                 if args.len() != 4 {
@@ -91,7 +93,7 @@ impl<'a> TypeCtx<'a> {
                 }
                 let lhs = self.type_expr(&args[0])?;
                 let rhs = self.type_expr(&args[1])?;
-                let (lhs, rhs, ty) = coerce_arithmetic_pair(span, lhs, rhs)?;
+                let (lhs, rhs, ty) = coerce_arithmetic_pair(&mut self.arena, span, lhs, rhs)?;
                 let required = match kind {
                     BuiltinKind::UmulExtended => LpsType::UInt,
                     BuiltinKind::ImulExtended => LpsType::Int,
@@ -101,20 +103,21 @@ impl<'a> TypeCtx<'a> {
 
                 let msb = self.type_assign_target(&args[2])?;
                 let lsb = self.type_assign_target(&args[3])?;
-                if msb.ty() != &ty || lsb.ty() != &ty {
+                if self.arena.place(msb).ty != ty || self.arena.place(lsb).ty != ty {
                     return Err(Diagnostic::error(
                         span,
                         "out argument types must match builtin argument type",
                     ));
                 }
 
-                Ok(HirExpr {
+                let args = self.arena.push_expr_list([lhs, rhs]);
+                Ok(self.arena.push_expr(
                     span,
-                    ty: LpsType::Void,
-                    kind: HirExprKind::Builtin {
+                    LpsType::Void,
+                    HirExprKind::Builtin {
                         kind,
-                        args: vec![lhs, rhs],
-                        writebacks: vec![
+                        args,
+                        writebacks: alloc::vec![
                             HirUserCallWriteback {
                                 arg_index: 2,
                                 target: msb,
@@ -129,7 +132,7 @@ impl<'a> TypeCtx<'a> {
                             },
                         ],
                     },
-                })
+                ))
             }
             _ => Err(Diagnostic::error(
                 span,

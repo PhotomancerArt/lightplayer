@@ -1,6 +1,6 @@
 use lpir::LpirOp;
 
-use crate::hir::HirAssignTarget;
+use crate::hir::PlaceId;
 use crate::{Diagnostic, Span};
 
 use super::super::{LowerCtx, LowerValue};
@@ -9,10 +9,11 @@ use super::path::{LoweredPlace, MemoryPlace, lower_place};
 pub(in crate::lower) fn try_assign_place_direct(
     ctx: &mut LowerCtx<'_>,
     span: Span,
-    target: &HirAssignTarget,
+    target: PlaceId,
     value: &LowerValue,
 ) -> Result<bool, Diagnostic> {
-    let Some(place) = lower_place(ctx, span, &target.place.root, &target.place.segments)? else {
+    let target = ctx.arena.place(target);
+    let Some(place) = lower_place(ctx, span, &target.root, &target.segments)? else {
         return Ok(false);
     };
     match place {

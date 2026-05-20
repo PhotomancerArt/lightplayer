@@ -1,4 +1,3 @@
-use alloc::boxed::Box;
 use alloc::string::String;
 use alloc::vec::Vec;
 
@@ -6,9 +5,9 @@ use lps_shared::LpsType;
 
 use crate::{Diagnostic, Span};
 
+use super::arena::ExprId;
 use super::scalar::{scalar_base_type, scalar_lane_count};
 use super::shape::TypeShape;
-use super::types::HirExpr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[allow(
@@ -69,7 +68,7 @@ pub(crate) enum PlaceSegment {
         ty: LpsType,
     },
     Index {
-        index: Box<HirExpr>,
+        index: ExprId,
         ty: LpsType,
     },
 }
@@ -144,13 +143,12 @@ impl HirPlace {
         Ok(())
     }
 
-    pub(super) fn push_index(&mut self, index: HirExpr) -> Result<(), Diagnostic> {
-        let span = index.span;
+    pub(super) fn push_index(&mut self, index: ExprId, span: Span) -> Result<(), Diagnostic> {
         let shape = TypeShape::new(&self.ty);
         if let Some(column_ty) = shape.matrix_column().cloned() {
             self.ty = column_ty.clone();
             self.segments.push(PlaceSegment::Index {
-                index: Box::new(index),
+                index,
                 ty: column_ty,
             });
             return Ok(());
@@ -158,18 +156,12 @@ impl HirPlace {
         if let Some((element, _, _)) = shape.array_element() {
             let ty = element.clone();
             self.ty = ty.clone();
-            self.segments.push(PlaceSegment::Index {
-                index: Box::new(index),
-                ty,
-            });
+            self.segments.push(PlaceSegment::Index { index, ty });
             return Ok(());
         }
         if let Some(base) = scalar_base_type(&self.ty) {
             self.ty = base.clone();
-            self.segments.push(PlaceSegment::Index {
-                index: Box::new(index),
-                ty: base,
-            });
+            self.segments.push(PlaceSegment::Index { index, ty: base });
             return Ok(());
         }
         Err(Diagnostic::error(
@@ -242,7 +234,7 @@ mod tests {
     use lps_shared::StructMember;
 
     use super::*;
-    use crate::hir::{HirExpr, HirExprKind};
+    use crate::hir::{HirArena, HirExprKind};
 
     #[test]
     fn place_struct_field_keeps_lane_and_byte_metadata() {
@@ -293,8 +285,10 @@ mod tests {
             element: Box::new(LpsType::Vec3),
             len: 2,
         };
+        let mut arena = HirArena::default();
         let mut place = local_place(0, ty);
-        place.push_index(int_expr(1)).unwrap();
+        let index = int_expr(&mut arena, 1);
+        place.push_index(index, Span::new(0, 1)).unwrap();
         assert_eq!(place.ty, LpsType::Vec3);
         assert_eq!(place.segments.len(), 1);
     }
@@ -303,11 +297,11 @@ mod tests {
         HirPlace::local(local, ty)
     }
 
-    fn int_expr(value: i32) -> HirExpr {
-        HirExpr {
-            span: Span::new(0, 1),
-            ty: LpsType::Int,
-            kind: HirExprKind::IntLiteral(value),
-        }
+    fn int_expr(arena: &mut HirArena, value: i32) -> ExprId {
+        arena.push_expr(
+            Span::new(0, 1),
+            LpsType::Int,
+            HirExprKind::IntLiteral(value),
+        )
     }
 }

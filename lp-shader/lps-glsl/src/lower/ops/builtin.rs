@@ -5,7 +5,7 @@ use lpir::{IrType, LpirOp};
 use lps_shared::LpsType;
 
 use crate::body::BinaryOp;
-use crate::hir::{BuiltinKind, HirExpr, HirUserCallWriteback, scalar_base_type, scalar_lane_count};
+use crate::hir::{BuiltinKind, ExprId, HirUserCallWriteback, scalar_base_type, scalar_lane_count};
 use crate::{Diagnostic, Span};
 
 use super::super::{LowerCtx, LowerValue, lower_expr};
@@ -27,13 +27,13 @@ pub(in crate::lower) fn lower_builtin(
     ctx: &mut LowerCtx<'_>,
     span: Span,
     kind: BuiltinKind,
-    args: &[HirExpr],
+    args: &[ExprId],
     writebacks: &[HirUserCallWriteback],
     result_ty: &LpsType,
 ) -> Result<LowerValue, Diagnostic> {
     let values = args
         .iter()
-        .map(|arg| lower_expr(ctx, arg))
+        .map(|arg| lower_expr(ctx, *arg))
         .collect::<Result<Vec<_>, _>>()?;
     if let Some(value) =
         lower_integer_writeback_builtin(ctx, span, kind, &values, writebacks, result_ty)?
@@ -343,7 +343,7 @@ fn lower_modf_builtin(
     assign_target(
         ctx,
         span,
-        &integer_writeback.target,
+        integer_writeback.target,
         LowerValue {
             ty: integer_writeback.ty.clone(),
             lanes: integer_lanes,

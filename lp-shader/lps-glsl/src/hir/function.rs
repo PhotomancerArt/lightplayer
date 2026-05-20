@@ -5,7 +5,8 @@ use alloc::vec::Vec;
 
 use lps_shared::LpsType;
 
-use super::types::{HirExpr, HirParam, ImportInfo, ImportKey};
+use super::arena::{ExprId, HirArena};
+use super::types::{HirParam, ImportInfo, ImportKey};
 
 #[derive(Debug, Clone)]
 pub(super) struct FunctionSig {
@@ -16,7 +17,8 @@ pub(super) struct FunctionSig {
 
 #[derive(Debug, Clone)]
 pub(super) struct GlobalConst {
-    pub(super) expr: HirExpr,
+    pub(super) arena: HirArena,
+    pub(super) expr: ExprId,
 }
 
 #[derive(Debug, Default)]

@@ -5,30 +5,34 @@ use lps_shared::LpsType;
 
 use crate::{Diagnostic, Span};
 
-use super::const_fold::cast_expr;
+use super::arena::{ExprId, ExprList, HirArena};
+use super::const_fold::fold_cast;
 use super::scalar::{scalar_base_type, scalar_lane_count};
-use super::types::{HirExpr, HirExprKind};
+use super::types::HirExprKind;
 
 pub(super) fn coerce_constructor_args(
+    arena: &mut HirArena,
     span: Span,
     target_ty: &LpsType,
-    args: Vec<HirExpr>,
-) -> Result<Vec<HirExpr>, Diagnostic> {
+    args: ExprList,
+) -> Result<ExprList, Diagnostic> {
+    let arg_ids = arena.expr_list(args).to_vec();
     let expected_lanes = scalar_lane_count(target_ty);
-    let actual_lanes = args
+    let actual_lanes = arg_ids
         .iter()
-        .map(|arg| scalar_lane_count(&arg.ty))
+        .map(|arg| scalar_lane_count(arena.expr_ty(*arg)))
         .sum::<usize>();
-    if target_ty.is_matrix() && args.len() == 1 && args[0].ty.is_matrix() {
+    if target_ty.is_matrix() && arg_ids.len() == 1 && arena.expr_ty(arg_ids[0]).is_matrix() {
         return Ok(args);
     }
     if let LpsType::Array { element, len } = target_ty
-        && args.len() == *len as usize
+        && arg_ids.len() == *len as usize
     {
-        return args
-            .into_iter()
-            .map(|arg| coerce_expr(arg, element))
-            .collect();
+        let mut coerced = Vec::with_capacity(arg_ids.len());
+        for arg in arg_ids {
+            coerced.push(coerce_expr(arena, arg, element)?);
+        }
+        return Ok(arena.push_expr_list(coerced));
     }
     if matches!(target_ty, LpsType::Struct { .. }) {
         if actual_lanes == expected_lanes {
@@ -43,25 +47,26 @@ pub(super) fn coerce_constructor_args(
     }
     if actual_lanes >= expected_lanes {
         let expected_scalar = scalar_base_type(target_ty).unwrap_or_else(|| target_ty.clone());
-        return args
-            .into_iter()
-            .map(|arg| {
-                let arg_scalar = scalar_base_type(&arg.ty).unwrap_or_else(|| arg.ty.clone());
-                if arg_scalar == expected_scalar {
-                    Ok(arg)
+        let mut coerced = Vec::with_capacity(arg_ids.len());
+        for arg in arg_ids {
+            let arg_ty = arena.expr_ty(arg).clone();
+            let arg_scalar = scalar_base_type(&arg_ty).unwrap_or_else(|| arg_ty.clone());
+            if arg_scalar == expected_scalar {
+                coerced.push(arg);
+            } else {
+                let target = if scalar_lane_count(&arg_ty) > 1 {
+                    LpsType::vector_type(&expected_scalar, scalar_lane_count(&arg_ty))
+                        .unwrap_or_else(|| expected_scalar.clone())
                 } else {
-                    let target = if scalar_lane_count(&arg.ty) > 1 {
-                        LpsType::vector_type(&expected_scalar, scalar_lane_count(&arg.ty))
-                            .unwrap_or_else(|| expected_scalar.clone())
-                    } else {
-                        expected_scalar.clone()
-                    };
-                    coerce_expr(arg, &target)
-                }
-            })
-            .collect();
+                    expected_scalar.clone()
+                };
+                coerced.push(coerce_expr(arena, arg, &target)?);
+            }
+        }
+        return Ok(arena.push_expr_list(coerced));
     }
-    if args.len() == 1 && expected_lanes > 1 && scalar_lane_count(&args[0].ty) == 1 {
+    if arg_ids.len() == 1 && expected_lanes > 1 && scalar_lane_count(arena.expr_ty(arg_ids[0])) == 1
+    {
         return Ok(args);
     }
     Err(Diagnostic::error(
@@ -73,82 +78,102 @@ pub(super) fn coerce_constructor_args(
 }
 
 pub(super) fn coerce_arithmetic_pair(
+    arena: &mut HirArena,
     span: Span,
-    lhs: HirExpr,
-    rhs: HirExpr,
-) -> Result<(HirExpr, HirExpr, LpsType), Diagnostic> {
-    let ty = vector_dominant_type(&[&lhs.ty, &rhs.ty])
+    lhs: ExprId,
+    rhs: ExprId,
+) -> Result<(ExprId, ExprId, LpsType), Diagnostic> {
+    let ty = vector_dominant_type(&[arena.expr_ty(lhs), arena.expr_ty(rhs)])
         .ok_or_else(|| Diagnostic::error(span, "unsupported arithmetic operand types"))?;
     if ty.is_matrix() {
-        let lhs = coerce_matrix_arithmetic_operand(lhs, &ty)?;
-        let rhs = coerce_matrix_arithmetic_operand(rhs, &ty)?;
+        let lhs = coerce_matrix_arithmetic_operand(arena, lhs, &ty)?;
+        let rhs = coerce_matrix_arithmetic_operand(arena, rhs, &ty)?;
         return Ok((lhs, rhs, ty));
     }
-    Ok((coerce_expr(lhs, &ty)?, coerce_expr(rhs, &ty)?, ty))
+    Ok((
+        coerce_expr(arena, lhs, &ty)?,
+        coerce_expr(arena, rhs, &ty)?,
+        ty,
+    ))
 }
 
 fn coerce_matrix_arithmetic_operand(
-    expr: HirExpr,
+    arena: &mut HirArena,
+    expr: ExprId,
     matrix_ty: &LpsType,
-) -> Result<HirExpr, Diagnostic> {
-    if expr.ty == *matrix_ty {
+) -> Result<ExprId, Diagnostic> {
+    if arena.expr_ty(expr) == matrix_ty {
         return Ok(expr);
     }
-    coerce_expr(expr, &LpsType::Float)
+    coerce_expr(arena, expr, &LpsType::Float)
 }
 
 pub(super) fn coerce_comparison_pair(
+    arena: &mut HirArena,
     span: Span,
-    lhs: HirExpr,
-    rhs: HirExpr,
-) -> Result<(HirExpr, HirExpr, LpsType), Diagnostic> {
-    let ty = vector_dominant_type(&[&lhs.ty, &rhs.ty])
+    lhs: ExprId,
+    rhs: ExprId,
+) -> Result<(ExprId, ExprId, LpsType), Diagnostic> {
+    let ty = vector_dominant_type(&[arena.expr_ty(lhs), arena.expr_ty(rhs)])
         .ok_or_else(|| Diagnostic::error(span, "unsupported comparison operand types"))?;
     let result_ty = comparison_result_type(&ty)
         .ok_or_else(|| Diagnostic::error(span, "unsupported comparison result type"))?;
-    Ok((coerce_expr(lhs, &ty)?, coerce_expr(rhs, &ty)?, result_ty))
+    Ok((
+        coerce_expr(arena, lhs, &ty)?,
+        coerce_expr(arena, rhs, &ty)?,
+        result_ty,
+    ))
 }
 
-pub(super) fn coerce_expr(expr: HirExpr, target: &LpsType) -> Result<HirExpr, Diagnostic> {
-    if expr.ty == *target {
+pub(super) fn coerce_expr(
+    arena: &mut HirArena,
+    expr: ExprId,
+    target: &LpsType,
+) -> Result<ExprId, Diagnostic> {
+    let expr_ty = arena.expr_ty(expr).clone();
+    if expr_ty == *target {
         return Ok(expr);
     }
-    if scalar_lane_count(&expr.ty) == 1 && scalar_lane_count(target) > 1 {
+    if scalar_lane_count(&expr_ty) == 1 && scalar_lane_count(target) > 1 {
         let scalar = scalar_base_type(target).unwrap_or_else(|| target.clone());
-        let expr = coerce_expr(expr, &scalar)?;
-        return Ok(HirExpr {
-            span: expr.span,
-            ty: target.clone(),
-            kind: HirExprKind::Constructor {
-                args: alloc::vec![expr],
-            },
-        });
+        let expr = coerce_expr(arena, expr, &scalar)?;
+        let args = arena.push_expr_list([expr]);
+        let span = arena.expr_span(expr);
+        return Ok(arena.push_expr(span, target.clone(), HirExprKind::Constructor { args }));
     }
-    if scalar_lane_count(&expr.ty) == scalar_lane_count(target)
-        && scalar_base_type(&expr.ty).is_some()
+    if scalar_lane_count(&expr_ty) == scalar_lane_count(target)
+        && scalar_base_type(&expr_ty).is_some()
         && scalar_base_type(target).is_some()
     {
-        return Ok(cast_expr(expr.span, target.clone(), expr));
+        return Ok(cast_expr(arena, expr, target.clone()));
     }
-    match (&expr.ty, target) {
+    match (&expr_ty, target) {
         (LpsType::Int, LpsType::Float)
         | (LpsType::UInt, LpsType::Float)
         | (LpsType::Float, LpsType::Int)
         | (LpsType::Float, LpsType::UInt)
         | (LpsType::Int, LpsType::UInt)
-        | (LpsType::UInt, LpsType::Int) => Ok(cast_expr(expr.span, target.clone(), expr)),
-        (LpsType::Bool, LpsType::Float)
+        | (LpsType::UInt, LpsType::Int)
+        | (LpsType::Bool, LpsType::Float)
         | (LpsType::Bool, LpsType::Int)
         | (LpsType::Bool, LpsType::UInt)
         | (LpsType::Float, LpsType::Bool)
         | (LpsType::Int, LpsType::Bool)
-        | (LpsType::UInt, LpsType::Bool) => Ok(cast_expr(expr.span, target.clone(), expr)),
+        | (LpsType::UInt, LpsType::Bool) => Ok(cast_expr(arena, expr, target.clone())),
         (LpsType::Bool, LpsType::Bool) => Ok(expr),
         _ => Err(Diagnostic::error(
-            expr.span,
-            format!("cannot coerce {:?} to {:?}", expr.ty, target),
+            arena.expr_span(expr),
+            format!("cannot coerce {:?} to {:?}", expr_ty, target),
         )),
     }
+}
+
+fn cast_expr(arena: &mut HirArena, expr: ExprId, target: LpsType) -> ExprId {
+    let span = arena.expr_span(expr);
+    if let Some(folded) = fold_cast(span, &target, arena.expr(expr)) {
+        return arena.push_expr(folded.span, folded.ty, folded.kind);
+    }
+    arena.push_expr(span, target, HirExprKind::Cast { expr })
 }
 
 pub(super) fn vector_dominant_type(types: &[&LpsType]) -> Option<LpsType> {
@@ -190,51 +215,35 @@ pub(super) fn comparison_result_type(operand_ty: &LpsType) -> Option<LpsType> {
     }
 }
 
-pub(super) fn zero_expr(span: Span, ty: &LpsType) -> Result<HirExpr, Diagnostic> {
+pub(super) fn zero_expr(
+    arena: &mut HirArena,
+    span: Span,
+    ty: &LpsType,
+) -> Result<ExprId, Diagnostic> {
     if let LpsType::Array { element, len } = ty {
         let mut args = Vec::new();
         for _ in 0..*len {
-            args.push(zero_expr(span, element)?);
+            args.push(zero_expr(arena, span, element)?);
         }
-        return Ok(HirExpr {
-            span,
-            ty: ty.clone(),
-            kind: HirExprKind::Constructor { args },
-        });
+        let args = arena.push_expr_list(args);
+        return Ok(arena.push_expr(span, ty.clone(), HirExprKind::Constructor { args }));
     }
     if let LpsType::Struct { members, .. } = ty {
-        let args = members
-            .iter()
-            .map(|member| zero_expr(span, &member.ty))
-            .collect::<Result<Vec<_>, _>>()?;
-        return Ok(HirExpr {
-            span,
-            ty: ty.clone(),
-            kind: HirExprKind::Constructor { args },
-        });
+        let mut args = Vec::new();
+        for member in members {
+            args.push(zero_expr(arena, span, &member.ty)?);
+        }
+        let args = arena.push_expr_list(args);
+        return Ok(arena.push_expr(span, ty.clone(), HirExprKind::Constructor { args }));
     }
-    let scalar = match scalar_base_type(ty).unwrap_or_else(|| ty.clone()) {
-        LpsType::Float => HirExpr {
-            span,
-            ty: LpsType::Float,
-            kind: HirExprKind::FloatLiteral(0.0),
-        },
-        LpsType::Int => HirExpr {
-            span,
-            ty: LpsType::Int,
-            kind: HirExprKind::IntLiteral(0),
-        },
-        LpsType::UInt => HirExpr {
-            span,
-            ty: LpsType::UInt,
-            kind: HirExprKind::UIntLiteral(0),
-        },
-        LpsType::Bool => HirExpr {
-            span,
-            ty: LpsType::Bool,
-            kind: HirExprKind::BoolLiteral(false),
-        },
+    let scalar_ty = scalar_base_type(ty).unwrap_or_else(|| ty.clone());
+    let kind = match scalar_ty {
+        LpsType::Float => HirExprKind::FloatLiteral(0.0),
+        LpsType::Int => HirExprKind::IntLiteral(0),
+        LpsType::UInt => HirExprKind::UIntLiteral(0),
+        LpsType::Bool => HirExprKind::BoolLiteral(false),
         _ => return Err(Diagnostic::error(span, "unsupported zero initializer type")),
     };
-    coerce_expr(scalar, ty)
+    let scalar = arena.push_expr(span, scalar_ty, kind);
+    coerce_expr(arena, scalar, ty)
 }

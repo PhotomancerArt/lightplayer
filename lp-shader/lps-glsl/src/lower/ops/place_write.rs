@@ -1,6 +1,6 @@
 use alloc::format;
 
-use crate::hir::{HirAssignTarget, PlaceRoot};
+use crate::hir::{PlaceId, PlaceRoot};
 use crate::{Diagnostic, Span};
 
 use super::super::place::try_assign_place_direct;
@@ -15,10 +15,10 @@ use super::place_read::root_value;
 pub(in crate::lower) fn assign_target(
     ctx: &mut LowerCtx<'_>,
     span: Span,
-    target: &HirAssignTarget,
+    target: PlaceId,
     value: LowerValue,
 ) -> Result<(), Diagnostic> {
-    let place = &target.place;
+    let place = ctx.arena.place(target);
     if place.segments.is_empty() {
         return assign_root(ctx, span, &place.root, value);
     }

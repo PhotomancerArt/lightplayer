@@ -281,7 +281,7 @@ fn lower_add_sub_carry_builtin(
     assign_target(
         ctx,
         span,
-        &carry_writeback.target,
+        carry_writeback.target,
         LowerValue {
             ty: carry_writeback.ty.clone(),
             lanes: carry_lanes,
@@ -326,7 +326,7 @@ fn lower_mul_extended_builtin(
     assign_target(
         ctx,
         span,
-        &msb_writeback.target,
+        msb_writeback.target,
         LowerValue {
             ty: msb_writeback.ty.clone(),
             lanes: msb_lanes,
@@ -335,7 +335,7 @@ fn lower_mul_extended_builtin(
     assign_target(
         ctx,
         span,
-        &lsb_writeback.target,
+        lsb_writeback.target,
         LowerValue {
             ty: lsb_writeback.ty.clone(),
             lanes: lsb_lanes,

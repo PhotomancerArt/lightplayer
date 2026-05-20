@@ -28,7 +28,7 @@ pub(super) fn read_segments(
         } => read_contiguous_lanes(span, value, *lane_offset, *lane_count, ty)?,
         PlaceSegment::Swizzle { lanes, ty, .. } => read_lane_map(span, value, lanes, ty)?,
         PlaceSegment::Index { index, ty } => {
-            let index = lower_expr(ctx, index)?;
+            let index = lower_expr(ctx, *index)?;
             lower_index(ctx, span, value, index, ty)?
         }
     };
@@ -66,7 +66,7 @@ pub(super) fn assign_segments(
             assign_lane_map(ctx, span, value, lanes, ty, rest, assignment)
         }
         PlaceSegment::Index { index, ty } => {
-            let index = lower_expr(ctx, index)?;
+            let index = lower_expr(ctx, *index)?;
             if rest.is_empty() {
                 assign_index_value(ctx, span, value.clone(), index, ty, assignment)?;
                 return Ok(value);

@@ -4,7 +4,7 @@ use lpir::{IrType, LpirOp};
 use lps_shared::LpsType;
 
 use crate::body::{BinaryOp, IncDecOp};
-use crate::hir::{HirAssignTarget, scalar_base_type, scalar_ir_types, scalar_lane_count};
+use crate::hir::{PlaceId, scalar_base_type, scalar_ir_types, scalar_lane_count};
 use crate::{Diagnostic, Span};
 
 use super::super::{LowerCtx, LowerValue};
@@ -56,7 +56,7 @@ pub(in crate::lower) fn lower_select(
 pub(in crate::lower) fn lower_inc_dec(
     ctx: &mut LowerCtx<'_>,
     span: Span,
-    target: &HirAssignTarget,
+    target: PlaceId,
     op: IncDecOp,
     prefix: bool,
 ) -> Result<LowerValue, Diagnostic> {
