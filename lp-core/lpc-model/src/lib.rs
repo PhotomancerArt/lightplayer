@@ -85,10 +85,11 @@ pub use node::{
     NodeNameError, RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc,
 };
 pub use nodes::{
-    AddSubMode, ClockControls, ClockDef, ClockDefView, ClockState, ColorOrder, ComputeShaderDef,
-    ComputeShaderDefView, DivMode, FixtureDef, FixtureDefView, FixtureSamplingConfig, FixtureState,
-    FixtureStateView, FluidDef, FluidDefView, FluidEmitter, FluidState, GlslOpts, GlslOptsView,
-    MappingConfig, MulMode, NodeDefParseError, OutputDef, OutputDefView, OutputDriverOptionsConfig,
+    AddSubMode, ButtonDef, ButtonDefView, ButtonState, ButtonStateView, ClockControls, ClockDef,
+    ClockDefView, ClockState, ColorOrder, ComputeShaderDef, ComputeShaderDefView, DivMode,
+    FixtureDef, FixtureDefView, FixtureSamplingConfig, FixtureState, FixtureStateView, FluidDef,
+    FluidDefView, FluidEmitter, FluidState, GlslOpts, GlslOptsView, MappingConfig, MulMode,
+    NodeDefParseError, OutputDef, OutputDefView, OutputDriverOptionsConfig,
     OutputDriverOptionsConfigView, PathSpec, ProjectDef, ProjectDefView, RingOrder, ScalarHint,
     ScalarHintView, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,
     ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,

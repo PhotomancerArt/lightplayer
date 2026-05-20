@@ -147,6 +147,21 @@ impl HardwareSystem {
         }
     }
 
+    pub fn open_button_by_spec(
+        &self,
+        spec: &HardwareEndpointSpec,
+        config: ButtonConfig,
+    ) -> Result<Box<dyn ButtonInput>, HardwareEndpointError> {
+        match endpoint_for_spec(self.button_endpoints(), spec) {
+            EndpointAddressMatch::Available(endpoint) => self.open_button(endpoint.id(), config),
+            EndpointAddressMatch::Unavailable(endpoint) => self.open_button(endpoint.id(), config),
+            EndpointAddressMatch::Missing => Err(HardwareEndpointError::UnknownEndpoint {
+                kind: HardwareEndpointKind::Button,
+                endpoint_id: HardwareEndpointId::new(spec.as_str()),
+            }),
+        }
+    }
+
     pub fn open_radio(
         &self,
         endpoint_id: &HardwareEndpointId,
@@ -336,6 +351,23 @@ mod tests {
             result,
             Err(HardwareEndpointError::UnknownEndpoint { .. })
         ));
+    }
+
+    #[test]
+    fn virtual_system_opens_button_by_endpoint_spec() {
+        let registry = Rc::new(HardwareRegistry::new(test_manifest()));
+        let mut system = HardwareSystem::new(Rc::clone(&registry));
+        let driver = VirtualButtonDriver::new(Rc::clone(&registry));
+        let control = driver.clone();
+        system.add_button_driver(Box::new(driver));
+        let spec = HardwareEndpointSpec::from_static("button:gpio:GPIO4");
+        let mut input = system
+            .open_button_by_spec(&spec, ButtonConfig::new(10))
+            .unwrap();
+
+        control.set_pressed(HardwareAddress::gpio(4), true);
+        assert!(input.poll(0).is_none());
+        assert!(input.poll(10).is_some());
     }
 
     #[test]

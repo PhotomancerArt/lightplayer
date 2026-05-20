@@ -24,7 +24,7 @@ pub mod resources;
 
 pub use engine::error::Error;
 pub use engine::{
-    Engine, EngineError, EngineServices, FrameNum, FrameTime, OutputFlushError, ProjectLoadError,
-    ProjectLoader,
+    ButtonService, Engine, EngineError, EngineServices, FrameNum, FrameTime, OutputFlushError,
+    ProjectLoadError, ProjectLoader,
 };
 pub use gfx::{Graphics, LpGraphics, LpShader, ShaderCompileOptions};

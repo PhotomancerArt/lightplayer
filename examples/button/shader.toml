@@ -1,0 +1,20 @@
+kind = "Shader"
+glsl_path = "shader.glsl"
+render_order = 0
+
+[bindings.output]
+target = "bus#visual.out"
+
+[bindings.held]
+source = "bus#trigger"
+
+[glsl_opts]
+add_sub = "wrapping"
+mul = "wrapping"
+div = "reciprocal"
+
+[consumed_slots.held]
+kind = "map"
+key = "u32"
+value = "lp::control::Message"
+mapping = { kind = "sentinel", len = 1, key = "id", empty_key = 0 }

@@ -13,6 +13,7 @@ use super::{
     HardwareRegistry,
 };
 
+#[derive(Clone)]
 pub struct VirtualButtonDriver {
     registry: Rc<HardwareRegistry>,
     driver_id: String,

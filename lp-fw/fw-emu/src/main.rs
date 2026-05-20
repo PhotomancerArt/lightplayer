@@ -109,12 +109,14 @@ pub extern "C" fn _lp_main() -> ! {
     // Create server (with time provider for shader comp timing)
     let time_provider_rc = Rc::new(SyscallTimeProvider::new());
     let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
-    let server = LpServer::new(
+    let button_service: Rc<dyn lpa_server::ButtonService> = hardware_system.clone();
+    let server = LpServer::new_with_button_service(
         output_provider,
         base_fs,
         "projects/".as_path(),
         None,
         Some(time_provider_rc),
+        Some(button_service),
         graphics,
     );
 

@@ -10,7 +10,7 @@ use alloc::{boxed::Box, format, rc::Rc, string::ToString, sync::Arc, vec::Vec};
 use core::cell::RefCell;
 use hashbrown::HashMap;
 use log;
-use lpc_engine::LpGraphics;
+use lpc_engine::{ButtonService, LpGraphics};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
@@ -40,6 +40,8 @@ pub struct LpServer {
     memory_stats: Option<MemoryStatsFn>,
     /// Optional time provider for perf timing (e.g. shader comp). ESP32/emu pass, others None.
     time_provider: Option<Rc<dyn TimeProvider>>,
+    /// Optional hardware button service for input nodes.
+    button_service: Option<Rc<dyn ButtonService>>,
     /// Shader backend (Cranelift, WASM, …).
     graphics: Arc<dyn LpGraphics>,
 }
@@ -84,6 +86,26 @@ impl LpServer {
         time_provider: Option<Rc<dyn TimeProvider>>,
         graphics: Arc<dyn LpGraphics>,
     ) -> Self {
+        Self::new_with_button_service(
+            output_provider,
+            base_fs,
+            projects_base_dir,
+            memory_stats,
+            time_provider,
+            None,
+            graphics,
+        )
+    }
+
+    pub fn new_with_button_service(
+        output_provider: Rc<RefCell<dyn OutputProvider>>,
+        base_fs: Box<dyn LpFs>,
+        projects_base_dir: &LpPath,
+        memory_stats: Option<MemoryStatsFn>,
+        time_provider: Option<Rc<dyn TimeProvider>>,
+        button_service: Option<Rc<dyn ButtonService>>,
+        graphics: Arc<dyn LpGraphics>,
+    ) -> Self {
         let project_manager = ProjectManager::new(projects_base_dir);
         Self {
             output_provider,
@@ -92,6 +114,7 @@ impl LpServer {
             last_frame_time_us: RefCell::new(None),
             memory_stats,
             time_provider,
+            button_service,
             graphics,
         }
     }
@@ -278,6 +301,7 @@ impl LpServer {
                         &self.output_provider,
                         self.memory_stats.as_ref(),
                         self.time_provider.clone(),
+                        self.button_service.clone(),
                         self.graphics.clone(),
                         client_msg,
                         theoretical_fps,
@@ -367,6 +391,7 @@ impl LpServer {
                                 &self.output_provider,
                                 self.memory_stats.as_ref(),
                                 self.time_provider.clone(),
+                                self.button_service.clone(),
                                 self.graphics.clone(),
                                 lpc_wire::ClientMessage { id: msg_id, msg },
                                 theoretical_fps,
@@ -436,6 +461,7 @@ impl LpServer {
             self.output_provider.clone(),
             self.memory_stats,
             self.time_provider.clone(),
+            self.button_service.clone(),
             self.graphics.clone(),
         )
     }

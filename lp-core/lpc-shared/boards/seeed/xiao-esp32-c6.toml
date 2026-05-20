@@ -264,7 +264,7 @@ aliases = [
 
 [[gpio]]
 address = "/gpio/20"
-display_label = "d9"
+display_label = "D9"
 capabilities = [
     "gpio-output",
     "gpio-input",

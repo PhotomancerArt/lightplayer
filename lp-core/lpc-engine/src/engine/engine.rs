@@ -40,7 +40,7 @@ use crate::products::visual::{
 };
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 
-use super::{EngineError, EngineServices};
+use super::{ButtonService, EngineError, EngineServices};
 use super::{FrameNum, FrameTime};
 
 /// Conventional demand input used by the M2 engine slice.
@@ -277,6 +277,7 @@ impl Engine {
         let mut producers_ticked = BTreeSet::new();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
         let time_provider = self.services.time_provider();
+        let button_service = self.services.button_service();
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             artifacts: &self.artifacts,
@@ -285,6 +286,7 @@ impl Engine {
             slot_shapes: &self.slot_shapes,
             graphics: self.graphics.clone(),
             time_provider,
+            button_service,
             frame_time_seconds: time_s,
         };
 
@@ -326,6 +328,7 @@ impl Engine {
         let mut producers_ticked = BTreeSet::new();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
         let time_provider = self.services.time_provider();
+        let button_service = self.services.button_service();
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             artifacts: &self.artifacts,
@@ -334,6 +337,7 @@ impl Engine {
             slot_shapes: &self.slot_shapes,
             graphics: self.graphics.clone(),
             time_provider,
+            button_service,
             frame_time_seconds: time_s,
         };
         host.render_node_texture(product, request)
@@ -358,6 +362,7 @@ impl Engine {
         let mut producers_ticked = BTreeSet::new();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
         let time_provider = self.services.time_provider();
+        let button_service = self.services.button_service();
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
             artifacts: &self.artifacts,
@@ -366,6 +371,7 @@ impl Engine {
             slot_shapes: &self.slot_shapes,
             graphics: self.graphics.clone(),
             time_provider,
+            button_service,
             frame_time_seconds: time_s,
         };
         host.render_node_control(product, request, target)
@@ -385,6 +391,7 @@ struct EngineResolveHost<'a> {
     slot_shapes: &'a SlotShapeRegistry,
     graphics: Option<Arc<dyn LpGraphics>>,
     time_provider: Option<Rc<dyn TimeProvider>>,
+    button_service: Option<Rc<dyn ButtonService>>,
     frame_time_seconds: f32,
 }
 
@@ -442,6 +449,7 @@ impl EngineResolveHost<'_> {
 
         let gfx = self.graphics.clone();
         let time_provider = self.time_provider.clone();
+        let button_service = self.button_service.clone();
         let time_s = self.frame_time_seconds;
         let slot_shapes = self.slot_shapes;
         let tick_result = {
@@ -450,7 +458,7 @@ impl EngineResolveHost<'_> {
                 host: self as &mut dyn ResolveHost,
             };
             let resolver_dyn: &mut dyn TickResolver = &mut bridge;
-            let mut tick_ctx = TickContext::with_render_services(
+            let mut tick_ctx = TickContext::with_engine_services(
                 node_id,
                 revision,
                 artifact_id,
@@ -459,6 +467,7 @@ impl EngineResolveHost<'_> {
                 slot_shapes,
                 gfx,
                 time_provider,
+                button_service,
                 time_s,
             );
             catch_node_panic(|| node_runtime.tick(&mut tick_ctx))
@@ -1297,6 +1306,7 @@ fn tick_tree_node(
 
     let gfx = host.graphics.clone();
     let time_provider = host.time_provider.clone();
+    let button_service = host.button_service.clone();
     let time_s = host.frame_time_seconds;
     let slot_shapes = host.slot_shapes;
     let tick_result = {
@@ -1305,7 +1315,7 @@ fn tick_tree_node(
             host: host as &mut dyn ResolveHost,
         };
         let resolver_dyn: &mut dyn TickResolver = &mut bridge;
-        let mut tick_ctx = TickContext::with_render_services(
+        let mut tick_ctx = TickContext::with_engine_services(
             node_id,
             revision,
             artifact_id,
@@ -1314,6 +1324,7 @@ fn tick_tree_node(
             slot_shapes,
             gfx,
             time_provider,
+            button_service,
             time_s,
         );
         catch_node_panic(|| node_runtime.tick(&mut tick_ctx))
@@ -1354,6 +1365,7 @@ pub(crate) fn resolve_with_engine_host(
     let mut producers_ticked = BTreeSet::new();
     let time_s = eng.frame_time.total_ms as f32 / 1000.0;
     let time_provider = eng.services.time_provider();
+    let button_service = eng.services.button_service();
     let mut host = EngineResolveHost {
         tree: &mut eng.tree,
         artifacts: &eng.artifacts,
@@ -1362,6 +1374,7 @@ pub(crate) fn resolve_with_engine_host(
         slot_shapes: &eng.slot_shapes,
         graphics: eng.graphics.clone(),
         time_provider,
+        button_service,
         frame_time_seconds: time_s,
     };
     let result = session
@@ -1387,6 +1400,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
     let mut producers_ticked = BTreeSet::new();
     let time_s = eng.frame_time.total_ms as f32 / 1000.0;
     let time_provider = eng.services.time_provider();
+    let button_service = eng.services.button_service();
     let mut host = EngineResolveHost {
         tree: &mut eng.tree,
         artifacts: &eng.artifacts,
@@ -1395,6 +1409,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         slot_shapes: &eng.slot_shapes,
         graphics: eng.graphics.clone(),
         time_provider,
+        button_service,
         frame_time_seconds: time_s,
     };
     let result = session.resolve(&mut host, key.clone()).and_then(|first| {

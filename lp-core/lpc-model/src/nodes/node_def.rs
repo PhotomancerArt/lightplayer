@@ -9,6 +9,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 
 use crate::node::kind::NodeKind;
+use crate::nodes::button::ButtonDef;
 use crate::nodes::clock::ClockDef;
 use crate::nodes::fixture::FixtureDef;
 use crate::nodes::fluid::FluidDef;
@@ -22,6 +23,7 @@ use crate::{
 };
 
 const PROJECT_VARIANT: &str = "Project";
+const BUTTON_VARIANT: &str = "Button";
 const CLOCK_VARIANT: &str = "Clock";
 const TEXTURE_VARIANT: &str = "Texture";
 const SHADER_VARIANT: &str = "Shader";
@@ -31,6 +33,7 @@ const OUTPUT_VARIANT: &str = "Output";
 const FIXTURE_VARIANT: &str = "Fixture";
 const NODE_DEF_VARIANT_NAMES: &[&str] = &[
     PROJECT_VARIANT,
+    BUTTON_VARIANT,
     CLOCK_VARIANT,
     TEXTURE_VARIANT,
     SHADER_VARIANT,
@@ -49,6 +52,7 @@ const NODE_DEF_VARIANT_NAMES: &[&str] = &[
 pub enum NodeDef {
     #[default]
     Project(ProjectDef),
+    Button(ButtonDef),
     Clock(ClockDef),
     Texture(TextureDef),
     Shader(ShaderDef),
@@ -97,6 +101,7 @@ impl NodeDef {
     pub fn kind(&self) -> NodeKind {
         match self {
             Self::Project(_) => NodeKind::Project,
+            Self::Button(_) => NodeKind::Button,
             Self::Clock(_) => NodeKind::Clock,
             Self::Texture(_) => NodeKind::Texture,
             Self::Shader(_) => NodeKind::Shader,
@@ -111,6 +116,7 @@ impl NodeDef {
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::Project(_) => ProjectDef::KIND,
+            Self::Button(_) => ButtonDef::KIND,
             Self::Clock(_) => ClockDef::KIND,
             Self::Texture(_) => TextureDef::KIND,
             Self::Shader(_) => ShaderDef::KIND,
@@ -125,6 +131,7 @@ impl NodeDef {
     pub fn variant_name(&self) -> &'static str {
         match self {
             Self::Project(_) => PROJECT_VARIANT,
+            Self::Button(_) => BUTTON_VARIANT,
             Self::Clock(_) => CLOCK_VARIANT,
             Self::Texture(_) => TEXTURE_VARIANT,
             Self::Shader(_) => SHADER_VARIANT,
@@ -145,6 +152,13 @@ impl NodeDef {
     pub fn as_texture(&self) -> Option<&TextureDef> {
         match self {
             Self::Texture(def) => Some(def),
+            _ => None,
+        }
+    }
+
+    pub fn as_button(&self) -> Option<&ButtonDef> {
+        match self {
+            Self::Button(def) => Some(def),
             _ => None,
         }
     }
@@ -217,6 +231,7 @@ impl SlotAccess for NodeDef {
     fn shape_id(&self) -> SlotShapeId {
         match self {
             Self::Project(def) => def.shape_id(),
+            Self::Button(def) => def.shape_id(),
             Self::Clock(def) => def.shape_id(),
             Self::Texture(def) => def.shape_id(),
             Self::Shader(def) => def.shape_id(),
@@ -230,6 +245,7 @@ impl SlotAccess for NodeDef {
     fn data(&self) -> SlotDataAccess<'_> {
         match self {
             Self::Project(def) => def.data(),
+            Self::Button(def) => def.data(),
             Self::Clock(def) => def.data(),
             Self::Texture(def) => def.data(),
             Self::Shader(def) => def.data(),
@@ -253,6 +269,7 @@ impl SlotMutAccess for NodeDef {
     fn data_mut(&mut self) -> SlotDataMutAccess<'_> {
         match self {
             Self::Project(def) => def.data_mut(),
+            Self::Button(def) => def.data_mut(),
             Self::Clock(def) => def.data_mut(),
             Self::Texture(def) => def.data_mut(),
             Self::Shader(def) => def.data_mut(),

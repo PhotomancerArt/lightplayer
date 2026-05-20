@@ -20,8 +20,8 @@ use crate::artifact::ArtifactLocation;
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::node::{NodeDefHandle, TreeError};
 use crate::nodes::{
-    ClockNode, ComputeShaderNode, CorePlaceholderNode, FixtureNode, FluidNode, OutputNode,
-    ShaderNode, TextureNode,
+    ButtonNode, ClockNode, ComputeShaderNode, CorePlaceholderNode, FixtureNode, FluidNode,
+    OutputNode, ShaderNode, TextureNode,
 };
 
 use super::{Engine, EngineServices};
@@ -217,6 +217,41 @@ impl ProjectLoader {
                     frame,
                 )?;
                 register_clock_default_time_binding(runtime, node, &config.bindings, frame)?;
+            }
+        }
+
+        for node in loaded_nodes {
+            if let NodeDef::Button(config) = &node.config {
+                runtime
+                    .attach_runtime_node(node.id, Box::new(ButtonNode::new()), frame)
+                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                        path: node.artifact_path.as_str().to_string(),
+                        reason: format!("attach button runtime: {e}"),
+                    })?;
+                register_target_binding(
+                    runtime,
+                    loaded_nodes,
+                    node,
+                    "down",
+                    &config.bindings,
+                    frame,
+                )?;
+                register_target_binding(
+                    runtime,
+                    loaded_nodes,
+                    node,
+                    "held",
+                    &config.bindings,
+                    frame,
+                )?;
+                register_target_binding(
+                    runtime,
+                    loaded_nodes,
+                    node,
+                    "up",
+                    &config.bindings,
+                    frame,
+                )?;
             }
         }
 
@@ -855,9 +890,13 @@ where
 mod tests {
     extern crate std;
 
+    use alloc::rc::Rc;
     use alloc::sync::Arc;
-    use lpc_model::TreePath;
-    use lpc_model::{NodeName, ProductRef, SlotData};
+    use lpc_model::{NodeName, ProductRef, SlotData, SlotMapKey, TreePath};
+    use lpc_shared::hardware::{
+        HardwareAddress, HardwareRegistry, HardwareSystem, VirtualButtonDriver,
+        default_esp32c6_hardware_manifest,
+    };
     use lpc_wire::{
         ProjectProbeRequest, ProjectProbeResult, ProjectReadRequest, ProjectReadResult,
         RenderProductProbeRequest, RenderProductProbeResult, WireTextureFormat,
@@ -868,7 +907,7 @@ mod tests {
 
     use super::*;
     use crate::dataflow::resolver::{QueryKey, ResolveLogLevel};
-    use crate::engine::resolve_with_engine_host;
+    use crate::engine::{ButtonService, resolve_with_engine_host};
     use crate::products::visual::RenderTextureRequest;
 
     fn flat_project() -> LpFsMemory {
@@ -1475,6 +1514,69 @@ value = "f32"
         );
     }
 
+    #[test]
+    fn button_node_publishes_held_and_up_from_virtual_d9() {
+        let fs = LpFsMemory::new();
+        fs.write_file(
+            "/project.toml".as_path(),
+            br#"
+kind = "Project"
+
+[nodes.button]
+artifact = "./button.toml"
+"#,
+        )
+        .expect("project");
+        fs.write_file(
+            "/button.toml".as_path(),
+            br#"
+kind = "Button"
+endpoint = "button:gpio:D9"
+stable_ms = 1
+"#,
+        )
+        .expect("button");
+
+        let registry = Rc::new(HardwareRegistry::new(default_esp32c6_hardware_manifest()));
+        let driver = VirtualButtonDriver::new(Rc::clone(&registry));
+        let control = driver.clone();
+        let mut hardware = HardwareSystem::new(registry);
+        hardware.add_button_driver(Box::new(driver));
+        let hardware = Rc::new(hardware);
+        let button_service: Rc<dyn ButtonService> = hardware.clone();
+
+        let mut services = EngineServices::new(TreePath::parse("/button.show").expect("path"));
+        services.set_button_service(Some(button_service));
+        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load button project");
+        let root = rt.tree().root();
+        let button = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("button").unwrap())
+            .expect("button node");
+
+        control.set_pressed(HardwareAddress::gpio(20), true);
+        let held = resolve_button_map(&mut rt, button, "held");
+        assert!(!held.entries.contains_key(&SlotMapKey::U32(1)));
+
+        rt.tick(1).expect("next frame");
+        let held = resolve_button_map(&mut rt, button, "held");
+        assert!(held.entries.contains_key(&SlotMapKey::U32(1)));
+
+        control.set_pressed(HardwareAddress::gpio(20), false);
+        rt.tick(1).expect("release candidate frame");
+        assert!(
+            resolve_button_map(&mut rt, button, "held")
+                .entries
+                .contains_key(&SlotMapKey::U32(1))
+        );
+
+        rt.tick(1).expect("release stable frame");
+        let up = resolve_button_map(&mut rt, button, "up");
+        assert!(up.entries.contains_key(&SlotMapKey::U32(1)));
+        let held = resolve_button_map(&mut rt, button, "held");
+        assert!(held.entries.is_empty());
+    }
+
     fn render_test_texture_bytes(rt: &mut Engine, product: lpc_model::VisualProduct) -> Vec<u8> {
         rt.render_texture_for_test(
             product,
@@ -1508,6 +1610,22 @@ value = "f32"
             max_rgb > 10_000,
             "trigger event circles should render bright RGB pixels"
         );
+    }
+
+    fn resolve_button_map(rt: &mut Engine, button: NodeId, slot: &str) -> lpc_model::SlotMapDyn {
+        let (production, _) = resolve_with_engine_host(
+            rt,
+            QueryKey::ProducedSlot {
+                node: button,
+                slot: SlotPath::parse(slot).expect("button slot"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("button production");
+        let SlotData::Map(map) = production.data().clone() else {
+            panic!("button slot should be a map");
+        };
+        map
     }
 
     fn write_flat_basic_files(fs: &LpFsMemory) {

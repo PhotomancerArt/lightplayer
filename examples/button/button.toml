@@ -1,0 +1,7 @@
+kind = "Button"
+endpoint = "button:gpio:D9"
+id = 1
+stable_ms = 30
+
+[bindings.held]
+target = "bus#trigger"

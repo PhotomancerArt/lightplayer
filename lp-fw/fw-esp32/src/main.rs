@@ -361,8 +361,9 @@ use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
     board::esp32c6::init::{init_board, start_runtime},
     core::cell::RefCell,
+    hardware::button::Esp32Gpio20ButtonDriver,
     hardware::manifest_loader::load_hardware_manifest,
-    lpa_server::{Graphics, LpGraphics, LpServer},
+    lpa_server::{ButtonService, Graphics, LpGraphics, LpServer},
     lpc_shared::hardware::{HardwareRegistry, HardwareSystem},
     lpc_shared::output::OutputProvider,
     lpfs::LpFsMemory,
@@ -552,7 +553,8 @@ async fn main(spawner: embassy_executor::Spawner) {
 
         // Initialize board (clock, heap, runtime) and get hardware peripherals
         esp_println::println!("[INIT] Initializing board...");
-        let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, flash, _gpio4, wifi) = init_board();
+        let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, flash, _gpio4, gpio20, wifi) =
+            init_board();
         esp_println::println!("[INIT] Board initialized, starting runtime...");
         start_runtime(timg0, sw_int);
         esp_println::println!("[INIT] Runtime started");
@@ -652,6 +654,10 @@ async fn main(spawner: embassy_executor::Spawner) {
         hardware_system.add_ws281x_driver(Box::new(Esp32RmtWs281xDriver::new(Rc::clone(
             &hardware_registry,
         ))));
+        hardware_system.add_button_driver(Box::new(Esp32Gpio20ButtonDriver::new(
+            Rc::clone(&hardware_registry),
+            gpio20,
+        )));
         #[cfg(feature = "radio")]
         {
             let radio_driver = Esp32EspNowRadioDriver::new(Rc::clone(&hardware_registry), wifi)
@@ -690,12 +696,14 @@ async fn main(spawner: embassy_executor::Spawner) {
         esp_println::println!("[INIT] Creating LpServer instance...");
         let time_provider_rc = Rc::new(Esp32TimeProvider::new());
         let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
-        let mut server = LpServer::new(
+        let button_service: Rc<dyn ButtonService> = hardware_system.clone();
+        let mut server = LpServer::new_with_button_service(
             output_provider,
             base_fs,
             "projects/".as_path(),
             Some(esp32_memory_stats),
             Some(time_provider_rc),
+            Some(button_service),
             graphics,
         );
         esp_println::println!("[INIT] LpServer created");

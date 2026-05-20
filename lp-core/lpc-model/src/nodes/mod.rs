@@ -1,3 +1,4 @@
+pub mod button;
 pub mod clock;
 pub mod fixture;
 pub mod fluid;
@@ -7,6 +8,7 @@ pub mod project;
 pub mod shader;
 pub mod texture;
 
+pub use button::{ButtonDef, ButtonDefView, ButtonState, ButtonStateView};
 pub use clock::{ClockControls, ClockDef, ClockDefView, ClockState};
 pub use fixture::{
     ColorOrder, FixtureDef, FixtureDefView, FixtureSamplingConfig, FixtureState, FixtureStateView,

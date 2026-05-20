@@ -1,0 +1,14 @@
+kind = "Project"
+name = "button"
+
+[nodes.output]
+artifact = "./output.toml"
+
+[nodes.button]
+artifact = "./button.toml"
+
+[nodes.shader]
+artifact = "./shader.toml"
+
+[nodes.fixture]
+artifact = "./fixture.toml"

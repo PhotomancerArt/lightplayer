@@ -1,3 +1,4 @@
+pub mod button;
 pub mod clock;
 pub mod fixture;
 pub mod fluid;
@@ -6,6 +7,7 @@ mod placeholder;
 pub mod shader;
 pub mod texture;
 
+pub use button::{ButtonNode, button_down_path, button_held_path, button_up_path};
 pub use clock::{ClockNode, clock_seconds_path};
 pub use fixture::fixture_node::{FixtureNode, fixture_input_path};
 pub use fluid::{FluidNode, MsaFluidSolver, fluid_emitters_path, fluid_output_path};

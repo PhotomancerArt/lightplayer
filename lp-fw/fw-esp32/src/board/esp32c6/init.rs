@@ -15,6 +15,7 @@ pub fn init_board() -> (
     esp_hal::peripherals::GPIO18<'static>,
     esp_hal::peripherals::FLASH<'static>,
     esp_hal::peripherals::GPIO4<'static>,
+    esp_hal::peripherals::GPIO20<'static>,
     esp_hal::peripherals::WIFI<'static>,
 ) {
     // Configure CPU clock to maximum speed (160MHz for ESP32-C6)
@@ -32,13 +33,16 @@ pub fn init_board() -> (
     let gpio18 = peripherals.GPIO18;
     let flash = peripherals.FLASH;
     let gpio4 = peripherals.GPIO4;
+    let gpio20 = peripherals.GPIO20;
     let wifi = peripherals.WIFI;
 
     // Set up software interrupt and timer for Embassy runtime
     let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     let timg0 = TimerGroup::new(peripherals.TIMG0);
 
-    (sw_int, timg0, rmt, usb_device, gpio18, flash, gpio4, wifi)
+    (
+        sw_int, timg0, rmt, usb_device, gpio18, flash, gpio4, gpio20, wifi,
+    )
 }
 
 /// Start Embassy runtime

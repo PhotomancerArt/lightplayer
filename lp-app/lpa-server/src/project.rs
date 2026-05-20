@@ -6,7 +6,7 @@ use crate::error::ServerError;
 use crate::server::MemoryStatsFn;
 use alloc::{boxed::Box, format, rc::Rc, string::String, sync::Arc};
 use core::cell::RefCell;
-use lpc_engine::{Engine, EngineServices, LpGraphics, ProjectLoader};
+use lpc_engine::{ButtonService, Engine, EngineServices, LpGraphics, ProjectLoader};
 use lpc_model::{LpPath, LpPathBuf, TreePath};
 use lpc_shared::backtrace;
 use lpc_shared::hardware::HardwareEndpointSpec;
@@ -38,6 +38,7 @@ impl Project {
         output_provider: Rc<RefCell<dyn OutputProvider>>,
         memory_stats: Option<MemoryStatsFn>,
         time_provider: Option<Rc<dyn TimeProvider>>,
+        button_service: Option<Rc<dyn ButtonService>>,
         graphics: Arc<dyn LpGraphics>,
     ) -> Result<Self, ServerError> {
         let _ = memory_stats;
@@ -47,6 +48,7 @@ impl Project {
         let mut services = EngineServices::new(root_path);
         services.set_output_provider(Some(Box::new(SharedOutputProvider(output_provider))));
         services.set_time_provider(time_provider);
+        services.set_button_service(button_service);
 
         backtrace::set_oom_context("project new: load core project");
         let mut runtime = {

@@ -13,6 +13,7 @@ use hashbrown::HashMap;
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
 use lpc_model::{HardwareEndpointSpec, Revision, TreePath};
 use lpc_shared::error::OutputError;
+use lpc_shared::hardware::{ButtonConfig, ButtonInput, HardwareEndpointError, HardwareSystem};
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::time::TimeProvider;
 
@@ -54,8 +55,28 @@ pub struct EngineServices {
     project_root: TreePath,
     output_provider: Option<Box<dyn OutputProvider>>,
     time_provider: Option<Rc<dyn TimeProvider>>,
+    button_service: Option<Rc<dyn ButtonService>>,
     /// Fixture-written buffers paired with authored output endpoint configuration.
     output_sinks: HashMap<RuntimeBufferId, OutputSinkBinding>,
+}
+
+/// Hardware button access used by runtime input nodes.
+pub trait ButtonService {
+    fn open_button_by_spec(
+        &self,
+        spec: &HardwareEndpointSpec,
+        config: ButtonConfig,
+    ) -> Result<Box<dyn ButtonInput>, HardwareEndpointError>;
+}
+
+impl ButtonService for HardwareSystem {
+    fn open_button_by_spec(
+        &self,
+        spec: &HardwareEndpointSpec,
+        config: ButtonConfig,
+    ) -> Result<Box<dyn ButtonInput>, HardwareEndpointError> {
+        HardwareSystem::open_button_by_spec(self, spec, config)
+    }
 }
 
 impl EngineServices {
@@ -64,6 +85,7 @@ impl EngineServices {
             project_root,
             output_provider: None,
             time_provider: None,
+            button_service: None,
             output_sinks: HashMap::new(),
         }
     }
@@ -84,6 +106,14 @@ impl EngineServices {
 
     pub fn time_provider(&self) -> Option<Rc<dyn TimeProvider>> {
         self.time_provider.clone()
+    }
+
+    pub fn set_button_service(&mut self, service: Option<Rc<dyn ButtonService>>) {
+        self.button_service = service;
+    }
+
+    pub fn button_service(&self) -> Option<Rc<dyn ButtonService>> {
+        self.button_service.clone()
     }
 
     /// Register an output sink: fixture pushes u16 RGB channel bytes into `buffer_id`; flush writes

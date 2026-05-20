@@ -9,6 +9,7 @@ use alloc::sync::Arc;
 use crate::artifact::ArtifactId;
 use crate::dataflow::bus::Bus;
 use crate::dataflow::resolver::{Production, QueryKey, ResolveError, TickResolver};
+use crate::engine::ButtonService;
 use crate::gfx::LpGraphics;
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
@@ -63,6 +64,7 @@ pub struct TickContext<'r> {
     slot_shapes: &'r SlotShapeRegistry,
     graphics: Option<Arc<dyn LpGraphics>>,
     time_provider: Option<Rc<dyn TimeProvider>>,
+    button_service: Option<Rc<dyn ButtonService>>,
     frame_time_seconds: f32,
 }
 
@@ -100,6 +102,33 @@ impl<'r> TickContext<'r> {
         time_provider: Option<Rc<dyn TimeProvider>>,
         frame_time_seconds: f32,
     ) -> Self {
+        Self::with_engine_services(
+            node_id,
+            frame_id,
+            artifact_ref,
+            artifact_content_frame,
+            resolver,
+            slot_shapes,
+            graphics,
+            time_provider,
+            None,
+            frame_time_seconds,
+        )
+    }
+
+    /// [`TickContext`] with graphics, time, and hardware input services.
+    pub fn with_engine_services(
+        node_id: NodeId,
+        frame_id: Revision,
+        artifact_ref: ArtifactId,
+        artifact_content_frame: Revision,
+        resolver: &'r mut dyn TickResolver,
+        slot_shapes: &'r SlotShapeRegistry,
+        graphics: Option<Arc<dyn LpGraphics>>,
+        time_provider: Option<Rc<dyn TimeProvider>>,
+        button_service: Option<Rc<dyn ButtonService>>,
+        frame_time_seconds: f32,
+    ) -> Self {
         Self {
             node_id,
             revision: frame_id,
@@ -109,6 +138,7 @@ impl<'r> TickContext<'r> {
             slot_shapes,
             graphics,
             time_provider,
+            button_service,
             frame_time_seconds,
         }
     }
@@ -213,6 +243,10 @@ impl<'r> TickContext<'r> {
         self.time_provider
             .as_ref()
             .map(|provider| provider.elapsed_ms(start_ms))
+    }
+
+    pub fn button_service(&self) -> Option<Rc<dyn ButtonService>> {
+        self.button_service.clone()
     }
 
     /// Materializes a visual product into a full texture through the active engine session.

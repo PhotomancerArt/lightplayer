@@ -21,7 +21,8 @@ use crate::serial::Esp32UsbSerialIo;
 /// Displays simple patterns on LEDs to verify RMT driver works.
 pub async fn run_rmt_test(_: embassy_executor::Spawner) -> ! {
     // Initialize board (clock, heap, runtime) and get hardware peripherals
-    let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, _flash, _gpio4, _wifi) = init_board();
+    let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, _flash, _gpio4, _gpio20, _wifi) =
+        init_board();
     start_runtime(timg0, sw_int);
 
     // Initialize USB-serial for logging (synchronous mode)

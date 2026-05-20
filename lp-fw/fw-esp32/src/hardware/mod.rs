@@ -1,4 +1,3 @@
-#[cfg(feature = "test_button")]
 pub mod button;
 #[cfg(feature = "radio")]
 pub mod espnow_radio_driver;

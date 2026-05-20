@@ -25,7 +25,7 @@ pub use engine::Engine;
 #[cfg(test)]
 pub(crate) use engine::default_demand_input_path;
 pub use engine_error::EngineError;
-pub use engine_services::{EngineServices, OutputFlushError};
+pub use engine_services::{ButtonService, EngineServices, OutputFlushError};
 pub use frame_num::FrameNum;
 pub use frame_time::FrameTime;
 pub use project_loader::{ProjectLoadError, ProjectLoader};

@@ -1,27 +1,30 @@
 //! GPIO button diagnostic mode.
 //!
-//! Uses GPIO4 with an internal pull-up and a normally-open button to GND.
+//! Uses D9/GPIO20 with an internal pull-up and a normally-open button to GND.
 
 extern crate alloc;
 
 use alloc::rc::Rc;
 use embassy_time::{Duration, Instant, Timer};
-use lpc_shared::hardware::{HardwareRegistry, default_esp32c6_hardware_manifest};
+use lpc_shared::hardware::{
+    ButtonConfig, ButtonInput, HardwareRegistry, default_esp32c6_hardware_manifest,
+};
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
-use crate::hardware::button::{ButtonConfig, Esp32ButtonInput};
+use crate::hardware::button::Esp32ButtonInput;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(5);
 
 pub async fn run_button_test(_: embassy_executor::Spawner) -> ! {
-    let (sw_int, timg0, _rmt_peripheral, _usb_device, gpio18, _flash, gpio4, _wifi) = init_board();
+    let (sw_int, timg0, _rmt_peripheral, _usb_device, gpio18, _flash, _gpio4, gpio20, _wifi) =
+        init_board();
     start_runtime(timg0, sw_int);
     drop(gpio18);
 
     let hardware_registry = Rc::new(HardwareRegistry::new(default_esp32c6_hardware_manifest()));
     let mut button =
-        Esp32ButtonInput::open_gpio4(hardware_registry, gpio4, ButtonConfig::default())
-            .expect("GPIO4 button opens");
+        Esp32ButtonInput::open_gpio20(hardware_registry, gpio20, ButtonConfig::default())
+            .expect("D9/GPIO20 button opens");
     let start = Instant::now();
 
     esp_println::println!(
