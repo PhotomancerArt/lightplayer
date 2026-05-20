@@ -2,16 +2,16 @@ kind = "Project"
 name = "fluid"
 
 [nodes.output]
-artifact = "./output.toml"
+def = { path = "./output.toml" }
 
 [nodes.clock]
-artifact = "./clock.toml"
+def = { path = "./clock.toml" }
 
 [nodes.compute]
-artifact = "./compute.toml"
+def = { path = "./compute.toml" }
 
 [nodes.fluid]
-artifact = "./fluid.toml"
+def = { path = "./fluid.toml" }
 
 [nodes.fixture]
-artifact = "./fixture.toml"
+def = { path = "./fixture.toml" }

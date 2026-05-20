@@ -35,11 +35,15 @@ fn shape_factory_static_defaults_are_empty_slot_defaults() {
     let SlotDataAccess::Record(record) = object.data() else {
         panic!("expected shader record");
     };
-    let SlotDataAccess::Value(glsl_path) = record.field(0).expect("glsl_path") else {
-        panic!("expected glsl_path value");
+    let SlotDataAccess::Enum(source) = record.field(0).expect("source") else {
+        panic!("expected source enum");
+    };
+    assert_eq!(source.variant(), "path");
+    let SlotDataAccess::Value(path) = source.data() else {
+        panic!("expected source path value");
     };
 
-    assert_eq!(glsl_path.value(), LpValue::String(String::new()));
+    assert_eq!(path.value(), LpValue::String(String::new()));
 }
 
 #[test]
@@ -83,7 +87,7 @@ fn shape_factory_created_object_can_insert_map_entry_then_mutate() {
     set_slot_value(
         object.as_mut(),
         &registry,
-        &SlotPath::parse("nodes[extra].artifact").unwrap(),
+        &SlotPath::parse("nodes[extra].def.path").unwrap(),
         lpc_model::Revision::new(21),
         LpValue::String(String::from("./extra.toml")),
     )

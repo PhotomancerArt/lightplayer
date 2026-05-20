@@ -8,7 +8,7 @@ pub use crate::products::control::{
     ControlSpan,
 };
 pub use crate::products::visual::{
-    RenderTextureRequest, TextureRenderProduct, TextureRenderProductError, VisualSample,
-    VisualSampleBatch, VisualSampleBatchResult, VisualSamplePoint,
+    RenderTextureRequest, TextureRenderProduct, TextureRenderProductError, TextureSampleBatch,
+    TextureUvSamplePoint, VisualSample, VisualSampleBatchResult,
 };
 pub use lpc_model::{ControlExtent, ControlProduct, VisualProduct};

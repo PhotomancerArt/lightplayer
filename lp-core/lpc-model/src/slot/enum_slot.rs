@@ -286,6 +286,7 @@ mod tests {
         fn slot_enum_shape() -> SlotShape {
             SlotShape::Enum {
                 meta: SlotMeta::empty(),
+                encoding: crate::SlotEnumEncoding::default(),
                 variants: vec![
                     SlotVariantShape {
                         name: SlotName::parse("first").unwrap(),

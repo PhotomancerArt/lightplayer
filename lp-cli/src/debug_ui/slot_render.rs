@@ -68,6 +68,42 @@ pub(crate) fn render_slot_root_rows(
     }
 }
 
+pub(crate) fn render_slot_root_rows_filtered(
+    ui: &mut egui::Ui,
+    registry: &SlotShapeRegistry,
+    root: &str,
+    shape_id: SlotShapeId,
+    data: &SlotData,
+    skip_top_fields: &[&str],
+    selection: Option<&mut Option<InspectorSelection>>,
+    status: Option<&SlotEditStatusContext<'_>>,
+    edit_intents: Option<&mut Vec<SlotEditIntent>>,
+) {
+    match registry.get(&shape_id) {
+        Some(shape) => render_slot_shape_rows_filtered(
+            ui,
+            registry,
+            root,
+            SlotPath::root(),
+            shape,
+            data,
+            0,
+            "root",
+            skip_top_fields,
+            selection,
+            status,
+            edit_intents,
+        ),
+        None => {
+            ui.colored_label(
+                egui::Color32::LIGHT_RED,
+                format!("Missing shape {shape_id}"),
+            );
+            render_slot_data_fallback(ui, data);
+        }
+    }
+}
+
 pub(crate) fn render_top_field_row(
     ui: &mut egui::Ui,
     registry: &SlotShapeRegistry,
@@ -223,6 +259,112 @@ fn render_slot_shape_rows(
                     edit_intents.as_deref_mut(),
                 );
             }
+        }
+        _ => render_named_slot_shape_row(
+            ui,
+            registry,
+            root,
+            path,
+            SlotPolicy::default(),
+            "value",
+            shape,
+            data,
+            depth,
+            id_path,
+            selection,
+            status,
+            edit_intents,
+        ),
+    }
+}
+
+fn render_slot_shape_rows_filtered(
+    ui: &mut egui::Ui,
+    registry: &SlotShapeRegistry,
+    root: &str,
+    path: SlotPath,
+    shape: &SlotShape,
+    data: &SlotData,
+    depth: usize,
+    id_path: &str,
+    skip_top_fields: &[&str],
+    mut selection: Option<&mut Option<InspectorSelection>>,
+    status: Option<&SlotEditStatusContext<'_>>,
+    mut edit_intents: Option<&mut Vec<SlotEditIntent>>,
+) {
+    let Some(shape) = resolve_shape(registry, shape) else {
+        ui.colored_label(egui::Color32::LIGHT_RED, "Missing referenced shape");
+        render_slot_data_fallback(ui, data);
+        return;
+    };
+
+    match (shape, data) {
+        (SlotShape::Record { fields, .. }, SlotData::Record(record)) => {
+            let mut rendered = false;
+            for (index, field) in fields.iter().enumerate() {
+                if depth == 0 && skip_top_fields.contains(&field.name.as_str()) {
+                    continue;
+                }
+                let Some(child) = record.fields.get(index) else {
+                    ui.colored_label(
+                        egui::Color32::LIGHT_RED,
+                        format!("missing field {}", field.name.as_str()),
+                    );
+                    continue;
+                };
+                rendered = true;
+                let child_path = path.child(field.name.clone());
+                render_named_slot_shape_row(
+                    ui,
+                    registry,
+                    root,
+                    child_path,
+                    field.policy,
+                    field.name.as_str(),
+                    &field.shape,
+                    child,
+                    depth,
+                    &format!("{id_path}.{}", field.name.as_str()),
+                    selection.as_deref_mut(),
+                    status,
+                    edit_intents.as_deref_mut(),
+                );
+            }
+            if !rendered {
+                ui.label("No config fields.");
+            }
+        }
+        (SlotShape::Enum { variants, .. }, SlotData::Enum(value)) => {
+            let label = value.variant.as_str();
+            egui::CollapsingHeader::new(label)
+                .id_salt(("slot-row-filtered-enum", id_path))
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.small(format!("variant changed rev {}", value.variant_revision.0));
+                    if let Some(variant) = variants.iter().find(|v| v.name == value.variant) {
+                        let child_path = path.child(value.variant.clone());
+                        render_slot_shape_rows_filtered(
+                            ui,
+                            registry,
+                            root,
+                            child_path,
+                            &variant.shape,
+                            &value.data,
+                            depth,
+                            &format!("{id_path}.{}", value.variant.as_str()),
+                            skip_top_fields,
+                            selection.as_deref_mut(),
+                            status,
+                            edit_intents.as_deref_mut(),
+                        );
+                    } else {
+                        ui.colored_label(
+                            egui::Color32::LIGHT_RED,
+                            format!("missing variant shape {}", value.variant.as_str()),
+                        );
+                        render_slot_data_fallback(ui, &value.data);
+                    }
+                });
         }
         _ => render_named_slot_shape_row(
             ui,
@@ -438,44 +580,96 @@ fn render_value_row(
     status: Option<&SlotEditStatusContext<'_>>,
     edit_intents: Option<&mut Vec<SlotEditIntent>>,
 ) {
+    if name == "output" {
+        ui.horizontal_wrapped(|ui| {
+            indent(ui, depth);
+            ui.monospace(name);
+            let response = ui.small(format!("rev {revision}"));
+            response.on_hover_text(value_hover_text(shape));
+            if let Some(status) = status {
+                render_slot_edit_status(ui, status.status(root, path));
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            indent(ui, depth + 1);
+            render_value_cell(
+                ui,
+                root,
+                path,
+                policy,
+                shape,
+                value,
+                selection,
+                edit_intents,
+            );
+        });
+        return;
+    }
+
     ui.horizontal_wrapped(|ui| {
         indent(ui, depth);
         ui.monospace(name);
         ui.label("=");
-        match value {
-            LpValue::Product(product) => {
-                render_product_skeleton(ui, *product, selection.as_deref_mut());
-            }
-            LpValue::Resource(resource) => {
-                render_resource_skeleton(ui, *resource, selection.as_deref_mut());
-            }
-            _ => {
-                let rendered_editor = policy.writable && slot_value_editor_supported(shape, value);
-                if rendered_editor {
-                    if let Some(edited) = render_slot_value_editor(ui, shape, policy, value)
-                        && let Some(edit_intents) = edit_intents
-                    {
-                        edit_intents.push(SlotEditIntent {
-                            root: root.to_string(),
-                            path: path.clone(),
-                            value: edited,
-                        });
-                    }
-                } else {
-                    ui.monospace(format_lp_value(value));
-                }
-            }
-        }
+        render_value_cell(
+            ui,
+            root,
+            path,
+            policy,
+            shape,
+            value,
+            selection.as_deref_mut(),
+            edit_intents,
+        );
         let response = ui.small(format!("rev {revision}"));
-        let mut hover = format!("type {}", format_lp_type(&shape.ty));
-        if let Some(editor) = format_value_editor_hint(&shape.editor) {
-            hover.push_str(&format!("\neditor {editor}"));
-        }
-        response.on_hover_text(hover);
+        response.on_hover_text(value_hover_text(shape));
         if let Some(status) = status {
             render_slot_edit_status(ui, status.status(root, path));
         }
     });
+}
+
+fn render_value_cell(
+    ui: &mut egui::Ui,
+    root: &str,
+    path: &SlotPath,
+    policy: SlotPolicy,
+    shape: &SlotValueShape,
+    value: &LpValue,
+    selection: Option<&mut Option<InspectorSelection>>,
+    edit_intents: Option<&mut Vec<SlotEditIntent>>,
+) {
+    match value {
+        LpValue::Product(product) => {
+            render_product_skeleton(ui, *product, selection);
+        }
+        LpValue::Resource(resource) => {
+            render_resource_skeleton(ui, *resource, selection);
+        }
+        _ => {
+            let rendered_editor = policy.writable && slot_value_editor_supported(shape, value);
+            if rendered_editor {
+                if let Some(edited) = render_slot_value_editor(ui, shape, policy, value)
+                    && let Some(edit_intents) = edit_intents
+                {
+                    edit_intents.push(SlotEditIntent {
+                        root: root.to_string(),
+                        path: path.clone(),
+                        value: edited,
+                    });
+                }
+            } else {
+                ui.monospace(format_lp_value(value));
+            }
+        }
+    }
+}
+
+fn value_hover_text(shape: &SlotValueShape) -> String {
+    let mut hover = format!("type {}", format_lp_type(&shape.ty));
+    if let Some(editor) = format_value_editor_hint(&shape.editor) {
+        hover.push_str(&format!("\neditor {editor}"));
+    }
+    hover
 }
 
 pub(crate) fn render_product_skeleton(
@@ -488,23 +682,26 @@ pub(crate) fn render_product_skeleton(
         .inner_margin(egui::Margin::symmetric(8.0, 5.0))
         .rounding(4.0)
         .show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.strong(product_kind_label(product));
-                ui.monospace(format_product_ref(product));
-                match product {
-                    ProductRef::Visual(_) => {
-                        ui.label("lazy");
-                    }
-                    ProductRef::Control(product) => {
-                        ui.label("lazy");
-                        let extent = product.preferred_extent();
-                        ui.monospace(format!(
-                            "{} samples",
-                            extent.rows.saturating_mul(extent.samples_per_row)
-                        ));
-                    }
-                }
+            ui.set_min_width(ui.available_width().min(420.0));
+            ui.horizontal(|ui| {
                 render_product_watch(ui, product, selection);
+                ui.vertical(|ui| {
+                    ui.strong(product_kind_label(product));
+                    ui.monospace(format_product_ref(product));
+                    ui.horizontal_wrapped(|ui| match product {
+                        ProductRef::Visual(_) => {
+                            ui.small("lazy");
+                        }
+                        ProductRef::Control(product) => {
+                            ui.small("lazy");
+                            let extent = product.preferred_extent();
+                            ui.monospace(format!(
+                                "{} samples",
+                                extent.rows.saturating_mul(extent.samples_per_row)
+                            ));
+                        }
+                    });
+                });
             });
         });
 }
@@ -519,10 +716,13 @@ pub(crate) fn render_resource_skeleton(
         .inner_margin(egui::Margin::symmetric(8.0, 5.0))
         .rounding(4.0)
         .show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.strong("resource");
-                ui.monospace(format_resource_ref(resource));
+            ui.set_min_width(ui.available_width().min(420.0));
+            ui.horizontal(|ui| {
                 render_resource_watch(ui, resource, selection);
+                ui.vertical(|ui| {
+                    ui.strong("resource");
+                    ui.monospace(format_resource_ref(resource));
+                });
             });
         });
 }

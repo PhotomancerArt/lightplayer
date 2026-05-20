@@ -22,7 +22,7 @@ pub use shader::{
     AddSubMode, ComputeShaderDef, ComputeShaderDefView, DivMode, GlslOpts, GlslOptsView, MulMode,
     ScalarHint, ScalarHintView, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,
     ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
-    ShaderSlotMappingKind, ShaderState, ShaderStateView, ShaderValueShapeRef,
+    ShaderSlotMappingKind, ShaderSource, ShaderState, ShaderStateView, ShaderValueShapeRef,
     generate_compute_shader_header,
 };
 pub use texture::{TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView};

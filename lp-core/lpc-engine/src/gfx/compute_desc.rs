@@ -139,7 +139,7 @@ mod tests {
     use alloc::format;
 
     use lpc_model::{
-        BindingDefs, FluidEmitter, MapSlot, ShaderSlotMappingDef, SourcePathSlot, StaticSlotShape,
+        BindingDefs, FluidEmitter, MapSlot, ShaderSlotMappingDef, StaticSlotShape,
         generate_compute_shader_header,
     };
     use lps_shared::LpsValueF32;
@@ -167,7 +167,7 @@ mod tests {
         );
 
         let def = ComputeShaderDef {
-            glsl_path: SourcePathSlot::new(String::from("emitters.glsl").into()),
+            source: lpc_model::EnumSlot::new(lpc_model::ShaderSource::path("emitters.glsl")),
             bindings: BindingDefs::default(),
             glsl_opts: lpc_model::GlslOpts::default(),
             consumed_slots: MapSlot::new(consumed),

@@ -1,14 +1,14 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    AddSubMode, BindingDefs, DivMode, GlslOpts, LpValue, MapSlot, MulMode, OptionSlot, PositiveF32,
-    PositiveF32Slot, Ratio, RatioSlot, RenderOrder, RenderOrderSlot, Revision, Slotted, SourcePath,
-    SourcePathSlot, ValueSlot,
+    AddSubMode, BindingDefs, DivMode, EnumSlot, GlslOpts, LpValue, MapSlot, MulMode, OptionSlot,
+    PositiveF32, PositiveF32Slot, Ratio, RatioSlot, RenderOrder, RenderOrderSlot, Revision,
+    ShaderSource, Slotted, ValueSlot,
 };
 
 #[derive(Default, Slotted)]
 pub struct ShaderDef {
-    pub glsl_path: SourcePathSlot,
+    pub source: EnumSlot<ShaderSource>,
     pub render_order: RenderOrderSlot,
     pub bindings: BindingDefs,
     pub glsl_opts: GlslOpts,
@@ -44,7 +44,7 @@ impl ShaderDef {
         );
 
         Self {
-            glsl_path: SourcePathSlot::new(SourcePath(String::from("main.glsl"))),
+            source: EnumSlot::new(ShaderSource::path("main.glsl")),
             render_order: RenderOrderSlot::new(RenderOrder(0)),
             bindings: BindingDefs::default(),
             glsl_opts: GlslOpts {
@@ -56,8 +56,12 @@ impl ShaderDef {
         }
     }
 
-    pub fn glsl_path(&self) -> &str {
-        self.glsl_path.value().as_str()
+    pub fn source_path(&self) -> &str {
+        self.source
+            .value()
+            .path_value()
+            .expect("mock shader source path")
+            .as_str()
     }
 
     pub fn render_order(&self) -> i32 {

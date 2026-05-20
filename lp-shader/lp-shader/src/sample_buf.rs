@@ -2,7 +2,10 @@
 
 use lpvm::LpvmBuffer;
 
-/// Packed Q16.16 visual sample points.
+/// Packed Q16.16 shader pixel-space sample points.
+///
+/// Each point is `[x_pixel_q16, y_pixel_q16]`. These are the same continuous
+/// pixel coordinates passed to `render(vec2 pos)`, not normalized texture UVs.
 pub struct LpsSamplePointBuf {
     buffer: LpvmBuffer,
     count: u32,

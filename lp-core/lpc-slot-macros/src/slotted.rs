@@ -38,7 +38,7 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
                 "Slotted derive requires named fields or a single-field tuple wrapper",
             )),
         },
-        Data::Enum(data) => crate::slotted_enum::derive_enum(ident, data),
+        Data::Enum(data) => crate::slotted_enum::derive_enum(ident, data, container_attrs),
         _ => Err(syn::Error::new(
             proc_macro2::Span::call_site(),
             "Slotted derive only supports structs and enums",

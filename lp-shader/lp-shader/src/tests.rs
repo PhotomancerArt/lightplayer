@@ -621,6 +621,33 @@ fn compile_px_desc_lps_glsl_basic_shader() {
 }
 
 #[test]
+fn compile_px_desc_lps_glsl_prunes_unreachable_if_else_after_return() {
+    let engine = test_engine();
+    let glsl = r#"
+vec4 render(vec2 pos) {
+    return vec4(1.0, 0.0, 0.0, 1.0);
+    if (pos.x > 0.5) {
+        return vec4(0.0, 1.0, 0.0, 1.0);
+    } else {
+        return vec4(0.0, 0.0, 1.0, 1.0);
+    }
+}
+"#;
+    let shader = engine
+        .compile_px_desc(
+            CompilePxDesc::new(
+                glsl,
+                TextureStorageFormat::Rgba16Unorm,
+                lpir::CompilerConfig::default(),
+            )
+            .with_frontend(ShaderFrontend::LpsGlsl),
+        )
+        .expect("compile_px_desc lps-glsl unreachable if/else");
+    assert_eq!(shader.output_format(), TextureStorageFormat::Rgba16Unorm);
+    assert_eq!(shader.render_sig().name, "render");
+}
+
+#[test]
 fn start_compile_px_job_lps_glsl_progresses_through_frontend_and_prepare() {
     let engine = test_engine();
     let desc = CompilePxDesc::new(

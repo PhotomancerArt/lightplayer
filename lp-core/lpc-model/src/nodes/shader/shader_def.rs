@@ -1,14 +1,15 @@
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
-use crate::nodes::shader::{GlslOpts, ShaderParamDef, ShaderSlotDef};
-use crate::{BindingDefs, LpPathBuf, MapSlot, RenderOrderSlot, Slotted, SourcePathSlot};
+use crate::nodes::shader::{GlslOpts, ShaderParamDef, ShaderSlotDef, ShaderSource};
+use crate::{BindingDefs, EnumSlot, MapSlot, RenderOrderSlot, Slotted};
 
 /// Authored shader node definition.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Slotted)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
+#[serde(deny_unknown_fields)]
 pub struct ShaderDef {
-    /// Path to the GLSL source, relative to this artifact file.
-    pub glsl_path: SourcePathSlot,
+    /// Authored shader source.
+    pub source: EnumSlot<ShaderSource>,
     /// Render order - lower numbers render first (default 0)
     pub render_order: RenderOrderSlot,
     /// Authored slot bindings for shader inputs and outputs.
@@ -28,11 +29,24 @@ pub struct ShaderDef {
     pub consumed_slots: MapSlot<String, ShaderSlotDef>,
 }
 
+impl Default for ShaderDef {
+    fn default() -> Self {
+        Self {
+            source: EnumSlot::new(ShaderSource::path("main.glsl")),
+            render_order: RenderOrderSlot::default(),
+            bindings: BindingDefs::default(),
+            glsl_opts: GlslOpts::default(),
+            param_defs: MapSlot::default(),
+            consumed_slots: MapSlot::default(),
+        }
+    }
+}
+
 impl ShaderDef {
     pub const KIND: &'static str = "shader";
 
-    pub fn glsl_path_buf(&self) -> LpPathBuf {
-        self.glsl_path.value().as_path_buf()
+    pub fn shader_source(&self) -> &ShaderSource {
+        self.source.value()
     }
 
     pub fn render_order(&self) -> i32 {
@@ -49,15 +63,14 @@ mod tests {
     use super::*;
     use crate::nodes::shader::{AddSubMode, DivMode, MulMode};
     use crate::{
-        NodeKind, RenderOrder, ShaderDefView, SlotPath, SlotShapeRegistry, SourcePath,
-        StaticSlotShape,
+        NodeDef, NodeKind, RenderOrder, ShaderDefView, SlotPath, SlotShapeRegistry, StaticSlotShape,
     };
-    use alloc::string::String;
+    use alloc::string::ToString;
 
     #[test]
     fn test_shader_def_kind() {
         let def = ShaderDef {
-            glsl_path: SourcePathSlot::new(SourcePath(String::from("main.glsl"))),
+            source: EnumSlot::new(ShaderSource::path("main.glsl")),
             render_order: RenderOrderSlot::new(RenderOrder(0)),
             bindings: BindingDefs::default(),
             glsl_opts: GlslOpts::default(),
@@ -70,7 +83,10 @@ mod tests {
     #[test]
     fn test_shader_def_default() {
         let def = ShaderDef::default();
-        assert_eq!(def.glsl_path.value().as_str(), "");
+        assert_eq!(
+            def.shader_source().path_value().unwrap().as_str(),
+            "main.glsl"
+        );
         assert_eq!(def.render_order(), 0);
         assert_eq!(*def.glsl_opts.add_sub.value(), AddSubMode::Wrapping);
         assert_eq!(*def.glsl_opts.mul.value(), MulMode::Wrapping);
@@ -86,10 +102,7 @@ mod tests {
 
         assert_eq!(view.registry_revision(), registry.revision());
         assert!(view.is_valid_for(&registry));
-        assert_eq!(
-            view.glsl_path().path(),
-            &SlotPath::parse("glsl_path").unwrap()
-        );
+        assert_eq!(view.source().path(), &SlotPath::parse("source").unwrap());
         assert_eq!(
             view.render_order().path(),
             &SlotPath::parse("render_order").unwrap()
@@ -98,5 +111,56 @@ mod tests {
             view.glsl_opts().path(),
             &SlotPath::parse("glsl_opts").unwrap()
         );
+    }
+
+    #[test]
+    fn shader_def_parses_source_path() {
+        let def = NodeDef::from_toml_str(
+            r#"
+kind = "Shader"
+
+source = { path = "main.glsl" }
+"#,
+        )
+        .expect("shader");
+
+        let NodeDef::Shader(def) = def else {
+            panic!("expected shader");
+        };
+        assert_eq!(
+            def.shader_source().path_value().unwrap().as_str(),
+            "main.glsl"
+        );
+    }
+
+    #[test]
+    fn shader_def_parses_inline_glsl() {
+        let def = NodeDef::from_toml_str(
+            r#"
+kind = "Shader"
+
+[source]
+glsl = "vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }"
+"#,
+        )
+        .expect("shader");
+
+        let NodeDef::Shader(def) = def else {
+            panic!("expected shader");
+        };
+        assert!(def.shader_source().glsl_value().unwrap().contains("render"));
+    }
+
+    #[test]
+    fn shader_def_rejects_glsl_path() {
+        let err = NodeDef::from_toml_str(
+            r#"
+kind = "Shader"
+glsl_path = "main.glsl"
+"#,
+        )
+        .expect_err("glsl_path should be rejected");
+
+        assert!(err.to_string().contains("glsl_path"));
     }
 }

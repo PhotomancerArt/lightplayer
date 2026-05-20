@@ -71,7 +71,9 @@ where
         SlotShape::Map {
             key, value: item, ..
         } => read_map(data, *key, item, registry, value),
-        SlotShape::Enum { variants, .. } => read_enum(data, variants, registry, value),
+        SlotShape::Enum {
+            encoding, variants, ..
+        } => read_enum(data, encoding, variants, registry, value),
         SlotShape::Option { some, .. } => read_option(data, some, registry, value),
     }
 }
@@ -161,6 +163,7 @@ where
 
 fn read_enum<S>(
     data: SlotDataMutAccess<'_>,
+    encoding: &crate::SlotEnumEncoding,
     variants: &[SlotVariantShape],
     registry: &SlotShapeRegistry,
     value: ValueReader<'_, '_, S>,
@@ -172,9 +175,27 @@ where
         value.skip_value()?;
         return Err(syntax_error("shape expected an enum slot"));
     };
+    match encoding {
+        crate::SlotEnumEncoding::Tagged { field } => {
+            read_tagged_enum(en, field.as_str(), variants, registry, value)
+        }
+        crate::SlotEnumEncoding::External => read_external_enum(en, variants, registry, value),
+    }
+}
+
+fn read_tagged_enum<S>(
+    en: &mut dyn crate::SlotEnumDefaultVariant,
+    discriminator: &str,
+    variants: &[SlotVariantShape],
+    registry: &SlotShapeRegistry,
+    value: ValueReader<'_, '_, S>,
+) -> Result<(), SyntaxError>
+where
+    S: SyntaxEventSource,
+{
     let mut object = value.object()?;
     let expected = variant_names(variants);
-    let variant_name = object.expect_discriminator("kind", &expected)?;
+    let variant_name = object.expect_discriminator(discriminator, &expected)?;
     let variant = variants
         .iter()
         .find(|variant| variant.name.as_str() == variant_name)
@@ -184,6 +205,42 @@ where
         .map_err(mutation_error_to_syntax)?;
     let data = en.data_mut();
     read_enum_payload_object(data, &variant.shape, registry, object)
+}
+
+fn read_external_enum<S>(
+    en: &mut dyn crate::SlotEnumDefaultVariant,
+    variants: &[SlotVariantShape],
+    registry: &SlotShapeRegistry,
+    value: ValueReader<'_, '_, S>,
+) -> Result<(), SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    let mut object = value.object()?;
+    let expected = variant_names(variants);
+    let Some(mut prop) = object.next_prop()? else {
+        return Err(syntax_error(format!(
+            "external enum expected exactly one variant property. Expected one of: {}.",
+            expected.join(", ")
+        )));
+    };
+    let variant_name = prop.name().to_string();
+    let variant = variants
+        .iter()
+        .find(|variant| variant.name.as_str() == variant_name)
+        .ok_or_else(|| prop.unknown_field(&variant_name, &expected))?;
+
+    en.set_variant_default_with_shape(current_revision(), &variant_name, registry, variants)
+        .map_err(mutation_error_to_syntax)?;
+    let data = en.data_mut();
+    apply_reader_to_slot(data, &variant.shape, registry, prop.value())?;
+    drop(prop);
+
+    if let Some(prop) = object.next_prop()? {
+        let name = prop.name().to_string();
+        return Err(prop.unknown_field(&name, &[]));
+    }
+    Ok(())
 }
 
 fn read_enum_payload_object<S>(
@@ -277,7 +334,7 @@ mod tests {
     use crate::{
         LpType, LpValue, SlotDataAccess, SlotMapKeyShape, SlotShapeRegistry, SlotVariantShape,
         slot::shape,
-        slot_codec::{JsonSyntaxSource, SlotReader},
+        slot_codec::{JsonSyntaxSource, SlotReader, TomlSyntaxSource},
     };
     use alloc::vec;
 
@@ -375,6 +432,7 @@ mod tests {
                 shape_id,
                 SlotShape::Enum {
                     meta: crate::SlotMeta::empty(),
+                    encoding: crate::SlotEnumEncoding::default(),
                     variants: vec![
                         SlotVariantShape::new(
                             "square",
@@ -396,6 +454,116 @@ mod tests {
             panic!("expected enum payload record");
         };
         assert_eq!(record_value(record, 0), LpValue::F32(0.5));
+    }
+
+    #[test]
+    fn dynamic_slot_reader_reads_external_value_enums() {
+        let shape_id = crate::SlotShapeId::from_static_name("test.DynamicExternalValueEnum");
+        let mut registry = SlotShapeRegistry::default();
+        registry
+            .register_dynamic_shape(
+                shape_id,
+                shape::enum_external(vec![
+                    SlotVariantShape::new("file", shape::value(LpType::String)).unwrap(),
+                    SlotVariantShape::new("inline", shape::value(LpType::String)).unwrap(),
+                ]),
+            )
+            .unwrap();
+
+        let object = read_json(&registry, shape_id, r#"{"file":"compute.glsl"}"#);
+
+        let SlotDataAccess::Enum(en) = object.data() else {
+            panic!("expected enum");
+        };
+        assert_eq!(en.variant(), "file");
+        assert_eq!(
+            slot_value(en.data()),
+            Some(LpValue::String(String::from("compute.glsl")))
+        );
+    }
+
+    #[test]
+    fn dynamic_slot_reader_reads_external_record_enums_from_toml() {
+        let shape_id = crate::SlotShapeId::from_static_name("test.DynamicExternalRecordEnum");
+        let mut registry = SlotShapeRegistry::default();
+        registry
+            .register_dynamic_shape(
+                shape_id,
+                shape::enum_external(vec![
+                    SlotVariantShape::new(
+                        "point",
+                        shape::record(vec![
+                            shape::field("x", shape::value(LpType::I32)),
+                            shape::field("y", shape::value(LpType::I32)),
+                        ]),
+                    )
+                    .unwrap(),
+                ]),
+            )
+            .unwrap();
+        let value = toml::from_str::<toml::Value>(
+            r#"
+[point]
+x = 10
+y = 11
+"#,
+        )
+        .unwrap();
+
+        let object = read_toml(&registry, shape_id, &value);
+
+        let SlotDataAccess::Enum(en) = object.data() else {
+            panic!("expected enum");
+        };
+        assert_eq!(en.variant(), "point");
+        let SlotDataAccess::Record(record) = en.data() else {
+            panic!("expected record payload");
+        };
+        assert_eq!(record_value(record, 0), LpValue::I32(10));
+        assert_eq!(record_value(record, 1), LpValue::I32(11));
+    }
+
+    #[test]
+    fn dynamic_slot_reader_rejects_external_enum_without_variant_property() {
+        let (registry, shape_id) = external_unit_enum_registry("test.DynamicExternalEmpty");
+        let mut reader = SlotReader::new(JsonSyntaxSource::new(r#"{}"#).unwrap(), &registry);
+
+        let Err(error) = read_dynamic_slot(&registry, shape_id, reader.value()) else {
+            panic!("expected external enum empty error");
+        };
+
+        assert!(error.message().contains("exactly one variant property"));
+    }
+
+    #[test]
+    fn dynamic_slot_reader_rejects_external_enum_with_multiple_variant_properties() {
+        let (registry, shape_id) = external_unit_enum_registry("test.DynamicExternalMany");
+        let mut reader = SlotReader::new(
+            JsonSyntaxSource::new(r#"{"a":{},"b":{}}"#).unwrap(),
+            &registry,
+        );
+
+        let Err(error) = read_dynamic_slot(&registry, shape_id, reader.value()) else {
+            panic!("expected external enum multiple property error");
+        };
+
+        assert!(error.message().contains("b"));
+    }
+
+    #[test]
+    fn dynamic_slot_reader_rejects_unknown_external_enum_variant() {
+        let (registry, shape_id) = external_unit_enum_registry("test.DynamicExternalUnknown");
+        let mut reader = SlotReader::new(
+            JsonSyntaxSource::new(r#"{"missing":{}}"#).unwrap(),
+            &registry,
+        );
+
+        let Err(error) = read_dynamic_slot(&registry, shape_id, reader.value()) else {
+            panic!("expected external enum unknown variant error");
+        };
+
+        assert!(error.message().contains("missing"));
+        assert!(error.message().contains("a"));
     }
 
     #[test]
@@ -428,6 +596,30 @@ mod tests {
     ) -> Box<dyn SlotMutAccess> {
         let mut reader = SlotReader::new(JsonSyntaxSource::new(json).unwrap(), registry);
         read_dynamic_slot(registry, shape_id, reader.value()).unwrap()
+    }
+
+    fn read_toml(
+        registry: &SlotShapeRegistry,
+        shape_id: crate::SlotShapeId,
+        value: &toml::Value,
+    ) -> Box<dyn SlotMutAccess> {
+        let mut reader = SlotReader::new(TomlSyntaxSource::new(value).unwrap(), registry);
+        read_dynamic_slot(registry, shape_id, reader.value()).unwrap()
+    }
+
+    fn external_unit_enum_registry(name: &str) -> (SlotShapeRegistry, crate::SlotShapeId) {
+        let shape_id = crate::SlotShapeId::from_static_name(name);
+        let mut registry = SlotShapeRegistry::default();
+        registry
+            .register_dynamic_shape(
+                shape_id,
+                shape::enum_external(vec![
+                    SlotVariantShape::new("a", shape::unit()).unwrap(),
+                    SlotVariantShape::new("b", shape::unit()).unwrap(),
+                ]),
+            )
+            .unwrap();
+        (registry, shape_id)
     }
 
     fn record_value(record: &dyn crate::SlotRecordAccess, index: usize) -> LpValue {

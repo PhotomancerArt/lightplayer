@@ -38,6 +38,8 @@ pub enum SlotShape {
     Enum {
         #[serde(default)]
         meta: SlotMeta,
+        #[serde(default, skip_serializing_if = "SlotEnumEncoding::is_default")]
+        encoding: SlotEnumEncoding,
         variants: Vec<SlotVariantShape>,
     },
     Option {
@@ -110,6 +112,39 @@ impl fmt::Display for SlotShapeIdError {
 }
 
 impl core::error::Error for SlotShapeIdError {}
+
+/// Authored syntax used when reading and writing an enum slot.
+///
+/// Encoding changes only the source/document representation of an enum. The
+/// runtime data model is always one active variant plus that variant's payload.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case", tag = "kind")]
+pub enum SlotEnumEncoding {
+    /// Store the active variant in a discriminator field, such as
+    /// `kind = "Variant"`, with the payload flattened beside it.
+    Tagged { field: SlotName },
+    /// Store the active variant as the single property of the enum object.
+    External,
+}
+
+impl SlotEnumEncoding {
+    pub fn tagged_kind() -> Self {
+        Self::Tagged {
+            field: SlotName::parse("kind").expect("valid static slot name"),
+        }
+    }
+
+    pub fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+}
+
+impl Default for SlotEnumEncoding {
+    fn default() -> Self {
+        Self::tagged_kind()
+    }
+}
 
 impl SlotShape {
     /// Reference another registered shape.
@@ -282,6 +317,7 @@ mod tests {
                     "mapping",
                     SlotShape::Enum {
                         meta: SlotMeta::empty(),
+                        encoding: SlotEnumEncoding::default(),
                         variants: vec![
                             SlotVariantShape::new(
                                 "shapes",
@@ -305,5 +341,17 @@ mod tests {
         let json = serde_json::to_string(&shape).unwrap();
         let back: SlotShape = serde_json::from_str(&json).unwrap();
         assert_eq!(back, shape);
+    }
+
+    #[test]
+    fn enum_encoding_defaults_to_tagged_kind() {
+        let json = r#"{"kind":"enum","variants":[]}"#;
+
+        let shape: SlotShape = serde_json::from_str(json).unwrap();
+
+        let SlotShape::Enum { encoding, .. } = shape else {
+            panic!("expected enum shape");
+        };
+        assert_eq!(encoding, SlotEnumEncoding::tagged_kind());
     }
 }

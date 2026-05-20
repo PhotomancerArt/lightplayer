@@ -32,8 +32,9 @@ use crate::products::control::{
     ControlSpan,
 };
 use crate::products::visual::{
-    RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSample, VisualSampleBatch,
-    VisualSamplePoint,
+    RenderTextureRequest, TextureRenderProduct, TextureSampleBatch, TextureUvSamplePoint,
+    VisualProduct, VisualSample, normalized_f32_to_q16, normalized_q16_to_pixel_q16,
+    texel_center_to_uv_q16,
 };
 
 /// Fixture node: resolves a shader visual product and exposes a control product for outputs.
@@ -149,16 +150,6 @@ struct DirectSamplePoint {
     channel: u32,
     x_norm_q16: i32,
     y_norm_q16: i32,
-}
-
-fn normalized_f32_to_q16(value: f32) -> i32 {
-    let clamped = value.clamp(0.0, 1.0);
-    (clamped * 65536.0) as i32
-}
-
-fn normalized_q16_to_pixel_q16(value: i32, extent: u32) -> i32 {
-    let scaled = i64::from(value) * i64::from(extent);
-    scaled.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32
 }
 
 pub fn fixture_input_path() -> SlotPath {
@@ -674,7 +665,7 @@ fn accumulate_fixture_channels_from_texture_product(
         ));
     }
 
-    let batch = uv_batch_for_fixture_entries(mapping_entries, width);
+    let batch = uv_batch_for_fixture_entries(mapping_entries, width, height);
     let sample_result = texture.sample_batch(&batch);
     accumulate_fixture_channels_from_texture_samples(mapping_entries, &sample_result.samples)
 }
@@ -682,7 +673,8 @@ fn accumulate_fixture_channels_from_texture_product(
 fn uv_batch_for_fixture_entries(
     entries: &[PixelMappingEntry],
     texture_width: u32,
-) -> VisualSampleBatch {
+    texture_height: u32,
+) -> TextureSampleBatch {
     let mut points = Vec::new();
     let mut pixel_index = 0_u32;
 
@@ -694,11 +686,9 @@ fn uv_batch_for_fixture_entries(
 
         let x = pixel_index % texture_width;
         let y = pixel_index / texture_width;
-        let x_q16 = ((x as i64) << 16) / i64::from(texture_width.max(1));
-        let y_q16 = ((y as i64) << 16) / i64::from(texture_width.max(1));
-        points.push(VisualSamplePoint {
-            x_q16: x_q16 as i32,
-            y_q16: y_q16 as i32,
+        points.push(TextureUvSamplePoint {
+            u_q16: texel_center_to_uv_q16(x, texture_width),
+            v_q16: texel_center_to_uv_q16(y, texture_height),
         });
 
         if !entry.has_more() {
@@ -706,7 +696,7 @@ fn uv_batch_for_fixture_entries(
         }
     }
 
-    VisualSampleBatch {
+    TextureSampleBatch {
         points,
         time_seconds: 0.0,
     }
@@ -1573,5 +1563,21 @@ mod tests {
         assert_eq!(normalized_q16_to_pixel_q16(0, 16), 0);
         assert_eq!(normalized_q16_to_pixel_q16(32768, 16), 8 * 65536);
         assert_eq!(normalized_q16_to_pixel_q16(65536, 16), 16 * 65536);
+    }
+
+    #[test]
+    fn texture_area_fallback_uv_batch_uses_texture_height_for_y_axis() {
+        let entries = vec![
+            PixelMappingEntry::skip(),
+            PixelMappingEntry::skip(),
+            PixelMappingEntry::skip(),
+            PixelMappingEntry::skip(),
+            PixelMappingEntry::new(0, Q32::ONE, false),
+        ];
+        let batch = uv_batch_for_fixture_entries(&entries, 2, 4);
+
+        assert_eq!(batch.points.len(), 1);
+        assert_eq!(batch.points[0].u_q16, 16384);
+        assert_eq!(batch.points[0].v_q16, 40960);
     }
 }

@@ -72,7 +72,8 @@ pub use slot_record_shape::SlotRecordShape;
 pub use slot_ref::SlotRef;
 pub use slot_semantics::SlotSemantics;
 pub use slot_shape::{
-    SlotFieldShape, SlotMapKeyShape, SlotShape, SlotShapeId, SlotShapeIdError, SlotVariantShape,
+    SlotEnumEncoding, SlotFieldShape, SlotMapKeyShape, SlotShape, SlotShapeId, SlotShapeIdError,
+    SlotVariantShape,
 };
 pub use slot_value::{
     FromLpValue, OrderedF32, SlotEnumOption, SlotValue, SlotValueShape, ToLpValue, ValueEditorHint,
@@ -80,8 +81,9 @@ pub use slot_value::{
 };
 pub mod shape {
     pub use super::slot_shape_builder::{
-        field, field_with_policy, field_with_semantics, field_with_semantics_and_policy, id, leaf,
-        map, option, record, reference, unit, value, variant,
+        enum_external, enum_tagged, enum_with_encoding, field, field_with_policy,
+        field_with_semantics, field_with_semantics_and_policy, id, leaf, map, option, record,
+        reference, unit, value, variant,
     };
 }
 pub use slot_shape_registry::{
