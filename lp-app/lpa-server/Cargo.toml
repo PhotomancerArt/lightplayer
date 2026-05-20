@@ -25,6 +25,7 @@ lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
+lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 hashbrown = { workspace = true }
 log = { workspace = true, default-features = false }
 

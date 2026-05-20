@@ -46,10 +46,14 @@ pub async fn run_workload(
 
     eprintln!("Loading project...");
     let project_path = format!("projects/{project_uid}");
-    client
-        .project_load(&project_path)
-        .await
-        .context("Failed to load project")?;
+    match client.project_load(&project_path).await {
+        Ok(_) => {}
+        Err(e) if is_profile_stop_error(&e) => {
+            eprintln!("Profile gate stopped during project load.");
+            return Ok(WorkloadOutcome::ProfileStopped);
+        }
+        Err(e) => return Err(e).context("Failed to load project"),
+    }
 
     eprintln!("Driving frames (mode-gated; --max-cycles {max_cycles})...");
     let mut last_print_cycle = 0u64;
@@ -90,6 +94,14 @@ pub async fn run_workload(
             }
         }
     }
+}
+
+fn is_profile_stop_error(e: &anyhow::Error) -> bool {
+    e.chain().any(|cause| {
+        cause
+            .to_string()
+            .contains("Emulator stopped by profile gate")
+    })
 }
 
 async fn push_project_files(

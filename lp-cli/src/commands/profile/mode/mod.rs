@@ -9,6 +9,7 @@ use clap::ValueEnum;
 
 pub mod all;
 pub mod compile;
+pub mod project_load;
 pub mod startup;
 pub mod steady_render;
 
@@ -24,6 +25,8 @@ pub enum ProfileMode {
     Compile,
     /// Capture project-load + first frame.
     Startup,
+    /// Capture only project loading and stop before the first frame.
+    ProjectLoad,
     /// Capture everything; stop only on guest halt or --max-cycles.
     All,
 }
@@ -34,6 +37,7 @@ impl ProfileMode {
             ProfileMode::SteadyRender => Box::new(steady_render::SteadyRenderGate::new()),
             ProfileMode::Compile => Box::new(compile::CompileGate::new()),
             ProfileMode::Startup => Box::new(startup::StartupGate::new()),
+            ProfileMode::ProjectLoad => Box::new(project_load::ProjectLoadGate::new()),
             ProfileMode::All => Box::new(all::AllGate::new()),
         }
     }
@@ -43,6 +47,7 @@ impl ProfileMode {
             ProfileMode::SteadyRender => "steady-render",
             ProfileMode::Compile => "compile",
             ProfileMode::Startup => "startup",
+            ProfileMode::ProjectLoad => "project-load",
             ProfileMode::All => "all",
         }
     }
@@ -60,6 +65,7 @@ mod profile_mode_smoke {
             ProfileMode::SteadyRender,
             ProfileMode::Compile,
             ProfileMode::Startup,
+            ProfileMode::ProjectLoad,
             ProfileMode::All,
         ] {
             let _ = mode.slug();

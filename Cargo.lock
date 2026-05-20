@@ -4039,6 +4039,7 @@ version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
  "log",
+ "lp-perf",
  "lpc-engine",
  "lpc-model",
  "lpc-shared",

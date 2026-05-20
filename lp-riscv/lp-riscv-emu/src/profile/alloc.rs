@@ -15,7 +15,7 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use super::{Collector, EmuCtx, FinishCtx, HaltReason, SyscallAction};
+use super::{Collector, EmuCtx, FinishCtx, GateAction, HaltReason, SyscallAction};
 use std::any::Any;
 
 #[cfg(test)]
@@ -148,6 +148,7 @@ pub struct AllocCollector {
     heap_start: u32,
     heap_size: u32,
     trace_path: PathBuf,
+    enabled: bool,
 }
 
 impl AllocCollector {
@@ -160,6 +161,7 @@ impl AllocCollector {
             heap_start,
             heap_size,
             trace_path,
+            enabled: false,
         })
     }
 
@@ -205,6 +207,9 @@ impl Collector for AllocCollector {
             return SyscallAction::Pass;
         }
         let event_type = args.first().copied().unwrap_or(0) as i32;
+        if !self.enabled && event_type != ALLOC_TRACE_OOM {
+            return SyscallAction::Handled;
+        }
         let frames = ctx.unwind_backtrace();
         let ic = ctx.instruction_count;
 
@@ -272,6 +277,18 @@ impl Collector for AllocCollector {
         self.writer.flush()
     }
 
+    fn on_gate_action(&mut self, action: GateAction) {
+        match action {
+            GateAction::Enable => {
+                self.enabled = true;
+            }
+            GateAction::Disable | GateAction::Stop => {
+                self.enabled = false;
+            }
+            GateAction::NoChange => {}
+        }
+    }
+
     fn report_section(&self, w: &mut dyn std::fmt::Write) -> std::fmt::Result {
         let meta_path = match self.trace_path.parent() {
             Some(p) => p.join("meta.json"),
@@ -303,6 +320,8 @@ struct TraceEventOwned {
     ic: u64,
     frames: Vec<u32>,
     #[serde(default)]
+    free: u32,
+    #[serde(default)]
     old_ptr: Option<u32>,
     #[serde(default)]
     old_sz: Option<u32>,
@@ -332,6 +351,9 @@ struct RunningStats {
     min_free_frames: Vec<u32>,
     min_free_event: String,
     min_free_sz: u32,
+    final_reported_free: Option<u64>,
+    min_reported_free: Option<u64>,
+    min_reported_free_ic: u64,
     hotspot_bytes: HashMap<String, u64>,
 }
 
@@ -349,6 +371,9 @@ impl RunningStats {
             min_free_frames: Vec::new(),
             min_free_event: String::new(),
             min_free_sz: 0,
+            final_reported_free: None,
+            min_reported_free: None,
+            min_reported_free_ic: 0,
             hotspot_bytes: HashMap::new(),
         }
     }
@@ -366,6 +391,18 @@ impl RunningStats {
             self.min_free_frames = frames.to_vec();
             self.min_free_event = event.to_string();
             self.min_free_sz = sz;
+        }
+    }
+
+    fn record_reported_free(&mut self, free: u32, ic: u64) {
+        if free == 0 {
+            return;
+        }
+        let free = u64::from(free);
+        self.final_reported_free = Some(free);
+        if self.min_reported_free.is_none_or(|min| free < min) {
+            self.min_reported_free = Some(free);
+            self.min_reported_free_ic = ic;
         }
     }
 
@@ -464,6 +501,7 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
 
         match event.t.as_str() {
             "A" => {
+                stats.record_reported_free(event.free, event.ic);
                 stats.record_alloc(event.sz, event.ic, &event.frames, &resolver);
                 live.insert(
                     event.ptr,
@@ -474,10 +512,12 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
                 );
             }
             "D" => {
+                stats.record_reported_free(event.free, event.ic);
                 stats.record_dealloc(event.sz, event.ic, &event.frames);
                 live.remove(&event.ptr);
             }
             "R" => {
+                stats.record_reported_free(event.free, event.ic);
                 let old_ptr = event.old_ptr.unwrap_or(0);
                 let old_sz = event.old_sz.unwrap_or(0);
                 stats.record_realloc(old_sz, event.sz, event.ic, &event.frames, &resolver);
@@ -597,8 +637,12 @@ impl AllocReport {
     }
 
     fn write_overview(&self, out: &mut String) {
+        let final_free = self
+            .stats
+            .final_reported_free
+            .unwrap_or_else(|| self.stats.derived_free());
         let pct = if self.heap_size > 0 {
-            (self.stats.derived_free() as f64 / self.heap_size as f64) * 100.0
+            (final_free as f64 / self.heap_size as f64) * 100.0
         } else {
             0.0
         };
@@ -626,10 +670,18 @@ impl AllocReport {
         writeln!(
             out,
             "  Final free: {} bytes ({:.1}% of heap)",
-            fmt_num(self.stats.derived_free()),
+            fmt_num(final_free),
             pct
         )
         .unwrap();
+        if self.stats.final_reported_free.is_some() {
+            writeln!(
+                out,
+                "  Live bytes: {} bytes (captured allocations)",
+                fmt_num(self.heap_size as u64 - self.stats.derived_free())
+            )
+            .unwrap();
+        }
         writeln!(out).unwrap();
     }
 
@@ -638,8 +690,12 @@ impl AllocReport {
         writeln!(
             out,
             "  Free: {} bytes at ic={}",
-            fmt_num(self.stats.min_free),
-            fmt_num(self.stats.min_free_ic)
+            fmt_num(self.stats.min_reported_free.unwrap_or(self.stats.min_free)),
+            fmt_num(if self.stats.min_reported_free.is_some() {
+                self.stats.min_reported_free_ic
+            } else {
+                self.stats.min_free_ic
+            })
         )
         .unwrap();
         writeln!(

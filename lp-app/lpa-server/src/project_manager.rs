@@ -98,32 +98,38 @@ impl ProjectManager {
                 .join(&name)
         };
 
-        backtrace::set_oom_context("project manager: chroot project fs");
-        let project_fs = base_fs
-            .chroot(project_path.as_path())
-            .map_err(|e| ServerError::Filesystem(format!("Failed to chroot to project: {e}")))?;
+        lp_perf::emit_begin!(lp_perf::EVENT_PROJECT_LOAD);
+        let result = (|| {
+            backtrace::set_oom_context("project manager: chroot project fs");
+            let project_fs = base_fs.chroot(project_path.as_path()).map_err(|e| {
+                ServerError::Filesystem(format!("Failed to chroot to project: {e}"))
+            })?;
 
-        backtrace::set_oom_context("project manager: create project");
-        let project = Project::new(
-            name.clone(),
-            project_path.as_path(),
-            project_fs,
-            output_provider,
-            memory_stats,
-            time_provider,
-            button_service,
-            radio_service,
-            graphics,
-        )?;
+            backtrace::set_oom_context("project manager: create project");
+            let project = Project::new(
+                name.clone(),
+                project_path.as_path(),
+                project_fs,
+                output_provider,
+                memory_stats,
+                time_provider,
+                button_service,
+                radio_service,
+                graphics,
+            )?;
 
-        backtrace::set_oom_context("project manager: insert project runtime");
-        self.projects.insert(handle, project);
-        log::info!("Project loaded: {name}");
-        backtrace::set_oom_context("project manager: insert project name");
-        self.name_to_handle.insert(name, handle);
-        backtrace::clear_oom_context();
+            backtrace::set_oom_context("project manager: insert project runtime");
+            self.projects.insert(handle, project);
+            log::info!("Project loaded: {name}");
+            backtrace::set_oom_context("project manager: insert project name");
+            self.name_to_handle.insert(name, handle);
+            backtrace::clear_oom_context();
 
-        Ok(handle)
+            Ok(handle)
+        })();
+        lp_perf::emit_end!(lp_perf::EVENT_PROJECT_LOAD);
+
+        result
     }
 
     /// Extract project name from path
