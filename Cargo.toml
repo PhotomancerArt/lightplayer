@@ -230,8 +230,9 @@ esp-radio-rtos-driver = { path = "../oss/esp-hal/esp-radio-rtos-driver" }
 esp-riscv-rt = { path = "../oss/esp-hal/esp-riscv-rt" }
 esp-rom-sys = { path = "../oss/esp-hal/esp-rom-sys" }
 esp-rtos = { path = "../oss/esp-hal/esp-rtos" }
-esp-storage = { path = "../oss/esp-hal/esp-storage" }
+esp-storage = { path = "third_party/esp-storage" }
 esp-sync = { path = "../oss/esp-hal/esp-sync" }
+littlefs-rust = { path = "../../littlefs-rust/littlefs-rust" }
 # no_std pp-rs fork for naga `glsl-in` on bare-metal (https://github.com/light-player/pp-rs)
 pp-rs = { path = "third_party/pp-rs" }
 
@@ -259,5 +260,3 @@ pp-rs = { path = "third_party/pp-rs" }
 #[patch."https://github.com/light-player/lp-common"]
 #lp-collection = { path = "../lp-common/lp-collection" }
 #
-#[patch.crates-io]
-#littlefs-rust = { path = "../littlefs-rust/littlefs-rust" }

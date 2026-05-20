@@ -86,7 +86,7 @@ embedded-io-async = "0.6"
 log = { workspace = true, default-features = false }
 
 embedded-storage = "0.3"
-esp-storage = { version = "0.9", features = ["esp32c6"] }
+esp-storage = { version = "0.9", features = ["esp32c6", "panic-unaligned-buffer"] }
 littlefs-rust = { version = "0.1.0", default-features = false, features = ["alloc"] }
 
 [lints]
