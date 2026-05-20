@@ -63,10 +63,15 @@ pub fn build(cpu: &CpuCollector, symbols: &dyn PcSymbolizer) -> Value {
             "function_name": symbols.symbolize(sample.function_pc),
             "sp": pc_key(sample.sp),
             "stack_top": pc_key(sample.stack_top),
-            "callstack": sample.callstack.iter().map(|pc| {
+            "callstack": sample.callstack.iter().map(|frame| {
                 json!({
-                    "pc": pc_key(*pc),
-                    "name": symbols.symbolize(*pc),
+                    "pc": pc_key(frame.function_pc),
+                    "name": symbols.symbolize(frame.function_pc),
+                    "entry_sp": pc_key(frame.entry_sp),
+                    "min_sp": pc_key(frame.min_sp),
+                    "frame_bytes": frame.self_bytes,
+                    "self_bytes": frame.self_bytes,
+                    "cumulative_bytes": frame.cumulative_bytes,
                 })
             }).collect::<Vec<_>>(),
         })
@@ -102,7 +107,7 @@ pub fn build(cpu: &CpuCollector, symbols: &dyn PcSymbolizer) -> Value {
     });
 
     json!({
-        "schema_version": 2,
+        "schema_version": 3,
         "cycle_model": cpu.cycle_model_label,
         "total_cycles_attributed": cpu.total_cycles_attributed,
         "stack": {
@@ -123,13 +128,13 @@ mod tests {
     use crate::commands::profile::symbolize::Symbolizer;
 
     #[test]
-    fn schema_version_is_2() {
+    fn schema_version_is_3() {
         let mut cpu = CpuCollector::new("esp32c6");
         cpu.on_gate_action(GateAction::Enable);
         cpu.on_instruction(0x1000, 0x1004, InstClass::Alu, 1);
         let sym = Symbolizer::new(&[], &[]);
         let v = build(&cpu, &sym);
-        assert_eq!(v["schema_version"], 2);
+        assert_eq!(v["schema_version"], 3);
     }
 
     #[test]
@@ -197,10 +202,20 @@ mod tests {
     fn includes_stack_high_water() {
         let mut cpu = CpuCollector::new("esp32c6");
         cpu.on_gate_action(GateAction::Enable);
-        cpu.on_instruction_with_state(0x1000, 0x1004, InstClass::Alu, 1, 0x8000_1f00, 0x8000_2000);
+        cpu.on_instruction_with_state(
+            0x1000,
+            0x2000,
+            InstClass::JalCall,
+            1,
+            0x8000_1ff0,
+            0x8000_2000,
+        );
+        cpu.on_instruction_with_state(0x2000, 0x2004, InstClass::Alu, 1, 0x8000_1f00, 0x8000_2000);
         let sym = Symbolizer::new(&[], &[]);
         let v = build(&cpu, &sym);
         assert_eq!(v["stack"]["max"]["used_bytes"], 0x100);
         assert_eq!(v["stack"]["by_function"][0]["used_bytes"], 0x100);
+        assert_eq!(v["stack"]["max"]["callstack"][0]["self_bytes"], 0xf0);
+        assert_eq!(v["stack"]["max"]["callstack"][0]["cumulative_bytes"], 0x100);
     }
 }

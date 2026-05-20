@@ -29,6 +29,10 @@ pub struct Frame {
     /// that pushed this frame (call / tail) added its cost. Inclusive time for the callee
     /// therefore includes that instruction's cycles (see [`CpuCollector::on_instruction_inner`]).
     pub cycles_at_entry: u64,
+    /// Guest SP immediately after the call/tail instruction entered this frame.
+    pub entry_sp: u32,
+    /// Lowest guest SP observed while executing this frame itself.
+    pub min_sp: u32,
 }
 
 #[derive(Default, Clone, Debug)]
@@ -52,7 +56,16 @@ pub struct StackSample {
     pub function_pc: u32,
     pub sp: u32,
     pub stack_top: u32,
-    pub callstack: Vec<u32>,
+    pub callstack: Vec<StackFrameSample>,
+}
+
+#[derive(Clone, Debug)]
+pub struct StackFrameSample {
+    pub function_pc: u32,
+    pub entry_sp: u32,
+    pub min_sp: u32,
+    pub self_bytes: u32,
+    pub cumulative_bytes: u32,
 }
 
 /// Aggregates per-function and per-edge cycle stats while a profile gate is active.
@@ -90,11 +103,13 @@ impl CpuCollector {
             .unwrap_or(ROOT_PC)
     }
 
-    fn push_frame(&mut self, caller_pc: u32, callee_pc: u32, cycles_at_entry: u64) {
+    fn push_frame(&mut self, caller_pc: u32, callee_pc: u32, cycles_at_entry: u64, sp: u32) {
         self.shadow_stack.push(Frame {
             caller_pc,
             callee_pc,
             cycles_at_entry,
+            entry_sp: sp,
+            min_sp: sp,
         });
         self.func_stats.entry(callee_pc).or_default().calls_in += 1;
         self.func_stats.entry(caller_pc).or_default().calls_out += 1;
@@ -117,11 +132,40 @@ impl CpuCollector {
         edge.inclusive_cycles += inclusive;
     }
 
+    fn update_current_frame_sp(&mut self, sp: u32) {
+        if let Some(frame) = self.shadow_stack.last_mut() {
+            if frame.min_sp == 0 || sp < frame.min_sp {
+                frame.min_sp = sp;
+            }
+        }
+    }
+
+    fn stack_frame_samples(&self, stack_top: u32) -> Vec<StackFrameSample> {
+        self.shadow_stack
+            .iter()
+            .map(|frame| {
+                let min_sp = if frame.min_sp == 0 {
+                    frame.entry_sp
+                } else {
+                    frame.min_sp
+                };
+                StackFrameSample {
+                    function_pc: frame.callee_pc,
+                    entry_sp: frame.entry_sp,
+                    min_sp,
+                    self_bytes: frame.entry_sp.saturating_sub(min_sp),
+                    cumulative_bytes: stack_top.saturating_sub(min_sp),
+                }
+            })
+            .collect()
+    }
+
     fn record_stack_sample(&mut self, pc: u32, sp: u32, stack_top: u32) {
         if !self.active || sp < RAM_START || sp > stack_top {
             return;
         }
 
+        self.update_current_frame_sp(sp);
         let used_bytes = stack_top.saturating_sub(sp);
         let function_pc = self.current_pc();
         let sample = StackSample {
@@ -130,11 +174,7 @@ impl CpuCollector {
             function_pc,
             sp,
             stack_top,
-            callstack: self
-                .shadow_stack
-                .iter()
-                .map(|frame| frame.callee_pc)
-                .collect(),
+            callstack: self.stack_frame_samples(stack_top),
         };
 
         if self
@@ -167,7 +207,14 @@ impl CpuCollector {
     /// `total_cycles_attributed` **before** that instruction's cost is added, so
     /// `pop_frame`'s inclusive interval includes the entering instruction's cycles in the
     /// callee's `inclusive_cycles`.
-    fn on_instruction_inner(&mut self, pc: u32, target_pc: u32, class: InstClass, cycles: u32) {
+    fn on_instruction_inner(
+        &mut self,
+        pc: u32,
+        target_pc: u32,
+        class: InstClass,
+        cycles: u32,
+        sp: u32,
+    ) {
         if !self.active {
             return;
         }
@@ -181,7 +228,7 @@ impl CpuCollector {
                 self.total_cycles_attributed += cycles;
                 let stat_pc = self.current_pc();
                 self.func_stats.entry(stat_pc).or_default().self_cycles += cycles;
-                self.push_frame(pc, target_pc, cycles_at_entry_for_callee);
+                self.push_frame(pc, target_pc, cycles_at_entry_for_callee, sp);
             }
             InstClass::JalrReturn => {
                 self.total_cycles_attributed += cycles;
@@ -195,7 +242,7 @@ impl CpuCollector {
                 let stat_pc = self.current_pc();
                 self.func_stats.entry(stat_pc).or_default().self_cycles += cycles;
                 self.pop_frame();
-                self.push_frame(pc, target_pc, cycles_at_entry_for_callee);
+                self.push_frame(pc, target_pc, cycles_at_entry_for_callee, sp);
             }
             _ => {
                 self.total_cycles_attributed += cycles;
@@ -238,7 +285,7 @@ impl Collector for CpuCollector {
     }
 
     fn on_instruction(&mut self, pc: u32, target_pc: u32, class: InstClass, cycles: u32) {
-        self.on_instruction_inner(pc, target_pc, class, cycles);
+        self.on_instruction_inner(pc, target_pc, class, cycles, 0);
     }
 
     fn on_instruction_with_state(
@@ -251,7 +298,7 @@ impl Collector for CpuCollector {
         stack_top: u32,
     ) {
         self.record_stack_sample(pc, sp, stack_top);
-        self.on_instruction_inner(pc, target_pc, class, cycles);
+        self.on_instruction_inner(pc, target_pc, class, cycles, sp);
     }
 
     fn finish(&mut self, _ctx: &FinishCtx<'_>) -> std::io::Result<()> {
@@ -339,9 +386,16 @@ impl CpuCollector {
             Some(sample) => {
                 writeln!(w, "  {}", format_stack_sample(sample, sym))?;
                 if !sample.callstack.is_empty() {
-                    writeln!(w, "  Active call stack (leaf first):")?;
-                    for pc in sample.callstack.iter().rev().take(16) {
-                        writeln!(w, "    {}", format_pc_for_report(*pc, sym))?;
+                    writeln!(w, "  Stack frames at high water (leaf first):")?;
+                    writeln!(w, "     frame     total  function")?;
+                    for frame in sample.callstack.iter().rev() {
+                        writeln!(
+                            w,
+                            "    {:>6}  {:>8}  {}",
+                            frame.self_bytes,
+                            frame.cumulative_bytes,
+                            format_pc_for_report(frame.function_pc, sym),
+                        )?;
                     }
                 }
             }
