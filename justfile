@@ -135,6 +135,50 @@ build-rv32-release: build-rv32
 build-fw-esp32: install-rv32-target
     cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32_profile }} --features esp32c6
 
+# Emit RV32 stack-size metadata for the ESP32 firmware.
+# The direct cargo build can fail at final link on local ESP linker-script setup,
+# but rustc still emits the object containing .stack_sizes before that point.
+# Usage:
+#   just esp-stack-sizes
+#   just esp-stack-sizes ProjectManager
+esp-stack-sizes pattern="": install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v rust-readobj >/dev/null 2>&1; then
+        echo "rust-readobj not found; install rust-binutils: rustup component add llvm-tools-preview"
+        exit 1
+    fi
+
+    set +e
+    RUSTFLAGS='-Z emit-stack-sizes' cargo build \
+        -p fw-esp32 \
+        --target {{ rv32_target }} \
+        --profile {{ fw_esp32_profile }} \
+        --features esp32c6,server
+    build_status=$?
+    set -e
+    if [ "$build_status" -ne 0 ]; then
+        echo "cargo build exited with $build_status; continuing if the .stack_sizes object was emitted"
+    fi
+
+    deps_dir="target/{{ rv32_target }}/{{ fw_esp32_profile }}/deps"
+    obj="$(find "$deps_dir" -type f -name 'fw_esp32-*.rcgu.o' -print | xargs ls -t 2>/dev/null | head -n 1 || true)"
+    if [ -z "$obj" ]; then
+        echo "No fw_esp32 rcgu object found under $deps_dir"
+        exit 1
+    fi
+
+    out_dir="target/stack-sizes"
+    out="$out_dir/fw-esp32.stack-sizes.txt"
+    mkdir -p "$out_dir"
+    rust-readobj --stack-sizes "$obj" > "$out"
+    echo "Stack-size report: $out"
+    echo "Object: $obj"
+
+    if [ -n "{{ pattern }}" ]; then
+        rg -n -A1 "{{ pattern }}" "$out" || true
+    fi
+
 # riscv32: emu-guest-test-app
 build-rv32-emu-guest-test-app: install-rv32-target
     cd lp-riscv/lp-riscv-emu-guest-test-app && RUSTFLAGS="-C target-feature=-c" cargo build --target {{ rv32_target }} --release
