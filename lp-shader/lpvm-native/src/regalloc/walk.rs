@@ -385,7 +385,7 @@ impl<'a> WalkState<'a> {
 
     fn finish(mut self) -> Result<AllocOutput, AllocError> {
         self.edits.reverse();
-        self.edits.sort_by_key(|(pt, _)| *pt);
+        stable_sort_edits_by_point(&mut self.edits);
 
         let mut entry_precolors: Vec<(VReg, u8)> = Vec::new();
         for (vreg_idx, preg) in self.func_abi.precolors() {
@@ -502,6 +502,16 @@ impl<'a> WalkState<'a> {
             num_spill_slots: self.spill.total_slots(),
             trace: self.trace,
         })
+    }
+}
+
+fn stable_sort_edits_by_point(edits: &mut [(EditPoint, Edit)]) {
+    for i in 1..edits.len() {
+        let mut j = i;
+        while j > 0 && edits[j].0 < edits[j - 1].0 {
+            edits.swap(j, j - 1);
+            j -= 1;
+        }
     }
 }
 

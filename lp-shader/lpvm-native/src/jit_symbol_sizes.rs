@@ -4,13 +4,13 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-/// Stable sort of `name → byte offset` by offset, then name.
+/// Sort `name → byte offset` by offset, then name.
 pub(crate) fn sort_by_offset<'a>(map: &'a BTreeMap<String, usize>) -> Vec<(&'a str, u32)> {
     let mut sorted: Vec<(&'a str, u32)> = map
         .iter()
         .map(|(name, off)| (name.as_str(), *off as u32))
         .collect();
-    sorted.sort_by(|(na, oa), (nb, ob)| oa.cmp(ob).then_with(|| na.cmp(nb)));
+    sorted.sort_unstable_by(|(na, oa), (nb, ob)| oa.cmp(ob).then_with(|| na.cmp(nb)));
     sorted
 }
 

@@ -78,7 +78,7 @@ impl FrameLayout {
             || has_incoming_stack_args;
 
         let mut callee_list: Vec<PReg> = used_callee_saved.iter().collect();
-        callee_list.sort_by_key(|p| (p.class as u8, p.hw));
+        callee_list.sort_unstable_by_key(|p| (p.class as u8, p.hw));
 
         let caller_arg_stack_size = align_up(caller_outgoing_stack_bytes, alignment);
         let spill_bytes = spill_count.saturating_mul(4);
@@ -127,7 +127,7 @@ impl FrameLayout {
             cursor -= 4;
             callee_save_offsets.push((r, cursor));
         }
-        callee_save_offsets.sort_by_key(|(_, o)| *o);
+        callee_save_offsets.sort_unstable_by_key(|(_, o)| *o);
 
         Self {
             total_size,

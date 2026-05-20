@@ -38,7 +38,7 @@ impl LineTable {
                 })
             })
             .collect();
-        entries.sort_by_key(|e| e.offset);
+        entries.sort_unstable_by_key(|e| e.offset);
         Self { entries }
     }
 

@@ -39,12 +39,10 @@ impl NativeCompileJob {
         isa: IsaTarget,
     ) -> Self {
         let function_count = ir.functions.len();
-        let sig_map = sig
-            .functions
-            .iter()
-            .cloned()
-            .map(|f| (f.name.clone(), f))
-            .collect();
+        let mut sig_map = BTreeMap::new();
+        for function in sig.functions.iter().cloned() {
+            sig_map.insert(function.name.clone(), function);
+        }
         Self {
             ir,
             stage: NativeCompileStage::SetupModule,
