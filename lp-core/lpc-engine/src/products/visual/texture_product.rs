@@ -4,7 +4,7 @@ use core::fmt;
 
 use lps_shared::TextureStorageFormat;
 
-use super::{VisualSample, VisualSampleBatch, VisualSampleBatchResult};
+use super::{TextureSampleBatch, VisualSample, VisualSampleBatchResult, texture_uv_q16_to_texel};
 
 /// Invalid [`TextureRenderProduct`] construction input.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,7 +34,7 @@ impl core::error::Error for TextureRenderProductError {}
 
 /// Texture-backed visual product with private byte storage (no `LpsTextureBuf` in the public API).
 ///
-/// Sample coordinates in [`VisualSampleBatch`] are interpreted as normalized Q16.16 values
+/// Sample coordinates in [`TextureSampleBatch`] are interpreted as normalized Q16.16 values
 /// and converted to integer texels with clamp-to-edge behavior.
 #[derive(Debug, Clone)]
 pub struct TextureRenderProduct {
@@ -106,11 +106,11 @@ impl TextureRenderProduct {
 }
 
 impl TextureRenderProduct {
-    pub fn sample_batch(&self, request: &VisualSampleBatch) -> VisualSampleBatchResult {
+    pub fn sample_batch(&self, request: &TextureSampleBatch) -> VisualSampleBatchResult {
         let mut samples = alloc::vec::Vec::with_capacity(request.points.len());
         for p in &request.points {
-            let tx = q16_to_texel(p.x_q16, self.width);
-            let ty = q16_to_texel(p.y_q16, self.height);
+            let tx = texture_uv_q16_to_texel(p.u_q16, self.width);
+            let ty = texture_uv_q16_to_texel(p.v_q16, self.height);
             let (tx, ty) = clamp_texel(tx, ty, self.width, self.height);
             let color = sample_texel(&self.pixels, self.width, self.format, tx, ty);
             samples.push(VisualSample {
@@ -119,14 +119,6 @@ impl TextureRenderProduct {
         }
         VisualSampleBatchResult { samples }
     }
-}
-
-fn q16_to_texel(v: i32, extent: u32) -> u32 {
-    if extent == 0 || v <= 0 {
-        return 0;
-    }
-    let scaled = ((v as i64) * (extent as i64)) >> 16;
-    u32::try_from(scaled).unwrap_or(u32::MAX)
 }
 
 fn clamp_texel(x: u32, y: u32, width: u32, height: u32) -> (u32, u32) {
@@ -182,7 +174,7 @@ mod tests {
     use alloc::vec;
 
     use super::{TextureRenderProduct, TextureRenderProductError};
-    use crate::products::visual::{VisualSampleBatch, VisualSamplePoint};
+    use crate::products::visual::{TextureSampleBatch, TextureUvSamplePoint};
 
     fn pixel_rgba16(r: u16, g: u16, b: u16, a: u16) -> [u8; 8] {
         let mut out = [0u8; 8];
@@ -211,20 +203,20 @@ mod tests {
         );
         assert_eq!(tex.try_raw_bytes().map(<[_]>::len), Some(32));
 
-        let batch = VisualSampleBatch {
+        let batch = TextureSampleBatch {
             points: vec![
-                VisualSamplePoint { x_q16: 0, y_q16: 0 },
-                VisualSamplePoint {
-                    x_q16: 32768,
-                    y_q16: 0,
+                TextureUvSamplePoint { u_q16: 0, v_q16: 0 },
+                TextureUvSamplePoint {
+                    u_q16: 32768,
+                    v_q16: 0,
                 },
-                VisualSamplePoint {
-                    x_q16: 0,
-                    y_q16: 32768,
+                TextureUvSamplePoint {
+                    u_q16: 0,
+                    v_q16: 32768,
                 },
-                VisualSamplePoint {
-                    x_q16: 32768,
-                    y_q16: 32768,
+                TextureUvSamplePoint {
+                    u_q16: 32768,
+                    v_q16: 32768,
                 },
             ],
             time_seconds: 0.0,

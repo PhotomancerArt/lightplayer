@@ -367,7 +367,10 @@ mod tests {
 
         let responses = engine.mutate_project_slots(Vec::from([request]));
 
-        assert!(matches!(responses[0].result, WireSlotMutationResult::Accepted));
+        assert!(matches!(
+            responses[0].result,
+            WireSlotMutationResult::Accepted
+        ));
         let def = engine
             .loaded_node_def(engine.tree().get(clock).unwrap().artifact())
             .unwrap();

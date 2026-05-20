@@ -19,6 +19,7 @@ use crate::node::{
 };
 use crate::products::visual::{
     RenderTextureRequest, TextureRenderProduct, VisualSampleBufferRequest, VisualSampleTarget,
+    pixel_q16_to_normalized_q16, texel_center_to_uv_q16,
 };
 
 use super::{MsaFluidSolver, sample_rgba16_bilinear_q16, stamp_emitter};
@@ -219,14 +220,6 @@ impl RenderNode for FluidNode {
     }
 }
 
-fn pixel_q16_to_normalized_q16(coord: i32, extent: u32) -> i32 {
-    if extent == 0 {
-        return 0;
-    }
-    let normalized = i64::from(coord) / i64::from(extent);
-    normalized.clamp(0, 65535) as i32
-}
-
 fn resolve_emitters(ctx: &mut TickContext<'_>) -> Result<Vec<FluidEmitter>, NodeError> {
     let production = ctx
         .resolve(QueryKey::ConsumedSlot {
@@ -266,9 +259,9 @@ fn write_texture_pixels(solver: &MsaFluidSolver, width: u32, height: u32, pixels
         return;
     }
     for y in 0..height {
-        let y_q16 = (((y as u64) << 16) / height as u64) as i32;
+        let y_q16 = texel_center_to_uv_q16(y, height);
         for x in 0..width {
-            let x_q16 = (((x as u64) << 16) / width as u64) as i32;
+            let x_q16 = texel_center_to_uv_q16(x, width);
             let rgba = sample_rgba16_bilinear_q16(solver, x_q16, y_q16);
             let offset = ((y * width + x) as usize) * 8;
             pixels[offset..offset + 2].copy_from_slice(&rgba[0].to_le_bytes());
