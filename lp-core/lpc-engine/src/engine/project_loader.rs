@@ -23,6 +23,7 @@ use crate::node::{NodeDefHandle, TreeError};
 use crate::nodes::{
     ButtonNode, ClockNode, ComputeShaderNode, ControlRadioNode, CorePlaceholderNode, FixtureNode,
     FluidNode, OutputNode, PlaylistNode, PlaylistRuntimeEntry, ShaderNode, TextureNode,
+    playlist_output_path,
 };
 
 use super::{Engine, EngineServices};
@@ -569,32 +570,87 @@ impl ProjectLoader {
             if node.kind != NodeKind::Playlist {
                 continue;
             }
-            let NodeDef::Playlist(config) = loaded_node_config(runtime, node)?.clone() else {
-                continue;
+            let (
+                idle_entry,
+                default_fade,
+                entries,
+                time_source,
+                output_target,
+                entry_trigger_sources,
+            ) = {
+                let NodeDef::Playlist(config) = loaded_node_config(runtime, node)? else {
+                    continue;
+                };
+                (
+                    *config.idle_entry.value(),
+                    config.default_fade.value().0,
+                    playlist_runtime_entries(loaded_nodes, node.id, config),
+                    binding_source(&config.bindings, "time")
+                        .map(|source| binding_source_endpoint(loaded_nodes, node, source))
+                        .transpose()?,
+                    binding_target(&config.bindings, "output")
+                        .map(|target| binding_target_endpoint(loaded_nodes, node, target))
+                        .transpose()?,
+                    playlist_entry_trigger_sources(loaded_nodes, node, config)?,
+                )
             };
-            let entries = playlist_runtime_entries(loaded_nodes, node.id);
-            register_optional_source_binding(
-                runtime,
-                loaded_nodes,
-                node,
-                "time",
-                &config.bindings,
-                frame,
-            )?;
-            register_target_binding(
-                runtime,
-                loaded_nodes,
-                node,
-                "output",
-                &config.bindings,
-                frame,
-            )?;
-            register_visual_default_output_binding(runtime, node, &config.bindings, frame)?;
-            register_playlist_entry_source_bindings(runtime, loaded_nodes, node, &config, frame)?;
+            if let Some(source) = time_source {
+                register_source_binding_at_path(
+                    runtime,
+                    node,
+                    "time",
+                    source,
+                    SlotPath::parse("time").expect("playlist time slot"),
+                    frame,
+                )?;
+            }
+            if let Some(target) = output_target.clone() {
+                runtime
+                    .add_binding(
+                        BindingDraft {
+                            source: BindingSource::ProducedSlot {
+                                node: node.id,
+                                slot: playlist_output_path(),
+                            },
+                            target,
+                            priority: BindingPriority::authored(),
+                            kind: binding_kind_for_slot("output"),
+                            owner: node.id,
+                        },
+                        frame,
+                    )
+                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                        path: node.artifact_path.as_str().to_string(),
+                        reason: format!("register output target binding: {e}"),
+                    })?;
+            }
+            if output_target.is_none() {
+                add_visual_default_output_binding(runtime, node, frame)?;
+            }
+            for (entry_index, source) in entry_trigger_sources {
+                let target_slot = SlotPath::parse(&format!("entries[{}].trigger", entry_index))
+                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                        path: node.artifact_path.as_str().to_string(),
+                        reason: format!("invalid playlist entry trigger path: {e}"),
+                    })?;
+                register_source_binding_at_path(
+                    runtime,
+                    node,
+                    "trigger",
+                    source,
+                    target_slot,
+                    frame,
+                )?;
+            }
             runtime
                 .attach_runtime_node(
                     node.id,
-                    Box::new(PlaylistNode::new(node.id, config, entries)),
+                    Box::new(PlaylistNode::new(
+                        node.id,
+                        idle_entry,
+                        default_fade,
+                        entries,
+                    )),
                     frame,
                 )
                 .map_err(|e| ProjectLoadError::InvalidSourcePath {
@@ -791,6 +847,7 @@ fn playlist_entry_child_name(
 fn playlist_runtime_entries(
     loaded_nodes: &[LoadedNode],
     playlist: NodeId,
+    config: &PlaylistDef,
 ) -> Vec<PlaylistRuntimeEntry> {
     loaded_nodes
         .iter()
@@ -802,10 +859,40 @@ fn playlist_runtime_entries(
                 index: entry,
                 child: node.id,
                 output_slot: SlotPath::parse("output").expect("playlist child output path"),
+                duration: config
+                    .entries
+                    .entries
+                    .get(&entry)
+                    .and_then(|entry| entry.duration.data.as_ref())
+                    .map(|duration| duration.value().0),
+                fade_after: config
+                    .entries
+                    .entries
+                    .get(&entry)
+                    .and_then(|entry| entry.fade_after.data.as_ref())
+                    .map(|fade| fade.value().0),
             }),
             _ => None,
         })
         .collect()
+}
+
+fn playlist_entry_trigger_sources(
+    loaded_nodes: &[LoadedNode],
+    current: &LoadedNode,
+    config: &PlaylistDef,
+) -> Result<Vec<(u32, BindingSource)>, ProjectLoadError> {
+    let mut sources = Vec::new();
+    for (entry_index, entry) in &config.entries.entries {
+        let Some(source) = binding_source(&entry.bindings, "trigger") else {
+            continue;
+        };
+        sources.push((
+            *entry_index,
+            binding_source_endpoint(loaded_nodes, current, source)?,
+        ));
+    }
+    Ok(sources)
 }
 
 fn read_shader_source<R>(
@@ -1033,30 +1120,6 @@ fn register_target_binding(
     Ok(())
 }
 
-fn register_playlist_entry_source_bindings(
-    engine: &mut Engine,
-    loaded_nodes: &[LoadedNode],
-    current: &LoadedNode,
-    config: &PlaylistDef,
-    frame: Revision,
-) -> Result<(), ProjectLoadError> {
-    for (entry_index, entry) in &config.entries.entries {
-        let Some(source) = binding_source(&entry.bindings, "trigger") else {
-            continue;
-        };
-        let source = binding_source_endpoint(loaded_nodes, current, source)?;
-        let target_slot =
-            SlotPath::parse(&format!("entries[{}].trigger", entry_index)).map_err(|e| {
-                ProjectLoadError::InvalidSourcePath {
-                    path: current.artifact_path.as_str().to_string(),
-                    reason: format!("invalid playlist entry trigger path: {e}"),
-                }
-            })?;
-        register_source_binding_at_path(engine, current, "trigger", source, target_slot, frame)?;
-    }
-    Ok(())
-}
-
 fn register_visual_default_output_binding(
     engine: &mut Engine,
     current: &LoadedNode,
@@ -1068,6 +1131,14 @@ fn register_visual_default_output_binding(
     {
         return Ok(());
     }
+    add_visual_default_output_binding(engine, current, frame)
+}
+
+fn add_visual_default_output_binding(
+    engine: &mut Engine,
+    current: &LoadedNode,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
     engine
         .add_binding(
             BindingDraft {

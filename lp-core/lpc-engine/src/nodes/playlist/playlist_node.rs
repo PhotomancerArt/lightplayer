@@ -5,8 +5,8 @@ use alloc::format;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    ControlMessage, FromLpValue, NodeId, PlaylistDef, PlaylistState, SlotAccess, SlotData,
-    SlotPath, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
+    ControlMessage, FromLpValue, NodeId, PlaylistState, SlotAccess, SlotData, SlotPath,
+    SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
 };
 use lps_shared::{TextureBuffer, TextureStorageFormat};
 
@@ -19,15 +19,18 @@ use crate::products::visual::{
     RenderTextureRequest, TextureRenderProduct, VisualSampleBufferRequest, VisualSampleTarget,
 };
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PlaylistRuntimeEntry {
     pub index: u32,
     pub child: NodeId,
     pub output_slot: SlotPath,
+    pub duration: Option<f32>,
+    pub fade_after: Option<f32>,
 }
 
 pub struct PlaylistNode {
-    config: PlaylistDef,
+    idle_entry: u32,
+    default_fade: f32,
     entries: Vec<PlaylistRuntimeEntry>,
     state: PlaylistState,
     current_entry: u32,
@@ -43,13 +46,13 @@ pub struct PlaylistNode {
 impl PlaylistNode {
     pub fn new(
         node_id: NodeId,
-        config: PlaylistDef,
-        mut entries: Vec<PlaylistRuntimeEntry>,
+        idle_entry: u32,
+        default_fade: f32,
+        entries: Vec<PlaylistRuntimeEntry>,
     ) -> Self {
-        entries.sort_by_key(|entry| entry.index);
-        let idle_entry = *config.idle_entry.value();
         Self {
-            config,
+            idle_entry,
+            default_fade,
             entries,
             state: PlaylistState::new(lpc_model::VisualProduct::new(node_id, 0), 0.0, idle_entry),
             current_entry: idle_entry,
@@ -67,20 +70,14 @@ impl PlaylistNode {
         self.entries.iter().find(|entry| entry.index == index)
     }
 
-    fn authored_entry(&self, index: u32) -> Option<&lpc_model::PlaylistEntry> {
-        self.config.entries.entries.get(&index)
-    }
-
     fn fade_after(&self, index: u32) -> f32 {
-        self.authored_entry(index)
-            .and_then(|entry| entry.fade_after.data.as_ref())
-            .map_or(self.config.default_fade.value().0, |fade| fade.value().0)
+        self.runtime_entry(index)
+            .and_then(|entry| entry.fade_after)
+            .unwrap_or(self.default_fade)
     }
 
     fn duration(&self, index: u32) -> Option<f32> {
-        self.authored_entry(index)
-            .and_then(|entry| entry.duration.data.as_ref())
-            .map(|duration| duration.value().0)
+        self.runtime_entry(index).and_then(|entry| entry.duration)
     }
 
     fn next_entry_after(&self, index: u32) -> Option<u32> {
@@ -124,7 +121,7 @@ impl NodeRuntime for PlaylistNode {
             detect_triggered_entry(ctx, &self.entries, &mut self.last_seen_triggers)?;
         if let Some(entry) = triggered_entry {
             self.switch_to(entry, time);
-        } else if self.current_entry != *self.config.idle_entry.value() {
+        } else if self.current_entry != self.idle_entry {
             let Some(duration) = self.duration(self.current_entry) else {
                 return Err(NodeError::msg(format!(
                     "playlist entry {} has no duration",
@@ -134,7 +131,7 @@ impl NodeRuntime for PlaylistNode {
             if time - self.switch_time >= duration {
                 let next = self
                     .next_entry_after(self.current_entry)
-                    .unwrap_or(*self.config.idle_entry.value());
+                    .unwrap_or(self.idle_entry);
                 self.switch_to(next, time);
             }
         }
@@ -192,9 +189,13 @@ impl NodeRuntime for PlaylistNode {
         &self,
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
-        PlaylistDef::ensure_registered(registry)?;
-        PlaylistState::ensure_registered(registry)?;
-        ControlMessage::ensure_registered(registry).map(|_| ())
+        if registry.get(&PlaylistState::SHAPE_ID).is_none() {
+            PlaylistState::ensure_registered(registry)?;
+        }
+        if registry.get(&ControlMessage::SHAPE_ID).is_none() {
+            ControlMessage::ensure_registered(registry)?;
+        }
+        Ok(())
     }
 
     fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
