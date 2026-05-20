@@ -3,11 +3,68 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use lp_riscv_emu::profile::{CpuCollector, PcSymbolizer};
+use lp_riscv_emu::profile::{CpuCollector, PcSymbolizer, StackFrameSample};
 use serde_json::{Value, json};
 
 fn pc_key(pc: u32) -> String {
     format!("0x{pc:08x}")
+}
+
+fn stack_frame_rows_by_symbol(
+    cpu: &CpuCollector,
+    symbols: &dyn PcSymbolizer,
+) -> Vec<StackFrameSample> {
+    let mut collapsed: HashMap<u32, StackFrameSample> = HashMap::new();
+    for frame in cpu.max_frame_by_func.values() {
+        let canon = symbols.entry_lo_for_pc(frame.function_pc);
+        let entry = collapsed.entry(canon).or_insert_with(|| {
+            let mut frame = frame.clone();
+            frame.function_pc = canon;
+            frame
+        });
+        if frame.self_bytes > entry.self_bytes {
+            let mut frame = frame.clone();
+            frame.function_pc = canon;
+            *entry = frame;
+        }
+    }
+    let mut rows: Vec<_> = collapsed.into_values().collect();
+    rows.sort_by_key(|frame| {
+        (
+            std::cmp::Reverse(frame.self_bytes),
+            std::cmp::Reverse(frame.cumulative_bytes),
+            frame.function_pc,
+        )
+    });
+    rows
+}
+
+fn call_count_rows_by_symbol(
+    cpu: &CpuCollector,
+    symbols: &dyn PcSymbolizer,
+) -> Vec<(u32, u64, u32)> {
+    let mut collapsed: HashMap<u32, (u64, u32)> = HashMap::new();
+    for (&pc, stats) in &cpu.func_stats {
+        let canon = symbols.entry_lo_for_pc(pc);
+        collapsed.entry(canon).or_insert((0, 0)).0 += stats.calls_in;
+    }
+    for (&pc, frame) in &cpu.max_frame_by_func {
+        let canon = symbols.entry_lo_for_pc(pc);
+        let entry = collapsed.entry(canon).or_insert((0, 0));
+        entry.1 = entry.1.max(frame.self_bytes);
+    }
+    let mut rows: Vec<_> = collapsed
+        .into_iter()
+        .map(|(pc, (calls, frame_bytes))| (pc, calls, frame_bytes))
+        .collect();
+    rows.sort_by_key(|(pc, calls, frame_bytes)| {
+        (
+            std::cmp::Reverse(*calls),
+            std::cmp::Reverse(*frame_bytes),
+            *pc,
+        )
+    });
+    rows
 }
 
 pub fn write(cpu: &CpuCollector, symbols: &dyn PcSymbolizer, dest: &Path) -> std::io::Result<()> {
@@ -106,13 +163,45 @@ pub fn build(cpu: &CpuCollector, symbols: &dyn PcSymbolizer) -> Value {
             .cmp(&a["used_bytes"].as_u64().unwrap_or(0))
     });
 
+    let largest_frames = stack_frame_rows_by_symbol(cpu, symbols)
+        .into_iter()
+        .take(20)
+        .map(|frame| {
+            json!({
+                "function": pc_key(frame.function_pc),
+                "function_name": symbols.symbolize(frame.function_pc),
+                "entry_sp": pc_key(frame.entry_sp),
+                "min_sp": pc_key(frame.min_sp),
+                "frame_bytes": frame.self_bytes,
+                "self_bytes": frame.self_bytes,
+                "cumulative_bytes": frame.cumulative_bytes,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let most_called_frames = call_count_rows_by_symbol(cpu, symbols)
+        .into_iter()
+        .filter(|(_, calls, _)| *calls > 0)
+        .take(20)
+        .map(|(pc, calls, frame_bytes)| {
+            json!({
+                "function": pc_key(pc),
+                "function_name": symbols.symbolize(pc),
+                "calls": calls,
+                "frame_bytes": frame_bytes,
+            })
+        })
+        .collect::<Vec<_>>();
+
     json!({
-        "schema_version": 3,
+        "schema_version": 4,
         "cycle_model": cpu.cycle_model_label,
         "total_cycles_attributed": cpu.total_cycles_attributed,
         "stack": {
             "max": max_stack,
             "by_function": stack_by_func,
+            "largest_frames": largest_frames,
+            "most_called_frames": most_called_frames,
         },
         "func_stats": Value::Object(func_stats),
         "call_edges": edges,
@@ -128,13 +217,13 @@ mod tests {
     use crate::commands::profile::symbolize::Symbolizer;
 
     #[test]
-    fn schema_version_is_3() {
+    fn schema_version_is_4() {
         let mut cpu = CpuCollector::new("esp32c6");
         cpu.on_gate_action(GateAction::Enable);
         cpu.on_instruction(0x1000, 0x1004, InstClass::Alu, 1);
         let sym = Symbolizer::new(&[], &[]);
         let v = build(&cpu, &sym);
-        assert_eq!(v["schema_version"], 3);
+        assert_eq!(v["schema_version"], 4);
     }
 
     #[test]
@@ -217,5 +306,8 @@ mod tests {
         assert_eq!(v["stack"]["by_function"][0]["used_bytes"], 0x100);
         assert_eq!(v["stack"]["max"]["callstack"][0]["self_bytes"], 0xf0);
         assert_eq!(v["stack"]["max"]["callstack"][0]["cumulative_bytes"], 0x100);
+        assert_eq!(v["stack"]["largest_frames"][0]["frame_bytes"], 0xf0);
+        assert_eq!(v["stack"]["most_called_frames"][0]["calls"], 1);
+        assert_eq!(v["stack"]["most_called_frames"][0]["frame_bytes"], 0xf0);
     }
 }

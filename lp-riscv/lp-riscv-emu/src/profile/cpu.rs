@@ -75,6 +75,7 @@ pub struct CpuCollector {
     pub call_edges: HashMap<(u32, u32), CallEdge>,
     pub max_stack: Option<StackSample>,
     pub max_stack_by_func: HashMap<u32, StackSample>,
+    pub max_frame_by_func: HashMap<u32, StackFrameSample>,
     active: bool,
     pub total_cycles_attributed: u64,
     pub cycle_model_label: &'static str,
@@ -89,6 +90,7 @@ impl CpuCollector {
             call_edges: HashMap::new(),
             max_stack: None,
             max_stack_by_func: HashMap::new(),
+            max_frame_by_func: HashMap::new(),
             active: false,
             total_cycles_attributed: 0,
             cycle_model_label,
@@ -132,10 +134,29 @@ impl CpuCollector {
         edge.inclusive_cycles += inclusive;
     }
 
-    fn update_current_frame_sp(&mut self, sp: u32) {
+    fn update_current_frame_sp(&mut self, sp: u32, stack_top: u32) {
         if let Some(frame) = self.shadow_stack.last_mut() {
             if frame.min_sp == 0 || sp < frame.min_sp {
                 frame.min_sp = sp;
+            }
+            let min_sp = if frame.min_sp == 0 {
+                frame.entry_sp
+            } else {
+                frame.min_sp
+            };
+            let sample = StackFrameSample {
+                function_pc: frame.callee_pc,
+                entry_sp: frame.entry_sp,
+                min_sp,
+                self_bytes: frame.entry_sp.saturating_sub(min_sp),
+                cumulative_bytes: stack_top.saturating_sub(min_sp),
+            };
+            let max_frame = self
+                .max_frame_by_func
+                .entry(frame.callee_pc)
+                .or_insert_with(|| sample.clone());
+            if sample.self_bytes > max_frame.self_bytes {
+                *max_frame = sample;
             }
         }
     }
@@ -165,7 +186,7 @@ impl CpuCollector {
             return;
         }
 
-        self.update_current_frame_sp(sp);
+        self.update_current_frame_sp(sp, stack_top);
         let used_bytes = stack_top.saturating_sub(sp);
         let function_pc = self.current_pc();
         let sample = StackSample {
@@ -366,6 +387,76 @@ fn collapse_func_stats_by_symbol(
     out
 }
 
+fn stack_frame_rows_by_symbol(
+    frames: &HashMap<u32, StackFrameSample>,
+    sym: Option<&dyn PcSymbolizer>,
+) -> Vec<StackFrameSample> {
+    let mut rows: Vec<StackFrameSample> = frames.values().cloned().collect();
+    if let Some(s) = sym {
+        let mut collapsed: HashMap<u32, StackFrameSample> = HashMap::new();
+        for frame in rows {
+            let canon = s.entry_lo_for_pc(frame.function_pc);
+            let entry = collapsed.entry(canon).or_insert_with(|| {
+                let mut frame = frame.clone();
+                frame.function_pc = canon;
+                frame
+            });
+            if frame.self_bytes > entry.self_bytes {
+                let mut frame = frame;
+                frame.function_pc = canon;
+                *entry = frame;
+            }
+        }
+        rows = collapsed.into_values().collect();
+    }
+    rows.sort_by_key(|frame| {
+        (
+            std::cmp::Reverse(frame.self_bytes),
+            std::cmp::Reverse(frame.cumulative_bytes),
+            frame.function_pc,
+        )
+    });
+    rows
+}
+
+fn call_count_rows_by_symbol(
+    func_stats: &HashMap<u32, FuncStats>,
+    frames: &HashMap<u32, StackFrameSample>,
+    sym: Option<&dyn PcSymbolizer>,
+) -> Vec<(u32, u64, u32)> {
+    let mut rows: Vec<(u32, u64, u32)> = Vec::new();
+    if let Some(s) = sym {
+        let mut collapsed: HashMap<u32, (u64, u32)> = HashMap::new();
+        for (&pc, stats) in func_stats {
+            let canon = s.entry_lo_for_pc(pc);
+            collapsed.entry(canon).or_insert((0, 0)).0 += stats.calls_in;
+        }
+        for (&pc, frame) in frames {
+            let canon = s.entry_lo_for_pc(pc);
+            let entry = collapsed.entry(canon).or_insert((0, 0));
+            entry.1 = entry.1.max(frame.self_bytes);
+        }
+        rows.extend(
+            collapsed
+                .into_iter()
+                .map(|(pc, (calls, frame_bytes))| (pc, calls, frame_bytes)),
+        );
+    } else {
+        rows.extend(func_stats.iter().map(|(&pc, stats)| {
+            let frame_bytes = frames.get(&pc).map_or(0, |frame| frame.self_bytes);
+            (pc, stats.calls_in, frame_bytes)
+        }));
+    }
+    rows.sort_by_key(|(pc, calls, frame_bytes)| {
+        (
+            std::cmp::Reverse(*calls),
+            std::cmp::Reverse(*frame_bytes),
+            *pc,
+        )
+    });
+    rows
+}
+
 impl CpuCollector {
     fn write_cpu_summary_text(
         &self,
@@ -400,6 +491,40 @@ impl CpuCollector {
                 }
             }
             None => writeln!(w, "  no stack samples")?,
+        }
+        writeln!(w)?;
+
+        writeln!(w, "Top 20 largest observed frames:")?;
+        writeln!(w, "     frame     total  function")?;
+        for frame in stack_frame_rows_by_symbol(&self.max_frame_by_func, sym)
+            .into_iter()
+            .take(20)
+        {
+            writeln!(
+                w,
+                "  {:>8}  {:>8}  {}",
+                frame.self_bytes,
+                frame.cumulative_bytes,
+                format_pc_for_report(frame.function_pc, sym),
+            )?;
+        }
+        writeln!(w)?;
+
+        writeln!(w, "Top 20 most-called frames:")?;
+        writeln!(w, "     calls     frame  function")?;
+        for (pc, calls, frame_bytes) in
+            call_count_rows_by_symbol(&self.func_stats, &self.max_frame_by_func, sym)
+                .into_iter()
+                .filter(|(_, calls, _)| *calls > 0)
+                .take(20)
+        {
+            writeln!(
+                w,
+                "  {:>8}  {:>8}  {}",
+                calls,
+                frame_bytes,
+                format_pc_for_report(pc, sym),
+            )?;
         }
         writeln!(w)?;
 
@@ -709,6 +834,7 @@ mod tests {
         assert_eq!(max.used_bytes, 0x100);
         assert_eq!(max.function_pc, 0x2000);
         assert_eq!(cpu.max_stack_by_func[&0x2000].used_bytes, 0x100);
+        assert_eq!(cpu.max_frame_by_func[&0x2000].self_bytes, 0xf0);
     }
 
     #[test]
