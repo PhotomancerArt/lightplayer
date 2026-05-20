@@ -3,8 +3,8 @@
 use crate::{
     ControlProduct, LpType, LpValue, ModelStructMember, ProductKind, ProductRef, ResourceRef,
     SlotAccess, SlotData, SlotMapDyn, SlotMutAccess, SlotOptionDyn, SlotRecord, SlotShape,
-    SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError, VisualProduct, WithRevision,
-    current_revision,
+    SlotShapeId, SlotShapeLookup, SlotShapeRegistry, SlotShapeRegistryError, VisualProduct,
+    WithRevision, current_revision,
 };
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
@@ -164,9 +164,10 @@ fn create_dynamic_default(
     id: SlotShapeId,
 ) -> Result<Box<dyn SlotMutAccess>, SlotFactoryError> {
     let shape = registry
-        .get(&id)
-        .ok_or(SlotFactoryError::MissingShape(id))?;
-    let data = create_dynamic_slot_data_for_root(registry, id, shape)?;
+        .get_shape(id)
+        .ok_or(SlotFactoryError::MissingShape(id))?
+        .to_owned_shape();
+    let data = create_dynamic_slot_data_for_root(registry, id, &shape)?;
     Ok(Box::new(DynamicSlotObject::new(id, data)))
 }
 
@@ -178,9 +179,10 @@ fn create_dynamic_slot_data_for_root(
     match shape {
         SlotShape::Ref { id } => {
             let shape = registry
-                .get(id)
-                .ok_or(SlotFactoryError::MissingReferencedShape(*id))?;
-            create_dynamic_slot_data_for_root(registry, *id, shape)
+                .get_shape(*id)
+                .ok_or(SlotFactoryError::MissingReferencedShape(*id))?
+                .to_owned_shape();
+            create_dynamic_slot_data_for_root(registry, *id, &shape)
         }
         SlotShape::Unit { .. } => Ok(SlotData::Unit {
             revision: current_revision(),

@@ -11,7 +11,7 @@ use core::fmt::Write;
 
 use crate::{
     ComputeShaderDef, LpType, ShaderSlotKind, ShaderSlotMappingKind, ShaderValueShapeRef,
-    SlotShape, SlotShapeRegistry,
+    SlotShapeLookup, SlotShapeRegistry,
 };
 
 /// Generate GLSL header declarations for authored compute shader slots.
@@ -191,15 +191,15 @@ fn lp_type_for_ref(
         return Ok(ty);
     }
     let id = crate::SlotShapeId::from_static_name(value_ref.as_str());
-    let shape = registry.get(&id).ok_or_else(|| {
+    let shape = registry.get_shape(id).ok_or_else(|| {
         ShaderHeaderGenError::UnknownNativeShape(String::from(value_ref.as_str()))
     })?;
-    match shape {
-        SlotShape::Value { shape } => Ok(shape.ty.clone()),
-        _ => Err(ShaderHeaderGenError::Unsupported(
+    shape
+        .value_shape()
+        .map(|shape| shape.ty_owned())
+        .ok_or(ShaderHeaderGenError::Unsupported(
             "native shader refs must resolve to value shapes",
-        )),
-    }
+        ))
 }
 
 fn glsl_type_for_lp_type(ty: &LpType) -> Result<String, ShaderHeaderGenError> {

@@ -234,6 +234,59 @@ pub(crate) fn field_shape_tokens(attr: &FieldShapeAttr, ty: &syn::Type) -> Token
     }
 }
 
+pub(crate) fn field_static_shape_tokens(attr: &FieldShapeAttr, ty: &syn::Type) -> TokenStream {
+    match attr {
+        FieldShapeAttr::Infer => {
+            quote::quote! {
+                <#ty as ::lpc_model::FieldSlot>::STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR
+            }
+        }
+        FieldShapeAttr::Value(expr) => {
+            let static_ty = static_lp_type_from_lp_type_expr(expr);
+            quote::quote! {
+                Some(&::lpc_model::StaticSlotShapeDescriptor::Value {
+                    shape: ::lpc_model::StaticSlotValueShape::new(
+                        ::lpc_model::SlotShapeId::new(0),
+                        #static_ty,
+                    ),
+                })
+            }
+        }
+        FieldShapeAttr::Leaf(_) => {
+            quote::quote! {
+                None
+            }
+        }
+        FieldShapeAttr::Record => {
+            quote::quote! {
+                <#ty as ::lpc_model::SlotRecordShape>::STATIC_SLOT_RECORD_SHAPE_DESCRIPTOR
+            }
+        }
+        FieldShapeAttr::Map { key, value_ref } => {
+            let key_tokens = map_key_tokens(key);
+            quote::quote! {
+                Some(&::lpc_model::StaticSlotShapeDescriptor::Map {
+                    meta: ::lpc_model::StaticSlotMeta::EMPTY,
+                    key: #key_tokens,
+                    value: &::lpc_model::StaticSlotShapeDescriptor::Ref {
+                        id: ::lpc_model::SlotShapeId::from_static_name(#value_ref),
+                    },
+                })
+            }
+        }
+        FieldShapeAttr::OptionRef(value_ref) => {
+            quote::quote! {
+                Some(&::lpc_model::StaticSlotShapeDescriptor::Option {
+                    meta: ::lpc_model::StaticSlotMeta::EMPTY,
+                    some: &::lpc_model::StaticSlotShapeDescriptor::Ref {
+                        id: ::lpc_model::SlotShapeId::from_static_name(#value_ref),
+                    },
+                })
+            }
+        }
+    }
+}
+
 pub(crate) fn field_access_tokens(
     attr: &FieldShapeAttr,
     ty: &syn::Type,
@@ -419,6 +472,21 @@ fn map_key_tokens(key: &LitStr) -> TokenStream {
             quote::quote! { compile_error!(#message) }
         }
     }
+}
+
+fn static_lp_type_from_lp_type_expr(expr: &Expr) -> TokenStream {
+    let Expr::Path(path) = expr else {
+        return quote::quote! {
+            compile_error!("static descriptor generation supports only simple LpType path expressions")
+        };
+    };
+    let Some(segment) = path.path.segments.last() else {
+        return quote::quote! {
+            compile_error!("static descriptor generation supports only simple LpType path expressions")
+        };
+    };
+    let ident = &segment.ident;
+    quote::quote! { ::lpc_model::StaticLpType::#ident }
 }
 
 fn parse_merge(value: &LitStr) -> Result<FieldMergeAttr> {

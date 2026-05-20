@@ -4,7 +4,7 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 use lpc_model::{
     Revision, SlotAccess, SlotData, SlotDataAccess, SlotMapDyn, SlotName, SlotOptionDyn, SlotPath,
-    SlotShape, SlotShapeId, SlotShapeRegistry, WithRevision,
+    SlotShape, SlotShapeId, SlotShapeLookup, SlotShapeRegistry, SlotShapeView, WithRevision,
     slot_codec::SlotWriter,
     slot_sync_codec::{
         read_slot_snapshot_shape_json, write_slot_snapshot_shape_value, write_slot_snapshot_value,
@@ -22,7 +22,7 @@ pub fn build_slot_full_sync<'a>(
     roots: impl IntoIterator<Item = (&'a str, &'a dyn SlotAccess)>,
 ) -> WireSlotFullSync {
     WireSlotFullSync {
-        registry: registry.snapshot(),
+        registry: registry.snapshot_with_static_catalog(),
         roots: roots
             .into_iter()
             .map(|(name, root)| {
@@ -63,39 +63,47 @@ pub fn snapshot_slot_root(
     data: SlotDataAccess<'_>,
     registry: &SlotShapeRegistry,
 ) -> SlotData {
-    let shape = registry.get(shape_id).expect("slot shape is registered");
+    let shape = registry
+        .get_shape(*shape_id)
+        .expect("slot shape is registered");
     snapshot_slot_shape(shape, data, registry)
 }
 
-/// Snapshot one data node through a concrete shape.
+/// Snapshot one data node through a borrowed shape view.
 pub fn snapshot_slot_shape(
-    shape: &SlotShape,
+    shape: SlotShapeView<'_>,
     data: SlotDataAccess<'_>,
     registry: &SlotShapeRegistry,
 ) -> SlotData {
-    match (shape, data) {
-        (SlotShape::Ref { id }, data) => snapshot_slot_root(id, data, registry),
-        (SlotShape::Unit { .. }, SlotDataAccess::Unit(frame)) => SlotData::Unit { revision: frame },
-        (SlotShape::Value { .. }, SlotDataAccess::Value(value)) => {
+    if let Some(id) = shape.ref_id() {
+        return snapshot_slot_root(&id, data, registry);
+    }
+
+    match data {
+        SlotDataAccess::Unit(frame) if shape.is_unit() => SlotData::Unit { revision: frame },
+        SlotDataAccess::Value(value) if shape.value_shape().is_some() => {
             SlotData::Value(WithRevision::new(value.changed_at(), value.value()))
         }
-        (SlotShape::Record { fields, .. }, SlotDataAccess::Record(record)) => {
+        SlotDataAccess::Record(record) => {
+            let fields_len = shape.record_fields_len().expect("slot shape/data mismatch");
             SlotData::Record(lpc_model::SlotRecord::with_revision(
                 record.fields_revision(),
-                fields
-                    .iter()
-                    .enumerate()
-                    .map(|(index, field)| {
+                (0..fields_len)
+                    .map(|index| {
+                        let field = shape.record_field(index).expect("record field exists");
                         snapshot_slot_shape(
-                            &field.shape,
-                            record.field(index).expect("record field exists"),
+                            field.shape(),
+                            record.field(index).unwrap_or_else(|| {
+                                panic!("record field {} exists", field.name_str())
+                            }),
                             registry,
                         )
                     })
                     .collect(),
             ))
         }
-        (SlotShape::Map { value, .. }, SlotDataAccess::Map(map)) => {
+        SlotDataAccess::Map(map) => {
+            let value = shape.map_value().expect("slot shape/data mismatch");
             let mut entries = BTreeMap::new();
             for key in map.keys() {
                 entries.insert(
@@ -105,28 +113,37 @@ pub fn snapshot_slot_shape(
             }
             SlotData::Map(SlotMapDyn::with_revision(map.keys_revision(), entries))
         }
-        (SlotShape::Enum { variants, .. }, SlotDataAccess::Enum(en)) => {
-            let variant = variants
-                .iter()
-                .find(|variant| variant.name.as_str() == en.variant())
+        SlotDataAccess::Enum(en) => {
+            let variant_name = SlotName::parse(en.variant()).expect("enum variant is a slot name");
+            let variant = shape
+                .enum_variant_by_name(&variant_name)
                 .expect("enum variant exists in shape");
             SlotData::Enum(lpc_model::SlotEnum::with_version(
                 en.variant_revision(),
-                SlotName::parse(en.variant()).expect("enum variant is a slot name"),
-                snapshot_slot_shape(&variant.shape, en.data(), registry),
+                variant_name,
+                snapshot_slot_shape(variant.shape(), en.data(), registry),
             ))
         }
-        (SlotShape::Option { some, .. }, SlotDataAccess::Option(option)) => match option.data() {
-            Some(data) => SlotData::Option(SlotOptionDyn::some_with_version(
-                option.presence_revision(),
-                snapshot_slot_shape(some, data, registry),
-            )),
-            None => SlotData::Option(SlotOptionDyn::none_with_version(option.presence_revision())),
-        },
-        (SlotShape::Custom { .. }, SlotDataAccess::Custom(custom)) => {
-            let data =
-                wire_slot_data_from_slot_shape(registry, shape, SlotDataAccess::Custom(custom));
-            read_slot_snapshot_shape_json(registry, shape, data.get())
+        SlotDataAccess::Option(option) => {
+            let some = shape.option_some().expect("slot shape/data mismatch");
+            match option.data() {
+                Some(data) => SlotData::Option(SlotOptionDyn::some_with_version(
+                    option.presence_revision(),
+                    snapshot_slot_shape(some, data, registry),
+                )),
+                None => {
+                    SlotData::Option(SlotOptionDyn::none_with_version(option.presence_revision()))
+                }
+            }
+        }
+        SlotDataAccess::Custom(custom) if shape.custom_codec().is_some() => {
+            let owned_shape = shape.to_owned_shape();
+            let data = wire_slot_data_from_slot_shape(
+                registry,
+                &owned_shape,
+                SlotDataAccess::Custom(custom),
+            );
+            read_slot_snapshot_shape_json(registry, &owned_shape, data.get())
                 .expect("custom slot sync snapshot decodes")
         }
         _ => panic!("slot shape/data mismatch"),
@@ -162,29 +179,33 @@ fn collect_diff_inner(
     since: Revision,
     patches: &mut Vec<WireSlotPatch>,
 ) {
-    let shape = registry.get(shape_id).expect("slot shape is registered");
+    let shape = registry
+        .get_shape(*shape_id)
+        .expect("slot shape is registered");
     collect_diff_shape(root_name, path, shape, data, registry, since, patches);
 }
 
 fn collect_diff_shape(
     root_name: &str,
     path: SlotPath,
-    shape: &SlotShape,
+    shape: SlotShapeView<'_>,
     data: SlotDataAccess<'_>,
     registry: &SlotShapeRegistry,
     since: Revision,
     patches: &mut Vec<WireSlotPatch>,
 ) {
-    match (shape, data) {
-        (SlotShape::Ref { id }, data) => {
-            collect_diff_inner(root_name, path, id, data, registry, since, patches);
-        }
-        (SlotShape::Unit { .. }, SlotDataAccess::Unit(frame)) => {
+    if let Some(id) = shape.ref_id() {
+        collect_diff_inner(root_name, path, &id, data, registry, since, patches);
+        return;
+    }
+
+    match data {
+        SlotDataAccess::Unit(frame) if shape.is_unit() => {
             if frame > since {
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path,
-                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape(
+                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape_view(
                         registry,
                         shape,
                         SlotDataAccess::Unit(frame),
@@ -192,12 +213,12 @@ fn collect_diff_shape(
                 });
             }
         }
-        (SlotShape::Value { .. }, SlotDataAccess::Value(value)) => {
+        SlotDataAccess::Value(value) if shape.value_shape().is_some() => {
             if value.changed_at() > since {
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path,
-                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape(
+                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape_view(
                         registry,
                         shape,
                         SlotDataAccess::Value(value),
@@ -205,22 +226,24 @@ fn collect_diff_shape(
                 });
             }
         }
-        (SlotShape::Record { fields, .. }, SlotDataAccess::Record(record)) => {
+        SlotDataAccess::Record(record) => {
+            let fields_len = shape.record_fields_len().expect("slot shape/data mismatch");
             if record.fields_revision() > since {
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path: path.clone(),
-                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape(
+                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape_view(
                         registry, shape, data,
                     )),
                 });
             }
-            for (index, field) in fields.iter().enumerate() {
+            for index in 0..fields_len {
+                let field = shape.record_field(index).expect("record field exists");
                 if let Some(child) = record.field(index) {
                     collect_diff_shape(
                         root_name,
-                        path.child(field.name.clone()),
-                        &field.shape,
+                        path.child(SlotName::parse(field.name_str()).expect("valid slot name")),
+                        field.shape(),
                         child,
                         registry,
                         since,
@@ -229,12 +252,13 @@ fn collect_diff_shape(
                 }
             }
         }
-        (SlotShape::Map { value, .. }, SlotDataAccess::Map(map)) => {
+        SlotDataAccess::Map(map) => {
+            let value_shape = shape.map_value().expect("slot shape/data mismatch");
             if map.keys_revision() > since {
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path: path.clone(),
-                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape(
+                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape_view(
                         registry, shape, data,
                     )),
                 });
@@ -244,7 +268,7 @@ fn collect_diff_shape(
                     collect_diff_shape(
                         root_name,
                         path.child_key(key.clone()),
-                        value,
+                        value_shape,
                         child,
                         registry,
                         since,
@@ -253,36 +277,37 @@ fn collect_diff_shape(
                 }
             }
         }
-        (SlotShape::Enum { variants, .. }, SlotDataAccess::Enum(en)) => {
-            let variant = variants
-                .iter()
-                .find(|variant| variant.name.as_str() == en.variant())
+        SlotDataAccess::Enum(en) => {
+            let variant_name = SlotName::parse(en.variant()).expect("enum variant is a slot name");
+            let variant = shape
+                .enum_variant_by_name(&variant_name)
                 .expect("enum variant exists in shape");
             if en.variant_revision() > since {
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path: path.clone(),
-                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape(
+                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape_view(
                         registry, shape, data,
                     )),
                 });
             }
             collect_diff_shape(
                 root_name,
-                path.child(SlotName::parse(en.variant()).expect("enum variant is a slot name")),
-                &variant.shape,
+                path.child(variant_name),
+                variant.shape(),
                 en.data(),
                 registry,
                 since,
                 patches,
             );
         }
-        (SlotShape::Option { some, .. }, SlotDataAccess::Option(option)) => {
+        SlotDataAccess::Option(option) => {
+            let some = shape.option_some().expect("slot shape/data mismatch");
             if option.presence_revision() > since {
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path: path.clone(),
-                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape(
+                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape_view(
                         registry, shape, data,
                     )),
                 });
@@ -299,12 +324,12 @@ fn collect_diff_shape(
                 );
             }
         }
-        (SlotShape::Custom { .. }, SlotDataAccess::Custom(custom)) => {
+        SlotDataAccess::Custom(custom) if shape.custom_codec().is_some() => {
             if custom.custom_revision() > since {
                 patches.push(WireSlotPatch {
                     root: root_name.to_string(),
                     path,
-                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape(
+                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape_view(
                         registry, shape, data,
                     )),
                 });
@@ -334,6 +359,20 @@ fn wire_slot_data_from_slot_shape(
     write_slot_snapshot_shape_value(registry, shape, data, writer.value())
         .expect("slot sync snapshot writes to vec");
     raw_wire_slot_data(writer.into_inner())
+}
+
+fn wire_slot_data_from_slot_shape_view(
+    registry: &SlotShapeRegistry,
+    shape: SlotShapeView<'_>,
+    data: SlotDataAccess<'_>,
+) -> WireSlotData {
+    match shape {
+        SlotShapeView::Static(_) => {
+            let owned_shape = shape.to_owned_shape();
+            wire_slot_data_from_slot_shape(registry, &owned_shape, data)
+        }
+        SlotShapeView::Dynamic(shape) => wire_slot_data_from_slot_shape(registry, shape, data),
+    }
 }
 
 fn raw_wire_slot_data(bytes: Vec<u8>) -> WireSlotData {

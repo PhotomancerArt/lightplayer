@@ -3,7 +3,8 @@ use alloc::format;
 use crate::slot_codec::custom_slot_codec::snapshot_custom_slot_data;
 use crate::slot_codec::{SlotValueWriter, SlotWrite, SlotWriteError, SlotWriter, write_lp_value};
 use crate::{
-    SlotDataAccess, SlotMapKey, SlotMapKeyShape, SlotShape, SlotShapeId, SlotShapeRegistry,
+    LpType, SlotDataAccess, SlotMapKey, SlotMapKeyShape, SlotName, SlotShape, SlotShapeId,
+    SlotShapeLookup, SlotShapeRegistry, SlotShapeView,
 };
 
 pub fn write_slot_snapshot_json<W>(
@@ -30,7 +31,7 @@ where
     W: SlotWrite,
 {
     let shape = registry
-        .get(&id)
+        .get_shape(id)
         .ok_or_else(|| invalid_slot_data(format!("missing slot shape: {id}")))?;
     write_shape(registry, shape, data, value)
 }
@@ -44,38 +45,49 @@ pub fn write_slot_snapshot_shape_value<W>(
 where
     W: SlotWrite,
 {
-    write_shape(registry, shape, data, value)
+    write_shape(registry, SlotShapeView::Dynamic(shape), data, value)
 }
 
 fn write_shape<W>(
     registry: &SlotShapeRegistry,
-    shape: &SlotShape,
+    shape: SlotShapeView<'_>,
     data: SlotDataAccess<'_>,
     value: SlotValueWriter<'_, W>,
 ) -> Result<(), SlotWriteError<W::Error>>
 where
     W: SlotWrite,
 {
-    match shape {
-        SlotShape::Ref { id } => write_slot_snapshot_value(registry, *id, data, value),
-        SlotShape::Unit { .. } => write_unit(data, value),
-        SlotShape::Value { shape } => write_value(&shape.ty, data, value),
-        SlotShape::Record { fields, .. } => write_record(registry, fields, data, value),
-        SlotShape::Map {
-            key, value: shape, ..
-        } => write_map(registry, *key, shape, data, value),
-        SlotShape::Enum { variants, .. } => write_enum(registry, variants, data, value),
-        SlotShape::Option { some, .. } => write_option(registry, some, data, value),
-        SlotShape::Custom { codec, shape, .. } => {
-            write_custom(registry, *codec, shape, data, value)
-        }
+    if let Some(id) = shape.ref_id() {
+        return write_slot_snapshot_value(registry, id, data, value);
     }
+    if shape.is_unit() {
+        return write_unit(data, value);
+    }
+    if let Some(value_shape) = shape.value_shape() {
+        return write_value(value_shape.ty_owned(), data, value);
+    }
+    if shape.record_fields_len().is_some() {
+        return write_record(registry, shape, data, value);
+    }
+    if let (Some(key), Some(value_shape)) = (shape.map_key(), shape.map_value()) {
+        return write_map(registry, key, value_shape, data, value);
+    }
+    if shape.is_enum() {
+        return write_enum(registry, shape, data, value);
+    }
+    if let Some(some) = shape.option_some() {
+        return write_option(registry, some, data, value);
+    }
+    if let (Some(codec), Some(custom_shape)) = (shape.custom_codec(), shape.custom_shape()) {
+        return write_custom(registry, codec, custom_shape, data, value);
+    }
+    Err(invalid_slot_data("unknown slot shape"))
 }
 
 fn write_custom<W>(
     registry: &SlotShapeRegistry,
     codec: SlotShapeId,
-    shape: &SlotShape,
+    shape: SlotShapeView<'_>,
     data: SlotDataAccess<'_>,
     value: SlotValueWriter<'_, W>,
 ) -> Result<(), SlotWriteError<W::Error>>
@@ -106,7 +118,7 @@ where
 }
 
 fn write_value<W>(
-    ty: &crate::LpType,
+    ty: LpType,
     data: SlotDataAccess<'_>,
     value: SlotValueWriter<'_, W>,
 ) -> Result<(), SlotWriteError<W::Error>>
@@ -122,13 +134,13 @@ where
     object
         .prop("changed_at")?
         .i64(slot_value.changed_at().as_i64())?;
-    write_lp_value(object.prop("value")?, ty, &lp_value)?;
+    write_lp_value(object.prop("value")?, &ty, &lp_value)?;
     object.finish()
 }
 
 fn write_record<W>(
     registry: &SlotShapeRegistry,
-    fields: &[crate::SlotFieldShape],
+    shape: SlotShapeView<'_>,
     data: SlotDataAccess<'_>,
     value: SlotValueWriter<'_, W>,
 ) -> Result<(), SlotWriteError<W::Error>>
@@ -144,11 +156,13 @@ where
         .prop("fields_revision")?
         .i64(record.fields_revision().as_i64())?;
     let mut field_values = object.prop("fields")?.array()?;
-    for (index, field) in fields.iter().enumerate() {
-        let field_data = record
-            .field(index)
-            .ok_or_else(|| invalid_slot_data(format!("missing record field {}", field.name)))?;
-        write_shape(registry, &field.shape, field_data, field_values.item()?)?;
+    let fields_len = shape.record_fields_len().expect("record shape has fields");
+    for index in 0..fields_len {
+        let field = shape.record_field(index).expect("record field exists");
+        let field_data = record.field(index).ok_or_else(|| {
+            invalid_slot_data(format!("missing record field {}", field.name_str()))
+        })?;
+        write_shape(registry, field.shape(), field_data, field_values.item()?)?;
     }
     field_values.finish()?;
     object.finish()
@@ -157,7 +171,7 @@ where
 fn write_map<W>(
     registry: &SlotShapeRegistry,
     key_shape: SlotMapKeyShape,
-    value_shape: &SlotShape,
+    value_shape: SlotShapeView<'_>,
     data: SlotDataAccess<'_>,
     value: SlotValueWriter<'_, W>,
 ) -> Result<(), SlotWriteError<W::Error>>
@@ -188,7 +202,7 @@ where
 
 fn write_enum<W>(
     registry: &SlotShapeRegistry,
-    variants: &[crate::SlotVariantShape],
+    shape: SlotShapeView<'_>,
     data: SlotDataAccess<'_>,
     value: SlotValueWriter<'_, W>,
 ) -> Result<(), SlotWriteError<W::Error>>
@@ -198,9 +212,10 @@ where
     let SlotDataAccess::Enum(en) = data else {
         return Err(invalid_slot_data("slot data does not match enum shape"));
     };
-    let variant = variants
-        .iter()
-        .find(|variant| variant.name.as_str() == en.variant())
+    let variant_name = SlotName::parse(en.variant())
+        .map_err(|_| invalid_slot_data(format!("invalid enum variant {}", en.variant())))?;
+    let variant = shape
+        .enum_variant_by_name(&variant_name)
         .ok_or_else(|| invalid_slot_data(format!("unknown enum variant {}", en.variant())))?;
     let mut object = value.object()?;
     object.prop("kind")?.string("enum")?;
@@ -208,13 +223,13 @@ where
         .prop("variant_revision")?
         .i64(en.variant_revision().as_i64())?;
     object.prop("variant")?.string(en.variant())?;
-    write_shape(registry, &variant.shape, en.data(), object.prop("data")?)?;
+    write_shape(registry, variant.shape(), en.data(), object.prop("data")?)?;
     object.finish()
 }
 
 fn write_option<W>(
     registry: &SlotShapeRegistry,
-    some_shape: &SlotShape,
+    some_shape: SlotShapeView<'_>,
     data: SlotDataAccess<'_>,
     value: SlotValueWriter<'_, W>,
 ) -> Result<(), SlotWriteError<W::Error>>

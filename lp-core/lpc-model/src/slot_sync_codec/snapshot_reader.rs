@@ -6,7 +6,8 @@ use alloc::vec::Vec;
 use crate::slot_codec::{JsonSyntaxSource, SyntaxError, SyntaxEventSource, ValueReader};
 use crate::{
     Revision, SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotMapKeyShape, SlotName, SlotOptionDyn,
-    SlotRecord, SlotShape, SlotShapeId, SlotShapeRegistry, WithRevision,
+    SlotRecord, SlotShape, SlotShapeId, SlotShapeLookup, SlotShapeRegistry, SlotShapeView,
+    WithRevision,
 };
 
 pub fn read_slot_snapshot_json(
@@ -15,7 +16,7 @@ pub fn read_slot_snapshot_json(
     json: &str,
 ) -> Result<SlotData, SyntaxError> {
     let shape = registry
-        .get(&id)
+        .get_shape(id)
         .ok_or_else(|| error(format!("missing slot shape: {id}")))?;
     let mut reader = crate::slot_codec::SlotReader::new(JsonSyntaxSource::new(json)?, registry);
     read_shape(registry, shape, reader.value())
@@ -27,25 +28,25 @@ pub fn read_slot_snapshot_shape_json(
     json: &str,
 ) -> Result<SlotData, SyntaxError> {
     let mut reader = crate::slot_codec::SlotReader::new(JsonSyntaxSource::new(json)?, registry);
-    read_shape(registry, shape, reader.value())
+    read_shape(registry, SlotShapeView::Dynamic(shape), reader.value())
 }
 
 fn read_shape<S>(
     registry: &SlotShapeRegistry,
-    shape: &SlotShape,
+    shape: SlotShapeView<'_>,
     value: ValueReader<'_, '_, S>,
 ) -> Result<SlotData, SyntaxError>
 where
     S: SyntaxEventSource,
 {
-    if let SlotShape::Ref { id } = shape {
+    if let Some(id) = shape.ref_id() {
         let shape = registry
-            .get(id)
+            .get_shape(id)
             .ok_or_else(|| error(format!("missing slot shape: {id}")))?;
         return read_shape(registry, shape, value);
     }
 
-    if let SlotShape::Custom { shape, .. } = shape {
+    if let Some(shape) = shape.custom_shape() {
         return read_shape(registry, shape, value);
     }
 
@@ -58,15 +59,20 @@ where
         )));
     }
 
-    match shape {
-        SlotShape::Unit { .. } => read_unit(object),
-        SlotShape::Value { shape } => read_value(object, &shape.ty),
-        SlotShape::Record { fields, .. } => read_record(registry, object, fields),
-        SlotShape::Map { key, value, .. } => read_map(registry, object, *key, value),
-        SlotShape::Enum { variants, .. } => read_enum(registry, object, variants),
-        SlotShape::Option { some, .. } => read_option(registry, object, some),
-        SlotShape::Custom { .. } => unreachable!("custom shapes are projected above"),
-        SlotShape::Ref { .. } => unreachable!("refs resolved above"),
+    if shape.is_unit() {
+        read_unit(object)
+    } else if let Some(value_shape) = shape.value_shape() {
+        read_value(object, &value_shape.ty_owned())
+    } else if shape.record_fields_len().is_some() {
+        read_record(registry, object, shape)
+    } else if let (Some(key), Some(value_shape)) = (shape.map_key(), shape.map_value()) {
+        read_map(registry, object, key, value_shape)
+    } else if shape.is_enum() {
+        read_enum(registry, object, shape)
+    } else if let Some(some) = shape.option_some() {
+        read_option(registry, object, some)
+    } else {
+        unreachable!("custom and ref shapes are projected above")
     }
 }
 
@@ -113,7 +119,7 @@ where
 fn read_record<S>(
     registry: &SlotShapeRegistry,
     mut object: crate::slot_codec::ObjectReader<'_, '_, S>,
-    fields: &[crate::SlotFieldShape],
+    shape: SlotShapeView<'_>,
 ) -> Result<SlotData, SyntaxError>
 where
     S: SyntaxEventSource,
@@ -123,7 +129,7 @@ where
     while let Some(mut prop) = object.next_prop()? {
         match prop.name() {
             "fields_revision" => fields_revision = Some(read_revision(prop.value())?),
-            "fields" => field_data = Some(read_fields(registry, prop.value(), fields)?),
+            "fields" => field_data = Some(read_fields(registry, prop.value(), shape)?),
             other => return Err(prop.unknown_field(other, &["kind", "fields_revision", "fields"])),
         }
     }
@@ -136,24 +142,25 @@ where
 fn read_fields<S>(
     registry: &SlotShapeRegistry,
     value: ValueReader<'_, '_, S>,
-    fields: &[crate::SlotFieldShape],
+    shape: SlotShapeView<'_>,
 ) -> Result<Vec<SlotData>, SyntaxError>
 where
     S: SyntaxEventSource,
 {
+    let fields_len = shape.record_fields_len().expect("record shape has fields");
     let mut items = Vec::new();
     let mut array = value.array()?;
     while let Some(item) = array.next_item()? {
         let index = items.len();
-        let field = fields
-            .get(index)
-            .ok_or_else(|| error(format!("too many record fields: expected {}", fields.len())))?;
-        items.push(read_shape(registry, &field.shape, item)?);
+        let field = shape
+            .record_field(index)
+            .ok_or_else(|| error(format!("too many record fields: expected {fields_len}")))?;
+        items.push(read_shape(registry, field.shape(), item)?);
     }
-    if items.len() != fields.len() {
+    if items.len() != fields_len {
         return Err(error(format!(
             "missing record fields: expected {}, found {}",
-            fields.len(),
+            fields_len,
             items.len()
         )));
     }
@@ -164,7 +171,7 @@ fn read_map<S>(
     registry: &SlotShapeRegistry,
     mut object: crate::slot_codec::ObjectReader<'_, '_, S>,
     key_shape: SlotMapKeyShape,
-    value_shape: &SlotShape,
+    value_shape: SlotShapeView<'_>,
 ) -> Result<SlotData, SyntaxError>
 where
     S: SyntaxEventSource,
@@ -195,7 +202,7 @@ fn read_entries<S>(
     registry: &SlotShapeRegistry,
     value: ValueReader<'_, '_, S>,
     key_shape: SlotMapKeyShape,
-    value_shape: &SlotShape,
+    value_shape: SlotShapeView<'_>,
 ) -> Result<BTreeMap<SlotMapKey, SlotData>, SyntaxError>
 where
     S: SyntaxEventSource,
@@ -213,7 +220,7 @@ fn read_entry<S>(
     registry: &SlotShapeRegistry,
     value: ValueReader<'_, '_, S>,
     key_shape: SlotMapKeyShape,
-    value_shape: &SlotShape,
+    value_shape: SlotShapeView<'_>,
 ) -> Result<(SlotMapKey, SlotData), SyntaxError>
 where
     S: SyntaxEventSource,
@@ -237,7 +244,7 @@ where
 fn read_enum<S>(
     registry: &SlotShapeRegistry,
     mut object: crate::slot_codec::ObjectReader<'_, '_, S>,
-    variants: &[crate::SlotVariantShape],
+    shape: SlotShapeView<'_>,
 ) -> Result<SlotData, SyntaxError>
 where
     S: SyntaxEventSource,
@@ -253,11 +260,10 @@ where
                 let name = variant_name
                     .as_ref()
                     .ok_or_else(|| error("enum `variant` must appear before `data`"))?;
-                let variant = variants
-                    .iter()
-                    .find(|variant| variant.name == *name)
+                let variant = shape
+                    .enum_variant_by_name(name)
                     .ok_or_else(|| error(format!("unknown enum variant {name}")))?;
-                data = Some(read_shape(registry, &variant.shape, prop.value())?);
+                data = Some(read_shape(registry, variant.shape(), prop.value())?);
             }
             other => {
                 return Err(
@@ -276,7 +282,7 @@ where
 fn read_option<S>(
     registry: &SlotShapeRegistry,
     mut object: crate::slot_codec::ObjectReader<'_, '_, S>,
-    some_shape: &SlotShape,
+    some_shape: SlotShapeView<'_>,
 ) -> Result<SlotData, SyntaxError>
 where
     S: SyntaxEventSource,
@@ -334,16 +340,21 @@ where
     Ok(Revision::new(value.i64()?))
 }
 
-fn shape_kind(shape: &SlotShape) -> &'static str {
-    match shape {
-        SlotShape::Ref { .. } => unreachable!("refs are resolved before reading a shape"),
-        SlotShape::Unit { .. } => "unit",
-        SlotShape::Value { .. } => "value",
-        SlotShape::Record { .. } => "record",
-        SlotShape::Map { .. } => "map",
-        SlotShape::Enum { .. } => "enum",
-        SlotShape::Option { .. } => "option",
-        SlotShape::Custom { .. } => unreachable!("custom shapes are projected before reading"),
+fn shape_kind(shape: SlotShapeView<'_>) -> &'static str {
+    if shape.is_unit() {
+        "unit"
+    } else if shape.value_shape().is_some() {
+        "value"
+    } else if shape.record_fields_len().is_some() {
+        "record"
+    } else if shape.map_value().is_some() {
+        "map"
+    } else if shape.is_enum() {
+        "enum"
+    } else if shape.option_some().is_some() {
+        "option"
+    } else {
+        unreachable!("custom and ref shapes are projected before reading")
     }
 }
 

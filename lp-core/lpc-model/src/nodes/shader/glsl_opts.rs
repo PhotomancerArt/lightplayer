@@ -2,7 +2,8 @@
 
 use crate::{
     FromLpValue, LpType, LpValue, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape,
-    Slotted, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
+    Slotted, StaticLpType, StaticSlotEnumOption, StaticSlotMeta, StaticSlotValueShape,
+    StaticValueEditorHint, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };
 use alloc::string::ToString;
 use serde::{Deserialize, Serialize};
@@ -119,6 +120,19 @@ impl FromLpValue for AddSubMode {
 
 impl SlotValue for AddSubMode {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("AddSubMode");
+    const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> = Some(static_mode_shape(
+        Self::SHAPE_ID,
+        &[
+            StaticSlotEnumOption {
+                value: "saturating",
+                label: "Saturating",
+            },
+            StaticSlotEnumOption {
+                value: "wrapping",
+                label: "Wrapping",
+            },
+        ],
+    ));
 
     fn value_shape() -> SlotValueShape {
         mode_shape(
@@ -142,6 +156,19 @@ impl FromLpValue for MulMode {
 
 impl SlotValue for MulMode {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("MulMode");
+    const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> = Some(static_mode_shape(
+        Self::SHAPE_ID,
+        &[
+            StaticSlotEnumOption {
+                value: "saturating",
+                label: "Saturating",
+            },
+            StaticSlotEnumOption {
+                value: "wrapping",
+                label: "Wrapping",
+            },
+        ],
+    ));
 
     fn value_shape() -> SlotValueShape {
         mode_shape(
@@ -165,6 +192,19 @@ impl FromLpValue for DivMode {
 
 impl SlotValue for DivMode {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("DivMode");
+    const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> = Some(static_mode_shape(
+        Self::SHAPE_ID,
+        &[
+            StaticSlotEnumOption {
+                value: "saturating",
+                label: "Saturating",
+            },
+            StaticSlotEnumOption {
+                value: "reciprocal",
+                label: "Reciprocal",
+            },
+        ],
+    ));
 
     fn value_shape() -> SlotValueShape {
         mode_shape(
@@ -194,6 +234,18 @@ fn mode_shape(id: SlotShapeId, options: &[(&str, &str)]) -> SlotValueShape {
                 .map(|(value, label)| SlotEnumOption::new(value, label))
                 .collect(),
         },
+    }
+}
+
+const fn static_mode_shape(
+    id: SlotShapeId,
+    options: &'static [StaticSlotEnumOption],
+) -> StaticSlotValueShape {
+    StaticSlotValueShape {
+        id,
+        ty: StaticLpType::String,
+        meta: StaticSlotMeta::EMPTY,
+        editor: StaticValueEditorHint::Dropdown { options },
     }
 }
 

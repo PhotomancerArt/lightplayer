@@ -17,7 +17,8 @@ use crate::{
     ArtifactPath, ArtifactPathSlot, FieldSlot, FieldSlotMut, Revision, SlotAccess,
     SlotCustomAccess, SlotCustomMutAccess, SlotDataAccess, SlotDataMutAccess, SlotMapValueAccess,
     SlotMapValueMutAccess, SlotRecordAccess, SlotRecordMutAccess, SlotShape, SlotShapeId,
-    SlotShapeRegistry, SlotValueAccess, StaticSlotShape,
+    SlotShapeRegistry, SlotValueAccess, StaticSlotFieldShape, StaticSlotMeta, StaticSlotShape,
+    StaticSlotShapeDescriptor,
 };
 
 pub(crate) const NODE_INVOCATION_CODEC_ID: SlotShapeId =
@@ -231,6 +232,25 @@ impl From<NodeDefRef> for NodeInvocation {
 }
 
 impl FieldSlot for NodeInvocation {
+    const STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR: Option<&'static StaticSlotShapeDescriptor> =
+        match <ArtifactPathSlot as FieldSlot>::STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR {
+            Some(def_shape) => Some(&StaticSlotShapeDescriptor::Custom {
+                meta: StaticSlotMeta::EMPTY,
+                codec: NODE_INVOCATION_CODEC_ID,
+                shape: &StaticSlotShapeDescriptor::Record {
+                    meta: StaticSlotMeta::EMPTY,
+                    fields: &[StaticSlotFieldShape {
+                        name: "def",
+                        shape: def_shape,
+                        semantics: crate::SlotSemantics::local(),
+                        policy: crate::SlotPolicy::writable_persisted(),
+                    }],
+                },
+                refs: &[NodeArtifact::SHAPE_ID],
+            }),
+            None => None,
+        };
+
     fn slot_field_shape() -> SlotShape {
         crate::slot::shape::custom(
             NODE_INVOCATION_CODEC_ID,

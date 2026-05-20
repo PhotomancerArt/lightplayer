@@ -1,6 +1,6 @@
 use crate::{
     LpValue, Revision, SlotFactory, SlotMutAccess, SlotShape, SlotShapeId, SlotShapeRegistry,
-    SlotShapeRegistryError, WithRevision,
+    SlotShapeRegistryError, StaticSlotShapeDescriptor, WithRevision,
 };
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -29,11 +29,16 @@ pub trait SlotAccess: Any {
 /// runtime owner with an instance- or artifact-specific id instead.
 pub trait StaticSlotShape {
     const SHAPE_ID: SlotShapeId;
+    const STATIC_SLOT_SHAPE_DESCRIPTOR: Option<&'static StaticSlotShapeDescriptor> = None;
 
     fn slot_shape() -> SlotShape;
 
     fn shape_name() -> Option<&'static str> {
         None
+    }
+
+    fn static_slot_shape_descriptor() -> Option<&'static StaticSlotShapeDescriptor> {
+        Self::STATIC_SLOT_SHAPE_DESCRIPTOR
     }
 
     fn ensure_registered(registry: &mut SlotShapeRegistry) -> Result<bool, SlotShapeRegistryError> {
@@ -87,6 +92,8 @@ pub trait StaticSlotAccess: SlotAccess + StaticSlotShape {
 /// not implement this trait must provide an explicit override supported by the
 /// derive or use a custom slot-access implementation.
 pub trait FieldSlot {
+    const STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR: Option<&'static StaticSlotShapeDescriptor> = None;
+
     fn slot_field_shape() -> SlotShape;
     fn slot_field_data(&self) -> SlotDataAccess<'_>;
 }

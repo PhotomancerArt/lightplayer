@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 
 use lpc_model::{
     ControlMessage, FromLpValue, NodeId, PlaylistState, SlotAccess, SlotData, SlotPath,
-    SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
+    SlotShapeLookup, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
 };
 use lps_shared::{TextureBuffer, TextureStorageFormat};
 
@@ -193,10 +193,10 @@ impl NodeRuntime for PlaylistNode {
         &self,
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
-        if registry.get(&PlaylistState::SHAPE_ID).is_none() {
+        if !registry.contains_shape(PlaylistState::SHAPE_ID) {
             PlaylistState::ensure_registered(registry)?;
         }
-        if registry.get(&ControlMessage::SHAPE_ID).is_none() {
+        if !registry.contains_shape(ControlMessage::SHAPE_ID) {
             ControlMessage::ensure_registered(registry)?;
         }
         Ok(())

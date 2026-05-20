@@ -9,12 +9,17 @@ impl Engine {
         let (registry, complete, next) = match query.level {
             ReadLevel::Ids | ReadLevel::Summary | ReadLevel::Detail => {
                 if let Some(limit) = query.limit {
-                    let (snapshot, next) = self
-                        .slot_shapes()
-                        .snapshot_page(query.after, usize::try_from(limit).unwrap_or(usize::MAX));
+                    let (snapshot, next) = self.slot_shapes().snapshot_page_with_static_catalog(
+                        query.after,
+                        usize::try_from(limit).unwrap_or(usize::MAX),
+                    );
                     (Some(snapshot), next.is_none(), next)
                 } else {
-                    (Some(self.slot_shapes().snapshot()), true, None)
+                    (
+                        Some(self.slot_shapes().snapshot_with_static_catalog()),
+                        true,
+                        None,
+                    )
                 }
             }
         };

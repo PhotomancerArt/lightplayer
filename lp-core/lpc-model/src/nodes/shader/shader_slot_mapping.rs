@@ -5,8 +5,8 @@
 //! mapped into shader-visible ABI storage.
 
 use crate::{
-    LpValue, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, Slotted, ToLpValue, ValueEditorHint,
-    ValueRootError,
+    LpValue, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, Slotted, StaticLpType,
+    StaticSlotValueShape, ToLpValue, ValueEditorHint, ValueRootError,
 };
 use alloc::string::{String, ToString};
 use serde::{Deserialize, Serialize};
@@ -99,6 +99,9 @@ impl crate::FromLpValue for ShaderSlotMappingKind {
 
 impl SlotValue for ShaderSlotMappingKind {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.shader_slot_mapping");
+    const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> = Some(
+        StaticSlotValueShape::new(Self::SHAPE_ID, StaticLpType::String),
+    );
 
     fn value_shape() -> SlotValueShape {
         SlotValueShape {

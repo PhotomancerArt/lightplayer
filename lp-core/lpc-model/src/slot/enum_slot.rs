@@ -1,7 +1,8 @@
 use crate::{
     Revision, SlotDataAccess, SlotDataMutAccess, SlotEnumAccess, SlotEnumDefaultVariant,
     SlotEnumMutAccess, SlotEnumShape, SlotMapValueAccess, SlotMapValueMutAccess, SlotMutationError,
-    SlotShape, SlotShapeRegistry, SlotVariantShape, WithRevision, current_revision,
+    SlotShape, SlotShapeRegistry, SlotVariantShape, StaticSlotShapeDescriptor, WithRevision,
+    current_revision,
 };
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -211,6 +212,9 @@ impl<T> FieldSlot for EnumSlot<T>
 where
     T: SlotEnumShape + SlottedEnum,
 {
+    const STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR: Option<&'static StaticSlotShapeDescriptor> =
+        T::STATIC_SLOT_ENUM_SHAPE_DESCRIPTOR;
+
     fn slot_field_shape() -> SlotShape {
         T::slot_enum_shape()
     }

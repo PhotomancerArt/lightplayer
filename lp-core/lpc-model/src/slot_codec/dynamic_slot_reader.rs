@@ -5,8 +5,8 @@ use alloc::vec::Vec;
 
 use crate::{
     DynamicSlotObject, SlotData, SlotDataMutAccess, SlotFactoryError, SlotMapKey, SlotMapKeyShape,
-    SlotMutAccess, SlotMutationError, SlotShape, SlotShapeId, SlotShapeRegistry, SlotVariantShape,
-    create_dynamic_slot_data, current_revision,
+    SlotMutAccess, SlotMutationError, SlotShape, SlotShapeId, SlotShapeLookup, SlotShapeRegistry,
+    SlotVariantShape, create_dynamic_slot_data, current_revision,
 };
 
 use super::{ObjectReader, SyntaxError, SyntaxEventSource, ValueReader, read_lp_value};
@@ -19,13 +19,11 @@ pub fn read_dynamic_slot<S>(
 where
     S: SyntaxEventSource,
 {
-    let shape = registry
-        .get(&shape_id)
-        .ok_or_else(|| syntax_error(format!("missing slot shape: {shape_id}")))?;
+    let shape = owned_shape_for_id(registry, shape_id)?;
     let mut object = registry
         .create_default(shape_id)
         .map_err(factory_error_to_syntax)?;
-    apply_reader_to_slot(object.data_mut(), shape, registry, value)?;
+    apply_reader_to_slot(object.data_mut(), &shape, registry, value)?;
     Ok(object)
 }
 
@@ -37,13 +35,11 @@ pub fn read_dynamic_slot_from_object<S>(
 where
     S: SyntaxEventSource,
 {
-    let shape = registry
-        .get(&shape_id)
-        .ok_or_else(|| syntax_error(format!("missing slot shape: {shape_id}")))?;
+    let shape = owned_shape_for_id(registry, shape_id)?;
     let mut slot = registry
         .create_default(shape_id)
         .map_err(factory_error_to_syntax)?;
-    apply_object_reader_to_slot(slot.data_mut(), shape, registry, object)?;
+    apply_object_reader_to_slot(slot.data_mut(), &shape, registry, object)?;
     Ok(slot)
 }
 
@@ -55,12 +51,10 @@ pub fn read_dynamic_slot_data<S>(
 where
     S: SyntaxEventSource,
 {
-    let shape = registry
-        .get(&shape_id)
-        .ok_or_else(|| syntax_error(format!("missing slot shape: {shape_id}")))?;
-    let data = create_dynamic_slot_data(registry, shape).map_err(factory_error_to_syntax)?;
+    let shape = owned_shape_for_id(registry, shape_id)?;
+    let data = create_dynamic_slot_data(registry, &shape).map_err(factory_error_to_syntax)?;
     let mut object = DynamicSlotObject::new(shape_id, data);
-    apply_reader_to_slot(object.data_mut(), shape, registry, value)?;
+    apply_reader_to_slot(object.data_mut(), &shape, registry, value)?;
     Ok(object.into_data())
 }
 
@@ -75,10 +69,9 @@ where
 {
     match shape {
         SlotShape::Ref { id } => {
-            let shape = registry
-                .get(id)
-                .ok_or_else(|| syntax_error(format!("missing referenced slot shape: {id}")))?;
-            apply_reader_to_slot(data, shape, registry, value)
+            let shape = owned_shape_for_id(registry, *id)
+                .map_err(|_| syntax_error(format!("missing referenced slot shape: {id}")))?;
+            apply_reader_to_slot(data, &shape, registry, value)
         }
         SlotShape::Unit { .. } => value.skip_value(),
         SlotShape::Value { shape } => read_value(data, &shape.ty, value),
@@ -108,10 +101,9 @@ where
 {
     match shape {
         SlotShape::Ref { id } => {
-            let shape = registry
-                .get(id)
-                .ok_or_else(|| syntax_error(format!("missing referenced slot shape: {id}")))?;
-            apply_object_reader_to_slot(data, shape, registry, object)
+            let shape = owned_shape_for_id(registry, *id)
+                .map_err(|_| syntax_error(format!("missing referenced slot shape: {id}")))?;
+            apply_object_reader_to_slot(data, &shape, registry, object)
         }
         SlotShape::Unit { .. } => {
             let SlotDataMutAccess::Unit(_) = data else {
@@ -381,10 +373,9 @@ where
 {
     match shape {
         SlotShape::Ref { id } => {
-            let shape = registry
-                .get(id)
-                .ok_or_else(|| syntax_error(format!("missing referenced slot shape: {id}")))?;
-            read_enum_payload_object(data, shape, registry, object)
+            let shape = owned_shape_for_id(registry, *id)
+                .map_err(|_| syntax_error(format!("missing referenced slot shape: {id}")))?;
+            read_enum_payload_object(data, &shape, registry, object)
         }
         SlotShape::Record { fields, .. } => read_record_object(data, fields, registry, object),
         SlotShape::Unit { .. } => object.finish(),
@@ -466,6 +457,16 @@ fn variant_names(variants: &[SlotVariantShape]) -> Vec<&str> {
         .iter()
         .map(|variant| variant.name.as_str())
         .collect()
+}
+
+fn owned_shape_for_id(
+    registry: &SlotShapeRegistry,
+    id: SlotShapeId,
+) -> Result<SlotShape, SyntaxError> {
+    registry
+        .get_shape(id)
+        .map(|shape| shape.to_owned_shape())
+        .ok_or_else(|| syntax_error(format!("missing slot shape: {id}")))
 }
 
 fn factory_error_to_syntax(error: SlotFactoryError) -> SyntaxError {

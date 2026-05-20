@@ -1,12 +1,14 @@
 //! Static shape support for Rust-authored record structs.
 
-use crate::SlotShape;
+use crate::{SlotShape, StaticSlotShapeDescriptor};
 
 /// Static shape for a Rust-authored indexed record.
 ///
 /// `SlotRecord` derives this together with [`crate::StaticSlotShape`] so
 /// Rust-authored records can be registered by shape id and also nested inline.
 pub trait SlotRecordShape {
+    const STATIC_SLOT_RECORD_SHAPE_DESCRIPTOR: Option<&'static StaticSlotShapeDescriptor> = None;
+
     fn slot_record_shape() -> SlotShape;
 }
 

@@ -5,7 +5,8 @@ use crate::nodes::fixture::{FixtureSamplingConfig, MappingConfig};
 use crate::{
     Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, EnumSlot, FromLpValue, LpType, LpValue,
     OptionSlot, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, Slotted,
-    ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
+    StaticLpType, StaticSlotEnumOption, StaticSlotMeta, StaticSlotValueShape,
+    StaticValueEditorHint, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };
 
 /// Authored fixture node definition.
@@ -252,6 +253,40 @@ impl FromLpValue for ColorOrder {
 
 impl SlotValue for ColorOrder {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("ColorOrder");
+    const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> =
+        Some(StaticSlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: StaticLpType::String,
+            meta: StaticSlotMeta::EMPTY,
+            editor: StaticValueEditorHint::Dropdown {
+                options: &[
+                    StaticSlotEnumOption {
+                        value: "rgb",
+                        label: "RGB",
+                    },
+                    StaticSlotEnumOption {
+                        value: "grb",
+                        label: "GRB",
+                    },
+                    StaticSlotEnumOption {
+                        value: "rbg",
+                        label: "RBG",
+                    },
+                    StaticSlotEnumOption {
+                        value: "gbr",
+                        label: "GBR",
+                    },
+                    StaticSlotEnumOption {
+                        value: "brg",
+                        label: "BRG",
+                    },
+                    StaticSlotEnumOption {
+                        value: "bgr",
+                        label: "BGR",
+                    },
+                ],
+            },
+        });
 
     fn value_shape() -> SlotValueShape {
         SlotValueShape {

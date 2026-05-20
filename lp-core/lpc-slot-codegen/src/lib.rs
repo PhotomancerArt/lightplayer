@@ -250,6 +250,8 @@ pub struct FixtureDef {
         let code = render_slot_shapes(&shapes);
 
         assert!(code.contains("register_all_static_slot_shapes"));
+        assert!(code.contains("static_slot_shape_ids"));
+        assert!(code.contains("create_static_slot_default"));
         assert!(code.contains("ensure_static_slot_shape"));
         assert!(code.contains("<crate::source::ShaderDef as ::lpc_model::StaticSlotShape>"));
         assert!(code.contains("MissingReferencedShape"));
@@ -315,6 +317,8 @@ pub struct FixtureDef {
 
         assert!(code.contains("_registry"));
         assert!(code.contains("_id"));
+        assert!(code.contains("static_slot_shape_ids"));
+        assert!(code.contains("&[]"));
         assert!(!code.contains("ensure_referenced_static_slot_shapes"));
     }
 }

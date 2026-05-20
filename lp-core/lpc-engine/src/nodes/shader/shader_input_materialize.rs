@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use lpc_model::{
     LpType, LpValue, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingKind,
-    ShaderValueShapeRef, SlotData, SlotMapKey, SlotShape, SlotShapeId, SlotShapeRegistry,
+    ShaderValueShapeRef, SlotData, SlotMapKey, SlotShapeId, SlotShapeLookup, SlotShapeRegistry,
 };
 use lps_shared::LpsValueF32;
 
@@ -193,15 +193,12 @@ fn lp_type_for_ref(
     }
 
     let id = SlotShapeId::from_static_name(value_ref.as_str());
-    let shape = registry.get(&id).ok_or_else(|| {
+    let shape = registry.get_shape(id).ok_or_else(|| {
         ShaderInputMaterializeError::UnknownNativeShape(value_ref.as_str().into())
     })?;
-    match shape {
-        SlotShape::Value { shape } => Ok(shape.ty.clone()),
-        _ => Err(ShaderInputMaterializeError::NativeShapeIsNotValue(
-            value_ref.as_str().into(),
-        )),
-    }
+    shape.value_shape().map(|shape| shape.ty_owned()).ok_or(
+        ShaderInputMaterializeError::NativeShapeIsNotValue(value_ref.as_str().into()),
+    )
 }
 
 fn default_value_for_type(ty: &LpType) -> Result<LpValue, ShaderInputMaterializeError> {

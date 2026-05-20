@@ -2,8 +2,8 @@
 
 use crate::{
     LpType, LpValue, ProductKind, Revision, SlotAccess, SlotDataAccess, SlotDataMutAccess,
-    SlotMapKey, SlotMutAccess, SlotMutationError, SlotPath, SlotPathSegment, SlotShape,
-    SlotShapeRegistry,
+    SlotMapKey, SlotMutAccess, SlotMutationError, SlotName, SlotPath, SlotPathSegment, SlotShape,
+    SlotShapeLookup, SlotShapeRegistry, SlotShapeView,
 };
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -88,9 +88,7 @@ pub fn slot_data_revision(
     registry: &SlotShapeRegistry,
     path: &SlotPath,
 ) -> Result<Revision, SlotMutationError> {
-    registry.get(&root.shape_id()).ok_or_else(|| {
-        SlotMutationError::unknown_path(format!("missing slot path root shape {}", root.shape_id()))
-    })?;
+    root_shape_ref(root, registry)?;
     let data = crate::lookup_slot_data(root, registry, path)
         .map_err(|err| SlotMutationError::unknown_path(err.to_string()))?;
     Ok(revision_for_data(data))
@@ -98,7 +96,7 @@ pub fn slot_data_revision(
 
 fn set_slot_value_in_shape(
     data: SlotDataMutAccess<'_>,
-    shape: &SlotShape,
+    shape: SlotShapeView<'_>,
     registry: &SlotShapeRegistry,
     segments: &[SlotPathSegment],
     revision: Revision,
@@ -106,17 +104,18 @@ fn set_slot_value_in_shape(
 ) -> Result<(), SlotMutationError> {
     let shape = resolve_ref_shape(shape, registry)?;
     let Some((head, tail)) = segments.split_first() else {
-        return match (shape, data) {
-            (SlotShape::Value { shape }, SlotDataMutAccess::Value(value_slot)) => {
-                if !lp_value_matches_type(&value, &shape.ty) {
+        return match (shape.value_shape(), data) {
+            (Some(shape), SlotDataMutAccess::Value(value_slot)) => {
+                let ty = shape.ty_owned();
+                if !lp_value_matches_type(&value, &ty) {
                     return Err(SlotMutationError::wrong_type(format!(
                         "expected {:?}, got {:?}",
-                        shape.ty, value
+                        ty, value
                     )));
                 }
                 value_slot.set_lp_value(revision, value)
             }
-            (SlotShape::Value { .. }, _) => Err(SlotMutationError::unsupported_target(
+            (Some(_), _) => Err(SlotMutationError::unsupported_target(
                 "slot path resolves to value shape but not value data",
             )),
             _ => Err(SlotMutationError::unsupported_target(
@@ -125,76 +124,66 @@ fn set_slot_value_in_shape(
         };
     };
 
-    match (shape, data, head) {
-        (
-            SlotShape::Record { fields, .. },
-            SlotDataMutAccess::Record(record),
-            SlotPathSegment::Field(name),
-        ) => {
-            let (index, field) = fields
-                .iter()
-                .enumerate()
-                .find(|(_, field)| field.name == *name)
-                .ok_or_else(|| {
-                    SlotMutationError::unknown_path(format!("record has no field {name}"))
-                })?;
+    match (data, head) {
+        (SlotDataMutAccess::Record(record), SlotPathSegment::Field(name))
+            if shape.record_fields_len().is_some() =>
+        {
+            let (index, field) = shape.record_field_by_name(name).ok_or_else(|| {
+                SlotMutationError::unknown_path(format!("record has no field {name}"))
+            })?;
             let field_data = record.field_mut(index).ok_or_else(|| {
                 SlotMutationError::unknown_path(format!("record field {name} has no data"))
             })?;
-            set_slot_value_in_shape(field_data, &field.shape, registry, tail, revision, value)
+            set_slot_value_in_shape(field_data, field.shape(), registry, tail, revision, value)
         }
-        (
-            SlotShape::Map {
-                value: value_shape, ..
-            },
-            SlotDataMutAccess::Map(map),
-            SlotPathSegment::Key(key),
-        ) => {
+        (SlotDataMutAccess::Map(map), SlotPathSegment::Key(key)) if shape.map_value().is_some() => {
             let item_data = map.get_mut(key).ok_or_else(|| {
                 SlotMutationError::unknown_path(format!("map has no key {}", display_key(key)))
             })?;
-            set_slot_value_in_shape(item_data, value_shape, registry, tail, revision, value)
+            set_slot_value_in_shape(
+                item_data,
+                shape.map_value().expect("map value shape"),
+                registry,
+                tail,
+                revision,
+                value,
+            )
         }
-        (
-            SlotShape::Option { some, .. },
-            SlotDataMutAccess::Option(option),
-            SlotPathSegment::Field(name),
-        ) if name.as_str() == "some" => {
+        (SlotDataMutAccess::Option(option), SlotPathSegment::Field(name))
+            if name.as_str() == "some" && shape.option_some().is_some() =>
+        {
             let data = option
                 .data_mut()
                 .ok_or_else(|| SlotMutationError::unknown_path("option slot is none"))?;
-            set_slot_value_in_shape(data, some, registry, tail, revision, value)
+            set_slot_value_in_shape(
+                data,
+                shape.option_some().expect("option some shape"),
+                registry,
+                tail,
+                revision,
+                value,
+            )
         }
-        (
-            SlotShape::Enum { variants, .. },
-            SlotDataMutAccess::Enum(en),
-            SlotPathSegment::Field(name),
-        ) => {
+        (SlotDataMutAccess::Enum(en), SlotPathSegment::Field(name)) if shape.is_enum() => {
             let active = String::from(en.variant());
-            let variant = variants
-                .iter()
-                .find(|variant| variant.name.as_str() == active)
-                .ok_or_else(|| {
-                    SlotMutationError::unknown_variant(format!(
-                        "enum has no active variant {active:?}"
-                    ))
-                })?;
+            let variant = enum_variant_by_str(shape, &active)?;
             let data = en.data_mut();
             if name.as_str() == active {
-                set_slot_value_in_shape(data, &variant.shape, registry, tail, revision, value)
+                set_slot_value_in_shape(data, variant, registry, tail, revision, value)
             } else {
-                set_slot_value_in_shape(data, &variant.shape, registry, segments, revision, value)
-                    .map_err(|_| {
+                set_slot_value_in_shape(data, variant, registry, segments, revision, value).map_err(
+                    |_| {
                         SlotMutationError::unknown_path(format!(
                             "unknown path in active enum variant {active:?}: {name}"
                         ))
-                    })
+                    },
+                )
             }
         }
-        (_, _, SlotPathSegment::Field(name)) => Err(SlotMutationError::unknown_path(format!(
+        (_, SlotPathSegment::Field(name)) => Err(SlotMutationError::unknown_path(format!(
             "slot path field {name} cannot descend into current slot shape"
         ))),
-        (_, _, SlotPathSegment::Key(key)) => Err(SlotMutationError::unknown_path(format!(
+        (_, SlotPathSegment::Key(key)) => Err(SlotMutationError::unknown_path(format!(
             "slot path key {} cannot descend into current slot shape",
             display_key(key)
         ))),
@@ -203,7 +192,7 @@ fn set_slot_value_in_shape(
 
 fn set_slot_variant_default_in_shape(
     data: SlotDataMutAccess<'_>,
-    shape: &SlotShape,
+    shape: SlotShapeView<'_>,
     registry: &SlotShapeRegistry,
     segments: &[SlotPathSegment],
     revision: Revision,
@@ -211,17 +200,14 @@ fn set_slot_variant_default_in_shape(
 ) -> Result<(), SlotMutationError> {
     let shape = resolve_ref_shape(shape, registry)?;
     let Some((head, tail)) = segments.split_first() else {
-        return match (shape, data) {
-            (SlotShape::Enum { variants, .. }, SlotDataMutAccess::Enum(en)) => {
-                if !variants
-                    .iter()
-                    .any(|variant| variant.name.as_str() == requested_variant)
-                {
-                    return Err(SlotMutationError::unknown_variant(format!(
-                        "enum has no variant {requested_variant:?}"
-                    )));
-                }
-                en.set_variant_default_with_shape(revision, requested_variant, registry, variants)
+        return match (shape.is_enum(), data) {
+            (true, SlotDataMutAccess::Enum(en)) => {
+                enum_variant_by_str(shape, requested_variant)?;
+                let owned_shape = shape.to_owned_shape();
+                let SlotShape::Enum { variants, .. } = owned_shape else {
+                    unreachable!("enum shape checked above");
+                };
+                en.set_variant_default_with_shape(revision, requested_variant, registry, &variants)
             }
             _ => Err(SlotMutationError::unsupported_target(
                 "set variant mutation requires an enum slot",
@@ -229,80 +215,61 @@ fn set_slot_variant_default_in_shape(
         };
     };
 
-    match (shape, data, head) {
-        (
-            SlotShape::Record { fields, .. },
-            SlotDataMutAccess::Record(record),
-            SlotPathSegment::Field(name),
-        ) => {
-            let (index, field) = fields
-                .iter()
-                .enumerate()
-                .find(|(_, field)| field.name == *name)
-                .ok_or_else(|| {
-                    SlotMutationError::unknown_path(format!("record has no field {name}"))
-                })?;
+    match (data, head) {
+        (SlotDataMutAccess::Record(record), SlotPathSegment::Field(name))
+            if shape.record_fields_len().is_some() =>
+        {
+            let (index, field) = shape.record_field_by_name(name).ok_or_else(|| {
+                SlotMutationError::unknown_path(format!("record has no field {name}"))
+            })?;
             let field_data = record.field_mut(index).ok_or_else(|| {
                 SlotMutationError::unknown_path(format!("record field {name} has no data"))
             })?;
             set_slot_variant_default_in_shape(
                 field_data,
-                &field.shape,
+                field.shape(),
                 registry,
                 tail,
                 revision,
                 requested_variant,
             )
         }
-        (SlotShape::Map { value, .. }, SlotDataMutAccess::Map(map), SlotPathSegment::Key(key)) => {
+        (SlotDataMutAccess::Map(map), SlotPathSegment::Key(key)) if shape.map_value().is_some() => {
             let item_data = map.get_mut(key).ok_or_else(|| {
                 SlotMutationError::unknown_path(format!("map has no key {}", display_key(key)))
             })?;
             set_slot_variant_default_in_shape(
                 item_data,
-                value,
+                shape.map_value().expect("map value shape"),
                 registry,
                 tail,
                 revision,
                 requested_variant,
             )
         }
-        (
-            SlotShape::Option { some, .. },
-            SlotDataMutAccess::Option(option),
-            SlotPathSegment::Field(name),
-        ) if name.as_str() == "some" => {
+        (SlotDataMutAccess::Option(option), SlotPathSegment::Field(name))
+            if name.as_str() == "some" && shape.option_some().is_some() =>
+        {
             let data = option
                 .data_mut()
                 .ok_or_else(|| SlotMutationError::unknown_path("option slot is none"))?;
             set_slot_variant_default_in_shape(
                 data,
-                some,
+                shape.option_some().expect("option some shape"),
                 registry,
                 tail,
                 revision,
                 requested_variant,
             )
         }
-        (
-            SlotShape::Enum { variants, .. },
-            SlotDataMutAccess::Enum(en),
-            SlotPathSegment::Field(name),
-        ) => {
+        (SlotDataMutAccess::Enum(en), SlotPathSegment::Field(name)) if shape.is_enum() => {
             let active = String::from(en.variant());
-            let variant = variants
-                .iter()
-                .find(|variant| variant.name.as_str() == active)
-                .ok_or_else(|| {
-                    SlotMutationError::unknown_variant(format!(
-                        "enum has no active variant {active:?}"
-                    ))
-                })?;
+            let variant = enum_variant_by_str(shape, &active)?;
             let data = en.data_mut();
             if name.as_str() == active {
                 set_slot_variant_default_in_shape(
                     data,
-                    &variant.shape,
+                    variant,
                     registry,
                     tail,
                     revision,
@@ -311,7 +278,7 @@ fn set_slot_variant_default_in_shape(
             } else {
                 set_slot_variant_default_in_shape(
                     data,
-                    &variant.shape,
+                    variant,
                     registry,
                     segments,
                     revision,
@@ -319,10 +286,10 @@ fn set_slot_variant_default_in_shape(
                 )
             }
         }
-        (_, _, SlotPathSegment::Field(name)) => Err(SlotMutationError::unknown_path(format!(
+        (_, SlotPathSegment::Field(name)) => Err(SlotMutationError::unknown_path(format!(
             "slot path field {name} cannot descend into current slot shape"
         ))),
-        (_, _, SlotPathSegment::Key(key)) => Err(SlotMutationError::unknown_path(format!(
+        (_, SlotPathSegment::Key(key)) => Err(SlotMutationError::unknown_path(format!(
             "slot path key {} cannot descend into current slot shape",
             display_key(key)
         ))),
@@ -331,7 +298,7 @@ fn set_slot_variant_default_in_shape(
 
 fn insert_slot_map_entry_default_in_shape(
     data: SlotDataMutAccess<'_>,
-    shape: &SlotShape,
+    shape: SlotShapeView<'_>,
     registry: &SlotShapeRegistry,
     segments: &[SlotPathSegment],
     revision: Revision,
@@ -339,9 +306,10 @@ fn insert_slot_map_entry_default_in_shape(
 ) -> Result<(), SlotMutationError> {
     let shape = resolve_ref_shape(shape, registry)?;
     let Some((head, tail)) = segments.split_first() else {
-        return match (shape, data) {
-            (SlotShape::Map { value, .. }, SlotDataMutAccess::Map(map)) => {
-                map.insert_default(revision, key, registry, value)
+        return match (shape.map_value(), data) {
+            (Some(value), SlotDataMutAccess::Map(map)) => {
+                let owned_value = value.to_owned_shape();
+                map.insert_default(revision, key, registry, &owned_value)
             }
             _ => Err(SlotMutationError::unsupported_target(
                 "insert default map entry requires a map slot",
@@ -349,90 +317,71 @@ fn insert_slot_map_entry_default_in_shape(
         };
     };
 
-    match (shape, data, head) {
-        (
-            SlotShape::Record { fields, .. },
-            SlotDataMutAccess::Record(record),
-            SlotPathSegment::Field(name),
-        ) => {
-            let (index, field) = fields
-                .iter()
-                .enumerate()
-                .find(|(_, field)| field.name == *name)
-                .ok_or_else(|| {
-                    SlotMutationError::unknown_path(format!("record has no field {name}"))
-                })?;
+    match (data, head) {
+        (SlotDataMutAccess::Record(record), SlotPathSegment::Field(name))
+            if shape.record_fields_len().is_some() =>
+        {
+            let (index, field) = shape.record_field_by_name(name).ok_or_else(|| {
+                SlotMutationError::unknown_path(format!("record has no field {name}"))
+            })?;
             let field_data = record.field_mut(index).ok_or_else(|| {
                 SlotMutationError::unknown_path(format!("record field {name} has no data"))
             })?;
             insert_slot_map_entry_default_in_shape(
                 field_data,
-                &field.shape,
+                field.shape(),
                 registry,
                 tail,
                 revision,
                 key,
             )
         }
-        (
-            SlotShape::Map { value, .. },
-            SlotDataMutAccess::Map(map),
-            SlotPathSegment::Key(map_key),
-        ) => {
+        (SlotDataMutAccess::Map(map), SlotPathSegment::Key(map_key))
+            if shape.map_value().is_some() =>
+        {
             let item_data = map.get_mut(map_key).ok_or_else(|| {
                 SlotMutationError::unknown_path(format!("map has no key {}", display_key(map_key)))
             })?;
-            insert_slot_map_entry_default_in_shape(item_data, value, registry, tail, revision, key)
+            insert_slot_map_entry_default_in_shape(
+                item_data,
+                shape.map_value().expect("map value shape"),
+                registry,
+                tail,
+                revision,
+                key,
+            )
         }
-        (
-            SlotShape::Option { some, .. },
-            SlotDataMutAccess::Option(option),
-            SlotPathSegment::Field(name),
-        ) if name.as_str() == "some" => {
+        (SlotDataMutAccess::Option(option), SlotPathSegment::Field(name))
+            if name.as_str() == "some" && shape.option_some().is_some() =>
+        {
             let data = option
                 .data_mut()
                 .ok_or_else(|| SlotMutationError::unknown_path("option slot is none"))?;
-            insert_slot_map_entry_default_in_shape(data, some, registry, tail, revision, key)
+            insert_slot_map_entry_default_in_shape(
+                data,
+                shape.option_some().expect("option some shape"),
+                registry,
+                tail,
+                revision,
+                key,
+            )
         }
-        (
-            SlotShape::Enum { variants, .. },
-            SlotDataMutAccess::Enum(en),
-            SlotPathSegment::Field(name),
-        ) => {
+        (SlotDataMutAccess::Enum(en), SlotPathSegment::Field(name)) if shape.is_enum() => {
             let active = String::from(en.variant());
-            let variant = variants
-                .iter()
-                .find(|variant| variant.name.as_str() == active)
-                .ok_or_else(|| {
-                    SlotMutationError::unknown_variant(format!(
-                        "enum has no active variant {active:?}"
-                    ))
-                })?;
+            let variant = enum_variant_by_str(shape, &active)?;
             let data = en.data_mut();
             if name.as_str() == active {
-                insert_slot_map_entry_default_in_shape(
-                    data,
-                    &variant.shape,
-                    registry,
-                    tail,
-                    revision,
-                    key,
-                )
+                insert_slot_map_entry_default_in_shape(data, variant, registry, tail, revision, key)
             } else {
                 insert_slot_map_entry_default_in_shape(
-                    data,
-                    &variant.shape,
-                    registry,
-                    segments,
-                    revision,
-                    key,
+                    data, variant, registry, segments, revision, key,
                 )
             }
         }
-        (_, _, SlotPathSegment::Field(name)) => Err(SlotMutationError::unknown_path(format!(
+        (_, SlotPathSegment::Field(name)) => Err(SlotMutationError::unknown_path(format!(
             "slot path field {name} cannot descend into current slot shape"
         ))),
-        (_, _, SlotPathSegment::Key(key)) => Err(SlotMutationError::unknown_path(format!(
+        (_, SlotPathSegment::Key(key)) => Err(SlotMutationError::unknown_path(format!(
             "slot path key {} cannot descend into current slot shape",
             display_key(key)
         ))),
@@ -441,16 +390,17 @@ fn insert_slot_map_entry_default_in_shape(
 
 fn set_slot_option_some_default_in_shape(
     data: SlotDataMutAccess<'_>,
-    shape: &SlotShape,
+    shape: SlotShapeView<'_>,
     registry: &SlotShapeRegistry,
     segments: &[SlotPathSegment],
     revision: Revision,
 ) -> Result<(), SlotMutationError> {
     let shape = resolve_ref_shape(shape, registry)?;
     let Some((head, tail)) = segments.split_first() else {
-        return match (shape, data) {
-            (SlotShape::Option { some, .. }, SlotDataMutAccess::Option(option)) => {
-                option.set_some_default(revision, registry, some)
+        return match (shape.option_some(), data) {
+            (Some(some), SlotDataMutAccess::Option(option)) => {
+                let owned_some = some.to_owned_shape();
+                option.set_some_default(revision, registry, &owned_some)
             }
             _ => Err(SlotMutationError::unsupported_target(
                 "set option some default requires an option slot",
@@ -458,83 +408,64 @@ fn set_slot_option_some_default_in_shape(
         };
     };
 
-    match (shape, data, head) {
-        (
-            SlotShape::Record { fields, .. },
-            SlotDataMutAccess::Record(record),
-            SlotPathSegment::Field(name),
-        ) => {
-            let (index, field) = fields
-                .iter()
-                .enumerate()
-                .find(|(_, field)| field.name == *name)
-                .ok_or_else(|| {
-                    SlotMutationError::unknown_path(format!("record has no field {name}"))
-                })?;
+    match (data, head) {
+        (SlotDataMutAccess::Record(record), SlotPathSegment::Field(name))
+            if shape.record_fields_len().is_some() =>
+        {
+            let (index, field) = shape.record_field_by_name(name).ok_or_else(|| {
+                SlotMutationError::unknown_path(format!("record has no field {name}"))
+            })?;
             let field_data = record.field_mut(index).ok_or_else(|| {
                 SlotMutationError::unknown_path(format!("record field {name} has no data"))
             })?;
             set_slot_option_some_default_in_shape(
                 field_data,
-                &field.shape,
+                field.shape(),
                 registry,
                 tail,
                 revision,
             )
         }
-        (SlotShape::Map { value, .. }, SlotDataMutAccess::Map(map), SlotPathSegment::Key(key)) => {
+        (SlotDataMutAccess::Map(map), SlotPathSegment::Key(key)) if shape.map_value().is_some() => {
             let item_data = map.get_mut(key).ok_or_else(|| {
                 SlotMutationError::unknown_path(format!("map has no key {}", display_key(key)))
             })?;
-            set_slot_option_some_default_in_shape(item_data, value, registry, tail, revision)
+            set_slot_option_some_default_in_shape(
+                item_data,
+                shape.map_value().expect("map value shape"),
+                registry,
+                tail,
+                revision,
+            )
         }
-        (
-            SlotShape::Option { some, .. },
-            SlotDataMutAccess::Option(option),
-            SlotPathSegment::Field(name),
-        ) if name.as_str() == "some" => {
+        (SlotDataMutAccess::Option(option), SlotPathSegment::Field(name))
+            if name.as_str() == "some" && shape.option_some().is_some() =>
+        {
             let data = option
                 .data_mut()
                 .ok_or_else(|| SlotMutationError::unknown_path("option slot is none"))?;
-            set_slot_option_some_default_in_shape(data, some, registry, tail, revision)
+            set_slot_option_some_default_in_shape(
+                data,
+                shape.option_some().expect("option some shape"),
+                registry,
+                tail,
+                revision,
+            )
         }
-        (
-            SlotShape::Enum { variants, .. },
-            SlotDataMutAccess::Enum(en),
-            SlotPathSegment::Field(name),
-        ) => {
+        (SlotDataMutAccess::Enum(en), SlotPathSegment::Field(name)) if shape.is_enum() => {
             let active = String::from(en.variant());
-            let variant = variants
-                .iter()
-                .find(|variant| variant.name.as_str() == active)
-                .ok_or_else(|| {
-                    SlotMutationError::unknown_variant(format!(
-                        "enum has no active variant {active:?}"
-                    ))
-                })?;
+            let variant = enum_variant_by_str(shape, &active)?;
             let data = en.data_mut();
             if name.as_str() == active {
-                set_slot_option_some_default_in_shape(
-                    data,
-                    &variant.shape,
-                    registry,
-                    tail,
-                    revision,
-                )
+                set_slot_option_some_default_in_shape(data, variant, registry, tail, revision)
             } else {
-                set_slot_option_some_default_in_shape(
-                    data,
-                    &variant.shape,
-                    registry,
-                    segments,
-                    revision,
-                )
+                set_slot_option_some_default_in_shape(data, variant, registry, segments, revision)
             }
         }
-        (_, _, SlotPathSegment::Field(name)) => Err(SlotMutationError::unknown_path(format!(
+        (_, SlotPathSegment::Field(name)) => Err(SlotMutationError::unknown_path(format!(
             "slot path field {name} cannot descend into current slot shape"
         ))),
-        (_, _, SlotPathSegment::Key(key)) => Err(SlotMutationError::unknown_path(format!(
+        (_, SlotPathSegment::Key(key)) => Err(SlotMutationError::unknown_path(format!(
             "slot path key {} cannot descend into current slot shape",
             display_key(key)
         ))),
@@ -556,22 +487,46 @@ fn revision_for_data(data: SlotDataAccess<'_>) -> Revision {
 fn root_shape<'a>(
     root: &dyn SlotMutAccess,
     registry: &'a SlotShapeRegistry,
-) -> Result<&'a SlotShape, SlotMutationError> {
-    registry.get(&root.shape_id()).ok_or_else(|| {
+) -> Result<SlotShapeView<'a>, SlotMutationError> {
+    registry.get_shape(root.shape_id()).ok_or_else(|| {
+        SlotMutationError::unknown_path(format!("missing slot path root shape {}", root.shape_id()))
+    })
+}
+
+fn root_shape_ref<'a>(
+    root: &dyn SlotAccess,
+    registry: &'a SlotShapeRegistry,
+) -> Result<SlotShapeView<'a>, SlotMutationError> {
+    registry.get_shape(root.shape_id()).ok_or_else(|| {
         SlotMutationError::unknown_path(format!("missing slot path root shape {}", root.shape_id()))
     })
 }
 
 fn resolve_ref_shape<'a>(
-    mut shape: &'a SlotShape,
+    mut shape: SlotShapeView<'a>,
     registry: &'a SlotShapeRegistry,
-) -> Result<&'a SlotShape, SlotMutationError> {
-    while let SlotShape::Ref { id } = shape {
-        shape = registry.get(id).ok_or_else(|| {
+) -> Result<SlotShapeView<'a>, SlotMutationError> {
+    while let Some(id) = shape.ref_id() {
+        shape = registry.get_shape(id).ok_or_else(|| {
             SlotMutationError::unknown_path(format!("missing referenced slot shape {id}"))
         })?;
     }
     Ok(shape)
+}
+
+fn enum_variant_by_str<'a>(
+    shape: SlotShapeView<'a>,
+    variant: &str,
+) -> Result<SlotShapeView<'a>, SlotMutationError> {
+    let name = SlotName::parse(variant).map_err(|_| {
+        SlotMutationError::unknown_variant(format!("invalid enum variant {variant:?}"))
+    })?;
+    shape
+        .enum_variant_by_name(&name)
+        .map(|variant| variant.shape())
+        .ok_or_else(|| {
+            SlotMutationError::unknown_variant(format!("enum has no variant {variant:?}"))
+        })
 }
 
 fn display_key(key: &SlotMapKey) -> String {

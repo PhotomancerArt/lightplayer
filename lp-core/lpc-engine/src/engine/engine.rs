@@ -10,13 +10,9 @@ use alloc::vec::Vec;
 use hashbrown::HashMap;
 
 use lpc_model::{
-    ArtifactPath, BindingDef, ButtonDef, ClockDef, ComputeShaderDef, ControlMessage,
-    ControlProduct, ControlRadioDef, Dim2u, FixtureDef, FluidDef, FluidEmitter, GlslOpts, NodeDef,
-    NodeId, OutputDef, OutputDriverOptionsConfig, PlaylistDef, PlaylistEntry, PositiveF32,
-    ProjectDef, Ratio, RenderOrder, Revision, ScalarHint, ShaderDef, ShaderParamDef, ShaderSlotDef,
-    ShaderSlotMappingDef, SlotAccess, SlotAccessor, SlotData, SlotDirection, SlotMerge, SlotPath,
-    SlotPathSegment, SlotSemantics, SlotShape, SlotShapeRegistry, SourcePath, StaticSlotShape,
-    TextureDef, TreePath, WithRevision, Xy, advance_revision, current_revision,
+    ControlProduct, NodeDef, NodeId, Revision, SlotAccess, SlotAccessor, SlotData, SlotDirection,
+    SlotMerge, SlotPath, SlotPathSegment, SlotSemantics, SlotShapeLookup, SlotShapeRegistry,
+    SlotShapeView, TreePath, WithRevision, advance_revision, current_revision,
     lookup_slot_data_and_shape,
 };
 use lpc_shared::time::TimeProvider;
@@ -78,9 +74,7 @@ impl Engine {
 
     pub fn with_services(root_path: TreePath, services: EngineServices) -> Self {
         let revision = Revision::default();
-        let mut slot_shapes = SlotShapeRegistry::default();
-        register_authored_slot_shapes(&mut slot_shapes)
-            .expect("authored slot shapes register without conflicts");
+        let slot_shapes = SlotShapeRegistry::default();
         Self {
             frame_num: FrameNum::default(),
             revision,
@@ -371,45 +365,6 @@ impl Engine {
         };
         host.render_node_control(product, request, target)
     }
-}
-
-fn register_authored_slot_shapes(
-    registry: &mut SlotShapeRegistry,
-) -> Result<(), lpc_model::SlotShapeRegistryError> {
-    for id in [
-        BindingDef::SHAPE_ID,
-        ControlMessage::SHAPE_ID,
-        lpc_model::NodeArtifact::SHAPE_ID,
-        ButtonDef::SHAPE_ID,
-        ClockDef::SHAPE_ID,
-        FixtureDef::SHAPE_ID,
-        FluidDef::SHAPE_ID,
-        FluidEmitter::SHAPE_ID,
-        OutputDef::SHAPE_ID,
-        OutputDriverOptionsConfig::SHAPE_ID,
-        PlaylistDef::SHAPE_ID,
-        PlaylistEntry::SHAPE_ID,
-        ProjectDef::SHAPE_ID,
-        ControlRadioDef::SHAPE_ID,
-        ComputeShaderDef::SHAPE_ID,
-        GlslOpts::SHAPE_ID,
-        ScalarHint::SHAPE_ID,
-        ShaderDef::SHAPE_ID,
-        ShaderParamDef::SHAPE_ID,
-        ShaderSlotDef::SHAPE_ID,
-        ShaderSlotMappingDef::SHAPE_ID,
-        TextureDef::SHAPE_ID,
-        ArtifactPath::SHAPE_ID,
-        Dim2u::SHAPE_ID,
-        PositiveF32::SHAPE_ID,
-        Ratio::SHAPE_ID,
-        RenderOrder::SHAPE_ID,
-        SourcePath::SHAPE_ID,
-        Xy::SHAPE_ID,
-    ] {
-        lpc_model::slot_shapes::ensure_static_slot_shape(registry, id)?;
-    }
-    Ok(())
 }
 
 /// Host adapter with borrows disjoint from the [`Resolver`] handed to [`EngineSession`].
@@ -815,7 +770,7 @@ impl EngineResolveHost<'_> {
                 )));
             }
         };
-        let shape = self.slot_shapes.get(&def.shape_id()).ok_or_else(|| {
+        let shape = self.slot_shapes.get_shape(def.shape_id()).ok_or_else(|| {
             SessionResolveError::other(format!("missing node def shape {}", def.shape_id()))
         })?;
         slot_path_semantics(shape, self.slot_shapes, slot)
@@ -1200,16 +1155,16 @@ impl EngineResolveHost<'_> {
 }
 
 fn slot_path_semantics(
-    shape: &SlotShape,
-    registry: &SlotShapeRegistry,
+    shape: SlotShapeView<'_>,
+    registry: &(impl SlotShapeLookup + ?Sized),
     slot: &SlotPath,
 ) -> Result<SlotSemantics, SessionResolveError> {
     slot_path_semantics_segments(shape, registry, slot, slot.segments())
 }
 
 fn slot_path_semantics_segments(
-    shape: &SlotShape,
-    registry: &SlotShapeRegistry,
+    shape: SlotShapeView<'_>,
+    registry: &(impl SlotShapeLookup + ?Sized),
     slot: &SlotPath,
     segments: &[SlotPathSegment],
 ) -> Result<SlotSemantics, SessionResolveError> {
@@ -1220,64 +1175,56 @@ fn slot_path_semantics_segments(
         )));
     };
 
-    match (shape, head) {
-        (SlotShape::Record { fields, .. }, SlotPathSegment::Field(name)) => {
-            let field = fields
-                .iter()
-                .find(|field| field.name == *name)
-                .ok_or_else(|| {
-                    SessionResolveError::other(format!("node def has no slot field {name}"))
-                })?;
+    match head {
+        SlotPathSegment::Field(name) if shape.record_field_by_name(name).is_some() => {
+            let (_, field) = shape
+                .record_field_by_name(name)
+                .expect("field checked above");
             if tail.is_empty() {
-                Ok(field.semantics)
+                Ok(field.semantics())
             } else {
-                slot_path_semantics_segments(&field.shape, registry, slot, tail)
+                slot_path_semantics_segments(field.shape(), registry, slot, tail)
             }
         }
-        (SlotShape::Map { value, .. }, SlotPathSegment::Key(_)) => {
+        SlotPathSegment::Key(_) if shape.map_value().is_some() => {
+            let value = shape.map_value().expect("map value checked above");
             slot_path_semantics_segments(value, registry, slot, tail)
         }
-        (SlotShape::Option { some, .. }, SlotPathSegment::Field(name))
-            if name.as_str() == "some" =>
+        SlotPathSegment::Field(name)
+            if name.as_str() == "some" && shape.option_some().is_some() =>
         {
+            let some = shape.option_some().expect("option some checked above");
             slot_path_semantics_segments(some, registry, slot, tail)
         }
-        (SlotShape::Enum { variants, .. }, SlotPathSegment::Field(name)) => {
-            let variant = variants
-                .iter()
-                .find(|variant| variant.name == *name)
-                .ok_or_else(|| {
-                    SessionResolveError::other(format!("node def enum has no variant {name}"))
-                })?;
-            slot_path_semantics_segments(&variant.shape, registry, slot, tail)
+        SlotPathSegment::Field(name) if shape.enum_variant_by_name(name).is_some() => {
+            let variant = shape.enum_variant_by_name(name).ok_or_else(|| {
+                SessionResolveError::other(format!("node def enum has no variant {name}"))
+            })?;
+            slot_path_semantics_segments(variant.shape(), registry, slot, tail)
         }
-        (_, SlotPathSegment::Field(name)) => Err(SessionResolveError::other(format!(
+        SlotPathSegment::Field(name) => Err(SessionResolveError::other(format!(
             "slot path field {name} cannot descend through node def shape for {slot}"
         ))),
-        (_, SlotPathSegment::Key(key)) => Err(SessionResolveError::other(format!(
+        SlotPathSegment::Key(key) => Err(SessionResolveError::other(format!(
             "slot path key {key:?} cannot descend through node def shape for {slot}"
         ))),
     }
 }
 
 fn resolve_shape_projection<'a>(
-    shape: &'a SlotShape,
-    registry: &'a SlotShapeRegistry,
-) -> Result<&'a SlotShape, SessionResolveError> {
+    shape: SlotShapeView<'a>,
+    registry: &'a (impl SlotShapeLookup + ?Sized),
+) -> Result<SlotShapeView<'a>, SessionResolveError> {
     let mut shape = shape;
     loop {
-        match shape {
-            SlotShape::Ref { id } => {
-                shape = registry.get(id).ok_or_else(|| {
-                    SessionResolveError::other(format!("missing referenced node def shape {id}"))
-                })?;
-            }
-            SlotShape::Custom {
-                shape: projected, ..
-            } => {
-                shape = projected;
-            }
-            other => return Ok(other),
+        if let Some(id) = shape.ref_id() {
+            shape = registry.get_shape(id).ok_or_else(|| {
+                SessionResolveError::other(format!("missing referenced node def shape {id}"))
+            })?;
+        } else if let Some(projected) = shape.custom_shape() {
+            shape = projected;
+        } else {
+            return Ok(shape);
         }
     }
 }
@@ -1765,10 +1712,10 @@ mod tests {
 
     #[test]
     fn nested_consumed_slot_semantics_reach_playlist_entry_trigger() {
-        let mut registry = SlotShapeRegistry::default();
-        lpc_model::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("shapes");
+        let registry = SlotShapeRegistry::default();
+        let shape = <lpc_model::PlaylistDef as lpc_model::StaticSlotShape>::slot_shape();
         let semantics = slot_path_semantics(
-            &<lpc_model::PlaylistDef as lpc_model::StaticSlotShape>::slot_shape(),
+            SlotShapeView::Dynamic(&shape),
             &registry,
             &SlotPath::parse("entries[2].trigger").expect("trigger path"),
         )

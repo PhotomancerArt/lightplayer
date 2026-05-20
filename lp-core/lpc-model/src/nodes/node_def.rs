@@ -240,12 +240,7 @@ impl NodeDef {
 
     /// Read authored TOML using the model crate's generated static shape registry.
     pub fn from_toml_str(text: &str) -> Result<Self, NodeDefParseError> {
-        let mut registry = SlotShapeRegistry::default();
-        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).map_err(|error| {
-            NodeDefParseError::Toml {
-                error: error.to_string(),
-            }
-        })?;
+        let registry = SlotShapeRegistry::default();
         Self::read_toml(&registry, text)
     }
 
