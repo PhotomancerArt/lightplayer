@@ -1,0 +1,139 @@
+use alloc::string::String;
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    BindingDefs, ControlMessage, MapSlot, NodeInvocation, OptionSlot, PositiveF32Slot, Slotted,
+    ValueSlot,
+};
+
+/// One authored playlist entry.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
+pub struct PlaylistEntry {
+    /// Entry-local bindings, registered against the owning playlist entry slot.
+    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
+    pub bindings: BindingDefs,
+
+    /// Trigger messages that start or restart this entry.
+    #[slot(
+        consumed,
+        merge = "by_key",
+        map(key = "u32", value_ref = "lp::control::Message")
+    )]
+    #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
+    pub trigger: MapSlot<u32, ControlMessage>,
+
+    /// Optional child node name.
+    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
+    pub name: OptionSlot<ValueSlot<String>>,
+
+    /// Duration in seconds before the playlist advances.
+    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
+    pub duration: OptionSlot<PositiveF32Slot>,
+
+    /// Outgoing crossfade duration override in seconds.
+    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
+    pub fade_after: OptionSlot<PositiveF32Slot>,
+
+    /// Visual child node invocation.
+    pub node: NodeInvocation,
+}
+
+impl Default for PlaylistEntry {
+    fn default() -> Self {
+        Self {
+            bindings: BindingDefs::default(),
+            trigger: MapSlot::default(),
+            name: OptionSlot::none(),
+            duration: OptionSlot::none(),
+            fade_after: OptionSlot::none(),
+            node: NodeInvocation::default(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        BindingRef, NodeDef, NodeDefRef, SlotDirection, SlotMerge, SlotShape, SlotShapeRegistry,
+        StaticSlotShape,
+    };
+
+    #[test]
+    fn playlist_entry_parses_path_child_and_trigger_binding() {
+        let def = NodeDef::from_toml_str(
+            r#"
+kind = "Playlist"
+
+[entries.2]
+name = "active"
+duration = 4.0
+fade_after = 0.8
+node = { def = { path = "./active.toml" } }
+
+[entries.2.bindings.trigger]
+source = "bus#trigger"
+"#,
+        )
+        .expect("playlist");
+
+        let NodeDef::Playlist(def) = def else {
+            panic!("playlist def");
+        };
+        let entry = def.entries.entries.get(&2).expect("entry");
+        assert_eq!(entry.name.data.as_ref().unwrap().value().as_str(), "active");
+        assert_eq!(entry.duration.data.as_ref().unwrap().value().0, 4.0);
+        assert!(matches!(entry.node.def, NodeDefRef::Path(_)));
+        assert!(matches!(
+            entry.bindings.entries()["trigger"].source_ref(),
+            Some(BindingRef::Bus(_))
+        ));
+    }
+
+    #[test]
+    fn playlist_entry_parses_inline_child() {
+        let def = NodeDef::from_toml_str(
+            r#"
+kind = "Playlist"
+
+[entries.2]
+name = "active"
+duration = 4.0
+
+[entries.2.node.def]
+kind = "Shader"
+source = { path = "active.glsl" }
+"#,
+        )
+        .expect("playlist");
+
+        let NodeDef::Playlist(def) = def else {
+            panic!("playlist def");
+        };
+        let entry = def.entries.entries.get(&2).expect("entry");
+        assert!(matches!(entry.node.inline_def(), Some(NodeDef::Shader(_))));
+    }
+
+    #[test]
+    fn playlist_entry_trigger_shape_is_consumed_by_key() {
+        let mut registry = SlotShapeRegistry::default();
+        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("static shapes");
+        assert_eq!(
+            registry
+                .entry(&ControlMessage::SHAPE_ID)
+                .and_then(|entry| entry.name()),
+            Some(crate::CONTROL_MESSAGE_SHAPE_NAME)
+        );
+
+        let SlotShape::Record { fields, .. } = PlaylistEntry::slot_shape() else {
+            panic!("record shape");
+        };
+        let trigger = fields
+            .iter()
+            .find(|field| field.name.as_str() == "trigger")
+            .expect("trigger field");
+
+        assert_eq!(trigger.semantics.direction, SlotDirection::Consumed);
+        assert_eq!(trigger.semantics.merge, SlotMerge::ByKey);
+    }
+}

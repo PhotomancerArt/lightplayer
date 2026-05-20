@@ -8,7 +8,9 @@ use alloc::sync::Arc;
 
 use crate::artifact::ArtifactId;
 use crate::dataflow::bus::Bus;
-use crate::dataflow::resolver::{Production, QueryKey, ResolveError, TickResolver};
+use crate::dataflow::resolver::{
+    Production, ProductionSource, QueryKey, ResolveError, TickResolver,
+};
 use crate::engine::ButtonService;
 use crate::gfx::LpGraphics;
 use crate::products::control::{
@@ -20,8 +22,8 @@ use crate::products::visual::{
 };
 use crate::resource::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
 use lpc_model::{
-    FromLpValue, NodeId, Revision, SlotAccessor, SlotPath, SlotShapeRegistry, WithRevision,
-    bus::ChannelName,
+    FromLpValue, NodeId, Revision, SlotAccess, SlotAccessor, SlotPath, SlotShapeRegistry,
+    WithRevision, bus::ChannelName, lookup_slot_data_and_shape,
 };
 use lpc_shared::time::TimeProvider;
 use lps_shared::LpsValueF32;
@@ -154,6 +156,26 @@ impl<'r> TickContext<'r> {
     /// Resolve a [`QueryKey`] for this frame (cache, bindings, optional host production).
     pub fn resolve(&mut self, query: QueryKey) -> Result<Production, ResolveError> {
         self.resolver.resolve(query)
+    }
+
+    pub fn publish_runtime_slot(
+        &mut self,
+        state_root: &dyn SlotAccess,
+        slot: SlotPath,
+    ) -> Result<(), NodeError> {
+        let (data, shape) = lookup_slot_data_and_shape(state_root, self.slot_shapes, &slot)
+            .map_err(|e| NodeError::msg(alloc::format!("runtime slot lookup {slot}: {e}")))?;
+        let snapshot = lpc_wire::snapshot_slot_shape(shape, data, self.slot_shapes);
+        let production = Production::new(
+            snapshot,
+            ProductionSource::ProducedSlot {
+                node: self.node_id,
+                slot: slot.clone(),
+            },
+        );
+        self.resolver
+            .publish_produced_slot(self.node_id, slot, production)
+            .map_err(|e| NodeError::msg(alloc::format!("publish runtime slot: {}", e.message)))
     }
 
     /// Resolve one of this node's consumed slots and parse it as a typed model value.
@@ -399,6 +421,29 @@ pub trait ControlRenderServices {
     ) -> Result<(), NodeError>;
 }
 
+/// Services available while materializing a [`crate::products::visual::VisualProduct`].
+pub trait VisualRenderServices {
+    fn render_texture(
+        &mut self,
+        product: VisualProduct,
+        request: &RenderTextureRequest,
+    ) -> Result<TextureRenderProduct, NodeError>;
+
+    fn render_texture_into(
+        &mut self,
+        product: VisualProduct,
+        request: &RenderTextureRequest,
+        target: &mut lp_shader::LpsTextureBuf,
+    ) -> Result<(), NodeError>;
+
+    fn sample_visual_into(
+        &mut self,
+        product: VisualProduct,
+        request: VisualSampleBufferRequest<'_>,
+        target: VisualSampleTarget<'_>,
+    ) -> Result<(), NodeError>;
+}
+
 /// Context passed to [`super::RenderNode`] materialization hooks.
 pub struct RenderContext<'a> {
     node_id: NodeId,
@@ -406,7 +451,7 @@ pub struct RenderContext<'a> {
     graphics: Option<Arc<dyn LpGraphics>>,
     time_provider: Option<Rc<dyn TimeProvider>>,
     frame_time_seconds: f32,
-    _marker: core::marker::PhantomData<&'a mut ()>,
+    services: Option<&'a mut dyn VisualRenderServices>,
 }
 
 impl<'a> RenderContext<'a> {
@@ -423,7 +468,25 @@ impl<'a> RenderContext<'a> {
             graphics,
             time_provider,
             frame_time_seconds,
-            _marker: core::marker::PhantomData,
+            services: None,
+        }
+    }
+
+    pub fn with_services(
+        node_id: NodeId,
+        revision: Revision,
+        graphics: Option<Arc<dyn LpGraphics>>,
+        time_provider: Option<Rc<dyn TimeProvider>>,
+        frame_time_seconds: f32,
+        services: &'a mut dyn VisualRenderServices,
+    ) -> Self {
+        Self {
+            node_id,
+            revision,
+            graphics,
+            time_provider,
+            frame_time_seconds,
+            services: Some(services),
         }
     }
 
@@ -453,6 +516,41 @@ impl<'a> RenderContext<'a> {
 
     pub fn time_seconds(&self) -> f32 {
         self.frame_time_seconds
+    }
+
+    pub fn render_texture(
+        &mut self,
+        product: VisualProduct,
+        request: &RenderTextureRequest,
+    ) -> Result<TextureRenderProduct, NodeError> {
+        self.services
+            .as_mut()
+            .ok_or_else(|| NodeError::msg("render context has no visual render services"))?
+            .render_texture(product, request)
+    }
+
+    pub fn render_texture_into(
+        &mut self,
+        product: VisualProduct,
+        request: &RenderTextureRequest,
+        target: &mut lp_shader::LpsTextureBuf,
+    ) -> Result<(), NodeError> {
+        self.services
+            .as_mut()
+            .ok_or_else(|| NodeError::msg("render context has no visual render services"))?
+            .render_texture_into(product, request, target)
+    }
+
+    pub fn sample_visual_into(
+        &mut self,
+        product: VisualProduct,
+        request: VisualSampleBufferRequest<'_>,
+        target: VisualSampleTarget<'_>,
+    ) -> Result<(), NodeError> {
+        self.services
+            .as_mut()
+            .ok_or_else(|| NodeError::msg("render context has no visual render services"))?
+            .sample_visual_into(product, request, target)
     }
 }
 
@@ -536,8 +634,15 @@ mod tests {
     use crate::node::NodeRuntime;
     use alloc::string::String;
     use alloc::vec::Vec;
-    use lpc_model::Kind;
-    use lpc_model::{SlotPath, SlotShapeRegistry};
+    use lpc_model::{
+        Kind, LpValue, SlotPath, SlotShapeRegistry, Slotted, StaticSlotShape, ValueSlot,
+    };
+
+    #[derive(Default, Slotted)]
+    struct TestRuntimeState {
+        #[slot(produced)]
+        pub value: ValueSlot<f32>,
+    }
 
     #[derive(Default)]
     struct TestBindings {
@@ -734,6 +839,44 @@ mod tests {
             })
             .expect("resolve consumed slot");
         assert!(pv.as_value().expect("value").eq(&LpsValueF32::F32(4.25)));
+    }
+
+    #[test]
+    fn tick_context_publish_runtime_slot_satisfies_same_frame_cache() {
+        let node = NodeId::new(7);
+        let frame = Revision::new(10);
+        let mut resolver = Resolver::new();
+        let mut session = session_bundle(&mut resolver, frame);
+        let mut host = PanicProduceHost::default();
+        let mut slot_shapes = SlotShapeRegistry::default();
+        TestRuntimeState::ensure_registered(&mut slot_shapes).expect("state shape");
+        let mut bridge = SessionHostResolver {
+            session: &mut session,
+            host: &mut host,
+        };
+        let mut ctx = TickContext::new(
+            node,
+            frame,
+            ArtifactId::from_raw(1),
+            Revision::new(1),
+            &mut bridge as &mut dyn TickResolver,
+            &slot_shapes,
+        );
+        let state = TestRuntimeState {
+            value: ValueSlot::new(3.5),
+        };
+        let slot = SlotPath::parse("value").expect("value slot");
+
+        ctx.publish_runtime_slot(&state, slot.clone())
+            .expect("publish");
+        let production = ctx
+            .resolve(QueryKey::ProducedSlot { node, slot })
+            .expect("resolve published slot");
+
+        assert_eq!(
+            *production.value_leaf().expect("leaf").value(),
+            LpValue::F32(3.5)
+        );
     }
 
     #[test]

@@ -47,6 +47,14 @@ impl<'a> EngineSession<'a> {
         &self.trace
     }
 
+    pub fn publish(&mut self, query: QueryKey, production: Production) {
+        self.resolver.cache_mut().insert(query, production);
+    }
+
+    pub fn publish_produced_slot(&mut self, node: NodeId, slot: SlotPath, production: Production) {
+        self.publish(QueryKey::ProducedSlot { node, slot }, production);
+    }
+
     /// Demand-resolve `query` for this frame (cache + cycle stack + host-owned bindings).
     pub fn resolve<H: ResolveHost + ?Sized>(
         &mut self,

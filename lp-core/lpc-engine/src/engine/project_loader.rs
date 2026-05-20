@@ -11,8 +11,8 @@ use lpc_model::nodes::project::project_def::ProjectDef;
 use lpc_model::{ArtifactLocator, ArtifactReadRoot, NodeDefRef, NodeInvocation, NodeKind};
 use lpc_model::{
     BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, FluidDef, Kind, LpValue, NodeDef,
-    NodeId, NodeName, Revision, ShaderDef, ShaderSlotKind, ShaderSource, SlotPath,
-    SlotShapeRegistry,
+    NodeId, NodeName, PlaylistDef, PlaylistEntry, Revision, ShaderDef, ShaderSlotKind,
+    ShaderSource, SlotPath, SlotShapeRegistry,
 };
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lpfs::lp_path::{LpPath, LpPathBuf};
@@ -22,7 +22,7 @@ use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, Bin
 use crate::node::{NodeDefHandle, TreeError};
 use crate::nodes::{
     ButtonNode, ClockNode, ComputeShaderNode, CorePlaceholderNode, FixtureNode, FluidNode,
-    OutputNode, ShaderNode, TextureNode,
+    OutputNode, PlaylistNode, PlaylistRuntimeEntry, ShaderNode, TextureNode,
 };
 
 use super::{Engine, EngineServices};
@@ -59,10 +59,24 @@ impl core::error::Error for ProjectLoadError {}
 
 struct LoadedNode {
     name: NodeName,
+    parent: Option<NodeId>,
     artifact_path: LpPathBuf,
     source_base_path: LpPathBuf,
     id: NodeId,
     config: NodeDef,
+    ownership: LoadedNodeOwnership,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum LoadedNodeOwnership {
+    ProjectChild,
+    PlaylistEntry { playlist: NodeId, entry: u32 },
+}
+
+impl LoadedNodeOwnership {
+    fn suppress_visual_default_output(self) -> bool {
+        matches!(self, Self::PlaylistEntry { .. })
+    }
 }
 
 /// Loads the authored project artifact tree into a core engine-backed runtime.
@@ -132,63 +146,115 @@ impl ProjectLoader {
                     path: project_path.as_str().to_string(),
                     reason: format!("{e}"),
                 })?;
-            let (artifact_path, source_base_path, config, artifact_id) = match &invocation.def {
-                NodeDefRef::Path(artifact_locator) => {
-                    let artifact_path =
-                        resolve_child_artifact_locator(&project_path, artifact_locator)?;
-                    let config =
-                        load_node_def(root, artifact_path.as_path(), runtime.slot_shapes())?;
-                    let artifact_id = runtime
-                        .artifacts_mut()
-                        .acquire_location(ArtifactLocation::file(artifact_path.clone()), frame);
-                    (artifact_path.clone(), artifact_path, config, artifact_id)
-                }
-                NodeDefRef::Inline(def) => {
-                    let artifact_path = inline_node_artifact_path(&project_path, &node_name);
-                    let config = (**def).clone();
-                    let artifact_id = runtime.artifacts_mut().acquire_location(
-                        ArtifactLocation::inline_node(project_path.clone(), node_name.as_str()),
-                        frame,
-                    );
-                    (artifact_path, project_path.clone(), config, artifact_id)
-                }
-            };
-            runtime
-                .artifacts_mut()
-                .load_with(&artifact_id, frame, |_location| Ok(config.clone()))
-                .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                    path: artifact_path.as_str().to_string(),
-                    reason: format!("load node artifact payload: {e:?}"),
-                })?;
-            let ty = node_kind_name(&config, artifact_path.as_path())?;
-            let leaf_id = runtime
-                .tree_mut()
-                .add_child(
-                    root_id,
-                    node_name.clone(),
-                    ty,
-                    WireChildKind::Input {
-                        source: WireSlotIndex(0),
-                    },
-                    invocation,
-                    artifact_id,
-                    frame,
-                )
-                .map_err(ProjectLoadError::Tree)?;
-
-            runtime.insert_artifact_node(artifact_path.clone(), leaf_id);
-            loaded_nodes.push(LoadedNode {
-                name: node_name,
-                artifact_path,
-                source_base_path,
-                id: leaf_id,
-                config,
-            });
+            Self::load_child_invocation(
+                root,
+                &mut runtime,
+                &mut loaded_nodes,
+                root_id,
+                node_name,
+                invocation,
+                &project_path,
+                LoadedNodeOwnership::ProjectChild,
+                frame,
+            )?;
         }
 
         Self::attach_loaded_nodes(root, &mut runtime, &loaded_nodes, frame)?;
 
         Ok(runtime)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn load_child_invocation<R>(
+        root: &R,
+        runtime: &mut Engine,
+        loaded_nodes: &mut Vec<LoadedNode>,
+        parent_id: NodeId,
+        node_name: NodeName,
+        invocation: NodeInvocation,
+        containing_file: &LpPathBuf,
+        ownership: LoadedNodeOwnership,
+        frame: Revision,
+    ) -> Result<NodeId, ProjectLoadError>
+    where
+        R: ArtifactReadRoot + ?Sized,
+        R::Err: core::fmt::Debug,
+    {
+        let (artifact_path, source_base_path, config, artifact_id) = match &invocation.def {
+            NodeDefRef::Path(artifact_locator) => {
+                let artifact_path =
+                    resolve_child_artifact_locator(containing_file, artifact_locator)?;
+                let config = load_node_def(root, artifact_path.as_path(), runtime.slot_shapes())?;
+                let artifact_id = runtime
+                    .artifacts_mut()
+                    .acquire_location(ArtifactLocation::file(artifact_path.clone()), frame);
+                (artifact_path.clone(), artifact_path, config, artifact_id)
+            }
+            NodeDefRef::Inline(def) => {
+                let artifact_path = inline_node_artifact_path(containing_file, &node_name);
+                let config = (**def).clone();
+                let artifact_id = runtime.artifacts_mut().acquire_location(
+                    ArtifactLocation::inline_node(containing_file.clone(), node_name.as_str()),
+                    frame,
+                );
+                (artifact_path, containing_file.clone(), config, artifact_id)
+            }
+        };
+        runtime
+            .artifacts_mut()
+            .load_with(&artifact_id, frame, |_location| Ok(config.clone()))
+            .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                path: artifact_path.as_str().to_string(),
+                reason: format!("load node artifact payload: {e:?}"),
+            })?;
+        let ty = node_kind_name(&config, artifact_path.as_path())?;
+        let leaf_id = runtime
+            .tree_mut()
+            .add_child(
+                parent_id,
+                node_name.clone(),
+                ty,
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                invocation,
+                artifact_id,
+                frame,
+            )
+            .map_err(ProjectLoadError::Tree)?;
+
+        runtime.insert_artifact_node(artifact_path.clone(), leaf_id);
+        loaded_nodes.push(LoadedNode {
+            name: node_name,
+            parent: Some(parent_id),
+            artifact_path: artifact_path.clone(),
+            source_base_path: source_base_path.clone(),
+            id: leaf_id,
+            config: config.clone(),
+            ownership,
+        });
+
+        if let NodeDef::Playlist(config) = &config {
+            for (entry_index, entry) in &config.entries.entries {
+                let child_name = playlist_entry_child_name(&artifact_path, *entry_index, entry)?;
+                Self::load_child_invocation(
+                    root,
+                    runtime,
+                    loaded_nodes,
+                    leaf_id,
+                    child_name,
+                    entry.node.clone(),
+                    &source_base_path,
+                    LoadedNodeOwnership::PlaylistEntry {
+                        playlist: leaf_id,
+                        entry: *entry_index,
+                    },
+                    frame,
+                )?;
+            }
+        }
+
+        Ok(leaf_id)
     }
 
     fn attach_loaded_nodes<R>(
@@ -342,6 +408,7 @@ impl ProjectLoader {
                     &config.bindings,
                     frame,
                 )?;
+                register_visual_default_output_binding(runtime, node, &config.bindings, frame)?;
                 for name in config.consumed_slots.entries.keys() {
                     register_optional_source_binding(
                         runtime,
@@ -436,6 +503,47 @@ impl ProjectLoader {
                     node,
                     "output",
                     &config.bindings,
+                    frame,
+                )?;
+                register_visual_default_output_binding(runtime, node, &config.bindings, frame)?;
+            }
+        }
+
+        for node in loaded_nodes {
+            if let NodeDef::Playlist(config) = &node.config {
+                let entries = playlist_runtime_entries(loaded_nodes, node.id);
+                runtime
+                    .attach_runtime_node(
+                        node.id,
+                        Box::new(PlaylistNode::new(node.id, config.clone(), entries)),
+                        frame,
+                    )
+                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                        path: node.artifact_path.as_str().to_string(),
+                        reason: format!("attach playlist placeholder runtime: {e}"),
+                    })?;
+                register_optional_source_binding(
+                    runtime,
+                    loaded_nodes,
+                    node,
+                    "time",
+                    &config.bindings,
+                    frame,
+                )?;
+                register_target_binding(
+                    runtime,
+                    loaded_nodes,
+                    node,
+                    "output",
+                    &config.bindings,
+                    frame,
+                )?;
+                register_visual_default_output_binding(runtime, node, &config.bindings, frame)?;
+                register_playlist_entry_source_bindings(
+                    runtime,
+                    loaded_nodes,
+                    node,
+                    config,
                     frame,
                 )?;
             }
@@ -607,6 +715,41 @@ fn inline_node_artifact_path(project_path: &LpPathBuf, node_name: &NodeName) -> 
     ))
 }
 
+fn playlist_entry_child_name(
+    playlist_path: &LpPathBuf,
+    entry_index: u32,
+    entry: &PlaylistEntry,
+) -> Result<NodeName, ProjectLoadError> {
+    let name = entry.name.data.as_ref().map_or_else(
+        || format!("entry_{entry_index}"),
+        |name| name.value().clone(),
+    );
+    NodeName::parse(&name).map_err(|e| ProjectLoadError::InvalidNodeName {
+        path: playlist_path.as_str().to_string(),
+        reason: format!("entry {entry_index}: {e}"),
+    })
+}
+
+fn playlist_runtime_entries(
+    loaded_nodes: &[LoadedNode],
+    playlist: NodeId,
+) -> Vec<PlaylistRuntimeEntry> {
+    loaded_nodes
+        .iter()
+        .filter_map(|node| match node.ownership {
+            LoadedNodeOwnership::PlaylistEntry {
+                playlist: owner,
+                entry,
+            } if owner == playlist => Some(PlaylistRuntimeEntry {
+                index: entry,
+                child: node.id,
+                output_slot: SlotPath::parse("output").expect("playlist child output path"),
+            }),
+            _ => None,
+        })
+        .collect()
+}
+
 fn read_shader_source<R>(
     root: &R,
     containing_file: &LpPathBuf,
@@ -657,14 +800,19 @@ fn resolve_relative_node_ref<'a>(
     current: &'a LoadedNode,
     parsed: &lpc_model::RelativeNodeRef,
 ) -> Option<&'a LoadedNode> {
-    if parsed.parent_hops() == 0 && parsed.segments().is_empty() {
-        return Some(current);
+    let mut node = current;
+    for _ in 0..parsed.parent_hops() {
+        let parent = node.parent?;
+        node = loaded_nodes
+            .iter()
+            .find(|candidate| candidate.id == parent)?;
     }
-    if parsed.parent_hops() == 1 && parsed.segments().len() == 1 {
-        let target = &parsed.segments()[0];
-        return loaded_nodes.iter().find(|node| &node.name == target);
+    for segment in parsed.segments() {
+        node = loaded_nodes
+            .iter()
+            .find(|candidate| candidate.parent == Some(node.id) && &candidate.name == segment)?;
     }
-    None
+    Some(node)
 }
 
 fn demand_input_path() -> SlotPath {
@@ -707,6 +855,17 @@ fn register_source_binding(
             path: current.artifact_path.as_str().to_string(),
             reason: format!("invalid target slot `{slot_name}`: {e}"),
         })?;
+    register_source_binding_at_path(engine, current, slot_name, source, target_slot, frame)
+}
+
+fn register_source_binding_at_path(
+    engine: &mut Engine,
+    current: &LoadedNode,
+    binding_slot_name: &str,
+    source: BindingSource,
+    target_slot: SlotPath,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
     engine
         .add_binding(
             BindingDraft {
@@ -716,14 +875,14 @@ fn register_source_binding(
                     slot: target_slot,
                 },
                 priority: BindingPriority::new(0),
-                kind: binding_kind_for_slot(slot_name),
+                kind: binding_kind_for_slot(binding_slot_name),
                 owner: current.id,
             },
             frame,
         )
         .map_err(|e| ProjectLoadError::InvalidSourcePath {
             path: current.artifact_path.as_str().to_string(),
-            reason: format!("register {slot_name} source binding: {e}"),
+            reason: format!("register {binding_slot_name} source binding: {e}"),
         })?;
     Ok(())
 }
@@ -776,6 +935,62 @@ fn register_target_binding(
         .map_err(|e| ProjectLoadError::InvalidSourcePath {
             path: current.artifact_path.as_str().to_string(),
             reason: format!("register {slot_name} target binding: {e}"),
+        })?;
+    Ok(())
+}
+
+fn register_playlist_entry_source_bindings(
+    engine: &mut Engine,
+    loaded_nodes: &[LoadedNode],
+    current: &LoadedNode,
+    config: &PlaylistDef,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
+    for (entry_index, entry) in &config.entries.entries {
+        let Some(source) = binding_source(&entry.bindings, "trigger") else {
+            continue;
+        };
+        let source = binding_source_endpoint(loaded_nodes, current, source)?;
+        let target_slot =
+            SlotPath::parse(&format!("entries[{entry_index}].trigger")).map_err(|e| {
+                ProjectLoadError::InvalidSourcePath {
+                    path: current.artifact_path.as_str().to_string(),
+                    reason: format!("invalid playlist entry trigger path: {e}"),
+                }
+            })?;
+        register_source_binding_at_path(engine, current, "trigger", source, target_slot, frame)?;
+    }
+    Ok(())
+}
+
+fn register_visual_default_output_binding(
+    engine: &mut Engine,
+    current: &LoadedNode,
+    bindings: &BindingDefs,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
+    if current.ownership.suppress_visual_default_output()
+        || binding_target(bindings, "output").is_some()
+    {
+        return Ok(());
+    }
+    engine
+        .add_binding(
+            BindingDraft {
+                source: BindingSource::ProducedSlot {
+                    node: current.id,
+                    slot: SlotPath::parse("output").expect("visual output slot path"),
+                },
+                target: BindingTarget::BusChannel(ChannelName(String::from("visual.out"))),
+                priority: BindingPriority::default_fallback(),
+                kind: Kind::Color,
+                owner: current.id,
+            },
+            frame,
+        )
+        .map_err(|e| ProjectLoadError::InvalidSourcePath {
+            path: current.artifact_path.as_str().to_string(),
+            reason: format!("register visual default output binding: {e}"),
         })?;
     Ok(())
 }
@@ -977,6 +1192,8 @@ where
 mod tests {
     extern crate std;
 
+    use core::cell::Cell;
+
     use alloc::rc::Rc;
     use alloc::sync::Arc;
     use lpc_model::{NodeName, ProductRef, SlotData, SlotMapKey, TreePath};
@@ -984,6 +1201,7 @@ mod tests {
         HardwareAddress, HardwareRegistry, HardwareSystem, VirtualButtonDriver,
         default_esp32c6_hardware_manifest,
     };
+    use lpc_shared::time::TimeProvider;
     use lpc_wire::{
         ProjectProbeRequest, ProjectProbeResult, ProjectReadRequest, ProjectReadResult,
         RenderProductProbeRequest, RenderProductProbeResult, WireTextureFormat,
@@ -993,7 +1211,8 @@ mod tests {
     use lps_shared::TextureStorageFormat;
 
     use super::*;
-    use crate::dataflow::resolver::{QueryKey, ResolveLogLevel};
+    use crate::dataflow::binding::{BindingPriority, BindingSource, BindingTarget};
+    use crate::dataflow::resolver::{Production, QueryKey, ResolveLogLevel};
     use crate::engine::{ButtonService, resolve_with_engine_host};
     use crate::products::visual::RenderTextureRequest;
 
@@ -1003,12 +1222,145 @@ mod tests {
         fs
     }
 
+    fn playlist_project_fs() -> LpFsMemory {
+        let fs = LpFsMemory::new();
+        fs.write_file(
+            "/project.toml".as_path(),
+            br#"
+kind = "Project"
+
+[nodes.playlist]
+def = { path = "./playlist.toml" }
+"#,
+        )
+        .expect("project.toml");
+        fs.write_file(
+            "/playlist.toml".as_path(),
+            br#"
+kind = "Playlist"
+default_fade = 0.35
+
+[entries.1]
+name = "idle"
+node = { def = { path = "./idle.toml" } }
+
+[entries.2]
+name = "active"
+duration = 4.0
+node = { def = { path = "./active.toml" } }
+
+[entries.2.bindings.trigger]
+source = "bus#trigger"
+"#,
+        )
+        .expect("playlist.toml");
+        fs.write_file(
+            "/idle.toml".as_path(),
+            br#"
+kind = "Shader"
+source = { path = "idle.glsl" }
+"#,
+        )
+        .expect("idle.toml");
+        fs.write_file(
+            "/active.toml".as_path(),
+            br#"
+kind = "Shader"
+source = { path = "active.glsl" }
+
+[bindings.time]
+source = "..#entry_time"
+
+[consumed_slots.time]
+kind = "value"
+value = "f32"
+default = 0.0
+"#,
+        )
+        .expect("active.toml");
+        fs.write_file(
+            "/idle.glsl".as_path(),
+            b"vec4 render(vec2 pos) { return vec4(0.0, pos, 1.0); }",
+        )
+        .expect("idle.glsl");
+        fs.write_file(
+            "/active.glsl".as_path(),
+            b"vec4 render(vec2 pos) { return vec4(time, pos.x, pos.y, 1.0); }",
+        )
+        .expect("active.glsl");
+        fs
+    }
+
+    fn button_playlist_project_fs() -> LpFsMemory {
+        let fs = playlist_project_fs();
+        fs.write_file(
+            "/project.toml".as_path(),
+            br#"
+kind = "Project"
+
+[nodes.clock]
+def = { path = "./clock.toml" }
+
+[nodes.button]
+def = { path = "./button.toml" }
+
+[nodes.playlist]
+def = { path = "./playlist.toml" }
+"#,
+        )
+        .expect("project.toml");
+        fs.write_file("/clock.toml".as_path(), br#"kind = "Clock""#)
+            .expect("clock.toml");
+        fs.write_file(
+            "/button.toml".as_path(),
+            br#"
+kind = "Button"
+endpoint = "button:gpio:D9"
+stable_ms = 1
+
+[bindings.down]
+target = "bus#trigger"
+"#,
+        )
+        .expect("button.toml");
+        fs.write_file(
+            "/playlist.toml".as_path(),
+            br#"
+kind = "Playlist"
+default_fade = 0.35
+
+[bindings.time]
+source = "bus#time.seconds"
+
+[entries.1]
+name = "idle"
+node = { def = { path = "./idle.toml" } }
+
+[entries.2]
+name = "active"
+duration = 4.0
+node = { def = { path = "./active.toml" } }
+
+[entries.2.bindings.trigger]
+source = "bus#trigger"
+"#,
+        )
+        .expect("playlist.toml");
+        fs
+    }
+
     fn examples_fluid_fs() -> LpFsStd {
         LpFsStd::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/fluid"))
     }
 
     fn examples_events_fs() -> LpFsStd {
         LpFsStd::new(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/events"))
+    }
+
+    fn examples_button_playlist_fs() -> LpFsStd {
+        LpFsStd::new(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/button-playlist"),
+        )
     }
 
     #[test]
@@ -1254,6 +1606,162 @@ source = { glsl = "vec4 render(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }" }
                 .any(|px| px[0] != 0 || px[1] != 0),
             "inline shader should produce nonzero red output"
         );
+    }
+
+    #[test]
+    fn top_level_shader_gets_default_visual_output_binding() {
+        let fs = LpFsMemory::new();
+        fs.write_file(
+            "/project.toml".as_path(),
+            br#"
+kind = "Project"
+
+[nodes.shader]
+def = { path = "./shader.toml" }
+"#,
+        )
+        .expect("project.toml");
+        fs.write_file(
+            "/shader.toml".as_path(),
+            br#"
+kind = "Shader"
+source = { path = "shader.glsl" }
+"#,
+        )
+        .expect("shader.toml");
+        fs.write_file(
+            "/shader.glsl".as_path(),
+            b"vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }",
+        )
+        .expect("shader.glsl");
+
+        let services = EngineServices::new(TreePath::parse("/default_visual.show").expect("path"));
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load");
+        let shader = rt
+            .artifact_node_id(LpPath::new("/shader.toml"))
+            .expect("shader node");
+
+        assert!(rt.tree().bindings().any(|binding| {
+            matches!(
+                (&binding.source, &binding.target),
+                (
+                    BindingSource::ProducedSlot { node, slot },
+                    BindingTarget::BusChannel(channel),
+                ) if *node == shader
+                    && slot == &SlotPath::parse("output").expect("output")
+                    && channel.0 == "visual.out"
+                    && binding.priority == BindingPriority::default_fallback()
+            )
+        }));
+    }
+
+    #[test]
+    fn playlist_entry_children_do_not_get_default_visual_output_binding() {
+        let fs = playlist_project_fs();
+        let services = EngineServices::new(TreePath::parse("/playlist.show").expect("path"));
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load playlist");
+        let root = rt.tree().root();
+        let playlist = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("playlist").unwrap())
+            .expect("playlist");
+        let active = rt
+            .tree()
+            .lookup_sibling(playlist, NodeName::parse("active").unwrap())
+            .expect("active");
+
+        assert!(!rt.tree().bindings().any(|binding| {
+            matches!(
+                (&binding.source, &binding.target),
+                (
+                    BindingSource::ProducedSlot { node, slot },
+                    BindingTarget::BusChannel(channel),
+                ) if *node == active
+                    && slot == &SlotPath::parse("output").expect("output")
+                    && channel.0 == "visual.out"
+                    && binding.priority == BindingPriority::default_fallback()
+            )
+        }));
+    }
+
+    #[test]
+    fn playlist_entries_load_as_children_and_bind_entry_trigger() {
+        let fs = playlist_project_fs();
+        let services = EngineServices::new(TreePath::parse("/playlist.show").expect("path"));
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load playlist");
+        let root = rt.tree().root();
+        let playlist = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("playlist").unwrap())
+            .expect("playlist");
+        let idle = rt
+            .tree()
+            .lookup_sibling(playlist, NodeName::parse("idle").unwrap())
+            .expect("idle");
+        let active = rt
+            .tree()
+            .lookup_sibling(playlist, NodeName::parse("active").unwrap())
+            .expect("active");
+
+        assert_eq!(rt.tree().get(idle).expect("idle").parent, Some(playlist));
+        assert_eq!(
+            rt.tree().get(active).expect("active").parent,
+            Some(playlist)
+        );
+        assert!(rt.tree().bindings().any(|binding| {
+            matches!(
+                (&binding.source, &binding.target),
+                (
+                    BindingSource::BusChannel(source),
+                    BindingTarget::ConsumedSlot { node, slot },
+                ) if source.0 == "trigger"
+                    && *node == playlist
+                    && slot == &SlotPath::parse("entries[2].trigger").expect("trigger")
+                    && binding.priority == BindingPriority::authored()
+            )
+        }));
+    }
+
+    #[test]
+    fn playlist_entry_trigger_restarts_active_entry_and_returns_idle() {
+        let fs = button_playlist_project_fs();
+        let registry = Rc::new(HardwareRegistry::new(default_esp32c6_hardware_manifest()));
+        let driver = VirtualButtonDriver::new(Rc::clone(&registry));
+        let control = driver.clone();
+        let mut hardware = HardwareSystem::new(registry);
+        hardware.add_button_driver(Box::new(driver));
+        let hardware = Rc::new(hardware);
+        let button_service: Rc<dyn ButtonService> = hardware.clone();
+        let mut services = EngineServices::new(TreePath::parse("/button_playlist.show").unwrap());
+        services.set_button_service(Some(button_service));
+        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load playlist");
+        let playlist = rt
+            .tree()
+            .lookup_sibling(rt.tree().root(), NodeName::parse("playlist").unwrap())
+            .expect("playlist");
+
+        assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 1);
+
+        control.set_pressed(HardwareAddress::gpio(20), true);
+        assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 1);
+        assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 2);
+        assert_eq!(resolve_playlist_f32(&mut rt, playlist, "entry_time"), 0.0);
+
+        rt.tick(1000).expect("advance time");
+        assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 2);
+        assert!(resolve_playlist_f32(&mut rt, playlist, "entry_time") >= 1.0);
+
+        control.set_pressed(HardwareAddress::gpio(20), false);
+        let _ = resolve_playlist_u32(&mut rt, playlist, "active_entry");
+        let _ = resolve_playlist_u32(&mut rt, playlist, "active_entry");
+        control.set_pressed(HardwareAddress::gpio(20), true);
+        let _ = resolve_playlist_u32(&mut rt, playlist, "active_entry");
+        let _ = resolve_playlist_u32(&mut rt, playlist, "active_entry");
+        assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 2);
+        assert_eq!(resolve_playlist_f32(&mut rt, playlist, "entry_time"), 0.0);
+
+        rt.tick(5000).expect("advance past duration");
+        assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 1);
     }
 
     #[test]
@@ -1664,6 +2172,65 @@ value = "f32"
     }
 
     #[test]
+    fn button_playlist_example_renders_idle_and_active_after_press() {
+        let fs = examples_button_playlist_fs();
+        let fs: &dyn LpFs = &fs;
+        let registry = Rc::new(HardwareRegistry::new(default_esp32c6_hardware_manifest()));
+        let driver = VirtualButtonDriver::new(Rc::clone(&registry));
+        let control = driver.clone();
+        let mut hardware = HardwareSystem::new(registry);
+        hardware.add_button_driver(Box::new(driver));
+        let hardware = Rc::new(hardware);
+        let button_service: Rc<dyn ButtonService> = hardware.clone();
+        let time = Rc::new(TestTimeProvider::new());
+        let time_provider: Rc<dyn TimeProvider> = time.clone();
+        let mut services =
+            EngineServices::new(TreePath::parse("/button_playlist.show").expect("path"));
+        services.set_button_service(Some(button_service));
+        services.set_time_provider(Some(time_provider));
+
+        let mut rt =
+            ProjectLoader::load_from_root(fs, services).expect("load button playlist example");
+        rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        let root = rt.tree().root();
+        let playlist = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("playlist").unwrap())
+            .expect("playlist node");
+
+        tick_with_test_time(&mut rt, &time, 16, "tick idle graph");
+        assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 1);
+        let idle_product = resolve_visual_product(&mut rt, playlist, "output");
+        let idle = render_test_texture_bytes(&mut rt, idle_product);
+        assert_nonzero_rgb(&idle, "idle playlist visual");
+
+        control.set_pressed(HardwareAddress::gpio(20), true);
+        tick_with_test_time(&mut rt, &time, 16, "press candidate");
+        tick_with_test_time(&mut rt, &time, 30, "press stable");
+        assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 2);
+        assert_eq!(resolve_playlist_f32(&mut rt, playlist, "entry_time"), 0.0);
+        let active_product = resolve_visual_product(&mut rt, playlist, "output");
+        let active = render_test_texture_bytes(&mut rt, active_product);
+        assert_nonzero_rgb(&active, "active playlist visual");
+        assert_ne!(idle, active, "active trigger should change the visual");
+
+        tick_with_test_time(&mut rt, &time, 1000, "advance active");
+        assert!(resolve_playlist_f32(&mut rt, playlist, "entry_time") >= 1.0);
+
+        control.set_pressed(HardwareAddress::gpio(20), false);
+        tick_with_test_time(&mut rt, &time, 16, "release candidate");
+        tick_with_test_time(&mut rt, &time, 30, "release stable");
+        control.set_pressed(HardwareAddress::gpio(20), true);
+        tick_with_test_time(&mut rt, &time, 16, "second press candidate");
+        tick_with_test_time(&mut rt, &time, 30, "second press stable");
+        assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 2);
+        assert_eq!(resolve_playlist_f32(&mut rt, playlist, "entry_time"), 0.0);
+
+        tick_with_test_time(&mut rt, &time, 5000, "advance past active duration");
+        assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 1);
+    }
+
+    #[test]
     fn button_node_publishes_held_and_up_from_virtual_d9() {
         let fs = LpFsMemory::new();
         fs.write_file(
@@ -1672,7 +2239,7 @@ value = "f32"
 kind = "Project"
 
 [nodes.button]
-artifact = "./button.toml"
+def = { path = "./button.toml" }
 "#,
         )
         .expect("project");
@@ -1736,10 +2303,19 @@ stable_ms = 1
                 time_seconds: 0.0,
             },
         )
-        .expect("events texture")
+        .expect("texture")
         .try_raw_bytes()
         .expect("bytes")
         .to_vec()
+    }
+
+    fn assert_nonzero_rgb(bytes: &[u8], label: &str) {
+        assert!(
+            bytes
+                .chunks_exact(8)
+                .any(|px| px[..6].iter().any(|byte| *byte != 0)),
+            "{label} should contain nonzero RGB data"
+        );
     }
 
     fn assert_bright_event_pixels(bytes: &[u8]) {
@@ -1775,6 +2351,77 @@ stable_ms = 1
             panic!("button slot should be a map");
         };
         map
+    }
+
+    fn resolve_visual_product(
+        rt: &mut Engine,
+        node: NodeId,
+        slot: &str,
+    ) -> lpc_model::VisualProduct {
+        let production = resolve_playlist_slot(rt, node, slot);
+        let LpValue::Product(ProductRef::Visual(product)) =
+            production.value_leaf().expect("visual product").value()
+        else {
+            panic!("slot {slot} should be a visual product");
+        };
+        *product
+    }
+
+    fn resolve_playlist_u32(rt: &mut Engine, playlist: NodeId, slot: &str) -> u32 {
+        let production = resolve_playlist_slot(rt, playlist, slot);
+        let LpValue::U32(value) = production.value_leaf().expect("playlist value").value() else {
+            panic!("playlist slot {slot} should be u32");
+        };
+        *value
+    }
+
+    fn resolve_playlist_f32(rt: &mut Engine, playlist: NodeId, slot: &str) -> f32 {
+        let production = resolve_playlist_slot(rt, playlist, slot);
+        let LpValue::F32(value) = production.value_leaf().expect("playlist value").value() else {
+            panic!("playlist slot {slot} should be f32");
+        };
+        *value
+    }
+
+    fn resolve_playlist_slot(rt: &mut Engine, playlist: NodeId, slot: &str) -> Production {
+        resolve_with_engine_host(
+            rt,
+            QueryKey::ProducedSlot {
+                node: playlist,
+                slot: SlotPath::parse(slot).expect("playlist slot"),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("playlist production")
+        .0
+    }
+
+    struct TestTimeProvider {
+        now_ms: Cell<u64>,
+    }
+
+    impl TestTimeProvider {
+        fn new() -> Self {
+            Self {
+                now_ms: Cell::new(0),
+            }
+        }
+
+        fn advance(&self, delta_ms: u64) {
+            self.now_ms.set(self.now_ms.get().saturating_add(delta_ms));
+        }
+    }
+
+    impl TimeProvider for TestTimeProvider {
+        fn now_ms(&self) -> u64 {
+            self.now_ms.get()
+        }
+    }
+
+    fn tick_with_test_time(rt: &mut Engine, time: &TestTimeProvider, delta_ms: u32, label: &str) {
+        time.advance(u64::from(delta_ms));
+        rt.tick(delta_ms)
+            .unwrap_or_else(|err| panic!("{label}: {err}"));
     }
 
     fn write_flat_basic_files(fs: &LpFsMemory) {

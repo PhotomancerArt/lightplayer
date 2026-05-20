@@ -30,7 +30,7 @@ use crate::node::NodeEntry;
 use crate::node::catch_node_panic::catch_node_panic;
 use crate::node::{
     ControlRenderContext, ControlRenderServices, NodeCall, NodeCallKey, NodeError,
-    NodeResourceInitContext, NodeRuntime, RenderContext, TickContext,
+    NodeResourceInitContext, NodeRuntime, RenderContext, TickContext, VisualRenderServices,
 };
 use crate::node::{NodeEntryState, NodeTree};
 use crate::products::control::{ControlLayout, ControlRenderRequest, ControlRenderTarget};
@@ -884,12 +884,13 @@ impl EngineResolveHost<'_> {
                     )),
                 );
             };
-            let mut ctx = RenderContext::new(
+            let mut ctx = RenderContext::with_services(
                 node_id,
                 revision,
                 self.graphics.clone(),
                 self.time_provider.clone(),
                 self.frame_time_seconds,
+                self,
             );
             catch_node_panic(|| render_node.render_texture(product, request, &mut ctx))
         };
@@ -970,12 +971,13 @@ impl EngineResolveHost<'_> {
                     )),
                 );
             };
-            let mut ctx = RenderContext::new(
+            let mut ctx = RenderContext::with_services(
                 node_id,
                 revision,
                 self.graphics.clone(),
                 self.time_provider.clone(),
                 self.frame_time_seconds,
+                self,
             );
             catch_node_panic(|| render_node.render_texture_into(product, request, target, &mut ctx))
         };
@@ -1056,12 +1058,13 @@ impl EngineResolveHost<'_> {
                     )),
                 );
             };
-            let mut ctx = RenderContext::new(
+            let mut ctx = RenderContext::with_services(
                 node_id,
                 revision,
                 self.graphics.clone(),
                 self.time_provider.clone(),
                 self.frame_time_seconds,
+                self,
             );
             catch_node_panic(|| render_node.sample_visual_into(product, request, target, &mut ctx))
         };
@@ -1180,6 +1183,37 @@ impl EngineResolveHost<'_> {
 }
 
 impl ControlRenderServices for EngineResolveHost<'_> {
+    fn render_texture(
+        &mut self,
+        product: VisualProduct,
+        request: &RenderTextureRequest,
+    ) -> Result<TextureRenderProduct, NodeError> {
+        self.render_node_texture(product, request)
+            .map_err(|e| NodeError::msg(format!("render texture: {e}")))
+    }
+
+    fn render_texture_into(
+        &mut self,
+        product: VisualProduct,
+        request: &RenderTextureRequest,
+        target: &mut lp_shader::LpsTextureBuf,
+    ) -> Result<(), NodeError> {
+        self.render_node_texture_into(product, request, target)
+            .map_err(|e| NodeError::msg(format!("render texture: {e}")))
+    }
+
+    fn sample_visual_into(
+        &mut self,
+        product: VisualProduct,
+        request: VisualSampleBufferRequest<'_>,
+        target: VisualSampleTarget<'_>,
+    ) -> Result<(), NodeError> {
+        self.sample_node_visual_into(product, request, target)
+            .map_err(|e| NodeError::msg(format!("sample visual: {e}")))
+    }
+}
+
+impl VisualRenderServices for EngineResolveHost<'_> {
     fn render_texture(
         &mut self,
         product: VisualProduct,

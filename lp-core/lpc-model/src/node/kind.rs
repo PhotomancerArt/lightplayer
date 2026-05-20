@@ -12,6 +12,7 @@ pub enum NodeKind {
     Shader,
     ComputeShader,
     Fluid,
+    Playlist,
     Output,
     Fixture,
 }

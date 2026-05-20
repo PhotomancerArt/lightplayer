@@ -1,5 +1,5 @@
 kind = "Shader"
-glsl_path = "shader.glsl"
+source = { path = "shader.glsl" }
 render_order = 0
 
 [bindings.output]

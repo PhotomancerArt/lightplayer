@@ -1,5 +1,5 @@
 kind = "Project"
-name = "events"
+name = "button-playlist"
 
 [nodes.output]
 def = { path = "./output.toml" }
@@ -7,14 +7,11 @@ def = { path = "./output.toml" }
 [nodes.clock]
 def = { path = "./clock.toml" }
 
-[nodes.event_a]
-def = { path = "./event_a.toml" }
+[nodes.button]
+def = { path = "./button.toml" }
 
-[nodes.event_b]
-def = { path = "./event_b.toml" }
-
-[nodes.shader]
-def = { path = "./shader.toml" }
+[nodes.playlist]
+def = { path = "./playlist.toml" }
 
 [nodes.fixture]
 def = { path = "./fixture.toml" }

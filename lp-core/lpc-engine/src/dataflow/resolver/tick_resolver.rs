@@ -10,11 +10,18 @@ use crate::products::control::{
 };
 use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use crate::resource::{RuntimeBuffer, RuntimeBufferId};
-use lpc_model::Revision;
+use lpc_model::{NodeId, Revision, SlotPath};
 
 /// Narrow API for [`crate::node::TickContext`] demand reads (`QueryKey` → [`Production`]).
 pub trait TickResolver {
     fn resolve(&mut self, query: QueryKey) -> Result<Production, ResolveError>;
+
+    fn publish_produced_slot(
+        &mut self,
+        node: NodeId,
+        slot: SlotPath,
+        production: Production,
+    ) -> Result<(), ResolveError>;
 
     fn render_texture(
         &mut self,
@@ -51,6 +58,16 @@ impl<'sess, 'resolver, 'host> TickResolver for SessionHostResolver<'sess, 'resol
         self.session
             .resolve(self.host, query)
             .map_err(|e: SessionResolveError| ResolveError::new(alloc::format!("{e}")))
+    }
+
+    fn publish_produced_slot(
+        &mut self,
+        node: NodeId,
+        slot: SlotPath,
+        production: Production,
+    ) -> Result<(), ResolveError> {
+        self.session.publish_produced_slot(node, slot, production);
+        Ok(())
     }
 
     fn render_control(

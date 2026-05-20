@@ -1,5 +1,5 @@
 kind = "ComputeShader"
-glsl_path = "event_a.glsl"
+source = { path = "event_a.glsl" }
 
 [bindings.events]
 target = "bus#trigger"

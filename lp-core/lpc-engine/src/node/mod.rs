@@ -19,7 +19,7 @@ pub mod tree_error;
 pub use crate::engine::memory_pressure::PressureLevel;
 pub use contexts::{
     ControlRenderContext, ControlRenderServices, DestroyCtx, MemPressureCtx,
-    NodeResourceInitContext, RenderContext, TickContext,
+    NodeResourceInitContext, RenderContext, TickContext, VisualRenderServices,
 };
 pub use control_node::ControlNode;
 pub use node_call::{NodeCall, NodeCallKey};

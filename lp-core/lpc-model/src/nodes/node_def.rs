@@ -14,6 +14,7 @@ use crate::nodes::clock::ClockDef;
 use crate::nodes::fixture::FixtureDef;
 use crate::nodes::fluid::FluidDef;
 use crate::nodes::output::OutputDef;
+use crate::nodes::playlist::PlaylistDef;
 use crate::nodes::project::ProjectDef;
 use crate::nodes::shader::{ComputeShaderDef, ShaderDef};
 use crate::nodes::texture::TextureDef;
@@ -29,6 +30,7 @@ const TEXTURE_VARIANT: &str = "Texture";
 const SHADER_VARIANT: &str = "Shader";
 const COMPUTE_SHADER_VARIANT: &str = "ComputeShader";
 const FLUID_VARIANT: &str = "Fluid";
+const PLAYLIST_VARIANT: &str = "Playlist";
 const OUTPUT_VARIANT: &str = "Output";
 const FIXTURE_VARIANT: &str = "Fixture";
 const NODE_DEF_VARIANT_NAMES: &[&str] = &[
@@ -39,6 +41,7 @@ const NODE_DEF_VARIANT_NAMES: &[&str] = &[
     SHADER_VARIANT,
     COMPUTE_SHADER_VARIANT,
     FLUID_VARIANT,
+    PLAYLIST_VARIANT,
     OUTPUT_VARIANT,
     FIXTURE_VARIANT,
 ];
@@ -58,6 +61,7 @@ pub enum NodeDef {
     Shader(ShaderDef),
     ComputeShader(ComputeShaderDef),
     Fluid(FluidDef),
+    Playlist(PlaylistDef),
     Output(OutputDef),
     Fixture(FixtureDef),
 }
@@ -87,8 +91,10 @@ impl NodeArtifact {
     pub fn read_toml(registry: &SlotShapeRegistry, text: &str) -> Result<Self, NodeDefParseError> {
         let payload = toml::from_str::<toml::Value>(text).map_err(toml_parse_error)?;
         reject_unknown_kind(&payload)?;
-        if read_kind(&payload)? == PROJECT_VARIANT {
-            return read_project_artifact(payload);
+        match read_kind(&payload)?.as_str() {
+            PROJECT_VARIANT => return read_project_artifact(payload),
+            PLAYLIST_VARIANT => return read_playlist_artifact(payload),
+            _ => {}
         }
         read_node_artifact(registry, payload)
     }
@@ -110,6 +116,7 @@ impl NodeDef {
             Self::Shader(_) => NodeKind::Shader,
             Self::ComputeShader(_) => NodeKind::ComputeShader,
             Self::Fluid(_) => NodeKind::Fluid,
+            Self::Playlist(_) => NodeKind::Playlist,
             Self::Output(_) => NodeKind::Output,
             Self::Fixture(_) => NodeKind::Fixture,
         }
@@ -125,6 +132,7 @@ impl NodeDef {
             Self::Shader(_) => ShaderDef::KIND,
             Self::ComputeShader(_) => ComputeShaderDef::KIND,
             Self::Fluid(_) => FluidDef::KIND,
+            Self::Playlist(_) => PlaylistDef::KIND,
             Self::Output(_) => OutputDef::KIND,
             Self::Fixture(_) => FixtureDef::KIND,
         }
@@ -140,6 +148,7 @@ impl NodeDef {
             Self::Shader(_) => SHADER_VARIANT,
             Self::ComputeShader(_) => COMPUTE_SHADER_VARIANT,
             Self::Fluid(_) => FLUID_VARIANT,
+            Self::Playlist(_) => PLAYLIST_VARIANT,
             Self::Output(_) => OUTPUT_VARIANT,
             Self::Fixture(_) => FIXTURE_VARIANT,
         }
@@ -194,6 +203,13 @@ impl NodeDef {
         }
     }
 
+    pub fn as_playlist(&self) -> Option<&PlaylistDef> {
+        match self {
+            Self::Playlist(def) => Some(def),
+            _ => None,
+        }
+    }
+
     pub fn as_output(&self) -> Option<&OutputDef> {
         match self {
             Self::Output(def) => Some(def),
@@ -240,6 +256,7 @@ impl SlotAccess for NodeDef {
             Self::Shader(def) => def.shape_id(),
             Self::ComputeShader(def) => def.shape_id(),
             Self::Fluid(def) => def.shape_id(),
+            Self::Playlist(def) => def.shape_id(),
             Self::Output(def) => def.shape_id(),
             Self::Fixture(def) => def.shape_id(),
         }
@@ -254,6 +271,7 @@ impl SlotAccess for NodeDef {
             Self::Shader(def) => def.data(),
             Self::ComputeShader(def) => def.data(),
             Self::Fluid(def) => def.data(),
+            Self::Playlist(def) => def.data(),
             Self::Output(def) => def.data(),
             Self::Fixture(def) => def.data(),
         }
@@ -278,6 +296,7 @@ impl SlotMutAccess for NodeDef {
             Self::Shader(def) => def.data_mut(),
             Self::ComputeShader(def) => def.data_mut(),
             Self::Fluid(def) => def.data_mut(),
+            Self::Playlist(def) => def.data_mut(),
             Self::Output(def) => def.data_mut(),
             Self::Fixture(def) => def.data_mut(),
         }
@@ -378,12 +397,31 @@ fn read_project_artifact(mut payload: toml::Value) -> Result<NodeArtifact, NodeD
     Ok(NodeArtifact::new(NodeDef::Project(def)))
 }
 
+fn read_playlist_artifact(mut payload: toml::Value) -> Result<NodeArtifact, NodeDefParseError> {
+    let Some(table) = payload.as_table_mut() else {
+        return Err(NodeDefParseError::Toml {
+            error: String::from("node definition TOML root must be a table"),
+        });
+    };
+    table.remove("kind");
+    let def: PlaylistDef =
+        payload
+            .try_into()
+            .map_err(|error: toml::de::Error| NodeDefParseError::Toml {
+                error: error.to_string(),
+            })?;
+    Ok(NodeArtifact::new(NodeDef::Playlist(def)))
+}
+
 fn write_node_artifact(
     registry: &SlotShapeRegistry,
     artifact: &NodeArtifact,
 ) -> Result<String, NodeDefWriteError> {
     if let NodeDef::Project(def) = artifact.node_def() {
         return write_project_artifact(def);
+    }
+    if let NodeDef::Playlist(def) = artifact.node_def() {
+        return write_playlist_artifact(def);
     }
     let value = registry
         .write_slot_toml(artifact)
@@ -396,6 +434,17 @@ fn write_node_artifact(
 }
 
 fn write_project_artifact(def: &ProjectDef) -> Result<String, NodeDefWriteError> {
+    write_serde_node_artifact(PROJECT_VARIANT, def)
+}
+
+fn write_playlist_artifact(def: &PlaylistDef) -> Result<String, NodeDefWriteError> {
+    write_serde_node_artifact(PLAYLIST_VARIANT, def)
+}
+
+fn write_serde_node_artifact<T>(variant: &str, def: &T) -> Result<String, NodeDefWriteError>
+where
+    T: serde::Serialize,
+{
     let text = toml::to_string(def).map_err(|error| NodeDefWriteError {
         error: error.to_string(),
     })?;
@@ -409,7 +458,7 @@ fn write_project_artifact(def: &ProjectDef) -> Result<String, NodeDefWriteError>
     };
     table.insert(
         String::from("kind"),
-        toml::Value::String(String::from(PROJECT_VARIANT)),
+        toml::Value::String(String::from(variant)),
     );
     toml::to_string(&value).map_err(|error| NodeDefWriteError {
         error: error.to_string(),

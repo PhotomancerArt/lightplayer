@@ -1,0 +1,16 @@
+kind = "Shader"
+source = { path = "active.glsl" }
+render_order = 0
+
+[bindings.time]
+source = "..#entry_time"
+
+[glsl_opts]
+add_sub = "wrapping"
+mul = "wrapping"
+div = "reciprocal"
+
+[consumed_slots.time]
+kind = "value"
+value = "f32"
+default = 0.0

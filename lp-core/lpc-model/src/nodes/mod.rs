@@ -4,6 +4,7 @@ pub mod fixture;
 pub mod fluid;
 pub mod node_def;
 pub mod output;
+pub mod playlist;
 pub mod project;
 pub mod shader;
 pub mod texture;
@@ -18,6 +19,10 @@ pub use fluid::{FluidDef, FluidDefView, FluidEmitter, FluidState};
 pub use node_def::{NodeArtifact, NodeDef, NodeDefParseError, NodeDefWriteError};
 pub use output::{
     OutputDef, OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView,
+};
+pub use playlist::{
+    PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState,
+    PlaylistStateView,
 };
 pub use project::{ProjectDef, ProjectDefView};
 pub use shader::{
