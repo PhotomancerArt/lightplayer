@@ -349,6 +349,21 @@ fn render_shape_tree_detail(
         SlotShape::Map { value, .. } | SlotShape::Option { some: value, .. } => {
             render_shape_tree_detail(ui, registry, value, depth + 1);
         }
+        SlotShape::Custom {
+            codec, shape, refs, ..
+        } => {
+            ui.horizontal_wrapped(|ui| {
+                ui.add_space(((depth + 1) as f32) * 14.0);
+                ui.monospace(format!("codec {codec}"));
+            });
+            for id in refs {
+                ui.horizontal_wrapped(|ui| {
+                    ui.add_space(((depth + 1) as f32) * 14.0);
+                    ui.monospace(format!("ref {id}"));
+                });
+            }
+            render_shape_tree_detail(ui, registry, shape, depth + 1);
+        }
         SlotShape::Enum { variants, .. } => {
             for variant in variants {
                 ui.horizontal_wrapped(|ui| {

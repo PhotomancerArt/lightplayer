@@ -628,7 +628,7 @@ impl ProjectLoader {
                 add_visual_default_output_binding(runtime, node, frame)?;
             }
             for (entry_index, source) in entry_trigger_sources {
-                let target_slot = SlotPath::parse(&format!("entries[{}].trigger", entry_index))
+                let target_slot = SlotPath::parse(&format!("entries[{entry_index}].trigger"))
                     .map_err(|e| ProjectLoadError::InvalidSourcePath {
                         path: node.artifact_path.as_str().to_string(),
                         reason: format!("invalid playlist entry trigger path: {e}"),

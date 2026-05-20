@@ -207,6 +207,10 @@ pub(crate) fn render_slot_shape_summary(
             ui.monospace("option");
             render_slot_shape_summary(ui, registry, some);
         }
+        Some(SlotShape::Custom { codec, shape, .. }) => {
+            ui.monospace(format!("custom {codec}"));
+            render_slot_shape_summary(ui, registry, shape);
+        }
         None => {
             ui.colored_label(egui::Color32::LIGHT_RED, "missing referenced shape");
         }
@@ -888,6 +892,10 @@ fn render_slot_shape_debug(
             } else {
                 render_shape_mismatch(ui, "option", data);
             }
+        }
+        Some(SlotShape::Custom { codec, shape, .. }) => {
+            ui.label(format!("custom codec {codec}"));
+            render_slot_shape_debug(ui, registry, shape, data, id_path);
         }
         Some(SlotShape::Ref { .. }) => unreachable!("refs are resolved above"),
         None => {
