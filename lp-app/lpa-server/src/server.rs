@@ -280,15 +280,26 @@ impl LpServer {
                 );
                 // Ignore errors and continue with other projects
                 // Errors will be visible when clients sync or query project state
-                match project.engine_mut().tick(delta_ms) {
-                    Ok(()) => {
-                        log::trace!("LpServer::tick: Project {} tick succeeded", project.name());
-                    }
+                match project.engine_mut() {
+                    Ok(engine) => match engine.tick(delta_ms) {
+                        Ok(()) => {
+                            log::trace!(
+                                "LpServer::tick: Project {} tick succeeded",
+                                project.name()
+                            );
+                        }
+                        Err(e) => {
+                            log::warn!(
+                                "LpServer::tick: Project {} tick error: {:?}",
+                                project.name(),
+                                e
+                            );
+                        }
+                    },
                     Err(e) => {
                         log::warn!(
-                            "LpServer::tick: Project {} tick error: {:?}",
-                            project.name(),
-                            e
+                            "LpServer::tick: Project {} unavailable: {e}",
+                            project.name()
                         );
                     }
                 }
@@ -306,7 +317,10 @@ impl LpServer {
                 log::debug!(
                     "LpServer::tick: Project {} revision: {}",
                     project.name(),
-                    project.engine().revision().as_i64()
+                    project
+                        .engine()
+                        .map(|engine| engine.revision().as_i64())
+                        .unwrap_or(-1)
                 );
             }
         }
@@ -399,10 +413,27 @@ impl LpServer {
                                 response_count += 1;
                                 continue;
                             };
-                            let mut source = ServerProjectReadSource::new(
-                                project.engine_mut(),
-                                Some(server_status),
-                            );
+                            let Ok(engine) = project.engine_mut() else {
+                                transport
+                                    .send(WireServerMessage {
+                                        id: msg_id,
+                                        msg: lpc_wire::server::ServerMsgBody::Error {
+                                            error: format!(
+                                                "{}",
+                                                ServerError::Core(format!(
+                                                    "project {} has no loaded runtime",
+                                                    project.name()
+                                                ))
+                                            ),
+                                        },
+                                    })
+                                    .await
+                                    .map_err(|error| ServerError::Core(format!("{error}")))?;
+                                response_count += 1;
+                                continue;
+                            };
+                            let mut source =
+                                ServerProjectReadSource::new(engine, Some(server_status));
                             transport
                                 .send_project_read(msg_id, handle, &mut source, request)
                                 .await

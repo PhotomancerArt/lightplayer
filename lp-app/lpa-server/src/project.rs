@@ -35,7 +35,7 @@ pub struct Project {
     /// Graphics backend used by shader runtime nodes.
     graphics: Arc<dyn LpGraphics>,
     /// The loaded project engine.
-    runtime: Engine,
+    runtime: Option<Engine>,
     /// Last filesystem version processed by this project
     last_fs_version: FsVersion,
 }
@@ -55,6 +55,7 @@ impl Project {
         button_service: Option<Rc<dyn ButtonService>>,
         radio_service: Option<Rc<dyn RadioService>>,
         graphics: Arc<dyn LpGraphics>,
+        loaded_fs_version: FsVersion,
     ) -> Result<Self, ServerError> {
         log_memory(memory_stats, "project new start");
         backtrace::set_oom_context("project new: root path");
@@ -92,8 +93,8 @@ impl Project {
             radio_service,
             memory_stats,
             graphics,
-            runtime,
-            last_fs_version: FsVersion::default(),
+            runtime: Some(runtime),
+            last_fs_version: loaded_fs_version.next(),
         };
         log_memory(memory_stats, "project new after wrapper");
         backtrace::clear_oom_context();
@@ -111,18 +112,26 @@ impl Project {
     }
 
     /// Get mutable access to the loaded engine.
-    pub fn engine_mut(&mut self) -> &mut Engine {
-        &mut self.runtime
+    pub fn engine_mut(&mut self) -> Result<&mut Engine, ServerError> {
+        let name = self.name.clone();
+        self.runtime
+            .as_mut()
+            .ok_or_else(|| ServerError::Core(format!("project {name} has no loaded runtime")))
     }
 
     /// Get immutable access to the loaded engine.
-    pub fn engine(&self) -> &Engine {
-        &self.runtime
+    pub fn engine(&self) -> Result<&Engine, ServerError> {
+        self.runtime.as_ref().ok_or_else(|| {
+            ServerError::Core(format!("project {} has no loaded runtime", self.name))
+        })
     }
 
     /// Reload the project from the filesystem.
     pub fn reload(&mut self) -> Result<(), ServerError> {
         log_memory(self.memory_stats, "project reload start");
+        backtrace::set_oom_context("project reload: drop old runtime");
+        drop(self.runtime.take());
+        log_memory(self.memory_stats, "project reload after drop old runtime");
         backtrace::set_oom_context("project reload: root path");
         let root_path = project_root_path(&self.name)?;
         log_memory(self.memory_stats, "project reload after root path");
@@ -145,7 +154,7 @@ impl Project {
         log_memory(self.memory_stats, "project reload after core project");
         backtrace::set_oom_context("project reload: set graphics");
         runtime.set_graphics(Some(self.graphics.clone()));
-        self.runtime = runtime;
+        self.runtime = Some(runtime);
         log_memory(self.memory_stats, "project reload after swap");
         backtrace::clear_oom_context();
         Ok(())

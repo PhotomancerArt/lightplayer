@@ -57,11 +57,19 @@ fn test_fs_changes_not_repeated() {
             .expect("Failed to load project")
         }
     };
+    let version_at_load = server.base_fs().current_version();
 
     // Get initial version
     let project = server.project_manager().get_project(handle).unwrap();
     let initial_version = project.last_fs_version();
-    assert_eq!(initial_version.as_i64(), 0);
+    assert_eq!(initial_version, version_at_load.next());
+
+    // First tick after initial load should not reload files that were already
+    // present during load.
+    let responses = server.tick(16, vec![]).unwrap();
+    assert_eq!(responses.len(), 0);
+    let project = server.project_manager().get_project(handle).unwrap();
+    assert_eq!(project.last_fs_version(), initial_version);
 
     // Write a file to the project
     let file_path = project_path.join("src/test.glsl");

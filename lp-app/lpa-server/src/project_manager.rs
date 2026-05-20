@@ -104,6 +104,7 @@ impl ProjectManager {
             let project_fs = base_fs.chroot(project_path.as_path()).map_err(|e| {
                 ServerError::Filesystem(format!("Failed to chroot to project: {e}"))
             })?;
+            let loaded_fs_version = base_fs.current_version();
 
             backtrace::set_oom_context("project manager: create project");
             let project = Project::new(
@@ -116,6 +117,7 @@ impl ProjectManager {
                 button_service,
                 radio_service,
                 graphics,
+                loaded_fs_version,
             )?;
 
             backtrace::set_oom_context("project manager: insert project runtime");
