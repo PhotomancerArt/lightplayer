@@ -6,6 +6,7 @@ pub mod node_def;
 pub mod output;
 pub mod playlist;
 pub mod project;
+pub mod radio;
 pub mod shader;
 pub mod texture;
 
@@ -25,6 +26,7 @@ pub use playlist::{
     PlaylistStateView,
 };
 pub use project::{ProjectDef, ProjectDefView};
+pub use radio::{ControlRadioDef, ControlRadioDefView, ControlRadioState, ControlRadioStateView};
 pub use shader::{
     AddSubMode, ComputeShaderDef, ComputeShaderDefView, DivMode, GlslOpts, GlslOptsView, MulMode,
     ScalarHint, ScalarHintView, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,

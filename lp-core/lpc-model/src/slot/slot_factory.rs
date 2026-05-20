@@ -8,6 +8,7 @@ use crate::{
 };
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
+use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
@@ -221,6 +222,9 @@ fn create_dynamic_slot_data_for_root(
         SlotShape::Option { .. } => Ok(SlotData::Option(SlotOptionDyn::none_with_version(
             current_revision(),
         ))),
+        SlotShape::Custom { codec, .. } => Err(SlotFactoryError::InvalidShape {
+            message: format!("custom slot codec {codec} cannot create dynamic data"),
+        }),
     }
 }
 

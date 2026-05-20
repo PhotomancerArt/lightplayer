@@ -13,6 +13,7 @@ pub enum NodeKind {
     ComputeShader,
     Fluid,
     Playlist,
+    ControlRadio,
     Output,
     Fixture,
 }

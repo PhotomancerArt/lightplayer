@@ -100,6 +100,7 @@ pub enum SlotDataAccess<'a> {
     Map(&'a dyn MapSlotAccess),
     Enum(&'a dyn SlotEnumAccess),
     Option(&'a dyn SlotOptionAccess),
+    Custom(&'a dyn SlotCustomAccess),
 }
 
 /// Borrowed access to an atomic slot value.
@@ -135,6 +136,17 @@ pub trait SlotEnumAccess {
 pub trait SlotOptionAccess {
     fn presence_revision(&self) -> Revision;
     fn data(&self) -> Option<SlotDataAccess<'_>>;
+}
+
+/// Borrowed access to a custom-coded slot subtree.
+pub trait SlotCustomAccess: Any {
+    fn custom_codec_id(&self) -> SlotShapeId;
+
+    fn custom_revision(&self) -> Revision {
+        Revision::default()
+    }
+
+    fn as_any(&self) -> &dyn Any;
 }
 
 impl SlotData {

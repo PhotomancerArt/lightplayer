@@ -488,12 +488,12 @@ source = { path = "compute.glsl" }
 [bindings.emitters]
 target = "bus#fluid.emitters"
 
-[consumed_slots.time]
+[consumed.time]
 kind = "value"
 value = "f32"
 default = 0.5
 
-[produced_slots.emitters]
+[produced.emitters]
 kind = "map"
 key = "u32"
 value = "lp::fluid::Emitter"

@@ -11,7 +11,7 @@ use crate::dataflow::bus::Bus;
 use crate::dataflow::resolver::{
     Production, ProductionSource, QueryKey, ResolveError, TickResolver,
 };
-use crate::engine::ButtonService;
+use crate::engine::{ButtonService, RadioService};
 use crate::gfx::LpGraphics;
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
@@ -67,6 +67,7 @@ pub struct TickContext<'r> {
     graphics: Option<Arc<dyn LpGraphics>>,
     time_provider: Option<Rc<dyn TimeProvider>>,
     button_service: Option<Rc<dyn ButtonService>>,
+    radio_service: Option<Rc<dyn RadioService>>,
     frame_time_seconds: f32,
 }
 
@@ -114,6 +115,7 @@ impl<'r> TickContext<'r> {
             graphics,
             time_provider,
             None,
+            None,
             frame_time_seconds,
         )
     }
@@ -129,6 +131,7 @@ impl<'r> TickContext<'r> {
         graphics: Option<Arc<dyn LpGraphics>>,
         time_provider: Option<Rc<dyn TimeProvider>>,
         button_service: Option<Rc<dyn ButtonService>>,
+        radio_service: Option<Rc<dyn RadioService>>,
         frame_time_seconds: f32,
     ) -> Self {
         Self {
@@ -141,6 +144,7 @@ impl<'r> TickContext<'r> {
             graphics,
             time_provider,
             button_service,
+            radio_service,
             frame_time_seconds,
         }
     }
@@ -269,6 +273,10 @@ impl<'r> TickContext<'r> {
 
     pub fn button_service(&self) -> Option<Rc<dyn ButtonService>> {
         self.button_service.clone()
+    }
+
+    pub fn radio_service(&self) -> Option<Rc<dyn RadioService>> {
+        self.radio_service.clone()
     }
 
     /// Materializes a visual product into a full texture through the active engine session.

@@ -1,16 +1,12 @@
-use serde::{Deserialize, Serialize};
-
 use crate::{BindingDefs, ClockControls, Slotted};
 
 /// Authored clock node definition.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Slotted)]
+#[derive(Debug, Clone, Default, PartialEq, Slotted)]
 pub struct ClockDef {
     /// Authored slot bindings for clock outputs.
-    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     pub bindings: BindingDefs,
 
     /// Runtime clock controls.
-    #[serde(default)]
     pub controls: ClockControls,
 }
 

@@ -110,13 +110,15 @@ pub extern "C" fn _lp_main() -> ! {
     let time_provider_rc = Rc::new(SyscallTimeProvider::new());
     let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
     let button_service: Rc<dyn lpa_server::ButtonService> = hardware_system.clone();
-    let server = LpServer::new_with_button_service(
+    let radio_service: Rc<dyn lpa_server::RadioService> = hardware_system.clone();
+    let server = LpServer::new_with_hardware_services(
         output_provider,
         base_fs,
         "projects/".as_path(),
         None,
         Some(time_provider_rc),
         Some(button_service),
+        Some(radio_service),
         graphics,
     );
 

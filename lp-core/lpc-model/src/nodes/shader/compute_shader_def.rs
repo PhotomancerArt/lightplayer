@@ -5,36 +5,24 @@
 //! and GLSL source location.
 
 use alloc::string::String;
-use serde::{Deserialize, Serialize};
 
 use crate::nodes::shader::{GlslOpts, ShaderSlotDef, ShaderSource};
 use crate::{BindingDefs, EnumSlot, MapSlot, Slotted};
 
 /// Authored serial compute shader definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Slotted)]
 pub struct ComputeShaderDef {
     /// Authored shader source.
     pub source: EnumSlot<ShaderSource>,
     /// Authored slot bindings for compute shader consumed and produced slots.
-    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     pub bindings: BindingDefs,
     /// GLSL compilation options.
-    #[serde(default)]
     pub glsl_opts: GlslOpts,
     /// Slots resolved by this compute shader.
-    #[serde(
-        default,
-        rename = "consumed",
-        skip_serializing_if = "MapSlot::is_empty"
-    )]
+    #[slot(name = "consumed")]
     pub consumed_slots: MapSlot<String, ShaderSlotDef>,
     /// Slots produced by this compute shader.
-    #[serde(
-        default,
-        rename = "produced",
-        skip_serializing_if = "MapSlot::is_empty"
-    )]
+    #[slot(name = "produced")]
     pub produced_slots: MapSlot<String, ShaderSlotDef>,
 }
 
@@ -73,8 +61,9 @@ mod tests {
 
     #[test]
     fn compute_shader_def_parses_consumed_and_produced_slots() {
-        let def: ComputeShaderDef = toml::from_str(
+        let def = NodeDef::from_toml_str(
             r#"
+kind = "ComputeShader"
 source = { path = "emitters.glsl" }
 
 [consumed.time]
@@ -89,6 +78,9 @@ mapping = { kind = "sentinel", len = 4, key = "id", empty_key = 0 }
 "#,
         )
         .expect("compute shader");
+        let NodeDef::ComputeShader(def) = def else {
+            panic!("compute shader def");
+        };
 
         assert_eq!(def.kind(), crate::NodeKind::ComputeShader);
         assert_eq!(def.consumed_slots.entries.len(), 1);

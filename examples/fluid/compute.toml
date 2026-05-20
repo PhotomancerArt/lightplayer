@@ -7,12 +7,12 @@ target = "bus#fluid.emitters"
 [bindings.time]
 source = "bus#time.seconds"
 
-[consumed_slots.time]
+[consumed.time]
 kind = "value"
 value = "f32"
 default = 0.0
 
-[produced_slots.emitters]
+[produced.emitters]
 kind = "map"
 key = "u32"
 value = "lp::fluid::Emitter"

@@ -87,8 +87,9 @@ fn real_source_defs_sync_as_slot_roots() {
         LpValue::String(String::from("wrapping")),
     );
 
-    let shader_with_params: ShaderDef = toml::from_str(
+    let shader_with_params = match NodeDef::from_toml_str(
         r#"
+kind = "Shader"
 render_order = 0
 
 source = { path = "shader.glsl" }
@@ -105,7 +106,11 @@ default = 0.25
 min = 0.0
 "#,
     )
-    .unwrap();
+    .unwrap()
+    {
+        NodeDef::Shader(def) => def,
+        other => panic!("expected shader, got {:?}", other.kind()),
+    };
     let sync = build_slot_full_sync(
         &registry,
         [("shader", &shader_with_params as &dyn lpc_model::SlotAccess)],
@@ -116,7 +121,7 @@ min = 0.0
             &shader_data,
             ShaderDef::SHAPE_ID.slot_shape_from(&registry),
             &registry,
-            "consumed_slots[speed].label",
+            "consumed[speed].label",
         ),
         LpValue::String(String::from("Speed")),
     );
@@ -286,6 +291,7 @@ fn select_key<'a>(
 fn resolve_shape<'a>(shape: &'a SlotShape, registry: &'a SlotShapeRegistry) -> &'a SlotShape {
     match shape {
         SlotShape::Ref { id } => registry.get(id).expect("shape ref"),
+        SlotShape::Custom { shape, .. } => resolve_shape(shape, registry),
         other => other,
     }
 }

@@ -182,11 +182,8 @@ impl ComputeShaderNode {
             let Some(slot) = self.def.consumed_slots.entries.get_mut(&key) else {
                 continue;
             };
-            compile_changed |= sync_shader_slot_def_from_authored(
-                ctx,
-                &alloc::format!("consumed_slots[{key}]"),
-                slot,
-            )?;
+            compile_changed |=
+                sync_shader_slot_def_from_authored(ctx, &alloc::format!("consumed[{key}]"), slot)?;
         }
 
         if compile_changed {

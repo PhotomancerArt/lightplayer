@@ -15,7 +15,7 @@ use alloc::{
 };
 use core::cell::RefCell;
 use hashbrown::HashMap;
-use lpc_engine::{ButtonService, LpGraphics};
+use lpc_engine::{ButtonService, LpGraphics, RadioService};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::backtrace;
 use lpc_shared::output::OutputProvider;
@@ -72,6 +72,7 @@ impl ProjectManager {
         memory_stats: Option<MemoryStatsFn>,
         time_provider: Option<Rc<dyn TimeProvider>>,
         button_service: Option<Rc<dyn ButtonService>>,
+        radio_service: Option<Rc<dyn RadioService>>,
         graphics: Arc<dyn LpGraphics>,
     ) -> Result<ProjectHandle, ServerError> {
         // Extract project name from path
@@ -111,6 +112,7 @@ impl ProjectManager {
             memory_stats,
             time_provider,
             button_service,
+            radio_service,
             graphics,
         )?;
 

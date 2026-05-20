@@ -1,5 +1,3 @@
-use serde::{Deserialize, Serialize};
-
 use alloc::vec;
 
 use crate::{
@@ -15,13 +13,10 @@ const FRAME_SECONDS_60HZ: f32 = 1.0 / 60.0;
 /// Clock controls live in authored node-def slot data so the UI can mutate them
 /// through the same path as ordinary config. Their slot policy marks them as
 /// writable and transient: they are runtime controls, not durable defaults.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ClockControls {
-    #[serde(default = "default_running")]
     pub running: ValueSlot<bool>,
-    #[serde(default = "default_rate")]
     pub rate: ValueSlot<f32>,
-    #[serde(default)]
     pub scrub_offset_seconds: ValueSlot<f32>,
 }
 

@@ -29,6 +29,24 @@ where
     Ok(object)
 }
 
+pub fn read_dynamic_slot_from_object<S>(
+    registry: &SlotShapeRegistry,
+    shape_id: SlotShapeId,
+    object: ObjectReader<'_, '_, S>,
+) -> Result<Box<dyn SlotMutAccess>, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    let shape = registry
+        .get(&shape_id)
+        .ok_or_else(|| syntax_error(format!("missing slot shape: {shape_id}")))?;
+    let mut slot = registry
+        .create_default(shape_id)
+        .map_err(factory_error_to_syntax)?;
+    apply_object_reader_to_slot(slot.data_mut(), shape, registry, object)?;
+    Ok(slot)
+}
+
 pub fn read_dynamic_slot_data<S>(
     registry: &SlotShapeRegistry,
     shape_id: SlotShapeId,
@@ -75,6 +93,78 @@ where
             encoding, variants, ..
         } => read_enum(data, encoding, variants, registry, value),
         SlotShape::Option { some, .. } => read_option(data, some, registry, value),
+        SlotShape::Custom { codec, .. } => read_custom_slot(data, *codec, registry, value),
+    }
+}
+
+fn apply_object_reader_to_slot<S>(
+    data: SlotDataMutAccess<'_>,
+    shape: &SlotShape,
+    registry: &SlotShapeRegistry,
+    object: ObjectReader<'_, '_, S>,
+) -> Result<(), SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    match shape {
+        SlotShape::Ref { id } => {
+            let shape = registry
+                .get(id)
+                .ok_or_else(|| syntax_error(format!("missing referenced slot shape: {id}")))?;
+            apply_object_reader_to_slot(data, shape, registry, object)
+        }
+        SlotShape::Unit { .. } => {
+            let SlotDataMutAccess::Unit(_) = data else {
+                object.finish()?;
+                return Err(syntax_error("shape expected a unit slot"));
+            };
+            object.finish()
+        }
+        SlotShape::Record { fields, .. } => read_record_object(data, fields, registry, object),
+        SlotShape::Map {
+            key, value: item, ..
+        } => read_map_object(data, *key, item, registry, object),
+        SlotShape::Enum {
+            encoding, variants, ..
+        } => {
+            let SlotDataMutAccess::Enum(en) = data else {
+                object.finish()?;
+                return Err(syntax_error("shape expected an enum slot"));
+            };
+            match encoding {
+                crate::SlotEnumEncoding::Tagged { field } => {
+                    read_tagged_enum_object(en, field.as_str(), variants, registry, object)
+                }
+                crate::SlotEnumEncoding::External => {
+                    read_external_enum_object(en, variants, registry, object)
+                }
+            }
+        }
+        SlotShape::Option { some, .. } => {
+            let SlotDataMutAccess::Option(option) = data else {
+                object.finish()?;
+                return Err(syntax_error("shape expected an option slot"));
+            };
+            option
+                .set_some_default(current_revision(), registry, some)
+                .map_err(mutation_error_to_syntax)?;
+            let Some(data) = option.data_mut() else {
+                return Err(syntax_error(
+                    "option default creation did not create a value",
+                ));
+            };
+            apply_object_reader_to_slot(data, some, registry, object)
+        }
+        SlotShape::Value { .. } => {
+            object.finish()?;
+            Err(syntax_error("shape expected a scalar value, found object"))
+        }
+        SlotShape::Custom { .. } => {
+            object.finish()?;
+            Err(syntax_error(
+                "custom slot reader cannot start from an already-open object",
+            ))
+        }
     }
 }
 
@@ -139,12 +229,24 @@ fn read_map<S>(
 where
     S: SyntaxEventSource,
 {
+    let object = value.object()?;
+    read_map_object(data, key_shape, item_shape, registry, object)
+}
+
+fn read_map_object<S>(
+    data: SlotDataMutAccess<'_>,
+    key_shape: SlotMapKeyShape,
+    item_shape: &SlotShape,
+    registry: &SlotShapeRegistry,
+    mut object: ObjectReader<'_, '_, S>,
+) -> Result<(), SyntaxError>
+where
+    S: SyntaxEventSource,
+{
     let SlotDataMutAccess::Map(map) = data else {
-        value.skip_value()?;
+        object.finish()?;
         return Err(syntax_error("shape expected a map slot"));
     };
-    let mut object = value.object()?;
-
     while let Some(mut prop) = object.next_prop()? {
         let key = parse_map_key(key_shape, prop.name())
             .map_err(|message| prop.unknown_field(prop.name(), &[message.as_str()]))?;
@@ -193,7 +295,20 @@ fn read_tagged_enum<S>(
 where
     S: SyntaxEventSource,
 {
-    let mut object = value.object()?;
+    let object = value.object()?;
+    read_tagged_enum_object(en, discriminator, variants, registry, object)
+}
+
+fn read_tagged_enum_object<S>(
+    en: &mut dyn crate::SlotEnumDefaultVariant,
+    discriminator: &str,
+    variants: &[SlotVariantShape],
+    registry: &SlotShapeRegistry,
+    mut object: ObjectReader<'_, '_, S>,
+) -> Result<(), SyntaxError>
+where
+    S: SyntaxEventSource,
+{
     let expected = variant_names(variants);
     let variant_name = object.expect_discriminator(discriminator, &expected)?;
     let variant = variants
@@ -216,7 +331,19 @@ fn read_external_enum<S>(
 where
     S: SyntaxEventSource,
 {
-    let mut object = value.object()?;
+    let object = value.object()?;
+    read_external_enum_object(en, variants, registry, object)
+}
+
+fn read_external_enum_object<S>(
+    en: &mut dyn crate::SlotEnumDefaultVariant,
+    variants: &[SlotVariantShape],
+    registry: &SlotShapeRegistry,
+    mut object: ObjectReader<'_, '_, S>,
+) -> Result<(), SyntaxError>
+where
+    S: SyntaxEventSource,
+{
     let expected = variant_names(variants);
     let Some(mut prop) = object.next_prop()? else {
         return Err(syntax_error(format!(
@@ -289,6 +416,31 @@ where
         ));
     };
     apply_reader_to_slot(data, some_shape, registry, value)
+}
+
+fn read_custom_slot<S>(
+    data: SlotDataMutAccess<'_>,
+    codec: SlotShapeId,
+    registry: &SlotShapeRegistry,
+    value: ValueReader<'_, '_, S>,
+) -> Result<(), SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    let SlotDataMutAccess::Custom(custom) = data else {
+        value.skip_value()?;
+        return Err(syntax_error(format!(
+            "shape expected custom slot codec {codec}"
+        )));
+    };
+    if custom.custom_codec_id() != codec {
+        value.skip_value()?;
+        return Err(syntax_error(format!(
+            "slot data custom codec {} does not match shape codec {codec}",
+            custom.custom_codec_id()
+        )));
+    }
+    crate::slot_codec::custom_slot_codec::read_custom_slot(codec, custom, registry, value)
 }
 
 fn parse_map_key(shape: SlotMapKeyShape, raw: &str) -> Result<SlotMapKey, String> {

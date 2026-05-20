@@ -7,15 +7,21 @@
 use alloc::boxed::Box;
 use alloc::string::{String, ToString};
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
 use crate::artifact::artifact_loc::ArtifactLocator;
-use crate::nodes::node_def::NodeDef;
-use crate::{
-    ArtifactPath, ArtifactPathSlot, FieldSlot, FieldSlotMut, Revision, SlotDataAccess,
-    SlotDataMutAccess, SlotMapValueAccess, SlotMapValueMutAccess, SlotRecordAccess,
-    SlotRecordMutAccess, SlotShape, SlotValueAccess,
+use crate::nodes::node_def::{NodeArtifact, NodeDef};
+use crate::slot_codec::{
+    ObjectReader, SlotDataWriteError, SlotValueWriter, SlotWrite, SlotWriteError, SyntaxError,
+    SyntaxEventSource, ValueReader,
 };
+use crate::{
+    ArtifactPath, ArtifactPathSlot, FieldSlot, FieldSlotMut, Revision, SlotAccess,
+    SlotCustomAccess, SlotCustomMutAccess, SlotDataAccess, SlotDataMutAccess, SlotMapValueAccess,
+    SlotMapValueMutAccess, SlotRecordAccess, SlotRecordMutAccess, SlotShape, SlotShapeId,
+    SlotShapeRegistry, SlotValueAccess, StaticSlotShape,
+};
+
+pub(crate) const NODE_INVOCATION_CODEC_ID: SlotShapeId =
+    SlotShapeId::from_static_name("lp::node::NodeInvocationCodec");
 
 /// Parent-owned child node invocation.
 #[derive(Clone, Debug, PartialEq)]
@@ -68,49 +74,150 @@ impl NodeInvocation {
             NodeDefRef::Inline(def) => Some(def),
         }
     }
+
+    pub(crate) fn read_invocation_slot<S>(
+        &mut self,
+        registry: &SlotShapeRegistry,
+        value: ValueReader<'_, '_, S>,
+    ) -> Result<(), SyntaxError>
+    where
+        S: SyntaxEventSource,
+    {
+        let mut object = value.object()?;
+        let Some(mut prop) = object.next_prop()? else {
+            return Err(object.missing_required_field("def"));
+        };
+        let name = prop.name().to_string();
+        if name != "def" {
+            return Err(prop.unknown_field(&name, &["def"]));
+        }
+        self.read_def_slot(registry, prop.value())?;
+        drop(prop);
+
+        if let Some(prop) = object.next_prop()? {
+            let name = prop.name().to_string();
+            return Err(prop.unknown_field(&name, &[]));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn write_invocation_slot_json<W>(
+        &self,
+        registry: &SlotShapeRegistry,
+        value: SlotValueWriter<'_, W>,
+    ) -> Result<(), SlotWriteError<W::Error>>
+    where
+        W: SlotWrite,
+    {
+        let mut object = value.object()?;
+        self.write_def_slot_json(registry, object.prop("def")?)?;
+        object.finish()
+    }
+
+    pub(crate) fn write_invocation_slot_toml(
+        &self,
+        registry: &SlotShapeRegistry,
+    ) -> Result<toml::Value, SlotDataWriteError> {
+        let mut table = toml::Table::new();
+        table.insert("def".into(), self.write_def_slot_toml(registry)?);
+        Ok(toml::Value::Table(table))
+    }
+
+    pub(crate) fn read_def_slot<S>(
+        &mut self,
+        registry: &SlotShapeRegistry,
+        value: ValueReader<'_, '_, S>,
+    ) -> Result<(), SyntaxError>
+    where
+        S: SyntaxEventSource,
+    {
+        let mut object = value.object()?;
+        let Some(first) = object.peek_prop_name()? else {
+            return Err(object.missing_required_field("path"));
+        };
+
+        match first.as_str() {
+            "path" => self.read_path_def(object),
+            "kind" => {
+                let artifact = read_node_artifact_from_object(registry, object)?;
+                *self = Self::inline(artifact.into_node_def());
+                Ok(())
+            }
+            _ => Err(SyntaxError::new(
+                "def",
+                None,
+                "node def reference must contain `path` or inline `kind`",
+            )),
+        }
+    }
+
+    pub(crate) fn write_def_slot_json<W>(
+        &self,
+        registry: &SlotShapeRegistry,
+        value: SlotValueWriter<'_, W>,
+    ) -> Result<(), SlotWriteError<W::Error>>
+    where
+        W: SlotWrite,
+    {
+        match &self.def {
+            NodeDefRef::Path(locator) => {
+                let path = locator.to_string();
+                let mut object = value.object()?;
+                object.prop("path")?.string(&path)?;
+                object.finish()
+            }
+            NodeDefRef::Inline(def) => {
+                let artifact = NodeArtifact::new((**def).clone());
+                registry.write_slot_json_value(NodeArtifact::SHAPE_ID, artifact.data(), value)
+            }
+        }
+    }
+
+    pub(crate) fn write_def_slot_toml(
+        &self,
+        registry: &SlotShapeRegistry,
+    ) -> Result<toml::Value, SlotDataWriteError> {
+        match &self.def {
+            NodeDefRef::Path(locator) => {
+                let mut table = toml::Table::new();
+                table.insert("path".into(), toml::Value::String(locator.to_string()));
+                Ok(toml::Value::Table(table))
+            }
+            NodeDefRef::Inline(def) => {
+                let artifact = NodeArtifact::new((**def).clone());
+                registry.write_slot_toml(&artifact)
+            }
+        }
+    }
+
+    fn read_path_def<S>(&mut self, mut object: ObjectReader<'_, '_, S>) -> Result<(), SyntaxError>
+    where
+        S: SyntaxEventSource,
+    {
+        let Some(mut prop) = object.next_prop()? else {
+            return Err(object.missing_required_field("path"));
+        };
+        let path = prop.value().string()?;
+        drop(prop);
+
+        if object.next_prop()?.is_some() {
+            return Err(SyntaxError::new(
+                "def",
+                None,
+                "`def.path` cannot be combined with inline node definition fields",
+            ));
+        }
+
+        let locator = ArtifactLocator::parse(&path)
+            .map_err(|error| SyntaxError::new("def.path", None, alloc::format!("{error}")))?;
+        *self = Self::path(locator);
+        Ok(())
+    }
 }
 
 impl Default for NodeInvocation {
     fn default() -> Self {
         Self::path(ArtifactLocator::path(""))
-    }
-}
-
-impl Serialize for NodeInvocation {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        use serde::ser::SerializeMap;
-
-        let mut map = serializer.serialize_map(Some(1))?;
-        map.serialize_entry("def", &self.def)?;
-        map.end()
-    }
-}
-
-impl<'de> Deserialize<'de> for NodeInvocation {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = toml::Value::deserialize(deserializer)?;
-        let table = value
-            .as_table()
-            .ok_or_else(|| serde::de::Error::custom("node invocation must be a table"))?;
-        if table.len() != 1 || !table.contains_key("def") {
-            return Err(serde::de::Error::custom(
-                "node invocation must contain exactly one `def` field",
-            ));
-        }
-        let def = NodeDefRef::from_toml_value(
-            table
-                .get("def")
-                .ok_or_else(|| serde::de::Error::custom("missing `def`"))?
-                .clone(),
-        )
-        .map_err(serde::de::Error::custom)?;
-        Ok(Self::from(def))
     }
 }
 
@@ -123,93 +230,35 @@ impl From<NodeDefRef> for NodeInvocation {
     }
 }
 
-impl Serialize for NodeDefRef {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        match self {
-            Self::Path(locator) => {
-                use serde::ser::SerializeMap;
-
-                let mut map = serializer.serialize_map(Some(1))?;
-                map.serialize_entry("path", &locator.to_string())?;
-                map.end()
-            }
-            Self::Inline(def) => node_def_to_toml_value(def)
-                .map_err(serde::ser::Error::custom)?
-                .serialize(serializer),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for NodeDefRef {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = toml::Value::deserialize(deserializer)?;
-        Self::from_toml_value(value).map_err(serde::de::Error::custom)
-    }
-}
-
-impl NodeDefRef {
-    fn from_toml_value(value: toml::Value) -> Result<Self, String> {
-        let table = value
-            .as_table()
-            .ok_or_else(|| String::from("node def reference must be a table"))?;
-        if let Some(path) = table.get("path") {
-            if table.len() != 1 {
-                return Err(String::from(
-                    "`def.path` cannot be combined with inline node definition fields",
-                ));
-            }
-            let Some(path) = path.as_str() else {
-                return Err(String::from("`def.path` must be a string"));
-            };
-            return ArtifactLocator::parse(path)
-                .map(Self::Path)
-                .map_err(|e| e.to_string());
-        }
-        if table.contains_key("kind") {
-            let text = toml::to_string(&value).map_err(|e| e.to_string())?;
-            let def = NodeDef::from_toml_str(&text).map_err(|e| e.to_string())?;
-            return Ok(Self::Inline(Box::new(def)));
-        }
-        Err(String::from(
-            "node def reference must contain `path` or inline `kind`",
-        ))
-    }
-}
-
 impl FieldSlot for NodeInvocation {
     fn slot_field_shape() -> SlotShape {
-        crate::slot::shape::record(alloc::vec![crate::slot::shape::field(
-            "def",
-            <ArtifactPathSlot as FieldSlot>::slot_field_shape(),
-        )])
+        crate::slot::shape::custom(
+            NODE_INVOCATION_CODEC_ID,
+            node_invocation_sync_shape(),
+            alloc::vec![NodeArtifact::SHAPE_ID],
+        )
     }
 
     fn slot_field_data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Record(self)
+        SlotDataAccess::Custom(self)
     }
 }
 
 impl FieldSlotMut for NodeInvocation {
     fn slot_field_data_mut(&mut self) -> SlotDataMutAccess<'_> {
-        SlotDataMutAccess::Record(self)
+        SlotDataMutAccess::Custom(self)
     }
 }
 
 impl SlotMapValueAccess for NodeInvocation {
     fn slot_data(&self) -> SlotDataAccess<'_> {
-        SlotDataAccess::Record(self)
+        SlotDataAccess::Custom(self)
     }
 }
 
 impl SlotMapValueMutAccess for NodeInvocation {
     fn slot_data_mut(&mut self) -> SlotDataMutAccess<'_> {
-        SlotDataMutAccess::Record(self)
+        SlotDataMutAccess::Custom(self)
     }
 }
 
@@ -239,12 +288,56 @@ impl SlotRecordMutAccess for NodeInvocation {
     }
 }
 
-fn node_def_to_toml_value(def: &NodeDef) -> Result<toml::Value, String> {
-    let mut registry = crate::SlotShapeRegistry::default();
-    crate::slot_shapes::register_all_static_slot_shapes(&mut registry)
-        .map_err(|e| e.to_string())?;
-    let text = def.write_toml(&registry).map_err(|e| e.to_string())?;
-    toml::from_str(&text).map_err(|e| e.to_string())
+impl SlotCustomAccess for NodeInvocation {
+    fn custom_codec_id(&self) -> SlotShapeId {
+        NODE_INVOCATION_CODEC_ID
+    }
+
+    fn custom_revision(&self) -> Revision {
+        self.def_slot.changed_at()
+    }
+
+    fn as_any(&self) -> &dyn core::any::Any {
+        self
+    }
+}
+
+impl SlotCustomMutAccess for NodeInvocation {
+    fn as_any_mut(&mut self) -> &mut dyn core::any::Any {
+        self
+    }
+}
+
+fn node_invocation_sync_shape() -> SlotShape {
+    crate::slot::shape::record(alloc::vec![crate::slot::shape::field(
+        "def",
+        <ArtifactPathSlot as FieldSlot>::slot_field_shape(),
+    )])
+}
+
+fn read_node_artifact_from_object<S>(
+    registry: &SlotShapeRegistry,
+    object: ObjectReader<'_, '_, S>,
+) -> Result<NodeArtifact, SyntaxError>
+where
+    S: SyntaxEventSource,
+{
+    let object =
+        crate::slot_codec::read_dynamic_slot_from_object(registry, NodeArtifact::SHAPE_ID, object)?;
+    object
+        .into_any()
+        .downcast::<NodeArtifact>()
+        .map(|artifact| *artifact)
+        .map_err(|_| {
+            SyntaxError::new(
+                "",
+                None,
+                alloc::format!(
+                    "slot reader returned unexpected type for shape {}",
+                    NodeArtifact::SHAPE_ID
+                ),
+            )
+        })
 }
 
 #[cfg(test)]
@@ -253,12 +346,11 @@ mod tests {
 
     #[test]
     fn node_invocation_toml_path_form_loads() {
-        let invocation: NodeInvocation = toml::from_str(
+        let invocation = read_invocation(
             r#"
 def = { path = "./texture.toml" }
 "#,
-        )
-        .unwrap();
+        );
 
         assert_eq!(
             invocation.def_locator().unwrap(),
@@ -268,40 +360,63 @@ def = { path = "./texture.toml" }
 
     #[test]
     fn node_invocation_rejects_legacy_artifact() {
-        let err = toml::from_str::<NodeInvocation>(
+        let err = read_invocation_err(
             r#"
 artifact = "./texture.toml"
 "#,
-        )
-        .unwrap_err();
+        );
 
         assert!(err.to_string().contains("def"));
     }
 
     #[test]
     fn node_invocation_toml_inline_form_loads() {
-        let invocation: NodeInvocation = toml::from_str(
+        let invocation = read_invocation(
             r#"
 [def]
 kind = "Clock"
 "#,
-        )
-        .unwrap();
+        );
 
         assert!(matches!(invocation.inline_def(), Some(NodeDef::Clock(_))));
     }
 
     #[test]
     fn node_invocation_rejects_path_plus_inline_fields() {
-        let err = toml::from_str::<NodeInvocation>(
+        let err = read_invocation_err(
             r#"
 [def]
 path = "./clock.toml"
 kind = "Clock"
 "#,
-        )
-        .unwrap_err();
+        );
 
-        assert!(err.to_string().contains("def.path"));
+        assert!(err.to_string().contains("path"));
+    }
+
+    fn read_invocation(text: &str) -> NodeInvocation {
+        read_invocation_result(text).unwrap()
+    }
+
+    fn read_invocation_err(text: &str) -> SyntaxError {
+        read_invocation_result(text).unwrap_err()
+    }
+
+    fn read_invocation_result(text: &str) -> Result<NodeInvocation, SyntaxError> {
+        let mut registry = SlotShapeRegistry::default();
+        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("shapes");
+        let value = toml::from_str::<toml::Value>(text).unwrap();
+        let mut reader = crate::slot_codec::SlotReader::new(
+            crate::slot_codec::TomlSyntaxSource::new(&value).unwrap(),
+            &registry,
+        );
+        let mut invocation = NodeInvocation::default();
+        crate::slot_codec::apply_reader_to_slot(
+            invocation.slot_field_data_mut(),
+            &NodeInvocation::slot_field_shape(),
+            &registry,
+            reader.value(),
+        )?;
+        Ok(invocation)
     }
 }

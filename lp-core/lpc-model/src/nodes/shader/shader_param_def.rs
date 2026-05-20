@@ -4,21 +4,19 @@ use crate::{
     LpValue, OptionSlot, PositiveF32, PositiveF32Slot, Ratio, RatioSlot, Slotted, ValueSlot,
 };
 use alloc::string::String;
-use serde::{Deserialize, Serialize};
 
 /// Authored definition for one shader parameter.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Slotted)]
+#[derive(Debug, Clone, Default, PartialEq, Slotted)]
 pub struct ShaderParamDef {
     pub label: ValueSlot<String>,
     pub description: ValueSlot<String>,
     pub value_type: ValueSlot<String>,
     pub default: RatioSlot,
-    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
     pub min: OptionSlot<ScalarHint>,
 }
 
 /// Simple numeric hint for scalar shader params.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Slotted)]
+#[derive(Debug, Clone, Default, PartialEq, Slotted)]
 pub struct ScalarHint {
     pub value: PositiveF32Slot,
 }

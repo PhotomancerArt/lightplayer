@@ -1,5 +1,6 @@
 use alloc::format;
 
+use crate::slot_codec::custom_slot_codec::snapshot_custom_slot_data;
 use crate::slot_codec::{SlotValueWriter, SlotWrite, SlotWriteError, SlotWriter, write_lp_value};
 use crate::{
     SlotDataAccess, SlotMapKey, SlotMapKeyShape, SlotShape, SlotShapeId, SlotShapeRegistry,
@@ -65,7 +66,27 @@ where
         } => write_map(registry, *key, shape, data, value),
         SlotShape::Enum { variants, .. } => write_enum(registry, variants, data, value),
         SlotShape::Option { some, .. } => write_option(registry, some, data, value),
+        SlotShape::Custom { codec, shape, .. } => {
+            write_custom(registry, *codec, shape, data, value)
+        }
     }
+}
+
+fn write_custom<W>(
+    registry: &SlotShapeRegistry,
+    codec: SlotShapeId,
+    shape: &SlotShape,
+    data: SlotDataAccess<'_>,
+    value: SlotValueWriter<'_, W>,
+) -> Result<(), SlotWriteError<W::Error>>
+where
+    W: SlotWrite,
+{
+    let SlotDataAccess::Custom(custom) = data else {
+        return Err(invalid_slot_data("slot data does not match custom shape"));
+    };
+    let data = snapshot_custom_slot_data(codec, custom).map_err(invalid_slot_data)?;
+    write_shape(registry, shape, data, value)
 }
 
 fn write_unit<W>(

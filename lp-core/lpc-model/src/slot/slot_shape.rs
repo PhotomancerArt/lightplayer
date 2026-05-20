@@ -47,6 +47,14 @@ pub enum SlotShape {
         meta: SlotMeta,
         some: Box<SlotShape>,
     },
+    Custom {
+        #[serde(default)]
+        meta: SlotMeta,
+        codec: SlotShapeId,
+        shape: Box<SlotShape>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        refs: Vec<SlotShapeId>,
+    },
 }
 
 /// Compact registry identity for a slot shape node.
@@ -198,6 +206,14 @@ impl SlotShape {
                 }
             }
             Self::Option { some, .. } => some.collect_referenced_shape_ids(refs),
+            Self::Custom {
+                shape,
+                refs: custom_refs,
+                ..
+            } => {
+                shape.collect_referenced_shape_ids(refs);
+                refs.extend(custom_refs.iter().copied());
+            }
         }
     }
 }

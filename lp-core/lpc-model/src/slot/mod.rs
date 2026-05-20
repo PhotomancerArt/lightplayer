@@ -34,8 +34,8 @@ mod value_slot;
 
 pub use enum_slot::{EnumSlot, SlottedEnum, SlottedEnumMut};
 pub use slot_access::{
-    FieldSlot, MapSlotAccess, SlotAccess, SlotDataAccess, SlotEnumAccess, SlotOptionAccess,
-    SlotRecordAccess, SlotValueAccess, StaticSlotAccess, StaticSlotShape,
+    FieldSlot, MapSlotAccess, SlotAccess, SlotCustomAccess, SlotDataAccess, SlotEnumAccess,
+    SlotOptionAccess, SlotRecordAccess, SlotValueAccess, StaticSlotAccess, StaticSlotShape,
 };
 pub use slot_accessor::{SlotAccessor, SlotAccessorError, SlotAccessorStep};
 pub use slot_data::{SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn, SlotRecord};
@@ -50,9 +50,9 @@ pub use slot_lookup::{
 pub use slot_merge::SlotMerge;
 pub use slot_meta::SlotMeta;
 pub use slot_mut_access::{
-    FieldSlotMut, MapSlotMutAccess, MapSlotMutAccess as MapSlotAccessMut, SlotDataMutAccess,
-    SlotDataMutAccess as SlotDataAccessMut, SlotEnumDefaultVariant, SlotEnumMutAccess,
-    SlotEnumMutAccess as SlotEnumAccessMut, SlotMapValueMutAccess,
+    FieldSlotMut, MapSlotMutAccess, MapSlotMutAccess as MapSlotAccessMut, SlotCustomMutAccess,
+    SlotDataMutAccess, SlotDataMutAccess as SlotDataAccessMut, SlotEnumDefaultVariant,
+    SlotEnumMutAccess, SlotEnumMutAccess as SlotEnumAccessMut, SlotMapValueMutAccess,
     SlotMapValueMutAccess as SlotMapValueAccessMut, SlotMutAccess, SlotMutAccess as SlotAccessMut,
     SlotMutationError, SlotOptionMutAccess, SlotOptionMutAccess as SlotOptionAccessMut,
     SlotRecordMutAccess, SlotRecordMutAccess as SlotRecordAccessMut, SlotValueMutAccess,
@@ -81,7 +81,7 @@ pub use slot_value::{
 };
 pub mod shape {
     pub use super::slot_shape_builder::{
-        enum_external, enum_tagged, enum_with_encoding, field, field_with_policy,
+        custom, enum_external, enum_tagged, enum_with_encoding, field, field_with_policy,
         field_with_semantics, field_with_semantics_and_policy, id, leaf, map, option, record,
         reference, unit, value, variant,
     };

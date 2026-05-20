@@ -13,7 +13,7 @@ add_sub = "wrapping"
 mul = "wrapping"
 div = "reciprocal"
 
-[consumed_slots.held]
+[consumed.held]
 kind = "map"
 key = "u32"
 value = "lp::control::Message"

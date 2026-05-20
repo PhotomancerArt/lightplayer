@@ -6,7 +6,9 @@ use lpc_model::{
     Revision, SlotAccess, SlotData, SlotDataAccess, SlotMapDyn, SlotName, SlotOptionDyn, SlotPath,
     SlotShape, SlotShapeId, SlotShapeRegistry, WithRevision,
     slot_codec::SlotWriter,
-    slot_sync_codec::{write_slot_snapshot_shape_value, write_slot_snapshot_value},
+    slot_sync_codec::{
+        read_slot_snapshot_shape_json, write_slot_snapshot_shape_value, write_slot_snapshot_value,
+    },
 };
 
 use super::{
@@ -121,6 +123,12 @@ pub fn snapshot_slot_shape(
             )),
             None => SlotData::Option(SlotOptionDyn::none_with_version(option.presence_revision())),
         },
+        (SlotShape::Custom { .. }, SlotDataAccess::Custom(custom)) => {
+            let data =
+                wire_slot_data_from_slot_shape(registry, shape, SlotDataAccess::Custom(custom));
+            read_slot_snapshot_shape_json(registry, shape, data.get())
+                .expect("custom slot sync snapshot decodes")
+        }
         _ => panic!("slot shape/data mismatch"),
     }
 }
@@ -190,7 +198,9 @@ fn collect_diff_shape(
                     root: root_name.to_string(),
                     path,
                     change: WireSlotChange::Replace(wire_slot_data_from_slot_shape(
-                        registry, shape, data,
+                        registry,
+                        shape,
+                        SlotDataAccess::Value(value),
                     )),
                 });
             }
@@ -287,6 +297,17 @@ fn collect_diff_shape(
                     since,
                     patches,
                 );
+            }
+        }
+        (SlotShape::Custom { .. }, SlotDataAccess::Custom(custom)) => {
+            if custom.custom_revision() > since {
+                patches.push(WireSlotPatch {
+                    root: root_name.to_string(),
+                    path,
+                    change: WireSlotChange::Replace(wire_slot_data_from_slot_shape(
+                        registry, shape, data,
+                    )),
+                });
             }
         }
         _ => panic!("slot shape/data mismatch"),

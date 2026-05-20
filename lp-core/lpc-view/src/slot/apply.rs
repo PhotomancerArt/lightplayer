@@ -133,6 +133,10 @@ fn apply_replace_shape(
         return Ok(());
     }
 
+    if let SlotShape::Custom { shape, .. } = shape {
+        return apply_replace_shape(data, shape, path, change, registry);
+    }
+
     let (head, tail) = path
         .segments()
         .split_first()
@@ -216,6 +220,10 @@ fn resolve_path_shape<'a>(
 
     if path.is_root() {
         return Ok((shape, data));
+    }
+
+    if let SlotShape::Custom { shape, .. } = shape {
+        return resolve_path_shape(data, shape, path, registry);
     }
 
     let (head, tail) = path

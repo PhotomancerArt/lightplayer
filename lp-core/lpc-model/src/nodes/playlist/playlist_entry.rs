@@ -1,5 +1,4 @@
 use alloc::string::String;
-use serde::{Deserialize, Serialize};
 
 use crate::{
     BindingDefs, ControlMessage, MapSlot, NodeInvocation, OptionSlot, PositiveF32Slot, Slotted,
@@ -7,10 +6,9 @@ use crate::{
 };
 
 /// One authored playlist entry.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
+#[derive(Debug, Clone, PartialEq, Slotted)]
 pub struct PlaylistEntry {
     /// Entry-local bindings, registered against the owning playlist entry slot.
-    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     pub bindings: BindingDefs,
 
     /// Trigger messages that start or restart this entry.
@@ -19,19 +17,15 @@ pub struct PlaylistEntry {
         merge = "by_key",
         map(key = "u32", value_ref = "lp::control::Message")
     )]
-    #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
     pub trigger: MapSlot<u32, ControlMessage>,
 
     /// Optional child node name.
-    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
     pub name: OptionSlot<ValueSlot<String>>,
 
     /// Duration in seconds before the playlist advances.
-    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
     pub duration: OptionSlot<PositiveF32Slot>,
 
     /// Outgoing crossfade duration override in seconds.
-    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
     pub fade_after: OptionSlot<PositiveF32Slot>,
 
     /// Visual child node invocation.

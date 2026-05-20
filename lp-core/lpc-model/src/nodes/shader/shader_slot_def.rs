@@ -15,21 +15,15 @@ use serde::{Deserialize, Serialize};
 use super::ShaderSlotMappingDef;
 
 /// Authored definition for one shader consumed or produced slot.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
+#[derive(Debug, Clone, PartialEq, Slotted)]
 pub struct ShaderSlotDef {
     pub kind: ValueSlot<ShaderSlotKind>,
     pub value: ValueSlot<ShaderValueShapeRef>,
-    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
     pub key: OptionSlot<ValueSlot<ShaderMapKeyDef>>,
-    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
     pub default: OptionSlot<ValueSlot<f32>>,
-    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
     pub min: OptionSlot<ValueSlot<f32>>,
-    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
     pub mapping: OptionSlot<ShaderSlotMappingDef>,
-    #[serde(default)]
     pub label: ValueSlot<String>,
-    #[serde(default)]
     pub description: ValueSlot<String>,
 }
 
@@ -306,10 +300,11 @@ impl SlotValue for ShaderValueShapeRef {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{SlotShapeRegistry, StaticSlotShape};
 
     #[test]
     fn value_shader_slot_parses_old_param_shape() {
-        let slot: ShaderSlotDef = toml::from_str(
+        let slot = read_slot_def(
             r#"kind = "value"
 value = "f32"
 default = 1.0
@@ -317,8 +312,7 @@ min = 0.0
 label = "Exposure"
 description = "Output exposure multiplier"
 "#,
-        )
-        .expect("slot");
+        );
 
         assert_eq!(*slot.kind.value(), ShaderSlotKind::Value);
         assert_eq!(slot.value.value().as_str(), "f32");
@@ -327,18 +321,30 @@ description = "Output exposure multiplier"
 
     #[test]
     fn map_shader_slot_parses_native_value_mapping() {
-        let slot: ShaderSlotDef = toml::from_str(
+        let slot = read_slot_def(
             r#"kind = "map"
 key = "u32"
 value = "lp::fluid::Emitter"
 mapping = { kind = "sentinel", len = 4, key = "id", empty_key = 0 }
 "#,
-        )
-        .expect("slot");
+        );
 
         assert_eq!(*slot.kind.value(), ShaderSlotKind::Map);
         assert_eq!(slot.value.value().as_str(), "lp::fluid::Emitter");
         assert!(slot.value.value().is_native());
         assert!(slot.mapping.data.is_some());
+    }
+
+    fn read_slot_def(text: &str) -> ShaderSlotDef {
+        let mut registry = SlotShapeRegistry::default();
+        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("shapes");
+        let value = toml::from_str::<toml::Value>(text).unwrap();
+        registry
+            .read_slot_toml(ShaderSlotDef::SHAPE_ID, &value)
+            .expect("slot")
+            .into_any()
+            .downcast::<ShaderSlotDef>()
+            .map(|def| *def)
+            .expect("shader slot def")
     }
 }

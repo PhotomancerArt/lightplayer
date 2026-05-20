@@ -8,12 +8,10 @@ use crate::{MapSlot, OptionSlot, Slotted, ValueSlot};
 /// A project is a node artifact with `kind = "Project"`. Its `nodes` table is
 /// the explicit source of child node invocations; the runtime no longer
 /// discovers children from filesystem directories.
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize, Slotted)]
+#[derive(Clone, Debug, Default, PartialEq, Slotted)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ProjectDef {
-    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
     pub name: OptionSlot<ValueSlot<String>>,
-    #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
     pub nodes: MapSlot<String, NodeInvocation>,
 }
 

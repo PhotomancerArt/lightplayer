@@ -12,7 +12,7 @@ use alloc::string::{String, ToString};
 use serde::{Deserialize, Serialize};
 
 /// Mapping from a semantic shader slot into shader-visible ABI storage.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
+#[derive(Debug, Clone, PartialEq, Slotted)]
 pub struct ShaderSlotMappingDef {
     pub kind: crate::ValueSlot<ShaderSlotMappingKind>,
     pub len: crate::ValueSlot<u32>,
@@ -113,21 +113,34 @@ impl SlotValue for ShaderSlotMappingKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{SlotShapeRegistry, StaticSlotShape};
 
     #[test]
     fn sentinel_mapping_round_trips_from_inline_toml() {
-        let mapping: ShaderSlotMappingDef = toml::from_str(
+        let mapping = read_mapping(
             r#"kind = "sentinel"
 len = 4
 key = "id"
 empty_key = 0
 "#,
-        )
-        .expect("mapping");
+        );
 
         assert_eq!(*mapping.kind.value(), ShaderSlotMappingKind::Sentinel);
         assert_eq!(*mapping.len.value(), 4);
         assert_eq!(mapping.key.value(), "id");
         assert_eq!(*mapping.empty_key.value(), 0);
+    }
+
+    fn read_mapping(text: &str) -> ShaderSlotMappingDef {
+        let mut registry = SlotShapeRegistry::default();
+        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("shapes");
+        let value = toml::from_str::<toml::Value>(text).unwrap();
+        registry
+            .read_slot_toml(ShaderSlotMappingDef::SHAPE_ID, &value)
+            .expect("mapping")
+            .into_any()
+            .downcast::<ShaderSlotMappingDef>()
+            .map(|def| *def)
+            .expect("shader slot mapping def")
     }
 }

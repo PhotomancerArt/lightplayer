@@ -70,6 +70,16 @@ pub fn reference(id: SlotShapeId) -> SlotShape {
     SlotShape::reference(id)
 }
 
+/// Build a custom-codec shape with empty metadata.
+pub fn custom(codec: SlotShapeId, shape: SlotShape, refs: Vec<SlotShapeId>) -> SlotShape {
+    SlotShape::Custom {
+        meta: SlotMeta::empty(),
+        codec,
+        shape: alloc::boxed::Box::new(shape),
+        refs,
+    }
+}
+
 /// Build one record field.
 ///
 /// This panics for invalid names because these names are authored in Rust

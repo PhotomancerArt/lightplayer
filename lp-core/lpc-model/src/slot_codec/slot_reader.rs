@@ -215,6 +215,30 @@ impl<'r, 'a, S> ObjectReader<'r, 'a, S>
 where
     S: SyntaxEventSource,
 {
+    pub fn peek_prop_name(&mut self) -> Result<Option<String>, SyntaxError> {
+        if self.ended {
+            return Ok(None);
+        }
+
+        match self.reader.next_event()? {
+            Some(SyntaxEvent::Prop { name, span }) => {
+                self.reader.push_back(SyntaxEvent::Prop {
+                    name: name.clone(),
+                    span,
+                });
+                Ok(Some(name))
+            }
+            Some(SyntaxEvent::EndObject { span }) => {
+                self.reader.push_back(SyntaxEvent::EndObject { span });
+                Ok(None)
+            }
+            Some(event) => Err(self
+                .reader
+                .error_at(event.span(), "expected object property or end of object")),
+            None => Err(self.reader.error("unterminated object")),
+        }
+    }
+
     pub fn next_prop(&mut self) -> Result<Option<PropReader<'_, 'a, S>>, SyntaxError> {
         if self.ended {
             return Ok(None);

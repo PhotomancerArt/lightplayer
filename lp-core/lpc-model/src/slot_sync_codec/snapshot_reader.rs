@@ -45,6 +45,10 @@ where
         return read_shape(registry, shape, value);
     }
 
+    if let SlotShape::Custom { shape, .. } = shape {
+        return read_shape(registry, shape, value);
+    }
+
     let expected_kind = shape_kind(shape);
     let mut object = value.object()?;
     let actual_kind = object.expect_discriminator("kind", &[expected_kind])?;
@@ -61,6 +65,7 @@ where
         SlotShape::Map { key, value, .. } => read_map(registry, object, *key, value),
         SlotShape::Enum { variants, .. } => read_enum(registry, object, variants),
         SlotShape::Option { some, .. } => read_option(registry, object, some),
+        SlotShape::Custom { .. } => unreachable!("custom shapes are projected above"),
         SlotShape::Ref { .. } => unreachable!("refs resolved above"),
     }
 }
@@ -338,6 +343,7 @@ fn shape_kind(shape: &SlotShape) -> &'static str {
         SlotShape::Map { .. } => "map",
         SlotShape::Enum { .. } => "enum",
         SlotShape::Option { .. } => "option",
+        SlotShape::Custom { .. } => unreachable!("custom shapes are projected before reading"),
     }
 }
 

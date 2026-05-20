@@ -19,7 +19,9 @@ pub mod server;
 pub mod template;
 
 pub use error::ServerError;
-pub use lpc_engine::{ButtonService, Graphics, LpGraphics, LpShader, ShaderCompileOptions};
+pub use lpc_engine::{
+    ButtonService, Graphics, LpGraphics, LpShader, RadioService, ShaderCompileOptions,
+};
 pub use project::Project;
 pub use project_manager::ProjectManager;
 pub use server::{LpServer, MemoryStatsFn};

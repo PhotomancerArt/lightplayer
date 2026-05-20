@@ -16,6 +16,7 @@ use super::{
 const VIRTUAL_RADIO_DEVICE_ID: RadioDeviceId = RadioDeviceId::new(0);
 const VIRTUAL_RADIO_QUEUE_CAPACITY: usize = 16;
 
+#[derive(Clone)]
 pub struct VirtualRadioDriver {
     registry: Rc<HardwareRegistry>,
     driver_id: String,

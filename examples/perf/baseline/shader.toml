@@ -10,7 +10,7 @@ add_sub = "saturating"
 mul = "saturating"
 div = "saturating"
 
-[consumed_slots.time]
+[consumed.time]
 kind = "value"
 value = "f32"
 default = 0.0

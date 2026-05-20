@@ -196,6 +196,21 @@ impl HardwareSystem {
             }),
         }
     }
+
+    pub fn open_radio_by_spec(
+        &self,
+        spec: &HardwareEndpointSpec,
+        config: RadioConfig,
+    ) -> Result<Box<dyn RadioDevice>, HardwareEndpointError> {
+        match endpoint_for_spec(self.radio_endpoints(), spec) {
+            EndpointAddressMatch::Available(endpoint) => self.open_radio(endpoint.id(), config),
+            EndpointAddressMatch::Unavailable(endpoint) => self.open_radio(endpoint.id(), config),
+            EndpointAddressMatch::Missing => Err(HardwareEndpointError::UnknownEndpoint {
+                kind: HardwareEndpointKind::Radio,
+                endpoint_id: HardwareEndpointId::new(spec.as_str()),
+            }),
+        }
+    }
 }
 
 trait EndpointDriver {

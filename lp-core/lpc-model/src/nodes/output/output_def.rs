@@ -1,18 +1,14 @@
-use serde::{Deserialize, Serialize};
-
 use crate::{BindingDefs, HardwareEndpointSpec, OptionSlot, Ratio, RatioSlot, Slotted, ValueSlot};
 
 pub const DEFAULT_OUTPUT_ENDPOINT_SPEC: &str = "ws281x:rmt:D10";
 
 /// Authored hardware output node definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
+#[derive(Debug, Clone, PartialEq, Slotted)]
 pub struct OutputDef {
     pub endpoint: ValueSlot<HardwareEndpointSpec>,
     /// Authored slot bindings for output inputs.
-    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     pub bindings: BindingDefs,
     /// Optional display pipeline options.
-    #[serde(default, skip_serializing_if = "OptionSlot::is_none")]
     pub options: OptionSlot<OutputDriverOptionsConfig>,
 }
 
@@ -51,22 +47,17 @@ impl Default for OutputDef {
 }
 
 /// Authored output driver options for the display pipeline.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
+#[derive(Debug, Clone, PartialEq, Slotted)]
 pub struct OutputDriverOptionsConfig {
     /// RGB white point balance.
-    #[serde(default = "default_white_point_slot")]
     pub white_point: ValueSlot<[f32; 3]>,
     /// Global brightness multiplier.
-    #[serde(default = "default_brightness_slot")]
     pub brightness: RatioSlot,
     /// Enable interpolation between frames.
-    #[serde(default = "default_true_slot")]
     pub interpolation_enabled: ValueSlot<bool>,
     /// Enable temporal dithering.
-    #[serde(default = "default_true_slot")]
     pub dithering_enabled: ValueSlot<bool>,
     /// Enable white point LUT.
-    #[serde(default = "default_true_slot")]
     pub lut_enabled: ValueSlot<bool>,
 }
 

@@ -12,6 +12,7 @@ pub const RADIO_MAX_PACKET_LEN: usize = RADIO_WIRE_HEADER_LEN + RADIO_MAX_PAYLOA
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RadioMessageKind {
     ButtonPress,
+    ControlMessage,
     Custom(u8),
 }
 
@@ -19,6 +20,7 @@ impl RadioMessageKind {
     pub const fn as_u8(self) -> u8 {
         match self {
             Self::ButtonPress => 1,
+            Self::ControlMessage => 2,
             Self::Custom(value) => value,
         }
     }
@@ -26,6 +28,7 @@ impl RadioMessageKind {
     pub const fn from_u8(value: u8) -> Self {
         match value {
             1 => Self::ButtonPress,
+            2 => Self::ControlMessage,
             other => Self::Custom(other),
         }
     }

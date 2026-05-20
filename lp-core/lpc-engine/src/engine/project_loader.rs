@@ -21,8 +21,8 @@ use crate::artifact::ArtifactLocation;
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::node::{NodeDefHandle, TreeError};
 use crate::nodes::{
-    ButtonNode, ClockNode, ComputeShaderNode, CorePlaceholderNode, FixtureNode, FluidNode,
-    OutputNode, PlaylistNode, PlaylistRuntimeEntry, ShaderNode, TextureNode,
+    ButtonNode, ClockNode, ComputeShaderNode, ControlRadioNode, CorePlaceholderNode, FixtureNode,
+    FluidNode, OutputNode, PlaylistNode, PlaylistRuntimeEntry, ShaderNode, TextureNode,
 };
 
 use super::{Engine, EngineServices};
@@ -164,7 +164,10 @@ impl ProjectLoader {
         Ok(runtime)
     }
 
-    #[allow(clippy::too_many_arguments)]
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "recursive project loading carries the active tree, artifact, and ownership context"
+    )]
     fn load_child_invocation<R>(
         root: &R,
         runtime: &mut Engine,
@@ -324,6 +327,33 @@ impl ProjectLoader {
                     loaded_nodes,
                     node,
                     "up",
+                    &config.bindings,
+                    frame,
+                )?;
+            }
+        }
+
+        for node in loaded_nodes {
+            if let NodeDef::ControlRadio(config) = &node.config {
+                runtime
+                    .attach_runtime_node(node.id, Box::new(ControlRadioNode::new()), frame)
+                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                        path: node.artifact_path.as_str().to_string(),
+                        reason: format!("attach control radio runtime: {e}"),
+                    })?;
+                register_optional_source_binding(
+                    runtime,
+                    loaded_nodes,
+                    node,
+                    "input",
+                    &config.bindings,
+                    frame,
+                )?;
+                register_target_binding(
+                    runtime,
+                    loaded_nodes,
+                    node,
+                    "output",
                     &config.bindings,
                     frame,
                 )?;
@@ -772,6 +802,7 @@ where
 fn node_kind_name(config: &NodeDef, path: &LpPath) -> Result<NodeName, ProjectLoadError> {
     let name = match config {
         NodeDef::ComputeShader(_) => "compute_shader",
+        NodeDef::ControlRadio(_) => "control_radio",
         NodeDef::Shader(_) => "shader",
         _ => config.kind_name(),
     };
@@ -1198,7 +1229,7 @@ mod tests {
     use alloc::sync::Arc;
     use lpc_model::{NodeName, ProductRef, SlotData, SlotMapKey, TreePath};
     use lpc_shared::hardware::{
-        HardwareAddress, HardwareRegistry, HardwareSystem, VirtualButtonDriver,
+        HardwareAddress, HardwareRegistry, HardwareSystem, VirtualButtonDriver, VirtualRadioDriver,
         default_esp32c6_hardware_manifest,
     };
     use lpc_shared::time::TimeProvider;
@@ -1213,7 +1244,7 @@ mod tests {
     use super::*;
     use crate::dataflow::binding::{BindingPriority, BindingSource, BindingTarget};
     use crate::dataflow::resolver::{Production, QueryKey, ResolveLogLevel};
-    use crate::engine::{ButtonService, resolve_with_engine_host};
+    use crate::engine::{ButtonService, RadioService, resolve_with_engine_host};
     use crate::products::visual::RenderTextureRequest;
 
     fn flat_project() -> LpFsMemory {
@@ -1271,7 +1302,7 @@ source = { path = "active.glsl" }
 [bindings.time]
 source = "..#entry_time"
 
-[consumed_slots.time]
+[consumed.time]
 kind = "value"
 value = "f32"
 default = 0.0
@@ -1360,6 +1391,12 @@ source = "bus#trigger"
     fn examples_button_playlist_fs() -> LpFsStd {
         LpFsStd::new(
             std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/button-playlist"),
+        )
+    }
+
+    fn examples_button_sign_fs() -> LpFsStd {
+        LpFsStd::new(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/button-sign"),
         )
     }
 
@@ -1458,7 +1495,7 @@ kind = "Shader"
 source = { path = "shader.glsl" }
 render_order = 0
 
-[consumed_slots.time]
+[consumed.time]
 kind = "value"
 value = "f32"
 default = 0.0
@@ -1960,12 +1997,12 @@ def = { path = "./compute.toml" }
 kind = "ComputeShader"
 source = { path = "compute.glsl" }
 
-[consumed_slots.time]
+[consumed.time]
 kind = "value"
 value = "f32"
 default = 0.25
 
-[produced_slots.phase]
+[produced.phase]
 kind = "value"
 value = "f32"
 "#,
@@ -2231,6 +2268,51 @@ value = "f32"
     }
 
     #[test]
+    fn button_sign_example_loads_with_control_radio_node() {
+        let fs = examples_button_sign_fs();
+        let fs: &dyn LpFs = &fs;
+        let services = EngineServices::new(TreePath::parse("/button_sign.show").expect("path"));
+
+        let rt = ProjectLoader::load_from_root(fs, services).expect("load button sign example");
+        let root = rt.tree().root();
+        let radio = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("radio").unwrap())
+            .expect("radio node");
+
+        assert!(
+            rt.tree()
+                .get(radio)
+                .expect("radio")
+                .state
+                .value()
+                .is_alive()
+        );
+        assert!(rt.tree().bindings().any(|binding| {
+            matches!(
+                (&binding.source, &binding.target),
+                (
+                    BindingSource::BusChannel(source),
+                    BindingTarget::ConsumedSlot { node, slot },
+                ) if source.0 == "trigger"
+                    && *node == radio
+                    && slot == &SlotPath::parse("input").expect("input")
+            )
+        }));
+        assert!(rt.tree().bindings().any(|binding| {
+            matches!(
+                (&binding.source, &binding.target),
+                (
+                    BindingSource::ProducedSlot { node, slot },
+                    BindingTarget::BusChannel(target),
+                ) if *node == radio
+                    && slot == &SlotPath::parse("output").expect("output")
+                    && target.0 == "trigger"
+            )
+        }));
+    }
+
+    #[test]
     fn button_node_publishes_held_and_up_from_virtual_d9() {
         let fs = LpFsMemory::new();
         fs.write_file(
@@ -2293,6 +2375,90 @@ stable_ms = 1
         assert!(held.entries.is_empty());
     }
 
+    #[test]
+    fn control_radio_bidirectional_bus_binding_broadcasts_button_event() {
+        let fs = LpFsMemory::new();
+        fs.write_file(
+            "/project.toml".as_path(),
+            br#"
+kind = "Project"
+
+[nodes.button]
+def = { path = "./button.toml" }
+
+[nodes.radio]
+def = { path = "./radio.toml" }
+"#,
+        )
+        .expect("project");
+        fs.write_file(
+            "/button.toml".as_path(),
+            br#"
+kind = "Button"
+endpoint = "button:gpio:D9"
+stable_ms = 1
+
+[bindings.down]
+target = "bus#trigger"
+"#,
+        )
+        .expect("button");
+        fs.write_file(
+            "/radio.toml".as_path(),
+            br#"
+kind = "ControlRadio"
+endpoint = "radio:virtual:0"
+channel = 1
+repeat_count = 2
+
+[bindings.input]
+source = "bus#trigger"
+
+[bindings.output]
+target = "bus#trigger"
+"#,
+        )
+        .expect("radio");
+
+        let registry = Rc::new(HardwareRegistry::new(default_esp32c6_hardware_manifest()));
+        let button_driver = VirtualButtonDriver::new(Rc::clone(&registry));
+        let button_control = button_driver.clone();
+        let radio_driver = VirtualRadioDriver::new(Rc::clone(&registry), 0);
+        let radio_control = radio_driver.clone();
+        let mut hardware = HardwareSystem::new(registry);
+        hardware.add_button_driver(Box::new(button_driver));
+        hardware.add_radio_driver(Box::new(radio_driver));
+        let hardware = Rc::new(hardware);
+        let button_service: Rc<dyn ButtonService> = hardware.clone();
+        let radio_service: Rc<dyn RadioService> = hardware.clone();
+
+        let mut services = EngineServices::new(TreePath::parse("/radio.show").expect("path"));
+        services.set_button_service(Some(button_service));
+        services.set_radio_service(Some(radio_service));
+        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load radio project");
+        let root = rt.tree().root();
+        let radio = rt
+            .tree()
+            .lookup_sibling(root, NodeName::parse("radio").unwrap())
+            .expect("radio node");
+
+        button_control.set_pressed(HardwareAddress::gpio(20), true);
+        let first = resolve_node_map(&mut rt, radio, "output", "radio output");
+        assert!(first.entries.is_empty());
+
+        rt.tick(1).expect("button stable frame");
+        let output = resolve_node_map(&mut rt, radio, "output", "radio output");
+        assert!(output.entries.contains_key(&SlotMapKey::U32(1)));
+
+        let sent = radio_control.take_sent();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(
+            sent[0].kind(),
+            lpc_shared::hardware::RadioMessageKind::ControlMessage
+        );
+        assert_eq!(sent[0].payload(), &[1, 0, 0, 0, 1, 0, 0, 0]);
+    }
+
     fn render_test_texture_bytes(rt: &mut Engine, product: lpc_model::VisualProduct) -> Vec<u8> {
         rt.render_texture_for_test(
             product,
@@ -2338,17 +2504,26 @@ stable_ms = 1
     }
 
     fn resolve_button_map(rt: &mut Engine, button: NodeId, slot: &str) -> lpc_model::SlotMapDyn {
+        resolve_node_map(rt, button, slot, "button slot")
+    }
+
+    fn resolve_node_map(
+        rt: &mut Engine,
+        node: NodeId,
+        slot: &str,
+        label: &str,
+    ) -> lpc_model::SlotMapDyn {
         let (production, _) = resolve_with_engine_host(
             rt,
             QueryKey::ProducedSlot {
-                node: button,
-                slot: SlotPath::parse(slot).expect("button slot"),
+                node,
+                slot: SlotPath::parse(slot).expect("map slot"),
             },
             ResolveLogLevel::Off,
         )
-        .expect("button production");
+        .expect("map production");
         let SlotData::Map(map) = production.data().clone() else {
-            panic!("button slot should be a map");
+            panic!("{label} should be a map");
         };
         map
     }

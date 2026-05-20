@@ -9,16 +9,13 @@ use crate::{
 };
 
 /// Authored fixture node definition.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Slotted)]
+#[derive(Debug, Clone, PartialEq, Slotted)]
 pub struct FixtureDef {
     /// Full-frame render size used when materializing the fixture input.
-    #[serde(default = "default_render_size")]
     pub render_size: Dim2uSlot,
     /// Authored slot bindings for fixture inputs.
-    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     pub bindings: BindingDefs,
     /// Visual sampling strategy.
-    #[serde(default)]
     pub sampling: ValueSlot<FixtureSamplingConfig>,
     /// Fixture mapping definition.
     pub mapping: EnumSlot<MappingConfig>,
@@ -27,11 +24,24 @@ pub struct FixtureDef {
     /// Texture-space 2D affine transform.
     pub transform: Affine2dSlot,
     /// Brightness level (0-255).
-    #[serde(default = "default_brightness")]
     pub brightness: OptionSlot<ValueSlot<u32>>,
     /// Enable gamma correction.
-    #[serde(default = "default_gamma_correction")]
     pub gamma_correction: OptionSlot<ValueSlot<bool>>,
+}
+
+impl Default for FixtureDef {
+    fn default() -> Self {
+        Self {
+            render_size: default_render_size(),
+            bindings: BindingDefs::default(),
+            sampling: ValueSlot::new(FixtureSamplingConfig::default()),
+            mapping: EnumSlot::default(),
+            color_order: ValueSlot::default(),
+            transform: Affine2dSlot::default(),
+            brightness: default_brightness(),
+            gamma_correction: default_gamma_correction(),
+        }
+    }
 }
 
 impl FixtureDef {

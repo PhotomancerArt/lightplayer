@@ -176,6 +176,15 @@ where
                 data_kind(other)
             ))),
         },
+        SlotShape::Custom { codec, .. } => match data {
+            SlotDataAccess::Custom(custom) => {
+                write_custom_slot_json(value, *codec, custom, registry)
+            }
+            other => Err(json_mismatch(format!(
+                "slot shape expected custom data, got {}",
+                data_kind(other)
+            ))),
+        },
     }
 }
 
@@ -195,7 +204,7 @@ where
                 field.name.as_str()
             ))
         })?;
-        if should_omit_json_field(&field.shape, data, registry) {
+        if should_omit_field(&field.shape, data, registry) {
             continue;
         }
         write_shape_json(
@@ -280,7 +289,7 @@ where
     }
 }
 
-fn should_omit_json_field(
+fn should_omit_field(
     shape: &SlotShape,
     data: SlotDataAccess<'_>,
     registry: &SlotShapeRegistry,
@@ -288,13 +297,13 @@ fn should_omit_json_field(
     match (shape, data) {
         (SlotShape::Ref { id }, data) => registry
             .get(id)
-            .is_some_and(|shape| should_omit_json_field(shape, data, registry)),
+            .is_some_and(|shape| should_omit_field(shape, data, registry)),
         (_, SlotDataAccess::Option(option)) => option.data().is_none(),
         (SlotShape::Record { fields, .. }, SlotDataAccess::Record(record)) => {
             fields.iter().enumerate().all(|(index, field)| {
                 record
                     .field(index)
-                    .is_some_and(|data| should_omit_json_field(&field.shape, data, registry))
+                    .is_some_and(|data| should_omit_field(&field.shape, data, registry))
             })
         }
         (SlotShape::Map { .. }, SlotDataAccess::Map(map)) => map.keys().is_empty(),
@@ -380,6 +389,13 @@ fn write_shape_toml(
                 data_kind(other)
             ))),
         },
+        SlotShape::Custom { codec, .. } => match data {
+            SlotDataAccess::Custom(custom) => write_custom_slot_toml(*codec, custom, registry),
+            other => Err(SlotDataWriteError::mismatch(format!(
+                "slot shape expected custom data, got {}",
+                data_kind(other)
+            ))),
+        },
     }
 }
 
@@ -396,7 +412,7 @@ fn write_record_fields_toml(
                 field.name.as_str()
             ))
         })?;
-        if matches!(data, SlotDataAccess::Option(option) if option.data().is_none()) {
+        if should_omit_field(&field.shape, data, registry) {
             continue;
         }
         table.insert(
@@ -807,7 +823,40 @@ fn data_kind(data: SlotDataAccess<'_>) -> &'static str {
         SlotDataAccess::Map(_) => "map",
         SlotDataAccess::Enum(_) => "enum",
         SlotDataAccess::Option(_) => "option",
+        SlotDataAccess::Custom(_) => "custom",
     }
+}
+
+fn write_custom_slot_json<W>(
+    value: SlotValueWriter<'_, W>,
+    codec: SlotShapeId,
+    data: &dyn crate::SlotCustomAccess,
+    registry: &SlotShapeRegistry,
+) -> Result<(), SlotWriteError<W::Error>>
+where
+    W: SlotWrite,
+{
+    if data.custom_codec_id() != codec {
+        return Err(json_mismatch(format!(
+            "slot data custom codec {} does not match shape codec {codec}",
+            data.custom_codec_id()
+        )));
+    }
+    crate::slot_codec::custom_slot_codec::write_custom_slot_json(codec, data, registry, value)
+}
+
+fn write_custom_slot_toml(
+    codec: SlotShapeId,
+    data: &dyn crate::SlotCustomAccess,
+    registry: &SlotShapeRegistry,
+) -> Result<toml::Value, SlotDataWriteError> {
+    if data.custom_codec_id() != codec {
+        return Err(SlotDataWriteError::mismatch(format!(
+            "slot data custom codec {} does not match shape codec {codec}",
+            data.custom_codec_id()
+        )));
+    }
+    crate::slot_codec::custom_slot_codec::write_custom_slot_toml(codec, data, registry)
 }
 
 #[cfg(test)]

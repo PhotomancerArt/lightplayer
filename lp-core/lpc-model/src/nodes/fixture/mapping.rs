@@ -9,8 +9,7 @@ use crate::{
 };
 
 /// Fixture-to-texture mapping authored on a fixture definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Slotted)]
 pub enum MappingConfig {
     /// No authored fixture mapping has been selected yet.
     #[default]
@@ -24,8 +23,7 @@ pub enum MappingConfig {
 }
 
 /// Specifies one path for a fixture.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Slotted)]
 pub enum PathSpec {
     /// A display made of concentric rings of lamps, usually LEDs on a PCB.
     #[default]

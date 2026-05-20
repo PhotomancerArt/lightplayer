@@ -1,30 +1,23 @@
-use serde::{Deserialize, Serialize};
-
 use super::PlaylistEntry;
 use crate::{BindingDefs, MapSlot, PositiveF32, PositiveF32Slot, Slotted, ValueSlot};
 
 /// Authored playlist visual selector node definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
+#[derive(Debug, Clone, PartialEq, Slotted)]
 pub struct PlaylistDef {
     /// Authored slot bindings for playlist-level inputs and visual output.
-    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     pub bindings: BindingDefs,
 
     /// Global graph time in seconds.
     #[slot(consumed)]
-    #[serde(default = "default_time")]
     pub time: ValueSlot<f32>,
 
     /// Entry shown when no triggered sequence is active.
-    #[serde(default = "default_idle_entry")]
     pub idle_entry: ValueSlot<u32>,
 
     /// Default outgoing crossfade duration in seconds.
-    #[serde(default = "default_fade")]
     pub default_fade: PositiveF32Slot,
 
     /// Authored entries keyed by stable playlist position.
-    #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
     pub entries: MapSlot<u32, PlaylistEntry>,
 }
 

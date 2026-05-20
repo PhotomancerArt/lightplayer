@@ -549,6 +549,7 @@ fn revision_for_data(data: SlotDataAccess<'_>) -> Revision {
         SlotDataAccess::Map(map) => map.keys_revision(),
         SlotDataAccess::Enum(en) => en.variant_revision(),
         SlotDataAccess::Option(option) => option.presence_revision(),
+        SlotDataAccess::Custom(custom) => custom.custom_revision(),
     }
 }
 

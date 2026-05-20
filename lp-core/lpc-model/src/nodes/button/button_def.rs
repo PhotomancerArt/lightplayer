@@ -1,5 +1,3 @@
-use serde::{Deserialize, Serialize};
-
 use crate::{BindingDefs, ControlMessage, HardwareEndpointSpec, MapSlot, Slotted, ValueSlot};
 
 pub const DEFAULT_BUTTON_ENDPOINT_SPEC: &str = "button:gpio:D9";
@@ -9,22 +7,18 @@ pub const DEFAULT_BUTTON_ENDPOINT_SPEC: &str = "button:gpio:D9";
 /// The button is exposed as three stable-key control-message maps:
 /// `down` for the press transition, `held` while the button remains pressed,
 /// and `up` for the release transition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
+#[derive(Debug, Clone, PartialEq, Slotted)]
 pub struct ButtonDef {
     /// Authored slot bindings for button outputs.
-    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     pub bindings: BindingDefs,
 
     /// Hardware endpoint spec, for example `button:gpio:D9`.
-    #[serde(default = "default_endpoint")]
     pub endpoint: ValueSlot<HardwareEndpointSpec>,
 
     /// Stable message id used as the key and payload id for this button.
-    #[serde(default = "default_id")]
     pub id: ValueSlot<u32>,
 
     /// Debounce duration in milliseconds.
-    #[serde(default = "default_stable_ms")]
     pub stable_ms: ValueSlot<u32>,
 }
 
@@ -52,22 +46,19 @@ impl ButtonDef {
 }
 
 /// Runtime button state published to shader-compatible control maps.
-#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, Slotted)]
+#[derive(Debug, Clone, Default, PartialEq, Slotted)]
 #[slot(default_policy = "read_only_transient")]
 pub struct ButtonState {
     /// Present for one tick when the button transitions to pressed.
     #[slot(produced, map(key = "u32", value_ref = "lp::control::Message"))]
-    #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
     pub down: MapSlot<u32, ControlMessage>,
 
     /// Present while the button is pressed.
     #[slot(produced, map(key = "u32", value_ref = "lp::control::Message"))]
-    #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
     pub held: MapSlot<u32, ControlMessage>,
 
     /// Present for one tick when the button transitions to released.
     #[slot(produced, map(key = "u32", value_ref = "lp::control::Message"))]
-    #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
     pub up: MapSlot<u32, ControlMessage>,
 }
 

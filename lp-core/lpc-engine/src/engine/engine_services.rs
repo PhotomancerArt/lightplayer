@@ -13,7 +13,9 @@ use hashbrown::HashMap;
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
 use lpc_model::{HardwareEndpointSpec, Revision, TreePath};
 use lpc_shared::error::OutputError;
-use lpc_shared::hardware::{ButtonConfig, ButtonInput, HardwareEndpointError, HardwareSystem};
+use lpc_shared::hardware::{
+    ButtonConfig, ButtonInput, HardwareEndpointError, HardwareSystem, RadioConfig, RadioDevice,
+};
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::time::TimeProvider;
 
@@ -56,6 +58,7 @@ pub struct EngineServices {
     output_provider: Option<Box<dyn OutputProvider>>,
     time_provider: Option<Rc<dyn TimeProvider>>,
     button_service: Option<Rc<dyn ButtonService>>,
+    radio_service: Option<Rc<dyn RadioService>>,
     /// Fixture-written buffers paired with authored output endpoint configuration.
     output_sinks: HashMap<RuntimeBufferId, OutputSinkBinding>,
 }
@@ -79,6 +82,25 @@ impl ButtonService for HardwareSystem {
     }
 }
 
+/// Hardware radio access used by runtime input/output bridge nodes.
+pub trait RadioService {
+    fn open_radio_by_spec(
+        &self,
+        spec: &HardwareEndpointSpec,
+        config: RadioConfig,
+    ) -> Result<Box<dyn RadioDevice>, HardwareEndpointError>;
+}
+
+impl RadioService for HardwareSystem {
+    fn open_radio_by_spec(
+        &self,
+        spec: &HardwareEndpointSpec,
+        config: RadioConfig,
+    ) -> Result<Box<dyn RadioDevice>, HardwareEndpointError> {
+        HardwareSystem::open_radio_by_spec(self, spec, config)
+    }
+}
+
 impl EngineServices {
     pub fn new(project_root: TreePath) -> Self {
         Self {
@@ -86,6 +108,7 @@ impl EngineServices {
             output_provider: None,
             time_provider: None,
             button_service: None,
+            radio_service: None,
             output_sinks: HashMap::new(),
         }
     }
@@ -114,6 +137,14 @@ impl EngineServices {
 
     pub fn button_service(&self) -> Option<Rc<dyn ButtonService>> {
         self.button_service.clone()
+    }
+
+    pub fn set_radio_service(&mut self, service: Option<Rc<dyn RadioService>>) {
+        self.radio_service = service;
+    }
+
+    pub fn radio_service(&self) -> Option<Rc<dyn RadioService>> {
+        self.radio_service.clone()
     }
 
     /// Register an output sink: fixture pushes u16 RGB channel bytes into `buffer_id`; flush writes

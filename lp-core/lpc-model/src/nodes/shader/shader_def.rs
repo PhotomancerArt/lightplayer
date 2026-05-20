@@ -1,31 +1,22 @@
 use alloc::string::String;
-use serde::{Deserialize, Serialize};
 
 use crate::nodes::shader::{GlslOpts, ShaderParamDef, ShaderSlotDef, ShaderSource};
 use crate::{BindingDefs, EnumSlot, MapSlot, RenderOrderSlot, Slotted};
 
 /// Authored shader node definition.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Slotted)]
 pub struct ShaderDef {
     /// Authored shader source.
     pub source: EnumSlot<ShaderSource>,
     /// Render order - lower numbers render first (default 0)
     pub render_order: RenderOrderSlot,
     /// Authored slot bindings for shader inputs and outputs.
-    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     pub bindings: BindingDefs,
     /// GLSL compilation options
-    #[serde(default)]
     pub glsl_opts: GlslOpts,
-    #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
     pub param_defs: MapSlot<String, ShaderParamDef>,
     /// Shader-consumed slots exposed to the resolver and GLSL uniform block.
-    #[serde(
-        default,
-        rename = "consumed",
-        skip_serializing_if = "MapSlot::is_empty"
-    )]
+    #[slot(name = "consumed")]
     pub consumed_slots: MapSlot<String, ShaderSlotDef>,
 }
 

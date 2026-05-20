@@ -163,7 +163,7 @@ pub(super) fn coerce_expr(
         (LpsType::Bool, LpsType::Bool) => Ok(expr),
         _ => Err(Diagnostic::error(
             arena.expr_span(expr),
-            format!("cannot coerce {:?} to {:?}", expr_ty, target),
+            format!("cannot coerce {expr_ty:?} to {target:?}"),
         )),
     }
 }

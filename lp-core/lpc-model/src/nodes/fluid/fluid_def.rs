@@ -1,5 +1,3 @@
-use serde::{Deserialize, Serialize};
-
 use crate::{
     BindingDefs, Dim2u, Dim2uSlot, FluidEmitter, MapSlot, PositiveF32, PositiveF32Slot, Ratio,
     RatioSlot, Slotted, ValueSlot,
@@ -10,35 +8,28 @@ use crate::{
 /// `emitters` is real authored/default slot data and a consumed dataflow slot.
 /// Most projects bind it from compute/input nodes, but inline emitter maps are
 /// useful for simple scenes and tests.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
+#[derive(Debug, Clone, PartialEq, Slotted)]
 pub struct FluidDef {
     /// Authored slot bindings for fluid inputs and visual output.
-    #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     pub bindings: BindingDefs,
 
     /// Solver grid size.
-    #[serde(default = "default_size")]
     pub size: Dim2uSlot,
 
     /// Jacobi iterations per solver step.
-    #[serde(default = "default_solver_iterations")]
     pub solver_iterations: ValueSlot<u32>,
 
     /// Target simulation update rate in Hz.
-    #[serde(default = "default_step_hz")]
     pub step_hz: PositiveF32Slot,
 
     /// Per-step color fade.
-    #[serde(default = "default_fade_speed")]
     pub fade_speed: RatioSlot,
 
     /// Fluid viscosity.
-    #[serde(default = "default_viscosity")]
     pub viscosity: PositiveF32Slot,
 
     /// Simulation time in seconds.
     #[slot(consumed)]
-    #[serde(default = "default_time")]
     pub time: ValueSlot<f32>,
 
     /// Stable-key emitter map consumed by the fluid simulation.
@@ -47,7 +38,6 @@ pub struct FluidDef {
         merge = "by_key",
         map(key = "u32", value_ref = "lp::fluid::Emitter")
     )]
-    #[serde(default, skip_serializing_if = "MapSlot::is_empty")]
     pub emitters: MapSlot<u32, FluidEmitter>,
 }
 

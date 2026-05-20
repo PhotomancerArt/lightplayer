@@ -98,13 +98,10 @@ impl DivMode {
 }
 
 /// GLSL compilation options (per-shader-node)
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, Slotted)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Slotted)]
 pub struct GlslOpts {
-    #[serde(default)]
     pub add_sub: ValueSlot<AddSubMode>,
-    #[serde(default)]
     pub mul: ValueSlot<MulMode>,
-    #[serde(default)]
     pub div: ValueSlot<DivMode>,
 }
 

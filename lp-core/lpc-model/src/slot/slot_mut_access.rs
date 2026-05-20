@@ -1,3 +1,4 @@
+use super::SlotCustomAccess;
 use crate::{
     LpValue, Revision, SlotAccess, SlotData, SlotEnum, SlotMapDyn, SlotMapKey, SlotOptionDyn,
     SlotRecord, SlotShape, SlotShapeRegistry, SlotValue, SlotVariantShape, ValueRootError,
@@ -25,6 +26,7 @@ pub enum SlotDataMutAccess<'a> {
     Map(&'a mut dyn MapSlotMutAccess),
     Enum(&'a mut dyn SlotEnumDefaultVariant),
     Option(&'a mut dyn SlotOptionMutAccess),
+    Custom(&'a mut dyn SlotCustomMutAccess),
 }
 
 /// Mutable access to an atomic slot value.
@@ -94,6 +96,11 @@ pub trait SlotOptionMutAccess {
         registry: &SlotShapeRegistry,
         some_shape: &SlotShape,
     ) -> Result<(), SlotMutationError>;
+}
+
+/// Mutable access to a custom-coded slot subtree.
+pub trait SlotCustomMutAccess: SlotCustomAccess {
+    fn as_any_mut(&mut self) -> &mut dyn core::any::Any;
 }
 
 /// A map value that can be exposed through mutable slot traversal.

@@ -1,5 +1,4 @@
 use alloc::string::String;
-use serde::{Deserialize, Serialize};
 
 use crate::{Slotted, SourcePath, SourcePathSlot, ValueSlot};
 
@@ -7,9 +6,8 @@ use crate::{Slotted, SourcePath, SourcePathSlot, ValueSlot};
 ///
 /// File-backed sources use `path` and resolve relative to the containing node
 /// definition artifact. Inline GLSL uses `glsl`.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
+#[derive(Debug, Clone, PartialEq, Slotted)]
 #[slot(enum_encoding = "external", rename_all = "snake_case")]
-#[serde(rename_all = "snake_case")]
 pub enum ShaderSource {
     #[default]
     Path(SourcePathSlot),
@@ -43,28 +41,45 @@ impl ShaderSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{EnumSlot, FieldSlotMut, SlotEnumShape, SlotShapeRegistry};
 
     #[test]
     fn shader_source_parses_path() {
-        let source: ShaderSource = toml::from_str(
+        let source = read_source(
             r#"
 path = "./visual.glsl"
 "#,
-        )
-        .expect("source");
+        );
 
         assert_eq!(source.path_value().unwrap().as_str(), "./visual.glsl");
     }
 
     #[test]
     fn shader_source_parses_glsl() {
-        let source: ShaderSource = toml::from_str(
+        let source = read_source(
             r#"
 glsl = "vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }"
 "#,
-        )
-        .expect("source");
+        );
 
         assert!(source.glsl_value().unwrap().contains("render"));
+    }
+
+    fn read_source(text: &str) -> ShaderSource {
+        let registry = SlotShapeRegistry::default();
+        let value = toml::from_str::<toml::Value>(text).unwrap();
+        let mut reader = crate::slot_codec::SlotReader::new(
+            crate::slot_codec::TomlSyntaxSource::new(&value).unwrap(),
+            &registry,
+        );
+        let mut source = EnumSlot::new(ShaderSource::default());
+        crate::slot_codec::apply_reader_to_slot(
+            source.slot_field_data_mut(),
+            &ShaderSource::slot_enum_shape(),
+            &registry,
+            reader.value(),
+        )
+        .unwrap();
+        source.into_inner()
     }
 }

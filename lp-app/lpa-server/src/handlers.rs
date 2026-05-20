@@ -7,7 +7,7 @@ use crate::project_manager::ProjectManager;
 use crate::server::MemoryStatsFn;
 use alloc::{format, rc::Rc, sync::Arc, vec::Vec};
 use core::cell::RefCell;
-use lpc_engine::{ButtonService, LpGraphics};
+use lpc_engine::{ButtonService, LpGraphics, RadioService};
 use lpc_model::{AsLpPath, LpPath, LpPathBuf};
 use lpc_shared::backtrace;
 use lpc_shared::output::OutputProvider;
@@ -42,6 +42,7 @@ pub fn handle_client_message(
     memory_stats: Option<&MemoryStatsFn>,
     time_provider: Option<Rc<dyn TimeProvider>>,
     button_service: Option<Rc<dyn ButtonService>>,
+    radio_service: Option<Rc<dyn RadioService>>,
     graphics: Arc<dyn LpGraphics>,
     client_msg: ClientMessage,
     theoretical_fps: Option<f32>,
@@ -59,6 +60,7 @@ pub fn handle_client_message(
             memory_stats,
             time_provider,
             button_service,
+            radio_service,
             graphics,
             path.as_path(),
         )?,
@@ -141,6 +143,7 @@ fn handle_load_project(
     memory_stats: Option<&MemoryStatsFn>,
     time_provider: Option<Rc<dyn TimeProvider>>,
     button_service: Option<Rc<dyn ButtonService>>,
+    radio_service: Option<Rc<dyn RadioService>>,
     graphics: Arc<dyn LpGraphics>,
     path: &LpPath,
 ) -> Result<ServerMessagePayload, ServerError> {
@@ -154,6 +157,7 @@ fn handle_load_project(
         memory_stats.copied(),
         time_provider,
         button_service,
+        radio_service,
         graphics,
     )?;
     backtrace::set_oom_context("server handler: load project memory log");
