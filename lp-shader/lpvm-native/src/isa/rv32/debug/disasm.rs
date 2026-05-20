@@ -154,7 +154,8 @@ mod tests {
                 LpirOp::Return {
                     values: VRegRange { start: 3, count: 1 },
                 },
-            ],
+            ]
+            .into(),
             vreg_pool: vec![],
         };
         // nop encoded as addi x0,x0,0 — any valid word works for the test

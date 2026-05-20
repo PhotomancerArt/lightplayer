@@ -356,7 +356,7 @@ mod tests {
             sret_arg: Some(VReg(1)),
             vreg_types: vec![IrType::Pointer, IrType::Pointer],
             slots: vec![],
-            body: vec![],
+            body: vec![].into(),
             vreg_pool: vec![],
         };
         let mut ir = LpirModule::default();

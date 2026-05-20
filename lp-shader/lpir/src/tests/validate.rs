@@ -93,7 +93,7 @@ fn validate_err_break_outside_loop() {
         sret_arg: None,
         vreg_types: Vec::new(),
         slots: Vec::new(),
-        body: vec![LpirOp::Break],
+        body: vec![LpirOp::Break].into(),
         vreg_pool: Vec::new(),
     };
     let m = LpirModule {
@@ -147,7 +147,8 @@ fn validate_err_undefined_vreg() {
             dst: VReg(2),
             lhs: VReg(1),
             rhs: VReg(1),
-        }],
+        }]
+        .into(),
         vreg_pool: Vec::new(),
     };
     let m = LpirModule {
@@ -173,7 +174,8 @@ fn validate_err_copy_type_mismatch() {
         body: vec![LpirOp::Copy {
             dst: VReg(2),
             src: VReg(1),
-        }],
+        }]
+        .into(),
         vreg_pool: Vec::new(),
     };
     let m = LpirModule {
@@ -225,7 +227,8 @@ fn validate_err_callee_oob() {
             callee: CalleeRef::Local(FuncId(3)),
             args: VRegRange { start: 0, count: 0 },
             results: VRegRange { start: 0, count: 0 },
-        }],
+        }]
+        .into(),
         vreg_pool: Vec::new(),
     };
     let m = LpirModule {
@@ -247,7 +250,7 @@ fn validate_err_continue_outside_loop() {
         sret_arg: None,
         vreg_types: Vec::new(),
         slots: Vec::new(),
-        body: vec![LpirOp::Continue],
+        body: vec![LpirOp::Continue].into(),
         vreg_pool: Vec::new(),
     };
     let m = LpirModule {
@@ -319,7 +322,8 @@ fn validate_err_return_value_type() {
             LpirOp::Return {
                 values: VRegRange { start: 0, count: 1 },
             },
-        ],
+        ]
+        .into(),
         vreg_pool: vec![VReg(1)],
     };
     let m = LpirModule {
@@ -343,7 +347,8 @@ fn validate_err_vreg_pool_oob() {
         slots: Vec::new(),
         body: vec![LpirOp::Return {
             values: VRegRange { start: 0, count: 1 },
-        }],
+        }]
+        .into(),
         vreg_pool: Vec::new(),
     };
     let m = LpirModule {
@@ -444,7 +449,8 @@ fn validate_err_slot_addr_oob() {
         body: vec![LpirOp::SlotAddr {
             dst: VReg(1),
             slot: crate::types::SlotId(0),
-        }],
+        }]
+        .into(),
         vreg_pool: Vec::new(),
     };
     let m = LpirModule {
@@ -468,7 +474,8 @@ fn validate_err_sret_with_return_types() {
         slots: Vec::new(),
         body: vec![LpirOp::Return {
             values: VRegRange { start: 0, count: 0 },
-        }],
+        }]
+        .into(),
         vreg_pool: Vec::new(),
     };
     let m = LpirModule {
@@ -495,7 +502,8 @@ fn validate_err_sret_wrong_vreg_index() {
         slots: Vec::new(),
         body: vec![LpirOp::Return {
             values: VRegRange { start: 0, count: 0 },
-        }],
+        }]
+        .into(),
         vreg_pool: Vec::new(),
     };
     let m = LpirModule {
@@ -525,7 +533,8 @@ fn validate_err_sret_return_values() {
             LpirOp::Return {
                 values: VRegRange { start: 0, count: 1 },
             },
-        ],
+        ]
+        .into(),
         vreg_pool: vec![VReg(2)],
     };
     let m = LpirModule {

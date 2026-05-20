@@ -10,4 +10,5 @@ workspace = true
 
 [dependencies]
 libm = "0.2"
+lp-collection = { workspace = true }
 lps-q32 = { path = "../lps-q32" }

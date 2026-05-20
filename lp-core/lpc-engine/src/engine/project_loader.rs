@@ -17,7 +17,7 @@ use lpc_model::{
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lpfs::lp_path::{LpPath, LpPathBuf};
 
-use crate::artifact::ArtifactLocation;
+use crate::artifact::{ArtifactLocation, ArtifactState};
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::node::{NodeDefHandle, TreeError};
 use crate::nodes::{
@@ -63,7 +63,8 @@ struct LoadedNode {
     artifact_path: LpPathBuf,
     source_base_path: LpPathBuf,
     id: NodeId,
-    config: NodeDef,
+    kind: NodeKind,
+    provides_default_time_bus: bool,
     ownership: LoadedNodeOwnership,
 }
 
@@ -211,6 +212,8 @@ impl ProjectLoader {
                 reason: format!("load node artifact payload: {e:?}"),
             })?;
         let ty = node_kind_name(&config, artifact_path.as_path())?;
+        let kind = config.kind();
+        let provides_default_time_bus = node_provides_default_time_bus(&config);
         let leaf_id = runtime
             .tree_mut()
             .add_child(
@@ -233,7 +236,8 @@ impl ProjectLoader {
             artifact_path: artifact_path.clone(),
             source_base_path: source_base_path.clone(),
             id: leaf_id,
-            config: config.clone(),
+            kind,
+            provides_default_time_bus,
             ownership,
         });
 
@@ -271,348 +275,372 @@ impl ProjectLoader {
         R::Err: core::fmt::Debug,
     {
         for node in loaded_nodes {
-            if let NodeDef::Clock(config) = &node.config {
-                runtime
-                    .attach_runtime_node(node.id, Box::new(ClockNode::new(node.id)), frame)
-                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                        path: node.artifact_path.as_str().to_string(),
-                        reason: format!("attach clock runtime: {e}"),
-                    })?;
-                register_target_binding(
-                    runtime,
-                    loaded_nodes,
-                    node,
-                    "seconds",
-                    &config.bindings,
-                    frame,
-                )?;
-                register_target_binding(
-                    runtime,
-                    loaded_nodes,
-                    node,
-                    "delta_seconds",
-                    &config.bindings,
-                    frame,
-                )?;
-                register_clock_default_time_binding(runtime, node, &config.bindings, frame)?;
+            if node.kind != NodeKind::Clock {
+                continue;
             }
+            let NodeDef::Clock(config) = loaded_node_config(runtime, node)?.clone() else {
+                continue;
+            };
+            runtime
+                .attach_runtime_node(node.id, Box::new(ClockNode::new(node.id)), frame)
+                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                    path: node.artifact_path.as_str().to_string(),
+                    reason: format!("attach clock runtime: {e}"),
+                })?;
+            register_target_binding(
+                runtime,
+                loaded_nodes,
+                node,
+                "seconds",
+                &config.bindings,
+                frame,
+            )?;
+            register_target_binding(
+                runtime,
+                loaded_nodes,
+                node,
+                "delta_seconds",
+                &config.bindings,
+                frame,
+            )?;
+            register_clock_default_time_binding(runtime, node, &config.bindings, frame)?;
         }
 
         for node in loaded_nodes {
-            if let NodeDef::Button(config) = &node.config {
-                runtime
-                    .attach_runtime_node(node.id, Box::new(ButtonNode::new()), frame)
-                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                        path: node.artifact_path.as_str().to_string(),
-                        reason: format!("attach button runtime: {e}"),
-                    })?;
-                register_target_binding(
-                    runtime,
-                    loaded_nodes,
-                    node,
-                    "down",
-                    &config.bindings,
-                    frame,
-                )?;
-                register_target_binding(
-                    runtime,
-                    loaded_nodes,
-                    node,
-                    "held",
-                    &config.bindings,
-                    frame,
-                )?;
-                register_target_binding(
-                    runtime,
-                    loaded_nodes,
-                    node,
-                    "up",
-                    &config.bindings,
-                    frame,
-                )?;
+            if node.kind != NodeKind::Button {
+                continue;
             }
+            let NodeDef::Button(config) = loaded_node_config(runtime, node)?.clone() else {
+                continue;
+            };
+            runtime
+                .attach_runtime_node(node.id, Box::new(ButtonNode::new()), frame)
+                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                    path: node.artifact_path.as_str().to_string(),
+                    reason: format!("attach button runtime: {e}"),
+                })?;
+            register_target_binding(runtime, loaded_nodes, node, "down", &config.bindings, frame)?;
+            register_target_binding(runtime, loaded_nodes, node, "held", &config.bindings, frame)?;
+            register_target_binding(runtime, loaded_nodes, node, "up", &config.bindings, frame)?;
         }
 
         for node in loaded_nodes {
-            if let NodeDef::ControlRadio(config) = &node.config {
-                runtime
-                    .attach_runtime_node(node.id, Box::new(ControlRadioNode::new()), frame)
-                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                        path: node.artifact_path.as_str().to_string(),
-                        reason: format!("attach control radio runtime: {e}"),
-                    })?;
+            if node.kind != NodeKind::ControlRadio {
+                continue;
+            }
+            let NodeDef::ControlRadio(config) = loaded_node_config(runtime, node)?.clone() else {
+                continue;
+            };
+            runtime
+                .attach_runtime_node(node.id, Box::new(ControlRadioNode::new()), frame)
+                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                    path: node.artifact_path.as_str().to_string(),
+                    reason: format!("attach control radio runtime: {e}"),
+                })?;
+            register_optional_source_binding(
+                runtime,
+                loaded_nodes,
+                node,
+                "input",
+                &config.bindings,
+                frame,
+            )?;
+            register_target_binding(
+                runtime,
+                loaded_nodes,
+                node,
+                "output",
+                &config.bindings,
+                frame,
+            )?;
+        }
+
+        for node in loaded_nodes {
+            if node.kind != NodeKind::Texture {
+                continue;
+            }
+            runtime
+                .attach_runtime_node(node.id, Box::new(TextureNode::new(node.id)), frame)
+                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                    path: node.artifact_path.as_str().to_string(),
+                    reason: format!("attach texture runtime: {e}"),
+                })?;
+        }
+
+        for node in loaded_nodes {
+            if node.kind != NodeKind::Output {
+                continue;
+            }
+            let NodeDef::Output(config) = loaded_node_config(runtime, node)?.clone() else {
+                continue;
+            };
+            runtime
+                .attach_runtime_node(node.id, Box::new(OutputNode::new()), frame)
+                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                    path: node.artifact_path.as_str().to_string(),
+                    reason: format!("attach output runtime: {e}"),
+                })?;
+            let sink_id = runtime
+                .runtime_output_sink_buffer_id(node.id)
+                .ok_or_else(|| ProjectLoadError::InvalidSourcePath {
+                    path: node.artifact_path.as_str().to_string(),
+                    reason: String::from("output runtime node produced no sink buffer"),
+                })?;
+            runtime
+                .services_mut()
+                .register_output_sink(sink_id, &config);
+            runtime
+                .add_binding(
+                    BindingDraft {
+                        source: BindingSource::Literal(LpValue::F32(0.0)),
+                        target: BindingTarget::ConsumedSlot {
+                            node: node.id,
+                            slot: demand_input_path(),
+                        },
+                        priority: BindingPriority::new(0),
+                        kind: Kind::Color,
+                        owner: node.id,
+                    },
+                    frame,
+                )
+                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                    path: node.artifact_path.as_str().to_string(),
+                    reason: format!("bind output demand slot: {e}"),
+                })?;
+            register_source_binding(
+                runtime,
+                loaded_nodes,
+                node,
+                "input",
+                &config.bindings,
+                frame,
+            )?;
+            runtime.add_demand_root(node.id);
+        }
+
+        for node in loaded_nodes {
+            if node.kind != NodeKind::Shader {
+                continue;
+            }
+            let NodeDef::Shader(config) = loaded_node_config(runtime, node)?.clone() else {
+                continue;
+            };
+            let glsl_source =
+                read_shader_source(root, &node.source_base_path, config.shader_source())?;
+            let bindings = config.bindings.clone();
+            let consumed_slot_names = config
+                .consumed_slots
+                .entries
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>();
+            let needs_default_time_binding = shader_needs_default_time_binding(&config);
+            runtime
+                .attach_runtime_node(
+                    node.id,
+                    Box::new(ShaderNode::new(node.id, config, glsl_source)),
+                    frame,
+                )
+                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                    path: node.artifact_path.as_str().to_string(),
+                    reason: format!("attach shader runtime: {e}"),
+                })?;
+            register_target_binding(runtime, loaded_nodes, node, "output", &bindings, frame)?;
+            register_visual_default_output_binding(runtime, node, &bindings, frame)?;
+            for name in consumed_slot_names {
                 register_optional_source_binding(
                     runtime,
                     loaded_nodes,
                     node,
-                    "input",
-                    &config.bindings,
+                    name.as_str(),
+                    &bindings,
                     frame,
                 )?;
-                register_target_binding(
-                    runtime,
-                    loaded_nodes,
-                    node,
-                    "output",
-                    &config.bindings,
-                    frame,
-                )?;
+            }
+            if needs_default_time_binding {
+                add_visual_default_time_binding(runtime, node, frame)?;
             }
         }
 
         for node in loaded_nodes {
-            if let NodeDef::Texture(_config) = &node.config {
-                runtime
-                    .attach_runtime_node(node.id, Box::new(TextureNode::new(node.id)), frame)
-                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                        path: node.artifact_path.as_str().to_string(),
-                        reason: format!("attach texture runtime: {e}"),
-                    })?;
+            if node.kind != NodeKind::ComputeShader {
+                continue;
             }
-        }
-
-        for node in loaded_nodes {
-            if let NodeDef::Output(config) = &node.config {
-                runtime
-                    .attach_runtime_node(node.id, Box::new(OutputNode::new()), frame)
-                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                        path: node.artifact_path.as_str().to_string(),
-                        reason: format!("attach output runtime: {e}"),
-                    })?;
-                let sink_id = runtime
-                    .runtime_output_sink_buffer_id(node.id)
-                    .ok_or_else(|| ProjectLoadError::InvalidSourcePath {
-                        path: node.artifact_path.as_str().to_string(),
-                        reason: String::from("output runtime node produced no sink buffer"),
-                    })?;
-                runtime.services_mut().register_output_sink(sink_id, config);
-                runtime
-                    .add_binding(
-                        BindingDraft {
-                            source: BindingSource::Literal(LpValue::F32(0.0)),
-                            target: BindingTarget::ConsumedSlot {
-                                node: node.id,
-                                slot: demand_input_path(),
-                            },
-                            priority: BindingPriority::new(0),
-                            kind: Kind::Color,
-                            owner: node.id,
-                        },
-                        frame,
-                    )
-                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                        path: node.artifact_path.as_str().to_string(),
-                        reason: format!("bind output demand slot: {e}"),
-                    })?;
-                register_source_binding(
-                    runtime,
-                    loaded_nodes,
-                    node,
-                    "input",
-                    &config.bindings,
-                    frame,
-                )?;
-                runtime.add_demand_root(node.id);
-            }
-        }
-
-        for node in loaded_nodes {
-            if let NodeDef::Shader(config) = &node.config {
-                let glsl_source =
-                    read_shader_source(root, &node.source_base_path, config.shader_source())?;
-                runtime
-                    .attach_runtime_node(
-                        node.id,
-                        Box::new(ShaderNode::new(node.id, config.clone(), glsl_source)),
-                        frame,
-                    )
-                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                        path: node.artifact_path.as_str().to_string(),
-                        reason: format!("attach shader runtime: {e}"),
-                    })?;
-                register_target_binding(
-                    runtime,
-                    loaded_nodes,
-                    node,
-                    "output",
-                    &config.bindings,
-                    frame,
-                )?;
-                register_visual_default_output_binding(runtime, node, &config.bindings, frame)?;
-                for name in config.consumed_slots.entries.keys() {
-                    register_optional_source_binding(
-                        runtime,
-                        loaded_nodes,
-                        node,
-                        name.as_str(),
-                        &config.bindings,
-                        frame,
-                    )?;
-                }
-                register_visual_default_time_binding(runtime, node, config, frame)?;
-            }
-        }
-
-        for node in loaded_nodes {
-            if let NodeDef::ComputeShader(config) = &node.config {
-                let source =
-                    read_shader_source(root, &node.source_base_path, config.shader_source())?;
-                let header = generate_compute_shader_header(config, runtime.slot_shapes())
-                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
+            let NodeDef::ComputeShader(config) = loaded_node_config(runtime, node)?.clone() else {
+                continue;
+            };
+            let source = read_shader_source(root, &node.source_base_path, config.shader_source())?;
+            let header =
+                generate_compute_shader_header(&config, runtime.slot_shapes()).map_err(|e| {
+                    ProjectLoadError::InvalidSourcePath {
                         path: node.artifact_path.as_str().to_string(),
                         reason: format!("generate compute shader header: {e}"),
-                    })?;
-                let glsl_source = format!("{header}\n{source}");
-                runtime
-                    .attach_runtime_node(
-                        node.id,
-                        Box::new(ComputeShaderNode::new(
-                            node.id,
-                            config.clone(),
-                            glsl_source,
-                            frame,
-                        )),
-                        frame,
-                    )
-                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                        path: node.artifact_path.as_str().to_string(),
-                        reason: format!("attach compute shader runtime: {e}"),
-                    })?;
+                    }
+                })?;
+            let glsl_source = format!("{header}\n{source}");
+            let bindings = config.bindings.clone();
+            let consumed_slot_names = config
+                .consumed_slots
+                .entries
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>();
+            let produced_slot_names = config
+                .produced_slots
+                .entries
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>();
+            runtime
+                .attach_runtime_node(
+                    node.id,
+                    Box::new(ComputeShaderNode::new(node.id, config, glsl_source, frame)),
+                    frame,
+                )
+                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                    path: node.artifact_path.as_str().to_string(),
+                    reason: format!("attach compute shader runtime: {e}"),
+                })?;
 
-                for name in config.consumed_slots.entries.keys() {
-                    register_optional_source_binding(
-                        runtime,
-                        loaded_nodes,
-                        node,
-                        name.as_str(),
-                        &config.bindings,
-                        frame,
-                    )?;
-                }
-                for name in config.produced_slots.entries.keys() {
-                    register_target_binding(
-                        runtime,
-                        loaded_nodes,
-                        node,
-                        name.as_str(),
-                        &config.bindings,
-                        frame,
-                    )?;
-                }
+            for name in consumed_slot_names {
+                register_optional_source_binding(
+                    runtime,
+                    loaded_nodes,
+                    node,
+                    name.as_str(),
+                    &bindings,
+                    frame,
+                )?;
             }
-        }
-
-        for node in loaded_nodes {
-            if let NodeDef::Fluid(config) = &node.config {
-                runtime
-                    .attach_runtime_node(node.id, Box::new(FluidNode::new(node.id)), frame)
-                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                        path: node.artifact_path.as_str().to_string(),
-                        reason: format!("attach fluid runtime: {e}"),
-                    })?;
-                register_optional_source_binding(
-                    runtime,
-                    loaded_nodes,
-                    node,
-                    "time",
-                    &config.bindings,
-                    frame,
-                )?;
-                register_fluid_default_time_binding(runtime, loaded_nodes, node, config, frame)?;
-                register_optional_source_binding(
-                    runtime,
-                    loaded_nodes,
-                    node,
-                    "emitters",
-                    &config.bindings,
-                    frame,
-                )?;
+            for name in produced_slot_names {
                 register_target_binding(
                     runtime,
                     loaded_nodes,
                     node,
-                    "output",
-                    &config.bindings,
-                    frame,
-                )?;
-                register_visual_default_output_binding(runtime, node, &config.bindings, frame)?;
-            }
-        }
-
-        for node in loaded_nodes {
-            if let NodeDef::Playlist(config) = &node.config {
-                let entries = playlist_runtime_entries(loaded_nodes, node.id);
-                runtime
-                    .attach_runtime_node(
-                        node.id,
-                        Box::new(PlaylistNode::new(node.id, config.clone(), entries)),
-                        frame,
-                    )
-                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                        path: node.artifact_path.as_str().to_string(),
-                        reason: format!("attach playlist placeholder runtime: {e}"),
-                    })?;
-                register_optional_source_binding(
-                    runtime,
-                    loaded_nodes,
-                    node,
-                    "time",
-                    &config.bindings,
-                    frame,
-                )?;
-                register_target_binding(
-                    runtime,
-                    loaded_nodes,
-                    node,
-                    "output",
-                    &config.bindings,
-                    frame,
-                )?;
-                register_visual_default_output_binding(runtime, node, &config.bindings, frame)?;
-                register_playlist_entry_source_bindings(
-                    runtime,
-                    loaded_nodes,
-                    node,
-                    config,
+                    name.as_str(),
+                    &bindings,
                     frame,
                 )?;
             }
         }
 
         for node in loaded_nodes {
-            if let NodeDef::Fixture(config) = &node.config {
-                runtime
-                    .attach_runtime_node(
-                        node.id,
-                        Box::new(FixtureNode::new(
-                            node.id,
-                            config.mapping.value().clone(),
-                            *config.sampling.value(),
-                            frame,
-                        )),
-                        frame,
-                    )
-                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                        path: node.artifact_path.as_str().to_string(),
-                        reason: format!("attach fixture runtime: {e}"),
-                    })?;
-                register_source_binding(
-                    runtime,
-                    loaded_nodes,
-                    node,
-                    "input",
-                    &config.bindings,
-                    frame,
-                )?;
-                register_target_binding(
-                    runtime,
-                    loaded_nodes,
-                    node,
-                    "output",
-                    &config.bindings,
-                    frame,
-                )?;
+            if node.kind != NodeKind::Fluid {
+                continue;
             }
+            let NodeDef::Fluid(config) = loaded_node_config(runtime, node)?.clone() else {
+                continue;
+            };
+            runtime
+                .attach_runtime_node(node.id, Box::new(FluidNode::new(node.id)), frame)
+                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                    path: node.artifact_path.as_str().to_string(),
+                    reason: format!("attach fluid runtime: {e}"),
+                })?;
+            register_optional_source_binding(
+                runtime,
+                loaded_nodes,
+                node,
+                "time",
+                &config.bindings,
+                frame,
+            )?;
+            register_fluid_default_time_binding(runtime, loaded_nodes, node, &config, frame)?;
+            register_optional_source_binding(
+                runtime,
+                loaded_nodes,
+                node,
+                "emitters",
+                &config.bindings,
+                frame,
+            )?;
+            register_target_binding(
+                runtime,
+                loaded_nodes,
+                node,
+                "output",
+                &config.bindings,
+                frame,
+            )?;
+            register_visual_default_output_binding(runtime, node, &config.bindings, frame)?;
+        }
+
+        for node in loaded_nodes {
+            if node.kind != NodeKind::Playlist {
+                continue;
+            }
+            let NodeDef::Playlist(config) = loaded_node_config(runtime, node)?.clone() else {
+                continue;
+            };
+            let entries = playlist_runtime_entries(loaded_nodes, node.id);
+            register_optional_source_binding(
+                runtime,
+                loaded_nodes,
+                node,
+                "time",
+                &config.bindings,
+                frame,
+            )?;
+            register_target_binding(
+                runtime,
+                loaded_nodes,
+                node,
+                "output",
+                &config.bindings,
+                frame,
+            )?;
+            register_visual_default_output_binding(runtime, node, &config.bindings, frame)?;
+            register_playlist_entry_source_bindings(runtime, loaded_nodes, node, &config, frame)?;
+            runtime
+                .attach_runtime_node(
+                    node.id,
+                    Box::new(PlaylistNode::new(node.id, config, entries)),
+                    frame,
+                )
+                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                    path: node.artifact_path.as_str().to_string(),
+                    reason: format!("attach playlist placeholder runtime: {e}"),
+                })?;
+        }
+
+        for node in loaded_nodes {
+            if node.kind != NodeKind::Fixture {
+                continue;
+            }
+            let NodeDef::Fixture(config) = loaded_node_config(runtime, node)?.clone() else {
+                continue;
+            };
+            runtime
+                .attach_runtime_node(
+                    node.id,
+                    Box::new(FixtureNode::new(
+                        node.id,
+                        config.mapping.value().clone(),
+                        *config.sampling.value(),
+                        frame,
+                    )),
+                    frame,
+                )
+                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                    path: node.artifact_path.as_str().to_string(),
+                    reason: format!("attach fixture runtime: {e}"),
+                })?;
+            register_source_binding(
+                runtime,
+                loaded_nodes,
+                node,
+                "input",
+                &config.bindings,
+                frame,
+            )?;
+            register_target_binding(
+                runtime,
+                loaded_nodes,
+                node,
+                "output",
+                &config.bindings,
+                frame,
+            )?;
         }
 
         Ok(())
@@ -812,6 +840,41 @@ fn node_kind_name(config: &NodeDef, path: &LpPath) -> Result<NodeName, ProjectLo
     })
 }
 
+fn loaded_node_config<'a>(
+    runtime: &'a Engine,
+    node: &LoadedNode,
+) -> Result<&'a NodeDef, ProjectLoadError> {
+    let artifact = runtime
+        .tree()
+        .get(node.id)
+        .ok_or(ProjectLoadError::Tree(TreeError::UnknownNode(node.id)))?
+        .artifact();
+    let entry = runtime.artifacts().entry(&artifact).ok_or_else(|| {
+        ProjectLoadError::InvalidSourcePath {
+            path: node.artifact_path.as_str().to_string(),
+            reason: format!("missing artifact payload for node {:?}", node.id),
+        }
+    })?;
+    match &entry.state {
+        ArtifactState::Loaded(def) | ArtifactState::Prepared(def) | ArtifactState::Idle(def) => {
+            Ok(def)
+        }
+        other => Err(ProjectLoadError::InvalidSourcePath {
+            path: node.artifact_path.as_str().to_string(),
+            reason: format!("artifact payload is not loaded: {other:?}"),
+        }),
+    }
+}
+
+fn node_provides_default_time_bus(config: &NodeDef) -> bool {
+    match config {
+        NodeDef::Clock(config) => {
+            binding_target(&config.bindings, "seconds").is_none_or(is_time_seconds_bus_target)
+        }
+        _ => false,
+    }
+}
+
 fn resolve_node_loc<'a>(
     loaded_nodes: &'a [LoadedNode],
     current: &'a LoadedNode,
@@ -983,7 +1046,7 @@ fn register_playlist_entry_source_bindings(
         };
         let source = binding_source_endpoint(loaded_nodes, current, source)?;
         let target_slot =
-            SlotPath::parse(&format!("entries[{entry_index}].trigger")).map_err(|e| {
+            SlotPath::parse(&format!("entries[{}].trigger", entry_index)).map_err(|e| {
                 ProjectLoadError::InvalidSourcePath {
                     path: current.artifact_path.as_str().to_string(),
                     reason: format!("invalid playlist entry trigger path: {e}"),
@@ -1063,23 +1126,22 @@ fn register_clock_default_time_binding(
     Ok(())
 }
 
-fn register_visual_default_time_binding(
-    engine: &mut Engine,
-    current: &LoadedNode,
-    config: &ShaderDef,
-    frame: Revision,
-) -> Result<(), ProjectLoadError> {
+fn shader_needs_default_time_binding(config: &ShaderDef) -> bool {
     if binding_source(&config.bindings, "time").is_some() {
-        return Ok(());
+        return false;
     }
     let Some(slot) = config.consumed_slots.entries.get("time") else {
-        return Ok(());
+        return false;
     };
-    if *slot.kind.value() != ShaderSlotKind::Value
-        || slot.value.value().as_lp_type() != Some(LpType::F32)
-    {
-        return Ok(());
-    }
+    *slot.kind.value() == ShaderSlotKind::Value
+        && slot.value.value().as_lp_type() == Some(LpType::F32)
+}
+
+fn add_visual_default_time_binding(
+    engine: &mut Engine,
+    current: &LoadedNode,
+    frame: Revision,
+) -> Result<(), ProjectLoadError> {
     engine
         .add_binding(
             BindingDraft {
@@ -1133,12 +1195,9 @@ fn register_fluid_default_time_binding(
 }
 
 fn has_default_time_bus(loaded_nodes: &[LoadedNode]) -> bool {
-    loaded_nodes.iter().any(|node| match &node.config {
-        NodeDef::Clock(config) => {
-            binding_target(&config.bindings, "seconds").is_none_or(is_time_seconds_bus_target)
-        }
-        _ => false,
-    })
+    loaded_nodes
+        .iter()
+        .any(|node| node.provides_default_time_bus)
 }
 
 fn is_time_seconds_bus_target(target: &AuthoredBindingRef) -> bool {

@@ -6,7 +6,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt::Write as _;
 
-use crate::lpir_module::{ImportDecl, IrFunction, LpirModule, VMCTX_VREG};
+use crate::lpir_module::{ImportDecl, IrFunction, LpirBody, LpirModule, VMCTX_VREG};
 use crate::lpir_op::LpirOp;
 use crate::types::ImportId;
 use crate::types::{CalleeRef, IrType, VReg};
@@ -205,7 +205,7 @@ fn print_op_at(
     out: &mut String,
     st: &mut PrintState<'_>,
     stack: &mut Vec<Block>,
-    body: &[LpirOp],
+    body: &LpirBody,
     pc: &mut usize,
     depth: &mut usize,
 ) {

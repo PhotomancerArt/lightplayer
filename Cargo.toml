@@ -143,6 +143,7 @@ cranelift-interpreter = { git = "https://github.com/light-player/lp-cranelift", 
 
 # regalloc2 - fork (ChunkedVec for OOM mitigation, feature-gating ION allocator)
 regalloc2 = { git = "https://github.com/light-player/lp-regalloc2", branch = "lightplayer", default-features = false, features = ["std"] }
+lp-collection = { git = "https://github.com/light-player/lp-common", branch = "main", default-features = false }
 
 # Common dependencies
 

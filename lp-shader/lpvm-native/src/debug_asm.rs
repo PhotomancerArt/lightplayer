@@ -101,7 +101,8 @@ mod tests {
                         LpirOp::Return {
                             values: VRegRange { start: 0, count: 1 },
                         },
-                    ],
+                    ]
+                    .into(),
                     vreg_pool: vec![VReg(3)],
                 },
             )]),

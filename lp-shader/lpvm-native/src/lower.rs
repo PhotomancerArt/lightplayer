@@ -2206,7 +2206,7 @@ mod tests {
             sret_arg: None,
             vreg_types: vec![],
             slots: vec![],
-            body: vec![],
+            body: vec![].into(),
             vreg_pool: vec![],
         }
     }
@@ -2511,7 +2511,7 @@ mod tests {
             sret_arg: None,
             vreg_types: vec![IrType::I32, IrType::I32, IrType::I32],
             slots: vec![],
-            body: vec![],
+            body: vec![].into(),
             vreg_pool: vec![],
         }
     }
@@ -2824,7 +2824,7 @@ mod tests {
             sret_arg: None,
             vreg_types: vec![IrType::I32, IrType::I32],
             slots: vec![],
-            body: vec![],
+            body: vec![].into(),
             vreg_pool: vec![],
         };
         let (ir, abi) = empty_ir_abi();
@@ -2898,7 +2898,7 @@ mod tests {
             sret_arg: None,
             vreg_types: vec![IrType::I32; 3],
             slots: vec![],
-            body: vec![],
+            body: vec![].into(),
             vreg_pool: vec![],
         };
         let (ir, abi) = empty_ir_abi();
@@ -2930,7 +2930,7 @@ mod tests {
             sret_arg: None,
             vreg_types: vec![IrType::I32; 3],
             slots: vec![],
-            body: vec![],
+            body: vec![].into(),
             vreg_pool: vec![],
         };
         let (ir, abi) = empty_ir_abi();
@@ -2961,7 +2961,7 @@ mod tests {
             sret_arg: None,
             vreg_types: vec![IrType::I32; 2],
             slots: vec![],
-            body: vec![],
+            body: vec![].into(),
             vreg_pool: vec![],
         };
         let (ir, abi) = empty_ir_abi();
@@ -3006,7 +3006,7 @@ mod tests {
             sret_arg: None,
             vreg_types: vec![IrType::I32; 2],
             slots: vec![],
-            body: vec![],
+            body: vec![].into(),
             vreg_pool: vec![],
         };
         let (ir, abi) = empty_ir_abi();
@@ -3059,7 +3059,7 @@ mod tests {
             sret_arg: None,
             vreg_types: vec![IrType::I32; 2],
             slots: vec![],
-            body: vec![],
+            body: vec![].into(),
             vreg_pool: vec![],
         };
         let (ir, abi) = empty_ir_abi();
@@ -3084,7 +3084,7 @@ mod tests {
             sret_arg: None,
             vreg_types: vec![IrType::I32; 2],
             slots: vec![],
-            body: vec![],
+            body: vec![].into(),
             vreg_pool: vec![],
         };
         let (ir, abi) = empty_ir_abi();
@@ -3544,7 +3544,7 @@ mod tests {
             sret_arg: None,
             vreg_types: vec![],
             slots: vec![],
-            body: vec![],
+            body: vec![].into(),
             vreg_pool: vec![v(10), v(11)],
         };
         let op = LpirOp::Return {
@@ -3608,7 +3608,8 @@ mod tests {
                 LpirOp::Return {
                     values: VRegRange { start: 1, count: 1 },
                 },
-            ],
+            ]
+            .into(),
             vreg_pool: vec![v(0), v(1)], // vreg_pool must contain the vregs being returned
         };
 

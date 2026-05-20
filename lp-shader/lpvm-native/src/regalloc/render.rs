@@ -59,7 +59,7 @@ fn format_lpir_op_line(
     op: &LpirOp,
 ) -> String {
     let mut f = func.clone();
-    f.body = alloc::vec![op.clone()];
+    f.body = alloc::vec![op.clone()].into();
     f.slots.clear();
     // Replace the function in the module while preserving all other functions
     // so that CalleeRef indices remain valid.

@@ -4,7 +4,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::lpir_module::{ImportDecl, IrFunction, LpirModule, SlotDecl, VMCTX_VREG};
+use crate::lpir_module::{ImportDecl, IrFunction, LpirBody, LpirModule, SlotDecl, VMCTX_VREG};
 use crate::lpir_op::LpirOp;
 use crate::types::{CalleeRef, FuncId, ImportId, IrType, SlotId, VReg, VRegRange};
 
@@ -17,7 +17,7 @@ pub struct FunctionBuilder {
     param_count: u16,
     vreg_types: Vec<IrType>,
     slots: Vec<SlotDecl>,
-    body: Vec<LpirOp>,
+    body: LpirBody,
     vreg_pool: Vec<VReg>,
     next_vreg: u32,
     next_slot: u32,
@@ -56,7 +56,7 @@ impl FunctionBuilder {
             param_count: 0,
             vreg_types: alloc::vec![IrType::Pointer], // VMContext (pointer width at codegen)
             slots: Vec::new(),
-            body: Vec::new(),
+            body: LpirBody::new(),
             vreg_pool: Vec::new(),
             next_vreg: 1,
             next_slot: 0,

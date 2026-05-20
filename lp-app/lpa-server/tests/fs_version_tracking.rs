@@ -51,6 +51,7 @@ fn test_fs_changes_not_repeated() {
                 None,
                 None,
                 None,
+                None,
                 graphics.clone(),
             )
             .expect("Failed to load project")

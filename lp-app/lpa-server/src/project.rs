@@ -30,6 +30,8 @@ pub struct Project {
     button_service: Option<Rc<dyn ButtonService>>,
     /// Shared radio service used when rebuilding engine services.
     radio_service: Option<Rc<dyn RadioService>>,
+    /// Optional memory stats callback for project load/reload checkpoints.
+    memory_stats: Option<MemoryStatsFn>,
     /// Graphics backend used by shader runtime nodes.
     graphics: Arc<dyn LpGraphics>,
     /// The loaded project engine.
@@ -54,9 +56,10 @@ impl Project {
         radio_service: Option<Rc<dyn RadioService>>,
         graphics: Arc<dyn LpGraphics>,
     ) -> Result<Self, ServerError> {
-        let _ = memory_stats;
+        log_memory(memory_stats, "project new start");
         backtrace::set_oom_context("project new: root path");
         let root_path = project_root_path(&name)?;
+        log_memory(memory_stats, "project new after root path");
         backtrace::set_oom_context("project new: engine services");
         let mut services = EngineServices::new(root_path);
         services.set_output_provider(Some(Box::new(SharedOutputProvider(
@@ -65,6 +68,7 @@ impl Project {
         services.set_time_provider(time_provider.clone());
         services.set_button_service(button_service.clone());
         services.set_radio_service(radio_service.clone());
+        log_memory(memory_stats, "project new after services");
 
         backtrace::set_oom_context("project new: load core project");
         let mut runtime = {
@@ -72,8 +76,10 @@ impl Project {
             ProjectLoader::load_from_root(&*fs_ref, services)
                 .map_err(|e| ServerError::Core(format!("Failed to load core project: {e}")))?
         };
+        log_memory(memory_stats, "project new after core project");
         backtrace::set_oom_context("project new: set graphics");
         runtime.set_graphics(Some(graphics.clone()));
+        log_memory(memory_stats, "project new after graphics");
 
         backtrace::set_oom_context("project new: build wrapper");
         let project = Self {
@@ -84,10 +90,12 @@ impl Project {
             time_provider,
             button_service,
             radio_service,
+            memory_stats,
             graphics,
             runtime,
             last_fs_version: FsVersion::default(),
         };
+        log_memory(memory_stats, "project new after wrapper");
         backtrace::clear_oom_context();
         Ok(project)
     }
@@ -114,8 +122,10 @@ impl Project {
 
     /// Reload the project from the filesystem.
     pub fn reload(&mut self) -> Result<(), ServerError> {
+        log_memory(self.memory_stats, "project reload start");
         backtrace::set_oom_context("project reload: root path");
         let root_path = project_root_path(&self.name)?;
+        log_memory(self.memory_stats, "project reload after root path");
         backtrace::set_oom_context("project reload: engine services");
         let mut services = EngineServices::new(root_path);
         services.set_output_provider(Some(Box::new(SharedOutputProvider(
@@ -124,6 +134,7 @@ impl Project {
         services.set_time_provider(self.time_provider.clone());
         services.set_button_service(self.button_service.clone());
         services.set_radio_service(self.radio_service.clone());
+        log_memory(self.memory_stats, "project reload after services");
 
         backtrace::set_oom_context("project reload: load core project");
         let mut runtime = {
@@ -131,9 +142,11 @@ impl Project {
             ProjectLoader::load_from_root(&*fs_ref, services)
                 .map_err(|e| ServerError::Core(format!("Failed to reload core project: {e}")))?
         };
+        log_memory(self.memory_stats, "project reload after core project");
         backtrace::set_oom_context("project reload: set graphics");
         runtime.set_graphics(Some(self.graphics.clone()));
         self.runtime = runtime;
+        log_memory(self.memory_stats, "project reload after swap");
         backtrace::clear_oom_context();
         Ok(())
     }
@@ -146,6 +159,18 @@ impl Project {
     /// Update the last filesystem version processed by this project
     pub fn update_fs_version(&mut self, version: FsVersion) {
         self.last_fs_version = version;
+    }
+}
+
+fn log_memory(memory_stats: Option<MemoryStatsFn>, label: &str) {
+    if let Some(stats) = memory_stats.and_then(|f| f()) {
+        let (free, used) = stats;
+        log::info!(
+            "[mem] {}: {}k free / {}k used",
+            label,
+            free / 1024,
+            used / 1024
+        );
     }
 }
 

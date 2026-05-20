@@ -3,6 +3,9 @@
 use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use core::ops::{Index, IndexMut};
+
+use lp_collection::{ChunkedVec, chunked_vec};
 
 use crate::lpir_op::LpirOp;
 use crate::types::{CalleeRef, FuncId, ImportId, IrType, VReg, VRegRange};
@@ -39,6 +42,92 @@ pub struct SlotDecl {
     pub size: u32,
 }
 
+/// Allocation-sensitive LPIR op stream.
+///
+/// ESP32 shader compilation can fail when a flat `Vec<LpirOp>` grows and
+/// requires old+new contiguous storage at the same time. Keep the public
+/// container small and chunk-backed while preserving the indexing/iteration
+/// surface expected by validators and backends.
+#[derive(Clone, Debug, Default)]
+pub struct LpirBody {
+    ops: ChunkedVec<LpirOp>,
+}
+
+impl LpirBody {
+    pub fn new() -> Self {
+        Self {
+            ops: ChunkedVec::new(),
+        }
+    }
+
+    pub fn push(&mut self, op: LpirOp) {
+        self.ops.push(op);
+    }
+
+    pub fn len(&self) -> usize {
+        self.ops.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+
+    pub fn get(&self, index: usize) -> Option<&LpirOp> {
+        self.ops.get(index)
+    }
+
+    pub fn last(&self) -> Option<&LpirOp> {
+        self.len()
+            .checked_sub(1)
+            .and_then(|index| self.ops.get(index))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &LpirOp> {
+        self.ops.iter()
+    }
+
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut LpirOp> {
+        self.ops.iter_mut()
+    }
+
+    pub fn clear(&mut self) {
+        self.ops = ChunkedVec::new();
+    }
+}
+
+impl From<Vec<LpirOp>> for LpirBody {
+    fn from(ops: Vec<LpirOp>) -> Self {
+        let mut body = Self::new();
+        for op in ops {
+            body.push(op);
+        }
+        body
+    }
+}
+
+impl Index<usize> for LpirBody {
+    type Output = LpirOp;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.ops[index]
+    }
+}
+
+impl IndexMut<usize> for LpirBody {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.ops[index]
+    }
+}
+
+impl<'a> IntoIterator for &'a LpirBody {
+    type Item = &'a LpirOp;
+    type IntoIter = chunked_vec::Iter<'a, LpirOp>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.ops.iter()
+    }
+}
+
 /// One function's IR: flat op body, vreg types, and operand pool for calls/returns.
 #[derive(Clone, Debug)]
 pub struct IrFunction {
@@ -55,7 +144,7 @@ pub struct IrFunction {
     pub sret_arg: Option<VReg>,
     pub vreg_types: Vec<IrType>,
     pub slots: Vec<SlotDecl>,
-    pub body: Vec<LpirOp>,
+    pub body: LpirBody,
     pub vreg_pool: Vec<VReg>,
 }
 

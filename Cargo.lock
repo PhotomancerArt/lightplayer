@@ -4203,6 +4203,7 @@ name = "lpir"
 version = "40.0.0"
 dependencies = [
  "libm",
+ "lp-collection",
  "lps-q32",
 ]
 
@@ -4308,6 +4309,7 @@ dependencies = [
 name = "lps-glsl"
 version = "40.0.0"
 dependencies = [
+ "lp-collection",
  "lpir",
  "lps-shared",
 ]

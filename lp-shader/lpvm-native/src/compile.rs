@@ -378,7 +378,8 @@ mod tests {
                         LpirOp::Return {
                             values: VRegRange { start: 0, count: 1 },
                         },
-                    ],
+                    ]
+                    .into(),
                     vreg_pool: vec![VReg(0)],
                 },
             )]),
@@ -433,7 +434,8 @@ mod tests {
                 LpirOp::Return {
                     values: VRegRange { start: 0, count: 1 },
                 },
-            ],
+            ]
+            .into(),
             vreg_pool: vec![VReg(3)],
         };
         let ir = LpirModule {
@@ -517,7 +519,8 @@ mod tests {
                         LpirOp::Return {
                             values: VRegRange { start: 0, count: 1 },
                         },
-                    ],
+                    ]
+                    .into(),
                     vreg_pool: vec![VReg(0)],
                 },
             )]),

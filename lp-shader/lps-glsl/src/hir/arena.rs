@@ -1,5 +1,6 @@
 use alloc::vec::Vec;
 
+use lp_collection::ChunkedVec;
 use lps_shared::LpsType;
 
 use crate::Span;
@@ -21,8 +22,8 @@ pub struct ExprList {
 
 #[derive(Debug, Clone, Default)]
 pub struct HirArena {
-    exprs: Vec<HirExpr>,
-    places: Vec<HirPlace>,
+    exprs: ChunkedVec<HirExpr>,
+    places: ChunkedVec<HirPlace>,
     expr_lists: Vec<ExprId>,
 }
 
