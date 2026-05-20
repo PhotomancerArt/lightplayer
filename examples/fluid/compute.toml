@@ -1,5 +1,5 @@
 kind = "ComputeShader"
-glsl_path = "compute.glsl"
+source = { path = "compute.glsl" }
 
 [bindings.emitters]
 target = "bus#fluid.emitters"

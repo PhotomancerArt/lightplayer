@@ -118,10 +118,12 @@ name = "aux"
             "kind".to_string(),
             Value::String("ComputeShader".to_string()),
         );
-        table.insert(
-            "glsl_path".to_string(),
+        let mut source = toml::Table::new();
+        source.insert(
+            "path".to_string(),
             Value::String("compute.glsl".to_string()),
         );
+        table.insert("source".to_string(), Value::Table(source));
         let value = Value::Table(table);
         let registry = SlotShapeRegistry::default();
         let mut reader = SlotReader::new(TomlSyntaxSource::new(&value).unwrap(), &registry);

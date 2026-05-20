@@ -2,16 +2,16 @@ kind = "Project"
 name = "rocaille"
 
 [nodes.output]
-artifact = "./output.toml"
+def = { path = "./output.toml" }
 
 [nodes.clock]
-artifact = "./clock.toml"
+def = { path = "./clock.toml" }
 
 [nodes.texture]
-artifact = "./texture.toml"
+def = { path = "./texture.toml" }
 
 [nodes.shader]
-artifact = "./shader.toml"
+def = { path = "./shader.toml" }
 
 [nodes.fixture]
-artifact = "./fixture.toml"
+def = { path = "./fixture.toml" }

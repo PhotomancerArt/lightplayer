@@ -1,22 +1,29 @@
-//! Direct visual sampling request types.
+//! Visual sampling request types.
 
 use alloc::vec::Vec;
 
-/// Normalized shader-space sample point encoded as Q16.16.
+/// Texture UV sample point encoded as Q16.16.
+///
+/// This is for sampling a materialized texture product, not for direct shader execution.
+/// Direct shader sampling uses [`lp_shader::LpsSamplePointBuf`], whose points are
+/// shader pixel-space Q16.16 coordinates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct VisualSamplePoint {
-    pub x_q16: i32,
-    pub y_q16: i32,
+pub struct TextureUvSamplePoint {
+    pub u_q16: i32,
+    pub v_q16: i32,
 }
 
-/// Direct sampling request for a visual product.
+/// Texture sampling request for a materialized visual product.
 #[derive(Debug, Clone)]
-pub struct VisualSampleBatch {
-    pub points: Vec<VisualSamplePoint>,
+pub struct TextureSampleBatch {
+    pub points: Vec<TextureUvSamplePoint>,
     pub time_seconds: f32,
 }
 
-/// Direct shader sampling request backed by a reusable guest-addressable point buffer.
+/// Direct visual sampling request backed by a reusable guest-addressable point buffer.
+///
+/// `points` are shader pixel-space Q16.16 coordinates. `output_width` and
+/// `output_height` define the shader `outputSize` uniform for those points.
 pub struct VisualSampleBufferRequest<'a> {
     pub points: &'a mut lp_shader::LpsSamplePointBuf,
     pub output_width: u32,

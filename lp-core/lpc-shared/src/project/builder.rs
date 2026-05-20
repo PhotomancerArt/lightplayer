@@ -5,14 +5,13 @@ use core::cell::RefCell;
 use lpc_model::GlslOpts;
 use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec, RingOrder};
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
-use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
+use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef, ShaderSource};
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, ArtifactLocator, AsLpPath, BindingDef, BindingDefs, BindingRef,
     BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureSamplingConfig, HardwareEndpointSpec, MapSlot,
     NodeDef, NodeInvocation, NodeSlotRef, OptionSlot, ProjectDef, Ratio, RatioSlot,
-    RelativeNodeRef, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry, SourcePath,
-    SourcePathSlot, ValueSlot,
+    RelativeNodeRef, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry, ValueSlot,
 };
 use lpfs::LpFs;
 use lpfs::lp_path::LpPathBuf;
@@ -290,11 +289,11 @@ impl ShaderBuilder {
 
         let node_name = numbered_node_name("shader", id);
         let path = artifact_path_for_node(&node_name);
-        let glsl_path = format!("/{node_name}.glsl");
-        let glsl_file = format!("{node_name}.glsl");
+        let source_path = format!("/{node_name}.glsl");
+        let source_file = format!("{node_name}.glsl");
 
         let config = ShaderDef {
-            glsl_path: SourcePathSlot::new(SourcePath(glsl_file)),
+            source: EnumSlot::new(ShaderSource::path(source_file)),
             render_order: RenderOrderSlot::new(RenderOrder(self.render_order)),
             bindings: bus_output_binding_defs("visual.out"),
             glsl_opts: GlslOpts::default(),
@@ -309,7 +308,7 @@ impl ShaderBuilder {
             .expect("Failed to write shader artifact");
 
         builder
-            .write_file_helper(&glsl_path, self.glsl_source.as_bytes())
+            .write_file_helper(&source_path, self.glsl_source.as_bytes())
             .expect("Failed to write shader GLSL file");
         builder.register_node(node_name, path.clone());
 

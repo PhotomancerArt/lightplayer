@@ -775,6 +775,7 @@ mod tests {
                     "choice",
                     SlotShape::Enum {
                         meta: SlotMeta::empty(),
+                        encoding: crate::SlotEnumEncoding::default(),
                         variants: vec![
                             SlotVariantShape::new(
                                 "variant",

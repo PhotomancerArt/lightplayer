@@ -7,14 +7,15 @@
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
-use crate::nodes::shader::{GlslOpts, ShaderSlotDef};
-use crate::{BindingDefs, LpPathBuf, MapSlot, Slotted, SourcePath, SourcePathSlot};
+use crate::nodes::shader::{GlslOpts, ShaderSlotDef, ShaderSource};
+use crate::{BindingDefs, EnumSlot, MapSlot, Slotted};
 
 /// Authored serial compute shader definition.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Slotted)]
+#[serde(deny_unknown_fields)]
 pub struct ComputeShaderDef {
-    /// Path to the GLSL source, relative to this artifact file.
-    pub glsl_path: SourcePathSlot,
+    /// Authored shader source.
+    pub source: EnumSlot<ShaderSource>,
     /// Authored slot bindings for compute shader consumed and produced slots.
     #[serde(default, skip_serializing_if = "BindingDefs::is_empty")]
     pub bindings: BindingDefs,
@@ -40,7 +41,7 @@ pub struct ComputeShaderDef {
 impl Default for ComputeShaderDef {
     fn default() -> Self {
         Self {
-            glsl_path: SourcePathSlot::new(SourcePath(String::from("main.glsl"))),
+            source: EnumSlot::new(ShaderSource::path("main.glsl")),
             bindings: BindingDefs::default(),
             glsl_opts: GlslOpts::default(),
             consumed_slots: MapSlot::default(),
@@ -52,8 +53,8 @@ impl Default for ComputeShaderDef {
 impl ComputeShaderDef {
     pub const KIND: &'static str = "shader/compute";
 
-    pub fn glsl_path_buf(&self) -> LpPathBuf {
-        self.glsl_path.value().as_path_buf()
+    pub fn shader_source(&self) -> &ShaderSource {
+        self.source.value()
     }
 
     pub fn kind(&self) -> crate::NodeKind {
@@ -68,13 +69,13 @@ mod tests {
         FluidEmitter, NodeDef, ShaderSlotKind, ShaderSlotMappingKind, SlotShapeRegistry,
         StaticSlotShape,
     };
+    use alloc::string::ToString;
 
     #[test]
     fn compute_shader_def_parses_consumed_and_produced_slots() {
         let def: ComputeShaderDef = toml::from_str(
             r#"
-kind = "ComputeShader"
-glsl_path = "emitters.glsl"
+source = { path = "emitters.glsl" }
 
 [consumed.time]
 kind = "value"
@@ -105,12 +106,26 @@ mapping = { kind = "sentinel", len = 4, key = "id", empty_key = 0 }
         let def = NodeDef::from_toml_str(
             r#"
 kind = "ComputeShader"
-glsl_path = "emitters.glsl"
+
+source = { path = "emitters.glsl" }
 "#,
         )
         .expect("node def");
 
         assert!(matches!(def, NodeDef::ComputeShader(_)));
+    }
+
+    #[test]
+    fn compute_shader_def_rejects_glsl_path() {
+        let err = NodeDef::from_toml_str(
+            r#"
+kind = "ComputeShader"
+glsl_path = "emitters.glsl"
+"#,
+        )
+        .expect_err("glsl_path should be rejected");
+
+        assert!(err.to_string().contains("glsl_path"));
     }
 
     #[test]

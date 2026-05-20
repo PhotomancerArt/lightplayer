@@ -100,6 +100,7 @@ fn test_stop_all_projects() {
                 output_provider.clone(),
                 None,
                 None,
+                None,
                 graphics.clone(),
             )
             .unwrap()
@@ -127,6 +128,7 @@ fn test_stop_all_projects() {
             pm,
             fs,
             &output_provider,
+            None,
             None,
             None,
             graphics.clone(),

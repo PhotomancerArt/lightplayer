@@ -225,9 +225,9 @@ impl LpServer {
         let current_version = self.base_fs().current_version();
 
         // Now apply changes to projects (mutable borrows)
-        for (handle, project_changes) in project_changes_map {
+        for (handle, _project_changes) in project_changes_map {
             if let Some(project) = self.project_manager.get_project_mut(handle) {
-                if let Err(_e) = project.engine_mut().handle_fs_changes(&project_changes) {
+                if let Err(_e) = project.reload() {
                     // Log error but continue with other projects
                     // Note: In no_std context, errors are silently ignored
                     // Errors will be visible when clients read project state.

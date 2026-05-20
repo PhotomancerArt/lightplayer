@@ -249,6 +249,41 @@ mod tests {
     }
 
     #[test]
+    fn synchronous_compile_prunes_if_else_after_return() {
+        let source = r#"
+vec4 render(vec2 pos) {
+    return vec4(1.0, 0.0, 0.0, 1.0);
+    if (pos.x > 0.5) {
+        return vec4(0.0, 1.0, 0.0, 1.0);
+    } else {
+        return vec4(0.0, 0.0, 1.0, 1.0);
+    }
+}
+"#;
+        let output = compile(source, &CompileOptions::default()).expect("compile");
+        lpir::validate_module(&output.ir).expect("valid LPIR");
+        let render = output
+            .ir
+            .functions
+            .values()
+            .find(|function| function.name == "render")
+            .expect("render function");
+
+        assert!(
+            render
+                .body
+                .iter()
+                .any(|op| matches!(op, lpir::LpirOp::Return { .. }))
+        );
+        assert!(
+            !render
+                .body
+                .iter()
+                .any(|op| matches!(op, lpir::LpirOp::IfStart { .. } | lpir::LpirOp::Else))
+        );
+    }
+
+    #[test]
     fn synchronous_compile_uses_slots_for_array_of_struct_locals() {
         let source = r#"
 struct Point {

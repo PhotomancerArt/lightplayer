@@ -679,6 +679,7 @@ mod tests {
 
             SlotShape::Enum {
                 meta: SlotMeta::empty(),
+                encoding: crate::SlotEnumEncoding::default(),
                 variants: vec![
                     variant("a", record(vec![field("value", value(crate::LpType::F32))])),
                     variant("b", record(vec![field("other", value(crate::LpType::F32))])),
@@ -975,6 +976,7 @@ mod tests {
         let shape_id = SlotShapeId::from_static_name("test.dynamic_enum_mutation");
         let shape = SlotShape::Enum {
             meta: SlotMeta::empty(),
+            encoding: crate::SlotEnumEncoding::default(),
             variants: vec![
                 crate::slot::shape::variant("a", crate::slot::shape::record(vec![])),
                 crate::slot::shape::variant(

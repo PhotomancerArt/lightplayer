@@ -275,9 +275,9 @@ mod tests {
     use alloc::string::String;
     use alloc::sync::Arc;
     use lpc_model::{
-        ArtifactLocator, BindingDefs, FluidEmitter, LpValue, MapSlot, NodeDef, NodeInvocation,
-        SlotDataAccess, StaticSlotShape, TreePath, ValueSlot, generate_compute_shader_header,
-        lookup_slot_data,
+        ArtifactLocator, BindingDefs, EnumSlot, FluidEmitter, LpValue, MapSlot, NodeDef,
+        NodeInvocation, ShaderSource, SlotDataAccess, StaticSlotShape, TreePath, ValueSlot,
+        generate_compute_shader_header, lookup_slot_data,
     };
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
@@ -421,7 +421,7 @@ void tick() {{
         );
 
         ComputeShaderDef {
-            glsl_path: lpc_model::SourcePathSlot::new(String::from("emitters.glsl").into()),
+            source: EnumSlot::new(ShaderSource::path("emitters.glsl")),
             bindings: BindingDefs::default(),
             glsl_opts: lpc_model::GlslOpts::default(),
             consumed_slots: MapSlot::new(consumed),

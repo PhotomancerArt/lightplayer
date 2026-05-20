@@ -1,6 +1,8 @@
 use std::collections::BTreeMap;
 
-use lpc_model::{ArtifactPath, ArtifactPathSlot, MapSlot, OptionSlot, Slotted, ValueSlot};
+use lpc_model::{
+    ArtifactPath, ArtifactPathSlot, EnumSlot, MapSlot, OptionSlot, Slotted, ValueSlot,
+};
 
 #[derive(Default, Slotted)]
 pub struct ProjectDef {
@@ -10,7 +12,13 @@ pub struct ProjectDef {
 
 #[derive(Default, Slotted)]
 pub struct NodeInvocationDef {
-    pub artifact: ArtifactPathSlot,
+    pub def: EnumSlot<NodeDefRef>,
+}
+
+#[derive(Slotted)]
+#[slot(enum_encoding = "external", rename_all = "snake_case")]
+pub enum NodeDefRef {
+    Path(ArtifactPathSlot),
 }
 
 impl ProjectDef {
@@ -43,13 +51,17 @@ impl ProjectDef {
 }
 
 impl NodeInvocationDef {
-    pub fn new(artifact: &str) -> Self {
+    pub fn new(path: &str) -> Self {
         Self {
-            artifact: ArtifactPathSlot::new(ArtifactPath(artifact.to_string())),
+            def: EnumSlot::new(NodeDefRef::Path(ArtifactPathSlot::new(ArtifactPath(
+                path.to_string(),
+            )))),
         }
     }
 
-    pub fn artifact(&self) -> &str {
-        self.artifact.value().as_str()
+    pub fn def_path(&self) -> &str {
+        match self.def.value() {
+            NodeDefRef::Path(path) => path.value().as_str(),
+        }
     }
 }

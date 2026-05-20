@@ -6,6 +6,8 @@ use syn::{
 pub(crate) struct ContainerAttrs {
     pub(crate) shape_id: Option<LitStr>,
     pub(crate) default_policy: Option<SlotPolicyAttr>,
+    pub(crate) enum_encoding: Option<EnumEncodingAttr>,
+    pub(crate) rename_all: Option<RenameAllAttr>,
 }
 
 pub(crate) struct FieldAttrs {
@@ -52,10 +54,23 @@ pub(crate) enum SlotPolicyAttr {
     WritableTransient,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum EnumEncodingAttr {
+    Tagged,
+    External,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum RenameAllAttr {
+    SnakeCase,
+}
+
 pub(crate) fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
     let mut parsed = ContainerAttrs {
         shape_id: None,
         default_policy: None,
+        enum_encoding: None,
+        rename_all: None,
     };
     for attr in slot_attrs(attrs) {
         attr.parse_nested_meta(|meta| {
@@ -67,6 +82,16 @@ pub(crate) fn parse_container(attrs: &[Attribute]) -> Result<ContainerAttrs> {
                 let value = meta.value()?;
                 let value: LitStr = value.parse()?;
                 parsed.default_policy = Some(parse_policy(&value)?);
+                Ok(())
+            } else if meta.path.is_ident("enum_encoding") {
+                let value = meta.value()?;
+                let value: LitStr = value.parse()?;
+                parsed.enum_encoding = Some(parse_enum_encoding(&value)?);
+                Ok(())
+            } else if meta.path.is_ident("rename_all") {
+                let value = meta.value()?;
+                let value: LitStr = value.parse()?;
+                parsed.rename_all = Some(parse_rename_all(&value)?);
                 Ok(())
             } else if meta.path.is_ident("root") {
                 Ok(())
@@ -417,6 +442,27 @@ fn parse_policy(value: &LitStr) -> Result<SlotPolicyAttr> {
         _ => Err(syn::Error::new_spanned(
             value,
             "unsupported slot policy; expected \"read_only_persisted\", \"writable_persisted\", \"read_only_transient\", or \"writable_transient\"",
+        )),
+    }
+}
+
+fn parse_enum_encoding(value: &LitStr) -> Result<EnumEncodingAttr> {
+    match value.value().as_str() {
+        "tagged" => Ok(EnumEncodingAttr::Tagged),
+        "external" => Ok(EnumEncodingAttr::External),
+        _ => Err(syn::Error::new_spanned(
+            value,
+            "unsupported slot enum encoding; expected \"tagged\" or \"external\"",
+        )),
+    }
+}
+
+fn parse_rename_all(value: &LitStr) -> Result<RenameAllAttr> {
+    match value.value().as_str() {
+        "snake_case" => Ok(RenameAllAttr::SnakeCase),
+        _ => Err(syn::Error::new_spanned(
+            value,
+            "unsupported slot rename_all policy; expected \"snake_case\"",
         )),
     }
 }

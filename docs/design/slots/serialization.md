@@ -125,6 +125,12 @@ discriminators by default and Rust-style `#[default]` to choose the default
 variant. This keeps discriminator lists attached to the model instead of
 duplicated in hand-written serializer code.
 
+Slot enums can opt into alternate authored encodings. The default remains
+tagged `kind = "Variant"` syntax; externally tagged enums use a single property
+named after the active variant. See
+[`enum-encoding.md`](./enum-encoding.md) for the supported encodings and derive
+attributes.
+
 That code is allowed to be opinionated. Unknown fields are errors until schema
 versioning exists. Discriminators are explicit. Field casing should match the
 slot/domain model unless a specific compact syntax is explicitly enabled.

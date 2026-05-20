@@ -155,8 +155,7 @@ mod tests {
 
     use lpc_model::{
         BindingDefs, CONTROL_MESSAGE_SHAPE_NAME, ControlMessage, FluidEmitter, MapSlot,
-        ShaderSlotMappingDef, SourcePathSlot, StaticSlotShape, ValueSlot,
-        generate_compute_shader_header,
+        ShaderSlotMappingDef, StaticSlotShape, ValueSlot, generate_compute_shader_header,
     };
     use lps_shared::LpsValueF32;
     use lpvm_wasm::WasmOptions;
@@ -183,7 +182,7 @@ mod tests {
         );
 
         let def = ComputeShaderDef {
-            glsl_path: SourcePathSlot::new(String::from("emitters.glsl").into()),
+            source: lpc_model::EnumSlot::new(lpc_model::ShaderSource::path("emitters.glsl")),
             bindings: BindingDefs::default(),
             glsl_opts: lpc_model::GlslOpts::default(),
             consumed_slots: MapSlot::new(consumed),
@@ -263,7 +262,7 @@ void tick() {{
         );
 
         let def = ComputeShaderDef {
-            glsl_path: SourcePathSlot::new(String::from("events.glsl").into()),
+            source: lpc_model::EnumSlot::new(lpc_model::ShaderSource::path("events.glsl")),
             bindings: BindingDefs::default(),
             glsl_opts: lpc_model::GlslOpts::default(),
             consumed_slots: MapSlot::new(consumed),

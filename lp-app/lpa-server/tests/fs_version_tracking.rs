@@ -50,6 +50,7 @@ fn test_fs_changes_not_repeated() {
                 output_provider.clone(),
                 None,
                 None,
+                None,
                 graphics.clone(),
             )
             .expect("Failed to load project")

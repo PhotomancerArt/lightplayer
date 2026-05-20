@@ -5,8 +5,8 @@
 //! underlying types remain explicit and serializable.
 
 use crate::{
-    LpType, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotPolicy, SlotSemantics, SlotShape,
-    SlotShapeId, SlotValueShape, SlotVariantShape,
+    LpType, SlotEnumEncoding, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotPolicy, SlotSemantics,
+    SlotShape, SlotShapeId, SlotValueShape, SlotVariantShape,
 };
 use alloc::boxed::Box;
 use alloc::vec::Vec;
@@ -40,6 +40,28 @@ pub fn option(some: SlotShape) -> SlotShape {
     SlotShape::Option {
         meta: SlotMeta::empty(),
         some: Box::new(some),
+    }
+}
+
+/// Build an enum shape with the default tagged `kind` encoding.
+pub fn enum_tagged(variants: Vec<SlotVariantShape>) -> SlotShape {
+    enum_with_encoding(SlotEnumEncoding::default(), variants)
+}
+
+/// Build an enum shape with externally tagged authored encoding.
+pub fn enum_external(variants: Vec<SlotVariantShape>) -> SlotShape {
+    enum_with_encoding(SlotEnumEncoding::External, variants)
+}
+
+/// Build an enum shape with explicit authored encoding.
+pub fn enum_with_encoding(
+    encoding: SlotEnumEncoding,
+    variants: Vec<SlotVariantShape>,
+) -> SlotShape {
+    SlotShape::Enum {
+        meta: SlotMeta::empty(),
+        encoding,
+        variants,
     }
 }
 
@@ -137,10 +159,7 @@ mod tests {
     fn builders_create_map_and_enum_shapes() {
         let shape = map(
             SlotMapKeyShape::String,
-            SlotShape::Enum {
-                meta: SlotMeta::empty(),
-                variants: vec![variant("none", unit())],
-            },
+            enum_tagged(vec![variant("none", unit())]),
         );
 
         let SlotShape::Map { key, value, .. } = shape else {
@@ -148,5 +167,15 @@ mod tests {
         };
         assert_eq!(key, SlotMapKeyShape::String);
         assert!(matches!(*value, SlotShape::Enum { .. }));
+    }
+
+    #[test]
+    fn builders_create_external_enum_shapes() {
+        let shape = enum_external(vec![variant("file", value(LpType::String))]);
+
+        let SlotShape::Enum { encoding, .. } = shape else {
+            panic!("enum shape");
+        };
+        assert_eq!(encoding, SlotEnumEncoding::External);
     }
 }

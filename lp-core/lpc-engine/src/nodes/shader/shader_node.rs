@@ -516,7 +516,11 @@ impl RenderNode for ShaderNode {
         }
 
         self.ensure_compiled(ctx)?;
-        let uniforms = build_uniforms(1, request.points.count(), &self.visual_uniforms);
+        let uniforms = build_uniforms(
+            request.output_width,
+            request.output_height,
+            &self.visual_uniforms,
+        );
         let shader = self
             .shader
             .as_mut()
@@ -619,7 +623,10 @@ mod tests {
     use crate::engine::resolve_with_engine_host;
     use crate::gfx::LpGraphics;
     use crate::nodes::TextureNode;
-    use crate::products::visual::{VisualProduct, VisualSampleBatch, VisualSamplePoint};
+    use crate::products::visual::{
+        TextureSampleBatch, TextureUvSamplePoint, VisualProduct, VisualSampleBufferRequest,
+        VisualSampleTarget, texel_center_to_uv_q16,
+    };
     use lpc_model::{
         ArtifactLocator, MapSlot, NodeDef, NodeInvocation, Revision, SlotDataAccess,
         StaticSlotShape, TextureDef, TreePath,
@@ -771,16 +778,127 @@ mod tests {
                 },
             )
             .expect("render texture");
-        let batch = VisualSampleBatch {
-            points: vec![VisualSamplePoint {
-                x_q16: 32768,
-                y_q16: 32768,
+        let batch = TextureSampleBatch {
+            points: vec![TextureUvSamplePoint {
+                u_q16: 32768,
+                v_q16: 32768,
             }],
             time_seconds: 0.5,
         };
         let sample = texture.sample_batch(&batch);
         assert!(sample.samples[0].rgba_unorm16[0] > 26_000);
         assert!(sample.samples[0].rgba_unorm16[0] < 40_000);
+    }
+
+    #[test]
+    fn shader_direct_sampling_uses_requested_output_size_uniform() {
+        let graphics = Arc::new(crate::Graphics::new());
+        let source = String::from(
+            "layout(binding = 0) uniform vec2 outputSize;\n\
+             vec4 render(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
+        );
+        let mut node = ShaderNode::new(NodeId::new(1), ShaderDef::default(), source);
+        let mut ctx = crate::node::RenderContext::new(
+            NodeId::new(1),
+            Revision::new(1),
+            Some(graphics.clone()),
+            None,
+            0.0,
+        );
+
+        let mut points = graphics.alloc_sample_points(1).expect("points");
+        points.data_mut().copy_from_slice(&[5 * 65536, 8 * 65536]);
+        let mut samples = graphics.alloc_sample_rgba16(1).expect("samples");
+
+        node.sample_visual_into(
+            VisualProduct::new(NodeId::new(1), 0),
+            VisualSampleBufferRequest {
+                points: &mut points,
+                output_width: 10,
+                output_height: 16,
+                time_seconds: 0.0,
+            },
+            VisualSampleTarget {
+                samples: &mut samples,
+            },
+            &mut ctx,
+        )
+        .expect("sample visual");
+
+        let got = samples.data();
+        assert!((i32::from(got[0]) - 32768).abs() <= 16, "{got:?}");
+        assert!((i32::from(got[1]) - 32768).abs() <= 16, "{got:?}");
+        assert_eq!(got[2], 0);
+        assert_eq!(got[3], 65535);
+    }
+
+    #[test]
+    fn shader_direct_sampling_matches_rendered_texture_pixel_center() {
+        let graphics = Arc::new(crate::Graphics::new());
+        let source = String::from(
+            "layout(binding = 0) uniform vec2 outputSize;\n\
+             vec4 render(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
+        );
+        let mut node = ShaderNode::new(NodeId::new(1), ShaderDef::default(), source);
+        let mut ctx = crate::node::RenderContext::new(
+            NodeId::new(1),
+            Revision::new(1),
+            Some(graphics.clone()),
+            None,
+            0.0,
+        );
+        let product = VisualProduct::new(NodeId::new(1), 0);
+        let width = 10;
+        let height = 16;
+
+        let texture = node
+            .render_texture(
+                product,
+                &crate::products::visual::RenderTextureRequest {
+                    width,
+                    height,
+                    format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+                    time_seconds: 0.0,
+                },
+                &mut ctx,
+            )
+            .expect("render texture");
+        let texture_sample = texture.sample_batch(&TextureSampleBatch {
+            points: vec![TextureUvSamplePoint {
+                u_q16: texel_center_to_uv_q16(2, width),
+                v_q16: texel_center_to_uv_q16(3, height),
+            }],
+            time_seconds: 0.0,
+        });
+
+        let mut points = graphics.alloc_sample_points(1).expect("points");
+        points
+            .data_mut()
+            .copy_from_slice(&[((2 * 65536) + 32768), ((3 * 65536) + 32768)]);
+        let mut samples = graphics.alloc_sample_rgba16(1).expect("samples");
+        node.sample_visual_into(
+            product,
+            VisualSampleBufferRequest {
+                points: &mut points,
+                output_width: width,
+                output_height: height,
+                time_seconds: 0.0,
+            },
+            VisualSampleTarget {
+                samples: &mut samples,
+            },
+            &mut ctx,
+        )
+        .expect("sample visual");
+
+        let rendered = texture_sample.samples[0].rgba_unorm16;
+        let direct = samples.data();
+        for channel in 0..4 {
+            assert!(
+                (i32::from(rendered[channel]) - i32::from(direct[channel])).abs() <= 16,
+                "rendered={rendered:?} direct={direct:?}"
+            );
+        }
     }
 
     #[test]

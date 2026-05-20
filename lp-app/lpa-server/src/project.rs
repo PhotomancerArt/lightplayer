@@ -20,6 +20,16 @@ pub struct Project {
     name: String,
     /// Project filesystem path
     path: LpPathBuf,
+    /// Chrooted filesystem for this project.
+    fs: Rc<RefCell<dyn LpFs>>,
+    /// Shared output provider used when rebuilding engine services.
+    output_provider: Rc<RefCell<dyn OutputProvider>>,
+    /// Shared time provider used when rebuilding engine services.
+    time_provider: Option<Rc<dyn TimeProvider>>,
+    /// Shared button service used when rebuilding engine services.
+    button_service: Option<Rc<dyn ButtonService>>,
+    /// Graphics backend used by shader runtime nodes.
+    graphics: Arc<dyn LpGraphics>,
     /// The loaded project engine.
     runtime: Engine,
     /// Last filesystem version processed by this project
@@ -46,9 +56,11 @@ impl Project {
         let root_path = project_root_path(&name)?;
         backtrace::set_oom_context("project new: engine services");
         let mut services = EngineServices::new(root_path);
-        services.set_output_provider(Some(Box::new(SharedOutputProvider(output_provider))));
-        services.set_time_provider(time_provider);
-        services.set_button_service(button_service);
+        services.set_output_provider(Some(Box::new(SharedOutputProvider(
+            output_provider.clone(),
+        ))));
+        services.set_time_provider(time_provider.clone());
+        services.set_button_service(button_service.clone());
 
         backtrace::set_oom_context("project new: load core project");
         let mut runtime = {
@@ -57,12 +69,17 @@ impl Project {
                 .map_err(|e| ServerError::Core(format!("Failed to load core project: {e}")))?
         };
         backtrace::set_oom_context("project new: set graphics");
-        runtime.set_graphics(Some(graphics));
+        runtime.set_graphics(Some(graphics.clone()));
 
         backtrace::set_oom_context("project new: build wrapper");
         let project = Self {
             name,
             path: path.to_path_buf(),
+            fs,
+            output_provider,
+            time_provider,
+            button_service,
+            graphics,
             runtime,
             last_fs_version: FsVersion::default(),
         };
@@ -91,9 +108,27 @@ impl Project {
     }
 
     /// Reload the project from the filesystem.
-    ///
-    /// M4 accepts source changes but does not rebuild the core runtime yet.
     pub fn reload(&mut self) -> Result<(), ServerError> {
+        backtrace::set_oom_context("project reload: root path");
+        let root_path = project_root_path(&self.name)?;
+        backtrace::set_oom_context("project reload: engine services");
+        let mut services = EngineServices::new(root_path);
+        services.set_output_provider(Some(Box::new(SharedOutputProvider(
+            self.output_provider.clone(),
+        ))));
+        services.set_time_provider(self.time_provider.clone());
+        services.set_button_service(self.button_service.clone());
+
+        backtrace::set_oom_context("project reload: load core project");
+        let mut runtime = {
+            let fs_ref = self.fs.borrow();
+            ProjectLoader::load_from_root(&*fs_ref, services)
+                .map_err(|e| ServerError::Core(format!("Failed to reload core project: {e}")))?
+        };
+        backtrace::set_oom_context("project reload: set graphics");
+        runtime.set_graphics(Some(self.graphics.clone()));
+        self.runtime = runtime;
+        backtrace::clear_oom_context();
         Ok(())
     }
 

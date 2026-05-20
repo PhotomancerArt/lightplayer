@@ -87,6 +87,9 @@ impl NodeArtifact {
     pub fn read_toml(registry: &SlotShapeRegistry, text: &str) -> Result<Self, NodeDefParseError> {
         let payload = toml::from_str::<toml::Value>(text).map_err(toml_parse_error)?;
         reject_unknown_kind(&payload)?;
+        if read_kind(&payload)? == PROJECT_VARIANT {
+            return read_project_artifact(payload);
+        }
         read_node_artifact(registry, payload)
     }
 
@@ -359,15 +362,55 @@ fn read_node_artifact(
         })
 }
 
+fn read_project_artifact(mut payload: toml::Value) -> Result<NodeArtifact, NodeDefParseError> {
+    let Some(table) = payload.as_table_mut() else {
+        return Err(NodeDefParseError::Toml {
+            error: String::from("node definition TOML root must be a table"),
+        });
+    };
+    table.remove("kind");
+    let def: ProjectDef =
+        payload
+            .try_into()
+            .map_err(|error: toml::de::Error| NodeDefParseError::Toml {
+                error: error.to_string(),
+            })?;
+    Ok(NodeArtifact::new(NodeDef::Project(def)))
+}
+
 fn write_node_artifact(
     registry: &SlotShapeRegistry,
     artifact: &NodeArtifact,
 ) -> Result<String, NodeDefWriteError> {
+    if let NodeDef::Project(def) = artifact.node_def() {
+        return write_project_artifact(def);
+    }
     let value = registry
         .write_slot_toml(artifact)
         .map_err(|error| NodeDefWriteError {
             error: error.to_string(),
         })?;
+    toml::to_string(&value).map_err(|error| NodeDefWriteError {
+        error: error.to_string(),
+    })
+}
+
+fn write_project_artifact(def: &ProjectDef) -> Result<String, NodeDefWriteError> {
+    let text = toml::to_string(def).map_err(|error| NodeDefWriteError {
+        error: error.to_string(),
+    })?;
+    let mut value = toml::from_str::<toml::Value>(&text).map_err(|error| NodeDefWriteError {
+        error: error.to_string(),
+    })?;
+    let Some(table) = value.as_table_mut() else {
+        return Err(NodeDefWriteError {
+            error: String::from("serialized project was not a table"),
+        });
+    };
+    table.insert(
+        String::from("kind"),
+        toml::Value::String(String::from(PROJECT_VARIANT)),
+    );
     toml::to_string(&value).map_err(|error| NodeDefWriteError {
         error: error.to_string(),
     })
@@ -405,7 +448,7 @@ mod tests {
 kind = "Project"
 
 [nodes.texture]
-artifact = "./texture.toml"
+def = { path = "./texture.toml" }
 "#,
         )
         .expect("project");
@@ -430,8 +473,9 @@ size = { width = 64, height = 48 }
             &registry,
             r#"
 kind = "Shader"
-glsl_path = "shader.glsl"
 render_order = 2
+
+source = { path = "shader.glsl" }
 
 [bindings.visual]
 target = "bus#visual.out"

@@ -12,8 +12,8 @@ use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingRef, BusSlotRef, Dim2u,
-    Dim2uSlot, EnumSlot, FixtureSamplingConfig, HardwareEndpointSpec, MapSlot, OptionSlot,
-    RenderOrder, RenderOrderSlot, SlotPath, SourcePath, SourcePathSlot, ValueSlot,
+    Dim2uSlot, EnumSlot, FixtureSamplingConfig, HardwareEndpointSpec, MapSlot, NodeDef, OptionSlot,
+    RenderOrder, RenderOrderSlot, ShaderSource, SlotPath, SlotShapeRegistry, ValueSlot,
 };
 use lpfs::LpFs;
 
@@ -74,26 +74,22 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
         }),
         bindings: bus_input_binding_defs("visual.out"),
     };
-    let texture_toml = with_kind(
-        "Texture",
-        toml::to_string(&texture_config).context("Failed to serialize texture def to TOML")?,
-    );
+    let texture_toml = authored_node_toml(&NodeDef::Texture(texture_config))
+        .context("Failed to serialize texture def to TOML")?;
     fs.write_file("/texture.toml".as_path(), texture_toml.as_bytes())
         .map_err(|e| anyhow::anyhow!("Failed to write texture.toml: {e}"))?;
 
     // Create shader node
     let shader_config = ShaderDef {
-        glsl_path: SourcePathSlot::new(SourcePath::from("shader.glsl")),
+        source: EnumSlot::new(ShaderSource::path("shader.glsl")),
         render_order: RenderOrderSlot::new(RenderOrder(0)),
         bindings: bus_output_binding_defs("visual.out"),
         glsl_opts: lpc_model::GlslOpts::default(),
         param_defs: lpc_model::MapSlot::default(),
         consumed_slots: default_visual_consumed_slots(),
     };
-    let shader_toml = with_kind(
-        "Shader",
-        toml::to_string(&shader_config).context("Failed to serialize shader def to TOML")?,
-    );
+    let shader_toml = authored_node_toml(&NodeDef::Shader(shader_config))
+        .context("Failed to serialize shader def to TOML")?;
     fs.write_file("/shader.toml".as_path(), shader_toml.as_bytes())
         .map_err(|e| anyhow::anyhow!("Failed to write shader.toml: {e}"))?;
 
@@ -171,10 +167,8 @@ vec4 render(vec2 pos) {
         bindings: bus_input_binding_defs("control.out"),
         options: OptionSlot::none(),
     };
-    let output_toml = with_kind(
-        "Output",
-        toml::to_string(&output_config).context("Failed to serialize output def to TOML")?,
-    );
+    let output_toml = authored_node_toml(&NodeDef::Output(output_config))
+        .context("Failed to serialize output def to TOML")?;
     fs.write_file("/output.toml".as_path(), output_toml.as_bytes())
         .map_err(|e| anyhow::anyhow!("Failed to write output.toml: {e}"))?;
 
@@ -192,10 +186,8 @@ vec4 render(vec2 pos) {
         brightness: OptionSlot::none(),
         gamma_correction: OptionSlot::none(),
     };
-    let fixture_toml = with_kind(
-        "Fixture",
-        toml::to_string(&fixture_config).context("Failed to serialize fixture def to TOML")?,
-    );
+    let fixture_toml = authored_node_toml(&NodeDef::Fixture(fixture_config))
+        .context("Failed to serialize fixture def to TOML")?;
     fs.write_file("/fixture.toml".as_path(), fixture_toml.as_bytes())
         .map_err(|e| anyhow::anyhow!("Failed to write fixture.toml: {e}"))?;
 
@@ -208,19 +200,19 @@ fn write_project_toml(fs: &dyn LpFs, name: &str) -> Result<()> {
 name = "{name}"
 
 [nodes.output]
-artifact = "./output.toml"
+def = {{ path = "./output.toml" }}
 
 [nodes.clock]
-artifact = "./clock.toml"
+def = {{ path = "./clock.toml" }}
 
 [nodes.texture]
-artifact = "./texture.toml"
+def = {{ path = "./texture.toml" }}
 
 [nodes.shader]
-artifact = "./shader.toml"
+def = {{ path = "./shader.toml" }}
 
 [nodes.fixture]
-artifact = "./fixture.toml"
+def = {{ path = "./fixture.toml" }}
 "#
     );
     fs.write_file("/project.toml".as_path(), project_toml.as_bytes())
@@ -228,8 +220,16 @@ artifact = "./fixture.toml"
     Ok(())
 }
 
-fn with_kind(kind: &str, body: String) -> String {
-    format!("kind = \"{kind}\"\n{body}")
+fn authored_node_toml(node: &NodeDef) -> Result<String> {
+    node.write_toml(&slot_shape_registry())
+        .map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+fn slot_shape_registry() -> SlotShapeRegistry {
+    let mut registry = SlotShapeRegistry::default();
+    lpc_model::slot_shapes::register_all_static_slot_shapes(&mut registry)
+        .expect("static slot shapes register without conflicts");
+    registry
 }
 
 fn default_visual_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
@@ -360,9 +360,12 @@ mod tests {
 
         // Verify texture node content
         let texture_toml = fs.read_file("/texture.toml".as_path()).unwrap();
-        let texture_config: TextureDef =
-            toml::from_str(std::str::from_utf8(&texture_toml).expect("UTF-8"))
+        let texture_config =
+            NodeDef::from_toml_str(std::str::from_utf8(&texture_toml).expect("UTF-8"))
                 .expect("texture node TOML");
+        let NodeDef::Texture(texture_config) = texture_config else {
+            panic!("expected texture node TOML");
+        };
         assert_eq!(texture_config.width(), 64);
         assert_eq!(texture_config.height(), 64);
         assert!(matches!(
@@ -372,10 +375,16 @@ mod tests {
 
         // Verify shader node content
         let shader_toml = fs.read_file("/shader.toml".as_path()).unwrap();
-        let shader_config: ShaderDef =
-            toml::from_str(std::str::from_utf8(&shader_toml).expect("UTF-8"))
+        let shader_config =
+            NodeDef::from_toml_str(std::str::from_utf8(&shader_toml).expect("UTF-8"))
                 .expect("shader node TOML");
-        assert_eq!(shader_config.glsl_path.value().0, "shader.glsl");
+        let NodeDef::Shader(shader_config) = shader_config else {
+            panic!("expected shader node TOML");
+        };
+        assert_eq!(
+            shader_config.shader_source().path_value().unwrap().as_str(),
+            "shader.glsl"
+        );
         assert!(matches!(
             shader_config.bindings.entries()["output"].target_ref(),
             Some(BindingRef::Bus(_))
