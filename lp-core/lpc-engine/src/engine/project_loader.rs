@@ -981,19 +981,26 @@ fn resolve_relative_node_ref<'a>(
     current: &'a LoadedNode,
     parsed: &lpc_model::RelativeNodeRef,
 ) -> Option<&'a LoadedNode> {
-    let mut node = current;
+    let mut node = Some(current);
+    let mut virtual_parent = None;
     for _ in 0..parsed.parent_hops() {
-        let parent = node.parent?;
-        node = loaded_nodes
-            .iter()
-            .find(|candidate| candidate.id == parent)?;
+        let parent = node?.parent?;
+        if let Some(parent_node) = loaded_nodes.iter().find(|candidate| candidate.id == parent) {
+            node = Some(parent_node);
+            virtual_parent = None;
+        } else {
+            node = None;
+            virtual_parent = Some(parent);
+        }
     }
     for segment in parsed.segments() {
+        let parent = node.map(|node| node.id).or(virtual_parent)?;
         node = loaded_nodes
             .iter()
-            .find(|candidate| candidate.parent == Some(node.id) && &candidate.name == segment)?;
+            .find(|candidate| candidate.parent == Some(parent) && &candidate.name == segment);
+        virtual_parent = None;
     }
-    Some(node)
+    node
 }
 
 fn demand_input_path() -> SlotPath {
@@ -1818,6 +1825,66 @@ source = { path = "shader.glsl" }
                     && slot == &SlotPath::parse("output").expect("output")
                     && channel.0 == "visual.out"
                     && binding.priority == BindingPriority::default_fallback()
+            )
+        }));
+    }
+
+    #[test]
+    fn top_level_sibling_node_refs_resolve_through_root() {
+        let fs = flat_project();
+        fs.write_file(
+            "/fixture.toml".as_path(),
+            br#"
+kind = "Fixture"
+color_order = "rgb"
+brightness = 255
+gamma_correction = false
+transform = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+
+[bindings.input]
+source = "..texture#output"
+
+[bindings.output]
+target = "bus#control.out"
+
+[mapping]
+kind = "PathPoints"
+sample_diameter = 2.0
+
+[mapping.paths.0]
+kind = "RingArray"
+center = [0.5, 0.5]
+diameter = 1.0
+start_ring_inclusive = 0
+end_ring_exclusive = 1
+offset_angle = 0.0
+order = "inner_first"
+
+[mapping.paths.0.ring_lamp_counts]
+0 = 1
+"#,
+        )
+        .expect("fixture.toml");
+
+        let services = EngineServices::new(TreePath::parse("/sibling_ref.show").expect("path"));
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load");
+        let texture = rt
+            .artifact_node_id(LpPath::new("/texture.toml"))
+            .expect("texture node");
+        let fixture = rt
+            .artifact_node_id(LpPath::new("/fixture.toml"))
+            .expect("fixture node");
+
+        assert!(rt.tree().bindings().any(|binding| {
+            matches!(
+                (&binding.source, &binding.target),
+                (
+                    BindingSource::ProducedSlot { node, slot },
+                    BindingTarget::ConsumedSlot { node: target, slot: target_slot },
+                ) if *node == texture
+                    && slot == &SlotPath::parse("output").expect("output")
+                    && *target == fixture
+                    && target_slot == &SlotPath::parse("input").expect("input")
             )
         }));
     }
