@@ -55,7 +55,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_model::{Revision, TreePath, WithRevision};
+    use lpc_model::{LpType, Revision, SlotShape, SlotShapeId, TreePath, WithRevision};
     use lpc_wire::{ProjectReadRequest, ProjectReadResult, ResourcePayloadRead};
 
     use crate::engine::test_support::EngineTestBuilder;
@@ -80,6 +80,35 @@ mod tests {
         assert_eq!(resources.summaries.len(), 1);
         assert!(resources.runtime_buffer_payloads.is_empty());
         assert!(matches!(response.results[3], ProjectReadResult::Runtime(_)));
+    }
+
+    #[test]
+    fn default_debug_shape_read_is_complete_without_limit() {
+        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let dynamic_ids = (0..70)
+            .map(|index| SlotShapeId::new(0x7000_0000 + index))
+            .collect::<alloc::vec::Vec<_>>();
+        for id in &dynamic_ids {
+            engine
+                .slot_shapes_mut()
+                .register_dynamic_shape(*id, SlotShape::value(LpType::Bool))
+                .expect("dynamic test shape");
+        }
+
+        let response = engine.read_project(ProjectReadRequest::default_debug(None));
+
+        let ProjectReadResult::Shapes(shapes) = &response.results[0] else {
+            panic!("first result should be shapes");
+        };
+        assert!(shapes.complete);
+        assert_eq!(shapes.next, None);
+        let registry = shapes.registry.as_ref().expect("shape registry");
+        for id in dynamic_ids {
+            assert!(
+                registry.shapes.contains_key(&id),
+                "missing dynamic shape {id}"
+            );
+        }
     }
 
     #[test]

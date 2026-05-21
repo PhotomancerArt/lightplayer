@@ -17,7 +17,7 @@ impl Engine {
                 } else {
                     let (snapshot, next) = self
                         .slot_shapes()
-                        .snapshot_page_with_static_catalog(query.after, 64);
+                        .snapshot_page_with_static_catalog(query.after, usize::MAX);
                     (Some(snapshot), next.is_none(), next)
                 }
             }
