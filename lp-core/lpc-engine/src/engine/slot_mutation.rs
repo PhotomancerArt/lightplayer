@@ -387,7 +387,7 @@ mod tests {
         let mut engine = ProjectLoader::load_from_root(&fs, services).unwrap();
         let output = node_id(&engine, "output");
         let root = alloc::format!("node.{}.def", output.0);
-        let request = mutation_request(&engine, &root, "pin", LpValue::Bool(false));
+        let request = mutation_request(&engine, &root, "endpoint", LpValue::Bool(false));
 
         let responses = engine.mutate_project_slots(Vec::from([request]));
 
@@ -520,7 +520,7 @@ def = { path = "./output.toml" }
             "/output.toml".as_path(),
             br#"
 kind = "Output"
-pin = 4
+endpoint = "ws281x:rmt:D10"
 
 [bindings.input]
 source = "bus#control.out"

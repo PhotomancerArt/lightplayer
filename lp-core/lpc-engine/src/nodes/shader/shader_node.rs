@@ -19,8 +19,8 @@ use crate::gfx::uniforms::{VisualUniform, build_uniforms};
 use crate::gfx::{LpShader, ShaderCompileOptions, ShaderCompileStats};
 use crate::node::catch_node_panic::catch_panic;
 use crate::node::{
-    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, RenderContext, RenderNode,
-    TickContext,
+    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
+    RenderContext, RenderNode, TickContext,
 };
 use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use crate::products::visual::{VisualSampleBufferRequest, VisualSampleTarget};
@@ -188,14 +188,18 @@ impl ShaderNode {
 }
 
 impl NodeRuntime for ShaderNode {
-    fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+    fn produce(
+        &mut self,
+        _slot: &SlotPath,
+        ctx: &mut TickContext<'_>,
+    ) -> Result<ProduceResult, NodeError> {
         self.update_config_from_view(ctx)?;
         self.update_consumed_slots_from_view(ctx)?;
         self.update_visual_uniforms(ctx)?;
         self.state
             .output
             .set_with_version(ctx.revision(), VisualProduct::new(self.node_id, 0));
-        Ok(())
+        Ok(ProduceResult::Produced)
     }
 
     fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {

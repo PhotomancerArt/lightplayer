@@ -25,7 +25,7 @@ use lps_shared::TextureBuffer;
 use crate::dataflow::resolver::QueryKey;
 use crate::node::{
     ControlNode, ControlRenderContext, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
-    PressureLevel, TickContext,
+    PressureLevel, ProduceResult, TickContext,
 };
 use crate::products::control::{
     ControlHint, ControlLayout, ControlRenderRequest, ControlRenderTarget, ControlSampleFormat,
@@ -156,8 +156,16 @@ pub fn fixture_input_path() -> SlotPath {
     SlotPath::parse("input").expect("fixture input path")
 }
 
+pub fn fixture_output_path() -> SlotPath {
+    SlotPath::parse("output").expect("fixture output path")
+}
+
 impl NodeRuntime for FixtureNode {
-    fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+    fn produce(
+        &mut self,
+        _slot: &SlotPath,
+        ctx: &mut TickContext<'_>,
+    ) -> Result<ProduceResult, NodeError> {
         let prod = ctx
             .resolve(QueryKey::ConsumedSlot {
                 node: ctx.node_id(),
@@ -208,6 +216,11 @@ impl NodeRuntime for FixtureNode {
             ver,
             ControlProduct::new(ctx.node_id(), 0, fixture_control_extent(&self.mapping)),
         );
+        Ok(ProduceResult::Produced)
+    }
+
+    fn consume(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+        let _ = self.produce(&fixture_output_path(), ctx)?;
         Ok(())
     }
 
@@ -919,12 +932,16 @@ mod tests {
     }
 
     impl NodeRuntime for FixtureTickCountSolidProducer {
-        fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+        fn produce(
+            &mut self,
+            _slot: &SlotPath,
+            ctx: &mut TickContext<'_>,
+        ) -> Result<ProduceResult, NodeError> {
             self.ticks.fetch_add(1, Ordering::Relaxed);
             self.state
                 .output
                 .set_with_version(ctx.revision(), VisualProduct::new(ctx.node_id(), 0));
-            Ok(())
+            Ok(ProduceResult::Produced)
         }
 
         fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
@@ -991,11 +1008,15 @@ mod tests {
     }
 
     impl NodeRuntime for FixtureExpectedSampleProducer {
-        fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+        fn produce(
+            &mut self,
+            _slot: &SlotPath,
+            ctx: &mut TickContext<'_>,
+        ) -> Result<ProduceResult, NodeError> {
             self.state
                 .output
                 .set_with_version(ctx.revision(), VisualProduct::new(ctx.node_id(), 0));
-            Ok(())
+            Ok(ProduceResult::Produced)
         }
 
         fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {

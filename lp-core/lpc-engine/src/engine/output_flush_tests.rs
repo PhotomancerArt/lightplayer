@@ -10,8 +10,8 @@ use crate::engine::error::Error;
 use crate::gfx::{LpGraphics, LpShader, ShaderCompileOptions};
 use crate::node::test_placeholder_spine;
 use crate::node::{
-    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, RenderContext, RenderNode,
-    TickContext,
+    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
+    RenderContext, RenderNode, TickContext,
 };
 use crate::nodes::{
     FixtureNode, OutputNode, fixture_input_path, output_input_path, shader_output_path,
@@ -137,12 +137,16 @@ struct SolidFixtureProducer {
 }
 
 impl NodeRuntime for SolidFixtureProducer {
-    fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+    fn produce(
+        &mut self,
+        _slot: &SlotPath,
+        ctx: &mut TickContext<'_>,
+    ) -> Result<ProduceResult, NodeError> {
         self.ticks.fetch_add(1, Ordering::Relaxed);
         self.state
             .output
             .set_with_version(ctx.revision(), VisualProduct::new(ctx.node_id(), 0));
-        Ok(())
+        Ok(ProduceResult::Produced)
     }
 
     fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {

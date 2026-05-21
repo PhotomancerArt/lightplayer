@@ -1,16 +1,23 @@
-//! Engine spine [`NodeRuntime`] trait: tick, destroy, memory pressure, and runtime state.
+//! Engine spine [`NodeRuntime`] trait: produce, consume, destroy, memory pressure, and runtime state.
 
 use crate::resource::RuntimeBufferId;
-use lpc_model::{SlotAccess, SlotShapeRegistry, SlotShapeRegistryError};
+use lpc_model::{SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError};
 
 use super::contexts::{DestroyCtx, MemPressureCtx, NodeResourceInitContext, TickContext};
 use super::node_error::NodeError;
 use super::{ControlNode, RenderNode};
 use crate::engine::memory_pressure::PressureLevel;
 
+/// Result of a produced-slot request against a runtime node.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ProduceResult {
+    Produced,
+    Unsupported,
+}
+
 /// Runtime node instance for the demand-driven engine spine.
 pub trait NodeRuntime {
-    /// Allocate [`RuntimeBufferId`] slots owned by this node before first tick.
+    /// Allocate [`RuntimeBufferId`] slots owned by this node before first use.
     ///
     /// Default: no-op. [`crate::engine::Engine::attach_runtime_node`] invokes this immediately
     /// before storing the alive node.
@@ -18,7 +25,25 @@ pub trait NodeRuntime {
         Ok(())
     }
 
-    fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError>;
+    /// Materialize a produced slot.
+    ///
+    /// Value-producing nodes should update the runtime state backing `slot`.
+    /// Nodes with no produced values may keep the default unsupported result.
+    fn produce(
+        &mut self,
+        _slot: &SlotPath,
+        _ctx: &mut TickContext<'_>,
+    ) -> Result<ProduceResult, NodeError> {
+        Ok(ProduceResult::Unsupported)
+    }
+
+    /// Consume graph inputs as an every-frame demand root.
+    ///
+    /// Output-like boundary nodes use this for side effects. Nodes that only
+    /// produce values can keep the no-op default.
+    fn consume(&mut self, _ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+        Ok(())
+    }
 
     fn destroy(&mut self, ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError>;
 
@@ -98,10 +123,6 @@ mod tests {
     }
 
     impl NodeRuntime for DummyNode {
-        fn tick(&mut self, _ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
-            Ok(())
-        }
-
         fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
             Ok(())
         }
@@ -146,6 +167,11 @@ mod tests {
             &slot_shapes,
         );
         let mut dyn_node: Box<dyn NodeRuntime> = Box::new(DummyNode::new());
-        dyn_node.tick(&mut tick).expect("tick");
+        assert_eq!(
+            dyn_node
+                .produce(&SlotPath::root(), &mut tick)
+                .expect("produce"),
+            ProduceResult::Unsupported
+        );
     }
 }

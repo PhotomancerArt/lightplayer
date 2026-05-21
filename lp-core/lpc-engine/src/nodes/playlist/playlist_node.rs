@@ -12,8 +12,8 @@ use lps_shared::{TextureBuffer, TextureStorageFormat};
 
 use crate::dataflow::resolver::QueryKey;
 use crate::node::{
-    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, RenderContext, RenderNode,
-    TickContext,
+    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
+    RenderContext, RenderNode, TickContext,
 };
 use crate::products::visual::{
     RenderTextureRequest, TextureRenderProduct, VisualSampleBufferRequest, VisualSampleTarget,
@@ -115,7 +115,11 @@ impl PlaylistNode {
 }
 
 impl NodeRuntime for PlaylistNode {
-    fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+    fn produce(
+        &mut self,
+        _slot: &SlotPath,
+        ctx: &mut TickContext<'_>,
+    ) -> Result<ProduceResult, NodeError> {
         let time = ctx.resolve_consumed_slot_value::<f32>(&SlotPath::parse("time").unwrap())?;
         let triggered_entry =
             detect_triggered_entry(ctx, &self.entries, &mut self.last_seen_triggers)?;
@@ -166,7 +170,7 @@ impl NodeRuntime for PlaylistNode {
                 )?);
             }
         }
-        Ok(())
+        Ok(ProduceResult::Produced)
     }
 
     fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {

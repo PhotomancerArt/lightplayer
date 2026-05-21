@@ -21,15 +21,25 @@ pub struct VirtualRadioDriver {
     registry: Rc<HardwareRegistry>,
     driver_id: String,
     address: HardwareAddress,
+    endpoint_spec: HardwareEndpointSpec,
     state: Rc<RefCell<VirtualRadioState>>,
 }
 
 impl VirtualRadioDriver {
     pub fn new(registry: Rc<HardwareRegistry>, radio_index: u8) -> Self {
+        Self::new_with_spec(registry, radio_index, "radio:virtual:0")
+    }
+
+    pub fn new_with_spec(
+        registry: Rc<HardwareRegistry>,
+        radio_index: u8,
+        spec: &'static str,
+    ) -> Self {
         Self {
             registry,
-            driver_id: alloc::format!("virtual-radio-{radio_index}"),
+            driver_id: alloc::format!("virtual-radio-{radio_index}-{spec}"),
             address: HardwareAddress::radio(radio_index),
+            endpoint_spec: HardwareEndpointSpec::from_static(spec),
             state: Rc::new(RefCell::new(VirtualRadioState::default())),
         }
     }
@@ -43,7 +53,7 @@ impl VirtualRadioDriver {
     }
 
     fn endpoint_id(&self) -> HardwareEndpointId {
-        HardwareEndpointId::for_driver_spec(self.driver_id(), &endpoint_spec())
+        HardwareEndpointId::for_driver_spec(self.driver_id(), &self.endpoint_spec)
     }
 }
 
@@ -68,7 +78,7 @@ impl RadioDriver for VirtualRadioDriver {
 
         vec![HardwareEndpoint::new(
             self.endpoint_id(),
-            endpoint_spec(),
+            self.endpoint_spec.clone(),
             HardwareEndpointKind::Radio,
             self.driver_id(),
             self.address.clone(),
@@ -120,10 +130,6 @@ impl RadioDriver for VirtualRadioDriver {
             Rc::clone(&self.state),
         )))
     }
-}
-
-fn endpoint_spec() -> HardwareEndpointSpec {
-    HardwareEndpointSpec::from_static("radio:virtual:0")
 }
 
 #[derive(Default)]

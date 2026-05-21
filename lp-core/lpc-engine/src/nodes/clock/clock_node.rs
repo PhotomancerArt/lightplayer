@@ -5,7 +5,9 @@ use lpc_model::{
     SlotShapeRegistryError, StaticSlotShape,
 };
 
-use crate::node::{DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext};
+use crate::node::{
+    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, TickContext,
+};
 
 /// Runtime clock node producing project time as ordinary slot data.
 pub struct ClockNode {
@@ -58,9 +60,14 @@ impl ClockNode {
 }
 
 impl NodeRuntime for ClockNode {
-    fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+    fn produce(
+        &mut self,
+        _slot: &SlotPath,
+        ctx: &mut TickContext<'_>,
+    ) -> Result<ProduceResult, NodeError> {
         let _ = self.node_id;
-        self.update_from_controls(ctx)
+        self.update_from_controls(ctx)?;
+        Ok(ProduceResult::Produced)
     }
 
     fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {

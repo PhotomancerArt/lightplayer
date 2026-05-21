@@ -30,7 +30,12 @@ impl HardwareSystem {
         let mut system = Self::new(Rc::clone(&registry));
         system.add_ws281x_driver(Box::new(VirtualWs281xDriver::new(Rc::clone(&registry), 0)));
         system.add_button_driver(Box::new(VirtualButtonDriver::new(Rc::clone(&registry))));
-        system.add_radio_driver(Box::new(VirtualRadioDriver::new(registry, 0)));
+        system.add_radio_driver(Box::new(VirtualRadioDriver::new(Rc::clone(&registry), 0)));
+        system.add_radio_driver(Box::new(VirtualRadioDriver::new_with_spec(
+            registry,
+            0,
+            "radio:espnow:0",
+        )));
         system
     }
 
@@ -310,7 +315,7 @@ mod tests {
 
         assert!(!system.ws281x_endpoints().is_empty());
         assert!(!system.button_endpoints().is_empty());
-        assert_eq!(system.radio_endpoints().len(), 1);
+        assert_eq!(system.radio_endpoints().len(), 2);
     }
 
     #[test]

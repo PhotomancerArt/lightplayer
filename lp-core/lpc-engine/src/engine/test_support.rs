@@ -21,7 +21,9 @@ use crate::dataflow::resolver::{
 };
 use crate::engine::Engine;
 use crate::node::test_placeholder_spine;
-use crate::node::{DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext};
+use crate::node::{
+    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, TickContext,
+};
 
 use super::engine::default_demand_input_path;
 use super::resolve_with_engine_host;
@@ -384,12 +386,16 @@ impl DummyShaderNode {
 }
 
 impl NodeRuntime for DummyShaderNode {
-    fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+    fn produce(
+        &mut self,
+        _slot: &SlotPath,
+        ctx: &mut TickContext<'_>,
+    ) -> Result<ProduceResult, NodeError> {
         self.tick_count.fetch_add(1, Ordering::Relaxed);
         for output in self.state.outputs.entries.values_mut() {
             output.set_with_version(ctx.revision(), *output.value());
         }
-        Ok(())
+        Ok(ProduceResult::Produced)
     }
 
     fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
@@ -428,7 +434,7 @@ impl DummyFixtureNode {
 }
 
 impl NodeRuntime for DummyFixtureNode {
-    fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+    fn consume(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let pv = ctx
             .resolve(QueryKey::ConsumedSlot {
                 node: ctx.node_id(),
@@ -464,7 +470,7 @@ impl DummyOutputNode {
 }
 
 impl NodeRuntime for DummyOutputNode {
-    fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+    fn consume(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let pv = ctx
             .resolve(QueryKey::ConsumedSlot {
                 node: ctx.node_id(),

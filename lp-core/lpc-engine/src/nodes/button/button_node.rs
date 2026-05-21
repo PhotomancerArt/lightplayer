@@ -10,7 +10,9 @@ use lpc_model::{
 };
 use lpc_shared::hardware::{ButtonConfig, ButtonEventKind, ButtonInput};
 
-use crate::node::{DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext};
+use crate::node::{
+    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, TickContext,
+};
 
 /// Runtime node for `kind = "Button"` artifacts.
 pub struct ButtonNode {
@@ -93,7 +95,11 @@ struct OpenedButton {
 }
 
 impl NodeRuntime for ButtonNode {
-    fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+    fn produce(
+        &mut self,
+        _slot: &SlotPath,
+        ctx: &mut TickContext<'_>,
+    ) -> Result<ProduceResult, NodeError> {
         let config = self.read_config(ctx)?;
         self.ensure_input(&config, ctx)?;
         let now_ms = self.next_now_ms(ctx);
@@ -129,7 +135,7 @@ impl NodeRuntime for ButtonNode {
         self.state.down = down;
         self.state.held = held;
         self.state.up = up;
-        Ok(())
+        Ok(ProduceResult::Produced)
     }
 
     fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {

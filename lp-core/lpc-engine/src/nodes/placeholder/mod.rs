@@ -2,7 +2,7 @@
 
 use lpc_model::NodeKind;
 
-use crate::node::{DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext};
+use crate::node::{DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel};
 
 /// Placeholder runtime node used while wiring source load into the core tree.
 pub struct CorePlaceholderNode {
@@ -21,10 +21,6 @@ impl CorePlaceholderNode {
 }
 
 impl NodeRuntime for CorePlaceholderNode {
-    fn tick(&mut self, _ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
-        Ok(())
-    }
-
     fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
         Ok(())
     }

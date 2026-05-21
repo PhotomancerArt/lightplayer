@@ -13,7 +13,9 @@ use lpc_engine::dataflow::resolver::{
     Production, QueryKey, ResolveHost, ResolveLogLevel, ResolveSession, ResolveTrace, Resolver,
     SessionHostResolver, SessionResolveError, TickResolver,
 };
-use lpc_engine::node::{MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext};
+use lpc_engine::node::{
+    MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, TickContext,
+};
 use lpc_model::node::node_invocation::NodeInvocation;
 use lpc_model::{
     ArtifactLocator, Kind, LpValue, NodeDef, NodeId, Revision, TextureDef, bus::ChannelName,
@@ -114,7 +116,7 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
         binding,
     };
     let slot_shapes = lpc_model::SlotShapeRegistry::default();
-    let mut node = TickProbeNode {
+    let mut node = ProduceProbeNode {
         query: QueryKey::Bus(channel),
         last: None,
     };
@@ -132,7 +134,8 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
         &slot_shapes,
     );
 
-    node.tick(&mut ctx).unwrap();
+    node.produce(&lpc_model::SlotPath::root(), &mut ctx)
+        .unwrap();
     assert_eq!(node.last, Some(2.0));
 
     assert!(ctx.artifact_changed_since(Revision::new(39)));
@@ -154,20 +157,24 @@ fn runtime_spine_node_export_is_reachable() {
 
 // --- Helpers ---
 
-struct TickProbeNode {
+struct ProduceProbeNode {
     query: QueryKey,
     last: Option<f32>,
 }
 
-impl NodeRuntime for TickProbeNode {
-    fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+impl NodeRuntime for ProduceProbeNode {
+    fn produce(
+        &mut self,
+        _slot: &lpc_model::SlotPath,
+        ctx: &mut TickContext<'_>,
+    ) -> Result<ProduceResult, NodeError> {
         let pv = ctx
             .resolve(self.query.clone())
             .map_err(|e| NodeError::msg(format!("resolve: {}", e.message)))?;
         if let LpsValueF32::F32(v) = pv.as_value().expect("value") {
             self.last = Some(v);
         }
-        Ok(())
+        Ok(ProduceResult::Produced)
     }
 
     fn destroy(&mut self, _ctx: &mut lpc_engine::node::DestroyCtx<'_>) -> Result<(), NodeError> {
