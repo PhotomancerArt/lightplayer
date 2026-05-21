@@ -3,7 +3,9 @@ use alloc::vec;
 use crate::{
     FieldSlot, FieldSlotMut, LpType, OrderedF32, Revision, SlotDataAccess, SlotDataAccessMut,
     SlotMapValueAccessMut, SlotMeta, SlotPolicy, SlotRecordAccess, SlotRecordAccessMut, SlotShape,
-    SlotShapeId, SlotValueShape, ValueEditorHint, ValueSlot,
+    SlotShapeId, SlotValueShape, StaticLpType, StaticSlotFieldShape, StaticSlotMeta,
+    StaticSlotShapeDescriptor, StaticSlotValueShape, StaticValueEditorHint, ValueEditorHint,
+    ValueSlot,
 };
 
 const FRAME_SECONDS_60HZ: f32 = 1.0 / 60.0;
@@ -31,6 +33,38 @@ impl Default for ClockControls {
 }
 
 impl FieldSlot for ClockControls {
+    const STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR: Option<&'static StaticSlotShapeDescriptor> =
+        match <ValueSlot<bool> as FieldSlot>::STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR {
+            Some(running_shape) => Some(&StaticSlotShapeDescriptor::Record {
+                meta: StaticSlotMeta::EMPTY,
+                fields: &[
+                    StaticSlotFieldShape {
+                        name: "running",
+                        shape: running_shape,
+                        semantics: crate::SlotSemantics::local(),
+                        policy: SlotPolicy::writable_transient(),
+                    },
+                    StaticSlotFieldShape {
+                        name: "rate",
+                        shape: &StaticSlotShapeDescriptor::Value {
+                            shape: static_clock_rate_shape(),
+                        },
+                        semantics: crate::SlotSemantics::local(),
+                        policy: SlotPolicy::writable_transient(),
+                    },
+                    StaticSlotFieldShape {
+                        name: "scrub_offset_seconds",
+                        shape: &StaticSlotShapeDescriptor::Value {
+                            shape: static_clock_scrub_offset_shape(),
+                        },
+                        semantics: crate::SlotSemantics::local(),
+                        policy: SlotPolicy::writable_transient(),
+                    },
+                ],
+            }),
+            None => None,
+        };
+
     fn slot_field_shape() -> SlotShape {
         SlotShape::Record {
             meta: SlotMeta::empty(),
@@ -118,12 +152,38 @@ fn clock_rate_shape() -> SlotValueShape {
     }
 }
 
+const fn static_clock_rate_shape() -> StaticSlotValueShape {
+    StaticSlotValueShape {
+        id: SlotShapeId::from_static_name("lp::clock::Rate"),
+        ty: StaticLpType::F32,
+        meta: StaticSlotMeta::EMPTY,
+        editor: StaticValueEditorHint::Slider {
+            min: OrderedF32(0.0),
+            max: OrderedF32(4.0),
+            step: Some(OrderedF32(0.05)),
+        },
+    }
+}
+
 fn clock_scrub_offset_shape() -> SlotValueShape {
     SlotValueShape {
         id: SlotShapeId::from_static_name("lp::clock::ScrubOffsetSeconds"),
         ty: LpType::F32,
         meta: SlotMeta::empty(),
         editor: ValueEditorHint::Slider {
+            min: OrderedF32(-10.0),
+            max: OrderedF32(10.0),
+            step: Some(OrderedF32(FRAME_SECONDS_60HZ)),
+        },
+    }
+}
+
+const fn static_clock_scrub_offset_shape() -> StaticSlotValueShape {
+    StaticSlotValueShape {
+        id: SlotShapeId::from_static_name("lp::clock::ScrubOffsetSeconds"),
+        ty: StaticLpType::F32,
+        meta: StaticSlotMeta::EMPTY,
+        editor: StaticValueEditorHint::Slider {
             min: OrderedF32(-10.0),
             max: OrderedF32(10.0),
             step: Some(OrderedF32(FRAME_SECONDS_60HZ)),

@@ -1,6 +1,7 @@
 use crate::{
     FromLpValue, LpType, LpValue, ProductKind, ProductRef, SlotMeta, SlotShapeId, SlotValue,
-    SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot, VisualProduct,
+    SlotValueShape, StaticLpType, StaticSlotMeta, StaticSlotValueShape, StaticValueEditorHint,
+    ToLpValue, ValueEditorHint, ValueRootError, ValueSlot, VisualProduct,
 };
 
 /// Revision-tracked graph visual-product leaf.
@@ -25,6 +26,13 @@ impl FromLpValue for VisualProduct {
 
 impl SlotValue for VisualProduct {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("VisualProduct");
+    const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> =
+        Some(StaticSlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: StaticLpType::Product(ProductKind::Visual),
+            meta: StaticSlotMeta::EMPTY,
+            editor: StaticValueEditorHint::VisualProduct,
+        });
 
     fn value_shape() -> SlotValueShape {
         SlotValueShape {

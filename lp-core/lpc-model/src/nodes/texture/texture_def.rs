@@ -35,7 +35,7 @@ impl TextureDef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NodeKind, SlotPath, SlotShapeRegistry, StaticSlotShape, TextureDefView};
+    use crate::{NodeKind, SlotPath, SlotShapeRegistry, TextureDefView};
 
     #[test]
     fn test_texture_def_kind() {
@@ -47,8 +47,7 @@ mod tests {
 
     #[test]
     fn generated_texture_def_view_compiles() {
-        let mut registry = SlotShapeRegistry::default();
-        TextureDef::ensure_registered(&mut registry).expect("texture shape");
+        let registry = SlotShapeRegistry::default();
 
         let view = TextureDefView::compile(&registry).expect("texture def view");
 

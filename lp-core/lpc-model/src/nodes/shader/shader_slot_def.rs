@@ -7,7 +7,8 @@
 
 use crate::{
     FromLpValue, LpType, LpValue, OptionSlot, SlotMeta, SlotShapeId, SlotValue, SlotValueShape,
-    Slotted, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
+    Slotted, StaticLpType, StaticSlotValueShape, ToLpValue, ValueEditorHint, ValueRootError,
+    ValueSlot,
 };
 use alloc::string::{String, ToString};
 use serde::{Deserialize, Serialize};
@@ -211,6 +212,9 @@ macro_rules! impl_string_leaf {
 
         impl SlotValue for $ty {
             const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name($shape_id);
+            const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> = Some(
+                StaticSlotValueShape::new(Self::SHAPE_ID, StaticLpType::String),
+            );
 
             fn value_shape() -> SlotValueShape {
                 SlotValueShape {
@@ -286,6 +290,9 @@ impl FromLpValue for ShaderValueShapeRef {
 
 impl SlotValue for ShaderValueShapeRef {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("slot.leaf.shader_value_shape_ref");
+    const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> = Some(
+        StaticSlotValueShape::new(Self::SHAPE_ID, StaticLpType::String),
+    );
 
     fn value_shape() -> SlotValueShape {
         SlotValueShape {
@@ -336,8 +343,7 @@ mapping = { kind = "sentinel", len = 4, key = "id", empty_key = 0 }
     }
 
     fn read_slot_def(text: &str) -> ShaderSlotDef {
-        let mut registry = SlotShapeRegistry::default();
-        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("shapes");
+        let registry = SlotShapeRegistry::default();
         let value = toml::from_str::<toml::Value>(text).unwrap();
         registry
             .read_slot_toml(ShaderSlotDef::SHAPE_ID, &value)

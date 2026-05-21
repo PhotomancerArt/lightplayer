@@ -66,8 +66,7 @@ fn test_fs_changes_not_repeated() {
 
     // First tick after initial load should not reload files that were already
     // present during load.
-    let responses = server.tick(16, vec![]).unwrap();
-    assert_eq!(responses.len(), 0);
+    server.advance_frame(16).unwrap();
     let project = server.project_manager().get_project(handle).unwrap();
     assert_eq!(project.last_fs_version(), initial_version);
 
@@ -82,8 +81,7 @@ fn test_fs_changes_not_repeated() {
     let current_version_after_write = server.base_fs().current_version();
 
     // First tick - should process the change
-    let responses = server.tick(16, vec![]).unwrap();
-    assert_eq!(responses.len(), 0);
+    server.advance_frame(16).unwrap();
 
     let project = server.project_manager().get_project(handle).unwrap();
     let version_after_first = project.last_fs_version();
@@ -104,8 +102,7 @@ fn test_fs_changes_not_repeated() {
         "No changes should be returned after processing"
     );
 
-    let responses = server.tick(16, vec![]).unwrap();
-    assert_eq!(responses.len(), 0);
+    server.advance_frame(16).unwrap();
 
     let project = server.project_manager().get_project(handle).unwrap();
     let version_after_second = project.last_fs_version();
@@ -120,8 +117,7 @@ fn test_fs_changes_not_repeated() {
         .unwrap();
 
     // Third tick - should process the new change
-    let responses = server.tick(16, vec![]).unwrap();
-    assert_eq!(responses.len(), 0);
+    server.advance_frame(16).unwrap();
 
     let project = server.project_manager().get_project(handle).unwrap();
     let version_after_third = project.last_fs_version();

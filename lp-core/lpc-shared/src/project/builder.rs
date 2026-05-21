@@ -10,9 +10,8 @@ use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, ArtifactLocator, AsLpPath, BindingDef, BindingDefs, BindingRef,
     BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode, FixtureSamplingConfig,
-    HardwareEndpointSpec, MapSlot, NodeDef, NodeInvocation, NodeSlotRef, OptionSlot, ProjectDef,
-    Ratio, RatioSlot, RelativeNodeRef, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry,
-    ValueSlot,
+    HardwareEndpointSpec, MapSlot, NodeDef, NodeInvocation, OptionSlot, ProjectDef, Ratio,
+    RatioSlot, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry, ValueSlot,
 };
 use lpfs::LpFs;
 use lpfs::lp_path::LpPathBuf;
@@ -197,25 +196,6 @@ impl ProjectBuilder {
     fn register_node(&mut self, name: String, path: LpPathBuf) {
         self.nodes.push((name, path));
     }
-
-    fn node_loc_for_path(&self, path: &LpPathBuf) -> RelativeNodeRef {
-        let name = self
-            .nodes
-            .iter()
-            .find(|(_, p)| p == path)
-            .map(|(name, _)| name.clone())
-            .unwrap_or_else(|| artifact_stem_as_node_name(path));
-        RelativeNodeRef::parse(&format!("..{name}")).expect("builder emits valid relative node ref")
-    }
-}
-
-fn artifact_stem_as_node_name(path: &LpPathBuf) -> String {
-    path.as_path()
-        .file_stem()
-        .unwrap_or("node")
-        .chars()
-        .map(|c| if c == '-' { '_' } else { c })
-        .collect()
 }
 
 fn artifact_path_for_node(name: &str) -> LpPathBuf {
@@ -236,10 +216,7 @@ fn authored_node_toml(registry: &SlotShapeRegistry, node: &NodeDef) -> String {
 }
 
 fn slot_shape_registry() -> SlotShapeRegistry {
-    let mut registry = SlotShapeRegistry::default();
-    lpc_model::slot_shapes::register_all_static_slot_shapes(&mut registry)
-        .expect("static slot shapes register without conflicts");
-    registry
+    SlotShapeRegistry::default()
 }
 
 impl TextureBuilder {
@@ -393,14 +370,14 @@ impl FixtureBuilder {
 
         let node_name = numbered_node_name("fixture", id);
         let path = artifact_path_for_node(&node_name);
-        let texture_loc = builder.node_loc_for_path(&self.texture_path);
+        let _texture_path = self.texture_path;
 
         let config = FixtureDef {
             render_size: lpc_model::Dim2uSlot::new(lpc_model::Dim2u {
                 width: 16,
                 height: 16,
             }),
-            bindings: fixture_binding_defs(texture_loc),
+            bindings: fixture_binding_defs(),
             sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
             diagnostic_mode: ValueSlot::new(FixtureDiagnosticMode::Off),
             mapping: EnumSlot::new(self.mapping),
@@ -454,13 +431,12 @@ fn default_visual_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
     MapSlot::new(slots)
 }
 
-fn fixture_binding_defs(texture_loc: RelativeNodeRef) -> BindingDefs {
+fn fixture_binding_defs() -> BindingDefs {
     let mut entries = BTreeMap::new();
     entries.insert(
         String::from("input"),
-        BindingDef::source(BindingRef::Node(NodeSlotRef::new(
-            texture_loc,
-            SlotPath::parse("output").expect("valid texture output slot"),
+        BindingDef::source(BindingRef::Bus(BusSlotRef::new(
+            SlotPath::parse("visual.out").expect("valid bus slot path"),
         ))),
     );
     entries.insert(

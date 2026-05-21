@@ -6,7 +6,7 @@ use alloc::string::String;
 use lp_shader::CompileComputeDesc;
 use lpc_model::{
     ComputeShaderDef, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingKind, ShaderValueShapeRef,
-    SlotShape, SlotShapeRegistry,
+    SlotShapeLookup, SlotShapeRegistry,
 };
 use lpir::CompilerConfig;
 use lps_shared::LpsType;
@@ -119,14 +119,15 @@ fn lps_type_for_slot_value(
     }
 
     let id = lpc_model::SlotShapeId::from_static_name(value_ref.as_str());
-    let shape = registry
-        .get(&id)
+    let shape = SlotShapeLookup::get_shape(registry, id)
         .ok_or_else(|| ComputeDescError::UnknownNativeShape(String::from(value_ref.as_str())))?;
-    match shape {
-        SlotShape::Value { shape } => Ok(model_type_to_lps_type(&shape.ty)),
-        _ => Err(ComputeDescError::NativeShapeIsNotValue(String::from(
+    if let Some(shape) = shape.value_shape() {
+        let ty = shape.ty_owned();
+        Ok(model_type_to_lps_type(&ty))
+    } else {
+        Err(ComputeDescError::NativeShapeIsNotValue(String::from(
             value_ref.as_str(),
-        ))),
+        )))
     }
 }
 
@@ -154,8 +155,8 @@ mod tests {
     use alloc::format;
 
     use lpc_model::{
-        BindingDefs, CONTROL_MESSAGE_SHAPE_NAME, ControlMessage, FluidEmitter, MapSlot,
-        ShaderSlotMappingDef, StaticSlotShape, ValueSlot, generate_compute_shader_header,
+        BindingDefs, CONTROL_MESSAGE_SHAPE_NAME, MapSlot, ShaderSlotMappingDef, ValueSlot,
+        generate_compute_shader_header,
     };
     use lps_shared::LpsValueF32;
     use lpvm_wasm::WasmOptions;
@@ -163,8 +164,7 @@ mod tests {
 
     #[test]
     fn compute_def_header_and_runtime_descriptor_execute() {
-        let mut registry = SlotShapeRegistry::default();
-        FluidEmitter::ensure_registered(&mut registry).expect("fluid emitter");
+        let registry = SlotShapeRegistry::default();
 
         let mut consumed = BTreeMap::new();
         consumed.insert(
@@ -234,8 +234,7 @@ void tick() {{
 
     #[test]
     fn compute_desc_accepts_consumed_sentinel_maps() {
-        let mut registry = SlotShapeRegistry::default();
-        ControlMessage::ensure_registered(&mut registry).expect("control message");
+        let registry = SlotShapeRegistry::default();
 
         let mut consumed = BTreeMap::new();
         consumed.insert(

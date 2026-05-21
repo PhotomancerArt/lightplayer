@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use lpc_model::{
     AddSubMode, ComputeShaderDef, DivMode, MulMode, NodeId, SlotAccess, SlotPath,
-    SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
+    SlotShapeRegistry, SlotShapeRegistryError,
 };
 use lps_shared::LpsValueF32;
 
@@ -240,8 +240,6 @@ impl NodeRuntime for ComputeShaderNode {
         &self,
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
-        ComputeShaderDef::ensure_registered(registry)?;
-        lpc_model::FluidEmitter::ensure_registered(registry)?;
         self.state.register_shape(registry).map_err(|e| match e {
             ComputeStateError::Shape(err) => err,
             _ => SlotShapeRegistryError::MissingReferencedShape(self.state.shape_id()),
@@ -279,9 +277,9 @@ mod tests {
     use alloc::string::String;
     use alloc::sync::Arc;
     use lpc_model::{
-        ArtifactLocator, BindingDefs, EnumSlot, FluidEmitter, LpValue, MapSlot, NodeDef,
-        NodeInvocation, ShaderSource, SlotDataAccess, StaticSlotShape, TreePath, ValueSlot,
-        generate_compute_shader_header, lookup_slot_data,
+        ArtifactLocator, BindingDefs, EnumSlot, LpValue, MapSlot, NodeDef, NodeInvocation,
+        ShaderSource, SlotDataAccess, TreePath, ValueSlot, generate_compute_shader_header,
+        lookup_slot_data,
     };
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
@@ -337,9 +335,7 @@ mod tests {
     }
 
     fn build_compute_engine() -> (Engine, NodeId) {
-        let mut registry = lpc_model::SlotShapeRegistry::default();
-        lpc_model::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("static");
-        FluidEmitter::ensure_registered(&mut registry).expect("fluid emitter");
+        let registry = lpc_model::SlotShapeRegistry::default();
 
         let def = compute_def();
         let header = generate_compute_shader_header(&def, &registry).expect("header");

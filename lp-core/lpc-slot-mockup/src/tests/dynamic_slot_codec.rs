@@ -321,5 +321,6 @@ fn data_kind(data: SlotDataAccess<'_>) -> &'static str {
         SlotDataAccess::Map(_) => "map",
         SlotDataAccess::Enum(_) => "enum",
         SlotDataAccess::Option(_) => "option",
+        SlotDataAccess::Custom(_) => "custom",
     }
 }

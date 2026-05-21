@@ -46,7 +46,7 @@ impl Default for FluidEmitter {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FromLpValue, SlotShapeRegistry, StaticSlotShape, ToLpValue};
+    use crate::{FromLpValue, ToLpValue};
 
     #[test]
     fn fluid_emitter_round_trips_through_lp_value() {
@@ -67,15 +67,9 @@ mod tests {
     }
 
     #[test]
-    fn fluid_emitter_registers_native_shape_name() {
-        let mut registry = SlotShapeRegistry::default();
-
-        FluidEmitter::ensure_registered(&mut registry).expect("registered");
-
+    fn fluid_emitter_has_static_shape_name() {
         assert_eq!(
-            registry
-                .entry(&<FluidEmitter as SlotValue>::SHAPE_ID)
-                .and_then(|entry| entry.name()),
+            crate::slot_shapes::static_slot_shape_name(<FluidEmitter as SlotValue>::SHAPE_ID),
             Some(FLUID_EMITTER_SHAPE_NAME)
         );
     }

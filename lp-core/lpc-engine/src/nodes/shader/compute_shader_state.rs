@@ -8,8 +8,8 @@ use alloc::vec::Vec;
 use lpc_model::{
     ComputeShaderDef, LpType, Revision, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind,
     ShaderValueShapeRef, SlotAccess, SlotData, SlotDataAccess, SlotFieldShape, SlotMapKeyShape,
-    SlotName, SlotRecordAccess, SlotShape, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError,
-    WithRevision,
+    SlotName, SlotRecordAccess, SlotShape, SlotShapeId, SlotShapeLookup, SlotShapeRegistry,
+    SlotShapeRegistryError, WithRevision,
 };
 
 /// Runtime-produced slot data for one compute shader node.
@@ -185,14 +185,14 @@ fn value_shape_for_ref(
     }
 
     let id = SlotShapeId::from_static_name(value_ref.as_str());
-    let entry = registry
-        .entry(&id)
+    let shape = SlotShapeLookup::get_shape(registry, id)
         .ok_or_else(|| ComputeStateError::UnknownNativeShape(value_ref.as_str().to_string()))?;
-    match entry.value() {
-        SlotShape::Value { .. } => Ok(SlotShape::reference(id)),
-        _ => Err(ComputeStateError::NativeShapeIsNotValue(
+    if shape.value_shape().is_some() {
+        Ok(SlotShape::reference(id))
+    } else {
+        Err(ComputeStateError::NativeShapeIsNotValue(
             value_ref.as_str().to_string(),
-        )),
+        ))
     }
 }
 

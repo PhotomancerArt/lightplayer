@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use crate::{
     EnumSlot, FromLpValue, LpType, LpValue, MapSlot, PositiveF32, PositiveF32Slot, SlotEnumOption,
     SlotMeta, SlotShapeId, SlotValue, SlotValueShape, Slotted, SourcePath, SourcePathSlot,
-    ToLpValue, ValueEditorHint, ValueRootError, ValueSlot, Xy, XySlot,
+    StaticLpType, StaticSlotEnumOption, StaticSlotMeta, StaticSlotValueShape,
+    StaticValueEditorHint, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot, Xy, XySlot,
 };
 
 /// Fixture-to-texture mapping authored on a fixture definition.
@@ -177,6 +178,24 @@ impl FromLpValue for RingOrder {
 
 impl SlotValue for RingOrder {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("RingOrder");
+    const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> =
+        Some(StaticSlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: StaticLpType::String,
+            meta: StaticSlotMeta::EMPTY,
+            editor: StaticValueEditorHint::Dropdown {
+                options: &[
+                    StaticSlotEnumOption {
+                        value: "inner_first",
+                        label: "Inner first",
+                    },
+                    StaticSlotEnumOption {
+                        value: "outer_first",
+                        label: "Outer first",
+                    },
+                ],
+            },
+        });
 
     fn value_shape() -> SlotValueShape {
         SlotValueShape {

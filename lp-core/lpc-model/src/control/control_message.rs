@@ -37,7 +37,7 @@ pub type TriggerEvent = ControlMessage;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{FromLpValue, LpValue, SlotShapeRegistry, StaticSlotShape, ToLpValue};
+    use crate::{FromLpValue, LpValue, ToLpValue};
 
     #[test]
     fn control_message_round_trips_through_lp_value() {
@@ -77,15 +77,9 @@ mod tests {
     }
 
     #[test]
-    fn control_message_registers_native_shape_name() {
-        let mut registry = SlotShapeRegistry::default();
-
-        ControlMessage::ensure_registered(&mut registry).expect("registered");
-
+    fn control_message_has_static_shape_name() {
         assert_eq!(
-            registry
-                .entry(&<ControlMessage as SlotValue>::SHAPE_ID)
-                .and_then(|entry| entry.name()),
+            crate::slot_shapes::static_slot_shape_name(<ControlMessage as SlotValue>::SHAPE_ID),
             Some(CONTROL_MESSAGE_SHAPE_NAME)
         );
     }

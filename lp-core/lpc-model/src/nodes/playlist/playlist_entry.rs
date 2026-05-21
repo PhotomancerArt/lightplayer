@@ -49,8 +49,7 @@ impl Default for PlaylistEntry {
 mod tests {
     use super::*;
     use crate::{
-        BindingRef, NodeDef, NodeDefRef, SlotDirection, SlotMerge, SlotShape, SlotShapeRegistry,
-        StaticSlotShape,
+        BindingRef, NodeDef, NodeDefRef, SlotDirection, SlotMerge, SlotShape, StaticSlotShape,
     };
 
     #[test]
@@ -110,12 +109,8 @@ source = { path = "active.glsl" }
 
     #[test]
     fn playlist_entry_trigger_shape_is_consumed_by_key() {
-        let mut registry = SlotShapeRegistry::default();
-        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("static shapes");
         assert_eq!(
-            registry
-                .entry(&ControlMessage::SHAPE_ID)
-                .and_then(|entry| entry.name()),
+            crate::slot_shapes::static_slot_shape_name(ControlMessage::SHAPE_ID),
             Some(crate::CONTROL_MESSAGE_SHAPE_NAME)
         );
 

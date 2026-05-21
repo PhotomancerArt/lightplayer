@@ -15,8 +15,7 @@ fn compiled_accessor_reads_record_field_by_index() {
     let root = AccessorRoot {
         output: ValueSlot::new(0.25),
     };
-    let mut registry = SlotShapeRegistry::default();
-    AccessorRoot::ensure_registered(&mut registry).unwrap();
+    let registry = registry();
     let accessor = SlotAccessor::compile_value(
         AccessorRoot::SHAPE_ID,
         SlotPath::parse("output").unwrap(),
@@ -34,8 +33,7 @@ fn compiled_accessor_reads_record_field_by_index() {
 
 #[test]
 fn missing_field_fails_when_accessor_compiles() {
-    let mut registry = SlotShapeRegistry::default();
-    AccessorRoot::ensure_registered(&mut registry).unwrap();
+    let registry = registry();
 
     let err = SlotAccessor::compile_value(
         AccessorRoot::SHAPE_ID,
@@ -52,8 +50,7 @@ fn registry_revision_mismatch_rejects_stale_accessor() {
     let root = AccessorRoot {
         output: ValueSlot::new(0.25),
     };
-    let mut registry = SlotShapeRegistry::default();
-    AccessorRoot::ensure_registered(&mut registry).unwrap();
+    let mut registry = registry();
     let accessor = SlotAccessor::compile_value(
         AccessorRoot::SHAPE_ID,
         SlotPath::parse("output").unwrap(),
@@ -75,4 +72,16 @@ fn assert_error_contains(err: SlotAccessorError, needle: &str) {
         err.to_string().contains(needle),
         "expected {err} to contain {needle:?}"
     );
+}
+
+fn registry() -> SlotShapeRegistry {
+    let mut registry = SlotShapeRegistry::default();
+    registry
+        .ensure_shape_named(
+            AccessorRoot::SHAPE_ID,
+            AccessorRoot::shape_name().expect("shape name"),
+            AccessorRoot::slot_shape(),
+        )
+        .unwrap();
+    registry
 }

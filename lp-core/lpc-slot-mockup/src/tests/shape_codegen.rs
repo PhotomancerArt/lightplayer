@@ -5,7 +5,7 @@ use crate::{
 use lpc_model::{SlotShapeRegistry, StaticSlotShape};
 
 #[test]
-fn generated_registration_covers_static_shapes() {
+fn generated_catalog_covers_static_shapes() {
     let mut registry = SlotShapeRegistry::default();
 
     crate::model::register_shapes(&mut registry).unwrap();
@@ -21,17 +21,12 @@ fn generated_registration_covers_static_shapes() {
 }
 
 #[test]
-fn generated_ensure_is_idempotent() {
+fn model_catalog_registration_is_idempotent() {
     let mut registry = SlotShapeRegistry::default();
-    lpc_model::slot_shapes::register_all_static_slot_shapes(&mut registry).unwrap();
 
-    let first =
-        crate::slot_shapes::ensure_static_slot_shape(&mut registry, ShaderDef::SHAPE_ID).unwrap();
-    let second =
-        crate::slot_shapes::ensure_static_slot_shape(&mut registry, ShaderDef::SHAPE_ID).unwrap();
+    crate::model::register_shapes(&mut registry).unwrap();
+    crate::model::register_shapes(&mut registry).unwrap();
 
-    assert!(first);
-    assert!(!second);
     assert_static_shape::<ShaderDef>(&registry);
 }
 

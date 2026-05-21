@@ -6,12 +6,13 @@ use alloc::format;
 
 use lpc_model::{
     ButtonDefView, ButtonState, ControlMessage, HardwareEndpointSpec, MapSlot, Revision,
-    SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
+    SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
 };
 use lpc_shared::hardware::{ButtonConfig, ButtonEventKind, ButtonInput};
 
 use crate::node::{
-    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, TickContext,
+    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
+    RuntimeStateShape, TickContext,
 };
 
 /// Runtime node for `kind = "Button"` artifacts.
@@ -161,7 +162,7 @@ impl NodeRuntime for ButtonNode {
         &self,
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
-        ButtonState::ensure_registered(registry).map(|_| ())
+        ButtonState::register_runtime_state_shape(registry).map(|_| ())
     }
 }
 

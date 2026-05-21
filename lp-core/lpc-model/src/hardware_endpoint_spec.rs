@@ -6,8 +6,8 @@ use core::str::FromStr;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::{
-    FromLpValue, LpType, LpValue, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, ToLpValue,
-    ValueEditorHint, ValueRootError,
+    FromLpValue, LpType, LpValue, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, StaticLpType,
+    StaticSlotValueShape, ToLpValue, ValueEditorHint, ValueRootError,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -102,6 +102,9 @@ impl FromLpValue for HardwareEndpointSpec {
 
 impl SlotValue for HardwareEndpointSpec {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("HardwareEndpointSpec");
+    const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> = Some(
+        StaticSlotValueShape::new(Self::SHAPE_ID, StaticLpType::String),
+    );
 
     fn value_shape() -> SlotValueShape {
         SlotValueShape {

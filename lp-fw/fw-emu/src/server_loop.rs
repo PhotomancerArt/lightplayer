@@ -1,6 +1,7 @@
 //! Server loop for emulator firmware
 //!
-//! Main loop that runs in the emulator and calls lpa-server::tick().
+//! Main loop that runs in the emulator and streams server responses through a
+//! transport.
 
 use crate::serial::SyscallSerialIo;
 use crate::time::SyscallTimeProvider;
@@ -93,26 +94,9 @@ pub fn run_server_loop(
         let delta_time = time_provider.elapsed_ms(last_tick);
         let delta_ms = delta_time.min(u32::MAX as u64) as u32;
 
-        // Tick server (synchronous)
-        match server.tick(delta_ms.max(1), incoming_messages) {
-            Ok(responses) => {
-                log::trace!(
-                    "run_server_loop: Server tick produced {} responses",
-                    responses.len()
-                );
-                // Send responses
-                for response in responses {
-                    if let WireMessage::Server(server_msg) = response {
-                        log::debug!(
-                            "run_server_loop: Sending response message id={}",
-                            server_msg.id
-                        );
-                        if let Err(e) = block_on(transport.send(server_msg)) {
-                            log::warn!("run_server_loop: Failed to send response: {:?}", e);
-                            // Transport error - continue with next message
-                        }
-                    }
-                }
+        match block_on(server.tick_and_send(delta_ms.max(1), incoming_messages, &mut transport)) {
+            Ok(response_count) => {
+                log::trace!("run_server_loop: Server sent {response_count} response(s)");
             }
             Err(e) => {
                 log::warn!("run_server_loop: Server tick error: {:?}", e);

@@ -54,8 +54,8 @@ impl ComputeShaderDef {
 mod tests {
     use super::*;
     use crate::{
-        FluidEmitter, NodeDef, ShaderSlotKind, ShaderSlotMappingKind, SlotShapeRegistry,
-        StaticSlotShape,
+        FluidEmitter, NodeDef, ShaderSlotKind, ShaderSlotMappingKind, SlotShapeLookup,
+        SlotShapeRegistry, StaticSlotShape,
     };
     use alloc::string::ToString;
 
@@ -122,16 +122,12 @@ glsl_path = "emitters.glsl"
 
     #[test]
     fn compute_shader_shape_can_reference_native_fluid_emitter() {
-        let mut registry = SlotShapeRegistry::default();
-        FluidEmitter::ensure_registered(&mut registry).expect("fluid emitter");
-        ComputeShaderDef::ensure_registered(&mut registry).expect("compute shader");
+        let registry = SlotShapeRegistry::default();
 
         assert_eq!(
-            registry
-                .entry(&FluidEmitter::SHAPE_ID)
-                .and_then(|entry| entry.name()),
+            crate::slot_shapes::static_slot_shape_name(FluidEmitter::SHAPE_ID),
             Some("lp::fluid::Emitter")
         );
-        assert!(registry.contains(&ComputeShaderDef::SHAPE_ID));
+        assert!(registry.get_shape(ComputeShaderDef::SHAPE_ID).is_some());
     }
 }

@@ -1,9 +1,9 @@
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use lpc_model::{
-    LpType, LpValue, ModelStructMember, Revision, SlotData, SlotMapKey, SlotMapKeyShape, SlotPath,
-    SlotPathSegment, SlotShape, SlotShapeId, SlotShapeRegistry,
-    slot_sync_codec::read_slot_snapshot_shape_json,
+    LpType, LpValue, ModelStructMember, Revision, SlotData, SlotDataAccess, SlotMapKey,
+    SlotMapKeyShape, SlotPath, SlotPathSegment, SlotShapeId, SlotShapeLookup, SlotShapeRegistry,
+    SlotShapeView, slot_sync_codec::read_slot_snapshot_shape_json,
 };
 use lpc_wire::{WireSlotChange, WireSlotPatch};
 
@@ -54,10 +54,13 @@ pub(super) fn shape_version_for_root(
     registry: &SlotShapeRegistry,
 ) -> Result<Revision, SlotMirrorError> {
     let shape_id = root_shapes.get(root).ok_or(SlotMirrorError::UnknownRoot)?;
-    Ok(registry
-        .entry(shape_id)
-        .ok_or(SlotMirrorError::MissingShape(*shape_id))?
-        .changed_at())
+    if let Some(entry) = registry.entry(shape_id) {
+        return Ok(entry.changed_at());
+    }
+    registry
+        .get_shape(*shape_id)
+        .map(|_| Revision::default())
+        .ok_or(SlotMirrorError::MissingShape(*shape_id))
 }
 
 pub(super) fn data_version_at(
@@ -66,14 +69,15 @@ pub(super) fn data_version_at(
     path: &SlotPath,
     registry: &SlotShapeRegistry,
 ) -> Result<Revision, SlotMirrorError> {
-    let (_, data) = resolve_path(root, shape_id, path, registry)?;
+    let (data, _) = resolve_path(root, shape_id, path, registry)?;
     match data {
-        SlotData::Unit { revision } => Ok(*revision),
-        SlotData::Value(value) => Ok(value.changed_at()),
-        SlotData::Record(record) => Ok(record.fields_revision),
-        SlotData::Map(map) => Ok(map.keys_revision),
-        SlotData::Enum(en) => Ok(en.variant_revision),
-        SlotData::Option(option) => Ok(option.presence_revision),
+        SlotDataAccess::Unit(revision) => Ok(revision),
+        SlotDataAccess::Value(value) => Ok(value.changed_at()),
+        SlotDataAccess::Record(record) => Ok(record.fields_revision()),
+        SlotDataAccess::Map(map) => Ok(map.keys_revision()),
+        SlotDataAccess::Enum(en) => Ok(en.variant_revision()),
+        SlotDataAccess::Option(option) => Ok(option.presence_revision()),
+        SlotDataAccess::Custom(custom) => Ok(custom.custom_revision()),
     }
 }
 
@@ -84,17 +88,100 @@ pub(super) fn validate_value_at(
     value: &LpValue,
     registry: &SlotShapeRegistry,
 ) -> Result<(), SlotMirrorError> {
-    let (shape, data) = resolve_path(root, shape_id, path, registry)?;
-    let SlotShape::Value { shape } = shape else {
+    let (data, shape) = resolve_path(root, shape_id, path, registry)?;
+    let Some(shape) = shape.value_shape() else {
         return Err(SlotMirrorError::NotAValue);
     };
-    let SlotData::Value(_) = data else {
+    let SlotDataAccess::Value(_) = data else {
         return Err(SlotMirrorError::NotAValue);
     };
-    if lp_value_matches_type(value, &shape.ty) {
+    if lp_value_matches_type(value, &shape.ty_owned()) {
         Ok(())
     } else {
         Err(SlotMirrorError::WrongType)
+    }
+}
+
+fn resolve_path<'a, 's>(
+    data: &'a SlotData,
+    shape_id: &SlotShapeId,
+    path: &SlotPath,
+    registry: &'s SlotShapeRegistry,
+) -> Result<(SlotDataAccess<'a>, SlotShapeView<'s>), SlotMirrorError> {
+    let shape = registry
+        .get_shape(*shape_id)
+        .ok_or(SlotMirrorError::MissingShape(*shape_id))?;
+    resolve_path_shape(data.access(), shape, path, registry)
+}
+
+fn resolve_path_shape<'a, 's>(
+    data: SlotDataAccess<'a>,
+    shape: SlotShapeView<'s>,
+    path: &SlotPath,
+    registry: &'s SlotShapeRegistry,
+) -> Result<(SlotDataAccess<'a>, SlotShapeView<'s>), SlotMirrorError> {
+    if let Some(id) = shape.ref_id() {
+        let shape = registry
+            .get_shape(id)
+            .ok_or(SlotMirrorError::MissingShape(id))?;
+        return resolve_path_shape(data, shape, path, registry);
+    }
+
+    if path.is_root() {
+        return Ok((data, shape));
+    }
+
+    if let Some(shape) = shape.custom_shape() {
+        return resolve_path_shape(data, shape, path, registry);
+    }
+
+    let (head, tail) = path
+        .segments()
+        .split_first()
+        .ok_or(SlotMirrorError::UnknownPath)?;
+    let tail = SlotPath::from_segments(tail.to_vec());
+    match (data, head) {
+        (SlotDataAccess::Record(record), SlotPathSegment::Field(head))
+            if shape.record_fields_len().is_some() =>
+        {
+            let (index, field) = shape
+                .record_field_by_name(head)
+                .ok_or(SlotMirrorError::UnknownPath)?;
+            let child = record.field(index).ok_or(SlotMirrorError::UnknownPath)?;
+            resolve_path_shape(child, field.shape(), &tail, registry)
+        }
+        (SlotDataAccess::Map(map), SlotPathSegment::Key(head)) if shape.map_value().is_some() => {
+            let key_shape = shape.map_key().ok_or(SlotMirrorError::UnknownPath)?;
+            let key = map_key_for_shape(head, key_shape)?;
+            let child = map.get(&key).ok_or(SlotMirrorError::UnknownPath)?;
+            resolve_path_shape(
+                child,
+                shape.map_value().expect("map value shape"),
+                &tail,
+                registry,
+            )
+        }
+        (SlotDataAccess::Enum(en), SlotPathSegment::Field(head)) if shape.is_enum() => {
+            let variant = shape
+                .enum_variant_by_name(head)
+                .ok_or(SlotMirrorError::UnknownPath)?;
+            resolve_path_shape(en.data(), variant.shape(), &tail, registry)
+        }
+        (SlotDataAccess::Option(option), SlotPathSegment::Field(head))
+            if shape.option_some().is_some() =>
+        {
+            if head.as_str() != "some" {
+                return Err(SlotMirrorError::UnknownPath);
+            }
+            let child = option.data().ok_or(SlotMirrorError::UnknownPath)?;
+            resolve_path_shape(
+                child,
+                shape.option_some().expect("option some shape"),
+                &tail,
+                registry,
+            )
+        }
+        _ => Err(SlotMirrorError::UnknownPath),
     }
 }
 
@@ -106,34 +193,37 @@ fn apply_replace(
     registry: &SlotShapeRegistry,
 ) -> Result<(), SlotMirrorError> {
     let shape = registry
-        .get(shape_id)
+        .get_shape(*shape_id)
         .ok_or(SlotMirrorError::MissingShape(*shape_id))?;
     apply_replace_shape(data, shape, path, change, registry)
 }
 
 fn apply_replace_shape(
     data: &mut SlotData,
-    shape: &SlotShape,
+    shape: SlotShapeView<'_>,
     path: &SlotPath,
     change: &WireSlotChange,
     registry: &SlotShapeRegistry,
 ) -> Result<(), SlotMirrorError> {
-    if let SlotShape::Ref { id } = shape {
-        let shape = registry.get(id).ok_or(SlotMirrorError::MissingShape(*id))?;
+    if let Some(id) = shape.ref_id() {
+        let shape = registry
+            .get_shape(id)
+            .ok_or(SlotMirrorError::MissingShape(id))?;
         return apply_replace_shape(data, shape, path, change, registry);
     }
 
     if path.is_root() {
         match change {
             WireSlotChange::Replace(replacement) => {
-                *data = read_slot_snapshot_shape_json(registry, shape, replacement.get())
+                let owned_shape = shape.to_owned_shape();
+                *data = read_slot_snapshot_shape_json(registry, &owned_shape, replacement.get())
                     .map_err(|error| SlotMirrorError::InvalidRootData(error.to_string()))?;
             }
         }
         return Ok(());
     }
 
-    if let SlotShape::Custom { shape, .. } = shape {
+    if let Some(shape) = shape.custom_shape() {
         return apply_replace_shape(data, shape, path, change, registry);
     }
 
@@ -142,141 +232,55 @@ fn apply_replace_shape(
         .split_first()
         .ok_or(SlotMirrorError::UnknownPath)?;
     let tail = SlotPath::from_segments(tail.to_vec());
-    match (shape, data) {
-        (SlotShape::Record { fields, .. }, SlotData::Record(record)) => {
-            let SlotPathSegment::Field(head) = head else {
-                return Err(SlotMirrorError::UnknownPath);
-            };
-            let (index, field) = fields
-                .iter()
-                .enumerate()
-                .find(|(_, field)| field.name == *head)
+    match (data, head) {
+        (SlotData::Record(record), SlotPathSegment::Field(head))
+            if shape.record_fields_len().is_some() =>
+        {
+            let (index, field) = shape
+                .record_field_by_name(head)
                 .ok_or(SlotMirrorError::UnknownPath)?;
             let child = record
                 .fields
                 .get_mut(index)
                 .ok_or(SlotMirrorError::UnknownPath)?;
-            apply_replace_shape(child, &field.shape, &tail, change, registry)
+            apply_replace_shape(child, field.shape(), &tail, change, registry)
         }
-        (SlotShape::Map { key, value, .. }, SlotData::Map(map)) => {
-            let SlotPathSegment::Key(head) = head else {
-                return Err(SlotMirrorError::UnknownPath);
-            };
-            let key = map_key_for_shape(head, *key)?;
+        (SlotData::Map(map), SlotPathSegment::Key(head)) if shape.map_value().is_some() => {
+            let key_shape = shape.map_key().ok_or(SlotMirrorError::UnknownPath)?;
+            let key = map_key_for_shape(head, key_shape)?;
             let child = map
                 .entries
                 .get_mut(&key)
                 .ok_or(SlotMirrorError::UnknownPath)?;
-            apply_replace_shape(child, value, &tail, change, registry)
+            apply_replace_shape(
+                child,
+                shape.map_value().expect("map value shape"),
+                &tail,
+                change,
+                registry,
+            )
         }
-        (SlotShape::Enum { variants, .. }, SlotData::Enum(en)) => {
-            let SlotPathSegment::Field(head) = head else {
-                return Err(SlotMirrorError::UnknownPath);
-            };
-            let variant = variants
-                .iter()
-                .find(|variant| variant.name == *head)
+        (SlotData::Enum(en), SlotPathSegment::Field(head)) if shape.is_enum() => {
+            let variant = shape
+                .enum_variant_by_name(head)
                 .ok_or(SlotMirrorError::UnknownPath)?;
-            apply_replace_shape(&mut en.data, &variant.shape, &tail, change, registry)
+            apply_replace_shape(&mut en.data, variant.shape(), &tail, change, registry)
         }
-        (SlotShape::Option { some, .. }, SlotData::Option(option)) => {
-            let SlotPathSegment::Field(head) = head else {
-                return Err(SlotMirrorError::UnknownPath);
-            };
+        (SlotData::Option(option), SlotPathSegment::Field(head))
+            if shape.option_some().is_some() =>
+        {
             if head.as_str() != "some" {
                 return Err(SlotMirrorError::UnknownPath);
             }
             let child = option.data.as_mut().ok_or(SlotMirrorError::UnknownPath)?;
-            apply_replace_shape(child, some, &tail, change, registry)
+            apply_replace_shape(
+                child,
+                shape.option_some().expect("option some shape"),
+                &tail,
+                change,
+                registry,
+            )
         }
-        (SlotShape::Unit { .. }, SlotData::Unit { .. }) => Err(SlotMirrorError::UnknownPath),
-        (SlotShape::Value { .. }, SlotData::Value(_)) => Err(SlotMirrorError::UnknownPath),
-        _ => Err(SlotMirrorError::UnknownPath),
-    }
-}
-
-fn resolve_path<'a>(
-    data: &'a SlotData,
-    shape_id: &SlotShapeId,
-    path: &SlotPath,
-    registry: &'a SlotShapeRegistry,
-) -> Result<(&'a SlotShape, &'a SlotData), SlotMirrorError> {
-    let shape = registry
-        .get(shape_id)
-        .ok_or(SlotMirrorError::MissingShape(*shape_id))?;
-    resolve_path_shape(data, shape, path, registry)
-}
-
-fn resolve_path_shape<'a>(
-    data: &'a SlotData,
-    shape: &'a SlotShape,
-    path: &SlotPath,
-    registry: &'a SlotShapeRegistry,
-) -> Result<(&'a SlotShape, &'a SlotData), SlotMirrorError> {
-    if let SlotShape::Ref { id } = shape {
-        let shape = registry.get(id).ok_or(SlotMirrorError::MissingShape(*id))?;
-        return resolve_path_shape(data, shape, path, registry);
-    }
-
-    if path.is_root() {
-        return Ok((shape, data));
-    }
-
-    if let SlotShape::Custom { shape, .. } = shape {
-        return resolve_path_shape(data, shape, path, registry);
-    }
-
-    let (head, tail) = path
-        .segments()
-        .split_first()
-        .ok_or(SlotMirrorError::UnknownPath)?;
-    let tail = SlotPath::from_segments(tail.to_vec());
-    match (shape, data) {
-        (SlotShape::Record { fields, .. }, SlotData::Record(record)) => {
-            let SlotPathSegment::Field(head) = head else {
-                return Err(SlotMirrorError::UnknownPath);
-            };
-            let (index, field) = fields
-                .iter()
-                .enumerate()
-                .find(|(_, field)| field.name == *head)
-                .ok_or(SlotMirrorError::UnknownPath)?;
-            let child = record
-                .fields
-                .get(index)
-                .ok_or(SlotMirrorError::UnknownPath)?;
-            resolve_path_shape(child, &field.shape, &tail, registry)
-        }
-        (SlotShape::Map { key, value, .. }, SlotData::Map(map)) => {
-            let SlotPathSegment::Key(head) = head else {
-                return Err(SlotMirrorError::UnknownPath);
-            };
-            let key = map_key_for_shape(head, *key)?;
-            let child = map.entries.get(&key).ok_or(SlotMirrorError::UnknownPath)?;
-            resolve_path_shape(child, value, &tail, registry)
-        }
-        (SlotShape::Enum { variants, .. }, SlotData::Enum(en)) => {
-            let SlotPathSegment::Field(head) = head else {
-                return Err(SlotMirrorError::UnknownPath);
-            };
-            let variant = variants
-                .iter()
-                .find(|variant| variant.name == *head)
-                .ok_or(SlotMirrorError::UnknownPath)?;
-            resolve_path_shape(&en.data, &variant.shape, &tail, registry)
-        }
-        (SlotShape::Option { some, .. }, SlotData::Option(option)) => {
-            let SlotPathSegment::Field(head) = head else {
-                return Err(SlotMirrorError::UnknownPath);
-            };
-            if head.as_str() != "some" {
-                return Err(SlotMirrorError::UnknownPath);
-            }
-            let child = option.data.as_ref().ok_or(SlotMirrorError::UnknownPath)?;
-            resolve_path_shape(child, some, &tail, registry)
-        }
-        (SlotShape::Unit { .. }, SlotData::Unit { .. }) => Err(SlotMirrorError::UnknownPath),
-        (SlotShape::Value { .. }, SlotData::Value(_)) => Err(SlotMirrorError::UnknownPath),
         _ => Err(SlotMirrorError::UnknownPath),
     }
 }

@@ -4,8 +4,8 @@ use alloc::string::ToString;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    FromLpValue, LpType, LpValue, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, ToLpValue,
-    ValueEditorHint, ValueRootError,
+    FromLpValue, LpType, LpValue, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, StaticLpType,
+    StaticSlotValueShape, ToLpValue, ValueEditorHint, ValueRootError,
 };
 
 /// How a fixture evaluates its input visual product before writing control samples.
@@ -57,6 +57,9 @@ impl FromLpValue for FixtureSamplingConfig {
 
 impl SlotValue for FixtureSamplingConfig {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("FixtureSamplingConfig");
+    const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> = Some(
+        StaticSlotValueShape::new(Self::SHAPE_ID, StaticLpType::String),
+    );
 
     fn value_shape() -> SlotValueShape {
         SlotValueShape {

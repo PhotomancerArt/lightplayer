@@ -20,7 +20,7 @@ use crate::gfx::{LpShader, ShaderCompileOptions, ShaderCompileStats};
 use crate::node::catch_node_panic::catch_panic;
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
-    RenderContext, RenderNode, TickContext,
+    RenderContext, RenderNode, RuntimeStateShape, TickContext,
 };
 use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use crate::products::visual::{VisualSampleBufferRequest, VisualSampleTarget};
@@ -222,7 +222,7 @@ impl NodeRuntime for ShaderNode {
         &self,
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
-        ShaderState::ensure_registered(registry).map(|_| ())
+        ShaderState::register_runtime_state_shape(registry).map(|_| ())
     }
 
     fn render_node(&mut self) -> Option<&mut dyn RenderNode> {

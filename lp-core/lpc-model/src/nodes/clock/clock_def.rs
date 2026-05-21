@@ -20,8 +20,7 @@ impl ClockDef {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::{ClockDefView, NodeDef, SlotPath, SlotShapeRegistry, StaticSlotShape};
+    use crate::{ClockDefView, NodeDef, SlotPath, SlotShapeRegistry};
 
     #[test]
     fn clock_def_parses_minimal_inline_node() {
@@ -41,8 +40,7 @@ kind = "Clock"
 
     #[test]
     fn generated_clock_def_view_compiles() {
-        let mut registry = SlotShapeRegistry::default();
-        ClockDef::ensure_registered(&mut registry).expect("clock shape");
+        let registry = SlotShapeRegistry::default();
 
         let view = ClockDefView::compile(&registry).expect("clock def view");
 

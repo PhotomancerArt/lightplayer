@@ -241,7 +241,7 @@ pub struct FixtureDef {
     }
 
     #[test]
-    fn generated_code_contains_bootstrap_functions_and_type_paths() {
+    fn generated_code_contains_static_catalog_functions_and_type_paths() {
         let shapes = vec![StaticRegisteredShape {
             type_path: String::from("crate::source::ShaderDef"),
             has_default_factory: true,
@@ -249,14 +249,13 @@ pub struct FixtureDef {
 
         let code = render_slot_shapes(&shapes);
 
-        assert!(code.contains("register_all_static_slot_shapes"));
-        assert!(code.contains("ensure_static_slot_shape"));
+        assert!(code.contains("static_slot_shape_ids"));
+        assert!(code.contains("create_static_slot_default"));
         assert!(code.contains("<crate::source::ShaderDef as ::lpc_model::StaticSlotShape>"));
-        assert!(code.contains("MissingReferencedShape"));
     }
 
     #[test]
-    fn generated_slot_value_shape_registers_without_default_factory() {
+    fn generated_slot_value_shape_uses_unsupported_factory_without_default_factory() {
         let shapes = vec![StaticRegisteredShape {
             type_path: String::from("crate::source::FluidEmitter"),
             has_default_factory: false,
@@ -264,9 +263,7 @@ pub struct FixtureDef {
 
         let code = render_slot_shapes(&shapes);
 
-        assert!(code.contains(
-            "<crate::source::FluidEmitter as ::lpc_model::StaticSlotShape>::ensure_registered(registry)?"
-        ));
+        assert!(code.contains("Some(::lpc_model::SlotFactory::unsupported())"));
         assert!(!code.contains("SlotFactory::for_default::<crate::source::FluidEmitter>"));
     }
 
@@ -313,8 +310,8 @@ pub struct FixtureDef {
     fn empty_generated_code_avoids_unused_warnings() {
         let code = render_slot_shapes(&[]);
 
-        assert!(code.contains("_registry"));
-        assert!(code.contains("_id"));
+        assert!(code.contains("static_slot_shape_ids"));
+        assert!(code.contains("&[]"));
         assert!(!code.contains("ensure_referenced_static_slot_shapes"));
     }
 }

@@ -16,13 +16,15 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
     let input = parse2::<DeriveInput>(input)?;
     let ident = input.ident;
     let attrs = SlotValueAttrs::parse(&input.attrs)?;
-    let editor = attrs.editor.unwrap_or(EditorSpec::Plain).tokens();
+    let editor_spec = attrs.editor.unwrap_or(EditorSpec::Plain);
+    let editor = editor_spec.tokens();
+    let static_editor = editor_spec.static_tokens();
     let shape_id = attrs
         .shape_id
         .map(|value| value.value())
         .unwrap_or_else(|| ident.to_string());
 
-    let (lp_type, to_lp_value, from_lp_value) = match input.data {
+    let (lp_type, static_lp_type, to_lp_value, from_lp_value) = match input.data {
         Data::Struct(data) => match data.fields {
             Fields::Unnamed(fields) if fields.unnamed.len() == 1 => {
                 let field = fields.unnamed.into_iter().next().expect("checked len");
@@ -30,6 +32,7 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
                 let ty = field.ty;
                 (
                     lp_type_tokens(&ty)?,
+                    static_lp_type_tokens(&ty)?,
                     quote! { <#ty as ::lpc_model::ToLpValue>::to_lp_value(&self.0) },
                     quote! {
                         Ok(Self(<#ty as ::lpc_model::FromLpValue>::from_lp_value(value)?))
@@ -38,6 +41,7 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
             }
             Fields::Named(fields) => {
                 let mut model_fields = Vec::new();
+                let mut static_model_fields = Vec::new();
                 let mut to_fields = Vec::new();
                 let mut from_fields = Vec::new();
                 for (index, field) in fields.named.into_iter().enumerate() {
@@ -46,11 +50,18 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
                     let field_name = field_ident.to_string();
                     let ty = field.ty;
                     let field_ty = lp_type_tokens(&ty)?;
+                    let static_field_ty = static_lp_type_tokens(&ty)?;
                     let index = syn::Index::from(index);
                     model_fields.push(quote! {
                         ::lpc_model::ModelStructMember {
                             name: ::lpc_model::__private::String::from(#field_name),
                             ty: #field_ty,
+                        }
+                    });
+                    static_model_fields.push(quote! {
+                        ::lpc_model::StaticModelStructMember {
+                            name: #field_name,
+                            ty: #static_field_ty,
                         }
                     });
                     to_fields.push(quote! {
@@ -81,6 +92,14 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
                             fields: ::lpc_model::__private::Vec::from([
                                 #(#model_fields),*
                             ]),
+                        }
+                    },
+                    quote! {
+                        ::lpc_model::StaticLpType::Struct {
+                            name: Some(stringify!(#ident)),
+                            fields: &[
+                                #(#static_model_fields),*
+                            ],
                         }
                     },
                     quote! {
@@ -139,6 +158,13 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
         impl ::lpc_model::SlotValue for #ident {
             const SHAPE_ID: ::lpc_model::SlotShapeId =
                 ::lpc_model::SlotShapeId::from_static_name(#shape_id);
+            const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<::lpc_model::StaticSlotValueShape> =
+                Some(::lpc_model::StaticSlotValueShape {
+                    id: Self::SHAPE_ID,
+                    ty: #static_lp_type,
+                    meta: ::lpc_model::StaticSlotMeta::EMPTY,
+                    editor: #static_editor,
+                });
 
             fn value_shape() -> ::lpc_model::SlotValueShape {
                 ::lpc_model::SlotValueShape {
@@ -152,6 +178,15 @@ fn derive_inner(input: TokenStream) -> Result<TokenStream> {
 
         impl ::lpc_model::StaticSlotShape for #ident {
             const SHAPE_ID: ::lpc_model::SlotShapeId = <Self as ::lpc_model::SlotValue>::SHAPE_ID;
+            const STATIC_SLOT_SHAPE_DESCRIPTOR: Option<&'static ::lpc_model::StaticSlotShapeDescriptor> =
+                Some(&::lpc_model::StaticSlotShapeDescriptor::Value {
+                    shape: ::lpc_model::StaticSlotValueShape {
+                        id: <Self as ::lpc_model::SlotValue>::SHAPE_ID,
+                        ty: #static_lp_type,
+                        meta: ::lpc_model::StaticSlotMeta::EMPTY,
+                        editor: #static_editor,
+                    },
+                });
 
             fn slot_shape() -> ::lpc_model::SlotShape {
                 ::lpc_model::SlotShape::leaf(<Self as ::lpc_model::SlotValue>::value_shape())
@@ -200,6 +235,34 @@ fn lp_type_tokens(ty: &Type) -> Result<TokenStream> {
     Err(syn::Error::new_spanned(
         ty,
         "SlotValue derive cannot infer an LpType for this field yet",
+    ))
+}
+
+fn static_lp_type_tokens(ty: &Type) -> Result<TokenStream> {
+    if type_is_path(ty, "String") {
+        return Ok(quote! { ::lpc_model::StaticLpType::String });
+    }
+    if type_is_path(ty, "i32") {
+        return Ok(quote! { ::lpc_model::StaticLpType::I32 });
+    }
+    if type_is_path(ty, "u32") {
+        return Ok(quote! { ::lpc_model::StaticLpType::U32 });
+    }
+    if type_is_path(ty, "f32") {
+        return Ok(quote! { ::lpc_model::StaticLpType::F32 });
+    }
+    if type_is_path(ty, "bool") {
+        return Ok(quote! { ::lpc_model::StaticLpType::Bool });
+    }
+    if array_is_f32_len(ty, 2) {
+        return Ok(quote! { ::lpc_model::StaticLpType::Vec2 });
+    }
+    if array_is_f32_len(ty, 3) {
+        return Ok(quote! { ::lpc_model::StaticLpType::Vec3 });
+    }
+    Err(syn::Error::new_spanned(
+        ty,
+        "SlotValue derive cannot infer a StaticLpType for this field yet",
     ))
 }
 
@@ -317,6 +380,45 @@ impl EditorSpec {
                 let step = option_f32_tokens(step);
                 quote! {
                     ::lpc_model::ValueEditorHint::Number {
+                        min: #min,
+                        max: #max,
+                        step: #step,
+                    }
+                }
+            }
+        }
+    }
+
+    fn static_tokens(&self) -> TokenStream {
+        match self {
+            Self::Plain => quote! { ::lpc_model::StaticValueEditorHint::Plain },
+            Self::Path => quote! { ::lpc_model::StaticValueEditorHint::Path },
+            Self::NodeRef => quote! { ::lpc_model::StaticValueEditorHint::NodeRef },
+            Self::Dimensions => quote! { ::lpc_model::StaticValueEditorHint::Dimensions },
+            Self::Affine2d => quote! { ::lpc_model::StaticValueEditorHint::Affine2d },
+            Self::Resource => quote! { ::lpc_model::StaticValueEditorHint::Resource },
+            Self::RuntimeBufferResource => {
+                quote! { ::lpc_model::StaticValueEditorHint::RuntimeBufferResource }
+            }
+            Self::VisualProduct => quote! { ::lpc_model::StaticValueEditorHint::VisualProduct },
+            Self::ControlProduct => quote! { ::lpc_model::StaticValueEditorHint::ControlProduct },
+            Self::Xy => quote! { ::lpc_model::StaticValueEditorHint::Xy },
+            Self::Slider { min, max, step } => {
+                let step = option_f32_tokens(step);
+                quote! {
+                    ::lpc_model::StaticValueEditorHint::Slider {
+                        min: ::lpc_model::OrderedF32(#min),
+                        max: ::lpc_model::OrderedF32(#max),
+                        step: #step,
+                    }
+                }
+            }
+            Self::Number { min, max, step } => {
+                let min = option_f32_tokens(min);
+                let max = option_f32_tokens(max);
+                let step = option_f32_tokens(step);
+                quote! {
+                    ::lpc_model::StaticValueEditorHint::Number {
                         min: #min,
                         max: #max,
                         step: #step,

@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     FromLpValue, LpType, LpValue, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape,
-    ToLpValue, ValueEditorHint, ValueRootError,
+    StaticLpType, StaticSlotEnumOption, StaticSlotMeta, StaticSlotValueShape,
+    StaticValueEditorHint, ToLpValue, ValueEditorHint, ValueRootError,
 };
 
 /// Fixture-level hardware diagnostic pattern.
@@ -64,6 +65,32 @@ impl FromLpValue for FixtureDiagnosticMode {
 
 impl SlotValue for FixtureDiagnosticMode {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("FixtureDiagnosticMode");
+    const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> =
+        Some(StaticSlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: StaticLpType::String,
+            meta: StaticSlotMeta::EMPTY,
+            editor: StaticValueEditorHint::Dropdown {
+                options: &[
+                    StaticSlotEnumOption {
+                        value: "off",
+                        label: "Off",
+                    },
+                    StaticSlotEnumOption {
+                        value: "led_index",
+                        label: "LED index",
+                    },
+                    StaticSlotEnumOption {
+                        value: "groups_10",
+                        label: "Groups of 10",
+                    },
+                    StaticSlotEnumOption {
+                        value: "chase",
+                        label: "Chase",
+                    },
+                ],
+            },
+        });
 
     fn value_shape() -> SlotValueShape {
         SlotValueShape {

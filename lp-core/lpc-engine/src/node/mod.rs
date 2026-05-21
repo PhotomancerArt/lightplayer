@@ -13,6 +13,7 @@ mod node_error;
 mod node_runtime;
 pub mod node_tree;
 mod render_node;
+mod runtime_state_shape;
 pub mod sync;
 pub mod tree_error;
 
@@ -30,6 +31,7 @@ pub use node_error::NodeError;
 pub use node_runtime::{NodeRuntime, ProduceResult};
 pub use node_tree::NodeTree;
 pub use render_node::RenderNode;
+pub use runtime_state_shape::RuntimeStateShape;
 pub use sync::tree_deltas_since;
 pub use tree_error::TreeError;
 
