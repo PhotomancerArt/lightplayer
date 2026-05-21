@@ -86,6 +86,14 @@ impl<'a> TraceGuard<'a> {
     pub fn record_event(&self, event: ResolveTraceEvent) {
         self.trace.record_event(event);
     }
+
+    pub fn record_cache_hit(&self, query: &QueryKey) {
+        self.trace.record_cache_hit(query);
+    }
+
+    pub fn record_select_binding(&self, query: &QueryKey, binding: BindingRef) {
+        self.trace.record_select_binding(query, binding);
+    }
 }
 
 /// Combined active stack and optional trace log.
@@ -130,20 +138,14 @@ impl ResolveTrace {
             let stack = self.active_stack.borrow();
             if stack.contains(query) {
                 drop(stack);
-                if self.is_logging_enabled() {
-                    self.record_event_if_enabled(ResolveTraceEvent::CycleDetected {
-                        query: query.clone(),
-                    });
-                }
+                self.record_cycle_detected(query);
                 return Err(ResolveTraceError::Cycle {
                     query: query.clone(),
                 });
             }
         }
         self.active_stack.borrow_mut().push(query.clone());
-        if self.is_logging_enabled() {
-            self.record_event_if_enabled(ResolveTraceEvent::BeginQuery(query.clone()));
-        }
+        self.record_begin_query(query);
         Ok(())
     }
 
@@ -181,6 +183,122 @@ impl ResolveTrace {
     /// Append an event only when logging is enabled.
     pub fn record_event(&self, event: ResolveTraceEvent) {
         self.record_event_if_enabled(event);
+    }
+
+    #[inline(never)]
+    pub fn record_begin_query(&self, query: &QueryKey) {
+        if self.log_level == ResolveLogLevel::Off {
+            return;
+        }
+        self.events
+            .borrow_mut()
+            .push(ResolveTraceEvent::BeginQuery(query.clone()));
+    }
+
+    #[inline(never)]
+    pub fn record_cache_hit(&self, query: &QueryKey) {
+        if self.log_level == ResolveLogLevel::Off {
+            return;
+        }
+        self.events
+            .borrow_mut()
+            .push(ResolveTraceEvent::CacheHit(query.clone()));
+    }
+
+    #[inline(never)]
+    pub fn record_select_binding(&self, query: &QueryKey, binding: BindingRef) {
+        if self.log_level == ResolveLogLevel::Off {
+            return;
+        }
+        self.events
+            .borrow_mut()
+            .push(ResolveTraceEvent::SelectBinding {
+                query: query.clone(),
+                binding,
+            });
+    }
+
+    #[inline(never)]
+    pub fn record_produce_start(&self, query: &QueryKey) {
+        if self.log_level == ResolveLogLevel::Off {
+            return;
+        }
+        self.events
+            .borrow_mut()
+            .push(ResolveTraceEvent::ProduceStart(query.clone()));
+    }
+
+    #[inline(never)]
+    pub fn record_produce_end(&self, query: &QueryKey) {
+        if self.log_level == ResolveLogLevel::Off {
+            return;
+        }
+        self.events
+            .borrow_mut()
+            .push(ResolveTraceEvent::ProduceEnd(query.clone()));
+    }
+
+    #[inline(never)]
+    pub fn record_select_merge_policy(&self, query: &QueryKey, policy: SlotMerge) {
+        if self.log_level == ResolveLogLevel::Off {
+            return;
+        }
+        self.events
+            .borrow_mut()
+            .push(ResolveTraceEvent::SelectMergePolicy {
+                query: query.clone(),
+                policy,
+            });
+    }
+
+    #[inline(never)]
+    pub fn record_merge_input(&self, query: &QueryKey, binding: BindingRef) {
+        if self.log_level == ResolveLogLevel::Off {
+            return;
+        }
+        self.events
+            .borrow_mut()
+            .push(ResolveTraceEvent::MergeInput {
+                query: query.clone(),
+                binding,
+            });
+    }
+
+    #[inline(never)]
+    pub fn record_merge_replace_key(&self, query: &QueryKey, key: SlotMapKey) {
+        if self.log_level == ResolveLogLevel::Off {
+            return;
+        }
+        self.events
+            .borrow_mut()
+            .push(ResolveTraceEvent::MergeReplaceKey {
+                query: query.clone(),
+                key,
+            });
+    }
+
+    #[inline(never)]
+    pub fn record_cycle_detected(&self, query: &QueryKey) {
+        if self.log_level == ResolveLogLevel::Off {
+            return;
+        }
+        self.events
+            .borrow_mut()
+            .push(ResolveTraceEvent::CycleDetected {
+                query: query.clone(),
+            });
+    }
+
+    #[inline(never)]
+    pub fn record_resolve_error(&self, query: &QueryKey) {
+        if self.log_level == ResolveLogLevel::Off {
+            return;
+        }
+        self.events
+            .borrow_mut()
+            .push(ResolveTraceEvent::ResolveError {
+                query: query.clone(),
+            });
     }
 
     fn record_event_if_enabled(&self, event: ResolveTraceEvent) {

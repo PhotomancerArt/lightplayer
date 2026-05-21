@@ -9,7 +9,7 @@ use crate::dataflow::resolver::production::{Production, ProductionSource};
 use crate::dataflow::resolver::query_key::QueryKey;
 use crate::dataflow::resolver::resolve_error::SessionResolveError;
 use crate::dataflow::resolver::resolve_host::ResolveHost;
-use crate::dataflow::resolver::resolve_trace::{ResolveTrace, ResolveTraceEvent};
+use crate::dataflow::resolver::resolve_trace::ResolveTrace;
 use crate::dataflow::resolver::resolver::Resolver;
 use crate::dataflow::resolver::resolver::materialize_literal_product;
 use lpc_model::{ChannelName, NodeId, Revision, SlotData, SlotMapDyn, SlotMerge, SlotPath};
@@ -62,21 +62,24 @@ impl<'a> EngineSession<'a> {
         query: QueryKey,
     ) -> Result<Production, SessionResolveError> {
         if let Some(pv) = self.resolver.cache().get(&query) {
-            if self.trace.is_logging_enabled() {
-                self.trace
-                    .record_event(ResolveTraceEvent::CacheHit(query.clone()));
-            }
+            self.trace.record_cache_hit(&query);
             return Ok(pv.clone());
         }
 
         self.trace
             .try_push_active(&query)
             .map_err(SessionResolveError::from)?;
-        let inner_result = self.resolve_uncached(host, &query);
-        self.trace.exit(&query);
-        let result = inner_result?;
-        self.resolver.cache_mut().insert(query, result.clone());
-        Ok(result)
+        match self.resolve_uncached(host, &query) {
+            Ok(result) => {
+                self.trace.exit(&query);
+                self.resolver.cache_mut().insert(query, result.clone());
+                Ok(result)
+            }
+            Err(err) => {
+                self.trace.exit(&query);
+                Err(err)
+            }
+        }
     }
 
     fn resolve_uncached<H: ResolveHost + ?Sized>(
@@ -93,21 +96,11 @@ impl<'a> EngineSession<'a> {
                 self.resolve_consumed_slot(host, *node, accessor.path(), query)
             }
             QueryKey::ProducedSlot { .. } => {
-                if self.trace.is_logging_enabled() {
-                    self.trace
-                        .record_event(ResolveTraceEvent::ProduceStart(query.clone()));
-                }
+                self.trace.record_produce_start(query);
                 let r = host.produce(query, self);
                 match &r {
-                    Ok(_) if self.trace.is_logging_enabled() => self
-                        .trace
-                        .record_event(ResolveTraceEvent::ProduceEnd(query.clone())),
-                    Err(_) if self.trace.is_logging_enabled() => {
-                        self.trace.record_event(ResolveTraceEvent::ResolveError {
-                            query: query.clone(),
-                        })
-                    }
-                    _ => {}
+                    Ok(_) => self.trace.record_produce_end(query),
+                    Err(_) => self.trace.record_resolve_error(query),
                 }
                 r
             }
@@ -122,12 +115,7 @@ impl<'a> EngineSession<'a> {
     ) -> Result<Production, SessionResolveError> {
         let candidates = host.providers_for_bus(channel);
         let entry = select_highest_priority_bus_provider(channel, &candidates)?;
-        if self.trace.is_logging_enabled() {
-            self.trace.record_event(ResolveTraceEvent::SelectBinding {
-                query: query.clone(),
-                binding: entry.0,
-            });
-        }
+        self.trace.record_select_binding(query, entry.0);
         self.resolve_binding_source(host, entry.0, &entry.1.source)
     }
 
@@ -139,13 +127,7 @@ impl<'a> EngineSession<'a> {
         query: &QueryKey,
     ) -> Result<Production, SessionResolveError> {
         let policy = host.merge_policy_for_consumed_slot(node, slot);
-        if self.trace.is_logging_enabled() {
-            self.trace
-                .record_event(ResolveTraceEvent::SelectMergePolicy {
-                    query: query.clone(),
-                    policy,
-                });
-        }
+        self.trace.record_select_merge_policy(query, policy);
         match policy {
             SlotMerge::Latest => self.resolve_latest_consumed_slot(host, node, slot, query),
             SlotMerge::Error => self.resolve_error_merge_consumed_slot(host, node, slot, query),
@@ -161,29 +143,14 @@ impl<'a> EngineSession<'a> {
         query: &QueryKey,
     ) -> Result<Production, SessionResolveError> {
         if let Some(entry) = host.binding_for_consumed_slot(node, slot) {
-            if self.trace.is_logging_enabled() {
-                self.trace.record_event(ResolveTraceEvent::SelectBinding {
-                    query: query.clone(),
-                    binding: entry.0,
-                });
-            }
+            self.trace.record_select_binding(query, entry.0);
             return self.resolve_binding_source(host, entry.0, &entry.1.source);
         }
-        if self.trace.is_logging_enabled() {
-            self.trace
-                .record_event(ResolveTraceEvent::ProduceStart(query.clone()));
-        }
+        self.trace.record_produce_start(query);
         let r = host.produce(query, self);
         match &r {
-            Ok(_) if self.trace.is_logging_enabled() => self
-                .trace
-                .record_event(ResolveTraceEvent::ProduceEnd(query.clone())),
-            Err(_) if self.trace.is_logging_enabled() => {
-                self.trace.record_event(ResolveTraceEvent::ResolveError {
-                    query: query.clone(),
-                });
-            }
-            _ => {}
+            Ok(_) => self.trace.record_produce_end(query),
+            Err(_) => self.trace.record_resolve_error(query),
         }
         r
     }
@@ -217,19 +184,16 @@ impl<'a> EngineSession<'a> {
         }
 
         let mut inputs = Vec::new();
-        for (binding_ref, entry) in entries {
-            if self.trace.is_logging_enabled() {
-                self.trace.record_event(ResolveTraceEvent::MergeInput {
-                    query: query.clone(),
-                    binding: binding_ref,
-                });
-            }
-            inputs.extend(self.resolve_binding_source_for_merge(
+        for (binding_ref, entry) in entries.iter() {
+            let binding_ref = *binding_ref;
+            self.trace.record_merge_input(query, binding_ref);
+            self.resolve_binding_source_for_merge(
                 host,
                 query,
                 binding_ref,
                 &entry.source,
-            )?);
+                &mut inputs,
+            )?;
         }
 
         merge_maps_by_key(inputs, query, &self.trace)
@@ -274,42 +238,43 @@ impl<'a> EngineSession<'a> {
         query: &QueryKey,
         binding_ref: BindingRef,
         source: &BindingSource,
-    ) -> Result<Vec<Production>, SessionResolveError> {
+        out: &mut Vec<Production>,
+    ) -> Result<(), SessionResolveError> {
         match source {
             BindingSource::BusChannel(channel) => {
                 let bus_query = QueryKey::Bus(channel.clone());
                 self.trace
                     .try_push_active(&bus_query)
                     .map_err(SessionResolveError::from)?;
-                let result = (|| {
-                    let mut providers = host.providers_for_bus(channel);
-                    providers.sort_by_key(|(provider_ref, entry)| (entry.priority, *provider_ref));
-                    let mut result = Vec::new();
-                    for (provider_ref, provider) in providers {
-                        if self.trace.is_logging_enabled() {
-                            self.trace.record_event(ResolveTraceEvent::MergeInput {
-                                query: query.clone(),
-                                binding: provider_ref,
-                            });
+                let mut providers = host.providers_for_bus(channel);
+                providers.sort_by_key(|(provider_ref, entry)| (entry.priority, *provider_ref));
+                for (provider_ref, provider) in providers.iter() {
+                    let provider_ref = *provider_ref;
+                    self.trace.record_merge_input(query, provider_ref);
+                    match self.resolve_binding_source_for_merge(
+                        host,
+                        query,
+                        provider_ref,
+                        &provider.source,
+                        out,
+                    ) {
+                        Ok(()) => {}
+                        Err(err) => {
+                            self.trace.exit(&bus_query);
+                            return Err(err);
                         }
-                        result.extend(self.resolve_binding_source_for_merge(
-                            host,
-                            query,
-                            provider_ref,
-                            &provider.source,
-                        )?);
                     }
-                    Ok(result)
-                })();
+                }
                 self.trace.exit(&bus_query);
-                result
+                Ok(())
             }
             _ => {
                 let mut production = self.resolve_binding_source(host, binding_ref, source)?;
                 production.source = ProductionSource::BusBinding {
                     binding: binding_ref,
                 };
-                Ok(alloc::vec![production])
+                out.push(production);
+                Ok(())
             }
         }
     }
@@ -330,11 +295,8 @@ fn merge_maps_by_key(
         };
         keys_revision = core::cmp::max(keys_revision, map.keys_revision);
         for (key, data) in map.entries {
-            if entries.insert(key.clone(), data).is_some() && trace.is_logging_enabled() {
-                trace.record_event(ResolveTraceEvent::MergeReplaceKey {
-                    query: query.clone(),
-                    key,
-                });
+            if entries.insert(key.clone(), data).is_some() {
+                trace.record_merge_replace_key(query, key);
             }
         }
     }
@@ -377,6 +339,7 @@ mod tests {
     use crate::dataflow::binding::BindingPriority;
     use crate::dataflow::binding::BindingTarget;
     use crate::dataflow::resolver::resolve_trace::ResolveLogLevel;
+    use crate::dataflow::resolver::resolve_trace::ResolveTraceEvent;
     use alloc::collections::BTreeMap;
     use alloc::string::String;
     use lpc_model::Kind;

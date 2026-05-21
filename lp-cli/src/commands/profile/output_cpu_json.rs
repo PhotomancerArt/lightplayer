@@ -22,7 +22,7 @@ fn stack_frame_rows_by_symbol(
             frame.function_pc = canon;
             frame
         });
-        if frame.self_bytes > entry.self_bytes {
+        if frame.frame_bytes > entry.frame_bytes {
             let mut frame = frame.clone();
             frame.function_pc = canon;
             *entry = frame;
@@ -31,7 +31,7 @@ fn stack_frame_rows_by_symbol(
     let mut rows: Vec<_> = collapsed.into_values().collect();
     rows.sort_by_key(|frame| {
         (
-            std::cmp::Reverse(frame.self_bytes),
+            std::cmp::Reverse(frame.frame_bytes),
             std::cmp::Reverse(frame.cumulative_bytes),
             frame.function_pc,
         )
@@ -51,7 +51,7 @@ fn call_count_rows_by_symbol(
     for (&pc, frame) in &cpu.max_frame_by_func {
         let canon = symbols.entry_lo_for_pc(pc);
         let entry = collapsed.entry(canon).or_insert((0, 0));
-        entry.1 = entry.1.max(frame.self_bytes);
+        entry.1 = entry.1.max(frame.frame_bytes);
     }
     let mut rows: Vec<_> = collapsed
         .into_iter()
@@ -126,8 +126,8 @@ pub fn build(cpu: &CpuCollector, symbols: &dyn PcSymbolizer) -> Value {
                     "name": symbols.symbolize(frame.function_pc),
                     "entry_sp": pc_key(frame.entry_sp),
                     "min_sp": pc_key(frame.min_sp),
-                    "frame_bytes": frame.self_bytes,
-                    "self_bytes": frame.self_bytes,
+                    "frame_bytes": frame.frame_bytes,
+                    "local_bytes": frame.local_bytes,
                     "cumulative_bytes": frame.cumulative_bytes,
                 })
             }).collect::<Vec<_>>(),
@@ -172,8 +172,8 @@ pub fn build(cpu: &CpuCollector, symbols: &dyn PcSymbolizer) -> Value {
                 "function_name": symbols.symbolize(frame.function_pc),
                 "entry_sp": pc_key(frame.entry_sp),
                 "min_sp": pc_key(frame.min_sp),
-                "frame_bytes": frame.self_bytes,
-                "self_bytes": frame.self_bytes,
+                "frame_bytes": frame.frame_bytes,
+                "local_bytes": frame.local_bytes,
                 "cumulative_bytes": frame.cumulative_bytes,
             })
         })
@@ -194,7 +194,7 @@ pub fn build(cpu: &CpuCollector, symbols: &dyn PcSymbolizer) -> Value {
         .collect::<Vec<_>>();
 
     json!({
-        "schema_version": 4,
+        "schema_version": 5,
         "cycle_model": cpu.cycle_model_label,
         "total_cycles_attributed": cpu.total_cycles_attributed,
         "stack": {
@@ -217,13 +217,13 @@ mod tests {
     use crate::commands::profile::symbolize::Symbolizer;
 
     #[test]
-    fn schema_version_is_4() {
+    fn schema_version_is_5() {
         let mut cpu = CpuCollector::new("esp32c6");
         cpu.on_gate_action(GateAction::Enable);
         cpu.on_instruction(0x1000, 0x1004, InstClass::Alu, 1);
         let sym = Symbolizer::new(&[], &[]);
         let v = build(&cpu, &sym);
-        assert_eq!(v["schema_version"], 4);
+        assert_eq!(v["schema_version"], 5);
     }
 
     #[test]
@@ -304,10 +304,12 @@ mod tests {
         let v = build(&cpu, &sym);
         assert_eq!(v["stack"]["max"]["used_bytes"], 0x100);
         assert_eq!(v["stack"]["by_function"][0]["used_bytes"], 0x100);
-        assert_eq!(v["stack"]["max"]["callstack"][0]["self_bytes"], 0xf0);
+        assert_eq!(v["stack"]["max"]["callstack"][0]["frame_bytes"], 0x100);
+        assert_eq!(v["stack"]["max"]["callstack"][0]["local_bytes"], 0xf0);
         assert_eq!(v["stack"]["max"]["callstack"][0]["cumulative_bytes"], 0x100);
-        assert_eq!(v["stack"]["largest_frames"][0]["frame_bytes"], 0xf0);
+        assert_eq!(v["stack"]["largest_frames"][0]["frame_bytes"], 0x100);
+        assert_eq!(v["stack"]["largest_frames"][0]["local_bytes"], 0xf0);
         assert_eq!(v["stack"]["most_called_frames"][0]["calls"], 1);
-        assert_eq!(v["stack"]["most_called_frames"][0]["frame_bytes"], 0xf0);
+        assert_eq!(v["stack"]["most_called_frames"][0]["frame_bytes"], 0x100);
     }
 }

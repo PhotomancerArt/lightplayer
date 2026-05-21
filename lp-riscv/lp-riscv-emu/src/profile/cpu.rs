@@ -64,7 +64,8 @@ pub struct StackFrameSample {
     pub function_pc: u32,
     pub entry_sp: u32,
     pub min_sp: u32,
-    pub self_bytes: u32,
+    pub frame_bytes: u32,
+    pub local_bytes: u32,
     pub cumulative_bytes: u32,
 }
 
@@ -134,48 +135,42 @@ impl CpuCollector {
         edge.inclusive_cycles += inclusive;
     }
 
-    fn update_current_frame_sp(&mut self, sp: u32, stack_top: u32) {
+    fn update_current_frame_sp(&mut self, sp: u32) {
         if let Some(frame) = self.shadow_stack.last_mut() {
             if frame.min_sp == 0 || sp < frame.min_sp {
                 frame.min_sp = sp;
             }
-            let min_sp = if frame.min_sp == 0 {
-                frame.entry_sp
-            } else {
-                frame.min_sp
-            };
-            let sample = StackFrameSample {
-                function_pc: frame.callee_pc,
-                entry_sp: frame.entry_sp,
-                min_sp,
-                self_bytes: frame.entry_sp.saturating_sub(min_sp),
-                cumulative_bytes: stack_top.saturating_sub(min_sp),
-            };
-            let max_frame = self
-                .max_frame_by_func
-                .entry(frame.callee_pc)
-                .or_insert_with(|| sample.clone());
-            if sample.self_bytes > max_frame.self_bytes {
-                *max_frame = sample;
-            }
         }
     }
 
-    fn stack_frame_samples(&self, stack_top: u32) -> Vec<StackFrameSample> {
+    fn stack_frame_samples(&self, sp: u32, stack_top: u32) -> Vec<StackFrameSample> {
+        let depth = self.shadow_stack.len();
         self.shadow_stack
             .iter()
-            .map(|frame| {
+            .enumerate()
+            .map(|(index, frame)| {
                 let min_sp = if frame.min_sp == 0 {
                     frame.entry_sp
                 } else {
                     frame.min_sp
                 };
+                let upper_sp = if index == 0 {
+                    stack_top
+                } else {
+                    self.shadow_stack[index - 1].entry_sp
+                };
+                let lower_sp = if index + 1 == depth {
+                    sp
+                } else {
+                    frame.entry_sp
+                };
                 StackFrameSample {
                     function_pc: frame.callee_pc,
                     entry_sp: frame.entry_sp,
                     min_sp,
-                    self_bytes: frame.entry_sp.saturating_sub(min_sp),
-                    cumulative_bytes: stack_top.saturating_sub(min_sp),
+                    frame_bytes: upper_sp.saturating_sub(lower_sp),
+                    local_bytes: frame.entry_sp.saturating_sub(min_sp),
+                    cumulative_bytes: stack_top.saturating_sub(lower_sp),
                 }
             })
             .collect()
@@ -186,16 +181,26 @@ impl CpuCollector {
             return;
         }
 
-        self.update_current_frame_sp(sp, stack_top);
+        self.update_current_frame_sp(sp);
         let used_bytes = stack_top.saturating_sub(sp);
         let function_pc = self.current_pc();
+        let callstack = self.stack_frame_samples(sp, stack_top);
+        for frame in &callstack {
+            let max_frame = self
+                .max_frame_by_func
+                .entry(frame.function_pc)
+                .or_insert_with(|| frame.clone());
+            if frame.frame_bytes > max_frame.frame_bytes {
+                *max_frame = frame.clone();
+            }
+        }
         let sample = StackSample {
             used_bytes,
             pc,
             function_pc,
             sp,
             stack_top,
-            callstack: self.stack_frame_samples(stack_top),
+            callstack,
         };
 
         if self
@@ -401,7 +406,7 @@ fn stack_frame_rows_by_symbol(
                 frame.function_pc = canon;
                 frame
             });
-            if frame.self_bytes > entry.self_bytes {
+            if frame.frame_bytes > entry.frame_bytes {
                 let mut frame = frame;
                 frame.function_pc = canon;
                 *entry = frame;
@@ -411,7 +416,7 @@ fn stack_frame_rows_by_symbol(
     }
     rows.sort_by_key(|frame| {
         (
-            std::cmp::Reverse(frame.self_bytes),
+            std::cmp::Reverse(frame.frame_bytes),
             std::cmp::Reverse(frame.cumulative_bytes),
             frame.function_pc,
         )
@@ -434,7 +439,7 @@ fn call_count_rows_by_symbol(
         for (&pc, frame) in frames {
             let canon = s.entry_lo_for_pc(pc);
             let entry = collapsed.entry(canon).or_insert((0, 0));
-            entry.1 = entry.1.max(frame.self_bytes);
+            entry.1 = entry.1.max(frame.frame_bytes);
         }
         rows.extend(
             collapsed
@@ -443,7 +448,7 @@ fn call_count_rows_by_symbol(
         );
     } else {
         rows.extend(func_stats.iter().map(|(&pc, stats)| {
-            let frame_bytes = frames.get(&pc).map_or(0, |frame| frame.self_bytes);
+            let frame_bytes = frames.get(&pc).map_or(0, |frame| frame.frame_bytes);
             (pc, stats.calls_in, frame_bytes)
         }));
     }
@@ -478,12 +483,13 @@ impl CpuCollector {
                 writeln!(w, "  {}", format_stack_sample(sample, sym))?;
                 if !sample.callstack.is_empty() {
                     writeln!(w, "  Stack frames at high water (leaf first):")?;
-                    writeln!(w, "     frame     total  function")?;
+                    writeln!(w, "     frame    local     total  function")?;
                     for frame in sample.callstack.iter().rev() {
                         writeln!(
                             w,
-                            "    {:>6}  {:>8}  {}",
-                            frame.self_bytes,
+                            "    {:>6}  {:>7}  {:>8}  {}",
+                            frame.frame_bytes,
+                            frame.local_bytes,
                             frame.cumulative_bytes,
                             format_pc_for_report(frame.function_pc, sym),
                         )?;
@@ -495,15 +501,16 @@ impl CpuCollector {
         writeln!(w)?;
 
         writeln!(w, "Top 20 largest observed frames:")?;
-        writeln!(w, "     frame     total  function")?;
+        writeln!(w, "     frame    local     total  function")?;
         for frame in stack_frame_rows_by_symbol(&self.max_frame_by_func, sym)
             .into_iter()
             .take(20)
         {
             writeln!(
                 w,
-                "  {:>8}  {:>8}  {}",
-                frame.self_bytes,
+                "  {:>8}  {:>7}  {:>8}  {}",
+                frame.frame_bytes,
+                frame.local_bytes,
                 frame.cumulative_bytes,
                 format_pc_for_report(frame.function_pc, sym),
             )?;
@@ -834,7 +841,8 @@ mod tests {
         assert_eq!(max.used_bytes, 0x100);
         assert_eq!(max.function_pc, 0x2000);
         assert_eq!(cpu.max_stack_by_func[&0x2000].used_bytes, 0x100);
-        assert_eq!(cpu.max_frame_by_func[&0x2000].self_bytes, 0xf0);
+        assert_eq!(cpu.max_frame_by_func[&0x2000].frame_bytes, 0x100);
+        assert_eq!(cpu.max_frame_by_func[&0x2000].local_bytes, 0xf0);
     }
 
     #[test]
