@@ -8,7 +8,7 @@
 - Supported straight-line geometry only: `polyline` plus `M/m`, `L/l`, `H/h`, `V/v`, and `Z/z` path commands.
 - Rejected ungrouped `path:` text, nested mapping groups, duplicate path indexes, curves, missing paths, multiple path-like elements, malformed labels, and zero counts.
 - Wired project loading so fixture TOML `SvgPath` mappings resolve relative to the fixture file and become `PathPoints` before `FixtureNode` construction.
-- Updated the checked-in button sign example to use a cleaned SVG mapping file.
+- Added a checked-in `fyeah-sign` example that uses a cleaned SVG mapping file while leaving `button-sign` on its circular mapping.
 - Added parser, model round-trip, project loader, and example validation coverage.
 
 ## Decisions for future reference

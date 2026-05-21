@@ -1,0 +1,20 @@
+kind = "Project"
+name = "fyeah-sign"
+
+[nodes.output]
+def = { path = "./output.toml" }
+
+[nodes.clock]
+def = { path = "./clock.toml" }
+
+[nodes.button]
+def = { path = "./button.toml" }
+
+[nodes.radio]
+def = { path = "./radio.toml" }
+
+[nodes.playlist]
+def = { path = "./playlist.toml" }
+
+[nodes.fixture]
+def = { path = "./fixture.toml" }
