@@ -7,6 +7,7 @@ pub mod points;
 pub mod precompute;
 pub mod sampling;
 pub mod structure;
+pub mod svg_path;
 
 // Re-export public API
 pub use accumulation::{
@@ -18,3 +19,4 @@ pub use points::{MappingPoint, generate_mapping_points};
 pub use precompute::compute_mapping;
 pub use sampling::{TextureSampler, create_sampler};
 pub use structure::PrecomputedMapping;
+pub use svg_path::{SvgPathError, resolve_svg_path_mapping};

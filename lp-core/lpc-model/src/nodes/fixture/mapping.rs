@@ -4,8 +4,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     EnumSlot, FromLpValue, LpType, LpValue, MapSlot, PositiveF32, PositiveF32Slot, SlotEnumOption,
-    SlotMeta, SlotShapeId, SlotValue, SlotValueShape, Slotted, ToLpValue, ValueEditorHint,
-    ValueRootError, ValueSlot, Xy, XySlot,
+    SlotMeta, SlotShapeId, SlotValue, SlotValueShape, Slotted, SourcePath, SourcePathSlot,
+    ToLpValue, ValueEditorHint, ValueRootError, ValueSlot, Xy, XySlot,
 };
 
 /// Fixture-to-texture mapping authored on a fixture definition.
@@ -18,6 +18,12 @@ pub enum MappingConfig {
     /// A mapping defined by fixture paths sampled from the target texture.
     PathPoints {
         paths: MapSlot<u32, EnumSlot<PathSpec>>,
+        sample_diameter: PositiveF32Slot,
+    },
+
+    /// A mapping imported from a small, strict SVG path subset at project-load time.
+    SvgPath {
+        source: SourcePathSlot,
         sample_diameter: PositiveF32Slot,
     },
 }
@@ -35,6 +41,12 @@ pub enum PathSpec {
         ring_lamp_counts: MapSlot<u32, ValueSlot<u32>>,
         offset_angle: ValueSlot<f32>,
         order: ValueSlot<RingOrder>,
+    },
+
+    /// Explicit lamp positions sampled from an authored mapping source.
+    PointList {
+        first_channel: ValueSlot<u32>,
+        points: MapSlot<u32, XySlot>,
     },
 }
 
@@ -60,6 +72,13 @@ impl MappingConfig {
             entries.insert(index as u32, EnumSlot::new(path));
         }
         Self::path_points(MapSlot::new(entries), sample_diameter)
+    }
+
+    pub fn svg_path(source: impl Into<SourcePath>, sample_diameter: f32) -> Self {
+        Self::SvgPath {
+            source: SourcePathSlot::new(source.into()),
+            sample_diameter: PositiveF32Slot::new(PositiveF32(sample_diameter)),
+        }
     }
 }
 
@@ -106,6 +125,17 @@ impl PathSpec {
             offset_angle,
             order,
         )
+    }
+
+    pub fn point_list(first_channel: u32, points: impl IntoIterator<Item = [f32; 2]>) -> Self {
+        let mut entries = BTreeMap::new();
+        for (index, point) in points.into_iter().enumerate() {
+            entries.insert(index as u32, XySlot::new(Xy(point)));
+        }
+        Self::PointList {
+            first_channel: ValueSlot::new(first_channel),
+            points: MapSlot::new(entries),
+        }
     }
 }
 

@@ -260,6 +260,7 @@ fn sync_mapping_config_from_def(
 ) -> Result<(), NodeError> {
     match mapping {
         MappingConfig::Unset => {}
+        MappingConfig::SvgPath { .. } => {}
         MappingConfig::PathPoints {
             paths,
             sample_diameter,
@@ -335,6 +336,7 @@ fn sync_path_spec_from_def(
             )?);
             order.set(read_def_value(ctx, &alloc::format!("{prefix}.order"))?);
         }
+        PathSpec::PointList { .. } => {}
     }
     Ok(())
 }
@@ -868,32 +870,38 @@ fn fixture_control_extent(config: &MappingConfig) -> ControlExtent {
 fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
     match config {
         MappingConfig::Unset => 0,
+        MappingConfig::SvgPath { .. } => 0,
         MappingConfig::PathPoints { paths, .. } => {
             let mut total = 0u32;
             for path in paths.entries.values() {
-                let PathSpec::RingArray {
-                    start_ring_inclusive,
-                    end_ring_exclusive,
-                    ring_lamp_counts,
-                    order,
-                    ..
-                } = path.value();
+                match path.value() {
+                    PathSpec::RingArray {
+                        start_ring_inclusive,
+                        end_ring_exclusive,
+                        ring_lamp_counts,
+                        order,
+                        ..
+                    } => {
+                        let start_ring = *start_ring_inclusive.value();
+                        let end_ring = *end_ring_exclusive.value();
+                        let ring_indices: Vec<u32> = match order.value() {
+                            RingOrder::InnerFirst => (start_ring..end_ring).collect(),
+                            RingOrder::OuterFirst => (start_ring..end_ring).rev().collect(),
+                        };
 
-                let start_ring = *start_ring_inclusive.value();
-                let end_ring = *end_ring_exclusive.value();
-                let ring_indices: Vec<u32> = match order.value() {
-                    RingOrder::InnerFirst => (start_ring..end_ring).collect(),
-                    RingOrder::OuterFirst => (start_ring..end_ring).rev().collect(),
-                };
-
-                for ring_index in ring_indices {
-                    total = total.saturating_add(
-                        ring_lamp_counts
-                            .entries
-                            .get(&ring_index)
-                            .map(|count| *count.value())
-                            .unwrap_or(0),
-                    );
+                        for ring_index in ring_indices {
+                            total = total.saturating_add(
+                                ring_lamp_counts
+                                    .entries
+                                    .get(&ring_index)
+                                    .map(|count| *count.value())
+                                    .unwrap_or(0),
+                            );
+                        }
+                    }
+                    PathSpec::PointList { points, .. } => {
+                        total = total.saturating_add(points.entries.len() as u32);
+                    }
                 }
             }
             total

@@ -418,7 +418,7 @@ mod tests {
     use super::*;
     use alloc::string::ToString;
 
-    use crate::{BindingRef, LpValue, MappingConfig, SlotShapeRegistry, TextureDef};
+    use crate::{BindingRef, LpValue, MappingConfig, PathSpec, SlotShapeRegistry, TextureDef};
 
     #[test]
     fn node_def_delegates_kind_and_slots() {
@@ -504,6 +504,73 @@ mapping = { kind = "PathPoints" }
             fixture.mapping.value(),
             MappingConfig::PathPoints { .. }
         ));
+
+        let fixture = NodeDef::read_toml(
+            &registry,
+            r#"
+kind = "Fixture"
+render_size = { width = 64, height = 16 }
+
+[mapping]
+kind = "SvgPath"
+source = "./fyeah-mapping.svg"
+sample_diameter = 2.0
+"#,
+        )
+        .expect("svg path fixture");
+        let NodeDef::Fixture(fixture) = fixture else {
+            panic!("expected fixture");
+        };
+        let MappingConfig::SvgPath {
+            source,
+            sample_diameter,
+        } = fixture.mapping.value()
+        else {
+            panic!("expected SvgPath mapping");
+        };
+        assert_eq!(source.value().as_str(), "./fyeah-mapping.svg");
+        assert_eq!(sample_diameter.value().0, 2.0);
+    }
+
+    #[test]
+    fn node_def_round_trips_point_list_fixture_toml() {
+        let registry = registry();
+        let fixture = crate::FixtureDef {
+            mapping: EnumSlot::new(MappingConfig::path_points_vec(
+                alloc::vec![PathSpec::point_list(
+                    3,
+                    alloc::vec![[0.0, 0.25], [1.0, 0.75]],
+                )],
+                2.0,
+            )),
+            ..crate::FixtureDef::default()
+        };
+        let text = NodeDef::Fixture(fixture)
+            .write_toml(&registry)
+            .expect("write fixture");
+        let read = NodeDef::read_toml(&registry, &text).expect("read fixture");
+        let NodeDef::Fixture(read) = read else {
+            panic!("expected fixture");
+        };
+        let MappingConfig::PathPoints { paths, .. } = read.mapping.value() else {
+            panic!("expected PathPoints");
+        };
+        let PathSpec::PointList {
+            first_channel,
+            points,
+        } = paths.entries.get(&0).expect("path").value()
+        else {
+            panic!("expected PointList");
+        };
+        assert_eq!(*first_channel.value(), 3);
+        assert_eq!(
+            points.entries.get(&0).expect("point").value().0,
+            [0.0, 0.25]
+        );
+        assert_eq!(
+            points.entries.get(&1).expect("point").value().0,
+            [1.0, 0.75]
+        );
     }
 
     #[test]

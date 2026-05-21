@@ -20,6 +20,7 @@ pub fn generate_mapping_points(
 ) -> Vec<MappingPoint> {
     match config {
         MappingConfig::Unset => Vec::new(),
+        MappingConfig::SvgPath { .. } => Vec::new(),
         MappingConfig::PathPoints {
             paths,
             sample_diameter,
@@ -52,15 +53,31 @@ pub fn generate_mapping_points(
                         texture_height,
                         channel_offset,
                     ),
+                    PathSpec::PointList {
+                        first_channel,
+                        points,
+                        ..
+                    } => generate_point_list_points(
+                        *first_channel.value(),
+                        points,
+                        sample_diameter.value().0,
+                        texture_width,
+                        texture_height,
+                    ),
                 };
 
-                channel_offset += points.len() as u32;
+                channel_offset = channel_offset.saturating_add(points.len() as u32);
                 all_points.extend(points);
             }
 
             all_points
         }
     }
+}
+
+fn normalized_sample_radius(sample_diameter: f32, texture_width: u32, texture_height: u32) -> f32 {
+    let max_dimension = texture_width.max(texture_height) as f32;
+    (sample_diameter / 2.0) / max_dimension
 }
 
 /// Generate mapping points from RingArray path specification
@@ -89,8 +106,8 @@ fn generate_ring_array_points(
     };
 
     // Convert sample_diameter (pixels) to normalized radius
-    let max_dimension = texture_width.max(texture_height) as f32;
-    let normalized_radius = (sample_diameter / 2.0) / max_dimension;
+    let normalized_radius =
+        normalized_sample_radius(sample_diameter, texture_width, texture_height);
 
     // Determine ring processing order
     let ring_indices: Vec<u32> = match order {
@@ -139,6 +156,29 @@ fn generate_ring_array_points(
     }
 
     points
+}
+
+fn generate_point_list_points(
+    first_channel: u32,
+    point_list: &lpc_model::MapSlot<u32, lpc_model::XySlot>,
+    sample_diameter: f32,
+    texture_width: u32,
+    texture_height: u32,
+) -> Vec<MappingPoint> {
+    let normalized_radius =
+        normalized_sample_radius(sample_diameter, texture_width, texture_height);
+    point_list
+        .entries
+        .iter()
+        .map(|(index, point)| {
+            let [x, y] = point.value().0;
+            MappingPoint {
+                channel: first_channel.saturating_add(*index),
+                center: [x.clamp(0.0, 1.0), y.clamp(0.0, 1.0)],
+                radius: normalized_radius,
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

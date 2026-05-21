@@ -10,9 +10,9 @@ use lpc_model::generate_compute_shader_header;
 use lpc_model::nodes::project::project_def::ProjectDef;
 use lpc_model::{ArtifactLocator, ArtifactReadRoot, NodeDefRef, NodeInvocation, NodeKind};
 use lpc_model::{
-    BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, FluidDef, Kind, LpValue, NodeDef,
-    NodeId, NodeName, PlaylistDef, PlaylistEntry, Revision, ShaderDef, ShaderSlotKind,
-    ShaderSource, SlotPath, SlotShapeRegistry,
+    BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, FixtureDef, FluidDef, Kind,
+    LpValue, MappingConfig, NodeDef, NodeId, NodeName, PlaylistDef, PlaylistEntry, Revision,
+    ShaderDef, ShaderSlotKind, ShaderSource, SlotPath, SlotShapeRegistry,
 };
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lpfs::lp_path::{LpPath, LpPathBuf};
@@ -20,6 +20,7 @@ use lpfs::lp_path::{LpPath, LpPathBuf};
 use crate::artifact::{ArtifactLocation, ArtifactState};
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
 use crate::node::{NodeDefHandle, TreeError};
+use crate::nodes::fixture::mapping::resolve_svg_path_mapping;
 use crate::nodes::{
     ButtonNode, ClockNode, ComputeShaderNode, ControlRadioNode, CorePlaceholderNode, FixtureNode,
     FluidNode, OutputNode, PlaylistNode, PlaylistRuntimeEntry, ShaderNode, TextureNode,
@@ -667,12 +668,13 @@ impl ProjectLoader {
             let NodeDef::Fixture(config) = loaded_node_config(runtime, node)?.clone() else {
                 continue;
             };
+            let mapping = resolve_fixture_mapping(root, &node.source_base_path, &config)?;
             runtime
                 .attach_runtime_node(
                     node.id,
                     Box::new(FixtureNode::new(
                         node.id,
-                        config.mapping.value().clone(),
+                        mapping,
                         *config.sampling.value(),
                         frame,
                     )),
@@ -912,6 +914,38 @@ where
             read_utf8_file(root, shader_path.as_path())
         }
         ShaderSource::Glsl(source) => Ok(source.value().clone()),
+    }
+}
+
+fn resolve_fixture_mapping<R>(
+    root: &R,
+    containing_file: &LpPathBuf,
+    config: &FixtureDef,
+) -> Result<MappingConfig, ProjectLoadError>
+where
+    R: ArtifactReadRoot + ?Sized,
+    R::Err: core::fmt::Debug,
+{
+    match config.mapping.value() {
+        MappingConfig::SvgPath {
+            source,
+            sample_diameter,
+        } => {
+            let svg_path =
+                resolve_path_relative_to_file(containing_file, &source.value().as_path_buf())?;
+            let svg = read_utf8_file(root, svg_path.as_path())?;
+            resolve_svg_path_mapping(
+                &svg,
+                config.render_width(),
+                config.render_height(),
+                sample_diameter.value().0,
+            )
+            .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                path: svg_path.as_str().to_string(),
+                reason: format!("resolve svg fixture mapping: {e}"),
+            })
+        }
+        other => Ok(other.clone()),
     }
 }
 
@@ -1389,6 +1423,102 @@ mod tests {
         let fs = LpFsMemory::new();
         write_flat_basic_files(&fs);
         fs
+    }
+
+    fn svg_fixture_project(svg: &[u8]) -> LpFsMemory {
+        let fs = LpFsMemory::new();
+        fs.write_file(
+            "/project.toml".as_path(),
+            br#"
+kind = "Project"
+
+[nodes.fixture]
+def = { path = "./fixture.toml" }
+"#,
+        )
+        .expect("project.toml");
+        fs.write_file(
+            "/fixture.toml".as_path(),
+            br#"
+kind = "Fixture"
+render_size = { width = 20, height = 10 }
+sampling = "direct"
+
+[bindings.input]
+source = "bus#visual.out"
+
+[bindings.output]
+target = "bus#control.out"
+
+[mapping]
+kind = "SvgPath"
+source = "./mapping.svg"
+sample_diameter = 2.0
+"#,
+        )
+        .expect("fixture.toml");
+        fs.write_file("/mapping.svg".as_path(), svg)
+            .expect("mapping.svg");
+        fs
+    }
+
+    #[test]
+    fn fixture_svg_path_mapping_loads_from_project() {
+        let fs = svg_fixture_project(
+            br#"
+<svg viewBox="0 0 20 10">
+  <g><polyline points="0 0 10 0"/><text>path:2,count:2</text></g>
+  <g><path d="M10,0 L20,0"/><text><tspan>path:1,count:3</tspan></text></g>
+</svg>
+"#,
+        );
+
+        let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load svg fixture project");
+        assert!(rt.artifact_node_id(LpPath::new("/fixture.toml")).is_some());
+    }
+
+    #[test]
+    fn fixture_svg_path_mapping_rejects_ungrouped_mapping_text() {
+        let fs = svg_fixture_project(
+            br#"
+<svg viewBox="0 0 20 10">
+  <path d="M0,0 L10,0"/>
+  <text>path:1,count:3</text>
+</svg>
+"#,
+        );
+
+        let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
+        let err = match ProjectLoader::load_from_root(&fs, services) {
+            Ok(_) => panic!("expected ungrouped mapping text error"),
+            Err(err) => err,
+        };
+        assert!(
+            err.to_string().contains("not inside a valid group"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn fixture_svg_path_mapping_rejects_curve_commands() {
+        let fs = svg_fixture_project(
+            br#"
+<svg viewBox="0 0 20 10">
+  <g><path d="M0,0 C1,1 2,2 3,3"/><text>path:1,count:3</text></g>
+</svg>
+"#,
+        );
+
+        let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
+        let err = match ProjectLoader::load_from_root(&fs, services) {
+            Ok(_) => panic!("expected curve command error"),
+            Err(err) => err,
+        };
+        assert!(
+            err.to_string().contains("unsupported SVG path command"),
+            "{err}"
+        );
     }
 
     fn playlist_project_fs() -> LpFsMemory {
