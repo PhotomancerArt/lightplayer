@@ -993,7 +993,13 @@ mod tests {
 
     fn registry() -> SlotShapeRegistry {
         let mut registry = SlotShapeRegistry::default();
-        MutRoot::ensure_registered(&mut registry).unwrap();
+        registry
+            .ensure_shape_named(
+                MutRoot::SHAPE_ID,
+                MutRoot::shape_name().expect("shape name"),
+                MutRoot::slot_shape(),
+            )
+            .unwrap();
         registry
     }
 }

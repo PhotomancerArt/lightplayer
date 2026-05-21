@@ -5,7 +5,8 @@ use alloc::vec::Vec;
 use crate::{
     ControlProduct, LpType, LpValue, ModelEnumVariant, ModelStructMember, ProductKind, ProductRef,
     ResourceDomain, ResourceRef, SlotAccess, SlotDataAccess, SlotEnumEncoding, SlotFieldShape,
-    SlotMapKey, SlotShape, SlotShapeId, SlotShapeRegistry, SlotVariantShape, VisualProduct,
+    SlotMapKey, SlotShape, SlotShapeId, SlotShapeLookup, SlotShapeRegistry, SlotVariantShape,
+    VisualProduct,
 };
 
 use super::{SlotValueWriter, SlotWrite, SlotWriteError, SlotWriter, write_lp_value};
@@ -72,9 +73,10 @@ where
     W: SlotWrite,
 {
     let shape = registry
-        .get(&id)
-        .ok_or_else(|| json_data_error(SlotDataWriteError::MissingShape(id)))?;
-    write_shape_json(value, shape, data, registry)
+        .get_shape(id)
+        .ok_or_else(|| json_data_error(SlotDataWriteError::MissingShape(id)))?
+        .to_owned_shape();
+    write_shape_json(value, &shape, data, registry)
 }
 
 pub fn write_dynamic_slot_toml(
@@ -90,9 +92,10 @@ pub fn write_slot_data_toml_value(
     data: SlotDataAccess<'_>,
 ) -> Result<toml::Value, SlotDataWriteError> {
     let shape = registry
-        .get(&id)
-        .ok_or(SlotDataWriteError::MissingShape(id))?;
-    write_shape_toml(shape, data, registry)
+        .get_shape(id)
+        .ok_or(SlotDataWriteError::MissingShape(id))?
+        .to_owned_shape();
+    write_shape_toml(&shape, data, registry)
 }
 
 fn write_shape_json<W>(
@@ -107,9 +110,10 @@ where
     match shape {
         SlotShape::Ref { id } => {
             let shape = registry
-                .get(id)
-                .ok_or_else(|| json_data_error(SlotDataWriteError::MissingReferencedShape(*id)))?;
-            write_shape_json(value, shape, data, registry)
+                .get_shape(*id)
+                .ok_or_else(|| json_data_error(SlotDataWriteError::MissingReferencedShape(*id)))?
+                .to_owned_shape();
+            write_shape_json(value, &shape, data, registry)
         }
         SlotShape::Unit { .. } => match data {
             SlotDataAccess::Unit(_) => value.object()?.finish(),
@@ -229,9 +233,10 @@ where
     match shape {
         SlotShape::Ref { id } => {
             let shape = registry
-                .get(id)
-                .ok_or_else(|| json_data_error(SlotDataWriteError::MissingReferencedShape(*id)))?;
-            write_enum_payload_json(object, shape, data, registry)
+                .get_shape(*id)
+                .ok_or_else(|| json_data_error(SlotDataWriteError::MissingReferencedShape(*id)))?
+                .to_owned_shape();
+            write_enum_payload_json(object, &shape, data, registry)
         }
         SlotShape::Record { fields, .. } => match data {
             SlotDataAccess::Record(record) => {
@@ -296,8 +301,8 @@ fn should_omit_field(
 ) -> bool {
     match (shape, data) {
         (SlotShape::Ref { id }, data) => registry
-            .get(id)
-            .is_some_and(|shape| should_omit_field(shape, data, registry)),
+            .get_shape(*id)
+            .is_some_and(|shape| should_omit_field(&shape.to_owned_shape(), data, registry)),
         (_, SlotDataAccess::Option(option)) => option.data().is_none(),
         (SlotShape::Record { fields, .. }, SlotDataAccess::Record(record)) => {
             fields.iter().enumerate().all(|(index, field)| {
@@ -320,9 +325,10 @@ fn write_shape_toml(
     match shape {
         SlotShape::Ref { id } => {
             let shape = registry
-                .get(id)
-                .ok_or(SlotDataWriteError::MissingReferencedShape(*id))?;
-            write_shape_toml(shape, data, registry)
+                .get_shape(*id)
+                .ok_or(SlotDataWriteError::MissingReferencedShape(*id))?
+                .to_owned_shape();
+            write_shape_toml(&shape, data, registry)
         }
         SlotShape::Unit { .. } => match data {
             SlotDataAccess::Unit(_) => Ok(toml_table(toml::Table::new())),
@@ -432,9 +438,10 @@ fn write_enum_payload_toml(
     match shape {
         SlotShape::Ref { id } => {
             let shape = registry
-                .get(id)
-                .ok_or(SlotDataWriteError::MissingReferencedShape(*id))?;
-            write_enum_payload_toml(table, shape, data, registry)
+                .get_shape(*id)
+                .ok_or(SlotDataWriteError::MissingReferencedShape(*id))?
+                .to_owned_shape();
+            write_enum_payload_toml(table, &shape, data, registry)
         }
         SlotShape::Record { fields, .. } => match data {
             SlotDataAccess::Record(record) => {

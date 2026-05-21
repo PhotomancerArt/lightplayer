@@ -41,6 +41,12 @@ pub trait StaticSlotShape {
         Self::STATIC_SLOT_SHAPE_DESCRIPTOR
     }
 
+    /// Register one non-catalog static shape into a dynamic registry.
+    ///
+    /// The generated `lpc_model` static catalog should be queried directly
+    /// instead of bulk-registered. This method remains for local test shapes
+    /// and runtime-state shapes authored by crates that do not have a catalog
+    /// wired into [`SlotShapeLookup`](crate::SlotShapeLookup).
     fn ensure_registered(registry: &mut SlotShapeRegistry) -> Result<bool, SlotShapeRegistryError> {
         match Self::shape_name() {
             Some(name) => registry.ensure_shape_named(Self::SHAPE_ID, name, Self::slot_shape()),
@@ -75,15 +81,9 @@ pub trait StaticSlotShape {
 
 /// Slot-accessible object whose data and shape are both authored statically by Rust.
 ///
-/// This is the data-access counterpart to [`StaticSlotShape`]. It remains as
-/// the ergonomic trait for code that needs both a runtime value and its static
-/// shape identity. `register_shape` is kept as a compatibility shim for older
-/// call sites; new static bootstrap code should prefer `ensure_registered`.
-pub trait StaticSlotAccess: SlotAccess + StaticSlotShape {
-    fn register_shape(registry: &mut SlotShapeRegistry) -> Result<(), SlotShapeRegistryError> {
-        Self::ensure_registered(registry).map(|_| ())
-    }
-}
+/// This is the data-access counterpart to [`StaticSlotShape`]. It is a marker
+/// for code that needs both a runtime value and its static shape identity.
+pub trait StaticSlotAccess: SlotAccess + StaticSlotShape {}
 
 /// Field-level slot access used by derive inference.
 ///

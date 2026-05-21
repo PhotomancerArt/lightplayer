@@ -423,8 +423,7 @@ kind = "Clock"
     }
 
     fn read_invocation_result(text: &str) -> Result<NodeInvocation, SyntaxError> {
-        let mut registry = SlotShapeRegistry::default();
-        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("shapes");
+        let registry = SlotShapeRegistry::default();
         let value = toml::from_str::<toml::Value>(text).unwrap();
         let mut reader = crate::slot_codec::SlotReader::new(
             crate::slot_codec::TomlSyntaxSource::new(&value).unwrap(),

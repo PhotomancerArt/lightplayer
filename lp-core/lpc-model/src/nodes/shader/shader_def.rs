@@ -53,9 +53,7 @@ impl ShaderDef {
 mod tests {
     use super::*;
     use crate::nodes::shader::{AddSubMode, DivMode, MulMode};
-    use crate::{
-        NodeDef, NodeKind, RenderOrder, ShaderDefView, SlotPath, SlotShapeRegistry, StaticSlotShape,
-    };
+    use crate::{NodeDef, NodeKind, RenderOrder, ShaderDefView, SlotPath, SlotShapeRegistry};
     use alloc::string::ToString;
 
     #[test]
@@ -86,8 +84,7 @@ mod tests {
 
     #[test]
     fn generated_shader_def_view_compiles() {
-        let mut registry = SlotShapeRegistry::default();
-        ShaderDef::ensure_registered(&mut registry).expect("shader shape");
+        let registry = SlotShapeRegistry::default();
 
         let view = ShaderDefView::compile(&registry).expect("shader def view");
 

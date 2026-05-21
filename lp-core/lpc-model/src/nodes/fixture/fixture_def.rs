@@ -312,7 +312,7 @@ mod tests {
     use super::*;
     use crate::NodeKind;
     use crate::nodes::fixture::mapping::{PathSpec, RingOrder};
-    use crate::{Affine2d, FixtureDefView, MapSlot, SlotPath, SlotShapeRegistry, StaticSlotShape};
+    use crate::{Affine2d, FixtureDefView, MapSlot, SlotPath, SlotShapeRegistry};
     use alloc::collections::BTreeMap;
 
     #[test]
@@ -386,8 +386,7 @@ mod tests {
 
     #[test]
     fn generated_fixture_def_view_compiles() {
-        let mut registry = SlotShapeRegistry::default();
-        FixtureDef::ensure_registered(&mut registry).expect("fixture shape");
+        let registry = SlotShapeRegistry::default();
 
         let view = FixtureDefView::compile(&registry).expect("fixture def view");
 

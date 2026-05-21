@@ -15,21 +15,21 @@ fn real_source_defs_sync_as_slot_roots() {
     let output = read_basic_output("output.toml");
     let fixture = read_basic_fixture("fixture.toml");
 
-    let mut registry = SlotShapeRegistry::default();
-    lpc_model::slot_shapes::register_all_static_slot_shapes(&mut registry).unwrap();
+    let registry = SlotShapeRegistry::default();
+    let shape_registry = paged_static_shape_registry_for_test();
 
     println!("server loaded");
     print_root(
         "project",
-        ProjectDef::SHAPE_ID.slot_shape_from(&registry),
+        ProjectDef::SHAPE_ID.slot_shape_from(&shape_registry),
         &project.data().into_owned(&ProjectDef::SHAPE_ID, &registry),
-        &registry,
+        &shape_registry,
     );
     print_root(
         "shader",
-        ShaderDef::SHAPE_ID.slot_shape_from(&registry),
+        ShaderDef::SHAPE_ID.slot_shape_from(&shape_registry),
         &shader.data().into_owned(&ShaderDef::SHAPE_ID, &registry),
-        &registry,
+        &shape_registry,
     );
 
     println!("syncing source roots");
@@ -51,8 +51,8 @@ fn real_source_defs_sync_as_slot_roots() {
     assert_value(
         select(
             &project_data,
-            ProjectDef::SHAPE_ID.slot_shape_from(&registry),
-            &registry,
+            ProjectDef::SHAPE_ID.slot_shape_from(&shape_registry),
+            &shape_registry,
             "nodes[shader].def",
         ),
         LpValue::String(String::from("shader.toml")),
@@ -62,8 +62,8 @@ fn real_source_defs_sync_as_slot_roots() {
     assert_value(
         select(
             &shader_data,
-            ShaderDef::SHAPE_ID.slot_shape_from(&registry),
-            &registry,
+            ShaderDef::SHAPE_ID.slot_shape_from(&shape_registry),
+            &shape_registry,
             "source.path",
         ),
         LpValue::String(String::from("shader.glsl")),
@@ -71,8 +71,8 @@ fn real_source_defs_sync_as_slot_roots() {
     assert_value(
         select(
             &shader_data,
-            ShaderDef::SHAPE_ID.slot_shape_from(&registry),
-            &registry,
+            ShaderDef::SHAPE_ID.slot_shape_from(&shape_registry),
+            &shape_registry,
             "bindings[output].target.some",
         ),
         LpValue::String(String::from("bus#visual.out")),
@@ -80,8 +80,8 @@ fn real_source_defs_sync_as_slot_roots() {
     assert_value(
         select(
             &shader_data,
-            ShaderDef::SHAPE_ID.slot_shape_from(&registry),
-            &registry,
+            ShaderDef::SHAPE_ID.slot_shape_from(&shape_registry),
+            &shape_registry,
             "glsl_opts.add_sub",
         ),
         LpValue::String(String::from("wrapping")),
@@ -119,8 +119,8 @@ min = 0.0
     assert_value(
         select(
             &shader_data,
-            ShaderDef::SHAPE_ID.slot_shape_from(&registry),
-            &registry,
+            ShaderDef::SHAPE_ID.slot_shape_from(&shape_registry),
+            &shape_registry,
             "consumed[speed].label",
         ),
         LpValue::String(String::from("Speed")),
@@ -134,8 +134,8 @@ min = 0.0
     assert_value(
         select(
             &output_data,
-            OutputDef::SHAPE_ID.slot_shape_from(&registry),
-            &registry,
+            OutputDef::SHAPE_ID.slot_shape_from(&shape_registry),
+            &shape_registry,
             "options.some.brightness",
         ),
         LpValue::F32(0.12),
@@ -149,8 +149,8 @@ min = 0.0
     assert!(matches!(
         select(
             &fixture_data,
-            FixtureDef::SHAPE_ID.slot_shape_from(&registry),
-            &registry,
+            FixtureDef::SHAPE_ID.slot_shape_from(&shape_registry),
+            &shape_registry,
             "mapping.PathPoints.paths[0].RingArray.ring_lamp_counts[8]"
         ),
         SlotData::Value(_)
@@ -162,9 +162,22 @@ fn read_basic_node_def(name: &str) -> NodeDef {
         .join("../../examples/basic")
         .join(name);
     let text = std::fs::read_to_string(path).unwrap();
-    let mut registry = SlotShapeRegistry::default();
-    lpc_model::slot_shapes::register_all_static_slot_shapes(&mut registry).unwrap();
+    let registry = SlotShapeRegistry::default();
     NodeDef::read_toml(&registry, &text).unwrap()
+}
+
+fn paged_static_shape_registry_for_test() -> SlotShapeRegistry {
+    let source = SlotShapeRegistry::default();
+    let mut registry = SlotShapeRegistry::default();
+    let mut after = None;
+    loop {
+        let (snapshot, next) = source.snapshot_page_with_static_catalog(after, 64);
+        registry.apply_partial_snapshot(snapshot);
+        let Some(cursor) = next else {
+            return registry;
+        };
+        after = Some(cursor);
+    }
 }
 
 fn read_basic_project(name: &str) -> ProjectDef {

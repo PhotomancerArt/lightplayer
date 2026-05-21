@@ -89,7 +89,7 @@ fn default_true_slot() -> ValueSlot<bool> {
 mod tests {
     use super::*;
     use crate::node::kind::NodeKind;
-    use crate::{NodeDef, OutputDefView, SlotPath, SlotShapeRegistry, StaticSlotShape};
+    use crate::{NodeDef, OutputDefView, SlotPath, SlotShapeRegistry};
     use alloc::format;
 
     #[test]
@@ -134,8 +134,7 @@ pin = 18
 
     #[test]
     fn generated_output_def_view_compiles() {
-        let mut registry = SlotShapeRegistry::default();
-        OutputDef::ensure_registered(&mut registry).expect("output shape");
+        let registry = SlotShapeRegistry::default();
 
         let view = OutputDefView::compile(&registry).expect("output def view");
 
@@ -149,8 +148,6 @@ pin = 18
     }
 
     fn registry() -> SlotShapeRegistry {
-        let mut registry = SlotShapeRegistry::default();
-        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("shapes");
-        registry
+        SlotShapeRegistry::default()
     }
 }

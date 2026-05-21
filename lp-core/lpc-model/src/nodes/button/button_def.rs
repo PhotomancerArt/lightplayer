@@ -79,7 +79,7 @@ fn default_stable_ms() -> ValueSlot<u32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NodeDef, SlotDirection, SlotShape, SlotShapeRegistry, StaticSlotShape};
+    use crate::{NodeDef, SlotDirection, SlotShape, StaticSlotShape};
 
     #[test]
     fn button_def_parses_defaults() {
@@ -101,12 +101,8 @@ endpoint = "button:gpio:D9"
 
     #[test]
     fn button_state_maps_are_produced_control_messages() {
-        let mut registry = SlotShapeRegistry::default();
-        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("static shapes");
         assert_eq!(
-            registry
-                .entry(&ControlMessage::SHAPE_ID)
-                .and_then(|entry| entry.name()),
+            crate::slot_shapes::static_slot_shape_name(ControlMessage::SHAPE_ID),
             Some(crate::CONTROL_MESSAGE_SHAPE_NAME)
         );
 

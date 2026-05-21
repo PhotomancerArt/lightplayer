@@ -70,6 +70,11 @@ impl SlotAccessor {
                         shape = resolve_ref_shape(some, registry)?;
                         continue;
                     }
+                    if shape.record_fields_len().is_some() {
+                        return Err(SlotAccessorError::new(format!(
+                            "record has no field {name}"
+                        )));
+                    }
                     return Err(SlotAccessorError::new(format!(
                         "slot path field {name} cannot descend into current slot shape"
                     )));
@@ -264,9 +269,13 @@ mod tests {
     #[test]
     fn compile_value_can_descend_into_option_some_payload() {
         let mut registry = SlotShapeRegistry::default();
-        crate::slot_shapes::register_all_static_slot_shapes(&mut registry)
-            .expect("static slot shapes");
-        OptionRoot::ensure_registered(&mut registry).expect("option shape");
+        registry
+            .ensure_shape_named(
+                OptionRoot::SHAPE_ID,
+                OptionRoot::shape_name().expect("shape name"),
+                OptionRoot::slot_shape(),
+            )
+            .expect("option shape");
 
         let accessor = SlotAccessor::compile_value(
             OptionRoot::SHAPE_ID,

@@ -221,15 +221,12 @@ fn glsl_type_for_lp_type(ty: &LpType) -> Result<String, ShaderHeaderGenError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        FluidEmitter, MapSlot, ShaderSlotDef, ShaderSlotMappingDef, ShaderSource, StaticSlotShape,
-    };
+    use crate::{MapSlot, ShaderSlotDef, ShaderSlotMappingDef, ShaderSource};
     use alloc::collections::BTreeMap;
 
     #[test]
     fn shader_header_generates_fluid_emitter_output() {
-        let mut registry = SlotShapeRegistry::default();
-        FluidEmitter::ensure_registered(&mut registry).expect("fluid emitter");
+        let registry = SlotShapeRegistry::default();
 
         let mut consumed = BTreeMap::new();
         consumed.insert(

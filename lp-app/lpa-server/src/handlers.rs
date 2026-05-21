@@ -13,8 +13,7 @@ use lpc_shared::backtrace;
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_wire::{
-    ProjectReadRequest, WireServerMessage, WireServerMsgBody as ServerMessagePayload,
-    WireSlotMutationRequest, WireSlotMutationResponse, WireSlotMutationResult,
+    WireServerMessage, WireServerMsgBody as ServerMessagePayload,
     messages::ClientMessage,
     server::{AvailableProject, FsRequest, FsResponse},
 };
@@ -45,7 +44,6 @@ pub fn handle_client_message(
     radio_service: Option<Rc<dyn RadioService>>,
     graphics: Arc<dyn LpGraphics>,
     client_msg: ClientMessage,
-    theoretical_fps: Option<f32>,
 ) -> Result<WireServerMessage, ServerError> {
     let ClientMessage { id, msg } = client_msg;
 
@@ -67,8 +65,10 @@ pub fn handle_client_message(
         lpc_wire::ClientRequest::UnloadProject { handle } => {
             handle_unload_project(project_manager, memory_stats, handle)?
         }
-        lpc_wire::ClientRequest::ProjectRequest { handle, request } => {
-            handle_project_request(project_manager, handle, request, theoretical_fps)?
+        lpc_wire::ClientRequest::ProjectRequest { .. } => {
+            return Err(ServerError::Core(
+                "ProjectRequest must be handled by streaming transport".into(),
+            ));
         }
         lpc_wire::ClientRequest::ListAvailableProjects => {
             handle_list_available_projects(project_manager, base_fs)?
@@ -177,63 +177,6 @@ fn handle_unload_project(
     log::info!("Unloading project handle {}", handle.id());
     project_manager.unload_project(handle)?;
     Ok(ServerMessagePayload::UnloadProject)
-}
-
-/// Handle a ProjectRequest (project-specific request)
-fn handle_project_request(
-    project_manager: &mut ProjectManager,
-    handle: lpc_wire::WireProjectHandle,
-    request: ProjectReadRequest,
-    theoretical_fps: Option<f32>,
-) -> Result<ServerMessagePayload, ServerError> {
-    let project = project_manager
-        .get_project_mut(handle)
-        .ok_or_else(|| ServerError::ProjectNotFound(format!("handle {}", handle.id())))?;
-    let _ = theoretical_fps;
-
-    log_project_mutations(&request.mutations);
-    let response = project.engine_mut().read_project(request);
-    log_project_mutation_responses(&response.mutations);
-    Ok(ServerMessagePayload::ProjectRequest { response })
-}
-
-fn log_project_mutations(mutations: &[WireSlotMutationRequest]) {
-    if mutations.is_empty() {
-        return;
-    }
-    log::info!("received {} project slot mutation(s)", mutations.len());
-    for mutation in mutations {
-        log::info!(
-            "slot mutation id={} root={} path={} op={:?}",
-            mutation.id.id(),
-            mutation.root,
-            mutation.path,
-            mutation.op,
-        );
-        log::info!(
-            "slot mutation id={} expected shape_rev={} data_rev={}",
-            mutation.id.id(),
-            mutation.expected_shape_version.0,
-            mutation.expected_data_version.0,
-        );
-    }
-}
-
-fn log_project_mutation_responses(responses: &[WireSlotMutationResponse]) {
-    for response in responses {
-        match &response.result {
-            WireSlotMutationResult::Accepted => {
-                log::info!("slot mutation id={} accepted", response.id.id());
-            }
-            WireSlotMutationResult::Rejected(rejection) => {
-                log::warn!(
-                    "slot mutation id={} rejected: {:?}",
-                    response.id.id(),
-                    rejection,
-                );
-            }
-        }
-    }
 }
 
 /// Handle a ListAvailableProjects request

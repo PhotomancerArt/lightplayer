@@ -226,10 +226,7 @@ fn authored_node_toml(node: &NodeDef) -> Result<String> {
 }
 
 fn slot_shape_registry() -> SlotShapeRegistry {
-    let mut registry = SlotShapeRegistry::default();
-    lpc_model::slot_shapes::register_all_static_slot_shapes(&mut registry)
-        .expect("static slot shapes register without conflicts");
-    registry
+    SlotShapeRegistry::default()
 }
 
 fn default_visual_consumed_slots() -> MapSlot<String, ShaderSlotDef> {

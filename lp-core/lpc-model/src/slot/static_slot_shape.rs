@@ -14,7 +14,8 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 
 /// Borrowed static shape of a slot tree.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
 pub enum StaticSlotShapeDescriptor {
     Ref {
         id: SlotShapeId,
@@ -139,9 +140,11 @@ impl StaticSlotShapeDescriptor {
 }
 
 /// Borrowed slot presentation metadata.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
 pub struct StaticSlotMeta {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<&'static str>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<&'static str>,
 }
 
@@ -164,11 +167,13 @@ impl StaticSlotMeta {
 }
 
 /// Borrowed shape of one complete value payload.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct StaticSlotValueShape {
     pub id: SlotShapeId,
     pub ty: StaticLpType,
+    #[serde(default)]
     pub meta: StaticSlotMeta,
+    #[serde(default)]
     pub editor: StaticValueEditorHint,
 }
 
@@ -193,7 +198,8 @@ impl StaticSlotValueShape {
 }
 
 /// Borrowed structural value type for static slot value shapes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum StaticLpType {
     Any,
     String,
@@ -274,7 +280,7 @@ impl StaticLpType {
 }
 
 /// One borrowed field in a static [`StaticLpType::Struct`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct StaticModelStructMember {
     pub name: &'static str,
     pub ty: StaticLpType,
@@ -290,7 +296,7 @@ impl StaticModelStructMember {
 }
 
 /// One borrowed variant in a static [`StaticLpType::Enum`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct StaticModelEnumVariant {
     pub name: &'static str,
     pub payload: Option<StaticLpType>,
@@ -306,20 +312,25 @@ impl StaticModelEnumVariant {
 }
 
 /// Borrowed editor hint for static value shapes.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
 pub enum StaticValueEditorHint {
     #[default]
     Plain,
     NodeRef,
     Path,
     Number {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         min: Option<OrderedF32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         max: Option<OrderedF32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         step: Option<OrderedF32>,
     },
     Slider {
         min: OrderedF32,
         max: OrderedF32,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         step: Option<OrderedF32>,
     },
     Xy,
@@ -360,7 +371,7 @@ impl StaticValueEditorHint {
 }
 
 /// Borrowed dropdown choice for static value shape editor hints.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct StaticSlotEnumOption {
     pub value: &'static str,
     pub label: &'static str,
@@ -376,7 +387,8 @@ impl StaticSlotEnumOption {
 }
 
 /// Borrowed enum syntax for a static enum slot.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case", tag = "kind")]
 pub enum StaticSlotEnumEncoding {
     Tagged { field: &'static str },
     External,
@@ -404,11 +416,13 @@ impl Default for StaticSlotEnumEncoding {
 }
 
 /// One borrowed field inside a static record shape.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct StaticSlotFieldShape {
     pub name: &'static str,
     pub shape: &'static StaticSlotShapeDescriptor,
+    #[serde(default, skip_serializing_if = "SlotSemantics::is_default")]
     pub semantics: SlotSemantics,
+    #[serde(default, skip_serializing_if = "SlotPolicy::is_default")]
     pub policy: SlotPolicy,
 }
 
@@ -425,7 +439,7 @@ impl StaticSlotFieldShape {
 }
 
 /// One borrowed variant inside a static enum shape.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
 pub struct StaticSlotVariantShape {
     pub name: &'static str,
     pub shape: &'static StaticSlotShapeDescriptor,
@@ -467,6 +481,14 @@ mod tests {
         assert_eq!(fields.len(), 1);
         assert_eq!(fields[0].name.as_str(), "enabled");
         assert!(matches!(fields[0].shape, SlotShape::Value { .. }));
+    }
+
+    #[test]
+    fn static_descriptor_serializes_like_owned_shape() {
+        let static_json = serde_json::to_string(&RECORD_SHAPE).unwrap();
+        let owned_json = serde_json::to_string(&RECORD_SHAPE.to_owned_shape()).unwrap();
+
+        assert_eq!(static_json, owned_json);
     }
 
     #[test]

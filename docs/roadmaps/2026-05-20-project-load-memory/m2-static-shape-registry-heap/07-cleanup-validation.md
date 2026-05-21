@@ -2,13 +2,13 @@
 
 ## Scope Of Phase
 
-Clean up compatibility shims, document the new shape catalog model, and capture
+Remove obsolete registration paths, document the new shape catalog model, and capture
 before/after memory data.
 
 ## Code Organization Reminders
 
 - Remove temporary debug logging and obsolete TODOs.
-- Keep compatibility helpers clearly documented if any remain.
+- Remove compatibility helpers rather than keeping host/device split paths.
 - Tests stay at the bottom.
 
 ## Sub-Agent Reminders
@@ -32,7 +32,21 @@ Tasks:
 
 ```bash
 cargo fmt --check
-cargo check -p lpa-server
-cargo test -p lpa-server --no-run
-cargo test -p fw-tests --test profile_alloc_emu
+cargo test -p lpc-model -p lpc-wire -p lpc-slot-mockup
+cargo test -p lpa-server
+cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
+cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu
+git diff --check
 ```
+
+## Latest Validation
+
+Passed after final cleanup:
+
+- `cargo fmt --check`
+- `git diff --check`
+- `cargo check -p lpc-model -p lpc-wire -p lpc-engine -p lpa-server -p lp-cli`
+- `cargo test -p lpc-model -p lpc-wire -p lpc-slot-mockup`
+- `cargo test -p lpa-server`
+- `cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server`
+- `cargo check -p fw-emu --target riscv32imac-unknown-none-elf --profile release-emu`

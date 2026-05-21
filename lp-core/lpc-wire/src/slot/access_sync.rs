@@ -11,9 +11,9 @@ use lpc_model::{
     },
 };
 
+use super::WireSlotFullSync;
 use super::{
-    WireSlotChange, WireSlotData, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot,
-    WireSlotRootsSnapshot,
+    WireSlotChange, WireSlotData, WireSlotPatch, WireSlotRootSnapshot, WireSlotRootsSnapshot,
 };
 
 /// Build a full slot sync payload from borrowed slot roots.
@@ -22,7 +22,7 @@ pub fn build_slot_full_sync<'a>(
     roots: impl IntoIterator<Item = (&'a str, &'a dyn SlotAccess)>,
 ) -> WireSlotFullSync {
     WireSlotFullSync {
-        registry: registry.snapshot_with_static_catalog(),
+        registry: registry.snapshot(),
         roots: roots
             .into_iter()
             .map(|(name, root)| {

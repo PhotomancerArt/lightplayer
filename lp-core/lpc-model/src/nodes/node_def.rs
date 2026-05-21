@@ -640,16 +640,16 @@ size = { width = 1, height = 2 }
 
     #[test]
     fn node_def_writes_authored_toml_through_artifact_wrapper() {
-        let registry = registry();
+        let write_registry = registry();
         let text = NodeDef::Texture(TextureDef::new(3, 4))
-            .write_toml(&registry)
+            .write_toml(&write_registry)
             .expect("write texture");
 
         assert!(text.contains("kind = \"Texture\""));
         assert!(text.contains("width = 3"));
         assert!(text.contains("height = 4"));
 
-        let read = NodeDef::read_toml(&registry, &text).expect("read texture");
+        let read = NodeDef::read_toml(&registry(), &text).expect("read texture");
         let NodeDef::Texture(def) = read else {
             panic!("expected texture");
         };
@@ -697,8 +697,6 @@ target = "bus#control.out"
     }
 
     fn registry() -> SlotShapeRegistry {
-        let mut registry = SlotShapeRegistry::default();
-        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("shapes");
-        registry
+        SlotShapeRegistry::default()
     }
 }

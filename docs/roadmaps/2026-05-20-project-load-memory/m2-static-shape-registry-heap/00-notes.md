@@ -26,14 +26,11 @@ runtime lookup/mutation, slot sync, and the on-device GLSL compiler path.
 
 - `lp-core/lpc-model/build.rs` generates `OUT_DIR/slot_shapes.rs` and
   `OUT_DIR/slot_views.rs` through `lpc-slot-codegen`.
-- `lp-core/lpc-slot-codegen/src/render/slot_shapes.rs` currently emits:
-  - `register_all_static_slot_shapes(&mut SlotShapeRegistry)`
-  - `ensure_static_slot_shape(&mut SlotShapeRegistry, SlotShapeId)`
-  - helper logic that walks registered `SlotShape::referenced_shape_ids()`
+- `lp-core/lpc-slot-codegen/src/render/slot_shapes.rs` emits the static
+  catalog lookup surface: ids, descriptors, names, and default factories.
 - `lp-core/lpc-engine/src/engine/engine.rs` constructs a fresh
-  `SlotShapeRegistry` in `Engine::with_services`, then calls
-  `register_authored_slot_shapes`, which funnels static authored ids through
-  `lpc_model::slot_shapes::ensure_static_slot_shape`.
+  `SlotShapeRegistry` in `Engine::with_services`; authored static shapes are
+  resolved through the generated catalog rather than registered into it.
 - `SlotShapeRegistry` in
   `lp-core/lpc-model/src/slot/slot_shape_registry.rs` owns:
   - `BTreeMap<SlotShapeId, SlotShapeEntry>`
@@ -59,8 +56,9 @@ runtime lookup/mutation, slot sync, and the on-device GLSL compiler path.
 - Do not feature-gate or remove compiler/runtime behavior to save memory.
 - Do not keep a firmware fallback that materializes all static shapes into owned
   heap data. That would preserve the current memory problem under a nicer API.
-- Host tests may use compatibility helpers, but the engine/device path should
-  not require resident static `SlotShape` maps.
+- Host tests should use the same static-catalog lookup and streaming/paged
+  shape export paths as production code. The old full owned static-catalog
+  snapshot helper has been removed instead of guarded by a firmware-only flag.
 - Keep dynamic/project-specific shapes possible. Shader/artifact-dependent
   shapes still need runtime registration/replacement.
 - Preserve typed default factories for static shapes, but route lookup through

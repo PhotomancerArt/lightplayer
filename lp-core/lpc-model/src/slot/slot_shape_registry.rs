@@ -11,6 +11,7 @@ use crate::{
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
+use core::ops::Bound::{Excluded, Unbounded};
 
 /// Registry of id-addressed slot shapes.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -460,24 +461,6 @@ impl SlotShapeRegistry {
         }
     }
 
-    pub fn snapshot_with_static_catalog(&self) -> SlotShapeRegistrySnapshot {
-        let mut shapes = BTreeMap::new();
-        for id in crate::slot_shapes::static_slot_shape_ids().iter().copied() {
-            if !self.shapes.contains_key(&id)
-                && let Some(entry) = Self::static_catalog_entry(id)
-            {
-                shapes.insert(id, entry);
-            }
-        }
-        for (id, entry) in &self.shapes {
-            shapes.insert(*id, entry.clone());
-        }
-        SlotShapeRegistrySnapshot {
-            ids_revision: self.ids_revision,
-            shapes,
-        }
-    }
-
     pub fn snapshot_page(
         &self,
         after: Option<SlotShapeId>,
@@ -513,8 +496,47 @@ impl SlotShapeRegistry {
         after: Option<SlotShapeId>,
         limit: usize,
     ) -> (SlotShapeRegistrySnapshot, Option<SlotShapeId>) {
-        self.snapshot_with_static_catalog()
-            .page(after, limit, self.ids_revision)
+        let mut shapes = BTreeMap::new();
+        let mut cursor = after;
+        let mut last_included = None;
+        let mut next = None;
+        let limit = limit.max(1);
+
+        loop {
+            let static_next = self.next_static_catalog_id_after(cursor);
+            let dynamic_next = self
+                .shapes
+                .range((cursor.map_or(Unbounded, Excluded), Unbounded))
+                .next()
+                .map(|(id, _)| *id);
+            let Some(id) = min_shape_id(static_next, dynamic_next) else {
+                break;
+            };
+
+            if shapes.len() >= limit {
+                next = last_included;
+                break;
+            }
+
+            if let Some(entry) = self
+                .shapes
+                .get(&id)
+                .cloned()
+                .or_else(|| Self::static_catalog_entry(id))
+            {
+                shapes.insert(id, entry);
+                last_included = Some(id);
+            }
+            cursor = Some(id);
+        }
+
+        (
+            SlotShapeRegistrySnapshot {
+                ids_revision: self.ids_revision,
+                shapes,
+            },
+            next,
+        )
     }
 
     pub fn static_catalog_entry(id: SlotShapeId) -> Option<SlotShapeEntry> {
@@ -523,6 +545,15 @@ impl SlotShapeRegistry {
             Some(name) => SlotShapeEntry::named(Revision::default(), name, shape),
             None => SlotShapeEntry::new(Revision::default(), shape),
         })
+    }
+
+    fn next_static_catalog_id_after(&self, after: Option<SlotShapeId>) -> Option<SlotShapeId> {
+        crate::slot_shapes::static_slot_shape_ids()
+            .iter()
+            .copied()
+            .filter(|id| after.is_none_or(|after| *id > after))
+            .filter(|id| !self.shapes.contains_key(id))
+            .min()
     }
 
     pub fn apply_snapshot(&mut self, snapshot: SlotShapeRegistrySnapshot) {
@@ -664,44 +695,20 @@ impl SlotShapeLookup for SlotShapeRegistry {
     }
 }
 
+fn min_shape_id(left: Option<SlotShapeId>, right: Option<SlotShapeId>) -> Option<SlotShapeId> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(core::cmp::min(left, right)),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotShapeRegistrySnapshot {
     pub ids_revision: Revision,
     pub shapes: BTreeMap<SlotShapeId, SlotShapeEntry>,
-}
-
-impl SlotShapeRegistrySnapshot {
-    fn page(
-        self,
-        after: Option<SlotShapeId>,
-        limit: usize,
-        ids_revision: Revision,
-    ) -> (Self, Option<SlotShapeId>) {
-        let mut shapes = BTreeMap::new();
-        let mut last_included = None;
-        let mut next = None;
-        let limit = limit.max(1);
-        for (id, entry) in self
-            .shapes
-            .into_iter()
-            .filter(|(id, _)| after.is_none_or(|after| *id > after))
-        {
-            if shapes.len() >= limit {
-                next = last_included;
-                break;
-            }
-            shapes.insert(id, entry);
-            last_included = Some(id);
-        }
-        (
-            Self {
-                ids_revision,
-                shapes,
-            },
-            next,
-        )
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -730,10 +737,7 @@ impl core::error::Error for SlotShapeRegistryError {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        LpType, ProjectDef, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotVariantShape,
-        StaticSlotShape,
-    };
+    use crate::{LpType, SlotFieldShape, SlotMapKeyShape, SlotMeta, SlotVariantShape};
     use alloc::boxed::Box;
     use alloc::vec;
     use alloc::vec::Vec;
@@ -827,13 +831,14 @@ mod tests {
     }
 
     #[test]
-    fn snapshot_with_static_catalog_exports_static_shapes_without_registering_them() {
+    fn static_catalog_pages_without_registering_all_static_shapes() {
         let registry = SlotShapeRegistry::default();
+        let (snapshot, next) = registry.snapshot_page_with_static_catalog(None, 1);
 
-        let snapshot = registry.snapshot_with_static_catalog();
-
-        assert!(!registry.contains(&ProjectDef::SHAPE_ID));
-        assert!(snapshot.shapes.contains_key(&ProjectDef::SHAPE_ID));
+        assert_eq!(snapshot.shapes.len(), 1);
+        assert!(next.is_some());
+        let project_shape = <crate::ProjectDef as crate::StaticSlotShape>::SHAPE_ID;
+        assert!(!registry.contains(&project_shape));
     }
 
     #[test]

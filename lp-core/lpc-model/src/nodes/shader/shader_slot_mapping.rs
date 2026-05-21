@@ -135,8 +135,7 @@ empty_key = 0
     }
 
     fn read_mapping(text: &str) -> ShaderSlotMappingDef {
-        let mut registry = SlotShapeRegistry::default();
-        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("shapes");
+        let registry = SlotShapeRegistry::default();
         let value = toml::from_str::<toml::Value>(text).unwrap();
         registry
             .read_slot_toml(ShaderSlotMappingDef::SHAPE_ID, &value)

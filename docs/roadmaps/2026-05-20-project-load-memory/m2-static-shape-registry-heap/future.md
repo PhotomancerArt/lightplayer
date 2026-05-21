@@ -1,5 +1,14 @@
 # Future Work
 
+## Follow-Up Smells
+
+- `followups/01-stream-static-catalog-export.md` - implemented; keep as design notes.
+- `followups/02-true-paged-static-catalog.md` - implemented; keep as design notes.
+- `followups/03-reduce-owned-shape-conversions.md`
+- `followups/04-rename-static-registration-api.md`
+- `followups/05-separate-engine-runtime-state-shapes.md`
+- `followups/06-restore-fw-esp32-validation.md` - implemented; keep as validation notes.
+
 ## Generated Precompiled Slot Views
 
 - **Idea:** Generate `SlotAccessor` steps directly from slot view codegen

@@ -342,7 +342,13 @@ mod tests {
             output: ValueSlot::new(0.5),
         };
         let mut registry = SlotShapeRegistry::default();
-        TestRoot::ensure_registered(&mut registry).unwrap();
+        registry
+            .ensure_shape_named(
+                TestRoot::SHAPE_ID,
+                TestRoot::shape_name().expect("shape name"),
+                TestRoot::slot_shape(),
+            )
+            .unwrap();
 
         let found =
             lookup_slot_data(&root, &registry, &SlotPath::parse("output").unwrap()).unwrap();
