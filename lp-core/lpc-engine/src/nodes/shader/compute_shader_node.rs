@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use lpc_model::{
     AddSubMode, ComputeShaderDef, DivMode, MulMode, NodeId, SlotAccess, SlotPath,
-    SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
+    SlotShapeRegistry, SlotShapeRegistryError,
 };
 use lps_shared::LpsValueF32;
 
@@ -240,8 +240,6 @@ impl NodeRuntime for ComputeShaderNode {
         &self,
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
-        ComputeShaderDef::ensure_registered(registry)?;
-        lpc_model::FluidEmitter::ensure_registered(registry)?;
         self.state.register_shape(registry).map_err(|e| match e {
             ComputeStateError::Shape(err) => err,
             _ => SlotShapeRegistryError::MissingReferencedShape(self.state.shape_id()),

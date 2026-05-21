@@ -4,7 +4,8 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 use lpc_model::{
     LpType, LpValue, NodeDef, NodeId, SlotAccess, SlotDataAccess, SlotDataAccessMut, SlotPath,
-    SlotPathSegment, SlotPolicy, SlotShape, lookup_slot_data_mut,
+    SlotPathSegment, SlotPolicy, SlotShapeLookup, SlotShapeRegistry, SlotShapeView,
+    lookup_slot_data_mut,
 };
 use lpc_wire::{
     WireSlotMutationOp, WireSlotMutationRejection, WireSlotMutationRequest,
@@ -133,12 +134,11 @@ fn parse_node_root(root: &str) -> Option<ParsedNodeRoot> {
 
 fn mutation_target_info(
     def: &NodeDef,
-    registry: &lpc_model::SlotShapeRegistry,
+    registry: &SlotShapeRegistry,
     path: &SlotPath,
 ) -> Result<MutationTargetInfo, WireSlotMutationRejection> {
     let shape_id = def.shape_id();
-    let shape = registry
-        .get(&shape_id)
+    let shape = SlotShapeLookup::get_shape(registry, shape_id)
         .ok_or(WireSlotMutationRejection::UnknownRoot)?;
     let target = resolve_mutation_target_info(
         def.data(),
@@ -160,75 +160,61 @@ struct ResolvedMutationTargetInfo {
 
 fn resolve_mutation_target_info(
     data: SlotDataAccess<'_>,
-    shape: &SlotShape,
-    registry: &lpc_model::SlotShapeRegistry,
+    shape: SlotShapeView<'_>,
+    registry: &SlotShapeRegistry,
     segments: &[SlotPathSegment],
     inherited_policy: SlotPolicy,
 ) -> Result<ResolvedMutationTargetInfo, WireSlotMutationRejection> {
-    let mut shape = shape;
-    while let SlotShape::Ref { id } = shape {
-        shape = registry
-            .get(id)
-            .ok_or(WireSlotMutationRejection::UnknownPath)?;
-    }
+    let shape = resolve_shape_ref(shape, registry)?;
 
     let Some((head, tail)) = segments.split_first() else {
-        return match (shape, data) {
-            (SlotShape::Value { shape }, SlotDataAccess::Value(_value)) => {
-                Ok(ResolvedMutationTargetInfo {
-                    ty: shape.ty.clone(),
-                    writable: inherited_policy.writable,
-                })
-            }
+        return match (shape.value_shape(), data) {
+            (Some(shape), SlotDataAccess::Value(_value)) => Ok(ResolvedMutationTargetInfo {
+                ty: shape.ty_owned(),
+                writable: inherited_policy.writable,
+            }),
             _ => Err(WireSlotMutationRejection::UnsupportedTarget),
         };
     };
 
-    match (shape, data, head) {
-        (
-            SlotShape::Record { fields, .. },
-            SlotDataAccess::Record(record),
-            SlotPathSegment::Field(name),
-        ) => {
-            let (index, field) = fields
-                .iter()
-                .enumerate()
-                .find(|(_, field)| field.name == *name)
+    match (data, head) {
+        (SlotDataAccess::Record(record), SlotPathSegment::Field(name)) => {
+            let (index, field) = shape
+                .record_field_by_name(name)
                 .ok_or(WireSlotMutationRejection::UnknownPath)?;
             let field_data = record
                 .field(index)
                 .ok_or(WireSlotMutationRejection::UnknownPath)?;
-            resolve_mutation_target_info(field_data, &field.shape, registry, tail, field.policy)
+            resolve_mutation_target_info(field_data, field.shape(), registry, tail, field.policy())
         }
-        (SlotShape::Map { value, .. }, SlotDataAccess::Map(map), SlotPathSegment::Key(key)) => {
+        (SlotDataAccess::Map(map), SlotPathSegment::Key(key)) => {
+            let value_shape = shape
+                .map_value()
+                .ok_or(WireSlotMutationRejection::UnknownPath)?;
             let field_data = map.get(key).ok_or(WireSlotMutationRejection::UnknownPath)?;
-            resolve_mutation_target_info(field_data, value, registry, tail, inherited_policy)
+            resolve_mutation_target_info(field_data, value_shape, registry, tail, inherited_policy)
         }
-        (
-            SlotShape::Option { some, .. },
-            SlotDataAccess::Option(option),
-            SlotPathSegment::Field(name),
-        ) if name.as_str() == "some" => {
+        (SlotDataAccess::Option(option), SlotPathSegment::Field(name))
+            if name.as_str() == "some" =>
+        {
+            let some_shape = shape
+                .option_some()
+                .ok_or(WireSlotMutationRejection::UnknownPath)?;
             let field_data = option
                 .data()
                 .ok_or(WireSlotMutationRejection::UnknownPath)?;
-            resolve_mutation_target_info(field_data, some, registry, tail, inherited_policy)
+            resolve_mutation_target_info(field_data, some_shape, registry, tail, inherited_policy)
         }
-        (
-            SlotShape::Enum { variants, .. },
-            SlotDataAccess::Enum(en),
-            SlotPathSegment::Field(name),
-        ) => {
+        (SlotDataAccess::Enum(en), SlotPathSegment::Field(name)) => {
             if en.variant() != name.as_str() {
                 return Err(WireSlotMutationRejection::UnknownPath);
             }
-            let variant = variants
-                .iter()
-                .find(|variant| variant.name == *name)
+            let variant = shape
+                .enum_variant_by_name(name)
                 .ok_or(WireSlotMutationRejection::UnknownPath)?;
             resolve_mutation_target_info(
                 en.data(),
-                &variant.shape,
+                variant.shape(),
                 registry,
                 tail,
                 inherited_policy,
@@ -236,6 +222,17 @@ fn resolve_mutation_target_info(
         }
         _ => Err(WireSlotMutationRejection::UnknownPath),
     }
+}
+
+fn resolve_shape_ref<'a>(
+    mut shape: SlotShapeView<'a>,
+    registry: &'a SlotShapeRegistry,
+) -> Result<SlotShapeView<'a>, WireSlotMutationRejection> {
+    while let Some(id) = shape.ref_id() {
+        shape = SlotShapeLookup::get_shape(registry, id)
+            .ok_or(WireSlotMutationRejection::UnknownPath)?;
+    }
+    Ok(shape)
 }
 
 fn map_lookup_error(error: lpc_model::SlotLookupError) -> WireSlotMutationRejection {

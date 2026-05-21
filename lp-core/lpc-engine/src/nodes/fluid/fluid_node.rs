@@ -5,9 +5,8 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    Dim2u, FluidDef, FluidDefView, FluidEmitter, FluidState, FromLpValue, NodeId, SlotAccess,
-    SlotData, SlotMapKey, SlotPath, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
-    VisualProduct,
+    Dim2u, FluidDefView, FluidEmitter, FluidState, FromLpValue, NodeId, SlotAccess, SlotData,
+    SlotMapKey, SlotPath, SlotShapeRegistry, SlotShapeRegistryError, VisualProduct,
 };
 use lps_q32::Q32;
 use lps_shared::{TextureBuffer, TextureStorageFormat};
@@ -15,7 +14,7 @@ use lps_shared::{TextureBuffer, TextureStorageFormat};
 use crate::dataflow::resolver::QueryKey;
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
-    RenderContext, RenderNode, TickContext,
+    RenderContext, RenderNode, RuntimeStateShape, TickContext,
 };
 use crate::products::visual::{
     RenderTextureRequest, TextureRenderProduct, VisualSampleBufferRequest, VisualSampleTarget,
@@ -146,9 +145,7 @@ impl NodeRuntime for FluidNode {
         &self,
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
-        FluidDef::ensure_registered(registry)?;
-        FluidEmitter::ensure_registered(registry)?;
-        FluidState::ensure_registered(registry).map(|_| ())
+        FluidState::register_runtime_state_shape(registry).map(|_| ())
     }
 
     fn render_node(&mut self) -> Option<&mut dyn RenderNode> {

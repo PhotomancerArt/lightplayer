@@ -7,8 +7,7 @@ use core::sync::atomic::{AtomicU32, Ordering};
 
 use lpc_model::{
     ChannelName, Kind, MapSlot, NodeId, NodeName, Revision, SlotAccess, SlotMapKey, SlotPath,
-    SlotPathSegment, SlotShapeRegistry, SlotShapeRegistryError, Slotted, StaticSlotShape, TreePath,
-    ValueSlot,
+    SlotPathSegment, SlotShapeRegistry, SlotShapeRegistryError, Slotted, TreePath, ValueSlot,
 };
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lps_shared::LpsValueF32;
@@ -22,7 +21,8 @@ use crate::dataflow::resolver::{
 use crate::engine::Engine;
 use crate::node::test_placeholder_spine;
 use crate::node::{
-    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, TickContext,
+    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
+    RuntimeStateShape, TickContext,
 };
 
 use super::engine::default_demand_input_path;
@@ -418,7 +418,7 @@ impl NodeRuntime for DummyShaderNode {
         &self,
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
-        DummyShaderState::ensure_default_registered::<DummyShaderState>(registry).map(|_| ())
+        DummyShaderState::register_runtime_state_shape(registry).map(|_| ())
     }
 }
 

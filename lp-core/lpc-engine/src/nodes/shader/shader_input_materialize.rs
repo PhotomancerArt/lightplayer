@@ -298,13 +298,12 @@ mod tests {
     use alloc::collections::BTreeMap;
     use lpc_model::{
         CONTROL_MESSAGE_SHAPE_NAME, ControlMessage, Revision, ShaderSlotMappingDef, SlotMapDyn,
-        StaticSlotShape, ToLpValue, WithRevision,
+        ToLpValue, WithRevision,
     };
 
     #[test]
     fn materializes_sentinel_map_to_shader_array() {
-        let mut registry = SlotShapeRegistry::default();
-        ControlMessage::ensure_registered(&mut registry).expect("control message");
+        let registry = SlotShapeRegistry::default();
         let slot = ShaderSlotDef::map_u32_native(
             CONTROL_MESSAGE_SHAPE_NAME,
             ShaderSlotMappingDef::sentinel(3, "id", 0),
@@ -334,8 +333,7 @@ mod tests {
 
     #[test]
     fn materializes_missing_map_to_empty_sentinel_array() {
-        let mut registry = SlotShapeRegistry::default();
-        ControlMessage::ensure_registered(&mut registry).expect("control message");
+        let registry = SlotShapeRegistry::default();
         let slot = ShaderSlotDef::map_u32_native(
             CONTROL_MESSAGE_SHAPE_NAME,
             ShaderSlotMappingDef::sentinel(2, "id", 0),
@@ -353,8 +351,7 @@ mod tests {
 
     #[test]
     fn rejects_map_key_that_disagrees_with_item_key_field() {
-        let mut registry = SlotShapeRegistry::default();
-        ControlMessage::ensure_registered(&mut registry).expect("control message");
+        let registry = SlotShapeRegistry::default();
         let slot = ShaderSlotDef::map_u32_native(
             CONTROL_MESSAGE_SHAPE_NAME,
             ShaderSlotMappingDef::sentinel(3, "id", 0),

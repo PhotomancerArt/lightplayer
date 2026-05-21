@@ -4,9 +4,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     EnumSlot, FromLpValue, LpType, LpValue, MapSlot, PositiveF32, PositiveF32Slot, SlotEnumOption,
-    SlotMeta, SlotShapeId, SlotValue, SlotValueShape, Slotted, StaticLpType, StaticSlotEnumOption,
-    StaticSlotMeta, StaticSlotValueShape, StaticValueEditorHint, SourcePath, SourcePathSlot,
-    ToLpValue, ValueEditorHint, ValueRootError, ValueSlot, Xy, XySlot,
+    SlotMeta, SlotShapeId, SlotValue, SlotValueShape, Slotted, SourcePath, SourcePathSlot,
+    StaticLpType, StaticSlotEnumOption, StaticSlotMeta, StaticSlotValueShape,
+    StaticValueEditorHint, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot, Xy, XySlot,
 };
 
 /// Fixture-to-texture mapping authored on a fixture definition.

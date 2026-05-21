@@ -240,6 +240,30 @@ impl SlotShapeRegistry {
         self.ensure_shape_named_with_factory(id, name, shape, SlotFactory::dynamic())
     }
 
+    /// Ensure that an engine runtime-state root shape is present.
+    ///
+    /// Runtime-state shapes are fixed Rust-authored roots published by live
+    /// nodes. They live in the dynamic registry because loaded projects expose
+    /// them as runtime roots, but they are distinct from authored model shapes
+    /// in the generated static catalog and from artifact-specific dynamic
+    /// shapes.
+    pub fn ensure_runtime_state_shape(
+        &mut self,
+        id: SlotShapeId,
+        shape: SlotShape,
+    ) -> Result<bool, SlotShapeRegistryError> {
+        self.ensure_shape_with_factory(id, shape, SlotFactory::dynamic())
+    }
+
+    pub fn ensure_runtime_state_shape_named(
+        &mut self,
+        id: SlotShapeId,
+        name: impl Into<String>,
+        shape: SlotShape,
+    ) -> Result<bool, SlotShapeRegistryError> {
+        self.ensure_shape_named_with_factory(id, name, shape, SlotFactory::dynamic())
+    }
+
     pub fn ensure_shape_with_factory(
         &mut self,
         id: SlotShapeId,

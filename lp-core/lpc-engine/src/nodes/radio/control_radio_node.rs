@@ -8,7 +8,6 @@ use alloc::vec::Vec;
 use lpc_model::{
     ControlMessage, ControlRadioDefView, ControlRadioState, FromLpValue, HardwareEndpointSpec,
     MapSlot, SlotAccess, SlotData, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
-    StaticSlotShape,
 };
 use lpc_shared::hardware::{
     RadioChannelId, RadioConfig, RadioDevice, RadioMessage, RadioMessageKind,
@@ -16,7 +15,8 @@ use lpc_shared::hardware::{
 
 use crate::dataflow::resolver::QueryKey;
 use crate::node::{
-    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, TickContext,
+    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
+    RuntimeStateShape, TickContext,
 };
 
 const CONTROL_MESSAGE_PAYLOAD_LEN: usize = 8;
@@ -300,8 +300,7 @@ impl NodeRuntime for ControlRadioNode {
         &self,
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
-        ControlRadioState::ensure_registered(registry)?;
-        ControlMessage::ensure_registered(registry).map(|_| ())
+        ControlRadioState::register_runtime_state_shape(registry).map(|_| ())
     }
 }
 

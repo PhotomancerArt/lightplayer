@@ -10,7 +10,7 @@ use lpc_model::nodes::fixture::{
 };
 use lpc_model::{
     ControlExtent, ControlProduct, Dim2u, FixtureDefView, FixtureState, Revision, SlotAccess,
-    SlotPath, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
+    SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
 };
 use lps_q32::q32::{Q32, ToQ32};
 
@@ -25,7 +25,7 @@ use lps_shared::TextureBuffer;
 use crate::dataflow::resolver::QueryKey;
 use crate::node::{
     ControlNode, ControlRenderContext, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
-    PressureLevel, ProduceResult, TickContext,
+    PressureLevel, ProduceResult, RuntimeStateShape, TickContext,
 };
 use crate::products::control::{
     ControlHint, ControlLayout, ControlRenderRequest, ControlRenderTarget, ControlSampleFormat,
@@ -246,7 +246,7 @@ impl NodeRuntime for FixtureNode {
         &self,
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
-        FixtureState::ensure_registered(registry).map(|_| ())
+        FixtureState::register_runtime_state_shape(registry).map(|_| ())
     }
 
     fn control_node(&mut self) -> Option<&mut dyn ControlNode> {
@@ -923,15 +923,13 @@ mod tests {
 
     use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
     use crate::engine::{Engine, default_demand_input_path};
-    use crate::node::{RenderContext, RenderNode, test_placeholder_spine};
+    use crate::node::{RenderContext, RenderNode, RuntimeStateShape, test_placeholder_spine};
     use crate::nodes::TextureNode;
     use crate::nodes::shader_output_path;
     use crate::products::visual::{
         TextureRenderProduct, VisualProduct, VisualSampleBufferRequest, VisualSampleTarget,
     };
-    use lpc_model::{
-        ShaderState, SlotAccess, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
-    };
+    use lpc_model::{ShaderState, SlotAccess, SlotShapeRegistry, SlotShapeRegistryError};
 
     struct FixtureTickCountSolidProducer {
         state: ShaderState,
@@ -972,7 +970,7 @@ mod tests {
             &self,
             registry: &mut SlotShapeRegistry,
         ) -> Result<(), SlotShapeRegistryError> {
-            ShaderState::ensure_registered(registry).map(|_| ())
+            ShaderState::register_runtime_state_shape(registry).map(|_| ())
         }
 
         fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
@@ -1047,7 +1045,7 @@ mod tests {
             &self,
             registry: &mut SlotShapeRegistry,
         ) -> Result<(), SlotShapeRegistryError> {
-            ShaderState::ensure_registered(registry).map(|_| ())
+            ShaderState::register_runtime_state_shape(registry).map(|_| ())
         }
 
         fn render_node(&mut self) -> Option<&mut dyn RenderNode> {

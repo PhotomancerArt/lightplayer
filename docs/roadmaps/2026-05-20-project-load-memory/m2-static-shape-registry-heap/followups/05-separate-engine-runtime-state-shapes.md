@@ -1,5 +1,15 @@
 # Separate Engine Runtime State Shapes
 
+## Status
+
+Implemented in the static-shapes followup pass after rebasing onto
+`feature/radio`.
+
+The engine now uses `RuntimeStateShape` for fixed node-owned runtime state
+roots, while authored model/support shapes resolve through `SlotShapeLookup`
+instead of being inserted into the dynamic registry as a side effect of runtime
+state registration.
+
 ## Smell
 
 Engine node shape registration still mixes several concepts:
