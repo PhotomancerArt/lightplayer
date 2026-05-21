@@ -57,7 +57,7 @@ impl NodeRuntime for OutputNode {
         self.channel_buffer_id
     }
 
-    fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+    fn consume(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         let prod = ctx
             .resolve(QueryKey::ConsumedSlot {
                 node: ctx.node_id(),

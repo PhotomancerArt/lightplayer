@@ -1,6 +1,7 @@
 use crate::commands::serve::init::{create_filesystem, initialize_server};
-use lpa_server::{Graphics, LpGraphics, LpServer};
+use lpa_server::{ButtonService, Graphics, LpGraphics, LpServer, RadioService};
 use lpc_model::AsLpPath;
+use lpc_shared::hardware::{HardwareRegistry, HardwareSystem, default_esp32c6_hardware_manifest};
 use lpc_shared::output::MemoryOutputProvider;
 use lpfs::LpFs;
 use std::cell::RefCell;
@@ -44,6 +45,11 @@ pub fn create_server(
 
     // Create output provider
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new_permissive()));
+    let hardware = Rc::new(HardwareSystem::with_virtual_drivers(Rc::new(
+        HardwareRegistry::new(default_esp32c6_hardware_manifest()),
+    )));
+    let button_service: Rc<dyn ButtonService> = hardware.clone();
+    let radio_service: Rc<dyn RadioService> = hardware.clone();
 
     // Create LpServer (takes ownership of filesystem)
     // We need to clone the filesystem reference before passing it to LpServer
@@ -51,12 +57,14 @@ pub fn create_server(
     // Note: LpServer takes ownership, so we can't return the same instance
     // For now, return a new filesystem instance (caller may not need it)
     let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
-    let server = LpServer::new(
+    let server = LpServer::new_with_hardware_services(
         output_provider,
         base_fs,
         "projects/".as_path(),
         None,
         None,
+        Some(button_service),
+        Some(radio_service),
         graphics,
     );
 

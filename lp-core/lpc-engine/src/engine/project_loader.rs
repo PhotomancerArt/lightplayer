@@ -354,6 +354,7 @@ impl ProjectLoader {
                 &config.bindings,
                 frame,
             )?;
+            runtime.add_demand_root(node.id);
         }
 
         for node in loaded_nodes {
@@ -2485,6 +2486,10 @@ value = "f32"
                 .value()
                 .is_alive()
         );
+        assert!(
+            rt.demand_roots().contains(&radio),
+            "radio must be a demand root"
+        );
         assert!(rt.tree().bindings().any(|binding| {
             matches!(
                 (&binding.source, &binding.target),
@@ -2507,6 +2512,24 @@ value = "f32"
                     && target.0 == "trigger"
             )
         }));
+    }
+
+    #[test]
+    fn button_sign_example_ticks_without_radio_trigger_cycle() {
+        let fs = examples_button_sign_fs();
+        let fs: &dyn LpFs = &fs;
+        let registry = Rc::new(HardwareRegistry::new(default_esp32c6_hardware_manifest()));
+        let hardware = Rc::new(HardwareSystem::with_virtual_drivers(registry));
+        let button_service: Rc<dyn ButtonService> = hardware.clone();
+        let radio_service: Rc<dyn RadioService> = hardware.clone();
+        let mut services = EngineServices::new(TreePath::parse("/button_sign.show").expect("path"));
+        services.set_button_service(Some(button_service));
+        services.set_radio_service(Some(radio_service));
+
+        let mut rt = ProjectLoader::load_from_root(fs, services).expect("load button sign example");
+        rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
+
+        rt.tick(16).expect("tick button-sign without radio cycle");
     }
 
     #[test]
@@ -2643,6 +2666,7 @@ target = "bus#trigger"
         let first = resolve_node_map(&mut rt, radio, "output", "radio output");
         assert!(first.entries.is_empty());
 
+        rt.tick(1).expect("button candidate frame");
         rt.tick(1).expect("button stable frame");
         let output = resolve_node_map(&mut rt, radio, "output", "radio output");
         assert!(output.entries.contains_key(&SlotMapKey::U32(1)));

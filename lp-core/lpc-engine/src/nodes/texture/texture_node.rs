@@ -3,7 +3,6 @@
 use lpc_model::NodeId;
 use lpc_model::Revision;
 use lpc_model::SlotAccess;
-#[cfg(test)]
 use lpc_model::SlotPath;
 use lpc_model::SlotShapeRegistry;
 use lpc_model::SlotShapeRegistryError;
@@ -15,7 +14,7 @@ use lpc_model::nodes::texture::TextureState;
 
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeResourceInitContext, NodeRuntime, PressureLevel,
-    TickContext,
+    ProduceResult, TickContext,
 };
 use crate::resource::{RuntimeBuffer, RuntimeBufferId};
 
@@ -81,7 +80,11 @@ impl NodeRuntime for TextureNode {
         Ok(())
     }
 
-    fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+    fn produce(
+        &mut self,
+        _slot: &SlotPath,
+        ctx: &mut TickContext<'_>,
+    ) -> Result<ProduceResult, NodeError> {
         let size: lpc_model::Dim2u = self.def_view(ctx)?.size().get(ctx)?;
         self.state.sync_with_revision(
             ctx.revision(),
@@ -96,7 +99,7 @@ impl NodeRuntime for TextureNode {
                 Ok(())
             })?;
         }
-        Ok(())
+        Ok(ProduceResult::Produced)
     }
 
     fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {

@@ -35,7 +35,8 @@ use crate::node::NodeEntry;
 use crate::node::catch_node_panic::catch_node_panic;
 use crate::node::{
     ControlRenderContext, ControlRenderServices, NodeCall, NodeCallKey, NodeError,
-    NodeResourceInitContext, NodeRuntime, RenderContext, TickContext, VisualRenderServices,
+    NodeResourceInitContext, NodeRuntime, ProduceResult, RenderContext, TickContext,
+    VisualRenderServices,
 };
 use crate::node::{NodeEntryState, NodeTree};
 use crate::products::control::{ControlLayout, ControlRenderRequest, ControlRenderTarget};
@@ -49,6 +50,7 @@ use super::{ButtonService, EngineError, EngineServices, RadioService};
 use super::{FrameNum, FrameTime};
 
 /// Conventional demand input used by the M2 engine slice.
+#[cfg(test)]
 pub(crate) fn default_demand_input_path() -> SlotPath {
     SlotPath::parse("in").expect("default demand input slot path")
 }
@@ -268,13 +270,6 @@ impl Engine {
         self.frame_time =
             FrameTime::new(delta_ms, self.frame_time.total_ms.saturating_add(delta_ms));
 
-        let demand_input = default_demand_input_path();
-        let tick_after_resolve: Vec<bool> = self
-            .demand_roots
-            .iter()
-            .map(|&root| self.consumed_slot_is_bound(root, &demand_input))
-            .collect();
-
         let mut resolver = core::mem::replace(&mut self.resolver, Resolver::new());
         let trace = ResolveTrace::new(ResolveLogLevel::Off);
         let mut session = EngineSession::new(self.revision, &mut resolver, trace);
@@ -298,20 +293,8 @@ impl Engine {
         };
 
         {
-            for (i, &root) in self.demand_roots.iter().enumerate() {
-                session
-                    .resolve(
-                        &mut host,
-                        QueryKey::ConsumedSlot {
-                            node: root,
-                            slot: demand_input.clone(),
-                        },
-                    )
-                    .map_err(EngineError::from)?;
-
-                if tick_after_resolve[i] {
-                    tick_tree_node(&mut session, &mut host, root)?;
-                }
+            for &root in &self.demand_roots {
+                consume_tree_node(&mut session, &mut host, root)?;
             }
         }
 
@@ -388,10 +371,6 @@ impl Engine {
         };
         host.render_node_control(product, request, target)
     }
-
-    fn consumed_slot_is_bound(&self, node: NodeId, slot: &SlotPath) -> bool {
-        self.tree.binding_for_consumed_slot(node, slot).is_some()
-    }
 }
 
 fn register_authored_slot_shapes(
@@ -448,9 +427,10 @@ struct EngineResolveHost<'a> {
 }
 
 impl EngineResolveHost<'_> {
-    fn tick_node_once_for_output(
+    fn produce_node_slot(
         &mut self,
         node_id: NodeId,
+        slot: &SlotPath,
         session: &mut EngineSession<'_>,
     ) -> Result<(), SessionResolveError> {
         if self.producers_ticked.contains(&node_id) {
@@ -471,7 +451,7 @@ impl EngineResolveHost<'_> {
 
             let old_changed_at = entry.state.changed_at();
             let executing = NodeEntryState::Executing {
-                call: NodeCallKey::new(node_id, NodeCall::Tick),
+                call: NodeCallKey::new(node_id, NodeCall::ProduceSlot { slot: slot.clone() }),
             };
             let stolen = core::mem::replace(
                 &mut entry.state,
@@ -505,7 +485,7 @@ impl EngineResolveHost<'_> {
         let radio_service = self.radio_service.clone();
         let time_s = self.frame_time_seconds;
         let slot_shapes = self.slot_shapes;
-        let tick_result = {
+        let produce_result = {
             let mut bridge = SessionHostResolver {
                 session,
                 host: self as &mut dyn ResolveHost,
@@ -524,7 +504,7 @@ impl EngineResolveHost<'_> {
                 radio_service,
                 time_s,
             );
-            catch_node_panic(|| node_runtime.tick(&mut tick_ctx))
+            catch_node_panic(|| node_runtime.produce(slot, &mut tick_ctx))
         };
 
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
@@ -532,12 +512,15 @@ impl EngineResolveHost<'_> {
         })?;
         entry.set_state(NodeEntryState::Alive(node_runtime), restore_frame);
 
-        match tick_result {
-            Ok(()) => {
+        match produce_result {
+            Ok(ProduceResult::Produced) => {
                 set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
                 self.producers_ticked.insert(node_id);
                 Ok(())
             }
+            Ok(ProduceResult::Unsupported) => Err(SessionResolveError::other(format!(
+                "produce: node {node_id:?} does not produce slot {slot:?}"
+            ))),
             Err(e) => {
                 let message = e.to_string();
                 set_entry_status_if_changed(
@@ -561,7 +544,7 @@ impl ResolveHost for EngineResolveHost<'_> {
     ) -> Result<Production, SessionResolveError> {
         match query {
             QueryKey::ProducedSlot { node, slot } => {
-                self.tick_node_once_for_output(*node, session)?;
+                self.produce_node_slot(*node, slot, session)?;
                 let entry = self.tree.get(*node).ok_or_else(|| {
                     SessionResolveError::other(format!("read output: unknown node {node:?}"))
                 })?;
@@ -1410,7 +1393,7 @@ fn restore_node_after_failed_control(
     Err(err)
 }
 
-fn tick_tree_node(
+fn consume_tree_node(
     session: &mut EngineSession<'_>,
     host: &mut EngineResolveHost<'_>,
     node_id: NodeId,
@@ -1462,7 +1445,7 @@ fn tick_tree_node(
     let radio_service = host.radio_service.clone();
     let time_s = host.frame_time_seconds;
     let slot_shapes = host.slot_shapes;
-    let tick_result = {
+    let consume_result = {
         let mut bridge = SessionHostResolver {
             session,
             host: host as &mut dyn ResolveHost,
@@ -1481,7 +1464,7 @@ fn tick_tree_node(
             radio_service,
             time_s,
         );
-        catch_node_panic(|| node_runtime.tick(&mut tick_ctx))
+        catch_node_panic(|| node_runtime.consume(&mut tick_ctx))
     };
 
     let entry = host
@@ -1490,9 +1473,10 @@ fn tick_tree_node(
         .ok_or(EngineError::UnknownNode(node_id))?;
     entry.set_state(NodeEntryState::Alive(node_runtime), restore_frame);
 
-    match tick_result {
+    match consume_result {
         Ok(()) => {
             set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
+            host.producers_ticked.insert(node_id);
             Ok(())
         }
         Err(e) => {
@@ -1866,7 +1850,7 @@ mod tests {
     struct FailingNode;
 
     impl NodeRuntime for FailingNode {
-        fn tick(&mut self, _ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+        fn consume(&mut self, _ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
             Err(NodeError::msg("intentional tick failure"))
         }
 

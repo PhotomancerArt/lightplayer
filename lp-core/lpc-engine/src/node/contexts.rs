@@ -54,7 +54,7 @@ impl<'a> NodeResourceInitContext<'a> {
     }
 }
 
-/// Context for [`super::Node::tick`](super::NodeRuntime::tick).
+/// Context for [`super::NodeRuntime::produce`] and [`super::NodeRuntime::consume`].
 ///
 /// Demand-style reads go through [`TickResolver`] (typically [`crate::dataflow::resolver::SessionHostResolver`]).
 pub struct TickContext<'r> {
@@ -940,21 +940,25 @@ mod tests {
         }
     }
 
-    /// Dummy node that uses [`TickContext::resolve`](TickContext::resolve) from [`super::super::NodeRuntime::tick`].
+    /// Dummy node that uses [`TickContext::resolve`](TickContext::resolve) from [`super::super::NodeRuntime::produce`].
     struct QueryResolvingNode {
         query: QueryKey,
         resolved_value: Option<f32>,
     }
 
     impl super::super::NodeRuntime for QueryResolvingNode {
-        fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), crate::node::NodeError> {
+        fn produce(
+            &mut self,
+            _slot: &SlotPath,
+            ctx: &mut TickContext<'_>,
+        ) -> Result<super::super::ProduceResult, crate::node::NodeError> {
             let pv = ctx.resolve(self.query.clone()).map_err(|e| {
                 crate::node::NodeError::msg(alloc::format!("resolve failed: {}", e.message))
             })?;
             if let LpsValueF32::F32(v) = pv.as_value().expect("value") {
                 self.resolved_value = Some(v);
             }
-            Ok(())
+            Ok(super::super::ProduceResult::Produced)
         }
 
         fn destroy(
@@ -974,7 +978,7 @@ mod tests {
     }
 
     #[test]
-    fn dummy_node_can_resolve_bus_query_from_tick() {
+    fn dummy_node_can_resolve_bus_query_from_produce() {
         let mut bindings = TestBindings::default();
         let frame = Revision::new(10);
         let channel = lpc_model::ChannelName(String::from("in"));
@@ -1012,12 +1016,13 @@ mod tests {
             &slot_shapes,
         );
 
-        node.tick(&mut ctx).expect("tick should succeed");
+        node.produce(&SlotPath::root(), &mut ctx)
+            .expect("produce should succeed");
         assert_eq!(node.resolved_value, Some(8.8));
     }
 
     #[test]
-    fn dummy_node_can_resolve_consumed_slot_via_host_from_tick() {
+    fn dummy_node_can_resolve_consumed_slot_via_host_from_produce() {
         let frame = Revision::new(10);
         let node_id = NodeId::new(2);
         let input_path = SlotPath::parse("fixture_in").unwrap();
@@ -1051,7 +1056,8 @@ mod tests {
             &slot_shapes,
         );
 
-        node.tick(&mut ctx).expect("tick should succeed");
+        node.produce(&SlotPath::root(), &mut ctx)
+            .expect("produce should succeed");
         assert_eq!(node.resolved_value, Some(11.0));
     }
 

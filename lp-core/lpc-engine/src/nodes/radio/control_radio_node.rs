@@ -15,7 +15,9 @@ use lpc_shared::hardware::{
 };
 
 use crate::dataflow::resolver::QueryKey;
-use crate::node::{DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext};
+use crate::node::{
+    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, TickContext,
+};
 
 const CONTROL_MESSAGE_PAYLOAD_LEN: usize = 8;
 const MAX_REPEAT_COUNT: u32 = 8;
@@ -181,6 +183,23 @@ impl ControlRadioNode {
         Ok(())
     }
 
+    fn publish_output(
+        &mut self,
+        ctx: &mut TickContext<'_>,
+        accepted: BTreeMap<u32, ControlMessage>,
+    ) -> Result<(), NodeError> {
+        self.state.output = MapSlot::with_version(ctx.revision(), accepted);
+        ctx.publish_runtime_slot(&self.state, control_radio_output_path())
+    }
+
+    fn current_frame_output(&self, revision: lpc_model::Revision) -> BTreeMap<u32, ControlMessage> {
+        if self.state.output.keys_revision == revision {
+            self.state.output.entries.clone()
+        } else {
+            BTreeMap::new()
+        }
+    }
+
     fn has_seen(&self, key: &ControlMessageKey) -> bool {
         self.recent_sent.contains(key) || self.recent_received.contains(key)
     }
@@ -224,20 +243,36 @@ struct PendingControlMessage {
 }
 
 impl NodeRuntime for ControlRadioNode {
-    fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+    fn produce(
+        &mut self,
+        slot: &SlotPath,
+        ctx: &mut TickContext<'_>,
+    ) -> Result<ProduceResult, NodeError> {
+        if slot != &control_radio_output_path() {
+            return Ok(ProduceResult::Unsupported);
+        }
         let config = self.read_config(ctx)?;
         self.ensure_radio(&config, ctx)?;
 
-        self.state.output = MapSlot::default();
-        ctx.publish_runtime_slot(&self.state, control_radio_output_path())?;
+        let mut accepted = self.current_frame_output(ctx.revision());
+        self.receive_remote(config.channel, &mut accepted)?;
+        self.publish_output(ctx, accepted)?;
+        Ok(ProduceResult::Produced)
+    }
 
-        let mut accepted = BTreeMap::new();
+    fn consume(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+        let config = self.read_config(ctx)?;
+        self.ensure_radio(&config, ctx)?;
+
+        let mut accepted = self.current_frame_output(ctx.revision());
+        self.receive_remote(config.channel, &mut accepted)?;
+        self.publish_output(ctx, accepted.clone())?;
+
         self.accept_local_inputs(ctx, config.repeat_count, &mut accepted)?;
         self.transmit_pending(config.channel)?;
         self.receive_remote(config.channel, &mut accepted)?;
 
-        self.state.output = MapSlot::with_version(ctx.revision(), accepted);
-        ctx.publish_runtime_slot(&self.state, control_radio_output_path())?;
+        self.publish_output(ctx, accepted)?;
         Ok(())
     }
 

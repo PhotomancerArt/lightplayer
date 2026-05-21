@@ -14,7 +14,9 @@ use lps_shared::LpsValueF32;
 use crate::dataflow::resolver::QueryKey;
 use crate::gfx::{LpComputeShader, ShaderCompileOptions, compute_desc_from_model_def};
 use crate::node::catch_node_panic::catch_panic;
-use crate::node::{DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, TickContext};
+use crate::node::{
+    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, TickContext,
+};
 
 use super::compute_materialize::materialize_produced_slot;
 use super::compute_shader_state::{ComputeShaderState, ComputeStateError};
@@ -195,7 +197,11 @@ impl ComputeShaderNode {
 }
 
 impl NodeRuntime for ComputeShaderNode {
-    fn tick(&mut self, ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
+    fn produce(
+        &mut self,
+        _slot: &SlotPath,
+        ctx: &mut TickContext<'_>,
+    ) -> Result<ProduceResult, NodeError> {
         self.sync_def_from_view(ctx)?;
         let input_pairs = self.collect_inputs(ctx)?;
         let inputs: Vec<_> = input_pairs
@@ -210,7 +216,8 @@ impl NodeRuntime for ComputeShaderNode {
         shader
             .tick(&inputs)
             .map_err(|e| NodeError::msg(format!("compute tick: {e}")))?;
-        self.sync_outputs(ctx)
+        self.sync_outputs(ctx)?;
+        Ok(ProduceResult::Produced)
     }
 
     fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
