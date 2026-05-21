@@ -9,9 +9,10 @@ use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef, ShaderSource};
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, ArtifactLocator, AsLpPath, BindingDef, BindingDefs, BindingRef,
-    BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureSamplingConfig, HardwareEndpointSpec, MapSlot,
-    NodeDef, NodeInvocation, NodeSlotRef, OptionSlot, ProjectDef, Ratio, RatioSlot,
-    RelativeNodeRef, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry, ValueSlot,
+    BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode, FixtureSamplingConfig,
+    HardwareEndpointSpec, MapSlot, NodeDef, NodeInvocation, NodeSlotRef, OptionSlot, ProjectDef,
+    Ratio, RatioSlot, RelativeNodeRef, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry,
+    ValueSlot,
 };
 use lpfs::LpFs;
 use lpfs::lp_path::LpPathBuf;
@@ -401,6 +402,7 @@ impl FixtureBuilder {
             }),
             bindings: fixture_binding_defs(texture_loc),
             sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
+            diagnostic_mode: ValueSlot::new(FixtureDiagnosticMode::Off),
             mapping: EnumSlot::new(self.mapping),
             color_order: ValueSlot::new(self.color_order),
             transform: Affine2dSlot::new(affine2d_from_matrix(self.transform)),

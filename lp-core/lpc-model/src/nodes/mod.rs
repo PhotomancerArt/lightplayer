@@ -13,8 +13,8 @@ pub mod texture;
 pub use button::{ButtonDef, ButtonDefView, ButtonState, ButtonStateView};
 pub use clock::{ClockControls, ClockDef, ClockDefView, ClockState};
 pub use fixture::{
-    ColorOrder, FixtureDef, FixtureDefView, FixtureSamplingConfig, FixtureState, FixtureStateView,
-    MappingConfig, PathSpec, RingOrder,
+    ColorOrder, FixtureDef, FixtureDefView, FixtureDiagnosticMode, FixtureSamplingConfig,
+    FixtureState, FixtureStateView, MappingConfig, PathSpec, RingOrder,
 };
 pub use fluid::{FluidDef, FluidDefView, FluidEmitter, FluidState};
 pub use node_def::{NodeArtifact, NodeDef, NodeDefParseError, NodeDefWriteError};

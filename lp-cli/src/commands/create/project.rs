@@ -12,8 +12,9 @@ use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingRef, BusSlotRef, Dim2u,
-    Dim2uSlot, EnumSlot, FixtureSamplingConfig, HardwareEndpointSpec, MapSlot, NodeDef, OptionSlot,
-    RenderOrder, RenderOrderSlot, ShaderSource, SlotPath, SlotShapeRegistry, ValueSlot,
+    Dim2uSlot, EnumSlot, FixtureDiagnosticMode, FixtureSamplingConfig, HardwareEndpointSpec,
+    MapSlot, NodeDef, OptionSlot, RenderOrder, RenderOrderSlot, ShaderSource, SlotPath,
+    SlotShapeRegistry, ValueSlot,
 };
 use lpfs::LpFs;
 
@@ -180,6 +181,7 @@ vec4 render(vec2 pos) {
         }),
         bindings: fixture_binding_defs(),
         sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
+        diagnostic_mode: ValueSlot::new(FixtureDiagnosticMode::Off),
         mapping: EnumSlot::new(MappingConfig::path_points(MapSlot::default(), 2.0)),
         color_order: ValueSlot::new(ColorOrder::Rgb),
         transform: Affine2dSlot::new(Affine2d::identity()),

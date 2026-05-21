@@ -20,14 +20,17 @@ const GPIO20_SPEC: &str = "button:gpio:D9";
 
 pub struct Esp32Gpio20ButtonDriver {
     registry: Rc<HardwareRegistry>,
-    pin: RefCell<Option<esp_hal::peripherals::GPIO20<'static>>>,
+    input: Rc<RefCell<Option<Input<'static>>>>,
 }
 
 impl Esp32Gpio20ButtonDriver {
     pub fn new(registry: Rc<HardwareRegistry>, pin: esp_hal::peripherals::GPIO20<'static>) -> Self {
         Self {
             registry,
-            pin: RefCell::new(Some(pin)),
+            input: Rc::new(RefCell::new(Some(Input::new(
+                pin,
+                InputConfig::default().with_pull(Pull::Up),
+            )))),
         }
     }
 
@@ -76,51 +79,70 @@ impl ButtonDriver for Esp32Gpio20ButtonDriver {
             });
         }
 
-        let Some(pin) = self.pin.borrow_mut().take() else {
+        let source = Self::source();
+        self.registry
+            .ensure_capability(&source, HardwareCapability::GpioInput)?;
+        let lease = self
+            .registry
+            .claim_bundle(HardwareClaim::new(DRIVER_ID, vec![source.clone()]))?;
+
+        let Some(input) = self.input.borrow_mut().take() else {
+            self.registry.release(&lease)?;
             return Err(HardwareEndpointError::EndpointUnavailable {
                 endpoint_id: endpoint_id.clone(),
                 reason: String::from("GPIO20 is already open"),
             });
         };
 
-        Esp32ButtonInput::open_gpio20(Rc::clone(&self.registry), pin, config)
-            .map(|input| Box::new(input) as Box<dyn ButtonInput>)
-            .map_err(HardwareEndpointError::from)
+        Ok(Box::new(Esp32ButtonInput::new_gpio20(
+            Rc::clone(&self.registry),
+            Rc::clone(&self.input),
+            source,
+            lease,
+            input,
+            config,
+        )))
     }
 }
 
 pub struct Esp32ButtonInput {
     registry: Rc<HardwareRegistry>,
     source: HardwareAddress,
+    input_home: Rc<RefCell<Option<Input<'static>>>>,
     lease: Option<HardwareLease>,
-    input: Input<'static>,
+    input: Option<Input<'static>>,
     debouncer: ButtonDebouncer,
 }
 
 impl Esp32ButtonInput {
-    pub fn open_gpio20(
+    fn new_gpio20(
         registry: Rc<HardwareRegistry>,
-        pin: esp_hal::peripherals::GPIO20<'static>,
+        input_home: Rc<RefCell<Option<Input<'static>>>>,
+        source: HardwareAddress,
+        lease: HardwareLease,
+        input: Input<'static>,
         config: ButtonConfig,
-    ) -> Result<Self, HardwareError> {
-        let source = HardwareAddress::gpio(20);
-        registry.ensure_capability(&source, HardwareCapability::GpioInput)?;
-        let lease = registry.claim_bundle(HardwareClaim::new(DRIVER_ID, vec![source.clone()]))?;
-        let input = Input::new(pin, InputConfig::default().with_pull(Pull::Up));
-        Ok(Self {
+    ) -> Self {
+        Self {
             registry,
             source: source.clone(),
+            input_home,
             lease: Some(lease),
-            input,
+            input: Some(input),
             debouncer: ButtonDebouncer::new(source, config.stable_ms()),
-        })
+        }
     }
 
     pub fn close(&mut self) -> Result<(), HardwareError> {
-        if let Some(lease) = self.lease.take() {
-            self.registry.release(&lease)?;
+        let release_result = if let Some(lease) = self.lease.take() {
+            self.registry.release(&lease)
+        } else {
+            Ok(())
+        };
+        if let Some(input) = self.input.take() {
+            *self.input_home.borrow_mut() = Some(input);
         }
-        Ok(())
+        release_result
     }
 }
 
@@ -130,7 +152,8 @@ impl ButtonInput for Esp32ButtonInput {
     }
 
     fn poll(&mut self, now_ms: u64) -> Option<ButtonEvent> {
-        self.debouncer.sample(now_ms, self.input.is_low())
+        let input = self.input.as_mut()?;
+        self.debouncer.sample(now_ms, input.is_low())
     }
 }
 

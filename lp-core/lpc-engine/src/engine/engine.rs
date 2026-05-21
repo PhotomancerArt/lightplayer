@@ -427,6 +427,81 @@ struct EngineResolveHost<'a> {
 }
 
 impl EngineResolveHost<'_> {
+    #[inline(never)]
+    fn produce_produced_slot(
+        &mut self,
+        node: NodeId,
+        slot: &SlotPath,
+        session: &mut EngineSession<'_>,
+    ) -> Result<Production, SessionResolveError> {
+        self.produce_node_slot(node, slot, session)?;
+        let entry = self.tree.get(node).ok_or_else(|| {
+            SessionResolveError::other(format!("read output: unknown node {node:?}"))
+        })?;
+        let n = match entry.state.value() {
+            NodeEntryState::Alive(n) => n,
+            _ => {
+                return Err(SessionResolveError::other(format!(
+                    "read output: node {node:?} not alive"
+                )));
+            }
+        };
+        let product = self.read_runtime_state_product(&**n, slot).map_err(|e| {
+            SessionResolveError::other(format!("missing produced slot {slot:?} on {node:?}: {e}"))
+        })?;
+        Ok(Production::new(
+            product,
+            ProductionSource::ProducedSlot {
+                node,
+                slot: slot.clone(),
+            },
+        ))
+    }
+
+    #[inline(never)]
+    fn produce_consumed_slot(
+        &self,
+        node: NodeId,
+        slot: &SlotPath,
+    ) -> Result<Production, SessionResolveError> {
+        let entry =
+            self.tree
+                .get(node)
+                .ok_or_else(|| SessionResolveError::UnresolvedConsumedSlot {
+                    node,
+                    slot: slot.clone(),
+                })?;
+        let product = self
+            .read_authored_def_product(&entry.def_handle, slot)
+            .map_err(|_| SessionResolveError::UnresolvedConsumedSlot {
+                node,
+                slot: slot.clone(),
+            })?;
+        Ok(Production::new(product, ProductionSource::Default))
+    }
+
+    #[inline(never)]
+    fn produce_consumed_slot_accessor(
+        &self,
+        node: NodeId,
+        accessor: &SlotAccessor,
+    ) -> Result<Production, SessionResolveError> {
+        let entry =
+            self.tree
+                .get(node)
+                .ok_or_else(|| SessionResolveError::UnresolvedConsumedSlot {
+                    node,
+                    slot: accessor.path().clone(),
+                })?;
+        let product = self
+            .read_authored_def_product_by_accessor(&entry.def_handle, accessor)
+            .map_err(|_| SessionResolveError::UnresolvedConsumedSlot {
+                node,
+                slot: accessor.path().clone(),
+            })?;
+        Ok(Production::new(product, ProductionSource::Default))
+    }
+
     fn produce_node_slot(
         &mut self,
         node_id: NodeId,
@@ -544,60 +619,11 @@ impl ResolveHost for EngineResolveHost<'_> {
     ) -> Result<Production, SessionResolveError> {
         match query {
             QueryKey::ProducedSlot { node, slot } => {
-                self.produce_node_slot(*node, slot, session)?;
-                let entry = self.tree.get(*node).ok_or_else(|| {
-                    SessionResolveError::other(format!("read output: unknown node {node:?}"))
-                })?;
-                let n = match entry.state.value() {
-                    NodeEntryState::Alive(n) => n,
-                    _ => {
-                        return Err(SessionResolveError::other(format!(
-                            "read output: node {node:?} not alive"
-                        )));
-                    }
-                };
-                let product = self.read_runtime_state_product(&**n, slot).map_err(|e| {
-                    SessionResolveError::other(format!(
-                        "missing produced slot {slot:?} on {node:?}: {e}"
-                    ))
-                })?;
-                Ok(Production::new(
-                    product,
-                    ProductionSource::ProducedSlot {
-                        node: *node,
-                        slot: slot.clone(),
-                    },
-                ))
+                self.produce_produced_slot(*node, slot, session)
             }
-            QueryKey::ConsumedSlot { node, slot } => {
-                let entry = self.tree.get(*node).ok_or_else(|| {
-                    SessionResolveError::UnresolvedConsumedSlot {
-                        node: *node,
-                        slot: slot.clone(),
-                    }
-                })?;
-                let product = self
-                    .read_authored_def_product(&entry.def_handle, slot)
-                    .map_err(|_| SessionResolveError::UnresolvedConsumedSlot {
-                        node: *node,
-                        slot: slot.clone(),
-                    })?;
-                Ok(Production::new(product, ProductionSource::Default))
-            }
+            QueryKey::ConsumedSlot { node, slot } => self.produce_consumed_slot(*node, slot),
             QueryKey::ConsumedSlotAccessor { node, accessor } => {
-                let entry = self.tree.get(*node).ok_or_else(|| {
-                    SessionResolveError::UnresolvedConsumedSlot {
-                        node: *node,
-                        slot: accessor.path().clone(),
-                    }
-                })?;
-                let product = self
-                    .read_authored_def_product_by_accessor(&entry.def_handle, accessor)
-                    .map_err(|_| SessionResolveError::UnresolvedConsumedSlot {
-                        node: *node,
-                        slot: accessor.path().clone(),
-                    })?;
-                Ok(Production::new(product, ProductionSource::Default))
+                self.produce_consumed_slot_accessor(*node, accessor)
             }
             QueryKey::Bus(_) => Err(SessionResolveError::other(
                 "engine host cannot satisfy bus query",

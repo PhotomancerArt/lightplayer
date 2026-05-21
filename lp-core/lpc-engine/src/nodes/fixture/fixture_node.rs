@@ -6,7 +6,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lpc_model::nodes::fixture::{
-    ColorOrder, FixtureSamplingConfig, MappingConfig, PathSpec, RingOrder,
+    ColorOrder, FixtureDiagnosticMode, FixtureSamplingConfig, MappingConfig, PathSpec, RingOrder,
 };
 use lpc_model::{
     ControlExtent, ControlProduct, Dim2u, FixtureDefView, FixtureState, Revision, SlotAccess,
@@ -166,24 +166,6 @@ impl NodeRuntime for FixtureNode {
         _slot: &SlotPath,
         ctx: &mut TickContext<'_>,
     ) -> Result<ProduceResult, NodeError> {
-        let prod = ctx
-            .resolve(QueryKey::ConsumedSlot {
-                node: ctx.node_id(),
-                slot: fixture_input_path(),
-            })
-            .map_err(|e| NodeError::msg(format!("resolve fixture input: {}", e.message)))?;
-
-        let visual_product = match prod
-            .value_leaf()
-            .ok_or_else(|| {
-                NodeError::msg("fixture input resolved to aggregate data, expected visual product")
-            })?
-            .get()
-        {
-            lpc_model::LpValue::Product(lpc_model::ProductRef::Visual(product)) => *product,
-            _ => return Err(NodeError::msg("fixture expected visual product from input")),
-        };
-
         let (render_size, color_order, brightness, gamma_correction) = {
             let def = self.def_view(ctx)?;
             (
@@ -193,21 +175,48 @@ impl NodeRuntime for FixtureNode {
                 def.gamma_correction().get_or(ctx, true)?,
             )
         };
+        let diagnostic_mode =
+            try_read_def_value(ctx, "diagnostic_mode")?.unwrap_or(FixtureDiagnosticMode::Off);
         self.sync_mapping_from_def(ctx)?;
         let width = render_size.width;
         let height = render_size.height;
 
         let ver = ctx.revision();
         let mapping_ver = self.mapping_version;
-        if self.sampling == FixtureSamplingConfig::TextureArea {
-            self.ensure_texture_area_mapping(width, height, mapping_ver, ver);
+        if diagnostic_mode == FixtureDiagnosticMode::Off {
+            let prod = ctx
+                .resolve(QueryKey::ConsumedSlot {
+                    node: ctx.node_id(),
+                    slot: fixture_input_path(),
+                })
+                .map_err(|e| NodeError::msg(format!("resolve fixture input: {}", e.message)))?;
+
+            let visual_product = match prod
+                .value_leaf()
+                .ok_or_else(|| {
+                    NodeError::msg(
+                        "fixture input resolved to aggregate data, expected visual product",
+                    )
+                })?
+                .get()
+            {
+                lpc_model::LpValue::Product(lpc_model::ProductRef::Visual(product)) => *product,
+                _ => return Err(NodeError::msg("fixture expected visual product from input")),
+            };
+            self.last_visual_product = Some(visual_product);
+
+            if self.sampling == FixtureSamplingConfig::TextureArea {
+                self.ensure_texture_area_mapping(width, height, mapping_ver, ver);
+            } else {
+                self.ensure_direct_points(mapping_ver);
+            }
         } else {
-            self.ensure_direct_points(mapping_ver);
+            self.last_visual_product = None;
         }
-        self.last_visual_product = Some(visual_product);
         self.last_settings = Some(FixtureRenderSettings {
             width,
             height,
+            diagnostic_mode,
             color_order,
             brightness,
             gamma_correction,
@@ -381,6 +390,7 @@ fn try_read_def_value<T: lpc_model::FromLpValue>(
 struct FixtureRenderSettings {
     width: u32,
     height: u32,
+    diagnostic_mode: FixtureDiagnosticMode,
     color_order: ColorOrder,
     brightness: u8,
     gamma_correction: bool,
@@ -394,12 +404,22 @@ impl ControlNode for FixtureNode {
         target: ControlRenderTarget<'_>,
         ctx: &mut ControlRenderContext<'_>,
     ) -> Result<ControlLayout, NodeError> {
-        let visual_product = self
-            .last_visual_product
-            .ok_or_else(|| NodeError::msg("fixture control render requested before tick"))?;
         let settings = self
             .last_settings
             .ok_or_else(|| NodeError::msg("fixture control render missing cached settings"))?;
+        if settings.diagnostic_mode != FixtureDiagnosticMode::Off {
+            return render_fixture_diagnostic_control(
+                request,
+                target,
+                settings,
+                fixture_lamp_channel_count(&self.mapping),
+                ctx.time_seconds(),
+            );
+        }
+
+        let visual_product = self
+            .last_visual_product
+            .ok_or_else(|| NodeError::msg("fixture control render requested before tick"))?;
         if self.sampling == FixtureSamplingConfig::Direct {
             return render_direct_fixture_control(
                 &mut self.sample_points,
@@ -617,6 +637,150 @@ fn render_direct_fixture_control(
             },
         }],
     })
+}
+
+fn render_fixture_diagnostic_control(
+    request: &ControlRenderRequest,
+    target: ControlRenderTarget<'_>,
+    settings: FixtureRenderSettings,
+    lamp_count: u32,
+    time_seconds: f32,
+) -> Result<ControlLayout, NodeError> {
+    if request.sample_format != ControlSampleFormat::Unorm16
+        || target.sample_format != ControlSampleFormat::Unorm16
+    {
+        return Err(NodeError::msg(
+            "fixture only supports unorm16 control targets",
+        ));
+    }
+    if request.extent != target.extent {
+        return Err(NodeError::msg(
+            "control render target extent does not match request",
+        ));
+    }
+
+    let expected_samples = request.extent.sample_count() as usize;
+    if target.samples.len() < expected_samples {
+        return Err(NodeError::msg(
+            "control render target is smaller than requested extent",
+        ));
+    }
+
+    target.samples.fill(0);
+    let available_lamps = expected_samples / 3;
+    let rendered_lamps = (lamp_count as usize).min(available_lamps);
+    let brightness = settings.brightness.to_q32() / 255.to_q32();
+    for lamp in 0..rendered_lamps {
+        let [r, g, b] = diagnostic_rgb(
+            settings.diagnostic_mode,
+            lamp as u32,
+            lamp_count,
+            time_seconds,
+        );
+        let ordered = finalize_fixture_rgb(
+            settings.color_order,
+            r,
+            g,
+            b,
+            settings.brightness,
+            brightness,
+            settings.gamma_correction,
+        );
+        let base = lamp * 3;
+        target.samples[base..base + 3].copy_from_slice(&ordered);
+    }
+
+    Ok(ControlLayout {
+        spans: vec![ControlSpan {
+            row: 0,
+            start: 0,
+            len: (rendered_lamps * 3) as u32,
+            hint: ControlHint::RgbPixels {
+                count: rendered_lamps as u32,
+                color_order: settings.color_order,
+            },
+        }],
+    })
+}
+
+fn diagnostic_rgb(
+    mode: FixtureDiagnosticMode,
+    lamp: u32,
+    lamp_count: u32,
+    time_seconds: f32,
+) -> [u16; 3] {
+    match mode {
+        FixtureDiagnosticMode::Off => [0, 0, 0],
+        FixtureDiagnosticMode::LedIndex => diagnostic_led_index_rgb(lamp),
+        FixtureDiagnosticMode::Groups10 => {
+            if (lamp + 1).is_multiple_of(10) {
+                [u16::MAX, u16::MAX, u16::MAX]
+            } else {
+                diagnostic_palette((lamp / 10) as usize)
+            }
+        }
+        FixtureDiagnosticMode::Chase => {
+            if lamp_count == 0 {
+                return [0, 0, 0];
+            }
+            let time = if time_seconds.is_sign_negative() {
+                0.0
+            } else {
+                time_seconds
+            };
+            let active = ((time * 8.0) as u32) % lamp_count;
+            if lamp == active {
+                [u16::MAX, u16::MAX, u16::MAX]
+            } else if lamp.abs_diff(active) == 1 {
+                [0, 0, 0x4000]
+            } else {
+                [0, 0, 0]
+            }
+        }
+    }
+}
+
+fn diagnostic_led_index_rgb(lamp: u32) -> [u16; 3] {
+    let one_based = lamp + 1;
+    if one_based.is_multiple_of(10) {
+        [u16::MAX, u16::MAX, u16::MAX]
+    } else if one_based.is_multiple_of(5) {
+        [u16::MAX, 0x8000, 0]
+    } else {
+        diagnostic_palette(lamp as usize)
+    }
+}
+
+fn diagnostic_palette(index: usize) -> [u16; 3] {
+    const PALETTE: [[u16; 3]; 6] = [
+        [u16::MAX, 0, 0],
+        [0, u16::MAX, 0],
+        [0, 0, u16::MAX],
+        [0, u16::MAX, u16::MAX],
+        [u16::MAX, 0, u16::MAX],
+        [u16::MAX, u16::MAX, 0],
+    ];
+    PALETTE[index % PALETTE.len()]
+}
+
+fn finalize_fixture_rgb(
+    color_order: ColorOrder,
+    r: u16,
+    g: u16,
+    b: u16,
+    brightness_u8: u8,
+    brightness: Q32,
+    gamma_correction: bool,
+) -> [u16; 3] {
+    let mut r = apply_brightness_unorm16(r, brightness_u8, brightness);
+    let mut g = apply_brightness_unorm16(g, brightness_u8, brightness);
+    let mut b = apply_brightness_unorm16(b, brightness_u8, brightness);
+    if gamma_correction {
+        r = apply_gamma((r >> 8) as u8).to_q32().to_u16_saturating();
+        g = apply_gamma((g >> 8) as u8).to_q32().to_u16_saturating();
+        b = apply_gamma((b >> 8) as u8).to_q32().to_u16_saturating();
+    }
+    ordered_rgb_u16(color_order, r, g, b)
 }
 
 fn apply_brightness_unorm16(value: u16, brightness_u8: u8, brightness: Q32) -> u16 {
@@ -1174,6 +1338,93 @@ mod tests {
                 frame,
             )
             .unwrap();
+    }
+
+    #[test]
+    fn fixture_diagnostic_led_index_bypasses_visual_input_and_marks_count_groups() {
+        let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
+        let frame = Revision::new(1);
+        let root = engine.tree().root();
+        let (spine, artifact) = test_placeholder_spine();
+        let mapping = MappingConfig::path_points_vec(
+            vec![PathSpec::ring_array_counts(
+                [0.5, 0.5],
+                1.0,
+                0,
+                1,
+                &[12],
+                0.0,
+                RingOrder::InnerFirst,
+            )],
+            2.0,
+        );
+
+        let fix_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("fx").unwrap(),
+                lpc_model::NodeName::parse("fixture").unwrap(),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                spine,
+                artifact,
+                frame,
+            )
+            .unwrap();
+
+        engine
+            .attach_runtime_node(
+                fix_id,
+                Box::new(FixtureNode::new(
+                    fix_id,
+                    mapping,
+                    FixtureSamplingConfig::TextureArea,
+                    frame,
+                )),
+                frame,
+            )
+            .unwrap();
+        bind_fixture_def_defaults(&mut engine, fix_id, frame);
+        bind_fixture_def_slot(
+            &mut engine,
+            fix_id,
+            frame,
+            "diagnostic_mode",
+            FixtureDiagnosticMode::LedIndex.to_lp_value(),
+        );
+
+        engine.add_demand_root(fix_id);
+        engine.tick(10).unwrap();
+
+        let extent = ControlExtent::new(1, 36);
+        let request = ControlRenderRequest::unorm16(extent);
+        let mut samples = vec![0u16; extent.sample_count() as usize];
+        let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
+        let layout = engine
+            .render_control_for_test(ControlProduct::new(fix_id, 0, extent), &request, target)
+            .expect("control render");
+
+        assert_eq!(
+            samples,
+            vec![
+                65535, 0, 0, // 1
+                0, 65535, 0, // 2
+                0, 0, 65535, // 3
+                0, 65535, 65535, // 4
+                65535, 32768, 0, // 5 marker
+                65535, 65535, 0, // 6
+                65535, 0, 0, // 7
+                0, 65535, 0, // 8
+                0, 0, 65535, // 9
+                65535, 65535, 65535, // 10 marker
+                65535, 0, 65535, // 11
+                65535, 65535, 0, // 12
+            ]
+        );
+        assert_eq!(layout.spans.len(), 1);
+        assert_eq!(layout.spans[0].len, 36);
     }
 
     #[test]

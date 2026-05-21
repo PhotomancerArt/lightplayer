@@ -294,11 +294,17 @@ fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
 mod tests {
     use super::*;
     use alloc::string::{String, ToString};
-    use lpc_model::{AsLpPath, NodeName, Revision, TreePath};
+    use lpc_model::{
+        AsLpPath, ControlExtent, ControlProduct, FixtureDiagnosticMode, NodeName, Revision,
+        ToLpValue, TreePath,
+    };
     use lpc_wire::WireSlotMutationId;
     use lpfs::{LpFs, LpFsMemory};
 
     use crate::engine::{EngineServices, ProjectLoader};
+    use crate::products::control::{
+        ControlRenderRequest, ControlRenderTarget, ControlSampleFormat,
+    };
 
     #[test]
     fn accepted_clock_mutation_changes_loaded_def() {
@@ -352,6 +358,72 @@ mod tests {
         };
         let options = def.options().expect("output options");
         assert!((options.brightness.value().0 - 0.75).abs() < 0.001);
+    }
+
+    #[test]
+    fn accepted_fixture_diagnostic_mutation_changes_loaded_def() {
+        let fs = fixture_project();
+        let services = EngineServices::new(TreePath::parse("/fixture.show").unwrap());
+        let mut engine = ProjectLoader::load_from_root(&fs, services).unwrap();
+        let fixture = node_id(&engine, "fixture");
+        let root = alloc::format!("node.{}.def", fixture.0);
+        let request = mutation_request(
+            &engine,
+            &root,
+            "diagnostic_mode",
+            FixtureDiagnosticMode::LedIndex.to_lp_value(),
+        );
+
+        let responses = engine.mutate_project_slots(Vec::from([request]));
+
+        assert!(matches!(
+            responses[0].result,
+            WireSlotMutationResult::Accepted
+        ));
+        let def = engine
+            .loaded_node_def(engine.tree().get(fixture).unwrap().artifact())
+            .unwrap();
+        let NodeDef::Fixture(def) = def else {
+            panic!("fixture def");
+        };
+        assert_eq!(
+            *def.diagnostic_mode.value(),
+            FixtureDiagnosticMode::LedIndex
+        );
+    }
+
+    #[test]
+    fn mutated_fixture_diagnostic_mode_affects_rendered_control_output() {
+        let fs = fixture_project();
+        let services = EngineServices::new(TreePath::parse("/fixture.show").unwrap());
+        let mut engine = ProjectLoader::load_from_root(&fs, services).unwrap();
+        let fixture = node_id(&engine, "fixture");
+        let root = alloc::format!("node.{}.def", fixture.0);
+        let request = mutation_request(
+            &engine,
+            &root,
+            "diagnostic_mode",
+            FixtureDiagnosticMode::LedIndex.to_lp_value(),
+        );
+
+        let responses = engine.mutate_project_slots(Vec::from([request]));
+
+        assert!(matches!(
+            responses[0].result,
+            WireSlotMutationResult::Accepted
+        ));
+        engine.add_demand_root(fixture);
+        engine.tick(10).unwrap();
+
+        let extent = ControlExtent::new(1, 6);
+        let request = ControlRenderRequest::unorm16(extent);
+        let mut samples = alloc::vec![0u16; extent.sample_count() as usize];
+        let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
+        engine
+            .render_control_for_test(ControlProduct::new(fixture, 0, extent), &request, target)
+            .expect("control render");
+
+        assert_eq!(samples, alloc::vec![65535, 0, 0, 0, 65535, 0]);
     }
 
     #[test]
@@ -527,6 +599,54 @@ source = "bus#control.out"
 
 [options]
 brightness = 0.25
+"#,
+        )
+        .unwrap();
+        fs
+    }
+
+    fn fixture_project() -> LpFsMemory {
+        let fs = LpFsMemory::new();
+        fs.write_file(
+            "/project.toml".as_path(),
+            br#"
+kind = "Project"
+
+[nodes.fixture]
+def = { path = "./fixture.toml" }
+"#,
+        )
+        .unwrap();
+        fs.write_file(
+            "/fixture.toml".as_path(),
+            br#"
+kind = "Fixture"
+color_order = "rgb"
+brightness = 255
+gamma_correction = false
+transform = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+
+[bindings.input]
+source = "bus#visual.out"
+
+[bindings.output]
+target = "bus#control.out"
+
+[mapping]
+kind = "PathPoints"
+sample_diameter = 2.0
+
+[mapping.paths.0]
+kind = "RingArray"
+center = [0.5, 0.5]
+diameter = 1.0
+start_ring_inclusive = 0
+end_ring_exclusive = 1
+offset_angle = 0.0
+order = "inner_first"
+
+[mapping.paths.0.ring_lamp_counts]
+0 = 2
 "#,
         )
         .unwrap();

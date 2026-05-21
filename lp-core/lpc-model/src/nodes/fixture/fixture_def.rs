@@ -1,7 +1,7 @@
 use alloc::string::ToString;
 use serde::{Deserialize, Serialize};
 
-use crate::nodes::fixture::{FixtureSamplingConfig, MappingConfig};
+use crate::nodes::fixture::{FixtureDiagnosticMode, FixtureSamplingConfig, MappingConfig};
 use crate::{
     Affine2dSlot, BindingDefs, Dim2u, Dim2uSlot, EnumSlot, FromLpValue, LpType, LpValue,
     OptionSlot, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, Slotted,
@@ -17,6 +17,8 @@ pub struct FixtureDef {
     pub bindings: BindingDefs,
     /// Visual sampling strategy.
     pub sampling: ValueSlot<FixtureSamplingConfig>,
+    /// Fixture-level hardware diagnostic pattern.
+    pub diagnostic_mode: ValueSlot<FixtureDiagnosticMode>,
     /// Fixture mapping definition.
     pub mapping: EnumSlot<MappingConfig>,
     /// Color order for RGB channels.
@@ -35,6 +37,7 @@ impl Default for FixtureDef {
             render_size: default_render_size(),
             bindings: BindingDefs::default(),
             sampling: ValueSlot::new(FixtureSamplingConfig::default()),
+            diagnostic_mode: ValueSlot::new(FixtureDiagnosticMode::default()),
             mapping: EnumSlot::default(),
             color_order: ValueSlot::default(),
             transform: Affine2dSlot::default(),
@@ -301,6 +304,7 @@ mod tests {
             render_size: default_render_size(),
             bindings: BindingDefs::default(),
             sampling: ValueSlot::new(FixtureSamplingConfig::TextureArea),
+            diagnostic_mode: ValueSlot::new(FixtureDiagnosticMode::Off),
             mapping: EnumSlot::new(MappingConfig::path_points(MapSlot::new(paths), 2.0)),
             color_order: ValueSlot::new(ColorOrder::Rgb),
             transform: Affine2dSlot::new(Affine2d::identity()),
