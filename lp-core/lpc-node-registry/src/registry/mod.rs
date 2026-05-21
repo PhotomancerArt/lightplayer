@@ -1,0 +1,1 @@
+//! NodeDefRegistry — milestone M2.

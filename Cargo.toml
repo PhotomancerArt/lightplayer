@@ -18,7 +18,7 @@ members = [
     "lp-core/lpc-model",
     "lp-core/lpc-slot-codegen",
     "lp-core/lpc-slot-macros",
-    "lp-core/lpc-slot-mockup",
+    "lp-core/lpc-node-registry",
     "lp-core/lpc-wire",
     # lps workspace members
     "lp-shader/lps-builtin-ids",
@@ -70,6 +70,7 @@ default-members = [
     "lp-fw/fw-tests",
     "lp-cli",
     "lp-core/lpc-model",
+    "lp-core/lpc-node-registry",
     "lp-core/lpc-wire",
     # lps workspace members (excluding lps-builtins-emu-app)
     "lp-shader/lps-builtin-ids",

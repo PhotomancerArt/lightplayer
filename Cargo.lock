@@ -4090,6 +4090,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpc-node-registry"
+version = "40.0.0"
+dependencies = [
+ "lpc-model",
+ "lpfs",
+]
+
+[[package]]
 name = "lpc-shared"
 version = "40.0.0"
 dependencies = [
@@ -4118,17 +4126,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
-]
-
-[[package]]
-name = "lpc-slot-mockup"
-version = "40.0.0"
-dependencies = [
- "lpc-model",
- "lpc-slot-codegen",
- "lpc-view",
- "lpc-wire",
- "toml",
 ]
 
 [[package]]
