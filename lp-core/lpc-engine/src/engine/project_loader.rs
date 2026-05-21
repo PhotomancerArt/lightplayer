@@ -14,12 +14,12 @@ use lpc_model::{
     LpValue, MappingConfig, NodeDef, NodeId, NodeName, PlaylistDef, PlaylistEntry, Revision,
     ShaderDef, ShaderSlotKind, ShaderSource, SlotPath, SlotShapeRegistry,
 };
-use lpc_wire::{WireChildKind, WireSlotIndex};
+use lpc_wire::{WireChildKind, WireNodeStatus, WireSlotIndex};
 use lpfs::lp_path::{LpPath, LpPathBuf};
 
 use crate::artifact::{ArtifactLocation, ArtifactState};
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
-use crate::node::{NodeDefHandle, TreeError};
+use crate::node::{NodeDefHandle, NodeEntryState, TreeError};
 use crate::nodes::fixture::mapping::resolve_svg_path_mapping;
 use crate::nodes::{
     ButtonNode, ClockNode, ComputeShaderNode, ControlRadioNode, CorePlaceholderNode, FixtureNode,
@@ -668,22 +668,30 @@ impl ProjectLoader {
             let NodeDef::Fixture(config) = loaded_node_config(runtime, node)?.clone() else {
                 continue;
             };
-            let mapping = resolve_fixture_mapping(root, &node.source_base_path, &config)?;
-            runtime
-                .attach_runtime_node(
-                    node.id,
-                    Box::new(FixtureNode::new(
-                        node.id,
-                        mapping,
-                        *config.sampling.value(),
-                        frame,
-                    )),
-                    frame,
-                )
-                .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                    path: node.artifact_path.as_str().to_string(),
-                    reason: format!("attach fixture runtime: {e}"),
-                })?;
+            match resolve_fixture_mapping(root, &node.source_base_path, &config) {
+                Ok(mapping) => {
+                    runtime
+                        .attach_runtime_node(
+                            node.id,
+                            Box::new(FixtureNode::new(
+                                node.id,
+                                mapping,
+                                *config.sampling.value(),
+                                frame,
+                            )),
+                            frame,
+                        )
+                        .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                            path: node.artifact_path.as_str().to_string(),
+                            reason: format!("attach fixture runtime: {e}"),
+                        })?;
+                    mark_node_status(runtime, node.id, frame, WireNodeStatus::Ok);
+                }
+                Err(error) => {
+                    let message = error.to_string();
+                    mark_node_load_error(runtime, node.id, frame, message);
+                }
+            }
             register_source_binding(
                 runtime,
                 loaded_nodes,
@@ -703,6 +711,24 @@ impl ProjectLoader {
         }
 
         Ok(())
+    }
+}
+
+fn mark_node_load_error(runtime: &mut Engine, node_id: NodeId, frame: Revision, message: String) {
+    if let Some(entry) = runtime.tree_mut().get_mut(node_id) {
+        entry.set_status(WireNodeStatus::Error(message.clone()), frame);
+        entry.set_state(NodeEntryState::Failed { reason: message }, frame);
+    }
+}
+
+fn mark_node_status(
+    runtime: &mut Engine,
+    node_id: NodeId,
+    frame: Revision,
+    status: WireNodeStatus,
+) {
+    if let Some(entry) = runtime.tree_mut().get_mut(node_id) {
+        entry.set_status(status, frame);
     }
 }
 
@@ -1490,14 +1516,8 @@ sample_diameter = 2.0
         );
 
         let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
-        let err = match ProjectLoader::load_from_root(&fs, services) {
-            Ok(_) => panic!("expected ungrouped mapping text error"),
-            Err(err) => err,
-        };
-        assert!(
-            err.to_string().contains("not inside a valid group"),
-            "{err}"
-        );
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load with bad fixture");
+        assert_fixture_node_error(&rt, "not inside a valid group");
     }
 
     #[test]
@@ -1511,14 +1531,23 @@ sample_diameter = 2.0
         );
 
         let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
-        let err = match ProjectLoader::load_from_root(&fs, services) {
-            Ok(_) => panic!("expected curve command error"),
-            Err(err) => err,
-        };
-        assert!(
-            err.to_string().contains("unsupported SVG path command"),
-            "{err}"
-        );
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load with bad fixture");
+        assert_fixture_node_error(&rt, "unsupported SVG path command");
+    }
+
+    fn assert_fixture_node_error(rt: &Engine, expected: &str) {
+        let fixture = rt
+            .artifact_node_id(LpPath::new("/fixture.toml"))
+            .expect("fixture node");
+        let entry = rt.tree().get(fixture).expect("fixture entry");
+        assert!(matches!(
+            entry.status.value(),
+            WireNodeStatus::Error(message) if message.contains(expected)
+        ));
+        assert!(matches!(
+            entry.state.value(),
+            NodeEntryState::Failed { reason } if reason.contains(expected)
+        ));
     }
 
     fn playlist_project_fs() -> LpFsMemory {
