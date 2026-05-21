@@ -1,9 +1,12 @@
 kind = "Shader"
-source = { path = "active.glsl" }
+source = { path = "blast.glsl" }
 render_order = 0
 
 [bindings.time]
 source = "..#entry_time"
+
+[bindings.progress]
+source = "..#entry_progress"
 
 [glsl_opts]
 add_sub = "wrapping"
@@ -11,6 +14,11 @@ mul = "wrapping"
 div = "reciprocal"
 
 [consumed.time]
+kind = "value"
+value = "f32"
+default = 0.0
+
+[consumed.progress]
 kind = "value"
 value = "f32"
 default = 0.0

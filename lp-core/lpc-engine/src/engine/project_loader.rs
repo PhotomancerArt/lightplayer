@@ -2112,15 +2112,24 @@ order = "inner_first"
             .expect("playlist");
 
         assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 1);
+        assert_eq!(
+            resolve_playlist_f32(&mut rt, playlist, "entry_progress"),
+            -1.0
+        );
 
         control.set_pressed(HardwareAddress::gpio(20), true);
         assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 1);
         assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 2);
         assert_eq!(resolve_playlist_f32(&mut rt, playlist, "entry_time"), 0.0);
+        assert_eq!(
+            resolve_playlist_f32(&mut rt, playlist, "entry_progress"),
+            0.0
+        );
 
         rt.tick(1000).expect("advance time");
         assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 2);
         assert!(resolve_playlist_f32(&mut rt, playlist, "entry_time") >= 1.0);
+        assert!(resolve_playlist_f32(&mut rt, playlist, "entry_progress") >= 0.25);
 
         control.set_pressed(HardwareAddress::gpio(20), false);
         let _ = resolve_playlist_u32(&mut rt, playlist, "active_entry");
@@ -2130,9 +2139,17 @@ order = "inner_first"
         let _ = resolve_playlist_u32(&mut rt, playlist, "active_entry");
         assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 2);
         assert_eq!(resolve_playlist_f32(&mut rt, playlist, "entry_time"), 0.0);
+        assert_eq!(
+            resolve_playlist_f32(&mut rt, playlist, "entry_progress"),
+            0.0
+        );
 
         rt.tick(5000).expect("advance past duration");
         assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 1);
+        assert_eq!(
+            resolve_playlist_f32(&mut rt, playlist, "entry_progress"),
+            -1.0
+        );
     }
 
     #[test]
@@ -2571,6 +2588,10 @@ value = "f32"
 
         tick_with_test_time(&mut rt, &time, 16, "tick idle graph");
         assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 1);
+        assert_eq!(
+            resolve_playlist_f32(&mut rt, playlist, "entry_progress"),
+            -1.0
+        );
         let idle_product = resolve_visual_product(&mut rt, playlist, "output");
         let idle = render_test_texture_bytes(&mut rt, idle_product);
         assert_nonzero_rgb(&idle, "idle playlist visual");
@@ -2580,6 +2601,10 @@ value = "f32"
         tick_with_test_time(&mut rt, &time, 30, "press stable");
         assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 2);
         assert_eq!(resolve_playlist_f32(&mut rt, playlist, "entry_time"), 0.0);
+        assert_eq!(
+            resolve_playlist_f32(&mut rt, playlist, "entry_progress"),
+            0.0
+        );
         let active_product = resolve_visual_product(&mut rt, playlist, "output");
         let active = render_test_texture_bytes(&mut rt, active_product);
         assert_nonzero_rgb(&active, "active playlist visual");
@@ -2587,6 +2612,7 @@ value = "f32"
 
         tick_with_test_time(&mut rt, &time, 1000, "advance active");
         assert!(resolve_playlist_f32(&mut rt, playlist, "entry_time") >= 1.0);
+        assert!(resolve_playlist_f32(&mut rt, playlist, "entry_progress") >= 0.25);
 
         control.set_pressed(HardwareAddress::gpio(20), false);
         tick_with_test_time(&mut rt, &time, 16, "release candidate");
@@ -2596,9 +2622,17 @@ value = "f32"
         tick_with_test_time(&mut rt, &time, 30, "second press stable");
         assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 2);
         assert_eq!(resolve_playlist_f32(&mut rt, playlist, "entry_time"), 0.0);
+        assert_eq!(
+            resolve_playlist_f32(&mut rt, playlist, "entry_progress"),
+            0.0
+        );
 
         tick_with_test_time(&mut rt, &time, 5000, "advance past active duration");
         assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 1);
+        assert_eq!(
+            resolve_playlist_f32(&mut rt, playlist, "entry_progress"),
+            -1.0
+        );
     }
 
     #[test]

@@ -54,7 +54,12 @@ impl PlaylistNode {
             idle_entry,
             default_fade,
             entries,
-            state: PlaylistState::new(lpc_model::VisualProduct::new(node_id, 0), 0.0, idle_entry),
+            state: PlaylistState::new(
+                lpc_model::VisualProduct::new(node_id, 0),
+                0.0,
+                -1.0,
+                idle_entry,
+            ),
             current_entry: idle_entry,
             previous_entry: None,
             previous_product: None,
@@ -141,6 +146,10 @@ impl NodeRuntime for PlaylistNode {
         }
 
         let entry_time = max_zero(time - self.switch_time);
+        let entry_progress = self
+            .duration(self.current_entry)
+            .map(|duration| clamp01(entry_time / duration))
+            .unwrap_or(-1.0);
         self.state.output.set_with_version(
             ctx.revision(),
             lpc_model::VisualProduct::new(ctx.node_id(), 0),
@@ -149,9 +158,13 @@ impl NodeRuntime for PlaylistNode {
             .entry_time
             .set_with_version(ctx.revision(), entry_time);
         self.state
+            .entry_progress
+            .set_with_version(ctx.revision(), entry_progress);
+        self.state
             .active_entry
             .set_with_version(ctx.revision(), self.current_entry);
         ctx.publish_runtime_slot(&self.state, SlotPath::parse("entry_time").unwrap())?;
+        ctx.publish_runtime_slot(&self.state, SlotPath::parse("entry_progress").unwrap())?;
         ctx.publish_runtime_slot(&self.state, SlotPath::parse("active_entry").unwrap())?;
         ctx.publish_runtime_slot(&self.state, SlotPath::parse("output").unwrap())?;
 

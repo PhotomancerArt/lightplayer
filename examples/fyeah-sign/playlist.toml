@@ -11,10 +11,10 @@ fade_after = 0.12
 node = { def = { path = "./idle.toml" } }
 
 [entries.2]
-name = "active"
-duration = 4.0
-fade_after = 0.8
-node = { def = { path = "./active.toml" } }
+name = "blast"
+duration = 10.0
+fade_after = 2.0
+node = { def = { path = "./blast.toml" } }
 
 [entries.2.bindings.trigger]
 source = "bus#trigger"
