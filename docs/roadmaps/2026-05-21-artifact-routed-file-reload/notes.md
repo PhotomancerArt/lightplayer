@@ -136,7 +136,8 @@ The registry (user: "NodeRegistry"; holds **defs**, not live runtimes) is the bo
 **Update protocol:**
 
 ```
-Engine --artifact changes--> NodeDefRegistry::update_from_artifacts(&ArtifactStore)
+Engine --fs changes to store--> store.apply_fs_changes
+Engine --sync--> NodeDefRegistry::sync(&ArtifactStore, …)
 NodeDefRegistry --report--> NodeDefUpdates { added, changed, removed, ... }
 Engine --applies report--> attach/detach/destroy nodes, propagate parent errors
 ```

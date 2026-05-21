@@ -23,9 +23,14 @@ parse paths — not wired into `ProjectLoader`.
 In scope:
 
 - `NodeDefId` opaque handle (same pattern as `ArtifactId`).
-- Registry entry: source `{ artifact_id, path_in_artifact }` (root = empty path).
+- Bootstrap: **`load_root(root_path)`** — any node-definition TOML (project is
+  convention); registry walks and registers all defs.
+- Steady state: driver **`apply_fs_changes`** on store, then **`sync`** →
+  `NodeDefUpdates`.
+- Registry entry source `{ artifact_id, path_in_artifact: SlotPath }` (root =
+  `SlotPath::root()`).
 - Identity separate from content: `Loaded` / `ParseError` / `ValidationError`.
-- `update_from_artifacts(&ArtifactStore, parse_ctx)` → `NodeDefUpdates`.
+- **`sync`** → `NodeDefUpdates` (driver applies fs to store first).
 - Inline defs derived from parent artifact at non-root paths.
 - Def content change does not mark parent def changed when only a child inline
   def changed.

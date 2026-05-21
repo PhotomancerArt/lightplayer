@@ -63,10 +63,23 @@
 
 #### NodeDefUpdates drives reload
 
-- **Decision:** Registry `update_from_artifacts` returns `NodeDefUpdates`
-  `{ added, changed, removed }`; engine applies lifecycle from report.
+- **Decision:** Registry **`sync`** returns `NodeDefUpdates`
+  `{ added, changed, removed }`; driver applies **`apply_fs_changes`** to
+  `ArtifactStore` first; engine applies lifecycle from report.
 - **Why:** Bounded, testable unit between fs events and node tree mutation.
-- **Rejected alternatives:** Engine re-parses directly; whole `Project::reload()`.
+  Driver owns fs + store; registry owns parse + diff.
+- **Rejected alternatives:** Engine re-parses directly; whole `Project::reload()`;
+  registry calling `apply_fs_changes` internally.
+
+#### Registry bootstrap via load_root
+
+- **Decision:** **`load_root(absolute_path)`** is the single public bootstrap
+  entry. Root may be any node-definition TOML kind; `project.toml` is convention.
+  Path-backed child registration is private (walk recursion).
+- **Why:** Matches engine/test driver model: init once, then fs loop →
+  `NodeDefUpdates`. M5 ChangeSet commit uses same `sync` output shape.
+- **Rejected alternatives:** Public `register_file` per artifact; requiring
+  `NodeDef::Project` at root.
 
 #### Prove semantics before cutover (M4 + M5 gate)
 
@@ -106,6 +119,19 @@
   marks child `changed`, not parent, unless parent payload changed.
 - **Why:** Avoid unnecessary parent/node refresh on nested edits.
 - **Rejected alternatives:** Mark entire artifact subtree changed on any edit.
+
+#### Kind change requires node delete/recreate
+
+- **Decision:** When a bound def's **`NodeKind`** changes, the engine **deletes
+  and recreates** the runtime node — no in-place slot refresh. Registry still
+  reports the `NodeDefId` in **`changed`**; shell stubs at invocation sites
+  include kind so parent containers also **`changed`** when an inline child's
+  kind flips.
+- **Why:** Node kind determines runtime type, wiring, and lifecycle; treating
+  kind change as a content patch would leave stale node state.
+- **Rejected alternatives:** In-place refresh on kind change; separate
+  `removed`+`added` ids for kind flips in M2.
+- **Revisit when:** Stable `NodeDefId` preservation across kind morph (future).
 
 #### project.toml graph reconciliation deferred (M8)
 

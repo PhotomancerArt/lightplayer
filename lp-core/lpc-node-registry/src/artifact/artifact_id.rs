@@ -4,7 +4,7 @@
 ///
 /// Dropping a caller's interest does **not** decrement refcount; call
 /// [`super::ArtifactStore::release`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct ArtifactId {
     handle: u32,
 }

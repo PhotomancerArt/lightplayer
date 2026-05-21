@@ -8,13 +8,18 @@ extern crate alloc;
 extern crate std;
 
 pub mod artifact;
+pub mod registry;
+pub mod view;
 
 mod change;
-mod registry;
 mod source;
-mod view;
 
 pub use artifact::{
     ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactReadFailure,
     ArtifactReadState, ArtifactStore,
 };
+pub use registry::{
+    DefSource, NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState, NodeDefUpdates, ParseCtx,
+    RegistryError, ValidationErrorPlaceholder,
+};
+pub use view::NodeDefView;
