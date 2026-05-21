@@ -27,6 +27,7 @@ const TARGET_UI_FPS: u64 = 30;
 const TARGET_UI_FRAME_MS: u64 = 1000 / TARGET_UI_FPS;
 const PROJECT_POLL_INTERVAL: Duration = Duration::from_millis(TARGET_UI_FRAME_MS);
 const UI_REPAINT_INTERVAL: Duration = Duration::from_millis(TARGET_UI_FRAME_MS);
+const SHAPE_SYNC_PAGE_LIMIT: u32 = 4;
 
 /// Debug UI application state.
 pub struct DebugUiState {
@@ -121,32 +122,28 @@ impl DebugUiState {
 
         self.last_poll = Instant::now();
         self.poll_in_flight = true;
-        let mutations = self.prepare_queued_mutations();
-        let (since, needs_slot_snapshot, selected_resource, selected_visual_product) =
-            self.next_project_read_context();
-        let shape_page_after = (!self.shapes_synced)
-            .then_some(self.next_shape_cursor)
-            .flatten();
-        let needs_shape_page = !self.shapes_synced;
-        let include_slots = (needs_slot_snapshot && self.shapes_synced) || !mutations.is_empty();
+        let request = if self.shapes_synced {
+            let mutations = self.prepare_queued_mutations();
+            let (since, needs_slot_snapshot, selected_resource, selected_visual_product) =
+                self.next_project_read_context();
+            let include_slots = needs_slot_snapshot || !mutations.is_empty();
+            debug_ui_project_read(
+                since,
+                include_slots,
+                selected_resource,
+                selected_visual_product,
+                mutations,
+            )
+        } else {
+            debug_ui_shape_sync_read(self.next_shape_cursor)
+        };
         let client = self.async_client.clone();
         let handle = self.project_handle;
         let tx = self.response_tx.clone();
         let repaint = ctx.clone();
         self.runtime_handle.spawn(async move {
             let result = client
-                .project_read(
-                    handle,
-                    debug_ui_project_read(
-                        since,
-                        needs_shape_page,
-                        shape_page_after,
-                        include_slots,
-                        selected_resource,
-                        selected_visual_product,
-                        mutations,
-                    ),
-                )
+                .project_read(handle, request)
                 .await
                 .map_err(|error| error.to_string());
             let _ = tx.send(result);
@@ -271,6 +268,12 @@ fn apply_debug_ui_project_read_response(
                 view.slots.apply_registry_page(registry);
             }
         }
+        if response.results.is_empty()
+            && response.probes.is_empty()
+            && response.mutations.is_empty()
+        {
+            return Ok(());
+        }
     }
     apply_project_read_response(view, response)
 }
@@ -290,21 +293,12 @@ fn take_shape_results(response: &mut ProjectReadResponse) -> Vec<ShapeReadResult
 
 fn debug_ui_project_read(
     since: Option<Revision>,
-    needs_shape_page: bool,
-    shape_page_after: Option<SlotShapeId>,
     include_slots: bool,
     selected_resource: Option<lpc_model::ResourceRef>,
     selected_visual_product: Option<lpc_model::VisualProduct>,
     mutations: Vec<WireSlotMutationRequest>,
 ) -> ProjectReadRequest {
     let mut queries = Vec::new();
-    if needs_shape_page {
-        queries.push(ProjectReadQuery::Shapes(ShapeReadQuery {
-            level: ReadLevel::Detail,
-            after: shape_page_after,
-            limit: Some(1),
-        }));
-    }
     queries.push(ProjectReadQuery::Nodes(NodeReadQuery {
         level: if include_slots {
             ReadLevel::Detail
@@ -338,6 +332,19 @@ fn debug_ui_project_read(
         queries,
         probes,
         mutations,
+    }
+}
+
+fn debug_ui_shape_sync_read(after: Option<SlotShapeId>) -> ProjectReadRequest {
+    ProjectReadRequest {
+        since: None,
+        queries: Vec::from([ProjectReadQuery::Shapes(ShapeReadQuery {
+            level: ReadLevel::Detail,
+            after,
+            limit: Some(SHAPE_SYNC_PAGE_LIMIT),
+        })]),
+        probes: Vec::new(),
+        mutations: Vec::new(),
     }
 }
 
@@ -394,7 +401,7 @@ mod tests {
     use lpc_model::{LpType, Revision, SlotShape, SlotShapeId, SlotShapeRegistry};
 
     #[test]
-    fn paged_shape_sync_keeps_prior_pages_when_final_page_is_complete() {
+    fn paged_shape_sync_keeps_prior_pages_without_advancing_project_revision() {
         let first_id = SlotShapeId::new(10);
         let second_id = SlotShapeId::new(20);
 
@@ -428,7 +435,26 @@ mod tests {
 
         assert!(view.slots.registry.get(&first_id).is_some());
         assert!(view.slots.registry.get(&second_id).is_some());
-        assert_eq!(view.revision, Revision::new(7));
+        assert_eq!(view.revision, Revision::default());
+    }
+
+    #[test]
+    fn initial_shape_sync_read_is_shape_only() {
+        let after = SlotShapeId::new(10);
+        let request = debug_ui_shape_sync_read(Some(after));
+
+        assert_eq!(request.since, None);
+        assert!(request.probes.is_empty());
+        assert!(request.mutations.is_empty());
+        assert_eq!(request.queries.len(), 1);
+        assert_eq!(
+            request.queries[0],
+            ProjectReadQuery::Shapes(ShapeReadQuery {
+                level: ReadLevel::Detail,
+                after: Some(after),
+                limit: Some(SHAPE_SYNC_PAGE_LIMIT),
+            })
+        );
     }
 }
 

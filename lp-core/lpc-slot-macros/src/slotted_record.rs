@@ -144,7 +144,7 @@ pub(crate) fn derive_record(
 
         impl ::lpc_model::FieldSlot for #ident {
             fn slot_field_shape() -> ::lpc_model::SlotShape {
-                <Self as ::lpc_model::SlotRecordShape>::slot_record_shape()
+                ::lpc_model::SlotShape::reference(<Self as ::lpc_model::StaticSlotShape>::SHAPE_ID)
             }
 
             fn slot_field_data(&self) -> ::lpc_model::SlotDataAccess<'_> {

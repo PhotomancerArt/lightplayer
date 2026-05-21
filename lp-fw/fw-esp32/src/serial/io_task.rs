@@ -40,11 +40,22 @@ static OUTGOING_SERVER_MSG: Channel<CriticalSectionRawMutex, lpc_wire::WireServe
 /// Project-read responses use this path so the firmware does not need to
 /// materialize a full `WireServerMessage` or a full JSON frame on the heap.
 #[cfg(feature = "server")]
-static OUTGOING_SERVER_JSON_CHUNK: Channel<CriticalSectionRawMutex, ServerJsonChunk, 16> =
-    Channel::new();
+pub const SERVER_JSON_CHUNK_SIZE: usize = 1024;
+
+/// Number of queued project-read JSON chunks.
+///
+/// Project-read serialization is synchronous, so this queue must hold the
+/// largest frame the server can produce before the I/O task gets scheduled to
+/// drain it.
+#[cfg(feature = "server")]
+pub const SERVER_JSON_CHUNK_CAPACITY: usize = 16;
 
 #[cfg(feature = "server")]
-pub const SERVER_JSON_CHUNK_SIZE: usize = 1024;
+static OUTGOING_SERVER_JSON_CHUNK: Channel<
+    CriticalSectionRawMutex,
+    ServerJsonChunk,
+    SERVER_JSON_CHUNK_CAPACITY,
+> = Channel::new();
 
 #[cfg(feature = "server")]
 #[derive(Debug, Clone, Copy)]
@@ -394,7 +405,7 @@ pub fn get_server_msg_channel()
 /// Get reference to raw server JSON chunk channel.
 #[cfg(feature = "server")]
 pub fn get_server_json_chunk_channel()
--> &'static Channel<CriticalSectionRawMutex, ServerJsonChunk, 16> {
+-> &'static Channel<CriticalSectionRawMutex, ServerJsonChunk, SERVER_JSON_CHUNK_CAPACITY> {
     &OUTGOING_SERVER_JSON_CHUNK
 }
 

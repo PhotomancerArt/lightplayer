@@ -54,7 +54,8 @@ mod tests {
     use super::*;
     use crate::nodes::shader::{AddSubMode, DivMode, MulMode};
     use crate::{
-        NodeDef, NodeKind, RenderOrder, ShaderDefView, SlotPath, SlotShapeRegistry, StaticSlotShape,
+        NodeDef, NodeKind, RenderOrder, ShaderDefView, SlotPath, SlotRecordShape, SlotShape,
+        SlotShapeRegistry, StaticSlotShape,
     };
     use alloc::string::ToString;
 
@@ -101,6 +102,52 @@ mod tests {
         assert_eq!(
             view.glsl_opts().path(),
             &SlotPath::parse("glsl_opts").unwrap()
+        );
+    }
+
+    #[test]
+    fn shader_def_shape_references_nested_static_records() {
+        let SlotShape::Record { fields, .. } = ShaderDef::slot_record_shape() else {
+            panic!("shader record shape");
+        };
+
+        let glsl_opts = fields
+            .iter()
+            .find(|field| field.name.as_str() == "glsl_opts")
+            .expect("glsl_opts field");
+        assert_eq!(
+            &glsl_opts.shape,
+            &SlotShape::Ref {
+                id: GlslOpts::SHAPE_ID
+            }
+        );
+
+        let param_defs = fields
+            .iter()
+            .find(|field| field.name.as_str() == "param_defs")
+            .expect("param_defs field");
+        let SlotShape::Map { value, .. } = &param_defs.shape else {
+            panic!("param_defs map shape");
+        };
+        assert_eq!(
+            value.as_ref(),
+            &SlotShape::Ref {
+                id: ShaderParamDef::SHAPE_ID
+            }
+        );
+
+        let consumed = fields
+            .iter()
+            .find(|field| field.name.as_str() == "consumed")
+            .expect("consumed field");
+        let SlotShape::Map { value, .. } = &consumed.shape else {
+            panic!("consumed map shape");
+        };
+        assert_eq!(
+            value.as_ref(),
+            &SlotShape::Ref {
+                id: ShaderSlotDef::SHAPE_ID
+            }
         );
     }
 

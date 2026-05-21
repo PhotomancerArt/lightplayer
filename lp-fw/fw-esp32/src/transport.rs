@@ -5,7 +5,8 @@
 
 extern crate alloc;
 
-use alloc::vec::Vec;
+use alloc::{format, vec::Vec};
+use core::fmt;
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use lpc_shared::transport::{ProjectReadJsonSource, ServerTransport};
@@ -16,7 +17,7 @@ use lpc_wire::{ClientMessage, TransportError, json};
 use lpc_wire::{ProjectReadRequest, WireProjectHandle};
 
 use crate::serial::io_task;
-use crate::serial::io_task::{SERVER_JSON_CHUNK_SIZE, ServerJsonChunk};
+use crate::serial::io_task::{SERVER_JSON_CHUNK_CAPACITY, SERVER_JSON_CHUNK_SIZE, ServerJsonChunk};
 
 /// Streaming transport that sends WireServerMessage to io_task for serialization
 ///
@@ -25,7 +26,8 @@ use crate::serial::io_task::{SERVER_JSON_CHUNK_SIZE, ServerJsonChunk};
 pub struct StreamingMessageRouterTransport {
     incoming: &'static Channel<CriticalSectionRawMutex, alloc::string::String, 32>,
     server_msg_channel: &'static Channel<CriticalSectionRawMutex, WireServerMessage, 1>,
-    server_json_chunk_channel: &'static Channel<CriticalSectionRawMutex, ServerJsonChunk, 16>,
+    server_json_chunk_channel:
+        &'static Channel<CriticalSectionRawMutex, ServerJsonChunk, SERVER_JSON_CHUNK_CAPACITY>,
 }
 
 impl StreamingMessageRouterTransport {
@@ -45,14 +47,30 @@ impl StreamingMessageRouterTransport {
 #[derive(Debug)]
 struct ChunkedJsonError;
 
+impl fmt::Display for ChunkedJsonError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "serial JSON chunk queue full ({} KiB frame budget exhausted)",
+            (SERVER_JSON_CHUNK_SIZE * SERVER_JSON_CHUNK_CAPACITY) / 1024
+        )
+    }
+}
+
 struct ChunkedJsonWriter {
-    channel: &'static Channel<CriticalSectionRawMutex, ServerJsonChunk, 16>,
+    channel: &'static Channel<CriticalSectionRawMutex, ServerJsonChunk, SERVER_JSON_CHUNK_CAPACITY>,
     buf: [u8; SERVER_JSON_CHUNK_SIZE],
     len: usize,
 }
 
 impl ChunkedJsonWriter {
-    fn new(channel: &'static Channel<CriticalSectionRawMutex, ServerJsonChunk, 16>) -> Self {
+    fn new(
+        channel: &'static Channel<
+            CriticalSectionRawMutex,
+            ServerJsonChunk,
+            SERVER_JSON_CHUNK_CAPACITY,
+        >,
+    ) -> Self {
         Self {
             channel,
             buf: [0; SERVER_JSON_CHUNK_SIZE],
@@ -170,7 +188,7 @@ impl ServerTransport for StreamingMessageRouterTransport {
 }
 
 fn write_project_read_chunks<S>(
-    channel: &'static Channel<CriticalSectionRawMutex, ServerJsonChunk, 16>,
+    channel: &'static Channel<CriticalSectionRawMutex, ServerJsonChunk, SERVER_JSON_CHUNK_CAPACITY>,
     id: u64,
     source: &mut S,
     request: ProjectReadRequest,
@@ -191,7 +209,9 @@ where
 
     let out = source
         .write_project_read_json(request, json.into_inner())
-        .map_err(|_| TransportError::Serialization("project-read JSON write failed".into()))?;
+        .map_err(|error| {
+            TransportError::Serialization(format!("project-read JSON write failed: {error}"))
+        })?;
 
     let mut json = JsonWriter::new(out);
     json.write_raw(b"}}}\n")
