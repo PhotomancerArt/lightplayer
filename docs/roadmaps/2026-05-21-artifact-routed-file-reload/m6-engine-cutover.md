@@ -42,7 +42,7 @@ Out of scope:
 
 ## Key Decisions
 
-- **Gate:** M4 here + [ChangeSet roadmap M6 diff gate](../2026-05-21-changeset-change-management/m6-diff-equivalence-gate.md) green before starting M6.
+- **Gate:** M4 here + [ChangeSet M6 diff gate](../2026-05-21-changeset-change-management/m6-diff-equivalence-gate/summary.md) — **green** ([ChangeSet summary](../2026-05-21-changeset-change-management/summary.md)).
 - Hard cut; no dual-store in production.
 
 ## Deliverables
@@ -53,7 +53,7 @@ Out of scope:
 ## Dependencies
 
 - M1–M4 here complete and passing.
-- [ChangeSet roadmap](../2026-05-21-changeset-change-management/overview.md) M6 diff + equivalence gate green.
+- [ChangeSet roadmap](../2026-05-21-changeset-change-management/summary.md) M6 diff + equivalence gate — green.
 
 ## Execution Strategy
 

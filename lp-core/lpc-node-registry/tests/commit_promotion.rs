@@ -1,11 +1,11 @@
-//! Commit promotion — D2, D5, C2 post-commit (M5).
+//! Commit promotion: overlay flush, filesystem write, and `SyncResult`.
 
 mod common;
 
 use common::fixtures;
 use lpc_model::{LpValue, NodeDef, Revision, SlotPath, SlotShapeRegistry};
 use lpc_node_registry::{
-    ArtifactChange, ArtifactOp, ArtifactTarget, DefSource, NodeDefEntry, NodeDefId,
+    ArtifactEdit, EditOp, EditTarget, DefSource, NodeDefEntry, NodeDefId,
     NodeDefRegistry, NodeDefState, ParseCtx,
 };
 use lpfs::{ChangeType, FsChange, LpFs, LpPath, LpPathBuf};
@@ -14,11 +14,11 @@ fn parse_ctx() -> SlotShapeRegistry {
     SlotShapeRegistry::default()
 }
 
-fn apply_change(registry: &mut NodeDefRegistry, fs: &dyn LpFs, change: &ArtifactChange) {
+fn apply_artifact_edit(registry: &mut NodeDefRegistry, fs: &dyn LpFs, change: &ArtifactEdit) {
     let shapes = parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     registry
-        .apply_change(change, fs, &ctx, Revision::new(2))
+        .apply_artifact_edit(change, fs, &ctx, Revision::new(2))
         .unwrap();
 }
 
@@ -64,19 +64,19 @@ fn d2_commit_updates_committed_and_clears_overlay() {
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    apply_change(
+    apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactChange {
-            target: ArtifactTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![ArtifactOp::SetSlot {
+        &ArtifactEdit {
+            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            ops: vec![EditOp::SetSlot {
                 path: SlotPath::parse("controls.rate").unwrap(),
                 value: LpValue::F32(2.0),
             }],
         },
     );
 
-    assert!(registry.overlay_active());
+    assert!(registry.slot_overlay_active());
     assert_eq!(
         clock_rate(&registry.view().get(&root, &fs, &ctx).unwrap()),
         2.0
@@ -85,7 +85,7 @@ fn d2_commit_updates_committed_and_clears_overlay() {
 
     registry.commit(&fs, Revision::new(3), &ctx).unwrap();
 
-    assert!(!registry.overlay_active());
+    assert!(!registry.slot_overlay_active());
     assert_eq!(clock_rate(registry.get(&root).unwrap()), 2.0);
     assert_eq!(
         clock_rate(&registry.view().get(&root, &fs, &ctx).unwrap()),
@@ -103,12 +103,12 @@ fn d2_commit_setbytes_updates_committed() {
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    apply_change(
+    apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactChange {
-            target: ArtifactTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![ArtifactOp::SetBytes(
+        &ArtifactEdit {
+            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            ops: vec![EditOp::SetBytes(
                 r#"
 kind = "Clock"
 
@@ -134,12 +134,12 @@ fn d2_commit_writes_slot_draft_to_fs() {
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    apply_change(
+    apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactChange {
-            target: ArtifactTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![ArtifactOp::SetSlot {
+        &ArtifactEdit {
+            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            ops: vec![EditOp::SetSlot {
                 path: SlotPath::parse("controls.rate").unwrap(),
                 value: LpValue::F32(2.0),
             }],
@@ -163,12 +163,12 @@ fn d5_overlay_wins_over_stale_fs() {
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    apply_change(
+    apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactChange {
-            target: ArtifactTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![ArtifactOp::SetSlot {
+        &ArtifactEdit {
+            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            ops: vec![EditOp::SetSlot {
                 path: SlotPath::parse("controls.rate").unwrap(),
                 value: LpValue::F32(2.0),
             }],
@@ -203,12 +203,12 @@ fn d5_sync_fs_does_not_clobber_overlay_view() {
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    apply_change(
+    apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactChange {
-            target: ArtifactTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![ArtifactOp::SetSlot {
+        &ArtifactEdit {
+            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            ops: vec![EditOp::SetSlot {
                 path: SlotPath::parse("controls.rate").unwrap(),
                 value: LpValue::F32(2.0),
             }],
@@ -243,19 +243,19 @@ fn d5_post_commit_fs_sync_updates_committed() {
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    apply_change(
+    apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactChange {
-            target: ArtifactTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![ArtifactOp::SetSlot {
+        &ArtifactEdit {
+            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            ops: vec![EditOp::SetSlot {
                 path: SlotPath::parse("controls.rate").unwrap(),
                 value: LpValue::F32(2.0),
             }],
         },
     );
     registry.commit(&fs, Revision::new(3), &ctx).unwrap();
-    assert!(!registry.overlay_active());
+    assert!(!registry.slot_overlay_active());
 
     fixtures::write_file(
         &mut fs,
@@ -283,12 +283,12 @@ fn c2_inline_child_changed_after_commit() {
         .unwrap();
     let child = inline_child_id(&registry, root);
 
-    apply_change(
+    apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactChange {
-            target: ArtifactTarget::Path(LpPathBuf::from("/playlist.toml")),
-            ops: vec![ArtifactOp::SetSlot {
+        &ArtifactEdit {
+            target: EditTarget::Path(LpPathBuf::from("/playlist.toml")),
+            ops: vec![EditOp::SetSlot {
                 path: SlotPath::parse("entries[2].node.def.render_order").unwrap(),
                 value: LpValue::I32(7),
             }],

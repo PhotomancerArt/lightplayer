@@ -7,9 +7,9 @@ use alloc::vec::Vec;
 use lpc_model::{NodeDef, NodeDefRef, Revision, SlotPath};
 use lpfs::{FsChange, LpFs, LpPath, LpPathBuf};
 
-use crate::change::apply::apply_op;
-use crate::change::{
-    ArtifactChange, ArtifactOp, ArtifactTarget, ChangeError, ChangeOverlay, ChangeSet,
+use crate::edit::apply::apply_op;
+use crate::edit::{
+    ArtifactEdit, EditOp, EditTarget, EditError, SlotOverlay, EditBatch,
     require_absolute_path,
 };
 use crate::{ArtifactId, ArtifactLocation, ArtifactStore};
@@ -26,11 +26,13 @@ use super::{
 
 /// Owner of parsed node definitions keyed by [`NodeDefId`].
 ///
-/// Bootstrap with [`Self::load_root`], then apply filesystem changes via
-/// [`Self::sync`] or [`Self::sync_fs`].
+/// Bootstrap with [`Self::load_root`], react to filesystem edits via
+/// [`Self::sync`] / [`Self::sync_fs`], and apply client edits through
+/// [`Self::apply_edit_batch`] → [`Self::commit`] or [`Self::discard_slot_overlay`].
+/// Effective reads use [`crate::NodeDefView`].
 pub struct NodeDefRegistry {
     store: ArtifactStore,
-    overlay: ChangeOverlay,
+    slot_overlay: SlotOverlay,
     entries: BTreeMap<NodeDefId, NodeDefEntry>,
     source_index: BTreeMap<DefSource, NodeDefId>,
     artifact_refs: BTreeMap<ArtifactId, u32>,
@@ -52,7 +54,7 @@ impl NodeDefRegistry {
     pub fn new() -> Self {
         Self {
             store: ArtifactStore::new(),
-            overlay: ChangeOverlay::new(),
+            slot_overlay: SlotOverlay::new(),
             entries: BTreeMap::new(),
             source_index: BTreeMap::new(),
             artifact_refs: BTreeMap::new(),
@@ -176,18 +178,18 @@ impl NodeDefRegistry {
     }
 
     /// Apply one artifact change block to the overlay. Committed state unchanged.
-    pub fn apply_change(
+    pub fn apply_artifact_edit(
         &mut self,
-        change: &ArtifactChange,
+        change: &ArtifactEdit,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
         frame: Revision,
-    ) -> Result<(), ChangeError> {
-        let path = self.resolve_change_target(change.target.clone())?;
+    ) -> Result<(), EditError> {
+        let path = self.resolve_edit_target(change.target.clone())?;
         for op in &change.ops {
             match op {
-                ArtifactOp::Delete | ArtifactOp::SetBytes(_) => {
-                    apply_op(&mut self.overlay, path.clone(), op)?;
+                EditOp::Delete | EditOp::SetBytes(_) => {
+                    apply_op(&mut self.slot_overlay, path.clone(), op)?;
                 }
                 _ => self.apply_slot_op(path.clone(), op, fs, ctx, frame)?,
             }
@@ -195,23 +197,23 @@ impl NodeDefRegistry {
         Ok(())
     }
 
-    /// Apply an ordered changeset to the overlay. Aborts on first error.
-    pub fn apply_changeset(
+    /// Apply an ordered batch to the overlay. Aborts on first error.
+    pub fn apply_edit_batch(
         &mut self,
-        changeset: &ChangeSet,
+        batch: &EditBatch,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
         frame: Revision,
-    ) -> Result<(), ChangeError> {
-        for change in &changeset.changes {
-            self.apply_change(change, fs, ctx, frame)?;
+    ) -> Result<(), EditError> {
+        for change in &batch.edits {
+            self.apply_artifact_edit(change, fs, ctx, frame)?;
         }
         Ok(())
     }
 
     /// Drop all pending overlay edits.
-    pub fn discard_overlay(&mut self) {
-        self.overlay.clear();
+    pub fn discard_slot_overlay(&mut self) {
+        self.slot_overlay.clear();
     }
 
     /// Promote all pending overlay entries to committed store and entries.
@@ -220,8 +222,8 @@ impl NodeDefRegistry {
         fs: &dyn LpFs,
         frame: Revision,
         ctx: &ParseCtx<'_>,
-    ) -> Result<SyncResult, crate::change::CommitError> {
-        commit::commit_overlay(self, fs, frame, ctx)
+    ) -> Result<SyncResult, crate::edit::CommitError> {
+        commit::commit_slot_overlay(self, fs, frame, ctx)
     }
 
     pub(crate) fn restore_entry_states(&mut self, before: &BTreeMap<NodeDefId, NodeDefState>) {
@@ -233,18 +235,18 @@ impl NodeDefRegistry {
     }
 
     /// Whether any overlay entries are pending.
-    pub fn overlay_active(&self) -> bool {
-        !self.overlay.is_empty()
+    pub fn slot_overlay_active(&self) -> bool {
+        !self.slot_overlay.is_empty()
     }
 
     /// Whether `path` has a pending overlay entry.
-    pub fn overlay_contains_path(&self, path: &LpPath) -> bool {
-        self.overlay.contains_path(path)
+    pub fn slot_overlay_contains_path(&self, path: &LpPath) -> bool {
+        self.slot_overlay.contains_path(path)
     }
 
     /// Pending overlay bytes for `path`, if any.
-    pub fn overlay_bytes(&self, path: &LpPath) -> Option<&[u8]> {
-        self.overlay.get_bytes(path)
+    pub fn slot_overlay_bytes(&self, path: &LpPath) -> Option<&[u8]> {
+        self.slot_overlay.get_bytes(path)
     }
 
     pub(crate) fn artifact_id_for_path(&self, path: &LpPath) -> Option<ArtifactId> {
@@ -259,14 +261,14 @@ impl NodeDefRegistry {
         self.store.read_bytes(&artifact_id, fs)
     }
 
-    fn resolve_change_target(&self, target: ArtifactTarget) -> Result<LpPathBuf, ChangeError> {
+    fn resolve_edit_target(&self, target: EditTarget) -> Result<LpPathBuf, EditError> {
         match target {
-            ArtifactTarget::Path(path) => require_absolute_path(path),
-            ArtifactTarget::Id(id) => {
+            EditTarget::Path(path) => require_absolute_path(path),
+            EditTarget::Id(id) => {
                 self.artifact_root_path
                     .get(&id)
                     .cloned()
-                    .ok_or(ChangeError::UnknownArtifact {
+                    .ok_or(EditError::UnknownArtifact {
                         artifact_id: id.handle(),
                     })
             }

@@ -6,7 +6,7 @@ use alloc::string::{String, ToString};
 use lpc_model::{LpPathBuf, Revision, SlotPath, SourceFileSlot, SourcePath};
 use lpfs::{LpFs, LpPath};
 
-use crate::change::{ChangeOverlay, OverlayEntry};
+use crate::edit::{SlotOverlay, SlotOverlayEntry};
 use crate::{ArtifactError, ArtifactReadFailure, ArtifactStore};
 
 use super::{MaterializedSource, ResolveError, SourceFileRef};
@@ -50,7 +50,7 @@ pub fn materialize_source(
     reference: &SourceFileRef,
     slot: &SourceFileSlot,
     ctx: &SourceDiagnosticCtx,
-    overlay: Option<&ChangeOverlay>,
+    slot_overlay: Option<&SlotOverlay>,
 ) -> Result<MaterializedSource, MaterializeError> {
     match reference {
         SourceFileRef::File {
@@ -59,9 +59,9 @@ pub fn materialize_source(
             resolved_path,
             ..
         } => {
-            if let Some(overlay) = overlay {
+            if let Some(slot_overlay) = slot_overlay {
                 if let Some(materialized) =
-                    materialize_file_overlay(overlay, resolved_path, authored_path, slot)?
+                    materialize_file_slot_overlay(slot_overlay, resolved_path, authored_path, slot)?
                 {
                     return Ok(materialized);
                 }
@@ -93,17 +93,17 @@ pub fn materialize_source(
     }
 }
 
-fn materialize_file_overlay(
-    overlay: &ChangeOverlay,
+fn materialize_file_slot_overlay(
+    slot_overlay: &SlotOverlay,
     resolved_path: &LpPathBuf,
     authored_path: &SourcePath,
     slot: &SourceFileSlot,
 ) -> Result<Option<MaterializedSource>, MaterializeError> {
-    let Some(entry) = overlay.entry(LpPath::new(resolved_path.as_str())) else {
+    let Some(entry) = slot_overlay.entry(LpPath::new(resolved_path.as_str())) else {
         return Ok(None);
     };
     match entry {
-        OverlayEntry::Bytes(bytes) => {
+        SlotOverlayEntry::Bytes(bytes) => {
             let text = core::str::from_utf8(bytes).map_err(|err| MaterializeError::Utf8 {
                 message: format!("{err}"),
             })?;
@@ -113,10 +113,10 @@ fn materialize_file_overlay(
                 diagnostic_name: authored_path.as_str().to_string(),
             }))
         }
-        OverlayEntry::Deleted => Err(MaterializeError::Artifact(ArtifactError::Read(
+        SlotOverlayEntry::Deleted => Err(MaterializeError::Artifact(ArtifactError::Read(
             ArtifactReadFailure::Deleted,
         ))),
-        OverlayEntry::SlotDraft(_) => Ok(None),
+        SlotOverlayEntry::DefDraft(_) => Ok(None),
     }
 }
 
@@ -131,7 +131,7 @@ fn inline_diagnostic_name(ctx: &SourceDiagnosticCtx, extension: &str) -> String 
 mod tests {
     use super::*;
     use crate::ArtifactReadFailure;
-    use crate::change::ChangeOverlay;
+    use crate::edit::SlotOverlay;
     use crate::source::resolve_source_file;
     use lpc_model::Revision;
     use lpfs::{ChangeType, FsChange, LpFsMemory, LpPath, LpPathBuf};
@@ -237,8 +237,8 @@ mod tests {
         let reference =
             resolve_source_file(&mut store, containing, &slot, Revision::new(1)).expect("resolve");
 
-        let mut overlay = ChangeOverlay::new();
-        overlay.apply_bytes(LpPathBuf::from("/shader.glsl"), b"v2-overlay".to_vec());
+        let mut slot_overlay = SlotOverlay::new();
+        slot_overlay.apply_bytes(LpPathBuf::from("/shader.glsl"), b"v2-overlay".to_vec());
 
         let committed =
             materialize_source(&mut store, &fs, &reference, &slot, &diag_ctx(), None).unwrap();
@@ -250,7 +250,7 @@ mod tests {
             &reference,
             &slot,
             &diag_ctx(),
-            Some(&overlay),
+            Some(&slot_overlay),
         )
         .unwrap();
         assert_eq!(effective.text, "v2-overlay");
@@ -267,8 +267,8 @@ mod tests {
         let reference =
             resolve_source_file(&mut store, containing, &slot, Revision::new(1)).expect("resolve");
 
-        let mut overlay = ChangeOverlay::new();
-        overlay.apply_delete(LpPathBuf::from("/shader.glsl"));
+        let mut slot_overlay = SlotOverlay::new();
+        slot_overlay.apply_delete(LpPathBuf::from("/shader.glsl"));
 
         let err = materialize_source(
             &mut store,
@@ -276,7 +276,7 @@ mod tests {
             &reference,
             &slot,
             &diag_ctx(),
-            Some(&overlay),
+            Some(&slot_overlay),
         )
         .unwrap_err();
         assert_eq!(

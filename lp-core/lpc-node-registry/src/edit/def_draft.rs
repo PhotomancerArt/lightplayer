@@ -1,14 +1,14 @@
-//! Mutable node-def draft for overlay slot edits.
+//! Mutable node-def draft for slot overlay edits.
 
 use lpc_model::NodeDef;
 
 /// Pending slot tree for one `.toml` artifact path.
 #[derive(Clone, Debug, PartialEq)]
-pub struct SlotDraft {
+pub struct DefDraft {
     pub def: NodeDef,
 }
 
-impl SlotDraft {
+impl DefDraft {
     pub fn new(def: NodeDef) -> Self {
         Self { def }
     }

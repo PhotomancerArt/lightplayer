@@ -2,7 +2,7 @@
 
 use lpc_model::{NodeDef, NodeDefParseError, NodeKind};
 
-/// Reserved placeholder for semantic validation failures (unused in M2).
+/// Semantic validation failure payload (reserved; not emitted by the registry yet).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ValidationErrorPlaceholder {
     message: alloc::string::String,

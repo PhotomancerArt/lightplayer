@@ -1,11 +1,11 @@
-//! Errors from applying client changes to the overlay.
+//! Errors from applying edits to the slot overlay.
 
 use alloc::string::String;
 use core::fmt;
 
-/// Failure applying an [`super::ArtifactChange`] or [`super::ChangeSet`].
+/// Failure applying an [`super::ArtifactEdit`] or [`super::EditBatch`].
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ChangeError {
+pub enum EditError {
     InvalidPath { message: String },
     UnknownArtifact { artifact_id: u32 },
     UnsupportedOp { op: &'static str },
@@ -14,14 +14,14 @@ pub enum ChangeError {
     Serialize { message: String },
 }
 
-impl fmt::Display for ChangeError {
+impl fmt::Display for EditError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidPath { message } => write!(f, "invalid path: {message}"),
             Self::UnknownArtifact { artifact_id } => {
                 write!(f, "unknown artifact id {artifact_id}")
             }
-            Self::UnsupportedOp { op } => write!(f, "unsupported change op: {op}"),
+            Self::UnsupportedOp { op } => write!(f, "unsupported edit op: {op}"),
             Self::Parse { message } => write!(f, "parse error: {message}"),
             Self::SlotMutation { message } => write!(f, "slot mutation error: {message}"),
             Self::Serialize { message } => write!(f, "serialize error: {message}"),

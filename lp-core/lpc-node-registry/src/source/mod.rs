@@ -1,4 +1,4 @@
-//! SourceFileRef resolution and materialization (M3).
+//! SourceFileRef resolution and UTF-8 materialization from artifacts.
 
 mod materialize;
 mod materialized_source;

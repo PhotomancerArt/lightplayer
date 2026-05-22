@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use lpc_model::Revision;
 use lpfs::{ChangeType, FsChange, LpFs, LpPath, LpPathBuf};
 
-use crate::change::{CommitError, OverlayEntry};
+use crate::edit::{CommitError, SlotOverlayEntry};
 use crate::registry::SourceRevisionBump;
 
 use super::{
@@ -15,17 +15,17 @@ use super::{
     dedupe_artifact_ids, dedupe_paths, serialize_slot_draft,
 };
 
-pub(crate) fn commit_overlay(
+pub(crate) fn commit_slot_overlay(
     registry: &mut NodeDefRegistry,
     fs: &dyn LpFs,
     frame: Revision,
     ctx: &ParseCtx<'_>,
 ) -> Result<SyncResult, CommitError> {
-    if registry.overlay.is_empty() {
+    if registry.slot_overlay.is_empty() {
         return Ok(SyncResult::default());
     }
 
-    let plan = OverlayCommitPlan::from_overlay(&registry.overlay, ctx)?;
+    let plan = SlotOverlayCommitPlan::from_slot_overlay(&registry.slot_overlay, ctx)?;
     let known_paths: BTreeMap<String, ()> = registry
         .artifact_path_to_id
         .keys()
@@ -81,7 +81,7 @@ pub(crate) fn commit_overlay(
     }
 
     let change_details = build_change_details(&before, &def_updates, &registry.entries);
-    registry.overlay.clear();
+    registry.slot_overlay.clear();
     Ok(SyncResult {
         def_updates,
         source_revisions,
@@ -91,7 +91,7 @@ pub(crate) fn commit_overlay(
 
 fn sync_committed_overlay_paths(
     registry: &mut NodeDefRegistry,
-    plan: &OverlayCommitPlan,
+    plan: &SlotOverlayCommitPlan,
     fs: &dyn LpFs,
     frame: Revision,
     ctx: &ParseCtx<'_>,
@@ -126,23 +126,23 @@ fn sync_committed_overlay_paths(
     Ok(())
 }
 
-struct OverlayCommitPlan {
+struct SlotOverlayCommitPlan {
     writes: Vec<(LpPathBuf, Vec<u8>)>,
     deletes: Vec<LpPathBuf>,
 }
 
-impl OverlayCommitPlan {
-    fn from_overlay(
-        overlay: &crate::change::ChangeOverlay,
+impl SlotOverlayCommitPlan {
+    fn from_slot_overlay(
+        overlay: &crate::edit::SlotOverlay,
         ctx: &ParseCtx<'_>,
     ) -> Result<Self, CommitError> {
         let mut writes = Vec::new();
         let mut deletes = Vec::new();
         for (path, entry) in overlay.iter_entries() {
             match entry {
-                OverlayEntry::Deleted => deletes.push(path),
-                OverlayEntry::Bytes(bytes) => writes.push((path, bytes.clone())),
-                OverlayEntry::SlotDraft(draft) => {
+                SlotOverlayEntry::Deleted => deletes.push(path),
+                SlotOverlayEntry::Bytes(bytes) => writes.push((path, bytes.clone())),
+                SlotOverlayEntry::DefDraft(draft) => {
                     let bytes = serialize_slot_draft(&draft.def, ctx)?;
                     writes.push((path, bytes));
                 }
@@ -187,15 +187,15 @@ fn is_def_artifact_path(path: &LpPath) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::change::{ChangeOverlay, SlotDraft};
+    use crate::edit::{SlotOverlay, DefDraft};
     use lpc_model::{NodeDef, SlotShapeRegistry};
 
     #[test]
     fn overlay_commit_plan_serializes_slot_draft() {
-        let mut overlay = ChangeOverlay::new();
-        overlay.apply_slot_draft(
+        let mut slot_overlay = SlotOverlay::new();
+        slot_overlay.apply_def_draft(
             LpPathBuf::from("/clock.toml"),
-            SlotDraft::new(
+            DefDraft::new(
                 NodeDef::from_toml_str(
                     r#"
 kind = "Clock"
@@ -209,7 +209,7 @@ rate = 1.0
         );
         let shapes = SlotShapeRegistry::default();
         let ctx = ParseCtx { shapes: &shapes };
-        let plan = OverlayCommitPlan::from_overlay(&overlay, &ctx).unwrap();
+        let plan = SlotOverlayCommitPlan::from_slot_overlay(&slot_overlay, &ctx).unwrap();
         assert_eq!(plan.writes.len(), 1);
         assert!(
             core::str::from_utf8(&plan.writes[0].1)

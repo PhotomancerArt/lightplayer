@@ -1,9 +1,9 @@
-//! Errors from promoting overlay to committed state.
+//! Errors from promoting slot overlay to committed state.
 
 use alloc::string::String;
 use core::fmt;
 
-/// Failure during [`super::NodeDefRegistry::commit`].
+/// Failure during [`crate::NodeDefRegistry::commit`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommitError {
     Fs { message: String },
@@ -21,10 +21,10 @@ impl fmt::Display for CommitError {
     }
 }
 
-impl From<crate::change::ChangeError> for CommitError {
-    fn from(err: crate::change::ChangeError) -> Self {
+impl From<crate::edit::EditError> for CommitError {
+    fn from(err: crate::edit::EditError) -> Self {
         match err {
-            crate::change::ChangeError::Serialize { message } => Self::Serialize { message },
+            crate::edit::EditError::Serialize { message } => Self::Serialize { message },
             other => Self::Registry {
                 message: alloc::format!("{other}"),
             },

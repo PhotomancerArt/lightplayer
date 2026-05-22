@@ -2,7 +2,7 @@
 
 use lpfs::FsChange;
 
-/// Registry change op. M4: filesystem only. M5: ChangeSet variants.
+/// Incoming filesystem notification for [`super::NodeDefRegistry::sync`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RegistryChange {
     Fs(FsChange),

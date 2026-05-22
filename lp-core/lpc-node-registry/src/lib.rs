@@ -1,4 +1,14 @@
-//! Node definition registry and artifact freshness store (parallel stack for M6 cutover).
+//! Node definition registry with artifact freshness and client edit overlay.
+//!
+//! [`ArtifactStore`] tracks file freshness and transient reads without caching
+//! bytes. [`NodeDefRegistry`] owns committed parse entries plus a
+//! [`SlotOverlay`] for uncommitted client edits. [`NodeDefView`] exposes
+//! effective reads (slot overlay ∪ committed). Apply an [`EditBatch`] with
+//! [`NodeDefRegistry::apply_edit_batch`], then [`NodeDefRegistry::commit`] or
+//! [`NodeDefRegistry::discard_slot_overlay`].
+//!
+//! With the `diff` feature (default on host, omit on embedded), [`diff`] builds
+//! an [`EditBatch`] between project snapshots for harness and replay.
 
 #![no_std]
 
@@ -8,7 +18,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod artifact;
-pub mod change;
+pub mod edit;
 #[cfg(feature = "diff")]
 pub mod diff;
 pub mod registry;
@@ -22,9 +32,9 @@ pub use artifact::{
     ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactReadFailure,
     ArtifactReadState, ArtifactStore,
 };
-pub use change::{
-    ArtifactChange, ArtifactOp, ArtifactTarget, ChangeError, ChangeOverlay, ChangeSet, ChangeSetId,
-    CommitError, OverlayEntry, SlotDraft,
+pub use edit::{
+    ArtifactEdit, CommitError, DefDraft, EditBatch, EditBatchId, EditError, EditOp, EditTarget,
+    SlotOverlay, SlotOverlayEntry,
 };
 #[cfg(feature = "diff")]
 pub use diff::{DiffError, ProjectSnapshot, assert_equivalent, diff};
@@ -38,3 +48,18 @@ pub use source::{
     materialize_source, resolve_source_file,
 };
 pub use view::NodeDefView;
+
+#[allow(deprecated, reason = "legacy edit type aliases for migration")]
+mod legacy_edit_names {
+    pub use super::edit::{
+        ArtifactChange, ArtifactOp, ArtifactTarget, ChangeError, ChangeOverlay, ChangeSet,
+        ChangeSetId, OverlayEntry, SlotDraft,
+    };
+}
+#[deprecated(note = "renamed to edit module")]
+pub use edit as change;
+#[allow(deprecated, reason = "legacy edit type aliases for migration")]
+pub use legacy_edit_names::{
+    ArtifactChange, ArtifactOp, ArtifactTarget, ChangeError, ChangeOverlay, ChangeSet, ChangeSetId,
+    OverlayEntry, SlotDraft,
+};

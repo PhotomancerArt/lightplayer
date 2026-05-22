@@ -2,7 +2,8 @@
 
 ## Status
 
-Implemented on branch `codex/incremental-artifact-reload`.
+Implemented on branch `codex/incremental-artifact-reload`. **Gate satisfied** —
+parent M6 engine cutover may proceed.
 
 ## Delivered
 

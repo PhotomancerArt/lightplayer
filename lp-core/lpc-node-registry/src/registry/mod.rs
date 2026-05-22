@@ -1,4 +1,4 @@
-//! NodeDefRegistry — parsed node definition storage (M2).
+//! Parsed node definition registry, filesystem sync, and commit promotion.
 
 mod def_shell;
 mod def_source;

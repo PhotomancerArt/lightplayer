@@ -7,7 +7,7 @@ use lpfs::{LpFs, LpPath};
 
 use super::slot_apply::serialize_slot_draft;
 use crate::ArtifactId;
-use crate::change::OverlayEntry;
+use crate::edit::SlotOverlayEntry;
 use crate::source::{
     MaterializeError, MaterializedSource, SourceDiagnosticCtx, materialize_source,
     resolve_source_file,
@@ -25,17 +25,17 @@ impl NodeDefRegistry {
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
     ) -> Result<Option<Vec<u8>>, RegistryError> {
-        if let Some(entry) = self.overlay.entry(path) {
+        if let Some(entry) = self.slot_overlay.entry(path) {
             return Ok(match entry {
-                OverlayEntry::Bytes(bytes) => Some(bytes.clone()),
-                OverlayEntry::SlotDraft(draft) => {
+                SlotOverlayEntry::Bytes(bytes) => Some(bytes.clone()),
+                SlotOverlayEntry::DefDraft(draft) => {
                     Some(serialize_slot_draft(&draft.def, ctx).map_err(|err| {
                         RegistryError::InvalidPath {
                             message: err.to_string(),
                         }
                     })?)
                 }
-                OverlayEntry::Deleted => None,
+                SlotOverlayEntry::Deleted => None,
             });
         }
         let Some(id) = self.artifact_path_to_id.get(path.as_str()).copied() else {
@@ -58,21 +58,21 @@ impl NodeDefRegistry {
             .artifact_root_path
             .get(&artifact_id)
             .ok_or(RegistryError::UnknownDef)?;
-        if let Some(entry) = self.overlay.entry(LpPath::new(path.as_str())) {
+        if let Some(entry) = self.slot_overlay.entry(LpPath::new(path.as_str())) {
             return Ok(match entry {
-                OverlayEntry::Bytes(bytes) => effective_state_from_overlay_bytes(
+                SlotOverlayEntry::Bytes(bytes) => effective_state_from_slot_overlay_bytes(
                     bytes.as_slice(),
                     &SlotPath::root(),
                     ctx,
-                    &NodeDefState::ParseError(overlay_deleted_error(path.as_str())),
+                    &NodeDefState::ParseError(slot_overlay_deleted_error(path.as_str())),
                 ),
-                OverlayEntry::SlotDraft(draft) => {
+                SlotOverlayEntry::DefDraft(draft) => {
                     def_state_at_source(&draft.def, &SlotPath::root()).unwrap_or_else(|| {
-                        NodeDefState::ParseError(overlay_deleted_error(path.as_str()))
+                        NodeDefState::ParseError(slot_overlay_deleted_error(path.as_str()))
                     })
                 }
-                OverlayEntry::Deleted => {
-                    NodeDefState::ParseError(overlay_deleted_error(path.as_str()))
+                SlotOverlayEntry::Deleted => {
+                    NodeDefState::ParseError(slot_overlay_deleted_error(path.as_str()))
                 }
             });
         }
@@ -83,20 +83,20 @@ impl NodeDefRegistry {
     pub fn effective_state(&self, id: &NodeDefId, ctx: &ParseCtx<'_>) -> Option<NodeDefState> {
         let entry = self.entries.get(id)?;
         let path = self.artifact_root_path.get(&entry.source.artifact_id)?;
-        if !self.overlay.contains_path(LpPath::new(path.as_str())) {
+        if !self.slot_overlay.contains_path(LpPath::new(path.as_str())) {
             return Some(entry.state.clone());
         }
-        let overlay_entry = self.overlay.entry(LpPath::new(path.as_str()))?;
+        let overlay_entry = self.slot_overlay.entry(LpPath::new(path.as_str()))?;
         Some(match overlay_entry {
-            OverlayEntry::Bytes(bytes) => effective_state_from_overlay_bytes(
+            SlotOverlayEntry::Bytes(bytes) => effective_state_from_slot_overlay_bytes(
                 bytes.as_slice(),
                 &entry.source.path,
                 ctx,
                 &entry.state,
             ),
-            OverlayEntry::SlotDraft(draft) => def_state_at_source(&draft.def, &entry.source.path)
+            SlotOverlayEntry::DefDraft(draft) => def_state_at_source(&draft.def, &entry.source.path)
                 .unwrap_or_else(|| entry.state.clone()),
-            OverlayEntry::Deleted => NodeDefState::ParseError(overlay_deleted_error(path.as_str())),
+            SlotOverlayEntry::Deleted => NodeDefState::ParseError(slot_overlay_deleted_error(path.as_str())),
         })
     }
 
@@ -128,7 +128,7 @@ impl NodeDefRegistry {
             &reference,
             slot,
             ctx,
-            Some(&self.overlay),
+            Some(&self.slot_overlay),
         )
     }
 }
@@ -148,13 +148,13 @@ pub(crate) fn parse_toml_bytes(ctx: &ParseCtx<'_>, bytes: &[u8]) -> NodeDefState
     }
 }
 
-fn overlay_deleted_error(path: &str) -> NodeDefParseError {
+fn slot_overlay_deleted_error(path: &str) -> NodeDefParseError {
     NodeDefParseError::Toml {
         error: alloc::format!("artifact deleted pending commit: `{path}`"),
     }
 }
 
-fn effective_state_from_overlay_bytes(
+fn effective_state_from_slot_overlay_bytes(
     bytes: &[u8],
     source_path: &lpc_model::SlotPath,
     ctx: &ParseCtx<'_>,

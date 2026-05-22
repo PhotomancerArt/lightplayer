@@ -1,11 +1,11 @@
-//! Slot overlay apply + effective projection (C1/C2, M4).
+//! Slot overlay apply and effective projection.
 
 mod common;
 
 use common::fixtures;
 use lpc_model::{LpValue, NodeDef, Revision, SlotPath, SlotShapeRegistry};
 use lpc_node_registry::{
-    ArtifactChange, ArtifactOp, ArtifactTarget, DefSource, NodeDefEntry, NodeDefId,
+    ArtifactEdit, EditOp, EditTarget, DefSource, NodeDefEntry, NodeDefId,
     NodeDefRegistry, NodeDefState, ParseCtx, serialize_slot_draft,
 };
 use lpfs::{LpPath, LpPathBuf};
@@ -14,11 +14,11 @@ fn parse_ctx() -> SlotShapeRegistry {
     SlotShapeRegistry::default()
 }
 
-fn apply_change(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs, change: &ArtifactChange) {
+fn apply_artifact_edit(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs, change: &ArtifactEdit) {
     let shapes = parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     registry
-        .apply_change(change, fs, &ctx, Revision::new(2))
+        .apply_artifact_edit(change, fs, &ctx, Revision::new(2))
         .unwrap();
 }
 
@@ -57,12 +57,12 @@ fn c1_setslot_patches_clock_rate_in_view() {
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    apply_change(
+    apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactChange {
-            target: ArtifactTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![ArtifactOp::SetSlot {
+        &ArtifactEdit {
+            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            ops: vec![EditOp::SetSlot {
                 path: SlotPath::parse("controls.rate").unwrap(),
                 value: LpValue::F32(2.0),
             }],
@@ -84,12 +84,12 @@ fn c1_slot_draft_serializes_to_toml() {
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    apply_change(
+    apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactChange {
-            target: ArtifactTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![ArtifactOp::SetSlot {
+        &ArtifactEdit {
+            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            ops: vec![EditOp::SetSlot {
                 path: SlotPath::parse("controls.rate").unwrap(),
                 value: LpValue::F32(2.0),
             }],
@@ -108,7 +108,7 @@ fn c1_slot_draft_serializes_to_toml() {
     };
     assert_eq!(*def.controls.rate.value(), 2.0);
 
-    let draft_def = registry.overlay_contains_path(LpPath::new("/clock.toml"));
+    let draft_def = registry.slot_overlay_contains_path(LpPath::new("/clock.toml"));
     assert!(draft_def);
     let effective = registry
         .view()
@@ -145,12 +145,12 @@ fn c2_playlist_slot_patch_committed_children_unchanged() {
     let child_before = registry.get(&child).unwrap().clone();
     let committed_idle = playlist_idle_entry(registry.get(&root).unwrap());
 
-    apply_change(
+    apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactChange {
-            target: ArtifactTarget::Path(LpPathBuf::from("/playlist.toml")),
-            ops: vec![ArtifactOp::SetSlot {
+        &ArtifactEdit {
+            target: EditTarget::Path(LpPathBuf::from("/playlist.toml")),
+            ops: vec![EditOp::SetSlot {
                 path: SlotPath::parse("idle_entry").unwrap(),
                 value: LpValue::U32(99),
             }],
@@ -178,12 +178,12 @@ fn c2_inline_child_slot_patch_visible_in_view() {
     let child = inline_child_id(&registry, root);
     let before = registry.get(&child).unwrap().clone();
 
-    apply_change(
+    apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactChange {
-            target: ArtifactTarget::Path(LpPathBuf::from("/playlist.toml")),
-            ops: vec![ArtifactOp::SetSlot {
+        &ArtifactEdit {
+            target: EditTarget::Path(LpPathBuf::from("/playlist.toml")),
+            ops: vec![EditOp::SetSlot {
                 path: SlotPath::parse("entries[2].node.def.render_order").unwrap(),
                 value: LpValue::I32(7),
             }],

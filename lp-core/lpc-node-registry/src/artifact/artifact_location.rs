@@ -6,7 +6,7 @@ use lpc_model::{ArtifactLocator, LpPathBuf};
 
 use super::ArtifactError;
 
-/// Resolved load location (M1: file-backed paths only).
+/// Resolved file-backed artifact location.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ArtifactLocation {
     File(LpPathBuf),

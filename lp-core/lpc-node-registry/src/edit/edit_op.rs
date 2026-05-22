@@ -1,20 +1,20 @@
-//! Per-artifact edit operations.
+//! Atomic edit operations within an artifact block.
 
 use alloc::string::String;
 
 use lpc_model::{LpValue, SlotPath};
 
-/// One edit operation within an artifact block.
+/// One edit operation within an [`super::ArtifactEdit`] block.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum ArtifactOp {
+pub enum EditOp {
     /// Remove this path on commit.
     Delete,
     /// Whole-file body — assets and optional TOML import escape hatch.
     SetBytes(String),
     /// Set a slot leaf value.
     SetSlot { path: SlotPath, value: LpValue },
-    /// Insert or replace one map entry (key is wire string; parsed on apply in M4).
+    /// Insert or replace one map entry (`key` is a wire string parsed on apply).
     MapInsert {
         path: SlotPath,
         key: String,
@@ -22,11 +22,11 @@ pub enum ArtifactOp {
     },
     /// Remove one map entry.
     MapRemove { path: SlotPath, key: String },
-    /// Set option presence (`present = true` uses shape default on apply in M4).
+    /// Set option presence (`present = true` inserts the shape default on apply).
     OptionSet { path: SlotPath, present: bool },
 }
 
-impl ArtifactOp {
+impl EditOp {
     pub fn op_name(&self) -> &'static str {
         match self {
             Self::Delete => "delete",

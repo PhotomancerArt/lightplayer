@@ -11,7 +11,7 @@ use lpc_model::{
 };
 
 use crate::ParseCtx;
-use crate::change::ArtifactOp;
+use crate::edit::EditOp;
 use crate::registry::apply_ops_to_node_def;
 
 use super::DiffError;
@@ -20,7 +20,7 @@ pub fn diff_node_defs(
     base: &NodeDef,
     target: &NodeDef,
     ctx: &ParseCtx<'_>,
-) -> Result<Vec<ArtifactOp>, DiffError> {
+) -> Result<Vec<EditOp>, DiffError> {
     if base.kind() == target.kind() && authored_defs_equivalent(base, target, ctx)? {
         return Ok(Vec::new());
     }
@@ -70,7 +70,7 @@ fn diff_at_path(
     target: &NodeDef,
     path: &SlotPath,
     ctx: &ParseCtx<'_>,
-    ops: &mut Vec<ArtifactOp>,
+    ops: &mut Vec<EditOp>,
 ) -> Result<(), DiffError> {
     let shapes = ctx.shapes;
     let slot_kind = {
@@ -287,9 +287,9 @@ fn push_set_slot(
     path: &SlotPath,
     value: LpValue,
     ctx: &ParseCtx<'_>,
-    ops: &mut Vec<ArtifactOp>,
+    ops: &mut Vec<EditOp>,
 ) -> Result<(), DiffError> {
-    let op = ArtifactOp::SetSlot {
+    let op = EditOp::SetSlot {
         path: path.clone(),
         value,
     };
@@ -307,9 +307,9 @@ fn push_map_remove(
     path: &SlotPath,
     key: &SlotMapKey,
     ctx: &ParseCtx<'_>,
-    ops: &mut Vec<ArtifactOp>,
+    ops: &mut Vec<EditOp>,
 ) -> Result<(), DiffError> {
-    let op = ArtifactOp::MapRemove {
+    let op = EditOp::MapRemove {
         path: path.clone(),
         key: map_key_display(key),
     };
@@ -329,10 +329,10 @@ fn push_map_insert(
     path: &SlotPath,
     key: &SlotMapKey,
     ctx: &ParseCtx<'_>,
-    ops: &mut Vec<ArtifactOp>,
+    ops: &mut Vec<EditOp>,
 ) -> Result<(), DiffError> {
     let placeholder = map_insert_placeholder(target, path, key, ctx)?;
-    let op = ArtifactOp::MapInsert {
+    let op = EditOp::MapInsert {
         path: path.clone(),
         key: map_key_display(key),
         value: placeholder,
@@ -358,9 +358,9 @@ fn push_option_set(
     path: &SlotPath,
     present: bool,
     ctx: &ParseCtx<'_>,
-    ops: &mut Vec<ArtifactOp>,
+    ops: &mut Vec<EditOp>,
 ) -> Result<(), DiffError> {
-    let op = ArtifactOp::OptionSet {
+    let op = EditOp::OptionSet {
         path: path.clone(),
         present,
     };

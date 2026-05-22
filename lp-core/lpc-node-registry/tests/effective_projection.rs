@@ -1,11 +1,11 @@
-//! Effective projection — view vs committed (M2).
+//! Effective projection: [`NodeDefView`] vs committed cache.
 
 mod common;
 
 use common::fixtures;
 use lpc_model::{NodeDef, Revision, SlotShapeRegistry};
 use lpc_node_registry::{
-    ArtifactChange, ArtifactOp, ArtifactTarget, NodeDefEntry, NodeDefId, NodeDefRegistry,
+    ArtifactEdit, EditOp, EditTarget, NodeDefEntry, NodeDefId, NodeDefRegistry,
     NodeDefState, ParseCtx,
 };
 use lpfs::{LpPath, LpPathBuf};
@@ -29,11 +29,11 @@ fn load_clock_root(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs) -> NodeD
         .unwrap()
 }
 
-fn apply_change(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs, change: &ArtifactChange) {
+fn apply_artifact_edit(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs, change: &ArtifactEdit) {
     let shapes = parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     registry
-        .apply_change(change, fs, &ctx, Revision::new(1))
+        .apply_artifact_edit(change, fs, &ctx, Revision::new(1))
         .unwrap();
 }
 
@@ -47,12 +47,12 @@ fn effective_view_differs_after_toml_setbytes() {
 
     assert_eq!(clock_rate(registry.get(&root).unwrap()), 1.0);
 
-    apply_change(
+    apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactChange {
-            target: ArtifactTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![ArtifactOp::SetBytes(
+        &ArtifactEdit {
+            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            ops: vec![EditOp::SetBytes(
                 r#"
 kind = "Clock"
 
@@ -90,12 +90,12 @@ fn discard_restores_effective_view_to_committed() {
     let shapes = parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
 
-    apply_change(
+    apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactChange {
-            target: ArtifactTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![ArtifactOp::SetBytes(
+        &ArtifactEdit {
+            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            ops: vec![EditOp::SetBytes(
                 r#"
 kind = "Clock"
 
@@ -111,7 +111,7 @@ rate = 2.0
         2.0
     );
 
-    registry.discard_overlay();
+    registry.discard_slot_overlay();
 
     let committed = registry.get(&root).unwrap().clone();
     let effective = registry.view().get(&root, &fs, &ctx).unwrap();
@@ -126,12 +126,12 @@ fn effective_deleted_overlay_yields_parse_error() {
     let shapes = parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
 
-    apply_change(
+    apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactChange {
-            target: ArtifactTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![ArtifactOp::Delete],
+        &ArtifactEdit {
+            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            ops: vec![EditOp::Delete],
         },
     );
 

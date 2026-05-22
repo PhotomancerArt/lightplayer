@@ -1,4 +1,4 @@
-//! Project snapshot diff and equivalence checks (ChangeSet M6).
+//! Project snapshot diff and equivalence checks (host `diff` feature).
 
 mod def_diff;
 mod equivalence;

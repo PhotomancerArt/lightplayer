@@ -1,4 +1,4 @@
-//! Integration tests for fs-change semantics (S1–S6).
+//! Filesystem change sync semantics.
 
 mod common;
 

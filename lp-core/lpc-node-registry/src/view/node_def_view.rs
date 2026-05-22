@@ -1,4 +1,7 @@
-//! Effective read projection over committed registry entries and overlay draft.
+//! Effective read projection over committed registry entries and overlay drafts.
+//!
+//! [`NodeDefView`] is the public read surface for node defs: overlay edits win
+//! over the committed parse cache without mutating stored entries.
 
 use lpfs::LpFs;
 

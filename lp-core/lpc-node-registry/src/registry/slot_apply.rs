@@ -12,7 +12,7 @@ use lpc_model::{
 };
 use lpfs::{LpFs, LpPath, LpPathBuf};
 
-use crate::change::{ArtifactOp, ChangeError, OverlayEntry, SlotDraft};
+use crate::edit::{EditOp, EditError, SlotOverlayEntry, DefDraft};
 use crate::registry::def_walker::collect_invocations;
 
 use super::{NodeDefRegistry, ParseCtx};
@@ -21,24 +21,24 @@ impl NodeDefRegistry {
     pub(crate) fn apply_slot_op(
         &mut self,
         path: LpPathBuf,
-        op: &ArtifactOp,
+        op: &EditOp,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
         frame: Revision,
-    ) -> Result<(), ChangeError> {
+    ) -> Result<(), EditError> {
         ensure_toml_path(&path)?;
         if matches!(
-            self.overlay.entry(LpPath::new(path.as_str())),
-            Some(OverlayEntry::Deleted)
+            self.slot_overlay.entry(LpPath::new(path.as_str())),
+            Some(SlotOverlayEntry::Deleted)
         ) {
-            return Err(ChangeError::InvalidPath {
+            return Err(EditError::InvalidPath {
                 message: alloc::format!("artifact deleted pending commit: `{}`", path.as_str()),
             });
         }
 
         let mut def = self.fork_slot_draft(LpPath::new(path.as_str()), fs, ctx)?;
         apply_op_to_def(&mut def, op, ctx, frame)?;
-        self.overlay.apply_slot_draft(path, SlotDraft::new(def));
+        self.slot_overlay.apply_def_draft(path, DefDraft::new(def));
         Ok(())
     }
 
@@ -47,11 +47,11 @@ impl NodeDefRegistry {
         path: &LpPath,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
-    ) -> Result<NodeDef, ChangeError> {
-        match self.overlay.entry(path) {
-            Some(OverlayEntry::SlotDraft(draft)) => Ok(draft.def.clone()),
-            Some(OverlayEntry::Bytes(bytes)) => parse_def_bytes(bytes.as_slice(), ctx),
-            Some(OverlayEntry::Deleted) => Err(ChangeError::InvalidPath {
+    ) -> Result<NodeDef, EditError> {
+        match self.slot_overlay.entry(path) {
+            Some(SlotOverlayEntry::DefDraft(draft)) => Ok(draft.def.clone()),
+            Some(SlotOverlayEntry::Bytes(bytes)) => parse_def_bytes(bytes.as_slice(), ctx),
+            Some(SlotOverlayEntry::Deleted) => Err(EditError::InvalidPath {
                 message: alloc::format!("artifact deleted pending commit: `{}`", path.as_str()),
             }),
             None => self.fork_committed_def(path, fs, ctx),
@@ -63,21 +63,21 @@ impl NodeDefRegistry {
         path: &LpPath,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
-    ) -> Result<NodeDef, ChangeError> {
+    ) -> Result<NodeDef, EditError> {
         let Some(artifact_id) = self.artifact_id_for_path(path) else {
             return Ok(NodeDef::default());
         };
         let bytes = self
             .read_committed_artifact_bytes(artifact_id, fs)
-            .map_err(|err| ChangeError::Parse {
+            .map_err(|err| EditError::Parse {
                 message: alloc::format!("read `{path:?}` for slot fork: {err:?}"),
             })?;
         parse_def_bytes(&bytes, ctx)
     }
 }
 
-pub fn serialize_slot_draft(def: &NodeDef, ctx: &ParseCtx<'_>) -> Result<Vec<u8>, ChangeError> {
-    let text = NodeDef::write_toml(def, ctx.shapes).map_err(|err| ChangeError::Serialize {
+pub fn serialize_slot_draft(def: &NodeDef, ctx: &ParseCtx<'_>) -> Result<Vec<u8>, EditError> {
+    let text = NodeDef::write_toml(def, ctx.shapes).map_err(|err| EditError::Serialize {
         message: err.to_string(),
     })?;
     Ok(text.into_bytes())
@@ -87,21 +87,21 @@ pub fn serialize_slot_draft(def: &NodeDef, ctx: &ParseCtx<'_>) -> Result<Vec<u8>
 #[cfg(feature = "diff")]
 pub(crate) fn apply_ops_to_node_def(
     def: &mut NodeDef,
-    ops: &[ArtifactOp],
+    ops: &[EditOp],
     ctx: &ParseCtx<'_>,
     frame: Revision,
-) -> Result<(), ChangeError> {
+) -> Result<(), EditError> {
     for op in ops {
         apply_op_to_def(def, op, ctx, frame)?;
     }
     Ok(())
 }
 
-fn ensure_toml_path(path: &LpPathBuf) -> Result<(), ChangeError> {
+fn ensure_toml_path(path: &LpPathBuf) -> Result<(), EditError> {
     if path.as_str().ends_with(".toml") {
         Ok(())
     } else {
-        Err(ChangeError::InvalidPath {
+        Err(EditError::InvalidPath {
             message: alloc::format!(
                 "slot ops require a `.toml` artifact path, got `{}`",
                 path.as_str()
@@ -110,32 +110,32 @@ fn ensure_toml_path(path: &LpPathBuf) -> Result<(), ChangeError> {
     }
 }
 
-fn parse_def_bytes(bytes: &[u8], ctx: &ParseCtx<'_>) -> Result<NodeDef, ChangeError> {
-    let text = core::str::from_utf8(bytes).map_err(|err| ChangeError::Parse {
+fn parse_def_bytes(bytes: &[u8], ctx: &ParseCtx<'_>) -> Result<NodeDef, EditError> {
+    let text = core::str::from_utf8(bytes).map_err(|err| EditError::Parse {
         message: err.to_string(),
     })?;
-    NodeDef::read_toml(ctx.shapes, text).map_err(|err| ChangeError::Parse {
+    NodeDef::read_toml(ctx.shapes, text).map_err(|err| EditError::Parse {
         message: err.to_string(),
     })
 }
 
 fn apply_op_to_def(
     def: &mut NodeDef,
-    op: &ArtifactOp,
+    op: &EditOp,
     ctx: &ParseCtx<'_>,
     frame: Revision,
-) -> Result<(), ChangeError> {
+) -> Result<(), EditError> {
     match op {
-        ArtifactOp::SetSlot { path, value } => apply_set_slot_on_def(def, ctx, path, frame, value),
-        ArtifactOp::MapInsert { path, key, value } => {
+        EditOp::SetSlot { path, value } => apply_set_slot_on_def(def, ctx, path, frame, value),
+        EditOp::MapInsert { path, key, value } => {
             apply_map_insert(def, ctx, path, frame, key, value)
         }
-        ArtifactOp::MapRemove { path, key } => apply_map_remove(def, ctx, path, frame, key),
-        ArtifactOp::OptionSet { path, present } => {
+        EditOp::MapRemove { path, key } => apply_map_remove(def, ctx, path, frame, key),
+        EditOp::OptionSet { path, present } => {
             apply_option_set(def, ctx, path, frame, *present)
         }
-        ArtifactOp::Delete | ArtifactOp::SetBytes(_) => {
-            Err(ChangeError::UnsupportedOp { op: op.op_name() })
+        EditOp::Delete | EditOp::SetBytes(_) => {
+            Err(EditError::UnsupportedOp { op: op.op_name() })
         }
     }
 }
@@ -146,7 +146,7 @@ fn apply_set_slot_on_def(
     path: &SlotPath,
     frame: Revision,
     value: &LpValue,
-) -> Result<(), ChangeError> {
+) -> Result<(), EditError> {
     if path.is_root() {
         if let LpValue::String(variant) = value {
             let mut artifact = NodeArtifact::new(def.clone());
@@ -182,13 +182,13 @@ fn apply_set_slot_on_def(
 fn apply_node_invocation_def(
     invocation: &mut NodeInvocation,
     value: &LpValue,
-) -> Result<(), ChangeError> {
+) -> Result<(), EditError> {
     let LpValue::String(path) = value else {
-        return Err(ChangeError::SlotMutation {
+        return Err(EditError::SlotMutation {
             message: String::from("node invocation def expects string path"),
         });
     };
-    let locator = ArtifactLocator::parse(path).map_err(|err| ChangeError::SlotMutation {
+    let locator = ArtifactLocator::parse(path).map_err(|err| EditError::SlotMutation {
         message: err.to_string(),
     })?;
     *invocation = NodeInvocation::path(locator);
@@ -231,7 +231,7 @@ fn apply_map_insert(
     frame: Revision,
     key: &str,
     value: &LpValue,
-) -> Result<(), ChangeError> {
+) -> Result<(), EditError> {
     let map_key = wire_map_key(key);
     mutate_def(def, |root| {
         insert_slot_map_entry_default(root, ctx.shapes, path, frame, &map_key)?;
@@ -253,9 +253,9 @@ fn map_value_is_value_leaf(
     root: &dyn SlotMutAccess,
     ctx: &ParseCtx<'_>,
     path: &SlotPath,
-) -> Result<bool, ChangeError> {
+) -> Result<bool, EditError> {
     let (_, shape) = lookup_slot_data_and_shape(root, ctx.shapes, path).map_err(|err| {
-        ChangeError::SlotMutation {
+        EditError::SlotMutation {
             message: err.to_string(),
         }
     })?;
@@ -268,7 +268,7 @@ fn apply_map_remove(
     path: &SlotPath,
     frame: Revision,
     key: &str,
-) -> Result<(), ChangeError> {
+) -> Result<(), EditError> {
     let map_key = wire_map_key(key);
     mutate_def(def, |root| {
         remove_slot_map_entry(root, ctx.shapes, path, frame, &map_key)
@@ -281,7 +281,7 @@ fn apply_option_set(
     path: &SlotPath,
     frame: Revision,
     present: bool,
-) -> Result<(), ChangeError> {
+) -> Result<(), EditError> {
     if present {
         mutate_def(def, |root| {
             set_slot_option_some_default(root, ctx.shapes, path, frame)
@@ -380,8 +380,8 @@ fn invocation_at_mut<'a>(def: &'a mut NodeDef, path: &SlotPath) -> Option<&'a mu
 fn mutate_def(
     root: &mut dyn SlotMutAccess,
     f: impl FnOnce(&mut dyn SlotMutAccess) -> Result<(), lpc_model::SlotMutationError>,
-) -> Result<(), ChangeError> {
-    f(root).map_err(|err| ChangeError::SlotMutation {
+) -> Result<(), EditError> {
+    f(root).map_err(|err| EditError::SlotMutation {
         message: err.to_string(),
     })
 }

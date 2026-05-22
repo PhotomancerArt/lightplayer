@@ -1,4 +1,4 @@
-//! `diff(base, target) -> ChangeSet`.
+//! `diff(base, target) -> EditBatch`.
 
 use alloc::collections::BTreeSet;
 use alloc::string::String;
@@ -9,7 +9,7 @@ use lpc_model::NodeDef;
 use lpfs::LpPathBuf;
 
 use crate::ParseCtx;
-use crate::change::{ArtifactChange, ArtifactOp, ArtifactTarget, ChangeSet, ChangeSetId};
+use crate::edit::{ArtifactEdit, EditOp, EditTarget, EditBatch, EditBatchId};
 
 use super::DiffError;
 use super::def_diff::diff_node_defs;
@@ -20,7 +20,7 @@ pub fn diff(
     base: &ProjectSnapshot,
     target: &ProjectSnapshot,
     ctx: &ParseCtx<'_>,
-) -> Result<ChangeSet, DiffError> {
+) -> Result<EditBatch, DiffError> {
     let mut paths = BTreeSet::new();
     paths.extend(base.paths());
     paths.extend(target.paths());
@@ -31,9 +31,9 @@ pub fn diff(
         let target_bytes = target.get(path);
         match (base_bytes, target_bytes) {
             (None, None) => {}
-            (Some(_), None) => changes.push(ArtifactChange {
-                target: ArtifactTarget::Path(LpPathBuf::from(path)),
-                ops: vec![ArtifactOp::Delete],
+            (Some(_), None) => changes.push(ArtifactEdit {
+                target: EditTarget::Path(LpPathBuf::from(path)),
+                ops: vec![EditOp::Delete],
             }),
             (None, Some(bytes)) | (Some(_), Some(bytes)) if base_bytes != target_bytes => {
                 if path.ends_with(".toml") {
@@ -41,8 +41,8 @@ pub fn diff(
                     let target_def = parse_toml_def(Some(bytes), ctx, path)?;
                     let ops = diff_node_defs(&base_def, &target_def, ctx)?;
                     if !ops.is_empty() {
-                        changes.push(ArtifactChange {
-                            target: ArtifactTarget::Path(LpPathBuf::from(path)),
+                        changes.push(ArtifactEdit {
+                            target: EditTarget::Path(LpPathBuf::from(path)),
                             ops,
                         });
                     }
@@ -50,16 +50,16 @@ pub fn diff(
                     let text = core::str::from_utf8(bytes).map_err(|err| DiffError::Parse {
                         message: alloc::format!("`{path}` utf-8: {err}"),
                     })?;
-                    changes.push(ArtifactChange {
-                        target: ArtifactTarget::Path(LpPathBuf::from(path)),
-                        ops: vec![ArtifactOp::SetBytes(String::from(text))],
+                    changes.push(ArtifactEdit {
+                        target: EditTarget::Path(LpPathBuf::from(path)),
+                        ops: vec![EditOp::SetBytes(String::from(text))],
                     });
                 }
             }
             _ => {}
         }
     }
-    Ok(ChangeSet::new(ChangeSetId(0), changes))
+    Ok(EditBatch::new(EditBatchId(0), changes))
 }
 
 fn parse_toml_def(

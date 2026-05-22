@@ -1,4 +1,4 @@
-//! Effective def read view (overlay ∪ committed cache).
+//! Effective def reads — overlay merged with the committed parse cache.
 
 mod node_def_view;
 

@@ -10,10 +10,10 @@ plans.
 
 ## Gate for this roadmap
 
-**M6 (engine cutover)** below starts only when:
+**M6 (engine cutover)** below may proceed — prerequisites are green:
 
-- **M4** (fs-change harness) here is green, **and**
-- **M6 (diff + equivalence gate)** on the [ChangeSet roadmap](../2026-05-21-changeset-change-management/m6-diff-equivalence-gate.md) is green.
+- **M4** (fs-change harness) here — green
+- **M6 (diff + equivalence gate)** on the [ChangeSet roadmap](../2026-05-21-changeset-change-management/m6-diff-equivalence-gate/summary.md) — green ([ChangeSet summary](../2026-05-21-changeset-change-management/summary.md))
 
 ## Historical note
 

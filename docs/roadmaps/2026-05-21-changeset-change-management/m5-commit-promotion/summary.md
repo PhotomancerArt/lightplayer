@@ -2,7 +2,7 @@
 
 ## Status
 
-Implemented on branch `codex/incremental-artifact-reload` (uncommitted at handoff).
+Implemented on branch `codex/incremental-artifact-reload`.
 
 ## Delivered
 

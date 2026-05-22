@@ -19,6 +19,6 @@ pub enum SourceFileRef {
         extension: String,
         slot_revision: Revision,
     },
-    /// Future URL-backed source (unsupported in M3).
+    /// URL-backed source (not supported yet).
     Url { url: String },
 }
