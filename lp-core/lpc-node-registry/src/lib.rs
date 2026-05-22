@@ -12,6 +12,9 @@ pub mod registry;
 pub mod source;
 pub mod view;
 
+#[cfg(test)]
+pub mod harness;
+
 mod change;
 
 pub use artifact::{
@@ -19,8 +22,9 @@ pub use artifact::{
     ArtifactReadState, ArtifactStore,
 };
 pub use registry::{
-    DefSource, NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState, NodeDefUpdates, ParseCtx,
-    RegistryError, ValidationErrorPlaceholder,
+    DefChangeDetail, DefSource, NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState,
+    NodeDefUpdates, ParseCtx, RegistryChange, RegistryError, SourceRevisionBump, SyncResult,
+    ValidationErrorPlaceholder,
 };
 pub use source::{
     MaterializeError, MaterializedSource, ResolveError, SourceDiagnosticCtx, SourceFileRef,

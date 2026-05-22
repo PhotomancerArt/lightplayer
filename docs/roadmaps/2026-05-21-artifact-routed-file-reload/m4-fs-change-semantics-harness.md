@@ -8,10 +8,8 @@ node lifecycle actions. **Production `lpc-engine` unchanged.**
 
 ## Parallel Build
 
-The harness exercises **only** the new crate (M1–M3). It may duplicate small
-fixture projects and loader-like parse glue **inside `lpc-node-registry` tests**
-rather than calling production `ProjectLoader`. Expected engine actions are
-asserted as a **spec log** for M5 to implement against.
+The harness proves **`NodeDefRegistry::sync(changes) -> SyncResult`** in tests
+only. Production `lpc-engine` unchanged until M6.
 
 ## Suggested Plan Location
 
@@ -21,24 +19,15 @@ asserted as a **spec log** for M5 to implement against.
 
 In scope:
 
-- Harness in **`lpc-node-registry`** tests (memory fs via `lpfs`) loading fixture
-  projects into M1/M2/M3 stores.
-- Apply `FsChange` batches; bump artifacts; call registry update; assert
-  `NodeDefUpdates`.
-- Scenarios:
-  - Leaf node TOML edit → one def `changed`.
-  - GLSL file edit → file artifact bumped; defs referencing `SourceFileRef`
-    see materialize version change (no def change if TOML unchanged).
-  - SVG file edit → same for fixture mapping source.
-  - Inline child def edit → child `changed`, parent not `changed`.
-  - Parse error → def error state; expected destroy/cascade markers in harness
-    action log.
-- Document expected **engine actions** per update (refresh node, destroy node,
-  cascade parent error) as harness assertions — not yet wired to real `Engine`.
+- **API refactor:** registry owns state; `sync` takes `RegistryChange` batch
+  (fs in M4), applies, returns **`SyncResult`** (factual diff).
+- Harness fixtures + scenario tests S1–S6.
+- **`engine-policy-v1.md`** — how M6 engine would react (not registry output).
 
 Out of scope:
 
 - Production engine cutover (**M6**).
+- `RegistryChange::ChangeSet` variants (**M5** — enum stub OK).
 - ChangeSet / client change management (**M5**).
 - Server `LpServer` fs routing (**M7**).
 - `project.toml` topology changes (**M8**).
@@ -52,9 +41,9 @@ Out of scope:
 
 ## Deliverables
 
-- Reload harness module + fixture projects under **`lpc-node-registry` tests**.
-- Scenario table documented in milestone summary (serves as M5 contract).
-- CI-running tests for all scenarios above.
+- **`sync(changes) -> SyncResult`** API on `NodeDefRegistry`
+- Scenario tests S1–S6
+- `engine-policy-v1.md` for M6
 
 ## Dependencies
 

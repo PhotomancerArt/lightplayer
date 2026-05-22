@@ -9,7 +9,11 @@ mod node_def_registry;
 mod node_def_state;
 mod node_def_updates;
 mod parse_ctx;
+mod registry_change;
 mod registry_error;
+mod source_bridge;
+mod source_deps;
+mod sync_result;
 
 pub use def_source::DefSource;
 pub(crate) use def_walker::resolve_node_locator;
@@ -19,4 +23,6 @@ pub use node_def_registry::NodeDefRegistry;
 pub use node_def_state::{NodeDefState, ValidationErrorPlaceholder};
 pub use node_def_updates::NodeDefUpdates;
 pub use parse_ctx::ParseCtx;
+pub use registry_change::RegistryChange;
 pub use registry_error::RegistryError;
+pub use sync_result::{DefChangeDetail, SourceRevisionBump, SyncResult};
