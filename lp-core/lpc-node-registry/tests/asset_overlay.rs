@@ -5,7 +5,7 @@ mod common;
 use common::fixtures;
 use lpc_model::{Revision, SlotShapeRegistry, SourceFileSlot};
 use lpc_node_registry::{
-    ArtifactEdit, ArtifactError, ArtifactReadFailure, EditOp, EditTarget, MaterializeError,
+    ArtifactEdit, ArtifactError, ArtifactReadFailure, AssetEdit, EditTarget, MaterializeError,
     NodeDefEntry, NodeDefId, NodeDefRegistry, ParseCtx, SourceDiagnosticCtx,
 };
 use lpfs::{LpPath, LpPathBuf};
@@ -52,12 +52,12 @@ fn c4c_replace_glsl_via_overlay_def_unchanged() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/shader.glsl")),
-            ops: vec![EditOp::SetBytes(
+        &ArtifactEdit::asset(
+            EditTarget::Path(LpPathBuf::from("/shader.glsl")),
+            vec![AssetEdit::ReplaceBody(
                 "void main() { gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0); }".into(),
             )],
-        },
+        ),
     );
 
     let effective = registry
@@ -82,10 +82,10 @@ fn c4a_add_asset_via_overlay_implicit_create() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/extra.glsl")),
-            ops: vec![EditOp::SetBytes("void main() {}".into())],
-        },
+        &ArtifactEdit::asset(
+            EditTarget::Path(LpPathBuf::from("/extra.glsl")),
+            vec![AssetEdit::ReplaceBody("void main() {}".into())],
+        ),
     );
 
     let slot = SourceFileSlot::from_path("./extra.glsl");
@@ -111,10 +111,10 @@ fn c4b_delete_asset_via_overlay() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/shader.glsl")),
-            ops: vec![EditOp::Delete],
-        },
+        &ArtifactEdit::asset(
+            EditTarget::Path(LpPathBuf::from("/shader.glsl")),
+            vec![AssetEdit::Delete],
+        ),
     );
 
     let err = registry
@@ -144,10 +144,10 @@ fn c4d_replace_asset_without_touching_def_toml() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/shader.glsl")),
-            ops: vec![EditOp::SetBytes("void main() { /* draft */ }".into())],
-        },
+        &ArtifactEdit::asset(
+            EditTarget::Path(LpPathBuf::from("/shader.glsl")),
+            vec![AssetEdit::ReplaceBody("void main() { /* draft */ }".into())],
+        ),
     );
 
     assert!(!registry.slot_overlay_contains_path(LpPath::new("/shader.toml")));

@@ -5,8 +5,8 @@ mod common;
 use common::fixtures;
 use lpc_model::{LpValue, Revision, SlotPath, SlotShapeRegistry};
 use lpc_node_registry::{
-    ArtifactEdit, EditBatch, EditBatchId, EditError, EditOp, EditTarget, NodeDefEntry, NodeDefId,
-    NodeDefRegistry, ParseCtx,
+    ArtifactEdit, AssetEdit, EditBatch, EditBatchId, EditError, EditTarget, NodeDefEntry,
+    NodeDefId, NodeDefRegistry, ParseCtx, SlotEdit,
 };
 use lpfs::{LpFsMemory, LpPath, LpPathBuf};
 
@@ -42,10 +42,10 @@ fn d1_apply_populates_overlay_base_unchanged() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/pending.glsl")),
-            ops: vec![EditOp::SetBytes("void main() {}".into())],
-        },
+        &ArtifactEdit::asset(
+            EditTarget::Path(LpPathBuf::from("/pending.glsl")),
+            vec![AssetEdit::ReplaceBody("void main() {}".into())],
+        ),
     )
     .unwrap();
 
@@ -72,10 +72,10 @@ fn d3_discard_clears_overlay_entries_unchanged() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/pending.glsl")),
-            ops: vec![EditOp::SetBytes("pending".into())],
-        },
+        &ArtifactEdit::asset(
+            EditTarget::Path(LpPathBuf::from("/pending.glsl")),
+            vec![AssetEdit::ReplaceBody("pending".into())],
+        ),
     )
     .unwrap();
     assert!(registry.slot_overlay_active());
@@ -94,10 +94,10 @@ fn apply_rejects_relative_path() {
     let err = apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("relative.glsl")),
-            ops: vec![EditOp::SetBytes("x".into())],
-        },
+        &ArtifactEdit::asset(
+            EditTarget::Path(LpPathBuf::from("relative.glsl")),
+            vec![AssetEdit::ReplaceBody("x".into())],
+        ),
     )
     .unwrap_err();
     assert!(matches!(err, EditError::InvalidPath { .. }));
@@ -105,16 +105,16 @@ fn apply_rejects_relative_path() {
 }
 
 #[test]
-fn apply_setbytes_on_unloaded_path_implicit_create() {
+fn apply_replace_body_on_unloaded_path_implicit_create() {
     let fs = LpFsMemory::new();
     let mut registry = NodeDefRegistry::new();
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/new.shader.glsl")),
-            ops: vec![EditOp::SetBytes("body".into())],
-        },
+        &ArtifactEdit::asset(
+            EditTarget::Path(LpPathBuf::from("/new.shader.glsl")),
+            vec![AssetEdit::ReplaceBody("body".into())],
+        ),
     )
     .unwrap();
     assert!(registry.slot_overlay_contains_path(LpPath::new("/new.shader.glsl")));
@@ -131,14 +131,14 @@ fn apply_edit_batch_batches_changes() {
             &EditBatch::new(
                 EditBatchId(1),
                 vec![
-                    ArtifactEdit {
-                        target: EditTarget::Path(LpPathBuf::from("/a.glsl")),
-                        ops: vec![EditOp::SetBytes("a".into())],
-                    },
-                    ArtifactEdit {
-                        target: EditTarget::Path(LpPathBuf::from("/b.glsl")),
-                        ops: vec![EditOp::SetBytes("b".into())],
-                    },
+                    ArtifactEdit::asset(
+                        EditTarget::Path(LpPathBuf::from("/a.glsl")),
+                        vec![AssetEdit::ReplaceBody("a".into())],
+                    ),
+                    ArtifactEdit::asset(
+                        EditTarget::Path(LpPathBuf::from("/b.glsl")),
+                        vec![AssetEdit::ReplaceBody("b".into())],
+                    ),
                 ],
             ),
             &fs,
@@ -163,10 +163,10 @@ fn apply_delete_marks_overlay_entry() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/shader.glsl")),
-            ops: vec![EditOp::Delete],
-        },
+        &ArtifactEdit::asset(
+            EditTarget::Path(LpPathBuf::from("/shader.glsl")),
+            vec![AssetEdit::Delete],
+        ),
     )
     .unwrap();
 
@@ -184,13 +184,13 @@ fn apply_slot_op_on_non_toml_path_errors() {
     let err = apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/shader.glsl")),
-            ops: vec![EditOp::SetSlot {
+        &ArtifactEdit::slot(
+            EditTarget::Path(LpPathBuf::from("/shader.glsl")),
+            vec![SlotEdit::AssignValue {
                 path: SlotPath::root(),
                 value: LpValue::F32(1.0),
             }],
-        },
+        ),
     )
     .unwrap_err();
     assert!(matches!(err, EditError::InvalidPath { .. }));

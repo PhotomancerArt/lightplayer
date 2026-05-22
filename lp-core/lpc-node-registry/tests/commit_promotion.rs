@@ -5,8 +5,8 @@ mod common;
 use common::fixtures;
 use lpc_model::{LpValue, NodeDef, Revision, SlotPath, SlotShapeRegistry};
 use lpc_node_registry::{
-    ArtifactEdit, DefSource, EditOp, EditTarget, NodeDefEntry, NodeDefId, NodeDefRegistry,
-    NodeDefState, ParseCtx,
+    ArtifactEdit, AssetEdit, DefSource, EditTarget, NodeDefEntry, NodeDefId, NodeDefRegistry,
+    NodeDefState, ParseCtx, SlotEdit,
 };
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath, LpPathBuf};
 
@@ -67,13 +67,13 @@ fn d2_commit_updates_committed_and_clears_overlay() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![EditOp::SetSlot {
+        &ArtifactEdit::slot(
+            EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            vec![SlotEdit::AssignValue {
                 path: SlotPath::parse("controls.rate").unwrap(),
                 value: LpValue::F32(2.0),
             }],
-        },
+        ),
     );
 
     assert!(registry.slot_overlay_active());
@@ -106,9 +106,9 @@ fn d2_commit_setbytes_updates_committed() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![EditOp::SetBytes(
+        &ArtifactEdit::asset(
+            EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            vec![AssetEdit::ReplaceBody(
                 r#"
 kind = "Clock"
 
@@ -117,7 +117,7 @@ rate = 3.0
 "#
                 .into(),
             )],
-        },
+        ),
     );
 
     registry.commit(&fs, Revision::new(3), &ctx).unwrap();
@@ -137,13 +137,13 @@ fn d2_commit_writes_slot_draft_to_fs() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![EditOp::SetSlot {
+        &ArtifactEdit::slot(
+            EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            vec![SlotEdit::AssignValue {
                 path: SlotPath::parse("controls.rate").unwrap(),
                 value: LpValue::F32(2.0),
             }],
-        },
+        ),
     );
 
     registry.commit(&fs, Revision::new(3), &ctx).unwrap();
@@ -166,13 +166,13 @@ fn d5_overlay_wins_over_stale_fs() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![EditOp::SetSlot {
+        &ArtifactEdit::slot(
+            EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            vec![SlotEdit::AssignValue {
                 path: SlotPath::parse("controls.rate").unwrap(),
                 value: LpValue::F32(2.0),
             }],
-        },
+        ),
     );
 
     fixtures::write_file(
@@ -206,13 +206,13 @@ fn d5_sync_fs_does_not_clobber_overlay_view() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![EditOp::SetSlot {
+        &ArtifactEdit::slot(
+            EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            vec![SlotEdit::AssignValue {
                 path: SlotPath::parse("controls.rate").unwrap(),
                 value: LpValue::F32(2.0),
             }],
-        },
+        ),
     );
 
     fixtures::write_file(
@@ -246,13 +246,13 @@ fn d5_post_commit_fs_sync_updates_committed() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![EditOp::SetSlot {
+        &ArtifactEdit::slot(
+            EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            vec![SlotEdit::AssignValue {
                 path: SlotPath::parse("controls.rate").unwrap(),
                 value: LpValue::F32(2.0),
             }],
-        },
+        ),
     );
     registry.commit(&fs, Revision::new(3), &ctx).unwrap();
     assert!(!registry.slot_overlay_active());
@@ -286,13 +286,13 @@ fn c2_inline_child_changed_after_commit() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/playlist.toml")),
-            ops: vec![EditOp::SetSlot {
+        &ArtifactEdit::slot(
+            EditTarget::Path(LpPathBuf::from("/playlist.toml")),
+            vec![SlotEdit::AssignValue {
                 path: SlotPath::parse("entries[2].node.def.render_order").unwrap(),
                 value: LpValue::I32(7),
             }],
-        },
+        ),
     );
 
     let result = registry.commit(&fs, Revision::new(3), &ctx).unwrap();

@@ -5,7 +5,7 @@ mod common;
 use common::fixtures;
 use lpc_model::{NodeDef, Revision, SlotShapeRegistry};
 use lpc_node_registry::{
-    ArtifactEdit, EditOp, EditTarget, NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState,
+    ArtifactEdit, AssetEdit, EditTarget, NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState,
     ParseCtx,
 };
 use lpfs::{LpPath, LpPathBuf};
@@ -50,9 +50,9 @@ fn effective_view_differs_after_toml_setbytes() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![EditOp::SetBytes(
+        &ArtifactEdit::asset(
+            EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            vec![AssetEdit::ReplaceBody(
                 r#"
 kind = "Clock"
 
@@ -61,7 +61,7 @@ rate = 2.0
 "#
                 .into(),
             )],
-        },
+        ),
     );
 
     let effective = registry.view().get(&root, &fs, &ctx).unwrap();
@@ -93,9 +93,9 @@ fn discard_restores_effective_view_to_committed() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![EditOp::SetBytes(
+        &ArtifactEdit::asset(
+            EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            vec![AssetEdit::ReplaceBody(
                 r#"
 kind = "Clock"
 
@@ -104,7 +104,7 @@ rate = 2.0
 "#
                 .into(),
             )],
-        },
+        ),
     );
     assert_eq!(
         clock_rate(&registry.view().get(&root, &fs, &ctx).unwrap()),
@@ -129,10 +129,10 @@ fn effective_deleted_overlay_yields_parse_error() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![EditOp::Delete],
-        },
+        &ArtifactEdit::asset(
+            EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            vec![AssetEdit::Delete],
+        ),
     );
 
     assert!(matches!(

@@ -17,6 +17,15 @@ Canonical names for M8 and beyond. Layer 0 (`FsEvent`) and layers 3–4 (`SyncOp
 
 `EditBatch` field: `edits: Vec<ArtifactEdit>` (serde alias `changes` for wire compat).
 
+## M10 — Slot / asset split
+
+| Old | New |
+|-----|-----|
+| `EditOp` | removed — use `SlotEdit` or `AssetEdit` |
+| flat `ArtifactEdit { target, ops }` | tagged `ArtifactEdit::Slot` / `::Asset` |
+| `SetBytes` | `AssetEdit::ReplaceBody` |
+| `Delete` (in mixed enum) | `AssetEdit::Delete` |
+
 ## Layer 2 — Slot overlay (registry pending state)
 
 | Old | New |

@@ -10,7 +10,7 @@ use lpc_model::{
 };
 
 use crate::ParseCtx;
-use crate::edit::EditOp;
+use crate::edit::SlotEdit;
 use crate::registry::apply_ops_to_node_def;
 
 use super::DiffError;
@@ -19,14 +19,14 @@ pub fn diff_node_defs(
     base: &NodeDef,
     target: &NodeDef,
     ctx: &ParseCtx<'_>,
-) -> Result<Vec<EditOp>, DiffError> {
+) -> Result<Vec<SlotEdit>, DiffError> {
     if base.kind() == target.kind() && authored_defs_equivalent(base, target, ctx)? {
         return Ok(Vec::new());
     }
     let mut ops = Vec::new();
     let mut current = base.clone();
     if current.kind() != target.kind() {
-        push_variant_set(
+        push_use_enum_variant(
             &mut current,
             &SlotPath::root(),
             String::from(target.variant_name()),
@@ -69,7 +69,7 @@ fn diff_at_path(
     target: &NodeDef,
     path: &SlotPath,
     ctx: &ParseCtx<'_>,
-    ops: &mut Vec<EditOp>,
+    ops: &mut Vec<SlotEdit>,
 ) -> Result<(), DiffError> {
     let shapes = ctx.shapes;
     let slot_kind = {
@@ -95,10 +95,10 @@ fn diff_at_path(
 
     match slot_kind {
         SlotKind::Value { target_value } => {
-            push_set_slot(current, path, target_value, ctx, ops)?;
+            push_assign_value(current, path, target_value, ctx, ops)?;
         }
         SlotKind::Enum { variant } => {
-            push_variant_set(current, path, variant.clone(), ctx, ops)?;
+            push_use_enum_variant(current, path, variant.clone(), ctx, ops)?;
             let variant_name = SlotName::parse(&variant).map_err(|err| DiffError::Diff {
                 message: alloc::format!("enum variant `{path}`: {err}"),
             })?;
@@ -131,7 +131,7 @@ fn diff_at_path(
             }
         }
         SlotKind::Option { present, has_body } => {
-            push_option_set(current, path, present, ctx, ops)?;
+            push_use_option(current, path, present, ctx, ops)?;
             if has_body {
                 diff_at_path(
                     current,
@@ -274,14 +274,14 @@ fn classify_slot(
     }
 }
 
-fn push_variant_set(
+fn push_use_enum_variant(
     current: &mut NodeDef,
     path: &SlotPath,
     variant: String,
     ctx: &ParseCtx<'_>,
-    ops: &mut Vec<EditOp>,
+    ops: &mut Vec<SlotEdit>,
 ) -> Result<(), DiffError> {
-    let op = EditOp::VariantSet {
+    let op = SlotEdit::UseEnumVariant {
         path: path.clone(),
         variant,
     };
@@ -294,14 +294,14 @@ fn push_variant_set(
     Ok(())
 }
 
-fn push_set_slot(
+fn push_assign_value(
     current: &mut NodeDef,
     path: &SlotPath,
     value: LpValue,
     ctx: &ParseCtx<'_>,
-    ops: &mut Vec<EditOp>,
+    ops: &mut Vec<SlotEdit>,
 ) -> Result<(), DiffError> {
-    let op = EditOp::SetSlot {
+    let op = SlotEdit::AssignValue {
         path: path.clone(),
         value,
     };
@@ -319,9 +319,9 @@ fn push_map_remove(
     path: &SlotPath,
     key: &SlotMapKey,
     ctx: &ParseCtx<'_>,
-    ops: &mut Vec<EditOp>,
+    ops: &mut Vec<SlotEdit>,
 ) -> Result<(), DiffError> {
-    let op = EditOp::MapRemove {
+    let op = SlotEdit::MapRemove {
         path: path.clone(),
         key: map_key_display(key),
     };
@@ -341,10 +341,10 @@ fn push_map_insert(
     path: &SlotPath,
     key: &SlotMapKey,
     ctx: &ParseCtx<'_>,
-    ops: &mut Vec<EditOp>,
+    ops: &mut Vec<SlotEdit>,
 ) -> Result<(), DiffError> {
     let placeholder = map_insert_placeholder(target, path, key, ctx)?;
-    let op = EditOp::MapInsert {
+    let op = SlotEdit::MapInsert {
         path: path.clone(),
         key: map_key_display(key),
         value: placeholder,
@@ -365,14 +365,14 @@ fn push_map_insert(
     )
 }
 
-fn push_option_set(
+fn push_use_option(
     current: &mut NodeDef,
     path: &SlotPath,
     present: bool,
     ctx: &ParseCtx<'_>,
-    ops: &mut Vec<EditOp>,
+    ops: &mut Vec<SlotEdit>,
 ) -> Result<(), DiffError> {
-    let op = EditOp::OptionSet {
+    let op = SlotEdit::UseOption {
         path: path.clone(),
         present,
     };

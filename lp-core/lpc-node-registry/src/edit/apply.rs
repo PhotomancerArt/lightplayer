@@ -4,16 +4,23 @@ use alloc::format;
 
 use lpfs::LpPathBuf;
 
-use super::{ArtifactEdit, EditBatch, EditError, EditOp, EditTarget, SlotOverlay};
+use super::{ArtifactEdit, AssetEdit, EditBatch, EditError, EditTarget, SlotOverlay};
 
 pub fn apply_artifact_edit(
     slot_overlay: &mut SlotOverlay,
     resolve_path: &impl Fn(EditTarget) -> Result<LpPathBuf, EditError>,
     edit: &ArtifactEdit,
 ) -> Result<(), EditError> {
-    let path = resolve_path(edit.target.clone())?;
-    for op in &edit.ops {
-        apply_op(slot_overlay, path.clone(), op)?;
+    let path = resolve_path(edit.target().clone())?;
+    match edit {
+        ArtifactEdit::Asset { ops, .. } => {
+            for op in ops {
+                apply_asset_op(slot_overlay, path.clone(), op)?;
+            }
+        }
+        ArtifactEdit::Slot { .. } => {
+            return Err(EditError::UnsupportedOp { op: "slot" });
+        }
     }
     Ok(())
 }
@@ -29,23 +36,20 @@ pub fn apply_edit_batch(
     Ok(())
 }
 
-pub(crate) fn apply_op(
+pub(crate) fn apply_asset_op(
     slot_overlay: &mut SlotOverlay,
     path: LpPathBuf,
-    op: &EditOp,
+    op: &AssetEdit,
 ) -> Result<(), EditError> {
     match op {
-        EditOp::Delete => {
+        AssetEdit::Delete => {
             slot_overlay.apply_delete(path);
             Ok(())
         }
-        EditOp::SetBytes(text) => {
+        AssetEdit::ReplaceBody(text) => {
             slot_overlay.apply_bytes(path, text.as_bytes().to_vec());
             Ok(())
         }
-        other => Err(EditError::UnsupportedOp {
-            op: other.op_name(),
-        }),
     }
 }
 

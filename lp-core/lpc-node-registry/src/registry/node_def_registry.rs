@@ -7,10 +7,9 @@ use alloc::vec::Vec;
 use lpc_model::{NodeDef, NodeInvocation, Revision, SlotPath};
 use lpfs::{FsEvent, LpFs, LpPath, LpPathBuf};
 
-use crate::edit::apply::apply_op;
+use crate::edit::apply::apply_asset_op;
 use crate::edit::{
-    ArtifactEdit, CommitError, EditBatch, EditError, EditOp, EditTarget, SlotOverlay,
-    require_absolute_path,
+    ArtifactEdit, CommitError, EditBatch, EditError, EditTarget, SlotOverlay, require_absolute_path,
 };
 use crate::{ArtifactId, ArtifactLocation, ArtifactStore};
 
@@ -232,13 +231,17 @@ impl NodeDefRegistry {
         ctx: &ParseCtx<'_>,
         frame: Revision,
     ) -> Result<(), EditError> {
-        let path = self.resolve_edit_target(change.target.clone())?;
-        for op in &change.ops {
-            match op {
-                EditOp::Delete | EditOp::SetBytes(_) => {
-                    apply_op(&mut self.slot_overlay, path.clone(), op)?;
+        let path = self.resolve_edit_target(change.target().clone())?;
+        match change {
+            ArtifactEdit::Asset { ops, .. } => {
+                for op in ops {
+                    apply_asset_op(&mut self.slot_overlay, path.clone(), op)?;
                 }
-                _ => self.apply_slot_op(path.clone(), op, fs, ctx, frame)?,
+            }
+            ArtifactEdit::Slot { ops, .. } => {
+                for op in ops {
+                    self.apply_slot_op(path.clone(), op, fs, ctx, frame)?;
+                }
             }
         }
         Ok(())

@@ -11,7 +11,7 @@ use lpc_model::{
 };
 use lpfs::{LpFs, LpPath, LpPathBuf};
 
-use crate::edit::{DefDraft, EditError, EditOp, SlotOverlayEntry};
+use crate::edit::{DefDraft, EditError, SlotEdit, SlotOverlayEntry};
 
 use super::{NodeDefRegistry, ParseCtx};
 
@@ -19,7 +19,7 @@ impl NodeDefRegistry {
     pub(crate) fn apply_slot_op(
         &mut self,
         path: LpPathBuf,
-        op: &EditOp,
+        op: &SlotEdit,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
         frame: Revision,
@@ -85,7 +85,7 @@ pub fn serialize_slot_draft(def: &NodeDef, ctx: &ParseCtx<'_>) -> Result<Vec<u8>
 #[cfg(feature = "diff")]
 pub(crate) fn apply_ops_to_node_def(
     def: &mut NodeDef,
-    ops: &[EditOp],
+    ops: &[SlotEdit],
     ctx: &ParseCtx<'_>,
     frame: Revision,
 ) -> Result<(), EditError> {
@@ -119,29 +119,28 @@ fn parse_def_bytes(bytes: &[u8], ctx: &ParseCtx<'_>) -> Result<NodeDef, EditErro
 
 fn apply_op_to_def(
     def: &mut NodeDef,
-    op: &EditOp,
+    op: &SlotEdit,
     ctx: &ParseCtx<'_>,
     frame: Revision,
 ) -> Result<(), EditError> {
     match op {
-        EditOp::VariantSet { path, variant } => {
+        SlotEdit::UseEnumVariant { path, variant } => {
             if path.is_root() {
-                apply_root_variant_set(def, ctx, frame, variant)
+                apply_root_use_enum_variant(def, ctx, frame, variant)
             } else {
                 mutate_def(def, |root| {
                     set_slot_variant_default(root, ctx.shapes, path, frame, variant)
                 })
             }
         }
-        EditOp::SetSlot { path, value } => mutate_def(def, |root| {
+        SlotEdit::AssignValue { path, value } => mutate_def(def, |root| {
             set_slot_value(root, ctx.shapes, path, frame, value.clone())
         }),
-        EditOp::MapInsert { path, key, value } => {
+        SlotEdit::MapInsert { path, key, value } => {
             apply_map_insert(def, ctx, path, frame, key, value)
         }
-        EditOp::MapRemove { path, key } => apply_map_remove(def, ctx, path, frame, key),
-        EditOp::OptionSet { path, present } => apply_option_set(def, ctx, path, frame, *present),
-        EditOp::Delete | EditOp::SetBytes(_) => Err(EditError::UnsupportedOp { op: op.op_name() }),
+        SlotEdit::MapRemove { path, key } => apply_map_remove(def, ctx, path, frame, key),
+        SlotEdit::UseOption { path, present } => apply_use_option(def, ctx, path, frame, *present),
     }
 }
 
@@ -196,7 +195,7 @@ fn apply_map_remove(
     })
 }
 
-fn apply_option_set(
+fn apply_use_option(
     def: &mut NodeDef,
     ctx: &ParseCtx<'_>,
     path: &SlotPath,
@@ -214,7 +213,7 @@ fn apply_option_set(
     }
 }
 
-fn apply_root_variant_set(
+fn apply_root_use_enum_variant(
     def: &mut NodeDef,
     ctx: &ParseCtx<'_>,
     frame: Revision,

@@ -5,8 +5,8 @@ mod common;
 use common::fixtures;
 use lpc_model::{LpValue, NodeDef, Revision, SlotPath, SlotShapeRegistry};
 use lpc_node_registry::{
-    ArtifactEdit, DefSource, EditOp, EditTarget, NodeDefEntry, NodeDefId, NodeDefRegistry,
-    NodeDefState, ParseCtx, serialize_slot_draft,
+    ArtifactEdit, DefSource, EditTarget, NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState,
+    ParseCtx, SlotEdit, serialize_slot_draft,
 };
 use lpfs::{LpPath, LpPathBuf};
 
@@ -60,13 +60,13 @@ fn c1_setslot_patches_clock_rate_in_view() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![EditOp::SetSlot {
+        &ArtifactEdit::slot(
+            EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            vec![SlotEdit::AssignValue {
                 path: SlotPath::parse("controls.rate").unwrap(),
                 value: LpValue::F32(2.0),
             }],
-        },
+        ),
     );
 
     let effective = registry.view().get(&root, &fs, &ctx).unwrap();
@@ -87,13 +87,13 @@ fn c1_slot_draft_serializes_to_toml() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![EditOp::SetSlot {
+        &ArtifactEdit::slot(
+            EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            vec![SlotEdit::AssignValue {
                 path: SlotPath::parse("controls.rate").unwrap(),
                 value: LpValue::F32(2.0),
             }],
-        },
+        ),
     );
 
     let bytes = registry
@@ -148,13 +148,13 @@ fn c2_playlist_slot_patch_committed_children_unchanged() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/playlist.toml")),
-            ops: vec![EditOp::SetSlot {
+        &ArtifactEdit::slot(
+            EditTarget::Path(LpPathBuf::from("/playlist.toml")),
+            vec![SlotEdit::AssignValue {
                 path: SlotPath::parse("idle_entry").unwrap(),
                 value: LpValue::U32(99),
             }],
-        },
+        ),
     );
 
     let effective = registry.view().get(&root, &fs, &ctx).unwrap();
@@ -181,13 +181,13 @@ fn c2_inline_child_slot_patch_visible_in_view() {
     apply_artifact_edit(
         &mut registry,
         &fs,
-        &ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/playlist.toml")),
-            ops: vec![EditOp::SetSlot {
+        &ArtifactEdit::slot(
+            EditTarget::Path(LpPathBuf::from("/playlist.toml")),
+            vec![SlotEdit::AssignValue {
                 path: SlotPath::parse("entries[2].node.def.render_order").unwrap(),
                 value: LpValue::I32(7),
             }],
-        },
+        ),
     );
 
     let effective = registry.view().get(&child, &fs, &ctx).unwrap();

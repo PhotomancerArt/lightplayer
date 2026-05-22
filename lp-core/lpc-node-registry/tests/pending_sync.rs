@@ -5,7 +5,8 @@ mod common;
 use common::fixtures;
 use lpc_model::{LpValue, Revision, SlotPath, SlotShapeRegistry};
 use lpc_node_registry::{
-    ArtifactEdit, EditBatch, EditBatchId, EditOp, EditTarget, NodeDefRegistry, ParseCtx, SyncOp,
+    ArtifactEdit, AssetEdit, EditBatch, EditBatchId, EditTarget, NodeDefRegistry, ParseCtx,
+    SlotEdit, SyncOp,
 };
 use lpfs::{FsEvent, FsEventKind, LpFsMemory, LpPath, LpPathBuf};
 
@@ -30,10 +31,10 @@ fn sync_apply_updates_overlay() {
     let outcome = registry
         .sync(
             &fs,
-            &[SyncOp::Apply(ArtifactEdit {
-                target: EditTarget::Path(LpPathBuf::from("/a.glsl")),
-                ops: vec![EditOp::SetBytes("a".into())],
-            })],
+            &[SyncOp::Apply(ArtifactEdit::asset(
+                EditTarget::Path(LpPathBuf::from("/a.glsl")),
+                vec![AssetEdit::ReplaceBody("a".into())],
+            ))],
             Revision::new(1),
             &ctx,
         )
@@ -54,10 +55,10 @@ fn sync_remove_drops_one_pending_artifact() {
     registry
         .sync(
             &fs,
-            &[SyncOp::Apply(ArtifactEdit {
-                target: target.clone(),
-                ops: vec![EditOp::SetBytes("a".into())],
-            })],
+            &[SyncOp::Apply(ArtifactEdit::asset(
+                target.clone(),
+                vec![AssetEdit::ReplaceBody("a".into())],
+            ))],
             Revision::new(1),
             &ctx,
         )
@@ -83,13 +84,13 @@ fn sync_apply_then_commit_clears_overlay() {
 
     let batch = EditBatch::new(
         EditBatchId(1),
-        vec![ArtifactEdit {
-            target: EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            ops: vec![EditOp::SetSlot {
+        vec![ArtifactEdit::slot(
+            EditTarget::Path(LpPathBuf::from("/clock.toml")),
+            vec![SlotEdit::AssignValue {
                 path: SlotPath::parse("controls.rate").unwrap(),
                 value: LpValue::F32(2.0),
             }],
-        }],
+        )],
     );
 
     let outcome = registry
@@ -126,13 +127,13 @@ fn sync_fs_and_commit_in_one_batch() {
             &fs,
             &[
                 SyncOp::Fs(fs_modify("/shader.glsl")),
-                SyncOp::Apply(ArtifactEdit {
-                    target: EditTarget::Path(LpPathBuf::from("/shader.toml")),
-                    ops: vec![EditOp::VariantSet {
+                SyncOp::Apply(ArtifactEdit::slot(
+                    EditTarget::Path(LpPathBuf::from("/shader.toml")),
+                    vec![SlotEdit::UseEnumVariant {
                         path: SlotPath::root(),
                         variant: "Shader".into(),
                     }],
-                }),
+                )),
                 SyncOp::Commit,
             ],
             Revision::new(2),
