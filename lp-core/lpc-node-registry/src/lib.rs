@@ -9,6 +9,7 @@ extern crate std;
 
 pub mod artifact;
 pub mod change;
+#[cfg(feature = "diff")]
 pub mod diff;
 pub mod registry;
 pub mod source;
@@ -25,11 +26,12 @@ pub use change::{
     ArtifactChange, ArtifactOp, ArtifactTarget, ChangeError, ChangeOverlay, ChangeSet, ChangeSetId,
     CommitError, OverlayEntry, SlotDraft,
 };
+#[cfg(feature = "diff")]
 pub use diff::{DiffError, ProjectSnapshot, assert_equivalent, diff};
 pub use registry::{
     DefChangeDetail, DefSource, NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState,
     NodeDefUpdates, ParseCtx, RegistryChange, RegistryError, SourceRevisionBump, SyncResult,
-    ValidationErrorPlaceholder, apply_ops_to_node_def, serialize_slot_draft,
+    ValidationErrorPlaceholder, serialize_slot_draft,
 };
 pub use source::{
     MaterializeError, MaterializedSource, ResolveError, SourceDiagnosticCtx, SourceFileRef,

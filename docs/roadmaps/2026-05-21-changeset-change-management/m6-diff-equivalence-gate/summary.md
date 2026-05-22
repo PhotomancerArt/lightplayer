@@ -8,6 +8,7 @@ Implemented on branch `codex/incremental-artifact-reload`.
 
 ### lpc-node-registry
 
+- `diff` Cargo feature (default on host/CI; omit for embedded: `default-features = false`)
 - `diff/` module — `ProjectSnapshot`, `diff()`, `assert_equivalent()`, `DiffError`
 - `diff/def_diff.rs` — slot-tree diff between parsed `NodeDef`s (kind preflight, map/option/enum/value ops)
 - `diff/project_diff.rs` — path union diff: `.toml` → slot ops, assets → `SetBytes`/`Delete`
@@ -28,6 +29,8 @@ Implemented on branch `codex/incremental-artifact-reload`.
 cargo test -p lpc-node-registry --test project_diff
 cargo test -p lpc-node-registry
 cargo clippy -p lpc-node-registry --all-targets --no-deps -- -D warnings
+# Embedded-shaped build (no diff harness):
+cargo check -p lpc-node-registry --no-default-features
 ```
 
 ## Known limits

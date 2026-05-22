@@ -84,7 +84,8 @@ pub fn serialize_slot_draft(def: &NodeDef, ctx: &ParseCtx<'_>) -> Result<Vec<u8>
 }
 
 /// Apply slot ops to an in-memory def (used by diff verification).
-pub fn apply_ops_to_node_def(
+#[cfg(feature = "diff")]
+pub(crate) fn apply_ops_to_node_def(
     def: &mut NodeDef,
     ops: &[ArtifactOp],
     ctx: &ParseCtx<'_>,

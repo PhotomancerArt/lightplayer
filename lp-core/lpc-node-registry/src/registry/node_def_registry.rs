@@ -752,8 +752,8 @@ mod effective_read;
 #[path = "slot_apply.rs"]
 mod slot_apply;
 
-pub use slot_apply::apply_ops_to_node_def;
-
+#[cfg(feature = "diff")]
+pub(crate) use slot_apply::apply_ops_to_node_def;
 pub use slot_apply::serialize_slot_draft;
 
 enum PathChangeKind {

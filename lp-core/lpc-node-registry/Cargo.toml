@@ -7,8 +7,14 @@ license.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["std"]
+default = ["std", "diff"]
 std = ["lpc-model/std", "lpfs/std"]
+# Host/CI harness: project snapshot diff and equivalence gate. Omit on embedded.
+diff = []
+
+[[test]]
+name = "project_diff"
+required-features = ["diff"]
 
 [dependencies]
 lpc-model = { path = "../lpc-model", default-features = false }
