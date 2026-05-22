@@ -12,11 +12,9 @@ pub enum EditOp {
     Delete,
     /// Whole-file body — assets and optional TOML import escape hatch.
     SetBytes(String),
-    /// Set a slot value at `path`.
-    ///
-    /// Apply interprets the value from slot shape: `String` may switch an enum
-    /// variant or node `kind` (at root); other values set scalar leaves. Project
-    /// `nodes[*].def` path strings update invocation locators.
+    /// Set an enum variant at `path`.
+    VariantSet { path: SlotPath, variant: String },
+    /// Set a slot value at `path` (value leaves only).
     SetSlot { path: SlotPath, value: LpValue },
     /// Insert or replace one map entry (`key` is a wire string parsed on apply).
     MapInsert {
@@ -35,6 +33,7 @@ impl EditOp {
         match self {
             Self::Delete => "delete",
             Self::SetBytes(_) => "set_bytes",
+            Self::VariantSet { .. } => "variant_set",
             Self::SetSlot { .. } => "set_slot",
             Self::MapInsert { .. } => "map_insert",
             Self::MapRemove { .. } => "map_remove",

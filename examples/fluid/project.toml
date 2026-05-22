@@ -2,16 +2,16 @@ kind = "Project"
 name = "fluid"
 
 [nodes.output]
-def = { path = "./output.toml" }
+ref = "./output.toml"
 
 [nodes.clock]
-def = { path = "./clock.toml" }
+ref = "./clock.toml"
 
 [nodes.compute]
-def = { path = "./compute.toml" }
+ref = "./compute.toml"
 
 [nodes.fluid]
-def = { path = "./fluid.toml" }
+ref = "./fluid.toml"
 
 [nodes.fixture]
-def = { path = "./fixture.toml" }
+ref = "./fixture.toml"

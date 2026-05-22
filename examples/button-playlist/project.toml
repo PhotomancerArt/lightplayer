@@ -2,16 +2,16 @@ kind = "Project"
 name = "button-playlist"
 
 [nodes.output]
-def = { path = "./output.toml" }
+ref = "./output.toml"
 
 [nodes.clock]
-def = { path = "./clock.toml" }
+ref = "./clock.toml"
 
 [nodes.button]
-def = { path = "./button.toml" }
+ref = "./button.toml"
 
 [nodes.playlist]
-def = { path = "./playlist.toml" }
+ref = "./playlist.toml"
 
 [nodes.fixture]
-def = { path = "./fixture.toml" }
+ref = "./fixture.toml"

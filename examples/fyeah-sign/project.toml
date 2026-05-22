@@ -2,19 +2,19 @@ kind = "Project"
 name = "fyeah-sign"
 
 [nodes.output]
-def = { path = "./output.toml" }
+ref = "./output.toml"
 
 [nodes.clock]
-def = { path = "./clock.toml" }
+ref = "./clock.toml"
 
 [nodes.button]
-def = { path = "./button.toml" }
+ref = "./button.toml"
 
 [nodes.radio]
-def = { path = "./radio.toml" }
+ref = "./radio.toml"
 
 [nodes.playlist]
-def = { path = "./playlist.toml" }
+ref = "./playlist.toml"
 
 [nodes.fixture]
-def = { path = "./fixture.toml" }
+ref = "./fixture.toml"

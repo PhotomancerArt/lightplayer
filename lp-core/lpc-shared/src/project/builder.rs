@@ -181,7 +181,9 @@ impl ProjectBuilder {
             let relative_path = path.as_str().trim_start_matches('/');
             nodes.insert(
                 name.clone(),
-                NodeInvocation::new(ArtifactLocator::path(format!("./{relative_path}"))),
+                EnumSlot::new(NodeInvocation::new(ArtifactLocator::path(format!(
+                    "./{relative_path}"
+                )))),
             );
         }
         let project = ProjectDef {

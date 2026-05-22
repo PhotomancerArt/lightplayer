@@ -24,7 +24,7 @@ pub fn collect_invocations(def: &NodeDef, base: &SlotPath) -> Vec<InvocationSite
             .filter_map(|(name, invocation)| {
                 Some(InvocationSite {
                     path: project_node_path(base, name)?,
-                    invocation: invocation.clone(),
+                    invocation: invocation.value().clone(),
                 })
             })
             .collect(),
@@ -35,7 +35,7 @@ pub fn collect_invocations(def: &NodeDef, base: &SlotPath) -> Vec<InvocationSite
             .filter_map(|(key, entry)| {
                 Some(InvocationSite {
                     path: playlist_entry_node_path(base, *key)?,
-                    invocation: entry.node.clone(),
+                    invocation: entry.node.value().clone(),
                 })
             })
             .collect(),
@@ -100,7 +100,7 @@ fn resolve_path_locator_from_dir(
 mod tests {
     use super::*;
     use alloc::string::ToString;
-    use lpc_model::{NodeDef, NodeDefRef};
+    use lpc_model::NodeDef;
 
     fn parse_def(text: &str) -> NodeDef {
         NodeDef::from_toml_str(text).expect("node def")
@@ -113,10 +113,10 @@ mod tests {
 kind = "Project"
 
 [nodes.clock]
-def = { path = "./clock.toml" }
+ref = "./clock.toml"
 
 [nodes.shader]
-def = { path = "./shader.toml" }
+ref = "./shader.toml"
 "#,
         );
         let sites = collect_invocations(&def, &SlotPath::root());
@@ -142,6 +142,6 @@ source = { path = "active.glsl" }
         let sites = collect_invocations(&def, &SlotPath::root());
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].path.to_string(), "entries[2].node");
-        assert!(matches!(sites[0].invocation.def, NodeDefRef::Inline(_)));
+        assert!(matches!(sites[0].invocation, NodeInvocation::Def(_)));
     }
 }

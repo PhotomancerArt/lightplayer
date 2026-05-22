@@ -12,7 +12,7 @@ use crate::source::{
     MaterializeError, MaterializedSource, SourceDiagnosticCtx, materialize_source,
     resolve_source_file,
 };
-use lpc_model::{NodeDef, NodeDefParseError, NodeDefRef, Revision, SlotPath, SourceFileSlot};
+use lpc_model::{NodeDef, NodeDefParseError, NodeInvocation, Revision, SlotPath, SourceFileSlot};
 
 use super::{NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState, ParseCtx, RegistryError};
 use crate::registry::def_walker::collect_invocations;
@@ -178,9 +178,9 @@ fn def_state_at_source(root: &NodeDef, source_path: &lpc_model::SlotPath) -> Opt
     }
     for site in collect_invocations(root, &lpc_model::SlotPath::root()) {
         if site.path == *source_path {
-            return match &site.invocation.def {
-                NodeDefRef::Inline(body) => Some(NodeDefState::Loaded(body.as_ref().clone())),
-                NodeDefRef::Path(_) => None,
+            return match &site.invocation {
+                NodeInvocation::Def(body) => Some(NodeDefState::Loaded(body.value().clone())),
+                NodeInvocation::Ref(_) => None,
             };
         }
     }

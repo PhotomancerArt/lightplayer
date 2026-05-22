@@ -188,7 +188,7 @@ fn apply_slot_op_on_non_toml_path_errors() {
             target: EditTarget::Path(LpPathBuf::from("/shader.glsl")),
             ops: vec![EditOp::SetSlot {
                 path: SlotPath::root(),
-                value: LpValue::String("Shader".into()),
+                value: LpValue::F32(1.0),
             }],
         },
     )

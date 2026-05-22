@@ -560,7 +560,7 @@ mod tests {
 kind = "Project"
 
 [nodes.clock]
-def = { path = "./clock.toml" }
+ref = "./clock.toml"
 "#,
         )
         .unwrap();
@@ -581,7 +581,7 @@ def = { path = "./clock.toml" }
 kind = "Project"
 
 [nodes.output]
-def = { path = "./output.toml" }
+ref = "./output.toml"
 "#,
         )
         .unwrap();
@@ -610,7 +610,7 @@ brightness = 0.25
 kind = "Project"
 
 [nodes.fixture]
-def = { path = "./fixture.toml" }
+ref = "./fixture.toml"
 "#,
         )
         .unwrap();

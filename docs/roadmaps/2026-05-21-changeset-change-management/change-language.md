@@ -1,7 +1,7 @@
 # ChangeSet Change Language (v1)
 
 Canonical edit vocabulary for client-driven changes. Lives in
-`lpc-node-registry/src/change/` — **serde types, not part of the slot system**.
+`lpc-node-registry/src/edit/` — **serde types, not part of the slot system**.
 Apply uses slot mut access + overlay tables; ops themselves are not `SlotData`.
 
 ## Top level
@@ -54,20 +54,32 @@ target artifact:
 
 | Op | Use |
 |----|-----|
-| `SetSlot { path, value }` | Scalar / enum / value (includes kind, path locators, wiring) |
+| `VariantSet { path, variant }` | Enum variant switch (node kind, `Ref`/`Def`, nested enums) |
+| `SetSlot { path, value }` | Value leaves only (scalars, path strings, etc.) |
 | `MapInsert { path, key, … }` | Map entry |
 | `MapRemove { path, key }` | Map entry |
 | `OptionSet { path, present }` | Option some/none (`some` → shape default) |
 
 Examples:
 
-- Standalone shader file: ops at `path = root()` on `/shader.toml`
-- Inline child: ops at `path = entries[2].node` on `/playlist.toml`
-- Wire to child file: `SetSlot` on `/project.toml` at `nodes[shader]` setting def
-  path locator (not a separate “invocation op”)
+- Standalone shader file: `VariantSet(root, "Shader")` then scalar `SetSlot`s on `/shader.toml`
+- Inline child: ops under `entries[2].node.def.Shader…` on `/playlist.toml`
+- Wire child to file: `VariantSet(nodes[shader], "Ref")` + `SetSlot(nodes[shader].ref, "./shader.toml")`
 
 Relative locators in slot values resolve against the **containing artifact path**
 (same as `resolve_node_locator` today).
+
+## Node invocation TOML (authored)
+
+```toml
+[nodes.shader]
+ref = "./shader.toml"
+
+[nodes.clock.def]
+kind = "Clock"
+```
+
+Legacy `def = { path = … }` is rejected.
 
 ## Node TOML vs assets
 
@@ -85,8 +97,8 @@ Every `examples/*` project must be reachable from blank via a finite
 - Slot ops + `SetBytes` for assets
 - No `CreateDef`; no pre-populated def blobs as the primary path
 
-New node at artifact root: slot ops at `root()` (e.g. set kind → applies
-`KindDef::default()`, then patch slots).
+New node at artifact root: `VariantSet(root, "Shader")` (applies variant default),
+then patch value leaves with `SetSlot`.
 
 ## Apply / commit
 
@@ -109,15 +121,18 @@ ArtifactChange { target: Path("/shader.glsl"), ops: [ SetBytes("…") ] }
 ArtifactChange {
   target: Path("/shader.toml"),
   ops: [
-    SetSlot(root, kind, Shader),
-    SetSlot(root.source, path, "shader.glsl"),
+    VariantSet(root, "Shader"),
+    SetSlot(root.source.path, "./shader.glsl"),
     …
   ],
 }
 
 ArtifactChange {
   target: Path("/project.toml"),
-  ops: [ SetSlot(nodes[shader].def, path, "./shader.toml") ],
+  ops: [
+    VariantSet(nodes[shader], "Ref"),
+    SetSlot(nodes[shader].ref, "./shader.toml"),
+  ],
 }
 ```
 

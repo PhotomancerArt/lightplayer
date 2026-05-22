@@ -2,13 +2,13 @@ kind = "Project"
 name = "button"
 
 [nodes.output]
-def = { path = "./output.toml" }
+ref = "./output.toml"
 
 [nodes.button]
-def = { path = "./button.toml" }
+ref = "./button.toml"
 
 [nodes.shader]
-def = { path = "./shader.toml" }
+ref = "./shader.toml"
 
 [nodes.fixture]
-def = { path = "./fixture.toml" }
+ref = "./fixture.toml"

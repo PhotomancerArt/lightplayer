@@ -330,7 +330,7 @@ mod tests {
 kind = "Project"
 
 [nodes.fluid]
-def = { path = "./fluid.toml" }
+ref = "./fluid.toml"
 "#,
         )
         .expect("project");
@@ -473,10 +473,10 @@ intensity = 2.0
 kind = "Project"
 
 [nodes.compute]
-def = { path = "./compute.toml" }
+ref = "./compute.toml"
 
 [nodes.fluid]
-def = { path = "./fluid.toml" }
+ref = "./fluid.toml"
 "#,
         )
         .expect("project");
@@ -622,10 +622,10 @@ source = "bus#fluid.emitters"
 kind = "Project"
 
 [nodes.clock]
-def = { path = "./clock.toml" }
+ref = "./clock.toml"
 
 [nodes.fluid]
-def = { path = "./fluid.toml" }
+ref = "./fluid.toml"
 "#,
         )
         .expect("project");

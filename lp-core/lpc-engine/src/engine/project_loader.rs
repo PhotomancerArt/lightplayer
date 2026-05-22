@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use lpc_model::LpType;
 use lpc_model::generate_compute_shader_header;
 use lpc_model::nodes::project::project_def::ProjectDef;
-use lpc_model::{ArtifactLocator, ArtifactReadRoot, NodeDefRef, NodeInvocation, NodeKind};
+use lpc_model::{ArtifactLocator, ArtifactReadRoot, NodeInvocation, NodeKind};
 use lpc_model::{
     BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, FixtureDef, FluidDef, Kind,
     LpValue, MappingConfig, NodeDef, NodeId, NodeName, PlaylistDef, PlaylistEntry, Revision,
@@ -143,7 +143,7 @@ impl ProjectLoader {
             })?;
 
         let mut loaded_nodes = Vec::new();
-        for (name, invocation) in project_def.nodes.entries {
+        for (name, invocation_slot) in project_def.nodes.entries {
             let node_name =
                 NodeName::parse(&name).map_err(|e| ProjectLoadError::InvalidNodeName {
                     path: project_path.as_str().to_string(),
@@ -155,7 +155,7 @@ impl ProjectLoader {
                 &mut loaded_nodes,
                 root_id,
                 node_name,
-                invocation,
+                invocation_slot.into_inner(),
                 &project_path,
                 LoadedNodeOwnership::ProjectChild,
                 frame,
@@ -186,19 +186,26 @@ impl ProjectLoader {
         R: ArtifactReadRoot + ?Sized,
         R::Err: core::fmt::Debug,
     {
-        let (artifact_path, source_base_path, config, artifact_id) = match &invocation.def {
-            NodeDefRef::Path(artifact_locator) => {
+        let (artifact_path, source_base_path, config, artifact_id) = match &invocation {
+            NodeInvocation::Ref(path_slot) => {
+                let artifact_locator =
+                    ArtifactLocator::parse(path_slot.value().as_str()).map_err(|err| {
+                        ProjectLoadError::InvalidSourcePath {
+                            path: path_slot.value().as_str().to_string(),
+                            reason: err.to_string(),
+                        }
+                    })?;
                 let artifact_path =
-                    resolve_child_artifact_locator(containing_file, artifact_locator)?;
+                    resolve_child_artifact_locator(containing_file, &artifact_locator)?;
                 let config = load_node_def(root, artifact_path.as_path(), runtime.slot_shapes())?;
                 let artifact_id = runtime
                     .artifacts_mut()
                     .acquire_location(ArtifactLocation::file(artifact_path.clone()), frame);
                 (artifact_path.clone(), artifact_path, config, artifact_id)
             }
-            NodeDefRef::Inline(def) => {
+            NodeInvocation::Def(body) => {
                 let artifact_path = inline_node_artifact_path(containing_file, &node_name);
-                let config = (**def).clone();
+                let config = body.value().clone();
                 let artifact_id = runtime.artifacts_mut().acquire_location(
                     ArtifactLocation::inline_node(containing_file.clone(), node_name.as_str()),
                     frame,
@@ -252,7 +259,7 @@ impl ProjectLoader {
                     loaded_nodes,
                     leaf_id,
                     child_name,
-                    entry.node.clone(),
+                    entry.node.clone().into_inner(),
                     &source_base_path,
                     LoadedNodeOwnership::PlaylistEntry {
                         playlist: leaf_id,
@@ -1459,7 +1466,7 @@ mod tests {
 kind = "Project"
 
 [nodes.fixture]
-def = { path = "./fixture.toml" }
+ref = "./fixture.toml"
 "#,
         )
         .expect("project.toml");
@@ -1558,7 +1565,7 @@ sample_diameter = 2.0
 kind = "Project"
 
 [nodes.playlist]
-def = { path = "./playlist.toml" }
+ref = "./playlist.toml"
 "#,
         )
         .expect("project.toml");
@@ -1570,12 +1577,12 @@ default_fade = 0.35
 
 [entries.1]
 name = "idle"
-node = { def = { path = "./idle.toml" } }
+node = { ref = "./idle.toml" }
 
 [entries.2]
 name = "active"
 duration = 4.0
-node = { def = { path = "./active.toml" } }
+node = { ref = "./active.toml" }
 
 [entries.2.bindings.trigger]
 source = "bus#trigger"
@@ -1627,13 +1634,13 @@ default = 0.0
 kind = "Project"
 
 [nodes.clock]
-def = { path = "./clock.toml" }
+ref = "./clock.toml"
 
 [nodes.button]
-def = { path = "./button.toml" }
+ref = "./button.toml"
 
 [nodes.playlist]
-def = { path = "./playlist.toml" }
+ref = "./playlist.toml"
 "#,
         )
         .expect("project.toml");
@@ -1662,12 +1669,12 @@ source = "bus#time.seconds"
 
 [entries.1]
 name = "idle"
-node = { def = { path = "./idle.toml" } }
+node = { ref = "./idle.toml" }
 
 [entries.2]
 name = "active"
 duration = 4.0
-node = { def = { path = "./active.toml" } }
+node = { ref = "./active.toml" }
 
 [entries.2.bindings.trigger]
 source = "bus#trigger"
@@ -1778,10 +1785,10 @@ source = "bus#trigger"
 kind = "Project"
 
 [nodes.clock]
-def = { path = "./clock.toml" }
+ref = "./clock.toml"
 
 [nodes.shader]
-def = { path = "./shader.toml" }
+ref = "./shader.toml"
 "#,
         )
         .expect("project.toml");
@@ -1957,7 +1964,7 @@ source = { glsl = "vec4 render(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }" }
 kind = "Project"
 
 [nodes.shader]
-def = { path = "./shader.toml" }
+ref = "./shader.toml"
 "#,
         )
         .expect("project.toml");
@@ -2190,7 +2197,7 @@ order = "inner_first"
 kind = "Project"
 
 [nodes.broken]
-def = { path = "./broken.toml" }
+ref = "./broken.toml"
 "#,
         )
         .expect("project.toml");
@@ -2233,7 +2240,7 @@ def = { path = "./broken.toml" }
 kind = "Project"
 
 [nodes.weird]
-def = { path = "./weird.toml" }
+ref = "./weird.toml"
 "#,
         )
         .expect("project.toml");
@@ -2367,7 +2374,7 @@ order = "inner_first"
 kind = "Project"
 
 [nodes.compute]
-def = { path = "./compute.toml" }
+ref = "./compute.toml"
 "#,
         )
         .expect("project.toml");
@@ -2758,7 +2765,7 @@ value = "f32"
 kind = "Project"
 
 [nodes.button]
-def = { path = "./button.toml" }
+ref = "./button.toml"
 "#,
         )
         .expect("project");
@@ -2821,10 +2828,10 @@ stable_ms = 1
 kind = "Project"
 
 [nodes.button]
-def = { path = "./button.toml" }
+ref = "./button.toml"
 
 [nodes.radio]
-def = { path = "./radio.toml" }
+ref = "./radio.toml"
 "#,
         )
         .expect("project");
@@ -3045,16 +3052,16 @@ kind = "Project"
 name = "basic"
 
 [nodes.output]
-def = { path = "./output.toml" }
+ref = "./output.toml"
 
 [nodes.texture]
-def = { path = "./texture.toml" }
+ref = "./texture.toml"
 
 [nodes.shader]
-def = { path = "./shader.toml" }
+ref = "./shader.toml"
 
 [nodes.fixture]
-def = { path = "./fixture.toml" }
+ref = "./fixture.toml"
 "#,
         )
         .expect("project.toml");

@@ -434,7 +434,7 @@ mod tests {
 kind = "Project"
 
 [nodes.texture]
-def = { path = "./texture.toml" }
+ref = "./texture.toml"
 "#,
         )
         .expect("project");

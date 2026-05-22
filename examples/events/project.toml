@@ -2,19 +2,19 @@ kind = "Project"
 name = "events"
 
 [nodes.output]
-def = { path = "./output.toml" }
+ref = "./output.toml"
 
 [nodes.clock]
-def = { path = "./clock.toml" }
+ref = "./clock.toml"
 
 [nodes.event_a]
-def = { path = "./event_a.toml" }
+ref = "./event_a.toml"
 
 [nodes.event_b]
-def = { path = "./event_b.toml" }
+ref = "./event_b.toml"
 
 [nodes.shader]
-def = { path = "./shader.toml" }
+ref = "./shader.toml"
 
 [nodes.fixture]
-def = { path = "./fixture.toml" }
+ref = "./fixture.toml"

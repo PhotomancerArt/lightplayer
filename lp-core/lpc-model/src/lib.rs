@@ -81,7 +81,7 @@ pub use lpfs::lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 pub use node::node_prop_spec::NodePropSpec;
 pub use node::tree_path::{NodePathSegment, PathError, TreePath};
 pub use node::{
-    NodeArtifact, NodeDef, NodeDefRef, NodeId, NodeInvocation, NodeKind, NodeName, NodeNameError,
+    NodeArtifact, NodeDef, NodeId, NodeInvocation, NodeKind, NodeName, NodeNameError,
     RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc,
 };
 pub use nodes::{

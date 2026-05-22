@@ -174,7 +174,7 @@ fn s5b_path_child_parse_error_reports_entered_error() {
 kind = "Playlist"
 
 [entries.2]
-node = { def = { path = "./child.toml" } }
+node = { ref = "./child.toml" }
 "#,
     );
     fixtures::write_file(&mut fs, "/child.toml", "kind = \"Shader\"\n");

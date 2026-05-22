@@ -4,7 +4,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_model::{NodeDef, NodeDefRef, Revision, SlotPath};
+use lpc_model::{NodeDef, NodeInvocation, Revision, SlotPath};
 use lpfs::{FsEvent, LpFs, LpPath, LpPathBuf};
 
 use crate::edit::apply::apply_op;
@@ -359,9 +359,13 @@ impl NodeDefRegistry {
         ctx: &ParseCtx<'_>,
     ) -> Result<(), RegistryError> {
         for site in collect_invocations(&def, &base_path) {
-            match &site.invocation.def {
-                NodeDefRef::Path(locator) => {
-                    let child_path = resolve_node_locator(file_path, locator)?;
+            match &site.invocation {
+                NodeInvocation::Ref(path_slot) => {
+                    let locator = lpc_model::ArtifactLocator::parse(path_slot.value().as_str())
+                        .map_err(|err| RegistryError::LocatorResolution {
+                            message: String::from(err),
+                        })?;
+                    let child_path = resolve_node_locator(file_path, &locator)?;
                     let child_artifact = self.acquire_file_artifact(child_path.clone(), frame)?;
                     let child_source = DefSource::artifact_root(child_artifact);
                     if !self.source_index.contains_key(&child_source) {
@@ -374,7 +378,7 @@ impl NodeDefRegistry {
                         )?;
                     }
                 }
-                NodeDefRef::Inline(body) => {
+                NodeInvocation::Def(body) => {
                     let source = DefSource {
                         artifact_id,
                         path: site.path.clone(),
@@ -382,13 +386,13 @@ impl NodeDefRegistry {
                     let revision = self.store.revision(&artifact_id).unwrap_or(frame);
                     self.register_def_at_source(
                         source,
-                        NodeDefState::Loaded((**body).clone()),
+                        NodeDefState::Loaded(body.value().clone()),
                         revision,
                     )?;
                     self.register_invocations(
                         artifact_id,
                         file_path,
-                        (**body).clone(),
+                        body.value().clone(),
                         site.path,
                         frame,
                         fs,
@@ -559,9 +563,13 @@ impl NodeDefRegistry {
         inventory: &mut BTreeMap<DefSource, NodeDefState>,
     ) -> Result<(), RegistryError> {
         for site in collect_invocations(&def, &base_path) {
-            match &site.invocation.def {
-                NodeDefRef::Path(locator) => {
-                    let child_path = resolve_node_locator(file_path, locator)?;
+            match &site.invocation {
+                NodeInvocation::Ref(path_slot) => {
+                    let locator = lpc_model::ArtifactLocator::parse(path_slot.value().as_str())
+                        .map_err(|err| RegistryError::LocatorResolution {
+                            message: String::from(err),
+                        })?;
+                    let child_path = resolve_node_locator(file_path, &locator)?;
                     let child_artifact = self.acquire_file_artifact(child_path.clone(), frame)?;
                     let child_inventory = self.derive_inventory(
                         child_artifact,
@@ -576,13 +584,13 @@ impl NodeDefRegistry {
                         }
                     }
                 }
-                NodeDefRef::Inline(body) => {
+                NodeInvocation::Def(body) => {
                     let source = DefSource {
                         artifact_id,
                         path: site.path.clone(),
                     };
                     if inventory
-                        .insert(source, NodeDefState::Loaded((**body).clone()))
+                        .insert(source, NodeDefState::Loaded(body.value().clone()))
                         .is_some()
                     {
                         return Err(RegistryError::DuplicateSource);
@@ -590,7 +598,7 @@ impl NodeDefRegistry {
                     self.derive_invocations(
                         artifact_id,
                         file_path,
-                        (**body).clone(),
+                        body.value().clone(),
                         site.path,
                         frame,
                         fs,
@@ -1059,7 +1067,7 @@ kind = "Clock"
 kind = "Playlist"
 
 [entries.2]
-node = { def = { path = "./active.toml" } }
+node = { ref = "./active.toml" }
 "#,
         );
         crate::harness::fixtures::write_file(

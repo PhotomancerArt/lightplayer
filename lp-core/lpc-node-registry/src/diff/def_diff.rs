@@ -5,9 +5,8 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpc_model::{
-    LpValue, NodeDef, NodeDefRef, Revision, SlotAccess, SlotDataAccess, SlotMapKey, SlotName,
-    SlotPath, SlotPathSegment, SlotShapeLookup, SlotShapeRegistry, SlotShapeView,
-    lookup_slot_data_and_shape,
+    LpValue, NodeDef, Revision, SlotAccess, SlotDataAccess, SlotMapKey, SlotName, SlotPath,
+    SlotShapeLookup, SlotShapeRegistry, SlotShapeView, lookup_slot_data_and_shape,
 };
 
 use crate::ParseCtx;
@@ -27,10 +26,10 @@ pub fn diff_node_defs(
     let mut ops = Vec::new();
     let mut current = base.clone();
     if current.kind() != target.kind() {
-        push_set_slot(
+        push_variant_set(
             &mut current,
             &SlotPath::root(),
-            LpValue::String(String::from(target.variant_name())),
+            String::from(target.variant_name()),
             ctx,
             &mut ops,
         )?;
@@ -99,7 +98,7 @@ fn diff_at_path(
             push_set_slot(current, path, target_value, ctx, ops)?;
         }
         SlotKind::Enum { variant } => {
-            push_set_slot(current, path, LpValue::String(variant.clone()), ctx, ops)?;
+            push_variant_set(current, path, variant.clone(), ctx, ops)?;
             let variant_name = SlotName::parse(&variant).map_err(|err| DiffError::Diff {
                 message: alloc::format!("enum variant `{path}`: {err}"),
             })?;
@@ -154,14 +153,6 @@ fn diff_at_path(
                 ops,
             )?;
         }
-        SlotKind::CustomDef => {
-            let def_path = path.child(SlotName::parse("def").expect("valid slot name"));
-            if let Some(value) = invocation_def_value(target, path) {
-                push_set_slot(current, &def_path, value, ctx, ops)?;
-            } else {
-                diff_at_path(current, base, target, &def_path, ctx, ops)?;
-            }
-        }
         SlotKind::Same => {}
     }
     Ok(())
@@ -191,7 +182,6 @@ enum SlotKind {
         has_body: bool,
     },
     OptionBody,
-    CustomDef,
 }
 
 fn classify_slot(
@@ -271,7 +261,9 @@ fn classify_slot(
                 Ok(SlotKind::Same)
             }
         }
-        (SlotDataAccess::Custom(_), SlotDataAccess::Custom(_)) => Ok(SlotKind::CustomDef),
+        (SlotDataAccess::Custom(_), SlotDataAccess::Custom(_)) => Err(DiffError::Diff {
+            message: String::from("custom slot diff is not supported"),
+        }),
         _ => Err(DiffError::Diff {
             message: alloc::format!(
                 "shape/data mismatch: {} vs {}",
@@ -280,6 +272,26 @@ fn classify_slot(
             ),
         }),
     }
+}
+
+fn push_variant_set(
+    current: &mut NodeDef,
+    path: &SlotPath,
+    variant: String,
+    ctx: &ParseCtx<'_>,
+    ops: &mut Vec<EditOp>,
+) -> Result<(), DiffError> {
+    let op = EditOp::VariantSet {
+        path: path.clone(),
+        variant,
+    };
+    apply_ops_to_node_def(current, &[op.clone()], ctx, Revision::new(1)).map_err(|err| {
+        DiffError::Diff {
+            message: err.to_string(),
+        }
+    })?;
+    ops.push(op);
+    Ok(())
 }
 
 fn push_set_slot(
@@ -421,30 +433,6 @@ fn default_lp_value(ty: &lpc_model::LpType) -> Result<LpValue, DiffError> {
             });
         }
     })
-}
-
-fn invocation_def_value(def: &NodeDef, path: &SlotPath) -> Option<LpValue> {
-    let segs = path.segments();
-    if segs.len() == 2 {
-        let SlotPathSegment::Field(field) = &segs[0] else {
-            return None;
-        };
-        if field.as_str() != "nodes" {
-            return None;
-        }
-        let SlotPathSegment::Key(SlotMapKey::String(name)) = &segs[1] else {
-            return None;
-        };
-        let NodeDef::Project(project) = def else {
-            return None;
-        };
-        let invocation = project.nodes.entries.get(name.as_str())?;
-        return match &invocation.def {
-            NodeDefRef::Path(locator) => Some(LpValue::String(locator.to_string())),
-            NodeDefRef::Inline(_) => None,
-        };
-    }
-    None
 }
 
 fn map_key_display(key: &SlotMapKey) -> String {

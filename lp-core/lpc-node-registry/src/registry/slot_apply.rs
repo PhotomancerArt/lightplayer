@@ -5,15 +5,13 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    ArtifactLocator, LpValue, NodeArtifact, NodeDef, NodeDefRef, NodeInvocation, Revision,
-    SlotMapKey, SlotMutAccess, SlotPath, SlotPathSegment, insert_slot_map_entry_default,
-    lookup_slot_data_and_shape, remove_slot_map_entry, set_slot_option_none,
-    set_slot_option_some_default, set_slot_value, set_slot_variant_default,
+    LpValue, NodeArtifact, NodeDef, Revision, SlotMapKey, SlotMutAccess, SlotPath, SlotPathSegment,
+    insert_slot_map_entry_default, lookup_slot_data_and_shape, remove_slot_map_entry,
+    set_slot_option_none, set_slot_option_some_default, set_slot_value, set_slot_variant_default,
 };
 use lpfs::{LpFs, LpPath, LpPathBuf};
 
 use crate::edit::{DefDraft, EditError, EditOp, SlotOverlayEntry};
-use crate::registry::def_walker::collect_invocations;
 
 use super::{NodeDefRegistry, ParseCtx};
 
@@ -126,7 +124,18 @@ fn apply_op_to_def(
     frame: Revision,
 ) -> Result<(), EditError> {
     match op {
-        EditOp::SetSlot { path, value } => apply_set_slot_on_def(def, ctx, path, frame, value),
+        EditOp::VariantSet { path, variant } => {
+            if path.is_root() {
+                apply_root_variant_set(def, ctx, frame, variant)
+            } else {
+                mutate_def(def, |root| {
+                    set_slot_variant_default(root, ctx.shapes, path, frame, variant)
+                })
+            }
+        }
+        EditOp::SetSlot { path, value } => mutate_def(def, |root| {
+            set_slot_value(root, ctx.shapes, path, frame, value.clone())
+        }),
         EditOp::MapInsert { path, key, value } => {
             apply_map_insert(def, ctx, path, frame, key, value)
         }
@@ -134,90 +143,6 @@ fn apply_op_to_def(
         EditOp::OptionSet { path, present } => apply_option_set(def, ctx, path, frame, *present),
         EditOp::Delete | EditOp::SetBytes(_) => Err(EditError::UnsupportedOp { op: op.op_name() }),
     }
-}
-
-fn apply_set_slot_on_def(
-    def: &mut NodeDef,
-    ctx: &ParseCtx<'_>,
-    path: &SlotPath,
-    frame: Revision,
-    value: &LpValue,
-) -> Result<(), EditError> {
-    if path.is_root() {
-        if let LpValue::String(variant) = value {
-            let mut artifact = NodeArtifact::new(def.clone());
-            return mutate_def(&mut artifact, |root| {
-                set_slot_variant_default(root, ctx.shapes, path, frame, variant)
-            })
-            .map(|()| {
-                *def = artifact.into_node_def();
-            });
-        }
-    } else if let LpValue::String(variant) = value {
-        if mutate_def(def, |root| {
-            set_slot_variant_default(root, ctx.shapes, path, frame, variant)
-        })
-        .is_ok()
-        {
-            return Ok(());
-        }
-    }
-    if let Some((body, inner)) = inline_body_mutation(def, path) {
-        return mutate_def(body, |root| {
-            set_slot_value(root, ctx.shapes, &inner, frame, value.clone())
-        });
-    }
-    if let Some(invocation) = project_node_def_mutation(def, path) {
-        return apply_node_invocation_def(invocation, value);
-    }
-    mutate_def(def, |root| {
-        set_slot_value(root, ctx.shapes, path, frame, value.clone())
-    })
-}
-
-fn apply_node_invocation_def(
-    invocation: &mut NodeInvocation,
-    value: &LpValue,
-) -> Result<(), EditError> {
-    let LpValue::String(path) = value else {
-        return Err(EditError::SlotMutation {
-            message: String::from("node invocation def expects string path"),
-        });
-    };
-    let locator = ArtifactLocator::parse(path).map_err(|err| EditError::SlotMutation {
-        message: err.to_string(),
-    })?;
-    *invocation = NodeInvocation::path(locator);
-    Ok(())
-}
-
-fn project_node_def_mutation<'a>(
-    def: &'a mut NodeDef,
-    path: &SlotPath,
-) -> Option<&'a mut NodeInvocation> {
-    let segs = path.segments();
-    if segs.len() != 3 {
-        return None;
-    }
-    let SlotPathSegment::Field(nodes) = &segs[0] else {
-        return None;
-    };
-    if nodes.as_str() != "nodes" {
-        return None;
-    }
-    let SlotPathSegment::Key(SlotMapKey::String(name)) = &segs[1] else {
-        return None;
-    };
-    let SlotPathSegment::Field(def_field) = &segs[2] else {
-        return None;
-    };
-    if def_field.as_str() != "def" {
-        return None;
-    }
-    let NodeDef::Project(project) = def else {
-        return None;
-    };
-    project.nodes.entries.get_mut(name.as_str())
 }
 
 fn apply_map_insert(
@@ -289,95 +214,26 @@ fn apply_option_set(
     }
 }
 
-fn inline_body_mutation<'a>(
-    def: &'a mut NodeDef,
-    path: &SlotPath,
-) -> Option<(&'a mut NodeDef, SlotPath)> {
-    let sites = collect_invocations(def, &SlotPath::root())
-        .into_iter()
-        .map(|site| site.path)
-        .collect::<Vec<_>>();
-    let (site_path, inner) = matching_inline_inner_path(path, &sites)?;
-    let invocation = invocation_at_mut(def, &site_path)?;
-    let NodeDefRef::Inline(body) = &mut invocation.def else {
-        return None;
-    };
-    Some((body.as_mut(), inner))
-}
-
-fn matching_inline_inner_path(path: &SlotPath, sites: &[SlotPath]) -> Option<(SlotPath, SlotPath)> {
-    for site_path in sites {
-        let site_len = site_path.segments().len();
-        let path_segs = path.segments();
-        if path_segs.len() <= site_len {
-            continue;
-        }
-        if path_segs[..site_len] != site_path.segments()[..site_len] {
-            continue;
-        }
-        let SlotPathSegment::Field(name) = &path_segs[site_len] else {
-            continue;
-        };
-        if name.as_str() != "def" {
-            continue;
-        }
-        let inner = SlotPath::from_segments(path_segs[site_len + 1..].to_vec());
-        return Some((site_path.clone(), inner));
-    }
-    None
-}
-
-fn invocation_at_mut<'a>(def: &'a mut NodeDef, path: &SlotPath) -> Option<&'a mut NodeInvocation> {
-    let segs = path.segments();
-    match def {
-        NodeDef::Project(project) if segs.len() == 2 => {
-            let SlotPathSegment::Field(nodes) = &segs[0] else {
-                return None;
-            };
-            if nodes.as_str() != "nodes" {
-                return None;
-            }
-            let SlotPathSegment::Key(SlotMapKey::String(name)) = &segs[1] else {
-                return None;
-            };
-            project.nodes.entries.get_mut(name)
-        }
-        NodeDef::Playlist(playlist) if segs.len() == 3 => {
-            let SlotPathSegment::Field(entries) = &segs[0] else {
-                return None;
-            };
-            if entries.as_str() != "entries" {
-                return None;
-            }
-            let SlotPathSegment::Key(key) = &segs[1] else {
-                return None;
-            };
-            let SlotPathSegment::Field(node) = &segs[2] else {
-                return None;
-            };
-            if node.as_str() != "node" {
-                return None;
-            }
-            let key = match key {
-                SlotMapKey::U32(value) => *value,
-                SlotMapKey::I32(value) if *value >= 0 => *value as u32,
-                _ => return None,
-            };
-            playlist
-                .entries
-                .entries
-                .get_mut(&key)
-                .map(|entry| &mut entry.node)
-        }
-        _ => None,
-    }
+fn apply_root_variant_set(
+    def: &mut NodeDef,
+    ctx: &ParseCtx<'_>,
+    frame: Revision,
+    variant: &str,
+) -> Result<(), EditError> {
+    let mut artifact = NodeArtifact::new(def.clone());
+    set_slot_variant_default(&mut artifact, ctx.shapes, &SlotPath::root(), frame, variant)
+        .map_err(|err| EditError::SlotMutation {
+            message: err.to_string(),
+        })?;
+    *def = artifact.into_node_def();
+    Ok(())
 }
 
 fn mutate_def(
-    root: &mut dyn SlotMutAccess,
+    def: &mut NodeDef,
     f: impl FnOnce(&mut dyn SlotMutAccess) -> Result<(), lpc_model::SlotMutationError>,
 ) -> Result<(), EditError> {
-    f(root).map_err(|err| EditError::SlotMutation {
+    f(def).map_err(|err| EditError::SlotMutation {
         message: err.to_string(),
     })
 }

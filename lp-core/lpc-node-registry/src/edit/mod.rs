@@ -54,9 +54,9 @@ mod tests {
                 target: EditTarget::Path(LpPathBuf::from("/shader.glsl")),
                 ops: vec![
                     EditOp::SetBytes("void main() {}".into()),
-                    EditOp::SetSlot {
+                    EditOp::VariantSet {
                         path: SlotPath::root(),
-                        value: LpValue::String("Clock".into()),
+                        variant: "Clock".into(),
                     },
                 ],
             }],

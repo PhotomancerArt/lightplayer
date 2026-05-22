@@ -1,7 +1,7 @@
 //! Shell views for parent def change detection.
 
 use lpc_model::{
-    NodeDef, NodeDefRef, NodeInvocation, NodeKind,
+    EnumSlot, NodeDef, NodeInvocation, NodeKind,
     nodes::{
         button::ButtonDef,
         clock::ClockDef,
@@ -22,14 +22,14 @@ pub fn def_shell(def: &NodeDef) -> NodeDef {
         NodeDef::Project(project) => {
             let mut shell = project.clone();
             for invocation in shell.nodes.entries.values_mut() {
-                *invocation = invocation_shell(invocation);
+                *invocation = EnumSlot::new(invocation_shell(invocation.value()));
             }
             NodeDef::Project(shell)
         }
         NodeDef::Playlist(playlist) => {
             let mut shell = playlist.clone();
             for entry in shell.entries.entries.values_mut() {
-                entry.node = invocation_shell(&entry.node);
+                entry.node = EnumSlot::new(invocation_shell(entry.node.value()));
             }
             NodeDef::Playlist(shell)
         }
@@ -38,9 +38,9 @@ pub fn def_shell(def: &NodeDef) -> NodeDef {
 }
 
 fn invocation_shell(invocation: &NodeInvocation) -> NodeInvocation {
-    match &invocation.def {
-        NodeDefRef::Path(locator) => NodeInvocation::path(locator.clone()),
-        NodeDefRef::Inline(body) => NodeInvocation::inline(kind_stub(body.kind())),
+    match invocation {
+        NodeInvocation::Ref(_) => invocation.clone(),
+        NodeInvocation::Def(body) => NodeInvocation::inline(kind_stub(body.value().kind())),
     }
 }
 

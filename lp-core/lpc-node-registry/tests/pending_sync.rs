@@ -128,9 +128,9 @@ fn sync_fs_and_commit_in_one_batch() {
                 SyncOp::Fs(fs_modify("/shader.glsl")),
                 SyncOp::Apply(ArtifactEdit {
                     target: EditTarget::Path(LpPathBuf::from("/shader.toml")),
-                    ops: vec![EditOp::SetSlot {
+                    ops: vec![EditOp::VariantSet {
                         path: SlotPath::root(),
-                        value: LpValue::String("Shader".into()),
+                        variant: "Shader".into(),
                     }],
                 }),
                 SyncOp::Commit,
