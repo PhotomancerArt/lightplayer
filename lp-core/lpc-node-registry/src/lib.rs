@@ -9,10 +9,10 @@ extern crate std;
 
 pub mod artifact;
 pub mod registry;
+pub mod source;
 pub mod view;
 
 mod change;
-mod source;
 
 pub use artifact::{
     ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactReadFailure,
@@ -21,5 +21,9 @@ pub use artifact::{
 pub use registry::{
     DefSource, NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState, NodeDefUpdates, ParseCtx,
     RegistryError, ValidationErrorPlaceholder,
+};
+pub use source::{
+    MaterializeError, MaterializedSource, ResolveError, SourceDiagnosticCtx, SourceFileRef,
+    materialize_source, resolve_source_file,
 };
 pub use view::NodeDefView;

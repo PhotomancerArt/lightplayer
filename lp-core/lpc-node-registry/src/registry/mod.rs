@@ -12,6 +12,7 @@ mod parse_ctx;
 mod registry_error;
 
 pub use def_source::DefSource;
+pub(crate) use def_walker::resolve_node_locator;
 pub use node_def_entry::NodeDefEntry;
 pub use node_def_id::NodeDefId;
 pub use node_def_registry::NodeDefRegistry;

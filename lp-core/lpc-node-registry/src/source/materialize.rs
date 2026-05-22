@@ -1,0 +1,193 @@
+//! Materialize [`SourceFileRef`] to transient UTF-8 text.
+
+use alloc::format;
+use alloc::string::{String, ToString};
+
+use lpc_model::{Revision, SlotPath, SourceFileSlot};
+use lpfs::LpFs;
+
+use crate::{ArtifactError, ArtifactStore};
+
+use super::{MaterializedSource, SourceFileRef};
+
+/// Context for stable compile/diagnostic labels.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceDiagnosticCtx {
+    pub containing_file: String,
+    pub slot_path: Option<SlotPath>,
+}
+
+/// Errors from [`materialize_source`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MaterializeError {
+    Unsupported,
+    MissingInlineBody,
+    Utf8 { message: String },
+    Artifact(ArtifactError),
+}
+
+impl From<ArtifactError> for MaterializeError {
+    fn from(err: ArtifactError) -> Self {
+        Self::Artifact(err)
+    }
+}
+
+/// Read source bytes/text transiently and compute the effective revision.
+pub fn materialize_source(
+    store: &mut ArtifactStore,
+    fs: &dyn LpFs,
+    reference: &SourceFileRef,
+    slot: &SourceFileSlot,
+    ctx: &SourceDiagnosticCtx,
+) -> Result<MaterializedSource, MaterializeError> {
+    match reference {
+        SourceFileRef::File {
+            artifact_id,
+            authored_path,
+            ..
+        } => {
+            let bytes = store.read_bytes(artifact_id, fs)?;
+            let text = core::str::from_utf8(&bytes).map_err(|err| MaterializeError::Utf8 {
+                message: format!("{err}"),
+            })?;
+            let artifact_revision = store
+                .revision(artifact_id)
+                .unwrap_or_else(Revision::default);
+            Ok(MaterializedSource {
+                version: slot.revision().max(artifact_revision),
+                text: String::from(text),
+                diagnostic_name: authored_path.as_str().to_string(),
+            })
+        }
+        SourceFileRef::Inline { extension, .. } => {
+            let (_, text) = slot
+                .inline_value()
+                .ok_or(MaterializeError::MissingInlineBody)?;
+            Ok(MaterializedSource {
+                version: slot.revision(),
+                text: String::from(text),
+                diagnostic_name: inline_diagnostic_name(ctx, extension),
+            })
+        }
+        SourceFileRef::Url { .. } => Err(MaterializeError::Unsupported),
+    }
+}
+
+fn inline_diagnostic_name(ctx: &SourceDiagnosticCtx, extension: &str) -> String {
+    match &ctx.slot_path {
+        Some(path) => format!("{}:{}.{}", ctx.containing_file, path, extension),
+        None => format!("{}:source.{}", ctx.containing_file, extension),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::source::resolve_source_file;
+    use lpc_model::Revision;
+    use lpfs::{ChangeType, FsChange, LpFsMemory, LpPath, LpPathBuf};
+
+    fn write_file(fs: &mut LpFsMemory, path: &str, content: &[u8]) {
+        fs.write_file_mut(LpPathBuf::from(path).as_path(), content)
+            .unwrap();
+    }
+
+    fn fs_change(path: &str) -> FsChange {
+        FsChange {
+            path: LpPathBuf::from(path),
+            change_type: ChangeType::Modify,
+        }
+    }
+
+    fn diag_ctx() -> SourceDiagnosticCtx {
+        SourceDiagnosticCtx {
+            containing_file: String::from("/shader.toml"),
+            slot_path: None,
+        }
+    }
+
+    #[test]
+    fn materialize_file_reads_utf8() {
+        let mut fs = LpFsMemory::new();
+        write_file(&mut fs, "/shader.glsl", b"void main() {}");
+
+        let slot = SourceFileSlot::from_path("./shader.glsl");
+        let slot_revision = slot.revision();
+        let mut store = ArtifactStore::new();
+        let containing = LpPath::new("/shader.toml");
+        let frame = Revision::new(1);
+        let reference = resolve_source_file(&mut store, containing, &slot, frame).expect("resolve");
+
+        let materialized =
+            materialize_source(&mut store, &fs, &reference, &slot, &diag_ctx()).expect("read");
+
+        assert!(materialized.text.contains("main"));
+        assert_eq!(materialized.diagnostic_name, "./shader.glsl");
+        assert_eq!(materialized.version, slot_revision.max(frame));
+    }
+
+    #[test]
+    fn materialize_inline_uses_slot_text_and_diagnostic_name() {
+        let slot = SourceFileSlot::from_inline("glsl", "void main() {}");
+        let reference = SourceFileRef::Inline {
+            extension: String::from("glsl"),
+            slot_revision: slot.revision(),
+        };
+
+        let materialized = materialize_source(
+            &mut ArtifactStore::new(),
+            &LpFsMemory::new(),
+            &reference,
+            &slot,
+            &diag_ctx(),
+        )
+        .expect("read");
+
+        assert!(materialized.text.contains("main"));
+        assert_eq!(materialized.diagnostic_name, "/shader.toml:source.glsl");
+        assert_eq!(materialized.version, slot.revision());
+    }
+
+    #[test]
+    fn file_bump_increases_version_without_slot_edit() {
+        let mut fs = LpFsMemory::new();
+        write_file(&mut fs, "/shader.glsl", b"v1");
+
+        let slot = SourceFileSlot::from_path("./shader.glsl");
+        let slot_revision = slot.revision();
+        let mut store = ArtifactStore::new();
+        let containing = LpPath::new("/shader.toml");
+        let reference =
+            resolve_source_file(&mut store, containing, &slot, Revision::new(1)).expect("resolve");
+
+        let first =
+            materialize_source(&mut store, &fs, &reference, &slot, &diag_ctx()).expect("read");
+        assert_eq!(first.text, "v1");
+        assert_eq!(first.version, slot_revision.max(Revision::new(1)));
+
+        write_file(&mut fs, "/shader.glsl", b"v2");
+        store.apply_fs_changes(&[fs_change("/shader.glsl")], Revision::new(5));
+
+        let second =
+            materialize_source(&mut store, &fs, &reference, &slot, &diag_ctx()).expect("read");
+        assert_eq!(second.text, "v2");
+        assert_eq!(second.version, slot_revision.max(Revision::new(5)));
+        assert!(second.version >= first.version);
+    }
+
+    #[test]
+    fn url_ref_is_unsupported() {
+        let reference = SourceFileRef::Url {
+            url: String::from("https://example.com/shader.glsl"),
+        };
+        let err = materialize_source(
+            &mut ArtifactStore::new(),
+            &LpFsMemory::new(),
+            &reference,
+            &SourceFileSlot::default(),
+            &diag_ctx(),
+        )
+        .unwrap_err();
+        assert_eq!(err, MaterializeError::Unsupported);
+    }
+}

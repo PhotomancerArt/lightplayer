@@ -108,8 +108,9 @@ pub use slot::{
     Affine2d, Affine2dSlot, ArtifactPath, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue,
     ControlProductSlot, Dim2u, Dim2uSlot, FromLpValue, OrderedF32, PositiveF32, PositiveF32Slot,
     Ratio, RatioSlot, RelativeNodeRefSlot, RenderOrder, RenderOrderSlot, ResourceRefSlot,
-    SlotEnumOption, SlotMapValueAccess, SlotValue, SlotValueShape, SourcePath, SourcePathSlot,
-    ToLpValue, ValueEditorHint, ValueRootError, VisualProductSlot, Xy, XySlot,
+    SlotEnumOption, SlotMapValueAccess, SlotValue, SlotValueShape, SourceFileBacking,
+    SourceFileSlot, SourcePath, SourcePathSlot, ToLpValue, ValueEditorHint, ValueRootError,
+    VisualProductSlot, Xy, XySlot,
 };
 pub use slot::{
     DynamicSlotObject, EnumSlot, FieldSlot, FieldSlotMut, MapSlot, MapSlotAccess, MapSlotAccessMut,

@@ -19,6 +19,21 @@ pub(crate) fn read_custom_slot<S>(
 where
     S: SyntaxEventSource,
 {
+    if codec == crate::slots::SOURCE_FILE_CODEC_ID {
+        let Some(slot) = data
+            .as_any_mut()
+            .downcast_mut::<crate::slots::SourceFileSlot>()
+        else {
+            value.skip_value()?;
+            return Err(SyntaxError::new(
+                "",
+                None,
+                "source file codec expected SourceFileSlot data",
+            ));
+        };
+        return slot.read_slot(value);
+    }
+
     if codec == crate::node::node_invocation::NODE_INVOCATION_CODEC_ID {
         let Some(invocation) = data
             .as_any_mut()
@@ -51,6 +66,15 @@ pub(crate) fn write_custom_slot_json<W>(
 where
     W: SlotWrite,
 {
+    if codec == crate::slots::SOURCE_FILE_CODEC_ID {
+        let Some(slot) = data.as_any().downcast_ref::<crate::slots::SourceFileSlot>() else {
+            return Err(SlotWriteError::InvalidSlotData(
+                "source file codec expected SourceFileSlot data".into(),
+            ));
+        };
+        return slot.write_slot_json(value);
+    }
+
     if codec == crate::node::node_invocation::NODE_INVOCATION_CODEC_ID {
         let Some(invocation) = data
             .as_any()
@@ -73,6 +97,15 @@ pub(crate) fn write_custom_slot_toml(
     data: &dyn SlotCustomAccess,
     registry: &SlotShapeRegistry,
 ) -> Result<toml::Value, SlotDataWriteError> {
+    if codec == crate::slots::SOURCE_FILE_CODEC_ID {
+        let Some(slot) = data.as_any().downcast_ref::<crate::slots::SourceFileSlot>() else {
+            return Err(SlotDataWriteError::ShapeDataMismatch {
+                message: "source file codec expected SourceFileSlot data".into(),
+            });
+        };
+        return slot.write_slot_toml();
+    }
+
     if codec == crate::node::node_invocation::NODE_INVOCATION_CODEC_ID {
         let Some(invocation) = data
             .as_any()
@@ -94,6 +127,13 @@ pub(crate) fn snapshot_custom_slot_data<'a>(
     codec: SlotShapeId,
     data: &'a dyn SlotCustomAccess,
 ) -> Result<SlotDataAccess<'a>, String> {
+    if codec == crate::slots::SOURCE_FILE_CODEC_ID {
+        let Some(slot) = data.as_any().downcast_ref::<crate::slots::SourceFileSlot>() else {
+            return Err("source file codec expected SourceFileSlot data".into());
+        };
+        return Ok(SlotDataAccess::Custom(slot));
+    }
+
     if codec == crate::node::node_invocation::NODE_INVOCATION_CODEC_ID {
         let Some(invocation) = data
             .as_any()

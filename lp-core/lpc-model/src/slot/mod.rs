@@ -105,8 +105,8 @@ pub use static_slot_shape::{
 pub use crate::slots::{
     Affine2d, Affine2dSlot, ArtifactPath, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue,
     ControlProductSlot, Dim2u, Dim2uSlot, PositiveF32, PositiveF32Slot, Ratio, RatioSlot,
-    RelativeNodeRefSlot, RenderOrder, RenderOrderSlot, ResourceRefSlot, SourcePath, SourcePathSlot,
-    VisualProductSlot, Xy, XySlot,
+    RelativeNodeRefSlot, RenderOrder, RenderOrderSlot, ResourceRefSlot, SourceFileBacking,
+    SourceFileSlot, SourcePath, SourcePathSlot, VisualProductSlot, Xy, XySlot,
 };
 pub use value_ref::ValueRef;
 pub use value_slot::{MapSlot, MapSlotKeyLike, OptionSlot, SlotMapValueAccess, ValueSlot};

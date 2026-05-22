@@ -131,6 +131,18 @@ where
         self.replay = Some(event);
     }
 
+    pub(crate) fn peek_event(&mut self) -> Result<Option<SyntaxEvent>, SyntaxError> {
+        if let Some(event) = self.replay.take() {
+            self.replay = Some(event.clone());
+            return Ok(Some(event));
+        }
+        let event = self.source.next_event()?;
+        if let Some(ref evt) = event {
+            self.replay = Some(evt.clone());
+        }
+        Ok(event)
+    }
+
     fn skip_value(&mut self) -> Result<(), SyntaxError> {
         let Some(event) = self.next_event()? else {
             return Err(self.error("expected value to skip, found end of input"));
@@ -512,6 +524,11 @@ where
             Some(event) => Err(self.reader.error_at(event.span(), "expected bool")),
             None => Err(self.reader.error("expected bool, found end of input")),
         }
+    }
+
+    pub fn is_string_scalar(&mut self) -> Result<bool, SyntaxError> {
+        let event = self.reader.peek_event()?;
+        Ok(matches!(event, Some(SyntaxEvent::StringChunk { .. })))
     }
 
     pub fn string(self) -> Result<String, SyntaxError> {
