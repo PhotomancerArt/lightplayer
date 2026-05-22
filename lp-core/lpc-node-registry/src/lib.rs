@@ -8,6 +8,7 @@ extern crate alloc;
 extern crate std;
 
 pub mod artifact;
+pub mod change;
 pub mod registry;
 pub mod source;
 pub mod view;
@@ -15,11 +16,13 @@ pub mod view;
 #[cfg(test)]
 pub mod harness;
 
-mod change;
-
 pub use artifact::{
     ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactReadFailure,
     ArtifactReadState, ArtifactStore,
+};
+pub use change::{
+    ArtifactChange, ArtifactOp, ArtifactTarget, ChangeError, ChangeOverlay, ChangeSet, ChangeSetId,
+    OverlayEntry,
 };
 pub use registry::{
     DefChangeDetail, DefSource, NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState,

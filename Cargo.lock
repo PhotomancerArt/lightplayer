@@ -4095,6 +4095,8 @@ version = "40.0.0"
 dependencies = [
  "lpc-model",
  "lpfs",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

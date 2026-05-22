@@ -7,6 +7,10 @@ use alloc::vec::Vec;
 use lpc_model::{NodeDef, NodeDefParseError, NodeDefRef, Revision, SlotPath};
 use lpfs::{FsChange, LpFs, LpPath, LpPathBuf};
 
+use crate::change::apply::apply_op;
+use crate::change::{
+    ArtifactChange, ArtifactTarget, ChangeError, ChangeOverlay, ChangeSet, require_absolute_path,
+};
 use crate::{ArtifactError, ArtifactId, ArtifactLocation, ArtifactStore};
 
 use super::def_shell::{is_container_def, shell_changed};
@@ -25,6 +29,7 @@ use super::{
 /// [`Self::sync`] or [`Self::sync_fs`].
 pub struct NodeDefRegistry {
     store: ArtifactStore,
+    overlay: ChangeOverlay,
     entries: BTreeMap<NodeDefId, NodeDefEntry>,
     source_index: BTreeMap<DefSource, NodeDefId>,
     artifact_refs: BTreeMap<ArtifactId, u32>,
@@ -46,6 +51,7 @@ impl NodeDefRegistry {
     pub fn new() -> Self {
         Self {
             store: ArtifactStore::new(),
+            overlay: ChangeOverlay::new(),
             entries: BTreeMap::new(),
             source_index: BTreeMap::new(),
             artifact_refs: BTreeMap::new(),
@@ -166,6 +172,57 @@ impl NodeDefRegistry {
     /// Iterate registered entries (stable order by id).
     pub fn iter_entries(&self) -> impl Iterator<Item = &NodeDefEntry> {
         self.entries.values()
+    }
+
+    /// Apply one artifact change block to the overlay. Committed state unchanged.
+    pub fn apply_change(&mut self, change: &ArtifactChange) -> Result<(), ChangeError> {
+        let path = self.resolve_change_target(change.target.clone())?;
+        for op in &change.ops {
+            apply_op(&mut self.overlay, path.clone(), op)?;
+        }
+        Ok(())
+    }
+
+    /// Apply an ordered changeset to the overlay. Aborts on first error.
+    pub fn apply_changeset(&mut self, changeset: &ChangeSet) -> Result<(), ChangeError> {
+        for change in &changeset.changes {
+            self.apply_change(change)?;
+        }
+        Ok(())
+    }
+
+    /// Drop all pending overlay edits.
+    pub fn discard_overlay(&mut self) {
+        self.overlay.clear();
+    }
+
+    /// Whether any overlay entries are pending.
+    pub fn overlay_active(&self) -> bool {
+        !self.overlay.is_empty()
+    }
+
+    /// Whether `path` has a pending overlay entry.
+    pub fn overlay_contains_path(&self, path: &LpPath) -> bool {
+        self.overlay.contains_path(path)
+    }
+
+    /// Pending overlay bytes for `path`, if any.
+    pub fn overlay_bytes(&self, path: &LpPath) -> Option<&[u8]> {
+        self.overlay.get_bytes(path)
+    }
+
+    fn resolve_change_target(&self, target: ArtifactTarget) -> Result<LpPathBuf, ChangeError> {
+        match target {
+            ArtifactTarget::Path(path) => require_absolute_path(path),
+            ArtifactTarget::Id(id) => {
+                self.artifact_root_path
+                    .get(&id)
+                    .cloned()
+                    .ok_or(ChangeError::UnknownArtifact {
+                        artifact_id: id.handle(),
+                    })
+            }
+        }
     }
 
     fn register_artifact_subtree(

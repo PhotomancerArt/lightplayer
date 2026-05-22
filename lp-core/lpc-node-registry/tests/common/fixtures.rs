@@ -26,6 +26,10 @@ render_order = 0
     fs
 }
 
+#[allow(
+    dead_code,
+    reason = "shared fixture; not every integration test binary uses all helpers"
+)]
 pub fn load_fixture_project() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
     write_file(
@@ -55,6 +59,10 @@ sample_diameter = 2.0
     fs
 }
 
+#[allow(
+    dead_code,
+    reason = "shared fixture; not every integration test binary uses all helpers"
+)]
 pub fn load_playlist_with_inline_child() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
     write_file(
