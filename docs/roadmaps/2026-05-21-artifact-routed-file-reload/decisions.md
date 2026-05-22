@@ -2,32 +2,34 @@
 
 #### Parallel build in lpc-node-registry until M6
 
-- **Decision:** M1–**M5** build the new system in `lpc-node-registry` alongside
-  the existing `lpc-engine` path. **No `lpc-engine` edits until M6.**
+- **Decision:** M1–**M4** build the new system in `lpc-node-registry` alongside
+  the existing `lpc-engine` path. **ChangeSet** is a
+  [promoted roadmap](../2026-05-21-changeset-change-management/overview.md).
+  **No `lpc-engine` edits until M6.**
 - **Why:** Prove fs-change and projection semantics in isolation; keep the app
   working on the old stack during development.
 - **Rejected alternatives:** In-place refactor of `lpc-engine` from M1; dual
   models in one loader before harness gate.
-- **Revisit when:** M6 cutover (mandatory after M4 + **M5**).
+- **Revisit when:** M6 cutover (mandatory after M4 + ChangeSet M6 gate).
 
-#### ChangeSet before engine cutover (M5)
+#### ChangeSet before engine cutover
 
-- **Decision:** **M5** proves **ChangeSet** change management in
-  `lpc-node-registry` harness before **M6** engine cutover. Client edits are
-  ordered, id'd, in-memory until **commit**; express node def slot patches and
-  **asset** add/replace/delete (whole-file v1).
+- **Decision:** **ChangeSet** change management is proven in the promoted roadmap
+  [`2026-05-21-changeset-change-management`](../2026-05-21-changeset-change-management/overview.md)
+  before **M6** engine cutover here. Client edits are ordered, id'd, in-memory
+  until **commit**; express node def slot patches and asset add/replace/delete.
 - **Why:** Client-driven edits are as critical as fs-reload; cutover without
   this shape repeats overlay work.
 - **Rejected alternatives:** Minimal projection only (old M4.1); defer ChangeSet
-  until after M6.
-- **Revisit when:** Wire protocol and CRDT merge (future).
+  until after M6; keep as nested M5 plan only.
+- **Revisit when:** Wire protocol and CRDT merge (ChangeSet roadmap `future.md`).
 
 #### ChangeSet as test and diff vocabulary
 
 - **Decision:** ChangeSet ops are the **canonical edit vocabulary** for client
   UI, future **project diff**, and **incremental stress replay** — not a
   separate ad-hoc mutation path for tests.
-- **Why:** One representation supports compose/morph user stories (M5), wire
+- **Why:** One representation supports compose/morph user stories, wire
   messages, and high-level tests decomposed into long op streams for host/emu/device.
 - **Rejected alternatives:** Filesystem-only test setup; whole-`reload()` per
   scenario on embedded targets.
@@ -40,7 +42,7 @@
   carries **asset** ops; commit bumps **artifact** store + registry.
 - **Why:** Clear vocabulary for node TOMLs vs dependency files.
 - **Resolved:** Single ChangeSet stream with `NodeChange` / `AssetChange`
-  variants; SlotOp-style patches — see `m5-changeset-change-management.md`.
+  variants; see [ChangeSet roadmap](../2026-05-21-changeset-change-management/decisions.md).
 
 #### lpc-node-registry crate; retire lpc-slot-mockup
 
@@ -81,10 +83,10 @@
 - **Rejected alternatives:** Public `register_file` per artifact; requiring
   `NodeDef::Project` at root.
 
-#### Prove semantics before cutover (M4 + M5 gate)
+#### Prove semantics before cutover (M4 + ChangeSet gate)
 
-- **Decision:** No production cutover until **M4** (fs-change) and **M5**
-  (ChangeSet) harness tests pass.
+- **Decision:** No production cutover until **M4** (fs-change) here and
+  **ChangeSet roadmap M6** (diff + equivalence gate) pass.
 - **Why:** Both reload and client edit paths must be proven in parallel stack.
 - **Rejected alternatives:** Cutover after M4 only.
 
@@ -108,7 +110,7 @@
 #### DefView is the sole read path
 
 - **Decision:** Nodes read through **`NodeDefView`** (base registry + active
-  **ChangeSet** projection). Proven in **M5** before M6.
+  **ChangeSet** projection). Proven in [ChangeSet roadmap](../2026-05-21-changeset-change-management/overview.md) before M6.
 - **Why:** All client edits flow through ChangeSet; commit promotes to base.
 - **Rejected alternatives:** Direct registry mutation from wire; overlay only in
   UI mockup branch.
@@ -145,3 +147,17 @@
 - **Decision:** User-initiated full reload keeps drop-and-rebuild; fs watcher
   uses incremental path only.
 - **Why:** Escape hatch for unsupported edits and debugging.
+- **Revisit when:** Unlikely.
+
+#### Slot provenance via ExplainSlot probe (M10)
+
+- **Decision:** Provenance is **on-demand**, not on tick/registry read paths.
+  Client attaches `ExplainSlot` probe to `project_read` (wire types in
+  `lpc-wire`; engine stub today) or re-derives locally on host when it holds
+  bindings + ChangeSet.
+- **Why:** ESP32 memory; values-only hot path; M3.5 resolver trace seeds
+  explain output.
+- **Rejected alternatives:** Provenance on every `Production`; registry
+  `explain_slot()` in v1; dedicated `lpa-server` provenance logic.
+- **Revisit when:** Thin remote clients without local edit context.
+- **Tracked:** [M10](m10-slot-provenance-client.md).

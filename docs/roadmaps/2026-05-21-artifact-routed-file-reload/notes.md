@@ -7,8 +7,9 @@ Deliver incremental file reload for a running LightPlayer project: changed files
 **Immediate goal:** single-file reload routed through the artifact layer.
 
 **Design constraint:** structure the artifact / definition / runtime stack so
-**ChangeSets** (M5) sit between registry base and effective reads — proven in
-harness before engine cutover (M6).
+**ChangeSets** sit between registry base and effective reads — proven in the
+[promoted ChangeSet roadmap](../2026-05-21-changeset-change-management/overview.md)
+before engine cutover (M6).
 
 Target stack (bottom → top):
 
@@ -19,7 +20,7 @@ ArtifactStore            — source identity + freshness (path, version); no lon
         ↓
 NodeDefRegistry            — parsed NodeDef storage (file-backed + inline), keyed by NodeDefId
         ↓
-ChangeSet layer (M5)       — ordered id'd client edits; in-memory until commit
+ChangeSet layer            — see [ChangeSet roadmap](../2026-05-21-changeset-change-management/overview.md)
         ↓
 NodeDefView + AssetView    — effective reads (base + active ChangeSets)
         ↓
@@ -39,7 +40,8 @@ In scope for this roadmap:
 
 Out of scope (this roadmap):
 
-- Full **project diff → ChangeSet** automation (see `future.md`; M5 stories are manual seed).
+- Full **project diff → ChangeSet** automation (see ChangeSet roadmap
+  [`future.md`](../2026-05-21-changeset-change-management/future.md)).
 - Full optimal graph diff for arbitrary `project.toml` edits in the first slice.
 - Library artifact locators.
 - Host precompilation or any weakening of on-device GLSL JIT.
@@ -269,17 +271,18 @@ Runtime `SourceRef` on nodes — superseded by **`SourceFileRef`** in resolved s
 
 Phases:
 
-1. **Parallel build (M1–M5, no `lpc-engine` changes)** — registry + fs harness (M4)
-   + **ChangeSet** (M5).
+1. **Parallel build (M1–M4 + ChangeSet roadmap, no `lpc-engine` changes)** —
+   registry + fs harness (M4) + [ChangeSet roadmap](../2026-05-21-changeset-change-management/overview.md).
 2. **Cutover (M6)** — delete old path; engine → `lpc-node-registry`.
 3. **Wire-up (M7)** — server fs-change.
 4. **Graph reconciliation (M8)**.
 5. **Cleanup (M9).**
 
-## Change management (M5)
+## Change management (promoted roadmap)
 
-See `m5-changeset-change-management.md`. **ChangeSet**: ordered, id'd, in-memory
-until commit. User stories drive harness acceptance:
+See [ChangeSet change management](../2026-05-21-changeset-change-management/overview.md).
+**ChangeSet**: ordered, id'd, in-memory until commit. User stories drive harness
+acceptance:
 
 - **Compose** — blank project → any `examples/*` project via ChangeSets.
 - **Morph** — any example → any other, one edit at a time, never crashing.
@@ -289,15 +292,15 @@ until commit. User stories drive harness acceptance:
 **Asset** = non-node file; **artifact** = store identity.
 
 Longer term: **project diff → ChangeSet stream** and **replay stress harness**
-(host / emu / device) — see `future.md`. M5 story IDs are the manual seed;
-automated diff and full-engine replay follow M6.
+(host / emu / device) — see ChangeSet roadmap `future.md`. Story IDs are the
+manual seed; automated diff and full-engine replay follow M6.
 
 ## Open Questions
 
 - **Q1:** `project.toml` graph reconciliation details — M8.
 
 (Q8 NodeChange vs AssetChange layering — **resolved**: single ChangeSet stream,
-`NodeChange` / `AssetChange` variants; see `m5-changeset-change-management.md`.)
+`NodeChange` / `AssetChange` variants; see [ChangeSet roadmap](../2026-05-21-changeset-change-management/decisions.md).)
 
 ## Roadmap Artifacts
 
@@ -305,8 +308,9 @@ automated diff and full-engine replay follow M6.
 
 ## Build Location
 
-- **`lpc-node-registry`** — **M1** crate bootstrap + `ArtifactStore`; **M2–M5**
-  fill registry, source, change, view. No `lpc-engine` edits until M6.
+- **`lpc-node-registry`** — **M1** crate bootstrap + `ArtifactStore`; **M2–M4**
+  registry + source; **ChangeSet roadmap** fills change + view. No `lpc-engine`
+  edits until M6.
 - **Delete `lpc-slot-mockup`** at M1 start.
 - **`lpc-model`** — `SourceFileSlot` additive in M3; production `ShaderDef` at **M6**.
 - **`lpc-engine`** — **M6** cutover only.

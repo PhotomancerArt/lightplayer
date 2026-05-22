@@ -1,16 +1,23 @@
 # Future Work — Artifact-Routed Reload
 
+## Slot resolution probes (ExplainSlot)
+
+- **Tracked as [M10](m10-slot-provenance-client.md)** — post-M6 milestone.
+- **Idea:** Provenance is **on-demand**, not on every read. Client attaches an
+  `ExplainSlot` probe to `project_read` (wire types exist; engine stub today) or
+  re-derives locally on host when it holds bindings + ChangeSet.
+- **Cascade:** binding / merge → effective registry def (overlay ∪ base) →
+  produced-slot fallback; optional `include_trace` for resolver steps.
+- **Why not on tick read path:** ESP32 memory; values-only on hot path.
+- **Why not lpa-server logic v1:** Server forwards `project_read` probes; engine
+  executes explain.
+- **Revisit when:** Thin remote clients without local edit context; registry
+  `explain_slot` helper.
+
 ## Project diff → ChangeSet stream
 
-- **Idea:** Given two project snapshots (directories or in-memory stores),
-  compute an ordered `ChangeOp` sequence that transforms base → target. Same
-  vocabulary as client edits and M5 user stories (A compose, B morph).
-- **Why not now:** M5 proves manual / story-driven ChangeSets and view/commit
-  semantics first. Diff needs stable slot paths, asset identity, and inline-def
-  path rules from M2–M5.
-- **Useful context:** Hand-written morph stories (`B1` `basic → basic2`) are
-  regression fixtures; diff generalizes to arbitrary `examples/*` pairs. Output
-  should be replayable one op at a time for stress testing.
+- **Implemented in [ChangeSet M6](../2026-05-21-changeset-change-management/m6-diff-equivalence-gate.md)** — gates parent engine cutover.
+- Post-M6: extend diff to arbitrary `examples/*` pairs for stress replay.
 
 ## ChangeSet replay stress harness (host / emu / device)
 
@@ -18,8 +25,8 @@
   (post-M6) with configurable granularity (batch commit vs per-op apply). One
   high-level test name (`empty → fyeah-sign`) drives hundreds/thousands of
   incremental mutations.
-- **Why not now:** Requires M6 engine on ChangeSet path and stable wire or
-  in-process apply API; M5 only proves registry harness.
+- **Why not now:** Requires M6 engine on ChangeSet path; ChangeSet roadmap
+  proves registry harness first.
 - **What it catches:** Panics on partial graph states, OOM spikes on ESP32,
   allocator fragmentation from repeated compile/prepare cycles, refcount leaks
   on artifact bump — failures whole-reload tests rarely trigger.
@@ -51,8 +58,10 @@
 ## ChangeSet wire protocol + CRDT merge
 
 - **Idea:** Full `lpc-wire` ChangeSet messages; concurrent edit merge.
-- **Why not now:** M5 proves in-memory ordered ChangeSet + commit/discard in harness.
-- **Useful context:** M5 milestone; `lightplayer-app-ui` overlay mockup for SlotOp reference.
+- **Why not now:** ChangeSet roadmap proves in-memory ordered ChangeSet +
+  commit/discard in harness.
+- **Useful context:** [ChangeSet roadmap](../2026-05-21-changeset-change-management/overview.md);
+  `lightplayer-app-ui` overlay mockup for SlotOp reference.
 
 ## Artifact digest / unchanged-write filtering
 

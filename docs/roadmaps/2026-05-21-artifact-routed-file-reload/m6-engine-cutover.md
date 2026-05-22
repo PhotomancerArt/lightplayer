@@ -4,7 +4,9 @@
 
 **End parallel build:** delete the old `lpc-engine` artifact-as-registry path and
 hard-cut **`ProjectLoader`**, **`Engine`**, and **shader/fixture runtimes** to
-**`lpc-node-registry`** — only after **M4 + M5** harness tests pass.
+**`lpc-node-registry`** — only after **M4** here and the
+[ChangeSet roadmap](../2026-05-21-changeset-change-management/overview.md)
+**M6 diff + equivalence gate** pass.
 
 ## Parallel Build → Cutover
 
@@ -40,7 +42,7 @@ Out of scope:
 
 ## Key Decisions
 
-- **Gate:** M4 + **M5** green before starting M6.
+- **Gate:** M4 here + [ChangeSet roadmap M6 diff gate](../2026-05-21-changeset-change-management/m6-diff-equivalence-gate.md) green before starting M6.
 - Hard cut; no dual-store in production.
 
 ## Deliverables
@@ -50,7 +52,8 @@ Out of scope:
 
 ## Dependencies
 
-- M1–M5 complete and passing.
+- M1–M4 here complete and passing.
+- [ChangeSet roadmap](../2026-05-21-changeset-change-management/overview.md) M6 diff + equivalence gate green.
 
 ## Execution Strategy
 
@@ -58,4 +61,4 @@ Full plan. Cross-cutting cutover; implement against M4/M5 harness contracts.
 
 Suggested chat opener:
 
-> M6 engine cutover needs a full plan — M4/M5 must be green first. Agree?
+> M6 engine cutover needs a full plan — M4 + ChangeSet M6 gate must be green first. Agree?

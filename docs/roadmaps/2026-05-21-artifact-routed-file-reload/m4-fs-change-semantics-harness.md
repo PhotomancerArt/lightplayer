@@ -27,15 +27,15 @@ In scope:
 Out of scope:
 
 - Production engine cutover (**M6**).
-- `RegistryChange::ChangeSet` variants (**M5** — enum stub OK).
-- ChangeSet / client change management (**M5**).
+- `RegistryChange::ChangeSet` variants — [ChangeSet M5](../2026-05-21-changeset-change-management/m5-commit-promotion.md); enum stub OK.
+- ChangeSet / client change management ([promoted roadmap](../2026-05-21-changeset-change-management/overview.md)).
 - Server `LpServer` fs routing (**M7**).
 - `project.toml` topology changes (**M8**).
 - Any edits to `lpc-engine` or `lpa-server`.
 
 ## Key Decisions
 
-- Harness is prerequisite for **M5**; **M4 + M5** gate **M6**.
+- Harness is prerequisite for [ChangeSet roadmap](../2026-05-21-changeset-change-management/overview.md); **M4 + ChangeSet M6** gate **M6**.
 - v1 node refresh rule may be coarse (recreate all nodes bound to changed defs).
 - Error propagation: no last-good; def error → node destroy → parent error.
 

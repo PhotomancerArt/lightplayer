@@ -28,21 +28,26 @@ Current pain:
 
 ## Architecture
 
-### Parallel build (M1–M5)
+### Parallel build (M1–M4 + ChangeSet roadmap)
 
-M1–**M5** implement the **new stack in `lpc-node-registry`** while **`lpc-engine`
-keeps the current path unchanged**. Production continues on the old system until
-**M6** cutover.
+M1–**M4** implement the **registry base + fs reload** stack in
+`lpc-node-registry`. **ChangeSet change management** is a
+[separate promoted roadmap](../2026-05-21-changeset-change-management/overview.md)
+(prerequisite for **M6**). **`lpc-engine` is unchanged** until M6 cutover.
 
 ```text
-M1–M5 (both exist):
+M1–M4 (this roadmap):
 
   lpc-node-registry/          NEW — unit + harness tests
   ├── artifact/               freshness-only store (all files incl. assets)
-  ├── registry/               NodeDefRegistry, NodeDefUpdates
-  ├── change/                 M5: ChangeSet, commit/discard, asset overlay
-  ├── view/                   NodeDefView = base + active ChangeSet(s)
+  ├── registry/               NodeDefRegistry, sync → SyncResult
   └── source/                 SourceFileRef materialize
+
+ChangeSet roadmap (parallel, gates M6):
+
+  lpc-node-registry/
+  ├── change/                 ChangeSet, commit/discard
+  └── view/                   NodeDefView + AssetView
 
   lpc-engine/                 OLD — unchanged until M6
 
@@ -54,15 +59,14 @@ M6: delete old path; lpc-engine → lpc-node-registry
 ```text
 Filesystem + client ChangeSets (uncommitted)
         ↓
-ArtifactStore              — file/asset identity + freshness
+NodeDefRegistry
+  ├── ArtifactStore          — committed bytes + freshness
+  ├── ChangeOverlay          — pending artifact/slot mutations
+  └── entries / indexes      — committed parse cache
         ↓
-NodeDefRegistry            — parsed defs; fs → NodeDefUpdates
+NodeDefView                  — effective reads (overlay ∪ base)
         ↓
-ChangeSet layer            — ordered id'd ops; in-memory until commit
-        ↓
-NodeDefView + AssetView    — effective reads for nodes
-        ↓
-Engine node tree
+Engine node tree             — bindings → effective def → value
 ```
 
 **ChangeSet** — ordered, id'd client edits: slot patches on defs, add/remove
@@ -77,8 +81,8 @@ lp-core/lpc-node-registry/
 ├── artifact/                  # M1 — crate bootstrap + freshness store
 ├── registry/                  # M2
 ├── source/                    # M3
-├── change/                    # M5 ChangeSet
-└── view/                      # M5 effective reads
+├── change/                    # ChangeSet roadmap
+└── view/                      # ChangeSet roadmap
 
 lp-core/lpc-engine/            # M6 cutover
 lp-core/lpc-model/slots/       # M3 SourceFileSlot
@@ -91,22 +95,23 @@ Delete **`lpc-slot-mockup`** at M1 start.
 - **Build parallel in `lpc-node-registry` first** — in-place `lpc-engine` refactor
   rejected before semantics proven; cutover at M6 only.
 - **Defer ChangeSet to post-cutover** — rejected; client edit path is core
-  architecture; must be proven in harness (M5) before M6.
+  architecture; must be proven in [ChangeSet roadmap](../2026-05-21-changeset-change-management/overview.md) before M6.
 - **Last-good on reload failure** — rejected for v1; errors propagate.
 
 ## Risks
 
-- **M5 scope** — ChangeSet + node patches + asset ops + fs precedence is large;
-  user-story harness (compose, morph, CRUD/refactor) drives acceptance; may need
-  plan sub-phases inside M5.
-- **M6 cutover churn** — still cross-cutting after M5 contract is clear.
-- **M5 scope size** — user stories + ChangeSet ops may need sub-phases inside M5.
+- **ChangeSet roadmap scope** — node patches + asset ops + story harness; phased
+  in [promoted roadmap](../2026-05-21-changeset-change-management/overview.md).
+- **M6 cutover churn** — cross-cutting after M4 + ChangeSet M6 gate contract clear.
 - **ESP32 heap** — ChangeSets and asset overlays must not retain duplicate file
   bytes long-term.
 
 ## Scope Estimate
 
-Nine milestones. **M6** cutover only after **M4 + M5** harness green.
+Nine milestones in this roadmap (M1–M4, M6–M10). **ChangeSet** is a separate
+roadmap gating **M6**. M6 cutover only after **M4** here + **ChangeSet M6**
+(diff + equivalence gate) green. **M10** (ExplainSlot probes) follows parent M6;
+not a cutover gate.
 
 ## Milestones
 
@@ -116,8 +121,9 @@ Nine milestones. **M6** cutover only after **M4 + M5** harness green.
 | M2 | NodeDefRegistry + NodeDefUpdates | Unit tests; lpc-engine untouched |
 | M3 | SourceFileSlot + SourceFileRef | Unit tests; production defs unchanged until **M6** |
 | M4 | Fs-change semantics harness | Harness; no cutover |
-| **M5** | **ChangeSet / change management** | **Harness; architecture gate** |
-| M6 | Engine + node cutover | M4 + M5 green |
+| — | **[ChangeSet change management](../2026-05-21-changeset-change-management/overview.md)** | **Separate roadmap; gates M6** |
+| M6 | Engine + node cutover | M4 + [ChangeSet M6](../2026-05-21-changeset-change-management/m6-diff-equivalence-gate.md) green |
 | M7 | Server fs-change wire-up | E2E reload |
 | M8 | project.toml / graph reconciliation | Graph hot reload |
 | M9 | Cleanup + validation | CI |
+| M10 | [Slot resolution probes](m10-slot-provenance-client.md) | Post-M6; `ExplainSlot` probe on demand; not on tick read path |
