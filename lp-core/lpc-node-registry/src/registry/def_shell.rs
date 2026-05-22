@@ -39,7 +39,7 @@ pub fn def_shell(def: &NodeDef) -> NodeDef {
 
 fn invocation_shell(invocation: &NodeInvocation) -> NodeInvocation {
     match invocation {
-        NodeInvocation::Ref(_) => invocation.clone(),
+        NodeInvocation::Unset | NodeInvocation::Ref(_) => invocation.clone(),
         NodeInvocation::Def(body) => NodeInvocation::inline(kind_stub(body.value().kind())),
     }
 }

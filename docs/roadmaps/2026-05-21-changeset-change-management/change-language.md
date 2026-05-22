@@ -54,7 +54,7 @@ target artifact:
 
 | Op | Use |
 |----|-----|
-| `VariantSet { path, variant }` | Enum variant switch (node kind, `Ref`/`Def`, nested enums) |
+| `VariantSet { path, variant }` | Enum variant switch (node kind, `Unset`/`Ref`/`Def`, nested enums) |
 | `SetSlot { path, value }` | Value leaves only (scalars, path strings, etc.) |
 | `MapInsert { path, key, … }` | Map entry |
 | `MapRemove { path, key }` | Map entry |
@@ -72,6 +72,9 @@ Relative locators in slot values resolve against the **containing artifact path*
 ## Node invocation TOML (authored)
 
 ```toml
+[nodes.placeholder]
+unset = {}
+
 [nodes.shader]
 ref = "./shader.toml"
 

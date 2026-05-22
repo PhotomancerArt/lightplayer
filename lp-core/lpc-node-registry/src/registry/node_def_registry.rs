@@ -360,11 +360,17 @@ impl NodeDefRegistry {
     ) -> Result<(), RegistryError> {
         for site in collect_invocations(&def, &base_path) {
             match &site.invocation {
+                NodeInvocation::Unset => {}
                 NodeInvocation::Ref(path_slot) => {
-                    let locator = lpc_model::ArtifactLocator::parse(path_slot.value().as_str())
-                        .map_err(|err| RegistryError::LocatorResolution {
+                    let path_text = path_slot.value().as_str();
+                    if path_text.is_empty() {
+                        continue;
+                    }
+                    let locator = lpc_model::ArtifactLocator::parse(path_text).map_err(|err| {
+                        RegistryError::LocatorResolution {
                             message: String::from(err),
-                        })?;
+                        }
+                    })?;
                     let child_path = resolve_node_locator(file_path, &locator)?;
                     let child_artifact = self.acquire_file_artifact(child_path.clone(), frame)?;
                     let child_source = DefSource::artifact_root(child_artifact);
@@ -564,11 +570,17 @@ impl NodeDefRegistry {
     ) -> Result<(), RegistryError> {
         for site in collect_invocations(&def, &base_path) {
             match &site.invocation {
+                NodeInvocation::Unset => {}
                 NodeInvocation::Ref(path_slot) => {
-                    let locator = lpc_model::ArtifactLocator::parse(path_slot.value().as_str())
-                        .map_err(|err| RegistryError::LocatorResolution {
+                    let path_text = path_slot.value().as_str();
+                    if path_text.is_empty() {
+                        continue;
+                    }
+                    let locator = lpc_model::ArtifactLocator::parse(path_text).map_err(|err| {
+                        RegistryError::LocatorResolution {
                             message: String::from(err),
-                        })?;
+                        }
+                    })?;
                     let child_path = resolve_node_locator(file_path, &locator)?;
                     let child_artifact = self.acquire_file_artifact(child_path.clone(), frame)?;
                     let child_inventory = self.derive_inventory(

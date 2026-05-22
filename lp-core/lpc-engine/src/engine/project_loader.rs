@@ -187,7 +187,20 @@ impl ProjectLoader {
         R::Err: core::fmt::Debug,
     {
         let (artifact_path, source_base_path, config, artifact_id) = match &invocation {
+            NodeInvocation::Unset => {
+                return Err(ProjectLoadError::InvalidSourcePath {
+                    path: node_name.as_str().to_string(),
+                    reason: String::from("node invocation is unset"),
+                });
+            }
             NodeInvocation::Ref(path_slot) => {
+                let path_text = path_slot.value().as_str();
+                if path_text.is_empty() {
+                    return Err(ProjectLoadError::InvalidSourcePath {
+                        path: node_name.as_str().to_string(),
+                        reason: String::from("node invocation ref path is empty"),
+                    });
+                }
                 let artifact_locator =
                     ArtifactLocator::parse(path_slot.value().as_str()).map_err(|err| {
                         ProjectLoadError::InvalidSourcePath {

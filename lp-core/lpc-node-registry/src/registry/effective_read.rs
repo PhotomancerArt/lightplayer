@@ -179,8 +179,8 @@ fn def_state_at_source(root: &NodeDef, source_path: &lpc_model::SlotPath) -> Opt
     for site in collect_invocations(root, &lpc_model::SlotPath::root()) {
         if site.path == *source_path {
             return match &site.invocation {
+                NodeInvocation::Unset | NodeInvocation::Ref(_) => None,
                 NodeInvocation::Def(body) => Some(NodeDefState::Loaded(body.value().clone())),
-                NodeInvocation::Ref(_) => None,
             };
         }
     }

@@ -1,7 +1,8 @@
 //! Parent-owned instruction to instantiate a child node.
 //!
-//! The parent owns the invocation namespace. The child node definition is either
-//! a relative path locator ([`NodeInvocation::Ref`]) or an inline [`NodeDef`].
+//! The parent owns the invocation namespace. The child node definition may be
+//! unset ([`NodeInvocation::Unset`]), a path locator ([`NodeInvocation::Ref`]),
+//! or an inline [`NodeDef`] ([`NodeInvocation::Def`]).
 
 use alloc::string::ToString;
 
@@ -16,7 +17,9 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Slotted)]
 #[slot(enum_encoding = "external", rename_all = "snake_case")]
 pub enum NodeInvocation {
+    /// Reserved map entry with no wiring yet (valid while editing).
     #[default]
+    Unset,
     Ref(ArtifactPathSlot),
     Def(InvocationDefBody),
 }
@@ -75,16 +78,27 @@ impl NodeInvocation {
 
     pub fn ref_locator(&self) -> Option<ArtifactLocator> {
         match self {
-            Self::Ref(path) => ArtifactLocator::parse(path.value().as_str()).ok(),
-            Self::Def(_) => None,
+            Self::Unset | Self::Def(_) => None,
+            Self::Ref(path) => {
+                let text = path.value().as_str();
+                if text.is_empty() {
+                    None
+                } else {
+                    ArtifactLocator::parse(text).ok()
+                }
+            }
         }
     }
 
     pub fn inline_def(&self) -> Option<&NodeDef> {
         match self {
-            Self::Ref(_) => None,
+            Self::Unset | Self::Ref(_) => None,
             Self::Def(body) => Some(body.value()),
         }
+    }
+
+    pub fn is_unset(&self) -> bool {
+        matches!(self, Self::Unset)
     }
 }
 
@@ -92,6 +106,21 @@ impl NodeInvocation {
 mod tests {
     use super::*;
     use crate::{EnumSlot, FieldSlotMut, NodeDef, SlotEnumShape, SlotShapeRegistry};
+
+    #[test]
+    fn node_invocation_default_is_unset() {
+        assert!(NodeInvocation::default().is_unset());
+    }
+
+    #[test]
+    fn node_invocation_toml_unset_form_loads() {
+        let invocation = read_invocation(
+            r#"
+unset = {}
+"#,
+        );
+        assert!(invocation.is_unset());
+    }
 
     #[test]
     fn node_invocation_toml_ref_form_loads() {
@@ -111,7 +140,7 @@ ref = "./texture.toml"
     fn node_invocation_rejects_legacy_def_path_form() {
         let err = read_invocation_err(
             r#"
-ref = "./texture.toml"
+def = { path = "./texture.toml" }
 "#,
         );
 
@@ -127,6 +156,10 @@ artifact = "./texture.toml"
         );
 
         assert!(err.to_string().contains("artifact") || err.to_string().contains("unknown"));
+    }
+
+    #[test]
+    fn node_invocation_toml_inline_def_form_loads() {
         let invocation = read_invocation(
             r#"
 [def]
@@ -149,6 +182,18 @@ kind = "Clock"
         );
 
         assert!(err.to_string().contains("def") || err.to_string().contains("unknown"));
+    }
+
+    #[test]
+    #[test]
+    fn node_invocation_round_trips_unset_form() {
+        let text = r#"
+kind = "Project"
+
+[nodes.placeholder]
+unset = {}
+"#;
+        round_trip_project_fragment(text);
     }
 
     #[test]
