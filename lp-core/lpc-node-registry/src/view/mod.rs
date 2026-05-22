@@ -1,4 +1,4 @@
-//! Def read view — milestone M2 stub; ChangeSet overlay in M5.
+//! Effective def read view (overlay ∪ committed cache).
 
 mod node_def_view;
 

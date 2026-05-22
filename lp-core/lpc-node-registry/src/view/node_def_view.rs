@@ -1,8 +1,10 @@
-//! Read-only view over base registry defs (ChangeSet overlay in M5).
+//! Effective read projection over committed registry entries and overlay draft.
 
-use crate::registry::{NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState};
+use lpfs::LpFs;
 
-/// Base registry lookup; M5 adds ChangeSet projection.
+use crate::registry::{NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState, ParseCtx};
+
+/// Effective def lookup — overlay ∪ committed cache.
 pub struct NodeDefView<'a> {
     registry: &'a NodeDefRegistry,
 }
@@ -12,11 +14,17 @@ impl<'a> NodeDefView<'a> {
         Self { registry }
     }
 
-    pub fn get(&self, id: &NodeDefId) -> Option<&NodeDefEntry> {
-        self.registry.get(id)
+    /// Effective def entry (overlay ∪ base). Always owned.
+    pub fn get(&self, id: &NodeDefId, _fs: &dyn LpFs, ctx: &ParseCtx<'_>) -> Option<NodeDefEntry> {
+        self.registry.effective_entry(id, ctx)
     }
 
-    pub fn state(&self, id: &NodeDefId) -> Option<&NodeDefState> {
-        self.registry.get(id).map(|entry| &entry.state)
+    pub fn state(
+        &self,
+        id: &NodeDefId,
+        _fs: &dyn LpFs,
+        ctx: &ParseCtx<'_>,
+    ) -> Option<NodeDefState> {
+        self.registry.effective_state(id, ctx)
     }
 }

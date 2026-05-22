@@ -1,17 +1,17 @@
 //! Parsed node definition registry driven by artifact freshness.
 
 use alloc::collections::BTreeMap;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_model::{NodeDef, NodeDefParseError, NodeDefRef, Revision, SlotPath};
+use lpc_model::{NodeDef, NodeDefRef, Revision, SlotPath};
 use lpfs::{FsChange, LpFs, LpPath, LpPathBuf};
 
 use crate::change::apply::apply_op;
 use crate::change::{
     ArtifactChange, ArtifactTarget, ChangeError, ChangeOverlay, ChangeSet, require_absolute_path,
 };
-use crate::{ArtifactError, ArtifactId, ArtifactLocation, ArtifactStore};
+use crate::{ArtifactId, ArtifactLocation, ArtifactStore};
 
 use super::def_shell::{is_container_def, shell_changed};
 use super::def_walker::{collect_invocations, resolve_node_locator};
@@ -506,23 +506,17 @@ impl NodeDefRegistry {
         Ok(())
     }
 
-    fn read_artifact_state(
+    pub(crate) fn read_artifact_state(
         &mut self,
         artifact_id: ArtifactId,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
     ) -> Result<NodeDefState, RegistryError> {
         match self.store.read_bytes(&artifact_id, fs) {
-            Ok(bytes) => {
-                let text = core::str::from_utf8(&bytes).map_err(|err| RegistryError::Utf8 {
-                    message: err.to_string(),
-                })?;
-                Ok(match NodeDef::read_toml(ctx.shapes, text) {
-                    Ok(def) => NodeDefState::Loaded(def),
-                    Err(err) => NodeDefState::ParseError(err),
-                })
-            }
-            Err(err) => Ok(NodeDefState::ParseError(read_error_state(err))),
+            Ok(bytes) => Ok(effective_read::parse_toml_bytes(ctx, &bytes)),
+            Err(err) => Ok(NodeDefState::ParseError(effective_read::read_error_state(
+                err,
+            ))),
         }
     }
 
@@ -701,15 +695,12 @@ impl NodeDefRegistry {
     }
 }
 
+#[path = "effective_read.rs"]
+mod effective_read;
+
 enum PathChangeKind {
     DefArtifact(ArtifactId),
     SourceOnly,
-}
-
-fn read_error_state(err: ArtifactError) -> NodeDefParseError {
-    NodeDefParseError::Toml {
-        error: alloc::format!("artifact read failed: {err:?}"),
-    }
 }
 
 fn state_changed(before: &NodeDefState, after: &NodeDefState) -> bool {
