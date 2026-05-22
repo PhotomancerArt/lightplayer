@@ -1,6 +1,9 @@
 //! Shared fixtures for integration tests.
 
-#![allow(dead_code, reason = "shared fixtures; not every integration test binary uses all helpers")]
+#![allow(
+    dead_code,
+    reason = "shared fixtures; not every integration test binary uses all helpers"
+)]
 
 use lpfs::{LpFsMemory, LpPath};
 

@@ -5,9 +5,10 @@ use alloc::vec;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    LpValue, NodeArtifact, NodeDef, NodeDefRef, NodeInvocation, Revision, SlotMapKey,
-    SlotMutAccess, SlotPath, SlotPathSegment, insert_slot_map_entry_default, remove_slot_map_entry,
-    set_slot_option_none, set_slot_option_some_default, set_slot_value, set_slot_variant_default,
+    ArtifactLocator, LpValue, NodeArtifact, NodeDef, NodeDefRef, NodeInvocation, Revision,
+    SlotMapKey, SlotMutAccess, SlotPath, SlotPathSegment, insert_slot_map_entry_default,
+    lookup_slot_data_and_shape, remove_slot_map_entry, set_slot_option_none,
+    set_slot_option_some_default, set_slot_value, set_slot_variant_default,
 };
 use lpfs::{LpFs, LpPath, LpPathBuf};
 
@@ -82,6 +83,19 @@ pub fn serialize_slot_draft(def: &NodeDef, ctx: &ParseCtx<'_>) -> Result<Vec<u8>
     Ok(text.into_bytes())
 }
 
+/// Apply slot ops to an in-memory def (used by diff verification).
+pub fn apply_ops_to_node_def(
+    def: &mut NodeDef,
+    ops: &[ArtifactOp],
+    ctx: &ParseCtx<'_>,
+    frame: Revision,
+) -> Result<(), ChangeError> {
+    for op in ops {
+        apply_op_to_def(def, op, ctx, frame)?;
+    }
+    Ok(())
+}
+
 fn ensure_toml_path(path: &LpPathBuf) -> Result<(), ChangeError> {
     if path.as_str().ends_with(".toml") {
         Ok(())
@@ -142,15 +156,71 @@ fn apply_set_slot_on_def(
                 *def = artifact.into_node_def();
             });
         }
+    } else if let LpValue::String(variant) = value {
+        if mutate_def(def, |root| {
+            set_slot_variant_default(root, ctx.shapes, path, frame, variant)
+        })
+        .is_ok()
+        {
+            return Ok(());
+        }
     }
     if let Some((body, inner)) = inline_body_mutation(def, path) {
         return mutate_def(body, |root| {
             set_slot_value(root, ctx.shapes, &inner, frame, value.clone())
         });
     }
+    if let Some(invocation) = project_node_def_mutation(def, path) {
+        return apply_node_invocation_def(invocation, value);
+    }
     mutate_def(def, |root| {
         set_slot_value(root, ctx.shapes, path, frame, value.clone())
     })
+}
+
+fn apply_node_invocation_def(
+    invocation: &mut NodeInvocation,
+    value: &LpValue,
+) -> Result<(), ChangeError> {
+    let LpValue::String(path) = value else {
+        return Err(ChangeError::SlotMutation {
+            message: String::from("node invocation def expects string path"),
+        });
+    };
+    let locator = ArtifactLocator::parse(path).map_err(|err| ChangeError::SlotMutation {
+        message: err.to_string(),
+    })?;
+    *invocation = NodeInvocation::path(locator);
+    Ok(())
+}
+
+fn project_node_def_mutation<'a>(
+    def: &'a mut NodeDef,
+    path: &SlotPath,
+) -> Option<&'a mut NodeInvocation> {
+    let segs = path.segments();
+    if segs.len() != 3 {
+        return None;
+    }
+    let SlotPathSegment::Field(nodes) = &segs[0] else {
+        return None;
+    };
+    if nodes.as_str() != "nodes" {
+        return None;
+    }
+    let SlotPathSegment::Key(SlotMapKey::String(name)) = &segs[1] else {
+        return None;
+    };
+    let SlotPathSegment::Field(def_field) = &segs[2] else {
+        return None;
+    };
+    if def_field.as_str() != "def" {
+        return None;
+    }
+    let NodeDef::Project(project) = def else {
+        return None;
+    };
+    project.nodes.entries.get_mut(name.as_str())
 }
 
 fn apply_map_insert(
@@ -169,8 +239,26 @@ fn apply_map_insert(
         } else {
             path.child_key(map_key)
         };
-        set_slot_value(root, ctx.shapes, &value_path, frame, value.clone())
+        if map_value_is_value_leaf(root, ctx, &value_path)
+            .map_err(|err| lpc_model::SlotMutationError::unsupported_target(err.to_string()))?
+        {
+            set_slot_value(root, ctx.shapes, &value_path, frame, value.clone())?;
+        }
+        Ok(())
     })
+}
+
+fn map_value_is_value_leaf(
+    root: &dyn SlotMutAccess,
+    ctx: &ParseCtx<'_>,
+    path: &SlotPath,
+) -> Result<bool, ChangeError> {
+    let (_, shape) = lookup_slot_data_and_shape(root, ctx.shapes, path).map_err(|err| {
+        ChangeError::SlotMutation {
+            message: err.to_string(),
+        }
+    })?;
+    Ok(shape.value_shape().is_some())
 }
 
 fn apply_map_remove(

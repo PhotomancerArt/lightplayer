@@ -19,7 +19,7 @@ pub use def_source::DefSource;
 pub(crate) use def_walker::resolve_node_locator;
 pub use node_def_entry::NodeDefEntry;
 pub use node_def_id::NodeDefId;
-pub use node_def_registry::{NodeDefRegistry, serialize_slot_draft};
+pub use node_def_registry::{NodeDefRegistry, apply_ops_to_node_def, serialize_slot_draft};
 pub use node_def_state::{NodeDefState, ValidationErrorPlaceholder};
 pub use node_def_updates::NodeDefUpdates;
 pub use parse_ctx::ParseCtx;
