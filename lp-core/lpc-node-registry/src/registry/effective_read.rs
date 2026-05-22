@@ -7,9 +7,13 @@ use lpfs::{LpFs, LpPath};
 
 use crate::ArtifactId;
 use crate::change::OverlayEntry;
+use crate::source::{
+    MaterializeError, MaterializedSource, SourceDiagnosticCtx, materialize_source,
+    resolve_source_file,
+};
+use lpc_model::{NodeDef, NodeDefParseError, Revision, SourceFileSlot};
 
 use super::{NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState, ParseCtx, RegistryError};
-use lpc_model::{NodeDef, NodeDefParseError};
 
 impl NodeDefRegistry {
     /// Bytes for `path` from overlay if present, else committed store/fs.
@@ -79,6 +83,26 @@ impl NodeDefRegistry {
     /// Read-only effective projection over this registry.
     pub fn view(&self) -> crate::view::NodeDefView<'_> {
         crate::view::NodeDefView::new(self)
+    }
+
+    /// Materialize authored source through overlay ∪ committed store.
+    pub fn materialize_source(
+        &mut self,
+        fs: &dyn LpFs,
+        containing_file: &LpPath,
+        slot: &SourceFileSlot,
+        ctx: &SourceDiagnosticCtx,
+        frame: Revision,
+    ) -> Result<MaterializedSource, MaterializeError> {
+        let reference = resolve_source_file(&mut self.store, containing_file, slot, frame)?;
+        materialize_source(
+            &mut self.store,
+            fs,
+            &reference,
+            slot,
+            ctx,
+            Some(&self.overlay),
+        )
     }
 }
 

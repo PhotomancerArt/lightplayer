@@ -74,11 +74,12 @@ pub fn materialize_version_for_path(
         containing_file: String::from(containing_file.as_str()),
         slot_path: None,
     };
-    let materialized = materialize_source(store, fs, &reference, &slot, &ctx).map_err(|err| {
-        RegistryError::LocatorResolution {
-            message: alloc::format!("materialize `{resolved_path:?}`: {err:?}"),
-        }
-    })?;
+    let materialized =
+        materialize_source(store, fs, &reference, &slot, &ctx, None).map_err(|err| {
+            RegistryError::LocatorResolution {
+                message: alloc::format!("materialize `{resolved_path:?}`: {err:?}"),
+            }
+        })?;
     Ok(materialized.version)
 }
 

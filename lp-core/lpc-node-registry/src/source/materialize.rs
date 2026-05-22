@@ -3,12 +3,13 @@
 use alloc::format;
 use alloc::string::{String, ToString};
 
-use lpc_model::{Revision, SlotPath, SourceFileSlot};
-use lpfs::LpFs;
+use lpc_model::{LpPathBuf, Revision, SlotPath, SourceFileSlot, SourcePath};
+use lpfs::{LpFs, LpPath};
 
-use crate::{ArtifactError, ArtifactStore};
+use crate::change::{ChangeOverlay, OverlayEntry};
+use crate::{ArtifactError, ArtifactReadFailure, ArtifactStore};
 
-use super::{MaterializedSource, SourceFileRef};
+use super::{MaterializedSource, ResolveError, SourceFileRef};
 
 /// Context for stable compile/diagnostic labels.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -23,7 +24,14 @@ pub enum MaterializeError {
     Unsupported,
     MissingInlineBody,
     Utf8 { message: String },
+    Resolve(ResolveError),
     Artifact(ArtifactError),
+}
+
+impl From<ResolveError> for MaterializeError {
+    fn from(err: ResolveError) -> Self {
+        Self::Resolve(err)
+    }
 }
 
 impl From<ArtifactError> for MaterializeError {
@@ -33,19 +41,31 @@ impl From<ArtifactError> for MaterializeError {
 }
 
 /// Read source bytes/text transiently and compute the effective revision.
+///
+/// When `overlay` is present, pending bytes for `resolved_path` take precedence
+/// over the committed store/fs read.
 pub fn materialize_source(
     store: &mut ArtifactStore,
     fs: &dyn LpFs,
     reference: &SourceFileRef,
     slot: &SourceFileSlot,
     ctx: &SourceDiagnosticCtx,
+    overlay: Option<&ChangeOverlay>,
 ) -> Result<MaterializedSource, MaterializeError> {
     match reference {
         SourceFileRef::File {
             artifact_id,
             authored_path,
+            resolved_path,
             ..
         } => {
+            if let Some(overlay) = overlay {
+                if let Some(materialized) =
+                    materialize_file_overlay(overlay, resolved_path, authored_path, slot)?
+                {
+                    return Ok(materialized);
+                }
+            }
             let bytes = store.read_bytes(artifact_id, fs)?;
             let text = core::str::from_utf8(&bytes).map_err(|err| MaterializeError::Utf8 {
                 message: format!("{err}"),
@@ -73,6 +93,32 @@ pub fn materialize_source(
     }
 }
 
+fn materialize_file_overlay(
+    overlay: &ChangeOverlay,
+    resolved_path: &LpPathBuf,
+    authored_path: &SourcePath,
+    slot: &SourceFileSlot,
+) -> Result<Option<MaterializedSource>, MaterializeError> {
+    let Some(entry) = overlay.entry(LpPath::new(resolved_path.as_str())) else {
+        return Ok(None);
+    };
+    match entry {
+        OverlayEntry::Bytes(bytes) => {
+            let text = core::str::from_utf8(bytes).map_err(|err| MaterializeError::Utf8 {
+                message: format!("{err}"),
+            })?;
+            Ok(Some(MaterializedSource {
+                version: slot.revision(),
+                text: String::from(text),
+                diagnostic_name: authored_path.as_str().to_string(),
+            }))
+        }
+        OverlayEntry::Deleted => Err(MaterializeError::Artifact(ArtifactError::Read(
+            ArtifactReadFailure::Deleted,
+        ))),
+    }
+}
+
 fn inline_diagnostic_name(ctx: &SourceDiagnosticCtx, extension: &str) -> String {
     match &ctx.slot_path {
         Some(path) => format!("{}:{}.{}", ctx.containing_file, path, extension),
@@ -83,6 +129,8 @@ fn inline_diagnostic_name(ctx: &SourceDiagnosticCtx, extension: &str) -> String 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ArtifactReadFailure;
+    use crate::change::ChangeOverlay;
     use crate::source::resolve_source_file;
     use lpc_model::Revision;
     use lpfs::{ChangeType, FsChange, LpFsMemory, LpPath, LpPathBuf};
@@ -119,7 +167,8 @@ mod tests {
         let reference = resolve_source_file(&mut store, containing, &slot, frame).expect("resolve");
 
         let materialized =
-            materialize_source(&mut store, &fs, &reference, &slot, &diag_ctx()).expect("read");
+            materialize_source(&mut store, &fs, &reference, &slot, &diag_ctx(), None)
+                .expect("read");
 
         assert!(materialized.text.contains("main"));
         assert_eq!(materialized.diagnostic_name, "./shader.glsl");
@@ -140,6 +189,7 @@ mod tests {
             &reference,
             &slot,
             &diag_ctx(),
+            None,
         )
         .expect("read");
 
@@ -160,19 +210,78 @@ mod tests {
         let reference =
             resolve_source_file(&mut store, containing, &slot, Revision::new(1)).expect("resolve");
 
-        let first =
-            materialize_source(&mut store, &fs, &reference, &slot, &diag_ctx()).expect("read");
+        let first = materialize_source(&mut store, &fs, &reference, &slot, &diag_ctx(), None)
+            .expect("read");
         assert_eq!(first.text, "v1");
         assert_eq!(first.version, slot_revision.max(Revision::new(1)));
 
         write_file(&mut fs, "/shader.glsl", b"v2");
         store.apply_fs_changes(&[fs_change("/shader.glsl")], Revision::new(5));
 
-        let second =
-            materialize_source(&mut store, &fs, &reference, &slot, &diag_ctx()).expect("read");
+        let second = materialize_source(&mut store, &fs, &reference, &slot, &diag_ctx(), None)
+            .expect("read");
         assert_eq!(second.text, "v2");
         assert_eq!(second.version, slot_revision.max(Revision::new(5)));
         assert!(second.version >= first.version);
+    }
+
+    #[test]
+    fn overlay_setbytes_replaces_committed_file_text() {
+        let mut fs = LpFsMemory::new();
+        write_file(&mut fs, "/shader.glsl", b"v1");
+
+        let slot = SourceFileSlot::from_path("./shader.glsl");
+        let mut store = ArtifactStore::new();
+        let containing = LpPath::new("/shader.toml");
+        let reference =
+            resolve_source_file(&mut store, containing, &slot, Revision::new(1)).expect("resolve");
+
+        let mut overlay = ChangeOverlay::new();
+        overlay.apply_bytes(LpPathBuf::from("/shader.glsl"), b"v2-overlay".to_vec());
+
+        let committed =
+            materialize_source(&mut store, &fs, &reference, &slot, &diag_ctx(), None).unwrap();
+        assert_eq!(committed.text, "v1");
+
+        let effective = materialize_source(
+            &mut store,
+            &fs,
+            &reference,
+            &slot,
+            &diag_ctx(),
+            Some(&overlay),
+        )
+        .unwrap();
+        assert_eq!(effective.text, "v2-overlay");
+    }
+
+    #[test]
+    fn overlay_delete_yields_deleted_error() {
+        let mut fs = LpFsMemory::new();
+        write_file(&mut fs, "/shader.glsl", b"v1");
+
+        let slot = SourceFileSlot::from_path("./shader.glsl");
+        let mut store = ArtifactStore::new();
+        let containing = LpPath::new("/shader.toml");
+        let reference =
+            resolve_source_file(&mut store, containing, &slot, Revision::new(1)).expect("resolve");
+
+        let mut overlay = ChangeOverlay::new();
+        overlay.apply_delete(LpPathBuf::from("/shader.glsl"));
+
+        let err = materialize_source(
+            &mut store,
+            &fs,
+            &reference,
+            &slot,
+            &diag_ctx(),
+            Some(&overlay),
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            MaterializeError::Artifact(ArtifactError::Read(ArtifactReadFailure::Deleted))
+        );
     }
 
     #[test]
@@ -186,6 +295,7 @@ mod tests {
             &reference,
             &SourceFileSlot::default(),
             &diag_ctx(),
+            None,
         )
         .unwrap_err();
         assert_eq!(err, MaterializeError::Unsupported);
