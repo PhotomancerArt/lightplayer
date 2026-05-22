@@ -9,6 +9,9 @@ pub enum ChangeError {
     InvalidPath { message: String },
     UnknownArtifact { artifact_id: u32 },
     UnsupportedOp { op: &'static str },
+    Parse { message: String },
+    SlotMutation { message: String },
+    Serialize { message: String },
 }
 
 impl fmt::Display for ChangeError {
@@ -19,6 +22,9 @@ impl fmt::Display for ChangeError {
                 write!(f, "unknown artifact id {artifact_id}")
             }
             Self::UnsupportedOp { op } => write!(f, "unsupported change op: {op}"),
+            Self::Parse { message } => write!(f, "parse error: {message}"),
+            Self::SlotMutation { message } => write!(f, "slot mutation error: {message}"),
+            Self::Serialize { message } => write!(f, "serialize error: {message}"),
         }
     }
 }

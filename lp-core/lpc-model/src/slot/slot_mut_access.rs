@@ -57,6 +57,11 @@ pub trait MapSlotMutAccess {
         registry: &SlotShapeRegistry,
         value_shape: &SlotShape,
     ) -> Result<(), SlotMutationError>;
+    fn remove_entry(
+        &mut self,
+        revision: Revision,
+        key: &SlotMapKey,
+    ) -> Result<(), SlotMutationError>;
 }
 
 /// Mutable access to an enum slot with one active variant.
@@ -96,6 +101,7 @@ pub trait SlotOptionMutAccess {
         registry: &SlotShapeRegistry,
         some_shape: &SlotShape,
     ) -> Result<(), SlotMutationError>;
+    fn clear_presence(&mut self, revision: Revision) -> Result<(), SlotMutationError>;
 }
 
 /// Mutable access to a custom-coded slot subtree.
@@ -276,6 +282,20 @@ impl MapSlotMutAccess for SlotMapDyn {
         self.keys_revision = revision;
         Ok(())
     }
+
+    fn remove_entry(
+        &mut self,
+        revision: Revision,
+        key: &SlotMapKey,
+    ) -> Result<(), SlotMutationError> {
+        if self.entries.remove(key).is_none() {
+            return Err(SlotMutationError::unknown_path(format!(
+                "map has no key {key:?}"
+            )));
+        }
+        self.keys_revision = revision;
+        Ok(())
+    }
 }
 
 impl SlotEnumMutAccess for SlotEnum {
@@ -347,6 +367,12 @@ impl SlotOptionMutAccess for SlotOptionDyn {
         self.data = Some(Box::new(data));
         Ok(())
     }
+
+    fn clear_presence(&mut self, revision: Revision) -> Result<(), SlotMutationError> {
+        self.data = None;
+        self.presence_revision = revision;
+        Ok(())
+    }
 }
 
 impl<T> SlotMapValueMutAccess for T
@@ -389,6 +415,23 @@ where
         self.keys_revision = revision;
         Ok(())
     }
+
+    fn remove_entry(
+        &mut self,
+        revision: Revision,
+        key: &SlotMapKey,
+    ) -> Result<(), SlotMutationError> {
+        let typed_key = K::from_slot_map_key(key).ok_or_else(|| {
+            SlotMutationError::wrong_type(format!("invalid map key for typed map: {key:?}"))
+        })?;
+        if self.entries.remove(&typed_key).is_none() {
+            return Err(SlotMutationError::unknown_path(format!(
+                "map has no key {key:?}"
+            )));
+        }
+        self.keys_revision = revision;
+        Ok(())
+    }
 }
 
 impl<K, V> FieldSlotMut for super::MapSlot<K, V>
@@ -422,6 +465,12 @@ where
         let _ = (registry, some_shape);
         self.presence_revision = revision;
         self.data = Some(T::default());
+        Ok(())
+    }
+
+    fn clear_presence(&mut self, revision: Revision) -> Result<(), SlotMutationError> {
+        self.data = None;
+        self.presence_revision = revision;
         Ok(())
     }
 }

@@ -9,7 +9,8 @@ use lpfs::{FsChange, LpFs, LpPath, LpPathBuf};
 
 use crate::change::apply::apply_op;
 use crate::change::{
-    ArtifactChange, ArtifactTarget, ChangeError, ChangeOverlay, ChangeSet, require_absolute_path,
+    ArtifactChange, ArtifactOp, ArtifactTarget, ChangeError, ChangeOverlay, ChangeSet,
+    require_absolute_path,
 };
 use crate::{ArtifactId, ArtifactLocation, ArtifactStore};
 
@@ -175,18 +176,35 @@ impl NodeDefRegistry {
     }
 
     /// Apply one artifact change block to the overlay. Committed state unchanged.
-    pub fn apply_change(&mut self, change: &ArtifactChange) -> Result<(), ChangeError> {
+    pub fn apply_change(
+        &mut self,
+        change: &ArtifactChange,
+        fs: &dyn LpFs,
+        ctx: &ParseCtx<'_>,
+        frame: Revision,
+    ) -> Result<(), ChangeError> {
         let path = self.resolve_change_target(change.target.clone())?;
         for op in &change.ops {
-            apply_op(&mut self.overlay, path.clone(), op)?;
+            match op {
+                ArtifactOp::Delete | ArtifactOp::SetBytes(_) => {
+                    apply_op(&mut self.overlay, path.clone(), op)?;
+                }
+                _ => self.apply_slot_op(path.clone(), op, fs, ctx, frame)?,
+            }
         }
         Ok(())
     }
 
     /// Apply an ordered changeset to the overlay. Aborts on first error.
-    pub fn apply_changeset(&mut self, changeset: &ChangeSet) -> Result<(), ChangeError> {
+    pub fn apply_changeset(
+        &mut self,
+        changeset: &ChangeSet,
+        fs: &dyn LpFs,
+        ctx: &ParseCtx<'_>,
+        frame: Revision,
+    ) -> Result<(), ChangeError> {
         for change in &changeset.changes {
-            self.apply_change(change)?;
+            self.apply_change(change, fs, ctx, frame)?;
         }
         Ok(())
     }
@@ -209,6 +227,18 @@ impl NodeDefRegistry {
     /// Pending overlay bytes for `path`, if any.
     pub fn overlay_bytes(&self, path: &LpPath) -> Option<&[u8]> {
         self.overlay.get_bytes(path)
+    }
+
+    pub(crate) fn artifact_id_for_path(&self, path: &LpPath) -> Option<ArtifactId> {
+        self.artifact_path_to_id.get(path.as_str()).copied()
+    }
+
+    pub(crate) fn read_committed_artifact_bytes(
+        &mut self,
+        artifact_id: ArtifactId,
+        fs: &dyn LpFs,
+    ) -> Result<Vec<u8>, crate::ArtifactError> {
+        self.store.read_bytes(&artifact_id, fs)
     }
 
     fn resolve_change_target(&self, target: ArtifactTarget) -> Result<LpPathBuf, ChangeError> {
@@ -697,6 +727,11 @@ impl NodeDefRegistry {
 
 #[path = "effective_read.rs"]
 mod effective_read;
+
+#[path = "slot_apply.rs"]
+mod slot_apply;
+
+pub use slot_apply::serialize_slot_draft;
 
 enum PathChangeKind {
     DefArtifact(ArtifactId),

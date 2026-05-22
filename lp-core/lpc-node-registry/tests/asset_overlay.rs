@@ -33,6 +33,14 @@ fn snapshot_entry(registry: &NodeDefRegistry, id: NodeDefId) -> NodeDefEntry {
     registry.get(&id).expect("entry").clone()
 }
 
+fn apply_change(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs, change: &ArtifactChange) {
+    let shapes = parse_ctx();
+    let ctx = ParseCtx { shapes: &shapes };
+    registry
+        .apply_change(change, fs, &ctx, Revision::new(1))
+        .unwrap();
+}
+
 #[test]
 fn c4c_replace_glsl_via_overlay_def_unchanged() {
     let fs = fixtures::load_shader_project();
@@ -41,14 +49,16 @@ fn c4c_replace_glsl_via_overlay_def_unchanged() {
     let before = snapshot_entry(&registry, root);
     let slot = SourceFileSlot::from_path("./shader.glsl");
 
-    registry
-        .apply_change(&ArtifactChange {
+    apply_change(
+        &mut registry,
+        &fs,
+        &ArtifactChange {
             target: ArtifactTarget::Path(LpPathBuf::from("/shader.glsl")),
             ops: vec![ArtifactOp::SetBytes(
                 "void main() { gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0); }".into(),
             )],
-        })
-        .unwrap();
+        },
+    );
 
     let effective = registry
         .materialize_source(
@@ -69,12 +79,14 @@ fn c4a_add_asset_via_overlay_implicit_create() {
     let mut registry = NodeDefRegistry::new();
     load_shader_root(&mut registry, &fs);
 
-    registry
-        .apply_change(&ArtifactChange {
+    apply_change(
+        &mut registry,
+        &fs,
+        &ArtifactChange {
             target: ArtifactTarget::Path(LpPathBuf::from("/extra.glsl")),
             ops: vec![ArtifactOp::SetBytes("void main() {}".into())],
-        })
-        .unwrap();
+        },
+    );
 
     let slot = SourceFileSlot::from_path("./extra.glsl");
     let materialized = registry
@@ -96,12 +108,14 @@ fn c4b_delete_asset_via_overlay() {
     load_shader_root(&mut registry, &fs);
     let slot = SourceFileSlot::from_path("./shader.glsl");
 
-    registry
-        .apply_change(&ArtifactChange {
+    apply_change(
+        &mut registry,
+        &fs,
+        &ArtifactChange {
             target: ArtifactTarget::Path(LpPathBuf::from("/shader.glsl")),
             ops: vec![ArtifactOp::Delete],
-        })
-        .unwrap();
+        },
+    );
 
     let err = registry
         .materialize_source(
@@ -127,12 +141,14 @@ fn c4d_replace_asset_without_touching_def_toml() {
     let slot = SourceFileSlot::from_path("./shader.glsl");
     let slot_revision = slot.revision();
 
-    registry
-        .apply_change(&ArtifactChange {
+    apply_change(
+        &mut registry,
+        &fs,
+        &ArtifactChange {
             target: ArtifactTarget::Path(LpPathBuf::from("/shader.glsl")),
             ops: vec![ArtifactOp::SetBytes("void main() { /* draft */ }".into())],
-        })
-        .unwrap();
+        },
+    );
 
     assert!(!registry.overlay_contains_path(LpPath::new("/shader.toml")));
     let effective = registry

@@ -5,15 +5,17 @@ use alloc::vec::Vec;
 
 use lpfs::{LpFs, LpPath};
 
+use super::slot_apply::serialize_slot_draft;
 use crate::ArtifactId;
 use crate::change::OverlayEntry;
 use crate::source::{
     MaterializeError, MaterializedSource, SourceDiagnosticCtx, materialize_source,
     resolve_source_file,
 };
-use lpc_model::{NodeDef, NodeDefParseError, Revision, SourceFileSlot};
+use lpc_model::{NodeDef, NodeDefParseError, NodeDefRef, Revision, SlotPath, SourceFileSlot};
 
 use super::{NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState, ParseCtx, RegistryError};
+use crate::registry::def_walker::collect_invocations;
 
 impl NodeDefRegistry {
     /// Bytes for `path` from overlay if present, else committed store/fs.
@@ -21,10 +23,18 @@ impl NodeDefRegistry {
         &mut self,
         path: &LpPath,
         fs: &dyn LpFs,
+        ctx: &ParseCtx<'_>,
     ) -> Result<Option<Vec<u8>>, RegistryError> {
         if let Some(entry) = self.overlay.entry(path) {
             return Ok(match entry {
                 OverlayEntry::Bytes(bytes) => Some(bytes.clone()),
+                OverlayEntry::SlotDraft(draft) => {
+                    Some(serialize_slot_draft(&draft.def, ctx).map_err(|err| {
+                        RegistryError::InvalidPath {
+                            message: err.to_string(),
+                        }
+                    })?)
+                }
                 OverlayEntry::Deleted => None,
             });
         }
@@ -50,7 +60,17 @@ impl NodeDefRegistry {
             .ok_or(RegistryError::UnknownDef)?;
         if let Some(entry) = self.overlay.entry(LpPath::new(path.as_str())) {
             return Ok(match entry {
-                OverlayEntry::Bytes(bytes) => parse_toml_bytes(ctx, bytes.as_slice()),
+                OverlayEntry::Bytes(bytes) => effective_state_from_overlay_bytes(
+                    bytes.as_slice(),
+                    &SlotPath::root(),
+                    ctx,
+                    &NodeDefState::ParseError(overlay_deleted_error(path.as_str())),
+                ),
+                OverlayEntry::SlotDraft(draft) => {
+                    def_state_at_source(&draft.def, &SlotPath::root()).unwrap_or_else(|| {
+                        NodeDefState::ParseError(overlay_deleted_error(path.as_str()))
+                    })
+                }
                 OverlayEntry::Deleted => {
                     NodeDefState::ParseError(overlay_deleted_error(path.as_str()))
                 }
@@ -68,7 +88,14 @@ impl NodeDefRegistry {
         }
         let overlay_entry = self.overlay.entry(LpPath::new(path.as_str()))?;
         Some(match overlay_entry {
-            OverlayEntry::Bytes(bytes) => parse_toml_bytes(ctx, bytes.as_slice()),
+            OverlayEntry::Bytes(bytes) => effective_state_from_overlay_bytes(
+                bytes.as_slice(),
+                &entry.source.path,
+                ctx,
+                &entry.state,
+            ),
+            OverlayEntry::SlotDraft(draft) => def_state_at_source(&draft.def, &entry.source.path)
+                .unwrap_or_else(|| entry.state.clone()),
             OverlayEntry::Deleted => NodeDefState::ParseError(overlay_deleted_error(path.as_str())),
         })
     }
@@ -125,6 +152,35 @@ fn overlay_deleted_error(path: &str) -> NodeDefParseError {
     NodeDefParseError::Toml {
         error: alloc::format!("artifact deleted pending commit: `{path}`"),
     }
+}
+
+fn effective_state_from_overlay_bytes(
+    bytes: &[u8],
+    source_path: &lpc_model::SlotPath,
+    ctx: &ParseCtx<'_>,
+    fallback: &NodeDefState,
+) -> NodeDefState {
+    match parse_toml_bytes(ctx, bytes) {
+        NodeDefState::Loaded(root) => {
+            def_state_at_source(&root, source_path).unwrap_or(fallback.clone())
+        }
+        other => other,
+    }
+}
+
+fn def_state_at_source(root: &NodeDef, source_path: &lpc_model::SlotPath) -> Option<NodeDefState> {
+    if source_path.is_root() {
+        return Some(NodeDefState::Loaded(root.clone()));
+    }
+    for site in collect_invocations(root, &lpc_model::SlotPath::root()) {
+        if site.path == *source_path {
+            return match &site.invocation.def {
+                NodeDefRef::Inline(body) => Some(NodeDefState::Loaded(body.as_ref().clone())),
+                NodeDefRef::Path(_) => None,
+            };
+        }
+    }
+    None
 }
 
 pub(crate) fn read_error_state(err: crate::ArtifactError) -> NodeDefParseError {

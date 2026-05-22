@@ -116,6 +116,7 @@ fn materialize_file_overlay(
         OverlayEntry::Deleted => Err(MaterializeError::Artifact(ArtifactError::Read(
             ArtifactReadFailure::Deleted,
         ))),
+        OverlayEntry::SlotDraft(_) => Ok(None),
     }
 }
 

@@ -29,6 +29,14 @@ fn load_clock_root(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs) -> NodeD
         .unwrap()
 }
 
+fn apply_change(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs, change: &ArtifactChange) {
+    let shapes = parse_ctx();
+    let ctx = ParseCtx { shapes: &shapes };
+    registry
+        .apply_change(change, fs, &ctx, Revision::new(1))
+        .unwrap();
+}
+
 #[test]
 fn effective_view_differs_after_toml_setbytes() {
     let fs = fixtures::load_clock();
@@ -39,8 +47,10 @@ fn effective_view_differs_after_toml_setbytes() {
 
     assert_eq!(clock_rate(registry.get(&root).unwrap()), 1.0);
 
-    registry
-        .apply_change(&ArtifactChange {
+    apply_change(
+        &mut registry,
+        &fs,
+        &ArtifactChange {
             target: ArtifactTarget::Path(LpPathBuf::from("/clock.toml")),
             ops: vec![ArtifactOp::SetBytes(
                 r#"
@@ -51,8 +61,8 @@ rate = 2.0
 "#
                 .into(),
             )],
-        })
-        .unwrap();
+        },
+    );
 
     let effective = registry.view().get(&root, &fs, &ctx).unwrap();
     assert_eq!(clock_rate(&effective), 2.0);
@@ -80,8 +90,10 @@ fn discard_restores_effective_view_to_committed() {
     let shapes = parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
 
-    registry
-        .apply_change(&ArtifactChange {
+    apply_change(
+        &mut registry,
+        &fs,
+        &ArtifactChange {
             target: ArtifactTarget::Path(LpPathBuf::from("/clock.toml")),
             ops: vec![ArtifactOp::SetBytes(
                 r#"
@@ -92,8 +104,8 @@ rate = 2.0
 "#
                 .into(),
             )],
-        })
-        .unwrap();
+        },
+    );
     assert_eq!(
         clock_rate(&registry.view().get(&root, &fs, &ctx).unwrap()),
         2.0
@@ -114,12 +126,14 @@ fn effective_deleted_overlay_yields_parse_error() {
     let shapes = parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
 
-    registry
-        .apply_change(&ArtifactChange {
+    apply_change(
+        &mut registry,
+        &fs,
+        &ArtifactChange {
             target: ArtifactTarget::Path(LpPathBuf::from("/clock.toml")),
             ops: vec![ArtifactOp::Delete],
-        })
-        .unwrap();
+        },
+    );
 
     assert!(matches!(
         registry.view().state(&root, &fs, &ctx),

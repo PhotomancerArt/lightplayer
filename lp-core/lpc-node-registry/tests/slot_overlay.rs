@@ -1,0 +1,196 @@
+//! Slot overlay apply + effective projection (C1/C2, M4).
+
+mod common;
+
+use common::fixtures;
+use lpc_model::{LpValue, NodeDef, Revision, SlotPath, SlotShapeRegistry};
+use lpc_node_registry::{
+    ArtifactChange, ArtifactOp, ArtifactTarget, DefSource, NodeDefEntry, NodeDefId,
+    NodeDefRegistry, NodeDefState, ParseCtx, serialize_slot_draft,
+};
+use lpfs::{LpPath, LpPathBuf};
+
+fn parse_ctx() -> SlotShapeRegistry {
+    SlotShapeRegistry::default()
+}
+
+fn apply_change(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs, change: &ArtifactChange) {
+    let shapes = parse_ctx();
+    let ctx = ParseCtx { shapes: &shapes };
+    registry
+        .apply_change(change, fs, &ctx, Revision::new(2))
+        .unwrap();
+}
+
+fn clock_rate(entry: &NodeDefEntry) -> f32 {
+    let NodeDefState::Loaded(NodeDef::Clock(def)) = &entry.state else {
+        panic!("expected loaded clock def");
+    };
+    *def.controls.rate.value()
+}
+
+fn shader_render_order(entry: &NodeDefEntry) -> i32 {
+    let NodeDefState::Loaded(NodeDef::Shader(def)) = &entry.state else {
+        panic!("expected loaded shader def");
+    };
+    def.render_order()
+}
+
+fn inline_child_id(registry: &NodeDefRegistry, root: NodeDefId) -> NodeDefId {
+    let artifact_id = registry.get(&root).unwrap().source.artifact_id;
+    registry
+        .get_by_source(&DefSource {
+            artifact_id,
+            path: SlotPath::parse("entries[2].node").unwrap(),
+        })
+        .expect("inline child")
+        .id
+}
+
+#[test]
+fn c1_setslot_patches_clock_rate_in_view() {
+    let fs = fixtures::load_clock();
+    let mut registry = NodeDefRegistry::new();
+    let shapes = parse_ctx();
+    let ctx = ParseCtx { shapes: &shapes };
+    let root = registry
+        .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
+        .unwrap();
+
+    apply_change(
+        &mut registry,
+        &fs,
+        &ArtifactChange {
+            target: ArtifactTarget::Path(LpPathBuf::from("/clock.toml")),
+            ops: vec![ArtifactOp::SetSlot {
+                path: SlotPath::parse("controls.rate").unwrap(),
+                value: LpValue::F32(2.0),
+            }],
+        },
+    );
+
+    let effective = registry.view().get(&root, &fs, &ctx).unwrap();
+    assert_eq!(clock_rate(&effective), 2.0);
+    assert_eq!(clock_rate(registry.get(&root).unwrap()), 1.0);
+}
+
+#[test]
+fn c1_slot_draft_serializes_to_toml() {
+    let fs = fixtures::load_clock();
+    let mut registry = NodeDefRegistry::new();
+    let shapes = parse_ctx();
+    let ctx = ParseCtx { shapes: &shapes };
+    registry
+        .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
+        .unwrap();
+
+    apply_change(
+        &mut registry,
+        &fs,
+        &ArtifactChange {
+            target: ArtifactTarget::Path(LpPathBuf::from("/clock.toml")),
+            ops: vec![ArtifactOp::SetSlot {
+                path: SlotPath::parse("controls.rate").unwrap(),
+                value: LpValue::F32(2.0),
+            }],
+        },
+    );
+
+    let bytes = registry
+        .read_effective_bytes(LpPath::new("/clock.toml"), &fs, &ctx)
+        .unwrap()
+        .expect("effective bytes");
+    let text = core::str::from_utf8(&bytes).unwrap();
+    assert!(text.contains("rate = 2"));
+    let reparsed = NodeDef::read_toml(&shapes, text).unwrap();
+    let NodeDef::Clock(def) = reparsed else {
+        panic!("expected clock");
+    };
+    assert_eq!(*def.controls.rate.value(), 2.0);
+
+    let draft_def = registry.overlay_contains_path(LpPath::new("/clock.toml"));
+    assert!(draft_def);
+    let effective = registry
+        .view()
+        .get(&registry.root_id().unwrap(), &fs, &ctx)
+        .unwrap();
+    let serialized = serialize_slot_draft(
+        match effective.state {
+            NodeDefState::Loaded(ref def) => def,
+            _ => panic!("expected loaded"),
+        },
+        &ctx,
+    )
+    .unwrap();
+    assert_eq!(serialized, bytes);
+}
+
+fn playlist_idle_entry(entry: &NodeDefEntry) -> u32 {
+    let NodeDefState::Loaded(NodeDef::Playlist(def)) = &entry.state else {
+        panic!("expected loaded playlist def");
+    };
+    *def.idle_entry.value()
+}
+
+#[test]
+fn c2_playlist_slot_patch_committed_children_unchanged() {
+    let fs = fixtures::load_playlist_with_inline_child();
+    let mut registry = NodeDefRegistry::new();
+    let shapes = parse_ctx();
+    let ctx = ParseCtx { shapes: &shapes };
+    let root = registry
+        .load_root(&fs, LpPath::new("/playlist.toml"), Revision::new(1), &ctx)
+        .unwrap();
+    let child = inline_child_id(&registry, root);
+    let child_before = registry.get(&child).unwrap().clone();
+    let committed_idle = playlist_idle_entry(registry.get(&root).unwrap());
+
+    apply_change(
+        &mut registry,
+        &fs,
+        &ArtifactChange {
+            target: ArtifactTarget::Path(LpPathBuf::from("/playlist.toml")),
+            ops: vec![ArtifactOp::SetSlot {
+                path: SlotPath::parse("idle_entry").unwrap(),
+                value: LpValue::U32(99),
+            }],
+        },
+    );
+
+    let effective = registry.view().get(&root, &fs, &ctx).unwrap();
+    assert_eq!(playlist_idle_entry(&effective), 99);
+    assert_eq!(
+        playlist_idle_entry(registry.get(&root).unwrap()),
+        committed_idle
+    );
+    assert_eq!(registry.get(&child).unwrap(), &child_before);
+}
+
+#[test]
+fn c2_inline_child_slot_patch_visible_in_view() {
+    let fs = fixtures::load_playlist_with_inline_child();
+    let mut registry = NodeDefRegistry::new();
+    let shapes = parse_ctx();
+    let ctx = ParseCtx { shapes: &shapes };
+    let root = registry
+        .load_root(&fs, LpPath::new("/playlist.toml"), Revision::new(1), &ctx)
+        .unwrap();
+    let child = inline_child_id(&registry, root);
+    let before = registry.get(&child).unwrap().clone();
+
+    apply_change(
+        &mut registry,
+        &fs,
+        &ArtifactChange {
+            target: ArtifactTarget::Path(LpPathBuf::from("/playlist.toml")),
+            ops: vec![ArtifactOp::SetSlot {
+                path: SlotPath::parse("entries[2].node.def.render_order").unwrap(),
+                value: LpValue::I32(7),
+            }],
+        },
+    );
+
+    let effective = registry.view().get(&child, &fs, &ctx).unwrap();
+    assert_eq!(shader_render_order(&effective), 7);
+    assert_eq!(registry.get(&child).unwrap(), &before);
+}

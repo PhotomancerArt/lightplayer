@@ -22,12 +22,12 @@ pub use artifact::{
 };
 pub use change::{
     ArtifactChange, ArtifactOp, ArtifactTarget, ChangeError, ChangeOverlay, ChangeSet, ChangeSetId,
-    OverlayEntry,
+    OverlayEntry, SlotDraft,
 };
 pub use registry::{
     DefChangeDetail, DefSource, NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState,
     NodeDefUpdates, ParseCtx, RegistryChange, RegistryError, SourceRevisionBump, SyncResult,
-    ValidationErrorPlaceholder,
+    ValidationErrorPlaceholder, serialize_slot_draft,
 };
 pub use source::{
     MaterializeError, MaterializedSource, ResolveError, SourceDiagnosticCtx, SourceFileRef,
