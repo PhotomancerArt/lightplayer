@@ -94,9 +94,13 @@ impl NodeDefRegistry {
                 ctx,
                 &entry.state,
             ),
-            SlotOverlayEntry::DefDraft(draft) => def_state_at_source(&draft.def, &entry.source.path)
-                .unwrap_or_else(|| entry.state.clone()),
-            SlotOverlayEntry::Deleted => NodeDefState::ParseError(slot_overlay_deleted_error(path.as_str())),
+            SlotOverlayEntry::DefDraft(draft) => {
+                def_state_at_source(&draft.def, &entry.source.path)
+                    .unwrap_or_else(|| entry.state.clone())
+            }
+            SlotOverlayEntry::Deleted => {
+                NodeDefState::ParseError(slot_overlay_deleted_error(path.as_str()))
+            }
         })
     }
 

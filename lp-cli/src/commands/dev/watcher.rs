@@ -1,18 +1,18 @@
 //! File system watcher
 //!
 //! Wraps the `notify` crate to provide file change events for the dev command.
-//! Converts OS-level file events into `FsChange` events compatible with the sync system.
+//! Converts OS-level file events into `FsEvent` events compatible with the sync system.
 
 use anyhow::{Context, Result};
-use lpfs::{ChangeType, FsChange};
+use lpfs::{FsEvent, FsEventKind};
 use notify::Watcher;
 use std::path::{Path, PathBuf};
 use tokio::sync::mpsc;
 
-/// File system watcher that converts OS events to FsChange events
+/// File system watcher that converts OS events to FsEvent events
 pub struct FileWatcher {
     /// Receiver for file change events
-    event_receiver: mpsc::UnboundedReceiver<FsChange>,
+    event_receiver: mpsc::UnboundedReceiver<FsEvent>,
     /// Root path of the project (for path normalization)
     #[allow(dead_code, reason = "Stored for path normalization")]
     root_path: PathBuf,
@@ -74,17 +74,17 @@ impl FileWatcher {
                                 }
                             };
 
-                            // Map notify event kind to ChangeType
-                            let change_type = match event.kind {
-                                notify::EventKind::Create(_) => ChangeType::Create,
-                                notify::EventKind::Modify(_) => ChangeType::Modify,
-                                notify::EventKind::Remove(_) => ChangeType::Delete,
+                            // Map notify event kind to FsEventKind
+                            let kind = match event.kind {
+                                notify::EventKind::Create(_) => FsEventKind::Create,
+                                notify::EventKind::Modify(_) => FsEventKind::Modify,
+                                notify::EventKind::Remove(_) => FsEventKind::Delete,
                                 notify::EventKind::Any | notify::EventKind::Other => {
                                     // For Any/Other, try to determine from file existence
                                     if path.exists() {
-                                        ChangeType::Modify
+                                        FsEventKind::Modify
                                     } else {
-                                        ChangeType::Delete
+                                        FsEventKind::Delete
                                     }
                                 }
                                 _ => {
@@ -93,10 +93,10 @@ impl FileWatcher {
                                 }
                             };
 
-                            // Create FsChange and send to channel (non-blocking)
-                            let change = FsChange {
+                            // Create FsEvent and send to channel (non-blocking)
+                            let change = FsEvent {
                                 path: lpc_model::LpPathBuf::from(normalized_path),
-                                change_type,
+                                kind,
                             };
 
                             // Send event (non-blocking, drop if channel is full)
@@ -197,9 +197,9 @@ impl FileWatcher {
     ///
     /// # Returns
     ///
-    /// * `Some(FsChange)` if an event is available
+    /// * `Some(FsEvent)` if an event is available
     /// * `None` if no events are available or the channel is closed
-    pub async fn next_change(&mut self) -> Option<FsChange> {
+    pub async fn next_change(&mut self) -> Option<FsEvent> {
         self.event_receiver.recv().await
     }
 }
@@ -237,7 +237,7 @@ mod tests {
         assert!(change.is_some(), "Expected file create event");
         let change = change.unwrap();
         assert_eq!(change.path.as_str(), "/test.txt");
-        assert_eq!(change.change_type, ChangeType::Create);
+        assert_eq!(change.kind, FsEventKind::Create);
     }
 
     #[tokio::test]
@@ -267,9 +267,9 @@ mod tests {
         assert_eq!(change.path.as_str(), "/test.txt");
         // Some OSes report modify as Create, so accept either
         assert!(
-            change.change_type == ChangeType::Modify || change.change_type == ChangeType::Create,
+            change.kind == FsEventKind::Modify || change.kind == FsEventKind::Create,
             "Expected Modify or Create, got {:?}",
-            change.change_type
+            change.kind
         );
     }
 
@@ -298,12 +298,12 @@ mod tests {
                 tokio::time::timeout(Duration::from_secs(1), watcher.next_change()).await
             {
                 if change.path.as_str() == "/test.txt" {
-                    if change.change_type == ChangeType::Delete {
+                    if change.kind == FsEventKind::Delete {
                         found_delete = true;
                         break;
                     }
                     // Some OSes report delete as Modify when file doesn't exist
-                    if change.change_type == ChangeType::Modify && !test_file.exists() {
+                    if change.kind == FsEventKind::Modify && !test_file.exists() {
                         found_delete = true;
                         break;
                     }

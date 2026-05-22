@@ -16,7 +16,7 @@ use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::ServerTransport;
 use lpc_wire::{ClientRequest, WireMessage, WireServerMessage};
-use lpfs::{FsChange, LpFs};
+use lpfs::{FsEvent, LpFs};
 
 /// Optional callback returning (free_bytes, used_bytes) for memory logging.
 /// Platforms without heap stats (e.g. fw-emu) pass `None`.
@@ -160,7 +160,7 @@ impl LpServer {
         );
 
         // Collect changes per project
-        let mut project_changes_map: HashMap<_, Vec<FsChange>> = HashMap::new();
+        let mut project_changes_map: HashMap<_, Vec<FsEvent>> = HashMap::new();
 
         for (handle, project_path) in &project_info {
             if let Some(project) = self.project_manager.get_project(*handle) {
@@ -178,14 +178,14 @@ impl LpServer {
                 // Build project prefix path using join - ensure it ends with /
                 let project_prefix_buf = LpPathBuf::from("/").join(project_path.as_str()).join("");
                 let project_prefix = project_prefix_buf.as_str();
-                let project_changes: Vec<FsChange> = base_changes
+                let project_changes: Vec<FsEvent> = base_changes
                     .into_iter()
                     .filter_map(|change| {
                         // Use LpPath to strip prefix and normalize
                         if let Some(stripped) = change.path.strip_prefix(project_prefix) {
-                            Some(FsChange {
+                            Some(FsEvent {
                                 path: stripped.to_path_buf(),
-                                change_type: change.change_type,
+                                kind: change.kind,
                             })
                         } else {
                             None

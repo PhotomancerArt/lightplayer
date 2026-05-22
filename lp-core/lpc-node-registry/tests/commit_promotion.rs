@@ -5,10 +5,10 @@ mod common;
 use common::fixtures;
 use lpc_model::{LpValue, NodeDef, Revision, SlotPath, SlotShapeRegistry};
 use lpc_node_registry::{
-    ArtifactEdit, EditOp, EditTarget, DefSource, NodeDefEntry, NodeDefId,
-    NodeDefRegistry, NodeDefState, ParseCtx,
+    ArtifactEdit, DefSource, EditOp, EditTarget, NodeDefEntry, NodeDefId, NodeDefRegistry,
+    NodeDefState, ParseCtx,
 };
-use lpfs::{ChangeType, FsChange, LpFs, LpPath, LpPathBuf};
+use lpfs::{FsEvent, FsEventKind, LpFs, LpPath, LpPathBuf};
 
 fn parse_ctx() -> SlotShapeRegistry {
     SlotShapeRegistry::default()
@@ -47,10 +47,10 @@ fn inline_child_id(registry: &NodeDefRegistry, root: NodeDefId) -> NodeDefId {
         .id
 }
 
-fn fs_modify(path: &str) -> FsChange {
-    FsChange {
+fn fs_modify(path: &str) -> FsEvent {
+    FsEvent {
         path: LpPathBuf::from(path),
-        change_type: ChangeType::Modify,
+        kind: FsEventKind::Modify,
     }
 }
 

@@ -3,8 +3,8 @@
 use crate::error::FsError;
 use crate::{
     LpFs,
-    fs_event::ChangeType,
-    fs_event::{FsChange, FsVersion},
+    fs_event::FsEventKind,
+    fs_event::{FsEvent, FsVersion},
     lp_fs_view::LpFsView,
 };
 use crate::{LpPath, LpPathBuf};
@@ -18,8 +18,8 @@ pub struct LpFsMemory {
     files: Rc<RefCell<HashMap<LpPathBuf, Vec<u8>>>>,
     /// Version counter (increments on each change)
     current_version: RefCell<FsVersion>,
-    /// Map of path -> (version, ChangeType) - only latest change per path
-    changes: RefCell<HashMap<LpPathBuf, (FsVersion, ChangeType)>>,
+    /// Map of path -> (version, FsEventKind) - only latest change per path
+    changes: RefCell<HashMap<LpPathBuf, (FsVersion, FsEventKind)>>,
 }
 
 impl LpFsMemory {
@@ -33,7 +33,7 @@ impl LpFsMemory {
     }
 
     /// Record a filesystem change
-    fn record_change(&self, path: &LpPath, change_type: ChangeType) {
+    fn record_change(&self, path: &LpPath, kind: FsEventKind) {
         let mut current = self.current_version.borrow_mut();
         *current = current.next();
         let version = *current;
@@ -41,7 +41,7 @@ impl LpFsMemory {
 
         self.changes
             .borrow_mut()
-            .insert(path.to_path_buf(), (version, change_type));
+            .insert(path.to_path_buf(), (version, kind));
     }
 
     /// Write a file (mutable version)
@@ -56,12 +56,12 @@ impl LpFsMemory {
         drop(files); // Release borrow before recording change
 
         // Record change
-        let change_type = if existed {
-            ChangeType::Modify
+        let kind = if existed {
+            FsEventKind::Modify
         } else {
-            ChangeType::Create
+            FsEventKind::Create
         };
-        self.record_change(normalized.as_path(), change_type);
+        self.record_change(normalized.as_path(), kind);
 
         Ok(())
     }
@@ -90,7 +90,7 @@ impl LpFsMemory {
         drop(files); // Release borrow before recording change
 
         // Record change
-        self.record_change(normalized.as_path(), ChangeType::Delete);
+        self.record_change(normalized.as_path(), FsEventKind::Delete);
 
         Ok(())
     }
@@ -133,7 +133,7 @@ impl LpFsMemory {
 
         // Record changes
         for file_path in files_to_remove_clone {
-            self.record_change(file_path.as_path(), ChangeType::Delete);
+            self.record_change(file_path.as_path(), FsEventKind::Delete);
         }
 
         Ok(())
@@ -195,12 +195,12 @@ impl LpFs for LpFsMemory {
         drop(files); // Release borrow before recording change
 
         // Record change
-        let change_type = if existed {
-            ChangeType::Modify
+        let kind = if existed {
+            FsEventKind::Modify
         } else {
-            ChangeType::Create
+            FsEventKind::Create
         };
-        self.record_change(normalized.as_path(), change_type);
+        self.record_change(normalized.as_path(), kind);
 
         Ok(())
     }
@@ -319,7 +319,7 @@ impl LpFs for LpFsMemory {
         drop(files); // Release borrow before recording change
 
         // Record change
-        self.record_change(normalized.as_path(), ChangeType::Delete);
+        self.record_change(normalized.as_path(), FsEventKind::Delete);
 
         Ok(())
     }
@@ -361,7 +361,7 @@ impl LpFs for LpFsMemory {
 
         // Record changes
         for file_path in files_to_remove {
-            self.record_change(file_path.as_path(), ChangeType::Delete);
+            self.record_change(file_path.as_path(), FsEventKind::Delete);
         }
 
         Ok(())
@@ -405,15 +405,15 @@ impl LpFs for LpFsMemory {
         *self.current_version.borrow()
     }
 
-    fn get_changes_since(&self, since_version: FsVersion) -> Vec<FsChange> {
+    fn get_changes_since(&self, since_version: FsVersion) -> Vec<FsEvent> {
         self.changes
             .borrow()
             .iter()
-            .filter_map(|(path, (version, change_type))| {
+            .filter_map(|(path, (version, kind))| {
                 if *version >= since_version {
-                    Some(FsChange {
+                    Some(FsEvent {
                         path: path.clone(),
-                        change_type: *change_type,
+                        kind: *kind,
                     })
                 } else {
                     None
@@ -428,16 +428,16 @@ impl LpFs for LpFsMemory {
             .retain(|_, (version, _)| *version >= before_version);
     }
 
-    fn record_changes(&mut self, changes: Vec<FsChange>) {
+    fn record_changes(&mut self, changes: Vec<FsEvent>) {
         for change in changes {
-            self.record_change(change.path.as_path(), change.change_type);
+            self.record_change(change.path.as_path(), change.kind);
         }
     }
 }
 
 impl LpFsMemory {
     /// Get all changes (convenience method)
-    pub fn get_changes(&self) -> Vec<FsChange> {
+    pub fn get_changes(&self) -> Vec<FsEvent> {
         self.get_changes_since(FsVersion::default())
     }
 

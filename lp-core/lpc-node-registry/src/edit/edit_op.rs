@@ -12,7 +12,11 @@ pub enum EditOp {
     Delete,
     /// Whole-file body — assets and optional TOML import escape hatch.
     SetBytes(String),
-    /// Set a slot leaf value.
+    /// Set a slot value at `path`.
+    ///
+    /// Apply interprets the value from slot shape: `String` may switch an enum
+    /// variant or node `kind` (at root); other values set scalar leaves. Project
+    /// `nodes[*].def` path strings update invocation locators.
     SetSlot { path: SlotPath, value: LpValue },
     /// Insert or replace one map entry (`key` is a wire string parsed on apply).
     MapInsert {

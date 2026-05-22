@@ -6,7 +6,7 @@
 //! - Path formatting in sync_file_change
 
 use lpc_model::AsLpPath;
-use lpfs::{ChangeType, FsChange, LpFs, LpFsMemory};
+use lpfs::{FsEvent, FsEventKind, LpFs, LpFsMemory};
 use std::collections::HashMap;
 use std::time::Instant;
 
@@ -15,12 +15,12 @@ use lp_cli::commands::dev::fs_loop::add_pending_change;
 #[test]
 fn test_add_pending_change() {
     // Test that add_pending_change correctly adds changes and updates timestamp
-    let mut pending_changes: HashMap<String, FsChange> = HashMap::new();
+    let mut pending_changes: HashMap<String, FsEvent> = HashMap::new();
     let mut last_change_time: Option<Instant> = None;
 
-    let change1 = FsChange {
+    let change1 = FsEvent {
         path: lpc_model::LpPathBuf::from("/src/test1.glsl"),
-        change_type: ChangeType::Create,
+        kind: FsEventKind::Create,
     };
 
     add_pending_change(&mut pending_changes, &mut last_change_time, change1.clone());
@@ -30,9 +30,9 @@ fn test_add_pending_change() {
     assert!(last_change_time.is_some());
 
     // Add another change
-    let change2 = FsChange {
+    let change2 = FsEvent {
         path: lpc_model::LpPathBuf::from("/src/test2.glsl"),
-        change_type: ChangeType::Modify,
+        kind: FsEventKind::Modify,
     };
 
     add_pending_change(&mut pending_changes, &mut last_change_time, change2.clone());
@@ -42,9 +42,9 @@ fn test_add_pending_change() {
     assert!(pending_changes.contains_key("/src/test2.glsl"));
 
     // Update existing change (should deduplicate by path)
-    let change1_updated = FsChange {
+    let change1_updated = FsEvent {
         path: lpc_model::LpPathBuf::from("/src/test1.glsl"),
-        change_type: ChangeType::Modify, // Changed from Create to Modify
+        kind: FsEventKind::Modify, // Changed from Create to Modify
     };
 
     let time_before = last_change_time.unwrap();
@@ -59,8 +59,8 @@ fn test_add_pending_change() {
     assert_eq!(pending_changes.len(), 2);
     // The change should be updated (Modify, not Create)
     assert_eq!(
-        pending_changes.get("/src/test1.glsl").unwrap().change_type,
-        ChangeType::Modify
+        pending_changes.get("/src/test1.glsl").unwrap().kind,
+        FsEventKind::Modify
     );
     // Timestamp should be updated
     assert!(last_change_time.unwrap() > time_before);
@@ -81,7 +81,7 @@ fn test_file_change_detection() {
     let changes = fs.get_changes();
     assert_eq!(changes.len(), 1);
     assert_eq!(changes[0].path.as_str(), "/src/test.glsl");
-    assert_eq!(changes[0].change_type, ChangeType::Create);
+    assert_eq!(changes[0].kind, FsEventKind::Create);
 
     // Modify the file
     fs.reset_changes();
@@ -93,7 +93,7 @@ fn test_file_change_detection() {
 
     let changes = fs.get_changes();
     assert_eq!(changes.len(), 1);
-    assert_eq!(changes[0].change_type, ChangeType::Modify);
+    assert_eq!(changes[0].kind, FsEventKind::Modify);
 
     // Delete the file
     fs.reset_changes();
@@ -101,7 +101,7 @@ fn test_file_change_detection() {
 
     let changes = fs.get_changes();
     assert_eq!(changes.len(), 1);
-    assert_eq!(changes[0].change_type, ChangeType::Delete);
+    assert_eq!(changes[0].kind, FsEventKind::Delete);
 }
 
 #[test]
@@ -122,7 +122,7 @@ fn test_multiple_file_changes() {
 
     // Verify all changes are Create type
     for change in &changes {
-        assert_eq!(change.change_type, ChangeType::Create);
+        assert_eq!(change.kind, FsEventKind::Create);
     }
 
     // Verify paths
@@ -164,13 +164,13 @@ fn test_debouncing_logic() {
     use lp_cli::commands::dev::fs_loop::DEBOUNCE_DURATION;
     use std::time::Duration;
 
-    let mut pending_changes: HashMap<String, FsChange> = HashMap::new();
+    let mut pending_changes: HashMap<String, FsEvent> = HashMap::new();
     let mut last_change_time: Option<Instant> = None;
 
     // Add a change
-    let change = FsChange {
+    let change = FsEvent {
         path: lpc_model::LpPathBuf::from("/src/test.glsl"),
-        change_type: ChangeType::Create,
+        kind: FsEventKind::Create,
     };
     add_pending_change(&mut pending_changes, &mut last_change_time, change);
 

@@ -5,8 +5,8 @@ mod common;
 use common::fixtures;
 use lpc_model::{LpValue, Revision, SlotPath, SlotShapeRegistry};
 use lpc_node_registry::{
-    ArtifactEdit, EditOp, EditTarget, EditError, EditBatch, EditBatchId, NodeDefEntry,
-    NodeDefId, NodeDefRegistry, ParseCtx,
+    ArtifactEdit, EditBatch, EditBatchId, EditError, EditOp, EditTarget, NodeDefEntry, NodeDefId,
+    NodeDefRegistry, ParseCtx,
 };
 use lpfs::{LpFsMemory, LpPath, LpPathBuf};
 
@@ -171,7 +171,10 @@ fn apply_delete_marks_overlay_entry() {
     .unwrap();
 
     assert!(registry.slot_overlay_contains_path(LpPath::new("/shader.glsl")));
-    assert_eq!(registry.slot_overlay_bytes(LpPath::new("/shader.glsl")), None);
+    assert_eq!(
+        registry.slot_overlay_bytes(LpPath::new("/shader.glsl")),
+        None
+    );
 }
 
 #[test]

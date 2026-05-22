@@ -3,7 +3,7 @@
 use crate::error::FsError;
 use crate::{
     LpFs,
-    fs_event::{ChangeType, FsChange, FsVersion},
+    fs_event::{FsEvent, FsEventKind, FsVersion},
     lp_fs_view::LpFsView,
 };
 use crate::{LpPath, LpPathBuf};
@@ -23,9 +23,9 @@ pub struct LpFsStd {
     /// Version counter (increments on each change)
     /// Uses Mutex for thread-safety (required for Send + Sync)
     current_version: Mutex<FsVersion>,
-    /// Map of path -> (version, ChangeType) - only latest change per path
+    /// Map of path -> (version, FsEventKind) - only latest change per path
     /// Uses Mutex for thread-safety (required for Send + Sync)
-    changes: Mutex<HashMap<LpPathBuf, (FsVersion, ChangeType)>>,
+    changes: Mutex<HashMap<LpPathBuf, (FsVersion, FsEventKind)>>,
 }
 
 impl LpFsStd {
@@ -46,16 +46,13 @@ impl LpFsStd {
     }
 
     /// Record a filesystem change
-    fn record_change(&self, path: LpPathBuf, change_type: ChangeType) {
+    fn record_change(&self, path: LpPathBuf, kind: FsEventKind) {
         let mut current = self.current_version.lock().unwrap();
         *current = current.next();
         let version = *current;
         drop(current);
 
-        self.changes
-            .lock()
-            .unwrap()
-            .insert(path, (version, change_type));
+        self.changes.lock().unwrap().insert(path, (version, kind));
     }
 
     /// Resolve a path relative to the root and validate it stays within root
@@ -441,16 +438,16 @@ impl LpFs for LpFsStd {
         *self.current_version.lock().unwrap()
     }
 
-    fn get_changes_since(&self, since_version: FsVersion) -> Vec<FsChange> {
+    fn get_changes_since(&self, since_version: FsVersion) -> Vec<FsEvent> {
         self.changes
             .lock()
             .unwrap()
             .iter()
-            .filter_map(|(path, (version, change_type))| {
+            .filter_map(|(path, (version, kind))| {
                 if *version >= since_version {
-                    Some(FsChange {
+                    Some(FsEvent {
                         path: path.clone(),
-                        change_type: *change_type,
+                        kind: *kind,
                     })
                 } else {
                     None
@@ -466,10 +463,10 @@ impl LpFs for LpFsStd {
             .retain(|_, (version, _)| *version >= before_version);
     }
 
-    fn record_changes(&mut self, changes: Vec<FsChange>) {
+    fn record_changes(&mut self, changes: Vec<FsEvent>) {
         for change in changes {
             // Path is already LpPathBuf, just record it
-            self.record_change(change.path, change.change_type);
+            self.record_change(change.path, change.kind);
         }
     }
 }

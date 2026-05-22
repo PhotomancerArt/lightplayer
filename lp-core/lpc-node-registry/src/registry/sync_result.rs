@@ -37,4 +37,10 @@ impl SyncResult {
             && self.source_revisions.is_empty()
             && self.change_details.is_empty()
     }
+
+    pub fn merge(&mut self, other: Self) {
+        self.def_updates.merge(other.def_updates);
+        self.source_revisions.extend(other.source_revisions);
+        self.change_details.extend(other.change_details);
+    }
 }

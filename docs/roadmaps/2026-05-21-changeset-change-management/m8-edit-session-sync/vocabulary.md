@@ -36,8 +36,13 @@ Canonical names for M8 and beyond. Layer 0 (`FsEvent`) and layers 3–4 (`SyncOp
 
 Deprecated type aliases live in `edit/mod.rs` and `lib.rs` (`change` module re-export).
 
-## Not yet renamed (later M8 phases)
+## Layer 3–4 — Sync ingress
 
-- `RegistryChange` → `SyncOp`
-- `FsChange` → `FsEvent`
-- Session log types (`SessionVersion`, `SessionEvent`, …)
+| Symbol | Role |
+|--------|------|
+| `SyncOp` | `Fs`, `Apply`, `Remove`, `ClearPending`, `Commit` |
+| `SyncOutcome` | `{ committed, pending_changed }` |
+| `SlotOverlay` | Current pending map (path → draft/bytes/deleted) |
+| `FsEvent` | Committed filesystem notification |
+
+History/undo lives on the **client**, not in the registry.

@@ -9,7 +9,7 @@ use lpc_model::NodeDef;
 use lpfs::LpPathBuf;
 
 use crate::ParseCtx;
-use crate::edit::{ArtifactEdit, EditOp, EditTarget, EditBatch, EditBatchId};
+use crate::edit::{ArtifactEdit, EditBatch, EditBatchId, EditOp, EditTarget};
 
 use super::DiffError;
 use super::def_diff::diff_node_defs;

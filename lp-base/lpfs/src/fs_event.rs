@@ -53,18 +53,10 @@ mod tests {
     }
 }
 
-/// Represents an event caused by a file or directory change
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FsChange {
-    /// Path affected by the change
-    pub path: LpPathBuf,
-    /// Type of change
-    pub change_type: ChangeType,
-}
-
-/// Type of file change
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChangeType {
+/// Kind of filesystem event.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FsEventKind {
     /// File was created
     Create,
     /// File was modified
@@ -72,3 +64,18 @@ pub enum ChangeType {
     /// File was deleted
     Delete,
 }
+
+/// Represents an event caused by a file or directory change
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FsEvent {
+    /// Path affected by the change
+    pub path: LpPathBuf,
+    /// Kind of change
+    pub kind: FsEventKind,
+}
+
+#[deprecated(note = "renamed to FsEventKind")]
+pub type ChangeType = FsEventKind;
+
+#[deprecated(note = "renamed to FsEvent")]
+pub type FsChange = FsEvent;

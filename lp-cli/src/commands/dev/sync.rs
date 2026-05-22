@@ -4,7 +4,7 @@
 
 use anyhow::{Context, Result};
 use lpc_model::AsLpPath;
-use lpfs::{ChangeType, FsChange, LpFs};
+use lpfs::{FsEvent, FsEventKind, LpFs};
 use std::sync::Arc;
 
 use crate::client::LpClient;
@@ -26,7 +26,7 @@ use crate::client::LpClient;
 /// * `Err` if syncing failed
 pub async fn sync_file_change(
     client: &Arc<LpClient>,
-    change: &FsChange,
+    change: &FsEvent,
     project_uid: &str,
     _project_dir: &std::path::Path,
     local_fs: &Arc<dyn LpFs + Send + Sync>,
@@ -43,12 +43,12 @@ pub async fn sync_file_change(
 
     log::info!(
         "Sending local fs change to server: {:?} {}",
-        change.change_type,
+        change.kind,
         change.path.as_str()
     );
 
-    match change.change_type {
-        ChangeType::Create | ChangeType::Modify => {
+    match change.kind {
+        FsEventKind::Create | FsEventKind::Modify => {
             // Check if file still exists (it might have been deleted by the time we sync)
             if !local_fs.file_exists(change.path.as_path()).unwrap_or(false) {
                 // File doesn't exist anymore, skip sync (likely a temporary file)
@@ -66,7 +66,7 @@ pub async fn sync_file_change(
                 .await
                 .with_context(|| format!("Failed to write file to server: {server_path}"))?;
         }
-        ChangeType::Delete => {
+        FsEventKind::Delete => {
             // Delete file from server
             client
                 .fs_delete_file(server_path.as_path())

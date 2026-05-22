@@ -3,7 +3,7 @@
 //! Monitors file changes in the project directory and syncs them to the server.
 
 use anyhow::{Context, Result};
-use lpfs::{FsChange, LpFs};
+use lpfs::{FsEvent, LpFs};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -46,7 +46,7 @@ pub async fn fs_loop(
         FileWatcher::new(project_dir.clone()).context("Failed to create file watcher")?;
 
     // Debouncing state
-    let mut pending_changes: HashMap<String, FsChange> = HashMap::new();
+    let mut pending_changes: HashMap<String, FsEvent> = HashMap::new();
     let mut last_change_time: Option<Instant> = None;
 
     // Main loop
@@ -78,7 +78,7 @@ pub async fn fs_loop(
 
         if should_sync {
             // Sync all pending changes
-            let changes: Vec<FsChange> = pending_changes.values().cloned().collect();
+            let changes: Vec<FsEvent> = pending_changes.values().cloned().collect();
             pending_changes.clear();
             last_change_time = None;
 
@@ -105,9 +105,9 @@ pub async fn fs_loop(
 ///
 /// Deduplicates changes by path (later changes override earlier ones).
 pub fn add_pending_change(
-    pending_changes: &mut HashMap<String, FsChange>,
+    pending_changes: &mut HashMap<String, FsEvent>,
     last_change_time: &mut Option<Instant>,
-    change: FsChange,
+    change: FsEvent,
 ) {
     pending_changes.insert(change.path.as_str().to_string(), change);
     *last_change_time = Some(Instant::now());

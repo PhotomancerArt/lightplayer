@@ -12,7 +12,7 @@ use lpc_model::{
 };
 use lpfs::{LpFs, LpPath, LpPathBuf};
 
-use crate::edit::{EditOp, EditError, SlotOverlayEntry, DefDraft};
+use crate::edit::{DefDraft, EditError, EditOp, SlotOverlayEntry};
 use crate::registry::def_walker::collect_invocations;
 
 use super::{NodeDefRegistry, ParseCtx};
@@ -131,12 +131,8 @@ fn apply_op_to_def(
             apply_map_insert(def, ctx, path, frame, key, value)
         }
         EditOp::MapRemove { path, key } => apply_map_remove(def, ctx, path, frame, key),
-        EditOp::OptionSet { path, present } => {
-            apply_option_set(def, ctx, path, frame, *present)
-        }
-        EditOp::Delete | EditOp::SetBytes(_) => {
-            Err(EditError::UnsupportedOp { op: op.op_name() })
-        }
+        EditOp::OptionSet { path, present } => apply_option_set(def, ctx, path, frame, *present),
+        EditOp::Delete | EditOp::SetBytes(_) => Err(EditError::UnsupportedOp { op: op.op_name() }),
     }
 }
 

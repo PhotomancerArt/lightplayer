@@ -5,16 +5,16 @@ mod common;
 use common::fixtures;
 use lpc_model::{NodeKind, Revision, SlotPath, SlotShapeRegistry};
 use lpc_node_registry::{DefChangeDetail, DefSource, NodeDefRegistry, ParseCtx, SyncResult};
-use lpfs::{ChangeType, FsChange, LpPath, LpPathBuf};
+use lpfs::{FsEvent, FsEventKind, LpPath, LpPathBuf};
 
 fn parse_ctx() -> SlotShapeRegistry {
     SlotShapeRegistry::default()
 }
 
-fn fs_modify(path: &str) -> FsChange {
-    FsChange {
+fn fs_modify(path: &str) -> FsEvent {
+    FsEvent {
         path: LpPathBuf::from(path),
-        change_type: ChangeType::Modify,
+        kind: FsEventKind::Modify,
     }
 }
 

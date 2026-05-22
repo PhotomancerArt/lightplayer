@@ -4,7 +4,7 @@ use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 use lpc_model::{ArtifactLocator, Revision};
-use lpfs::{ChangeType, FsChange, LpFs};
+use lpfs::{FsEvent, FsEventKind, LpFs};
 
 use super::{
     ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactReadFailure,
@@ -84,7 +84,7 @@ impl ArtifactStore {
         Ok(())
     }
 
-    pub fn apply_fs_changes(&mut self, changes: &[FsChange], frame: Revision) {
+    pub fn apply_fs_changes(&mut self, changes: &[FsEvent], frame: Revision) {
         for change in changes {
             self.apply_fs_change(change, frame);
         }
@@ -149,7 +149,7 @@ impl ArtifactStore {
         handle
     }
 
-    fn apply_fs_change(&mut self, change: &FsChange, frame: Revision) {
+    fn apply_fs_change(&mut self, change: &FsEvent, frame: Revision) {
         for entry in self.by_handle.values_mut() {
             let Some(path) = entry.location.file_path() else {
                 continue;
@@ -158,9 +158,9 @@ impl ArtifactStore {
                 continue;
             }
             entry.revision = frame;
-            entry.read_state = match change.change_type {
-                ChangeType::Delete => ArtifactReadState::Failed(ArtifactReadFailure::Deleted),
-                ChangeType::Modify | ChangeType::Create => ArtifactReadState::Unread,
+            entry.read_state = match change.kind {
+                FsEventKind::Delete => ArtifactReadState::Failed(ArtifactReadFailure::Deleted),
+                FsEventKind::Modify | FsEventKind::Create => ArtifactReadState::Unread,
             };
         }
     }
@@ -169,16 +169,16 @@ impl ArtifactStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpfs::{ChangeType, FsChange, LpFsMemory, LpPathBuf};
+    use lpfs::{FsEvent, FsEventKind, LpFsMemory, LpPathBuf};
 
     fn file_location(path: &str) -> ArtifactLocation {
         ArtifactLocation::file(path)
     }
 
-    fn fs_change(path: &str, change_type: ChangeType) -> FsChange {
-        FsChange {
+    fn fs_change(path: &str, kind: FsEventKind) -> FsEvent {
+        FsEvent {
             path: LpPathBuf::from(path),
-            change_type,
+            kind,
         }
     }
 
@@ -209,7 +209,7 @@ mod tests {
         let mut store = ArtifactStore::new();
         let id = store.acquire_location(file_location("/b.glsl"), Revision::new(1));
         store.apply_fs_changes(
-            &[fs_change("/b.glsl", ChangeType::Modify)],
+            &[fs_change("/b.glsl", FsEventKind::Modify)],
             Revision::new(5),
         );
         assert_eq!(store.revision(&id), Some(Revision::new(5)));
@@ -223,7 +223,7 @@ mod tests {
     fn fs_change_on_unacquired_path_is_noop() {
         let mut store = ArtifactStore::new();
         store.apply_fs_changes(
-            &[fs_change("/missing.glsl", ChangeType::Modify)],
+            &[fs_change("/missing.glsl", FsEventKind::Modify)],
             Revision::new(9),
         );
         let id = store.acquire_location(file_location("/missing.glsl"), Revision::new(2));
@@ -238,7 +238,10 @@ mod tests {
     fn fs_delete_sets_deleted_failure_while_entry_held() {
         let mut store = ArtifactStore::new();
         let id = store.acquire_location(file_location("/c.svg"), Revision::new(1));
-        store.apply_fs_changes(&[fs_change("/c.svg", ChangeType::Delete)], Revision::new(3));
+        store.apply_fs_changes(
+            &[fs_change("/c.svg", FsEventKind::Delete)],
+            Revision::new(3),
+        );
         assert_eq!(store.revision(&id), Some(Revision::new(3)));
         assert_eq!(
             store.entry(&id).unwrap().read_state,
@@ -304,7 +307,7 @@ mod tests {
         fs.write_file_mut(project_path("x.glsl").as_path(), b"v2")
             .unwrap();
         store.apply_fs_changes(
-            &[fs_change("/x.glsl", ChangeType::Modify)],
+            &[fs_change("/x.glsl", FsEventKind::Modify)],
             Revision::new(2),
         );
         assert_eq!(

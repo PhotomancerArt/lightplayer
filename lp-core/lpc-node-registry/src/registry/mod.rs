@@ -13,6 +13,9 @@ mod registry_change;
 mod registry_error;
 mod source_bridge;
 mod source_deps;
+mod sync_error;
+mod sync_op;
+mod sync_outcome;
 mod sync_result;
 
 pub use def_source::DefSource;
@@ -25,6 +28,10 @@ pub use node_def_registry::{NodeDefRegistry, serialize_slot_draft};
 pub use node_def_state::{NodeDefState, ValidationErrorPlaceholder};
 pub use node_def_updates::NodeDefUpdates;
 pub use parse_ctx::ParseCtx;
+#[allow(deprecated, reason = "legacy sync op alias for migration")]
 pub use registry_change::RegistryChange;
 pub use registry_error::RegistryError;
+pub use sync_error::SyncError;
+pub use sync_op::SyncOp;
+pub use sync_outcome::SyncOutcome;
 pub use sync_result::{DefChangeDetail, SourceRevisionBump, SyncResult};

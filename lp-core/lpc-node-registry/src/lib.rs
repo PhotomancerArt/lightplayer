@@ -18,9 +18,9 @@ extern crate alloc;
 extern crate std;
 
 pub mod artifact;
-pub mod edit;
 #[cfg(feature = "diff")]
 pub mod diff;
+pub mod edit;
 pub mod registry;
 pub mod source;
 pub mod view;
@@ -32,16 +32,18 @@ pub use artifact::{
     ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactReadFailure,
     ArtifactReadState, ArtifactStore,
 };
+#[cfg(feature = "diff")]
+pub use diff::{DiffError, ProjectSnapshot, assert_equivalent, diff};
 pub use edit::{
     ArtifactEdit, CommitError, DefDraft, EditBatch, EditBatchId, EditError, EditOp, EditTarget,
     SlotOverlay, SlotOverlayEntry,
 };
-#[cfg(feature = "diff")]
-pub use diff::{DiffError, ProjectSnapshot, assert_equivalent, diff};
+#[allow(deprecated, reason = "legacy sync op alias for migration")]
+pub use registry::RegistryChange;
 pub use registry::{
     DefChangeDetail, DefSource, NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState,
-    NodeDefUpdates, ParseCtx, RegistryChange, RegistryError, SourceRevisionBump, SyncResult,
-    ValidationErrorPlaceholder, serialize_slot_draft,
+    NodeDefUpdates, ParseCtx, RegistryError, SourceRevisionBump, SyncError, SyncOp, SyncOutcome,
+    SyncResult, ValidationErrorPlaceholder, serialize_slot_draft,
 };
 pub use source::{
     MaterializeError, MaterializedSource, ResolveError, SourceDiagnosticCtx, SourceFileRef,

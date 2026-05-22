@@ -5,20 +5,22 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::{NodeDef, NodeDefRef, Revision, SlotPath};
-use lpfs::{FsChange, LpFs, LpPath, LpPathBuf};
+use lpfs::{FsEvent, LpFs, LpPath, LpPathBuf};
 
 use crate::edit::apply::apply_op;
 use crate::edit::{
-    ArtifactEdit, EditOp, EditTarget, EditError, SlotOverlay, EditBatch,
+    ArtifactEdit, CommitError, EditBatch, EditError, EditOp, EditTarget, SlotOverlay,
     require_absolute_path,
 };
 use crate::{ArtifactId, ArtifactLocation, ArtifactStore};
 
 use super::def_shell::{is_container_def, shell_changed};
 use super::def_walker::{collect_invocations, resolve_node_locator};
-use super::registry_change::RegistryChange;
 use super::source_bridge;
 use super::source_deps::SourceDep;
+use super::sync_error::SyncError;
+use super::sync_op::SyncOp;
+use super::sync_outcome::SyncOutcome;
 use super::sync_result::{DefChangeDetail, SourceRevisionBump, SyncResult};
 use super::{
     DefSource, NodeDefEntry, NodeDefId, NodeDefState, NodeDefUpdates, ParseCtx, RegistryError,
@@ -93,24 +95,76 @@ impl NodeDefRegistry {
         Ok(root_id)
     }
 
-    /// Apply incoming changes, update internal state, return summary.
+    /// Apply incoming sync operations and return committed + pending effects.
     pub fn sync(
         &mut self,
         fs: &dyn LpFs,
-        changes: &[RegistryChange],
+        ops: &[SyncOp],
+        frame: Revision,
+        ctx: &ParseCtx<'_>,
+    ) -> Result<SyncOutcome, SyncError> {
+        let mut committed = SyncResult::default();
+        let mut pending_changed = false;
+
+        for op in ops {
+            match op.clone() {
+                SyncOp::Fs(event) => {
+                    let result = self.apply_fs_sync(fs, core::slice::from_ref(&event), frame, ctx);
+                    committed.merge(result);
+                }
+                SyncOp::Apply(edit) => {
+                    self.apply_artifact_edit(&edit, fs, ctx, frame)?;
+                    pending_changed = true;
+                }
+                SyncOp::Remove(target) => {
+                    pending_changed |= self.remove_pending_edit(target)?;
+                }
+                SyncOp::ClearPending => {
+                    if self.slot_overlay_active() {
+                        self.slot_overlay.clear();
+                        pending_changed = true;
+                    }
+                }
+                SyncOp::Commit => {
+                    let had_pending = self.slot_overlay_active();
+                    let result = commit::commit_slot_overlay(self, fs, frame, ctx)?;
+                    committed.merge(result);
+                    pending_changed |= had_pending;
+                }
+            }
+        }
+
+        Ok(SyncOutcome {
+            committed,
+            pending_changed,
+        })
+    }
+
+    /// Convenience wrapper mapping [`FsEvent`] batches to [`SyncOp::Fs`].
+    pub fn sync_fs(
+        &mut self,
+        fs: &dyn LpFs,
+        changes: &[FsEvent],
+        frame: Revision,
+        ctx: &ParseCtx<'_>,
+    ) -> SyncResult {
+        let ops: Vec<SyncOp> = changes.iter().cloned().map(SyncOp::Fs).collect();
+        self.sync(fs, &ops, frame, ctx)
+            .map(|outcome| outcome.committed)
+            .unwrap_or_default()
+    }
+
+    fn apply_fs_sync(
+        &mut self,
+        fs: &dyn LpFs,
+        changes: &[FsEvent],
         frame: Revision,
         ctx: &ParseCtx<'_>,
     ) -> SyncResult {
         let before = self.snapshot_def_states();
 
-        let fs_changes: Vec<FsChange> = changes
-            .iter()
-            .filter_map(|change| match change {
-                RegistryChange::Fs(fs_change) => Some(fs_change.clone()),
-            })
-            .collect();
-        if !fs_changes.is_empty() {
-            self.store.apply_fs_changes(&fs_changes, frame);
+        if !changes.is_empty() {
+            self.store.apply_fs_changes(changes, frame);
         }
 
         let mut def_updates = NodeDefUpdates::default();
@@ -118,7 +172,7 @@ impl NodeDefRegistry {
 
         let mut def_artifact_ids = Vec::new();
         let mut source_paths = Vec::new();
-        for change in &fs_changes {
+        for change in changes {
             match self.classify_changed_path(&change.path) {
                 PathChangeKind::DefArtifact(artifact_id) => def_artifact_ids.push(artifact_id),
                 PathChangeKind::SourceOnly => source_paths.push(change.path.clone()),
@@ -145,17 +199,10 @@ impl NodeDefRegistry {
         }
     }
 
-    /// Convenience wrapper mapping [`FsChange`] batches to [`RegistryChange::Fs`].
-    pub fn sync_fs(
-        &mut self,
-        fs: &dyn LpFs,
-        changes: &[FsChange],
-        frame: Revision,
-        ctx: &ParseCtx<'_>,
-    ) -> SyncResult {
-        let registry_changes: Vec<RegistryChange> =
-            changes.iter().cloned().map(RegistryChange::Fs).collect();
-        self.sync(fs, &registry_changes, frame, ctx)
+    /// Drop pending overlay entry for `target`. Returns whether an entry existed.
+    pub fn remove_pending_edit(&mut self, target: EditTarget) -> Result<bool, EditError> {
+        let path = self.resolve_edit_target(target)?;
+        Ok(self.slot_overlay.remove_path(LpPath::new(path.as_str())))
     }
 
     pub fn root_id(&self) -> Option<NodeDefId> {
@@ -222,7 +269,7 @@ impl NodeDefRegistry {
         fs: &dyn LpFs,
         frame: Revision,
         ctx: &ParseCtx<'_>,
-    ) -> Result<SyncResult, crate::edit::CommitError> {
+    ) -> Result<SyncResult, CommitError> {
         commit::commit_slot_overlay(self, fs, frame, ctx)
     }
 
@@ -823,16 +870,16 @@ mod tests {
     use super::*;
     use alloc::collections::BTreeSet;
     use lpc_model::{NodeKind, SlotShapeRegistry};
-    use lpfs::{ChangeType, LpFsMemory};
+    use lpfs::{FsEventKind, LpFsMemory};
 
     fn parse_ctx() -> SlotShapeRegistry {
         SlotShapeRegistry::default()
     }
 
-    fn fs_modify(path: &str) -> FsChange {
-        FsChange {
+    fn fs_modify(path: &str) -> FsEvent {
+        FsEvent {
             path: LpPathBuf::from(path),
-            change_type: ChangeType::Modify,
+            kind: FsEventKind::Modify,
         }
     }
 

@@ -17,7 +17,7 @@ use lpc_model::{
 };
 use lpc_shared::time::TimeProvider;
 use lpc_wire::WireNodeStatus;
-use lpfs::FsChange;
+use lpfs::FsEvent;
 use lpfs::lp_path::{LpPath, LpPathBuf};
 
 use crate::artifact::{ArtifactState, ArtifactStore};
@@ -301,7 +301,7 @@ impl Engine {
     /// The server-owned project wrapper currently reloads the project from its
     /// filesystem on changes so node definition and shader source updates use
     /// the same loader path as initial load.
-    pub fn handle_fs_changes(&mut self, _changes: &[FsChange]) -> Result<(), EngineError> {
+    pub fn handle_fs_changes(&mut self, _changes: &[FsEvent]) -> Result<(), EngineError> {
         Ok(())
     }
 

@@ -5,8 +5,8 @@ mod common;
 use common::fixtures;
 use lpc_model::{LpValue, NodeDef, Revision, SlotPath, SlotShapeRegistry};
 use lpc_node_registry::{
-    ArtifactEdit, EditOp, EditTarget, DefSource, NodeDefEntry, NodeDefId,
-    NodeDefRegistry, NodeDefState, ParseCtx, serialize_slot_draft,
+    ArtifactEdit, DefSource, EditOp, EditTarget, NodeDefEntry, NodeDefId, NodeDefRegistry,
+    NodeDefState, ParseCtx, serialize_slot_draft,
 };
 use lpfs::{LpPath, LpPathBuf};
 

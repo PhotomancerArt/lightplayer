@@ -54,6 +54,11 @@ impl SlotOverlay {
         self.by_path.clear();
     }
 
+    /// Remove pending state for `path`. Returns whether an entry existed.
+    pub fn remove_path(&mut self, path: &LpPath) -> bool {
+        self.by_path.remove(path.as_str()).is_some()
+    }
+
     /// Iterate pending paths and entries in stable order.
     pub(crate) fn iter_entries(&self) -> impl Iterator<Item = (LpPathBuf, &SlotOverlayEntry)> {
         self.by_path
@@ -62,10 +67,8 @@ impl SlotOverlay {
     }
 
     pub(crate) fn apply_bytes(&mut self, path: LpPathBuf, bytes: Vec<u8>) {
-        self.by_path.insert(
-            path.as_str().to_string(),
-            SlotOverlayEntry::Bytes(bytes),
-        );
+        self.by_path
+            .insert(path.as_str().to_string(), SlotOverlayEntry::Bytes(bytes));
     }
 
     pub(crate) fn apply_delete(&mut self, path: LpPathBuf) {
@@ -74,9 +77,7 @@ impl SlotOverlay {
     }
 
     pub(crate) fn apply_def_draft(&mut self, path: LpPathBuf, draft: DefDraft) {
-        self.by_path.insert(
-            path.as_str().to_string(),
-            SlotOverlayEntry::DefDraft(draft),
-        );
+        self.by_path
+            .insert(path.as_str().to_string(), SlotOverlayEntry::DefDraft(draft));
     }
 }

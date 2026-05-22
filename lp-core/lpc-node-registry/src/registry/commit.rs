@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::Revision;
-use lpfs::{ChangeType, FsChange, LpFs, LpPath, LpPathBuf};
+use lpfs::{FsEvent, FsEventKind, LpFs, LpPath, LpPathBuf};
 
 use crate::edit::{CommitError, SlotOverlayEntry};
 use crate::registry::SourceRevisionBump;
@@ -157,23 +157,23 @@ impl SlotOverlayCommitPlan {
         paths
     }
 
-    fn fs_changes(&self, known_paths: &BTreeMap<String, ()>) -> Vec<FsChange> {
+    fn fs_changes(&self, known_paths: &BTreeMap<String, ()>) -> Vec<FsEvent> {
         let mut changes = Vec::new();
         for (path, _) in &self.writes {
-            let change_type = if known_paths.contains_key(path.as_str()) {
-                ChangeType::Modify
+            let kind = if known_paths.contains_key(path.as_str()) {
+                FsEventKind::Modify
             } else {
-                ChangeType::Create
+                FsEventKind::Create
             };
-            changes.push(FsChange {
+            changes.push(FsEvent {
                 path: path.clone(),
-                change_type,
+                kind,
             });
         }
         for path in &self.deletes {
-            changes.push(FsChange {
+            changes.push(FsEvent {
                 path: path.clone(),
-                change_type: ChangeType::Delete,
+                kind: FsEventKind::Delete,
             });
         }
         changes
@@ -187,7 +187,7 @@ fn is_def_artifact_path(path: &LpPath) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::edit::{SlotOverlay, DefDraft};
+    use crate::edit::{DefDraft, SlotOverlay};
     use lpc_model::{NodeDef, SlotShapeRegistry};
 
     #[test]

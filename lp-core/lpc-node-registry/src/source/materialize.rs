@@ -134,17 +134,17 @@ mod tests {
     use crate::edit::SlotOverlay;
     use crate::source::resolve_source_file;
     use lpc_model::Revision;
-    use lpfs::{ChangeType, FsChange, LpFsMemory, LpPath, LpPathBuf};
+    use lpfs::{FsEvent, FsEventKind, LpFsMemory, LpPath, LpPathBuf};
 
     fn write_file(fs: &mut LpFsMemory, path: &str, content: &[u8]) {
         fs.write_file_mut(LpPathBuf::from(path).as_path(), content)
             .unwrap();
     }
 
-    fn fs_change(path: &str) -> FsChange {
-        FsChange {
+    fn fs_change(path: &str) -> FsEvent {
+        FsEvent {
             path: LpPathBuf::from(path),
-            change_type: ChangeType::Modify,
+            kind: FsEventKind::Modify,
         }
     }
 
