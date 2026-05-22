@@ -6,6 +6,7 @@ mod artifact_op;
 mod artifact_target;
 mod change_error;
 mod change_set;
+pub mod commit_error;
 mod overlay;
 mod slot_draft;
 
@@ -15,6 +16,7 @@ pub use artifact_op::ArtifactOp;
 pub use artifact_target::ArtifactTarget;
 pub use change_error::ChangeError;
 pub use change_set::{ChangeSet, ChangeSetId};
+pub use commit_error::CommitError;
 pub use overlay::{ChangeOverlay, OverlayEntry};
 pub use slot_draft::SlotDraft;
 

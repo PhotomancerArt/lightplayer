@@ -22,7 +22,7 @@ pub use artifact::{
 };
 pub use change::{
     ArtifactChange, ArtifactOp, ArtifactTarget, ChangeError, ChangeOverlay, ChangeSet, ChangeSetId,
-    OverlayEntry, SlotDraft,
+    CommitError, OverlayEntry, SlotDraft,
 };
 pub use registry::{
     DefChangeDetail, DefSource, NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState,

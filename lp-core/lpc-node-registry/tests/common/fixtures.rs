@@ -1,5 +1,7 @@
 //! Shared fixtures for integration tests.
 
+#![allow(dead_code, reason = "shared fixtures; not every integration test binary uses all helpers")]
+
 use lpfs::{LpFsMemory, LpPath};
 
 pub fn write_file(fs: &mut LpFsMemory, path: &str, contents: &str) {

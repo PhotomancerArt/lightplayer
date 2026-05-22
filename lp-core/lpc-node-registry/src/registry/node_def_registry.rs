@@ -214,6 +214,24 @@ impl NodeDefRegistry {
         self.overlay.clear();
     }
 
+    /// Promote all pending overlay entries to committed store and entries.
+    pub fn commit(
+        &mut self,
+        fs: &dyn LpFs,
+        frame: Revision,
+        ctx: &ParseCtx<'_>,
+    ) -> Result<SyncResult, crate::change::CommitError> {
+        commit::commit_overlay(self, fs, frame, ctx)
+    }
+
+    pub(crate) fn restore_entry_states(&mut self, before: &BTreeMap<NodeDefId, NodeDefState>) {
+        for (id, state) in before {
+            if let Some(entry) = self.entries.get_mut(id) {
+                entry.state = state.clone();
+            }
+        }
+    }
+
     /// Whether any overlay entries are pending.
     pub fn overlay_active(&self) -> bool {
         !self.overlay.is_empty()
@@ -333,7 +351,7 @@ impl NodeDefRegistry {
         Ok(())
     }
 
-    fn sync_def_artifact(
+    pub(crate) fn sync_def_artifact(
         &mut self,
         artifact_id: ArtifactId,
         fs: &dyn LpFs,
@@ -395,7 +413,7 @@ impl NodeDefRegistry {
         }
     }
 
-    fn sync_source_path(
+    pub(crate) fn sync_source_path(
         &mut self,
         path: &LpPath,
         fs: &dyn LpFs,
@@ -550,7 +568,7 @@ impl NodeDefRegistry {
         }
     }
 
-    fn acquire_file_artifact(
+    pub(crate) fn acquire_file_artifact(
         &mut self,
         path: LpPathBuf,
         frame: Revision,
@@ -598,7 +616,7 @@ impl NodeDefRegistry {
         }
     }
 
-    fn reconcile_artifact_refs(&mut self, frame: Revision) -> Result<(), RegistryError> {
+    pub(crate) fn reconcile_artifact_refs(&mut self, frame: Revision) -> Result<(), RegistryError> {
         let referenced: alloc::collections::BTreeSet<ArtifactId> = self
             .entries
             .values()
@@ -708,7 +726,7 @@ impl NodeDefRegistry {
         }
     }
 
-    fn snapshot_def_states(&self) -> BTreeMap<NodeDefId, NodeDefState> {
+    pub(crate) fn snapshot_def_states(&self) -> BTreeMap<NodeDefId, NodeDefState> {
         self.entries
             .iter()
             .map(|(id, entry)| (*id, entry.state.clone()))
@@ -724,6 +742,9 @@ impl NodeDefRegistry {
         id
     }
 }
+
+#[path = "commit.rs"]
+mod commit;
 
 #[path = "effective_read.rs"]
 mod effective_read;
@@ -751,7 +772,7 @@ fn state_changed(before: &NodeDefState, after: &NodeDefState) -> bool {
     }
 }
 
-fn build_change_details(
+pub(crate) fn build_change_details(
     before: &BTreeMap<NodeDefId, NodeDefState>,
     updates: &NodeDefUpdates,
     entries: &BTreeMap<NodeDefId, NodeDefEntry>,
@@ -783,12 +804,12 @@ fn classify_def_change(before: &NodeDefState, after: &NodeDefState) -> DefChange
     }
 }
 
-fn dedupe_artifact_ids(ids: &mut Vec<ArtifactId>) {
+pub(crate) fn dedupe_artifact_ids(ids: &mut Vec<ArtifactId>) {
     ids.sort_unstable();
     ids.dedup();
 }
 
-fn dedupe_paths(paths: &mut Vec<LpPathBuf>) {
+pub(crate) fn dedupe_paths(paths: &mut Vec<LpPathBuf>) {
     paths.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
     paths.dedup_by(|a, b| a.as_str() == b.as_str());
 }

@@ -50,6 +50,13 @@ impl ChangeOverlay {
         self.by_path.clear();
     }
 
+    /// Iterate pending paths and entries in stable order.
+    pub(crate) fn iter_entries(&self) -> impl Iterator<Item = (LpPathBuf, &OverlayEntry)> {
+        self.by_path
+            .iter()
+            .map(|(path, entry)| (LpPathBuf::from(path.as_str()), entry))
+    }
+
     pub(crate) fn apply_bytes(&mut self, path: LpPathBuf, bytes: Vec<u8>) {
         self.by_path
             .insert(path.as_str().to_string(), OverlayEntry::Bytes(bytes));
