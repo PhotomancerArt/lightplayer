@@ -14,7 +14,7 @@ use crate::edit::{
 use crate::{ArtifactLocation, ArtifactStore};
 
 use super::def_shell::{is_container_def, shell_changed};
-use super::def_walker::{collect_invocations, resolve_node_locator};
+use super::def_walker::{collect_invocations, resolve_node_specifier};
 use super::source_bridge;
 use super::source_deps::SourceDep;
 use super::sync_error::SyncError;
@@ -360,12 +360,13 @@ impl NodeDefRegistry {
                     if path_text.is_empty() {
                         continue;
                     }
-                    let locator = lpc_model::ArtifactLocator::parse(path_text).map_err(|err| {
-                        RegistryError::LocatorResolution {
-                            message: String::from(err),
-                        }
-                    })?;
-                    let child_path = resolve_node_locator(file_path, &locator)?;
+                    let specifier =
+                        lpc_model::ArtifactSpecifier::parse(path_text).map_err(|err| {
+                            RegistryError::SpecifierResolution {
+                                message: String::from(err),
+                            }
+                        })?;
+                    let child_path = resolve_node_specifier(file_path, &specifier)?;
                     let child_location = self.store.register_file(child_path.clone(), frame);
                     let child_source = NodeDefLoc::artifact_root(child_location.clone());
                     if !self.source_index.contains_key(&child_source) {
@@ -566,12 +567,13 @@ impl NodeDefRegistry {
                     if path_text.is_empty() {
                         continue;
                     }
-                    let locator = lpc_model::ArtifactLocator::parse(path_text).map_err(|err| {
-                        RegistryError::LocatorResolution {
-                            message: String::from(err),
-                        }
-                    })?;
-                    let child_path = resolve_node_locator(file_path, &locator)?;
+                    let specifier =
+                        lpc_model::ArtifactSpecifier::parse(path_text).map_err(|err| {
+                            RegistryError::SpecifierResolution {
+                                message: String::from(err),
+                            }
+                        })?;
+                    let child_path = resolve_node_specifier(file_path, &specifier)?;
                     let child_location = self.store.register_file(child_path.clone(), frame);
                     let child_inventory = self.derive_inventory(
                         child_location,
@@ -720,7 +722,7 @@ impl NodeDefRegistry {
             return Ok(());
         };
         let containing = entry.loc.artifact.file_path().cloned().ok_or_else(|| {
-            RegistryError::LocatorResolution {
+            RegistryError::SpecifierResolution {
                 message: alloc::format!("missing artifact path for def {def_id:?}"),
             }
         })?;

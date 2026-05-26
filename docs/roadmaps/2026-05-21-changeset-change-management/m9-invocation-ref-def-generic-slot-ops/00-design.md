@@ -36,14 +36,14 @@ Reject: `def = { path = ... }`, `artifact = ...`.
 
 ```rust
 pub enum NodeInvocation {
-    Ref(ArtifactLocator),
+    Ref(ArtifactSpecifier),
     Def(NodeDef),
 }
 ```
 
 - **`Slotted` enum** — generic `set_slot_variant_default` / `set_slot_value` apply
 - **Remove:** `NodeDefRef`, `def_slot`, `NODE_INVOCATION_CODEC_ID` whole-record custom path
-- **Helpers:** `ref_locator()`, `inline_def()` → match on `Ref` / `Def`
+- **Helpers:** `ref_specifier()`, `inline_def()` → match on `Ref` / `Def`
 
 ## Edit ops (layer 1)
 

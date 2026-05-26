@@ -61,20 +61,20 @@ recurse `collect_invocations(inline_def, &path)` to find nested invocations
 ### Path resolution helper
 
 ```rust
-pub fn resolve_node_locator(
+pub fn resolve_node_specifier(
     containing_file: &LpPath,
-    locator: &ArtifactLocator,
+    locator: &ArtifactSpecifier,
 ) -> Result<LpPathBuf, RegistryError>;
 ```
 
-Mirror engine `resolve_path_locator_from_dir` logic:
+Mirror engine `resolve_path_specifier_from_dir` logic:
 
-- `ArtifactLocator::Path`: absolute as-is; relative joined to containing file's
+- `ArtifactSpecifier::Path`: absolute as-is; relative joined to containing file's
   parent directory.
-- `ArtifactLocator::Lib`: `RegistryError` (unsupported).
+- `ArtifactSpecifier::Lib`: `RegistryError` (unsupported).
 
 Use `lpfs::LpPath` / `LpPathBuf`. Reference:
-`lpc-engine/src/engine/project_loader.rs` `resolve_path_locator_from_dir` (read
+`lpc-engine/src/engine/project_loader.rs` `resolve_path_specifier_from_dir` (read
 only — do not edit engine).
 
 ### Shell helpers (`def_shell.rs`)
@@ -95,7 +95,7 @@ pub fn shell_changed(before: &NodeDef, after: &NodeDef) -> bool;
 - Replace `NodeDefRef::Inline(full)` with `NodeDefRef::Inline(Box::new(kind_stub))`
   where `kind_stub` is a minimal `NodeDef` of the same `NodeKind` (default
   variant / empty struct — match pattern used in model tests).
-- Path invocations: compare locator string (`ArtifactLocator` display / path
+- Path invocations: compare locator string (`ArtifactSpecifier` display / path
   field).
 
 **Kind in shell:** stub carries `NodeKind` — kind flip at invocation site

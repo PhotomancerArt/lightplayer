@@ -36,7 +36,7 @@ Error if both.
 ```rust
 #[derive(Clone, Debug, PartialEq, Slotted)]
 pub enum NodeInvocation {
-    Ref(ArtifactLocator),  // or Ref { locator } if slotted derive needs named fields
+    Ref(ArtifactSpecifier),  // or Ref { locator } if slotted derive needs named fields
     Def(NodeDef),
 }
 ```
@@ -58,9 +58,9 @@ Implement via slotted enum codec if possible; otherwise minimal custom
 
 ```rust
 impl NodeInvocation {
-    pub fn path(locator: ArtifactLocator) -> Self;
+    pub fn path(locator: ArtifactSpecifier) -> Self;
     pub fn inline(def: NodeDef) -> Self;
-    pub fn ref_locator(&self) -> Option<&ArtifactLocator>;
+    pub fn ref_specifier(&self) -> Option<&ArtifactSpecifier>;
     pub fn inline_def(&self) -> Option<&NodeDef>;
 }
 ```
@@ -70,7 +70,7 @@ Keep `path()` / `inline()` constructors for call-site ergonomics.
 **Delete from `custom_slot_codec.rs`:** `NODE_INVOCATION_CODEC_ID` branches if enum
 no longer uses custom codec.
 
-**Default:** `Ref(ArtifactLocator::path(""))` or `Def(NodeDef::default())` — match
+**Default:** `Ref(ArtifactSpecifier::path(""))` or `Def(NodeDef::default())` — match
 prior default behavior.
 
 ## Tests (this phase)

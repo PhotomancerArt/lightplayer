@@ -2,7 +2,7 @@
 
 ## Scope
 
-1. **`NodeInvocation`** becomes `Ref(ArtifactLocator) | Def(NodeDef)` slotted enum
+1. **`NodeInvocation`** becomes `Ref(ArtifactSpecifier) | Def(NodeDef)` slotted enum
 2. **TOML** — `ref = "..."` vs `[....def] kind = ...` (breaking; no dual-read)
 3. **Delete** `NodeDefRef`, `def_slot`, whole-invocation custom codec hack
 4. **`VariantSet`** edit op; **`SetSlot`** = value leaves only

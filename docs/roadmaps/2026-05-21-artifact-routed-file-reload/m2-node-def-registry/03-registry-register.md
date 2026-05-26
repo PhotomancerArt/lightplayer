@@ -81,14 +81,14 @@ fn register_file_at_path(
     &mut self,
     store: &mut ArtifactStore,
     fs: &dyn LpFs,
-    locator: &ArtifactLocator,
+    locator: &ArtifactSpecifier,
     containing_file: &LpPath,
     frame: Revision,
     ctx: &ParseCtx<'_>,
 ) -> Result<NodeDefId, RegistryError>
 ```
 
-1. `resolve_node_locator(containing_file, locator)?` → absolute path.
+1. `resolve_node_specifier(containing_file, locator)?` → absolute path.
 2. Acquire artifact + register root (same as steps in `load_root` for that file).
 3. Return child root `NodeDefId`.
 

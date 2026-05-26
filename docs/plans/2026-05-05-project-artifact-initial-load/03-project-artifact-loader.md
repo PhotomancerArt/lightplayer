@@ -6,7 +6,7 @@ Rewrite the core project initial-load path around `/project.toml` and artifact-l
 
 In scope:
 
-- Add a new core loader entry point that starts from an `ArtifactLocator`, defaulting to `/project.toml` for project-root loads.
+- Add a new core loader entry point that starts from an `ArtifactSpecifier`, defaulting to `/project.toml` for project-root loads.
 - Load `ProjectDef` using artifact loading infrastructure.
 - Instantiate or attach the root `ProjectNode` / project placeholder for `kind = "project"`.
 - Load child node artifacts declared in `ProjectDef.nodes`.
@@ -50,7 +50,7 @@ Relevant files:
 The new loader should conceptually do:
 
 ```text
-load_project_artifact(fs, services, ArtifactLocator::path("/project.toml"))
+load_project_artifact(fs, services, ArtifactSpecifier::path("/project.toml"))
   -> resolve/load ProjectDef
   -> create CoreProjectRuntime with services.project_root()
   -> attach ProjectNode/root payload

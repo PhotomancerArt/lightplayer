@@ -3,7 +3,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_model::{ArtifactLocator, NodeDef, NodeInvocation, SlotMapKey, SlotName, SlotPath};
+use lpc_model::{ArtifactSpecifier, NodeDef, NodeInvocation, SlotMapKey, SlotName, SlotPath};
 
 use super::RegistryError;
 
@@ -59,30 +59,30 @@ fn playlist_entry_node_path(base: &SlotPath, key: u32) -> Option<SlotPath> {
     )
 }
 
-/// Resolve a path locator relative to the directory containing `containing_file`.
-pub fn resolve_node_locator(
+/// Resolve a path specifier relative to the directory containing `containing_file`.
+pub fn resolve_node_specifier(
     containing_file: &lpfs::LpPath,
-    locator: &ArtifactLocator,
+    specifier: &ArtifactSpecifier,
 ) -> Result<lpfs::LpPathBuf, RegistryError> {
     let base_dir = containing_file
         .parent()
         .unwrap_or_else(|| lpfs::LpPath::new("/"));
-    resolve_path_locator_from_dir(base_dir, locator)
+    resolve_path_specifier_from_dir(base_dir, specifier)
 }
 
-fn resolve_path_locator_from_dir(
+fn resolve_path_specifier_from_dir(
     base_dir: &lpfs::LpPath,
-    locator: &ArtifactLocator,
+    specifier: &ArtifactSpecifier,
 ) -> Result<lpfs::LpPathBuf, RegistryError> {
-    match locator {
-        ArtifactLocator::Path(path) => {
+    match specifier {
+        ArtifactSpecifier::Path(path) => {
             if path.is_absolute() {
                 Ok(path.clone())
             } else {
                 base_dir
                     .to_path_buf()
                     .join_relative(path.as_str())
-                    .ok_or_else(|| RegistryError::LocatorResolution {
+                    .ok_or_else(|| RegistryError::SpecifierResolution {
                         message: alloc::format!(
                             "path `{}` cannot be resolved relative to `{base_dir:?}`",
                             path.as_str()
@@ -90,8 +90,8 @@ fn resolve_path_locator_from_dir(
                     })
             }
         }
-        ArtifactLocator::Lib(lib) => Err(RegistryError::LocatorResolution {
-            message: alloc::format!("library artifact locators are not supported: {lib}"),
+        ArtifactSpecifier::Lib(lib) => Err(RegistryError::SpecifierResolution {
+            message: alloc::format!("library artifact specifiers are not supported: {lib}"),
         }),
     }
 }

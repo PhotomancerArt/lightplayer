@@ -11,7 +11,7 @@ pub enum RegistryError {
     InvalidPath { message: String },
     DuplicateSource,
     UnknownDef,
-    LocatorResolution { message: String },
+    SpecifierResolution { message: String },
     Utf8 { message: String },
     Artifact(ArtifactError),
 }

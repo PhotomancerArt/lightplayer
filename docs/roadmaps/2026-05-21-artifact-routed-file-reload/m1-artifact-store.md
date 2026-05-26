@@ -71,7 +71,7 @@ Per entry:
 
 API surface (conceptual):
 
-- `acquire_locator` / `acquire_location` → `ArtifactId` (always entry unless resolution fails)
+- `acquire_specifier` / `acquire_location` → `ArtifactId` (always entry unless resolution fails)
 - `release(id)`
 - `revision(id) → Revision`
 - `apply_fs_changes(&[FsChange], frame)` — bumps **held** entries only

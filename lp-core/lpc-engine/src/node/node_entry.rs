@@ -3,7 +3,7 @@
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/01-tree.md` §NodeEntry.
 
 use alloc::vec::Vec;
-use lpc_model::{ArtifactLocator, NodeId, NodeInvocation, Revision, TreePath, WithRevision};
+use lpc_model::{ArtifactSpecifier, NodeId, NodeInvocation, Revision, TreePath, WithRevision};
 use lpc_wire::{WireChildKind, WireNodeStatus};
 
 use crate::artifact::ArtifactId;
@@ -61,7 +61,7 @@ impl<N> NodeEntry<N> {
             path,
             parent,
             child_kind,
-            NodeInvocation::new(ArtifactLocator::path(Self::PLACEHOLDER_ARTIFACT_PATH)),
+            NodeInvocation::new(ArtifactSpecifier::path(Self::PLACEHOLDER_ARTIFACT_PATH)),
             NodeDefHandle::artifact_root(ArtifactId::from_raw(0)),
             revision,
         )
@@ -128,7 +128,7 @@ impl<N> NodeEntry<N> {
 mod tests {
     use super::NodeEntry;
     use crate::node::NodeDefHandle;
-    use lpc_model::{ArtifactLocator, NodeInvocation};
+    use lpc_model::{ArtifactSpecifier, NodeInvocation};
     use lpc_model::{NodeId, Revision, TreePath};
     use lpc_wire::{WireChildKind, WireNodeStatus, WireSlotIndex};
 
@@ -205,7 +205,7 @@ mod tests {
     #[test]
     fn node_entry_new_spine_stores_config_and_def_handle() {
         let frame = Revision::new(1);
-        let config = NodeInvocation::new(ArtifactLocator::path("./fluid.vis"));
+        let config = NodeInvocation::new(ArtifactSpecifier::path("./fluid.vis"));
         let artifact = crate::artifact::ArtifactId::from_raw(7);
         let def_handle = NodeDefHandle::artifact_root(artifact);
         let entry: NodeEntry<()> = NodeEntry::new_spine(

@@ -66,7 +66,7 @@ Examples:
 - Wire child to file: `UseEnumVariant(nodes[shader], "Ref")` + `AssignValue(nodes[shader].ref, "./shader.toml")`
 
 Relative locators in slot values resolve against the **containing artifact path**
-(same as `resolve_node_locator` today).
+(same as `resolve_node_specifier` today).
 
 ### Asset ops (`AssetEdit`)
 

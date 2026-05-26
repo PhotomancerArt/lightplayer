@@ -28,7 +28,7 @@ This plan covers:
 This plan does not cover:
 
 - A full optimal graph diff for arbitrary `project.toml` edits in the first implementation.
-- Library artifact locators.
+- Library artifact specifiers.
 - Host precompilation or any change that weakens the on-device GLSL JIT path.
 
 ## Current State

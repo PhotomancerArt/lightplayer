@@ -6,21 +6,21 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use crate::artifact::src_artifact_lib_ref::SrcArtifactLibRef;
 
-/// Author-facing locator for a loadable artifact carried in source as a string.
+/// Author-facing specifier for a loadable artifact carried in source as a string.
 ///
-/// - `./effects/tint.effect.toml` parses as [`ArtifactLocator::Path`].
-/// - `lib:core/visual/checkerboard` parses as [`ArtifactLocator::Lib`].
+/// - `./effects/tint.effect.toml` parses as [`ArtifactSpecifier::Path`].
+/// - `lib:core/visual/checkerboard` parses as [`ArtifactSpecifier::Lib`].
 ///
-/// Path locators are contextual: relative paths resolve relative to the file
-/// that contains the locator. Engine-side resolved identity is
-/// `ArtifactLocation` in `lpc-engine`; this type stays authored and contextual.
+/// Path specifiers are contextual: relative paths resolve relative to the file
+/// that contains the specifier. Resolved catalog identity is `ArtifactLocation`
+/// in `lpc-node-registry`; this type stays authored and contextual.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum ArtifactLocator {
+pub enum ArtifactSpecifier {
     Path(LpPathBuf),
     Lib(SrcArtifactLibRef),
 }
 
-impl ArtifactLocator {
+impl ArtifactSpecifier {
     /// Path reference (possibly relative).
     #[must_use]
     pub fn path(p: impl Into<LpPathBuf>) -> Self {
@@ -42,7 +42,7 @@ impl ArtifactLocator {
     }
 }
 
-impl fmt::Display for ArtifactLocator {
+impl fmt::Display for ArtifactSpecifier {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Path(path) => f.write_str(path.as_str()),
@@ -51,7 +51,7 @@ impl fmt::Display for ArtifactLocator {
     }
 }
 
-impl Serialize for ArtifactLocator {
+impl Serialize for ArtifactSpecifier {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -60,7 +60,7 @@ impl Serialize for ArtifactLocator {
     }
 }
 
-impl<'de> Deserialize<'de> for ArtifactLocator {
+impl<'de> Deserialize<'de> for ArtifactSpecifier {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -71,7 +71,7 @@ impl<'de> Deserialize<'de> for ArtifactLocator {
 }
 
 #[cfg(feature = "schema-gen")]
-impl schemars::JsonSchema for ArtifactLocator {
+impl schemars::JsonSchema for ArtifactSpecifier {
     fn schema_name() -> alloc::borrow::Cow<'static, str> {
         <String as schemars::JsonSchema>::schema_name()
     }
@@ -89,41 +89,41 @@ impl schemars::JsonSchema for ArtifactLocator {
 mod tests {
     use alloc::string::ToString;
 
-    use super::ArtifactLocator;
+    use super::ArtifactSpecifier;
     use crate::artifact::src_artifact_lib_ref::SrcArtifactLibRef;
 
     #[test]
     fn display_normalizes_path() {
         assert_eq!(
-            ArtifactLocator::path("./fluid.vis").to_string(),
+            ArtifactSpecifier::path("./fluid.vis").to_string(),
             "fluid.vis",
         );
     }
 
     #[test]
     fn display_lib_form() {
-        let s = ArtifactLocator::lib_ref(SrcArtifactLibRef::try_from_suffix("core/x").unwrap());
+        let s = ArtifactSpecifier::lib_ref(SrcArtifactLibRef::try_from_suffix("core/x").unwrap());
         assert_eq!(s.to_string(), "lib:core/x");
     }
 
     #[test]
     fn serde_json_round_trip_path_and_lib() {
-        let path = ArtifactLocator::path("effects/tint.effect.toml");
+        let path = ArtifactSpecifier::path("effects/tint.effect.toml");
         let j = serde_json::to_string(&path).unwrap();
         assert_eq!(j, "\"effects/tint.effect.toml\"");
-        let back: ArtifactLocator = serde_json::from_str(&j).unwrap();
+        let back: ArtifactSpecifier = serde_json::from_str(&j).unwrap();
         assert_eq!(back, path);
 
-        let lib = ArtifactLocator::parse("lib:core/visual/checkerboard").unwrap();
+        let lib = ArtifactSpecifier::parse("lib:core/visual/checkerboard").unwrap();
         let j = serde_json::to_string(&lib).unwrap();
         assert_eq!(j, "\"lib:core/visual/checkerboard\"");
-        let back: ArtifactLocator = serde_json::from_str(&j).unwrap();
+        let back: ArtifactSpecifier = serde_json::from_str(&j).unwrap();
         assert_eq!(back, lib);
     }
 
     #[test]
     fn parse_rejects_empty_lib_suffix() {
-        assert!(ArtifactLocator::parse("lib:").is_err());
-        assert!(ArtifactLocator::parse("lib:   ").is_err());
+        assert!(ArtifactSpecifier::parse("lib:").is_err());
+        assert!(ArtifactSpecifier::parse("lib:   ").is_err());
     }
 }

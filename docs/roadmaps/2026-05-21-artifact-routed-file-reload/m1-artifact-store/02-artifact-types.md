@@ -8,7 +8,7 @@ Implement artifact **types** under `lpc-node-registry/src/artifact/` (no store l
 yet beyond what tests need for type checking):
 
 - `ArtifactId`
-- `ArtifactLocation` (`File` only) + `try_from_locator`
+- `ArtifactLocation` (`File` only) + `try_from_specifier`
 - `ArtifactError`
 - `ArtifactReadState`
 - `ArtifactReadFailure`
@@ -21,7 +21,7 @@ Export all public types from `artifact/mod.rs`.
 ## Code Organization Reminders
 
 - Granular files per type; `mod.rs` re-exports.
-- Unit tests for `try_from_locator` at bottom of `artifact_location.rs`.
+- Unit tests for `try_from_specifier` at bottom of `artifact_location.rs`.
 - Helpers at bottom of files.
 
 ## Sub-agent Reminders
@@ -54,11 +54,11 @@ pub enum ArtifactLocation {
 ```
 
 - `file(path) -> Self`
-- `try_from_locator(loc: &ArtifactLocator) -> Result<Self, ArtifactError>`
-  - `ArtifactLocator::Path(p)` → `File(p.clone())`
-  - `ArtifactLocator::Lib(_)` → `ArtifactError::Resolution("library artifact references are not supported yet")`
+- `try_from_specifier(loc: &ArtifactSpecifier) -> Result<Self, ArtifactError>`
+  - `ArtifactSpecifier::Path(p)` → `File(p.clone())`
+  - `ArtifactSpecifier::Lib(_)` → `ArtifactError::Resolution("library artifact references are not supported yet")`
 
-Use `lpc_model::{ArtifactLocator, LpPathBuf}`.
+Use `lpc_model::{ArtifactSpecifier, LpPathBuf}`.
 
 Port ordering tests from `lpc-engine/src/artifact/artifact_location.rs` (file-only subset).
 
@@ -116,7 +116,7 @@ Use `lpc_model::Revision`.
 
 In `artifact_location.rs`:
 
-- Path locator resolves to `File`.
+- Path specifier resolves to `File`.
 - Lib locator returns `Resolution` error.
 
 ## Validate

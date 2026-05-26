@@ -76,8 +76,8 @@ pub enum ShaderSource {
 }
 ```
 
-Use `SourcePath` if direct `ArtifactLocator` slot support is not clean. The
-engine can parse `SourcePath` into `ArtifactLocator` later.
+Use `SourcePath` if direct `ArtifactSpecifier` slot support is not clean. The
+engine can parse `SourcePath` into `ArtifactSpecifier` later.
 
 Update exports in:
 
@@ -172,7 +172,7 @@ pub struct NodeInvocation {
 }
 
 pub enum NodeDefRef {
-    Path { path: ArtifactLocator },
+    Path { path: ArtifactSpecifier },
     Inline(Box<NodeDef>),
 }
 ```

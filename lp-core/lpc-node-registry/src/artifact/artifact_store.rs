@@ -3,7 +3,7 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use lpc_model::{ArtifactLocator, Revision};
+use lpc_model::{ArtifactSpecifier, Revision};
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath, LpPathBuf};
 
 use super::{
@@ -50,12 +50,12 @@ impl ArtifactStore {
         location
     }
 
-    pub fn acquire_locator(
+    pub fn acquire_specifier(
         &mut self,
-        locator: &ArtifactLocator,
+        specifier: &ArtifactSpecifier,
         frame: Revision,
     ) -> Result<ArtifactLocation, ArtifactError> {
-        let location = ArtifactLocation::try_from_locator(locator)?;
+        let location = ArtifactLocation::try_from_specifier(specifier)?;
         let path = location
             .file_path()
             .cloned()
@@ -238,11 +238,11 @@ mod tests {
     }
 
     #[test]
-    fn acquire_locator_rejects_lib() {
+    fn acquire_specifier_rejects_lib() {
         let mut store = ArtifactStore::new();
-        let locator = ArtifactLocator::parse("lib:core/x").unwrap();
+        let specifier = ArtifactSpecifier::parse("lib:core/x").unwrap();
         let err = store
-            .acquire_locator(&locator, Revision::new(1))
+            .acquire_specifier(&specifier, Revision::new(1))
             .unwrap_err();
         assert!(matches!(err, ArtifactError::Resolution(_)));
         let location = store.register_file(LpPathBuf::from("/after.toml"), Revision::new(1));

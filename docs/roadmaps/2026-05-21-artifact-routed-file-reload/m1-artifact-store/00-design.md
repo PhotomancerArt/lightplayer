@@ -15,7 +15,7 @@ Engine (M6) ──acquire──► NodeDefRegistry (M2) ──acquire──► A
                               └──────────────────────────────┘
 ```
 
-- **Acquire** resolves an authored locator to `ArtifactLocation::File(path)`,
+- **Acquire** resolves an authored specifier to `ArtifactLocation::File(path)`,
   creates or reuses the entry, increments **refcount**, returns **`ArtifactId`**.
 - **Release** decrements refcount; at **zero**, entry is **removed** from the store.
 - **Fs changes** do not create entries. They only affect paths that already have
@@ -36,7 +36,7 @@ lp-core/lpc-node-registry/
     ├── artifact/
     │   ├── mod.rs
     │   ├── artifact_id.rs          # opaque ArtifactId
-    │   ├── artifact_location.rs    # File(LpPathBuf) only; try_from_locator
+    │   ├── artifact_location.rs    # File(LpPathBuf) only; try_from_specifier
     │   ├── artifact_error.rs
     │   ├── artifact_read_state.rs  # Unread | ReadOk | Failed(ArtifactReadFailure)
     │   ├── artifact_entry.rs
@@ -127,9 +127,9 @@ impl ArtifactStore {
         frame: Revision,
     ) -> ArtifactId;
 
-    pub fn acquire_locator(
+    pub fn acquire_specifier(
         &mut self,
-        locator: &ArtifactLocator,
+        locator: &ArtifactSpecifier,
         frame: Revision,
     ) -> Result<ArtifactId, ArtifactError>;
 

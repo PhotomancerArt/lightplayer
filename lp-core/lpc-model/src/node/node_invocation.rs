@@ -1,12 +1,12 @@
 //! Parent-owned instruction to instantiate a child node.
 //!
 //! The parent owns the invocation namespace. The child node definition may be
-//! unset ([`NodeInvocation::Unset`]), a path locator ([`NodeInvocation::Ref`]),
+//! unset ([`NodeInvocation::Unset`]), a path specifier ([`NodeInvocation::Ref`]),
 //! or an inline [`NodeDef`] ([`NodeInvocation::Def`]).
 
 use alloc::string::ToString;
 
-use crate::artifact::artifact_loc::ArtifactLocator;
+use crate::artifact::artifact_specifier::ArtifactSpecifier;
 use crate::nodes::node_def::{NodeArtifact, NodeDef};
 use crate::{
     ArtifactPath, ArtifactPathSlot, FieldSlot, FieldSlotMut, SlotDataAccess, SlotDataMutAccess,
@@ -62,13 +62,13 @@ impl FieldSlotMut for InvocationDefBody {
 impl NodeInvocation {
     /// New path-backed invocation.
     #[must_use]
-    pub fn new(locator: ArtifactLocator) -> Self {
-        Self::path(locator)
+    pub fn new(specifier: ArtifactSpecifier) -> Self {
+        Self::path(specifier)
     }
 
     #[must_use]
-    pub fn path(locator: ArtifactLocator) -> Self {
-        Self::Ref(ArtifactPathSlot::new(ArtifactPath(locator.to_string())))
+    pub fn path(specifier: ArtifactSpecifier) -> Self {
+        Self::Ref(ArtifactPathSlot::new(ArtifactPath(specifier.to_string())))
     }
 
     #[must_use]
@@ -76,7 +76,7 @@ impl NodeInvocation {
         Self::Def(InvocationDefBody::new(def))
     }
 
-    pub fn ref_locator(&self) -> Option<ArtifactLocator> {
+    pub fn ref_specifier(&self) -> Option<ArtifactSpecifier> {
         match self {
             Self::Unset | Self::Def(_) => None,
             Self::Ref(path) => {
@@ -84,7 +84,7 @@ impl NodeInvocation {
                 if text.is_empty() {
                     None
                 } else {
-                    ArtifactLocator::parse(text).ok()
+                    ArtifactSpecifier::parse(text).ok()
                 }
             }
         }
@@ -131,8 +131,8 @@ ref = "./texture.toml"
         );
 
         assert_eq!(
-            invocation.ref_locator().unwrap(),
-            ArtifactLocator::path("./texture.toml")
+            invocation.ref_specifier().unwrap(),
+            ArtifactSpecifier::path("./texture.toml")
         );
     }
 
@@ -184,7 +184,6 @@ kind = "Clock"
         assert!(err.to_string().contains("def") || err.to_string().contains("unknown"));
     }
 
-    #[test]
     #[test]
     fn node_invocation_round_trips_unset_form() {
         let text = r#"

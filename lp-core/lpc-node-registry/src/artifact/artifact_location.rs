@@ -4,7 +4,7 @@ use alloc::format;
 use alloc::string::String;
 use core::cmp::Ordering;
 
-use lpc_model::{ArtifactLocator, LpPathBuf};
+use lpc_model::{ArtifactSpecifier, LpPathBuf};
 use lpfs::LpPath as LpFsPath;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -27,10 +27,10 @@ impl ArtifactLocation {
         Self::File(path)
     }
 
-    pub fn try_from_locator(locator: &ArtifactLocator) -> Result<Self, ArtifactError> {
-        match locator {
-            ArtifactLocator::Path(path) => Ok(Self::File(path.clone())),
-            ArtifactLocator::Lib(lib) => Err(ArtifactError::Resolution(format!(
+    pub fn try_from_specifier(specifier: &ArtifactSpecifier) -> Result<Self, ArtifactError> {
+        match specifier {
+            ArtifactSpecifier::Path(path) => Ok(Self::File(path.clone())),
+            ArtifactSpecifier::Lib(lib) => Err(ArtifactError::Resolution(format!(
                 "library artifact references are not supported yet ({lib})"
             ))),
         }
@@ -110,9 +110,9 @@ mod tests {
     use lpc_model::artifact::src_artifact_lib_ref::SrcArtifactLibRef;
 
     #[test]
-    fn path_locator_resolves_to_file() {
-        let loc = ArtifactLocator::path("./shader.glsl");
-        let location = ArtifactLocation::try_from_locator(&loc).unwrap();
+    fn path_specifier_resolves_to_file() {
+        let spec = ArtifactSpecifier::path("./shader.glsl");
+        let location = ArtifactLocation::try_from_specifier(&spec).unwrap();
         assert_eq!(
             location,
             ArtifactLocation::File(LpPathBuf::from("./shader.glsl"))
@@ -120,11 +120,11 @@ mod tests {
     }
 
     #[test]
-    fn lib_locator_returns_resolution_error() {
-        let loc = ArtifactLocator::lib_ref(
+    fn lib_specifier_returns_resolution_error() {
+        let spec = ArtifactSpecifier::lib_ref(
             SrcArtifactLibRef::try_from_suffix("core/x").expect("valid lib ref"),
         );
-        let err = ArtifactLocation::try_from_locator(&loc).unwrap_err();
+        let err = ArtifactLocation::try_from_specifier(&spec).unwrap_err();
         assert!(matches!(err, ArtifactError::Resolution(msg) if msg.contains("not supported")));
     }
 

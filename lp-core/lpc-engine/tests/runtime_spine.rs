@@ -18,7 +18,7 @@ use lpc_engine::node::{
 };
 use lpc_model::node::node_invocation::NodeInvocation;
 use lpc_model::{
-    ArtifactLocator, Kind, LpValue, NodeDef, NodeId, Revision, TextureDef, bus::ChannelName,
+    ArtifactSpecifier, Kind, LpValue, NodeDef, NodeId, Revision, TextureDef, bus::ChannelName,
 };
 use lps_shared::LpsValueF32;
 
@@ -69,12 +69,12 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
         owner: NodeId::new(1),
     };
 
-    let config = NodeInvocation::new(ArtifactLocator::path("e.lp"));
+    let config = NodeInvocation::new(ArtifactSpecifier::path("e.lp"));
 
     let mut mgr = ArtifactStore::new();
-    let locator = config.ref_locator().unwrap();
+    let specifier = config.ref_specifier().unwrap();
     let ar = mgr.acquire_location(
-        ArtifactLocation::try_from_src_spec(&locator).unwrap(),
+        ArtifactLocation::try_from_src_spec(&specifier).unwrap(),
         Revision::new(0),
     );
     mgr.load_with(&ar, Revision::new(40), |_location| Ok(texture_def(7, 7)))

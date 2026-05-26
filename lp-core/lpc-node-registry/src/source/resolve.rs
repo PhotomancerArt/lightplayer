@@ -2,10 +2,10 @@
 
 use alloc::string::String;
 
-use lpc_model::{ArtifactLocator, Revision, SourceFileBacking, SourceFileSlot, SourcePath};
+use lpc_model::{ArtifactSpecifier, Revision, SourceFileBacking, SourceFileSlot, SourcePath};
 use lpfs::LpPath;
 
-use crate::registry::resolve_node_locator;
+use crate::registry::resolve_node_specifier;
 use crate::{ArtifactStore, RegistryError};
 
 use super::SourceFileRef;
@@ -13,14 +13,14 @@ use super::SourceFileRef;
 /// Errors from [`resolve_source_file`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolveError {
-    LocatorResolution { message: String },
+    SpecifierResolution { message: String },
 }
 
 impl From<RegistryError> for ResolveError {
     fn from(err: RegistryError) -> Self {
         match err {
-            RegistryError::LocatorResolution { message } => Self::LocatorResolution { message },
-            other => Self::LocatorResolution {
+            RegistryError::SpecifierResolution { message } => Self::SpecifierResolution { message },
+            other => Self::SpecifierResolution {
                 message: alloc::format!("{other:?}"),
             },
         }
@@ -49,8 +49,8 @@ fn resolve_path_backing(
     path: &SourcePath,
     frame: Revision,
 ) -> Result<SourceFileRef, ResolveError> {
-    let locator = ArtifactLocator::path(path.as_path_buf());
-    let resolved_path = resolve_node_locator(containing_file, &locator)?;
+    let specifier = ArtifactSpecifier::path(path.as_path_buf());
+    let resolved_path = resolve_node_specifier(containing_file, &specifier)?;
     let extension = resolved_path.extension().unwrap_or("").into();
     let location = store.register_file(resolved_path.clone(), frame);
     Ok(SourceFileRef::File {

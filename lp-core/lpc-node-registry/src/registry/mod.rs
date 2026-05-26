@@ -18,7 +18,7 @@ mod sync_op;
 mod sync_outcome;
 mod sync_result;
 
-pub(crate) use def_walker::resolve_node_locator;
+pub(crate) use def_walker::resolve_node_specifier;
 pub use node_def_entry::NodeDefEntry;
 pub use node_def_id::NodeDefId;
 pub use node_def_loc::NodeDefLoc;

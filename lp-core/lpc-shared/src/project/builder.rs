@@ -8,7 +8,7 @@ use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
 use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef, ShaderSource};
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
-    Affine2d, Affine2dSlot, ArtifactLocator, AsLpPath, BindingDef, BindingDefs, BindingRef,
+    Affine2d, Affine2dSlot, ArtifactSpecifier, AsLpPath, BindingDef, BindingDefs, BindingRef,
     BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode, FixtureSamplingConfig,
     HardwareEndpointSpec, MapSlot, NodeDef, NodeInvocation, OptionSlot, ProjectDef, Ratio,
     RatioSlot, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry, ValueSlot,
@@ -181,7 +181,7 @@ impl ProjectBuilder {
             let relative_path = path.as_str().trim_start_matches('/');
             nodes.insert(
                 name.clone(),
-                EnumSlot::new(NodeInvocation::new(ArtifactLocator::path(format!(
+                EnumSlot::new(NodeInvocation::new(ArtifactSpecifier::path(format!(
                     "./{relative_path}"
                 )))),
             );

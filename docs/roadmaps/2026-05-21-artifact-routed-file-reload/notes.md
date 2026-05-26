@@ -43,7 +43,7 @@ Out of scope (this roadmap):
 - Full **project diff → ChangeSet** automation (see ChangeSet roadmap
   [`future.md`](../2026-05-21-changeset-change-management/future.md)).
 - Full optimal graph diff for arbitrary `project.toml` edits in the first slice.
-- Library artifact locators.
+- Library artifact specifiers.
 - Host precompilation or any weakening of on-device GLSL JIT.
 - Byte-level artifact diffing / digest in the first pass.
 

@@ -99,7 +99,7 @@ their current serde-facing tests are obsolete.
 
 Many small types still implement or derive serde as strings/compact structs:
 
-- `artifact/artifact_loc.rs`
+- `artifact/artifact_specifier.rs`
 - `binding/bus_slot_ref.rs`
 - `binding/node_slot_ref.rs`
 - `binding/binding_endpoint.rs`

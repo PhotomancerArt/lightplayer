@@ -11,9 +11,9 @@ Add resolved handle type and explicit resolve step in `lpc-node-registry`.
 - `SourceFileRef` enum (`File` / `Inline` / `Url` stub)
 - `ResolveError`
 - `resolve_source_file(store, containing_file, slot, frame)`
-- Path resolve via `resolve_node_locator` (reuse registry helper)
+- Path resolve via `resolve_node_specifier` (reuse registry helper)
 - File mode acquires `ArtifactLocation::file(resolved_path)` in store
-- `pub(crate) use def_walker::resolve_node_locator` from registry
+- `pub(crate) use def_walker::resolve_node_specifier` from registry
 - Unit tests: path acquire + inline revision
 
 **Out of scope:** Reading bytes, version combine, `ShaderDef` cutover.

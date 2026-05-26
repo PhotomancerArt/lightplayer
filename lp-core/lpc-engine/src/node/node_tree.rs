@@ -341,7 +341,7 @@ mod tests {
     use crate::node::test_placeholder_spine;
     use alloc::string::String;
     use alloc::vec::Vec;
-    use lpc_model::{ArtifactLocator, NodeInvocation};
+    use lpc_model::{ArtifactSpecifier, NodeInvocation};
     use lpc_model::{ChannelName, Kind, LpValue, NodeId, NodeName, Revision, SlotPath, TreePath};
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
@@ -374,7 +374,7 @@ mod tests {
     fn tree_add_child_stores_config_and_artifact() {
         let mut tree = make_tree();
         let root = tree.root();
-        let cfg = NodeInvocation::new(ArtifactLocator::path("child.lp"));
+        let cfg = NodeInvocation::new(ArtifactSpecifier::path("child.lp"));
         let art = ArtifactId::from_raw(9);
         let child = tree
             .add_child(

@@ -40,7 +40,7 @@ Out of scope:
 
 `lpc-node-registry` crate exists with requester-owned `ArtifactStore`:
 
-- `acquire_location` / `acquire_locator` / `release`
+- `acquire_location` / `acquire_specifier` / `release`
 - `apply_fs_changes` bumps `revision` on held entries
 - Transient `read_bytes(id, fs)` — no cached bytes on entries
 

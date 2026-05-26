@@ -6,7 +6,7 @@
 
 Implement `ArtifactStore` with:
 
-- `new`, `acquire_location`, `acquire_locator`, `release`
+- `new`, `acquire_location`, `acquire_specifier`, `release`
 - `apply_fs_changes`
 - `revision`, `entry`, `refcount` accessors
 
@@ -44,9 +44,9 @@ pub struct ArtifactStore {
   - `revision = frame`
   - `read_state = Unread`
 
-### `acquire_locator(locator, frame) -> Result<ArtifactId, ArtifactError>`
+### `acquire_specifier(locator, frame) -> Result<ArtifactId, ArtifactError>`
 
-Resolve via `ArtifactLocation::try_from_locator`, then `acquire_location`.
+Resolve via `ArtifactLocation::try_from_specifier`, then `acquire_location`.
 
 ### `release(id, _frame) -> Result<(), ArtifactError>`
 
@@ -70,7 +70,7 @@ Path match: compare `FsChange.path` to entry's file path (`LpPathBuf` equality).
 3. `fs_modify_bumps_revision_and_sets_unread` — acquire, apply Modify, assert revision + Unread
 4. `fs_change_on_unacquired_path_is_noop` — apply change before acquire, then acquire gets fresh revision from acquire frame only
 5. `fs_delete_sets_deleted_failure_while_entry_held`
-6. `acquire_locator_rejects_lib`
+6. `acquire_specifier_rejects_lib`
 
 Use `lpfs::FsChange`, `ChangeType`, `LpPathBuf`.
 

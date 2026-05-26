@@ -69,7 +69,7 @@
 - **Why not now:** Filesystem change events as version bumps are sufficient for first pass; ESP32 cost of retaining or hashing full sources is undesirable until proven necessary.
 - **Useful context:** Plan notes in original `docs/plans/2026-05-21-artifact-routed-file-reload/00-notes.md`.
 
-## Library artifact locators
+## Library artifact specifiers
 
-- **Idea:** `ArtifactLocator::Lib(...)` resolved through a library namespace.
+- **Idea:** `ArtifactSpecifier::Lib(...)` resolved through a library namespace.
 - **Why not now:** File-backed reload first; `ArtifactLocation::try_from_src_spec` already rejects lib locators.

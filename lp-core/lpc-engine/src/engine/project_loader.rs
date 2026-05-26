@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use lpc_model::LpType;
 use lpc_model::generate_compute_shader_header;
 use lpc_model::nodes::project::project_def::ProjectDef;
-use lpc_model::{ArtifactLocator, ArtifactReadRoot, NodeInvocation, NodeKind};
+use lpc_model::{ArtifactReadRoot, ArtifactSpecifier, NodeInvocation, NodeKind};
 use lpc_model::{
     BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, FixtureDef, FluidDef, Kind,
     LpValue, MappingConfig, NodeDef, NodeId, NodeName, PlaylistDef, PlaylistEntry, Revision,
@@ -91,19 +91,19 @@ impl ProjectLoader {
         R: ArtifactReadRoot + ?Sized,
         R::Err: core::fmt::Debug,
     {
-        Self::load_project_artifact(root, services, ArtifactLocator::path("/project.toml"))
+        Self::load_project_artifact(root, services, ArtifactSpecifier::path("/project.toml"))
     }
 
     pub fn load_project_artifact<R>(
         root: &R,
         services: EngineServices,
-        project_locator: ArtifactLocator,
+        project_specifier: ArtifactSpecifier,
     ) -> Result<Engine, ProjectLoadError>
     where
         R: ArtifactReadRoot + ?Sized,
         R::Err: core::fmt::Debug,
     {
-        let project_path = resolve_project_locator(&project_locator)?;
+        let project_path = resolve_project_specifier(&project_specifier)?;
         let project_root = services.project_root().clone();
         let mut runtime = Engine::with_services(project_root.clone(), services);
         let project_def = load_project_def(root, &project_path, runtime.slot_shapes())?;
@@ -121,7 +121,7 @@ impl ProjectLoader {
                 path: project_path.as_str().to_string(),
                 reason: format!("load project artifact payload: {e:?}"),
             })?;
-        let project_invocation = NodeInvocation::new(project_locator);
+        let project_invocation = NodeInvocation::new(project_specifier);
 
         {
             let root_entry = runtime
@@ -201,15 +201,13 @@ impl ProjectLoader {
                         reason: String::from("node invocation ref path is empty"),
                     });
                 }
-                let artifact_locator =
-                    ArtifactLocator::parse(path_slot.value().as_str()).map_err(|err| {
-                        ProjectLoadError::InvalidSourcePath {
-                            path: path_slot.value().as_str().to_string(),
-                            reason: err.to_string(),
-                        }
+                let artifact_specifier = ArtifactSpecifier::parse(path_slot.value().as_str())
+                    .map_err(|err| ProjectLoadError::InvalidSourcePath {
+                        path: path_slot.value().as_str().to_string(),
+                        reason: err.to_string(),
                     })?;
                 let artifact_path =
-                    resolve_child_artifact_locator(containing_file, &artifact_locator)?;
+                    resolve_child_artifact_specifier(containing_file, &artifact_specifier)?;
                 let config = load_node_def(root, artifact_path.as_path(), runtime.slot_shapes())?;
                 let artifact_id = runtime
                     .artifacts_mut()
@@ -810,27 +808,27 @@ where
     }
 }
 
-fn resolve_project_locator(locator: &ArtifactLocator) -> Result<LpPathBuf, ProjectLoadError> {
-    resolve_path_locator_from_dir(LpPath::new("/"), locator)
+fn resolve_project_specifier(specifier: &ArtifactSpecifier) -> Result<LpPathBuf, ProjectLoadError> {
+    resolve_path_specifier_from_dir(LpPath::new("/"), specifier)
 }
 
-fn resolve_child_artifact_locator(
+fn resolve_child_artifact_specifier(
     containing_file: &LpPathBuf,
-    locator: &ArtifactLocator,
+    specifier: &ArtifactSpecifier,
 ) -> Result<LpPathBuf, ProjectLoadError> {
     let parent = containing_file
         .as_path()
         .parent()
         .unwrap_or(LpPath::new("/"));
-    resolve_path_locator_from_dir(parent, locator)
+    resolve_path_specifier_from_dir(parent, specifier)
 }
 
-fn resolve_path_locator_from_dir(
+fn resolve_path_specifier_from_dir(
     base_dir: &LpPath,
-    locator: &ArtifactLocator,
+    specifier: &ArtifactSpecifier,
 ) -> Result<LpPathBuf, ProjectLoadError> {
-    match locator {
-        ArtifactLocator::Path(path) => {
+    match specifier {
+        ArtifactSpecifier::Path(path) => {
             if path.is_absolute() {
                 Ok(path.clone())
             } else {
@@ -843,9 +841,9 @@ fn resolve_path_locator_from_dir(
                     })
             }
         }
-        ArtifactLocator::Lib(lib) => Err(ProjectLoadError::InvalidSourcePath {
+        ArtifactSpecifier::Lib(lib) => Err(ProjectLoadError::InvalidSourcePath {
             path: lib.to_string(),
-            reason: String::from("library artifact locators are not supported for nodes yet"),
+            reason: String::from("library artifact specifiers are not supported for nodes yet"),
         }),
     }
 }

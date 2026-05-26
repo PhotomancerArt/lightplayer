@@ -54,7 +54,7 @@ Full mutation may be substantial, but the clock controls are a valuable first re
 
 - `lp-core/lpc-engine/src/engine/project_loader.rs`
   - `ProjectLoader` loads `/project.toml`, then iterates `project_def.nodes.entries`.
-  - Each child invocation is resolved through `invocation.artifact_locator()`.
+  - Each child invocation is resolved through `invocation.artifact_specifier()`.
   - Each child node def is loaded from disk by `load_node_def`.
   - Runtime nodes are attached in kind-specific passes.
   - Bindings are registered from each node def's `bindings`.

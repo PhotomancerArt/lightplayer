@@ -39,4 +39,4 @@
 - **Idea:** Resolve `lib:package/item` locators for node defs and shader source.
 - **Why not now:** Path and inline sources must be made clean first.
 - **Useful context:** Authored fields should stay named `path` where they mean
-  relative locator, while `ArtifactLocator` remains capable of parsing `lib:`.
+  relative locator, while `ArtifactSpecifier` remains capable of parsing `lib:`.
