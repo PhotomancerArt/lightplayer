@@ -2,7 +2,16 @@
 
 Small refactors and design notes before M1 API hardening sign-off.
 
-## Done in code (M0.1a)
+### Store-owned artifact catalog (M0.1b)
+
+`ArtifactStore` now owns durable path ↔ [`ArtifactId`] registration:
+
+- `register_file` / `unregister` — catalog lifetime (not refcount cache pins)
+- `id_for_path` / `path_for_id` — lookups
+- Registry duplicate maps removed; `reconcile_artifacts` unregisters ids not
+  referenced by defs or source deps
+
+Ids remain stable for the same path until explicit unregister.
 
 ### `ArtifactStore` keys use `ArtifactId`
 

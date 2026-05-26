@@ -1,24 +1,26 @@
-//! Refcounted freshness-only artifact cache.
+//! Project artifact catalog: stable ids, freshness, transient reads.
 
 use alloc::collections::BTreeMap;
+use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::{ArtifactLocator, Revision};
-use lpfs::{FsEvent, FsEventKind, LpFs};
+use lpfs::{FsEvent, FsEventKind, LpFs, LpPath, LpPathBuf};
 
 use super::{
     ArtifactEntry, ArtifactError, ArtifactId, ArtifactLocation, ArtifactReadFailure,
     ArtifactReadState,
 };
 
-/// Cache of held file artifacts keyed by [`ArtifactId`] and resolved location.
+/// Catalog of project file artifacts keyed by stable [`ArtifactId`] and path.
 ///
-/// Entries exist only while requesters hold refs ([`Self::acquire_location`] /
-/// [`Self::release`]). Filesystem changes invalidate held entries; they do not
-/// register new ones.
+/// An artifact remains registered until [`Self::unregister`]. Registration is
+/// idempotent: [`Self::register_file`] returns the same id for the same path.
+/// Filesystem changes invalidate read state on registered entries; they do not
+/// register new paths.
 pub struct ArtifactStore {
     by_id: BTreeMap<ArtifactId, ArtifactEntry>,
-    location_to_id: BTreeMap<ArtifactLocation, ArtifactId>,
+    path_to_id: BTreeMap<String, ArtifactId>,
     next_id: u32,
 }
 
@@ -26,28 +28,25 @@ impl ArtifactStore {
     pub fn new() -> Self {
         Self {
             by_id: BTreeMap::new(),
-            location_to_id: BTreeMap::new(),
+            path_to_id: BTreeMap::new(),
             next_id: 1,
         }
     }
 
-    pub fn acquire_location(&mut self, location: ArtifactLocation, frame: Revision) -> ArtifactId {
-        if let Some(id) = self.location_to_id.get(&location).copied() {
-            if let Some(entry) = self.by_id.get_mut(&id) {
-                entry.refcount += 1;
-                return id;
-            }
-            self.location_to_id.remove(&location);
+    /// Register `path` in the project catalog, or return the existing id.
+    pub fn register_file(&mut self, path: LpPathBuf, frame: Revision) -> ArtifactId {
+        if let Some(&id) = self.path_to_id.get(path.as_str()) {
+            return id;
         }
 
         let id = self.alloc_id();
-        self.location_to_id.insert(location.clone(), id);
+        let location = ArtifactLocation::file(path.clone());
+        self.path_to_id.insert(String::from(path.as_str()), id);
         self.by_id.insert(
             id,
             ArtifactEntry {
                 id,
                 location,
-                refcount: 1,
                 revision: frame,
                 read_state: ArtifactReadState::Unread,
             },
@@ -61,25 +60,37 @@ impl ArtifactStore {
         frame: Revision,
     ) -> Result<ArtifactId, ArtifactError> {
         let location = ArtifactLocation::try_from_locator(locator)?;
-        Ok(self.acquire_location(location, frame))
+        let path = location
+            .file_path()
+            .cloned()
+            .ok_or_else(|| ArtifactError::internal("expected file artifact location"))?;
+        Ok(self.register_file(path, frame))
     }
 
-    pub fn release(&mut self, id: &ArtifactId, _frame: Revision) -> Result<(), ArtifactError> {
+    /// Drop a registered artifact when nothing in the project references it.
+    pub fn unregister(&mut self, id: &ArtifactId) -> Result<(), ArtifactError> {
         let entry = self
             .by_id
-            .get_mut(id)
+            .remove(id)
             .ok_or(ArtifactError::UnknownArtifact { id: *id })?;
-        if entry.refcount == 0 {
-            return Err(ArtifactError::InvalidRelease { id: *id });
+        if let Some(path) = entry.location.file_path() {
+            self.path_to_id.remove(path.as_str());
         }
-        entry.refcount -= 1;
-        if entry.refcount != 0 {
-            return Ok(());
-        }
-        let location = entry.location.clone();
-        self.by_id.remove(id);
-        self.location_to_id.remove(&location);
         Ok(())
+    }
+
+    pub fn id_for_path(&self, path: &LpPath) -> Option<ArtifactId> {
+        self.path_to_id.get(path.as_str()).copied()
+    }
+
+    pub fn path_for_id(&self, id: ArtifactId) -> Option<&LpPathBuf> {
+        self.by_id
+            .get(&id)
+            .and_then(|entry| entry.location.file_path())
+    }
+
+    pub fn artifact_ids(&self) -> impl Iterator<Item = ArtifactId> + '_ {
+        self.by_id.keys().copied()
     }
 
     pub fn apply_fs_changes(&mut self, changes: &[FsEvent], frame: Revision) {
@@ -119,10 +130,6 @@ impl ArtifactStore {
 
     pub fn revision(&self, id: &ArtifactId) -> Option<Revision> {
         self.entry(id).map(|entry| entry.revision)
-    }
-
-    pub fn refcount(&self, id: &ArtifactId) -> Option<u32> {
-        self.entry(id).map(|entry| entry.refcount)
     }
 
     pub fn entry(&self, id: &ArtifactId) -> Option<&ArtifactEntry> {
@@ -166,11 +173,7 @@ impl ArtifactStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpfs::{FsEvent, FsEventKind, LpFsMemory, LpPathBuf};
-
-    fn file_location(path: &str) -> ArtifactLocation {
-        ArtifactLocation::file(path)
-    }
+    use lpfs::{FsEvent, FsEventKind, LpFsMemory};
 
     fn fs_change(path: &str, kind: FsEventKind) -> FsEvent {
         FsEvent {
@@ -184,27 +187,27 @@ mod tests {
     }
 
     #[test]
-    fn acquire_same_location_reuses_artifact_id_and_increments_refcount() {
+    fn register_same_path_reuses_artifact_id() {
         let mut store = ArtifactStore::new();
-        let location = file_location("/shader.glsl");
-        let id1 = store.acquire_location(location.clone(), Revision::new(1));
-        let id2 = store.acquire_location(location, Revision::new(2));
+        let id1 = store.register_file(LpPathBuf::from("/shader.glsl"), Revision::new(1));
+        let id2 = store.register_file(LpPathBuf::from("/shader.glsl"), Revision::new(2));
         assert_eq!(id1, id2);
-        assert_eq!(store.refcount(&id1), Some(2));
+        assert_eq!(store.artifact_ids().count(), 1);
     }
 
     #[test]
-    fn release_at_zero_removes_entry() {
+    fn unregister_removes_entry_and_path_lookup() {
         let mut store = ArtifactStore::new();
-        let id = store.acquire_location(file_location("/a.toml"), Revision::new(1));
-        store.release(&id, Revision::new(1)).unwrap();
+        let id = store.register_file(LpPathBuf::from("/a.toml"), Revision::new(1));
+        store.unregister(&id).unwrap();
         assert!(store.entry(&id).is_none());
+        assert!(store.id_for_path(LpPath::new("/a.toml")).is_none());
     }
 
     #[test]
     fn fs_modify_bumps_revision_and_sets_unread() {
         let mut store = ArtifactStore::new();
-        let id = store.acquire_location(file_location("/b.glsl"), Revision::new(1));
+        let id = store.register_file(LpPathBuf::from("/b.glsl"), Revision::new(1));
         store.apply_fs_changes(
             &[fs_change("/b.glsl", FsEventKind::Modify)],
             Revision::new(5),
@@ -217,13 +220,13 @@ mod tests {
     }
 
     #[test]
-    fn fs_change_on_unacquired_path_is_noop() {
+    fn fs_change_on_unregistered_path_is_noop() {
         let mut store = ArtifactStore::new();
         store.apply_fs_changes(
             &[fs_change("/missing.glsl", FsEventKind::Modify)],
             Revision::new(9),
         );
-        let id = store.acquire_location(file_location("/missing.glsl"), Revision::new(2));
+        let id = store.register_file(LpPathBuf::from("/missing.glsl"), Revision::new(2));
         assert_eq!(store.revision(&id), Some(Revision::new(2)));
         assert_eq!(
             store.entry(&id).unwrap().read_state,
@@ -232,9 +235,9 @@ mod tests {
     }
 
     #[test]
-    fn fs_delete_sets_deleted_failure_while_entry_held() {
+    fn fs_delete_sets_deleted_failure_while_registered() {
         let mut store = ArtifactStore::new();
-        let id = store.acquire_location(file_location("/c.svg"), Revision::new(1));
+        let id = store.register_file(LpPathBuf::from("/c.svg"), Revision::new(1));
         store.apply_fs_changes(
             &[fs_change("/c.svg", FsEventKind::Delete)],
             Revision::new(3),
@@ -254,7 +257,7 @@ mod tests {
             .acquire_locator(&locator, Revision::new(1))
             .unwrap_err();
         assert!(matches!(err, ArtifactError::Resolution(_)));
-        let id = store.acquire_location(file_location("/after.toml"), Revision::new(1));
+        let id = store.register_file(LpPathBuf::from("/after.toml"), Revision::new(1));
         assert_eq!(id.raw(), 1);
     }
 
@@ -265,7 +268,7 @@ mod tests {
             .unwrap();
 
         let mut store = ArtifactStore::new();
-        let id = store.acquire_location(file_location("/shader.glsl"), Revision::new(1));
+        let id = store.register_file(LpPathBuf::from("/shader.glsl"), Revision::new(1));
         let bytes = store.read_bytes(&id, &fs).unwrap();
         assert_eq!(bytes, b"void main() {}");
         assert_eq!(
@@ -278,7 +281,7 @@ mod tests {
     fn read_bytes_missing_file_sets_not_found() {
         let fs = LpFsMemory::new();
         let mut store = ArtifactStore::new();
-        let id = store.acquire_location(file_location("/nope.glsl"), Revision::new(1));
+        let id = store.register_file(LpPathBuf::from("/nope.glsl"), Revision::new(1));
         let err = store.read_bytes(&id, &fs).unwrap_err();
         assert!(matches!(
             err,
@@ -288,7 +291,7 @@ mod tests {
             store.entry(&id).unwrap().read_state,
             ArtifactReadState::Failed(ArtifactReadFailure::NotFound)
         );
-        assert_eq!(store.refcount(&id), Some(1));
+        assert!(store.entry(&id).is_some());
     }
 
     #[test]
@@ -298,7 +301,7 @@ mod tests {
             .unwrap();
 
         let mut store = ArtifactStore::new();
-        let id = store.acquire_location(file_location("/x.glsl"), Revision::new(1));
+        let id = store.register_file(LpPathBuf::from("/x.glsl"), Revision::new(1));
         assert_eq!(store.read_bytes(&id, &fs).unwrap(), b"v1");
 
         fs.write_file_mut(project_path("x.glsl").as_path(), b"v2")

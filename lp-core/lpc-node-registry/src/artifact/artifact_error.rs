@@ -10,8 +10,6 @@ use super::ArtifactReadFailure;
 pub enum ArtifactError {
     /// No entry exists for this [`ArtifactId`].
     UnknownArtifact { id: ArtifactId },
-    /// [`super::ArtifactStore::release`] called when refcount is already zero.
-    InvalidRelease { id: ArtifactId },
     /// Locator resolution failed at acquire time (no entry created).
     Resolution(String),
     /// Transient read failed; see [`ArtifactReadFailure`] on the entry.

@@ -5,7 +5,6 @@ use alloc::string::String;
 use lpc_model::{ArtifactLocator, Revision, SourceFileBacking, SourceFileSlot, SourcePath};
 use lpfs::LpPath;
 
-use crate::artifact::ArtifactLocation;
 use crate::registry::resolve_node_locator;
 use crate::{ArtifactStore, RegistryError};
 
@@ -53,8 +52,7 @@ fn resolve_path_backing(
     let locator = ArtifactLocator::path(path.as_path_buf());
     let resolved_path = resolve_node_locator(containing_file, &locator)?;
     let extension = resolved_path.extension().unwrap_or("").into();
-    let location = ArtifactLocation::file(resolved_path.clone());
-    let artifact_id = store.acquire_location(location, frame);
+    let artifact_id = store.register_file(resolved_path.clone(), frame);
     Ok(SourceFileRef::File {
         artifact_id,
         authored_path: path.clone(),
@@ -89,7 +87,7 @@ mod tests {
         assert_eq!(authored_path.as_str(), "./shader.glsl");
         assert_eq!(resolved_path.as_str(), "/project/shader.glsl");
         assert_eq!(extension, "glsl");
-        assert_eq!(store.refcount(&artifact_id), Some(1));
+        assert!(store.entry(&artifact_id).is_some());
     }
 
     #[test]

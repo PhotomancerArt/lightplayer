@@ -9,7 +9,7 @@ use crate::ArtifactId;
 pub struct NodeDefLoc {
     /// Artifact where the node is defined
     pub artifact_id: ArtifactId,
-    
+
     /// Path in the artifact
     pub path: SlotPath,
 }

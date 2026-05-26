@@ -38,7 +38,7 @@ impl NodeDefRegistry {
                 SlotOverlayEntry::Deleted => None,
             });
         }
-        let Some(id) = self.artifact_path_to_id.get(path.as_str()).copied() else {
+        let Some(id) = self.store.id_for_path(path) else {
             return Ok(None);
         };
         match self.store.read_bytes(&id, fs) {
@@ -55,8 +55,8 @@ impl NodeDefRegistry {
         ctx: &ParseCtx<'_>,
     ) -> Result<NodeDefState, RegistryError> {
         let path = self
-            .artifact_root_path
-            .get(&artifact_id)
+            .store
+            .path_for_id(artifact_id)
             .ok_or(RegistryError::UnknownDef)?;
         if let Some(entry) = self.slot_overlay.entry(LpPath::new(path.as_str())) {
             return Ok(match entry {
@@ -82,7 +82,7 @@ impl NodeDefRegistry {
     /// Effective state for a registered def (overlay ∪ committed cache).
     pub fn effective_state(&self, id: &NodeDefId, ctx: &ParseCtx<'_>) -> Option<NodeDefState> {
         let entry = self.entries.get(id)?;
-        let path = self.artifact_root_path.get(&entry.loc.artifact_id)?;
+        let path = self.store.path_for_id(entry.loc.artifact_id)?;
         if !self.slot_overlay.contains_path(LpPath::new(path.as_str())) {
             return Some(entry.state.clone());
         }
@@ -94,10 +94,8 @@ impl NodeDefRegistry {
                 ctx,
                 &entry.state,
             ),
-            SlotOverlayEntry::DefDraft(draft) => {
-                def_state_at_source(&draft.def, &entry.loc.path)
-                    .unwrap_or_else(|| entry.state.clone())
-            }
+            SlotOverlayEntry::DefDraft(draft) => def_state_at_source(&draft.def, &entry.loc.path)
+                .unwrap_or_else(|| entry.state.clone()),
             SlotOverlayEntry::Deleted => {
                 NodeDefState::ParseError(slot_overlay_deleted_error(path.as_str()))
             }

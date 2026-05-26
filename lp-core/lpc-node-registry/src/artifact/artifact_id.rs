@@ -1,9 +1,8 @@
 //! Opaque id for an artifact entry inside [`super::ArtifactStore`].
 
-/// Runtime id returned by [`super::ArtifactStore::acquire_location`].
+/// Runtime id returned by [`super::ArtifactStore::register_file`].
 ///
-/// Dropping a caller's interest does **not** decrement refcount; call
-/// [`super::ArtifactStore::release`].
+/// Remains valid while the artifact is registered in the store catalog.
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize, serde::Deserialize,
 )]

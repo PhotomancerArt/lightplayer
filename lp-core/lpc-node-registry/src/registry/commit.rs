@@ -27,9 +27,14 @@ pub(crate) fn commit_slot_overlay(
 
     let plan = SlotOverlayCommitPlan::from_slot_overlay(&registry.slot_overlay, ctx)?;
     let known_paths: BTreeMap<String, ()> = registry
-        .artifact_path_to_id
-        .keys()
-        .map(|path| (path.clone(), ()))
+        .store
+        .artifact_ids()
+        .filter_map(|id| {
+            registry
+                .store
+                .path_for_id(id)
+                .map(|path| (String::from(path.as_str()), ()))
+        })
         .collect();
 
     for (path, bytes) in &plan.writes {
@@ -54,7 +59,7 @@ pub(crate) fn commit_slot_overlay(
 
     for path in plan.all_paths() {
         if registry.artifact_id_for_path(path.as_path()).is_none() {
-            registry.acquire_file_artifact(path.clone(), frame)?;
+            registry.register_file_artifact(path.clone(), frame);
         }
     }
 
@@ -75,7 +80,7 @@ pub(crate) fn commit_slot_overlay(
         return Err(err);
     }
 
-    if let Err(err) = registry.reconcile_artifact_refs(frame) {
+    if let Err(err) = registry.reconcile_artifacts() {
         registry.restore_entry_states(&before);
         return Err(err.into());
     }

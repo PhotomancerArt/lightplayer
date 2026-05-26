@@ -1,4 +1,4 @@
-//! Requester-owned artifact freshness store (no cached file bytes).
+//! Project artifact catalog: stable ids, freshness metadata, transient reads.
 
 mod artifact_entry;
 mod artifact_error;

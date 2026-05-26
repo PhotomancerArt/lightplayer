@@ -2,7 +2,7 @@
 
 use lpc_model::Revision;
 
-use super::{NodeDefLoc, NodeDefId, NodeDefState};
+use super::{NodeDefId, NodeDefLoc, NodeDefState};
 
 /// Parsed or failed node definition at a stable source address.
 #[derive(Clone, Debug, PartialEq)]

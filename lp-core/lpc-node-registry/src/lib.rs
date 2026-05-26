@@ -1,10 +1,10 @@
 //! Node definition registry with artifact freshness and client edit overlay.
 //!
-//! [`ArtifactStore`] tracks file freshness and transient reads without caching
-//! bytes. [`NodeDefRegistry`] owns committed parse entries plus a
-//! [`SlotOverlay`] for uncommitted client edits. [`NodeDefView`] exposes
-//! effective reads (slot overlay ∪ committed). Apply an [`EditBatch`] with
-//! [`NodeDefRegistry::apply_edit_batch`], then [`NodeDefRegistry::commit`] or
+//! [`ArtifactStore`] owns the project file catalog (stable [`ArtifactId`]s,
+//! freshness, transient reads). [`NodeDefRegistry`] is a consumer: parsed
+//! def entries plus a [`SlotOverlay`] for uncommitted client edits.
+//! [`NodeDefView`] exposes effective reads (slot overlay ∪ committed). Apply an
+//! [`EditBatch`] with [`NodeDefRegistry::apply_edit_batch`], then [`NodeDefRegistry::commit`] or
 //! [`NodeDefRegistry::discard_slot_overlay`].
 //!
 //! With the `diff` feature (default on host, omit on embedded), [`diff`] builds
@@ -41,7 +41,7 @@ pub use edit::{
 #[allow(deprecated, reason = "legacy sync op alias for migration")]
 pub use registry::RegistryChange;
 pub use registry::{
-    DefChangeDetail, NodeDefLoc, NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState,
+    DefChangeDetail, NodeDefEntry, NodeDefId, NodeDefLoc, NodeDefRegistry, NodeDefState,
     NodeDefUpdates, ParseCtx, RegistryError, SourceRevisionBump, SyncError, SyncOp, SyncOutcome,
     SyncResult, ValidationErrorPlaceholder, serialize_slot_draft,
 };
