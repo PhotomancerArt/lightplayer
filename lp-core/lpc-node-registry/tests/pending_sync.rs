@@ -141,7 +141,5 @@ fn sync_fs_and_commit_in_one_batch() {
         )
         .unwrap();
 
-    assert!(
-        !outcome.committed.source_revisions.is_empty() || !outcome.committed.def_updates.is_empty()
-    );
+    assert!(!outcome.committed.def_updates.changed.is_empty());
 }

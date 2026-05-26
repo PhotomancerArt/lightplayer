@@ -42,8 +42,8 @@ pub use edit::{
 pub use registry::RegistryChange;
 pub use registry::{
     DefChangeDetail, NodeDefEntry, NodeDefId, NodeDefLoc, NodeDefRegistry, NodeDefState,
-    NodeDefUpdates, ParseCtx, RegistryError, SourceRevisionBump, SyncError, SyncOp, SyncOutcome,
-    SyncResult, ValidationErrorPlaceholder, serialize_slot_draft,
+    NodeDefUpdates, ParseCtx, RegistryError, SyncError, SyncOp, SyncOutcome, SyncResult,
+    ValidationErrorPlaceholder, serialize_slot_draft,
 };
 pub use source::{
     MaterializeError, MaterializedSource, ResolveError, SourceDiagnosticCtx, SourceFileRef,

@@ -16,11 +16,10 @@ use crate::{ArtifactLocation, ArtifactStore};
 use super::def_shell::{is_container_def, shell_changed};
 use super::def_walker::{collect_invocations, resolve_node_specifier};
 use super::source_bridge;
-use super::source_deps::SourceDep;
 use super::sync_error::SyncError;
 use super::sync_op::SyncOp;
 use super::sync_outcome::SyncOutcome;
-use super::sync_result::{DefChangeDetail, SourceRevisionBump, SyncResult};
+use super::sync_result::{DefChangeDetail, SyncResult};
 use super::{
     NodeDefEntry, NodeDefId, NodeDefLoc, NodeDefState, NodeDefUpdates, ParseCtx, RegistryError,
 };
@@ -36,8 +35,6 @@ pub struct NodeDefRegistry {
     slot_overlay: SlotOverlay,
     entries: BTreeMap<NodeDefId, NodeDefEntry>,
     source_index: BTreeMap<NodeDefLoc, NodeDefId>,
-    def_source_deps: BTreeMap<NodeDefId, Vec<SourceDep>>,
-    source_path_index: BTreeMap<String, Vec<NodeDefId>>,
     root_id: Option<NodeDefId>,
     next_id: u32,
 }
@@ -55,8 +52,6 @@ impl NodeDefRegistry {
             slot_overlay: SlotOverlay::new(),
             entries: BTreeMap::new(),
             source_index: BTreeMap::new(),
-            def_source_deps: BTreeMap::new(),
-            source_path_index: BTreeMap::new(),
             root_id: None,
             next_id: 1,
         }
@@ -84,7 +79,7 @@ impl NodeDefRegistry {
         let location = self.store.register_file(path_buf.clone(), frame);
         let root_id = self.register_artifact_subtree(location, root_path, frame, fs, ctx)?;
         self.root_id = Some(root_id);
-        self.refresh_all_source_deps(fs, frame, ctx);
+        self.register_all_asset_paths(frame)?;
         Ok(root_id)
     }
 
@@ -161,25 +156,18 @@ impl NodeDefRegistry {
         }
 
         let mut def_updates = NodeDefUpdates::default();
-        let mut source_revisions = Vec::new();
 
         let mut def_artifact_locations = Vec::new();
-        let mut source_paths = Vec::new();
         for change in changes {
-            match self.classify_changed_path(&change.path) {
-                PathChangeKind::DefArtifact(location) => def_artifact_locations.push(location),
-                PathChangeKind::SourceOnly => source_paths.push(change.path.clone()),
+            if let PathChangeKind::DefArtifact(location) = self.classify_changed_path(&change.path)
+            {
+                def_artifact_locations.push(location);
             }
         }
         dedupe_locations(&mut def_artifact_locations);
-        dedupe_paths(&mut source_paths);
 
         for location in def_artifact_locations {
             self.sync_def_artifact(location, fs, frame, ctx, &mut def_updates);
-        }
-
-        for path in source_paths {
-            self.sync_source_path(&path, fs, frame, ctx, &mut source_revisions);
         }
 
         let _ = self.reconcile_artifacts();
@@ -187,7 +175,6 @@ impl NodeDefRegistry {
         let change_details = build_change_details(&before, &def_updates, &self.entries);
         SyncResult {
             def_updates,
-            source_revisions,
             change_details,
         }
     }
@@ -295,6 +282,13 @@ impl NodeDefRegistry {
 
     pub(crate) fn artifact_location_for_path(&self, path: &LpPath) -> Option<ArtifactLocation> {
         self.store.location_for_path(path)
+    }
+
+    /// Committed [`ArtifactStore`] revision for a registered file path.
+    pub fn artifact_revision_for_path(&self, path: &LpPath) -> Option<Revision> {
+        self.store
+            .location_for_path(path)
+            .and_then(|location| self.store.revision(&location))
     }
 
     pub(crate) fn read_committed_artifact_bytes(
@@ -463,62 +457,7 @@ impl NodeDefRegistry {
         }
 
         for def_id in affected {
-            let _ = self.refresh_source_deps_for_entry(def_id, fs, frame, ctx);
-        }
-    }
-
-    pub(crate) fn sync_source_path(
-        &mut self,
-        path: &LpPath,
-        fs: &dyn LpFs,
-        frame: Revision,
-        _ctx: &ParseCtx<'_>,
-        out: &mut Vec<SourceRevisionBump>,
-    ) {
-        let key = String::from(path.as_str());
-        let Some(def_ids) = self.source_path_index.get(&key).cloned() else {
-            return;
-        };
-
-        for def_id in def_ids {
-            let Some(deps) = self.def_source_deps.get_mut(&def_id) else {
-                continue;
-            };
-            let Some(entry) = self.entries.get(&def_id) else {
-                continue;
-            };
-            let NodeDefState::Loaded(def) = entry.state.clone() else {
-                continue;
-            };
-            let Some(containing) = entry.loc.artifact.file_path().cloned() else {
-                continue;
-            };
-
-            for dep in deps.iter_mut() {
-                if dep.resolved_path.as_str() != path.as_str() {
-                    continue;
-                }
-                let before = dep.last_version;
-                let after = match source_bridge::materialize_version_for_def_path(
-                    &mut self.store,
-                    fs,
-                    containing.as_path(),
-                    &def,
-                    &dep.resolved_path,
-                    frame,
-                ) {
-                    Ok(version) => version,
-                    Err(_) => continue,
-                };
-                if after > before {
-                    out.push(SourceRevisionBump {
-                        def_id,
-                        before,
-                        after,
-                    });
-                    dep.last_version = after;
-                }
-            }
+            let _ = self.register_asset_paths_for_entry(def_id, frame);
         }
     }
 
@@ -644,10 +583,16 @@ impl NodeDefRegistry {
             .map(|entry| entry.loc.artifact.clone())
             .collect::<alloc::collections::BTreeSet<_>>();
 
-        for deps in self.def_source_deps.values() {
-            for dep in deps {
-                if let Some(location) = self.store.location_for_path(dep.resolved_path.as_path()) {
-                    referenced.insert(location);
+        for entry in self.entries.values() {
+            let NodeDefState::Loaded(def) = &entry.state else {
+                continue;
+            };
+            let Some(containing) = entry.loc.artifact.file_path() else {
+                continue;
+            };
+            if let Ok(paths) = source_bridge::asset_paths_for_def(def, containing.as_path()) {
+                for path in paths {
+                    referenced.insert(ArtifactLocation::location_for_path(path.as_path()));
                 }
             }
         }
@@ -693,28 +638,24 @@ impl NodeDefRegistry {
     }
 
     fn remove_entry(&mut self, id: NodeDefId) {
-        self.remove_def_from_source_index(id);
         if let Some(entry) = self.entries.remove(&id) {
             self.source_index.remove(&entry.loc);
         }
     }
 
-    fn refresh_all_source_deps(&mut self, fs: &dyn LpFs, frame: Revision, ctx: &ParseCtx<'_>) {
+    fn register_all_asset_paths(&mut self, frame: Revision) -> Result<(), RegistryError> {
         let ids: Vec<NodeDefId> = self.entries.keys().copied().collect();
         for id in ids {
-            let _ = self.refresh_source_deps_for_entry(id, fs, frame, ctx);
+            self.register_asset_paths_for_entry(id, frame)?;
         }
+        Ok(())
     }
 
-    fn refresh_source_deps_for_entry(
+    fn register_asset_paths_for_entry(
         &mut self,
         def_id: NodeDefId,
-        fs: &dyn LpFs,
         frame: Revision,
-        _ctx: &ParseCtx<'_>,
     ) -> Result<(), RegistryError> {
-        self.remove_def_from_source_index(def_id);
-
         let Some(entry) = self.entries.get(&def_id) else {
             return Ok(());
         };
@@ -727,48 +668,10 @@ impl NodeDefRegistry {
             }
         })?;
 
-        let paths = source_bridge::source_paths_for_def(&def, containing.as_path())?;
-        let mut deps = Vec::new();
-        for resolved in paths {
-            self.store.register_file(resolved.clone(), frame);
-            let version = source_bridge::materialize_version_for_def_path(
-                &mut self.store,
-                fs,
-                containing.as_path(),
-                &def,
-                &resolved,
-                frame,
-            )?;
-            self.index_source_dep(def_id, &resolved);
-            deps.push(SourceDep {
-                resolved_path: resolved,
-                last_version: version,
-            });
+        for path in source_bridge::asset_paths_for_def(&def, containing.as_path())? {
+            self.store.register_file(path, frame);
         }
-        self.def_source_deps.insert(def_id, deps);
         Ok(())
-    }
-
-    fn remove_def_from_source_index(&mut self, def_id: NodeDefId) {
-        if let Some(deps) = self.def_source_deps.remove(&def_id) {
-            for dep in deps {
-                let key = String::from(dep.resolved_path.as_str());
-                if let Some(list) = self.source_path_index.get_mut(&key) {
-                    list.retain(|id| *id != def_id);
-                    if list.is_empty() {
-                        self.source_path_index.remove(&key);
-                    }
-                }
-            }
-        }
-    }
-
-    fn index_source_dep(&mut self, def_id: NodeDefId, path: &LpPathBuf) {
-        let key = String::from(path.as_str());
-        let list = self.source_path_index.entry(key).or_default();
-        if !list.contains(&def_id) {
-            list.push(def_id);
-        }
     }
 
     fn classify_changed_path(&self, path: &LpPath) -> PathChangeKind {
@@ -868,11 +771,6 @@ pub(crate) fn dedupe_locations(locations: &mut Vec<ArtifactLocation>) {
     locations.dedup();
 }
 
-pub(crate) fn dedupe_paths(paths: &mut Vec<LpPathBuf>) {
-    paths.sort_unstable_by(|a, b| a.as_str().cmp(b.as_str()));
-    paths.dedup_by(|a, b| a.as_str() == b.as_str());
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -965,12 +863,12 @@ rate = 2.0
     }
 
     #[test]
-    fn glsl_edit_only_bumps_source_revision() {
+    fn glsl_edit_only_bumps_artifact_store_revision() {
         let mut fs = crate::harness::fixtures::load_shader_project();
         let mut registry = NodeDefRegistry::new();
         let shapes = parse_ctx();
         let ctx = ParseCtx { shapes: &shapes };
-        let shader_id = registry
+        registry
             .load_root(&fs, LpPath::new("/shader.toml"), Revision::new(1), &ctx)
             .unwrap();
 
@@ -981,9 +879,10 @@ rate = 2.0
         );
         let result = registry.sync_fs(&fs, &[fs_modify("/shader.glsl")], Revision::new(2), &ctx);
         assert!(result.def_updates.is_empty());
-        assert_eq!(result.source_revisions.len(), 1);
-        assert_eq!(result.source_revisions[0].def_id, shader_id);
-        assert!(result.source_revisions[0].after > result.source_revisions[0].before);
+        assert_eq!(
+            registry.artifact_revision_for_path(LpPath::new("/shader.glsl")),
+            Some(Revision::new(2))
+        );
     }
 
     #[test]

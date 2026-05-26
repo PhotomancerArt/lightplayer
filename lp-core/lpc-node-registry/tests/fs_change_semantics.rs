@@ -69,12 +69,12 @@ rate = 2.0
 }
 
 #[test]
-fn s2_glsl_edit_only_bumps_source_revision() {
+fn s2_glsl_edit_only_bumps_artifact_store_revision() {
     let mut fs = fixtures::load_shader_project();
     let mut registry = NodeDefRegistry::new();
     let shapes = parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
-    let shader_id = registry
+    registry
         .load_root(&fs, LpPath::new("/shader.toml"), Revision::new(1), &ctx)
         .unwrap();
 
@@ -85,21 +85,19 @@ fn s2_glsl_edit_only_bumps_source_revision() {
     );
     let result = sync_at(&mut registry, &fs, "/shader.glsl", 2, &ctx);
     assert!(result.def_updates.is_empty());
-    assert!(
-        result
-            .source_revisions
-            .iter()
-            .any(|bump| bump.def_id == shader_id && bump.after > bump.before)
+    assert_eq!(
+        registry.artifact_revision_for_path(LpPath::new("/shader.glsl")),
+        Some(Revision::new(2))
     );
 }
 
 #[test]
-fn s3_svg_edit_only_bumps_source_revision() {
+fn s3_svg_edit_only_bumps_artifact_store_revision() {
     let mut fs = fixtures::load_fixture_project();
     let mut registry = NodeDefRegistry::new();
     let shapes = parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
-    let fixture_id = registry
+    registry
         .load_root(&fs, LpPath::new("/fixture.toml"), Revision::new(1), &ctx)
         .unwrap();
 
@@ -110,11 +108,9 @@ fn s3_svg_edit_only_bumps_source_revision() {
     );
     let result = sync_at(&mut registry, &fs, "/mapping.svg", 2, &ctx);
     assert!(result.def_updates.is_empty());
-    assert!(
-        result
-            .source_revisions
-            .iter()
-            .any(|bump| bump.def_id == fixture_id && bump.after > bump.before)
+    assert_eq!(
+        registry.artifact_revision_for_path(LpPath::new("/mapping.svg")),
+        Some(Revision::new(2))
     );
 }
 
