@@ -8,7 +8,7 @@ use crate::ArtifactId;
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum EditTarget {
-    /// Committed artifact handle.
+    /// Committed artifact id.
     Id(ArtifactId),
     /// Absolute project path — primary authoring form; implicit slot overlay create.
     Path(LpPathBuf),

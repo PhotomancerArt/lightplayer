@@ -314,14 +314,11 @@ impl NodeDefRegistry {
     fn resolve_edit_target(&self, target: EditTarget) -> Result<LpPathBuf, EditError> {
         match target {
             EditTarget::Path(path) => require_absolute_path(path),
-            EditTarget::Id(id) => {
-                self.artifact_root_path
-                    .get(&id)
-                    .cloned()
-                    .ok_or(EditError::UnknownArtifact {
-                        artifact_id: id.handle(),
-                    })
-            }
+            EditTarget::Id(id) => self
+                .artifact_root_path
+                .get(&id)
+                .cloned()
+                .ok_or(EditError::UnknownArtifact { id }),
         }
     }
 

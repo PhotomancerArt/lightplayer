@@ -11,40 +11,39 @@ use super::{
     ArtifactReadState,
 };
 
-/// Cache of held file artifacts keyed by opaque handle and resolved location.
+/// Cache of held file artifacts keyed by [`ArtifactId`] and resolved location.
 ///
 /// Entries exist only while requesters hold refs ([`Self::acquire_location`] /
 /// [`Self::release`]). Filesystem changes invalidate held entries; they do not
 /// register new ones.
 pub struct ArtifactStore {
-    by_handle: BTreeMap<u32, ArtifactEntry>,
-    location_to_handle: BTreeMap<ArtifactLocation, u32>,
-    next_handle: u32,
+    by_id: BTreeMap<ArtifactId, ArtifactEntry>,
+    location_to_id: BTreeMap<ArtifactLocation, ArtifactId>,
+    next_id: u32,
 }
 
 impl ArtifactStore {
     pub fn new() -> Self {
         Self {
-            by_handle: BTreeMap::new(),
-            location_to_handle: BTreeMap::new(),
-            next_handle: 1,
+            by_id: BTreeMap::new(),
+            location_to_id: BTreeMap::new(),
+            next_id: 1,
         }
     }
 
     pub fn acquire_location(&mut self, location: ArtifactLocation, frame: Revision) -> ArtifactId {
-        if let Some(&handle) = self.location_to_handle.get(&location) {
-            if let Some(entry) = self.by_handle.get_mut(&handle) {
+        if let Some(id) = self.location_to_id.get(&location).copied() {
+            if let Some(entry) = self.by_id.get_mut(&id) {
                 entry.refcount += 1;
-                return entry.id;
+                return id;
             }
-            self.location_to_handle.remove(&location);
+            self.location_to_id.remove(&location);
         }
 
-        let handle = self.alloc_handle();
-        let id = ArtifactId::from_raw(handle);
-        self.location_to_handle.insert(location.clone(), handle);
-        self.by_handle.insert(
-            handle,
+        let id = self.alloc_id();
+        self.location_to_id.insert(location.clone(), id);
+        self.by_id.insert(
+            id,
             ArtifactEntry {
                 id,
                 location,
@@ -66,21 +65,20 @@ impl ArtifactStore {
     }
 
     pub fn release(&mut self, id: &ArtifactId, _frame: Revision) -> Result<(), ArtifactError> {
-        let handle = id.handle();
         let entry = self
-            .by_handle
-            .get_mut(&handle)
-            .ok_or(ArtifactError::UnknownHandle { handle })?;
+            .by_id
+            .get_mut(id)
+            .ok_or(ArtifactError::UnknownArtifact { id: *id })?;
         if entry.refcount == 0 {
-            return Err(ArtifactError::InvalidRelease { handle });
+            return Err(ArtifactError::InvalidRelease { id: *id });
         }
         entry.refcount -= 1;
         if entry.refcount != 0 {
             return Ok(());
         }
         let location = entry.location.clone();
-        self.by_handle.remove(&handle);
-        self.location_to_handle.remove(&location);
+        self.by_id.remove(id);
+        self.location_to_id.remove(&location);
         Ok(())
     }
 
@@ -91,11 +89,10 @@ impl ArtifactStore {
     }
 
     pub fn read_bytes(&mut self, id: &ArtifactId, fs: &dyn LpFs) -> Result<Vec<u8>, ArtifactError> {
-        let handle = id.handle();
         let path = {
             let entry = self
                 .entry(id)
-                .ok_or(ArtifactError::UnknownHandle { handle })?;
+                .ok_or(ArtifactError::UnknownArtifact { id: *id })?;
             entry
                 .location
                 .file_path()
@@ -105,14 +102,14 @@ impl ArtifactStore {
 
         match fs.read_file(path.as_path()) {
             Ok(bytes) => {
-                if let Some(entry) = self.by_handle.get_mut(&handle) {
+                if let Some(entry) = self.by_id.get_mut(id) {
                     entry.read_state = ArtifactReadState::ReadOk;
                 }
                 Ok(bytes)
             }
             Err(err) => {
                 let failure = ArtifactReadFailure::from_fs_error(err);
-                if let Some(entry) = self.by_handle.get_mut(&handle) {
+                if let Some(entry) = self.by_id.get_mut(id) {
                     entry.read_state = ArtifactReadState::Failed(failure.clone());
                 }
                 Err(ArtifactError::Read(failure))
@@ -129,7 +126,7 @@ impl ArtifactStore {
     }
 
     pub fn entry(&self, id: &ArtifactId) -> Option<&ArtifactEntry> {
-        self.by_handle.get(&id.handle())
+        self.by_id.get(id)
     }
 }
 
@@ -140,17 +137,17 @@ impl Default for ArtifactStore {
 }
 
 impl ArtifactStore {
-    fn alloc_handle(&mut self) -> u32 {
-        let handle = self.next_handle;
-        self.next_handle = self.next_handle.wrapping_add(1);
-        if self.next_handle == 0 {
-            self.next_handle = 1;
+    fn alloc_id(&mut self) -> ArtifactId {
+        let raw = self.next_id;
+        self.next_id = self.next_id.wrapping_add(1);
+        if self.next_id == 0 {
+            self.next_id = 1;
         }
-        handle
+        ArtifactId::from_raw(raw)
     }
 
     fn apply_fs_change(&mut self, change: &FsEvent, frame: Revision) {
-        for entry in self.by_handle.values_mut() {
+        for entry in self.by_id.values_mut() {
             let Some(path) = entry.location.file_path() else {
                 continue;
             };
@@ -187,7 +184,7 @@ mod tests {
     }
 
     #[test]
-    fn acquire_same_location_reuses_handle_and_increments_refcount() {
+    fn acquire_same_location_reuses_artifact_id_and_increments_refcount() {
         let mut store = ArtifactStore::new();
         let location = file_location("/shader.glsl");
         let id1 = store.acquire_location(location.clone(), Revision::new(1));
@@ -258,7 +255,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, ArtifactError::Resolution(_)));
         let id = store.acquire_location(file_location("/after.toml"), Revision::new(1));
-        assert_eq!(id.handle(), 1);
+        assert_eq!(id.raw(), 1);
     }
 
     #[test]

@@ -68,8 +68,8 @@ mod tests {
         );
 
         let json = serde_json::to_string(&batch).expect("serialize");
-        assert!(json.contains("\"kind\":\"asset\""));
-        assert!(json.contains("\"kind\":\"slot\""));
+        assert!(json.contains("\"kind\":\"Asset\""));
+        assert!(json.contains("\"kind\":\"Slot\""));
         let back: EditBatch = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(back, batch);
     }

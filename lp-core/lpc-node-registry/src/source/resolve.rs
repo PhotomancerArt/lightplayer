@@ -28,7 +28,7 @@ impl From<RegistryError> for ResolveError {
     }
 }
 
-/// Resolve an authored slot to a handle-only ref, acquiring file artifacts in `store`.
+/// Resolve an authored slot to an id-only ref, acquiring file artifacts in `store`.
 pub fn resolve_source_file(
     store: &mut ArtifactStore,
     containing_file: &LpPath,

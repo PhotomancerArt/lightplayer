@@ -6,7 +6,7 @@ use super::{AssetEdit, EditTarget, SlotEdit};
 
 /// Edits targeting a single artifact path or id.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(tag = "kind")]
 pub enum ArtifactEdit {
     /// Structured slot edits on a `.toml` artifact.
     Slot {
