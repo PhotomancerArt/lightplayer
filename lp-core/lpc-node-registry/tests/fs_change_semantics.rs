@@ -32,10 +32,10 @@ fn inline_child_id(
     registry: &NodeDefRegistry,
     root: lpc_node_registry::NodeDefId,
 ) -> lpc_node_registry::NodeDefId {
-    let artifact_id = registry.get(&root).unwrap().loc.artifact_id;
+    let artifact = registry.get(&root).unwrap().loc.artifact.clone();
     registry
         .get_by_source(&NodeDefLoc {
-            artifact_id,
+            artifact,
             path: SlotPath::parse("entries[2].node").unwrap(),
         })
         .expect("inline child")

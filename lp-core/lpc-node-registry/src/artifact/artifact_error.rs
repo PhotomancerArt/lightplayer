@@ -2,14 +2,14 @@
 
 use alloc::string::String;
 
-use super::ArtifactId;
+use super::ArtifactLocation;
 use super::ArtifactReadFailure;
 
 /// Errors returned by [`super::ArtifactStore`] and read operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ArtifactError {
-    /// No entry exists for this [`ArtifactId`].
-    UnknownArtifact { id: ArtifactId },
+    /// No catalog entry exists for this [`ArtifactLocation`].
+    UnknownArtifact { location: ArtifactLocation },
     /// Locator resolution failed at acquire time (no entry created).
     Resolution(String),
     /// Transient read failed; see [`ArtifactReadFailure`] on the entry.

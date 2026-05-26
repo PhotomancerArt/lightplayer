@@ -54,7 +54,7 @@ pub fn materialize_source(
 ) -> Result<MaterializedSource, MaterializeError> {
     match reference {
         SourceFileRef::File {
-            artifact_id,
+            location,
             authored_path,
             resolved_path,
             ..
@@ -66,13 +66,11 @@ pub fn materialize_source(
                     return Ok(materialized);
                 }
             }
-            let bytes = store.read_bytes(artifact_id, fs)?;
+            let bytes = store.read_bytes(location, fs)?;
             let text = core::str::from_utf8(&bytes).map_err(|err| MaterializeError::Utf8 {
                 message: format!("{err}"),
             })?;
-            let artifact_revision = store
-                .revision(artifact_id)
-                .unwrap_or_else(Revision::default);
+            let artifact_revision = store.revision(location).unwrap_or_else(Revision::default);
             Ok(MaterializedSource {
                 version: slot.revision().max(artifact_revision),
                 text: String::from(text),

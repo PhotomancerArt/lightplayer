@@ -37,10 +37,10 @@ fn shader_render_order(entry: &NodeDefEntry) -> i32 {
 }
 
 fn inline_child_id(registry: &NodeDefRegistry, root: NodeDefId) -> NodeDefId {
-    let artifact_id = registry.get(&root).unwrap().loc.artifact_id;
+    let artifact = registry.get(&root).unwrap().loc.artifact.clone();
     registry
         .get_by_source(&NodeDefLoc {
-            artifact_id,
+            artifact,
             path: SlotPath::parse("entries[2].node").unwrap(),
         })
         .expect("inline child")

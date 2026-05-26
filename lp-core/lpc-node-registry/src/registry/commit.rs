@@ -8,11 +8,10 @@ use lpc_model::Revision;
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath, LpPathBuf};
 
 use crate::edit::{CommitError, SlotOverlayEntry};
-use crate::registry::SourceRevisionBump;
 
 use super::{
-    NodeDefLoc, NodeDefRegistry, NodeDefUpdates, ParseCtx, SyncResult, build_change_details,
-    dedupe_artifact_ids, dedupe_paths, serialize_slot_draft,
+    NodeDefLoc, NodeDefRegistry, NodeDefUpdates, ParseCtx, SourceRevisionBump, SyncResult,
+    build_change_details, dedupe_locations, dedupe_paths, serialize_slot_draft,
 };
 
 pub(crate) fn commit_slot_overlay(
@@ -28,11 +27,10 @@ pub(crate) fn commit_slot_overlay(
     let plan = SlotOverlayCommitPlan::from_slot_overlay(&registry.slot_overlay, ctx)?;
     let known_paths: BTreeMap<String, ()> = registry
         .store
-        .artifact_ids()
-        .filter_map(|id| {
-            registry
-                .store
-                .path_for_id(id)
+        .locations()
+        .filter_map(|location| {
+            location
+                .file_path()
                 .map(|path| (String::from(path.as_str()), ()))
         })
         .collect();
@@ -58,7 +56,10 @@ pub(crate) fn commit_slot_overlay(
     }
 
     for path in plan.all_paths() {
-        if registry.artifact_id_for_path(path.as_path()).is_none() {
+        if registry
+            .artifact_location_for_path(path.as_path())
+            .is_none()
+        {
             registry.register_file_artifact(path.clone(), frame);
         }
     }
@@ -103,15 +104,15 @@ fn sync_committed_overlay_paths(
     def_updates: &mut NodeDefUpdates,
     source_revisions: &mut Vec<SourceRevisionBump>,
 ) -> Result<(), CommitError> {
-    let mut def_artifact_ids = Vec::new();
+    let mut def_artifact_locations = Vec::new();
     let mut source_paths = Vec::new();
 
     for path in plan.all_paths() {
         if is_def_artifact_path(path.as_path()) {
-            if let Some(artifact_id) = registry.artifact_id_for_path(path.as_path()) {
-                let source = NodeDefLoc::artifact_root(artifact_id);
+            if let Some(location) = registry.artifact_location_for_path(path.as_path()) {
+                let source = NodeDefLoc::artifact_root(location.clone());
                 if registry.source_index.contains_key(&source) {
-                    def_artifact_ids.push(artifact_id);
+                    def_artifact_locations.push(location);
                 }
             }
         } else {
@@ -119,11 +120,11 @@ fn sync_committed_overlay_paths(
         }
     }
 
-    dedupe_artifact_ids(&mut def_artifact_ids);
+    dedupe_locations(&mut def_artifact_locations);
     dedupe_paths(&mut source_paths);
 
-    for artifact_id in def_artifact_ids {
-        registry.sync_def_artifact(artifact_id, fs, frame, ctx, def_updates);
+    for location in def_artifact_locations {
+        registry.sync_def_artifact(location, fs, frame, ctx, def_updates);
     }
     for path in source_paths {
         registry.sync_source_path(&path, fs, frame, ctx, source_revisions);

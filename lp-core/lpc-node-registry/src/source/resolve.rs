@@ -52,9 +52,9 @@ fn resolve_path_backing(
     let locator = ArtifactLocator::path(path.as_path_buf());
     let resolved_path = resolve_node_locator(containing_file, &locator)?;
     let extension = resolved_path.extension().unwrap_or("").into();
-    let artifact_id = store.register_file(resolved_path.clone(), frame);
+    let location = store.register_file(resolved_path.clone(), frame);
     Ok(SourceFileRef::File {
-        artifact_id,
+        location,
         authored_path: path.clone(),
         resolved_path,
         extension,
@@ -76,7 +76,7 @@ mod tests {
             resolve_source_file(&mut store, containing, &slot, Revision::new(2)).expect("resolve");
 
         let SourceFileRef::File {
-            artifact_id,
+            location,
             authored_path,
             resolved_path,
             extension,
@@ -87,7 +87,7 @@ mod tests {
         assert_eq!(authored_path.as_str(), "./shader.glsl");
         assert_eq!(resolved_path.as_str(), "/project/shader.glsl");
         assert_eq!(extension, "glsl");
-        assert!(store.entry(&artifact_id).is_some());
+        assert!(store.entry(&location).is_some());
     }
 
     #[test]

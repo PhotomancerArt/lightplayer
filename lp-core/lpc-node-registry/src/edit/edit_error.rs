@@ -3,13 +3,13 @@
 use alloc::string::String;
 use core::fmt;
 
-use crate::ArtifactId;
+use crate::ArtifactLocation;
 
 /// Failure applying an [`super::ArtifactEdit`] or [`super::EditBatch`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EditError {
     InvalidPath { message: String },
-    UnknownArtifact { id: ArtifactId },
+    UnknownArtifact { location: ArtifactLocation },
     UnsupportedOp { op: &'static str },
     Parse { message: String },
     SlotMutation { message: String },
@@ -20,8 +20,8 @@ impl fmt::Display for EditError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidPath { message } => write!(f, "invalid path: {message}"),
-            Self::UnknownArtifact { id } => {
-                write!(f, "unknown artifact id {}", id.raw())
+            Self::UnknownArtifact { location } => {
+                write!(f, "unknown artifact {}", location.to_uri())
             }
             Self::UnsupportedOp { op } => write!(f, "unsupported edit op: {op}"),
             Self::Parse { message } => write!(f, "parse error: {message}"),

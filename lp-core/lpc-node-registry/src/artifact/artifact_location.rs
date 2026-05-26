@@ -1,12 +1,18 @@
-//! Resolved file location used as the artifact store cache key.
+//! Resolved artifact identity (catalog key and wire URI).
 
+use alloc::format;
+use alloc::string::String;
 use core::cmp::Ordering;
 
 use lpc_model::{ArtifactLocator, LpPathBuf};
+use lpfs::LpPath as LpFsPath;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 use super::ArtifactError;
 
-/// Resolved file-backed artifact location.
+const FILE_URI_PREFIX: &str = "file:";
+
+/// Resolved artifact location — canonical project identity for file-backed artifacts.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub enum ArtifactLocation {
     File(LpPathBuf),
@@ -17,10 +23,14 @@ impl ArtifactLocation {
         Self::File(path.into())
     }
 
+    pub fn from_absolute_path(path: LpPathBuf) -> Self {
+        Self::File(path)
+    }
+
     pub fn try_from_locator(locator: &ArtifactLocator) -> Result<Self, ArtifactError> {
         match locator {
             ArtifactLocator::Path(path) => Ok(Self::File(path.clone())),
-            ArtifactLocator::Lib(lib) => Err(ArtifactError::Resolution(alloc::format!(
+            ArtifactLocator::Lib(lib) => Err(ArtifactError::Resolution(format!(
                 "library artifact references are not supported yet ({lib})"
             ))),
         }
@@ -30,6 +40,53 @@ impl ArtifactLocation {
         match self {
             Self::File(path) => Some(path),
         }
+    }
+
+    pub fn to_uri(&self) -> String {
+        match self {
+            Self::File(path) => format!("{FILE_URI_PREFIX}{}", path.as_str()),
+        }
+    }
+
+    pub fn parse_uri(raw: &str) -> Result<Self, ArtifactError> {
+        let raw = raw.trim();
+        if let Some(rest) = raw.strip_prefix(FILE_URI_PREFIX) {
+            if rest.is_empty() {
+                return Err(ArtifactError::Resolution(format!(
+                    "invalid artifact uri `{raw}`"
+                )));
+            }
+            return Ok(Self::File(LpPathBuf::from(rest)));
+        }
+        if raw.starts_with('/') {
+            return Ok(Self::File(LpPathBuf::from(raw)));
+        }
+        Err(ArtifactError::Resolution(format!(
+            "artifact uri must start with `{FILE_URI_PREFIX}` or be an absolute path, got `{raw}`"
+        )))
+    }
+
+    pub fn location_for_path(path: &LpFsPath) -> Self {
+        Self::File(path.to_path_buf())
+    }
+}
+
+impl Serialize for ArtifactLocation {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_uri())
+    }
+}
+
+impl<'de> Deserialize<'de> for ArtifactLocation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let raw = String::deserialize(deserializer)?;
+        Self::parse_uri(&raw).map_err(|err| serde::de::Error::custom(format!("{err:?}")))
     }
 }
 
@@ -50,7 +107,6 @@ impl PartialOrd for ArtifactLocation {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::artifact::ArtifactError;
     use lpc_model::artifact::src_artifact_lib_ref::SrcArtifactLibRef;
 
     #[test]
@@ -70,5 +126,25 @@ mod tests {
         );
         let err = ArtifactLocation::try_from_locator(&loc).unwrap_err();
         assert!(matches!(err, ArtifactError::Resolution(msg) if msg.contains("not supported")));
+    }
+
+    #[test]
+    fn uri_roundtrip_and_serde() {
+        let location = ArtifactLocation::file("/shader.toml");
+        assert_eq!(location.to_uri(), "file:/shader.toml");
+        assert_eq!(
+            ArtifactLocation::parse_uri("file:/shader.toml").unwrap(),
+            location
+        );
+        let json = serde_json::to_string(&location).unwrap();
+        assert_eq!(json, "\"file:/shader.toml\"");
+        let back: ArtifactLocation = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, location);
+    }
+
+    #[test]
+    fn parse_absolute_path_without_prefix() {
+        let location = ArtifactLocation::parse_uri("/shader.toml").unwrap();
+        assert_eq!(location, ArtifactLocation::file("/shader.toml"));
     }
 }

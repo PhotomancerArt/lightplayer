@@ -62,11 +62,11 @@ impl NodeDefRegistry {
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
     ) -> Result<NodeDef, EditError> {
-        let Some(artifact_id) = self.artifact_id_for_path(path) else {
+        let Some(location) = self.artifact_location_for_path(path) else {
             return Ok(NodeDef::default());
         };
         let bytes = self
-            .read_committed_artifact_bytes(artifact_id, fs)
+            .read_committed_artifact_bytes(&location, fs)
             .map_err(|err| EditError::Parse {
                 message: alloc::format!("read `{path:?}` for slot fork: {err:?}"),
             })?;

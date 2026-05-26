@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use lpfs::{LpFs, LpPath};
 
 use super::slot_apply::serialize_slot_draft;
-use crate::ArtifactId;
+use crate::ArtifactLocation;
 use crate::edit::SlotOverlayEntry;
 use crate::source::{
     MaterializeError, MaterializedSource, SourceDiagnosticCtx, materialize_source,
@@ -38,10 +38,10 @@ impl NodeDefRegistry {
                 SlotOverlayEntry::Deleted => None,
             });
         }
-        let Some(id) = self.store.id_for_path(path) else {
+        let Some(location) = self.store.location_for_path(path) else {
             return Ok(None);
         };
-        match self.store.read_bytes(&id, fs) {
+        match self.store.read_bytes(&location, fs) {
             Ok(bytes) => Ok(Some(bytes)),
             Err(_) => Ok(None),
         }
@@ -50,14 +50,11 @@ impl NodeDefRegistry {
     /// Parse effective TOML for an artifact (overlay ∪ base).
     pub fn parse_effective_state(
         &mut self,
-        artifact_id: ArtifactId,
+        location: &ArtifactLocation,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
     ) -> Result<NodeDefState, RegistryError> {
-        let path = self
-            .store
-            .path_for_id(artifact_id)
-            .ok_or(RegistryError::UnknownDef)?;
+        let path = location.file_path().ok_or(RegistryError::UnknownDef)?;
         if let Some(entry) = self.slot_overlay.entry(LpPath::new(path.as_str())) {
             return Ok(match entry {
                 SlotOverlayEntry::Bytes(bytes) => effective_state_from_slot_overlay_bytes(
@@ -76,13 +73,13 @@ impl NodeDefRegistry {
                 }
             });
         }
-        self.read_artifact_state(artifact_id, fs, ctx)
+        self.read_artifact_state(location, fs, ctx)
     }
 
     /// Effective state for a registered def (overlay ∪ committed cache).
     pub fn effective_state(&self, id: &NodeDefId, ctx: &ParseCtx<'_>) -> Option<NodeDefState> {
         let entry = self.entries.get(id)?;
-        let path = self.store.path_for_id(entry.loc.artifact_id)?;
+        let path = entry.loc.artifact.file_path()?;
         if !self.slot_overlay.contains_path(LpPath::new(path.as_str())) {
             return Some(entry.state.clone());
         }
