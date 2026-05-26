@@ -11,7 +11,7 @@ use crate::edit::{CommitError, SlotOverlayEntry};
 use crate::registry::SourceRevisionBump;
 
 use super::{
-    DefSource, NodeDefRegistry, NodeDefUpdates, ParseCtx, SyncResult, build_change_details,
+    NodeDefLoc, NodeDefRegistry, NodeDefUpdates, ParseCtx, SyncResult, build_change_details,
     dedupe_artifact_ids, dedupe_paths, serialize_slot_draft,
 };
 
@@ -104,7 +104,7 @@ fn sync_committed_overlay_paths(
     for path in plan.all_paths() {
         if is_def_artifact_path(path.as_path()) {
             if let Some(artifact_id) = registry.artifact_id_for_path(path.as_path()) {
-                let source = DefSource::artifact_root(artifact_id);
+                let source = NodeDefLoc::artifact_root(artifact_id);
                 if registry.source_index.contains_key(&source) {
                     def_artifact_ids.push(artifact_id);
                 }

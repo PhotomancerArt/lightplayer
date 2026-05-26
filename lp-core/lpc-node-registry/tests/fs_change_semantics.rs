@@ -4,7 +4,7 @@ mod common;
 
 use common::fixtures;
 use lpc_model::{NodeKind, Revision, SlotPath, SlotShapeRegistry};
-use lpc_node_registry::{DefChangeDetail, DefSource, NodeDefRegistry, ParseCtx, SyncResult};
+use lpc_node_registry::{DefChangeDetail, NodeDefLoc, NodeDefRegistry, ParseCtx, SyncResult};
 use lpfs::{FsEvent, FsEventKind, LpPath, LpPathBuf};
 
 fn parse_ctx() -> SlotShapeRegistry {
@@ -32,9 +32,9 @@ fn inline_child_id(
     registry: &NodeDefRegistry,
     root: lpc_node_registry::NodeDefId,
 ) -> lpc_node_registry::NodeDefId {
-    let artifact_id = registry.get(&root).unwrap().source.artifact_id;
+    let artifact_id = registry.get(&root).unwrap().loc.artifact_id;
     registry
-        .get_by_source(&DefSource {
+        .get_by_source(&NodeDefLoc {
             artifact_id,
             path: SlotPath::parse("entries[2].node").unwrap(),
         })
@@ -186,7 +186,7 @@ node = { ref = "./child.toml" }
         .unwrap();
     let child = registry
         .iter_entries()
-        .find(|entry| entry.source.path.is_root() && entry.id != root)
+        .find(|entry| entry.loc.path.is_root() && entry.id != root)
         .expect("path child")
         .id;
 

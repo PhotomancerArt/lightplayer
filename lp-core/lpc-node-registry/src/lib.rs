@@ -41,7 +41,7 @@ pub use edit::{
 #[allow(deprecated, reason = "legacy sync op alias for migration")]
 pub use registry::RegistryChange;
 pub use registry::{
-    DefChangeDetail, DefSource, NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState,
+    DefChangeDetail, NodeDefLoc, NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState,
     NodeDefUpdates, ParseCtx, RegistryError, SourceRevisionBump, SyncError, SyncOp, SyncOutcome,
     SyncResult, ValidationErrorPlaceholder, serialize_slot_draft,
 };

@@ -22,7 +22,7 @@ use super::sync_op::SyncOp;
 use super::sync_outcome::SyncOutcome;
 use super::sync_result::{DefChangeDetail, SourceRevisionBump, SyncResult};
 use super::{
-    DefSource, NodeDefEntry, NodeDefId, NodeDefState, NodeDefUpdates, ParseCtx, RegistryError,
+    NodeDefLoc, NodeDefEntry, NodeDefId, NodeDefState, NodeDefUpdates, ParseCtx, RegistryError,
 };
 
 /// Owner of parsed node definitions keyed by [`NodeDefId`].
@@ -35,7 +35,7 @@ pub struct NodeDefRegistry {
     store: ArtifactStore,
     slot_overlay: SlotOverlay,
     entries: BTreeMap<NodeDefId, NodeDefEntry>,
-    source_index: BTreeMap<DefSource, NodeDefId>,
+    source_index: BTreeMap<NodeDefLoc, NodeDefId>,
     artifact_refs: BTreeMap<ArtifactId, u32>,
     artifact_root_path: BTreeMap<ArtifactId, LpPathBuf>,
     artifact_path_to_id: BTreeMap<String, ArtifactId>,
@@ -212,7 +212,7 @@ impl NodeDefRegistry {
         self.entries.get(id)
     }
 
-    pub fn get_by_source(&self, source: &DefSource) -> Option<&NodeDefEntry> {
+    pub fn get_by_source(&self, source: &NodeDefLoc) -> Option<&NodeDefEntry> {
         self.source_index
             .get(source)
             .and_then(|id| self.entries.get(id))
@@ -332,7 +332,7 @@ impl NodeDefRegistry {
     ) -> Result<NodeDefId, RegistryError> {
         let revision = self.store.revision(&artifact_id).unwrap_or(frame);
         let state = self.read_artifact_state(artifact_id, fs, ctx)?;
-        let source = DefSource::artifact_root(artifact_id);
+        let source = NodeDefLoc::artifact_root(artifact_id);
         let root_id = self.register_def_at_source(source, state.clone(), revision)?;
         if let NodeDefState::Loaded(def) = state {
             self.register_invocations(
@@ -373,7 +373,7 @@ impl NodeDefRegistry {
                     })?;
                     let child_path = resolve_node_locator(file_path, &locator)?;
                     let child_artifact = self.acquire_file_artifact(child_path.clone(), frame)?;
-                    let child_source = DefSource::artifact_root(child_artifact);
+                    let child_source = NodeDefLoc::artifact_root(child_artifact);
                     if !self.source_index.contains_key(&child_source) {
                         self.register_artifact_subtree(
                             child_artifact,
@@ -385,7 +385,7 @@ impl NodeDefRegistry {
                     }
                 }
                 NodeInvocation::Def(body) => {
-                    let source = DefSource {
+                    let source = NodeDefLoc {
                         artifact_id,
                         path: site.path.clone(),
                     };
@@ -431,11 +431,11 @@ impl NodeDefRegistry {
                 Err(_) => return,
             };
 
-        let old_sources: BTreeMap<DefSource, NodeDefId> = self
+        let old_sources: BTreeMap<NodeDefLoc, NodeDefId> = self
             .entries
             .values()
-            .filter(|entry| entry.source.artifact_id == artifact_id)
-            .map(|entry| (entry.source.clone(), entry.id))
+            .filter(|entry| entry.loc.artifact_id == artifact_id)
+            .map(|entry| (entry.loc.clone(), entry.id))
             .collect();
 
         for (source, id) in &old_sources {
@@ -455,7 +455,7 @@ impl NodeDefRegistry {
                     updates.push_changed(*id);
                     if let Some(entry) = self.entries.get_mut(id) {
                         entry.state = new_state.clone();
-                        entry.last_seen_revision = current;
+                        entry.revision = current;
                     }
                     affected.push(*id);
                 }
@@ -497,7 +497,7 @@ impl NodeDefRegistry {
             };
             let Some(containing) = self
                 .artifact_root_path
-                .get(&entry.source.artifact_id)
+                .get(&entry.loc.artifact_id)
                 .cloned()
             else {
                 continue;
@@ -538,10 +538,10 @@ impl NodeDefRegistry {
         frame: Revision,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
-    ) -> Result<BTreeMap<DefSource, NodeDefState>, RegistryError> {
+    ) -> Result<BTreeMap<NodeDefLoc, NodeDefState>, RegistryError> {
         let mut inventory = BTreeMap::new();
         let state = self.read_artifact_state(artifact_id, fs, ctx)?;
-        inventory.insert(DefSource::artifact_root(artifact_id), state.clone());
+        inventory.insert(NodeDefLoc::artifact_root(artifact_id), state.clone());
         if let NodeDefState::Loaded(def) = state {
             self.derive_invocations(
                 artifact_id,
@@ -566,7 +566,7 @@ impl NodeDefRegistry {
         frame: Revision,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
-        inventory: &mut BTreeMap<DefSource, NodeDefState>,
+        inventory: &mut BTreeMap<NodeDefLoc, NodeDefState>,
     ) -> Result<(), RegistryError> {
         for site in collect_invocations(&def, &base_path) {
             match &site.invocation {
@@ -597,7 +597,7 @@ impl NodeDefRegistry {
                     }
                 }
                 NodeInvocation::Def(body) => {
-                    let source = DefSource {
+                    let source = NodeDefLoc {
                         artifact_id,
                         path: site.path.clone(),
                     };
@@ -657,7 +657,7 @@ impl NodeDefRegistry {
 
     fn register_def_at_source(
         &mut self,
-        source: DefSource,
+        source: NodeDefLoc,
         state: NodeDefState,
         revision: Revision,
     ) -> Result<NodeDefId, RegistryError> {
@@ -670,9 +670,9 @@ impl NodeDefRegistry {
             id,
             NodeDefEntry {
                 id,
-                source,
+                loc: source,
                 state,
-                last_seen_revision: revision,
+                revision: revision,
             },
         );
         Ok(id)
@@ -681,7 +681,7 @@ impl NodeDefRegistry {
     fn remove_entry(&mut self, id: NodeDefId) {
         self.remove_def_from_source_index(id);
         if let Some(entry) = self.entries.remove(&id) {
-            self.source_index.remove(&entry.source);
+            self.source_index.remove(&entry.loc);
         }
     }
 
@@ -689,7 +689,7 @@ impl NodeDefRegistry {
         let referenced: alloc::collections::BTreeSet<ArtifactId> = self
             .entries
             .values()
-            .map(|entry| entry.source.artifact_id)
+            .map(|entry| entry.loc.artifact_id)
             .collect();
 
         let to_release: Vec<ArtifactId> = self
@@ -733,7 +733,7 @@ impl NodeDefRegistry {
         };
         let containing = self
             .artifact_root_path
-            .get(&entry.source.artifact_id)
+            .get(&entry.loc.artifact_id)
             .cloned()
             .ok_or_else(|| RegistryError::LocatorResolution {
                 message: alloc::format!("missing artifact path for def {def_id:?}"),
@@ -787,7 +787,7 @@ impl NodeDefRegistry {
         let Some(artifact_id) = self.artifact_path_to_id.get(path.as_str()).copied() else {
             return PathChangeKind::SourceOnly;
         };
-        let source = DefSource::artifact_root(artifact_id);
+        let source = NodeDefLoc::artifact_root(artifact_id);
         if self.source_index.contains_key(&source) {
             PathChangeKind::DefArtifact(artifact_id)
         } else {
@@ -1010,7 +1010,7 @@ rate = 2.0
         let child = registry
             .entries
             .values()
-            .find(|entry| !entry.source.path.is_root())
+            .find(|entry| !entry.loc.path.is_root())
             .expect("inline child")
             .id;
 
@@ -1099,7 +1099,7 @@ source = { path = "a.glsl" }
         let child = registry
             .entries
             .values()
-            .find(|entry| entry.source.path.is_root() && entry.id != root)
+            .find(|entry| entry.loc.path.is_root() && entry.id != root)
             .expect("child file root")
             .id;
 
@@ -1138,7 +1138,7 @@ kind = "Shader"
         let child = registry
             .entries
             .values()
-            .find(|entry| !entry.source.path.is_root())
+            .find(|entry| !entry.loc.path.is_root())
             .expect("inline child")
             .id;
 

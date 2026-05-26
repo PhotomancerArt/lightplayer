@@ -5,7 +5,7 @@ mod common;
 use common::fixtures;
 use lpc_model::{LpValue, NodeDef, Revision, SlotPath, SlotShapeRegistry};
 use lpc_node_registry::{
-    ArtifactEdit, DefSource, EditTarget, NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState,
+    ArtifactEdit, NodeDefLoc, EditTarget, NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState,
     ParseCtx, SlotEdit, serialize_slot_draft,
 };
 use lpfs::{LpPath, LpPathBuf};
@@ -37,9 +37,9 @@ fn shader_render_order(entry: &NodeDefEntry) -> i32 {
 }
 
 fn inline_child_id(registry: &NodeDefRegistry, root: NodeDefId) -> NodeDefId {
-    let artifact_id = registry.get(&root).unwrap().source.artifact_id;
+    let artifact_id = registry.get(&root).unwrap().loc.artifact_id;
     registry
-        .get_by_source(&DefSource {
+        .get_by_source(&NodeDefLoc {
             artifact_id,
             path: SlotPath::parse("entries[2].node").unwrap(),
         })

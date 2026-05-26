@@ -1,7 +1,7 @@
 //! Parsed node definition registry, filesystem sync, and commit promotion.
 
 mod def_shell;
-mod def_source;
+mod node_def_loc;
 mod def_walker;
 mod node_def_entry;
 mod node_def_id;
@@ -18,7 +18,7 @@ mod sync_op;
 mod sync_outcome;
 mod sync_result;
 
-pub use def_source::DefSource;
+pub use node_def_loc::NodeDefLoc;
 pub(crate) use def_walker::resolve_node_locator;
 pub use node_def_entry::NodeDefEntry;
 pub use node_def_id::NodeDefId;
