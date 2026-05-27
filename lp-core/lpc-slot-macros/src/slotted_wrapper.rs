@@ -67,10 +67,12 @@ pub(crate) fn derive_wrapper(
 
         impl ::lpc_model::FieldSlot for #ident {
             const STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR: Option<&'static ::lpc_model::StaticSlotShapeDescriptor> =
-                <#field_ty as ::lpc_model::FieldSlot>::STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR;
+                Some(&::lpc_model::StaticSlotShapeDescriptor::Ref {
+                    id: <Self as ::lpc_model::StaticSlotShape>::SHAPE_ID,
+                });
 
             fn slot_field_shape() -> ::lpc_model::SlotShape {
-                <#field_ty as ::lpc_model::FieldSlot>::slot_field_shape()
+                ::lpc_model::SlotShape::reference(<Self as ::lpc_model::StaticSlotShape>::SHAPE_ID)
             }
 
             fn slot_field_data(&self) -> ::lpc_model::SlotDataAccess<'_> {

@@ -94,7 +94,9 @@ fn default_time() -> ValueSlot<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NodeDef, SlotDirection, SlotMerge, SlotShape, StaticSlotShape};
+    use crate::{
+        NodeDef, SlotDirection, SlotMerge, SlotShape, StaticSlotShape, StaticSlotShapeDescriptor,
+    };
 
     #[test]
     fn fluid_def_parses_inline_emitters() {
@@ -138,6 +140,25 @@ intensity = 1.0
 
         assert_eq!(emitters.semantics.direction, SlotDirection::Consumed);
         assert_eq!(emitters.semantics.merge, SlotMerge::ByKey);
+
+        let static_shape =
+            crate::slot_shapes::static_slot_shape(FluidDef::SHAPE_ID).expect("static shape");
+        let StaticSlotShapeDescriptor::Record { fields, .. } = *static_shape else {
+            panic!("static fluid shape");
+        };
+        let emitters = fields
+            .iter()
+            .find(|field| field.name == "emitters")
+            .expect("static emitters field");
+        let StaticSlotShapeDescriptor::Map { value, .. } = *emitters.shape else {
+            panic!("static emitters map");
+        };
+        assert_eq!(
+            value,
+            &StaticSlotShapeDescriptor::Ref {
+                id: FluidEmitter::SHAPE_ID
+            }
+        );
     }
 
     #[test]

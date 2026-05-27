@@ -55,7 +55,7 @@ mod tests {
     use crate::nodes::shader::{AddSubMode, DivMode, MulMode};
     use crate::{
         NodeDef, NodeKind, RenderOrder, ShaderDefView, SlotPath, SlotRecordShape, SlotShape,
-        SlotShapeRegistry,
+        SlotShapeRegistry, StaticSlotShape, StaticSlotShapeDescriptor,
     };
     use alloc::string::ToString;
 
@@ -105,7 +105,7 @@ mod tests {
     }
 
     #[test]
-    fn shader_def_shape_embeds_nested_static_records() {
+    fn shader_def_shape_references_nested_static_records() {
         let SlotShape::Record {
             fields: shader_fields,
             ..
@@ -118,12 +118,12 @@ mod tests {
             .iter()
             .find(|field| field.name.as_str() == "glsl_opts")
             .expect("glsl_opts field");
-        let SlotShape::Record { fields, .. } = &glsl_opts.shape else {
-            panic!("glsl_opts record shape");
-        };
-        assert_eq!(fields[0].name.as_str(), "add_sub");
-        assert_eq!(fields[1].name.as_str(), "mul");
-        assert_eq!(fields[2].name.as_str(), "div");
+        assert_eq!(
+            &glsl_opts.shape,
+            &SlotShape::Ref {
+                id: GlslOpts::SHAPE_ID
+            }
+        );
 
         let param_defs = shader_fields
             .iter()
@@ -132,9 +132,11 @@ mod tests {
         let SlotShape::Map { value, .. } = &param_defs.shape else {
             panic!("param_defs map shape");
         };
-        assert!(
-            matches!(value.as_ref(), SlotShape::Record { .. }),
-            "param_defs value should embed shader param record"
+        assert_eq!(
+            value.as_ref(),
+            &SlotShape::Ref {
+                id: ShaderParamDef::SHAPE_ID
+            }
         );
 
         let consumed = shader_fields
@@ -144,9 +146,53 @@ mod tests {
         let SlotShape::Map { value, .. } = &consumed.shape else {
             panic!("consumed map shape");
         };
-        assert!(
-            matches!(value.as_ref(), SlotShape::Record { .. }),
-            "consumed value should embed shader slot record"
+        assert_eq!(
+            value.as_ref(),
+            &SlotShape::Ref {
+                id: ShaderSlotDef::SHAPE_ID
+            }
+        );
+
+        let static_shape =
+            crate::slot_shapes::static_slot_shape(ShaderDef::SHAPE_ID).expect("static shape");
+        let StaticSlotShapeDescriptor::Record { fields, .. } = *static_shape else {
+            panic!("static shader shape");
+        };
+        let glsl_opts = fields
+            .iter()
+            .find(|field| field.name == "glsl_opts")
+            .expect("static glsl_opts field");
+        assert_eq!(
+            glsl_opts.shape,
+            &StaticSlotShapeDescriptor::Ref {
+                id: GlslOpts::SHAPE_ID
+            }
+        );
+        let param_defs = fields
+            .iter()
+            .find(|field| field.name == "param_defs")
+            .expect("static param_defs field");
+        let StaticSlotShapeDescriptor::Map { value, .. } = *param_defs.shape else {
+            panic!("static param_defs map");
+        };
+        assert_eq!(
+            value,
+            &StaticSlotShapeDescriptor::Ref {
+                id: ShaderParamDef::SHAPE_ID
+            }
+        );
+        let consumed = fields
+            .iter()
+            .find(|field| field.name == "consumed")
+            .expect("static consumed field");
+        let StaticSlotShapeDescriptor::Map { value, .. } = *consumed.shape else {
+            panic!("static consumed map");
+        };
+        assert_eq!(
+            value,
+            &StaticSlotShapeDescriptor::Ref {
+                id: ShaderSlotDef::SHAPE_ID
+            }
         );
     }
 

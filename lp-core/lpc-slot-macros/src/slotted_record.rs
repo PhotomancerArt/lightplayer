@@ -177,10 +177,12 @@ pub(crate) fn derive_record(
 
         impl ::lpc_model::FieldSlot for #ident {
             const STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR: Option<&'static ::lpc_model::StaticSlotShapeDescriptor> =
-                <Self as ::lpc_model::SlotRecordShape>::STATIC_SLOT_RECORD_SHAPE_DESCRIPTOR;
+                Some(&::lpc_model::StaticSlotShapeDescriptor::Ref {
+                    id: <Self as ::lpc_model::StaticSlotShape>::SHAPE_ID,
+                });
 
             fn slot_field_shape() -> ::lpc_model::SlotShape {
-                <Self as ::lpc_model::SlotRecordShape>::slot_record_shape()
+                ::lpc_model::SlotShape::reference(<Self as ::lpc_model::StaticSlotShape>::SHAPE_ID)
             }
 
             fn slot_field_data(&self) -> ::lpc_model::SlotDataAccess<'_> {
