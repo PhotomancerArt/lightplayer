@@ -72,6 +72,16 @@ impl ArtifactEdits {
     pub fn has_pending_at_path(&self, path: &SlotPath) -> bool {
         self.slot_edits.iter().any(|edit| edit.path() == path)
     }
+
+    /// Merge pending edits from `other`, preserving upsert semantics.
+    pub fn merge_from(&mut self, other: &ArtifactEdits) {
+        for op in other.slot_edits() {
+            self.upsert_slot(op.clone());
+        }
+        if !matches!(other.asset_pending(), PendingAsset::None) {
+            self.set_asset(other.asset_pending().clone());
+        }
+    }
 }
 
 impl ArtifactOverlay {
@@ -109,6 +119,14 @@ impl ArtifactOverlay {
 
     pub fn iter(&self) -> impl Iterator<Item = (&ArtifactLoc, &ArtifactEdits)> + '_ {
         self.edits.iter().filter(|(_, pending)| !pending.is_empty())
+    }
+
+    /// Merge pending edits from `other` into this overlay.
+    pub fn merge_from(&mut self, other: &ArtifactOverlay) {
+        for (location, source) in other.iter() {
+            let pending = self.ensure_pending(location.clone());
+            pending.merge_from(source);
+        }
     }
 }
 

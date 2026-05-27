@@ -7,8 +7,8 @@
 //! state with [`NodeDefRegistry::upsert_slot_edit`] / [`NodeDefRegistry::set_pending_asset`],
 //! then [`NodeDefRegistry::commit`] or [`NodeDefRegistry::discard_slot_overlay`].
 //!
-//! With the `diff` feature (default on host, omit on embedded), [`diff`] builds
-//! an [`OverlayDelta`] between project snapshots for harness and replay.
+//! With the `diff` feature (default on host, omit on embedded), [`diff`] returns an
+//! [`ArtifactOverlay`] between project snapshots for harness and replay.
 
 #![no_std]
 
@@ -35,8 +35,8 @@ pub use artifact::{
 #[cfg(feature = "diff")]
 pub use diff::{DiffError, ProjectSnapshot, assert_equivalent, diff};
 pub use edit::{
-    ArtifactEdits, ArtifactOverlay, CommitError, EditError, OverlayDelta, PendingAsset,
-    PendingSlotTarget, SlotEdit,
+    ArtifactEdits, ArtifactOverlay, CommitError, EditError, PendingAsset, PendingSlotTarget,
+    SlotEdit,
 };
 #[allow(deprecated, reason = "legacy sync op alias for migration")]
 pub use registry::RegistryChange;

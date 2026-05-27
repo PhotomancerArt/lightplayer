@@ -1,12 +1,13 @@
-//! `diff(base, target) -> OverlayDelta`.
+//! `diff(base, target) -> ArtifactOverlay`.
 
 use alloc::collections::BTreeSet;
 
 use lpc_model::NodeDef;
 use lpfs::LpPathBuf;
 
+use crate::ArtifactLoc;
 use crate::ParseCtx;
-use crate::edit::{ArtifactEdits, OverlayDelta, PendingAsset};
+use crate::edit::{ArtifactOverlay, PendingAsset};
 
 use super::DiffError;
 use super::def_diff::diff_node_defs;
@@ -17,21 +18,21 @@ pub fn diff(
     base: &ProjectSnapshot,
     target: &ProjectSnapshot,
     ctx: &ParseCtx<'_>,
-) -> Result<OverlayDelta, DiffError> {
+) -> Result<ArtifactOverlay, DiffError> {
     let mut paths = BTreeSet::new();
     paths.extend(base.paths());
     paths.extend(target.paths());
 
-    let mut delta = OverlayDelta::new();
+    let mut overlay = ArtifactOverlay::new();
     for path in paths {
         let base_bytes = base.get(path);
         let target_bytes = target.get(path);
         match (base_bytes, target_bytes) {
             (None, None) => {}
             (Some(_), None) => {
-                let mut pending = ArtifactEdits::default();
-                pending.set_asset(PendingAsset::Delete);
-                delta.insert(LpPathBuf::from(path), pending);
+                overlay
+                    .ensure_pending(ArtifactLoc::file(LpPathBuf::from(path)))
+                    .set_asset(PendingAsset::Delete);
             }
             (None, Some(bytes)) | (Some(_), Some(bytes)) if base_bytes != target_bytes => {
                 if path.ends_with(".toml") {
@@ -39,22 +40,22 @@ pub fn diff(
                     let target_def = parse_toml_def(Some(bytes), ctx, path)?;
                     let ops = diff_node_defs(&base_def, &target_def, ctx)?;
                     if !ops.is_empty() {
-                        let mut pending = ArtifactEdits::default();
+                        let pending =
+                            overlay.ensure_pending(ArtifactLoc::file(LpPathBuf::from(path)));
                         for op in ops {
                             pending.upsert_slot(op);
                         }
-                        delta.insert(LpPathBuf::from(path), pending);
                     }
                 } else {
-                    let mut pending = ArtifactEdits::default();
-                    pending.set_asset(PendingAsset::ReplaceBody(bytes.to_vec()));
-                    delta.insert(LpPathBuf::from(path), pending);
+                    overlay
+                        .ensure_pending(ArtifactLoc::file(LpPathBuf::from(path)))
+                        .set_asset(PendingAsset::ReplaceBody(bytes.to_vec()));
                 }
             }
             _ => {}
         }
     }
-    Ok(delta)
+    Ok(overlay)
 }
 
 fn parse_toml_def(

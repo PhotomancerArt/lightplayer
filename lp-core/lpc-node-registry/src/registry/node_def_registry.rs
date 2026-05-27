@@ -8,7 +8,7 @@ use lpc_model::{NodeDef, NodeInvocation, Revision, SlotPath};
 use lpfs::{FsEvent, LpFs, LpPath, LpPathBuf};
 
 use crate::edit::{
-    ArtifactEdits, ArtifactOverlay, CommitError, EditError, OverlayDelta, PendingAsset, SlotEdit,
+    ArtifactEdits, ArtifactOverlay, CommitError, EditError, PendingAsset, SlotEdit,
     require_absolute_path,
 };
 use crate::{ArtifactLoc, ArtifactStore};
@@ -26,7 +26,7 @@ use super::{NodeDefEntry, NodeDefLoc, NodeDefState, NodeDefUpdates, ParseCtx, Re
 ///
 /// Bootstrap with [`Self::load_root`], react to filesystem edits via
 /// [`Self::sync`] / [`Self::sync_fs`], mutate pending state via
-/// [`Self::upsert_slot_edit`] / [`Self::set_pending_asset`] / [`Self::apply_overlay_delta`],
+/// [`Self::upsert_slot_edit`] / [`Self::set_pending_asset`] / [`Self::apply_overlay`],
 /// then [`Self::commit`] or [`Self::discard_slot_overlay`].
 /// Pending edits are address-keyed current slot/asset changes in [`ArtifactOverlay`].
 /// Effective reads use [`crate::NodeDefView`].
@@ -209,23 +209,9 @@ impl NodeDefRegistry {
         Ok(())
     }
 
-    /// Merge snapshot diff pending state into the overlay.
-    pub fn apply_overlay_delta(
-        &mut self,
-        delta: &OverlayDelta,
-        fs: &dyn LpFs,
-        ctx: &ParseCtx<'_>,
-        frame: Revision,
-    ) -> Result<(), EditError> {
-        for (path, source) in delta.iter() {
-            for op in source.slot_edits() {
-                self.upsert_slot_edit(path.clone(), op.clone(), fs, ctx, frame)?;
-            }
-            if !matches!(source.asset_pending(), PendingAsset::None) {
-                self.set_pending_asset(path.clone(), source.asset_pending().clone())?;
-            }
-        }
-        Ok(())
+    /// Merge pending overlay edits into the registry overlay.
+    pub fn apply_overlay(&mut self, overlay: &ArtifactOverlay) {
+        self.overlay.merge_from(overlay);
     }
 
     pub fn root_loc(&self) -> Option<&NodeDefLoc> {
