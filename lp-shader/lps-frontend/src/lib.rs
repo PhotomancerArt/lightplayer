@@ -596,10 +596,10 @@ float test_main() {
         assert_eq!(g.sret_arg, Some(VReg(1)));
         assert!(g.return_types.is_empty());
         assert_eq!(g.param_count, 0);
-        let ret = g
-            .body
-            .iter()
-            .rfind(|op| matches!(op, LpirOp::Return { .. }))
+        let ret = (0..g.body.len())
+            .rev()
+            .filter_map(|index| g.body.get(index))
+            .find(|op| matches!(op, LpirOp::Return { .. }))
             .expect("return op");
         match ret {
             LpirOp::Return { values } => assert_eq!(values.count, 0),
