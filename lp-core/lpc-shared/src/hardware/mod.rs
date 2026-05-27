@@ -31,7 +31,9 @@ pub mod ws281x_driver;
 pub use button_debouncer::ButtonDebouncer;
 pub use button_driver::{ButtonConfig, ButtonDriver, ButtonInput};
 pub use button_event::{ButtonEvent, ButtonEventKind};
-pub use default_manifests::default_esp32c6_hardware_manifest;
+pub use default_manifests::{
+    default_esp32c6_hardware_manifest, permissive_emu_hardware_manifest,
+};
 pub use hardware_address::HardwareAddress;
 pub use hardware_capability::HardwareCapability;
 pub use hardware_claim::HardwareClaim;

@@ -24,7 +24,7 @@ use fw_core::transport::SerialTransport;
 use lp_riscv_emu_guest::allocator;
 use lpa_server::{Graphics, LpGraphics, LpServer};
 use lpc_model::AsLpPath;
-use lpc_shared::hardware::{HardwareManifest, HardwareRegistry, HardwareSystem};
+use lpc_shared::hardware::{HardwareRegistry, HardwareSystem, permissive_emu_hardware_manifest};
 use lpc_shared::output::OutputProvider;
 use lpfs::LpFsMemory;
 use lps_builtins::host_debug;
@@ -96,9 +96,7 @@ pub extern "C" fn _lp_main() -> ! {
     // Create filesystem (in-memory)
     let base_fs = alloc::boxed::Box::new(LpFsMemory::new());
 
-    let hardware_registry = Rc::new(HardwareRegistry::new(
-        HardwareManifest::virtual_single_rmt_gpio_board(),
-    ));
+    let hardware_registry = Rc::new(HardwareRegistry::new(permissive_emu_hardware_manifest()));
     let hardware_system = Rc::new(HardwareSystem::with_virtual_drivers(hardware_registry));
 
     // Create output provider
