@@ -62,7 +62,9 @@ fn normalize_resource_for_emu(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::hardware::{HardwareAddress, HardwareEndpointSpec, HardwareRegistry, HardwareSystem};
+    use crate::hardware::{
+        HardwareAddress, HardwareEndpointSpec, HardwareRegistry, HardwareSystem,
+    };
 
     #[test]
     fn default_esp32c6_manifest_loads_checked_in_board_profile() {

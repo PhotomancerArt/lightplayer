@@ -109,8 +109,7 @@ fn set_slot_value_in_shape(
                 let ty = shape.ty_owned();
                 if !lp_value_matches_type(&value, &ty) {
                     return Err(SlotMutationError::wrong_type(format!(
-                        "expected {:?}, got {:?}",
-                        ty, value
+                        "expected {ty:?}, got {value:?}"
                     )));
                 }
                 value_slot.set_lp_value(revision, value)
