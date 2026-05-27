@@ -1,7 +1,7 @@
 //! Shared overlay mutation helpers for integration tests.
 
 use lpc_model::{Revision, SlotShapeRegistry};
-use lpc_node_registry::{NodeDefRegistry, ParseCtx, PendingAsset, SlotEdit};
+use lpc_node_registry::{AssetEdit, NodeDefRegistry, ParseCtx, SlotEdit};
 use lpfs::{LpFs, LpPathBuf};
 
 pub fn parse_ctx() -> SlotShapeRegistry {
@@ -26,7 +26,7 @@ pub fn set_pending_asset_bytes(registry: &mut NodeDefRegistry, path: &str, bytes
     registry
         .set_pending_asset(
             LpPathBuf::from(path),
-            PendingAsset::ReplaceBody(bytes.to_vec()),
+            AssetEdit::ReplaceBody(bytes.to_vec()),
         )
         .unwrap();
 }
@@ -37,6 +37,6 @@ pub fn set_pending_asset_text(registry: &mut NodeDefRegistry, path: &str, text: 
 
 pub fn delete_pending_asset(registry: &mut NodeDefRegistry, path: &str) {
     registry
-        .set_pending_asset(LpPathBuf::from(path), PendingAsset::Delete)
+        .set_pending_asset(LpPathBuf::from(path), AssetEdit::Delete)
         .unwrap();
 }

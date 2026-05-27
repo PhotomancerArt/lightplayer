@@ -8,7 +8,7 @@ use lpc_model::{Revision, current_revision};
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath, LpPathBuf};
 
 use crate::ArtifactStore;
-use crate::edit::{CommitError, PendingAsset};
+use crate::edit::{AssetEdit, CommitError};
 
 use super::projection::project_artifact_bytes;
 use super::{
@@ -141,9 +141,9 @@ impl OverlayCommitPlan {
                 continue;
             };
             match &pending.asset_edit {
-                PendingAsset::Delete => deletes.push(path),
-                PendingAsset::ReplaceBody(bytes) => writes.push((path, bytes.clone())),
-                PendingAsset::None => {
+                AssetEdit::Delete => deletes.push(path),
+                AssetEdit::ReplaceBody(bytes) => writes.push((path, bytes.clone())),
+                AssetEdit::None => {
                     let committed = store.read_bytes(&location, fs).ok();
                     let bytes =
                         project_artifact_bytes(committed.as_deref(), Some(pending), ctx, frame)?;

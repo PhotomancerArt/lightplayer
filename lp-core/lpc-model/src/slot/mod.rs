@@ -62,8 +62,9 @@ pub use slot_mut_access::{
     SlotValueMutAccess as SlotValueMut,
 };
 pub use slot_mutation::{
-    insert_slot_map_entry_default, remove_slot_map_entry, set_slot_option_none,
-    set_slot_option_some_default, set_slot_value, set_slot_variant_default, slot_data_revision,
+    ensure_slot_present, insert_slot_map_entry_default, remove_slot_map_entry,
+    set_slot_option_none, set_slot_option_some_default, set_slot_value, set_slot_variant_default,
+    slot_data_revision,
 };
 pub use slot_name::{SlotName, SlotNameError};
 pub use slot_owner::SlotOwner;

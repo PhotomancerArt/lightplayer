@@ -4,7 +4,7 @@ mod common;
 
 use common::fixtures;
 use lpc_model::{LpValue, Revision, SlotPath, SlotShapeRegistry};
-use lpc_node_registry::{NodeDefRegistry, ParseCtx, PendingAsset, SlotEdit, SyncOp};
+use lpc_node_registry::{AssetEdit, NodeDefRegistry, ParseCtx, SlotEdit, SyncOp};
 use lpfs::{FsEvent, FsEventKind, LpFsMemory, LpPath, LpPathBuf};
 
 fn parse_ctx() -> SlotShapeRegistry {
@@ -30,7 +30,7 @@ fn sync_apply_updates_overlay() {
             &fs,
             &[SyncOp::SetPendingAsset {
                 path: LpPathBuf::from("/a.glsl"),
-                asset: PendingAsset::ReplaceBody(b"a".to_vec()),
+                asset: AssetEdit::ReplaceBody(b"a".to_vec()),
             }],
             Revision::new(1),
             &ctx,
@@ -54,7 +54,7 @@ fn sync_remove_drops_one_pending_artifact() {
             &fs,
             &[SyncOp::SetPendingAsset {
                 path: path.clone(),
-                asset: PendingAsset::ReplaceBody(b"a".to_vec()),
+                asset: AssetEdit::ReplaceBody(b"a".to_vec()),
             }],
             Revision::new(1),
             &ctx,
@@ -124,9 +124,8 @@ fn sync_fs_and_commit_in_one_batch() {
                 SyncOp::Fs(fs_modify("/shader.glsl")),
                 SyncOp::UpsertSlot {
                     path: LpPathBuf::from("/shader.toml"),
-                    op: SlotEdit::UseEnumVariant {
-                        path: SlotPath::root(),
-                        variant: "Shader".into(),
+                    op: SlotEdit::EnsurePresent {
+                        path: SlotPath::parse("Shader").unwrap(),
                     },
                 },
                 SyncOp::Commit,

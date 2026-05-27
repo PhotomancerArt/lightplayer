@@ -7,7 +7,7 @@ use lpfs::LpPathBuf;
 
 use crate::ArtifactLoc;
 use crate::ParseCtx;
-use crate::edit::{ArtifactOverlay, PendingAsset};
+use crate::edit::{ArtifactOverlay, AssetEdit};
 
 use super::DiffError;
 use super::def_diff::diff_node_defs;
@@ -32,7 +32,7 @@ pub fn diff(
             (Some(_), None) => {
                 overlay
                     .ensure_pending(ArtifactLoc::file(LpPathBuf::from(path)))
-                    .set_asset(PendingAsset::Delete);
+                    .set_asset(AssetEdit::Delete);
             }
             (None, Some(bytes)) | (Some(_), Some(bytes)) if base_bytes != target_bytes => {
                 if path.ends_with(".toml") {
@@ -49,7 +49,7 @@ pub fn diff(
                 } else {
                     overlay
                         .ensure_pending(ArtifactLoc::file(LpPathBuf::from(path)))
-                        .set_asset(PendingAsset::ReplaceBody(bytes.to_vec()));
+                        .set_asset(AssetEdit::ReplaceBody(bytes.to_vec()));
                 }
             }
             _ => {}

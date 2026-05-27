@@ -131,7 +131,7 @@ pub use slot::{
     StaticModelStructMember, StaticSlotAccess, StaticSlotEnumEncoding, StaticSlotEnumOption,
     StaticSlotFieldShape, StaticSlotMeta, StaticSlotShape, StaticSlotShapeDescriptor,
     StaticSlotValueShape, StaticSlotVariantShape, StaticValueEditorHint, ValueRef, ValueSlot,
-    create_dynamic_slot_data, insert_slot_map_entry_default, lookup_slot_data,
+    create_dynamic_slot_data, ensure_slot_present, insert_slot_map_entry_default, lookup_slot_data,
     lookup_slot_data_and_shape, lookup_slot_data_mut, remove_slot_map_entry, set_slot_option_none,
     set_slot_option_some_default, set_slot_value, set_slot_variant_default, slot_data_revision,
 };

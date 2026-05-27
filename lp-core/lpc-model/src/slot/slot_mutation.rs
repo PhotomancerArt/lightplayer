@@ -27,6 +27,20 @@ pub fn set_slot_value(
     )
 }
 
+/// Ensure every structural segment in `path` exists.
+///
+/// Missing map entries are default-constructed, `some` option bodies are
+/// default-constructed, and enum variant segments select the requested variant.
+pub fn ensure_slot_present(
+    root: &mut dyn SlotMutAccess,
+    registry: &SlotShapeRegistry,
+    path: &SlotPath,
+    revision: Revision,
+) -> Result<(), SlotMutationError> {
+    let shape = root_shape(root, registry)?;
+    ensure_slot_present_in_shape(root.data_mut(), shape, registry, path.segments(), revision)
+}
+
 /// Switch an enum slot to a default-constructed variant.
 pub fn set_slot_variant_default(
     root: &mut dyn SlotMutAccess,
@@ -122,6 +136,96 @@ pub fn slot_data_revision(
     let data = crate::lookup_slot_data(root, registry, path)
         .map_err(|err| SlotMutationError::unknown_path(err.to_string()))?;
     Ok(revision_for_data(data))
+}
+
+fn ensure_slot_present_in_shape(
+    data: SlotDataMutAccess<'_>,
+    shape: SlotShapeView<'_>,
+    registry: &SlotShapeRegistry,
+    segments: &[SlotPathSegment],
+    revision: Revision,
+) -> Result<(), SlotMutationError> {
+    let shape = resolve_ref_shape(shape, registry)?;
+    let Some((head, tail)) = segments.split_first() else {
+        return match (shape.option_some(), data) {
+            (Some(some), SlotDataMutAccess::Option(option)) => {
+                if option.data_mut().is_none() {
+                    let owned_some = some.to_owned_shape();
+                    option.set_some_default(revision, registry, &owned_some)?;
+                }
+                Ok(())
+            }
+            _ => Ok(()),
+        };
+    };
+
+    match (data, head) {
+        (SlotDataMutAccess::Record(record), SlotPathSegment::Field(name))
+            if shape.record_fields_len().is_some() =>
+        {
+            let (index, field) = shape.record_field_by_name(name).ok_or_else(|| {
+                SlotMutationError::unknown_path(format!("record has no field {name}"))
+            })?;
+            let field_data = record.field_mut(index).ok_or_else(|| {
+                SlotMutationError::unknown_path(format!("record field {name} has no data"))
+            })?;
+            ensure_slot_present_in_shape(field_data, field.shape(), registry, tail, revision)
+        }
+        (SlotDataMutAccess::Map(map), SlotPathSegment::Key(key)) if shape.map_value().is_some() => {
+            let value_shape = shape.map_value().expect("map value shape");
+            if map.get_mut(key).is_none() {
+                let owned_value = value_shape.to_owned_shape();
+                map.insert_default(revision, key, registry, &owned_value)?;
+            }
+            let item_data = map.get_mut(key).ok_or_else(|| {
+                SlotMutationError::unknown_path(format!("map has no key {}", display_key(key)))
+            })?;
+            ensure_slot_present_in_shape(item_data, value_shape, registry, tail, revision)
+        }
+        (SlotDataMutAccess::Option(option), SlotPathSegment::Field(name))
+            if name.as_str() == "some" && shape.option_some().is_some() =>
+        {
+            let some_shape = shape.option_some().expect("option some shape");
+            if option.data_mut().is_none() {
+                let owned_some = some_shape.to_owned_shape();
+                option.set_some_default(revision, registry, &owned_some)?;
+            }
+            let data = option
+                .data_mut()
+                .ok_or_else(|| SlotMutationError::unknown_path("option slot is none"))?;
+            ensure_slot_present_in_shape(data, some_shape, registry, tail, revision)
+        }
+        (SlotDataMutAccess::Enum(en), SlotPathSegment::Field(name)) if shape.is_enum() => {
+            if let Some(variant) = shape.enum_variant_by_name(name) {
+                if en.variant() != name.as_str() {
+                    let owned_shape = shape.to_owned_shape();
+                    let SlotShape::Enum { variants, .. } = owned_shape else {
+                        unreachable!("enum shape checked above");
+                    };
+                    en.set_variant_default_with_shape(
+                        revision,
+                        name.as_str(),
+                        registry,
+                        &variants,
+                    )?;
+                }
+                let data = en.data_mut();
+                ensure_slot_present_in_shape(data, variant.shape(), registry, tail, revision)
+            } else {
+                let active = String::from(en.variant());
+                let variant = enum_variant_by_str(shape, &active)?;
+                let data = en.data_mut();
+                ensure_slot_present_in_shape(data, variant, registry, segments, revision)
+            }
+        }
+        (_, SlotPathSegment::Field(name)) => Err(SlotMutationError::unknown_path(format!(
+            "slot path field {name} cannot descend into current slot shape"
+        ))),
+        (_, SlotPathSegment::Key(key)) => Err(SlotMutationError::unknown_path(format!(
+            "slot path key {} cannot descend into current slot shape",
+            display_key(key)
+        ))),
+    }
 }
 
 fn set_slot_value_in_shape(
@@ -1016,6 +1120,38 @@ mod tests {
     }
 
     #[test]
+    fn ensure_slot_present_inserts_missing_map_key_without_replacing_existing() {
+        let mut root = test_root();
+        let registry = registry();
+
+        ensure_slot_present(
+            &mut root,
+            &registry,
+            &SlotPath::parse("params[gain]").unwrap(),
+            Revision::new(7),
+        )
+        .unwrap();
+        set_slot_value(
+            &mut root,
+            &registry,
+            &SlotPath::parse("params[gain]").unwrap(),
+            Revision::new(8),
+            LpValue::F32(9.0),
+        )
+        .unwrap();
+        ensure_slot_present(
+            &mut root,
+            &registry,
+            &SlotPath::parse("params[gain]").unwrap(),
+            Revision::new(9),
+        )
+        .unwrap();
+
+        assert_eq!(root.params.keys_revision, Revision::new(7));
+        assert_eq!(root.params.entries["gain"].value(), &9.0);
+    }
+
+    #[test]
     fn slot_mutation_sets_option_some_value_leaf() {
         let mut root = test_root();
         let registry = registry();
@@ -1053,6 +1189,26 @@ mod tests {
             &SlotPath::parse("enabled.some").unwrap(),
             Revision::new(8),
             LpValue::Bool(false),
+        )
+        .unwrap();
+
+        assert_eq!(root.enabled.presence_revision, Revision::new(7));
+        assert_eq!(root.enabled.data.as_ref().unwrap().value(), &false);
+    }
+
+    #[test]
+    fn ensure_slot_present_sets_option_some_default() {
+        let mut root = MutRoot {
+            enabled: OptionSlot::none(),
+            ..test_root()
+        };
+        let registry = registry();
+
+        ensure_slot_present(
+            &mut root,
+            &registry,
+            &SlotPath::parse("enabled.some").unwrap(),
+            Revision::new(7),
         )
         .unwrap();
 
@@ -1107,6 +1263,26 @@ mod tests {
         };
         assert_eq!(root.mode.variant_revision(), Revision::new(9));
         assert_eq!(other.value(), &5.0);
+    }
+
+    #[test]
+    fn ensure_slot_present_selects_enum_variant() {
+        let mut root = test_root();
+        let registry = registry();
+
+        ensure_slot_present(
+            &mut root,
+            &registry,
+            &SlotPath::parse("mode.b").unwrap(),
+            Revision::new(9),
+        )
+        .unwrap();
+
+        let TestEnum::B { other } = root.mode.value() else {
+            panic!("expected b");
+        };
+        assert_eq!(root.mode.variant_revision(), Revision::new(9));
+        assert_eq!(other.value(), &0.0);
     }
 
     #[test]

@@ -8,7 +8,7 @@ use lpc_model::{NodeDef, NodeInvocation, Revision, SlotPath};
 use lpfs::{FsEvent, LpFs, LpPath, LpPathBuf};
 
 use crate::edit::{
-    ArtifactEdits, ArtifactOverlay, CommitError, EditError, PendingAsset, SlotEdit,
+    ArtifactEdits, ArtifactOverlay, AssetEdit, CommitError, EditError, SlotEdit,
     require_absolute_path,
 };
 use crate::{ArtifactLoc, ArtifactStore};
@@ -201,7 +201,7 @@ impl NodeDefRegistry {
     pub fn set_pending_asset(
         &mut self,
         path: LpPathBuf,
-        asset: PendingAsset,
+        asset: AssetEdit,
     ) -> Result<(), EditError> {
         require_absolute_path(path.clone())?;
         let location = self.location_for_pending_path(LpPath::new(path.as_str()));
@@ -289,7 +289,7 @@ impl NodeDefRegistry {
         let location = self.location_for_pending_path(path);
         let pending = self.overlay.pending_at(&location)?;
         match pending.asset_pending() {
-            crate::edit::PendingAsset::ReplaceBody(bytes) => Some(bytes.as_slice()),
+            crate::edit::AssetEdit::ReplaceBody(bytes) => Some(bytes.as_slice()),
             _ => None,
         }
     }

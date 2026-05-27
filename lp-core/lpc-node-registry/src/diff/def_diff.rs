@@ -26,10 +26,13 @@ pub fn diff_node_defs(
     let mut ops = Vec::new();
     let mut current = base.clone();
     if current.kind() != target.kind() {
-        push_use_enum_variant(
+        push_ensure_present(
             &mut current,
-            &SlotPath::root(),
-            String::from(target.variant_name()),
+            &SlotPath::root().child(SlotName::parse(target.variant_name()).map_err(|err| {
+                DiffError::Diff {
+                    message: alloc::format!("root variant name: {err}"),
+                }
+            })?),
             ctx,
             &mut ops,
         )?;
@@ -98,10 +101,10 @@ fn diff_at_path(
             push_assign_value(current, path, target_value, ctx, ops)?;
         }
         SlotKind::Enum { variant } => {
-            push_use_enum_variant(current, path, variant.clone(), ctx, ops)?;
             let variant_name = SlotName::parse(&variant).map_err(|err| DiffError::Diff {
                 message: alloc::format!("enum variant `{path}`: {err}"),
             })?;
+            push_ensure_present(current, &path.child(variant_name.clone()), ctx, ops)?;
             diff_at_path(current, base, target, &path.child(variant_name), ctx, ops)?;
         }
         SlotKind::EnumBody { variant } => {
@@ -121,17 +124,22 @@ fn diff_at_path(
             shared_keys,
         } => {
             for key in remove_keys {
-                push_map_remove(current, path, &key, ctx, ops)?;
+                push_remove(current, &path.child_key(key), ctx, ops)?;
             }
             for key in insert_keys {
-                push_map_insert(current, base, target, path, &key, ctx, ops)?;
+                push_ensure_present(current, &path.child_key(key.clone()), ctx, ops)?;
+                diff_at_path(current, base, target, &path.child_key(key), ctx, ops)?;
             }
             for key in shared_keys {
                 diff_at_path(current, base, target, &path.child_key(key), ctx, ops)?;
             }
         }
         SlotKind::Option { present, has_body } => {
-            push_use_option(current, path, present, ctx, ops)?;
+            if present {
+                push_ensure_present(current, path, ctx, ops)?;
+            } else {
+                push_remove(current, path, ctx, ops)?;
+            }
             if has_body {
                 diff_at_path(
                     current,
@@ -274,17 +282,13 @@ fn classify_slot(
     }
 }
 
-fn push_use_enum_variant(
+fn push_ensure_present(
     current: &mut NodeDef,
     path: &SlotPath,
-    variant: String,
     ctx: &ParseCtx<'_>,
     ops: &mut Vec<SlotEdit>,
 ) -> Result<(), DiffError> {
-    let op = SlotEdit::UseEnumVariant {
-        path: path.clone(),
-        variant,
-    };
+    let op = SlotEdit::EnsurePresent { path: path.clone() };
     apply_ops_to_node_def(current, &[op.clone()], ctx, Revision::new(1)).map_err(|err| {
         DiffError::Diff {
             message: err.to_string(),
@@ -314,68 +318,13 @@ fn push_assign_value(
     Ok(())
 }
 
-fn push_map_remove(
+fn push_remove(
     current: &mut NodeDef,
     path: &SlotPath,
-    key: &SlotMapKey,
     ctx: &ParseCtx<'_>,
     ops: &mut Vec<SlotEdit>,
 ) -> Result<(), DiffError> {
-    let op = SlotEdit::MapRemove {
-        path: path.clone(),
-        key: map_key_display(key),
-    };
-    apply_ops_to_node_def(current, &[op.clone()], ctx, Revision::new(1)).map_err(|err| {
-        DiffError::Diff {
-            message: err.to_string(),
-        }
-    })?;
-    ops.push(op);
-    Ok(())
-}
-
-fn push_map_insert(
-    current: &mut NodeDef,
-    base: &NodeDef,
-    target: &NodeDef,
-    path: &SlotPath,
-    key: &SlotMapKey,
-    ctx: &ParseCtx<'_>,
-    ops: &mut Vec<SlotEdit>,
-) -> Result<(), DiffError> {
-    let placeholder = map_insert_placeholder(target, path, key, ctx)?;
-    let op = SlotEdit::MapInsert {
-        path: path.clone(),
-        key: map_key_display(key),
-        value: placeholder,
-    };
-    apply_ops_to_node_def(current, &[op.clone()], ctx, Revision::new(1)).map_err(|err| {
-        DiffError::Diff {
-            message: err.to_string(),
-        }
-    })?;
-    ops.push(op);
-    diff_at_path(
-        current,
-        base,
-        target,
-        &path.child_key(key.clone()),
-        ctx,
-        ops,
-    )
-}
-
-fn push_use_option(
-    current: &mut NodeDef,
-    path: &SlotPath,
-    present: bool,
-    ctx: &ParseCtx<'_>,
-    ops: &mut Vec<SlotEdit>,
-) -> Result<(), DiffError> {
-    let op = SlotEdit::UseOption {
-        path: path.clone(),
-        present,
-    };
+    let op = SlotEdit::Remove { path: path.clone() };
     apply_ops_to_node_def(current, &[op.clone()], ctx, Revision::new(1)).map_err(|err| {
         DiffError::Diff {
             message: err.to_string(),
@@ -395,52 +344,6 @@ fn resolve_shape<'a>(
         })?;
     }
     Ok(shape)
-}
-
-fn map_insert_placeholder(
-    target: &NodeDef,
-    path: &SlotPath,
-    key: &SlotMapKey,
-    ctx: &ParseCtx<'_>,
-) -> Result<LpValue, DiffError> {
-    let entry_path = path.child_key(key.clone());
-    let (data, shape) =
-        lookup_slot_data_and_shape(target as &dyn SlotAccess, ctx.shapes, &entry_path).map_err(
-            |err| DiffError::Diff {
-                message: alloc::format!("map placeholder `{entry_path}`: {err}"),
-            },
-        )?;
-    let shape = resolve_shape(shape, ctx.shapes)?;
-    if let Some(value_shape) = shape.value_shape() {
-        return default_lp_value(&value_shape.ty_owned());
-    }
-    if let SlotDataAccess::Value(value) = data {
-        return Ok(value.value());
-    }
-    Ok(LpValue::Bool(false))
-}
-
-fn default_lp_value(ty: &lpc_model::LpType) -> Result<LpValue, DiffError> {
-    Ok(match ty {
-        lpc_model::LpType::String => LpValue::String(String::new()),
-        lpc_model::LpType::Bool => LpValue::Bool(false),
-        lpc_model::LpType::F32 => LpValue::F32(0.0),
-        lpc_model::LpType::I32 => LpValue::I32(0),
-        lpc_model::LpType::U32 => LpValue::U32(0),
-        other => {
-            return Err(DiffError::Diff {
-                message: alloc::format!("unsupported map placeholder type {other:?}"),
-            });
-        }
-    })
-}
-
-fn map_key_display(key: &SlotMapKey) -> String {
-    match key {
-        SlotMapKey::String(value) => value.clone(),
-        SlotMapKey::I32(value) => value.to_string(),
-        SlotMapKey::U32(value) => value.to_string(),
-    }
 }
 
 fn data_kind(data: SlotDataAccess<'_>) -> &'static str {

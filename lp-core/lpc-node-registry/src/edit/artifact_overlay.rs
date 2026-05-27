@@ -18,14 +18,14 @@ pub struct ArtifactOverlay {
 /// Pending edits for one artifact location.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ArtifactEdits {
-    /// Pending slot ops in apply order. Same [`SlotEdit::pending_target`] upserts in place.
+    /// Pending slot ops in apply order. Same [`SlotEdit::path`] upserts in place.
     slot_edits: Vec<SlotEdit>,
-    pub asset_edit: PendingAsset,
+    pub asset_edit: AssetEdit,
 }
 
 /// Pending asset body or deletion for one artifact.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub enum PendingAsset {
+pub enum AssetEdit {
     #[default]
     None,
     Delete,
@@ -35,12 +35,12 @@ pub enum PendingAsset {
 impl ArtifactEdits {
     /// Insert or replace the pending edit; clears asset pending.
     pub fn upsert_slot(&mut self, edit: SlotEdit) {
-        self.asset_edit = PendingAsset::None;
-        let target = edit.pending_target();
+        self.asset_edit = AssetEdit::None;
+        let target = edit.path().clone();
         if let Some(pos) = self
             .slot_edits
             .iter()
-            .position(|existing| existing.pending_target() == target)
+            .position(|existing| existing.path() == &target)
         {
             self.slot_edits.remove(pos);
         }
@@ -48,13 +48,13 @@ impl ArtifactEdits {
     }
 
     /// Set asset pending state; clears all slot edits.
-    pub fn set_asset(&mut self, asset: PendingAsset) {
+    pub fn set_asset(&mut self, asset: AssetEdit) {
         self.asset_edit = asset;
         self.slot_edits.clear();
     }
 
     pub fn is_empty(&self) -> bool {
-        matches!(self.asset_edit, PendingAsset::None) && self.slot_edits.is_empty()
+        matches!(self.asset_edit, AssetEdit::None) && self.slot_edits.is_empty()
     }
 
     pub fn slot_edits(&self) -> impl Iterator<Item = &SlotEdit> {
@@ -65,7 +65,7 @@ impl ArtifactEdits {
         self.slot_edits.is_empty()
     }
 
-    pub fn asset_pending(&self) -> &PendingAsset {
+    pub fn asset_pending(&self) -> &AssetEdit {
         &self.asset_edit
     }
 
@@ -78,7 +78,7 @@ impl ArtifactEdits {
         for op in other.slot_edits() {
             self.upsert_slot(op.clone());
         }
-        if !matches!(other.asset_pending(), PendingAsset::None) {
+        if !matches!(other.asset_pending(), AssetEdit::None) {
             self.set_asset(other.asset_pending().clone());
         }
     }
@@ -197,24 +197,22 @@ mod tests {
     #[test]
     fn set_asset_clears_slots() {
         let mut pending = ArtifactEdits::default();
-        pending.upsert_slot(SlotEdit::UseEnumVariant {
+        pending.upsert_slot(SlotEdit::EnsurePresent {
             path: SlotPath::root(),
-            variant: "Clock".into(),
         });
-        pending.set_asset(PendingAsset::Delete);
+        pending.set_asset(AssetEdit::Delete);
         assert_eq!(pending.slot_edits().count(), 0);
-        assert_eq!(pending.asset_edit, PendingAsset::Delete);
+        assert_eq!(pending.asset_edit, AssetEdit::Delete);
     }
 
     #[test]
     fn upsert_slot_clears_asset() {
         let mut pending = ArtifactEdits::default();
-        pending.set_asset(PendingAsset::ReplaceBody(b"body".to_vec()));
-        pending.upsert_slot(SlotEdit::UseEnumVariant {
+        pending.set_asset(AssetEdit::ReplaceBody(b"body".to_vec()));
+        pending.upsert_slot(SlotEdit::EnsurePresent {
             path: SlotPath::root(),
-            variant: "Clock".into(),
         });
-        assert_eq!(pending.asset_edit, PendingAsset::None);
+        assert_eq!(pending.asset_edit, AssetEdit::None);
         assert_eq!(pending.slot_edits().count(), 1);
     }
 

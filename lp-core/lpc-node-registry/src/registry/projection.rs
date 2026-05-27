@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 
 use lpc_model::{NodeDef, NodeDefParseError, Revision, current_revision};
 
-use crate::edit::{ArtifactEdits, PendingAsset};
+use crate::edit::{ArtifactEdits, AssetEdit};
 
 use super::effective_read::{def_state_at_source, parse_toml_bytes, read_error_state};
 use super::slot_apply::{apply_op_to_def, parse_def_bytes, serialize_slot_draft};
@@ -23,9 +23,9 @@ pub fn project_artifact_bytes(
     };
 
     match &pending.asset_edit {
-        PendingAsset::Delete => return Ok(None),
-        PendingAsset::ReplaceBody(bytes) => return Ok(Some(bytes.clone())),
-        PendingAsset::None => {}
+        AssetEdit::Delete => return Ok(None),
+        AssetEdit::ReplaceBody(bytes) => return Ok(Some(bytes.clone())),
+        AssetEdit::None => {}
     }
 
     if pending.slot_edits_is_empty() {
@@ -57,15 +57,15 @@ pub fn project_artifact_def(
     };
 
     match &pending.asset_edit {
-        PendingAsset::Delete => {
+        AssetEdit::Delete => {
             return NodeDefState::ParseError(read_error_state(crate::ArtifactError::Read(
                 crate::ArtifactReadFailure::Deleted,
             )));
         }
-        PendingAsset::ReplaceBody(bytes) => {
+        AssetEdit::ReplaceBody(bytes) => {
             return parse_toml_bytes(ctx, bytes);
         }
-        PendingAsset::None => {}
+        AssetEdit::None => {}
     }
 
     if pending.slot_edits_is_empty() {
@@ -171,7 +171,7 @@ rate = 1.0
         let parse_ctx = ctx(&shapes);
         let body = b"void main() {}".to_vec();
         let mut pending = ArtifactEdits::default();
-        pending.set_asset(PendingAsset::ReplaceBody(body.clone()));
+        pending.set_asset(AssetEdit::ReplaceBody(body.clone()));
 
         let bytes = project_artifact_bytes(None, Some(&pending), &parse_ctx, Revision::new(1))
             .unwrap()
@@ -184,7 +184,7 @@ rate = 1.0
         let shapes = SlotShapeRegistry::default();
         let parse_ctx = ctx(&shapes);
         let mut pending = ArtifactEdits::default();
-        pending.set_asset(PendingAsset::Delete);
+        pending.set_asset(AssetEdit::Delete);
 
         let bytes =
             project_artifact_bytes(Some(b"x"), Some(&pending), &parse_ctx, Revision::new(1))

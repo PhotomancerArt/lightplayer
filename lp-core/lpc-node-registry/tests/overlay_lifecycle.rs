@@ -61,7 +61,7 @@ fn apply_rejects_relative_path() {
     let err = registry
         .set_pending_asset(
             LpPathBuf::from("relative.glsl"),
-            lpc_node_registry::PendingAsset::ReplaceBody(b"x".to_vec()),
+            lpc_node_registry::AssetEdit::ReplaceBody(b"x".to_vec()),
         )
         .unwrap_err();
     assert!(matches!(err, EditError::InvalidPath { .. }));

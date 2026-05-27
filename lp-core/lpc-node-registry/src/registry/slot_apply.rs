@@ -1,17 +1,15 @@
 //! Apply slot-level artifact ops and serialize overlay drafts.
 
-use alloc::string::{String, ToString};
-use alloc::vec;
+use alloc::string::ToString;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    LpValue, NodeArtifact, NodeDef, Revision, SlotMapKey, SlotMutAccess, SlotPath, SlotPathSegment,
-    insert_slot_map_entry_default, lookup_slot_data_and_shape, remove_slot_map_entry,
-    set_slot_option_none, set_slot_option_some_default, set_slot_value, set_slot_variant_default,
+    NodeArtifact, NodeDef, Revision, SlotMutAccess, SlotPath, SlotPathSegment, ensure_slot_present,
+    remove_slot_map_entry, set_slot_option_none, set_slot_value, set_slot_variant_default,
 };
 use lpfs::{LpFs, LpPath, LpPathBuf};
 
-use crate::edit::{EditError, PendingAsset, SlotEdit};
+use crate::edit::{AssetEdit, EditError, SlotEdit};
 
 use super::{NodeDefRegistry, ParseCtx};
 
@@ -28,7 +26,7 @@ impl NodeDefRegistry {
         let location = self.location_for_pending_path(LpPath::new(path.as_str()));
         if matches!(
             self.overlay.pending_at(&location).map(|p| &p.asset_edit),
-            Some(PendingAsset::Delete)
+            Some(AssetEdit::Delete)
         ) {
             return Err(EditError::InvalidPath {
                 message: alloc::format!("artifact deleted pending commit: `{}`", path.as_str()),
@@ -91,108 +89,75 @@ pub(crate) fn apply_op_to_def(
     frame: Revision,
 ) -> Result<(), EditError> {
     match op {
-        SlotEdit::UseEnumVariant { path, variant } => {
-            if path.is_root() {
-                apply_root_use_enum_variant(def, ctx, frame, variant)
-            } else {
-                mutate_def(def, |root| {
-                    set_slot_variant_default(root, ctx.shapes, path, frame, variant)
-                })
-            }
+        SlotEdit::EnsurePresent { path } => apply_ensure_present(def, ctx, path, frame),
+        SlotEdit::AssignValue { path, value } => {
+            apply_ensure_present(def, ctx, path, frame)?;
+            mutate_def(def, |root| {
+                set_slot_value(root, ctx.shapes, path, frame, value.clone())
+            })
         }
-        SlotEdit::AssignValue { path, value } => mutate_def(def, |root| {
-            set_slot_value(root, ctx.shapes, path, frame, value.clone())
-        }),
-        SlotEdit::MapInsert { path, key, value } => {
-            apply_map_insert(def, ctx, path, frame, key, value)
-        }
-        SlotEdit::MapRemove { path, key } => apply_map_remove(def, ctx, path, frame, key),
-        SlotEdit::UseOption { path, present } => apply_use_option(def, ctx, path, frame, *present),
+        SlotEdit::Remove { path } => apply_remove(def, ctx, path, frame),
     }
 }
 
-fn apply_map_insert(
+fn apply_ensure_present(
     def: &mut NodeDef,
     ctx: &ParseCtx<'_>,
     path: &SlotPath,
     frame: Revision,
-    key: &str,
-    value: &LpValue,
 ) -> Result<(), EditError> {
-    let map_key = wire_map_key(key);
-    mutate_def(def, |root| {
-        insert_slot_map_entry_default(root, ctx.shapes, path, frame, &map_key)?;
-        let value_path = if path.is_root() {
-            SlotPath::from_segments(vec![SlotPathSegment::Key(map_key.clone())])
-        } else {
-            path.child_key(map_key)
-        };
-        if map_value_is_value_leaf(root, ctx, &value_path)
-            .map_err(|err| lpc_model::SlotMutationError::unsupported_target(err.to_string()))?
+    if let Some(SlotPathSegment::Field(variant)) = path.segments().first() {
+        let mut artifact = NodeArtifact::new(def.clone());
+        if set_slot_variant_default(
+            &mut artifact,
+            ctx.shapes,
+            &SlotPath::root(),
+            frame,
+            variant.as_str(),
+        )
+        .is_ok()
         {
-            set_slot_value(root, ctx.shapes, &value_path, frame, value.clone())?;
+            ensure_slot_present(&mut artifact, ctx.shapes, path, frame).map_err(|err| {
+                EditError::SlotMutation {
+                    message: err.to_string(),
+                }
+            })?;
+            *def = artifact.into_node_def();
+            return Ok(());
         }
-        Ok(())
-    })
-}
-
-fn map_value_is_value_leaf(
-    root: &dyn SlotMutAccess,
-    ctx: &ParseCtx<'_>,
-    path: &SlotPath,
-) -> Result<bool, EditError> {
-    let (_, shape) = lookup_slot_data_and_shape(root, ctx.shapes, path).map_err(|err| {
-        EditError::SlotMutation {
-            message: err.to_string(),
-        }
-    })?;
-    Ok(shape.value_shape().is_some())
-}
-
-fn apply_map_remove(
-    def: &mut NodeDef,
-    ctx: &ParseCtx<'_>,
-    path: &SlotPath,
-    frame: Revision,
-    key: &str,
-) -> Result<(), EditError> {
-    let map_key = wire_map_key(key);
+    }
     mutate_def(def, |root| {
-        remove_slot_map_entry(root, ctx.shapes, path, frame, &map_key)
+        ensure_slot_present(root, ctx.shapes, path, frame)
     })
 }
 
-fn apply_use_option(
+fn apply_remove(
     def: &mut NodeDef,
     ctx: &ParseCtx<'_>,
     path: &SlotPath,
     frame: Revision,
-    present: bool,
 ) -> Result<(), EditError> {
-    if present {
-        mutate_def(def, |root| {
-            set_slot_option_some_default(root, ctx.shapes, path, frame)
-        })
-    } else {
-        mutate_def(def, |root| {
+    let Some((parent, terminal)) = split_parent(path) else {
+        return mutate_def(def, |root| {
             set_slot_option_none(root, ctx.shapes, path, frame)
-        })
+        });
+    };
+    match terminal {
+        SlotPathSegment::Key(key) => mutate_def(def, |root| {
+            remove_slot_map_entry(root, ctx.shapes, &parent, frame, key)
+        }),
+        SlotPathSegment::Field(name) if name.as_str() == "some" => mutate_def(def, |root| {
+            set_slot_option_none(root, ctx.shapes, &parent, frame)
+        }),
+        SlotPathSegment::Field(_) => mutate_def(def, |root| {
+            set_slot_option_none(root, ctx.shapes, path, frame)
+        }),
     }
 }
 
-fn apply_root_use_enum_variant(
-    def: &mut NodeDef,
-    ctx: &ParseCtx<'_>,
-    frame: Revision,
-    variant: &str,
-) -> Result<(), EditError> {
-    let mut artifact = NodeArtifact::new(def.clone());
-    set_slot_variant_default(&mut artifact, ctx.shapes, &SlotPath::root(), frame, variant)
-        .map_err(|err| EditError::SlotMutation {
-            message: err.to_string(),
-        })?;
-    *def = artifact.into_node_def();
-    Ok(())
+fn split_parent(path: &SlotPath) -> Option<(SlotPath, &SlotPathSegment)> {
+    let (terminal, parent) = path.segments().split_last()?;
+    Some((SlotPath::from_segments(parent.to_vec()), terminal))
 }
 
 fn mutate_def(
@@ -202,14 +167,4 @@ fn mutate_def(
     f(def).map_err(|err| EditError::SlotMutation {
         message: err.to_string(),
     })
-}
-
-fn wire_map_key(key: &str) -> SlotMapKey {
-    if let Ok(value) = key.parse::<u32>() {
-        SlotMapKey::U32(value)
-    } else if let Ok(value) = key.parse::<i32>() {
-        SlotMapKey::I32(value)
-    } else {
-        SlotMapKey::String(String::from(key))
-    }
 }

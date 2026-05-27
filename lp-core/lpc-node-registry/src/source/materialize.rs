@@ -6,7 +6,7 @@ use alloc::string::{String, ToString};
 use lpc_model::{LpPathBuf, Revision, SlotPath, SourceFileSlot, SourcePath};
 use lpfs::LpFs;
 
-use crate::edit::{ArtifactOverlay, PendingAsset};
+use crate::edit::{ArtifactOverlay, AssetEdit};
 use crate::{ArtifactError, ArtifactReadFailure, ArtifactStore};
 
 use super::{MaterializedSource, ResolveError, SourceFileRef};
@@ -102,7 +102,7 @@ fn materialize_file_artifact_overlay(
         return Ok(None);
     };
     match &pending.asset_edit {
-        PendingAsset::ReplaceBody(bytes) => {
+        AssetEdit::ReplaceBody(bytes) => {
             let text = core::str::from_utf8(bytes).map_err(|err| MaterializeError::Utf8 {
                 message: format!("{err}"),
             })?;
@@ -112,10 +112,10 @@ fn materialize_file_artifact_overlay(
                 diagnostic_name: authored_path.as_str().to_string(),
             }))
         }
-        PendingAsset::Delete => Err(MaterializeError::Artifact(ArtifactError::Read(
+        AssetEdit::Delete => Err(MaterializeError::Artifact(ArtifactError::Read(
             ArtifactReadFailure::Deleted,
         ))),
-        PendingAsset::None => Ok(None),
+        AssetEdit::None => Ok(None),
     }
 }
 
@@ -130,7 +130,7 @@ fn inline_diagnostic_name(ctx: &SourceDiagnosticCtx, extension: &str) -> String 
 mod tests {
     use super::*;
     use crate::ArtifactReadFailure;
-    use crate::edit::{ArtifactOverlay, PendingAsset};
+    use crate::edit::{ArtifactOverlay, AssetEdit};
     use crate::source::resolve_source_file;
     use lpc_model::Revision;
     use lpfs::{FsEvent, FsEventKind, LpFsMemory, LpPath, LpPathBuf};
@@ -239,7 +239,7 @@ mod tests {
         let mut overlay = ArtifactOverlay::new();
         overlay
             .ensure_pending(crate::ArtifactLoc::file("/shader.glsl"))
-            .set_asset(PendingAsset::ReplaceBody(b"v2-overlay".to_vec()));
+            .set_asset(AssetEdit::ReplaceBody(b"v2-overlay".to_vec()));
 
         let committed =
             materialize_source(&mut store, &fs, &reference, &slot, &diag_ctx(), None).unwrap();
@@ -271,7 +271,7 @@ mod tests {
         let mut overlay = ArtifactOverlay::new();
         overlay
             .ensure_pending(crate::ArtifactLoc::file("/shader.glsl"))
-            .set_asset(PendingAsset::Delete);
+            .set_asset(AssetEdit::Delete);
 
         let err = materialize_source(
             &mut store,
