@@ -1674,6 +1674,12 @@ source = "bus#trigger"
         )
     }
 
+    fn examples_fyeah_button_fs() -> LpFsStd {
+        LpFsStd::new(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/fyeah-button"),
+        )
+    }
+
     #[test]
     fn project_toml_loads_into_runtime_with_expected_nodes() {
         let fs = flat_project();
@@ -2718,6 +2724,26 @@ value = "f32"
         rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
 
         rt.tick(16).expect("tick fyeah-sign without radio cycle");
+    }
+
+    #[test]
+    fn fyeah_button_example_ticks_without_radio_trigger_cycle() {
+        let fs = examples_fyeah_button_fs();
+        let fs: &dyn LpFs = &fs;
+        let registry = Rc::new(HardwareRegistry::new(default_esp32c6_hardware_manifest()));
+        let hardware = Rc::new(HardwareSystem::with_virtual_drivers(registry));
+        let button_service: Rc<dyn ButtonService> = hardware.clone();
+        let radio_service: Rc<dyn RadioService> = hardware.clone();
+        let mut services =
+            EngineServices::new(TreePath::parse("/fyeah_button.show").expect("path"));
+        services.set_button_service(Some(button_service));
+        services.set_radio_service(Some(radio_service));
+
+        let mut rt =
+            ProjectLoader::load_from_root(fs, services).expect("load fyeah button example");
+        rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
+
+        rt.tick(16).expect("tick fyeah-button without radio cycle");
     }
 
     #[test]
