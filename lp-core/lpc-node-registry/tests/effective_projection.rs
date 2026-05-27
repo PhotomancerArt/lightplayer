@@ -84,7 +84,7 @@ rate = 2.0
         2.0
     );
 
-    registry.discard_slot_overlay();
+    registry.discard_overlay();
 
     let committed = registry.get(&root).unwrap().clone();
     let effective = registry.view().get(&root, &fs, &ctx).unwrap();

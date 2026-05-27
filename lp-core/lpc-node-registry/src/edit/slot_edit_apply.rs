@@ -10,15 +10,15 @@ use lpc_model::{
 };
 use lpfs::{LpFs, LpPath, LpPathBuf};
 
-use crate::edit::{AssetEdit, EditError, SlotEdit};
+use crate::registry::{NodeDefRegistry, ParseCtx};
 
-use super::{NodeDefRegistry, ParseCtx};
+use super::EditError;
 
 impl NodeDefRegistry {
-    pub(crate) fn apply_slot_op(
+    pub(crate) fn queue_slot_edit(
         &mut self,
         path: LpPathBuf,
-        op: &SlotEdit,
+        op: &super::SlotEdit,
         _fs: &dyn LpFs,
         _ctx: &ParseCtx<'_>,
         _frame: Revision,
@@ -27,7 +27,7 @@ impl NodeDefRegistry {
         let location = self.location_for_pending_path(LpPath::new(path.as_str()));
         if matches!(
             self.overlay.pending_at(&location).map(|p| &p.asset_edit),
-            Some(AssetEdit::Delete)
+            Some(super::AssetEdit::Delete)
         ) {
             return Err(EditError::InvalidPath {
                 message: alloc::format!("artifact deleted pending commit: `{}`", path.as_str()),
@@ -51,7 +51,7 @@ pub fn serialize_slot_draft(def: &NodeDef, ctx: &ParseCtx<'_>) -> Result<Vec<u8>
 #[cfg(feature = "diff")]
 pub(crate) fn apply_ops_to_node_def(
     def: &mut NodeDef,
-    ops: &[SlotEdit],
+    ops: &[super::SlotEdit],
     ctx: &ParseCtx<'_>,
     frame: Revision,
 ) -> Result<(), EditError> {
@@ -85,19 +85,21 @@ pub(crate) fn parse_def_bytes(bytes: &[u8], ctx: &ParseCtx<'_>) -> Result<NodeDe
 
 pub(crate) fn apply_op_to_def(
     def: &mut NodeDef,
-    op: &SlotEdit,
+    op: &super::SlotEdit,
     ctx: &ParseCtx<'_>,
     frame: Revision,
 ) -> Result<(), EditError> {
     match op {
-        SlotEdit::EnsurePresent { path } => apply_ensure_present(def, ctx, path, frame).map(drop),
-        SlotEdit::AssignValue { path, value } => {
+        super::SlotEdit::EnsurePresent { path } => {
+            apply_ensure_present(def, ctx, path, frame).map(drop)
+        }
+        super::SlotEdit::AssignValue { path, value } => {
             let value_path = apply_ensure_present(def, ctx, path, frame)?;
             mutate_def(def, |root| {
                 set_slot_value(root, ctx.shapes, &value_path, frame, value.clone())
             })
         }
-        SlotEdit::Remove { path } => apply_remove(def, ctx, path, frame),
+        super::SlotEdit::Remove { path } => apply_remove(def, ctx, path, frame),
     }
 }
 

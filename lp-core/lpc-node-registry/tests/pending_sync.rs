@@ -38,7 +38,7 @@ fn sync_apply_updates_overlay() {
         .unwrap();
 
     assert!(outcome.pending_changed);
-    assert!(registry.slot_overlay_contains_path(LpPath::new("/a.glsl")));
+    assert!(registry.overlay_contains_path(LpPath::new("/a.glsl")));
 }
 
 #[test]

@@ -7,21 +7,25 @@
 use alloc::boxed::Box;
 use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::vec;
+use alloc::vec::Vec;
 
+use crate::artifact::artifact_spec::ArtifactSpec;
 use crate::node::kind::NodeKind;
 use crate::nodes::button::ButtonDef;
 use crate::nodes::clock::ClockDef;
-use crate::nodes::fixture::FixtureDef;
+use crate::nodes::fixture::{FixtureDef, MappingConfig};
 use crate::nodes::fluid::FluidDef;
 use crate::nodes::output::OutputDef;
 use crate::nodes::playlist::PlaylistDef;
 use crate::nodes::project::ProjectDef;
 use crate::nodes::radio::ControlRadioDef;
-use crate::nodes::shader::{ComputeShaderDef, ShaderDef};
+use crate::nodes::shader::{ComputeShaderDef, ShaderDef, ShaderSource};
 use crate::nodes::texture::TextureDef;
 use crate::{
-    EnumSlot, SlotAccess, SlotDataAccess, SlotDataMutAccess, SlotMutAccess, SlotShapeId,
-    SlotShapeRegistry, Slotted, StaticSlotShape,
+    EnumSlot, LpPath, LpPathBuf, NodeInvocation, SlotAccess, SlotDataAccess, SlotDataMutAccess,
+    SlotMapKey, SlotMutAccess, SlotName, SlotPath, SlotShapeId, SlotShapeRegistry, Slotted,
+    SourcePath, StaticSlotShape,
 };
 
 const PROJECT_VARIANT: &str = "Project";
@@ -78,6 +82,39 @@ pub enum NodeDef {
 #[derive(Clone, Debug, Default, PartialEq, Slotted)]
 pub struct NodeArtifact(pub EnumSlot<NodeDef>);
 
+/// One child node invocation and its path within the owning artifact.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InvocationSite {
+    pub path: SlotPath,
+    pub invocation: NodeInvocation,
+}
+
+/// Failure resolving model-authored artifact path references.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ArtifactPathResolutionError {
+    LibUnsupported { specifier: String },
+    RelativePath { path: String, base_dir: String },
+}
+
+impl core::fmt::Display for ArtifactPathResolutionError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::LibUnsupported { specifier } => {
+                write!(
+                    f,
+                    "library artifact specifiers are not supported: {specifier}"
+                )
+            }
+            Self::RelativePath { path, base_dir } => {
+                write!(
+                    f,
+                    "path `{path}` cannot be resolved relative to `{base_dir}`"
+                )
+            }
+        }
+    }
+}
+
 impl NodeArtifact {
     pub fn new(def: NodeDef) -> Self {
         Self(EnumSlot::new(def))
@@ -105,6 +142,23 @@ impl NodeArtifact {
 }
 
 impl NodeDef {
+    /// Default-authored node definition for a kind.
+    pub fn default_for_kind(kind: NodeKind) -> Self {
+        match kind {
+            NodeKind::Project => Self::Project(ProjectDef::default()),
+            NodeKind::Button => Self::Button(ButtonDef::default()),
+            NodeKind::Clock => Self::Clock(ClockDef::default()),
+            NodeKind::Texture => Self::Texture(TextureDef::default()),
+            NodeKind::Shader => Self::Shader(ShaderDef::default()),
+            NodeKind::ComputeShader => Self::ComputeShader(ComputeShaderDef::default()),
+            NodeKind::Fluid => Self::Fluid(FluidDef::default()),
+            NodeKind::Playlist => Self::Playlist(PlaylistDef::default()),
+            NodeKind::ControlRadio => Self::ControlRadio(ControlRadioDef::default()),
+            NodeKind::Output => Self::Output(OutputDef::default()),
+            NodeKind::Fixture => Self::Fixture(FixtureDef::default()),
+        }
+    }
+
     /// Core node kind for this definition.
     pub fn kind(&self) -> NodeKind {
         match self {
@@ -158,6 +212,64 @@ impl NodeDef {
 
     pub fn is_variant_name(name: &str) -> bool {
         NODE_DEF_VARIANT_NAMES.contains(&name)
+    }
+
+    /// Child invocation slots reachable directly from this definition under `base`.
+    pub fn invocation_sites(&self, base: &SlotPath) -> Vec<InvocationSite> {
+        match self {
+            Self::Project(project) => project
+                .nodes
+                .entries
+                .iter()
+                .filter_map(|(name, invocation)| {
+                    Some(InvocationSite {
+                        path: project_node_path(base, name)?,
+                        invocation: invocation.value().clone(),
+                    })
+                })
+                .collect(),
+            Self::Playlist(playlist) => playlist
+                .entries
+                .entries
+                .iter()
+                .filter_map(|(key, entry)| {
+                    Some(InvocationSite {
+                        path: playlist_entry_node_path(base, *key)?,
+                        invocation: entry.node.value().clone(),
+                    })
+                })
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    /// File-backed asset paths referenced by this definition.
+    pub fn referenced_asset_paths(
+        &self,
+        containing_file: &LpPath,
+    ) -> Result<Vec<LpPathBuf>, ArtifactPathResolutionError> {
+        match self {
+            Self::Shader(shader) => paths_for_shader(shader.shader_source(), containing_file),
+            Self::ComputeShader(shader) => {
+                paths_for_shader(shader.shader_source(), containing_file)
+            }
+            Self::Fixture(fixture) => paths_for_fixture(fixture, containing_file),
+            _ => Ok(Vec::new()),
+        }
+    }
+
+    /// True when full authored bodies differ.
+    pub fn body_changed(before: &Self, after: &Self) -> bool {
+        before != after
+    }
+
+    /// True when parent-facing shell views differ.
+    ///
+    /// Inline child definition bodies are reduced to kind-only stubs so parent
+    /// containers only report a shell change when child presence, references,
+    /// ordering, or child kind changes.
+    pub fn shell_changed(before: &Self, after: &Self) -> bool {
+        def_shell(before) != def_shell(after)
     }
 
     pub fn as_project(&self) -> Option<&ProjectDef> {
@@ -251,6 +363,104 @@ impl NodeDef {
     /// Write this node definition as authored TOML through the slot registry.
     pub fn write_toml(&self, registry: &SlotShapeRegistry) -> Result<String, NodeDefWriteError> {
         NodeArtifact::new(self.clone()).write_toml(registry)
+    }
+}
+
+fn project_node_path(base: &SlotPath, name: &str) -> Option<SlotPath> {
+    let nodes = SlotName::parse("nodes").ok()?;
+    let key = SlotMapKey::String(String::from(name));
+    Some(base.child(nodes).child_key(key))
+}
+
+fn playlist_entry_node_path(base: &SlotPath, key: u32) -> Option<SlotPath> {
+    let entries = SlotName::parse("entries").ok()?;
+    let node = SlotName::parse("node").ok()?;
+    Some(
+        base.child(entries)
+            .child_key(SlotMapKey::U32(key))
+            .child(node),
+    )
+}
+
+fn paths_for_shader(
+    source: &ShaderSource,
+    containing_file: &LpPath,
+) -> Result<Vec<LpPathBuf>, ArtifactPathResolutionError> {
+    let Some(path) = source.path_value() else {
+        return Ok(Vec::new());
+    };
+    Ok(vec![resolve_source_path(containing_file, path)?])
+}
+
+fn paths_for_fixture(
+    fixture: &FixtureDef,
+    containing_file: &LpPath,
+) -> Result<Vec<LpPathBuf>, ArtifactPathResolutionError> {
+    let MappingConfig::SvgPath { source, .. } = fixture.mapping.value() else {
+        return Ok(Vec::new());
+    };
+    Ok(vec![resolve_source_path(containing_file, source.value())?])
+}
+
+fn resolve_source_path(
+    containing_file: &LpPath,
+    path: &SourcePath,
+) -> Result<LpPathBuf, ArtifactPathResolutionError> {
+    let specifier = ArtifactSpec::path(path.as_path_buf());
+    resolve_artifact_specifier(containing_file, &specifier)
+}
+
+pub fn resolve_artifact_specifier(
+    containing_file: &LpPath,
+    specifier: &ArtifactSpec,
+) -> Result<LpPathBuf, ArtifactPathResolutionError> {
+    let base_dir = containing_file.parent().unwrap_or_else(|| LpPath::new("/"));
+    match specifier {
+        ArtifactSpec::Path(path) => {
+            if path.is_absolute() {
+                Ok(path.clone())
+            } else {
+                base_dir
+                    .to_path_buf()
+                    .join_relative(path.as_str())
+                    .ok_or_else(|| ArtifactPathResolutionError::RelativePath {
+                        path: String::from(path.as_str()),
+                        base_dir: String::from(base_dir.as_str()),
+                    })
+            }
+        }
+        ArtifactSpec::Lib(lib) => Err(ArtifactPathResolutionError::LibUnsupported {
+            specifier: lib.to_string(),
+        }),
+    }
+}
+
+fn def_shell(def: &NodeDef) -> NodeDef {
+    match def {
+        NodeDef::Project(project) => {
+            let mut shell = project.clone();
+            for invocation in shell.nodes.entries.values_mut() {
+                *invocation = EnumSlot::new(invocation_shell(invocation.value()));
+            }
+            NodeDef::Project(shell)
+        }
+        NodeDef::Playlist(playlist) => {
+            let mut shell = playlist.clone();
+            for entry in shell.entries.entries.values_mut() {
+                entry.node = EnumSlot::new(invocation_shell(entry.node.value()));
+            }
+            NodeDef::Playlist(shell)
+        }
+        other => other.clone(),
+    }
+}
+
+fn invocation_shell(invocation: &NodeInvocation) -> NodeInvocation {
+    match invocation {
+        NodeInvocation::Unset | NodeInvocation::Ref(_) => invocation.clone(),
+        NodeInvocation::Def(body) => {
+            NodeInvocation::inline(NodeDef::default_for_kind(body.value().kind()))
+        }
     }
 }
 
@@ -698,6 +908,147 @@ target = "bus#control.out"
         };
         let binding = def.bindings.0.entries.get("main").expect("binding");
         assert!(matches!(binding.target_ref(), Some(BindingRef::Bus(_))));
+    }
+
+    #[test]
+    fn node_def_invocation_sites_cover_project_and_playlist() {
+        let project = NodeDef::from_toml_str(
+            r#"
+kind = "Project"
+
+[nodes.clock]
+ref = "./clock.toml"
+"#,
+        )
+        .expect("project");
+        let sites = project.invocation_sites(&SlotPath::root());
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].path.to_string(), "nodes[clock]");
+        assert!(matches!(sites[0].invocation, NodeInvocation::Ref(_)));
+
+        let playlist = NodeDef::from_toml_str(
+            r#"
+kind = "Playlist"
+
+[entries.2]
+name = "active"
+
+[entries.2.node.def]
+kind = "Shader"
+source = { path = "active.glsl" }
+"#,
+        )
+        .expect("playlist");
+        let sites = playlist.invocation_sites(&SlotPath::root());
+        assert_eq!(sites.len(), 1);
+        assert_eq!(sites[0].path.to_string(), "entries[2].node");
+        assert!(matches!(sites[0].invocation, NodeInvocation::Def(_)));
+    }
+
+    #[test]
+    fn node_def_referenced_asset_paths_resolve_relative_shader_compute_and_fixture_paths() {
+        let shader = NodeDef::from_toml_str(
+            r#"
+kind = "Shader"
+source = { path = "shader.glsl" }
+"#,
+        )
+        .expect("shader");
+        assert_eq!(
+            shader
+                .referenced_asset_paths(LpPath::new("/nodes/shader.toml"))
+                .unwrap(),
+            vec![LpPathBuf::from("/nodes/shader.glsl")]
+        );
+
+        let compute = NodeDef::from_toml_str(
+            r#"
+kind = "ComputeShader"
+source = { path = "../compute.glsl" }
+"#,
+        )
+        .expect("compute");
+        assert_eq!(
+            compute
+                .referenced_asset_paths(LpPath::new("/nodes/compute.toml"))
+                .unwrap(),
+            vec![LpPathBuf::from("/compute.glsl")]
+        );
+
+        let fixture = NodeDef::from_toml_str(
+            r#"
+kind = "Fixture"
+render_size = { width = 64, height = 16 }
+
+[mapping]
+kind = "SvgPath"
+source = "fixture.svg"
+sample_diameter = 2.0
+"#,
+        )
+        .expect("fixture");
+        assert_eq!(
+            fixture
+                .referenced_asset_paths(LpPath::new("/fixtures/fixture.toml"))
+                .unwrap(),
+            vec![LpPathBuf::from("/fixtures/fixture.svg")]
+        );
+    }
+
+    #[test]
+    fn node_def_shell_change_ignores_inline_body_but_tracks_inline_kind() {
+        let before = NodeDef::from_toml_str(
+            r#"
+kind = "Playlist"
+
+[entries.2.node.def]
+kind = "Shader"
+source = { path = "a.glsl" }
+"#,
+        )
+        .expect("before");
+        let body_changed = NodeDef::from_toml_str(
+            r#"
+kind = "Playlist"
+
+[entries.2.node.def]
+kind = "Shader"
+source = { path = "b.glsl" }
+"#,
+        )
+        .expect("body changed");
+        let kind_changed = NodeDef::from_toml_str(
+            r#"
+kind = "Playlist"
+
+[entries.2.node.def]
+kind = "Clock"
+"#,
+        )
+        .expect("kind changed");
+
+        assert!(NodeDef::body_changed(&before, &body_changed));
+        assert!(!NodeDef::shell_changed(&before, &body_changed));
+        assert!(NodeDef::shell_changed(&before, &kind_changed));
+    }
+
+    #[test]
+    fn node_def_default_for_kind_covers_every_kind() {
+        for kind in [
+            NodeKind::Project,
+            NodeKind::Button,
+            NodeKind::Clock,
+            NodeKind::Texture,
+            NodeKind::Shader,
+            NodeKind::ComputeShader,
+            NodeKind::Fluid,
+            NodeKind::Playlist,
+            NodeKind::ControlRadio,
+            NodeKind::Output,
+            NodeKind::Fixture,
+        ] {
+            assert_eq!(NodeDef::default_for_kind(kind).kind(), kind);
+        }
     }
 
     fn registry() -> SlotShapeRegistry {

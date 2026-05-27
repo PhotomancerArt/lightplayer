@@ -1,7 +1,10 @@
 //! Parsed node definition registry, filesystem sync, and commit promotion.
 
-mod def_shell;
-mod def_walker;
+mod changes;
+mod commit;
+mod effective_read;
+mod inventory;
+mod load;
 mod node_def_entry;
 mod node_def_loc;
 mod node_def_registry;
@@ -10,18 +13,18 @@ mod node_def_updates;
 mod parse_ctx;
 mod registry_change;
 mod registry_error;
-mod source_bridge;
+mod sync;
 mod sync_error;
 mod sync_op;
 mod sync_outcome;
 mod sync_result;
 
-pub(crate) use def_walker::resolve_node_specifier;
+#[cfg(feature = "diff")]
+pub(crate) use crate::edit::apply_ops_to_node_def;
+pub use crate::edit::serialize_slot_draft;
 pub use node_def_entry::NodeDefEntry;
 pub use node_def_loc::NodeDefLoc;
-#[cfg(feature = "diff")]
-pub(crate) use node_def_registry::apply_ops_to_node_def;
-pub use node_def_registry::{NodeDefRegistry, serialize_slot_draft};
+pub use node_def_registry::NodeDefRegistry;
 pub use node_def_state::{NodeDefState, ValidationErrorPlaceholder};
 pub use node_def_updates::NodeDefUpdates;
 pub use parse_ctx::ParseCtx;

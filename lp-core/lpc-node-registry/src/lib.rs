@@ -5,7 +5,7 @@
 //! def entries plus an [`ArtifactOverlay`] for uncommitted pending edits.
 //! [`NodeDefView`] exposes effective reads (overlay ∪ committed). Mutate pending
 //! state with [`NodeDefRegistry::upsert_slot_edit`] / [`NodeDefRegistry::set_pending_asset`],
-//! then [`NodeDefRegistry::commit`] or [`NodeDefRegistry::discard_slot_overlay`].
+//! then [`NodeDefRegistry::commit`] or [`NodeDefRegistry::discard_overlay`].
 //!
 //! With the `diff` feature (default on host, omit on embedded), [`diff`] returns an
 //! [`ArtifactOverlay`] between project snapshots for harness and replay.

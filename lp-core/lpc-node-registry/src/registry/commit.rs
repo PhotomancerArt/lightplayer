@@ -8,13 +8,11 @@ use lpc_model::{Revision, current_revision};
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath, LpPathBuf};
 
 use crate::ArtifactStore;
+use crate::edit::project_artifact_bytes;
 use crate::edit::{AssetEdit, CommitError};
 
-use super::projection::project_artifact_bytes;
-use super::{
-    NodeDefLoc, NodeDefRegistry, NodeDefUpdates, ParseCtx, SyncResult, build_change_details,
-    dedupe_locations,
-};
+use super::changes::{build_change_details, dedupe_locations};
+use super::{NodeDefLoc, NodeDefRegistry, NodeDefUpdates, ParseCtx, SyncResult};
 
 pub(crate) fn commit_slot_overlay(
     registry: &mut NodeDefRegistry,

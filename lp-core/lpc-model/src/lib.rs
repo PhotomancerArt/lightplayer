@@ -85,11 +85,12 @@ pub use node::{
     RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc,
 };
 pub use nodes::{
-    AddSubMode, ButtonDef, ButtonDefView, ButtonState, ButtonStateView, ClockControls, ClockDef,
-    ClockDefView, ClockState, ColorOrder, ComputeShaderDef, ComputeShaderDefView, ControlRadioDef,
-    ControlRadioDefView, ControlRadioState, ControlRadioStateView, DivMode, FixtureDef,
-    FixtureDefView, FixtureDiagnosticMode, FixtureSamplingConfig, FixtureState, FixtureStateView,
-    FluidDef, FluidDefView, FluidEmitter, FluidState, GlslOpts, GlslOptsView, MappingConfig,
+    AddSubMode, ArtifactPathResolutionError, ButtonDef, ButtonDefView, ButtonState,
+    ButtonStateView, ClockControls, ClockDef, ClockDefView, ClockState, ColorOrder,
+    ComputeShaderDef, ComputeShaderDefView, ControlRadioDef, ControlRadioDefView,
+    ControlRadioState, ControlRadioStateView, DivMode, FixtureDef, FixtureDefView,
+    FixtureDiagnosticMode, FixtureSamplingConfig, FixtureState, FixtureStateView, FluidDef,
+    FluidDefView, FluidEmitter, FluidState, GlslOpts, GlslOptsView, InvocationSite, MappingConfig,
     MulMode, NodeDefParseError, OutputDef, OutputDefView, OutputDriverOptionsConfig,
     OutputDriverOptionsConfigView, PathSpec, PlaylistDef, PlaylistDefView, PlaylistEntry,
     PlaylistEntryView, PlaylistState, PlaylistStateView, ProjectDef, ProjectDefView, RingOrder,
@@ -97,7 +98,7 @@ pub use nodes::{
     ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
     ShaderSlotMappingKind, ShaderSource, ShaderState, ShaderStateView, ShaderValueShapeRef,
     TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView,
-    generate_compute_shader_header,
+    generate_compute_shader_header, resolve_artifact_specifier,
 };
 pub use product::{ControlExtent, ControlProduct, ProductKind, ProductRef, VisualProduct};
 pub use project::{ProjectConfig, Revision};

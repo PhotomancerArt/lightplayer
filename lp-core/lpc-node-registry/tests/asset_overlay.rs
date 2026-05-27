@@ -112,7 +112,7 @@ fn c4d_replace_asset_without_touching_def_toml() {
 
     overlay::set_pending_asset_text(&mut registry, "/shader.glsl", "void main() { /* draft */ }");
 
-    assert!(!registry.slot_overlay_contains_path(LpPath::new("/shader.toml")));
+    assert!(!registry.overlay_contains_path(LpPath::new("/shader.toml")));
     let effective = registry
         .materialize_source(
             &fs,

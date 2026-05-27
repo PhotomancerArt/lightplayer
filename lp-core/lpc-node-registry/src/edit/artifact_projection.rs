@@ -3,13 +3,12 @@
 use alloc::string::ToString;
 use alloc::vec::Vec;
 
-use lpc_model::{NodeDef, NodeDefParseError, Revision, current_revision};
+use lpc_model::{NodeDef, NodeDefParseError, NodeInvocation, Revision, SlotPath, current_revision};
 
-use crate::edit::{ArtifactEdits, AssetEdit};
+use super::{ArtifactEdits, AssetEdit};
+use super::{apply_op_to_def, parse_def_bytes, serialize_slot_draft};
 
-use super::effective_read::{def_state_at_source, parse_toml_bytes, read_error_state};
-use super::slot_apply::{apply_op_to_def, parse_def_bytes, serialize_slot_draft};
-use super::{NodeDefEntry, NodeDefLoc, NodeDefState, ParseCtx, RegistryError};
+use crate::registry::{NodeDefEntry, NodeDefLoc, NodeDefState, ParseCtx, RegistryError};
 
 /// Effective raw bytes for an artifact (overlay ∪ committed).
 pub fn project_artifact_bytes(
@@ -110,8 +109,44 @@ pub fn project_def_at_loc(
     }
 
     match &root_state {
-        NodeDefState::Loaded(root) => def_state_at_source(root, &loc.path).unwrap_or(root_state),
+        NodeDefState::Loaded(root) => def_state_at_path(root, &loc.path).unwrap_or(root_state),
         other => other.clone(),
+    }
+}
+
+pub(crate) fn parse_toml_bytes(ctx: &ParseCtx<'_>, bytes: &[u8]) -> NodeDefState {
+    let text = match core::str::from_utf8(bytes) {
+        Ok(text) => text,
+        Err(err) => {
+            return NodeDefState::ParseError(NodeDefParseError::Toml {
+                error: err.to_string(),
+            });
+        }
+    };
+    match NodeDef::read_toml(ctx.shapes, text) {
+        Ok(def) => NodeDefState::Loaded(def),
+        Err(err) => NodeDefState::ParseError(err),
+    }
+}
+
+pub(crate) fn def_state_at_path(root: &NodeDef, path: &SlotPath) -> Option<NodeDefState> {
+    if path.is_root() {
+        return Some(NodeDefState::Loaded(root.clone()));
+    }
+    for site in root.invocation_sites(&SlotPath::root()) {
+        if site.path == *path {
+            return match &site.invocation {
+                NodeInvocation::Unset | NodeInvocation::Ref(_) => None,
+                NodeInvocation::Def(body) => Some(NodeDefState::Loaded(body.value().clone())),
+            };
+        }
+    }
+    None
+}
+
+pub(crate) fn read_error_state(err: crate::ArtifactError) -> NodeDefParseError {
+    NodeDefParseError::Toml {
+        error: alloc::format!("artifact read failed: {err:?}"),
     }
 }
 

@@ -4,7 +4,7 @@ use lpc_model::SlotPath;
 
 use crate::ArtifactLoc;
 
-/// Source location for a registry entry.
+/// Definition location for a registry entry.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct NodeDefLoc {
     /// Artifact where the node is defined.

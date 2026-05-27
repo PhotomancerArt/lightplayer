@@ -1,19 +1,17 @@
 //! Effective artifact reads — overlay before committed store.
 
-use alloc::string::ToString;
 use alloc::vec::Vec;
 
+use crate::edit::{project_artifact_bytes, project_artifact_def, project_def_at_loc};
 use crate::source::{
     MaterializeError, MaterializedSource, SourceDiagnosticCtx, materialize_source,
     resolve_source_file,
 };
 use lpc_model::SourceFileSlot;
-use lpc_model::{NodeDef, NodeDefParseError, NodeInvocation, Revision, SlotPath, current_revision};
+use lpc_model::{Revision, current_revision};
 use lpfs::{LpFs, LpPath};
 
-use super::projection::{project_artifact_bytes, project_artifact_def, project_def_at_loc};
 use super::{NodeDefEntry, NodeDefLoc, NodeDefRegistry, NodeDefState, ParseCtx, RegistryError};
-use crate::registry::def_walker::collect_invocations;
 
 impl NodeDefRegistry {
     /// Bytes for `path` from overlay if present, else committed store/fs.
@@ -119,41 +117,5 @@ impl NodeDefRegistry {
     pub(crate) fn location_for_pending_path(&self, path: &LpPath) -> crate::ArtifactLoc {
         self.artifact_location_for_path(path)
             .unwrap_or_else(|| crate::ArtifactLoc::location_for_path(path))
-    }
-}
-
-pub(crate) fn parse_toml_bytes(ctx: &ParseCtx<'_>, bytes: &[u8]) -> NodeDefState {
-    let text = match core::str::from_utf8(bytes) {
-        Ok(text) => text,
-        Err(err) => {
-            return NodeDefState::ParseError(NodeDefParseError::Toml {
-                error: err.to_string(),
-            });
-        }
-    };
-    match NodeDef::read_toml(ctx.shapes, text) {
-        Ok(def) => NodeDefState::Loaded(def),
-        Err(err) => NodeDefState::ParseError(err),
-    }
-}
-
-pub(crate) fn def_state_at_source(root: &NodeDef, source_path: &SlotPath) -> Option<NodeDefState> {
-    if source_path.is_root() {
-        return Some(NodeDefState::Loaded(root.clone()));
-    }
-    for site in collect_invocations(root, &SlotPath::root()) {
-        if site.path == *source_path {
-            return match &site.invocation {
-                NodeInvocation::Unset | NodeInvocation::Ref(_) => None,
-                NodeInvocation::Def(body) => Some(NodeDefState::Loaded(body.value().clone())),
-            };
-        }
-    }
-    None
-}
-
-pub(crate) fn read_error_state(err: crate::ArtifactError) -> NodeDefParseError {
-    NodeDefParseError::Toml {
-        error: alloc::format!("artifact read failed: {err:?}"),
     }
 }

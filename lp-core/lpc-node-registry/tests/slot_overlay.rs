@@ -97,7 +97,7 @@ fn c1_slot_draft_serializes_to_toml() {
     };
     assert_eq!(*def.controls.rate.value(), 2.0);
 
-    let draft_def = registry.slot_overlay_contains_path(LpPath::new("/clock.toml"));
+    let draft_def = registry.overlay_contains_path(LpPath::new("/clock.toml"));
     assert!(draft_def);
     let effective = registry
         .view()

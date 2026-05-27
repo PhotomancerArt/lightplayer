@@ -25,9 +25,9 @@ fn d1_apply_populates_overlay_base_unchanged() {
     overlay::set_pending_asset_text(&mut registry, "/pending.glsl", "void main() {}");
 
     assert!(registry.overlay_active());
-    assert!(registry.slot_overlay_contains_path(LpPath::new("/pending.glsl")));
+    assert!(registry.overlay_contains_path(LpPath::new("/pending.glsl")));
     assert_eq!(
-        registry.slot_overlay_bytes(LpPath::new("/pending.glsl")),
+        registry.pending_asset_bytes(LpPath::new("/pending.glsl")),
         Some(b"void main() {}" as &[u8])
     );
     assert_eq!(snapshot_registry(&registry, &root), before);
@@ -47,10 +47,10 @@ fn d3_discard_clears_overlay_entries_unchanged() {
     overlay::set_pending_asset_text(&mut registry, "/pending.glsl", "pending");
     assert!(registry.overlay_active());
 
-    registry.discard_slot_overlay();
+    registry.discard_overlay();
 
     assert!(!registry.overlay_active());
-    assert!(!registry.slot_overlay_contains_path(LpPath::new("/pending.glsl")));
+    assert!(!registry.overlay_contains_path(LpPath::new("/pending.glsl")));
     assert_eq!(snapshot_registry(&registry, &root), before);
 }
 
@@ -73,7 +73,7 @@ fn apply_replace_body_on_unloaded_path_implicit_create() {
     let _fs = LpFsMemory::new();
     let mut registry = NodeDefRegistry::new();
     overlay::set_pending_asset_text(&mut registry, "/new.shader.glsl", "body");
-    assert!(registry.slot_overlay_contains_path(LpPath::new("/new.shader.glsl")));
+    assert!(registry.overlay_contains_path(LpPath::new("/new.shader.glsl")));
 }
 
 #[test]
@@ -82,8 +82,8 @@ fn apply_multiple_pending_assets() {
     let mut registry = NodeDefRegistry::new();
     overlay::set_pending_asset_text(&mut registry, "/a.glsl", "a");
     overlay::set_pending_asset_text(&mut registry, "/b.glsl", "b");
-    assert!(registry.slot_overlay_contains_path(LpPath::new("/a.glsl")));
-    assert!(registry.slot_overlay_contains_path(LpPath::new("/b.glsl")));
+    assert!(registry.overlay_contains_path(LpPath::new("/a.glsl")));
+    assert!(registry.overlay_contains_path(LpPath::new("/b.glsl")));
 }
 
 #[test]
@@ -98,15 +98,15 @@ fn apply_delete_marks_overlay_entry() {
 
     overlay::delete_pending_asset(&mut registry, "/shader.glsl");
 
-    assert!(registry.slot_overlay_contains_path(LpPath::new("/shader.glsl")));
+    assert!(registry.overlay_contains_path(LpPath::new("/shader.glsl")));
     assert_eq!(
-        registry.slot_overlay_bytes(LpPath::new("/shader.glsl")),
+        registry.pending_asset_bytes(LpPath::new("/shader.glsl")),
         None
     );
 }
 
 #[test]
-fn apply_slot_op_on_non_toml_path_errors() {
+fn queue_slot_edit_on_non_toml_path_errors() {
     let fs = LpFsMemory::new();
     let mut registry = NodeDefRegistry::new();
     let shapes = overlay::parse_ctx();

@@ -4,7 +4,7 @@ use lpc_model::Revision;
 
 use super::{NodeDefLoc, NodeDefState};
 
-/// Parsed or failed node definition at a stable source address.
+/// Parsed or failed node definition at a stable definition address.
 #[derive(Clone, Debug, PartialEq)]
 pub struct NodeDefEntry {
     pub loc: NodeDefLoc,

@@ -9,7 +9,7 @@ use crate::ArtifactError;
 pub enum RegistryError {
     NotEmpty,
     InvalidPath { message: String },
-    DuplicateSource,
+    DuplicateDefLocation,
     UnknownDef,
     SpecifierResolution { message: String },
     Utf8 { message: String },

@@ -2,10 +2,14 @@
 
 use alloc::string::String;
 
-use lpc_model::{ArtifactSpec, Revision, SourceFileBacking, SourceFileSlot, SourcePath};
+use alloc::string::ToString;
+
+use lpc_model::{
+    ArtifactSpec, Revision, SourceFileBacking, SourceFileSlot, SourcePath,
+    resolve_artifact_specifier,
+};
 use lpfs::LpPath;
 
-use crate::registry::resolve_node_specifier;
 use crate::{ArtifactStore, RegistryError};
 
 use super::SourceFileRef;
@@ -50,7 +54,11 @@ fn resolve_path_backing(
     frame: Revision,
 ) -> Result<SourceFileRef, ResolveError> {
     let specifier = ArtifactSpec::path(path.as_path_buf());
-    let resolved_path = resolve_node_specifier(containing_file, &specifier)?;
+    let resolved_path = resolve_artifact_specifier(containing_file, &specifier).map_err(|err| {
+        ResolveError::SpecifierResolution {
+            message: err.to_string(),
+        }
+    })?;
     let extension = resolved_path.extension().unwrap_or("").into();
     let location = store.register_file(resolved_path.clone(), frame);
     Ok(SourceFileRef::File {
