@@ -1,18 +1,23 @@
 //! Unified registry ingress operations.
 
-use lpfs::FsEvent;
+use lpfs::{FsEvent, LpPathBuf};
 
-use crate::edit::{ArtifactEdit, EditTarget};
+use crate::edit::{PendingAsset, SlotEdit};
 
 /// One registry sync operation (filesystem or pending-edit CRUD).
 #[derive(Clone, Debug, PartialEq)]
 pub enum SyncOp {
     /// Committed filesystem notification.
     Fs(FsEvent),
-    /// Apply or replace pending edits for one artifact (upsert into [`super::NodeDefRegistry`] overlay).
-    Apply(ArtifactEdit),
-    /// Drop pending edits for one artifact target.
-    Remove(EditTarget),
+    /// Upsert one slot edit into the overlay.
+    UpsertSlot { path: LpPathBuf, op: SlotEdit },
+    /// Set pending asset state for one artifact path.
+    SetPendingAsset {
+        path: LpPathBuf,
+        asset: PendingAsset,
+    },
+    /// Drop pending edits for one artifact path.
+    Remove { path: LpPathBuf },
     /// Drop all pending edits.
     ClearPending,
     /// Promote pending overlay to committed store and clear overlay.

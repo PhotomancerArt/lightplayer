@@ -2,17 +2,13 @@
 
 mod common;
 
-use common::fixtures;
-use lpc_model::{Revision, SlotShapeRegistry, SourceFileSlot};
+use common::{fixtures, overlay};
+use lpc_model::{Revision, SourceFileSlot};
 use lpc_node_registry::{
-    ArtifactEdit, ArtifactError, ArtifactReadFailure, AssetEdit, EditTarget, MaterializeError,
-    NodeDefEntry, NodeDefLoc, NodeDefRegistry, ParseCtx, SourceDiagnosticCtx,
+    ArtifactError, ArtifactReadFailure, MaterializeError, NodeDefEntry, NodeDefLoc,
+    NodeDefRegistry, ParseCtx, SourceDiagnosticCtx,
 };
-use lpfs::{LpPath, LpPathBuf};
-
-fn parse_ctx() -> SlotShapeRegistry {
-    SlotShapeRegistry::default()
-}
+use lpfs::LpPath;
 
 fn diag_ctx() -> SourceDiagnosticCtx {
     SourceDiagnosticCtx {
@@ -22,7 +18,7 @@ fn diag_ctx() -> SourceDiagnosticCtx {
 }
 
 fn load_shader_root(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs) -> NodeDefLoc {
-    let shapes = parse_ctx();
+    let shapes = overlay::parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     registry
         .load_root(fs, LpPath::new("/shader.toml"), Revision::new(1), &ctx)
@@ -33,14 +29,6 @@ fn snapshot_entry(registry: &NodeDefRegistry, loc: &NodeDefLoc) -> NodeDefEntry 
     registry.get(loc).expect("entry").clone()
 }
 
-fn apply_artifact_edit(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs, change: &ArtifactEdit) {
-    let shapes = parse_ctx();
-    let ctx = ParseCtx { shapes: &shapes };
-    registry
-        .apply_artifact_edit(change, fs, &ctx, Revision::new(1))
-        .unwrap();
-}
-
 #[test]
 fn c4c_replace_glsl_via_overlay_def_unchanged() {
     let fs = fixtures::load_shader_project();
@@ -49,15 +37,10 @@ fn c4c_replace_glsl_via_overlay_def_unchanged() {
     let before = snapshot_entry(&registry, &root);
     let slot = SourceFileSlot::from_path("./shader.glsl");
 
-    apply_artifact_edit(
+    overlay::set_pending_asset_text(
         &mut registry,
-        &fs,
-        &ArtifactEdit::asset(
-            EditTarget::Path(LpPathBuf::from("/shader.glsl")),
-            vec![AssetEdit::ReplaceBody(
-                "void main() { gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0); }".into(),
-            )],
-        ),
+        "/shader.glsl",
+        "void main() { gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0); }",
     );
 
     let effective = registry
@@ -79,14 +62,7 @@ fn c4a_add_asset_via_overlay_implicit_create() {
     let mut registry = NodeDefRegistry::new();
     load_shader_root(&mut registry, &fs);
 
-    apply_artifact_edit(
-        &mut registry,
-        &fs,
-        &ArtifactEdit::asset(
-            EditTarget::Path(LpPathBuf::from("/extra.glsl")),
-            vec![AssetEdit::ReplaceBody("void main() {}".into())],
-        ),
-    );
+    overlay::set_pending_asset_text(&mut registry, "/extra.glsl", "void main() {}");
 
     let slot = SourceFileSlot::from_path("./extra.glsl");
     let materialized = registry
@@ -108,14 +84,7 @@ fn c4b_delete_asset_via_overlay() {
     load_shader_root(&mut registry, &fs);
     let slot = SourceFileSlot::from_path("./shader.glsl");
 
-    apply_artifact_edit(
-        &mut registry,
-        &fs,
-        &ArtifactEdit::asset(
-            EditTarget::Path(LpPathBuf::from("/shader.glsl")),
-            vec![AssetEdit::Delete],
-        ),
-    );
+    overlay::delete_pending_asset(&mut registry, "/shader.glsl");
 
     let err = registry
         .materialize_source(
@@ -141,14 +110,7 @@ fn c4d_replace_asset_without_touching_def_toml() {
     let slot = SourceFileSlot::from_path("./shader.glsl");
     let slot_revision = slot.revision();
 
-    apply_artifact_edit(
-        &mut registry,
-        &fs,
-        &ArtifactEdit::asset(
-            EditTarget::Path(LpPathBuf::from("/shader.glsl")),
-            vec![AssetEdit::ReplaceBody("void main() { /* draft */ }".into())],
-        ),
-    );
+    overlay::set_pending_asset_text(&mut registry, "/shader.glsl", "void main() { /* draft */ }");
 
     assert!(!registry.slot_overlay_contains_path(LpPath::new("/shader.toml")));
     let effective = registry

@@ -32,12 +32,12 @@ fn a1_diff_empty_to_basic_apply_commit_equivalent() {
     let ctx = ParseCtx { shapes: &shapes };
     let base = ProjectSnapshot::empty();
     let target = examples_basic_snapshot();
-    let batch = diff(&base, &target, &ctx).expect("diff");
+    let delta = diff(&base, &target, &ctx).expect("diff");
 
     let fs = lpfs::LpFsMemory::new();
     let mut registry = NodeDefRegistry::new();
     registry
-        .apply_edit_batch(&batch, &fs, &ctx, Revision::new(1))
+        .apply_overlay_delta(&delta, &fs, &ctx, Revision::new(1))
         .expect("apply");
     registry
         .commit(&fs, Revision::new(2), &ctx)
@@ -51,12 +51,12 @@ fn a1_roundtrip_load_root_after_commit() {
     let shapes = parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     let target = examples_basic_snapshot();
-    let batch = diff(&ProjectSnapshot::empty(), &target, &ctx).expect("diff");
+    let delta = diff(&ProjectSnapshot::empty(), &target, &ctx).expect("diff");
 
     let fs = lpfs::LpFsMemory::new();
     let mut registry = NodeDefRegistry::new();
     registry
-        .apply_edit_batch(&batch, &fs, &ctx, Revision::new(1))
+        .apply_overlay_delta(&delta, &fs, &ctx, Revision::new(1))
         .unwrap();
     registry.commit(&fs, Revision::new(2), &ctx).unwrap();
 
@@ -73,7 +73,7 @@ fn b1_diff_basic_to_basic2_apply_commit_equivalent() {
     let ctx = ParseCtx { shapes: &shapes };
     let base = examples_basic_snapshot();
     let target = examples_basic2_snapshot();
-    let batch = diff(&base, &target, &ctx).expect("diff");
+    let delta = diff(&base, &target, &ctx).expect("diff");
 
     let fs = base.copy_to_memory_fs();
     let mut registry = NodeDefRegistry::new();
@@ -81,7 +81,7 @@ fn b1_diff_basic_to_basic2_apply_commit_equivalent() {
         .load_root(&fs, LpPath::new("/project.toml"), Revision::new(1), &ctx)
         .expect("load_root");
     registry
-        .apply_edit_batch(&batch, &fs, &ctx, Revision::new(2))
+        .apply_overlay_delta(&delta, &fs, &ctx, Revision::new(2))
         .expect("apply");
     registry
         .commit(&fs, Revision::new(3), &ctx)
@@ -95,6 +95,6 @@ fn diff_identical_snapshots_is_empty() {
     let shapes = parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     let snapshot = examples_basic_snapshot();
-    let batch = diff(&snapshot, &snapshot, &ctx).expect("diff");
-    assert!(batch.edits.is_empty());
+    let delta = diff(&snapshot, &snapshot, &ctx).expect("diff");
+    assert!(delta.is_empty());
 }

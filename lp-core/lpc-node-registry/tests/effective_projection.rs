@@ -2,17 +2,10 @@
 
 mod common;
 
-use common::fixtures;
-use lpc_model::{NodeDef, Revision, SlotShapeRegistry};
-use lpc_node_registry::{
-    ArtifactEdit, AssetEdit, EditTarget, NodeDefEntry, NodeDefLoc, NodeDefRegistry, NodeDefState,
-    ParseCtx,
-};
-use lpfs::{LpPath, LpPathBuf};
-
-fn parse_ctx() -> SlotShapeRegistry {
-    SlotShapeRegistry::default()
-}
+use common::{fixtures, overlay};
+use lpc_model::{NodeDef, Revision};
+use lpc_node_registry::{NodeDefEntry, NodeDefLoc, NodeDefRegistry, NodeDefState, ParseCtx};
+use lpfs::LpPath;
 
 fn clock_rate(entry: &NodeDefEntry) -> f32 {
     let NodeDefState::Loaded(NodeDef::Clock(def)) = &entry.state else {
@@ -22,19 +15,11 @@ fn clock_rate(entry: &NodeDefEntry) -> f32 {
 }
 
 fn load_clock_root(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs) -> NodeDefLoc {
-    let shapes = parse_ctx();
+    let shapes = overlay::parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     registry
         .load_root(fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap()
-}
-
-fn apply_artifact_edit(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs, change: &ArtifactEdit) {
-    let shapes = parse_ctx();
-    let ctx = ParseCtx { shapes: &shapes };
-    registry
-        .apply_artifact_edit(change, fs, &ctx, Revision::new(1))
-        .unwrap();
 }
 
 #[test]
@@ -42,26 +27,20 @@ fn effective_view_differs_after_toml_setbytes() {
     let fs = fixtures::load_clock();
     let mut registry = NodeDefRegistry::new();
     let root = load_clock_root(&mut registry, &fs);
-    let shapes = parse_ctx();
+    let shapes = overlay::parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
 
     assert_eq!(clock_rate(registry.get(&root).unwrap()), 1.0);
 
-    apply_artifact_edit(
+    overlay::set_pending_asset_text(
         &mut registry,
-        &fs,
-        &ArtifactEdit::asset(
-            EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            vec![AssetEdit::ReplaceBody(
-                r#"
+        "/clock.toml",
+        r#"
 kind = "Clock"
 
 [controls]
 rate = 2.0
-"#
-                .into(),
-            )],
-        ),
+"#,
     );
 
     let effective = registry.view().get(&root, &fs, &ctx).unwrap();
@@ -74,7 +53,7 @@ fn effective_view_matches_committed_without_overlay() {
     let fs = fixtures::load_clock();
     let mut registry = NodeDefRegistry::new();
     let root = load_clock_root(&mut registry, &fs);
-    let shapes = parse_ctx();
+    let shapes = overlay::parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
 
     let committed = registry.get(&root).unwrap().clone();
@@ -87,24 +66,18 @@ fn discard_restores_effective_view_to_committed() {
     let fs = fixtures::load_clock();
     let mut registry = NodeDefRegistry::new();
     let root = load_clock_root(&mut registry, &fs);
-    let shapes = parse_ctx();
+    let shapes = overlay::parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
 
-    apply_artifact_edit(
+    overlay::set_pending_asset_text(
         &mut registry,
-        &fs,
-        &ArtifactEdit::asset(
-            EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            vec![AssetEdit::ReplaceBody(
-                r#"
+        "/clock.toml",
+        r#"
 kind = "Clock"
 
 [controls]
 rate = 2.0
-"#
-                .into(),
-            )],
-        ),
+"#,
     );
     assert_eq!(
         clock_rate(&registry.view().get(&root, &fs, &ctx).unwrap()),
@@ -123,17 +96,10 @@ fn effective_deleted_overlay_yields_parse_error() {
     let fs = fixtures::load_clock();
     let mut registry = NodeDefRegistry::new();
     let root = load_clock_root(&mut registry, &fs);
-    let shapes = parse_ctx();
+    let shapes = overlay::parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
 
-    apply_artifact_edit(
-        &mut registry,
-        &fs,
-        &ArtifactEdit::asset(
-            EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            vec![AssetEdit::Delete],
-        ),
-    );
+    overlay::delete_pending_asset(&mut registry, "/clock.toml");
 
     assert!(matches!(
         registry.view().state(&root, &fs, &ctx),

@@ -2,25 +2,11 @@
 
 mod common;
 
-use common::fixtures;
-use lpc_model::{LpValue, NodeDef, Revision, SlotPath, SlotShapeRegistry};
-use lpc_node_registry::{
-    ArtifactEdit, AssetEdit, EditTarget, NodeDefEntry, NodeDefLoc, NodeDefRegistry, NodeDefState,
-    ParseCtx, SlotEdit,
-};
+use common::{fixtures, overlay};
+use lpc_model::{LpValue, NodeDef, Revision, SlotPath};
+use lpc_node_registry::SlotEdit;
+use lpc_node_registry::{NodeDefEntry, NodeDefLoc, NodeDefRegistry, NodeDefState, ParseCtx};
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath, LpPathBuf};
-
-fn parse_ctx() -> SlotShapeRegistry {
-    SlotShapeRegistry::default()
-}
-
-fn apply_artifact_edit(registry: &mut NodeDefRegistry, fs: &dyn LpFs, change: &ArtifactEdit) {
-    let shapes = parse_ctx();
-    let ctx = ParseCtx { shapes: &shapes };
-    registry
-        .apply_artifact_edit(change, fs, &ctx, Revision::new(2))
-        .unwrap();
-}
 
 fn clock_rate(entry: &NodeDefEntry) -> f32 {
     let NodeDefState::Loaded(NodeDef::Clock(def)) = &entry.state else {
@@ -54,25 +40,24 @@ fn fs_modify(path: &str) -> FsEvent {
 fn d2_commit_updates_committed_and_clears_overlay() {
     let fs = fixtures::load_clock();
     let mut registry = NodeDefRegistry::new();
-    let shapes = parse_ctx();
+    let shapes = overlay::parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     let root = registry
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    apply_artifact_edit(
+    overlay::upsert_slot(
         &mut registry,
         &fs,
-        &ArtifactEdit::slot(
-            EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            vec![SlotEdit::AssignValue {
-                path: SlotPath::parse("controls.rate").unwrap(),
-                value: LpValue::F32(2.0),
-            }],
-        ),
+        "/clock.toml",
+        SlotEdit::AssignValue {
+            path: SlotPath::parse("controls.rate").unwrap(),
+            value: LpValue::F32(2.0),
+        },
+        Revision::new(2),
     );
 
-    assert!(registry.slot_overlay_active());
+    assert!(registry.overlay_active());
     assert_eq!(
         clock_rate(&registry.view().get(&root, &fs, &ctx).unwrap()),
         2.0
@@ -81,7 +66,7 @@ fn d2_commit_updates_committed_and_clears_overlay() {
 
     registry.commit(&fs, Revision::new(3), &ctx).unwrap();
 
-    assert!(!registry.slot_overlay_active());
+    assert!(!registry.overlay_active());
     assert_eq!(clock_rate(registry.get(&root).unwrap()), 2.0);
     assert_eq!(
         clock_rate(&registry.view().get(&root, &fs, &ctx).unwrap()),
@@ -93,27 +78,21 @@ fn d2_commit_updates_committed_and_clears_overlay() {
 fn d2_commit_setbytes_updates_committed() {
     let fs = fixtures::load_clock();
     let mut registry = NodeDefRegistry::new();
-    let shapes = parse_ctx();
+    let shapes = overlay::parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     let root = registry
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    apply_artifact_edit(
+    overlay::set_pending_asset_text(
         &mut registry,
-        &fs,
-        &ArtifactEdit::asset(
-            EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            vec![AssetEdit::ReplaceBody(
-                r#"
+        "/clock.toml",
+        r#"
 kind = "Clock"
 
 [controls]
 rate = 3.0
-"#
-                .into(),
-            )],
-        ),
+"#,
     );
 
     registry.commit(&fs, Revision::new(3), &ctx).unwrap();
@@ -124,22 +103,21 @@ rate = 3.0
 fn d2_commit_writes_slot_draft_to_fs() {
     let fs = fixtures::load_clock();
     let mut registry = NodeDefRegistry::new();
-    let shapes = parse_ctx();
+    let shapes = overlay::parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     registry
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    apply_artifact_edit(
+    overlay::upsert_slot(
         &mut registry,
         &fs,
-        &ArtifactEdit::slot(
-            EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            vec![SlotEdit::AssignValue {
-                path: SlotPath::parse("controls.rate").unwrap(),
-                value: LpValue::F32(2.0),
-            }],
-        ),
+        "/clock.toml",
+        SlotEdit::AssignValue {
+            path: SlotPath::parse("controls.rate").unwrap(),
+            value: LpValue::F32(2.0),
+        },
+        Revision::new(2),
     );
 
     registry.commit(&fs, Revision::new(3), &ctx).unwrap();
@@ -153,22 +131,21 @@ fn d2_commit_writes_slot_draft_to_fs() {
 fn d5_overlay_wins_over_stale_fs() {
     let mut fs = fixtures::load_clock();
     let mut registry = NodeDefRegistry::new();
-    let shapes = parse_ctx();
+    let shapes = overlay::parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     let root = registry
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    apply_artifact_edit(
+    overlay::upsert_slot(
         &mut registry,
         &fs,
-        &ArtifactEdit::slot(
-            EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            vec![SlotEdit::AssignValue {
-                path: SlotPath::parse("controls.rate").unwrap(),
-                value: LpValue::F32(2.0),
-            }],
-        ),
+        "/clock.toml",
+        SlotEdit::AssignValue {
+            path: SlotPath::parse("controls.rate").unwrap(),
+            value: LpValue::F32(2.0),
+        },
+        Revision::new(2),
     );
 
     fixtures::write_file(
@@ -193,22 +170,21 @@ rate = 9.0
 fn d5_sync_fs_does_not_clobber_overlay_view() {
     let mut fs = fixtures::load_clock();
     let mut registry = NodeDefRegistry::new();
-    let shapes = parse_ctx();
+    let shapes = overlay::parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     let root = registry
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    apply_artifact_edit(
+    overlay::upsert_slot(
         &mut registry,
         &fs,
-        &ArtifactEdit::slot(
-            EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            vec![SlotEdit::AssignValue {
-                path: SlotPath::parse("controls.rate").unwrap(),
-                value: LpValue::F32(2.0),
-            }],
-        ),
+        "/clock.toml",
+        SlotEdit::AssignValue {
+            path: SlotPath::parse("controls.rate").unwrap(),
+            value: LpValue::F32(2.0),
+        },
+        Revision::new(2),
     );
 
     fixtures::write_file(
@@ -233,25 +209,24 @@ rate = 9.0
 fn d5_post_commit_fs_sync_updates_committed() {
     let mut fs = fixtures::load_clock();
     let mut registry = NodeDefRegistry::new();
-    let shapes = parse_ctx();
+    let shapes = overlay::parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     let root = registry
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    apply_artifact_edit(
+    overlay::upsert_slot(
         &mut registry,
         &fs,
-        &ArtifactEdit::slot(
-            EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            vec![SlotEdit::AssignValue {
-                path: SlotPath::parse("controls.rate").unwrap(),
-                value: LpValue::F32(2.0),
-            }],
-        ),
+        "/clock.toml",
+        SlotEdit::AssignValue {
+            path: SlotPath::parse("controls.rate").unwrap(),
+            value: LpValue::F32(2.0),
+        },
+        Revision::new(2),
     );
     registry.commit(&fs, Revision::new(3), &ctx).unwrap();
-    assert!(!registry.slot_overlay_active());
+    assert!(!registry.overlay_active());
 
     fixtures::write_file(
         &mut fs,
@@ -272,23 +247,22 @@ rate = 7.0
 fn c2_inline_child_changed_after_commit() {
     let fs = fixtures::load_playlist_with_inline_child();
     let mut registry = NodeDefRegistry::new();
-    let shapes = parse_ctx();
+    let shapes = overlay::parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     let root = registry
         .load_root(&fs, LpPath::new("/playlist.toml"), Revision::new(1), &ctx)
         .unwrap();
     let child = inline_child_loc(&root);
 
-    apply_artifact_edit(
+    overlay::upsert_slot(
         &mut registry,
         &fs,
-        &ArtifactEdit::slot(
-            EditTarget::Path(LpPathBuf::from("/playlist.toml")),
-            vec![SlotEdit::AssignValue {
-                path: SlotPath::parse("entries[2].node.def.render_order").unwrap(),
-                value: LpValue::I32(7),
-            }],
-        ),
+        "/playlist.toml",
+        SlotEdit::AssignValue {
+            path: SlotPath::parse("entries[2].node.def.render_order").unwrap(),
+            value: LpValue::I32(7),
+        },
+        Revision::new(2),
     );
 
     let result = registry.commit(&fs, Revision::new(3), &ctx).unwrap();
@@ -301,7 +275,7 @@ fn c2_inline_child_changed_after_commit() {
 fn commit_empty_overlay_is_noop() {
     let fs = fixtures::load_clock();
     let mut registry = NodeDefRegistry::new();
-    let shapes = parse_ctx();
+    let shapes = overlay::parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     registry
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)

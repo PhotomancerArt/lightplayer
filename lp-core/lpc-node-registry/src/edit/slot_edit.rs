@@ -6,7 +6,7 @@ use lpc_model::{LpValue, SlotPath};
 
 use super::PendingSlotTarget;
 
-/// One slot-tree edit within a [`super::ArtifactEdit::Slot`] block.
+/// One slot-tree mutation within a pending overlay.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SlotEdit {

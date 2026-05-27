@@ -7,9 +7,8 @@ use alloc::vec::Vec;
 use lpc_model::{NodeDef, NodeInvocation, Revision, SlotPath};
 use lpfs::{FsEvent, LpFs, LpPath, LpPathBuf};
 
-use crate::edit::apply::apply_asset_op;
 use crate::edit::{
-    ArtifactEdit, ArtifactEdits, ArtifactOverlay, CommitError, EditBatch, EditError, EditTarget,
+    ArtifactEdits, ArtifactOverlay, CommitError, EditError, OverlayDelta, PendingAsset, SlotEdit,
     require_absolute_path,
 };
 use crate::{ArtifactLoc, ArtifactStore};
@@ -26,8 +25,9 @@ use super::{NodeDefEntry, NodeDefLoc, NodeDefState, NodeDefUpdates, ParseCtx, Re
 /// Owner of parsed node definitions keyed by [`NodeDefLoc`].
 ///
 /// Bootstrap with [`Self::load_root`], react to filesystem edits via
-/// [`Self::sync`] / [`Self::sync_fs`], and apply client edits through
-/// [`Self::apply_edit_batch`] → [`Self::commit`] or [`Self::discard_slot_overlay`].
+/// [`Self::sync`] / [`Self::sync_fs`], mutate pending state via
+/// [`Self::upsert_slot_edit`] / [`Self::set_pending_asset`] / [`Self::apply_overlay_delta`],
+/// then [`Self::commit`] or [`Self::discard_slot_overlay`].
 /// Pending edits are address-keyed current slot/asset changes in [`ArtifactOverlay`].
 /// Effective reads use [`crate::NodeDefView`].
 pub struct NodeDefRegistry {
@@ -96,12 +96,16 @@ impl NodeDefRegistry {
                     let result = self.apply_fs_sync(fs, core::slice::from_ref(&event), frame, ctx);
                     committed.merge(result);
                 }
-                SyncOp::Apply(edit) => {
-                    self.apply_artifact_edit(&edit, fs, ctx, frame)?;
+                SyncOp::UpsertSlot { path, op } => {
+                    self.upsert_slot_edit(path, op, fs, ctx, frame)?;
                     pending_changed = true;
                 }
-                SyncOp::Remove(target) => {
-                    pending_changed |= self.remove_pending_edit(target)?;
+                SyncOp::SetPendingAsset { path, asset } => {
+                    self.set_pending_asset(path, asset)?;
+                    pending_changed = true;
+                }
+                SyncOp::Remove { path } => {
+                    pending_changed |= self.remove_pending_at(LpPath::new(path.as_str()));
                 }
                 SyncOp::ClearPending => {
                     if self.overlay_active() {
@@ -175,11 +179,53 @@ impl NodeDefRegistry {
         }
     }
 
-    /// Drop pending overlay entry for `target`. Returns whether an entry existed.
-    pub fn remove_pending_edit(&mut self, target: EditTarget) -> Result<bool, EditError> {
-        let path = self.resolve_edit_target(target)?;
+    /// Drop pending overlay entry for `path`. Returns whether an entry existed.
+    pub fn remove_pending_at(&mut self, path: &LpPath) -> bool {
+        let location = self.location_for_pending_path(path);
+        self.overlay.remove(&location)
+    }
+
+    /// Upsert one slot edit into the overlay for a `.toml` artifact path.
+    pub fn upsert_slot_edit(
+        &mut self,
+        path: LpPathBuf,
+        op: SlotEdit,
+        fs: &dyn LpFs,
+        ctx: &ParseCtx<'_>,
+        frame: Revision,
+    ) -> Result<(), EditError> {
+        self.apply_slot_op(path, &op, fs, ctx, frame)
+    }
+
+    /// Set pending asset state for one artifact path.
+    pub fn set_pending_asset(
+        &mut self,
+        path: LpPathBuf,
+        asset: PendingAsset,
+    ) -> Result<(), EditError> {
+        require_absolute_path(path.clone())?;
         let location = self.location_for_pending_path(LpPath::new(path.as_str()));
-        Ok(self.overlay.remove(&location))
+        self.overlay.ensure_pending(location).set_asset(asset);
+        Ok(())
+    }
+
+    /// Merge snapshot diff pending state into the overlay.
+    pub fn apply_overlay_delta(
+        &mut self,
+        delta: &OverlayDelta,
+        fs: &dyn LpFs,
+        ctx: &ParseCtx<'_>,
+        frame: Revision,
+    ) -> Result<(), EditError> {
+        for (path, source) in delta.iter() {
+            for op in source.slot_edits() {
+                self.upsert_slot_edit(path.clone(), op.clone(), fs, ctx, frame)?;
+            }
+            if !matches!(source.asset_pending(), PendingAsset::None) {
+                self.set_pending_asset(path.clone(), source.asset_pending().clone())?;
+            }
+        }
+        Ok(())
     }
 
     pub fn root_loc(&self) -> Option<&NodeDefLoc> {
@@ -193,45 +239,6 @@ impl NodeDefRegistry {
     /// Iterate registered entries (stable order by location).
     pub fn iter_entries(&self) -> impl Iterator<Item = &NodeDefEntry> {
         self.defs.values()
-    }
-
-    /// Apply one artifact change block to the overlay. Committed state unchanged.
-    pub fn apply_artifact_edit(
-        &mut self,
-        change: &ArtifactEdit,
-        fs: &dyn LpFs,
-        ctx: &ParseCtx<'_>,
-        frame: Revision,
-    ) -> Result<(), EditError> {
-        let path = self.resolve_edit_target(change.target().clone())?;
-        match change {
-            ArtifactEdit::Asset { ops, .. } => {
-                let location = self.location_for_pending_path(LpPath::new(path.as_str()));
-                for op in ops {
-                    apply_asset_op(&mut self.overlay, location.clone(), op)?;
-                }
-            }
-            ArtifactEdit::Slot { ops, .. } => {
-                for op in ops {
-                    self.apply_slot_op(path.clone(), op, fs, ctx, frame)?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Apply an ordered batch to the overlay. Aborts on first error.
-    pub fn apply_edit_batch(
-        &mut self,
-        batch: &EditBatch,
-        fs: &dyn LpFs,
-        ctx: &ParseCtx<'_>,
-        frame: Revision,
-    ) -> Result<(), EditError> {
-        for change in &batch.edits {
-            self.apply_artifact_edit(change, fs, ctx, frame)?;
-        }
-        Ok(())
     }
 
     /// Drop all pending overlay edits.
@@ -310,25 +317,6 @@ impl NodeDefRegistry {
         self.store
             .location_for_path(path)
             .and_then(|location| self.store.revision(&location))
-    }
-
-    fn resolve_edit_target(&self, target: EditTarget) -> Result<LpPathBuf, EditError> {
-        match target {
-            EditTarget::Path(path) => require_absolute_path(path),
-            EditTarget::Location(location) => location
-                .file_path()
-                .cloned()
-                .ok_or_else(|| EditError::UnknownArtifact {
-                    location: location.clone(),
-                })
-                .and_then(|path| {
-                    if self.store.entry(&location).is_some() {
-                        Ok(path)
-                    } else {
-                        Err(EditError::UnknownArtifact { location })
-                    }
-                }),
-        }
     }
 
     fn register_artifact_subtree(

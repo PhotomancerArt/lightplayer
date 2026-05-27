@@ -4,10 +4,7 @@ mod common;
 
 use common::fixtures;
 use lpc_model::{LpValue, Revision, SlotPath, SlotShapeRegistry};
-use lpc_node_registry::{
-    ArtifactEdit, AssetEdit, EditBatch, EditBatchId, EditTarget, NodeDefRegistry, ParseCtx,
-    SlotEdit, SyncOp,
-};
+use lpc_node_registry::{NodeDefRegistry, ParseCtx, PendingAsset, SlotEdit, SyncOp};
 use lpfs::{FsEvent, FsEventKind, LpFsMemory, LpPath, LpPathBuf};
 
 fn parse_ctx() -> SlotShapeRegistry {
@@ -31,10 +28,10 @@ fn sync_apply_updates_overlay() {
     let outcome = registry
         .sync(
             &fs,
-            &[SyncOp::Apply(ArtifactEdit::asset(
-                EditTarget::Path(LpPathBuf::from("/a.glsl")),
-                vec![AssetEdit::ReplaceBody("a".into())],
-            ))],
+            &[SyncOp::SetPendingAsset {
+                path: LpPathBuf::from("/a.glsl"),
+                asset: PendingAsset::ReplaceBody(b"a".to_vec()),
+            }],
             Revision::new(1),
             &ctx,
         )
@@ -50,26 +47,26 @@ fn sync_remove_drops_one_pending_artifact() {
     let mut registry = NodeDefRegistry::new();
     let shapes = parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
-    let target = EditTarget::Path(LpPathBuf::from("/a.glsl"));
+    let path = LpPathBuf::from("/a.glsl");
 
     registry
         .sync(
             &fs,
-            &[SyncOp::Apply(ArtifactEdit::asset(
-                target.clone(),
-                vec![AssetEdit::ReplaceBody("a".into())],
-            ))],
+            &[SyncOp::SetPendingAsset {
+                path: path.clone(),
+                asset: PendingAsset::ReplaceBody(b"a".to_vec()),
+            }],
             Revision::new(1),
             &ctx,
         )
         .unwrap();
 
     let outcome = registry
-        .sync(&fs, &[SyncOp::Remove(target)], Revision::new(1), &ctx)
+        .sync(&fs, &[SyncOp::Remove { path }], Revision::new(1), &ctx)
         .unwrap();
 
     assert!(outcome.pending_changed);
-    assert!(!registry.slot_overlay_active());
+    assert!(!registry.overlay_active());
 }
 
 #[test]
@@ -82,28 +79,26 @@ fn sync_apply_then_commit_clears_overlay() {
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    let batch = EditBatch::new(
-        EditBatchId(1),
-        vec![ArtifactEdit::slot(
-            EditTarget::Path(LpPathBuf::from("/clock.toml")),
-            vec![SlotEdit::AssignValue {
-                path: SlotPath::parse("controls.rate").unwrap(),
-                value: LpValue::F32(2.0),
-            }],
-        )],
-    );
-
     let outcome = registry
         .sync(
             &fs,
-            &[SyncOp::Apply(batch.edits[0].clone()), SyncOp::Commit],
+            &[
+                SyncOp::UpsertSlot {
+                    path: LpPathBuf::from("/clock.toml"),
+                    op: SlotEdit::AssignValue {
+                        path: SlotPath::parse("controls.rate").unwrap(),
+                        value: LpValue::F32(2.0),
+                    },
+                },
+                SyncOp::Commit,
+            ],
             Revision::new(2),
             &ctx,
         )
         .unwrap();
 
     assert!(!outcome.committed.def_updates.changed.is_empty());
-    assert!(!registry.slot_overlay_active());
+    assert!(!registry.overlay_active());
 }
 
 #[test]
@@ -127,13 +122,13 @@ fn sync_fs_and_commit_in_one_batch() {
             &fs,
             &[
                 SyncOp::Fs(fs_modify("/shader.glsl")),
-                SyncOp::Apply(ArtifactEdit::slot(
-                    EditTarget::Path(LpPathBuf::from("/shader.toml")),
-                    vec![SlotEdit::UseEnumVariant {
+                SyncOp::UpsertSlot {
+                    path: LpPathBuf::from("/shader.toml"),
+                    op: SlotEdit::UseEnumVariant {
                         path: SlotPath::root(),
                         variant: "Shader".into(),
-                    }],
-                )),
+                    },
+                },
                 SyncOp::Commit,
             ],
             Revision::new(2),

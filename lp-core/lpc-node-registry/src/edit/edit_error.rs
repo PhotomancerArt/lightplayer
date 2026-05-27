@@ -5,12 +5,11 @@ use core::fmt;
 
 use crate::ArtifactLoc;
 
-/// Failure applying an [`super::ArtifactEdit`] or [`super::EditBatch`].
+/// Failure applying pending overlay edits.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EditError {
     InvalidPath { message: String },
     UnknownArtifact { location: ArtifactLoc },
-    UnsupportedOp { op: &'static str },
     Parse { message: String },
     SlotMutation { message: String },
     Serialize { message: String },
@@ -23,7 +22,6 @@ impl fmt::Display for EditError {
             Self::UnknownArtifact { location } => {
                 write!(f, "unknown artifact {}", location.to_uri())
             }
-            Self::UnsupportedOp { op } => write!(f, "unsupported edit op: {op}"),
             Self::Parse { message } => write!(f, "parse error: {message}"),
             Self::SlotMutation { message } => write!(f, "slot mutation error: {message}"),
             Self::Serialize { message } => write!(f, "serialize error: {message}"),
