@@ -8,7 +8,7 @@ mod commit_error;
 mod edit_batch;
 mod edit_error;
 mod edit_target;
-mod pending_slot_key;
+mod pending_slot_target;
 mod slot_edit;
 
 pub use apply::{apply_artifact_edit, apply_edit_batch, require_absolute_path};
@@ -19,7 +19,7 @@ pub use commit_error::CommitError;
 pub use edit_batch::{EditBatch, EditBatchId};
 pub use edit_error::EditError;
 pub use edit_target::EditTarget;
-pub use pending_slot_key::{parse_slot_path_key, slot_edit_key, slot_path_key};
+pub use pending_slot_target::PendingSlotTarget;
 pub use slot_edit::SlotEdit;
 
 #[deprecated(note = "renamed to ArtifactEdit")]

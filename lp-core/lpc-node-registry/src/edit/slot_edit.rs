@@ -4,6 +4,8 @@ use alloc::string::String;
 
 use lpc_model::{LpValue, SlotPath};
 
+use super::PendingSlotTarget;
+
 /// One slot-tree edit within a [`super::ArtifactEdit::Slot`] block.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -42,6 +44,22 @@ impl SlotEdit {
             | Self::MapInsert { path, .. }
             | Self::MapRemove { path, .. }
             | Self::UseOption { path, .. } => path,
+        }
+    }
+
+    pub fn pending_target(&self) -> PendingSlotTarget {
+        match self {
+            Self::MapInsert { path, key, .. } => PendingSlotTarget::MapInsert {
+                path: path.clone(),
+                key: key.clone(),
+            },
+            Self::MapRemove { path, key, .. } => PendingSlotTarget::MapRemove {
+                path: path.clone(),
+                key: key.clone(),
+            },
+            Self::UseEnumVariant { path, .. }
+            | Self::AssignValue { path, .. }
+            | Self::UseOption { path, .. } => PendingSlotTarget::Slot(path.clone()),
         }
     }
 }

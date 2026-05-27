@@ -1,7 +1,6 @@
 //! Address-keyed pending artifact edits (slot upserts and asset replacements).
 
 use alloc::collections::BTreeMap;
-use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::SlotPath;
@@ -9,7 +8,6 @@ use lpc_model::SlotPath;
 use crate::ArtifactLoc;
 
 use super::SlotEdit;
-use super::pending_slot_key::{slot_edit_key, slot_path_key};
 
 /// In-memory map of current pending edits keyed by [`ArtifactLoc`].
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -20,8 +18,8 @@ pub struct ArtifactOverlay {
 /// Pending edits for one artifact location.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ArtifactEdits {
-    /// Pending slot ops in apply order. Key is [`slot_edit_key`]; same key upserts in place.
-    pub slot_edits: Vec<(String, SlotEdit)>,
+    /// Pending slot ops in apply order. Same [`SlotEdit::pending_target`] upserts in place.
+    slot_edits: Vec<SlotEdit>,
     pub asset_edit: PendingAsset,
 }
 
@@ -38,15 +36,15 @@ impl ArtifactEdits {
     /// Insert or replace the pending edit; clears asset pending.
     pub fn upsert_slot(&mut self, edit: SlotEdit) {
         self.asset_edit = PendingAsset::None;
-        let key = slot_edit_key(&edit);
+        let target = edit.pending_target();
         if let Some(pos) = self
             .slot_edits
             .iter()
-            .position(|(existing, _)| existing == &key)
+            .position(|existing| existing.pending_target() == target)
         {
             self.slot_edits.remove(pos);
         }
-        self.slot_edits.push((key, edit));
+        self.slot_edits.push(edit);
     }
 
     /// Set asset pending state; clears all slot edits.
@@ -59,14 +57,12 @@ impl ArtifactEdits {
         matches!(self.asset_edit, PendingAsset::None) && self.slot_edits.is_empty()
     }
 
-    pub fn slot_edits(&self) -> impl Iterator<Item = (&str, &SlotEdit)> {
-        self.slot_edits
-            .iter()
-            .map(|(key, edit)| (key.as_str(), edit))
+    pub fn slot_edits(&self) -> impl Iterator<Item = &SlotEdit> {
+        self.slot_edits.iter()
     }
 
-    pub(crate) fn slot_edits_in_apply_order(&self) -> impl Iterator<Item = &SlotEdit> {
-        self.slot_edits.iter().map(|(_, edit)| edit)
+    pub(crate) fn slot_edits_is_empty(&self) -> bool {
+        self.slot_edits.is_empty()
     }
 
     pub fn asset_pending(&self) -> &PendingAsset {
@@ -74,10 +70,7 @@ impl ArtifactEdits {
     }
 
     pub fn has_pending_at_path(&self, path: &SlotPath) -> bool {
-        let path_key = slot_path_key(path);
-        self.slot_edits
-            .iter()
-            .any(|(key, _)| key == &path_key || key.starts_with(&alloc::format!("{path_key}#")))
+        self.slot_edits.iter().any(|edit| edit.path() == path)
     }
 }
 
@@ -142,7 +135,7 @@ mod tests {
             path: SlotPath::parse("controls.phase").unwrap(),
             value: LpValue::F32(0.5),
         });
-        assert_eq!(pending.slot_edits.len(), 2);
+        assert_eq!(pending.slot_edits().count(), 2);
     }
 
     #[test]
@@ -157,7 +150,7 @@ mod tests {
             path,
             value: LpValue::F32(2.0),
         });
-        assert_eq!(pending.slot_edits.len(), 1);
+        assert_eq!(pending.slot_edits().count(), 1);
     }
 
     #[test]
@@ -175,8 +168,8 @@ mod tests {
             path: SlotPath::parse("controls.rate").unwrap(),
             value: LpValue::F32(2.0),
         });
-        assert_eq!(pending.slot_edits.len(), 2);
-        let rate = pending.slot_edits.last().and_then(|(_, edit)| match edit {
+        assert_eq!(pending.slot_edits().count(), 2);
+        let rate = pending.slot_edits().last().and_then(|edit| match edit {
             SlotEdit::AssignValue { value, .. } => Some(value),
             _ => None,
         });
@@ -191,7 +184,7 @@ mod tests {
             variant: "Clock".into(),
         });
         pending.set_asset(PendingAsset::Delete);
-        assert!(pending.slot_edits.is_empty());
+        assert_eq!(pending.slot_edits().count(), 0);
         assert_eq!(pending.asset_edit, PendingAsset::Delete);
     }
 
@@ -204,7 +197,7 @@ mod tests {
             variant: "Clock".into(),
         });
         assert_eq!(pending.asset_edit, PendingAsset::None);
-        assert_eq!(pending.slot_edits.len(), 1);
+        assert_eq!(pending.slot_edits().count(), 1);
     }
 
     #[test]
@@ -219,5 +212,18 @@ mod tests {
         overlay.ensure_pending(location.clone());
         overlay.clear();
         assert!(overlay.is_empty());
+    }
+
+    #[test]
+    fn has_pending_at_path() {
+        let mut pending = ArtifactEdits::default();
+        let path = SlotPath::parse("controls.rate").unwrap();
+        assert!(!pending.has_pending_at_path(&path));
+        pending.upsert_slot(SlotEdit::AssignValue {
+            path: path.clone(),
+            value: LpValue::F32(1.0),
+        });
+        assert!(pending.has_pending_at_path(&path));
+        assert!(!pending.has_pending_at_path(&SlotPath::parse("controls.phase").unwrap()));
     }
 }

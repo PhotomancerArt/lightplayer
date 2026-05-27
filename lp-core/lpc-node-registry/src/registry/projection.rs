@@ -28,7 +28,7 @@ pub fn project_artifact_bytes(
         PendingAsset::None => {}
     }
 
-    if pending.slot_edits.is_empty() {
+    if pending.slot_edits_is_empty() {
         return Ok(committed.map(<[u8]>::to_vec));
     }
 
@@ -37,7 +37,7 @@ pub fn project_artifact_bytes(
         None => NodeDef::default(),
     };
 
-    for edit in pending.slot_edits_in_apply_order() {
+    for edit in pending.slot_edits() {
         apply_op_to_def(&mut def, edit, ctx, frame).map_err(edit_to_registry)?;
     }
 
@@ -68,7 +68,7 @@ pub fn project_artifact_def(
         PendingAsset::None => {}
     }
 
-    if pending.slot_edits.is_empty() {
+    if pending.slot_edits_is_empty() {
         return committed_state.clone();
     }
 
@@ -76,7 +76,7 @@ pub fn project_artifact_def(
     match committed_state {
         NodeDefState::Loaded(def) => {
             let mut projected = def.clone();
-            for edit in pending.slot_edits_in_apply_order() {
+            for edit in pending.slot_edits() {
                 if let Err(err) = apply_op_to_def(&mut projected, edit, ctx, frame) {
                     return NodeDefState::ParseError(NodeDefParseError::Toml {
                         error: err.to_string(),
