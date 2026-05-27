@@ -3,7 +3,7 @@
 use alloc::vec;
 use alloc::vec::Vec;
 
-use lpc_model::{ArtifactSpecifier, FixtureDef, NodeDef, ShaderSource, SourcePath};
+use lpc_model::{ArtifactSpec, FixtureDef, NodeDef, ShaderSource, SourcePath};
 use lpfs::LpPath;
 
 use crate::RegistryError;
@@ -48,6 +48,6 @@ fn resolve_source_path(
     containing_file: &LpPath,
     path: &SourcePath,
 ) -> Result<lpc_model::LpPathBuf, RegistryError> {
-    let specifier = ArtifactSpecifier::path(path.as_path_buf());
+    let specifier = ArtifactSpec::path(path.as_path_buf());
     resolve_node_specifier(containing_file, &specifier)
 }

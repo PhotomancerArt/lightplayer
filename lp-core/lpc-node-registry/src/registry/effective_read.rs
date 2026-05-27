@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use lpfs::{LpFs, LpPath};
 
 use super::slot_apply::serialize_slot_draft;
-use crate::ArtifactLocation;
+use crate::ArtifactLoc;
 use crate::edit::SlotOverlayEntry;
 use crate::source::{
     MaterializeError, MaterializedSource, SourceDiagnosticCtx, materialize_source,
@@ -50,7 +50,7 @@ impl NodeDefRegistry {
     /// Parse effective TOML for an artifact (overlay ∪ base).
     pub fn parse_effective_state(
         &mut self,
-        location: &ArtifactLocation,
+        location: &ArtifactLoc,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
     ) -> Result<NodeDefState, RegistryError> {

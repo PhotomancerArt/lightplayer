@@ -6,7 +6,7 @@
 
 use alloc::string::ToString;
 
-use crate::artifact::artifact_specifier::ArtifactSpecifier;
+use crate::artifact::artifact_spec::ArtifactSpec;
 use crate::nodes::node_def::{NodeArtifact, NodeDef};
 use crate::{
     ArtifactPath, ArtifactPathSlot, FieldSlot, FieldSlotMut, SlotDataAccess, SlotDataMutAccess,
@@ -62,12 +62,12 @@ impl FieldSlotMut for InvocationDefBody {
 impl NodeInvocation {
     /// New path-backed invocation.
     #[must_use]
-    pub fn new(specifier: ArtifactSpecifier) -> Self {
+    pub fn new(specifier: ArtifactSpec) -> Self {
         Self::path(specifier)
     }
 
     #[must_use]
-    pub fn path(specifier: ArtifactSpecifier) -> Self {
+    pub fn path(specifier: ArtifactSpec) -> Self {
         Self::Ref(ArtifactPathSlot::new(ArtifactPath(specifier.to_string())))
     }
 
@@ -76,7 +76,7 @@ impl NodeInvocation {
         Self::Def(InvocationDefBody::new(def))
     }
 
-    pub fn ref_specifier(&self) -> Option<ArtifactSpecifier> {
+    pub fn ref_specifier(&self) -> Option<ArtifactSpec> {
         match self {
             Self::Unset | Self::Def(_) => None,
             Self::Ref(path) => {
@@ -84,7 +84,7 @@ impl NodeInvocation {
                 if text.is_empty() {
                     None
                 } else {
-                    ArtifactSpecifier::parse(text).ok()
+                    ArtifactSpec::parse(text).ok()
                 }
             }
         }
@@ -132,7 +132,7 @@ ref = "./texture.toml"
 
         assert_eq!(
             invocation.ref_specifier().unwrap(),
-            ArtifactSpecifier::path("./texture.toml")
+            ArtifactSpec::path("./texture.toml")
         );
     }
 

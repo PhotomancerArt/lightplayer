@@ -18,7 +18,7 @@ use lpc_engine::node::{
 };
 use lpc_model::node::node_invocation::NodeInvocation;
 use lpc_model::{
-    ArtifactSpecifier, Kind, LpValue, NodeDef, NodeId, Revision, TextureDef, bus::ChannelName,
+    ArtifactSpec, Kind, LpValue, NodeDef, NodeId, Revision, TextureDef, bus::ChannelName,
 };
 use lps_shared::LpsValueF32;
 
@@ -69,7 +69,7 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
         owner: NodeId::new(1),
     };
 
-    let config = NodeInvocation::new(ArtifactSpecifier::path("e.lp"));
+    let config = NodeInvocation::new(ArtifactSpec::path("e.lp"));
 
     let mut mgr = ArtifactStore::new();
     let specifier = config.ref_specifier().unwrap();

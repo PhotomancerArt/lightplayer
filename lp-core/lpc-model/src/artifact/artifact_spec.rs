@@ -8,19 +8,19 @@ use crate::artifact::src_artifact_lib_ref::SrcArtifactLibRef;
 
 /// Author-facing specifier for a loadable artifact carried in source as a string.
 ///
-/// - `./effects/tint.effect.toml` parses as [`ArtifactSpecifier::Path`].
-/// - `lib:core/visual/checkerboard` parses as [`ArtifactSpecifier::Lib`].
+/// - `./effects/tint.effect.toml` parses as [`ArtifactSpec::Path`].
+/// - `lib:core/visual/checkerboard` parses as [`ArtifactSpec::Lib`].
 ///
 /// Path specifiers are contextual: relative paths resolve relative to the file
 /// that contains the specifier. Resolved catalog identity is `ArtifactLocation`
 /// in `lpc-node-registry`; this type stays authored and contextual.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum ArtifactSpecifier {
+pub enum ArtifactSpec {
     Path(LpPathBuf),
     Lib(SrcArtifactLibRef),
 }
 
-impl ArtifactSpecifier {
+impl ArtifactSpec {
     /// Path reference (possibly relative).
     #[must_use]
     pub fn path(p: impl Into<LpPathBuf>) -> Self {
@@ -42,7 +42,7 @@ impl ArtifactSpecifier {
     }
 }
 
-impl fmt::Display for ArtifactSpecifier {
+impl fmt::Display for ArtifactSpec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Path(path) => f.write_str(path.as_str()),
@@ -51,7 +51,7 @@ impl fmt::Display for ArtifactSpecifier {
     }
 }
 
-impl Serialize for ArtifactSpecifier {
+impl Serialize for ArtifactSpec {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -60,7 +60,7 @@ impl Serialize for ArtifactSpecifier {
     }
 }
 
-impl<'de> Deserialize<'de> for ArtifactSpecifier {
+impl<'de> Deserialize<'de> for ArtifactSpec {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -71,7 +71,7 @@ impl<'de> Deserialize<'de> for ArtifactSpecifier {
 }
 
 #[cfg(feature = "schema-gen")]
-impl schemars::JsonSchema for ArtifactSpecifier {
+impl schemars::JsonSchema for ArtifactSpec {
     fn schema_name() -> alloc::borrow::Cow<'static, str> {
         <String as schemars::JsonSchema>::schema_name()
     }
@@ -89,41 +89,41 @@ impl schemars::JsonSchema for ArtifactSpecifier {
 mod tests {
     use alloc::string::ToString;
 
-    use super::ArtifactSpecifier;
+    use super::ArtifactSpec;
     use crate::artifact::src_artifact_lib_ref::SrcArtifactLibRef;
 
     #[test]
     fn display_normalizes_path() {
         assert_eq!(
-            ArtifactSpecifier::path("./fluid.vis").to_string(),
+            ArtifactSpec::path("./fluid.vis").to_string(),
             "fluid.vis",
         );
     }
 
     #[test]
     fn display_lib_form() {
-        let s = ArtifactSpecifier::lib_ref(SrcArtifactLibRef::try_from_suffix("core/x").unwrap());
+        let s = ArtifactSpec::lib_ref(SrcArtifactLibRef::try_from_suffix("core/x").unwrap());
         assert_eq!(s.to_string(), "lib:core/x");
     }
 
     #[test]
     fn serde_json_round_trip_path_and_lib() {
-        let path = ArtifactSpecifier::path("effects/tint.effect.toml");
+        let path = ArtifactSpec::path("effects/tint.effect.toml");
         let j = serde_json::to_string(&path).unwrap();
         assert_eq!(j, "\"effects/tint.effect.toml\"");
-        let back: ArtifactSpecifier = serde_json::from_str(&j).unwrap();
+        let back: ArtifactSpec = serde_json::from_str(&j).unwrap();
         assert_eq!(back, path);
 
-        let lib = ArtifactSpecifier::parse("lib:core/visual/checkerboard").unwrap();
+        let lib = ArtifactSpec::parse("lib:core/visual/checkerboard").unwrap();
         let j = serde_json::to_string(&lib).unwrap();
         assert_eq!(j, "\"lib:core/visual/checkerboard\"");
-        let back: ArtifactSpecifier = serde_json::from_str(&j).unwrap();
+        let back: ArtifactSpec = serde_json::from_str(&j).unwrap();
         assert_eq!(back, lib);
     }
 
     #[test]
     fn parse_rejects_empty_lib_suffix() {
-        assert!(ArtifactSpecifier::parse("lib:").is_err());
-        assert!(ArtifactSpecifier::parse("lib:   ").is_err());
+        assert!(ArtifactSpec::parse("lib:").is_err());
+        assert!(ArtifactSpec::parse("lib:   ").is_err());
     }
 }

@@ -3,19 +3,19 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use lpc_model::{ArtifactSpecifier, Revision};
+use lpc_model::{ArtifactSpec, Revision};
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath, LpPathBuf};
 
 use super::{
-    ArtifactEntry, ArtifactError, ArtifactLocation, ArtifactReadFailure, ArtifactReadState,
+    ArtifactEntry, ArtifactError, ArtifactLoc, ArtifactReadFailure, ArtifactReadState,
 };
 
-/// Catalog of project file artifacts keyed by [`ArtifactLocation`].
+/// Catalog of project file artifacts keyed by [`ArtifactLoc`].
 ///
 /// An artifact remains registered until [`Self::unregister`]. Registration is
 /// idempotent: [`Self::register_file`] returns the same location for the same path.
 pub struct ArtifactStore {
-    by_location: BTreeMap<ArtifactLocation, ArtifactEntry>,
+    by_location: BTreeMap<ArtifactLoc, ArtifactEntry>,
 }
 
 impl ArtifactStore {
@@ -26,16 +26,16 @@ impl ArtifactStore {
     }
 
     /// Register `path` in the project catalog, or return the existing location.
-    pub fn register_file(&mut self, path: LpPathBuf, frame: Revision) -> ArtifactLocation {
-        self.register_location(ArtifactLocation::file(path), frame)
+    pub fn register_file(&mut self, path: LpPathBuf, frame: Revision) -> ArtifactLoc {
+        self.register_location(ArtifactLoc::file(path), frame)
     }
 
     /// Register a resolved location, or return the existing entry's location.
     pub fn register_location(
         &mut self,
-        location: ArtifactLocation,
+        location: ArtifactLoc,
         frame: Revision,
-    ) -> ArtifactLocation {
+    ) -> ArtifactLoc {
         if let Some(entry) = self.by_location.get(&location) {
             return entry.location.clone();
         }
@@ -52,10 +52,10 @@ impl ArtifactStore {
 
     pub fn acquire_specifier(
         &mut self,
-        specifier: &ArtifactSpecifier,
+        specifier: &ArtifactSpec,
         frame: Revision,
-    ) -> Result<ArtifactLocation, ArtifactError> {
-        let location = ArtifactLocation::try_from_specifier(specifier)?;
+    ) -> Result<ArtifactLoc, ArtifactError> {
+        let location = ArtifactLoc::try_from_specifier(specifier)?;
         let path = location
             .file_path()
             .cloned()
@@ -64,7 +64,7 @@ impl ArtifactStore {
     }
 
     /// Drop a registered artifact when nothing in the project references it.
-    pub fn unregister(&mut self, location: &ArtifactLocation) -> Result<(), ArtifactError> {
+    pub fn unregister(&mut self, location: &ArtifactLoc) -> Result<(), ArtifactError> {
         self.by_location
             .remove(location)
             .ok_or(ArtifactError::UnknownArtifact {
@@ -73,14 +73,14 @@ impl ArtifactStore {
         Ok(())
     }
 
-    pub fn location_for_path(&self, path: &LpPath) -> Option<ArtifactLocation> {
-        let location = ArtifactLocation::location_for_path(path);
+    pub fn location_for_path(&self, path: &LpPath) -> Option<ArtifactLoc> {
+        let location = ArtifactLoc::location_for_path(path);
         self.by_location
             .get(&location)
             .map(|entry| entry.location.clone())
     }
 
-    pub fn locations(&self) -> impl Iterator<Item = ArtifactLocation> + '_ {
+    pub fn locations(&self) -> impl Iterator<Item =ArtifactLoc> + '_ {
         self.by_location
             .values()
             .map(|entry| entry.location.clone())
@@ -94,7 +94,7 @@ impl ArtifactStore {
 
     pub fn read_bytes(
         &mut self,
-        location: &ArtifactLocation,
+        location: &ArtifactLoc,
         fs: &dyn LpFs,
     ) -> Result<Vec<u8>, ArtifactError> {
         let path = location
@@ -125,11 +125,11 @@ impl ArtifactStore {
         }
     }
 
-    pub fn revision(&self, location: &ArtifactLocation) -> Option<Revision> {
+    pub fn revision(&self, location: &ArtifactLoc) -> Option<Revision> {
         self.entry(location).map(|entry| entry.revision)
     }
 
-    pub fn entry(&self, location: &ArtifactLocation) -> Option<&ArtifactEntry> {
+    pub fn entry(&self, location: &ArtifactLoc) -> Option<&ArtifactEntry> {
         self.by_location.get(location)
     }
 }
@@ -174,8 +174,8 @@ mod tests {
         LpPathBuf::from(alloc::format!("/{name}"))
     }
 
-    fn file_loc(path: &str) -> ArtifactLocation {
-        ArtifactLocation::file(path)
+    fn file_loc(path: &str) -> ArtifactLoc {
+        ArtifactLoc::file(path)
     }
 
     #[test]
@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn acquire_specifier_rejects_lib() {
         let mut store = ArtifactStore::new();
-        let specifier = ArtifactSpecifier::parse("lib:core/x").unwrap();
+        let specifier = ArtifactSpec::parse("lib:core/x").unwrap();
         let err = store
             .acquire_specifier(&specifier, Revision::new(1))
             .unwrap_err();

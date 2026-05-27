@@ -629,7 +629,7 @@ mod tests {
         VisualSampleTarget, texel_center_to_uv_q16,
     };
     use lpc_model::{
-        ArtifactSpecifier, MapSlot, NodeDef, NodeInvocation, Revision, SlotDataAccess,
+        ArtifactSpec, MapSlot, NodeDef, NodeInvocation, Revision, SlotDataAccess,
         StaticSlotShape, TextureDef, TreePath,
     };
     use lpc_wire::{WireChildKind, WireSlotIndex};
@@ -653,7 +653,7 @@ mod tests {
         engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
-        let tex_invocation = NodeInvocation::new(ArtifactSpecifier::path("tex.toml"));
+        let tex_invocation = NodeInvocation::new(ArtifactSpec::path("tex.toml"));
         let tex_artifact = engine
             .artifacts_mut()
             .acquire_location(ArtifactLocation::file("tex.toml"), frame);
@@ -663,7 +663,7 @@ mod tests {
                 Ok(NodeDef::Texture(TextureDef::new(8, 8)))
             })
             .expect("load texture artifact");
-        let shader_invocation = NodeInvocation::new(ArtifactSpecifier::path("shader.toml"));
+        let shader_invocation = NodeInvocation::new(ArtifactSpec::path("shader.toml"));
         let shader_artifact = engine
             .artifacts_mut()
             .acquire_location(ArtifactLocation::file("shader.toml"), frame);

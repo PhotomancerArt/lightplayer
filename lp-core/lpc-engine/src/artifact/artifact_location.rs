@@ -3,7 +3,7 @@
 use core::cmp::Ordering;
 
 use alloc::string::String;
-use lpc_model::{ArtifactSpecifier, LpPathBuf};
+use lpc_model::{ArtifactSpec, LpPathBuf};
 
 /// Resolved load location used as the artifact manager cache key.
 ///
@@ -29,10 +29,10 @@ impl ArtifactLocation {
         }
     }
 
-    pub fn try_from_src_spec(spec: &ArtifactSpecifier) -> Result<Self, super::ArtifactError> {
+    pub fn try_from_src_spec(spec: &ArtifactSpec) -> Result<Self, super::ArtifactError> {
         match spec {
-            ArtifactSpecifier::Path(path) => Ok(Self::File(path.clone())),
-            ArtifactSpecifier::Lib(lib) => Err(super::ArtifactError::Resolution(alloc::format!(
+            ArtifactSpec::Path(path) => Ok(Self::File(path.clone())),
+            ArtifactSpec::Lib(lib) => Err(super::ArtifactError::Resolution(alloc::format!(
                 "library artifact references are not supported yet ({lib})"
             ))),
         }
@@ -75,7 +75,7 @@ mod tests {
     use crate::artifact::ArtifactError;
     #[test]
     fn try_from_src_spec_preserves_file_path_location() {
-        let spec = ArtifactSpecifier::path("./fx/../fx/a.effect.toml");
+        let spec = ArtifactSpec::path("./fx/../fx/a.effect.toml");
         let location = ArtifactLocation::try_from_src_spec(&spec).unwrap();
         match location {
             ArtifactLocation::File(path) => assert_eq!(path.as_str(), "fx/../fx/a.effect.toml"),
@@ -85,7 +85,7 @@ mod tests {
 
     #[test]
     fn try_from_src_spec_rejects_lib_for_now() {
-        let spec = ArtifactSpecifier::parse("lib:core/x").unwrap();
+        let spec = ArtifactSpec::parse("lib:core/x").unwrap();
         let err = ArtifactLocation::try_from_src_spec(&spec).unwrap_err();
         assert!(matches!(err, ArtifactError::Resolution(s) if s.contains("not supported")));
     }

@@ -59,7 +59,7 @@ pub mod sync;
 pub use value::constraint;
 pub use value::kind;
 
-pub use artifact::{ArtifactReadRoot, ArtifactSpecifier, SrcArtifactLibRef};
+pub use artifact::{ArtifactReadRoot, ArtifactSpec, SrcArtifactLibRef};
 pub use binding::{
     BindingDef, BindingDefError, BindingDefView, BindingDefs, BindingRef, BindingRefError,
     BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError,

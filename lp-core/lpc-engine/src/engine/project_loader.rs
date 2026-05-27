@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use lpc_model::LpType;
 use lpc_model::generate_compute_shader_header;
 use lpc_model::nodes::project::project_def::ProjectDef;
-use lpc_model::{ArtifactReadRoot, ArtifactSpecifier, NodeInvocation, NodeKind};
+use lpc_model::{ArtifactReadRoot, ArtifactSpec, NodeInvocation, NodeKind};
 use lpc_model::{
     BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, FixtureDef, FluidDef, Kind,
     LpValue, MappingConfig, NodeDef, NodeId, NodeName, PlaylistDef, PlaylistEntry, Revision,
@@ -91,13 +91,13 @@ impl ProjectLoader {
         R: ArtifactReadRoot + ?Sized,
         R::Err: core::fmt::Debug,
     {
-        Self::load_project_artifact(root, services, ArtifactSpecifier::path("/project.toml"))
+        Self::load_project_artifact(root, services, ArtifactSpec::path("/project.toml"))
     }
 
     pub fn load_project_artifact<R>(
         root: &R,
         services: EngineServices,
-        project_specifier: ArtifactSpecifier,
+        project_specifier: ArtifactSpec,
     ) -> Result<Engine, ProjectLoadError>
     where
         R: ArtifactReadRoot + ?Sized,
@@ -201,7 +201,7 @@ impl ProjectLoader {
                         reason: String::from("node invocation ref path is empty"),
                     });
                 }
-                let artifact_specifier = ArtifactSpecifier::parse(path_slot.value().as_str())
+                let artifact_specifier = ArtifactSpec::parse(path_slot.value().as_str())
                     .map_err(|err| ProjectLoadError::InvalidSourcePath {
                         path: path_slot.value().as_str().to_string(),
                         reason: err.to_string(),
@@ -808,13 +808,13 @@ where
     }
 }
 
-fn resolve_project_specifier(specifier: &ArtifactSpecifier) -> Result<LpPathBuf, ProjectLoadError> {
+fn resolve_project_specifier(specifier: &ArtifactSpec) -> Result<LpPathBuf, ProjectLoadError> {
     resolve_path_specifier_from_dir(LpPath::new("/"), specifier)
 }
 
 fn resolve_child_artifact_specifier(
     containing_file: &LpPathBuf,
-    specifier: &ArtifactSpecifier,
+    specifier: &ArtifactSpec,
 ) -> Result<LpPathBuf, ProjectLoadError> {
     let parent = containing_file
         .as_path()
@@ -825,10 +825,10 @@ fn resolve_child_artifact_specifier(
 
 fn resolve_path_specifier_from_dir(
     base_dir: &LpPath,
-    specifier: &ArtifactSpecifier,
+    specifier: &ArtifactSpec,
 ) -> Result<LpPathBuf, ProjectLoadError> {
     match specifier {
-        ArtifactSpecifier::Path(path) => {
+        ArtifactSpec::Path(path) => {
             if path.is_absolute() {
                 Ok(path.clone())
             } else {
@@ -841,7 +841,7 @@ fn resolve_path_specifier_from_dir(
                     })
             }
         }
-        ArtifactSpecifier::Lib(lib) => Err(ProjectLoadError::InvalidSourcePath {
+        ArtifactSpec::Lib(lib) => Err(ProjectLoadError::InvalidSourcePath {
             path: lib.to_string(),
             reason: String::from("library artifact specifiers are not supported for nodes yet"),
         }),

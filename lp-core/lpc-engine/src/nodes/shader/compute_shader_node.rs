@@ -277,7 +277,7 @@ mod tests {
     use alloc::string::String;
     use alloc::sync::Arc;
     use lpc_model::{
-        ArtifactSpecifier, BindingDefs, EnumSlot, LpValue, MapSlot, NodeDef, NodeInvocation,
+        ArtifactSpec, BindingDefs, EnumSlot, LpValue, MapSlot, NodeDef, NodeInvocation,
         ShaderSource, SlotDataAccess, TreePath, ValueSlot, generate_compute_shader_header,
         lookup_slot_data,
     };
@@ -376,7 +376,7 @@ void tick() {{
                 WireChildKind::Input {
                     source: WireSlotIndex(0),
                 },
-                NodeInvocation::new(ArtifactSpecifier::path("compute.toml")),
+                NodeInvocation::new(ArtifactSpec::path("compute.toml")),
                 artifact,
                 frame,
             )

@@ -4,7 +4,7 @@ use alloc::format;
 use alloc::string::String;
 use core::cmp::Ordering;
 
-use lpc_model::{ArtifactSpecifier, LpPathBuf};
+use lpc_model::{ArtifactSpec, LpPathBuf};
 use lpfs::LpPath as LpFsPath;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -14,11 +14,11 @@ const FILE_URI_PREFIX: &str = "file:";
 
 /// Resolved artifact location — canonical project identity for file-backed artifacts.
 #[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum ArtifactLocation {
+pub enum ArtifactLoc {
     File(LpPathBuf),
 }
 
-impl ArtifactLocation {
+impl ArtifactLoc {
     pub fn file(path: impl Into<LpPathBuf>) -> Self {
         Self::File(path.into())
     }
@@ -27,10 +27,10 @@ impl ArtifactLocation {
         Self::File(path)
     }
 
-    pub fn try_from_specifier(specifier: &ArtifactSpecifier) -> Result<Self, ArtifactError> {
+    pub fn try_from_specifier(specifier: &ArtifactSpec) -> Result<Self, ArtifactError> {
         match specifier {
-            ArtifactSpecifier::Path(path) => Ok(Self::File(path.clone())),
-            ArtifactSpecifier::Lib(lib) => Err(ArtifactError::Resolution(format!(
+            ArtifactSpec::Path(path) => Ok(Self::File(path.clone())),
+            ArtifactSpec::Lib(lib) => Err(ArtifactError::Resolution(format!(
                 "library artifact references are not supported yet ({lib})"
             ))),
         }
@@ -71,7 +71,7 @@ impl ArtifactLocation {
     }
 }
 
-impl Serialize for ArtifactLocation {
+impl Serialize for ArtifactLoc {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -80,7 +80,7 @@ impl Serialize for ArtifactLocation {
     }
 }
 
-impl<'de> Deserialize<'de> for ArtifactLocation {
+impl<'de> Deserialize<'de> for ArtifactLoc {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -90,7 +90,7 @@ impl<'de> Deserialize<'de> for ArtifactLocation {
     }
 }
 
-impl Ord for ArtifactLocation {
+impl Ord for ArtifactLoc {
     fn cmp(&self, other: &Self) -> Ordering {
         match (self, other) {
             (Self::File(a), Self::File(b)) => a.as_str().cmp(b.as_str()),
@@ -98,7 +98,7 @@ impl Ord for ArtifactLocation {
     }
 }
 
-impl PartialOrd for ArtifactLocation {
+impl PartialOrd for ArtifactLoc {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
@@ -111,40 +111,40 @@ mod tests {
 
     #[test]
     fn path_specifier_resolves_to_file() {
-        let spec = ArtifactSpecifier::path("./shader.glsl");
-        let location = ArtifactLocation::try_from_specifier(&spec).unwrap();
+        let spec = ArtifactSpec::path("./shader.glsl");
+        let location = ArtifactLoc::try_from_specifier(&spec).unwrap();
         assert_eq!(
             location,
-            ArtifactLocation::File(LpPathBuf::from("./shader.glsl"))
+            ArtifactLoc::File(LpPathBuf::from("./shader.glsl"))
         );
     }
 
     #[test]
     fn lib_specifier_returns_resolution_error() {
-        let spec = ArtifactSpecifier::lib_ref(
+        let spec = ArtifactSpec::lib_ref(
             SrcArtifactLibRef::try_from_suffix("core/x").expect("valid lib ref"),
         );
-        let err = ArtifactLocation::try_from_specifier(&spec).unwrap_err();
+        let err = ArtifactLoc::try_from_specifier(&spec).unwrap_err();
         assert!(matches!(err, ArtifactError::Resolution(msg) if msg.contains("not supported")));
     }
 
     #[test]
     fn uri_roundtrip_and_serde() {
-        let location = ArtifactLocation::file("/shader.toml");
+        let location = ArtifactLoc::file("/shader.toml");
         assert_eq!(location.to_uri(), "file:/shader.toml");
         assert_eq!(
-            ArtifactLocation::parse_uri("file:/shader.toml").unwrap(),
+            ArtifactLoc::parse_uri("file:/shader.toml").unwrap(),
             location
         );
         let json = serde_json::to_string(&location).unwrap();
         assert_eq!(json, "\"file:/shader.toml\"");
-        let back: ArtifactLocation = serde_json::from_str(&json).unwrap();
+        let back: ArtifactLoc = serde_json::from_str(&json).unwrap();
         assert_eq!(back, location);
     }
 
     #[test]
     fn parse_absolute_path_without_prefix() {
-        let location = ArtifactLocation::parse_uri("/shader.toml").unwrap();
-        assert_eq!(location, ArtifactLocation::file("/shader.toml"));
+        let location = ArtifactLoc::parse_uri("/shader.toml").unwrap();
+        assert_eq!(location, ArtifactLoc::file("/shader.toml"));
     }
 }

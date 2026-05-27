@@ -3,7 +3,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_model::{ArtifactSpecifier, NodeDef, NodeInvocation, SlotMapKey, SlotName, SlotPath};
+use lpc_model::{ArtifactSpec, NodeDef, NodeInvocation, SlotMapKey, SlotName, SlotPath};
 
 use super::RegistryError;
 
@@ -62,7 +62,7 @@ fn playlist_entry_node_path(base: &SlotPath, key: u32) -> Option<SlotPath> {
 /// Resolve a path specifier relative to the directory containing `containing_file`.
 pub fn resolve_node_specifier(
     containing_file: &lpfs::LpPath,
-    specifier: &ArtifactSpecifier,
+    specifier: &ArtifactSpec,
 ) -> Result<lpfs::LpPathBuf, RegistryError> {
     let base_dir = containing_file
         .parent()
@@ -72,10 +72,10 @@ pub fn resolve_node_specifier(
 
 fn resolve_path_specifier_from_dir(
     base_dir: &lpfs::LpPath,
-    specifier: &ArtifactSpecifier,
+    specifier: &ArtifactSpec,
 ) -> Result<lpfs::LpPathBuf, RegistryError> {
     match specifier {
-        ArtifactSpecifier::Path(path) => {
+        ArtifactSpec::Path(path) => {
             if path.is_absolute() {
                 Ok(path.clone())
             } else {
@@ -90,7 +90,7 @@ fn resolve_path_specifier_from_dir(
                     })
             }
         }
-        ArtifactSpecifier::Lib(lib) => Err(RegistryError::SpecifierResolution {
+        ArtifactSpec::Lib(lib) => Err(RegistryError::SpecifierResolution {
             message: alloc::format!("library artifact specifiers are not supported: {lib}"),
         }),
     }

@@ -11,7 +11,7 @@ use crate::edit::apply::apply_asset_op;
 use crate::edit::{
     ArtifactEdit, CommitError, EditBatch, EditError, EditTarget, SlotOverlay, require_absolute_path,
 };
-use crate::{ArtifactLocation, ArtifactStore};
+use crate::{ArtifactLoc, ArtifactStore};
 
 use super::def_shell::{is_container_def, shell_changed};
 use super::def_walker::{collect_invocations, resolve_node_specifier};
@@ -268,7 +268,7 @@ impl NodeDefRegistry {
         self.overlay.get_bytes(path)
     }
 
-    pub(crate) fn artifact_location_for_path(&self, path: &LpPath) -> Option<ArtifactLocation> {
+    pub(crate) fn artifact_location_for_path(&self, path: &LpPath) -> Option<ArtifactLoc> {
         self.store.location_for_path(path)
     }
 
@@ -281,7 +281,7 @@ impl NodeDefRegistry {
 
     pub(crate) fn read_committed_artifact_bytes(
         &mut self,
-        location: &ArtifactLocation,
+        location: &ArtifactLoc,
         fs: &dyn LpFs,
     ) -> Result<Vec<u8>, crate::ArtifactError> {
         self.store.read_bytes(location, fs)
@@ -308,7 +308,7 @@ impl NodeDefRegistry {
 
     fn register_artifact_subtree(
         &mut self,
-        location: ArtifactLocation,
+        location: ArtifactLoc,
         file_path: &LpPath,
         frame: Revision,
         fs: &dyn LpFs,
@@ -326,7 +326,7 @@ impl NodeDefRegistry {
 
     fn register_invocations(
         &mut self,
-        location: &ArtifactLocation,
+        location: &ArtifactLoc,
         file_path: &LpPath,
         def: NodeDef,
         base_path: SlotPath,
@@ -343,7 +343,7 @@ impl NodeDefRegistry {
                         continue;
                     }
                     let specifier =
-                        lpc_model::ArtifactSpecifier::parse(path_text).map_err(|err| {
+                        lpc_model::ArtifactSpec::parse(path_text).map_err(|err| {
                             RegistryError::SpecifierResolution {
                                 message: String::from(err),
                             }
@@ -389,7 +389,7 @@ impl NodeDefRegistry {
 
     pub(crate) fn sync_def_artifact(
         &mut self,
-        location: ArtifactLocation,
+        location: ArtifactLoc,
         fs: &dyn LpFs,
         frame: Revision,
         ctx: &ParseCtx<'_>,
@@ -449,7 +449,7 @@ impl NodeDefRegistry {
 
     fn derive_inventory(
         &mut self,
-        location: ArtifactLocation,
+        location: ArtifactLoc,
         file_path: &LpPath,
         frame: Revision,
         fs: &dyn LpFs,
@@ -475,7 +475,7 @@ impl NodeDefRegistry {
 
     fn derive_invocations(
         &mut self,
-        location: &ArtifactLocation,
+        location: &ArtifactLoc,
         file_path: &LpPath,
         def: NodeDef,
         base_path: SlotPath,
@@ -493,7 +493,7 @@ impl NodeDefRegistry {
                         continue;
                     }
                     let specifier =
-                        lpc_model::ArtifactSpecifier::parse(path_text).map_err(|err| {
+                        lpc_model::ArtifactSpec::parse(path_text).map_err(|err| {
                             RegistryError::SpecifierResolution {
                                 message: String::from(err),
                             }
@@ -542,7 +542,7 @@ impl NodeDefRegistry {
 
     pub(crate) fn read_artifact_state(
         &mut self,
-        location: &ArtifactLocation,
+        location: &ArtifactLoc,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
     ) -> Result<NodeDefState, RegistryError> {
@@ -558,11 +558,11 @@ impl NodeDefRegistry {
         &mut self,
         path: LpPathBuf,
         frame: Revision,
-    ) -> ArtifactLocation {
+    ) -> ArtifactLoc {
         self.store.register_file(path, frame)
     }
 
-    fn referenced_locations(&self) -> alloc::collections::BTreeSet<ArtifactLocation> {
+    fn referenced_locations(&self) -> alloc::collections::BTreeSet<ArtifactLoc> {
         let mut referenced = self
             .defs
             .keys()
@@ -578,7 +578,7 @@ impl NodeDefRegistry {
             };
             if let Ok(paths) = source_bridge::asset_paths_for_def(def, containing.as_path()) {
                 for path in paths {
-                    referenced.insert(ArtifactLocation::location_for_path(path.as_path()));
+                    referenced.insert(ArtifactLoc::location_for_path(path.as_path()));
                 }
             }
         }
@@ -588,7 +588,7 @@ impl NodeDefRegistry {
 
     pub(crate) fn reconcile_artifacts(&mut self) -> Result<(), RegistryError> {
         let referenced = self.referenced_locations();
-        let to_unregister: Vec<ArtifactLocation> = self
+        let to_unregister: Vec<ArtifactLoc> = self
             .store
             .locations()
             .filter(|location| !referenced.contains(location))
@@ -685,7 +685,7 @@ pub(crate) use slot_apply::apply_ops_to_node_def;
 pub use slot_apply::serialize_slot_draft;
 
 enum PathChangeKind {
-    DefArtifact(ArtifactLocation),
+    DefArtifact(ArtifactLoc),
     SourceOnly,
 }
 
@@ -734,7 +734,7 @@ fn classify_def_change(before: &NodeDefState, after: &NodeDefState) -> DefChange
     }
 }
 
-pub(crate) fn dedupe_locations(locations: &mut Vec<ArtifactLocation>) {
+pub(crate) fn dedupe_locations(locations: &mut Vec<ArtifactLoc>) {
     locations.sort_unstable();
     locations.dedup();
 }

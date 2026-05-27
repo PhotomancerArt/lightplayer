@@ -3,13 +3,13 @@
 use alloc::string::String;
 use core::fmt;
 
-use crate::ArtifactLocation;
+use crate::ArtifactLoc;
 
 /// Failure applying an [`super::ArtifactEdit`] or [`super::EditBatch`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EditError {
     InvalidPath { message: String },
-    UnknownArtifact { location: ArtifactLocation },
+    UnknownArtifact { location: ArtifactLoc },
     UnsupportedOp { op: &'static str },
     Parse { message: String },
     SlotMutation { message: String },
