@@ -3,7 +3,7 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use lpc_model::SlotPath;
+use lpc_model::{NodeDef, SlotPath};
 
 use crate::ArtifactLoc;
 
@@ -37,12 +37,36 @@ impl ArtifactEdits {
     pub fn upsert_slot(&mut self, edit: SlotEdit) {
         self.asset_edit = AssetEdit::None;
         let target = edit.path().clone();
-        if let Some(pos) = self
-            .slot_edits
-            .iter()
-            .position(|existing| existing.path() == &target)
+        let clear_scopes = structural_clear_scopes(&edit);
+        let clears_ancestor_remove = matches!(
+            edit,
+            SlotEdit::EnsurePresent { .. } | SlotEdit::AssignValue { .. }
+        );
+        self.slot_edits.retain(|existing| {
+            if existing.path() == &target {
+                return false;
+            }
+            if clear_scopes
+                .iter()
+                .any(|scope| is_strict_ancestor(scope, existing.path()))
+            {
+                return false;
+            }
+            if clears_ancestor_remove
+                && matches!(existing, SlotEdit::Remove { path } if is_strict_ancestor(path, &target))
+            {
+                return false;
+            }
+            true
+        });
+
+        if matches!(edit, SlotEdit::Remove { .. })
+            && self
+                .slot_edits
+                .iter()
+                .any(|existing| matches!(existing, SlotEdit::Remove { path } if is_strict_ancestor(path, &target)))
         {
-            self.slot_edits.remove(pos);
+            return;
         }
         self.slot_edits.push(edit);
     }
@@ -82,6 +106,41 @@ impl ArtifactEdits {
             self.set_asset(other.asset_pending().clone());
         }
     }
+}
+
+fn structural_clear_scopes(edit: &SlotEdit) -> Vec<SlotPath> {
+    match edit {
+        SlotEdit::Remove { path } => alloc::vec![path.clone()],
+        SlotEdit::EnsurePresent { path } => {
+            let mut scopes = alloc::vec![path.clone()];
+            if ensure_present_clears_parent_scope(path) {
+                scopes.push(parent_path(path));
+            }
+            scopes
+        }
+        SlotEdit::AssignValue { .. } => Vec::new(),
+    }
+}
+
+fn ensure_present_clears_parent_scope(path: &SlotPath) -> bool {
+    match path.segments() {
+        [lpc_model::SlotPathSegment::Field(name)] => NodeDef::is_variant_name(name.as_str()),
+        [.., lpc_model::SlotPathSegment::Field(_)] => true,
+        _ => false,
+    }
+}
+
+fn parent_path(path: &SlotPath) -> SlotPath {
+    let Some((_, parent)) = path.segments().split_last() else {
+        return SlotPath::root();
+    };
+    SlotPath::from_segments(parent.to_vec())
+}
+
+fn is_strict_ancestor(ancestor: &SlotPath, descendant: &SlotPath) -> bool {
+    let ancestor = ancestor.segments();
+    let descendant = descendant.segments();
+    ancestor.len() < descendant.len() && descendant.starts_with(ancestor)
 }
 
 impl ArtifactOverlay {
@@ -241,5 +300,74 @@ mod tests {
         });
         assert!(pending.has_pending_at_path(&path));
         assert!(!pending.has_pending_at_path(&SlotPath::parse("controls.phase").unwrap()));
+    }
+
+    #[test]
+    fn parent_remove_clears_pending_descendants() {
+        let mut pending = ArtifactEdits::default();
+        pending.upsert_slot(SlotEdit::AssignValue {
+            path: SlotPath::parse("entries[0].node.controls.rate").unwrap(),
+            value: LpValue::F32(2.0),
+        });
+        pending.upsert_slot(SlotEdit::Remove {
+            path: SlotPath::parse("entries[0].node").unwrap(),
+        });
+
+        assert_eq!(pending.slot_edits().count(), 1);
+        assert!(matches!(
+            pending.slot_edits().next(),
+            Some(SlotEdit::Remove { path }) if path == &SlotPath::parse("entries[0].node").unwrap()
+        ));
+    }
+
+    #[test]
+    fn descendant_assign_clears_ancestor_remove() {
+        let mut pending = ArtifactEdits::default();
+        pending.upsert_slot(SlotEdit::Remove {
+            path: SlotPath::parse("entries[0].node").unwrap(),
+        });
+        pending.upsert_slot(SlotEdit::AssignValue {
+            path: SlotPath::parse("entries[0].node.controls.rate").unwrap(),
+            value: LpValue::F32(2.0),
+        });
+
+        assert_eq!(pending.slot_edits().count(), 1);
+        assert!(matches!(
+            pending.slot_edits().next(),
+            Some(SlotEdit::AssignValue { path, .. })
+                if path == &SlotPath::parse("entries[0].node.controls.rate").unwrap()
+        ));
+    }
+
+    #[test]
+    fn enum_variant_ensure_clears_stale_payload_descendants() {
+        let mut pending = ArtifactEdits::default();
+        pending.upsert_slot(SlotEdit::AssignValue {
+            path: SlotPath::parse("entries[0].node.controls.rate").unwrap(),
+            value: LpValue::F32(2.0),
+        });
+        pending.upsert_slot(SlotEdit::EnsurePresent {
+            path: SlotPath::parse("entries[0].node.Shader").unwrap(),
+        });
+
+        assert_eq!(pending.slot_edits().count(), 1);
+        assert!(matches!(
+            pending.slot_edits().next(),
+            Some(SlotEdit::EnsurePresent { path })
+                if path == &SlotPath::parse("entries[0].node.Shader").unwrap()
+        ));
+    }
+
+    #[test]
+    fn single_field_ensure_does_not_clear_root_variant_ensure() {
+        let mut pending = ArtifactEdits::default();
+        pending.upsert_slot(SlotEdit::EnsurePresent {
+            path: SlotPath::parse("Output").unwrap(),
+        });
+        pending.upsert_slot(SlotEdit::EnsurePresent {
+            path: SlotPath::parse("options").unwrap(),
+        });
+
+        assert_eq!(pending.slot_edits().count(), 2);
     }
 }

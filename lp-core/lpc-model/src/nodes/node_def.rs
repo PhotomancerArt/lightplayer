@@ -156,6 +156,10 @@ impl NodeDef {
         }
     }
 
+    pub fn is_variant_name(name: &str) -> bool {
+        NODE_DEF_VARIANT_NAMES.contains(&name)
+    }
+
     pub fn as_project(&self) -> Option<&ProjectDef> {
         match self {
             Self::Project(def) => Some(def),

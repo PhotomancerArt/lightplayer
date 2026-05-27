@@ -17,6 +17,13 @@ fn clock_rate(entry: &NodeDefEntry) -> f32 {
     *def.controls.rate.value()
 }
 
+fn clock_scrub_offset(entry: &NodeDefEntry) -> f32 {
+    let NodeDefState::Loaded(NodeDef::Clock(def)) = &entry.state else {
+        panic!("expected loaded clock def");
+    };
+    *def.controls.scrub_offset_seconds.value()
+}
+
 fn shader_render_order(entry: &NodeDefEntry) -> i32 {
     let NodeDefState::Loaded(NodeDef::Shader(def)) = &entry.state else {
         panic!("expected loaded shader def");
@@ -105,6 +112,42 @@ fn c1_slot_draft_serializes_to_toml() {
     )
     .unwrap();
     assert_eq!(serialized, bytes);
+}
+
+#[test]
+fn c1_root_variant_path_preserves_existing_same_kind_payload() {
+    let mut fs = fixtures::load_clock();
+    fixtures::write_file(
+        &mut fs,
+        "/clock.toml",
+        r#"
+kind = "Clock"
+
+[controls]
+rate = 2.5
+"#,
+    );
+    let mut registry = NodeDefRegistry::new();
+    let shapes = overlay::parse_ctx();
+    let ctx = ParseCtx { shapes: &shapes };
+    let root = registry
+        .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
+        .unwrap();
+
+    overlay::upsert_slot(
+        &mut registry,
+        &fs,
+        "/clock.toml",
+        SlotEdit::AssignValue {
+            path: SlotPath::parse("Clock.controls.scrub_offset_seconds").unwrap(),
+            value: LpValue::F32(4.0),
+        },
+        Revision::new(2),
+    );
+
+    let effective = registry.view().get(&root, &fs, &ctx).unwrap();
+    assert_eq!(clock_rate(&effective), 2.5);
+    assert_eq!(clock_scrub_offset(&effective), 4.0);
 }
 
 fn playlist_idle_entry(entry: &NodeDefEntry) -> u32 {

@@ -135,5 +135,11 @@ fn sync_fs_and_commit_in_one_batch() {
         )
         .unwrap();
 
-    assert!(!outcome.committed.def_updates.changed.is_empty());
+    assert!(outcome.pending_changed);
+    assert!(!registry.overlay_active());
+    assert!(outcome.committed.def_updates.is_empty());
+    assert_eq!(
+        registry.artifact_revision_for_path(LpPath::new("/shader.glsl")),
+        Some(Revision::new(2))
+    );
 }
