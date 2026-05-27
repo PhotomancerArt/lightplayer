@@ -1,21 +1,26 @@
-//! Apply edit vocabulary ops to a [`super::SlotOverlay`].
+//! Apply edit vocabulary ops to an [`super::ArtifactOverlay`].
 
 use alloc::format;
 
 use lpfs::LpPathBuf;
 
-use super::{ArtifactEdit, AssetEdit, EditBatch, EditError, EditTarget, SlotOverlay};
+use crate::ArtifactLoc;
+
+use super::{
+    ArtifactEdit, ArtifactOverlay, AssetEdit, EditBatch, EditError, EditTarget, PendingAsset,
+};
 
 pub fn apply_artifact_edit(
-    slot_overlay: &mut SlotOverlay,
+    overlay: &mut ArtifactOverlay,
     resolve_path: &impl Fn(EditTarget) -> Result<LpPathBuf, EditError>,
     edit: &ArtifactEdit,
 ) -> Result<(), EditError> {
     let path = resolve_path(edit.target().clone())?;
+    let location = ArtifactLoc::location_for_path(path.as_path());
     match edit {
         ArtifactEdit::Asset { ops, .. } => {
             for op in ops {
-                apply_asset_op(slot_overlay, path.clone(), op)?;
+                apply_asset_op(overlay, location.clone(), op)?;
             }
         }
         ArtifactEdit::Slot { .. } => {
@@ -26,31 +31,29 @@ pub fn apply_artifact_edit(
 }
 
 pub fn apply_edit_batch(
-    slot_overlay: &mut SlotOverlay,
+    overlay: &mut ArtifactOverlay,
     resolve_path: &impl Fn(EditTarget) -> Result<LpPathBuf, EditError>,
     batch: &EditBatch,
 ) -> Result<(), EditError> {
     for edit in &batch.edits {
-        apply_artifact_edit(slot_overlay, resolve_path, edit)?;
+        apply_artifact_edit(overlay, resolve_path, edit)?;
     }
     Ok(())
 }
 
 pub(crate) fn apply_asset_op(
-    slot_overlay: &mut SlotOverlay,
-    path: LpPathBuf,
+    overlay: &mut ArtifactOverlay,
+    location: ArtifactLoc,
     op: &AssetEdit,
 ) -> Result<(), EditError> {
+    let pending = overlay.ensure_pending(location);
     match op {
-        AssetEdit::Delete => {
-            slot_overlay.apply_delete(path);
-            Ok(())
-        }
+        AssetEdit::Delete => pending.set_asset(PendingAsset::Delete),
         AssetEdit::ReplaceBody(text) => {
-            slot_overlay.apply_bytes(path, text.as_bytes().to_vec());
-            Ok(())
+            pending.set_asset(PendingAsset::ReplaceBody(text.as_bytes().to_vec()));
         }
     }
+    Ok(())
 }
 
 pub fn require_absolute_path(path: LpPathBuf) -> Result<LpPathBuf, EditError> {

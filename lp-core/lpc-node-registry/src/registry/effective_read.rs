@@ -3,17 +3,15 @@
 use alloc::string::ToString;
 use alloc::vec::Vec;
 
-use lpfs::{LpFs, LpPath};
-
-use super::slot_apply::serialize_slot_draft;
-use crate::ArtifactLoc;
-use crate::edit::SlotOverlayEntry;
 use crate::source::{
     MaterializeError, MaterializedSource, SourceDiagnosticCtx, materialize_source,
     resolve_source_file,
 };
-use lpc_model::{NodeDef, NodeDefParseError, NodeInvocation, Revision, SlotPath, SourceFileSlot};
+use lpc_model::SourceFileSlot;
+use lpc_model::{NodeDef, NodeDefParseError, NodeInvocation, Revision, SlotPath, current_revision};
+use lpfs::{LpFs, LpPath};
 
+use super::projection::{project_artifact_bytes, project_artifact_def, project_def_at_loc};
 use super::{NodeDefEntry, NodeDefLoc, NodeDefRegistry, NodeDefState, ParseCtx, RegistryError};
 use crate::registry::def_walker::collect_invocations;
 
@@ -25,79 +23,51 @@ impl NodeDefRegistry {
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
     ) -> Result<Option<Vec<u8>>, RegistryError> {
-        if let Some(entry) = self.overlay.entry(path) {
-            return Ok(match entry {
-                SlotOverlayEntry::Bytes(bytes) => Some(bytes.clone()),
-                SlotOverlayEntry::DefDraft(draft) => {
-                    Some(serialize_slot_draft(&draft.def, ctx).map_err(|err| {
-                        RegistryError::InvalidPath {
-                            message: err.to_string(),
-                        }
-                    })?)
-                }
-                SlotOverlayEntry::Deleted => None,
-            });
-        }
-        let Some(location) = self.store.location_for_path(path) else {
-            return Ok(None);
-        };
-        match self.store.read_bytes(&location, fs) {
-            Ok(bytes) => Ok(Some(bytes)),
-            Err(_) => Ok(None),
-        }
+        let location = self.location_for_pending_path(path);
+        let committed = self.read_committed_bytes_for_path(path, fs)?;
+        let pending = self.overlay.pending_at(&location).cloned();
+        project_artifact_bytes(
+            committed.as_deref(),
+            pending.as_ref(),
+            ctx,
+            current_revision(),
+        )
     }
 
     /// Parse effective TOML for an artifact (overlay ∪ base).
     pub fn parse_effective_state(
         &mut self,
-        location: &ArtifactLoc,
+        location: &crate::ArtifactLoc,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
     ) -> Result<NodeDefState, RegistryError> {
-        let path = location.file_path().ok_or(RegistryError::UnknownDef)?;
-        if let Some(entry) = self.overlay.entry(LpPath::new(path.as_str())) {
-            return Ok(match entry {
-                SlotOverlayEntry::Bytes(bytes) => effective_state_from_slot_overlay_bytes(
-                    bytes.as_slice(),
-                    &SlotPath::root(),
-                    ctx,
-                    &NodeDefState::ParseError(slot_overlay_deleted_error(path.as_str())),
-                ),
-                SlotOverlayEntry::DefDraft(draft) => {
-                    def_state_at_source(&draft.def, &SlotPath::root()).unwrap_or_else(|| {
-                        NodeDefState::ParseError(slot_overlay_deleted_error(path.as_str()))
-                    })
-                }
-                SlotOverlayEntry::Deleted => {
-                    NodeDefState::ParseError(slot_overlay_deleted_error(path.as_str()))
-                }
-            });
+        let pending = self.overlay.pending_at(location).cloned();
+        if pending.is_none() {
+            return self.read_artifact_state(location, fs, ctx);
         }
-        self.read_artifact_state(location, fs, ctx)
+
+        let committed_state = match self.defs.get(&NodeDefLoc::artifact_root(location.clone())) {
+            Some(entry) => entry.state.clone(),
+            None => self.read_artifact_state(location, fs, ctx)?,
+        };
+
+        Ok(project_artifact_def(
+            &committed_state,
+            pending.as_ref(),
+            ctx,
+        ))
     }
 
     /// Effective state for a registered def (overlay ∪ committed cache).
     pub fn effective_state(&self, loc: &NodeDefLoc, ctx: &ParseCtx<'_>) -> Option<NodeDefState> {
         let entry = self.defs.get(loc)?;
-        let path = loc.artifact.file_path()?;
-        if !self.overlay.contains_path(LpPath::new(path.as_str())) {
+        let pending = self.overlay.pending_at(&loc.artifact);
+        if pending.is_none() {
             return Some(entry.state.clone());
         }
-        let overlay_entry = self.overlay.entry(LpPath::new(path.as_str()))?;
-        Some(match overlay_entry {
-            SlotOverlayEntry::Bytes(bytes) => effective_state_from_slot_overlay_bytes(
-                bytes.as_slice(),
-                &loc.path,
-                ctx,
-                &entry.state,
-            ),
-            SlotOverlayEntry::DefDraft(draft) => {
-                def_state_at_source(&draft.def, &loc.path).unwrap_or_else(|| entry.state.clone())
-            }
-            SlotOverlayEntry::Deleted => {
-                NodeDefState::ParseError(slot_overlay_deleted_error(path.as_str()))
-            }
-        })
+        let root_loc = NodeDefLoc::artifact_root(loc.artifact.clone());
+        let root_entry = self.defs.get(&root_loc)?;
+        Some(project_def_at_loc(loc, root_entry, pending, ctx))
     }
 
     /// Effective def entry (overlay ∪ base). Always owned.
@@ -131,6 +101,25 @@ impl NodeDefRegistry {
             Some(&self.overlay),
         )
     }
+
+    pub(crate) fn read_committed_bytes_for_path(
+        &mut self,
+        path: &LpPath,
+        fs: &dyn LpFs,
+    ) -> Result<Option<Vec<u8>>, RegistryError> {
+        let Some(location) = self.store.location_for_path(path) else {
+            return Ok(None);
+        };
+        match self.store.read_bytes(&location, fs) {
+            Ok(bytes) => Ok(Some(bytes)),
+            Err(_) => Ok(None),
+        }
+    }
+
+    pub(crate) fn location_for_pending_path(&self, path: &LpPath) -> crate::ArtifactLoc {
+        self.artifact_location_for_path(path)
+            .unwrap_or_else(|| crate::ArtifactLoc::location_for_path(path))
+    }
 }
 
 pub(crate) fn parse_toml_bytes(ctx: &ParseCtx<'_>, bytes: &[u8]) -> NodeDefState {
@@ -148,31 +137,11 @@ pub(crate) fn parse_toml_bytes(ctx: &ParseCtx<'_>, bytes: &[u8]) -> NodeDefState
     }
 }
 
-fn slot_overlay_deleted_error(path: &str) -> NodeDefParseError {
-    NodeDefParseError::Toml {
-        error: alloc::format!("artifact deleted pending commit: `{path}`"),
-    }
-}
-
-fn effective_state_from_slot_overlay_bytes(
-    bytes: &[u8],
-    source_path: &lpc_model::SlotPath,
-    ctx: &ParseCtx<'_>,
-    fallback: &NodeDefState,
-) -> NodeDefState {
-    match parse_toml_bytes(ctx, bytes) {
-        NodeDefState::Loaded(root) => {
-            def_state_at_source(&root, source_path).unwrap_or(fallback.clone())
-        }
-        other => other,
-    }
-}
-
-fn def_state_at_source(root: &NodeDef, source_path: &lpc_model::SlotPath) -> Option<NodeDefState> {
+pub(crate) fn def_state_at_source(root: &NodeDef, source_path: &SlotPath) -> Option<NodeDefState> {
     if source_path.is_root() {
         return Some(NodeDefState::Loaded(root.clone()));
     }
-    for site in collect_invocations(root, &lpc_model::SlotPath::root()) {
+    for site in collect_invocations(root, &SlotPath::root()) {
         if site.path == *source_path {
             return match &site.invocation {
                 NodeInvocation::Unset | NodeInvocation::Ref(_) => None,

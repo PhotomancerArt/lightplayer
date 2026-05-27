@@ -6,9 +6,7 @@ use alloc::vec::Vec;
 use lpc_model::{ArtifactSpec, Revision};
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath, LpPathBuf};
 
-use super::{
-    ArtifactEntry, ArtifactError, ArtifactLoc, ArtifactReadFailure, ArtifactReadState,
-};
+use super::{ArtifactEntry, ArtifactError, ArtifactLoc, ArtifactReadFailure, ArtifactReadState};
 
 /// Catalog of project file artifacts keyed by [`ArtifactLoc`].
 ///
@@ -31,11 +29,7 @@ impl ArtifactStore {
     }
 
     /// Register a resolved location, or return the existing entry's location.
-    pub fn register_location(
-        &mut self,
-        location: ArtifactLoc,
-        frame: Revision,
-    ) -> ArtifactLoc {
+    pub fn register_location(&mut self, location: ArtifactLoc, frame: Revision) -> ArtifactLoc {
         if let Some(entry) = self.by_location.get(&location) {
             return entry.location.clone();
         }
@@ -80,7 +74,7 @@ impl ArtifactStore {
             .map(|entry| entry.location.clone())
     }
 
-    pub fn locations(&self) -> impl Iterator<Item =ArtifactLoc> + '_ {
+    pub fn locations(&self) -> impl Iterator<Item = ArtifactLoc> + '_ {
         self.by_location
             .values()
             .map(|entry| entry.location.clone())

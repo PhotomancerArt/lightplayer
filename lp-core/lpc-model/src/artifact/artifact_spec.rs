@@ -94,10 +94,7 @@ mod tests {
 
     #[test]
     fn display_normalizes_path() {
-        assert_eq!(
-            ArtifactSpec::path("./fluid.vis").to_string(),
-            "fluid.vis",
-        );
+        assert_eq!(ArtifactSpec::path("./fluid.vis").to_string(), "fluid.vis",);
     }
 
     #[test]

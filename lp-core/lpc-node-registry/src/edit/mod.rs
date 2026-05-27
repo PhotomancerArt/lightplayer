@@ -1,26 +1,26 @@
-//! Edit vocabulary, slot overlay storage, and apply.
+//! Edit vocabulary, artifact overlay storage, and apply.
 
 pub(crate) mod apply;
 mod artifact_edit;
+mod artifact_overlay;
 mod asset_edit;
 mod commit_error;
-mod def_draft;
 mod edit_batch;
 mod edit_error;
 mod edit_target;
+mod pending_slot_key;
 mod slot_edit;
-mod slot_overlay;
 
 pub use apply::{apply_artifact_edit, apply_edit_batch, require_absolute_path};
 pub use artifact_edit::ArtifactEdit;
+pub use artifact_overlay::{ArtifactEdits, ArtifactOverlay, PendingAsset};
 pub use asset_edit::AssetEdit;
 pub use commit_error::CommitError;
-pub use def_draft::DefDraft;
 pub use edit_batch::{EditBatch, EditBatchId};
 pub use edit_error::EditError;
 pub use edit_target::EditTarget;
+pub use pending_slot_key::{parse_slot_path_key, slot_edit_key, slot_path_key};
 pub use slot_edit::SlotEdit;
-pub use slot_overlay::{SlotOverlay, SlotOverlayEntry};
 
 #[deprecated(note = "renamed to ArtifactEdit")]
 pub type ArtifactChange = ArtifactEdit;
@@ -34,12 +34,8 @@ pub type ChangeSet = EditBatch;
 pub type ChangeSetId = EditBatchId;
 #[deprecated(note = "renamed to EditError")]
 pub type ChangeError = EditError;
-#[deprecated(note = "renamed to SlotOverlay")]
-pub type ChangeOverlay = SlotOverlay;
-#[deprecated(note = "renamed to SlotOverlayEntry")]
-pub type OverlayEntry = SlotOverlayEntry;
-#[deprecated(note = "renamed to DefDraft")]
-pub type SlotDraft = DefDraft;
+#[deprecated(note = "renamed to ArtifactOverlay")]
+pub type ChangeOverlay = ArtifactOverlay;
 
 #[cfg(test)]
 mod tests {

@@ -629,8 +629,8 @@ mod tests {
         VisualSampleTarget, texel_center_to_uv_q16,
     };
     use lpc_model::{
-        ArtifactSpec, MapSlot, NodeDef, NodeInvocation, Revision, SlotDataAccess,
-        StaticSlotShape, TextureDef, TreePath,
+        ArtifactSpec, MapSlot, NodeDef, NodeInvocation, Revision, SlotDataAccess, StaticSlotShape,
+        TextureDef, TreePath,
     };
     use lpc_wire::{WireChildKind, WireSlotIndex};
 

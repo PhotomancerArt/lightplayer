@@ -201,10 +201,12 @@ impl ProjectLoader {
                         reason: String::from("node invocation ref path is empty"),
                     });
                 }
-                let artifact_specifier = ArtifactSpec::parse(path_slot.value().as_str())
-                    .map_err(|err| ProjectLoadError::InvalidSourcePath {
-                        path: path_slot.value().as_str().to_string(),
-                        reason: err.to_string(),
+                let artifact_specifier =
+                    ArtifactSpec::parse(path_slot.value().as_str()).map_err(|err| {
+                        ProjectLoadError::InvalidSourcePath {
+                            path: path_slot.value().as_str().to_string(),
+                            reason: err.to_string(),
+                        }
                     })?;
                 let artifact_path =
                     resolve_child_artifact_specifier(containing_file, &artifact_specifier)?;

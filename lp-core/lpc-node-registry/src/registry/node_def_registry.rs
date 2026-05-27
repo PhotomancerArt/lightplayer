@@ -9,7 +9,8 @@ use lpfs::{FsEvent, LpFs, LpPath, LpPathBuf};
 
 use crate::edit::apply::apply_asset_op;
 use crate::edit::{
-    ArtifactEdit, CommitError, EditBatch, EditError, EditTarget, SlotOverlay, require_absolute_path,
+    ArtifactEdit, ArtifactEdits, ArtifactOverlay, CommitError, EditBatch, EditError, EditTarget,
+    require_absolute_path,
 };
 use crate::{ArtifactLoc, ArtifactStore};
 
@@ -27,10 +28,11 @@ use super::{NodeDefEntry, NodeDefLoc, NodeDefState, NodeDefUpdates, ParseCtx, Re
 /// Bootstrap with [`Self::load_root`], react to filesystem edits via
 /// [`Self::sync`] / [`Self::sync_fs`], and apply client edits through
 /// [`Self::apply_edit_batch`] → [`Self::commit`] or [`Self::discard_slot_overlay`].
+/// Pending edits are address-keyed current slot/asset changes in [`ArtifactOverlay`].
 /// Effective reads use [`crate::NodeDefView`].
 pub struct NodeDefRegistry {
     store: ArtifactStore,
-    overlay: SlotOverlay,
+    overlay: ArtifactOverlay,
     defs: BTreeMap<NodeDefLoc, NodeDefEntry>,
     root: Option<NodeDefLoc>,
 }
@@ -45,7 +47,7 @@ impl NodeDefRegistry {
     pub fn new() -> Self {
         Self {
             store: ArtifactStore::new(),
-            overlay: SlotOverlay::new(),
+            overlay: ArtifactOverlay::new(),
             defs: BTreeMap::new(),
             root: None,
         }
@@ -102,13 +104,13 @@ impl NodeDefRegistry {
                     pending_changed |= self.remove_pending_edit(target)?;
                 }
                 SyncOp::ClearPending => {
-                    if self.slot_overlay_active() {
+                    if self.overlay_active() {
                         self.overlay.clear();
                         pending_changed = true;
                     }
                 }
                 SyncOp::Commit => {
-                    let had_pending = self.slot_overlay_active();
+                    let had_pending = self.overlay_active();
                     let result = commit::commit_slot_overlay(self, fs, frame, ctx)?;
                     committed.merge(result);
                     pending_changed |= had_pending;
@@ -176,7 +178,8 @@ impl NodeDefRegistry {
     /// Drop pending overlay entry for `target`. Returns whether an entry existed.
     pub fn remove_pending_edit(&mut self, target: EditTarget) -> Result<bool, EditError> {
         let path = self.resolve_edit_target(target)?;
-        Ok(self.overlay.remove_path(LpPath::new(path.as_str())))
+        let location = self.location_for_pending_path(LpPath::new(path.as_str()));
+        Ok(self.overlay.remove(&location))
     }
 
     pub fn root_loc(&self) -> Option<&NodeDefLoc> {
@@ -203,8 +206,9 @@ impl NodeDefRegistry {
         let path = self.resolve_edit_target(change.target().clone())?;
         match change {
             ArtifactEdit::Asset { ops, .. } => {
+                let location = self.location_for_pending_path(LpPath::new(path.as_str()));
                 for op in ops {
-                    apply_asset_op(&mut self.overlay, path.clone(), op)?;
+                    apply_asset_op(&mut self.overlay, location.clone(), op)?;
                 }
             }
             ArtifactEdit::Slot { ops, .. } => {
@@ -253,19 +257,48 @@ impl NodeDefRegistry {
         }
     }
 
-    /// Whether any overlay entries are pending.
-    pub fn slot_overlay_active(&self) -> bool {
+    /// Whether any artifact has pending edits.
+    pub fn overlay_active(&self) -> bool {
         !self.overlay.is_empty()
+    }
+
+    /// Pending edits for one artifact, if any.
+    pub fn pending_at(&self, location: &ArtifactLoc) -> Option<&ArtifactEdits> {
+        self.overlay.pending_at(location)
+    }
+
+    /// Iterate artifacts with pending edits (stable order).
+    pub fn iter_pending(&self) -> impl Iterator<Item = (&ArtifactLoc, &ArtifactEdits)> + '_ {
+        self.overlay.iter()
+    }
+
+    /// Whether a specific slot path has a pending edit within an artifact.
+    pub fn has_pending_slot(&self, location: &ArtifactLoc, path: &SlotPath) -> bool {
+        self.overlay
+            .pending_at(location)
+            .is_some_and(|pending| pending.has_pending_at_path(path))
+    }
+
+    /// Whether any overlay entries are pending.
+    #[deprecated(note = "renamed to overlay_active")]
+    pub fn slot_overlay_active(&self) -> bool {
+        self.overlay_active()
     }
 
     /// Whether `path` has a pending overlay entry.
     pub fn slot_overlay_contains_path(&self, path: &LpPath) -> bool {
-        self.overlay.contains_path(path)
+        let location = self.location_for_pending_path(path);
+        self.overlay.contains(&location)
     }
 
-    /// Pending overlay bytes for `path`, if any.
+    /// Pending overlay bytes for `path`, if any (asset replace-body only).
     pub fn slot_overlay_bytes(&self, path: &LpPath) -> Option<&[u8]> {
-        self.overlay.get_bytes(path)
+        let location = self.location_for_pending_path(path);
+        let pending = self.overlay.pending_at(&location)?;
+        match pending.asset_pending() {
+            crate::edit::PendingAsset::ReplaceBody(bytes) => Some(bytes.as_slice()),
+            _ => None,
+        }
     }
 
     pub(crate) fn artifact_location_for_path(&self, path: &LpPath) -> Option<ArtifactLoc> {
@@ -277,14 +310,6 @@ impl NodeDefRegistry {
         self.store
             .location_for_path(path)
             .and_then(|location| self.store.revision(&location))
-    }
-
-    pub(crate) fn read_committed_artifact_bytes(
-        &mut self,
-        location: &ArtifactLoc,
-        fs: &dyn LpFs,
-    ) -> Result<Vec<u8>, crate::ArtifactError> {
-        self.store.read_bytes(location, fs)
     }
 
     fn resolve_edit_target(&self, target: EditTarget) -> Result<LpPathBuf, EditError> {
@@ -342,12 +367,11 @@ impl NodeDefRegistry {
                     if path_text.is_empty() {
                         continue;
                     }
-                    let specifier =
-                        lpc_model::ArtifactSpec::parse(path_text).map_err(|err| {
-                            RegistryError::SpecifierResolution {
-                                message: String::from(err),
-                            }
-                        })?;
+                    let specifier = lpc_model::ArtifactSpec::parse(path_text).map_err(|err| {
+                        RegistryError::SpecifierResolution {
+                            message: String::from(err),
+                        }
+                    })?;
                     let child_path = resolve_node_specifier(file_path, &specifier)?;
                     let child_location = self.store.register_file(child_path.clone(), frame);
                     let child_source = NodeDefLoc::artifact_root(child_location.clone());
@@ -492,12 +516,11 @@ impl NodeDefRegistry {
                     if path_text.is_empty() {
                         continue;
                     }
-                    let specifier =
-                        lpc_model::ArtifactSpec::parse(path_text).map_err(|err| {
-                            RegistryError::SpecifierResolution {
-                                message: String::from(err),
-                            }
-                        })?;
+                    let specifier = lpc_model::ArtifactSpec::parse(path_text).map_err(|err| {
+                        RegistryError::SpecifierResolution {
+                            message: String::from(err),
+                        }
+                    })?;
                     let child_path = resolve_node_specifier(file_path, &specifier)?;
                     let child_location = self.store.register_file(child_path.clone(), frame);
                     let child_inventory = self.derive_inventory(
@@ -676,6 +699,9 @@ mod commit;
 
 #[path = "effective_read.rs"]
 mod effective_read;
+
+#[path = "projection.rs"]
+mod projection;
 
 #[path = "slot_apply.rs"]
 mod slot_apply;

@@ -2,8 +2,8 @@
 //!
 //! [`ArtifactStore`] owns the project file catalog ([`ArtifactLoc`] URIs,
 //! freshness, transient reads). [`NodeDefRegistry`] is a consumer: parsed
-//! def entries plus a [`SlotOverlay`] for uncommitted client edits.
-//! [`NodeDefView`] exposes effective reads (slot overlay ∪ committed). Apply an
+//! def entries plus an [`ArtifactOverlay`] for uncommitted client edits.
+//! [`NodeDefView`] exposes effective reads (overlay ∪ committed). Apply an
 //! [`EditBatch`] with [`NodeDefRegistry::apply_edit_batch`], then [`NodeDefRegistry::commit`] or
 //! [`NodeDefRegistry::discard_slot_overlay`].
 //!
@@ -35,8 +35,9 @@ pub use artifact::{
 #[cfg(feature = "diff")]
 pub use diff::{DiffError, ProjectSnapshot, assert_equivalent, diff};
 pub use edit::{
-    ArtifactEdit, AssetEdit, CommitError, DefDraft, EditBatch, EditBatchId, EditError, EditTarget,
-    SlotEdit, SlotOverlay, SlotOverlayEntry,
+    ArtifactEdit, ArtifactEdits, ArtifactOverlay, AssetEdit, CommitError, EditBatch, EditBatchId,
+    EditError, EditTarget, PendingAsset, SlotEdit, parse_slot_path_key, slot_edit_key,
+    slot_path_key,
 };
 #[allow(deprecated, reason = "legacy sync op alias for migration")]
 pub use registry::RegistryChange;
@@ -55,7 +56,7 @@ pub use view::NodeDefView;
 mod legacy_edit_names {
     pub use super::edit::{
         ArtifactChange, ArtifactOp, ArtifactTarget, ChangeError, ChangeOverlay, ChangeSet,
-        ChangeSetId, OverlayEntry, SlotDraft,
+        ChangeSetId,
     };
 }
 #[deprecated(note = "renamed to edit module")]
@@ -63,5 +64,4 @@ pub use edit as change;
 #[allow(deprecated, reason = "legacy edit type aliases for migration")]
 pub use legacy_edit_names::{
     ArtifactChange, ArtifactOp, ArtifactTarget, ChangeError, ChangeOverlay, ChangeSet, ChangeSetId,
-    OverlayEntry, SlotDraft,
 };

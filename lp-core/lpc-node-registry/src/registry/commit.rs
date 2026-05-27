@@ -4,14 +4,16 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_model::Revision;
+use lpc_model::{Revision, current_revision};
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath, LpPathBuf};
 
-use crate::edit::{CommitError, SlotOverlayEntry};
+use crate::ArtifactStore;
+use crate::edit::{CommitError, PendingAsset};
 
+use super::projection::project_artifact_bytes;
 use super::{
     NodeDefLoc, NodeDefRegistry, NodeDefUpdates, ParseCtx, SyncResult, build_change_details,
-    dedupe_locations, serialize_slot_draft,
+    dedupe_locations,
 };
 
 pub(crate) fn commit_slot_overlay(
@@ -24,7 +26,7 @@ pub(crate) fn commit_slot_overlay(
         return Ok(SyncResult::default());
     }
 
-    let plan = SlotOverlayCommitPlan::from_slot_overlay(&registry.overlay, ctx)?;
+    let plan = OverlayCommitPlan::from_overlay(&registry.overlay, &mut registry.store, fs, ctx)?;
     let known_paths: BTreeMap<String, ()> = registry
         .store
         .locations()
@@ -89,7 +91,7 @@ pub(crate) fn commit_slot_overlay(
 
 fn sync_committed_def_artifacts(
     registry: &mut NodeDefRegistry,
-    plan: &SlotOverlayCommitPlan,
+    plan: &OverlayCommitPlan,
     fs: &dyn LpFs,
     frame: Revision,
     ctx: &ParseCtx<'_>,
@@ -118,28 +120,40 @@ fn sync_committed_def_artifacts(
     Ok(())
 }
 
-struct SlotOverlayCommitPlan {
+struct OverlayCommitPlan {
     writes: Vec<(LpPathBuf, Vec<u8>)>,
     deletes: Vec<LpPathBuf>,
 }
 
-impl SlotOverlayCommitPlan {
-    fn from_slot_overlay(
-        overlay: &crate::edit::SlotOverlay,
+impl OverlayCommitPlan {
+    fn from_overlay(
+        overlay: &crate::edit::ArtifactOverlay,
+        store: &mut ArtifactStore,
+        fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
     ) -> Result<Self, CommitError> {
+        let frame = current_revision();
         let mut writes = Vec::new();
         let mut deletes = Vec::new();
-        for (path, entry) in overlay.iter_entries() {
-            match entry {
-                SlotOverlayEntry::Deleted => deletes.push(path),
-                SlotOverlayEntry::Bytes(bytes) => writes.push((path, bytes.clone())),
-                SlotOverlayEntry::DefDraft(draft) => {
-                    let bytes = serialize_slot_draft(&draft.def, ctx)?;
-                    writes.push((path, bytes));
+
+        for (location, pending) in overlay.iter() {
+            let Some(path) = location.file_path().cloned() else {
+                continue;
+            };
+            match &pending.asset_edit {
+                PendingAsset::Delete => deletes.push(path),
+                PendingAsset::ReplaceBody(bytes) => writes.push((path, bytes.clone())),
+                PendingAsset::None => {
+                    let committed = store.read_bytes(&location, fs).ok();
+                    let bytes =
+                        project_artifact_bytes(committed.as_deref(), Some(pending), ctx, frame)?;
+                    if let Some(bytes) = bytes {
+                        writes.push((path, bytes));
+                    }
                 }
             }
         }
+
         Ok(Self { writes, deletes })
     }
 
@@ -179,34 +193,44 @@ fn is_def_artifact_path(path: &LpPath) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::edit::{DefDraft, SlotOverlay};
-    use lpc_model::{NodeDef, SlotShapeRegistry};
+    use crate::edit::{ArtifactOverlay, SlotEdit};
+    use lpc_model::{LpValue, Revision, SlotPath, SlotShapeRegistry};
+    use lpfs::LpFsMemory;
 
     #[test]
-    fn overlay_commit_plan_serializes_slot_draft() {
-        let mut slot_overlay = SlotOverlay::new();
-        slot_overlay.apply_def_draft(
-            LpPathBuf::from("/clock.toml"),
-            DefDraft::new(
-                NodeDef::from_toml_str(
-                    r#"
+    fn overlay_commit_plan_folds_slot_pending() {
+        let mut overlay = ArtifactOverlay::new();
+        let location = crate::ArtifactLoc::file("/clock.toml");
+        overlay
+            .ensure_pending(location)
+            .upsert_slot(SlotEdit::AssignValue {
+                path: SlotPath::parse("controls.rate").unwrap(),
+                value: LpValue::F32(2.0),
+            });
+
+        let mut fs = LpFsMemory::new();
+        fs.write_file_mut(
+            LpPathBuf::from("/clock.toml").as_path(),
+            br#"
 kind = "Clock"
 
 [controls]
 rate = 1.0
 "#,
-                )
-                .expect("clock"),
-            ),
-        );
+        )
+        .unwrap();
+
+        let mut store = ArtifactStore::new();
+        store.register_file(LpPathBuf::from("/clock.toml"), Revision::new(1));
+
         let shapes = SlotShapeRegistry::default();
         let ctx = ParseCtx { shapes: &shapes };
-        let plan = SlotOverlayCommitPlan::from_slot_overlay(&slot_overlay, &ctx).unwrap();
+        let plan = OverlayCommitPlan::from_overlay(&overlay, &mut store, &fs, &ctx).unwrap();
         assert_eq!(plan.writes.len(), 1);
         assert!(
             core::str::from_utf8(&plan.writes[0].1)
                 .unwrap()
-                .contains("rate = 1")
+                .contains("rate = 2")
         );
     }
 }

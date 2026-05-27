@@ -34,4 +34,14 @@ impl SlotEdit {
             Self::UseOption { .. } => "use_option",
         }
     }
+
+    pub fn path(&self) -> &SlotPath {
+        match self {
+            Self::UseEnumVariant { path, .. }
+            | Self::AssignValue { path, .. }
+            | Self::MapInsert { path, .. }
+            | Self::MapRemove { path, .. }
+            | Self::UseOption { path, .. } => path,
+        }
+    }
 }

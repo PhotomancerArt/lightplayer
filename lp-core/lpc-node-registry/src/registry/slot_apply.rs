@@ -11,7 +11,7 @@ use lpc_model::{
 };
 use lpfs::{LpFs, LpPath, LpPathBuf};
 
-use crate::edit::{DefDraft, EditError, SlotEdit, SlotOverlayEntry};
+use crate::edit::{EditError, PendingAsset, SlotEdit};
 
 use super::{NodeDefRegistry, ParseCtx};
 
@@ -20,57 +20,24 @@ impl NodeDefRegistry {
         &mut self,
         path: LpPathBuf,
         op: &SlotEdit,
-        fs: &dyn LpFs,
-        ctx: &ParseCtx<'_>,
-        frame: Revision,
+        _fs: &dyn LpFs,
+        _ctx: &ParseCtx<'_>,
+        _frame: Revision,
     ) -> Result<(), EditError> {
         ensure_toml_path(&path)?;
+        let location = self.location_for_pending_path(LpPath::new(path.as_str()));
         if matches!(
-            self.overlay.entry(LpPath::new(path.as_str())),
-            Some(SlotOverlayEntry::Deleted)
+            self.overlay.pending_at(&location).map(|p| &p.asset_edit),
+            Some(PendingAsset::Delete)
         ) {
             return Err(EditError::InvalidPath {
                 message: alloc::format!("artifact deleted pending commit: `{}`", path.as_str()),
             });
         }
 
-        let mut def = self.fork_slot_draft(LpPath::new(path.as_str()), fs, ctx)?;
-        apply_op_to_def(&mut def, op, ctx, frame)?;
-        self.overlay.apply_def_draft(path, DefDraft::new(def));
+        let pending = self.overlay.ensure_pending(location);
+        pending.upsert_slot(op.clone());
         Ok(())
-    }
-
-    fn fork_slot_draft(
-        &mut self,
-        path: &LpPath,
-        fs: &dyn LpFs,
-        ctx: &ParseCtx<'_>,
-    ) -> Result<NodeDef, EditError> {
-        match self.overlay.entry(path) {
-            Some(SlotOverlayEntry::DefDraft(draft)) => Ok(draft.def.clone()),
-            Some(SlotOverlayEntry::Bytes(bytes)) => parse_def_bytes(bytes.as_slice(), ctx),
-            Some(SlotOverlayEntry::Deleted) => Err(EditError::InvalidPath {
-                message: alloc::format!("artifact deleted pending commit: `{}`", path.as_str()),
-            }),
-            None => self.fork_committed_def(path, fs, ctx),
-        }
-    }
-
-    fn fork_committed_def(
-        &mut self,
-        path: &LpPath,
-        fs: &dyn LpFs,
-        ctx: &ParseCtx<'_>,
-    ) -> Result<NodeDef, EditError> {
-        let Some(location) = self.artifact_location_for_path(path) else {
-            return Ok(NodeDef::default());
-        };
-        let bytes = self
-            .read_committed_artifact_bytes(&location, fs)
-            .map_err(|err| EditError::Parse {
-                message: alloc::format!("read `{path:?}` for slot fork: {err:?}"),
-            })?;
-        parse_def_bytes(&bytes, ctx)
     }
 }
 
@@ -108,7 +75,7 @@ fn ensure_toml_path(path: &LpPathBuf) -> Result<(), EditError> {
     }
 }
 
-fn parse_def_bytes(bytes: &[u8], ctx: &ParseCtx<'_>) -> Result<NodeDef, EditError> {
+pub(crate) fn parse_def_bytes(bytes: &[u8], ctx: &ParseCtx<'_>) -> Result<NodeDef, EditError> {
     let text = core::str::from_utf8(bytes).map_err(|err| EditError::Parse {
         message: err.to_string(),
     })?;
@@ -117,7 +84,7 @@ fn parse_def_bytes(bytes: &[u8], ctx: &ParseCtx<'_>) -> Result<NodeDef, EditErro
     })
 }
 
-fn apply_op_to_def(
+pub(crate) fn apply_op_to_def(
     def: &mut NodeDef,
     op: &SlotEdit,
     ctx: &ParseCtx<'_>,
