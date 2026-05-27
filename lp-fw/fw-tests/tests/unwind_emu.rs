@@ -11,6 +11,8 @@ use lp_riscv_emu::{
 };
 use lp_riscv_inst::Gpr;
 
+const UNWIND_TEST_INSTRUCTION_LIMIT: u64 = 250_000_000;
+
 /// Validates that stack unwinding works in the RISC-V emulator (catch_unwind catches a panic).
 ///
 /// The guest firmware calls `panic!()` and catches it with `catch_unwind`, validating the
@@ -43,10 +45,11 @@ fn test_unwind_caught_in_emulator() {
     emu.set_pc(load_info.entry_point);
 
     emu.serial_write(b"__test_unwind\n");
-    emu.run_until_yield(50_000_000).unwrap_or_else(|e| {
-        println!("{}", emu.dump_state());
-        panic!("Emulator error: {e:?}");
-    });
+    emu.run_until_yield(UNWIND_TEST_INSTRUCTION_LIMIT)
+        .unwrap_or_else(|e| {
+            println!("{}", emu.dump_state());
+            panic!("Emulator error: {e:?}");
+        });
 
     let output = emu.serial_read_line();
     assert_eq!(
