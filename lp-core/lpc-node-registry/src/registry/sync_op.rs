@@ -2,7 +2,7 @@
 
 use lpfs::{FsEvent, LpPathBuf};
 
-use crate::edit::{AssetEdit, SlotEdit};
+use crate::edit_model::{AssetEdit, SlotEdit};
 
 /// One registry sync operation (filesystem or pending-edit CRUD).
 #[derive(Clone, Debug, PartialEq)]

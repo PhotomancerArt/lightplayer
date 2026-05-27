@@ -8,37 +8,11 @@ use lpc_model::{
     ensure_slot_present, remove_slot_map_entry, set_slot_option_none, set_slot_value,
     set_slot_variant_default,
 };
-use lpfs::{LpFs, LpPath, LpPathBuf};
 
-use crate::registry::{NodeDefRegistry, ParseCtx};
+use crate::edit_model::SlotEdit;
+use crate::registry::ParseCtx;
 
 use super::EditError;
-
-impl NodeDefRegistry {
-    pub(crate) fn queue_slot_edit(
-        &mut self,
-        path: LpPathBuf,
-        op: &super::SlotEdit,
-        _fs: &dyn LpFs,
-        _ctx: &ParseCtx<'_>,
-        _frame: Revision,
-    ) -> Result<(), EditError> {
-        ensure_toml_path(&path)?;
-        let location = self.location_for_pending_path(LpPath::new(path.as_str()));
-        if matches!(
-            self.overlay.pending_at(&location).map(|p| &p.asset_edit),
-            Some(super::AssetEdit::Delete)
-        ) {
-            return Err(EditError::InvalidPath {
-                message: alloc::format!("artifact deleted pending commit: `{}`", path.as_str()),
-            });
-        }
-
-        let pending = self.overlay.ensure_pending(location);
-        pending.upsert_slot(op.clone());
-        Ok(())
-    }
-}
 
 pub fn serialize_slot_draft(def: &NodeDef, ctx: &ParseCtx<'_>) -> Result<Vec<u8>, EditError> {
     let text = NodeDef::write_toml(def, ctx.shapes).map_err(|err| EditError::Serialize {
@@ -51,7 +25,7 @@ pub fn serialize_slot_draft(def: &NodeDef, ctx: &ParseCtx<'_>) -> Result<Vec<u8>
 #[cfg(feature = "diff")]
 pub(crate) fn apply_ops_to_node_def(
     def: &mut NodeDef,
-    ops: &[super::SlotEdit],
+    ops: &[SlotEdit],
     ctx: &ParseCtx<'_>,
     frame: Revision,
 ) -> Result<(), EditError> {
@@ -59,19 +33,6 @@ pub(crate) fn apply_ops_to_node_def(
         apply_op_to_def(def, op, ctx, frame)?;
     }
     Ok(())
-}
-
-fn ensure_toml_path(path: &LpPathBuf) -> Result<(), EditError> {
-    if path.as_str().ends_with(".toml") {
-        Ok(())
-    } else {
-        Err(EditError::InvalidPath {
-            message: alloc::format!(
-                "slot ops require a `.toml` artifact path, got `{}`",
-                path.as_str()
-            ),
-        })
-    }
 }
 
 pub(crate) fn parse_def_bytes(bytes: &[u8], ctx: &ParseCtx<'_>) -> Result<NodeDef, EditError> {
@@ -85,21 +46,19 @@ pub(crate) fn parse_def_bytes(bytes: &[u8], ctx: &ParseCtx<'_>) -> Result<NodeDe
 
 pub(crate) fn apply_op_to_def(
     def: &mut NodeDef,
-    op: &super::SlotEdit,
+    op: &SlotEdit,
     ctx: &ParseCtx<'_>,
     frame: Revision,
 ) -> Result<(), EditError> {
     match op {
-        super::SlotEdit::EnsurePresent { path } => {
-            apply_ensure_present(def, ctx, path, frame).map(drop)
-        }
-        super::SlotEdit::AssignValue { path, value } => {
+        SlotEdit::EnsurePresent { path } => apply_ensure_present(def, ctx, path, frame).map(drop),
+        SlotEdit::AssignValue { path, value } => {
             let value_path = apply_ensure_present(def, ctx, path, frame)?;
             mutate_def(def, |root| {
                 set_slot_value(root, ctx.shapes, &value_path, frame, value.clone())
             })
         }
-        super::SlotEdit::Remove { path } => apply_remove(def, ctx, path, frame),
+        SlotEdit::Remove { path } => apply_remove(def, ctx, path, frame),
     }
 }
 

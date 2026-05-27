@@ -5,14 +5,12 @@ use alloc::collections::BTreeMap;
 use lpc_model::{Revision, SlotPath};
 use lpfs::{LpFs, LpPath, LpPathBuf};
 
-use crate::edit::{
-    ArtifactEdits, ArtifactOverlay, AssetEdit, CommitError, EditError, SlotEdit,
-    require_absolute_path,
-};
+use crate::edit_apply::EditError;
+use crate::edit_model::{ArtifactEdits, ArtifactOverlay, AssetEdit, SlotEdit};
 use crate::{ArtifactLoc, ArtifactStore};
 
 use super::sync_result::SyncResult;
-use super::{NodeDefEntry, NodeDefLoc, NodeDefState, ParseCtx};
+use super::{CommitError, NodeDefEntry, NodeDefLoc, NodeDefState, ParseCtx};
 
 /// Owner of parsed node definitions keyed by [`NodeDefLoc`].
 ///
@@ -69,7 +67,7 @@ impl NodeDefRegistry {
         path: LpPathBuf,
         asset: AssetEdit,
     ) -> Result<(), EditError> {
-        require_absolute_path(path.clone())?;
+        super::path_validation::require_absolute_path(path.clone())?;
         let location = self.location_for_pending_path(LpPath::new(path.as_str()));
         self.overlay.ensure_pending(location).set_asset(asset);
         Ok(())
@@ -167,7 +165,7 @@ impl NodeDefRegistry {
         let location = self.location_for_pending_path(path);
         let pending = self.overlay.pending_at(&location)?;
         match pending.asset_pending() {
-            crate::edit::AssetEdit::ReplaceBody(bytes) => Some(bytes.as_slice()),
+            AssetEdit::ReplaceBody(bytes) => Some(bytes.as_slice()),
             _ => None,
         }
     }

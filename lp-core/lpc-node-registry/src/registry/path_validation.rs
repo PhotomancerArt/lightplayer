@@ -2,7 +2,7 @@ use alloc::format;
 
 use lpfs::LpPathBuf;
 
-use super::EditError;
+use crate::edit_apply::EditError;
 
 pub fn require_absolute_path(path: LpPathBuf) -> Result<LpPathBuf, EditError> {
     if !path.is_absolute() {

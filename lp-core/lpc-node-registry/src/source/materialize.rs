@@ -6,7 +6,7 @@ use alloc::string::{String, ToString};
 use lpc_model::{LpPathBuf, Revision, SlotPath, SourceFileSlot, SourcePath};
 use lpfs::LpFs;
 
-use crate::edit::{ArtifactOverlay, AssetEdit};
+use crate::edit_model::{ArtifactOverlay, AssetEdit};
 use crate::{ArtifactError, ArtifactReadFailure, ArtifactStore};
 
 use super::{MaterializedSource, ResolveError, SourceFileRef};
@@ -130,7 +130,7 @@ fn inline_diagnostic_name(ctx: &SourceDiagnosticCtx, extension: &str) -> String 
 mod tests {
     use super::*;
     use crate::ArtifactReadFailure;
-    use crate::edit::{ArtifactOverlay, AssetEdit};
+    use crate::edit_model::{ArtifactOverlay, AssetEdit};
     use crate::source::resolve_source_file;
     use lpc_model::Revision;
     use lpfs::{FsEvent, FsEventKind, LpFsMemory, LpPath, LpPathBuf};

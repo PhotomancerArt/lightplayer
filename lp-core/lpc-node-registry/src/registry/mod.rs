@@ -2,6 +2,8 @@
 
 mod changes;
 mod commit;
+mod commit_error;
+mod effective_projection;
 mod effective_read;
 mod inventory;
 mod load;
@@ -11,6 +13,8 @@ mod node_def_registry;
 mod node_def_state;
 mod node_def_updates;
 mod parse_ctx;
+pub mod path_validation;
+mod queue_edit;
 mod registry_change;
 mod registry_error;
 mod sync;
@@ -20,8 +24,9 @@ mod sync_outcome;
 mod sync_result;
 
 #[cfg(feature = "diff")]
-pub(crate) use crate::edit::apply_ops_to_node_def;
-pub use crate::edit::serialize_slot_draft;
+pub(crate) use crate::edit_apply::apply_ops_to_node_def;
+pub use crate::edit_apply::serialize_slot_draft;
+pub use commit_error::CommitError;
 pub use node_def_entry::NodeDefEntry;
 pub use node_def_loc::NodeDefLoc;
 pub use node_def_registry::NodeDefRegistry;

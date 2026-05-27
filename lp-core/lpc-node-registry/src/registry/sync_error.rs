@@ -1,6 +1,8 @@
 //! Errors from unified registry sync.
 
-use crate::edit::{CommitError, EditError};
+use crate::edit_apply::EditError;
+
+use super::CommitError;
 
 /// Failure applying a [`super::SyncOp`] batch.
 #[derive(Clone, Debug, PartialEq, Eq)]

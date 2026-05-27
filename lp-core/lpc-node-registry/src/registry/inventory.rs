@@ -176,8 +176,10 @@ impl NodeDefRegistry {
         ctx: &ParseCtx<'_>,
     ) -> Result<NodeDefState, RegistryError> {
         match self.store.read_bytes(location, fs) {
-            Ok(bytes) => Ok(crate::edit::parse_toml_bytes(ctx, &bytes)),
-            Err(err) => Ok(NodeDefState::ParseError(crate::edit::read_error_state(err))),
+            Ok(bytes) => Ok(super::effective_projection::parse_toml_bytes(ctx, &bytes)),
+            Err(err) => Ok(NodeDefState::ParseError(
+                super::effective_projection::read_error_state(err),
+            )),
         }
     }
 

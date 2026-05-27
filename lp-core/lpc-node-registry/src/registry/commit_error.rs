@@ -21,10 +21,10 @@ impl fmt::Display for CommitError {
     }
 }
 
-impl From<crate::edit::EditError> for CommitError {
-    fn from(err: crate::edit::EditError) -> Self {
+impl From<crate::edit_apply::EditError> for CommitError {
+    fn from(err: crate::edit_apply::EditError) -> Self {
         match err {
-            crate::edit::EditError::Serialize { message } => Self::Serialize { message },
+            crate::edit_apply::EditError::Serialize { message } => Self::Serialize { message },
             other => Self::Registry {
                 message: alloc::format!("{other}"),
             },

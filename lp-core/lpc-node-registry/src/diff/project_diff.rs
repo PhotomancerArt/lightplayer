@@ -7,7 +7,7 @@ use lpfs::LpPathBuf;
 
 use crate::ArtifactLoc;
 use crate::ParseCtx;
-use crate::edit::{ArtifactOverlay, AssetEdit};
+use crate::edit_model::{ArtifactOverlay, AssetEdit};
 
 use super::DiffError;
 use super::def_diff::diff_node_defs;

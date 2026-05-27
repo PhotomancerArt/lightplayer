@@ -1,52 +1,16 @@
-//! Fold committed artifact state with pending overlay edits.
+//! Registry-shaped effective state projection from pending edits.
 
 use alloc::string::ToString;
-use alloc::vec::Vec;
 
-use lpc_model::{NodeDef, NodeDefParseError, NodeInvocation, Revision, SlotPath, current_revision};
+use lpc_model::{NodeDef, NodeDefParseError, NodeInvocation, SlotPath, current_revision};
 
-use super::{ArtifactEdits, AssetEdit};
-use super::{apply_op_to_def, parse_def_bytes, serialize_slot_draft};
+use crate::edit_apply::{apply_op_to_def, project_artifact_bytes};
+use crate::edit_model::{ArtifactEdits, AssetEdit};
 
-use crate::registry::{NodeDefEntry, NodeDefLoc, NodeDefState, ParseCtx, RegistryError};
-
-/// Effective raw bytes for an artifact (overlay ∪ committed).
-pub fn project_artifact_bytes(
-    committed: Option<&[u8]>,
-    pending: Option<&ArtifactEdits>,
-    ctx: &ParseCtx<'_>,
-    frame: Revision,
-) -> Result<Option<Vec<u8>>, RegistryError> {
-    let Some(pending) = pending else {
-        return Ok(committed.map(<[u8]>::to_vec));
-    };
-
-    match &pending.asset_edit {
-        AssetEdit::Delete => return Ok(None),
-        AssetEdit::ReplaceBody(bytes) => return Ok(Some(bytes.clone())),
-        AssetEdit::None => {}
-    }
-
-    if pending.slot_edits_is_empty() {
-        return Ok(committed.map(<[u8]>::to_vec));
-    }
-
-    let mut def = match committed {
-        Some(bytes) => parse_def_bytes(bytes, ctx).map_err(edit_to_registry)?,
-        None => NodeDef::default(),
-    };
-
-    for edit in pending.slot_edits() {
-        apply_op_to_def(&mut def, edit, ctx, frame).map_err(edit_to_registry)?;
-    }
-
-    serialize_slot_draft(&def, ctx)
-        .map(Some)
-        .map_err(edit_to_registry)
-}
+use super::{NodeDefEntry, NodeDefLoc, NodeDefState, ParseCtx, RegistryError};
 
 /// Effective [`NodeDefState`] for an artifact root.
-pub fn project_artifact_def(
+pub(crate) fn project_artifact_def(
     committed_state: &NodeDefState,
     pending: Option<&ArtifactEdits>,
     ctx: &ParseCtx<'_>,
@@ -97,7 +61,7 @@ pub fn project_artifact_def(
 }
 
 /// Effective state for a registered def location (inline slice of projected root).
-pub fn project_def_at_loc(
+pub(crate) fn project_def_at_loc(
     loc: &NodeDefLoc,
     root_entry: &NodeDefEntry,
     pending: Option<&ArtifactEdits>,
@@ -129,7 +93,19 @@ pub(crate) fn parse_toml_bytes(ctx: &ParseCtx<'_>, bytes: &[u8]) -> NodeDefState
     }
 }
 
-pub(crate) fn def_state_at_path(root: &NodeDef, path: &SlotPath) -> Option<NodeDefState> {
+pub(crate) fn read_error_state(err: crate::ArtifactError) -> NodeDefParseError {
+    NodeDefParseError::Toml {
+        error: alloc::format!("artifact read failed: {err:?}"),
+    }
+}
+
+pub(crate) fn edit_to_registry(err: crate::edit_apply::EditError) -> RegistryError {
+    RegistryError::InvalidPath {
+        message: err.to_string(),
+    }
+}
+
+fn def_state_at_path(root: &NodeDef, path: &SlotPath) -> Option<NodeDefState> {
     if path.is_root() {
         return Some(NodeDefState::Loaded(root.clone()));
     }
@@ -144,87 +120,14 @@ pub(crate) fn def_state_at_path(root: &NodeDef, path: &SlotPath) -> Option<NodeD
     None
 }
 
-pub(crate) fn read_error_state(err: crate::ArtifactError) -> NodeDefParseError {
-    NodeDefParseError::Toml {
-        error: alloc::format!("artifact read failed: {err:?}"),
-    }
-}
-
-fn edit_to_registry(err: crate::edit::EditError) -> RegistryError {
-    RegistryError::InvalidPath {
-        message: err.to_string(),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use lpc_model::{LpValue, NodeDef, Revision, SlotPath, SlotShapeRegistry};
 
     fn ctx<'a>(shapes: &'a SlotShapeRegistry) -> ParseCtx<'a> {
         ParseCtx { shapes }
-    }
-
-    fn clock_def() -> NodeDef {
-        NodeDef::from_toml_str(
-            r#"
-kind = "Clock"
-
-[controls]
-rate = 1.0
-"#,
-        )
-        .expect("clock")
-    }
-
-    #[test]
-    fn slot_pending_changes_effective_rate() {
-        let shapes = SlotShapeRegistry::default();
-        let parse_ctx = ctx(&shapes);
-        let committed = serialize_slot_draft(&clock_def(), &parse_ctx).unwrap();
-        let mut pending = ArtifactEdits::default();
-        pending.upsert_slot(crate::edit::SlotEdit::AssignValue {
-            path: SlotPath::parse("controls.rate").unwrap(),
-            value: LpValue::F32(2.0),
-        });
-
-        let bytes = project_artifact_bytes(
-            Some(&committed),
-            Some(&pending),
-            &parse_ctx,
-            Revision::new(1),
-        )
-        .unwrap()
-        .unwrap();
-        let text = core::str::from_utf8(&bytes).unwrap();
-        assert!(text.contains("rate = 2"));
-    }
-
-    #[test]
-    fn asset_replace_body() {
-        let shapes = SlotShapeRegistry::default();
-        let parse_ctx = ctx(&shapes);
-        let body = b"void main() {}".to_vec();
-        let mut pending = ArtifactEdits::default();
-        pending.set_asset(AssetEdit::ReplaceBody(body.clone()));
-
-        let bytes = project_artifact_bytes(None, Some(&pending), &parse_ctx, Revision::new(1))
-            .unwrap()
-            .unwrap();
-        assert_eq!(bytes, body);
-    }
-
-    #[test]
-    fn asset_delete_returns_none() {
-        let shapes = SlotShapeRegistry::default();
-        let parse_ctx = ctx(&shapes);
-        let mut pending = ArtifactEdits::default();
-        pending.set_asset(AssetEdit::Delete);
-
-        let bytes =
-            project_artifact_bytes(Some(b"x"), Some(&pending), &parse_ctx, Revision::new(1))
-                .unwrap();
-        assert!(bytes.is_none());
     }
 
     #[test]
@@ -245,7 +148,7 @@ rate = 1.0
         .expect("playlist");
         let committed = NodeDefState::Loaded(root);
         let mut pending = ArtifactEdits::default();
-        pending.upsert_slot(crate::edit::SlotEdit::AssignValue {
+        pending.upsert_slot(crate::edit_model::SlotEdit::AssignValue {
             path: SlotPath::parse("entries[0].node.controls.rate").unwrap(),
             value: LpValue::F32(3.0),
         });

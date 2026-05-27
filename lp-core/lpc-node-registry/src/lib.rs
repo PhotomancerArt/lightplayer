@@ -21,6 +21,8 @@ pub mod artifact;
 #[cfg(feature = "diff")]
 pub mod diff;
 pub mod edit;
+pub(crate) mod edit_apply;
+pub mod edit_model;
 pub mod registry;
 pub mod source;
 pub mod view;

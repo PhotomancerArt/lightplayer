@@ -8,11 +8,11 @@ use lpc_model::{Revision, current_revision};
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath, LpPathBuf};
 
 use crate::ArtifactStore;
-use crate::edit::project_artifact_bytes;
-use crate::edit::{AssetEdit, CommitError};
+use crate::edit_apply::project_artifact_bytes;
+use crate::edit_model::{ArtifactOverlay, AssetEdit};
 
 use super::changes::{build_change_details, dedupe_locations};
-use super::{NodeDefLoc, NodeDefRegistry, NodeDefUpdates, ParseCtx, SyncResult};
+use super::{CommitError, NodeDefLoc, NodeDefRegistry, NodeDefUpdates, ParseCtx, SyncResult};
 
 pub(crate) fn commit_slot_overlay(
     registry: &mut NodeDefRegistry,
@@ -125,7 +125,7 @@ struct OverlayCommitPlan {
 
 impl OverlayCommitPlan {
     fn from_overlay(
-        overlay: &crate::edit::ArtifactOverlay,
+        overlay: &ArtifactOverlay,
         store: &mut ArtifactStore,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
@@ -191,7 +191,7 @@ fn is_def_artifact_path(path: &LpPath) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::edit::{ArtifactOverlay, SlotEdit};
+    use crate::edit_model::{ArtifactOverlay, SlotEdit};
     use lpc_model::{LpValue, Revision, SlotPath, SlotShapeRegistry};
     use lpfs::LpFsMemory;
 

@@ -10,7 +10,7 @@ use lpc_model::{
 };
 
 use crate::ParseCtx;
-use crate::edit::SlotEdit;
+use crate::edit_model::SlotEdit;
 use crate::registry::apply_ops_to_node_def;
 
 use super::DiffError;

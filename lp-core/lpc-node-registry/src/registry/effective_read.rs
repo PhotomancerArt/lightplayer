@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use crate::edit::{project_artifact_bytes, project_artifact_def, project_def_at_loc};
+use crate::edit_apply::project_artifact_bytes;
 use crate::source::{
     MaterializeError, MaterializedSource, SourceDiagnosticCtx, materialize_source,
     resolve_source_file,
@@ -11,6 +11,7 @@ use lpc_model::SourceFileSlot;
 use lpc_model::{Revision, current_revision};
 use lpfs::{LpFs, LpPath};
 
+use super::effective_projection::{edit_to_registry, project_artifact_def, project_def_at_loc};
 use super::{NodeDefEntry, NodeDefLoc, NodeDefRegistry, NodeDefState, ParseCtx, RegistryError};
 
 impl NodeDefRegistry {
@@ -30,6 +31,7 @@ impl NodeDefRegistry {
             ctx,
             current_revision(),
         )
+        .map_err(edit_to_registry)
     }
 
     /// Parse effective TOML for an artifact (overlay ∪ base).
