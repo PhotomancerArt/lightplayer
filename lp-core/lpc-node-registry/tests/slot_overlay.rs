@@ -5,8 +5,8 @@ mod common;
 use common::fixtures;
 use lpc_model::{LpValue, NodeDef, Revision, SlotPath, SlotShapeRegistry};
 use lpc_node_registry::{
-    ArtifactEdit, EditTarget, NodeDefEntry, NodeDefId, NodeDefLoc, NodeDefRegistry, NodeDefState,
-    ParseCtx, SlotEdit, serialize_slot_draft,
+    ArtifactEdit, EditTarget, NodeDefEntry, NodeDefLoc, NodeDefRegistry, NodeDefState, ParseCtx,
+    SlotEdit, serialize_slot_draft,
 };
 use lpfs::{LpPath, LpPathBuf};
 
@@ -36,15 +36,11 @@ fn shader_render_order(entry: &NodeDefEntry) -> i32 {
     def.render_order()
 }
 
-fn inline_child_id(registry: &NodeDefRegistry, root: NodeDefId) -> NodeDefId {
-    let artifact = registry.get(&root).unwrap().loc.artifact.clone();
-    registry
-        .get_by_source(&NodeDefLoc {
-            artifact,
-            path: SlotPath::parse("entries[2].node").unwrap(),
-        })
-        .expect("inline child")
-        .id
+fn inline_child_loc(root: &NodeDefLoc) -> NodeDefLoc {
+    NodeDefLoc {
+        artifact: root.artifact.clone(),
+        path: SlotPath::parse("entries[2].node").unwrap(),
+    }
 }
 
 #[test]
@@ -112,7 +108,7 @@ fn c1_slot_draft_serializes_to_toml() {
     assert!(draft_def);
     let effective = registry
         .view()
-        .get(&registry.root_id().unwrap(), &fs, &ctx)
+        .get(registry.root_loc().unwrap(), &fs, &ctx)
         .unwrap();
     let serialized = serialize_slot_draft(
         match effective.state {
@@ -141,7 +137,7 @@ fn c2_playlist_slot_patch_committed_children_unchanged() {
     let root = registry
         .load_root(&fs, LpPath::new("/playlist.toml"), Revision::new(1), &ctx)
         .unwrap();
-    let child = inline_child_id(&registry, root);
+    let child = inline_child_loc(&root);
     let child_before = registry.get(&child).unwrap().clone();
     let committed_idle = playlist_idle_entry(registry.get(&root).unwrap());
 
@@ -175,7 +171,7 @@ fn c2_inline_child_slot_patch_visible_in_view() {
     let root = registry
         .load_root(&fs, LpPath::new("/playlist.toml"), Revision::new(1), &ctx)
         .unwrap();
-    let child = inline_child_id(&registry, root);
+    let child = inline_child_loc(&root);
     let before = registry.get(&child).unwrap().clone();
 
     apply_artifact_edit(

@@ -64,7 +64,7 @@ fn a1_roundtrip_load_root_after_commit() {
     loaded
         .load_root(&fs, LpPath::new("/project.toml"), Revision::new(3), &ctx)
         .expect("load_root");
-    assert!(loaded.root_id().is_some());
+    assert!(loaded.root_loc().is_some());
 }
 
 #[test]

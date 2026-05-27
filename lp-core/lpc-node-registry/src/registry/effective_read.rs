@@ -14,7 +14,7 @@ use crate::source::{
 };
 use lpc_model::{NodeDef, NodeDefParseError, NodeInvocation, Revision, SlotPath, SourceFileSlot};
 
-use super::{NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState, ParseCtx, RegistryError};
+use super::{NodeDefEntry, NodeDefLoc, NodeDefRegistry, NodeDefState, ParseCtx, RegistryError};
 use crate::registry::def_walker::collect_invocations;
 
 impl NodeDefRegistry {
@@ -25,7 +25,7 @@ impl NodeDefRegistry {
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
     ) -> Result<Option<Vec<u8>>, RegistryError> {
-        if let Some(entry) = self.slot_overlay.entry(path) {
+        if let Some(entry) = self.overlay.entry(path) {
             return Ok(match entry {
                 SlotOverlayEntry::Bytes(bytes) => Some(bytes.clone()),
                 SlotOverlayEntry::DefDraft(draft) => {
@@ -55,7 +55,7 @@ impl NodeDefRegistry {
         ctx: &ParseCtx<'_>,
     ) -> Result<NodeDefState, RegistryError> {
         let path = location.file_path().ok_or(RegistryError::UnknownDef)?;
-        if let Some(entry) = self.slot_overlay.entry(LpPath::new(path.as_str())) {
+        if let Some(entry) = self.overlay.entry(LpPath::new(path.as_str())) {
             return Ok(match entry {
                 SlotOverlayEntry::Bytes(bytes) => effective_state_from_slot_overlay_bytes(
                     bytes.as_slice(),
@@ -77,22 +77,23 @@ impl NodeDefRegistry {
     }
 
     /// Effective state for a registered def (overlay ∪ committed cache).
-    pub fn effective_state(&self, id: &NodeDefId, ctx: &ParseCtx<'_>) -> Option<NodeDefState> {
-        let entry = self.entries.get(id)?;
-        let path = entry.loc.artifact.file_path()?;
-        if !self.slot_overlay.contains_path(LpPath::new(path.as_str())) {
+    pub fn effective_state(&self, loc: &NodeDefLoc, ctx: &ParseCtx<'_>) -> Option<NodeDefState> {
+        let entry = self.defs.get(loc)?;
+        let path = loc.artifact.file_path()?;
+        if !self.overlay.contains_path(LpPath::new(path.as_str())) {
             return Some(entry.state.clone());
         }
-        let overlay_entry = self.slot_overlay.entry(LpPath::new(path.as_str()))?;
+        let overlay_entry = self.overlay.entry(LpPath::new(path.as_str()))?;
         Some(match overlay_entry {
             SlotOverlayEntry::Bytes(bytes) => effective_state_from_slot_overlay_bytes(
                 bytes.as_slice(),
-                &entry.loc.path,
+                &loc.path,
                 ctx,
                 &entry.state,
             ),
-            SlotOverlayEntry::DefDraft(draft) => def_state_at_source(&draft.def, &entry.loc.path)
-                .unwrap_or_else(|| entry.state.clone()),
+            SlotOverlayEntry::DefDraft(draft) => {
+                def_state_at_source(&draft.def, &loc.path).unwrap_or_else(|| entry.state.clone())
+            }
             SlotOverlayEntry::Deleted => {
                 NodeDefState::ParseError(slot_overlay_deleted_error(path.as_str()))
             }
@@ -100,9 +101,9 @@ impl NodeDefRegistry {
     }
 
     /// Effective def entry (overlay ∪ base). Always owned.
-    pub fn effective_entry(&self, id: &NodeDefId, ctx: &ParseCtx<'_>) -> Option<NodeDefEntry> {
-        let committed = self.entries.get(id)?.clone();
-        let state = self.effective_state(id, ctx)?;
+    pub fn effective_entry(&self, loc: &NodeDefLoc, ctx: &ParseCtx<'_>) -> Option<NodeDefEntry> {
+        let committed = self.defs.get(loc)?.clone();
+        let state = self.effective_state(loc, ctx)?;
         Some(NodeDefEntry { state, ..committed })
     }
 
@@ -127,7 +128,7 @@ impl NodeDefRegistry {
             &reference,
             slot,
             ctx,
-            Some(&self.slot_overlay),
+            Some(&self.overlay),
         )
     }
 }

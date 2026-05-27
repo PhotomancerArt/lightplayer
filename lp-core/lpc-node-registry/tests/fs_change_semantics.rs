@@ -28,18 +28,11 @@ fn sync_at(
     registry.sync_fs(fs, &[fs_modify(path)], Revision::new(frame), ctx)
 }
 
-fn inline_child_id(
-    registry: &NodeDefRegistry,
-    root: lpc_node_registry::NodeDefId,
-) -> lpc_node_registry::NodeDefId {
-    let artifact = registry.get(&root).unwrap().loc.artifact.clone();
-    registry
-        .get_by_source(&NodeDefLoc {
-            artifact,
-            path: SlotPath::parse("entries[2].node").unwrap(),
-        })
-        .expect("inline child")
-        .id
+fn inline_child_loc(root: &NodeDefLoc) -> NodeDefLoc {
+    NodeDefLoc {
+        artifact: root.artifact.clone(),
+        path: SlotPath::parse("entries[2].node").unwrap(),
+    }
 }
 
 #[test]
@@ -123,7 +116,7 @@ fn s4_inline_child_edit_isolated() {
     let root = registry
         .load_root(&fs, LpPath::new("/playlist.toml"), Revision::new(1), &ctx)
         .unwrap();
-    let child = inline_child_id(&registry, root);
+    let child = inline_child_loc(&root);
 
     fixtures::write_file(
         &mut fs,
@@ -153,7 +146,7 @@ fn s5a_leaf_parse_error_reports_entered_error() {
 
     fixtures::write_file(&mut fs, "/clock.toml", "kind = \"Clock\"\nrate = ");
     let result = sync_at(&mut registry, &fs, "/clock.toml", 2, &ctx);
-    assert_eq!(result.def_updates.changed, vec![root]);
+    assert_eq!(result.def_updates.changed, vec![root.clone()]);
     assert!(matches!(
         result.change_details.as_slice(),
         [(id, DefChangeDetail::EnteredError)] if *id == root
@@ -182,14 +175,15 @@ node = { ref = "./child.toml" }
         .unwrap();
     let child = registry
         .iter_entries()
-        .find(|entry| entry.loc.path.is_root() && entry.id != root)
+        .find(|entry| entry.loc.path.is_root() && entry.loc != root)
         .expect("path child")
-        .id;
+        .loc
+        .clone();
 
     fixtures::write_file(&mut fs, "/child.toml", "kind = \"Shader\"\nsource = ");
     let result = sync_at(&mut registry, &fs, "/child.toml", 2, &ctx);
     assert!(!result.def_updates.changed.contains(&root));
-    assert_eq!(result.def_updates.changed, vec![child]);
+    assert_eq!(result.def_updates.changed, vec![child.clone()]);
     assert!(matches!(
         result.change_details.as_slice(),
         [(id, DefChangeDetail::EnteredError)] if *id == child
@@ -205,7 +199,7 @@ fn s6_kind_change_reports_kind_changed() {
     let root = registry
         .load_root(&fs, LpPath::new("/playlist.toml"), Revision::new(1), &ctx)
         .unwrap();
-    let child = inline_child_id(&registry, root);
+    let child = inline_child_loc(&root);
 
     fixtures::write_file(
         &mut fs,

@@ -5,7 +5,7 @@
 
 use lpfs::LpFs;
 
-use crate::registry::{NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState, ParseCtx};
+use crate::registry::{NodeDefEntry, NodeDefLoc, NodeDefRegistry, NodeDefState, ParseCtx};
 
 /// Effective def lookup — overlay ∪ committed cache.
 pub struct NodeDefView<'a> {
@@ -18,16 +18,21 @@ impl<'a> NodeDefView<'a> {
     }
 
     /// Effective def entry (overlay ∪ base). Always owned.
-    pub fn get(&self, id: &NodeDefId, _fs: &dyn LpFs, ctx: &ParseCtx<'_>) -> Option<NodeDefEntry> {
-        self.registry.effective_entry(id, ctx)
+    pub fn get(
+        &self,
+        loc: &NodeDefLoc,
+        _fs: &dyn LpFs,
+        ctx: &ParseCtx<'_>,
+    ) -> Option<NodeDefEntry> {
+        self.registry.effective_entry(loc, ctx)
     }
 
     pub fn state(
         &self,
-        id: &NodeDefId,
+        loc: &NodeDefLoc,
         _fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
     ) -> Option<NodeDefState> {
-        self.registry.effective_state(id, ctx)
+        self.registry.effective_state(loc, ctx)
     }
 }

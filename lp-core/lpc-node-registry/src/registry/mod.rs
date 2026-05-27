@@ -3,7 +3,6 @@
 mod def_shell;
 mod def_walker;
 mod node_def_entry;
-mod node_def_id;
 mod node_def_loc;
 mod node_def_registry;
 mod node_def_state;
@@ -19,7 +18,6 @@ mod sync_result;
 
 pub(crate) use def_walker::resolve_node_specifier;
 pub use node_def_entry::NodeDefEntry;
-pub use node_def_id::NodeDefId;
 pub use node_def_loc::NodeDefLoc;
 #[cfg(feature = "diff")]
 pub(crate) use node_def_registry::apply_ops_to_node_def;

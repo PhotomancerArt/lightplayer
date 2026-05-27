@@ -5,7 +5,7 @@ mod common;
 use common::fixtures;
 use lpc_model::{NodeDef, Revision, SlotShapeRegistry};
 use lpc_node_registry::{
-    ArtifactEdit, AssetEdit, EditTarget, NodeDefEntry, NodeDefId, NodeDefRegistry, NodeDefState,
+    ArtifactEdit, AssetEdit, EditTarget, NodeDefEntry, NodeDefLoc, NodeDefRegistry, NodeDefState,
     ParseCtx,
 };
 use lpfs::{LpPath, LpPathBuf};
@@ -21,7 +21,7 @@ fn clock_rate(entry: &NodeDefEntry) -> f32 {
     *def.controls.rate.value()
 }
 
-fn load_clock_root(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs) -> NodeDefId {
+fn load_clock_root(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs) -> NodeDefLoc {
     let shapes = parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     registry

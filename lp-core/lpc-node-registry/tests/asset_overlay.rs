@@ -6,7 +6,7 @@ use common::fixtures;
 use lpc_model::{Revision, SlotShapeRegistry, SourceFileSlot};
 use lpc_node_registry::{
     ArtifactEdit, ArtifactError, ArtifactReadFailure, AssetEdit, EditTarget, MaterializeError,
-    NodeDefEntry, NodeDefId, NodeDefRegistry, ParseCtx, SourceDiagnosticCtx,
+    NodeDefEntry, NodeDefLoc, NodeDefRegistry, ParseCtx, SourceDiagnosticCtx,
 };
 use lpfs::{LpPath, LpPathBuf};
 
@@ -21,7 +21,7 @@ fn diag_ctx() -> SourceDiagnosticCtx {
     }
 }
 
-fn load_shader_root(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs) -> NodeDefId {
+fn load_shader_root(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs) -> NodeDefLoc {
     let shapes = parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     registry
@@ -29,8 +29,8 @@ fn load_shader_root(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs) -> Node
         .unwrap()
 }
 
-fn snapshot_entry(registry: &NodeDefRegistry, id: NodeDefId) -> NodeDefEntry {
-    registry.get(&id).expect("entry").clone()
+fn snapshot_entry(registry: &NodeDefRegistry, loc: &NodeDefLoc) -> NodeDefEntry {
+    registry.get(loc).expect("entry").clone()
 }
 
 fn apply_artifact_edit(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs, change: &ArtifactEdit) {
@@ -46,7 +46,7 @@ fn c4c_replace_glsl_via_overlay_def_unchanged() {
     let fs = fixtures::load_shader_project();
     let mut registry = NodeDefRegistry::new();
     let root = load_shader_root(&mut registry, &fs);
-    let before = snapshot_entry(&registry, root);
+    let before = snapshot_entry(&registry, &root);
     let slot = SourceFileSlot::from_path("./shader.glsl");
 
     apply_artifact_edit(
@@ -70,7 +70,7 @@ fn c4c_replace_glsl_via_overlay_def_unchanged() {
         )
         .unwrap();
     assert!(effective.text.contains("0.0, 1.0, 0.0"));
-    assert_eq!(snapshot_entry(&registry, root), before);
+    assert_eq!(snapshot_entry(&registry, &root), before);
 }
 
 #[test]
@@ -137,7 +137,7 @@ fn c4d_replace_asset_without_touching_def_toml() {
     let fs = fixtures::load_shader_project();
     let mut registry = NodeDefRegistry::new();
     let root = load_shader_root(&mut registry, &fs);
-    let before = snapshot_entry(&registry, root);
+    let before = snapshot_entry(&registry, &root);
     let slot = SourceFileSlot::from_path("./shader.glsl");
     let slot_revision = slot.revision();
 
@@ -162,5 +162,5 @@ fn c4d_replace_asset_without_touching_def_toml() {
         .unwrap();
     assert!(effective.text.contains("draft"));
     assert_eq!(effective.version, slot_revision);
-    assert_eq!(snapshot_entry(&registry, root), before);
+    assert_eq!(snapshot_entry(&registry, &root), before);
 }

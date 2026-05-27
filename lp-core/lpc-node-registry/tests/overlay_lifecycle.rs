@@ -6,7 +6,7 @@ use common::fixtures;
 use lpc_model::{LpValue, Revision, SlotPath, SlotShapeRegistry};
 use lpc_node_registry::{
     ArtifactEdit, AssetEdit, EditBatch, EditBatchId, EditError, EditTarget, NodeDefEntry,
-    NodeDefId, NodeDefRegistry, ParseCtx, SlotEdit,
+    NodeDefLoc, NodeDefRegistry, ParseCtx, SlotEdit,
 };
 use lpfs::{LpFsMemory, LpPath, LpPathBuf};
 
@@ -24,8 +24,8 @@ fn apply_artifact_edit(
     registry.apply_artifact_edit(change, fs, &ctx, Revision::new(1))
 }
 
-fn snapshot_registry(registry: &NodeDefRegistry, root: NodeDefId) -> NodeDefEntry {
-    registry.get(&root).expect("root entry").clone()
+fn snapshot_registry(registry: &NodeDefRegistry, root: &NodeDefLoc) -> NodeDefEntry {
+    registry.get(root).expect("root entry").clone()
 }
 
 #[test]
@@ -37,7 +37,7 @@ fn d1_apply_populates_overlay_base_unchanged() {
     let root = registry
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap();
-    let before = snapshot_registry(&registry, root);
+    let before = snapshot_registry(&registry, &root);
 
     apply_artifact_edit(
         &mut registry,
@@ -55,7 +55,7 @@ fn d1_apply_populates_overlay_base_unchanged() {
         registry.slot_overlay_bytes(LpPath::new("/pending.glsl")),
         Some(b"void main() {}" as &[u8])
     );
-    assert_eq!(snapshot_registry(&registry, root), before);
+    assert_eq!(snapshot_registry(&registry, &root), before);
 }
 
 #[test]
@@ -67,7 +67,7 @@ fn d3_discard_clears_overlay_entries_unchanged() {
     let root = registry
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap();
-    let before = snapshot_registry(&registry, root);
+    let before = snapshot_registry(&registry, &root);
 
     apply_artifact_edit(
         &mut registry,
@@ -84,7 +84,7 @@ fn d3_discard_clears_overlay_entries_unchanged() {
 
     assert!(!registry.slot_overlay_active());
     assert!(!registry.slot_overlay_contains_path(LpPath::new("/pending.glsl")));
-    assert_eq!(snapshot_registry(&registry, root), before);
+    assert_eq!(snapshot_registry(&registry, &root), before);
 }
 
 #[test]

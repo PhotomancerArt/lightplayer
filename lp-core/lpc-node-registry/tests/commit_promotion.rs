@@ -5,8 +5,8 @@ mod common;
 use common::fixtures;
 use lpc_model::{LpValue, NodeDef, Revision, SlotPath, SlotShapeRegistry};
 use lpc_node_registry::{
-    ArtifactEdit, AssetEdit, EditTarget, NodeDefEntry, NodeDefId, NodeDefLoc, NodeDefRegistry,
-    NodeDefState, ParseCtx, SlotEdit,
+    ArtifactEdit, AssetEdit, EditTarget, NodeDefEntry, NodeDefLoc, NodeDefRegistry, NodeDefState,
+    ParseCtx, SlotEdit,
 };
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath, LpPathBuf};
 
@@ -36,15 +36,11 @@ fn shader_render_order(entry: &NodeDefEntry) -> i32 {
     def.render_order()
 }
 
-fn inline_child_id(registry: &NodeDefRegistry, root: NodeDefId) -> NodeDefId {
-    let artifact = registry.get(&root).unwrap().loc.artifact.clone();
-    registry
-        .get_by_source(&NodeDefLoc {
-            artifact,
-            path: SlotPath::parse("entries[2].node").unwrap(),
-        })
-        .expect("inline child")
-        .id
+fn inline_child_loc(root: &NodeDefLoc) -> NodeDefLoc {
+    NodeDefLoc {
+        artifact: root.artifact.clone(),
+        path: SlotPath::parse("entries[2].node").unwrap(),
+    }
 }
 
 fn fs_modify(path: &str) -> FsEvent {
@@ -281,7 +277,7 @@ fn c2_inline_child_changed_after_commit() {
     let root = registry
         .load_root(&fs, LpPath::new("/playlist.toml"), Revision::new(1), &ctx)
         .unwrap();
-    let child = inline_child_id(&registry, root);
+    let child = inline_child_loc(&root);
 
     apply_artifact_edit(
         &mut registry,
@@ -297,7 +293,7 @@ fn c2_inline_child_changed_after_commit() {
 
     let result = registry.commit(&fs, Revision::new(3), &ctx).unwrap();
     assert!(!result.def_updates.changed.contains(&root));
-    assert_eq!(result.def_updates.changed, vec![child]);
+    assert_eq!(result.def_updates.changed, vec![child.clone()]);
     assert_eq!(shader_render_order(registry.get(&child).unwrap()), 7);
 }
 

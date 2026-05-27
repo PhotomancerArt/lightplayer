@@ -20,11 +20,11 @@ pub(crate) fn commit_slot_overlay(
     frame: Revision,
     ctx: &ParseCtx<'_>,
 ) -> Result<SyncResult, CommitError> {
-    if registry.slot_overlay.is_empty() {
+    if registry.overlay.is_empty() {
         return Ok(SyncResult::default());
     }
 
-    let plan = SlotOverlayCommitPlan::from_slot_overlay(&registry.slot_overlay, ctx)?;
+    let plan = SlotOverlayCommitPlan::from_slot_overlay(&registry.overlay, ctx)?;
     let known_paths: BTreeMap<String, ()> = registry
         .store
         .locations()
@@ -79,8 +79,8 @@ pub(crate) fn commit_slot_overlay(
         return Err(err.into());
     }
 
-    let change_details = build_change_details(&before, &def_updates, &registry.entries);
-    registry.slot_overlay.clear();
+    let change_details = build_change_details(&before, &def_updates, &registry.defs);
+    registry.overlay.clear();
     Ok(SyncResult {
         def_updates,
         change_details,
@@ -105,7 +105,7 @@ fn sync_committed_def_artifacts(
             continue;
         };
         let source = NodeDefLoc::artifact_root(location.clone());
-        if registry.source_index.contains_key(&source) {
+        if registry.defs.contains_key(&source) {
             def_artifact_locations.push(location);
         }
     }

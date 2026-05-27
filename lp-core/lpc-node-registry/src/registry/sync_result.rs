@@ -4,7 +4,7 @@ use alloc::vec::Vec;
 
 use lpc_model::NodeKind;
 
-use super::{NodeDefId, NodeDefUpdates};
+use super::{NodeDefLoc, NodeDefUpdates};
 
 /// Factual classification of a def change (not engine policy).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -19,7 +19,7 @@ pub enum DefChangeDetail {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SyncResult {
     pub def_updates: NodeDefUpdates,
-    pub change_details: Vec<(NodeDefId, DefChangeDetail)>,
+    pub change_details: Vec<(NodeDefLoc, DefChangeDetail)>,
 }
 
 impl SyncResult {

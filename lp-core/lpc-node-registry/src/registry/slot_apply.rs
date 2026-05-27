@@ -26,7 +26,7 @@ impl NodeDefRegistry {
     ) -> Result<(), EditError> {
         ensure_toml_path(&path)?;
         if matches!(
-            self.slot_overlay.entry(LpPath::new(path.as_str())),
+            self.overlay.entry(LpPath::new(path.as_str())),
             Some(SlotOverlayEntry::Deleted)
         ) {
             return Err(EditError::InvalidPath {
@@ -36,7 +36,7 @@ impl NodeDefRegistry {
 
         let mut def = self.fork_slot_draft(LpPath::new(path.as_str()), fs, ctx)?;
         apply_op_to_def(&mut def, op, ctx, frame)?;
-        self.slot_overlay.apply_def_draft(path, DefDraft::new(def));
+        self.overlay.apply_def_draft(path, DefDraft::new(def));
         Ok(())
     }
 
@@ -46,7 +46,7 @@ impl NodeDefRegistry {
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
     ) -> Result<NodeDef, EditError> {
-        match self.slot_overlay.entry(path) {
+        match self.overlay.entry(path) {
             Some(SlotOverlayEntry::DefDraft(draft)) => Ok(draft.def.clone()),
             Some(SlotOverlayEntry::Bytes(bytes)) => parse_def_bytes(bytes.as_slice(), ctx),
             Some(SlotOverlayEntry::Deleted) => Err(EditError::InvalidPath {

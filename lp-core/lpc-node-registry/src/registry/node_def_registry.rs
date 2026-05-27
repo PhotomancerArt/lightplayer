@@ -20,11 +20,9 @@ use super::sync_error::SyncError;
 use super::sync_op::SyncOp;
 use super::sync_outcome::SyncOutcome;
 use super::sync_result::{DefChangeDetail, SyncResult};
-use super::{
-    NodeDefEntry, NodeDefId, NodeDefLoc, NodeDefState, NodeDefUpdates, ParseCtx, RegistryError,
-};
+use super::{NodeDefEntry, NodeDefLoc, NodeDefState, NodeDefUpdates, ParseCtx, RegistryError};
 
-/// Owner of parsed node definitions keyed by [`NodeDefId`].
+/// Owner of parsed node definitions keyed by [`NodeDefLoc`].
 ///
 /// Bootstrap with [`Self::load_root`], react to filesystem edits via
 /// [`Self::sync`] / [`Self::sync_fs`], and apply client edits through
@@ -32,11 +30,9 @@ use super::{
 /// Effective reads use [`crate::NodeDefView`].
 pub struct NodeDefRegistry {
     store: ArtifactStore,
-    slot_overlay: SlotOverlay,
-    entries: BTreeMap<NodeDefId, NodeDefEntry>,
-    source_index: BTreeMap<NodeDefLoc, NodeDefId>,
-    root_id: Option<NodeDefId>,
-    next_id: u32,
+    overlay: SlotOverlay,
+    defs: BTreeMap<NodeDefLoc, NodeDefEntry>,
+    root: Option<NodeDefLoc>,
 }
 
 impl Default for NodeDefRegistry {
@@ -49,11 +45,9 @@ impl NodeDefRegistry {
     pub fn new() -> Self {
         Self {
             store: ArtifactStore::new(),
-            slot_overlay: SlotOverlay::new(),
-            entries: BTreeMap::new(),
-            source_index: BTreeMap::new(),
-            root_id: None,
-            next_id: 1,
+            overlay: SlotOverlay::new(),
+            defs: BTreeMap::new(),
+            root: None,
         }
     }
 
@@ -66,8 +60,8 @@ impl NodeDefRegistry {
         root_path: &LpPath,
         frame: Revision,
         ctx: &ParseCtx<'_>,
-    ) -> Result<NodeDefId, RegistryError> {
-        if !self.entries.is_empty() {
+    ) -> Result<NodeDefLoc, RegistryError> {
+        if !self.defs.is_empty() {
             return Err(RegistryError::NotEmpty);
         }
         if !root_path.is_absolute() {
@@ -77,10 +71,10 @@ impl NodeDefRegistry {
         }
         let path_buf = root_path.to_path_buf();
         let location = self.store.register_file(path_buf.clone(), frame);
-        let root_id = self.register_artifact_subtree(location, root_path, frame, fs, ctx)?;
-        self.root_id = Some(root_id);
+        let root_loc = self.register_artifact_subtree(location, root_path, frame, fs, ctx)?;
+        self.root = Some(root_loc.clone());
         self.register_all_asset_paths(frame)?;
-        Ok(root_id)
+        Ok(root_loc)
     }
 
     /// Apply incoming sync operations and return committed + pending effects.
@@ -109,7 +103,7 @@ impl NodeDefRegistry {
                 }
                 SyncOp::ClearPending => {
                     if self.slot_overlay_active() {
-                        self.slot_overlay.clear();
+                        self.overlay.clear();
                         pending_changed = true;
                     }
                 }
@@ -172,7 +166,7 @@ impl NodeDefRegistry {
 
         let _ = self.reconcile_artifacts();
 
-        let change_details = build_change_details(&before, &def_updates, &self.entries);
+        let change_details = build_change_details(&before, &def_updates, &self.defs);
         SyncResult {
             def_updates,
             change_details,
@@ -182,26 +176,20 @@ impl NodeDefRegistry {
     /// Drop pending overlay entry for `target`. Returns whether an entry existed.
     pub fn remove_pending_edit(&mut self, target: EditTarget) -> Result<bool, EditError> {
         let path = self.resolve_edit_target(target)?;
-        Ok(self.slot_overlay.remove_path(LpPath::new(path.as_str())))
+        Ok(self.overlay.remove_path(LpPath::new(path.as_str())))
     }
 
-    pub fn root_id(&self) -> Option<NodeDefId> {
-        self.root_id
+    pub fn root_loc(&self) -> Option<&NodeDefLoc> {
+        self.root.as_ref()
     }
 
-    pub fn get(&self, id: &NodeDefId) -> Option<&NodeDefEntry> {
-        self.entries.get(id)
+    pub fn get(&self, loc: &NodeDefLoc) -> Option<&NodeDefEntry> {
+        self.defs.get(loc)
     }
 
-    pub fn get_by_source(&self, source: &NodeDefLoc) -> Option<&NodeDefEntry> {
-        self.source_index
-            .get(source)
-            .and_then(|id| self.entries.get(id))
-    }
-
-    /// Iterate registered entries (stable order by id).
+    /// Iterate registered entries (stable order by location).
     pub fn iter_entries(&self) -> impl Iterator<Item = &NodeDefEntry> {
-        self.entries.values()
+        self.defs.values()
     }
 
     /// Apply one artifact change block to the overlay. Committed state unchanged.
@@ -216,7 +204,7 @@ impl NodeDefRegistry {
         match change {
             ArtifactEdit::Asset { ops, .. } => {
                 for op in ops {
-                    apply_asset_op(&mut self.slot_overlay, path.clone(), op)?;
+                    apply_asset_op(&mut self.overlay, path.clone(), op)?;
                 }
             }
             ArtifactEdit::Slot { ops, .. } => {
@@ -244,7 +232,7 @@ impl NodeDefRegistry {
 
     /// Drop all pending overlay edits.
     pub fn discard_slot_overlay(&mut self) {
-        self.slot_overlay.clear();
+        self.overlay.clear();
     }
 
     /// Promote all pending overlay entries to committed store and entries.
@@ -257,9 +245,9 @@ impl NodeDefRegistry {
         commit::commit_slot_overlay(self, fs, frame, ctx)
     }
 
-    pub(crate) fn restore_entry_states(&mut self, before: &BTreeMap<NodeDefId, NodeDefState>) {
-        for (id, state) in before {
-            if let Some(entry) = self.entries.get_mut(id) {
+    pub(crate) fn restore_entry_states(&mut self, before: &BTreeMap<NodeDefLoc, NodeDefState>) {
+        for (loc, state) in before {
+            if let Some(entry) = self.defs.get_mut(loc) {
                 entry.state = state.clone();
             }
         }
@@ -267,17 +255,17 @@ impl NodeDefRegistry {
 
     /// Whether any overlay entries are pending.
     pub fn slot_overlay_active(&self) -> bool {
-        !self.slot_overlay.is_empty()
+        !self.overlay.is_empty()
     }
 
     /// Whether `path` has a pending overlay entry.
     pub fn slot_overlay_contains_path(&self, path: &LpPath) -> bool {
-        self.slot_overlay.contains_path(path)
+        self.overlay.contains_path(path)
     }
 
     /// Pending overlay bytes for `path`, if any.
     pub fn slot_overlay_bytes(&self, path: &LpPath) -> Option<&[u8]> {
-        self.slot_overlay.get_bytes(path)
+        self.overlay.get_bytes(path)
     }
 
     pub(crate) fn artifact_location_for_path(&self, path: &LpPath) -> Option<ArtifactLocation> {
@@ -325,15 +313,15 @@ impl NodeDefRegistry {
         frame: Revision,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
-    ) -> Result<NodeDefId, RegistryError> {
+    ) -> Result<NodeDefLoc, RegistryError> {
         let revision = self.store.revision(&location).unwrap_or(frame);
         let state = self.read_artifact_state(&location, fs, ctx)?;
         let source = NodeDefLoc::artifact_root(location.clone());
-        let root_id = self.register_def_at_source(source, state.clone(), revision)?;
+        self.register_def_at_source(source.clone(), state.clone(), revision)?;
         if let NodeDefState::Loaded(def) = state {
             self.register_invocations(&location, file_path, def, SlotPath::root(), frame, fs, ctx)?;
         }
-        Ok(root_id)
+        Ok(source)
     }
 
     fn register_invocations(
@@ -363,7 +351,7 @@ impl NodeDefRegistry {
                     let child_path = resolve_node_specifier(file_path, &specifier)?;
                     let child_location = self.store.register_file(child_path.clone(), frame);
                     let child_source = NodeDefLoc::artifact_root(child_location.clone());
-                    if !self.source_index.contains_key(&child_source) {
+                    if !self.defs.contains_key(&child_source) {
                         self.register_artifact_subtree(
                             child_location,
                             child_path.as_path(),
@@ -420,44 +408,42 @@ impl NodeDefRegistry {
                 Err(_) => return,
             };
 
-        let old_sources: BTreeMap<NodeDefLoc, NodeDefId> = self
-            .entries
-            .values()
-            .filter(|entry| entry.loc.artifact == location)
-            .map(|entry| (entry.loc.clone(), entry.id))
+        let old_sources: BTreeMap<NodeDefLoc, NodeDefState> = self
+            .defs
+            .iter()
+            .filter(|(loc, _)| loc.artifact == location)
+            .map(|(loc, entry)| (loc.clone(), entry.state.clone()))
             .collect();
 
-        for (source, id) in &old_sources {
+        for source in old_sources.keys() {
             if !new_inventory.contains_key(source) {
-                updates.push_removed(*id);
-                self.remove_entry(*id);
+                updates.push_removed(source.clone());
+                self.defs.remove(source);
             }
         }
 
         let mut affected = Vec::new();
         for (source, new_state) in &new_inventory {
-            if let Some(id) = old_sources.get(source) {
-                let Some(entry) = self.entries.get(id) else {
-                    continue;
-                };
-                if state_changed(&entry.state, new_state) {
-                    updates.push_changed(*id);
-                    if let Some(entry) = self.entries.get_mut(id) {
+            if let Some(old_state) = old_sources.get(source) {
+                if state_changed(old_state, new_state) {
+                    updates.push_changed(source.clone());
+                    if let Some(entry) = self.defs.get_mut(source) {
                         entry.state = new_state.clone();
                         entry.revision = current;
                     }
-                    affected.push(*id);
+                    affected.push(source.clone());
                 }
-            } else if let Ok(id) =
-                self.register_def_at_source(source.clone(), new_state.clone(), current)
+            } else if self
+                .register_def_at_source(source.clone(), new_state.clone(), current)
+                .is_ok()
             {
-                updates.push_added(id);
-                affected.push(id);
+                updates.push_added(source.clone());
+                affected.push(source.clone());
             }
         }
 
-        for def_id in affected {
-            let _ = self.register_asset_paths_for_entry(def_id, frame);
+        for loc in affected {
+            let _ = self.register_asset_paths_for_entry(&loc, frame);
         }
     }
 
@@ -578,16 +564,16 @@ impl NodeDefRegistry {
 
     fn referenced_locations(&self) -> alloc::collections::BTreeSet<ArtifactLocation> {
         let mut referenced = self
-            .entries
-            .values()
-            .map(|entry| entry.loc.artifact.clone())
+            .defs
+            .keys()
+            .map(|loc| loc.artifact.clone())
             .collect::<alloc::collections::BTreeSet<_>>();
 
-        for entry in self.entries.values() {
+        for (loc, entry) in &self.defs {
             let NodeDefState::Loaded(def) = &entry.state else {
                 continue;
             };
-            let Some(containing) = entry.loc.artifact.file_path() else {
+            let Some(containing) = loc.artifact.file_path() else {
                 continue;
             };
             if let Ok(paths) = source_bridge::asset_paths_for_def(def, containing.as_path()) {
@@ -619,52 +605,43 @@ impl NodeDefRegistry {
         source: NodeDefLoc,
         state: NodeDefState,
         revision: Revision,
-    ) -> Result<NodeDefId, RegistryError> {
-        if self.source_index.contains_key(&source) {
+    ) -> Result<(), RegistryError> {
+        if self.defs.contains_key(&source) {
             return Err(RegistryError::DuplicateSource);
         }
-        let id = self.alloc_id();
-        self.source_index.insert(source.clone(), id);
-        self.entries.insert(
-            id,
+        self.defs.insert(
+            source.clone(),
             NodeDefEntry {
-                id,
                 loc: source,
                 state,
-                revision: revision,
+                revision,
             },
         );
-        Ok(id)
-    }
-
-    fn remove_entry(&mut self, id: NodeDefId) {
-        if let Some(entry) = self.entries.remove(&id) {
-            self.source_index.remove(&entry.loc);
-        }
+        Ok(())
     }
 
     fn register_all_asset_paths(&mut self, frame: Revision) -> Result<(), RegistryError> {
-        let ids: Vec<NodeDefId> = self.entries.keys().copied().collect();
-        for id in ids {
-            self.register_asset_paths_for_entry(id, frame)?;
+        let locs: Vec<NodeDefLoc> = self.defs.keys().cloned().collect();
+        for loc in locs {
+            self.register_asset_paths_for_entry(&loc, frame)?;
         }
         Ok(())
     }
 
     fn register_asset_paths_for_entry(
         &mut self,
-        def_id: NodeDefId,
+        loc: &NodeDefLoc,
         frame: Revision,
     ) -> Result<(), RegistryError> {
-        let Some(entry) = self.entries.get(&def_id) else {
+        let Some(entry) = self.defs.get(loc) else {
             return Ok(());
         };
         let NodeDefState::Loaded(def) = entry.state.clone() else {
             return Ok(());
         };
-        let containing = entry.loc.artifact.file_path().cloned().ok_or_else(|| {
+        let containing = loc.artifact.file_path().cloned().ok_or_else(|| {
             RegistryError::SpecifierResolution {
-                message: alloc::format!("missing artifact path for def {def_id:?}"),
+                message: alloc::format!("missing artifact path for def {loc:?}"),
             }
         })?;
 
@@ -679,27 +656,18 @@ impl NodeDefRegistry {
             return PathChangeKind::SourceOnly;
         };
         let source = NodeDefLoc::artifact_root(location.clone());
-        if self.source_index.contains_key(&source) {
+        if self.defs.contains_key(&source) {
             PathChangeKind::DefArtifact(location)
         } else {
             PathChangeKind::SourceOnly
         }
     }
 
-    pub(crate) fn snapshot_def_states(&self) -> BTreeMap<NodeDefId, NodeDefState> {
-        self.entries
+    pub(crate) fn snapshot_def_states(&self) -> BTreeMap<NodeDefLoc, NodeDefState> {
+        self.defs
             .iter()
-            .map(|(id, entry)| (*id, entry.state.clone()))
+            .map(|(loc, entry)| (loc.clone(), entry.state.clone()))
             .collect()
-    }
-
-    fn alloc_id(&mut self) -> NodeDefId {
-        let id = NodeDefId::from_raw(self.next_id);
-        self.next_id = self.next_id.wrapping_add(1);
-        if self.next_id == 0 {
-            self.next_id = 1;
-        }
-        id
     }
 }
 
@@ -735,17 +703,17 @@ fn state_changed(before: &NodeDefState, after: &NodeDefState) -> bool {
 }
 
 pub(crate) fn build_change_details(
-    before: &BTreeMap<NodeDefId, NodeDefState>,
+    before: &BTreeMap<NodeDefLoc, NodeDefState>,
     updates: &NodeDefUpdates,
-    entries: &BTreeMap<NodeDefId, NodeDefEntry>,
-) -> Vec<(NodeDefId, DefChangeDetail)> {
+    entries: &BTreeMap<NodeDefLoc, NodeDefEntry>,
+) -> Vec<(NodeDefLoc, DefChangeDetail)> {
     updates
         .changed
         .iter()
-        .filter_map(|id| {
-            let before_state = before.get(id)?;
-            let after_state = entries.get(id).map(|entry| &entry.state)?;
-            Some((*id, classify_def_change(before_state, after_state)))
+        .filter_map(|loc| {
+            let before_state = before.get(loc)?;
+            let after_state = entries.get(loc).map(|entry| &entry.state)?;
+            Some((loc.clone(), classify_def_change(before_state, after_state)))
         })
         .collect()
 }
@@ -789,8 +757,8 @@ mod tests {
         }
     }
 
-    fn changed_set(updates: &NodeDefUpdates) -> BTreeSet<NodeDefId> {
-        updates.changed.iter().copied().collect()
+    fn changed_set(updates: &NodeDefUpdates) -> BTreeSet<NodeDefLoc> {
+        updates.changed.iter().cloned().collect()
     }
 
     #[test]
@@ -813,7 +781,7 @@ source = { path = "a.glsl" }
         registry
             .load_root(&fs, LpPath::new("/playlist.toml"), Revision::new(1), &ctx)
             .unwrap();
-        assert_eq!(registry.entries.len(), 2);
+        assert_eq!(registry.defs.len(), 2);
     }
 
     #[test]
@@ -855,10 +823,13 @@ rate = 2.0
         let result = registry.sync_fs(&fs, &[fs_modify("/clock.toml")], Revision::new(2), &ctx);
         assert!(result.def_updates.added.is_empty());
         assert!(result.def_updates.removed.is_empty());
-        assert_eq!(changed_set(&result.def_updates), BTreeSet::from([root]));
+        assert_eq!(
+            changed_set(&result.def_updates),
+            BTreeSet::from([root.clone()])
+        );
         assert!(matches!(
             result.change_details.as_slice(),
-            [(id, DefChangeDetail::Content)] if *id == root
+            [(loc, DefChangeDetail::Content)] if *loc == root
         ));
     }
 
@@ -895,11 +866,11 @@ rate = 2.0
             .load_root(&fs, LpPath::new("/playlist.toml"), Revision::new(1), &ctx)
             .unwrap();
         let child = registry
-            .entries
-            .values()
-            .find(|entry| !entry.loc.path.is_root())
+            .defs
+            .keys()
+            .find(|loc| !loc.path.is_root())
             .expect("inline child")
-            .id;
+            .clone();
 
         crate::harness::fixtures::write_file(
             &mut fs,
@@ -913,7 +884,7 @@ source = { path = "b.glsl" }
 "#,
         );
         let result = registry.sync_fs(&fs, &[fs_modify("/playlist.toml")], Revision::new(2), &ctx);
-        assert!(!result.def_updates.contains_changed(root));
+        assert!(!result.def_updates.contains_changed(&root));
         assert_eq!(changed_set(&result.def_updates), BTreeSet::from([child]));
     }
 
@@ -953,7 +924,7 @@ kind = "Clock"
         let result = registry.sync_fs(&fs, &[fs_modify("/playlist.toml")], Revision::new(2), &ctx);
         assert_eq!(result.def_updates.added.len(), 1);
         assert!(result.def_updates.removed.is_empty());
-        assert!(result.def_updates.contains_changed(root));
+        assert!(result.def_updates.contains_changed(&root));
     }
 
     #[test]
@@ -984,11 +955,11 @@ source = { path = "a.glsl" }
             .load_root(&fs, LpPath::new("/playlist.toml"), Revision::new(1), &ctx)
             .unwrap();
         let child = registry
-            .entries
-            .values()
-            .find(|entry| entry.loc.path.is_root() && entry.id != root)
+            .defs
+            .keys()
+            .find(|loc| loc.path.is_root() && **loc != root)
             .expect("child file root")
-            .id;
+            .clone();
 
         crate::harness::fixtures::write_file(
             &mut fs,
@@ -999,7 +970,7 @@ source = { path = "b.glsl" }
 "#,
         );
         let result = registry.sync_fs(&fs, &[fs_modify("/active.toml")], Revision::new(2), &ctx);
-        assert!(!result.def_updates.contains_changed(root));
+        assert!(!result.def_updates.contains_changed(&root));
         assert_eq!(changed_set(&result.def_updates), BTreeSet::from([child]));
     }
 
@@ -1023,11 +994,11 @@ kind = "Shader"
             .load_root(&fs, LpPath::new("/playlist.toml"), Revision::new(1), &ctx)
             .unwrap();
         let child = registry
-            .entries
-            .values()
-            .find(|entry| !entry.loc.path.is_root())
+            .defs
+            .keys()
+            .find(|loc| !loc.path.is_root())
             .expect("inline child")
-            .id;
+            .clone();
 
         crate::harness::fixtures::write_file(
             &mut fs,
@@ -1040,16 +1011,21 @@ kind = "Clock"
 "#,
         );
         let result = registry.sync_fs(&fs, &[fs_modify("/playlist.toml")], Revision::new(2), &ctx);
-        assert!(result.def_updates.contains_changed(root));
-        assert!(result.def_updates.contains_changed(child));
-        assert!(result.change_details.iter().any(|(id, detail)| *id == child
-            && matches!(
-                detail,
-                DefChangeDetail::KindChanged {
-                    from: NodeKind::Shader,
-                    to: NodeKind::Clock
-                }
-            )));
+        assert!(result.def_updates.contains_changed(&root));
+        assert!(result.def_updates.contains_changed(&child));
+        assert!(
+            result
+                .change_details
+                .iter()
+                .any(|(loc, detail)| *loc == child
+                    && matches!(
+                        detail,
+                        DefChangeDetail::KindChanged {
+                            from: NodeKind::Shader,
+                            to: NodeKind::Clock
+                        }
+                    ))
+        );
     }
 
     #[test]
@@ -1064,10 +1040,10 @@ kind = "Clock"
 
         crate::harness::fixtures::write_file(&mut fs, "/clock.toml", "kind = \"Clock\"\nrate = ");
         let result = registry.sync_fs(&fs, &[fs_modify("/clock.toml")], Revision::new(2), &ctx);
-        assert!(result.def_updates.contains_changed(root));
+        assert!(result.def_updates.contains_changed(&root));
         assert!(matches!(
             result.change_details.as_slice(),
-            [(id, DefChangeDetail::EnteredError)] if *id == root
+            [(loc, DefChangeDetail::EnteredError)] if *loc == root
         ));
     }
 }

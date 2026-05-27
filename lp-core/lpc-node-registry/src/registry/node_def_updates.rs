@@ -2,14 +2,14 @@
 
 use alloc::vec::Vec;
 
-use super::NodeDefId;
+use super::NodeDefLoc;
 
 /// Added, changed, and removed node definitions after a registry sync.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct NodeDefUpdates {
-    pub added: Vec<NodeDefId>,
-    pub changed: Vec<NodeDefId>,
-    pub removed: Vec<NodeDefId>,
+    pub added: Vec<NodeDefLoc>,
+    pub changed: Vec<NodeDefLoc>,
+    pub removed: Vec<NodeDefLoc>,
 }
 
 impl NodeDefUpdates {
@@ -23,25 +23,25 @@ impl NodeDefUpdates {
         self.removed.extend(other.removed);
     }
 
-    pub fn push_added(&mut self, id: NodeDefId) {
-        push_unique(&mut self.added, id);
+    pub fn push_added(&mut self, loc: NodeDefLoc) {
+        push_unique(&mut self.added, loc);
     }
 
-    pub fn push_changed(&mut self, id: NodeDefId) {
-        push_unique(&mut self.changed, id);
+    pub fn push_changed(&mut self, loc: NodeDefLoc) {
+        push_unique(&mut self.changed, loc);
     }
 
-    pub fn push_removed(&mut self, id: NodeDefId) {
-        push_unique(&mut self.removed, id);
+    pub fn push_removed(&mut self, loc: NodeDefLoc) {
+        push_unique(&mut self.removed, loc);
     }
 
-    pub fn contains_changed(&self, id: NodeDefId) -> bool {
-        self.changed.contains(&id)
+    pub fn contains_changed(&self, loc: &NodeDefLoc) -> bool {
+        self.changed.contains(loc)
     }
 }
 
-fn push_unique(list: &mut Vec<NodeDefId>, id: NodeDefId) {
-    if !list.contains(&id) {
-        list.push(id);
+fn push_unique(list: &mut Vec<NodeDefLoc>, loc: NodeDefLoc) {
+    if !list.contains(&loc) {
+        list.push(loc);
     }
 }
