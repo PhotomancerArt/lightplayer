@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     FromLpValue, LpType, LpValue, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape,
-    ToLpValue, ValueEditorHint, ValueRootError,
+    StaticLpType, StaticSlotEnumOption, StaticSlotMeta, StaticSlotValueShape,
+    StaticValueEditorHint, ToLpValue, ValueEditorHint, ValueRootError,
 };
 
 /// Fixture-level hardware diagnostic pattern.
@@ -17,8 +18,10 @@ pub enum FixtureDiagnosticMode {
     Off,
     /// High-contrast per-LED identity colors with 5/10 markers.
     LedIndex,
-    /// Color LEDs in countable groups of ten.
+    /// Color LEDs in red, green, and blue groups of ten.
     Groups10,
+    /// Color each authored fixture path with a distinct color.
+    PathColors,
     /// Animate a single bright index marker through the fixture.
     Chase,
 }
@@ -29,6 +32,7 @@ impl FixtureDiagnosticMode {
             Self::Off => "off",
             Self::LedIndex => "led_index",
             Self::Groups10 => "groups_10",
+            Self::PathColors => "path_colors",
             Self::Chase => "chase",
         }
     }
@@ -38,6 +42,7 @@ impl FixtureDiagnosticMode {
             "off" => Some(Self::Off),
             "led_index" => Some(Self::LedIndex),
             "groups_10" => Some(Self::Groups10),
+            "path_colors" => Some(Self::PathColors),
             "chase" => Some(Self::Chase),
             _ => None,
         }
@@ -64,6 +69,36 @@ impl FromLpValue for FixtureDiagnosticMode {
 
 impl SlotValue for FixtureDiagnosticMode {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("FixtureDiagnosticMode");
+    const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> =
+        Some(StaticSlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: StaticLpType::String,
+            meta: StaticSlotMeta::EMPTY,
+            editor: StaticValueEditorHint::Dropdown {
+                options: &[
+                    StaticSlotEnumOption {
+                        value: "off",
+                        label: "Off",
+                    },
+                    StaticSlotEnumOption {
+                        value: "led_index",
+                        label: "LED index",
+                    },
+                    StaticSlotEnumOption {
+                        value: "groups_10",
+                        label: "RGB groups of 10",
+                    },
+                    StaticSlotEnumOption {
+                        value: "path_colors",
+                        label: "Path colors",
+                    },
+                    StaticSlotEnumOption {
+                        value: "chase",
+                        label: "Chase",
+                    },
+                ],
+            },
+        });
 
     fn value_shape() -> SlotValueShape {
         SlotValueShape {
@@ -74,7 +109,8 @@ impl SlotValue for FixtureDiagnosticMode {
                 options: alloc::vec![
                     SlotEnumOption::new("off", "Off"),
                     SlotEnumOption::new("led_index", "LED index"),
-                    SlotEnumOption::new("groups_10", "Groups of 10"),
+                    SlotEnumOption::new("groups_10", "RGB groups of 10"),
+                    SlotEnumOption::new("path_colors", "Path colors"),
                     SlotEnumOption::new("chase", "Chase"),
                 ],
             },

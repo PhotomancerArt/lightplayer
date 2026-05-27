@@ -12,7 +12,7 @@ node = { def = { path = "./idle.toml" } }
 
 [entries.2]
 name = "blast"
-duration = 10.0
+duration = 6.0
 fade_after = 2.0
 node = { def = { path = "./blast.toml" } }
 

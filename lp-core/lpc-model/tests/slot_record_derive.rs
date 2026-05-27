@@ -3,7 +3,7 @@
 use lpc_model::{
     LpValue, SlotAccess, SlotDataAccess, SlotDataMutAccess, SlotMapValueAccess, SlotMutAccess,
     SlotPath, SlotRecordAccess, SlotRecordMutAccess, SlotRecordShape, SlotShape, SlotShapeRegistry,
-    StaticSlotAccess, StaticSlotShape, ValueSlot, lookup_slot_data,
+    StaticSlotAccess, StaticSlotShape, StaticSlotShapeDescriptor, ValueSlot, lookup_slot_data,
 };
 
 #[derive(lpc_model::Slotted)]
@@ -62,10 +62,24 @@ fn derive_generates_record_shape_access_and_root_registration() {
         vec![NestedRecord::SHAPE_ID]
     );
 
+    let Some(StaticSlotShapeDescriptor::Record {
+        fields: static_fields,
+        ..
+    }) = DerivedRecord::static_slot_shape_descriptor()
+    else {
+        panic!("static record shape descriptor");
+    };
+    assert_eq!(static_fields[1].name, "nested");
+    assert_eq!(
+        static_fields[1].shape,
+        &StaticSlotShapeDescriptor::Ref {
+            id: NestedRecord::SHAPE_ID
+        }
+    );
+
     let mut registry = SlotShapeRegistry::default();
-    assert!(DerivedRecord::ensure_registered(&mut registry).unwrap());
-    assert!(!DerivedRecord::ensure_registered(&mut registry).unwrap());
-    DerivedRecord::register_shape(&mut registry).unwrap();
+    assert!(ensure_test_shape::<DerivedRecord>(&mut registry));
+    assert!(!ensure_test_shape::<DerivedRecord>(&mut registry));
     assert!(registry.get(&DerivedRecord::SHAPE_ID).is_some());
 }
 
@@ -159,9 +173,23 @@ fn derive_supports_single_field_tuple_wrappers() {
         vec![WrappedRecord::SHAPE_ID]
     );
 
+    let Some(StaticSlotShapeDescriptor::Record {
+        fields: static_fields,
+        ..
+    }) = RecordWithWrapper::static_slot_shape_descriptor()
+    else {
+        panic!("static parent record shape descriptor");
+    };
+    assert_eq!(
+        static_fields[0].shape,
+        &StaticSlotShapeDescriptor::Ref {
+            id: WrappedRecord::SHAPE_ID
+        }
+    );
+
     let mut registry = SlotShapeRegistry::default();
-    WrappedRecord::ensure_registered(&mut registry).unwrap();
-    NestedRecord::ensure_registered(&mut registry).unwrap();
+    ensure_test_shape::<WrappedRecord>(&mut registry);
+    ensure_test_shape::<NestedRecord>(&mut registry);
     let found = lookup_slot_data(&wrapper, &registry, &SlotPath::parse("count").unwrap()).unwrap();
     let SlotDataAccess::Value(count) = found else {
         panic!("count value through wrapper path");
@@ -170,3 +198,11 @@ fn derive_supports_single_field_tuple_wrappers() {
 }
 
 fn assert_static_slot_access<T: StaticSlotAccess>() {}
+
+fn ensure_test_shape<T: StaticSlotShape>(registry: &mut SlotShapeRegistry) -> bool {
+    match T::shape_name() {
+        Some(name) => registry.ensure_shape_named(T::SHAPE_ID, name, T::slot_shape()),
+        None => registry.ensure_shape(T::SHAPE_ID, T::slot_shape()),
+    }
+    .unwrap()
+}

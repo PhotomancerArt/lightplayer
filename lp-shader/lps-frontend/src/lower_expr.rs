@@ -1623,13 +1623,37 @@ fn uniform_global_access_index_path(
     if let TypeInner::Pointer { base: inner, .. } = &ctx.module.types[naga_ty].inner {
         naga_ty = *inner;
     }
+    let mut off = ginfo.byte_offset;
+    let mut i = 0usize;
+    if let TypeInner::Array {
+        base: elem_ty_h,
+        size,
+        ..
+    } = &ctx.module.types[naga_ty].inner
+    {
+        let n = match size {
+            ArraySize::Constant(nz) => nz.get(),
+            ArraySize::Pending(_) | ArraySize::Dynamic => {
+                return Err(LowerError::UnsupportedExpression(String::from(
+                    "uniform path: dynamic root array",
+                )));
+            }
+        };
+        let elem_idx = indices[i].min(n.saturating_sub(1));
+        let lps_elem = crate::lower_aggregate_layout::naga_to_lps_type(ctx.module, *elem_ty_h)?;
+        let stride = array_stride(&lps_elem, LayoutRules::Std430) as u32;
+        off = off.wrapping_add(elem_idx.saturating_mul(stride));
+        i += 1;
+        naga_ty = *elem_ty_h;
+        if i >= indices.len() {
+            return load_lps_value_from_vmctx(ctx, off, &lps_elem);
+        }
+    }
     if !matches!(&ctx.module.types[naga_ty].inner, TypeInner::Struct { .. }) {
         return Err(LowerError::UnsupportedExpression(String::from(
             "uniform path: root not a struct",
         )));
     }
-    let mut off = ginfo.byte_offset;
-    let mut i = 0usize;
     while i < indices.len() {
         let layout = crate::naga_util::aggregate_layout(ctx.module, naga_ty)?
             .ok_or_else(|| LowerError::Internal(String::from("uniform path: layout")))?;

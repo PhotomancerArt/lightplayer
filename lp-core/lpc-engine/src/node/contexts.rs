@@ -639,12 +639,10 @@ mod tests {
         Production, QueryKey, ResolveHost, ResolveSession, ResolveTrace, Resolver,
         SessionHostResolver, TickResolver,
     };
-    use crate::node::NodeRuntime;
+    use crate::node::{NodeRuntime, RuntimeStateShape};
     use alloc::string::String;
     use alloc::vec::Vec;
-    use lpc_model::{
-        Kind, LpValue, SlotPath, SlotShapeRegistry, Slotted, StaticSlotShape, ValueSlot,
-    };
+    use lpc_model::{Kind, LpValue, SlotPath, SlotShapeRegistry, Slotted, ValueSlot};
 
     #[derive(Default, Slotted)]
     struct TestRuntimeState {
@@ -857,7 +855,7 @@ mod tests {
         let mut session = session_bundle(&mut resolver, frame);
         let mut host = PanicProduceHost::default();
         let mut slot_shapes = SlotShapeRegistry::default();
-        TestRuntimeState::ensure_registered(&mut slot_shapes).expect("state shape");
+        TestRuntimeState::register_runtime_state_shape(&mut slot_shapes).expect("state shape");
         let mut bridge = SessionHostResolver {
             session: &mut session,
             host: &mut host,

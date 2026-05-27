@@ -124,9 +124,10 @@ impl Engine {
         let mut shapes = result.prop("shapes")?.object()?;
         shapes.prop("level")?.serde(&query.level)?;
         if let Some(limit) = query.limit {
-            let (snapshot, next) = self
-                .slot_shapes()
-                .snapshot_page(query.after, usize::try_from(limit).unwrap_or(usize::MAX));
+            let (snapshot, next) = self.slot_shapes().snapshot_page_with_static_catalog(
+                query.after,
+                usize::try_from(limit).unwrap_or(usize::MAX),
+            );
             shapes.prop("registry")?.serde(&snapshot)?;
             shapes.prop("complete")?.bool(next.is_none())?;
             if let Some(next) = next {

@@ -6,14 +6,14 @@ use alloc::vec::Vec;
 
 use lpc_model::{
     ControlMessage, FromLpValue, NodeId, PlaylistState, SlotAccess, SlotData, SlotPath,
-    SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
+    SlotShapeRegistry, SlotShapeRegistryError,
 };
 use lps_shared::{TextureBuffer, TextureStorageFormat};
 
 use crate::dataflow::resolver::QueryKey;
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
-    RenderContext, RenderNode, TickContext,
+    RenderContext, RenderNode, RuntimeStateShape, TickContext,
 };
 use crate::products::visual::{
     RenderTextureRequest, TextureRenderProduct, VisualSampleBufferRequest, VisualSampleTarget,
@@ -206,13 +206,7 @@ impl NodeRuntime for PlaylistNode {
         &self,
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
-        if registry.get(&PlaylistState::SHAPE_ID).is_none() {
-            PlaylistState::ensure_registered(registry)?;
-        }
-        if registry.get(&ControlMessage::SHAPE_ID).is_none() {
-            ControlMessage::ensure_registered(registry)?;
-        }
-        Ok(())
+        PlaylistState::register_runtime_state_shape(registry).map(|_| ())
     }
 
     fn render_node(&mut self) -> Option<&mut dyn RenderNode> {

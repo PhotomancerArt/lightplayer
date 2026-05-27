@@ -11,7 +11,7 @@ use crate::gfx::{LpGraphics, LpShader, ShaderCompileOptions};
 use crate::node::test_placeholder_spine;
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
-    RenderContext, RenderNode, TickContext,
+    RenderContext, RenderNode, RuntimeStateShape, TickContext,
 };
 use crate::nodes::{
     FixtureNode, OutputNode, fixture_input_path, output_input_path, shader_output_path,
@@ -22,7 +22,7 @@ use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
 use lpc_model::nodes::output::OutputDef;
 use lpc_model::{
     Dim2u, HardwareEndpointSpec, Kind, LpValue, Revision, ShaderState, SlotAccess, SlotPath,
-    SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape, ToLpValue, TreePath,
+    SlotShapeRegistry, SlotShapeRegistryError, ToLpValue, TreePath,
 };
 use lpc_shared::output::{
     MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
@@ -169,7 +169,7 @@ impl NodeRuntime for SolidFixtureProducer {
         &self,
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
-        ShaderState::ensure_registered(registry).map(|_| ())
+        ShaderState::register_runtime_state_shape(registry).map(|_| ())
     }
 
     fn render_node(&mut self) -> Option<&mut dyn RenderNode> {

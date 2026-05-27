@@ -1,5 +1,5 @@
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::{Fields, Result};
 
 use crate::{attr, slotted::validate_slot_name};
@@ -11,8 +11,12 @@ pub(crate) fn derive_enum(
 ) -> Result<TokenStream> {
     let variant_count = data.variants.len();
     let encoding_tokens = enum_encoding_tokens(container_attrs.enum_encoding);
+    let static_encoding_tokens = static_enum_encoding_tokens(container_attrs.enum_encoding);
     let mut only_variant_slot_name = None::<String>;
     let mut variant_shapes = Vec::new();
+    let mut static_shape_options = Vec::new();
+    let mut static_shape_bindings = Vec::new();
+    let mut static_variant_shapes = Vec::new();
     let mut variant_arms = Vec::new();
     let mut data_arms = Vec::new();
     let mut data_mut_arms = Vec::new();
@@ -48,6 +52,14 @@ pub(crate) fn derive_enum(
                 variant_shapes.push(quote! {
                     ::lpc_model::slot::shape::variant(#slot_name, ::lpc_model::slot::shape::unit())
                 });
+                static_variant_shapes.push(quote! {
+                    ::lpc_model::StaticSlotVariantShape {
+                        name: #slot_name,
+                        shape: &::lpc_model::StaticSlotShapeDescriptor::Unit {
+                            meta: ::lpc_model::StaticSlotMeta::EMPTY,
+                        },
+                    }
+                });
                 variant_arms.push(quote! { Self::#variant_ident => #slot_name, });
                 data_arms.push(quote! {
                     Self::#variant_ident => ::lpc_model::SlotDataAccess::Unit(::lpc_model::Revision::default()),
@@ -67,12 +79,23 @@ pub(crate) fn derive_enum(
                     ));
                 }
                 let field_ty = &fields.unnamed[0].ty;
+                let static_shape =
+                    attr::field_static_shape_tokens(&attr::FieldShapeAttr::Infer, field_ty);
+                let static_shape_binding = format_ident!("__shape_{}", static_shape_bindings.len());
                 variant_shapes.push(quote! {
                     ::lpc_model::slot::shape::variant(
                         #slot_name,
                         <#field_ty as ::lpc_model::FieldSlot>::slot_field_shape(),
                     )
                 });
+                static_shape_options.push(static_shape);
+                static_variant_shapes.push(quote! {
+                    ::lpc_model::StaticSlotVariantShape {
+                        name: #slot_name,
+                        shape: #static_shape_binding,
+                    }
+                });
+                static_shape_bindings.push(static_shape_binding);
                 variant_arms.push(quote! { Self::#variant_ident(_) => #slot_name, });
                 data_arms.push(quote! {
                     Self::#variant_ident(value) => <#field_ty as ::lpc_model::FieldSlot>::slot_field_data(value),
@@ -88,6 +111,7 @@ pub(crate) fn derive_enum(
             }
             Fields::Named(fields) => {
                 let mut shape_fields = Vec::new();
+                let mut static_shape_fields = Vec::new();
                 let mut access_arms = Vec::new();
                 let mut mut_access_arms = Vec::new();
                 let mut field_idents = Vec::new();
@@ -106,9 +130,23 @@ pub(crate) fn derive_enum(
 
                     let field_ty = field.ty;
                     let shape = attr::field_shape_tokens(&field_attr.shape, &field_ty);
+                    let static_shape =
+                        attr::field_static_shape_tokens(&field_attr.shape, &field_ty);
+                    let static_shape_binding =
+                        format_ident!("__shape_{}", static_shape_bindings.len());
                     shape_fields.push(quote! {
                         ::lpc_model::slot::shape::field(#field_name, #shape)
                     });
+                    static_shape_options.push(static_shape);
+                    static_shape_fields.push(quote! {
+                        ::lpc_model::StaticSlotFieldShape {
+                            name: #field_name,
+                            shape: #static_shape_binding,
+                            semantics: ::lpc_model::SlotSemantics::local(),
+                            policy: ::lpc_model::SlotPolicy::writable_persisted(),
+                        }
+                    });
+                    static_shape_bindings.push(static_shape_binding);
 
                     if let Some(access) = attr::field_binding_access_tokens(
                         &field_attr.shape,
@@ -140,6 +178,17 @@ pub(crate) fn derive_enum(
                             #(#shape_fields),*
                         ])),
                     )
+                });
+                static_variant_shapes.push(quote! {
+                    ::lpc_model::StaticSlotVariantShape {
+                        name: #slot_name,
+                        shape: &::lpc_model::StaticSlotShapeDescriptor::Record {
+                            meta: ::lpc_model::StaticSlotMeta::EMPTY,
+                            fields: &[
+                                #(#static_shape_fields),*
+                            ],
+                        },
+                    }
                 });
                 variant_arms.push(quote! { Self::#variant_ident { .. } => #slot_name, });
                 data_arms.push(quote! {
@@ -212,6 +261,20 @@ pub(crate) fn derive_enum(
         }
 
         impl ::lpc_model::SlotEnumShape for #ident {
+            const STATIC_SLOT_ENUM_SHAPE_DESCRIPTOR: Option<&'static ::lpc_model::StaticSlotShapeDescriptor> =
+                match (#(#static_shape_options,)*) {
+                    (#(Some(#static_shape_bindings),)*) => {
+                        Some(&::lpc_model::StaticSlotShapeDescriptor::Enum {
+                            meta: ::lpc_model::StaticSlotMeta::EMPTY,
+                            encoding: #static_encoding_tokens,
+                            variants: &[
+                                #(#static_variant_shapes),*
+                            ],
+                        })
+                    }
+                    _ => None,
+                };
+
             fn slot_enum_shape() -> ::lpc_model::SlotShape {
                 ::lpc_model::SlotShape::Enum {
                     meta: ::lpc_model::SlotMeta::empty(),
@@ -272,6 +335,17 @@ fn enum_encoding_tokens(encoding: Option<attr::EnumEncodingAttr>) -> TokenStream
     match encoding.unwrap_or(attr::EnumEncodingAttr::Tagged) {
         attr::EnumEncodingAttr::Tagged => quote! { ::lpc_model::SlotEnumEncoding::default() },
         attr::EnumEncodingAttr::External => quote! { ::lpc_model::SlotEnumEncoding::External },
+    }
+}
+
+fn static_enum_encoding_tokens(encoding: Option<attr::EnumEncodingAttr>) -> TokenStream {
+    match encoding.unwrap_or(attr::EnumEncodingAttr::Tagged) {
+        attr::EnumEncodingAttr::Tagged => {
+            quote! { ::lpc_model::StaticSlotEnumEncoding::tagged_kind() }
+        }
+        attr::EnumEncodingAttr::External => {
+            quote! { ::lpc_model::StaticSlotEnumEncoding::External }
+        }
     }
 }
 

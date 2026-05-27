@@ -1,0 +1,21 @@
+kind = "Fixture"
+color_order = "rgb"
+brightness = 255
+gamma_correction = false
+sampling = "direct"
+transform = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+
+[bindings.input]
+source = "bus#visual.out"
+
+[bindings.output]
+target = "bus#control.out"
+
+[render_size]
+width = 16
+height = 16
+
+[mapping]
+kind = "SvgPath"
+source = "./fyeah-mapping.svg"
+sample_diameter = 2.0

@@ -26,9 +26,12 @@ mod slot_ref;
 mod slot_semantics;
 mod slot_shape;
 mod slot_shape_builder;
+mod slot_shape_lookup;
 mod slot_shape_registry;
+mod slot_shape_view;
 mod slot_value;
 mod stable_hash;
+mod static_slot_shape;
 mod value_ref;
 mod value_slot;
 
@@ -75,6 +78,7 @@ pub use slot_shape::{
     SlotEnumEncoding, SlotFieldShape, SlotMapKeyShape, SlotShape, SlotShapeId, SlotShapeIdError,
     SlotVariantShape,
 };
+pub use slot_shape_lookup::SlotShapeLookup;
 pub use slot_value::{
     FromLpValue, OrderedF32, SlotEnumOption, SlotValue, SlotValueShape, ToLpValue, ValueEditorHint,
     ValueRootError,
@@ -88,6 +92,14 @@ pub mod shape {
 }
 pub use slot_shape_registry::{
     SlotShapeEntry, SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot,
+};
+pub use slot_shape_view::{
+    SlotFieldShapeView, SlotShapeView, SlotValueShapeView, SlotVariantShapeView,
+};
+pub use static_slot_shape::{
+    StaticLpType, StaticModelEnumVariant, StaticModelStructMember, StaticSlotEnumEncoding,
+    StaticSlotEnumOption, StaticSlotFieldShape, StaticSlotMeta, StaticSlotShapeDescriptor,
+    StaticSlotValueShape, StaticSlotVariantShape, StaticValueEditorHint,
 };
 
 pub use crate::slots::{

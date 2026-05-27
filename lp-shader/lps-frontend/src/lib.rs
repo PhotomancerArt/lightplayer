@@ -253,6 +253,25 @@ float f() {
     }
 
     #[test]
+    fn lower_uniform_array_of_struct_member_access_validates() {
+        let src = r#"
+struct ControlMessage {
+    uint id;
+    uint seq;
+};
+
+layout(binding = 0) uniform ControlMessage events[2];
+
+float f() {
+    return float(events[0].id + events[1].seq);
+}
+"#;
+        let naga = compile(src).expect("parse");
+        let (ir, _) = super::lower(&naga).expect("lower");
+        lpir::validate_module(&ir).expect("validate");
+    }
+
+    #[test]
     fn lower_inout_float_modify() {
         let src = r#"
 void modify_inout(inout float value) {
@@ -596,10 +615,10 @@ float test_main() {
         assert_eq!(g.sret_arg, Some(VReg(1)));
         assert!(g.return_types.is_empty());
         assert_eq!(g.param_count, 0);
-        let ret = g
-            .body
-            .iter()
-            .rfind(|op| matches!(op, LpirOp::Return { .. }))
+        let ret = (0..g.body.len())
+            .rev()
+            .filter_map(|index| g.body.get(index))
+            .find(|op| matches!(op, LpirOp::Return { .. }))
             .expect("return op");
         match ret {
             LpirOp::Return { values } => assert_eq!(values.count, 0),

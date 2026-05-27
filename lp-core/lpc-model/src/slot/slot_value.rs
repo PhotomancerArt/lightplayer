@@ -6,7 +6,7 @@
 //! values that can live at that boundary, while [`SlotValueShape`] describes the
 //! payload type, semantic metadata, and editor hints generic clients need.
 
-use crate::{LpType, LpValue, SlotShapeId};
+use crate::{LpType, LpValue, SlotShapeId, StaticLpType, StaticSlotValueShape};
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
@@ -21,6 +21,7 @@ use super::SlotMeta;
 /// slots, and they do not get independent versions.
 pub trait SlotValue: ToLpValue + FromLpValue {
     const SHAPE_ID: SlotShapeId;
+    const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> = None;
 
     fn value_shape() -> SlotValueShape;
 }
@@ -268,9 +269,11 @@ impl FromLpValue for [f32; 3] {
 }
 
 macro_rules! impl_slot_leaf {
-    ($ty:ty, $id:literal, $shape:expr) => {
+    ($ty:ty, $id:literal, $shape:expr, $static_ty:expr) => {
         impl SlotValue for $ty {
             const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name($id);
+            const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> =
+                Some(StaticSlotValueShape::new(Self::SHAPE_ID, $static_ty));
 
             fn value_shape() -> SlotValueShape {
                 $shape
@@ -282,30 +285,50 @@ macro_rules! impl_slot_leaf {
 impl_slot_leaf!(
     String,
     "slot.leaf.raw_string",
-    SlotValueShape::raw(LpType::String)
+    SlotValueShape::raw(LpType::String),
+    StaticLpType::String
 );
 impl_slot_leaf!(
     LpValue,
     "slot.leaf.raw_any",
-    SlotValueShape::raw(LpType::Any)
+    SlotValueShape::raw(LpType::Any),
+    StaticLpType::Any
 );
-impl_slot_leaf!(i32, "slot.leaf.raw_i32", SlotValueShape::raw(LpType::I32));
-impl_slot_leaf!(u32, "slot.leaf.raw_u32", SlotValueShape::raw(LpType::U32));
-impl_slot_leaf!(f32, "slot.leaf.raw_f32", SlotValueShape::raw(LpType::F32));
+impl_slot_leaf!(
+    i32,
+    "slot.leaf.raw_i32",
+    SlotValueShape::raw(LpType::I32),
+    StaticLpType::I32
+);
+impl_slot_leaf!(
+    u32,
+    "slot.leaf.raw_u32",
+    SlotValueShape::raw(LpType::U32),
+    StaticLpType::U32
+);
+impl_slot_leaf!(
+    f32,
+    "slot.leaf.raw_f32",
+    SlotValueShape::raw(LpType::F32),
+    StaticLpType::F32
+);
 impl_slot_leaf!(
     bool,
     "slot.leaf.raw_bool",
-    SlotValueShape::raw(LpType::Bool)
+    SlotValueShape::raw(LpType::Bool),
+    StaticLpType::Bool
 );
 impl_slot_leaf!(
     [f32; 2],
     "slot.leaf.raw_vec2",
-    SlotValueShape::raw(LpType::Vec2)
+    SlotValueShape::raw(LpType::Vec2),
+    StaticLpType::Vec2
 );
 impl_slot_leaf!(
     [f32; 3],
     "slot.leaf.raw_vec3",
-    SlotValueShape::raw(LpType::Vec3)
+    SlotValueShape::raw(LpType::Vec3),
+    StaticLpType::Vec3
 );
 fn raw_shape_id(ty: &LpType) -> SlotShapeId {
     SlotShapeId::from_static_name(match ty {

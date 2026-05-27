@@ -6,7 +6,8 @@ use lpc_model::{
 };
 
 use crate::node::{
-    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, TickContext,
+    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
+    RuntimeStateShape, TickContext,
 };
 
 /// Runtime clock node producing project time as ordinary slot data.
@@ -90,7 +91,7 @@ impl NodeRuntime for ClockNode {
         &self,
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
-        ClockState::ensure_registered(registry).map(|_| ())
+        ClockState::register_runtime_state_shape(registry).map(|_| ())
     }
 }
 

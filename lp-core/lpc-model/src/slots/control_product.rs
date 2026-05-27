@@ -1,6 +1,7 @@
 use crate::{
     ControlProduct, FromLpValue, LpType, LpValue, ProductKind, ProductRef, SlotMeta, SlotShapeId,
-    SlotValue, SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
+    SlotValue, SlotValueShape, StaticLpType, StaticSlotMeta, StaticSlotValueShape,
+    StaticValueEditorHint, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot,
 };
 
 /// Revision-tracked graph control-product leaf.
@@ -25,6 +26,13 @@ impl FromLpValue for ControlProduct {
 
 impl SlotValue for ControlProduct {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("ControlProduct");
+    const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> =
+        Some(StaticSlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: StaticLpType::Product(ProductKind::Control),
+            meta: StaticSlotMeta::EMPTY,
+            editor: StaticValueEditorHint::ControlProduct,
+        });
 
     fn value_shape() -> SlotValueShape {
         SlotValueShape {

@@ -1,0 +1,11 @@
+kind = "ControlRadio"
+endpoint = "radio:espnow:0"
+channel = 1
+repeat_count = 3
+wifi_channel = 0
+
+[bindings.input]
+source = "bus#trigger"
+
+[bindings.output]
+target = "bus#trigger"

@@ -29,7 +29,7 @@ fn render_one_slot_view(out: &mut String, view: &StaticSlotView) {
     out.push_str(&view.view_name);
     out.push_str(" {\n");
     out.push_str("    pub fn compile(\n");
-    out.push_str("        registry: &::lpc_model::SlotShapeRegistry,\n");
+    out.push_str("        registry: &(impl ::lpc_model::SlotShapeLookup + ?Sized),\n");
     out.push_str("    ) -> Result<Self, ::lpc_model::SlotAccessorError> {\n");
     out.push_str("        Ok(Self {\n");
     out.push_str("            registry_revision: registry.revision(),\n");
@@ -64,7 +64,7 @@ fn render_one_slot_view(out: &mut String, view: &StaticSlotView) {
 
     out.push_str("    pub fn get_or_compile<'a>(\n");
     out.push_str("        cache: &'a mut Option<Self>,\n");
-    out.push_str("        registry: &::lpc_model::SlotShapeRegistry,\n");
+    out.push_str("        registry: &(impl ::lpc_model::SlotShapeLookup + ?Sized),\n");
     out.push_str("    ) -> Result<&'a Self, ::lpc_model::SlotAccessorError> {\n");
     out.push_str("        let needs_compile = cache\n");
     out.push_str("            .as_ref()\n");
@@ -79,9 +79,10 @@ fn render_one_slot_view(out: &mut String, view: &StaticSlotView) {
     out.push_str("        self.registry_revision\n");
     out.push_str("    }\n\n");
 
-    out.push_str(
-        "    pub fn is_valid_for(&self, registry: &::lpc_model::SlotShapeRegistry) -> bool {\n",
-    );
+    out.push_str("    pub fn is_valid_for(\n");
+    out.push_str("        &self,\n");
+    out.push_str("        registry: &(impl ::lpc_model::SlotShapeLookup + ?Sized),\n");
+    out.push_str("    ) -> bool {\n");
     out.push_str("        self.registry_revision == registry.revision()\n");
     out.push_str("    }\n\n");
 

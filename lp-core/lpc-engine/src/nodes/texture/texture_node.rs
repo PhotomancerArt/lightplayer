@@ -6,7 +6,6 @@ use lpc_model::SlotAccess;
 use lpc_model::SlotPath;
 use lpc_model::SlotShapeRegistry;
 use lpc_model::SlotShapeRegistryError;
-use lpc_model::StaticSlotShape;
 use lpc_model::TextureDefView;
 use lpc_model::WithRevision;
 use lpc_model::nodes::texture::TextureFormat;
@@ -14,7 +13,7 @@ use lpc_model::nodes::texture::TextureState;
 
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeResourceInitContext, NodeRuntime, PressureLevel,
-    ProduceResult, TickContext,
+    ProduceResult, RuntimeStateShape, TickContext,
 };
 use crate::resource::{RuntimeBuffer, RuntimeBufferId};
 
@@ -122,7 +121,7 @@ impl NodeRuntime for TextureNode {
         &self,
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
-        TextureState::ensure_registered(registry).map(|_| ())
+        TextureState::register_runtime_state_shape(registry).map(|_| ())
     }
 }
 

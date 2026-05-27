@@ -94,7 +94,9 @@ fn default_time() -> ValueSlot<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{NodeDef, SlotDirection, SlotMerge, SlotShape, SlotShapeRegistry, StaticSlotShape};
+    use crate::{
+        NodeDef, SlotDirection, SlotMerge, SlotShape, StaticSlotShape, StaticSlotShapeDescriptor,
+    };
 
     #[test]
     fn fluid_def_parses_inline_emitters() {
@@ -123,12 +125,8 @@ intensity = 1.0
 
     #[test]
     fn fluid_emitters_shape_is_consumed_and_merged_by_key() {
-        let mut registry = SlotShapeRegistry::default();
-        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("static shapes");
         assert_eq!(
-            registry
-                .entry(&FluidEmitter::SHAPE_ID)
-                .and_then(|entry| entry.name()),
+            crate::slot_shapes::static_slot_shape_name(FluidEmitter::SHAPE_ID),
             Some("lp::fluid::Emitter")
         );
 
@@ -142,6 +140,25 @@ intensity = 1.0
 
         assert_eq!(emitters.semantics.direction, SlotDirection::Consumed);
         assert_eq!(emitters.semantics.merge, SlotMerge::ByKey);
+
+        let static_shape =
+            crate::slot_shapes::static_slot_shape(FluidDef::SHAPE_ID).expect("static shape");
+        let StaticSlotShapeDescriptor::Record { fields, .. } = *static_shape else {
+            panic!("static fluid shape");
+        };
+        let emitters = fields
+            .iter()
+            .find(|field| field.name == "emitters")
+            .expect("static emitters field");
+        let StaticSlotShapeDescriptor::Map { value, .. } = *emitters.shape else {
+            panic!("static emitters map");
+        };
+        assert_eq!(
+            value,
+            &StaticSlotShapeDescriptor::Ref {
+                id: FluidEmitter::SHAPE_ID
+            }
+        );
     }
 
     #[test]

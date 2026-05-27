@@ -10,7 +10,7 @@ use lpc_model::nodes::fixture::{
 };
 use lpc_model::{
     ControlExtent, ControlProduct, Dim2u, FixtureDefView, FixtureState, Revision, SlotAccess,
-    SlotPath, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
+    SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
 };
 use lps_q32::q32::{Q32, ToQ32};
 
@@ -25,7 +25,7 @@ use lps_shared::TextureBuffer;
 use crate::dataflow::resolver::QueryKey;
 use crate::node::{
     ControlNode, ControlRenderContext, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
-    PressureLevel, ProduceResult, TickContext,
+    PressureLevel, ProduceResult, RuntimeStateShape, TickContext,
 };
 use crate::products::control::{
     ControlHint, ControlLayout, ControlRenderRequest, ControlRenderTarget, ControlSampleFormat,
@@ -255,7 +255,7 @@ impl NodeRuntime for FixtureNode {
         &self,
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
-        FixtureState::ensure_registered(registry).map(|_| ())
+        FixtureState::register_runtime_state_shape(registry).map(|_| ())
     }
 
     fn control_node(&mut self) -> Option<&mut dyn ControlNode> {
@@ -412,7 +412,7 @@ impl ControlNode for FixtureNode {
                 request,
                 target,
                 settings,
-                fixture_lamp_channel_count(&self.mapping),
+                &self.mapping,
                 ctx.time_seconds(),
             );
         }
@@ -643,7 +643,7 @@ fn render_fixture_diagnostic_control(
     request: &ControlRenderRequest,
     target: ControlRenderTarget<'_>,
     settings: FixtureRenderSettings,
-    lamp_count: u32,
+    mapping: &MappingConfig,
     time_seconds: f32,
 ) -> Result<ControlLayout, NodeError> {
     if request.sample_format != ControlSampleFormat::Unorm16
@@ -667,16 +667,26 @@ fn render_fixture_diagnostic_control(
     }
 
     target.samples.fill(0);
+    let lamp_count = fixture_lamp_channel_count(mapping);
     let available_lamps = expected_samples / 3;
     let rendered_lamps = (lamp_count as usize).min(available_lamps);
     let brightness = settings.brightness.to_q32() / 255.to_q32();
+    let path_spans = if settings.diagnostic_mode == FixtureDiagnosticMode::PathColors {
+        fixture_path_spans(mapping)
+    } else {
+        Vec::new()
+    };
     for lamp in 0..rendered_lamps {
-        let [r, g, b] = diagnostic_rgb(
-            settings.diagnostic_mode,
-            lamp as u32,
-            lamp_count,
-            time_seconds,
-        );
+        let [r, g, b] = if settings.diagnostic_mode == FixtureDiagnosticMode::PathColors {
+            diagnostic_path_color_rgb(lamp as u32, &path_spans)
+        } else {
+            diagnostic_rgb(
+                settings.diagnostic_mode,
+                lamp as u32,
+                lamp_count,
+                time_seconds,
+            )
+        };
         let ordered = finalize_fixture_rgb(
             settings.color_order,
             r,
@@ -712,13 +722,8 @@ fn diagnostic_rgb(
     match mode {
         FixtureDiagnosticMode::Off => [0, 0, 0],
         FixtureDiagnosticMode::LedIndex => diagnostic_led_index_rgb(lamp),
-        FixtureDiagnosticMode::Groups10 => {
-            if (lamp + 1).is_multiple_of(10) {
-                [u16::MAX, u16::MAX, u16::MAX]
-            } else {
-                diagnostic_palette((lamp / 10) as usize)
-            }
-        }
+        FixtureDiagnosticMode::PathColors => [0, 0, 0],
+        FixtureDiagnosticMode::Groups10 => diagnostic_rgb_group_10_rgb(lamp),
         FixtureDiagnosticMode::Chase => {
             if lamp_count == 0 {
                 return [0, 0, 0];
@@ -738,6 +743,23 @@ fn diagnostic_rgb(
             }
         }
     }
+}
+
+fn diagnostic_rgb_group_10_rgb(lamp: u32) -> [u16; 3] {
+    match (lamp / 10) % 3 {
+        0 => [u16::MAX, 0, 0],
+        1 => [0, u16::MAX, 0],
+        _ => [0, 0, u16::MAX],
+    }
+}
+
+fn diagnostic_path_color_rgb(lamp: u32, path_spans: &[FixturePathSpan]) -> [u16; 3] {
+    path_spans
+        .iter()
+        .find(|span| span.contains(lamp))
+        .map_or([0, 0, 0], |span| {
+            diagnostic_palette(span.palette_index as usize)
+        })
 }
 
 fn diagnostic_led_index_rgb(lamp: u32) -> [u16; 3] {
@@ -1031,14 +1053,40 @@ fn fixture_control_extent(config: &MappingConfig) -> ControlExtent {
     ControlExtent::new(1, fixture_lamp_channel_count(config).saturating_mul(3))
 }
 
+#[derive(Clone, Copy)]
+struct FixturePathSpan {
+    palette_index: u32,
+    first_lamp: u32,
+    lamp_count: u32,
+}
+
+impl FixturePathSpan {
+    fn end_lamp(self) -> u32 {
+        self.first_lamp.saturating_add(self.lamp_count)
+    }
+
+    fn contains(self, lamp: u32) -> bool {
+        lamp >= self.first_lamp && lamp < self.end_lamp()
+    }
+}
+
 fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
+    fixture_path_spans(config)
+        .into_iter()
+        .map(FixturePathSpan::end_lamp)
+        .max()
+        .unwrap_or(0)
+}
+
+fn fixture_path_spans(config: &MappingConfig) -> Vec<FixturePathSpan> {
     match config {
-        MappingConfig::Unset => 0,
-        MappingConfig::SvgPath { .. } => 0,
+        MappingConfig::Unset => Vec::new(),
+        MappingConfig::SvgPath { .. } => Vec::new(),
         MappingConfig::PathPoints { paths, .. } => {
-            let mut total = 0u32;
+            let mut spans = Vec::new();
+            let mut next_lamp = 0u32;
             for path in paths.entries.values() {
-                match path.value() {
+                let (first_lamp, lamp_count) = match path.value() {
                     PathSpec::RingArray {
                         start_ring_inclusive,
                         end_ring_exclusive,
@@ -1053,8 +1101,9 @@ fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
                             RingOrder::OuterFirst => (start_ring..end_ring).rev().collect(),
                         };
 
+                        let mut lamp_count = 0u32;
                         for ring_index in ring_indices {
-                            total = total.saturating_add(
+                            lamp_count = lamp_count.saturating_add(
                                 ring_lamp_counts
                                     .entries
                                     .get(&ring_index)
@@ -1062,13 +1111,24 @@ fn fixture_lamp_channel_count(config: &MappingConfig) -> u32 {
                                     .unwrap_or(0),
                             );
                         }
+                        (next_lamp, lamp_count)
                     }
-                    PathSpec::PointList { points, .. } => {
-                        total = total.saturating_add(points.entries.len() as u32);
-                    }
+                    PathSpec::PointList {
+                        first_channel,
+                        points,
+                        ..
+                    } => (*first_channel.value(), points.entries.len() as u32),
+                };
+                if lamp_count > 0 {
+                    spans.push(FixturePathSpan {
+                        palette_index: spans.len() as u32,
+                        first_lamp,
+                        lamp_count,
+                    });
                 }
+                next_lamp = first_lamp.saturating_add(lamp_count);
             }
-            total
+            spans
         }
     }
 }
@@ -1087,15 +1147,13 @@ mod tests {
 
     use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
     use crate::engine::{Engine, default_demand_input_path};
-    use crate::node::{RenderContext, RenderNode, test_placeholder_spine};
+    use crate::node::{RenderContext, RenderNode, RuntimeStateShape, test_placeholder_spine};
     use crate::nodes::TextureNode;
     use crate::nodes::shader_output_path;
     use crate::products::visual::{
         TextureRenderProduct, VisualProduct, VisualSampleBufferRequest, VisualSampleTarget,
     };
-    use lpc_model::{
-        ShaderState, SlotAccess, SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape,
-    };
+    use lpc_model::{ShaderState, SlotAccess, SlotShapeRegistry, SlotShapeRegistryError};
 
     struct FixtureTickCountSolidProducer {
         state: ShaderState,
@@ -1136,7 +1194,7 @@ mod tests {
             &self,
             registry: &mut SlotShapeRegistry,
         ) -> Result<(), SlotShapeRegistryError> {
-            ShaderState::ensure_registered(registry).map(|_| ())
+            ShaderState::register_runtime_state_shape(registry).map(|_| ())
         }
 
         fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
@@ -1211,7 +1269,7 @@ mod tests {
             &self,
             registry: &mut SlotShapeRegistry,
         ) -> Result<(), SlotShapeRegistryError> {
-            ShaderState::ensure_registered(registry).map(|_| ())
+            ShaderState::register_runtime_state_shape(registry).map(|_| ())
         }
 
         fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
@@ -1425,6 +1483,160 @@ mod tests {
         );
         assert_eq!(layout.spans.len(), 1);
         assert_eq!(layout.spans[0].len, 36);
+    }
+
+    #[test]
+    fn fixture_diagnostic_path_colors_marks_authored_path_boundaries() {
+        let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
+        let frame = Revision::new(1);
+        let root = engine.tree().root();
+        let (spine, artifact) = test_placeholder_spine();
+        let mapping = MappingConfig::path_points_vec(
+            vec![
+                PathSpec::point_list(0, [[0.0, 0.0], [0.25, 0.0]]),
+                PathSpec::point_list(3, [[0.5, 0.0], [0.75, 0.0]]),
+            ],
+            2.0,
+        );
+
+        let fix_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("fx").unwrap(),
+                lpc_model::NodeName::parse("fixture").unwrap(),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                spine,
+                artifact,
+                frame,
+            )
+            .unwrap();
+
+        engine
+            .attach_runtime_node(
+                fix_id,
+                Box::new(FixtureNode::new(
+                    fix_id,
+                    mapping,
+                    FixtureSamplingConfig::Direct,
+                    frame,
+                )),
+                frame,
+            )
+            .unwrap();
+        bind_fixture_def_defaults(&mut engine, fix_id, frame);
+        bind_fixture_def_slot(
+            &mut engine,
+            fix_id,
+            frame,
+            "diagnostic_mode",
+            FixtureDiagnosticMode::PathColors.to_lp_value(),
+        );
+
+        engine.add_demand_root(fix_id);
+        engine.tick(10).unwrap();
+
+        let extent = ControlExtent::new(1, 15);
+        let request = ControlRenderRequest::unorm16(extent);
+        let mut samples = vec![0u16; extent.sample_count() as usize];
+        let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
+        let layout = engine
+            .render_control_for_test(ControlProduct::new(fix_id, 0, extent), &request, target)
+            .expect("control render");
+
+        assert_eq!(
+            samples,
+            vec![
+                65535, 0, 0, // path 0
+                65535, 0, 0, // path 0
+                0, 0, 0, // unassigned channel gap
+                0, 65535, 0, // path 1
+                0, 65535, 0, // path 1
+            ]
+        );
+        assert_eq!(layout.spans.len(), 1);
+        assert_eq!(layout.spans[0].len, 15);
+    }
+
+    #[test]
+    fn fixture_diagnostic_groups_10_renders_rgb_color_order_bands() {
+        let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
+        let frame = Revision::new(1);
+        let root = engine.tree().root();
+        let (spine, artifact) = test_placeholder_spine();
+        let mapping = MappingConfig::path_points_vec(
+            vec![PathSpec::ring_array_counts(
+                [0.5, 0.5],
+                1.0,
+                0,
+                1,
+                &[30],
+                0.0,
+                RingOrder::InnerFirst,
+            )],
+            2.0,
+        );
+
+        let fix_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("fx").unwrap(),
+                lpc_model::NodeName::parse("fixture").unwrap(),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                spine,
+                artifact,
+                frame,
+            )
+            .unwrap();
+
+        engine
+            .attach_runtime_node(
+                fix_id,
+                Box::new(FixtureNode::new(
+                    fix_id,
+                    mapping,
+                    FixtureSamplingConfig::TextureArea,
+                    frame,
+                )),
+                frame,
+            )
+            .unwrap();
+        bind_fixture_def_defaults(&mut engine, fix_id, frame);
+        bind_fixture_def_slot(
+            &mut engine,
+            fix_id,
+            frame,
+            "diagnostic_mode",
+            FixtureDiagnosticMode::Groups10.to_lp_value(),
+        );
+
+        engine.add_demand_root(fix_id);
+        engine.tick(10).unwrap();
+
+        let extent = ControlExtent::new(1, 90);
+        let request = ControlRenderRequest::unorm16(extent);
+        let mut samples = vec![0u16; extent.sample_count() as usize];
+        let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
+        let layout = engine
+            .render_control_for_test(ControlProduct::new(fix_id, 0, extent), &request, target)
+            .expect("control render");
+
+        for rgb in samples[0..30].chunks_exact(3) {
+            assert_eq!(rgb, &[65535, 0, 0]);
+        }
+        for rgb in samples[30..60].chunks_exact(3) {
+            assert_eq!(rgb, &[0, 65535, 0]);
+        }
+        for rgb in samples[60..90].chunks_exact(3) {
+            assert_eq!(rgb, &[0, 0, 65535]);
+        }
+        assert_eq!(layout.spans.len(), 1);
+        assert_eq!(layout.spans[0].len, 90);
     }
 
     #[test]

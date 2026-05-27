@@ -1,7 +1,8 @@
 use super::{BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError};
 use crate::{
-    FromLpValue, LpType, LpValue, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, ToLpValue,
-    ValueEditorHint, ValueRootError,
+    FromLpValue, LpType, LpValue, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, StaticLpType,
+    StaticSlotMeta, StaticSlotValueShape, StaticValueEditorHint, ToLpValue, ValueEditorHint,
+    ValueRootError,
 };
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -76,6 +77,13 @@ impl FromLpValue for BindingRef {
 
 impl SlotValue for BindingRef {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("BindingRef");
+    const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> =
+        Some(StaticSlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: StaticLpType::String,
+            meta: StaticSlotMeta::EMPTY,
+            editor: StaticValueEditorHint::Path,
+        });
 
     fn value_shape() -> SlotValueShape {
         SlotValueShape {

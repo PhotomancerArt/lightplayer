@@ -9,7 +9,7 @@
 use crate::slot::SlotReadContext;
 use crate::{
     FromLpValue, Revision, SlotAccess, SlotDataAccess, SlotName, SlotPath, SlotPathSegment,
-    SlotShape, SlotShapeId, SlotShapeRegistry,
+    SlotShapeId, SlotShapeLookup, SlotShapeView,
 };
 use alloc::format;
 use alloc::string::String;
@@ -44,42 +44,42 @@ impl SlotAccessor {
     pub fn compile(
         root: SlotShapeId,
         path: SlotPath,
-        registry: &SlotShapeRegistry,
+        registry: &(impl SlotShapeLookup + ?Sized),
     ) -> Result<Self, SlotAccessorError> {
-        let shape = registry.get(&root).ok_or_else(|| {
+        let shape = registry.get_shape(root).ok_or_else(|| {
             SlotAccessorError::new(format!("missing slot path root shape {root}"))
         })?;
         let mut shape = resolve_ref_shape(shape, registry)?;
         let mut steps = Vec::new();
 
         for segment in path.segments() {
-            match (shape, segment) {
-                (SlotShape::Record { fields, .. }, SlotPathSegment::Field(name)) => {
-                    let (index, field) = fields
-                        .iter()
-                        .enumerate()
-                        .find(|(_, field)| field.name == *name)
-                        .ok_or_else(|| {
-                            SlotAccessorError::new(format!("record has no field {name}"))
-                        })?;
-                    steps.push(SlotAccessorStep::RecordField {
-                        index,
-                        name: name.clone(),
-                    });
-                    shape = resolve_ref_shape(&field.shape, registry)?;
-                }
-                (SlotShape::Option { some, .. }, SlotPathSegment::Field(name))
-                    if name.as_str() == "some" =>
-                {
-                    steps.push(SlotAccessorStep::OptionSome);
-                    shape = resolve_ref_shape(some, registry)?;
-                }
-                (_, SlotPathSegment::Field(name)) => {
+            match segment {
+                SlotPathSegment::Field(name) => {
+                    if let Some((index, field)) = shape.record_field_by_name(name) {
+                        steps.push(SlotAccessorStep::RecordField {
+                            index,
+                            name: name.clone(),
+                        });
+                        shape = resolve_ref_shape(field.shape(), registry)?;
+                        continue;
+                    }
+                    if name.as_str() == "some"
+                        && let Some(some) = shape.option_some()
+                    {
+                        steps.push(SlotAccessorStep::OptionSome);
+                        shape = resolve_ref_shape(some, registry)?;
+                        continue;
+                    }
+                    if shape.record_fields_len().is_some() {
+                        return Err(SlotAccessorError::new(format!(
+                            "record has no field {name}"
+                        )));
+                    }
                     return Err(SlotAccessorError::new(format!(
                         "slot path field {name} cannot descend into current slot shape"
                     )));
                 }
-                (_, SlotPathSegment::Key(key)) => {
+                SlotPathSegment::Key(key) => {
                     return Err(SlotAccessorError::new(format!(
                         "compiled map-key slot access is not implemented yet: {key:?}"
                     )));
@@ -99,11 +99,11 @@ impl SlotAccessor {
     pub fn compile_value(
         root: SlotShapeId,
         path: SlotPath,
-        registry: &SlotShapeRegistry,
+        registry: &(impl SlotShapeLookup + ?Sized),
     ) -> Result<Self, SlotAccessorError> {
         let accessor = Self::compile(root, path, registry)?;
         let shape = accessor.leaf_shape(registry)?;
-        if !matches!(shape, SlotShape::Value { .. }) {
+        if shape.value_shape().is_none() {
             return Err(SlotAccessorError::new(format!(
                 "slot path {} does not resolve to a value leaf",
                 accessor.path
@@ -144,7 +144,7 @@ impl SlotAccessor {
     pub fn access<'a>(
         &self,
         root: &'a dyn SlotAccess,
-        registry: &SlotShapeRegistry,
+        registry: &(impl SlotShapeLookup + ?Sized),
     ) -> Result<SlotDataAccess<'a>, SlotAccessorError> {
         self.check_registry_revision(registry)?;
         if root.shape_id() != self.root {
@@ -185,7 +185,7 @@ impl SlotAccessor {
 
     fn check_registry_revision(
         &self,
-        registry: &SlotShapeRegistry,
+        registry: &(impl SlotShapeLookup + ?Sized),
     ) -> Result<(), SlotAccessorError> {
         if self.registry_revision == registry.revision() {
             Ok(())
@@ -201,30 +201,28 @@ impl SlotAccessor {
 
     fn leaf_shape<'a>(
         &self,
-        registry: &'a SlotShapeRegistry,
-    ) -> Result<&'a SlotShape, SlotAccessorError> {
+        registry: &'a (impl SlotShapeLookup + ?Sized),
+    ) -> Result<SlotShapeView<'a>, SlotAccessorError> {
         self.check_registry_revision(registry)?;
-        let mut shape = registry.get(&self.root).ok_or_else(|| {
+        let mut shape = registry.get_shape(self.root).ok_or_else(|| {
             SlotAccessorError::new(format!("missing slot path root shape {}", self.root))
         })?;
         shape = resolve_ref_shape(shape, registry)?;
         for step in &self.steps {
-            match (shape, step) {
-                (SlotShape::Record { fields, .. }, SlotAccessorStep::RecordField { index, .. }) => {
-                    let field = fields.get(*index).ok_or_else(|| {
+            match step {
+                SlotAccessorStep::RecordField { index, .. } => {
+                    let field = shape.record_field(*index).ok_or_else(|| {
                         SlotAccessorError::new(format!(
                             "compiled field index {index} is outside current shape"
                         ))
                     })?;
-                    shape = resolve_ref_shape(&field.shape, registry)?;
+                    shape = resolve_ref_shape(field.shape(), registry)?;
                 }
-                (SlotShape::Option { some, .. }, SlotAccessorStep::OptionSome) => {
+                SlotAccessorStep::OptionSome => {
+                    let some = shape.option_some().ok_or_else(|| {
+                        SlotAccessorError::new("compiled accessor no longer matches current shape")
+                    })?;
                     shape = resolve_ref_shape(some, registry)?;
-                }
-                _ => {
-                    return Err(SlotAccessorError::new(
-                        "compiled accessor no longer matches current shape",
-                    ));
                 }
             }
         }
@@ -249,12 +247,12 @@ impl core::fmt::Display for SlotAccessorError {
 impl core::error::Error for SlotAccessorError {}
 
 fn resolve_ref_shape<'a>(
-    mut shape: &'a SlotShape,
-    registry: &'a SlotShapeRegistry,
-) -> Result<&'a SlotShape, SlotAccessorError> {
-    while let SlotShape::Ref { id } = shape {
+    mut shape: SlotShapeView<'a>,
+    registry: &'a (impl SlotShapeLookup + ?Sized),
+) -> Result<SlotShapeView<'a>, SlotAccessorError> {
+    while let Some(id) = shape.ref_id() {
         shape = registry
-            .get(id)
+            .get_shape(id)
             .ok_or_else(|| SlotAccessorError::new(format!("missing referenced slot shape {id}")))?;
     }
     Ok(shape)
@@ -271,9 +269,13 @@ mod tests {
     #[test]
     fn compile_value_can_descend_into_option_some_payload() {
         let mut registry = SlotShapeRegistry::default();
-        crate::slot_shapes::register_all_static_slot_shapes(&mut registry)
-            .expect("static slot shapes");
-        OptionRoot::ensure_registered(&mut registry).expect("option shape");
+        registry
+            .ensure_shape_named(
+                OptionRoot::SHAPE_ID,
+                OptionRoot::shape_name().expect("shape name"),
+                OptionRoot::slot_shape(),
+            )
+            .expect("option shape");
 
         let accessor = SlotAccessor::compile_value(
             OptionRoot::SHAPE_ID,

@@ -1,4 +1,7 @@
-use crate::{LpValue, Revision, SlotMapKeyShape, SlotShape, WithRevision, current_revision};
+use crate::{
+    LpValue, Revision, SlotMapKeyShape, SlotShape, StaticSlotMeta, StaticSlotShapeDescriptor,
+    WithRevision, current_revision,
+};
 use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
@@ -115,6 +118,12 @@ impl<T: SlotValue> SlotValueAccess for T {
 }
 
 impl<T: SlotValue> FieldSlot for T {
+    const STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR: Option<&'static StaticSlotShapeDescriptor> =
+        match T::STATIC_VALUE_SHAPE_DESCRIPTOR {
+            Some(shape) => Some(&StaticSlotShapeDescriptor::Value { shape }),
+            None => None,
+        };
+
     fn slot_field_shape() -> SlotShape {
         SlotShape::leaf(T::value_shape())
     }
@@ -125,6 +134,12 @@ impl<T: SlotValue> FieldSlot for T {
 }
 
 impl<T: SlotValue> FieldSlot for ValueSlot<T> {
+    const STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR: Option<&'static StaticSlotShapeDescriptor> =
+        match T::STATIC_VALUE_SHAPE_DESCRIPTOR {
+            Some(shape) => Some(&StaticSlotShapeDescriptor::Value { shape }),
+            None => None,
+        };
+
     fn slot_field_shape() -> SlotShape {
         SlotShape::leaf(T::value_shape())
     }
@@ -136,6 +151,8 @@ impl<T: SlotValue> FieldSlot for ValueSlot<T> {
 
 /// Conversion between typed map keys and generic slot map keys.
 pub trait MapSlotKeyLike: Clone + Ord {
+    const KEY_SHAPE: SlotMapKeyShape;
+
     fn key_shape() -> SlotMapKeyShape;
     fn to_authored_key(&self) -> String;
     fn from_authored_key(key: &str) -> Result<Self, String>;
@@ -304,6 +321,16 @@ where
     K: MapSlotKeyLike,
     V: FieldSlot + SlotMapValueAccess,
 {
+    const STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR: Option<&'static StaticSlotShapeDescriptor> =
+        match V::STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR {
+            Some(value) => Some(&StaticSlotShapeDescriptor::Map {
+                meta: StaticSlotMeta::EMPTY,
+                key: K::KEY_SHAPE,
+                value,
+            }),
+            None => None,
+        };
+
     fn slot_field_shape() -> SlotShape {
         SlotShape::Map {
             meta: super::SlotMeta::empty(),
@@ -437,6 +464,15 @@ impl<T> FieldSlot for OptionSlot<T>
 where
     T: FieldSlot + SlotMapValueAccess,
 {
+    const STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR: Option<&'static StaticSlotShapeDescriptor> =
+        match T::STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR {
+            Some(some) => Some(&StaticSlotShapeDescriptor::Option {
+                meta: StaticSlotMeta::EMPTY,
+                some,
+            }),
+            None => None,
+        };
+
     fn slot_field_shape() -> SlotShape {
         SlotShape::Option {
             meta: super::SlotMeta::empty(),
@@ -450,8 +486,10 @@ where
 }
 
 impl MapSlotKeyLike for String {
+    const KEY_SHAPE: SlotMapKeyShape = SlotMapKeyShape::String;
+
     fn key_shape() -> SlotMapKeyShape {
-        SlotMapKeyShape::String
+        Self::KEY_SHAPE
     }
 
     fn to_authored_key(&self) -> String {
@@ -475,8 +513,10 @@ impl MapSlotKeyLike for String {
 }
 
 impl MapSlotKeyLike for i32 {
+    const KEY_SHAPE: SlotMapKeyShape = SlotMapKeyShape::I32;
+
     fn key_shape() -> SlotMapKeyShape {
-        SlotMapKeyShape::I32
+        Self::KEY_SHAPE
     }
 
     fn to_authored_key(&self) -> String {
@@ -501,8 +541,10 @@ impl MapSlotKeyLike for i32 {
 }
 
 impl MapSlotKeyLike for u32 {
+    const KEY_SHAPE: SlotMapKeyShape = SlotMapKeyShape::U32;
+
     fn key_shape() -> SlotMapKeyShape {
-        SlotMapKeyShape::U32
+        Self::KEY_SHAPE
     }
 
     fn to_authored_key(&self) -> String {

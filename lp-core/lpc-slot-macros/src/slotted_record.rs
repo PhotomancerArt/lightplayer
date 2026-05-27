@@ -1,5 +1,5 @@
 use proc_macro2::TokenStream;
-use quote::quote;
+use quote::{format_ident, quote};
 use syn::Result;
 
 use crate::{
@@ -14,6 +14,9 @@ pub(crate) fn derive_record(
     container_attrs: attr::ContainerAttrs,
 ) -> Result<TokenStream> {
     let mut shape_fields = Vec::new();
+    let mut static_shape_options = Vec::new();
+    let mut static_shape_fields = Vec::new();
+    let mut static_shape_bindings = Vec::new();
     let mut access_arms = Vec::new();
     let mut mut_access_arms = Vec::new();
     let mut access_index = 0usize;
@@ -34,11 +37,16 @@ pub(crate) fn derive_record(
         let field_ty = field.ty;
 
         let shape = attr::field_shape_tokens(&field_attr.shape, &field_ty);
+        let static_shape = attr::field_static_shape_tokens(&field_attr.shape, &field_ty);
+        let static_shape_binding = format_ident!("__field_shape_{}", static_shape_bindings.len());
         let semantics = attr::field_semantics_tokens(field_attr.direction, field_attr.merge);
         let selected_policy = field_attr.policy.or(container_attrs.default_policy);
         let policy = selected_policy
             .map(attr::field_policy_tokens)
             .unwrap_or_else(|| quote! { ::lpc_model::SlotPolicy::default() });
+        let static_policy = selected_policy
+            .map(attr::field_policy_tokens)
+            .unwrap_or_else(|| quote! { ::lpc_model::SlotPolicy::writable_persisted() });
         shape_fields.push(quote! {
             ::lpc_model::slot::shape::field_with_semantics_and_policy(
                 #field_name,
@@ -47,6 +55,16 @@ pub(crate) fn derive_record(
                 #policy,
             )
         });
+        static_shape_options.push(static_shape);
+        static_shape_fields.push(quote! {
+            ::lpc_model::StaticSlotFieldShape {
+                name: #field_name,
+                shape: #static_shape_binding,
+                semantics: #semantics,
+                policy: #static_policy,
+            }
+        });
+        static_shape_bindings.push(static_shape_binding);
 
         if let Some(access) = attr::field_access_tokens(&field_attr.shape, &field_ty, &field_ident)
         {
@@ -90,6 +108,8 @@ pub(crate) fn derive_record(
         impl ::lpc_model::StaticSlotShape for #ident {
             const SHAPE_ID: ::lpc_model::SlotShapeId =
                 #shape_id;
+            const STATIC_SLOT_SHAPE_DESCRIPTOR: Option<&'static ::lpc_model::StaticSlotShapeDescriptor> =
+                <Self as ::lpc_model::SlotRecordShape>::STATIC_SLOT_RECORD_SHAPE_DESCRIPTOR;
 
             fn shape_name() -> Option<&'static str> {
                 Some(concat!(module_path!(), "::", stringify!(#ident)))
@@ -105,6 +125,19 @@ pub(crate) fn derive_record(
 
     Ok(quote! {
         impl ::lpc_model::SlotRecordShape for #ident {
+            const STATIC_SLOT_RECORD_SHAPE_DESCRIPTOR: Option<&'static ::lpc_model::StaticSlotShapeDescriptor> =
+                match (#(#static_shape_options,)*) {
+                    (#(Some(#static_shape_bindings),)*) => {
+                        Some(&::lpc_model::StaticSlotShapeDescriptor::Record {
+                            meta: ::lpc_model::StaticSlotMeta::EMPTY,
+                            fields: &[
+                                #(#static_shape_fields),*
+                            ],
+                        })
+                    }
+                    _ => None,
+                };
+
             fn slot_record_shape() -> ::lpc_model::SlotShape {
                 ::lpc_model::slot::shape::record(::lpc_model::__private::Vec::from([
                     #(#shape_fields),*
@@ -143,6 +176,11 @@ pub(crate) fn derive_record(
         }
 
         impl ::lpc_model::FieldSlot for #ident {
+            const STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR: Option<&'static ::lpc_model::StaticSlotShapeDescriptor> =
+                Some(&::lpc_model::StaticSlotShapeDescriptor::Ref {
+                    id: <Self as ::lpc_model::StaticSlotShape>::SHAPE_ID,
+                });
+
             fn slot_field_shape() -> ::lpc_model::SlotShape {
                 ::lpc_model::SlotShape::reference(<Self as ::lpc_model::StaticSlotShape>::SHAPE_ID)
             }

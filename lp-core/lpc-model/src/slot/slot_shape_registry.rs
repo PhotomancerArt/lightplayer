@@ -6,11 +6,12 @@
 
 use crate::{
     Revision, SlotData, SlotFactory, SlotFactoryError, SlotMutAccess, SlotShape, SlotShapeId,
-    current_revision,
+    SlotShapeLookup, SlotShapeView, current_revision,
 };
 use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::string::String;
+use core::ops::Bound::{Excluded, Unbounded};
 
 /// Registry of id-addressed slot shapes.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
@@ -231,6 +232,30 @@ impl SlotShapeRegistry {
     }
 
     pub fn ensure_dynamic_shape_named(
+        &mut self,
+        id: SlotShapeId,
+        name: impl Into<String>,
+        shape: SlotShape,
+    ) -> Result<bool, SlotShapeRegistryError> {
+        self.ensure_shape_named_with_factory(id, name, shape, SlotFactory::dynamic())
+    }
+
+    /// Ensure that an engine runtime-state root shape is present.
+    ///
+    /// Runtime-state shapes are fixed Rust-authored roots published by live
+    /// nodes. They live in the dynamic registry because loaded projects expose
+    /// them as runtime roots, but they are distinct from authored model shapes
+    /// in the generated static catalog and from artifact-specific dynamic
+    /// shapes.
+    pub fn ensure_runtime_state_shape(
+        &mut self,
+        id: SlotShapeId,
+        shape: SlotShape,
+    ) -> Result<bool, SlotShapeRegistryError> {
+        self.ensure_shape_with_factory(id, shape, SlotFactory::dynamic())
+    }
+
+    pub fn ensure_runtime_state_shape_named(
         &mut self,
         id: SlotShapeId,
         name: impl Into<String>,
@@ -490,6 +515,71 @@ impl SlotShapeRegistry {
         )
     }
 
+    pub fn snapshot_page_with_static_catalog(
+        &self,
+        after: Option<SlotShapeId>,
+        limit: usize,
+    ) -> (SlotShapeRegistrySnapshot, Option<SlotShapeId>) {
+        let mut shapes = BTreeMap::new();
+        let mut cursor = after;
+        let mut last_included = None;
+        let mut next = None;
+        let limit = limit.max(1);
+
+        loop {
+            let static_next = self.next_static_catalog_id_after(cursor);
+            let dynamic_next = self
+                .shapes
+                .range((cursor.map_or(Unbounded, Excluded), Unbounded))
+                .next()
+                .map(|(id, _)| *id);
+            let Some(id) = min_shape_id(static_next, dynamic_next) else {
+                break;
+            };
+
+            if shapes.len() >= limit {
+                next = last_included;
+                break;
+            }
+
+            if let Some(entry) = self
+                .shapes
+                .get(&id)
+                .cloned()
+                .or_else(|| Self::static_catalog_entry(id))
+            {
+                shapes.insert(id, entry);
+                last_included = Some(id);
+            }
+            cursor = Some(id);
+        }
+
+        (
+            SlotShapeRegistrySnapshot {
+                ids_revision: self.ids_revision,
+                shapes,
+            },
+            next,
+        )
+    }
+
+    pub fn static_catalog_entry(id: SlotShapeId) -> Option<SlotShapeEntry> {
+        let shape = crate::slot_shapes::static_slot_shape(id)?.to_owned_shape();
+        Some(match crate::slot_shapes::static_slot_shape_name(id) {
+            Some(name) => SlotShapeEntry::named(Revision::default(), name, shape),
+            None => SlotShapeEntry::new(Revision::default(), shape),
+        })
+    }
+
+    fn next_static_catalog_id_after(&self, after: Option<SlotShapeId>) -> Option<SlotShapeId> {
+        crate::slot_shapes::static_slot_shape_ids()
+            .iter()
+            .copied()
+            .filter(|id| after.is_none_or(|after| *id > after))
+            .filter(|id| !self.shapes.contains_key(id))
+            .min()
+    }
+
     pub fn apply_snapshot(&mut self, snapshot: SlotShapeRegistrySnapshot) {
         self.ids_revision = snapshot.ids_revision;
         self.shapes = snapshot.shapes;
@@ -514,14 +604,18 @@ impl SlotShapeRegistry {
         &self,
         id: SlotShapeId,
     ) -> Result<Box<dyn SlotMutAccess>, SlotFactoryError> {
-        if !self.shapes.contains_key(&id) {
-            return Err(SlotFactoryError::MissingShape(id));
+        if self.shapes.contains_key(&id) {
+            return self
+                .factories
+                .get(&id)
+                .copied()
+                .unwrap_or_else(SlotFactory::unsupported)
+                .create_default(self, id);
         }
-        self.factories
-            .get(&id)
-            .copied()
-            .unwrap_or_else(SlotFactory::unsupported)
-            .create_default(self, id)
+        if let Some(factory) = crate::slot_shapes::create_static_slot_default(id) {
+            return factory.create_default(self, id);
+        }
+        Err(SlotFactoryError::MissingShape(id))
     }
 
     pub fn read_slot_json(
@@ -606,6 +700,31 @@ impl SlotShapeRegistry {
 impl PartialEq for SlotShapeRegistry {
     fn eq(&self, other: &Self) -> bool {
         self.ids_revision == other.ids_revision && self.shapes == other.shapes
+    }
+}
+
+impl SlotShapeLookup for SlotShapeRegistry {
+    fn revision(&self) -> Revision {
+        self.revision()
+    }
+
+    fn get_shape(&self, id: SlotShapeId) -> Option<SlotShapeView<'_>> {
+        self.get(&id)
+            .map(SlotShapeView::Dynamic)
+            .or_else(|| crate::slot_shapes::static_slot_shape(id).map(SlotShapeView::Static))
+    }
+
+    fn create_default(&self, id: SlotShapeId) -> Result<Box<dyn SlotMutAccess>, SlotFactoryError> {
+        SlotShapeRegistry::create_default(self, id)
+    }
+}
+
+fn min_shape_id(left: Option<SlotShapeId>, right: Option<SlotShapeId>) -> Option<SlotShapeId> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(core::cmp::min(left, right)),
+        (Some(left), None) => Some(left),
+        (None, Some(right)) => Some(right),
+        (None, None) => None,
     }
 }
 
@@ -721,6 +840,29 @@ mod tests {
             panic!("expected unsupported factory");
         };
         assert_eq!(error, SlotFactoryError::UnsupportedFactory(id));
+    }
+
+    #[test]
+    fn generated_static_catalog_describes_every_registered_shape() {
+        let missing = crate::slot_shapes::static_slot_shape_ids()
+            .iter()
+            .copied()
+            .filter(|id| crate::slot_shapes::static_slot_shape(*id).is_none())
+            .map(|id| (id, crate::slot_shapes::static_slot_shape_name(id)))
+            .collect::<Vec<_>>();
+
+        assert_eq!(missing, Vec::<(SlotShapeId, Option<&'static str>)>::new());
+    }
+
+    #[test]
+    fn static_catalog_pages_without_registering_all_static_shapes() {
+        let registry = SlotShapeRegistry::default();
+        let (snapshot, next) = registry.snapshot_page_with_static_catalog(None, 1);
+
+        assert_eq!(snapshot.shapes.len(), 1);
+        assert!(next.is_some());
+        let project_shape = <crate::ProjectDef as crate::StaticSlotShape>::SHAPE_ID;
+        assert!(!registry.contains(&project_shape));
     }
 
     #[test]

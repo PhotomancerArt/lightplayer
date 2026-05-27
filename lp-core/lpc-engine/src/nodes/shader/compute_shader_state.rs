@@ -6,10 +6,10 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpc_model::{
-    ComputeShaderDef, LpType, Revision, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind,
+    ComputeShaderDef, LpType, OrderedF32, Revision, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind,
     ShaderValueShapeRef, SlotAccess, SlotData, SlotDataAccess, SlotFieldShape, SlotMapKeyShape,
-    SlotName, SlotRecordAccess, SlotShape, SlotShapeId, SlotShapeRegistry, SlotShapeRegistryError,
-    WithRevision,
+    SlotName, SlotRecordAccess, SlotShape, SlotShapeId, SlotShapeLookup, SlotShapeRegistry,
+    SlotShapeRegistryError, ValueEditorHint, WithRevision,
 };
 
 /// Runtime-produced slot data for one compute shader node.
@@ -159,7 +159,7 @@ pub fn shape_for_shader_slot(
     registry: &SlotShapeRegistry,
 ) -> Result<SlotShape, ComputeStateError> {
     match slot.kind.value() {
-        ShaderSlotKind::Value => value_shape_for_ref(slot.value.value(), registry),
+        ShaderSlotKind::Value => value_shape_for_slot(slot, registry),
         ShaderSlotKind::Map => {
             let key = slot.key.data.as_ref().ok_or_else(|| {
                 ComputeStateError::Unsupported(String::from("map slot missing key"))
@@ -176,6 +176,33 @@ pub fn shape_for_shader_slot(
     }
 }
 
+fn value_shape_for_slot(
+    slot: &ShaderSlotDef,
+    registry: &SlotShapeRegistry,
+) -> Result<SlotShape, ComputeStateError> {
+    let shape = value_shape_for_ref(slot.value.value(), registry)?;
+    let SlotShape::Value { mut shape } = shape else {
+        return Ok(shape);
+    };
+    if shape.ty != LpType::F32 {
+        return Ok(SlotShape::Value { shape });
+    }
+
+    shape.editor = match (slot.min.data.as_ref(), slot.max.data.as_ref()) {
+        (Some(min), Some(max)) => ValueEditorHint::Slider {
+            min: OrderedF32(*min.value()),
+            max: OrderedF32(*max.value()),
+            step: Some(OrderedF32(0.01)),
+        },
+        (min, max) => ValueEditorHint::Number {
+            min: min.map(|value| OrderedF32(*value.value())),
+            max: max.map(|value| OrderedF32(*value.value())),
+            step: None,
+        },
+    };
+    Ok(SlotShape::Value { shape })
+}
+
 fn value_shape_for_ref(
     value_ref: &ShaderValueShapeRef,
     registry: &SlotShapeRegistry,
@@ -185,14 +212,14 @@ fn value_shape_for_ref(
     }
 
     let id = SlotShapeId::from_static_name(value_ref.as_str());
-    let entry = registry
-        .entry(&id)
+    let shape = SlotShapeLookup::get_shape(registry, id)
         .ok_or_else(|| ComputeStateError::UnknownNativeShape(value_ref.as_str().to_string()))?;
-    match entry.value() {
-        SlotShape::Value { .. } => Ok(SlotShape::reference(id)),
-        _ => Err(ComputeStateError::NativeShapeIsNotValue(
+    if shape.value_shape().is_some() {
+        Ok(SlotShape::reference(id))
+    } else {
+        Err(ComputeStateError::NativeShapeIsNotValue(
             value_ref.as_str().to_string(),
-        )),
+        ))
     }
 }
 
@@ -219,5 +246,33 @@ fn default_lp_value_for_ref(value_ref: &ShaderValueShapeRef) -> lpc_model::LpVal
         LpType::Vec3 => lpc_model::LpValue::Vec3([0.0, 0.0, 0.0]),
         LpType::Vec4 => lpc_model::LpValue::Vec4([0.0, 0.0, 0.0, 0.0]),
         _ => lpc_model::LpValue::F32(0.0),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lpc_model::{OptionSlot, ValueSlot};
+
+    #[test]
+    fn f32_shader_slot_with_min_and_max_uses_slider_editor() {
+        let mut slot = ShaderSlotDef::value_f32("Speed", "Wheel speed", 1.0, Some(0.0));
+        slot.max = OptionSlot::some(ValueSlot::new(3.0));
+        let registry = SlotShapeRegistry::default();
+
+        let SlotShape::Value { shape } =
+            shape_for_shader_slot(&slot, &registry).expect("shader slot shape")
+        else {
+            panic!("expected value shape");
+        };
+
+        assert!(matches!(
+            shape.editor,
+            ValueEditorHint::Slider {
+                min: OrderedF32(0.0),
+                max: OrderedF32(3.0),
+                step: Some(OrderedF32(0.01)),
+            }
+        ));
     }
 }

@@ -37,7 +37,8 @@ fn build_iadd_module() -> (LpirModule, LpsModuleSig) {
             LpirOp::Return {
                 values: VRegRange { start: 0, count: 1 },
             },
-        ],
+        ]
+        .into(),
         vreg_pool: vec![v(2)],
     };
 

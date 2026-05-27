@@ -20,7 +20,7 @@ use crate::gfx::{LpShader, ShaderCompileOptions, ShaderCompileStats};
 use crate::node::catch_node_panic::catch_panic;
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
-    RenderContext, RenderNode, TickContext,
+    RenderContext, RenderNode, RuntimeStateShape, TickContext,
 };
 use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use crate::products::visual::{VisualSampleBufferRequest, VisualSampleTarget};
@@ -222,7 +222,7 @@ impl NodeRuntime for ShaderNode {
         &self,
         registry: &mut SlotShapeRegistry,
     ) -> Result<(), SlotShapeRegistryError> {
-        ShaderState::ensure_registered(registry).map(|_| ())
+        ShaderState::register_runtime_state_shape(registry).map(|_| ())
     }
 
     fn render_node(&mut self) -> Option<&mut dyn RenderNode> {
@@ -291,6 +291,13 @@ pub(super) fn sync_shader_slot_def_from_authored(
             try_read_authored_value::<f32>(ctx, &alloc::format!("{base_path}.min.some"))?
         {
             changed |= set_slot_if_changed(min, value);
+        }
+    }
+    if let Some(max) = slot.max.data.as_mut() {
+        if let Some(value) =
+            try_read_authored_value::<f32>(ctx, &alloc::format!("{base_path}.max.some"))?
+        {
+            changed |= set_slot_if_changed(max, value);
         }
     }
     if let Some(mapping) = slot.mapping.data.as_mut() {

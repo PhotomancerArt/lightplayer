@@ -22,11 +22,10 @@ use lpfs::{FsChange, LpFs};
 /// Platforms without heap stats (e.g. fw-emu) pass `None`.
 pub type MemoryStatsFn = fn() -> Option<(u32, u32)>;
 
-/// Main server struct for processing client-server messages
+/// Main server struct for processing client-server messages.
 ///
-/// Uses a tick-based API similar to game engines, processing incoming messages
-/// and returning responses. The server manages projects and handles filesystem
-/// operations on its base filesystem.
+/// Message responses are sent through [`ServerTransport`] so large project-read
+/// responses can stream without first materializing a full response object.
 pub struct LpServer {
     /// Output provider (shared, mutable) for projects
     output_provider: Rc<RefCell<dyn OutputProvider>>,
@@ -144,52 +143,8 @@ impl LpServer {
         }
     }
 
-    /// Process incoming messages and return responses
-    ///
-    /// This is the main entry point for processing client messages. It handles
-    /// filesystem operations and project management requests.
-    ///
-    /// # Arguments
-    ///
-    /// * `delta_ms` - Time delta in milliseconds (for future use with project updates)
-    /// * `incoming` - Vector of incoming messages from clients
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(Vec<WireMessage>)` - Vector of response messages (all `WireMessage::Server` variants)
-    /// * `Err(ServerError)` - If processing failed
-    ///
-    /// # Example
-    ///
-    /// ```rust,no_run
-    /// extern crate alloc;
-    /// use lpc_model::AsLpPath;
-    /// use lpc_wire::WireMessage;
-    /// use lpa_server::LpServer;
-    /// use lpfs::LpFsMemory;
-    /// use lpc_shared::output::MemoryOutputProvider;
-    /// use alloc::{boxed::Box, rc::Rc, sync::Arc, vec::Vec};
-    /// use core::cell::RefCell;
-    ///
-    /// let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
-    /// let base_fs = Box::new(LpFsMemory::new());
-    /// let graphics = Arc::new(lpc_engine::Graphics::new());
-    /// let mut server = LpServer::new(
-    ///     output_provider,
-    ///     base_fs,
-    ///     "projects/".as_path(),
-    ///     None,
-    ///     None,
-    ///     graphics,
-    /// );
-    /// let incoming = vec![/* messages */];
-    /// let responses = server.tick(16, incoming).unwrap();
-    /// ```
-    pub fn tick(
-        &mut self,
-        delta_ms: u32,
-        incoming: Vec<WireMessage>,
-    ) -> Result<Vec<WireMessage>, ServerError> {
+    /// Advance loaded projects by one frame without processing client messages.
+    pub fn advance_frame(&mut self, delta_ms: u32) -> Result<(), ServerError> {
         // Process filesystem changes for all loaded projects
         // Collect project info first to avoid borrowing issues
         let project_info: Vec<_> = self
@@ -311,52 +266,7 @@ impl LpServer {
             }
         }
 
-        // Process incoming messages AFTER ticking projects.
-        // This ensures project read requests see the current frame's data.
-        let mut responses = Vec::new();
-        for message in incoming {
-            match message {
-                WireMessage::Client(client_msg) => {
-                    // Process client message and generate response
-                    let theoretical_fps = self.theoretical_fps();
-                    let msg_id = client_msg.id;
-                    match handlers::handle_client_message(
-                        &mut self.project_manager,
-                        &mut *self.base_fs,
-                        &self.output_provider,
-                        self.memory_stats.as_ref(),
-                        self.time_provider.clone(),
-                        self.button_service.clone(),
-                        self.radio_service.clone(),
-                        self.graphics.clone(),
-                        client_msg,
-                        theoretical_fps,
-                    ) {
-                        Ok(response) => {
-                            responses.push(WireMessage::Server(response));
-                        }
-                        Err(e) => {
-                            // Send error response for this message
-                            responses.push(WireMessage::Server(WireServerMessage {
-                                id: msg_id,
-                                msg: lpc_wire::server::ServerMsgBody::Error {
-                                    error: format!("{e}"),
-                                },
-                            }));
-                        }
-                    }
-                }
-                WireMessage::Server(_) => {
-                    // Server messages shouldn't be sent to the server
-                    // Log or ignore
-                    return Err(ServerError::Core(
-                        "Received server message on server side".to_string(),
-                    ));
-                }
-            }
-        }
-
-        Ok(responses)
+        Ok(())
     }
 
     /// Tick projects and send incoming-message responses through a transport.
@@ -370,7 +280,7 @@ impl LpServer {
         incoming: Vec<WireMessage>,
         transport: &mut T,
     ) -> Result<usize, ServerError> {
-        self.tick(delta_ms, Vec::new())?;
+        self.advance_frame(delta_ms)?;
 
         let mut response_count = 0usize;
         for message in incoming {
@@ -410,7 +320,6 @@ impl LpServer {
                             response_count += 1;
                         }
                         msg => {
-                            let theoretical_fps = self.theoretical_fps();
                             let response = handlers::handle_client_message(
                                 &mut self.project_manager,
                                 &mut *self.base_fs,
@@ -421,7 +330,6 @@ impl LpServer {
                                 self.radio_service.clone(),
                                 self.graphics.clone(),
                                 lpc_wire::ClientMessage { id: msg_id, msg },
-                                theoretical_fps,
                             )?;
                             transport
                                 .send(response)

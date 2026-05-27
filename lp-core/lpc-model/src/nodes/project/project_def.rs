@@ -88,8 +88,6 @@ mod tests {
     }
 
     fn registry() -> SlotShapeRegistry {
-        let mut registry = SlotShapeRegistry::default();
-        crate::slot_shapes::register_all_static_slot_shapes(&mut registry).expect("shapes");
-        registry
+        SlotShapeRegistry::default()
     }
 }

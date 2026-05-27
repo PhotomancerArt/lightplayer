@@ -1,6 +1,7 @@
 use crate::{
-    FromLpValue, LpType, LpValue, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, ToLpValue,
-    ValueEditorHint, ValueRootError, ValueSlot,
+    FromLpValue, LpType, LpValue, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, StaticLpType,
+    StaticSlotMeta, StaticSlotValueShape, StaticValueEditorHint, ToLpValue, ValueEditorHint,
+    ValueRootError, ValueSlot,
 };
 use serde::{Deserialize, Serialize};
 
@@ -68,6 +69,13 @@ impl FromLpValue for Affine2d {
 
 impl SlotValue for Affine2d {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("Affine2d");
+    const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> =
+        Some(StaticSlotValueShape {
+            id: Self::SHAPE_ID,
+            ty: StaticLpType::Mat3x3,
+            meta: StaticSlotMeta::EMPTY,
+            editor: StaticValueEditorHint::Affine2d,
+        });
 
     fn value_shape() -> SlotValueShape {
         SlotValueShape {
