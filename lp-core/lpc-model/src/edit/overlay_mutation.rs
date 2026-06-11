@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 
 use crate::{ArtifactLocation, SlotPath};
 
-use super::{ArtifactBodyEdit, SlotEdit};
+use super::{AssetOverlay, SlotEdit};
 
 /// One ordered mutation to the canonical project overlay.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -21,7 +21,7 @@ pub enum OverlayMutation {
     },
     SetArtifactBody {
         artifact: ArtifactLocation,
-        edit: ArtifactBodyEdit,
+        edit: AssetOverlay,
     },
     ClearArtifact {
         artifact: ArtifactLocation,

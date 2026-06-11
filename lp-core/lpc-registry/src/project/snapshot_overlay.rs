@@ -4,7 +4,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use lpc_model::{ArtifactBodyEdit, ArtifactLocation, ProjectOverlay};
+use lpc_model::{AssetOverlay, ArtifactLocation, ProjectOverlay};
 use lpfs::{LpFs, LpPath, LpPathBuf};
 
 /// Raw project files keyed by absolute project path.
@@ -71,13 +71,13 @@ pub fn derive_overlay_between_snapshots(
         if base.get(path) != Some(bytes) {
             overlay.set_artifact_body(
                 ArtifactLocation::file(path),
-                ArtifactBodyEdit::ReplaceBody(bytes.to_vec()),
+                AssetOverlay::ReplaceBody(bytes.to_vec()),
             );
         }
     }
     for (path, _) in base.iter() {
         if target.get(path).is_none() {
-            overlay.set_artifact_body(ArtifactLocation::file(path), ArtifactBodyEdit::Delete);
+            overlay.set_artifact_body(ArtifactLocation::file(path), AssetOverlay::Delete);
         }
     }
 

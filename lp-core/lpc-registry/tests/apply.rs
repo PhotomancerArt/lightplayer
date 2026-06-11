@@ -1,5 +1,5 @@
 use lpc_model::{
-    ArtifactBodyEdit, ArtifactLocation, AssetBodySource, AssetChangeKind, AssetState,
+    AssetOverlay, ArtifactLocation, AssetBodySource, AssetChangeKind, AssetState,
     NodeDefChangeKind, NodeDefLocation, NodeDefState, OverlayMutation, Revision, SlotShapeRegistry,
 };
 use lpc_registry::{ParseCtx, ProjectRegistry};
@@ -60,7 +60,7 @@ fn apply_body_overlay_changes_referenced_node_def_and_assets() {
             &fs,
             OverlayMutation::SetArtifactBody {
                 artifact: shader_location.clone(),
-                edit: ArtifactBodyEdit::ReplaceBody(br#"kind = "Clock""#.to_vec()),
+                edit: AssetOverlay::ReplaceBody(br#"kind = "Clock""#.to_vec()),
             },
             Revision::new(2),
             &ctx,
@@ -99,7 +99,7 @@ fn apply_asset_overlay_changes_referenced_asset() {
             &fs,
             OverlayMutation::SetArtifactBody {
                 artifact: asset.clone(),
-                edit: ArtifactBodyEdit::ReplaceBody(
+                edit: AssetOverlay::ReplaceBody(
                     b"void main() { gl_FragColor = vec4(1.0); }".to_vec(),
                 ),
             },
@@ -134,7 +134,7 @@ fn discard_overlay_returns_inventory_to_committed_state() {
             &fs,
             OverlayMutation::SetArtifactBody {
                 artifact: asset.clone(),
-                edit: ArtifactBodyEdit::Delete,
+                edit: AssetOverlay::Delete,
             },
             Revision::new(2),
             &ctx,
@@ -171,7 +171,7 @@ fn commit_overlay_writes_artifact_without_runtime_project_change() {
             &fs,
             OverlayMutation::SetArtifactBody {
                 artifact: asset.clone(),
-                edit: ArtifactBodyEdit::ReplaceBody(body.clone()),
+                edit: AssetOverlay::ReplaceBody(body.clone()),
             },
             Revision::new(2),
             &ctx,

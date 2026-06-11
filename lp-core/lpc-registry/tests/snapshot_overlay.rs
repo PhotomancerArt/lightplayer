@@ -27,7 +27,7 @@ kind = "Clock"
     let fs = LpFsMemory::new();
     let mut registry = ProjectRegistry::new();
     for (artifact, artifact_overlay) in overlay.iter() {
-        let ArtifactOverlay::Body { edit } = artifact_overlay else {
+        let ArtifactOverlay::Asset { overlay: edit } = artifact_overlay else {
             panic!("snapshot overlay should only emit body edits");
         };
         registry

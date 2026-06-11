@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    ArtifactBodyEdit, ArtifactLocation, AssetState, NodeDefLocation, OverlayMutation, Revision,
+    AssetOverlay, ArtifactLocation, AssetState, NodeDefLocation, OverlayMutation, Revision,
     SlotShapeRegistry,
 };
 use lpc_registry::{ParseCtx, ProjectRegistry};
@@ -119,7 +119,7 @@ source = { path = "shader.glsl" }
             &fs,
             OverlayMutation::SetArtifactBody {
                 artifact: asset.clone(),
-                edit: ArtifactBodyEdit::ReplaceBody(b"void main() { }".to_vec()),
+                edit: AssetOverlay::ReplaceBody(b"void main() { }".to_vec()),
             },
             Revision::new(2),
             &ctx,

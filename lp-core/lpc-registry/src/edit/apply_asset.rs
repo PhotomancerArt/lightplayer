@@ -2,7 +2,7 @@
 
 use alloc::vec::Vec;
 
-use lpc_model::{ArtifactBodyEdit, ArtifactOverlay, NodeDef, Revision};
+use lpc_model::{AssetOverlay, ArtifactOverlay, NodeDef, Revision};
 
 use super::{apply_op_to_def, parse_def_bytes, serialize_slot_draft};
 
@@ -10,7 +10,7 @@ use super::EditApplyError;
 use crate::ParseCtx;
 
 /// Effective raw bytes for an artifact (overlay ∪ committed).
-pub fn project_artifact_bytes(
+pub fn apply_overlay_bytes(
     committed: Option<&[u8]>,
     pending: Option<&ArtifactOverlay>,
     ctx: &ParseCtx<'_>,
@@ -22,8 +22,8 @@ pub fn project_artifact_bytes(
 
     let ArtifactOverlay::Slot { overlay } = pending else {
         return match pending.as_body() {
-            Some(ArtifactBodyEdit::Delete) => Ok(None),
-            Some(ArtifactBodyEdit::ReplaceBody(bytes)) => Ok(Some(bytes.clone())),
+            Some(AssetOverlay::Delete) => Ok(None),
+            Some(AssetOverlay::ReplaceBody(bytes)) => Ok(Some(bytes.clone())),
             None => Ok(committed.map(<[u8]>::to_vec)),
         };
     };
@@ -75,7 +75,7 @@ rate = 1.0
             LpValue::F32(2.0),
         ));
 
-        let bytes = project_artifact_bytes(
+        let bytes = apply_overlay_bytes(
             Some(&committed),
             Some(&pending),
             &parse_ctx,
@@ -92,9 +92,9 @@ rate = 1.0
         let shapes = SlotShapeRegistry::default();
         let parse_ctx = ctx(&shapes);
         let body = b"void main() {}".to_vec();
-        let pending = ArtifactOverlay::body(ArtifactBodyEdit::ReplaceBody(body.clone()));
+        let pending = ArtifactOverlay::body(AssetOverlay::ReplaceBody(body.clone()));
 
-        let bytes = project_artifact_bytes(None, Some(&pending), &parse_ctx, Revision::new(1))
+        let bytes = apply_overlay_bytes(None, Some(&pending), &parse_ctx, Revision::new(1))
             .unwrap()
             .unwrap();
         assert_eq!(bytes, body);
@@ -104,10 +104,10 @@ rate = 1.0
     fn asset_delete_returns_none() {
         let shapes = SlotShapeRegistry::default();
         let parse_ctx = ctx(&shapes);
-        let pending = ArtifactOverlay::body(ArtifactBodyEdit::Delete);
+        let pending = ArtifactOverlay::body(AssetOverlay::Delete);
 
         let bytes =
-            project_artifact_bytes(Some(b"x"), Some(&pending), &parse_ctx, Revision::new(1))
+            apply_overlay_bytes(Some(b"x"), Some(&pending), &parse_ctx, Revision::new(1))
                 .unwrap();
         assert!(bytes.is_none());
     }

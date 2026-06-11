@@ -23,7 +23,7 @@ pub use project::commit_error::CommitError;
 pub use edit::{serialize_slot_draft, EditApplyError};
 pub use project::load_result::LoadResult;
 pub use lpc_model::{
-    ArtifactBodyEdit, ArtifactOverlay, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,
+    AssetOverlay, ArtifactOverlay, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,
 };
 pub use project::parse_ctx::ParseCtx;
 pub use project::project_registry::ProjectRegistry;

@@ -4,7 +4,7 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    ArtifactBodyEdit, ArtifactChangeSet, ArtifactLocation, ArtifactOverlay, CommitResult,
+    AssetOverlay, ArtifactChangeSet, ArtifactLocation, ArtifactOverlay, CommitResult,
     NodeDefEntry, NodeDefLocation, OverlayMutation, OverlayMutationBatch,
     OverlayMutationBatchResult, OverlayMutationCommandResult, OverlayMutationEffect,
     ProjectApplyBatchResult, ProjectApplyResult, ProjectInventory, ProjectOverlay, Revision,
@@ -13,7 +13,7 @@ use lpc_model::{
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath};
 
 use crate::{
-    edit::project_artifact_bytes, EditApplyError, ArtifactStore, CommitError, LoadResult, ParseCtx,
+    edit::apply_overlay_bytes, EditApplyError, ArtifactStore, CommitError, LoadResult, ParseCtx,
     RegistryError,
 };
 use crate::project::inventory_change_set::change_set_between;
@@ -160,8 +160,8 @@ impl ProjectRegistry {
                 .file_exists(location.file_path().as_path())
                 .unwrap_or(false);
             match overlay {
-                ArtifactOverlay::Body {
-                    edit: ArtifactBodyEdit::Delete,
+                ArtifactOverlay::Asset {
+                    overlay: AssetOverlay::Delete,
                 } => {
                     if existed {
                         fs.delete_file(location.file_path().as_path())
@@ -189,7 +189,7 @@ impl ProjectRegistry {
                         None
                     };
                     let bytes =
-                        project_artifact_bytes(committed.as_deref(), Some(overlay), ctx, frame)
+                        apply_overlay_bytes(committed.as_deref(), Some(overlay), ctx, frame)
                             .map_err(|err| CommitError::Projection {
                                 location: location.clone(),
                                 message: err.to_string(),

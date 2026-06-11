@@ -4,7 +4,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 
 use lpc_model::{
-    ArtifactBodyEdit, ArtifactLocation, ArtifactOverlay, LpPathBuf, ProjectOverlay, Revision,
+    AssetOverlay, ArtifactLocation, ArtifactOverlay, LpPathBuf, ProjectOverlay, Revision,
     SlotPath, SourceFileSlot, SourcePath,
 };
 use lpfs::LpFs;
@@ -103,8 +103,8 @@ fn materialize_file_artifact_overlay(
         return Ok(None);
     };
     match pending {
-        ArtifactOverlay::Body {
-            edit: ArtifactBodyEdit::ReplaceBody(bytes),
+        ArtifactOverlay::Asset {
+            overlay: AssetOverlay::ReplaceBody(bytes),
         } => {
             let text = core::str::from_utf8(bytes).map_err(|err| MaterializeError::Utf8 {
                 message: format!("{err}"),
@@ -115,8 +115,8 @@ fn materialize_file_artifact_overlay(
                 diagnostic_name: authored_path.as_str().to_string(),
             }))
         }
-        ArtifactOverlay::Body {
-            edit: ArtifactBodyEdit::Delete,
+        ArtifactOverlay::Asset {
+            overlay: AssetOverlay::Delete,
         } => Err(MaterializeError::Artifact(ArtifactError::Read(
             ArtifactReadFailure::Deleted,
         ))),
@@ -243,7 +243,7 @@ mod tests {
         let mut overlay = ProjectOverlay::new();
         overlay.set_artifact_body(
             ArtifactLocation::file("/shader.glsl"),
-            ArtifactBodyEdit::ReplaceBody(b"v2-overlay".to_vec()),
+            AssetOverlay::ReplaceBody(b"v2-overlay".to_vec()),
         );
 
         let committed =
@@ -276,7 +276,7 @@ mod tests {
         let mut overlay = ProjectOverlay::new();
         overlay.set_artifact_body(
             ArtifactLocation::file("/shader.glsl"),
-            ArtifactBodyEdit::Delete,
+            AssetOverlay::Delete,
         );
 
         let err = materialize_source(

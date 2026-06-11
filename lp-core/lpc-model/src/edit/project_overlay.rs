@@ -4,7 +4,7 @@ use alloc::collections::BTreeMap;
 
 use crate::{ArtifactLocation, SlotPath};
 
-use super::{ArtifactBodyEdit, ArtifactOverlay, OverlayMutation, SlotEdit, SlotOverlay};
+use super::{AssetOverlay, ArtifactOverlay, OverlayMutation, SlotEdit, SlotOverlay};
 
 /// Current project-wide pending edit intent.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -53,7 +53,7 @@ impl ProjectOverlay {
     pub fn remove_slot_edit(&mut self, artifact: &ArtifactLocation, path: &SlotPath) -> bool {
         let changed = match self.artifacts.get_mut(artifact) {
             Some(ArtifactOverlay::Slot { overlay }) => overlay.remove_edit(path),
-            Some(ArtifactOverlay::Body { .. }) | None => false,
+            Some(ArtifactOverlay::Asset { .. }) | None => false,
         };
         self.remove_empty_artifact(artifact);
         changed
@@ -62,7 +62,7 @@ impl ProjectOverlay {
     pub fn set_artifact_body(
         &mut self,
         artifact: ArtifactLocation,
-        edit: ArtifactBodyEdit,
+        edit: AssetOverlay,
     ) -> bool {
         let next = ArtifactOverlay::body(edit);
         if self.artifacts.get(&artifact) == Some(&next) {
@@ -104,7 +104,7 @@ impl ProjectOverlay {
                         self.put_slot_edit(artifact.clone(), edit);
                     }
                 }
-                ArtifactOverlay::Body { edit } => {
+                ArtifactOverlay::Asset { overlay: edit } => {
                     self.set_artifact_body(artifact.clone(), edit.clone());
                 }
             }
@@ -133,11 +133,11 @@ mod tests {
         let path = ArtifactLocation::file("/shader.glsl");
         overlay.set_artifact_body(
             path.clone(),
-            ArtifactBodyEdit::ReplaceBody(b"body".to_vec()),
+            AssetOverlay::ReplaceBody(b"body".to_vec()),
         );
         assert!(matches!(
             overlay.artifact(&path),
-            Some(ArtifactOverlay::Body { .. })
+            Some(ArtifactOverlay::Asset { .. })
         ));
 
         overlay.put_slot_edit(

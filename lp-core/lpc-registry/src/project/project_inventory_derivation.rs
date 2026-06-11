@@ -5,7 +5,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 
 use lpc_model::{
-    ArtifactBodyEdit, ArtifactLocation, AssetBodySource, AssetEntry, AssetState, NodeDefLocation,
+    AssetOverlay, ArtifactLocation, AssetBodySource, AssetEntry, AssetState, NodeDefLocation,
     NodeDefState, NodeInvocation, ProjectInventory, ProjectOverlay, Revision, SlotPath,
     WithRevision, resolve_artifact_specifier,
 };
@@ -13,7 +13,7 @@ use lpfs::{LpFs, LpPath};
 
 use crate::{
     ArtifactError, ArtifactReadFailure, ArtifactStore, ParseCtx,
-    edit::{EditApplyError, parse_def_bytes, project_artifact_bytes},
+    edit::{EditApplyError, parse_def_bytes, apply_overlay_bytes},
 };
 
 pub(crate) fn derive_effective_inventory(
@@ -160,8 +160,8 @@ impl InventoryDerivation<'_, '_> {
 
         if let Some(body) = pending.and_then(|overlay| overlay.as_body()) {
             return match body {
-                ArtifactBodyEdit::Delete => NodeDefState::Deleted,
-                ArtifactBodyEdit::ReplaceBody(bytes) => match parse_def_bytes(bytes, self.ctx) {
+                AssetOverlay::Delete => NodeDefState::Deleted,
+                AssetOverlay::ReplaceBody(bytes) => match parse_def_bytes(bytes, self.ctx) {
                     Ok(def) => NodeDefState::Loaded(def),
                     Err(err) => NodeDefState::ParseError(parse_error(err)),
                 },
@@ -174,7 +174,7 @@ impl InventoryDerivation<'_, '_> {
             Err(err) => return node_def_state_for_read_error(err),
         };
 
-        match project_artifact_bytes(
+        match apply_overlay_bytes(
             committed.as_deref(),
             pending,
             self.ctx,
@@ -196,8 +196,8 @@ impl InventoryDerivation<'_, '_> {
             .artifact(location)
             .and_then(|overlay| overlay.as_body())
         {
-            Some(ArtifactBodyEdit::Delete) => return AssetState::Deleted,
-            Some(ArtifactBodyEdit::ReplaceBody(_)) => {
+            Some(AssetOverlay::Delete) => return AssetState::Deleted,
+            Some(AssetOverlay::ReplaceBody(_)) => {
                 return AssetState::Available {
                     source: AssetBodySource::OverlayReplace,
                 };

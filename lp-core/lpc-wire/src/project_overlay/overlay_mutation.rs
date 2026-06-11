@@ -31,7 +31,7 @@ mod tests {
     use super::*;
     use alloc::vec;
     use lpc_model::{
-        ArtifactBodyEdit, ArtifactLocation, OverlayMutation, OverlayMutationCommand,
+        AssetOverlay, ArtifactLocation, OverlayMutation, OverlayMutationCommand,
         OverlayMutationCommandId, OverlayMutationCommandResult, OverlayMutationEffect, SlotEdit,
         SlotPath,
     };
@@ -50,7 +50,7 @@ mod tests {
                 id: OverlayMutationCommandId::new(2),
                 mutation: OverlayMutation::SetArtifactBody {
                     artifact: ArtifactLocation::file("/shader.glsl"),
-                    edit: ArtifactBodyEdit::ReplaceBody(b"void main() {}".to_vec()),
+                    edit: AssetOverlay::ReplaceBody(b"void main() {}".to_vec()),
                 },
             },
         ]));
