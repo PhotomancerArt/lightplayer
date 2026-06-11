@@ -2,6 +2,8 @@
 
 mod apply_error;
 mod apply_slot;
+pub mod inventory_change_set;
+pub mod project_inventory_derivation;
 
 pub use apply_error::EditApplyError;
 pub use apply_slot::serialize_slot_draft;

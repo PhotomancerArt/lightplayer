@@ -12,11 +12,11 @@ use lpc_model::{
 };
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath};
 
-use crate::project::inventory_change_set::change_set_between;
-use crate::project::project_inventory_derivation::derive_effective_inventory;
+use crate::overlay::inventory_change_set::change_set_between;
+use crate::overlay::project_inventory_derivation::derive_effective_inventory;
 use crate::{
     ArtifactStore, CommitError, LoadResult, ParseCtx, RegistryError,
-    edit::{EditApplyError, serialize_slot_draft},
+    overlay::{EditApplyError, serialize_slot_draft},
 };
 
 /// Canonical registry for a loaded project.

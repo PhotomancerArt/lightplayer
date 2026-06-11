@@ -13,7 +13,7 @@ use lpfs::{LpFs, LpPath};
 
 use crate::{
     ArtifactError, ArtifactReadFailure, ArtifactStore, ParseCtx,
-    edit::{EditApplyError, apply_slot_overlay_to_def, parse_def_bytes},
+    overlay::{EditApplyError, apply_slot_overlay_to_def, parse_def_bytes},
 };
 
 pub(crate) fn derive_effective_inventory(
