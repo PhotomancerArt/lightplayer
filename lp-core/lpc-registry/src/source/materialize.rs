@@ -4,8 +4,8 @@ use alloc::format;
 use alloc::string::{String, ToString};
 
 use lpc_model::{
-    AssetOverlay, ArtifactLocation, ArtifactOverlay, LpPathBuf, ProjectOverlay, Revision,
-    SlotPath, SourceFileSlot, SourcePath,
+    ArtifactLocation, ArtifactOverlay, AssetOverlay, LpPathBuf, ProjectOverlay, Revision, SlotPath,
+    SourceFileSlot, SourcePath,
 };
 use lpfs::LpFs;
 
@@ -274,10 +274,7 @@ mod tests {
             resolve_source_file(&mut store, containing, &slot, Revision::new(1)).expect("resolve");
 
         let mut overlay = ProjectOverlay::new();
-        overlay.set_artifact_body(
-            ArtifactLocation::file("/shader.glsl"),
-            AssetOverlay::Delete,
-        );
+        overlay.set_artifact_body(ArtifactLocation::file("/shader.glsl"), AssetOverlay::Delete);
 
         let err = materialize_source(
             &mut store,

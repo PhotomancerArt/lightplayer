@@ -4,7 +4,7 @@ use alloc::collections::BTreeMap;
 
 use crate::{ArtifactLocation, SlotPath};
 
-use super::{AssetOverlay, ArtifactOverlay, OverlayMutation, SlotEdit, SlotOverlay};
+use super::{ArtifactOverlay, AssetOverlay, OverlayMutation, SlotEdit, SlotOverlay};
 
 /// Current project-wide pending edit intent.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -59,11 +59,7 @@ impl ProjectOverlay {
         changed
     }
 
-    pub fn set_artifact_body(
-        &mut self,
-        artifact: ArtifactLocation,
-        edit: AssetOverlay,
-    ) -> bool {
+    pub fn set_artifact_body(&mut self, artifact: ArtifactLocation, edit: AssetOverlay) -> bool {
         let next = ArtifactOverlay::body(edit);
         if self.artifacts.get(&artifact) == Some(&next) {
             return false;
@@ -131,10 +127,7 @@ mod tests {
     fn body_and_slot_overlays_are_exclusive() {
         let mut overlay = ProjectOverlay::new();
         let path = ArtifactLocation::file("/shader.glsl");
-        overlay.set_artifact_body(
-            path.clone(),
-            AssetOverlay::ReplaceBody(b"body".to_vec()),
-        );
+        overlay.set_artifact_body(path.clone(), AssetOverlay::ReplaceBody(b"body".to_vec()));
         assert!(matches!(
             overlay.artifact(&path),
             Some(ArtifactOverlay::Asset { .. })

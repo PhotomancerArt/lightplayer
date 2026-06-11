@@ -1,23 +1,23 @@
 //! Effective project registry built from artifacts plus overlay.
 
-use alloc::string::ToString;
+use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpc_model::{
-    AssetOverlay, ArtifactChangeSet, ArtifactLocation, ArtifactOverlay, CommitResult,
-    NodeDefEntry, NodeDefLocation, OverlayMutation, OverlayMutationBatch,
+    ArtifactChangeSet, ArtifactLocation, ArtifactOverlay, AssetOverlay, CommitResult, NodeDefEntry,
+    NodeDefLocation, NodeDefState, OverlayMutation, OverlayMutationBatch,
     OverlayMutationBatchResult, OverlayMutationCommandResult, OverlayMutationEffect,
     ProjectApplyBatchResult, ProjectApplyResult, ProjectInventory, ProjectOverlay, Revision,
     WithRevision,
 };
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath};
 
-use crate::{
-    edit::apply_overlay_bytes, EditApplyError, ArtifactStore, CommitError, LoadResult, ParseCtx,
-    RegistryError,
-};
 use crate::project::inventory_change_set::change_set_between;
 use crate::project::project_inventory_derivation::derive_effective_inventory;
+use crate::{
+    ArtifactStore, CommitError, LoadResult, ParseCtx, RegistryError,
+    edit::{EditApplyError, serialize_slot_draft},
+};
 
 /// Canonical registry for a loaded project.
 pub struct ProjectRegistry {
@@ -176,44 +176,47 @@ impl ProjectRegistry {
                         kind: FsEventKind::Delete,
                     });
                 }
-                _ => {
-                    let committed = if existed {
-                        Some(
-                            fs.read_file(location.file_path().as_path())
-                                .map_err(|err| CommitError::Filesystem {
-                                    location: location.clone(),
-                                    message: err.to_string(),
-                                })?,
-                        )
+                ArtifactOverlay::Asset {
+                    overlay: AssetOverlay::ReplaceBody(bytes),
+                } => {
+                    fs.write_file(location.file_path().as_path(), bytes)
+                        .map_err(|err| CommitError::Filesystem {
+                            location: location.clone(),
+                            message: err.to_string(),
+                        })?;
+                    if existed {
+                        artifact_changes.changed.push(location.clone());
+                        fs_events.push(FsEvent {
+                            path: location.file_path().clone(),
+                            kind: FsEventKind::Modify,
+                        });
                     } else {
-                        None
-                    };
-                    let bytes =
-                        apply_overlay_bytes(committed.as_deref(), Some(overlay), ctx, frame)
-                            .map_err(|err| CommitError::Projection {
-                                location: location.clone(),
-                                message: err.to_string(),
-                            })?;
-
-                    if let Some(bytes) = bytes {
-                        fs.write_file(location.file_path().as_path(), &bytes)
-                            .map_err(|err| CommitError::Filesystem {
-                                location: location.clone(),
-                                message: err.to_string(),
-                            })?;
-                        if existed {
-                            artifact_changes.changed.push(location.clone());
-                            fs_events.push(FsEvent {
-                                path: location.file_path().clone(),
-                                kind: FsEventKind::Modify,
-                            });
-                        } else {
-                            artifact_changes.added.push(location.clone());
-                            fs_events.push(FsEvent {
-                                path: location.file_path().clone(),
-                                kind: FsEventKind::Create,
-                            });
-                        }
+                        artifact_changes.added.push(location.clone());
+                        fs_events.push(FsEvent {
+                            path: location.file_path().clone(),
+                            kind: FsEventKind::Create,
+                        });
+                    }
+                }
+                ArtifactOverlay::Slot { .. } => {
+                    let bytes = self.materialize_node_def_bytes_for_commit(location, ctx)?;
+                    fs.write_file(location.file_path().as_path(), &bytes)
+                        .map_err(|err| CommitError::Filesystem {
+                            location: location.clone(),
+                            message: err.to_string(),
+                        })?;
+                    if existed {
+                        artifact_changes.changed.push(location.clone());
+                        fs_events.push(FsEvent {
+                            path: location.file_path().clone(),
+                            kind: FsEventKind::Modify,
+                        });
+                    } else {
+                        artifact_changes.added.push(location.clone());
+                        fs_events.push(FsEvent {
+                            path: location.file_path().clone(),
+                            kind: FsEventKind::Create,
+                        });
                     }
                 }
             }
@@ -227,6 +230,31 @@ impl ProjectRegistry {
         Ok(CommitResult {
             artifacts: artifact_changes,
             changes: lpc_model::ProjectChangeSet::default(),
+        })
+    }
+
+    fn materialize_node_def_bytes_for_commit(
+        &self,
+        artifact: &ArtifactLocation,
+        ctx: &ParseCtx<'_>,
+    ) -> Result<Vec<u8>, CommitError> {
+        let location = NodeDefLocation::artifact_root(artifact.clone());
+        let Some(entry) = self.inventory.defs.get(&location) else {
+            return Err(CommitError::Projection {
+                location: artifact.clone(),
+                message: String::from("slot overlay has no effective node definition"),
+            });
+        };
+        let NodeDefState::Loaded(def) = &entry.state else {
+            return Err(CommitError::Projection {
+                location: artifact.clone(),
+                message: String::from("slot overlay targets an errored node definition"),
+            });
+        };
+
+        serialize_slot_draft(def, ctx).map_err(|err| CommitError::Projection {
+            location: artifact.clone(),
+            message: err.to_string(),
         })
     }
 

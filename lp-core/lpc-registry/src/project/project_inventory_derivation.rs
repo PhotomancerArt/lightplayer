@@ -5,7 +5,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 
 use lpc_model::{
-    AssetOverlay, ArtifactLocation, AssetBodySource, AssetEntry, AssetState, NodeDefLocation,
+    ArtifactLocation, AssetBodySource, AssetEntry, AssetOverlay, AssetState, NodeDefLocation,
     NodeDefState, NodeInvocation, ProjectInventory, ProjectOverlay, Revision, SlotPath,
     WithRevision, resolve_artifact_specifier,
 };
@@ -13,7 +13,7 @@ use lpfs::{LpFs, LpPath};
 
 use crate::{
     ArtifactError, ArtifactReadFailure, ArtifactStore, ParseCtx,
-    edit::{EditApplyError, parse_def_bytes, apply_overlay_bytes},
+    edit::{EditApplyError, apply_slot_overlay_to_def, parse_def_bytes},
 };
 
 pub(crate) fn derive_effective_inventory(
@@ -168,25 +168,29 @@ impl InventoryDerivation<'_, '_> {
             };
         }
 
-        let committed = match self.artifacts.read_bytes(location, self.fs) {
-            Ok(bytes) => Some(bytes),
-            Err(_) if pending.and_then(|overlay| overlay.as_slot()).is_some() => None,
+        let mut def = match self.artifacts.read_bytes(location, self.fs) {
+            Ok(bytes) => match parse_def_bytes(&bytes, self.ctx) {
+                Ok(def) => def,
+                Err(err) => return NodeDefState::ParseError(parse_error(err)),
+            },
+            Err(_) if pending.and_then(|overlay| overlay.as_slot()).is_some() => {
+                lpc_model::NodeDef::default()
+            }
             Err(err) => return node_def_state_for_read_error(err),
         };
 
-        match apply_overlay_bytes(
-            committed.as_deref(),
-            pending,
-            self.ctx,
-            self.overlay.changed_at(),
-        ) {
-            Ok(Some(bytes)) => match parse_def_bytes(&bytes, self.ctx) {
-                Ok(def) => NodeDefState::Loaded(def),
-                Err(err) => NodeDefState::ParseError(parse_error(err)),
-            },
-            Ok(None) => NodeDefState::Deleted,
-            Err(err) => NodeDefState::ParseError(parse_error(err)),
+        if let Some(slot_overlay) = pending.and_then(|overlay| overlay.as_slot()) {
+            if let Err(err) = apply_slot_overlay_to_def(
+                &mut def,
+                slot_overlay,
+                self.ctx,
+                self.overlay.changed_at(),
+            ) {
+                return NodeDefState::ParseError(parse_error(err));
+            }
         }
+
+        NodeDefState::Loaded(def)
     }
 
     fn read_effective_asset(&mut self, location: &ArtifactLocation) -> AssetState {

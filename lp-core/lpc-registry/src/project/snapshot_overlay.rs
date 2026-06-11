@@ -4,7 +4,7 @@ use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
-use lpc_model::{AssetOverlay, ArtifactLocation, ProjectOverlay};
+use lpc_model::{ArtifactLocation, AssetOverlay, ProjectOverlay};
 use lpfs::{LpFs, LpPath, LpPathBuf};
 
 /// Raw project files keyed by absolute project path.

@@ -4,9 +4,9 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    NodeArtifact, NodeDef, Revision, SlotMutAccess, SlotName, SlotPath, SlotPathSegment,
-    ensure_slot_present, remove_slot_map_entry, set_slot_option_none, set_slot_value,
-    set_slot_variant_default,
+    NodeArtifact, NodeDef, Revision, SlotMutAccess, SlotName, SlotOverlay, SlotPath,
+    SlotPathSegment, ensure_slot_present, remove_slot_map_entry, set_slot_option_none,
+    set_slot_value, set_slot_variant_default,
 };
 
 use crate::ParseCtx;
@@ -28,6 +28,18 @@ pub(crate) fn parse_def_bytes(bytes: &[u8], ctx: &ParseCtx<'_>) -> Result<NodeDe
     NodeDef::read_toml(ctx.shapes, text).map_err(|err| EditApplyError::Parse {
         message: err.to_string(),
     })
+}
+
+pub(crate) fn apply_slot_overlay_to_def(
+    def: &mut NodeDef,
+    overlay: &SlotOverlay,
+    ctx: &ParseCtx<'_>,
+    frame: Revision,
+) -> Result<(), EditApplyError> {
+    for edit in overlay.to_apply_plan() {
+        apply_op_to_def(def, &edit, ctx, frame)?;
+    }
+    Ok(())
 }
 
 pub(crate) fn apply_op_to_def(

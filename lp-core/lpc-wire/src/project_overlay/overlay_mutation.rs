@@ -31,7 +31,7 @@ mod tests {
     use super::*;
     use alloc::vec;
     use lpc_model::{
-        AssetOverlay, ArtifactLocation, OverlayMutation, OverlayMutationCommand,
+        ArtifactLocation, AssetOverlay, OverlayMutation, OverlayMutationCommand,
         OverlayMutationCommandId, OverlayMutationCommandResult, OverlayMutationEffect, SlotEdit,
         SlotPath,
     };

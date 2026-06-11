@@ -1,6 +1,7 @@
 use lpc_model::{
-    AssetOverlay, ArtifactLocation, AssetBodySource, AssetChangeKind, AssetState,
-    NodeDefChangeKind, NodeDefLocation, NodeDefState, OverlayMutation, Revision, SlotShapeRegistry,
+    ArtifactLocation, AssetBodySource, AssetChangeKind, AssetOverlay, AssetState, LpValue,
+    NodeDefChangeKind, NodeDefLocation, NodeDefState, OverlayMutation, Revision, SlotEdit,
+    SlotPath, SlotShapeRegistry,
 };
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpfs::{FsEvent, FsEventKind, LpFs, LpFsMemory, LpPath, LpPathBuf};
@@ -36,6 +37,42 @@ source = { path = "shader.glsl" }
 "#,
     );
     write_file(&mut fs, "/shader.glsl", "void main() {}");
+
+    let mut registry = ProjectRegistry::new();
+    registry
+        .load_root(
+            &fs,
+            LpPath::new("/project.toml"),
+            Revision::new(1),
+            &parse_ctx(&shapes),
+        )
+        .unwrap();
+    (fs, shapes, registry)
+}
+
+fn clock_project() -> (LpFsMemory, SlotShapeRegistry, ProjectRegistry) {
+    let shapes = SlotShapeRegistry::default();
+    let mut fs = LpFsMemory::new();
+    write_file(
+        &mut fs,
+        "/project.toml",
+        r#"
+kind = "Project"
+
+[nodes.clock]
+ref = "./clock.toml"
+"#,
+    );
+    write_file(
+        &mut fs,
+        "/clock.toml",
+        r#"
+kind = "Clock"
+
+[controls]
+rate = 1.0
+"#,
+    );
 
     let mut registry = ProjectRegistry::new();
     registry
@@ -191,6 +228,37 @@ fn commit_overlay_writes_artifact_without_runtime_project_change() {
             source: AssetBodySource::Committed
         }
     );
+}
+
+#[test]
+fn commit_slot_overlay_writes_effective_node_def() {
+    let (fs, shapes, mut registry) = clock_project();
+    let ctx = parse_ctx(&shapes);
+    let clock = ArtifactLocation::file("/clock.toml");
+
+    registry
+        .apply_mutation(
+            &fs,
+            OverlayMutation::PutSlotEdit {
+                artifact: clock.clone(),
+                edit: SlotEdit::assign_value(
+                    SlotPath::parse("controls.rate").unwrap(),
+                    LpValue::F32(2.0),
+                ),
+            },
+            Revision::new(2),
+            &ctx,
+        )
+        .unwrap();
+
+    let result = registry
+        .commit_overlay(&fs, Revision::new(3), &ctx)
+        .unwrap();
+
+    let text = String::from_utf8(fs.read_file(LpPath::new("/clock.toml")).unwrap()).unwrap();
+    assert_eq!(result.artifacts.changed, vec![clock]);
+    assert!(result.changes.is_empty());
+    assert!(text.contains("rate = 2"));
 }
 
 #[test]

@@ -82,7 +82,7 @@ pub use value::{LpType, LpValue, ModelEnumVariant, ModelStructMember};
 pub use config::DEFAULT_SERIAL_BAUD_RATE;
 pub use control::{CONTROL_MESSAGE_SHAPE_NAME, ControlMessage, TriggerEvent};
 pub use edit::{
-    AssetOverlay, ArtifactOverlay, OverlayMutation, OverlayMutationBatch,
+    ArtifactOverlay, AssetOverlay, OverlayMutation, OverlayMutationBatch,
     OverlayMutationBatchResult, OverlayMutationCommand, OverlayMutationCommandId,
     OverlayMutationCommandResult, OverlayMutationCommandStatus, OverlayMutationEffect,
     OverlayMutationRejection, OverlayMutationRejectionReason, ProjectCommitSummary, ProjectOverlay,

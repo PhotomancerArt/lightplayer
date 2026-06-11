@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    AssetOverlay, ArtifactLocation, AssetState, NodeDefLocation, OverlayMutation, Revision,
+    ArtifactLocation, AssetOverlay, AssetState, NodeDefLocation, OverlayMutation, Revision,
     SlotShapeRegistry,
 };
 use lpc_registry::{ParseCtx, ProjectRegistry};
