@@ -53,9 +53,9 @@ fn real_source_defs_sync_as_slot_roots() {
             &project_data,
             ProjectDef::SHAPE_ID.slot_shape_from(&shape_registry),
             &shape_registry,
-            "nodes[shader].def",
+            "nodes[shader].ref",
         ),
-        LpValue::String(String::from("shader.toml")),
+        LpValue::String(String::from("./shader.toml")),
     );
 
     let shader_data = root_data(&sync, &registry, "shader");
