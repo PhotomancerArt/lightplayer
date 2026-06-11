@@ -124,6 +124,6 @@ impl NodeDefRegistry {
 }
 
 enum PathChangeKind {
-    DefArtifact(crate::ArtifactLoc),
+    DefArtifact(crate::ArtifactLocation),
     NonDefArtifact,
 }

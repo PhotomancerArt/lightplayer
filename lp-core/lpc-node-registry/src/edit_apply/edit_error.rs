@@ -3,13 +3,13 @@
 use alloc::string::String;
 use core::fmt;
 
-use crate::ArtifactLoc;
+use crate::ArtifactLocation;
 
 /// Failure applying pending overlay edits.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EditError {
     InvalidPath { message: String },
-    UnknownArtifact { location: ArtifactLoc },
+    UnknownArtifact { location: ArtifactLocation },
     Parse { message: String },
     SlotMutation { message: String },
     Serialize { message: String },

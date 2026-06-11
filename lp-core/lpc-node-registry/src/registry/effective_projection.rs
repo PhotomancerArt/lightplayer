@@ -155,7 +155,7 @@ rate = 1.0
             LpValue::F32(3.0),
         ));
 
-        let loc = NodeDefLoc::artifact_root(crate::ArtifactLoc::file("/playlist.toml"));
+        let loc = NodeDefLoc::artifact_root(crate::ArtifactLocation::file("/playlist.toml"));
         let entry = NodeDefEntry {
             loc: loc.clone(),
             state: committed,

@@ -36,7 +36,7 @@ impl NodeDefRegistry {
     /// Parse effective TOML for an artifact (overlay ∪ base).
     pub fn parse_effective_state(
         &mut self,
-        location: &crate::ArtifactLoc,
+        location: &crate::ArtifactLocation,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
     ) -> Result<NodeDefState, RegistryError> {

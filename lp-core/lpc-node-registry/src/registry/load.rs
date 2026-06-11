@@ -36,7 +36,7 @@ impl NodeDefRegistry {
 
     pub(crate) fn register_artifact_subtree(
         &mut self,
-        location: crate::ArtifactLoc,
+        location: crate::ArtifactLocation,
         file_path: &LpPath,
         frame: Revision,
         fs: &dyn LpFs,
@@ -54,7 +54,7 @@ impl NodeDefRegistry {
 
     pub(crate) fn register_invocations(
         &mut self,
-        location: &crate::ArtifactLoc,
+        location: &crate::ArtifactLocation,
         file_path: &LpPath,
         def: NodeDef,
         base_path: SlotPath,

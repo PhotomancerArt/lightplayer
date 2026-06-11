@@ -324,7 +324,7 @@ fn definition_loc(path: &str, slot_path: SlotPath) -> DefinitionLocation {
 
 fn loc(path: &str, slot_path: &str) -> NodeDefLoc {
     NodeDefLoc {
-        artifact: lpc_node_registry::ArtifactLoc::file(path),
+        artifact: lpc_node_registry::ArtifactLocation::file(path),
         path: if slot_path.is_empty() {
             SlotPath::root()
         } else {

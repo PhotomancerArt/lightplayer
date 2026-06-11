@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use lpc_model::{NodeDef, NodeInvocation, Revision, SlotPath, resolve_artifact_specifier};
 use lpfs::{LpFs, LpPath, LpPathBuf};
 
-use crate::ArtifactLoc;
+use crate::ArtifactLocation;
 
 use super::changes::state_changed;
 use super::{NodeDefEntry, NodeDefLoc, NodeDefRegistry, NodeDefState, NodeDefUpdates};
@@ -16,7 +16,7 @@ use super::{ParseCtx, RegistryError};
 impl NodeDefRegistry {
     pub(crate) fn sync_def_artifact(
         &mut self,
-        location: ArtifactLoc,
+        location: ArtifactLocation,
         fs: &dyn LpFs,
         frame: Revision,
         ctx: &ParseCtx<'_>,
@@ -76,7 +76,7 @@ impl NodeDefRegistry {
 
     fn derive_inventory(
         &mut self,
-        location: ArtifactLoc,
+        location: ArtifactLocation,
         file_path: &LpPath,
         frame: Revision,
         fs: &dyn LpFs,
@@ -106,7 +106,7 @@ impl NodeDefRegistry {
     )]
     fn derive_invocations(
         &mut self,
-        location: &ArtifactLoc,
+        location: &ArtifactLocation,
         file_path: &LpPath,
         def: NodeDef,
         base_path: SlotPath,
@@ -171,7 +171,7 @@ impl NodeDefRegistry {
 
     pub(crate) fn read_artifact_state(
         &mut self,
-        location: &ArtifactLoc,
+        location: &ArtifactLocation,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
     ) -> Result<NodeDefState, RegistryError> {
@@ -187,11 +187,11 @@ impl NodeDefRegistry {
         &mut self,
         path: LpPathBuf,
         frame: Revision,
-    ) -> ArtifactLoc {
+    ) -> ArtifactLocation {
         self.store.register_file(path, frame)
     }
 
-    fn referenced_locations(&self) -> Result<BTreeSet<ArtifactLoc>, RegistryError> {
+    fn referenced_locations(&self) -> Result<BTreeSet<ArtifactLocation>, RegistryError> {
         let Some(root) = self.root.as_ref() else {
             return Ok(self.store.locations().collect());
         };
@@ -204,7 +204,7 @@ impl NodeDefRegistry {
     fn collect_referenced_locations(
         &self,
         loc: &NodeDefLoc,
-        referenced: &mut BTreeSet<ArtifactLoc>,
+        referenced: &mut BTreeSet<ArtifactLocation>,
         visited_defs: &mut BTreeSet<NodeDefLoc>,
     ) -> Result<(), RegistryError> {
         if !visited_defs.insert(loc.clone()) {
@@ -228,7 +228,7 @@ impl NodeDefRegistry {
                 message: String::from(err.to_string()),
             })?
         {
-            referenced.insert(ArtifactLoc::location_for_path(path.as_path()));
+            referenced.insert(ArtifactLocation::location_for_path(path.as_path()));
         }
 
         for site in def.invocation_sites(&loc.path) {
@@ -242,7 +242,7 @@ impl NodeDefRegistry {
                         .map_err(|err| RegistryError::SpecifierResolution {
                         message: String::from(err.to_string()),
                     })?;
-                    let child_loc = NodeDefLoc::artifact_root(ArtifactLoc::location_for_path(
+                    let child_loc = NodeDefLoc::artifact_root(ArtifactLocation::location_for_path(
                         child_path.as_path(),
                     ));
                     self.collect_referenced_locations(&child_loc, referenced, visited_defs)?;
@@ -265,7 +265,7 @@ impl NodeDefRegistry {
         updates: &mut NodeDefUpdates,
     ) -> Result<(), RegistryError> {
         let referenced = self.referenced_locations()?;
-        let to_unregister: Vec<ArtifactLoc> = self
+        let to_unregister: Vec<ArtifactLocation> = self
             .store
             .locations()
             .filter(|location| !referenced.contains(location))

@@ -3,7 +3,7 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use crate::ArtifactLoc;
+use crate::ArtifactLocation;
 
 use super::sync_result::DefChangeDetail;
 use super::{NodeDefEntry, NodeDefLoc, NodeDefState, NodeDefUpdates};
@@ -53,7 +53,7 @@ fn classify_def_change(before: &NodeDefState, after: &NodeDefState) -> DefChange
     }
 }
 
-pub(crate) fn dedupe_locations(locations: &mut Vec<ArtifactLoc>) {
+pub(crate) fn dedupe_locations(locations: &mut Vec<ArtifactLocation>) {
     locations.sort_unstable();
     locations.dedup();
 }

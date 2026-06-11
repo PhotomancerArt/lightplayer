@@ -1,6 +1,6 @@
 //! Node definition registry with artifact freshness and client edit overlay.
 //!
-//! [`ArtifactStore`] owns the project file catalog ([`ArtifactLoc`] URIs,
+//! [`ArtifactStore`] owns the project file catalog ([`ArtifactLocation`] URIs,
 //! freshness, transient reads). [`NodeDefRegistry`] is a consumer: parsed
 //! def entries plus a [`ProjectOverlay`] for uncommitted pending edits.
 //! [`NodeDefView`] exposes effective reads (overlay ∪ committed). Mutate pending
@@ -30,7 +30,7 @@ pub mod view;
 pub mod harness;
 
 pub use artifact::{
-    ArtifactEntry, ArtifactError, ArtifactLoc, ArtifactReadFailure, ArtifactReadState,
+    ArtifactEntry, ArtifactError, ArtifactLocation, ArtifactReadFailure, ArtifactReadState,
     ArtifactStore,
 };
 #[cfg(feature = "diff")]

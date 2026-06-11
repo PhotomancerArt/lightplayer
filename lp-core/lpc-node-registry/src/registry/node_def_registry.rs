@@ -6,7 +6,7 @@ use lpc_model::{ArtifactBodyEdit, ArtifactOverlay, ProjectOverlay, Revision, Slo
 use lpfs::{LpFs, LpPath, LpPathBuf};
 
 use crate::edit_apply::EditError;
-use crate::{ArtifactLoc, ArtifactStore};
+use crate::{ArtifactLocation, ArtifactStore};
 
 use super::sync_result::SyncResult;
 use super::{CommitError, NodeDefEntry, NodeDefLoc, NodeDefState, ParseCtx};
@@ -131,7 +131,7 @@ impl NodeDefRegistry {
     }
 
     /// Whether a specific slot path has a pending edit within an artifact.
-    pub fn has_pending_slot(&self, location: &ArtifactLoc, path: &SlotPath) -> bool {
+    pub fn has_pending_slot(&self, location: &ArtifactLocation, path: &SlotPath) -> bool {
         let Some(file_path) = location.file_path() else {
             return false;
         };
@@ -154,7 +154,7 @@ impl NodeDefRegistry {
         }
     }
 
-    pub(crate) fn artifact_location_for_path(&self, path: &LpPath) -> Option<ArtifactLoc> {
+    pub(crate) fn artifact_location_for_path(&self, path: &LpPath) -> Option<ArtifactLocation> {
         self.store.location_for_path(path)
     }
 
