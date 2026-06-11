@@ -1,10 +1,9 @@
 //! Queue pending client edits on the registry overlay.
 
-use lpc_model::Revision;
-use lpfs::{LpFs, LpPath, LpPathBuf};
+use lpc_model::{ArtifactBodyEdit, ArtifactOverlay, Revision, SlotEdit};
+use lpfs::{LpFs, LpPathBuf};
 
 use crate::edit_apply::EditError;
-use crate::edit_model::{AssetEdit, SlotEdit};
 
 use super::{NodeDefRegistry, ParseCtx};
 
@@ -18,18 +17,18 @@ impl NodeDefRegistry {
         _frame: Revision,
     ) -> Result<(), EditError> {
         ensure_toml_path(&path)?;
-        let location = self.location_for_pending_path(LpPath::new(path.as_str()));
         if matches!(
-            self.overlay.pending_at(&location).map(|p| &p.asset_edit),
-            Some(AssetEdit::Delete)
+            self.overlay
+                .artifact(&path)
+                .and_then(ArtifactOverlay::as_body),
+            Some(ArtifactBodyEdit::Delete)
         ) {
             return Err(EditError::InvalidPath {
                 message: alloc::format!("artifact deleted pending commit: `{}`", path.as_str()),
             });
         }
 
-        let pending = self.overlay.ensure_pending(location);
-        pending.upsert_slot(op.clone());
+        self.overlay.put_slot_edit(path, op.clone());
         Ok(())
     }
 }

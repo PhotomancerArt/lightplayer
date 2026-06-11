@@ -31,8 +31,8 @@ impl NodeDefRegistry {
                     self.upsert_slot_edit(path, op, fs, ctx, frame)?;
                     pending_changed = true;
                 }
-                SyncOp::SetPendingAsset { path, asset } => {
-                    self.set_pending_asset(path, asset)?;
+                SyncOp::SetPendingArtifactBody { path, edit } => {
+                    self.set_pending_artifact_body(path, edit)?;
                     pending_changed = true;
                 }
                 SyncOp::Remove { path } => {
@@ -46,7 +46,7 @@ impl NodeDefRegistry {
                 }
                 SyncOp::Commit => {
                     let had_pending = self.overlay_active();
-                    let result = super::commit::commit_slot_overlay(self, fs, frame, ctx)?;
+                    let result = super::commit::commit_project_overlay(self, fs, frame, ctx)?;
                     committed.merge(result);
                     pending_changed |= had_pending;
                 }

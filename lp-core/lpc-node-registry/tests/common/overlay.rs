@@ -1,7 +1,7 @@
 //! Shared overlay mutation helpers for integration tests.
 
-use lpc_model::{Revision, SlotShapeRegistry};
-use lpc_node_registry::{AssetEdit, NodeDefRegistry, ParseCtx, SlotEdit};
+use lpc_model::{ArtifactBodyEdit, Revision, SlotShapeRegistry};
+use lpc_node_registry::{NodeDefRegistry, ParseCtx, SlotEdit};
 use lpfs::{LpFs, LpPathBuf};
 
 pub fn parse_ctx() -> SlotShapeRegistry {
@@ -22,21 +22,21 @@ pub fn upsert_slot(
         .unwrap();
 }
 
-pub fn set_pending_asset_bytes(registry: &mut NodeDefRegistry, path: &str, bytes: &[u8]) {
+pub fn set_pending_artifact_body_bytes(registry: &mut NodeDefRegistry, path: &str, bytes: &[u8]) {
     registry
-        .set_pending_asset(
+        .set_pending_artifact_body(
             LpPathBuf::from(path),
-            AssetEdit::ReplaceBody(bytes.to_vec()),
+            ArtifactBodyEdit::ReplaceBody(bytes.to_vec()),
         )
         .unwrap();
 }
 
-pub fn set_pending_asset_text(registry: &mut NodeDefRegistry, path: &str, text: &str) {
-    set_pending_asset_bytes(registry, path, text.as_bytes());
+pub fn set_pending_artifact_body_text(registry: &mut NodeDefRegistry, path: &str, text: &str) {
+    set_pending_artifact_body_bytes(registry, path, text.as_bytes());
 }
 
-pub fn delete_pending_asset(registry: &mut NodeDefRegistry, path: &str) {
+pub fn delete_pending_artifact_body(registry: &mut NodeDefRegistry, path: &str) {
     registry
-        .set_pending_asset(LpPathBuf::from(path), AssetEdit::Delete)
+        .set_pending_artifact_body(LpPathBuf::from(path), ArtifactBodyEdit::Delete)
         .unwrap();
 }

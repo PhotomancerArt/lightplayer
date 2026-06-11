@@ -9,8 +9,8 @@ use lpc_model::{
     set_slot_variant_default,
 };
 
-use crate::edit_model::SlotEdit;
 use crate::registry::ParseCtx;
+use lpc_model::SlotEdit;
 
 use super::EditError;
 
@@ -50,15 +50,17 @@ pub(crate) fn apply_op_to_def(
     ctx: &ParseCtx<'_>,
     frame: Revision,
 ) -> Result<(), EditError> {
-    match op {
-        SlotEdit::EnsurePresent { path } => apply_ensure_present(def, ctx, path, frame).map(drop),
-        SlotEdit::AssignValue { path, value } => {
-            let value_path = apply_ensure_present(def, ctx, path, frame)?;
+    match &op.op {
+        lpc_model::SlotEditOp::EnsurePresent => {
+            apply_ensure_present(def, ctx, &op.path, frame).map(drop)
+        }
+        lpc_model::SlotEditOp::AssignValue(value) => {
+            let value_path = apply_ensure_present(def, ctx, &op.path, frame)?;
             mutate_def(def, |root| {
                 set_slot_value(root, ctx.shapes, &value_path, frame, value.clone())
             })
         }
-        SlotEdit::Remove { path } => apply_remove(def, ctx, path, frame),
+        lpc_model::SlotEditOp::Remove => apply_remove(def, ctx, &op.path, frame),
     }
 }
 

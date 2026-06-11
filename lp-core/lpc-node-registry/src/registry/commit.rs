@@ -4,17 +4,16 @@ use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_model::{Revision, current_revision};
+use lpc_model::{ArtifactBodyEdit, ArtifactOverlay, ProjectOverlay, Revision, current_revision};
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath, LpPathBuf};
 
 use crate::ArtifactStore;
 use crate::edit_apply::project_artifact_bytes;
-use crate::edit_model::{ArtifactOverlay, AssetEdit};
 
 use super::changes::{build_change_details, dedupe_locations};
 use super::{CommitError, NodeDefLoc, NodeDefRegistry, NodeDefUpdates, ParseCtx, SyncResult};
 
-pub(crate) fn commit_slot_overlay(
+pub(crate) fn commit_project_overlay(
     registry: &mut NodeDefRegistry,
     fs: &dyn LpFs,
     frame: Revision,
@@ -125,7 +124,7 @@ struct OverlayCommitPlan {
 
 impl OverlayCommitPlan {
     fn from_overlay(
-        overlay: &ArtifactOverlay,
+        overlay: &ProjectOverlay,
         store: &mut ArtifactStore,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
@@ -134,19 +133,22 @@ impl OverlayCommitPlan {
         let mut writes = Vec::new();
         let mut deletes = Vec::new();
 
-        for (location, pending) in overlay.iter() {
-            let Some(path) = location.file_path().cloned() else {
-                continue;
-            };
-            match &pending.asset_edit {
-                AssetEdit::Delete => deletes.push(path),
-                AssetEdit::ReplaceBody(bytes) => writes.push((path, bytes.clone())),
-                AssetEdit::None => {
-                    let committed = store.read_bytes(&location, fs).ok();
+        for (path, pending) in overlay.iter() {
+            match pending {
+                ArtifactOverlay::Body {
+                    edit: ArtifactBodyEdit::Delete,
+                } => deletes.push(path.clone()),
+                ArtifactOverlay::Body {
+                    edit: ArtifactBodyEdit::ReplaceBody(bytes),
+                } => writes.push((path.clone(), bytes.clone())),
+                ArtifactOverlay::Slot { .. } => {
+                    let committed = store
+                        .location_for_path(path.as_path())
+                        .and_then(|location| store.read_bytes(&location, fs).ok());
                     let bytes =
                         project_artifact_bytes(committed.as_deref(), Some(pending), ctx, frame)?;
                     if let Some(bytes) = bytes {
-                        writes.push((path, bytes));
+                        writes.push((path.clone(), bytes));
                     }
                 }
             }
@@ -191,20 +193,16 @@ fn is_def_artifact_path(path: &LpPath) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::edit_model::{ArtifactOverlay, SlotEdit};
-    use lpc_model::{LpValue, Revision, SlotPath, SlotShapeRegistry};
+    use lpc_model::{LpValue, Revision, SlotEdit, SlotPath, SlotShapeRegistry};
     use lpfs::LpFsMemory;
 
     #[test]
     fn overlay_commit_plan_folds_slot_pending() {
-        let mut overlay = ArtifactOverlay::new();
-        let location = crate::ArtifactLoc::file("/clock.toml");
-        overlay
-            .ensure_pending(location)
-            .upsert_slot(SlotEdit::AssignValue {
-                path: SlotPath::parse("controls.rate").unwrap(),
-                value: LpValue::F32(2.0),
-            });
+        let mut overlay = ProjectOverlay::new();
+        overlay.put_slot_edit(
+            LpPathBuf::from("/clock.toml"),
+            SlotEdit::assign_value(SlotPath::parse("controls.rate").unwrap(), LpValue::F32(2.0)),
+        );
 
         let mut fs = LpFsMemory::new();
         fs.write_file_mut(

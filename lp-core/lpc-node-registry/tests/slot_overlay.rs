@@ -52,10 +52,7 @@ fn c1_setslot_patches_clock_rate_in_view() {
         &mut registry,
         &fs,
         "/clock.toml",
-        SlotEdit::AssignValue {
-            path: SlotPath::parse("controls.rate").unwrap(),
-            value: LpValue::F32(2.0),
-        },
+        SlotEdit::assign_value(SlotPath::parse("controls.rate").unwrap(), LpValue::F32(2.0)),
         Revision::new(2),
     );
 
@@ -78,10 +75,7 @@ fn c1_slot_draft_serializes_to_toml() {
         &mut registry,
         &fs,
         "/clock.toml",
-        SlotEdit::AssignValue {
-            path: SlotPath::parse("controls.rate").unwrap(),
-            value: LpValue::F32(2.0),
-        },
+        SlotEdit::assign_value(SlotPath::parse("controls.rate").unwrap(), LpValue::F32(2.0)),
         Revision::new(2),
     );
 
@@ -138,10 +132,10 @@ rate = 2.5
         &mut registry,
         &fs,
         "/clock.toml",
-        SlotEdit::AssignValue {
-            path: SlotPath::parse("Clock.controls.scrub_offset_seconds").unwrap(),
-            value: LpValue::F32(4.0),
-        },
+        SlotEdit::assign_value(
+            SlotPath::parse("Clock.controls.scrub_offset_seconds").unwrap(),
+            LpValue::F32(4.0),
+        ),
         Revision::new(2),
     );
 
@@ -174,10 +168,7 @@ fn c2_playlist_slot_patch_committed_children_unchanged() {
         &mut registry,
         &fs,
         "/playlist.toml",
-        SlotEdit::AssignValue {
-            path: SlotPath::parse("idle_entry").unwrap(),
-            value: LpValue::U32(99),
-        },
+        SlotEdit::assign_value(SlotPath::parse("idle_entry").unwrap(), LpValue::U32(99)),
         Revision::new(2),
     );
 
@@ -206,10 +197,10 @@ fn c2_inline_child_slot_patch_visible_in_view() {
         &mut registry,
         &fs,
         "/playlist.toml",
-        SlotEdit::AssignValue {
-            path: SlotPath::parse("entries[2].node.def.render_order").unwrap(),
-            value: LpValue::I32(7),
-        },
+        SlotEdit::assign_value(
+            SlotPath::parse("entries[2].node.def.render_order").unwrap(),
+            LpValue::I32(7),
+        ),
         Revision::new(2),
     );
 

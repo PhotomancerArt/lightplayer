@@ -3,10 +3,12 @@
 use alloc::format;
 use alloc::string::{String, ToString};
 
-use lpc_model::{LpPathBuf, Revision, SlotPath, SourceFileSlot, SourcePath};
+use lpc_model::{
+    ArtifactBodyEdit, ArtifactOverlay, LpPathBuf, ProjectOverlay, Revision, SlotPath,
+    SourceFileSlot, SourcePath,
+};
 use lpfs::LpFs;
 
-use crate::edit_model::{ArtifactOverlay, AssetEdit};
 use crate::{ArtifactError, ArtifactReadFailure, ArtifactStore};
 
 use super::{MaterializedSource, ResolveError, SourceFileRef};
@@ -50,7 +52,7 @@ pub fn materialize_source(
     reference: &SourceFileRef,
     slot: &SourceFileSlot,
     ctx: &SourceDiagnosticCtx,
-    overlay: Option<&ArtifactOverlay>,
+    overlay: Option<&ProjectOverlay>,
 ) -> Result<MaterializedSource, MaterializeError> {
     match reference {
         SourceFileRef::File {
@@ -92,17 +94,18 @@ pub fn materialize_source(
 }
 
 fn materialize_file_artifact_overlay(
-    overlay: &ArtifactOverlay,
+    overlay: &ProjectOverlay,
     resolved_path: &LpPathBuf,
     authored_path: &SourcePath,
     slot: &SourceFileSlot,
 ) -> Result<Option<MaterializedSource>, MaterializeError> {
-    let location = crate::ArtifactLoc::location_for_path(resolved_path.as_path());
-    let Some(pending) = overlay.pending_at(&location) else {
+    let Some(pending) = overlay.artifact(resolved_path) else {
         return Ok(None);
     };
-    match &pending.asset_edit {
-        AssetEdit::ReplaceBody(bytes) => {
+    match pending {
+        ArtifactOverlay::Body {
+            edit: ArtifactBodyEdit::ReplaceBody(bytes),
+        } => {
             let text = core::str::from_utf8(bytes).map_err(|err| MaterializeError::Utf8 {
                 message: format!("{err}"),
             })?;
@@ -112,10 +115,12 @@ fn materialize_file_artifact_overlay(
                 diagnostic_name: authored_path.as_str().to_string(),
             }))
         }
-        AssetEdit::Delete => Err(MaterializeError::Artifact(ArtifactError::Read(
+        ArtifactOverlay::Body {
+            edit: ArtifactBodyEdit::Delete,
+        } => Err(MaterializeError::Artifact(ArtifactError::Read(
             ArtifactReadFailure::Deleted,
         ))),
-        AssetEdit::None => Ok(None),
+        ArtifactOverlay::Slot { .. } => Ok(None),
     }
 }
 
@@ -130,7 +135,6 @@ fn inline_diagnostic_name(ctx: &SourceDiagnosticCtx, extension: &str) -> String 
 mod tests {
     use super::*;
     use crate::ArtifactReadFailure;
-    use crate::edit_model::{ArtifactOverlay, AssetEdit};
     use crate::source::resolve_source_file;
     use lpc_model::Revision;
     use lpfs::{FsEvent, FsEventKind, LpFsMemory, LpPath, LpPathBuf};
@@ -236,10 +240,11 @@ mod tests {
         let reference =
             resolve_source_file(&mut store, containing, &slot, Revision::new(1)).expect("resolve");
 
-        let mut overlay = ArtifactOverlay::new();
-        overlay
-            .ensure_pending(crate::ArtifactLoc::file("/shader.glsl"))
-            .set_asset(AssetEdit::ReplaceBody(b"v2-overlay".to_vec()));
+        let mut overlay = ProjectOverlay::new();
+        overlay.set_artifact_body(
+            LpPathBuf::from("/shader.glsl"),
+            ArtifactBodyEdit::ReplaceBody(b"v2-overlay".to_vec()),
+        );
 
         let committed =
             materialize_source(&mut store, &fs, &reference, &slot, &diag_ctx(), None).unwrap();
@@ -268,10 +273,8 @@ mod tests {
         let reference =
             resolve_source_file(&mut store, containing, &slot, Revision::new(1)).expect("resolve");
 
-        let mut overlay = ArtifactOverlay::new();
-        overlay
-            .ensure_pending(crate::ArtifactLoc::file("/shader.glsl"))
-            .set_asset(AssetEdit::Delete);
+        let mut overlay = ProjectOverlay::new();
+        overlay.set_artifact_body(LpPathBuf::from("/shader.glsl"), ArtifactBodyEdit::Delete);
 
         let err = materialize_source(
             &mut store,

@@ -311,7 +311,7 @@ impl Eq for LpPath {}
 ///
 /// Supports both absolute (starting with `/`) and relative paths.
 /// Paths are automatically normalized on construction.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct LpPathBuf(String);
 
 impl LpPathBuf {

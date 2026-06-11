@@ -3,8 +3,8 @@
 mod common;
 
 use common::fixtures;
-use lpc_model::{LpValue, Revision, SlotPath, SlotShapeRegistry};
-use lpc_node_registry::{AssetEdit, NodeDefRegistry, ParseCtx, SlotEdit, SyncOp};
+use lpc_model::{ArtifactBodyEdit, LpValue, Revision, SlotPath, SlotShapeRegistry};
+use lpc_node_registry::{NodeDefRegistry, ParseCtx, SlotEdit, SyncOp};
 use lpfs::{FsEvent, FsEventKind, LpFsMemory, LpPath, LpPathBuf};
 
 fn parse_ctx() -> SlotShapeRegistry {
@@ -28,9 +28,9 @@ fn sync_apply_updates_overlay() {
     let outcome = registry
         .sync(
             &fs,
-            &[SyncOp::SetPendingAsset {
+            &[SyncOp::SetPendingArtifactBody {
                 path: LpPathBuf::from("/a.glsl"),
-                asset: AssetEdit::ReplaceBody(b"a".to_vec()),
+                edit: ArtifactBodyEdit::ReplaceBody(b"a".to_vec()),
             }],
             Revision::new(1),
             &ctx,
@@ -52,9 +52,9 @@ fn sync_remove_drops_one_pending_artifact() {
     registry
         .sync(
             &fs,
-            &[SyncOp::SetPendingAsset {
+            &[SyncOp::SetPendingArtifactBody {
                 path: path.clone(),
-                asset: AssetEdit::ReplaceBody(b"a".to_vec()),
+                edit: ArtifactBodyEdit::ReplaceBody(b"a".to_vec()),
             }],
             Revision::new(1),
             &ctx,
@@ -85,10 +85,10 @@ fn sync_apply_then_commit_clears_overlay() {
             &[
                 SyncOp::UpsertSlot {
                     path: LpPathBuf::from("/clock.toml"),
-                    op: SlotEdit::AssignValue {
-                        path: SlotPath::parse("controls.rate").unwrap(),
-                        value: LpValue::F32(2.0),
-                    },
+                    op: SlotEdit::assign_value(
+                        SlotPath::parse("controls.rate").unwrap(),
+                        LpValue::F32(2.0),
+                    ),
                 },
                 SyncOp::Commit,
             ],
@@ -124,9 +124,7 @@ fn sync_fs_and_commit_in_one_batch() {
                 SyncOp::Fs(fs_modify("/shader.glsl")),
                 SyncOp::UpsertSlot {
                     path: LpPathBuf::from("/shader.toml"),
-                    op: SlotEdit::EnsurePresent {
-                        path: SlotPath::parse("Shader").unwrap(),
-                    },
+                    op: SlotEdit::ensure_present(SlotPath::parse("Shader").unwrap()),
                 },
                 SyncOp::Commit,
             ],

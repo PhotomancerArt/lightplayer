@@ -3,7 +3,7 @@
 mod common;
 
 use common::{fixtures, overlay};
-use lpc_model::{LpValue, Revision, SlotPath};
+use lpc_model::{ArtifactBodyEdit, LpValue, Revision, SlotPath};
 use lpc_node_registry::{EditError, NodeDefEntry, NodeDefLoc, NodeDefRegistry, ParseCtx, SlotEdit};
 use lpfs::{LpFsMemory, LpPath, LpPathBuf};
 
@@ -22,12 +22,12 @@ fn d1_apply_populates_overlay_base_unchanged() {
         .unwrap();
     let before = snapshot_registry(&registry, &root);
 
-    overlay::set_pending_asset_text(&mut registry, "/pending.glsl", "void main() {}");
+    overlay::set_pending_artifact_body_text(&mut registry, "/pending.glsl", "void main() {}");
 
     assert!(registry.overlay_active());
     assert!(registry.overlay_contains_path(LpPath::new("/pending.glsl")));
     assert_eq!(
-        registry.pending_asset_bytes(LpPath::new("/pending.glsl")),
+        registry.pending_artifact_body_bytes(LpPath::new("/pending.glsl")),
         Some(b"void main() {}" as &[u8])
     );
     assert_eq!(snapshot_registry(&registry, &root), before);
@@ -44,7 +44,7 @@ fn d3_discard_clears_overlay_entries_unchanged() {
         .unwrap();
     let before = snapshot_registry(&registry, &root);
 
-    overlay::set_pending_asset_text(&mut registry, "/pending.glsl", "pending");
+    overlay::set_pending_artifact_body_text(&mut registry, "/pending.glsl", "pending");
     assert!(registry.overlay_active());
 
     registry.discard_overlay();
@@ -59,9 +59,9 @@ fn apply_rejects_relative_path() {
     let _fs = LpFsMemory::new();
     let mut registry = NodeDefRegistry::new();
     let err = registry
-        .set_pending_asset(
+        .set_pending_artifact_body(
             LpPathBuf::from("relative.glsl"),
-            lpc_node_registry::AssetEdit::ReplaceBody(b"x".to_vec()),
+            ArtifactBodyEdit::ReplaceBody(b"x".to_vec()),
         )
         .unwrap_err();
     assert!(matches!(err, EditError::InvalidPath { .. }));
@@ -72,7 +72,7 @@ fn apply_rejects_relative_path() {
 fn apply_replace_body_on_unloaded_path_implicit_create() {
     let _fs = LpFsMemory::new();
     let mut registry = NodeDefRegistry::new();
-    overlay::set_pending_asset_text(&mut registry, "/new.shader.glsl", "body");
+    overlay::set_pending_artifact_body_text(&mut registry, "/new.shader.glsl", "body");
     assert!(registry.overlay_contains_path(LpPath::new("/new.shader.glsl")));
 }
 
@@ -80,8 +80,8 @@ fn apply_replace_body_on_unloaded_path_implicit_create() {
 fn apply_multiple_pending_assets() {
     let _fs = LpFsMemory::new();
     let mut registry = NodeDefRegistry::new();
-    overlay::set_pending_asset_text(&mut registry, "/a.glsl", "a");
-    overlay::set_pending_asset_text(&mut registry, "/b.glsl", "b");
+    overlay::set_pending_artifact_body_text(&mut registry, "/a.glsl", "a");
+    overlay::set_pending_artifact_body_text(&mut registry, "/b.glsl", "b");
     assert!(registry.overlay_contains_path(LpPath::new("/a.glsl")));
     assert!(registry.overlay_contains_path(LpPath::new("/b.glsl")));
 }
@@ -96,11 +96,11 @@ fn apply_delete_marks_overlay_entry() {
         .load_root(&fs, LpPath::new("/shader.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    overlay::delete_pending_asset(&mut registry, "/shader.glsl");
+    overlay::delete_pending_artifact_body(&mut registry, "/shader.glsl");
 
     assert!(registry.overlay_contains_path(LpPath::new("/shader.glsl")));
     assert_eq!(
-        registry.pending_asset_bytes(LpPath::new("/shader.glsl")),
+        registry.pending_artifact_body_bytes(LpPath::new("/shader.glsl")),
         None
     );
 }
@@ -114,10 +114,7 @@ fn queue_slot_edit_on_non_toml_path_errors() {
     let err = registry
         .upsert_slot_edit(
             LpPathBuf::from("/shader.glsl"),
-            SlotEdit::AssignValue {
-                path: SlotPath::root(),
-                value: LpValue::F32(1.0),
-            },
+            SlotEdit::assign_value(SlotPath::root(), LpValue::F32(1.0)),
             &fs,
             &ctx,
             Revision::new(1),

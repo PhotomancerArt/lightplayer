@@ -1,16 +1,20 @@
-//! Wire-shaped project edit POC against the node registry.
+//! Wire-shaped project overlay POC against the node registry.
 
 use lpc_model::{
-    ArtifactBodyEdit, ArtifactEdit, DefinitionLocation, LpValue, ProjectEditBatch,
-    ProjectEditCommand, ProjectEditCommandId, ProjectEditCommandStatus, ProjectEditEffect,
-    ProjectEditOp, Revision, SlotPath, SlotShapeRegistry, SourceFileSlot,
+    ArtifactBodyEdit, ArtifactOverlay, DefinitionLocation, LpValue, OverlayMutation,
+    OverlayMutationBatch, OverlayMutationCommand, OverlayMutationCommandId,
+    OverlayMutationCommandStatus, OverlayMutationEffect, OverlayMutationRejectionReason, Revision,
+    SlotEdit, SlotEditOp, SlotPath, SlotShapeRegistry, SourceFileSlot,
 };
 use lpc_node_registry::{NodeDefLoc, NodeDefRegistry, ParseCtx, SourceDiagnosticCtx};
-use lpc_wire::{WireProjectEditRequest, WireProjectEditResponse};
+use lpc_wire::{
+    WireOverlayCommitRequest, WireOverlayCommitResponse, WireOverlayMutationRequest,
+    WireOverlayMutationResponse, WireOverlayReadRequest, WireOverlayReadResponse,
+};
 use lpfs::{LpFs, LpFsMemory, LpPath, LpPathBuf};
 
 #[test]
-fn project_edit_batch_builds_graph_from_loaded_root_and_commits() {
+fn overlay_api_builds_graph_from_loaded_root_and_commits() {
     let fs = minimal_project_fs();
     let shapes = SlotShapeRegistry::default();
     let ctx = ParseCtx { shapes: &shapes };
@@ -20,70 +24,83 @@ fn project_edit_batch_builds_graph_from_loaded_root_and_commits() {
         .expect("load root");
     assert_eq!(root, loc("/project.toml", ""));
 
-    let request = round_trip_request(WireProjectEditRequest::new(ProjectEditBatch::new(vec![
-        slot_command(
-            1,
-            "/project.toml",
-            lpc_model::SlotEdit::EnsurePresent {
-                path: SlotPath::parse("nodes[shader].ref").unwrap(),
-            },
-        ),
-        slot_command(
-            2,
-            "/project.toml",
-            lpc_model::SlotEdit::AssignValue {
-                path: SlotPath::parse("nodes[shader].ref").unwrap(),
-                value: LpValue::String(String::from("./shader.toml")),
-            },
-        ),
-        slot_command(
-            3,
-            "/project.toml",
-            lpc_model::SlotEdit::EnsurePresent {
-                path: SlotPath::parse("nodes[clock].def.Clock").unwrap(),
-            },
-        ),
-        slot_command(
-            4,
-            "/project.toml",
-            lpc_model::SlotEdit::AssignValue {
-                path: SlotPath::parse("nodes[clock].def.controls.rate").unwrap(),
-                value: LpValue::F32(2.0),
-            },
-        ),
-        slot_command(
-            5,
-            "/shader.toml",
-            lpc_model::SlotEdit::EnsurePresent {
-                path: SlotPath::parse("Shader").unwrap(),
-            },
-        ),
-        slot_command(
-            6,
-            "/shader.toml",
-            lpc_model::SlotEdit::AssignValue {
-                path: SlotPath::parse("source.path").unwrap(),
-                value: LpValue::String(String::from("./shader.glsl")),
-            },
-        ),
-        body_command(
-            7,
-            "/shader.glsl",
-            ArtifactBodyEdit::ReplaceBody(b"void main() { /* created */ }".to_vec()),
-        ),
-        body_command(
-            8,
-            "/scratch.glsl",
-            ArtifactBodyEdit::ReplaceBody(b"scratch".to_vec()),
-        ),
-        body_command(9, "/scratch.glsl", ArtifactBodyEdit::Delete),
-        command(10, ProjectEditOp::Commit),
-    ])));
+    let _: WireOverlayReadRequest =
+        serde_json::from_str(&serde_json::to_string(&WireOverlayReadRequest).unwrap()).unwrap();
+    let empty_overlay =
+        round_trip_read_response(WireOverlayReadResponse::new(registry.overlay().clone()));
+    assert!(empty_overlay.overlay.is_empty());
 
-    let result = registry.apply_project_edit_batch(&fs, &request.batch, Revision::new(2), &ctx);
-    assert_all_accepted(&result.results);
-    let response = round_trip_response(WireProjectEditResponse::new(result));
-    let summary = committed_summary(&response, 10);
+    let request = round_trip_mutation_request(WireOverlayMutationRequest::new(
+        OverlayMutationBatch::new(vec![
+            put_slot(
+                1,
+                "/project.toml",
+                SlotEdit::ensure_present(SlotPath::parse("nodes[shader].ref").unwrap()),
+            ),
+            put_slot(
+                2,
+                "/project.toml",
+                SlotEdit::assign_value(
+                    SlotPath::parse("nodes[shader].ref").unwrap(),
+                    LpValue::String(String::from("./shader.toml")),
+                ),
+            ),
+            put_slot(
+                3,
+                "/project.toml",
+                SlotEdit::ensure_present(SlotPath::parse("nodes[clock].def.Clock").unwrap()),
+            ),
+            put_slot(
+                4,
+                "/project.toml",
+                SlotEdit::assign_value(
+                    SlotPath::parse("nodes[clock].def.controls.rate").unwrap(),
+                    LpValue::F32(2.0),
+                ),
+            ),
+            put_slot(
+                5,
+                "/shader.toml",
+                SlotEdit::ensure_present(SlotPath::parse("Shader").unwrap()),
+            ),
+            put_slot(
+                6,
+                "/shader.toml",
+                SlotEdit::assign_value(
+                    SlotPath::parse("source.path").unwrap(),
+                    LpValue::String(String::from("./shader.glsl")),
+                ),
+            ),
+            set_body(
+                7,
+                "/shader.glsl",
+                ArtifactBodyEdit::ReplaceBody(b"void main() { /* created */ }".to_vec()),
+            ),
+            set_body(
+                8,
+                "/scratch.glsl",
+                ArtifactBodyEdit::ReplaceBody(b"scratch".to_vec()),
+            ),
+            set_body(9, "/scratch.glsl", ArtifactBodyEdit::Delete),
+        ]),
+    ));
+
+    let result = registry.apply_overlay_mutation_batch(&fs, &request.batch, Revision::new(2), &ctx);
+    assert_all_mutations_accepted(&result.results);
+    let response = round_trip_mutation_response(WireOverlayMutationResponse::new(result));
+    assert_all_mutations_accepted(&response.result.results);
+
+    let pending =
+        round_trip_read_response(WireOverlayReadResponse::new(registry.overlay().clone()));
+    assert_project_overlay_was_coalesced(&pending);
+
+    let _: WireOverlayCommitRequest =
+        serde_json::from_str(&serde_json::to_string(&WireOverlayCommitRequest).unwrap()).unwrap();
+    let summary = registry
+        .commit_overlay(&fs, Revision::new(3), &ctx)
+        .expect("commit");
+    let response = round_trip_commit_response(WireOverlayCommitResponse::new(summary));
+    let summary = &response.summary;
     assert!(
         summary
             .def_updates
@@ -108,7 +125,7 @@ fn project_edit_batch_builds_graph_from_loaded_root_and_commits() {
             LpPath::new("/shader.toml"),
             &SourceFileSlot::from_path("./shader.glsl"),
             &source_diag_ctx("/shader.toml"),
-            Revision::new(3),
+            Revision::new(4),
         )
         .expect("materialized source");
     assert!(source.text.contains("created"));
@@ -116,7 +133,7 @@ fn project_edit_batch_builds_graph_from_loaded_root_and_commits() {
 
     let mut reloaded = NodeDefRegistry::new();
     reloaded
-        .load_root(&fs, LpPath::new("/project.toml"), Revision::new(4), &ctx)
+        .load_root(&fs, LpPath::new("/project.toml"), Revision::new(5), &ctx)
         .expect("reload root");
     assert!(
         reloaded
@@ -125,26 +142,24 @@ fn project_edit_batch_builds_graph_from_loaded_root_and_commits() {
     );
     assert!(reloaded.get(&loc("/shader.toml", "")).is_some());
 
-    let second = WireProjectEditRequest::new(ProjectEditBatch::new(vec![
-        body_command(
-            11,
+    let second = WireOverlayMutationRequest::new(OverlayMutationBatch::new(vec![
+        set_body(
+            10,
             "/shader.glsl",
             ArtifactBodyEdit::ReplaceBody(b"void main() { /* replaced */ }".to_vec()),
         ),
-        slot_command(
-            12,
+        put_slot(
+            11,
             "/project.toml",
-            lpc_model::SlotEdit::Remove {
-                path: SlotPath::parse("nodes[shader]").unwrap(),
-            },
+            SlotEdit::remove(SlotPath::parse("nodes[shader]").unwrap()),
         ),
-        body_command(13, "/shader.glsl", ArtifactBodyEdit::Delete),
-        command(14, ProjectEditOp::Commit),
+        set_body(12, "/shader.glsl", ArtifactBodyEdit::Delete),
     ]));
-    let result = registry.apply_project_edit_batch(&fs, &second.batch, Revision::new(5), &ctx);
-    assert_all_accepted(&result.results);
-    let response = WireProjectEditResponse::new(result);
-    let summary = committed_summary(&response, 14);
+    let result = registry.apply_overlay_mutation_batch(&fs, &second.batch, Revision::new(6), &ctx);
+    assert_all_mutations_accepted(&result.results);
+    let summary = registry
+        .commit_overlay(&fs, Revision::new(7), &ctx)
+        .expect("second commit");
     assert!(
         summary
             .def_updates
@@ -156,7 +171,7 @@ fn project_edit_batch_builds_graph_from_loaded_root_and_commits() {
 
     let mut final_reload = NodeDefRegistry::new();
     final_reload
-        .load_root(&fs, LpPath::new("/project.toml"), Revision::new(6), &ctx)
+        .load_root(&fs, LpPath::new("/project.toml"), Revision::new(8), &ctx)
         .expect("final reload");
     assert!(
         final_reload
@@ -171,7 +186,7 @@ fn project_edit_batch_builds_graph_from_loaded_root_and_commits() {
 }
 
 #[test]
-fn project_edit_batch_rejects_relative_artifact_path() {
+fn overlay_mutation_rejects_relative_artifact_path() {
     let fs = minimal_project_fs();
     let shapes = SlotShapeRegistry::default();
     let ctx = ParseCtx { shapes: &shapes };
@@ -180,17 +195,17 @@ fn project_edit_batch_rejects_relative_artifact_path() {
         .load_root(&fs, LpPath::new("/project.toml"), Revision::new(1), &ctx)
         .expect("load root");
 
-    let batch = ProjectEditBatch::new(vec![body_command(
+    let batch = OverlayMutationBatch::new(vec![set_body(
         1,
         "relative.glsl",
         ArtifactBodyEdit::ReplaceBody(b"x".to_vec()),
     )]);
-    let result = registry.apply_project_edit_batch(&fs, &batch, Revision::new(2), &ctx);
+    let result = registry.apply_overlay_mutation_batch(&fs, &batch, Revision::new(2), &ctx);
 
     assert!(matches!(
         &result.results[0].status,
-        ProjectEditCommandStatus::Rejected { rejection }
-            if rejection.reason == lpc_model::ProjectEditRejectionReason::InvalidPath
+        OverlayMutationCommandStatus::Rejected { rejection }
+            if rejection.reason == OverlayMutationRejectionReason::InvalidPath
     ));
 }
 
@@ -206,68 +221,92 @@ kind = "Project"
     fs
 }
 
-fn command(id: u64, op: ProjectEditOp) -> ProjectEditCommand {
-    ProjectEditCommand {
-        id: ProjectEditCommandId::new(id),
-        op,
+fn put_slot(id: u64, artifact_path: &str, edit: SlotEdit) -> OverlayMutationCommand {
+    command(
+        id,
+        OverlayMutation::PutSlotEdit {
+            artifact_path: LpPathBuf::from(artifact_path),
+            edit,
+        },
+    )
+}
+
+fn set_body(id: u64, artifact_path: &str, edit: ArtifactBodyEdit) -> OverlayMutationCommand {
+    command(
+        id,
+        OverlayMutation::SetArtifactBody {
+            artifact_path: LpPathBuf::from(artifact_path),
+            edit,
+        },
+    )
+}
+
+fn command(id: u64, mutation: OverlayMutation) -> OverlayMutationCommand {
+    OverlayMutationCommand {
+        id: OverlayMutationCommandId::new(id),
+        mutation,
     }
 }
 
-fn slot_command(id: u64, artifact_path: &str, edit: lpc_model::SlotEdit) -> ProjectEditCommand {
-    command(
-        id,
-        ProjectEditOp::ApplyArtifactEdit {
-            edit: ArtifactEdit::slot(LpPathBuf::from(artifact_path), edit),
-        },
-    )
-}
-
-fn body_command(id: u64, artifact_path: &str, edit: ArtifactBodyEdit) -> ProjectEditCommand {
-    command(
-        id,
-        ProjectEditOp::ApplyArtifactEdit {
-            edit: ArtifactEdit::body(LpPathBuf::from(artifact_path), edit),
-        },
-    )
-}
-
-fn assert_all_accepted(results: &[lpc_model::ProjectEditCommandResult]) {
+fn assert_all_mutations_accepted(results: &[lpc_model::OverlayMutationCommandResult]) {
     assert!(
-        results
-            .iter()
-            .all(|result| matches!(result.status, ProjectEditCommandStatus::Accepted { .. })),
-        "expected all project edit commands to be accepted: {results:?}"
+        results.iter().all(|result| matches!(
+            result.status,
+            OverlayMutationCommandStatus::Accepted {
+                effect: OverlayMutationEffect::OverlayChanged { .. }
+            }
+        )),
+        "expected all overlay mutations to be accepted: {results:?}"
     );
 }
 
-fn committed_summary(
-    response: &WireProjectEditResponse,
-    command_id: u64,
-) -> &lpc_model::ProjectCommitSummary {
-    response
-        .result
-        .results
-        .iter()
-        .find_map(|result| {
-            if result.id != ProjectEditCommandId::new(command_id) {
-                return None;
-            }
-            match &result.status {
-                ProjectEditCommandStatus::Accepted {
-                    effect: ProjectEditEffect::Committed { summary },
-                } => Some(summary),
-                _ => None,
-            }
-        })
-        .expect("commit summary")
+fn assert_project_overlay_was_coalesced(response: &WireOverlayReadResponse) {
+    let project = response
+        .overlay
+        .artifact(&LpPathBuf::from("/project.toml"))
+        .expect("project overlay");
+    let ArtifactOverlay::Slot { overlay } = project else {
+        panic!("expected project slot overlay");
+    };
+    assert_eq!(
+        overlay
+            .edits
+            .get(&SlotPath::parse("nodes[shader].ref").unwrap()),
+        Some(&SlotEditOp::AssignValue(LpValue::String(String::from(
+            "./shader.toml"
+        ))))
+    );
+
+    let scratch = response
+        .overlay
+        .artifact(&LpPathBuf::from("/scratch.glsl"))
+        .expect("scratch overlay");
+    assert!(matches!(
+        scratch,
+        ArtifactOverlay::Body {
+            edit: ArtifactBodyEdit::Delete
+        }
+    ));
 }
 
-fn round_trip_request(request: WireProjectEditRequest) -> WireProjectEditRequest {
+fn round_trip_read_response(response: WireOverlayReadResponse) -> WireOverlayReadResponse {
+    let json = serde_json::to_string(&response).unwrap();
+    serde_json::from_str(&json).unwrap()
+}
+
+fn round_trip_mutation_request(request: WireOverlayMutationRequest) -> WireOverlayMutationRequest {
     let json = serde_json::to_string(&request).unwrap();
     serde_json::from_str(&json).unwrap()
 }
 
-fn round_trip_response(response: WireProjectEditResponse) -> WireProjectEditResponse {
+fn round_trip_mutation_response(
+    response: WireOverlayMutationResponse,
+) -> WireOverlayMutationResponse {
+    let json = serde_json::to_string(&response).unwrap();
+    serde_json::from_str(&json).unwrap()
+}
+
+fn round_trip_commit_response(response: WireOverlayCommitResponse) -> WireOverlayCommitResponse {
     let json = serde_json::to_string(&response).unwrap();
     serde_json::from_str(&json).unwrap()
 }
@@ -295,5 +334,6 @@ fn loc(path: &str, slot_path: &str) -> NodeDefLoc {
 }
 
 fn read_text(fs: &dyn LpFs, path: &str) -> String {
-    String::from_utf8(fs.read_file(LpPath::new(path)).unwrap()).unwrap()
+    let bytes = fs.read_file(LpPath::new(path)).unwrap();
+    String::from_utf8(bytes).unwrap()
 }

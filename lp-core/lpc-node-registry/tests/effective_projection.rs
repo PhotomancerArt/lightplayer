@@ -32,7 +32,7 @@ fn effective_view_differs_after_toml_setbytes() {
 
     assert_eq!(clock_rate(registry.get(&root).unwrap()), 1.0);
 
-    overlay::set_pending_asset_text(
+    overlay::set_pending_artifact_body_text(
         &mut registry,
         "/clock.toml",
         r#"
@@ -69,7 +69,7 @@ fn discard_restores_effective_view_to_committed() {
     let shapes = overlay::parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
 
-    overlay::set_pending_asset_text(
+    overlay::set_pending_artifact_body_text(
         &mut registry,
         "/clock.toml",
         r#"
@@ -99,7 +99,7 @@ fn effective_deleted_overlay_yields_parse_error() {
     let shapes = overlay::parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
 
-    overlay::delete_pending_asset(&mut registry, "/clock.toml");
+    overlay::delete_pending_artifact_body(&mut registry, "/clock.toml");
 
     assert!(matches!(
         registry.view().state(&root, &fs, &ctx),

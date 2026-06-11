@@ -2,36 +2,36 @@
 
 use alloc::string::ToString;
 
-use lpc_model::{NodeDef, NodeDefParseError, NodeInvocation, SlotPath, current_revision};
+use lpc_model::{
+    ArtifactBodyEdit, ArtifactOverlay, NodeDef, NodeDefParseError, NodeInvocation, SlotPath,
+    current_revision,
+};
 
 use crate::edit_apply::{apply_op_to_def, project_artifact_bytes};
-use crate::edit_model::{ArtifactEdits, AssetEdit};
 
 use super::{NodeDefEntry, NodeDefLoc, NodeDefState, ParseCtx, RegistryError};
 
 /// Effective [`NodeDefState`] for an artifact root.
 pub(crate) fn project_artifact_def(
     committed_state: &NodeDefState,
-    pending: Option<&ArtifactEdits>,
+    pending: Option<&ArtifactOverlay>,
     ctx: &ParseCtx<'_>,
 ) -> NodeDefState {
     let Some(pending) = pending else {
         return committed_state.clone();
     };
 
-    match &pending.asset_edit {
-        AssetEdit::Delete => {
-            return NodeDefState::ParseError(read_error_state(crate::ArtifactError::Read(
-                crate::ArtifactReadFailure::Deleted,
-            )));
-        }
-        AssetEdit::ReplaceBody(bytes) => {
-            return parse_toml_bytes(ctx, bytes);
-        }
-        AssetEdit::None => {}
-    }
+    let ArtifactOverlay::Slot { overlay } = pending else {
+        return match pending.as_body() {
+            Some(ArtifactBodyEdit::Delete) => NodeDefState::ParseError(read_error_state(
+                crate::ArtifactError::Read(crate::ArtifactReadFailure::Deleted),
+            )),
+            Some(ArtifactBodyEdit::ReplaceBody(bytes)) => parse_toml_bytes(ctx, bytes),
+            None => committed_state.clone(),
+        };
+    };
 
-    if pending.slot_edits_is_empty() {
+    if overlay.is_empty() {
         return committed_state.clone();
     }
 
@@ -39,8 +39,8 @@ pub(crate) fn project_artifact_def(
     match committed_state {
         NodeDefState::Loaded(def) => {
             let mut projected = def.clone();
-            for edit in pending.slot_edits() {
-                if let Err(err) = apply_op_to_def(&mut projected, edit, ctx, frame) {
+            for edit in overlay.to_apply_plan() {
+                if let Err(err) = apply_op_to_def(&mut projected, &edit, ctx, frame) {
                     return NodeDefState::ParseError(NodeDefParseError::Toml {
                         error: err.to_string(),
                     });
@@ -64,7 +64,7 @@ pub(crate) fn project_artifact_def(
 pub(crate) fn project_def_at_loc(
     loc: &NodeDefLoc,
     root_entry: &NodeDefEntry,
-    pending: Option<&ArtifactEdits>,
+    pending: Option<&ArtifactOverlay>,
     ctx: &ParseCtx<'_>,
 ) -> NodeDefState {
     let root_state = project_artifact_def(&root_entry.state, pending, ctx);
@@ -82,9 +82,11 @@ pub(crate) fn parse_toml_bytes(ctx: &ParseCtx<'_>, bytes: &[u8]) -> NodeDefState
     let text = match core::str::from_utf8(bytes) {
         Ok(text) => text,
         Err(err) => {
-            return NodeDefState::ParseError(NodeDefParseError::Toml {
-                error: err.to_string(),
-            });
+            return NodeDefState::ParseError(read_error_state(crate::ArtifactError::Read(
+                crate::ArtifactReadFailure::Io {
+                    message: err.to_string(),
+                },
+            )));
         }
     };
     match NodeDef::read_toml(ctx.shapes, text) {
@@ -124,7 +126,7 @@ fn def_state_at_path(root: &NodeDef, path: &SlotPath) -> Option<NodeDefState> {
 mod tests {
     use super::*;
 
-    use lpc_model::{LpValue, NodeDef, Revision, SlotPath, SlotShapeRegistry};
+    use lpc_model::{LpValue, NodeDef, Revision, SlotEdit, SlotPath, SlotShapeRegistry};
 
     fn ctx<'a>(shapes: &'a SlotShapeRegistry) -> ParseCtx<'a> {
         ParseCtx { shapes }
@@ -147,11 +149,11 @@ rate = 1.0
         )
         .expect("playlist");
         let committed = NodeDefState::Loaded(root);
-        let mut pending = ArtifactEdits::default();
-        pending.upsert_slot(crate::edit_model::SlotEdit::AssignValue {
-            path: SlotPath::parse("entries[0].node.controls.rate").unwrap(),
-            value: LpValue::F32(3.0),
-        });
+        let mut pending = ArtifactOverlay::slot(lpc_model::SlotOverlay::new());
+        pending.put_slot_edit(SlotEdit::assign_value(
+            SlotPath::parse("entries[0].node.controls.rate").unwrap(),
+            LpValue::F32(3.0),
+        ));
 
         let loc = NodeDefLoc::artifact_root(crate::ArtifactLoc::file("/playlist.toml"));
         let entry = NodeDefEntry {

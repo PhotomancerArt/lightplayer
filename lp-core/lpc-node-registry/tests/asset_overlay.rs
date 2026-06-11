@@ -37,7 +37,7 @@ fn c4c_replace_glsl_via_overlay_def_unchanged() {
     let before = snapshot_entry(&registry, &root);
     let slot = SourceFileSlot::from_path("./shader.glsl");
 
-    overlay::set_pending_asset_text(
+    overlay::set_pending_artifact_body_text(
         &mut registry,
         "/shader.glsl",
         "void main() { gl_FragColor = vec4(0.0, 1.0, 0.0, 1.0); }",
@@ -62,7 +62,7 @@ fn c4a_add_asset_via_overlay_implicit_create() {
     let mut registry = NodeDefRegistry::new();
     load_shader_root(&mut registry, &fs);
 
-    overlay::set_pending_asset_text(&mut registry, "/extra.glsl", "void main() {}");
+    overlay::set_pending_artifact_body_text(&mut registry, "/extra.glsl", "void main() {}");
 
     let slot = SourceFileSlot::from_path("./extra.glsl");
     let materialized = registry
@@ -84,7 +84,7 @@ fn c4b_delete_asset_via_overlay() {
     load_shader_root(&mut registry, &fs);
     let slot = SourceFileSlot::from_path("./shader.glsl");
 
-    overlay::delete_pending_asset(&mut registry, "/shader.glsl");
+    overlay::delete_pending_artifact_body(&mut registry, "/shader.glsl");
 
     let err = registry
         .materialize_source(
@@ -110,7 +110,11 @@ fn c4d_replace_asset_without_touching_def_toml() {
     let slot = SourceFileSlot::from_path("./shader.glsl");
     let slot_revision = slot.revision();
 
-    overlay::set_pending_asset_text(&mut registry, "/shader.glsl", "void main() { /* draft */ }");
+    overlay::set_pending_artifact_body_text(
+        &mut registry,
+        "/shader.glsl",
+        "void main() { /* draft */ }",
+    );
 
     assert!(!registry.overlay_contains_path(LpPath::new("/shader.toml")));
     let effective = registry

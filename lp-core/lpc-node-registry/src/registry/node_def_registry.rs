@@ -2,11 +2,10 @@
 
 use alloc::collections::BTreeMap;
 
-use lpc_model::{ArtifactBodyEdit, Revision, SlotPath};
+use lpc_model::{ArtifactBodyEdit, ArtifactOverlay, ProjectOverlay, Revision, SlotEdit, SlotPath};
 use lpfs::{LpFs, LpPath, LpPathBuf};
 
 use crate::edit_apply::EditError;
-use crate::edit_model::{ArtifactEdits, ArtifactOverlay, AssetEdit, SlotEdit};
 use crate::{ArtifactLoc, ArtifactStore};
 
 use super::sync_result::SyncResult;
@@ -16,13 +15,13 @@ use super::{CommitError, NodeDefEntry, NodeDefLoc, NodeDefState, ParseCtx};
 ///
 /// Bootstrap with [`Self::load_root`], react to filesystem edits via
 /// [`Self::sync`] / [`Self::sync_fs`], mutate pending state via
-/// [`Self::upsert_slot_edit`] / [`Self::set_pending_asset`] / [`Self::apply_overlay`],
+/// [`Self::upsert_slot_edit`] / [`Self::set_pending_artifact_body`] / [`Self::apply_overlay`],
 /// then [`Self::commit`] or [`Self::discard_overlay`].
-/// Pending edits are address-keyed current slot/asset changes in [`ArtifactOverlay`].
+/// Pending edits are current artifact changes in [`ProjectOverlay`].
 /// Effective reads use [`crate::NodeDefView`].
 pub struct NodeDefRegistry {
     pub(crate) store: ArtifactStore,
-    pub(crate) overlay: ArtifactOverlay,
+    pub(crate) overlay: ProjectOverlay,
     pub(crate) defs: BTreeMap<NodeDefLoc, NodeDefEntry>,
     pub(crate) root: Option<NodeDefLoc>,
 }
@@ -37,7 +36,7 @@ impl NodeDefRegistry {
     pub fn new() -> Self {
         Self {
             store: ArtifactStore::new(),
-            overlay: ArtifactOverlay::new(),
+            overlay: ProjectOverlay::new(),
             defs: BTreeMap::new(),
             root: None,
         }
@@ -45,8 +44,7 @@ impl NodeDefRegistry {
 
     /// Drop pending overlay entry for `path`. Returns whether an entry existed.
     pub fn remove_pending_at(&mut self, path: &LpPath) -> bool {
-        let location = self.location_for_pending_path(path);
-        self.overlay.remove(&location)
+        self.overlay.clear_artifact(&path.to_path_buf())
     }
 
     /// Upsert one slot edit into the overlay for a `.toml` artifact path.
@@ -68,35 +66,17 @@ impl NodeDefRegistry {
         edit: ArtifactBodyEdit,
     ) -> Result<(), EditError> {
         super::path_validation::require_absolute_path(path.clone())?;
-        let location = self.location_for_pending_path(LpPath::new(path.as_str()));
-        self.overlay
-            .ensure_pending(location)
-            .set_artifact_body(edit);
+        self.overlay.set_artifact_body(path, edit);
         Ok(())
     }
 
-    /// Set pending asset state for one artifact path.
-    pub fn set_pending_asset(
-        &mut self,
-        path: LpPathBuf,
-        asset: AssetEdit,
-    ) -> Result<(), EditError> {
-        match asset.into_artifact_body() {
-            Some(edit) => self.set_pending_artifact_body(path, edit),
-            None => {
-                super::path_validation::require_absolute_path(path.clone())?;
-                let location = self.location_for_pending_path(LpPath::new(path.as_str()));
-                self.overlay
-                    .ensure_pending(location)
-                    .set_asset(AssetEdit::None);
-                Ok(())
-            }
-        }
+    /// Merge pending overlay edits into the registry overlay.
+    pub fn apply_overlay(&mut self, overlay: &ProjectOverlay) {
+        self.overlay.merge_from(overlay);
     }
 
-    /// Merge pending overlay edits into the registry overlay.
-    pub fn apply_overlay(&mut self, overlay: &ArtifactOverlay) {
-        self.overlay.merge_from(overlay);
+    pub fn overlay(&self) -> &ProjectOverlay {
+        &self.overlay
     }
 
     pub fn root_loc(&self) -> Option<&NodeDefLoc> {
@@ -117,12 +97,6 @@ impl NodeDefRegistry {
         self.overlay.clear();
     }
 
-    /// Drop all pending overlay edits.
-    #[deprecated(note = "renamed to discard_overlay")]
-    pub fn discard_slot_overlay(&mut self) {
-        self.discard_overlay();
-    }
-
     /// Promote all pending overlay entries to committed store and entries.
     pub fn commit(
         &mut self,
@@ -130,7 +104,7 @@ impl NodeDefRegistry {
         frame: Revision,
         ctx: &ParseCtx<'_>,
     ) -> Result<SyncResult, CommitError> {
-        super::commit::commit_slot_overlay(self, fs, frame, ctx)
+        super::commit::commit_project_overlay(self, fs, frame, ctx)
     }
 
     pub(crate) fn restore_entry_states(&mut self, before: &BTreeMap<NodeDefLoc, NodeDefState>) {
@@ -146,55 +120,38 @@ impl NodeDefRegistry {
         !self.overlay.is_empty()
     }
 
-    /// Pending edits for one artifact, if any.
-    pub fn pending_at(&self, location: &ArtifactLoc) -> Option<&ArtifactEdits> {
-        self.overlay.pending_at(location)
+    /// Pending edits for one artifact path, if any.
+    pub fn pending_at_path(&self, path: &LpPath) -> Option<&ArtifactOverlay> {
+        self.overlay.artifact(&path.to_path_buf())
     }
 
     /// Iterate artifacts with pending edits (stable order).
-    pub fn iter_pending(&self) -> impl Iterator<Item = (&ArtifactLoc, &ArtifactEdits)> + '_ {
+    pub fn iter_pending(&self) -> impl Iterator<Item = (&LpPathBuf, &ArtifactOverlay)> + '_ {
         self.overlay.iter()
     }
 
     /// Whether a specific slot path has a pending edit within an artifact.
     pub fn has_pending_slot(&self, location: &ArtifactLoc, path: &SlotPath) -> bool {
+        let Some(file_path) = location.file_path() else {
+            return false;
+        };
         self.overlay
-            .pending_at(location)
-            .is_some_and(|pending| pending.has_pending_at_path(path))
-    }
-
-    /// Whether any overlay entries are pending.
-    #[deprecated(note = "renamed to overlay_active")]
-    pub fn slot_overlay_active(&self) -> bool {
-        self.overlay_active()
+            .artifact(file_path)
+            .and_then(ArtifactOverlay::as_slot)
+            .is_some_and(|pending| pending.contains_path(path))
     }
 
     /// Whether `path` has a pending overlay entry.
     pub fn overlay_contains_path(&self, path: &LpPath) -> bool {
-        let location = self.location_for_pending_path(path);
-        self.overlay.contains(&location)
-    }
-
-    /// Whether `path` has a pending overlay entry.
-    #[deprecated(note = "renamed to overlay_contains_path")]
-    pub fn slot_overlay_contains_path(&self, path: &LpPath) -> bool {
-        self.overlay_contains_path(path)
+        self.overlay.contains_artifact(&path.to_path_buf())
     }
 
     /// Pending overlay bytes for `path`, if any (asset replace-body only).
-    pub fn pending_asset_bytes(&self, path: &LpPath) -> Option<&[u8]> {
-        let location = self.location_for_pending_path(path);
-        let pending = self.overlay.pending_at(&location)?;
-        match pending.asset_pending() {
-            AssetEdit::ReplaceBody(bytes) => Some(bytes.as_slice()),
-            _ => None,
+    pub fn pending_artifact_body_bytes(&self, path: &LpPath) -> Option<&[u8]> {
+        match self.overlay.artifact(&path.to_path_buf())?.as_body()? {
+            ArtifactBodyEdit::Delete => None,
+            ArtifactBodyEdit::ReplaceBody(bytes) => Some(bytes.as_slice()),
         }
-    }
-
-    /// Pending overlay bytes for `path`, if any (asset replace-body only).
-    #[deprecated(note = "renamed to pending_asset_bytes")]
-    pub fn slot_overlay_bytes(&self, path: &LpPath) -> Option<&[u8]> {
-        self.pending_asset_bytes(path)
     }
 
     pub(crate) fn artifact_location_for_path(&self, path: &LpPath) -> Option<ArtifactLoc> {

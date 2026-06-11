@@ -1,4 +1,4 @@
-# ADR 2026-06-10: Shared Project Edit Vocabulary
+# ADR 2026-06-10: Canonical Project Overlay Vocabulary
 
 ## Status
 
@@ -6,53 +6,67 @@ Accepted
 
 ## Context
 
-The registry branch needs a future UI and engine cutover path that edits authored
-project artifacts, not only immediate engine memory. The existing
+The registry branch needs a future UI and engine cutover path that edits
+authored project artifacts, not only immediate engine memory. The existing
 `WireSlotMutation*` API is intentionally narrow: it sets value leaves on runtime
 slot roots like `node.<id>.def`, applies immediately, and has no overlay or
 commit concept.
 
-`lpc-node-registry` already owns overlay, effective-read, and commit mechanics,
-but its local `SyncOp` mixes client-like edit operations with server-local
-filesystem events. Exposing that enum on the wire would couple clients to
-registry implementation details.
+The first registry wire POC proved useful behavior, but it duplicated the same
+ideas across layers with command-shaped types such as `ArtifactEdit`,
+`ArtifactEditOp`, and `ProjectEditBatch`, while the registry still had its own
+`ArtifactEdits` / `AssetEdit` overlay model.
 
-The naming also needed tightening before becoming protocol vocabulary:
-`AssetEdit` could replace or delete any artifact body, including `.toml`
-definition files, so it was broader than "asset".
+We want the model layer to own the durable vocabulary, the wire layer to wrap it
+in message envelopes, and the registry to apply it.
 
 ## Decision
 
-Shared authored edit nouns live in `lpc-model::edit`.
+`lpc-model::edit` owns the canonical project overlay model:
 
-The shared vocabulary uses:
+- `ProjectOverlay`: the full current pending edit set for a project.
+- `ArtifactOverlay`: either a structured `SlotOverlay` or one
+  `ArtifactBodyEdit`.
+- `SlotOverlay`: canonical map from `SlotPath` to `SlotEditOp`.
+- `SlotEdit`: path-bearing slot edit.
+- `SlotEditOp`: path-free operation, one of `EnsurePresent`,
+  `AssignValue(LpValue)`, or `Remove`.
+- `ArtifactBodyEdit`: byte-level artifact body `ReplaceBody(Vec<u8>)` or
+  `Delete`.
+- `OverlayMutation`: ordered edits to the overlay itself.
 
-- `SlotEdit::{EnsurePresent, AssignValue, Remove}` for structured slot edits.
-- `ArtifactBodyEdit` for byte-level replace/delete of artifact bodies.
-- `ArtifactEdit` for artifact-path-addressed edits.
-- `ProjectEditBatch` and `ProjectEditOp` for ordered client-authored commands.
-- Portable command results and definition-location summaries for registry output.
+The overlay represents current pending intent, not edit history. Multiple
+mutations targeting the same path are coalesced into one overlay entry.
+Ancestor/descendant conflicts are normalized in model code. Artifact body edits
+and slot overlays are mutually exclusive for a given artifact.
 
-`lpc-wire` defines thin wire envelopes around the model vocabulary:
-`WireProjectEditRequest` and `WireProjectEditResponse`.
+`lpc-wire` defines thin wire envelopes around model types:
 
-`lpc-node-registry` applies `ProjectEditBatch` directly and does not depend on
-`lpc-wire`. Registry `SyncOp::Fs` remains server-local and is not a client wire
-operation.
+- read overlay request/response returns a full `ProjectOverlay`;
+- mutate overlay request/response applies an ordered `OverlayMutationBatch`;
+- commit overlay request/response returns a portable `ProjectCommitSummary`.
+
+`lpc-node-registry` stores and applies `ProjectOverlay`. It owns path
+validation, slot application, effective projection, filesystem writes/deletes,
+commit, sync, and definition inventory reconciliation. It does not define a
+second overlay model and does not depend on `lpc-wire` in library code.
 
 The legacy `WireSlotMutation*` path remains during the POC and will be removed
 only after the later UI/server/engine cutover.
 
 ## Consequences
 
-The future UI can build and serialize authored project edits without depending
-on registry internals.
+The future UI can read and mirror one canonical pending overlay instead of
+reconstructing pending state from command history.
 
-The registry can test wire-shaped edit behavior without becoming a protocol
-crate.
+Wire schemas stay message-shaped and avoid copying model concepts.
 
-The new API has a clean place to grow revisioning, idempotency, and conflict
-semantics later.
+Registry tests can exercise wire-shaped behavior without coupling registry
+library code to the protocol crate.
 
-`AssetEdit` remains as a registry compatibility name for now, but new shared and
-wire-facing code should use `ArtifactBodyEdit`.
+Overlay application order is deterministic and derived from the canonical
+`SlotOverlay` map; user mutation order affects coalescing, not the persisted
+overlay representation.
+
+Revisioning, idempotency, conflict semantics, and backward compatibility remain
+future wire/API work.

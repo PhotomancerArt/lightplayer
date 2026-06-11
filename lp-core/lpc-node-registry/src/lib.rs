@@ -2,13 +2,13 @@
 //!
 //! [`ArtifactStore`] owns the project file catalog ([`ArtifactLoc`] URIs,
 //! freshness, transient reads). [`NodeDefRegistry`] is a consumer: parsed
-//! def entries plus an [`ArtifactOverlay`] for uncommitted pending edits.
+//! def entries plus a [`ProjectOverlay`] for uncommitted pending edits.
 //! [`NodeDefView`] exposes effective reads (overlay ∪ committed). Mutate pending
-//! state with [`NodeDefRegistry::upsert_slot_edit`] / [`NodeDefRegistry::set_pending_asset`],
+//! state with [`NodeDefRegistry::upsert_slot_edit`] / [`NodeDefRegistry::set_pending_artifact_body`],
 //! then [`NodeDefRegistry::commit`] or [`NodeDefRegistry::discard_overlay`].
 //!
 //! With the `diff` feature (default on host, omit on embedded), [`diff`] returns an
-//! [`ArtifactOverlay`] between project snapshots for harness and replay.
+//! [`ProjectOverlay`] between project snapshots for harness and replay.
 
 #![no_std]
 
@@ -22,7 +22,6 @@ pub mod artifact;
 pub mod diff;
 pub mod edit;
 pub(crate) mod edit_apply;
-pub mod edit_model;
 pub mod registry;
 pub mod source;
 pub mod view;
@@ -36,8 +35,9 @@ pub use artifact::{
 };
 #[cfg(feature = "diff")]
 pub use diff::{DiffError, ProjectSnapshot, assert_equivalent, diff};
-pub use edit::{
-    ArtifactBodyEdit, ArtifactEdits, ArtifactOverlay, AssetEdit, CommitError, EditError, SlotEdit,
+pub use edit::{CommitError, EditError};
+pub use lpc_model::{
+    ArtifactBodyEdit, ArtifactOverlay, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,
 };
 #[allow(deprecated, reason = "legacy sync op alias for migration")]
 pub use registry::RegistryChange;

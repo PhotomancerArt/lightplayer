@@ -78,10 +78,11 @@ pub use value::{LpType, LpValue, ModelEnumVariant, ModelStructMember};
 pub use config::DEFAULT_SERIAL_BAUD_RATE;
 pub use control::{CONTROL_MESSAGE_SHAPE_NAME, ControlMessage, TriggerEvent};
 pub use edit::{
-    ArtifactBodyEdit, ArtifactEdit, ArtifactEditOp, DefinitionLocation, ProjectCommitSummary,
-    ProjectDefChangeDetail, ProjectDefUpdates, ProjectEditBatch, ProjectEditBatchResult,
-    ProjectEditCommand, ProjectEditCommandId, ProjectEditCommandResult, ProjectEditCommandStatus,
-    ProjectEditEffect, ProjectEditOp, ProjectEditRejection, ProjectEditRejectionReason, SlotEdit,
+    ArtifactBodyEdit, ArtifactOverlay, DefinitionLocation, OverlayMutation, OverlayMutationBatch,
+    OverlayMutationBatchResult, OverlayMutationCommand, OverlayMutationCommandId,
+    OverlayMutationCommandResult, OverlayMutationCommandStatus, OverlayMutationEffect,
+    OverlayMutationRejection, OverlayMutationRejectionReason, ProjectCommitSummary,
+    ProjectDefChangeDetail, ProjectDefUpdates, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,
 };
 pub use hardware_endpoint_spec::{HardwareEndpointSpec, HardwareEndpointSpecError};
 pub use lpfs::lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};

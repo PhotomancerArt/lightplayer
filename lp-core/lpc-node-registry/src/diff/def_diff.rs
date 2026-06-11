@@ -10,8 +10,8 @@ use lpc_model::{
 };
 
 use crate::ParseCtx;
-use crate::edit_model::SlotEdit;
 use crate::registry::apply_ops_to_node_def;
+use lpc_model::SlotEdit;
 
 use super::DiffError;
 
@@ -288,7 +288,7 @@ fn push_ensure_present(
     ctx: &ParseCtx<'_>,
     ops: &mut Vec<SlotEdit>,
 ) -> Result<(), DiffError> {
-    let op = SlotEdit::EnsurePresent { path: path.clone() };
+    let op = SlotEdit::ensure_present(path.clone());
     apply_ops_to_node_def(current, &[op.clone()], ctx, Revision::new(1)).map_err(|err| {
         DiffError::Diff {
             message: err.to_string(),
@@ -305,10 +305,7 @@ fn push_assign_value(
     ctx: &ParseCtx<'_>,
     ops: &mut Vec<SlotEdit>,
 ) -> Result<(), DiffError> {
-    let op = SlotEdit::AssignValue {
-        path: path.clone(),
-        value,
-    };
+    let op = SlotEdit::assign_value(path.clone(), value);
     apply_ops_to_node_def(current, &[op.clone()], ctx, Revision::new(1)).map_err(|err| {
         DiffError::Diff {
             message: err.to_string(),
@@ -324,7 +321,7 @@ fn push_remove(
     ctx: &ParseCtx<'_>,
     ops: &mut Vec<SlotEdit>,
 ) -> Result<(), DiffError> {
-    let op = SlotEdit::Remove { path: path.clone() };
+    let op = SlotEdit::remove(path.clone());
     apply_ops_to_node_def(current, &[op.clone()], ctx, Revision::new(1)).map_err(|err| {
         DiffError::Diff {
             message: err.to_string(),

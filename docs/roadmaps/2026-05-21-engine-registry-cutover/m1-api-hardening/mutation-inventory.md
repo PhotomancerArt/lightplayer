@@ -49,8 +49,8 @@
 
 | Old | New |
 |-----|-----|
-| `WireSlotMutationRequest` | model/wire `SyncOp` / `ArtifactEdit` |
-| `prepare_set_value` | build `AssignValue` + apply sync op |
+| `WireSlotMutationRequest` | `WireOverlayMutationRequest` / `OverlayMutation` |
+| `prepare_set_value` | build `SlotEdit { path, op: AssignValue }` + mutate overlay |
 | `mutate_project_slots` | `registry.sync` + engine refresh on commit |
 | immediate accept/reject | apply errors + commit outcome |
 

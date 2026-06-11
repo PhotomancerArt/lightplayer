@@ -1,13 +1,11 @@
-//! `diff(base, target) -> ArtifactOverlay`.
+//! `diff(base, target) -> ProjectOverlay`.
 
 use alloc::collections::BTreeSet;
 
-use lpc_model::NodeDef;
+use lpc_model::{ArtifactBodyEdit, NodeDef, ProjectOverlay};
 use lpfs::LpPathBuf;
 
-use crate::ArtifactLoc;
 use crate::ParseCtx;
-use crate::edit_model::{ArtifactOverlay, AssetEdit};
 
 use super::DiffError;
 use super::def_diff::diff_node_defs;
@@ -18,21 +16,19 @@ pub fn diff(
     base: &ProjectSnapshot,
     target: &ProjectSnapshot,
     ctx: &ParseCtx<'_>,
-) -> Result<ArtifactOverlay, DiffError> {
+) -> Result<ProjectOverlay, DiffError> {
     let mut paths = BTreeSet::new();
     paths.extend(base.paths());
     paths.extend(target.paths());
 
-    let mut overlay = ArtifactOverlay::new();
+    let mut overlay = ProjectOverlay::new();
     for path in paths {
         let base_bytes = base.get(path);
         let target_bytes = target.get(path);
         match (base_bytes, target_bytes) {
             (None, None) => {}
             (Some(_), None) => {
-                overlay
-                    .ensure_pending(ArtifactLoc::file(LpPathBuf::from(path)))
-                    .set_asset(AssetEdit::Delete);
+                overlay.set_artifact_body(LpPathBuf::from(path), ArtifactBodyEdit::Delete);
             }
             (None, Some(bytes)) | (Some(_), Some(bytes)) if base_bytes != target_bytes => {
                 if path.ends_with(".toml") {
@@ -40,16 +36,15 @@ pub fn diff(
                     let target_def = parse_toml_def(Some(bytes), ctx, path)?;
                     let ops = diff_node_defs(&base_def, &target_def, ctx)?;
                     if !ops.is_empty() {
-                        let pending =
-                            overlay.ensure_pending(ArtifactLoc::file(LpPathBuf::from(path)));
                         for op in ops {
-                            pending.upsert_slot(op);
+                            overlay.put_slot_edit(LpPathBuf::from(path), op);
                         }
                     }
                 } else {
-                    overlay
-                        .ensure_pending(ArtifactLoc::file(LpPathBuf::from(path)))
-                        .set_asset(AssetEdit::ReplaceBody(bytes.to_vec()));
+                    overlay.set_artifact_body(
+                        LpPathBuf::from(path),
+                        ArtifactBodyEdit::ReplaceBody(bytes.to_vec()),
+                    );
                 }
             }
             _ => {}

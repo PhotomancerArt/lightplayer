@@ -22,10 +22,10 @@ No commit step. No overlay. Effective = committed = engine memory.
 ```text
 User edits control
   → Resolve (artifact_path, slot_path)   ← NEW: needs read metadata (M1 C2)
-  → Build ArtifactEdit::Slot { AssignValue, EnsurePresent, Remove }
-  → ProjectEditBatch apply command (pending overlay)
+  → Build OverlayMutation::PutSlotEdit { SlotEdit { path, op } }
+  → WireOverlayMutationRequest (pending overlay)
   → Optional: read effective via project read
-  → User commits → ProjectEditBatch commit command → fs + engine refresh
+  → User commits → WireOverlayCommitRequest → fs + engine refresh
 ```
 
 ## Capability matrix
@@ -40,7 +40,7 @@ User edits control
 | 6 | Map / playlist entry edits | not in UI | `EnsurePresent` / `Remove` | POC | SlotPath identity creates map keys |
 | 7 | Option fields | not in UI | `EnsurePresent` / `Remove` | POC | No separate option op |
 | 8 | Edit GLSL source | not via mutation | `ArtifactBodyEdit::ReplaceBody` | POC | Future asset editor |
-| 9 | Commit / discard | N/A (instant) | explicit ops | **Yes** | UX change — add UI affordance? |
+| 9 | Commit / discard | N/A (instant) | commit request / clear overlay mutation | **Yes** | UX change — add UI affordance? |
 | 10 | Node tree slot read | `node.<id>.def` roots in project read | effective defs from registry | **Yes** | Read path must use NodeDefView |
 
 ## Addressing migration
@@ -60,7 +60,7 @@ Project read should expose per node (minimum):
 - `def_artifact_path` (absolute)
 - optional `slot_path_prefix` for inline children (e.g. `entries[2].node.def`)
 
-Without this, UI cannot build `ArtifactEdit` from the node panel.
+Without this, UI cannot build overlay mutations from the node panel.
 
 ## Suggested v1 parity bar
 

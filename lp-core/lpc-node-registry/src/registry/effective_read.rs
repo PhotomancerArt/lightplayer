@@ -22,9 +22,8 @@ impl NodeDefRegistry {
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
     ) -> Result<Option<Vec<u8>>, RegistryError> {
-        let location = self.location_for_pending_path(path);
         let committed = self.read_committed_bytes_for_path(path, fs)?;
-        let pending = self.overlay.pending_at(&location).cloned();
+        let pending = self.overlay.artifact(&path.to_path_buf()).cloned();
         project_artifact_bytes(
             committed.as_deref(),
             pending.as_ref(),
@@ -41,7 +40,10 @@ impl NodeDefRegistry {
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
     ) -> Result<NodeDefState, RegistryError> {
-        let pending = self.overlay.pending_at(location).cloned();
+        let pending = location
+            .file_path()
+            .and_then(|path| self.overlay.artifact(path))
+            .cloned();
         if pending.is_none() {
             return self.read_artifact_state(location, fs, ctx);
         }
@@ -61,7 +63,10 @@ impl NodeDefRegistry {
     /// Effective state for a registered def (overlay ∪ committed cache).
     pub fn effective_state(&self, loc: &NodeDefLoc, ctx: &ParseCtx<'_>) -> Option<NodeDefState> {
         let entry = self.defs.get(loc)?;
-        let pending = self.overlay.pending_at(&loc.artifact);
+        let pending = loc
+            .artifact
+            .file_path()
+            .and_then(|path| self.overlay.artifact(path));
         if pending.is_none() {
             return Some(entry.state.clone());
         }
@@ -114,10 +119,5 @@ impl NodeDefRegistry {
             Ok(bytes) => Ok(Some(bytes)),
             Err(_) => Ok(None),
         }
-    }
-
-    pub(crate) fn location_for_pending_path(&self, path: &LpPath) -> crate::ArtifactLoc {
-        self.artifact_location_for_path(path)
-            .unwrap_or_else(|| crate::ArtifactLoc::location_for_path(path))
     }
 }

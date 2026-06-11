@@ -50,10 +50,7 @@ fn d2_commit_updates_committed_and_clears_overlay() {
         &mut registry,
         &fs,
         "/clock.toml",
-        SlotEdit::AssignValue {
-            path: SlotPath::parse("controls.rate").unwrap(),
-            value: LpValue::F32(2.0),
-        },
+        SlotEdit::assign_value(SlotPath::parse("controls.rate").unwrap(), LpValue::F32(2.0)),
         Revision::new(2),
     );
 
@@ -84,7 +81,7 @@ fn d2_commit_setbytes_updates_committed() {
         .load_root(&fs, LpPath::new("/clock.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    overlay::set_pending_asset_text(
+    overlay::set_pending_artifact_body_text(
         &mut registry,
         "/clock.toml",
         r#"
@@ -113,10 +110,7 @@ fn d2_commit_writes_slot_draft_to_fs() {
         &mut registry,
         &fs,
         "/clock.toml",
-        SlotEdit::AssignValue {
-            path: SlotPath::parse("controls.rate").unwrap(),
-            value: LpValue::F32(2.0),
-        },
+        SlotEdit::assign_value(SlotPath::parse("controls.rate").unwrap(), LpValue::F32(2.0)),
         Revision::new(2),
     );
 
@@ -141,10 +135,7 @@ fn d5_overlay_wins_over_stale_fs() {
         &mut registry,
         &fs,
         "/clock.toml",
-        SlotEdit::AssignValue {
-            path: SlotPath::parse("controls.rate").unwrap(),
-            value: LpValue::F32(2.0),
-        },
+        SlotEdit::assign_value(SlotPath::parse("controls.rate").unwrap(), LpValue::F32(2.0)),
         Revision::new(2),
     );
 
@@ -180,10 +171,7 @@ fn d5_sync_fs_does_not_clobber_overlay_view() {
         &mut registry,
         &fs,
         "/clock.toml",
-        SlotEdit::AssignValue {
-            path: SlotPath::parse("controls.rate").unwrap(),
-            value: LpValue::F32(2.0),
-        },
+        SlotEdit::assign_value(SlotPath::parse("controls.rate").unwrap(), LpValue::F32(2.0)),
         Revision::new(2),
     );
 
@@ -219,10 +207,7 @@ fn d5_post_commit_fs_sync_updates_committed() {
         &mut registry,
         &fs,
         "/clock.toml",
-        SlotEdit::AssignValue {
-            path: SlotPath::parse("controls.rate").unwrap(),
-            value: LpValue::F32(2.0),
-        },
+        SlotEdit::assign_value(SlotPath::parse("controls.rate").unwrap(), LpValue::F32(2.0)),
         Revision::new(2),
     );
     registry.commit(&fs, Revision::new(3), &ctx).unwrap();
@@ -258,10 +243,10 @@ fn c2_inline_child_changed_after_commit() {
         &mut registry,
         &fs,
         "/playlist.toml",
-        SlotEdit::AssignValue {
-            path: SlotPath::parse("entries[2].node.def.render_order").unwrap(),
-            value: LpValue::I32(7),
-        },
+        SlotEdit::assign_value(
+            SlotPath::parse("entries[2].node.def.render_order").unwrap(),
+            LpValue::I32(7),
+        ),
         Revision::new(2),
     );
 

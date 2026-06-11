@@ -16,9 +16,10 @@
 
 - **Decision:** Shared serde edit types live in **`lpc-model::edit`**.
 - **Why:** Wire + registry need one vocabulary; wire cannot depend on registry.
-- **Status:** Implemented for the registry wire-edit POC with `SlotEdit`,
-  `ArtifactBodyEdit`, `ArtifactEdit`, `ProjectEditBatch`, command results, and
-  portable definition locations.
+- **Status:** Implemented with canonical overlay vocabulary: `ProjectOverlay`,
+  `ArtifactOverlay`, `SlotOverlay`, `SlotEdit`, `SlotEditOp`,
+  `ArtifactBodyEdit`, `OverlayMutation`, mutation results, commit summaries,
+  and portable definition locations.
 
 #### Edit types are still not SlotData
 
@@ -45,17 +46,17 @@
 - **Why:** The operation can replace or delete any artifact body, including
   `.toml` definitions. "Asset" remains useful for non-def referenced files such
   as GLSL/SVG bodies.
-- **Status:** Implemented for the POC. Registry keeps `AssetEdit` compatibility
-  wrappers until cleanup removes the legacy name.
+- **Status:** Implemented. Registry-local `AssetEdit` compatibility state was
+  removed; registry stores `ProjectOverlay` from `lpc-model`.
 
-#### Project edit batches, not registry SyncOp on wire
+#### Overlay mutations, not registry SyncOp on wire
 
-- **Decision:** Client-authored edit commands use `ProjectEditBatch` /
-  `ProjectEditOp`; registry `SyncOp::Fs` stays server-local.
+- **Decision:** Client-authored overlay changes use ordered
+  `OverlayMutationBatch`; registry `SyncOp::Fs` stays server-local.
 - **Why:** `SyncOp` mixes client edit intent with filesystem watcher events.
   Exposing it would leak registry mechanics into the wire contract.
-- **Status:** Implemented for the POC with `lpc-wire::WireProjectEditRequest`
-  and `WireProjectEditResponse` wrappers.
+- **Status:** Implemented for the POC with `WireOverlayRead*`,
+  `WireOverlayMutation*`, and `WireOverlayCommit*` wrappers.
 
 #### Legacy mutation cleanup
 
