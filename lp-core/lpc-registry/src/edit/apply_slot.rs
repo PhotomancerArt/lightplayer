@@ -12,20 +12,20 @@ use lpc_model::{
 use crate::ParseCtx;
 use lpc_model::SlotEdit;
 
-use super::EditError;
+use super::EditApplyError;
 
-pub fn serialize_slot_draft(def: &NodeDef, ctx: &ParseCtx<'_>) -> Result<Vec<u8>, EditError> {
-    let text = NodeDef::write_toml(def, ctx.shapes).map_err(|err| EditError::Serialize {
+pub fn serialize_slot_draft(def: &NodeDef, ctx: &ParseCtx<'_>) -> Result<Vec<u8>, EditApplyError> {
+    let text = NodeDef::write_toml(def, ctx.shapes).map_err(|err| EditApplyError::Serialize {
         message: err.to_string(),
     })?;
     Ok(text.into_bytes())
 }
 
-pub(crate) fn parse_def_bytes(bytes: &[u8], ctx: &ParseCtx<'_>) -> Result<NodeDef, EditError> {
-    let text = core::str::from_utf8(bytes).map_err(|err| EditError::Parse {
+pub(crate) fn parse_def_bytes(bytes: &[u8], ctx: &ParseCtx<'_>) -> Result<NodeDef, EditApplyError> {
+    let text = core::str::from_utf8(bytes).map_err(|err| EditApplyError::Parse {
         message: err.to_string(),
     })?;
-    NodeDef::read_toml(ctx.shapes, text).map_err(|err| EditError::Parse {
+    NodeDef::read_toml(ctx.shapes, text).map_err(|err| EditApplyError::Parse {
         message: err.to_string(),
     })
 }
@@ -35,7 +35,7 @@ pub(crate) fn apply_op_to_def(
     op: &SlotEdit,
     ctx: &ParseCtx<'_>,
     frame: Revision,
-) -> Result<(), EditError> {
+) -> Result<(), EditApplyError> {
     match &op.op {
         lpc_model::SlotEditOp::EnsurePresent => {
             apply_ensure_present(def, ctx, &op.path, frame).map(drop)
@@ -55,7 +55,7 @@ fn apply_ensure_present(
     ctx: &ParseCtx<'_>,
     path: &SlotPath,
     frame: Revision,
-) -> Result<SlotPath, EditError> {
+) -> Result<SlotPath, EditApplyError> {
     if let Some((variant, tail)) = split_root_variant(path) {
         if def.variant_name() == variant.as_str() {
             mutate_def(def, |root| {
@@ -103,7 +103,7 @@ fn apply_remove(
     ctx: &ParseCtx<'_>,
     path: &SlotPath,
     frame: Revision,
-) -> Result<(), EditError> {
+) -> Result<(), EditApplyError> {
     let Some((parent, terminal)) = split_parent(path) else {
         return mutate_def(def, |root| {
             set_slot_option_none(root, ctx.shapes, path, frame)
@@ -130,8 +130,8 @@ fn split_parent(path: &SlotPath) -> Option<(SlotPath, &SlotPathSegment)> {
 fn mutate_def(
     def: &mut NodeDef,
     f: impl FnOnce(&mut dyn SlotMutAccess) -> Result<(), lpc_model::SlotMutationError>,
-) -> Result<(), EditError> {
-    f(def).map_err(|err| EditError::SlotMutation {
+) -> Result<(), EditApplyError> {
+    f(def).map_err(|err| EditApplyError::SlotMutation {
         message: err.to_string(),
     })
 }

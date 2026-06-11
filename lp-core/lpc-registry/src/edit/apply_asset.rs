@@ -6,7 +6,7 @@ use lpc_model::{ArtifactBodyEdit, ArtifactOverlay, NodeDef, Revision};
 
 use super::{apply_op_to_def, parse_def_bytes, serialize_slot_draft};
 
-use super::EditError;
+use super::EditApplyError;
 use crate::ParseCtx;
 
 /// Effective raw bytes for an artifact (overlay ∪ committed).
@@ -15,7 +15,7 @@ pub fn project_artifact_bytes(
     pending: Option<&ArtifactOverlay>,
     ctx: &ParseCtx<'_>,
     frame: Revision,
-) -> Result<Option<Vec<u8>>, EditError> {
+) -> Result<Option<Vec<u8>>, EditApplyError> {
     let Some(pending) = pending else {
         return Ok(committed.map(<[u8]>::to_vec));
     };

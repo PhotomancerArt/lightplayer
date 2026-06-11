@@ -13,7 +13,7 @@ use lpfs::{LpFs, LpPath};
 
 use crate::{
     ArtifactError, ArtifactReadFailure, ArtifactStore, ParseCtx,
-    edit_apply::{EditError, parse_def_bytes, project_artifact_bytes},
+    edit::{EditApplyError, parse_def_bytes, project_artifact_bytes},
 };
 
 pub(crate) fn derive_effective_inventory(
@@ -248,7 +248,7 @@ fn node_def_state_for_read_error(err: ArtifactError) -> NodeDefState {
     }
 }
 
-fn parse_error(err: EditError) -> lpc_model::NodeDefParseError {
+fn parse_error(err: EditApplyError) -> lpc_model::NodeDefParseError {
     lpc_model::NodeDefParseError::Toml {
         error: err.to_string(),
     }

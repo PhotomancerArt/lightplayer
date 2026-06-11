@@ -13,10 +13,11 @@ use lpc_model::{
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath};
 
 use crate::{
-    ApplyError, ArtifactStore, CommitError, LoadResult, ParseCtx, RegistryError,
-    edit_apply::project_artifact_bytes, inventory_change_set::change_set_between,
-    project_inventory_derivation::derive_effective_inventory,
+    edit::project_artifact_bytes, EditApplyError, ArtifactStore, CommitError, LoadResult, ParseCtx,
+    RegistryError,
 };
+use crate::project::inventory_change_set::change_set_between;
+use crate::project::project_inventory_derivation::derive_effective_inventory;
 
 /// Canonical registry for a loaded project.
 pub struct ProjectRegistry {
@@ -61,7 +62,7 @@ impl ProjectRegistry {
         mutation: OverlayMutation,
         frame: Revision,
         ctx: &ParseCtx<'_>,
-    ) -> Result<ProjectApplyResult, ApplyError> {
+    ) -> Result<ProjectApplyResult, EditApplyError> {
         let before = self.inventory.clone();
         let overlay_changed = self.overlay.get_mut().apply_mutation(mutation);
         if overlay_changed {

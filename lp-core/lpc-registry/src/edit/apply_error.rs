@@ -7,7 +7,7 @@ use crate::ArtifactLocation;
 
 /// Failure applying pending overlay edits.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum EditError {
+pub enum EditApplyError {
     InvalidPath { message: String },
     UnknownArtifact { location: ArtifactLocation },
     Parse { message: String },
@@ -15,7 +15,7 @@ pub enum EditError {
     Serialize { message: String },
 }
 
-impl fmt::Display for EditError {
+impl fmt::Display for EditApplyError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidPath { message } => write!(f, "invalid path: {message}"),
