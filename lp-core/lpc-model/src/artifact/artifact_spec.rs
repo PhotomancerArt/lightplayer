@@ -13,7 +13,7 @@ use crate::artifact::src_artifact_lib_ref::SrcArtifactLibRef;
 ///
 /// Path specifiers are contextual: relative paths resolve relative to the file
 /// that contains the specifier. Resolved catalog identity is `ArtifactLocation`
-/// in `lpc-node-registry`; this type stays authored and contextual.
+/// in `lpc-registry`; this type stays authored and contextual.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ArtifactSpec {
     Path(LpPathBuf),

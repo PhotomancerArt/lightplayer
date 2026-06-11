@@ -1,6 +1,8 @@
 //! **Shared** graph node identifiers and authored node-tree locators.
 
 pub mod kind;
+pub mod node_def_change_set;
+pub mod node_def_entry;
 pub mod node_def_location;
 pub mod node_def_state;
 pub mod node_def_updates;
@@ -18,6 +20,8 @@ pub mod tree_path;
 
 pub use crate::nodes::node_def::{NodeArtifact, NodeDef};
 pub use kind::NodeKind;
+pub use node_def_change_set::{NodeDefChange, NodeDefChangeKind, NodeDefChangeSet};
+pub use node_def_entry::NodeDefEntry;
 pub use node_def_location::NodeDefLocation;
 pub use node_def_state::{NodeDefState, NodeDefValidationError};
 pub use node_def_updates::{NodeDefChangeDetail, NodeDefUpdates};

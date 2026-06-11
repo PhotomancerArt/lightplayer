@@ -61,7 +61,9 @@ pub use value::constraint;
 pub use value::kind;
 
 pub use artifact::{
-    ArtifactLocation, ArtifactLocationError, ArtifactReadRoot, ArtifactSpec, SrcArtifactLibRef,
+    ArtifactChangeSet, ArtifactLocation, ArtifactLocationError, ArtifactReadRoot, ArtifactSpec,
+    AssetBodySource, AssetChange, AssetChangeKind, AssetChangeSet, AssetEntry, AssetState,
+    SrcArtifactLibRef,
 };
 pub use binding::{
     BindingDef, BindingDefError, BindingDefView, BindingDefs, BindingRef, BindingRefError,
@@ -91,9 +93,10 @@ pub use lpfs::lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 pub use node::node_prop_spec::NodePropSpec;
 pub use node::tree_path::{NodePathSegment, PathError, TreePath};
 pub use node::{
-    NodeArtifact, NodeDef, NodeDefChangeDetail, NodeDefLocation, NodeDefState, NodeDefUpdates,
-    NodeDefValidationError, NodeId, NodeInvocation, NodeKind, NodeName, NodeNameError,
-    RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc,
+    NodeArtifact, NodeDef, NodeDefChange, NodeDefChangeDetail, NodeDefChangeKind, NodeDefChangeSet,
+    NodeDefEntry, NodeDefLocation, NodeDefState, NodeDefUpdates, NodeDefValidationError, NodeId,
+    NodeInvocation, NodeKind, NodeName, NodeNameError, RelativeNodeRef, RelativeNodeRefError,
+    RelativeNodeRefSrc,
 };
 pub use nodes::{
     AddSubMode, ArtifactPathResolutionError, ButtonDef, ButtonDefView, ButtonState,
@@ -112,7 +115,10 @@ pub use nodes::{
     generate_compute_shader_header, resolve_artifact_specifier,
 };
 pub use product::{ControlExtent, ControlProduct, ProductKind, ProductRef, VisualProduct};
-pub use project::{ProjectConfig, Revision};
+pub use project::{
+    CommitResult, ProjectApplyBatchResult, ProjectApplyResult, ProjectChangeSet, ProjectConfig,
+    ProjectInventory, Revision,
+};
 pub use project::{advance_revision, current_revision, set_current_revision};
 pub use resource::{ResourceDomain, ResourceRef, RuntimeBufferId, runtime_buffer_resource_shape};
 pub use server::server_config::ServerConfig;

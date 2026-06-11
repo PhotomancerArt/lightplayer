@@ -22,6 +22,9 @@ impl NodeDefValidationError {
 #[derive(Clone, Debug, PartialEq)]
 pub enum NodeDefState {
     Loaded(NodeDef),
+    NotFound,
+    Deleted,
+    ReadError { message: String },
     ParseError(NodeDefParseError),
     ValidationError(NodeDefValidationError),
 }
@@ -29,6 +32,10 @@ pub enum NodeDefState {
 impl NodeDefState {
     pub fn is_loaded(&self) -> bool {
         matches!(self, Self::Loaded(_))
+    }
+
+    pub fn is_error(&self) -> bool {
+        !self.is_loaded()
     }
 
     pub fn kind(&self) -> Option<NodeKind> {

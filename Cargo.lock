@@ -4090,7 +4090,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "lpc-node-registry"
+name = "lpc-registry"
 version = "40.0.0"
 dependencies = [
  "lpc-model",

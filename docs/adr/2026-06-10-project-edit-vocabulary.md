@@ -46,10 +46,10 @@ and slot overlays are mutually exclusive for a given artifact.
 - mutate overlay request/response applies an ordered `OverlayMutationBatch`;
 - commit overlay request/response returns a portable `ProjectCommitSummary`.
 
-`lpc-node-registry` stores and applies `ProjectOverlay`. It owns path
-validation, slot application, effective projection, filesystem writes/deletes,
-commit, sync, and definition inventory reconciliation. It does not define a
-second overlay model and does not depend on `lpc-wire` in library code.
+`lpc-registry` stores and applies `ProjectOverlay`. It owns path validation,
+slot application, effective inventory derivation, filesystem writes/deletes, and
+commit. It does not define a second overlay model and does not depend on
+`lpc-wire` in library code.
 
 The legacy `WireSlotMutation*` path remains during the POC and will be removed
 only after the later UI/server/engine cutover.
