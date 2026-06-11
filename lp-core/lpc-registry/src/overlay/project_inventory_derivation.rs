@@ -5,9 +5,9 @@ use alloc::format;
 use alloc::string::{String, ToString};
 
 use lpc_model::{
-    ArtifactLocation, AssetBodySource, AssetEntry, AssetOverlay, AssetState, NodeDefLocation,
-    NodeDefState, NodeInvocation, ProjectInventory, ProjectOverlay, Revision, SlotPath,
-    WithRevision, resolve_artifact_specifier,
+    ArtifactLocation, AssetBodySource, AssetEntry, AssetKind, AssetOverlay, AssetSource,
+    AssetState, NodeDefLocation, NodeDefState, NodeInvocation, ProjectInventory, ProjectOverlay,
+    ReferencedAsset, Revision, SlotPath, WithRevision, resolve_artifact_specifier,
 };
 use lpfs::{LpFs, LpPath};
 
@@ -68,40 +68,46 @@ impl InventoryDerivation<'_, '_> {
             return;
         };
 
-        self.walk_loaded_def(&location.artifact, &location.path, &def, revision);
+        self.walk_loaded_def(&location, &def, revision);
     }
 
     fn walk_loaded_def(
         &mut self,
-        artifact: &ArtifactLocation,
-        base_path: &SlotPath,
+        location: &NodeDefLocation,
         def: &lpc_model::NodeDef,
         revision: Revision,
     ) {
-        match def.referenced_asset_paths(artifact.file_path().as_path()) {
-            Ok(paths) => {
-                for path in paths {
-                    self.walk_asset(ArtifactLocation::file(path));
+        match def.referenced_assets(
+            location.artifact.file_path().as_path(),
+            location,
+            &location.path,
+        ) {
+            Ok(assets) => {
+                for asset in assets {
+                    self.walk_asset(asset, revision);
                 }
             }
             Err(err) => {
-                let location = ArtifactLocation::file(error_asset_path(artifact, base_path));
+                let source = AssetSource::artifact(ArtifactLocation::file(error_asset_path(
+                    &location.artifact,
+                    &location.path,
+                )));
                 let state = AssetState::ReadError {
                     message: err.to_string(),
                 };
                 self.inventory.assets.insert(
-                    location.clone(),
-                    AssetEntry::new(location, state, self.overlay.changed_at()),
+                    source.clone(),
+                    AssetEntry::new(source, AssetKind::Binary, state, self.overlay.changed_at()),
                 );
             }
         }
 
-        for site in def.invocation_sites(base_path) {
+        for site in def.invocation_sites(&location.path) {
             match &site.invocation {
                 NodeInvocation::Unset => {}
                 NodeInvocation::Def(body) => {
                     let child_location = NodeDefLocation {
-                        artifact: artifact.clone(),
+                        artifact: location.artifact.clone(),
                         path: site.path,
                     };
                     let child_def = body.value().clone();
@@ -113,15 +119,13 @@ impl InventoryDerivation<'_, '_> {
                             revision,
                         ),
                     );
-                    self.walk_loaded_def(
-                        &child_location.artifact,
-                        &child_location.path,
-                        &child_def,
-                        revision,
-                    );
+                    self.walk_loaded_def(&child_location, &child_def, revision);
                 }
                 NodeInvocation::Ref(_) => {
-                    self.walk_ref_invocation(artifact.file_path().as_path(), &site.invocation);
+                    self.walk_ref_invocation(
+                        location.artifact.file_path().as_path(),
+                        &site.invocation,
+                    );
                 }
             }
         }
@@ -145,14 +149,13 @@ impl InventoryDerivation<'_, '_> {
         self.walk_def_location(child_location);
     }
 
-    fn walk_asset(&mut self, location: ArtifactLocation) {
-        self.artifacts
-            .register_location(location.clone(), self.frame);
-        let revision = self.revision_for_artifact(&location);
-        let state = self.read_effective_asset(&location);
-        self.inventory
-            .assets
-            .insert(location.clone(), AssetEntry::new(location, state, revision));
+    fn walk_asset(&mut self, asset: ReferencedAsset, owner_revision: Revision) {
+        let revision = self.revision_for_asset(&asset.source, owner_revision);
+        let state = self.read_effective_asset(&asset.source);
+        self.inventory.assets.insert(
+            asset.source.clone(),
+            AssetEntry::new(asset.source, asset.kind, state, revision),
+        );
     }
 
     fn read_effective_def(&mut self, location: &ArtifactLocation) -> NodeDefState {
@@ -193,7 +196,24 @@ impl InventoryDerivation<'_, '_> {
         NodeDefState::Loaded(def)
     }
 
-    fn read_effective_asset(&mut self, location: &ArtifactLocation) -> AssetState {
+    fn read_effective_asset(&mut self, source: &AssetSource) -> AssetState {
+        let location = match source {
+            AssetSource::Artifact { location } => location,
+            AssetSource::Inline { .. } => {
+                return AssetState::Available {
+                    source: AssetBodySource::Inline,
+                };
+            }
+            AssetSource::Url { .. } => {
+                return AssetState::ReadError {
+                    message: String::from("URL assets are not supported yet"),
+                };
+            }
+        };
+
+        self.artifacts
+            .register_location(location.clone(), self.frame);
+
         match self
             .overlay
             .get()
@@ -238,6 +258,13 @@ impl InventoryDerivation<'_, '_> {
             self.overlay.changed_at()
         } else {
             self.artifacts.revision(location).unwrap_or(self.frame)
+        }
+    }
+
+    fn revision_for_asset(&self, source: &AssetSource, owner_revision: Revision) -> Revision {
+        match source {
+            AssetSource::Artifact { location } => self.revision_for_artifact(location),
+            AssetSource::Inline { .. } | AssetSource::Url { .. } => owner_revision,
         }
     }
 }

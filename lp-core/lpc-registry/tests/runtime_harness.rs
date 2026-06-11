@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    ArtifactLocation, AssetOverlay, AssetState, NodeDefLocation, OverlayMutation, Revision,
-    SlotShapeRegistry,
+    ArtifactLocation, AssetOverlay, AssetSource, AssetState, NodeDefLocation, OverlayMutation,
+    Revision, SlotShapeRegistry,
 };
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpfs::{LpFsMemory, LpPath};
@@ -19,7 +19,7 @@ fn write_file(fs: &mut LpFsMemory, path: &str, contents: &str) {
 #[derive(Default)]
 struct FakeRuntime {
     nodes: BTreeMap<NodeDefLocation, RuntimeNodeState>,
-    assets: BTreeMap<ArtifactLocation, RuntimeAssetState>,
+    assets: BTreeMap<AssetSource, RuntimeAssetState>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -52,7 +52,7 @@ impl FakeRuntime {
             self.load_asset(registry, location);
         }
         for change in &changes.assets.changed {
-            self.load_asset(registry, &change.location);
+            self.load_asset(registry, &change.source);
         }
     }
 
@@ -67,10 +67,10 @@ impl FakeRuntime {
         );
     }
 
-    fn load_asset(&mut self, registry: &ProjectRegistry, location: &ArtifactLocation) {
-        let entry = registry.asset(location).expect("asset entry");
+    fn load_asset(&mut self, registry: &ProjectRegistry, source: &AssetSource) {
+        let entry = registry.asset(source).expect("asset entry");
         self.assets.insert(
-            location.clone(),
+            source.clone(),
             RuntimeAssetState {
                 revision: entry.revision,
                 available: entry.state.is_available(),
@@ -114,6 +114,7 @@ source = { path = "shader.glsl" }
     assert_eq!(runtime.assets.len(), 1);
 
     let asset = ArtifactLocation::file("/shader.glsl");
+    let asset_source = AssetSource::artifact(asset.clone());
     let apply = registry
         .apply_mutation(
             &fs,
@@ -127,11 +128,11 @@ source = { path = "shader.glsl" }
         .unwrap();
     runtime.apply(&registry, &apply.changes);
     assert_eq!(
-        runtime.assets.get(&asset).unwrap().revision,
+        runtime.assets.get(&asset_source).unwrap().revision,
         Revision::new(2)
     );
     assert_eq!(
-        registry.asset(&asset).unwrap().state,
+        registry.asset(&asset_source).unwrap().state,
         AssetState::Available {
             source: lpc_model::AssetBodySource::OverlayReplace
         }

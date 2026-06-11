@@ -45,6 +45,7 @@ pub mod slot_views {
 }
 
 pub mod artifact;
+pub mod asset;
 pub mod hardware_endpoint_spec;
 pub mod nodes;
 pub mod product;
@@ -62,8 +63,11 @@ pub use value::kind;
 
 pub use artifact::{
     ArtifactChangeSet, ArtifactLocation, ArtifactLocationError, ArtifactReadRoot, ArtifactSpec,
-    AssetBodySource, AssetChange, AssetChangeKind, AssetChangeSet, AssetEntry, AssetState,
     SrcArtifactLibRef,
+};
+pub use asset::{
+    AssetBodySource, AssetChange, AssetChangeKind, AssetChangeSet, AssetEntry, AssetKind,
+    AssetSource, AssetState, ReferencedAsset,
 };
 pub use binding::{
     BindingDef, BindingDefError, BindingDefView, BindingDefs, BindingRef, BindingRefError,

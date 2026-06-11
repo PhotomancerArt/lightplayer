@@ -48,24 +48,22 @@ fn node_def_changes(
 fn asset_changes(before: &ProjectInventory, after: &ProjectInventory) -> AssetChangeSet {
     let mut changes = AssetChangeSet::default();
 
-    for location in after.assets.keys() {
-        if !before.assets.contains_key(location) {
-            changes.added.push(location.clone());
+    for source in after.assets.keys() {
+        if !before.assets.contains_key(source) {
+            changes.added.push(source.clone());
         }
     }
-    for location in before.assets.keys() {
-        if !after.assets.contains_key(location) {
-            changes.removed.push(location.clone());
+    for source in before.assets.keys() {
+        if !after.assets.contains_key(source) {
+            changes.removed.push(source.clone());
         }
     }
-    for (location, before_entry) in &before.assets {
-        let Some(after_entry) = after.assets.get(location) else {
+    for (source, before_entry) in &before.assets {
+        let Some(after_entry) = after.assets.get(source) else {
             continue;
         };
         if let Some(kind) = classify_asset_change(before_entry, after_entry) {
-            changes
-                .changed
-                .push(AssetChange::new(location.clone(), kind));
+            changes.changed.push(AssetChange::new(source.clone(), kind));
         }
     }
 

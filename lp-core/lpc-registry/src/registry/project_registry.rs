@@ -278,8 +278,8 @@ impl ProjectRegistry {
         self.inventory.defs.get(location)
     }
 
-    pub fn asset(&self, location: &ArtifactLocation) -> Option<&lpc_model::AssetEntry> {
-        self.inventory.assets.get(location)
+    pub fn asset(&self, source: &lpc_model::AssetSource) -> Option<&lpc_model::AssetEntry> {
+        self.inventory.assets.get(source)
     }
 
     pub(crate) fn derive_inventory(

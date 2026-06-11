@@ -5,7 +5,7 @@ use alloc::string::String;
 use alloc::string::ToString;
 
 use lpc_model::{
-    ArtifactSpec, Revision, SourceFileBacking, SourceFileSlot, SourcePath,
+    ArtifactSpec, AssetSource, Revision, SourceFileBacking, SourceFileSlot, SourcePath,
     resolve_artifact_specifier,
 };
 use lpfs::LpPath;
@@ -62,7 +62,7 @@ fn resolve_path_backing(
     let extension = resolved_path.extension().unwrap_or("").into();
     let location = store.register_file(resolved_path.clone(), frame);
     Ok(SourceFileRef::File {
-        location,
+        source: AssetSource::artifact(location),
         authored_path: path.clone(),
         resolved_path,
         extension,
@@ -84,7 +84,7 @@ mod tests {
             resolve_source_file(&mut store, containing, &slot, Revision::new(2)).expect("resolve");
 
         let SourceFileRef::File {
-            location,
+            source,
             authored_path,
             resolved_path,
             extension,
@@ -95,6 +95,9 @@ mod tests {
         assert_eq!(authored_path.as_str(), "./shader.glsl");
         assert_eq!(resolved_path.as_str(), "/project/shader.glsl");
         assert_eq!(extension, "glsl");
+        let AssetSource::Artifact { location } = source else {
+            panic!("expected artifact source");
+        };
         assert!(store.entry(&location).is_some());
     }
 

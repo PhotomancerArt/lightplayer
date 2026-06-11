@@ -42,7 +42,9 @@ artifacts + overlay -> ProjectInventory { defs, assets }
 project state. It contains:
 
 - `NodeDefEntry` keyed by `NodeDefLocation`;
-- `AssetEntry` keyed by `ArtifactLocation`;
+- `AssetEntry` keyed by `AssetSource`, where file-backed sources wrap an
+  `ArtifactLocation` and inline sources are identified by owner `NodeDefLocation`
+  plus `SlotPath`.
 - loaded and error states for both definitions and assets.
 
 The registry does not maintain a semantic `base_defs` graph. On load, overlay
@@ -61,7 +63,7 @@ from the registry. A snapshot-to-overlay helper may still exist for tests and
 bootstrap workflows, but it is an operation that derives edit intent between two
 file snapshots. It is not the runtime change vocabulary.
 
-`NodeDef::invocation_sites` and `NodeDef::referenced_asset_paths` are the model
+`NodeDef::invocation_sites` and `NodeDef::referenced_assets` are the model
 APIs for graph walking. The registry does not keep node-kind lists for project
 topology. This pass assumes static authored references: no dynamic node-def refs
 or dynamic asset refs are discovered at runtime.

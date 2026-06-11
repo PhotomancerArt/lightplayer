@@ -56,11 +56,14 @@ pub fn materialize_source(
 ) -> Result<MaterializedSource, MaterializeError> {
     match reference {
         SourceFileRef::File {
-            location,
+            source,
             authored_path,
             resolved_path,
             ..
         } => {
+            let lpc_model::AssetSource::Artifact { location } = source else {
+                return Err(MaterializeError::Unsupported);
+            };
             if let Some(overlay) = overlay {
                 if let Some(materialized) =
                     materialize_file_artifact_overlay(overlay, resolved_path, authored_path, slot)?

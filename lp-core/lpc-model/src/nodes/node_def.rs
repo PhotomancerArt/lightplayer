@@ -23,9 +23,10 @@ use crate::nodes::radio::ControlRadioDef;
 use crate::nodes::shader::{ComputeShaderDef, ShaderDef, ShaderSource};
 use crate::nodes::texture::TextureDef;
 use crate::{
-    EnumSlot, LpPath, LpPathBuf, NodeInvocation, SlotAccess, SlotDataAccess, SlotDataMutAccess,
-    SlotMapKey, SlotMutAccess, SlotName, SlotPath, SlotShapeId, SlotShapeRegistry, Slotted,
-    SourcePath, StaticSlotShape,
+    ArtifactLocation, AssetKind, AssetSource, EnumSlot, LpPath, LpPathBuf, NodeDefLocation,
+    NodeInvocation, ReferencedAsset, SlotAccess, SlotDataAccess, SlotDataMutAccess, SlotMapKey,
+    SlotMutAccess, SlotName, SlotPath, SlotShapeId, SlotShapeRegistry, Slotted, SourcePath,
+    StaticSlotShape,
 };
 
 const PROJECT_VARIANT: &str = "Project";
@@ -248,12 +249,40 @@ impl NodeDef {
         &self,
         containing_file: &LpPath,
     ) -> Result<Vec<LpPathBuf>, ArtifactPathResolutionError> {
-        match self {
-            Self::Shader(shader) => paths_for_shader(shader.shader_source(), containing_file),
-            Self::ComputeShader(shader) => {
-                paths_for_shader(shader.shader_source(), containing_file)
+        let owner =
+            NodeDefLocation::artifact_root(ArtifactLocation::location_for_path(containing_file));
+        let mut paths = Vec::new();
+        for asset in self.referenced_assets(containing_file, &owner, &SlotPath::root())? {
+            if let AssetSource::Artifact { location } = asset.source {
+                paths.push(location.file_path().clone());
             }
-            Self::Fixture(fixture) => paths_for_fixture(fixture, containing_file),
+        }
+        Ok(paths)
+    }
+
+    /// Assets referenced by this definition.
+    pub fn referenced_assets(
+        &self,
+        containing_file: &LpPath,
+        owner: &NodeDefLocation,
+        base: &SlotPath,
+    ) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
+        match self {
+            Self::Shader(shader) => assets_for_shader(
+                shader.shader_source(),
+                containing_file,
+                owner,
+                base,
+                AssetKind::ShaderSource,
+            ),
+            Self::ComputeShader(shader) => assets_for_shader(
+                shader.shader_source(),
+                containing_file,
+                owner,
+                base,
+                AssetKind::ComputeShaderSource,
+            ),
+            Self::Fixture(fixture) => assets_for_fixture(fixture, containing_file),
             _ => Ok(Vec::new()),
         }
     }
@@ -382,24 +411,47 @@ fn playlist_entry_node_path(base: &SlotPath, key: u32) -> Option<SlotPath> {
     )
 }
 
-fn paths_for_shader(
+fn assets_for_shader(
     source: &ShaderSource,
     containing_file: &LpPath,
-) -> Result<Vec<LpPathBuf>, ArtifactPathResolutionError> {
-    let Some(path) = source.path_value() else {
-        return Ok(Vec::new());
-    };
-    Ok(vec![resolve_source_path(containing_file, path)?])
+    owner: &NodeDefLocation,
+    base: &SlotPath,
+    kind: AssetKind,
+) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
+    if let Some(path) = source.path_value() {
+        let location = ArtifactLocation::file(resolve_source_path(containing_file, path)?);
+        return Ok(vec![ReferencedAsset::new(
+            AssetSource::artifact(location),
+            kind,
+        )]);
+    }
+
+    if source.glsl_value().is_some() {
+        return Ok(vec![ReferencedAsset::new(
+            AssetSource::inline(owner.clone(), source_slot_path(base)),
+            kind,
+        )]);
+    }
+
+    Ok(Vec::new())
 }
 
-fn paths_for_fixture(
+fn assets_for_fixture(
     fixture: &FixtureDef,
     containing_file: &LpPath,
-) -> Result<Vec<LpPathBuf>, ArtifactPathResolutionError> {
+) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
     let MappingConfig::SvgPath { source, .. } = fixture.mapping.value() else {
         return Ok(Vec::new());
     };
-    Ok(vec![resolve_source_path(containing_file, source.value())?])
+    let location = ArtifactLocation::file(resolve_source_path(containing_file, source.value())?);
+    Ok(vec![ReferencedAsset::new(
+        AssetSource::artifact(location),
+        AssetKind::FixtureSvg,
+    )])
+}
+
+fn source_slot_path(base: &SlotPath) -> SlotPath {
+    base.child(SlotName::parse("source").expect("source is a valid slot name"))
 }
 
 fn resolve_source_path(
@@ -992,6 +1044,55 @@ sample_diameter = 2.0
                 .referenced_asset_paths(LpPath::new("/fixtures/fixture.toml"))
                 .unwrap(),
             vec![LpPathBuf::from("/fixtures/fixture.svg")]
+        );
+    }
+
+    #[test]
+    fn node_def_referenced_assets_include_source_identity_and_kind() {
+        let owner = NodeDefLocation {
+            artifact: ArtifactLocation::file("/project.toml"),
+            path: SlotPath::parse("nodes[shader]").unwrap(),
+        };
+        let shader = NodeDef::from_toml_str(
+            r#"
+kind = "Shader"
+source = { glsl = "void main() {}" }
+"#,
+        )
+        .expect("shader");
+
+        assert_eq!(
+            shader
+                .referenced_assets(LpPath::new("/project.toml"), &owner, &owner.path)
+                .unwrap(),
+            vec![ReferencedAsset::new(
+                AssetSource::inline(owner, SlotPath::parse("nodes[shader].source").unwrap()),
+                AssetKind::ShaderSource,
+            )]
+        );
+
+        let fixture = NodeDef::from_toml_str(
+            r#"
+kind = "Fixture"
+render_size = { width = 64, height = 16 }
+
+[mapping]
+kind = "SvgPath"
+source = "fixture.svg"
+sample_diameter = 2.0
+"#,
+        )
+        .expect("fixture");
+        let owner = NodeDefLocation::artifact_root(ArtifactLocation::file("/fixtures/f.toml"));
+
+        assert_eq!(
+            fixture
+                .referenced_assets(LpPath::new("/fixtures/f.toml"), &owner, &owner.path)
+                .unwrap(),
+            vec![ReferencedAsset::new(
+                AssetSource::artifact(ArtifactLocation::file("/fixtures/fixture.svg")),
+                AssetKind::FixtureSvg,
+            )]
         );
     }
 

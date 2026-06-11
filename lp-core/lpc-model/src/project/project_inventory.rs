@@ -2,13 +2,13 @@
 
 use alloc::collections::BTreeMap;
 
-use crate::{ArtifactLocation, AssetEntry, NodeDefEntry, NodeDefLocation};
+use crate::{AssetEntry, AssetSource, NodeDefEntry, NodeDefLocation};
 
 /// Effective post-overlay project state derived from artifacts plus overlay.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ProjectInventory {
     pub defs: BTreeMap<NodeDefLocation, NodeDefEntry>,
-    pub assets: BTreeMap<ArtifactLocation, AssetEntry>,
+    pub assets: BTreeMap<AssetSource, AssetEntry>,
 }
 
 impl ProjectInventory {

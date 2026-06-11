@@ -7,10 +7,11 @@ use alloc::string::String;
 #[serde(rename_all = "snake_case")]
 pub enum AssetBodySource {
     Committed,
+    Inline,
     OverlayReplace,
 }
 
-/// Effective state for a referenced non-definition artifact.
+/// Effective state for a referenced project asset.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case", tag = "state")]
 pub enum AssetState {

@@ -2,15 +2,13 @@
 
 use alloc::string::String;
 
-use lpc_model::{LpPathBuf, Revision, SourcePath};
-
-use crate::ArtifactLocation;
+use lpc_model::{AssetSource, LpPathBuf, Revision, SourcePath};
 
 /// Resolved backing for an authored [`lpc_model::SourceFileSlot`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SourceFileRef {
     File {
-        location: ArtifactLocation,
+        source: AssetSource,
         authored_path: SourcePath,
         resolved_path: LpPathBuf,
         extension: String,

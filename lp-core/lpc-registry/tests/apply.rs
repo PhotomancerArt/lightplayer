@@ -1,6 +1,6 @@
 use lpc_model::{
-    ArtifactLocation, AssetBodySource, AssetChangeKind, AssetOverlay, AssetState, LpValue,
-    NodeDefChangeKind, NodeDefLocation, NodeDefState, OverlayMutation, Revision, SlotEdit,
+    ArtifactLocation, AssetBodySource, AssetChangeKind, AssetOverlay, AssetSource, AssetState,
+    LpValue, NodeDefChangeKind, NodeDefLocation, NodeDefState, OverlayMutation, Revision, SlotEdit,
     SlotPath, SlotShapeRegistry,
 };
 use lpc_registry::{ParseCtx, ProjectRegistry};
@@ -117,7 +117,9 @@ fn apply_body_overlay_changes_referenced_node_def_and_assets() {
     );
     assert_eq!(
         result.changes.assets.removed,
-        vec![ArtifactLocation::file("/shader.glsl")]
+        vec![AssetSource::artifact(ArtifactLocation::file(
+            "/shader.glsl"
+        ))]
     );
     assert!(matches!(
         registry.def(&shader_def).unwrap().state,
@@ -130,6 +132,7 @@ fn apply_asset_overlay_changes_referenced_asset() {
     let (fs, shapes, mut registry) = shader_project();
     let ctx = parse_ctx(&shapes);
     let asset = ArtifactLocation::file("/shader.glsl");
+    let asset_source = AssetSource::artifact(asset.clone());
 
     let result = registry
         .apply_mutation(
@@ -148,12 +151,12 @@ fn apply_asset_overlay_changes_referenced_asset() {
     assert_eq!(
         result.changes.assets.changed,
         vec![lpc_model::AssetChange::new(
-            asset.clone(),
+            asset_source.clone(),
             AssetChangeKind::Body
         )]
     );
     assert_eq!(
-        registry.asset(&asset).unwrap().state,
+        registry.asset(&asset_source).unwrap().state,
         AssetState::Available {
             source: AssetBodySource::OverlayReplace
         }
@@ -165,6 +168,7 @@ fn discard_overlay_returns_inventory_to_committed_state() {
     let (fs, shapes, mut registry) = shader_project();
     let ctx = parse_ctx(&shapes);
     let asset = ArtifactLocation::file("/shader.glsl");
+    let asset_source = AssetSource::artifact(asset.clone());
 
     registry
         .apply_mutation(
@@ -177,19 +181,22 @@ fn discard_overlay_returns_inventory_to_committed_state() {
             &ctx,
         )
         .unwrap();
-    assert_eq!(registry.asset(&asset).unwrap().state, AssetState::Deleted);
+    assert_eq!(
+        registry.asset(&asset_source).unwrap().state,
+        AssetState::Deleted
+    );
 
     let changes = registry.discard_overlay(&fs, Revision::new(3), &ctx);
 
     assert_eq!(
         changes.assets.changed,
         vec![lpc_model::AssetChange::new(
-            asset.clone(),
+            asset_source.clone(),
             AssetChangeKind::LeftError
         )]
     );
     assert_eq!(
-        registry.asset(&asset).unwrap().state,
+        registry.asset(&asset_source).unwrap().state,
         AssetState::Available {
             source: AssetBodySource::Committed
         }
@@ -201,6 +208,7 @@ fn commit_overlay_writes_artifact_without_runtime_project_change() {
     let (fs, shapes, mut registry) = shader_project();
     let ctx = parse_ctx(&shapes);
     let asset = ArtifactLocation::file("/shader.glsl");
+    let asset_source = AssetSource::artifact(asset.clone());
     let body = b"void main() { gl_FragColor = vec4(0.5); }".to_vec();
 
     registry
@@ -223,7 +231,7 @@ fn commit_overlay_writes_artifact_without_runtime_project_change() {
     assert!(result.changes.is_empty());
     assert_eq!(fs.read_file(LpPath::new("/shader.glsl")).unwrap(), body);
     assert_eq!(
-        registry.asset(&asset).unwrap().state,
+        registry.asset(&asset_source).unwrap().state,
         AssetState::Available {
             source: AssetBodySource::Committed
         }
@@ -266,6 +274,7 @@ fn refresh_artifacts_returns_runtime_asset_changes() {
     let (mut fs, shapes, mut registry) = shader_project();
     let ctx = parse_ctx(&shapes);
     let asset = ArtifactLocation::file("/shader.glsl");
+    let asset_source = AssetSource::artifact(asset.clone());
     write_file(
         &mut fs,
         "/shader.glsl",
@@ -284,6 +293,9 @@ fn refresh_artifacts_returns_runtime_asset_changes() {
 
     assert_eq!(
         changes.assets.changed,
-        vec![lpc_model::AssetChange::new(asset, AssetChangeKind::Body)]
+        vec![lpc_model::AssetChange::new(
+            asset_source,
+            AssetChangeKind::Body
+        )]
     );
 }

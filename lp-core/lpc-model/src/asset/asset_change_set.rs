@@ -2,14 +2,14 @@
 
 use alloc::vec::Vec;
 
-use crate::ArtifactLocation;
+use crate::AssetSource;
 
 /// Effective asset changes visible to runtime/project consumers.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AssetChangeSet {
-    pub added: Vec<ArtifactLocation>,
+    pub added: Vec<AssetSource>,
     pub changed: Vec<AssetChange>,
-    pub removed: Vec<ArtifactLocation>,
+    pub removed: Vec<AssetSource>,
 }
 
 impl AssetChangeSet {
@@ -21,13 +21,13 @@ impl AssetChangeSet {
 /// One changed asset and its coarse runtime-facing classification.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AssetChange {
-    pub location: ArtifactLocation,
+    pub source: AssetSource,
     pub kind: AssetChangeKind,
 }
 
 impl AssetChange {
-    pub fn new(location: ArtifactLocation, kind: AssetChangeKind) -> Self {
-        Self { location, kind }
+    pub fn new(source: AssetSource, kind: AssetChangeKind) -> Self {
+        Self { source, kind }
     }
 }
 
