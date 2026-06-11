@@ -10,7 +10,7 @@ use lpfs::{LpFs, LpPath, LpPathBuf};
 use crate::ArtifactLocation;
 
 use super::changes::state_changed;
-use super::{NodeDefEntry, NodeDefLoc, NodeDefRegistry, NodeDefState, NodeDefUpdates};
+use super::{NodeDefEntry, NodeDefLocation, NodeDefRegistry, NodeDefState, NodeDefUpdates};
 use super::{ParseCtx, RegistryError};
 
 impl NodeDefRegistry {
@@ -25,9 +25,7 @@ impl NodeDefRegistry {
         let Some(current) = self.store.revision(&location) else {
             return;
         };
-        let Some(file_path) = location.file_path().cloned() else {
-            return;
-        };
+        let file_path = location.file_path().clone();
 
         let new_inventory =
             match self.derive_inventory(location.clone(), file_path.as_path(), frame, fs, ctx) {
@@ -35,7 +33,7 @@ impl NodeDefRegistry {
                 Err(_) => return,
             };
 
-        let old_locs: BTreeMap<NodeDefLoc, NodeDefState> = self
+        let old_locs: BTreeMap<NodeDefLocation, NodeDefState> = self
             .defs
             .iter()
             .filter(|(loc, _)| loc.artifact == location)
@@ -81,10 +79,13 @@ impl NodeDefRegistry {
         frame: Revision,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
-    ) -> Result<BTreeMap<NodeDefLoc, NodeDefState>, RegistryError> {
+    ) -> Result<BTreeMap<NodeDefLocation, NodeDefState>, RegistryError> {
         let mut inventory = BTreeMap::new();
         let state = self.read_artifact_state(&location, fs, ctx)?;
-        inventory.insert(NodeDefLoc::artifact_root(location.clone()), state.clone());
+        inventory.insert(
+            NodeDefLocation::artifact_root(location.clone()),
+            state.clone(),
+        );
         if let NodeDefState::Loaded(def) = state {
             self.derive_invocations(
                 &location,
@@ -113,7 +114,7 @@ impl NodeDefRegistry {
         frame: Revision,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
-        inventory: &mut BTreeMap<NodeDefLoc, NodeDefState>,
+        inventory: &mut BTreeMap<NodeDefLocation, NodeDefState>,
     ) -> Result<(), RegistryError> {
         for site in def.invocation_sites(&base_path) {
             match &site.invocation {
@@ -143,7 +144,7 @@ impl NodeDefRegistry {
                     }
                 }
                 NodeInvocation::Def(body) => {
-                    let loc = NodeDefLoc {
+                    let loc = NodeDefLocation {
                         artifact: location.clone(),
                         path: site.path.clone(),
                     };
@@ -203,9 +204,9 @@ impl NodeDefRegistry {
 
     fn collect_referenced_locations(
         &self,
-        loc: &NodeDefLoc,
+        loc: &NodeDefLocation,
         referenced: &mut BTreeSet<ArtifactLocation>,
-        visited_defs: &mut BTreeSet<NodeDefLoc>,
+        visited_defs: &mut BTreeSet<NodeDefLocation>,
     ) -> Result<(), RegistryError> {
         if !visited_defs.insert(loc.clone()) {
             return Ok(());
@@ -218,9 +219,7 @@ impl NodeDefRegistry {
         let NodeDefState::Loaded(def) = &entry.state else {
             return Ok(());
         };
-        let Some(containing) = loc.artifact.file_path() else {
-            return Ok(());
-        };
+        let containing = loc.artifact.file_path();
 
         for path in def
             .referenced_asset_paths(containing.as_path())
@@ -242,13 +241,13 @@ impl NodeDefRegistry {
                         .map_err(|err| RegistryError::SpecifierResolution {
                         message: String::from(err.to_string()),
                     })?;
-                    let child_loc = NodeDefLoc::artifact_root(ArtifactLocation::location_for_path(
-                        child_path.as_path(),
-                    ));
+                    let child_loc = NodeDefLocation::artifact_root(
+                        ArtifactLocation::location_for_path(child_path.as_path()),
+                    );
                     self.collect_referenced_locations(&child_loc, referenced, visited_defs)?;
                 }
                 NodeInvocation::Def(_) => {
-                    let child_loc = NodeDefLoc {
+                    let child_loc = NodeDefLocation {
                         artifact: loc.artifact.clone(),
                         path: site.path,
                     };
@@ -273,7 +272,7 @@ impl NodeDefRegistry {
 
         for location in to_unregister {
             self.store.unregister(&location)?;
-            let removed: Vec<NodeDefLoc> = self
+            let removed: Vec<NodeDefLocation> = self
                 .defs
                 .keys()
                 .filter(|loc| loc.artifact == location)
@@ -292,7 +291,7 @@ impl NodeDefRegistry {
 
     pub(crate) fn register_def_at_location(
         &mut self,
-        loc: NodeDefLoc,
+        loc: NodeDefLocation,
         state: NodeDefState,
         revision: Revision,
     ) -> Result<(), RegistryError> {
@@ -314,7 +313,7 @@ impl NodeDefRegistry {
         &mut self,
         frame: Revision,
     ) -> Result<(), RegistryError> {
-        let locs: Vec<NodeDefLoc> = self.defs.keys().cloned().collect();
+        let locs: Vec<NodeDefLocation> = self.defs.keys().cloned().collect();
         for loc in locs {
             self.register_asset_paths_for_entry(&loc, frame)?;
         }
@@ -323,7 +322,7 @@ impl NodeDefRegistry {
 
     fn register_asset_paths_for_entry(
         &mut self,
-        loc: &NodeDefLoc,
+        loc: &NodeDefLocation,
         frame: Revision,
     ) -> Result<(), RegistryError> {
         let Some(entry) = self.defs.get(loc) else {
@@ -332,11 +331,7 @@ impl NodeDefRegistry {
         let NodeDefState::Loaded(def) = entry.state.clone() else {
             return Ok(());
         };
-        let containing = loc.artifact.file_path().cloned().ok_or_else(|| {
-            RegistryError::SpecifierResolution {
-                message: alloc::format!("missing artifact path for def {loc:?}"),
-            }
-        })?;
+        let containing = loc.artifact.file_path().clone();
 
         for path in def
             .referenced_asset_paths(containing.as_path())
@@ -349,7 +344,7 @@ impl NodeDefRegistry {
         Ok(())
     }
 
-    pub(crate) fn snapshot_def_states(&self) -> BTreeMap<NodeDefLoc, NodeDefState> {
+    pub(crate) fn snapshot_def_states(&self) -> BTreeMap<NodeDefLocation, NodeDefState> {
         self.defs
             .iter()
             .map(|(loc, entry)| (loc.clone(), entry.state.clone()))

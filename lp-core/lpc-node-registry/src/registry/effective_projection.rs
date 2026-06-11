@@ -9,7 +9,7 @@ use lpc_model::{
 
 use crate::edit_apply::{apply_op_to_def, project_artifact_bytes};
 
-use super::{NodeDefEntry, NodeDefLoc, NodeDefState, ParseCtx, RegistryError};
+use super::{NodeDefEntry, NodeDefLocation, NodeDefState, ParseCtx, RegistryError};
 
 /// Effective [`NodeDefState`] for an artifact root.
 pub(crate) fn project_artifact_def(
@@ -62,7 +62,7 @@ pub(crate) fn project_artifact_def(
 
 /// Effective state for a registered def location (inline slice of projected root).
 pub(crate) fn project_def_at_loc(
-    loc: &NodeDefLoc,
+    loc: &NodeDefLocation,
     root_entry: &NodeDefEntry,
     pending: Option<&ArtifactOverlay>,
     ctx: &ParseCtx<'_>,
@@ -155,14 +155,14 @@ rate = 1.0
             LpValue::F32(3.0),
         ));
 
-        let loc = NodeDefLoc::artifact_root(crate::ArtifactLocation::file("/playlist.toml"));
+        let loc = NodeDefLocation::artifact_root(crate::ArtifactLocation::file("/playlist.toml"));
         let entry = NodeDefEntry {
             loc: loc.clone(),
             state: committed,
             revision: Revision::new(1),
         };
         let effective = project_def_at_loc(
-            &NodeDefLoc {
+            &NodeDefLocation {
                 path: SlotPath::parse("entries[0].node").unwrap(),
                 ..loc
             },

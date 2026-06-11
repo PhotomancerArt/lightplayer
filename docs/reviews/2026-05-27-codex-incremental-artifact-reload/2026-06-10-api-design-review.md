@@ -64,8 +64,8 @@ The short answer to "can we show the full functionality in a test today?" is **n
 - **Source**: still valid when it means authored shader/source text (`SourceFileSlot`, `materialize_source`). Avoid using it for generic artifact bookkeeping.
 - **ArtifactLoc**: registry identity for an artifact, currently path-backed for these workflows.
 - **ArtifactStore**: registry-owned catalog of artifact locations, revisions, and transient read state.
-- **NodeDefLoc**: identity of a parsed node definition: artifact location plus `SlotPath` inside that artifact. Root defs use the root path; inline defs use child invocation paths.
-- **NodeDefEntry**: current parsed registry entry: `NodeDefLoc`, `NodeDefState`, and revision.
+- **NodeDefLocation**: identity of a parsed node definition: artifact location plus `SlotPath` inside that artifact. Root defs use the root path; inline defs use child invocation paths.
+- **NodeDefEntry**: current parsed registry entry: `NodeDefLocation`, `NodeDefState`, and revision.
 - **NodeDefState**: either a loaded `NodeDef` or a parse/error placeholder.
 - **NodeDefRegistry**: owner of committed parsed defs plus pending overlay; the main local API for load, sync, effective read, and commit.
 - **ArtifactOverlay**: pending current-state map keyed by `ArtifactLoc`. It is not an append-only edit log.
@@ -74,9 +74,9 @@ The short answer to "can we show the full functionality in a test today?" is **n
 - **AssetEdit**: asset body operation: `None`, `ReplaceBody(Vec<u8>)`, or `Delete`.
 - **SyncOp**: local registry ingress enum mixing filesystem events, pending edits, remove/clear, and commit. This is not a settled wire type.
 - **SyncOutcome**: result of processing `SyncOp`s: committed changes plus a pending-changed bit.
-- **SyncResult**: factual committed registry changes: `NodeDefUpdates` plus `DefChangeDetail`s.
+- **SyncResult**: factual committed registry changes: `NodeDefUpdates` plus `NodeDefChangeDetail`s.
 - **NodeDefUpdates**: added/changed/removed def locations.
-- **DefChangeDetail**: coarse change classification: content, kind changed, entered error, left error.
+- **NodeDefChangeDetail**: coarse change classification: content, kind changed, entered error, left error.
 - **NodeDefView**: read-only effective projection over registry committed state plus overlay.
 - **ProjectSnapshot / diff**: host/test harness tools that compute an `ArtifactOverlay` between filesystem snapshots.
 

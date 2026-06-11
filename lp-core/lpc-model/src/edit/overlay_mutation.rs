@@ -3,7 +3,7 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::{LpPathBuf, SlotPath};
+use crate::{ArtifactLocation, SlotPath};
 
 use super::{ArtifactBodyEdit, SlotEdit};
 
@@ -12,19 +12,19 @@ use super::{ArtifactBodyEdit, SlotEdit};
 #[serde(rename_all = "snake_case", tag = "op")]
 pub enum OverlayMutation {
     PutSlotEdit {
-        artifact_path: LpPathBuf,
+        artifact: ArtifactLocation,
         edit: SlotEdit,
     },
     RemoveSlotEdit {
-        artifact_path: LpPathBuf,
+        artifact: ArtifactLocation,
         path: SlotPath,
     },
     SetArtifactBody {
-        artifact_path: LpPathBuf,
+        artifact: ArtifactLocation,
         edit: ArtifactBodyEdit,
     },
     ClearArtifact {
-        artifact_path: LpPathBuf,
+        artifact: ArtifactLocation,
     },
     Clear,
 }

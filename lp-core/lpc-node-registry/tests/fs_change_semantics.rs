@@ -4,7 +4,9 @@ mod common;
 
 use common::fixtures;
 use lpc_model::{NodeKind, Revision, SlotPath, SlotShapeRegistry};
-use lpc_node_registry::{DefChangeDetail, NodeDefLoc, NodeDefRegistry, ParseCtx, SyncResult};
+use lpc_node_registry::{
+    NodeDefChangeDetail, NodeDefLocation, NodeDefRegistry, ParseCtx, SyncResult,
+};
 use lpfs::{FsEvent, FsEventKind, LpPath, LpPathBuf};
 
 fn parse_ctx() -> SlotShapeRegistry {
@@ -28,8 +30,8 @@ fn sync_at(
     registry.sync_fs(fs, &[fs_modify(path)], Revision::new(frame), ctx)
 }
 
-fn inline_child_loc(root: &NodeDefLoc) -> NodeDefLoc {
-    NodeDefLoc {
+fn inline_child_loc(root: &NodeDefLocation) -> NodeDefLocation {
+    NodeDefLocation {
         artifact: root.artifact.clone(),
         path: SlotPath::parse("entries[2].node").unwrap(),
     }
@@ -149,7 +151,7 @@ fn s5a_leaf_parse_error_reports_entered_error() {
     assert_eq!(result.def_updates.changed, vec![root.clone()]);
     assert!(matches!(
         result.change_details.as_slice(),
-        [(id, DefChangeDetail::EnteredError)] if *id == root
+        [(id, NodeDefChangeDetail::EnteredError)] if *id == root
     ));
 }
 
@@ -186,7 +188,7 @@ node = { ref = "./child.toml" }
     assert_eq!(result.def_updates.changed, vec![child.clone()]);
     assert!(matches!(
         result.change_details.as_slice(),
-        [(id, DefChangeDetail::EnteredError)] if *id == child
+        [(id, NodeDefChangeDetail::EnteredError)] if *id == child
     ));
 }
 
@@ -217,7 +219,7 @@ kind = "Clock"
     assert!(result.change_details.iter().any(|(id, detail)| *id == child
         && matches!(
             detail,
-            DefChangeDetail::KindChanged {
+            NodeDefChangeDetail::KindChanged {
                 from: NodeKind::Shader,
                 to: NodeKind::Clock
             }

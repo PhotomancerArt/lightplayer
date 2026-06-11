@@ -4,7 +4,7 @@ mod common;
 
 use common::{fixtures, overlay};
 use lpc_model::{NodeDef, Revision};
-use lpc_node_registry::{NodeDefEntry, NodeDefLoc, NodeDefRegistry, NodeDefState, ParseCtx};
+use lpc_node_registry::{NodeDefEntry, NodeDefLocation, NodeDefRegistry, NodeDefState, ParseCtx};
 use lpfs::LpPath;
 
 fn clock_rate(entry: &NodeDefEntry) -> f32 {
@@ -14,7 +14,7 @@ fn clock_rate(entry: &NodeDefEntry) -> f32 {
     *def.controls.rate.value()
 }
 
-fn load_clock_root(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs) -> NodeDefLoc {
+fn load_clock_root(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs) -> NodeDefLocation {
     let shapes = overlay::parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     registry

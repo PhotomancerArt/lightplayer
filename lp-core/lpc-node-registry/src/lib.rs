@@ -42,9 +42,9 @@ pub use lpc_model::{
 #[allow(deprecated, reason = "legacy sync op alias for migration")]
 pub use registry::RegistryChange;
 pub use registry::{
-    DefChangeDetail, NodeDefEntry, NodeDefLoc, NodeDefRegistry, NodeDefState, NodeDefUpdates,
-    ParseCtx, RegistryError, SyncError, SyncOp, SyncOutcome, SyncResult,
-    ValidationErrorPlaceholder, serialize_slot_draft,
+    NodeDefChangeDetail, NodeDefEntry, NodeDefLocation, NodeDefRegistry, NodeDefState,
+    NodeDefUpdates, NodeDefValidationError, ParseCtx, RegistryError, SyncError, SyncOp,
+    SyncOutcome, SyncResult, serialize_slot_draft,
 };
 pub use source::{
     MaterializeError, MaterializedSource, ResolveError, SourceDiagnosticCtx, SourceFileRef,

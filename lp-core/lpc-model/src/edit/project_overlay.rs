@@ -2,14 +2,14 @@
 
 use alloc::collections::BTreeMap;
 
-use crate::{LpPathBuf, SlotPath};
+use crate::{ArtifactLocation, SlotPath};
 
 use super::{ArtifactBodyEdit, ArtifactOverlay, OverlayMutation, SlotEdit, SlotOverlay};
 
 /// Current project-wide pending edit intent.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProjectOverlay {
-    pub artifacts: BTreeMap<LpPathBuf, ArtifactOverlay>,
+    pub artifacts: BTreeMap<ArtifactLocation, ArtifactOverlay>,
 }
 
 impl ProjectOverlay {
@@ -21,55 +21,59 @@ impl ProjectOverlay {
         self.artifacts.is_empty()
     }
 
-    pub fn contains_artifact(&self, artifact_path: &LpPathBuf) -> bool {
-        self.artifacts.contains_key(artifact_path)
+    pub fn contains_artifact(&self, artifact: &ArtifactLocation) -> bool {
+        self.artifacts.contains_key(artifact)
     }
 
-    pub fn artifact(&self, artifact_path: &LpPathBuf) -> Option<&ArtifactOverlay> {
-        self.artifacts.get(artifact_path)
+    pub fn artifact(&self, artifact: &ArtifactLocation) -> Option<&ArtifactOverlay> {
+        self.artifacts.get(artifact)
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = (&LpPathBuf, &ArtifactOverlay)> + '_ {
+    pub fn iter(&self) -> impl Iterator<Item = (&ArtifactLocation, &ArtifactOverlay)> + '_ {
         self.artifacts
             .iter()
             .filter(|(_, overlay)| !overlay.is_empty())
     }
 
-    pub fn put_slot_edit(&mut self, artifact_path: LpPathBuf, edit: SlotEdit) -> bool {
-        let changed = match self.artifacts.get_mut(&artifact_path) {
+    pub fn put_slot_edit(&mut self, artifact: ArtifactLocation, edit: SlotEdit) -> bool {
+        let changed = match self.artifacts.get_mut(&artifact) {
             Some(overlay) => overlay.put_slot_edit(edit),
             None => {
                 let mut slot = SlotOverlay::new();
                 slot.put_edit(edit);
                 self.artifacts
-                    .insert(artifact_path.clone(), ArtifactOverlay::slot(slot));
+                    .insert(artifact.clone(), ArtifactOverlay::slot(slot));
                 true
             }
         };
-        self.remove_empty_artifact(&artifact_path);
+        self.remove_empty_artifact(&artifact);
         changed
     }
 
-    pub fn remove_slot_edit(&mut self, artifact_path: &LpPathBuf, path: &SlotPath) -> bool {
-        let changed = match self.artifacts.get_mut(artifact_path) {
+    pub fn remove_slot_edit(&mut self, artifact: &ArtifactLocation, path: &SlotPath) -> bool {
+        let changed = match self.artifacts.get_mut(artifact) {
             Some(ArtifactOverlay::Slot { overlay }) => overlay.remove_edit(path),
             Some(ArtifactOverlay::Body { .. }) | None => false,
         };
-        self.remove_empty_artifact(artifact_path);
+        self.remove_empty_artifact(artifact);
         changed
     }
 
-    pub fn set_artifact_body(&mut self, artifact_path: LpPathBuf, edit: ArtifactBodyEdit) -> bool {
+    pub fn set_artifact_body(
+        &mut self,
+        artifact: ArtifactLocation,
+        edit: ArtifactBodyEdit,
+    ) -> bool {
         let next = ArtifactOverlay::body(edit);
-        if self.artifacts.get(&artifact_path) == Some(&next) {
+        if self.artifacts.get(&artifact) == Some(&next) {
             return false;
         }
-        self.artifacts.insert(artifact_path, next);
+        self.artifacts.insert(artifact, next);
         true
     }
 
-    pub fn clear_artifact(&mut self, artifact_path: &LpPathBuf) -> bool {
-        self.artifacts.remove(artifact_path).is_some()
+    pub fn clear_artifact(&mut self, artifact: &ArtifactLocation) -> bool {
+        self.artifacts.remove(artifact).is_some()
     }
 
     pub fn clear(&mut self) -> bool {
@@ -80,45 +84,40 @@ impl ProjectOverlay {
 
     pub fn apply_mutation(&mut self, mutation: OverlayMutation) -> bool {
         match mutation {
-            OverlayMutation::PutSlotEdit {
-                artifact_path,
-                edit,
-            } => self.put_slot_edit(artifact_path, edit),
-            OverlayMutation::RemoveSlotEdit {
-                artifact_path,
-                path,
-            } => self.remove_slot_edit(&artifact_path, &path),
-            OverlayMutation::SetArtifactBody {
-                artifact_path,
-                edit,
-            } => self.set_artifact_body(artifact_path, edit),
-            OverlayMutation::ClearArtifact { artifact_path } => self.clear_artifact(&artifact_path),
+            OverlayMutation::PutSlotEdit { artifact, edit } => self.put_slot_edit(artifact, edit),
+            OverlayMutation::RemoveSlotEdit { artifact, path } => {
+                self.remove_slot_edit(&artifact, &path)
+            }
+            OverlayMutation::SetArtifactBody { artifact, edit } => {
+                self.set_artifact_body(artifact, edit)
+            }
+            OverlayMutation::ClearArtifact { artifact } => self.clear_artifact(&artifact),
             OverlayMutation::Clear => self.clear(),
         }
     }
 
     pub fn merge_from(&mut self, other: &ProjectOverlay) {
-        for (artifact_path, overlay) in other.iter() {
+        for (artifact, overlay) in other.iter() {
             match overlay {
                 ArtifactOverlay::Slot { overlay } => {
                     for edit in overlay.to_apply_plan() {
-                        self.put_slot_edit(artifact_path.clone(), edit);
+                        self.put_slot_edit(artifact.clone(), edit);
                     }
                 }
                 ArtifactOverlay::Body { edit } => {
-                    self.set_artifact_body(artifact_path.clone(), edit.clone());
+                    self.set_artifact_body(artifact.clone(), edit.clone());
                 }
             }
         }
     }
 
-    fn remove_empty_artifact(&mut self, artifact_path: &LpPathBuf) {
+    fn remove_empty_artifact(&mut self, artifact: &ArtifactLocation) {
         if self
             .artifacts
-            .get(artifact_path)
+            .get(artifact)
             .is_some_and(ArtifactOverlay::is_empty)
         {
-            self.artifacts.remove(artifact_path);
+            self.artifacts.remove(artifact);
         }
     }
 }
@@ -131,7 +130,7 @@ mod tests {
     #[test]
     fn body_and_slot_overlays_are_exclusive() {
         let mut overlay = ProjectOverlay::new();
-        let path = LpPathBuf::from("/shader.glsl");
+        let path = ArtifactLocation::file("/shader.glsl");
         overlay.set_artifact_body(
             path.clone(),
             ArtifactBodyEdit::ReplaceBody(b"body".to_vec()),
@@ -154,7 +153,7 @@ mod tests {
     #[test]
     fn clear_empty_slot_overlay_removes_artifact() {
         let mut overlay = ProjectOverlay::new();
-        let artifact_path = LpPathBuf::from("/project.toml");
+        let artifact_path = ArtifactLocation::file("/project.toml");
         let slot_path = SlotPath::parse("nodes[clock]").unwrap();
         overlay.put_slot_edit(
             artifact_path.clone(),
@@ -168,11 +167,11 @@ mod tests {
     #[test]
     fn apply_mutation_updates_canonical_overlay() {
         let mut overlay = ProjectOverlay::new();
-        let artifact_path = LpPathBuf::from("/project.toml");
+        let artifact_path = ArtifactLocation::file("/project.toml");
         let slot_path = SlotPath::parse("nodes[clock]").unwrap();
 
         assert!(overlay.apply_mutation(OverlayMutation::PutSlotEdit {
-            artifact_path: artifact_path.clone(),
+            artifact: artifact_path.clone(),
             edit: SlotEdit::ensure_present(slot_path.clone()),
         }));
 

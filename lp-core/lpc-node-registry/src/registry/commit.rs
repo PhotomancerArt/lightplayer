@@ -11,7 +11,7 @@ use crate::ArtifactStore;
 use crate::edit_apply::project_artifact_bytes;
 
 use super::changes::{build_change_details, dedupe_locations};
-use super::{CommitError, NodeDefLoc, NodeDefRegistry, NodeDefUpdates, ParseCtx, SyncResult};
+use super::{CommitError, NodeDefLocation, NodeDefRegistry, NodeDefUpdates, ParseCtx, SyncResult};
 
 pub(crate) fn commit_project_overlay(
     registry: &mut NodeDefRegistry,
@@ -27,11 +27,7 @@ pub(crate) fn commit_project_overlay(
     let known_paths: BTreeMap<String, ()> = registry
         .store
         .locations()
-        .filter_map(|location| {
-            location
-                .file_path()
-                .map(|path| (String::from(path.as_str()), ()))
-        })
+        .map(|location| (String::from(location.file_path().as_str()), ()))
         .collect();
 
     for (path, bytes) in &plan.writes {
@@ -103,7 +99,7 @@ fn sync_committed_def_artifacts(
         let Some(location) = registry.artifact_location_for_path(path.as_path()) else {
             continue;
         };
-        let source = NodeDefLoc::artifact_root(location.clone());
+        let source = NodeDefLocation::artifact_root(location.clone());
         if registry.defs.contains_key(&source) {
             def_artifact_locations.push(location);
         }
@@ -133,7 +129,8 @@ impl OverlayCommitPlan {
         let mut writes = Vec::new();
         let mut deletes = Vec::new();
 
-        for (path, pending) in overlay.iter() {
+        for (location, pending) in overlay.iter() {
+            let path = location.file_path();
             match pending {
                 ArtifactOverlay::Body {
                     edit: ArtifactBodyEdit::Delete,
@@ -200,7 +197,7 @@ mod tests {
     fn overlay_commit_plan_folds_slot_pending() {
         let mut overlay = ProjectOverlay::new();
         overlay.put_slot_edit(
-            LpPathBuf::from("/clock.toml"),
+            lpc_model::ArtifactLocation::file("/clock.toml"),
             SlotEdit::assign_value(SlotPath::parse("controls.rate").unwrap(), LpValue::F32(2.0)),
         );
 

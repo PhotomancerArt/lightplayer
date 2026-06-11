@@ -21,13 +21,13 @@ impl WireOverlayReadResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_model::{LpPathBuf, SlotEdit, SlotPath};
+    use lpc_model::{ArtifactLocation, SlotEdit, SlotPath};
 
     #[test]
     fn overlay_read_response_round_trips() {
         let mut overlay = ProjectOverlay::new();
         overlay.put_slot_edit(
-            LpPathBuf::from("/project.toml"),
+            ArtifactLocation::file("/project.toml"),
             SlotEdit::ensure_present(SlotPath::parse("nodes[clock]").unwrap()),
         );
         let response = WireOverlayReadResponse::new(overlay);

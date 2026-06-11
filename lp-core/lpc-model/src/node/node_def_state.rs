@@ -1,27 +1,29 @@
-//! Parsed payload or error state for a registry entry.
+//! Parsed payload or error state for a node definition.
 
-use lpc_model::{NodeDef, NodeDefParseError, NodeKind};
+use alloc::string::String;
 
-/// Semantic validation failure payload (reserved; not emitted by the registry yet).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ValidationErrorPlaceholder {
-    message: alloc::string::String,
+use crate::{NodeDef, NodeDefParseError, NodeKind};
+
+/// Semantic validation failure payload.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct NodeDefValidationError {
+    pub message: String,
 }
 
-impl ValidationErrorPlaceholder {
-    pub fn new(message: impl Into<alloc::string::String>) -> Self {
+impl NodeDefValidationError {
+    pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),
         }
     }
 }
 
-/// Loaded definition or structured failure for a known def identity.
+/// Loaded definition or structured failure for a known definition identity.
 #[derive(Clone, Debug, PartialEq)]
 pub enum NodeDefState {
     Loaded(NodeDef),
     ParseError(NodeDefParseError),
-    ValidationError(ValidationErrorPlaceholder),
+    ValidationError(NodeDefValidationError),
 }
 
 impl NodeDefState {

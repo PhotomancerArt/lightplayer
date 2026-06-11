@@ -31,7 +31,7 @@ mod tests {
     use super::*;
     use alloc::vec;
     use lpc_model::{
-        ArtifactBodyEdit, LpPathBuf, OverlayMutation, OverlayMutationCommand,
+        ArtifactBodyEdit, ArtifactLocation, OverlayMutation, OverlayMutationCommand,
         OverlayMutationCommandId, OverlayMutationCommandResult, OverlayMutationEffect, SlotEdit,
         SlotPath,
     };
@@ -42,14 +42,14 @@ mod tests {
             OverlayMutationCommand {
                 id: OverlayMutationCommandId::new(1),
                 mutation: OverlayMutation::PutSlotEdit {
-                    artifact_path: LpPathBuf::from("/project.toml"),
+                    artifact: ArtifactLocation::file("/project.toml"),
                     edit: SlotEdit::ensure_present(SlotPath::parse("nodes[clock]").unwrap()),
                 },
             },
             OverlayMutationCommand {
                 id: OverlayMutationCommandId::new(2),
                 mutation: OverlayMutation::SetArtifactBody {
-                    artifact_path: LpPathBuf::from("/shader.glsl"),
+                    artifact: ArtifactLocation::file("/shader.glsl"),
                     edit: ArtifactBodyEdit::ReplaceBody(b"void main() {}".to_vec()),
                 },
             },

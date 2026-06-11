@@ -1,17 +1,17 @@
 //! Wire-shaped project overlay POC against the node registry.
 
 use lpc_model::{
-    ArtifactBodyEdit, ArtifactOverlay, DefinitionLocation, LpValue, OverlayMutation,
+    ArtifactBodyEdit, ArtifactLocation, ArtifactOverlay, LpValue, NodeDefLocation, OverlayMutation,
     OverlayMutationBatch, OverlayMutationCommand, OverlayMutationCommandId,
     OverlayMutationCommandStatus, OverlayMutationEffect, OverlayMutationRejectionReason, Revision,
     SlotEdit, SlotEditOp, SlotPath, SlotShapeRegistry, SourceFileSlot,
 };
-use lpc_node_registry::{NodeDefLoc, NodeDefRegistry, ParseCtx, SourceDiagnosticCtx};
+use lpc_node_registry::{NodeDefRegistry, ParseCtx, SourceDiagnosticCtx};
 use lpc_wire::{
     WireOverlayCommitRequest, WireOverlayCommitResponse, WireOverlayMutationRequest,
     WireOverlayMutationResponse, WireOverlayReadRequest, WireOverlayReadResponse,
 };
-use lpfs::{LpFs, LpFsMemory, LpPath, LpPathBuf};
+use lpfs::{LpFs, LpFsMemory, LpPath};
 
 #[test]
 fn overlay_api_builds_graph_from_loaded_root_and_commits() {
@@ -225,7 +225,7 @@ fn put_slot(id: u64, artifact_path: &str, edit: SlotEdit) -> OverlayMutationComm
     command(
         id,
         OverlayMutation::PutSlotEdit {
-            artifact_path: LpPathBuf::from(artifact_path),
+            artifact: ArtifactLocation::file(artifact_path),
             edit,
         },
     )
@@ -235,7 +235,7 @@ fn set_body(id: u64, artifact_path: &str, edit: ArtifactBodyEdit) -> OverlayMuta
     command(
         id,
         OverlayMutation::SetArtifactBody {
-            artifact_path: LpPathBuf::from(artifact_path),
+            artifact: ArtifactLocation::file(artifact_path),
             edit,
         },
     )
@@ -263,7 +263,7 @@ fn assert_all_mutations_accepted(results: &[lpc_model::OverlayMutationCommandRes
 fn assert_project_overlay_was_coalesced(response: &WireOverlayReadResponse) {
     let project = response
         .overlay
-        .artifact(&LpPathBuf::from("/project.toml"))
+        .artifact(&ArtifactLocation::file("/project.toml"))
         .expect("project overlay");
     let ArtifactOverlay::Slot { overlay } = project else {
         panic!("expected project slot overlay");
@@ -279,7 +279,7 @@ fn assert_project_overlay_was_coalesced(response: &WireOverlayReadResponse) {
 
     let scratch = response
         .overlay
-        .artifact(&LpPathBuf::from("/scratch.glsl"))
+        .artifact(&ArtifactLocation::file("/scratch.glsl"))
         .expect("scratch overlay");
     assert!(matches!(
         scratch,
@@ -318,13 +318,16 @@ fn source_diag_ctx(containing_file: &str) -> SourceDiagnosticCtx {
     }
 }
 
-fn definition_loc(path: &str, slot_path: SlotPath) -> DefinitionLocation {
-    DefinitionLocation::new(LpPathBuf::from(path), slot_path)
+fn definition_loc(path: &str, slot_path: SlotPath) -> NodeDefLocation {
+    NodeDefLocation {
+        artifact: ArtifactLocation::file(path),
+        path: slot_path,
+    }
 }
 
-fn loc(path: &str, slot_path: &str) -> NodeDefLoc {
-    NodeDefLoc {
-        artifact: lpc_node_registry::ArtifactLocation::file(path),
+fn loc(path: &str, slot_path: &str) -> NodeDefLocation {
+    NodeDefLocation {
+        artifact: ArtifactLocation::file(path),
         path: if slot_path.is_empty() {
             SlotPath::root()
         } else {

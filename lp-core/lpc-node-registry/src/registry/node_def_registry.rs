@@ -2,16 +2,19 @@
 
 use alloc::collections::BTreeMap;
 
-use lpc_model::{ArtifactBodyEdit, ArtifactOverlay, ProjectOverlay, Revision, SlotEdit, SlotPath};
+use lpc_model::{
+    ArtifactBodyEdit, ArtifactLocation, ArtifactOverlay, ProjectOverlay, Revision, SlotEdit,
+    SlotPath,
+};
 use lpfs::{LpFs, LpPath, LpPathBuf};
 
+use crate::ArtifactStore;
 use crate::edit_apply::EditError;
-use crate::{ArtifactLocation, ArtifactStore};
 
 use super::sync_result::SyncResult;
-use super::{CommitError, NodeDefEntry, NodeDefLoc, NodeDefState, ParseCtx};
+use super::{CommitError, NodeDefEntry, NodeDefLocation, NodeDefState, ParseCtx};
 
-/// Owner of parsed node definitions keyed by [`NodeDefLoc`].
+/// Owner of parsed node definitions keyed by [`NodeDefLocation`].
 ///
 /// Bootstrap with [`Self::load_root`], react to filesystem edits via
 /// [`Self::sync`] / [`Self::sync_fs`], mutate pending state via
@@ -22,8 +25,8 @@ use super::{CommitError, NodeDefEntry, NodeDefLoc, NodeDefState, ParseCtx};
 pub struct NodeDefRegistry {
     pub(crate) store: ArtifactStore,
     pub(crate) overlay: ProjectOverlay,
-    pub(crate) defs: BTreeMap<NodeDefLoc, NodeDefEntry>,
-    pub(crate) root: Option<NodeDefLoc>,
+    pub(crate) defs: BTreeMap<NodeDefLocation, NodeDefEntry>,
+    pub(crate) root: Option<NodeDefLocation>,
 }
 
 impl Default for NodeDefRegistry {
@@ -44,7 +47,8 @@ impl NodeDefRegistry {
 
     /// Drop pending overlay entry for `path`. Returns whether an entry existed.
     pub fn remove_pending_at(&mut self, path: &LpPath) -> bool {
-        self.overlay.clear_artifact(&path.to_path_buf())
+        self.overlay
+            .clear_artifact(&ArtifactLocation::location_for_path(path))
     }
 
     /// Upsert one slot edit into the overlay for a `.toml` artifact path.
@@ -66,7 +70,8 @@ impl NodeDefRegistry {
         edit: ArtifactBodyEdit,
     ) -> Result<(), EditError> {
         super::path_validation::require_absolute_path(path.clone())?;
-        self.overlay.set_artifact_body(path, edit);
+        self.overlay
+            .set_artifact_body(ArtifactLocation::file(path), edit);
         Ok(())
     }
 
@@ -79,11 +84,11 @@ impl NodeDefRegistry {
         &self.overlay
     }
 
-    pub fn root_loc(&self) -> Option<&NodeDefLoc> {
+    pub fn root_loc(&self) -> Option<&NodeDefLocation> {
         self.root.as_ref()
     }
 
-    pub fn get(&self, loc: &NodeDefLoc) -> Option<&NodeDefEntry> {
+    pub fn get(&self, loc: &NodeDefLocation) -> Option<&NodeDefEntry> {
         self.defs.get(loc)
     }
 
@@ -107,7 +112,10 @@ impl NodeDefRegistry {
         super::commit::commit_project_overlay(self, fs, frame, ctx)
     }
 
-    pub(crate) fn restore_entry_states(&mut self, before: &BTreeMap<NodeDefLoc, NodeDefState>) {
+    pub(crate) fn restore_entry_states(
+        &mut self,
+        before: &BTreeMap<NodeDefLocation, NodeDefState>,
+    ) {
         for (loc, state) in before {
             if let Some(entry) = self.defs.get_mut(loc) {
                 entry.state = state.clone();
@@ -122,33 +130,36 @@ impl NodeDefRegistry {
 
     /// Pending edits for one artifact path, if any.
     pub fn pending_at_path(&self, path: &LpPath) -> Option<&ArtifactOverlay> {
-        self.overlay.artifact(&path.to_path_buf())
+        self.overlay
+            .artifact(&ArtifactLocation::location_for_path(path))
     }
 
     /// Iterate artifacts with pending edits (stable order).
-    pub fn iter_pending(&self) -> impl Iterator<Item = (&LpPathBuf, &ArtifactOverlay)> + '_ {
+    pub fn iter_pending(&self) -> impl Iterator<Item = (&ArtifactLocation, &ArtifactOverlay)> + '_ {
         self.overlay.iter()
     }
 
     /// Whether a specific slot path has a pending edit within an artifact.
     pub fn has_pending_slot(&self, location: &ArtifactLocation, path: &SlotPath) -> bool {
-        let Some(file_path) = location.file_path() else {
-            return false;
-        };
         self.overlay
-            .artifact(file_path)
+            .artifact(location)
             .and_then(ArtifactOverlay::as_slot)
             .is_some_and(|pending| pending.contains_path(path))
     }
 
     /// Whether `path` has a pending overlay entry.
     pub fn overlay_contains_path(&self, path: &LpPath) -> bool {
-        self.overlay.contains_artifact(&path.to_path_buf())
+        self.overlay
+            .contains_artifact(&ArtifactLocation::location_for_path(path))
     }
 
     /// Pending overlay bytes for `path`, if any (asset replace-body only).
     pub fn pending_artifact_body_bytes(&self, path: &LpPath) -> Option<&[u8]> {
-        match self.overlay.artifact(&path.to_path_buf())?.as_body()? {
+        match self
+            .overlay
+            .artifact(&ArtifactLocation::location_for_path(path))?
+            .as_body()?
+        {
             ArtifactBodyEdit::Delete => None,
             ArtifactBodyEdit::ReplaceBody(bytes) => Some(bytes.as_slice()),
         }
@@ -173,7 +184,7 @@ mod tests {
     use lpc_model::{NodeKind, SlotShapeRegistry};
     use lpfs::{FsEvent, FsEventKind, LpFsMemory};
 
-    use super::super::{DefChangeDetail, NodeDefUpdates, RegistryError};
+    use super::super::{NodeDefChangeDetail, NodeDefUpdates, RegistryError};
 
     fn parse_ctx() -> SlotShapeRegistry {
         SlotShapeRegistry::default()
@@ -186,7 +197,7 @@ mod tests {
         }
     }
 
-    fn changed_set(updates: &NodeDefUpdates) -> BTreeSet<NodeDefLoc> {
+    fn changed_set(updates: &NodeDefUpdates) -> BTreeSet<NodeDefLocation> {
         updates.changed.iter().cloned().collect()
     }
 
@@ -258,7 +269,7 @@ rate = 2.0
         );
         assert!(matches!(
             result.change_details.as_slice(),
-            [(loc, DefChangeDetail::Content)] if *loc == root
+            [(loc, NodeDefChangeDetail::Content)] if *loc == root
         ));
     }
 
@@ -449,7 +460,7 @@ kind = "Clock"
                 .any(|(loc, detail)| *loc == child
                     && matches!(
                         detail,
-                        DefChangeDetail::KindChanged {
+                        NodeDefChangeDetail::KindChanged {
                             from: NodeKind::Shader,
                             to: NodeKind::Clock
                         }
@@ -472,7 +483,7 @@ kind = "Clock"
         assert!(result.def_updates.contains_changed(&root));
         assert!(matches!(
             result.change_details.as_slice(),
-            [(loc, DefChangeDetail::EnteredError)] if *loc == root
+            [(loc, NodeDefChangeDetail::EnteredError)] if *loc == root
         ));
     }
 }

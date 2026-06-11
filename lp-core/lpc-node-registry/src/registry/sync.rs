@@ -6,7 +6,7 @@ use lpc_model::Revision;
 use lpfs::{FsEvent, LpFs, LpPath};
 
 use super::changes::{build_change_details, dedupe_locations};
-use super::{NodeDefLoc, NodeDefRegistry, NodeDefUpdates, ParseCtx, SyncOutcome, SyncResult};
+use super::{NodeDefLocation, NodeDefRegistry, NodeDefUpdates, ParseCtx, SyncOutcome, SyncResult};
 use super::{SyncError, SyncOp};
 
 impl NodeDefRegistry {
@@ -114,7 +114,7 @@ impl NodeDefRegistry {
         let Some(location) = self.store.location_for_path(path) else {
             return PathChangeKind::NonDefArtifact;
         };
-        let loc = NodeDefLoc::artifact_root(location.clone());
+        let loc = NodeDefLocation::artifact_root(location.clone());
         if self.defs.contains_key(&loc) {
             PathChangeKind::DefArtifact(location)
         } else {

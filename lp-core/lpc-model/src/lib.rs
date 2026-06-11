@@ -60,7 +60,9 @@ pub mod sync;
 pub use value::constraint;
 pub use value::kind;
 
-pub use artifact::{ArtifactReadRoot, ArtifactSpec, SrcArtifactLibRef};
+pub use artifact::{
+    ArtifactLocation, ArtifactLocationError, ArtifactReadRoot, ArtifactSpec, SrcArtifactLibRef,
+};
 pub use binding::{
     BindingDef, BindingDefError, BindingDefView, BindingDefs, BindingRef, BindingRefError,
     BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError,
@@ -78,18 +80,19 @@ pub use value::{LpType, LpValue, ModelEnumVariant, ModelStructMember};
 pub use config::DEFAULT_SERIAL_BAUD_RATE;
 pub use control::{CONTROL_MESSAGE_SHAPE_NAME, ControlMessage, TriggerEvent};
 pub use edit::{
-    ArtifactBodyEdit, ArtifactOverlay, DefinitionLocation, OverlayMutation, OverlayMutationBatch,
+    ArtifactBodyEdit, ArtifactOverlay, OverlayMutation, OverlayMutationBatch,
     OverlayMutationBatchResult, OverlayMutationCommand, OverlayMutationCommandId,
     OverlayMutationCommandResult, OverlayMutationCommandStatus, OverlayMutationEffect,
-    OverlayMutationRejection, OverlayMutationRejectionReason, ProjectCommitSummary,
-    ProjectDefChangeDetail, ProjectDefUpdates, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,
+    OverlayMutationRejection, OverlayMutationRejectionReason, ProjectCommitSummary, ProjectOverlay,
+    SlotEdit, SlotEditOp, SlotOverlay,
 };
 pub use hardware_endpoint_spec::{HardwareEndpointSpec, HardwareEndpointSpecError};
 pub use lpfs::lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 pub use node::node_prop_spec::NodePropSpec;
 pub use node::tree_path::{NodePathSegment, PathError, TreePath};
 pub use node::{
-    NodeArtifact, NodeDef, NodeId, NodeInvocation, NodeKind, NodeName, NodeNameError,
+    NodeArtifact, NodeDef, NodeDefChangeDetail, NodeDefLocation, NodeDefState, NodeDefUpdates,
+    NodeDefValidationError, NodeId, NodeInvocation, NodeKind, NodeName, NodeNameError,
     RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc,
 };
 pub use nodes::{

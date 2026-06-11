@@ -4,10 +4,12 @@ mod common;
 
 use common::{fixtures, overlay};
 use lpc_model::{ArtifactBodyEdit, LpValue, Revision, SlotPath};
-use lpc_node_registry::{EditError, NodeDefEntry, NodeDefLoc, NodeDefRegistry, ParseCtx, SlotEdit};
+use lpc_node_registry::{
+    EditError, NodeDefEntry, NodeDefLocation, NodeDefRegistry, ParseCtx, SlotEdit,
+};
 use lpfs::{LpFsMemory, LpPath, LpPathBuf};
 
-fn snapshot_registry(registry: &NodeDefRegistry, root: &NodeDefLoc) -> NodeDefEntry {
+fn snapshot_registry(registry: &NodeDefRegistry, root: &NodeDefLocation) -> NodeDefEntry {
     registry.get(root).expect("root entry").clone()
 }
 

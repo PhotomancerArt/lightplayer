@@ -41,7 +41,7 @@ The scenario should include:
 - Asset create, replace, and delete.
 - Commit.
 - Fresh registry reload from filesystem proving the committed artifacts are sufficient for engine loading.
-- Assertions on `SyncOutcome`, `NodeDefUpdates`, `DefChangeDetail`, effective reads, materialized source, and final filesystem bytes.
+- Assertions on `SyncOutcome`, `NodeDefUpdates`, `NodeDefChangeDetail`, effective reads, materialized source, and final filesystem bytes.
 
 ## Validation
 

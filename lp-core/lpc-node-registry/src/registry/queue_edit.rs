@@ -1,6 +1,6 @@
 //! Queue pending client edits on the registry overlay.
 
-use lpc_model::{ArtifactBodyEdit, ArtifactOverlay, Revision, SlotEdit};
+use lpc_model::{ArtifactBodyEdit, ArtifactLocation, ArtifactOverlay, Revision, SlotEdit};
 use lpfs::{LpFs, LpPathBuf};
 
 use crate::edit_apply::EditError;
@@ -17,9 +17,10 @@ impl NodeDefRegistry {
         _frame: Revision,
     ) -> Result<(), EditError> {
         ensure_toml_path(&path)?;
+        let location = ArtifactLocation::file(path.clone());
         if matches!(
             self.overlay
-                .artifact(&path)
+                .artifact(&location)
                 .and_then(ArtifactOverlay::as_body),
             Some(ArtifactBodyEdit::Delete)
         ) {
@@ -28,7 +29,7 @@ impl NodeDefRegistry {
             });
         }
 
-        self.overlay.put_slot_edit(path, op.clone());
+        self.overlay.put_slot_edit(location, op.clone());
         Ok(())
     }
 }

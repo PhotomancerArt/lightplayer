@@ -7,12 +7,14 @@ use crate::source::{
     MaterializeError, MaterializedSource, SourceDiagnosticCtx, materialize_source,
     resolve_source_file,
 };
-use lpc_model::SourceFileSlot;
+use lpc_model::{ArtifactLocation, SourceFileSlot};
 use lpc_model::{Revision, current_revision};
 use lpfs::{LpFs, LpPath};
 
 use super::effective_projection::{edit_to_registry, project_artifact_def, project_def_at_loc};
-use super::{NodeDefEntry, NodeDefLoc, NodeDefRegistry, NodeDefState, ParseCtx, RegistryError};
+use super::{
+    NodeDefEntry, NodeDefLocation, NodeDefRegistry, NodeDefState, ParseCtx, RegistryError,
+};
 
 impl NodeDefRegistry {
     /// Bytes for `path` from overlay if present, else committed store/fs.
@@ -23,7 +25,10 @@ impl NodeDefRegistry {
         ctx: &ParseCtx<'_>,
     ) -> Result<Option<Vec<u8>>, RegistryError> {
         let committed = self.read_committed_bytes_for_path(path, fs)?;
-        let pending = self.overlay.artifact(&path.to_path_buf()).cloned();
+        let pending = self
+            .overlay
+            .artifact(&ArtifactLocation::location_for_path(path))
+            .cloned();
         project_artifact_bytes(
             committed.as_deref(),
             pending.as_ref(),
@@ -40,15 +45,15 @@ impl NodeDefRegistry {
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
     ) -> Result<NodeDefState, RegistryError> {
-        let pending = location
-            .file_path()
-            .and_then(|path| self.overlay.artifact(path))
-            .cloned();
+        let pending = self.overlay.artifact(location).cloned();
         if pending.is_none() {
             return self.read_artifact_state(location, fs, ctx);
         }
 
-        let committed_state = match self.defs.get(&NodeDefLoc::artifact_root(location.clone())) {
+        let committed_state = match self
+            .defs
+            .get(&NodeDefLocation::artifact_root(location.clone()))
+        {
             Some(entry) => entry.state.clone(),
             None => self.read_artifact_state(location, fs, ctx)?,
         };
@@ -61,22 +66,27 @@ impl NodeDefRegistry {
     }
 
     /// Effective state for a registered def (overlay ∪ committed cache).
-    pub fn effective_state(&self, loc: &NodeDefLoc, ctx: &ParseCtx<'_>) -> Option<NodeDefState> {
+    pub fn effective_state(
+        &self,
+        loc: &NodeDefLocation,
+        ctx: &ParseCtx<'_>,
+    ) -> Option<NodeDefState> {
         let entry = self.defs.get(loc)?;
-        let pending = loc
-            .artifact
-            .file_path()
-            .and_then(|path| self.overlay.artifact(path));
+        let pending = self.overlay.artifact(&loc.artifact);
         if pending.is_none() {
             return Some(entry.state.clone());
         }
-        let root_loc = NodeDefLoc::artifact_root(loc.artifact.clone());
+        let root_loc = NodeDefLocation::artifact_root(loc.artifact.clone());
         let root_entry = self.defs.get(&root_loc)?;
         Some(project_def_at_loc(loc, root_entry, pending, ctx))
     }
 
     /// Effective def entry (overlay ∪ base). Always owned.
-    pub fn effective_entry(&self, loc: &NodeDefLoc, ctx: &ParseCtx<'_>) -> Option<NodeDefEntry> {
+    pub fn effective_entry(
+        &self,
+        loc: &NodeDefLocation,
+        ctx: &ParseCtx<'_>,
+    ) -> Option<NodeDefEntry> {
         let committed = self.defs.get(loc)?.clone();
         let state = self.effective_state(loc, ctx)?;
         Some(NodeDefEntry { state, ..committed })

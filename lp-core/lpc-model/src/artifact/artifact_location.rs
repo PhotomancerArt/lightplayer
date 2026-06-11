@@ -1,73 +1,65 @@
-//! Resolved artifact identity (catalog key and wire URI).
+//! Resolved artifact identity.
 
 use alloc::format;
 use alloc::string::String;
-use core::cmp::Ordering;
 
-use lpc_model::{ArtifactSpec, LpPathBuf};
-use lpfs::LpPath as LpFsPath;
+use crate::{ArtifactLocationError, ArtifactSpec, LpPath, LpPathBuf};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-use super::ArtifactError;
 
 const FILE_URI_PREFIX: &str = "file:";
 
-/// Resolved artifact location — canonical project identity for file-backed artifacts.
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub enum ArtifactLocation {
-    File(LpPathBuf),
+/// Canonical project identity for a file-backed artifact.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct ArtifactLocation {
+    path: LpPathBuf,
 }
 
 impl ArtifactLocation {
     pub fn file(path: impl Into<LpPathBuf>) -> Self {
-        Self::File(path.into())
+        Self { path: path.into() }
     }
 
     pub fn from_absolute_path(path: LpPathBuf) -> Self {
-        Self::File(path)
+        Self { path }
     }
 
-    pub fn try_from_specifier(specifier: &ArtifactSpec) -> Result<Self, ArtifactError> {
+    pub fn try_from_specifier(specifier: &ArtifactSpec) -> Result<Self, ArtifactLocationError> {
         match specifier {
-            ArtifactSpec::Path(path) => Ok(Self::File(path.clone())),
-            ArtifactSpec::Lib(lib) => Err(ArtifactError::Resolution(format!(
+            ArtifactSpec::Path(path) => Ok(Self::file(path.clone())),
+            ArtifactSpec::Lib(lib) => Err(ArtifactLocationError::Resolution(format!(
                 "library artifact references are not supported yet ({lib})"
             ))),
         }
     }
 
-    pub fn file_path(&self) -> Option<&LpPathBuf> {
-        match self {
-            Self::File(path) => Some(path),
-        }
+    pub fn file_path(&self) -> &LpPathBuf {
+        &self.path
     }
 
     pub fn to_uri(&self) -> String {
-        match self {
-            Self::File(path) => format!("{FILE_URI_PREFIX}{}", path.as_str()),
-        }
+        format!("{FILE_URI_PREFIX}{}", self.path.as_str())
     }
 
-    pub fn parse_uri(raw: &str) -> Result<Self, ArtifactError> {
+    pub fn parse_uri(raw: &str) -> Result<Self, ArtifactLocationError> {
         let raw = raw.trim();
         if let Some(rest) = raw.strip_prefix(FILE_URI_PREFIX) {
             if rest.is_empty() {
-                return Err(ArtifactError::Resolution(format!(
+                return Err(ArtifactLocationError::Resolution(format!(
                     "invalid artifact uri `{raw}`"
                 )));
             }
-            return Ok(Self::File(LpPathBuf::from(rest)));
+            return Ok(Self::file(rest));
         }
         if raw.starts_with('/') {
-            return Ok(Self::File(LpPathBuf::from(raw)));
+            return Ok(Self::file(raw));
         }
-        Err(ArtifactError::Resolution(format!(
+        Err(ArtifactLocationError::Resolution(format!(
             "artifact uri must start with `{FILE_URI_PREFIX}` or be an absolute path, got `{raw}`"
         )))
     }
 
-    pub fn location_for_path(path: &LpFsPath) -> Self {
-        Self::File(path.to_path_buf())
+    pub fn location_for_path(path: &LpPath) -> Self {
+        Self::file(path.to_path_buf())
     }
 }
 
@@ -90,33 +82,16 @@ impl<'de> Deserialize<'de> for ArtifactLocation {
     }
 }
 
-impl Ord for ArtifactLocation {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self, other) {
-            (Self::File(a), Self::File(b)) => a.as_str().cmp(b.as_str()),
-        }
-    }
-}
-
-impl PartialOrd for ArtifactLocation {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_model::artifact::src_artifact_lib_ref::SrcArtifactLibRef;
+    use crate::artifact::src_artifact_lib_ref::SrcArtifactLibRef;
 
     #[test]
     fn path_specifier_resolves_to_file() {
         let spec = ArtifactSpec::path("./shader.glsl");
         let location = ArtifactLocation::try_from_specifier(&spec).unwrap();
-        assert_eq!(
-            location,
-            ArtifactLocation::File(LpPathBuf::from("./shader.glsl"))
-        );
+        assert_eq!(location, ArtifactLocation::file("./shader.glsl"));
     }
 
     #[test]
@@ -125,7 +100,9 @@ mod tests {
             SrcArtifactLibRef::try_from_suffix("core/x").expect("valid lib ref"),
         );
         let err = ArtifactLocation::try_from_specifier(&spec).unwrap_err();
-        assert!(matches!(err, ArtifactError::Resolution(msg) if msg.contains("not supported")));
+        assert!(
+            matches!(err, ArtifactLocationError::Resolution(msg) if msg.contains("not supported"))
+        );
     }
 
     #[test]

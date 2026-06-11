@@ -5,7 +5,7 @@ mod common;
 use common::{fixtures, overlay};
 use lpc_model::{LpValue, NodeDef, Revision, SlotPath};
 use lpc_node_registry::{
-    NodeDefEntry, NodeDefLoc, NodeDefRegistry, NodeDefState, ParseCtx, SlotEdit,
+    NodeDefEntry, NodeDefLocation, NodeDefRegistry, NodeDefState, ParseCtx, SlotEdit,
     serialize_slot_draft,
 };
 use lpfs::LpPath;
@@ -31,8 +31,8 @@ fn shader_render_order(entry: &NodeDefEntry) -> i32 {
     def.render_order()
 }
 
-fn inline_child_loc(root: &NodeDefLoc) -> NodeDefLoc {
-    NodeDefLoc {
+fn inline_child_loc(root: &NodeDefLocation) -> NodeDefLocation {
+    NodeDefLocation {
         artifact: root.artifact.clone(),
         path: SlotPath::parse("entries[2].node").unwrap(),
     }

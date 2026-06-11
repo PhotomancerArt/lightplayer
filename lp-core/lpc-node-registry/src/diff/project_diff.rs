@@ -2,8 +2,7 @@
 
 use alloc::collections::BTreeSet;
 
-use lpc_model::{ArtifactBodyEdit, NodeDef, ProjectOverlay};
-use lpfs::LpPathBuf;
+use lpc_model::{ArtifactBodyEdit, ArtifactLocation, NodeDef, ProjectOverlay};
 
 use crate::ParseCtx;
 
@@ -28,7 +27,7 @@ pub fn diff(
         match (base_bytes, target_bytes) {
             (None, None) => {}
             (Some(_), None) => {
-                overlay.set_artifact_body(LpPathBuf::from(path), ArtifactBodyEdit::Delete);
+                overlay.set_artifact_body(ArtifactLocation::file(path), ArtifactBodyEdit::Delete);
             }
             (None, Some(bytes)) | (Some(_), Some(bytes)) if base_bytes != target_bytes => {
                 if path.ends_with(".toml") {
@@ -37,12 +36,12 @@ pub fn diff(
                     let ops = diff_node_defs(&base_def, &target_def, ctx)?;
                     if !ops.is_empty() {
                         for op in ops {
-                            overlay.put_slot_edit(LpPathBuf::from(path), op);
+                            overlay.put_slot_edit(ArtifactLocation::file(path), op);
                         }
                     }
                 } else {
                     overlay.set_artifact_body(
-                        LpPathBuf::from(path),
+                        ArtifactLocation::file(path),
                         ArtifactBodyEdit::ReplaceBody(bytes.to_vec()),
                     );
                 }

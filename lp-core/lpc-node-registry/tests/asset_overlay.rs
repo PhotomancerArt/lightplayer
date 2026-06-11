@@ -5,7 +5,7 @@ mod common;
 use common::{fixtures, overlay};
 use lpc_model::{Revision, SourceFileSlot};
 use lpc_node_registry::{
-    ArtifactError, ArtifactReadFailure, MaterializeError, NodeDefEntry, NodeDefLoc,
+    ArtifactError, ArtifactReadFailure, MaterializeError, NodeDefEntry, NodeDefLocation,
     NodeDefRegistry, ParseCtx, SourceDiagnosticCtx,
 };
 use lpfs::LpPath;
@@ -17,7 +17,7 @@ fn diag_ctx() -> SourceDiagnosticCtx {
     }
 }
 
-fn load_shader_root(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs) -> NodeDefLoc {
+fn load_shader_root(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs) -> NodeDefLocation {
     let shapes = overlay::parse_ctx();
     let ctx = ParseCtx { shapes: &shapes };
     registry
@@ -25,7 +25,7 @@ fn load_shader_root(registry: &mut NodeDefRegistry, fs: &dyn lpfs::LpFs) -> Node
         .unwrap()
 }
 
-fn snapshot_entry(registry: &NodeDefRegistry, loc: &NodeDefLoc) -> NodeDefEntry {
+fn snapshot_entry(registry: &NodeDefRegistry, loc: &NodeDefLocation) -> NodeDefEntry {
     registry.get(loc).expect("entry").clone()
 }
 

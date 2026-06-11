@@ -5,8 +5,8 @@ use alloc::vec::Vec;
 
 use crate::ArtifactLocation;
 
-use super::sync_result::DefChangeDetail;
-use super::{NodeDefEntry, NodeDefLoc, NodeDefState, NodeDefUpdates};
+use super::{NodeDefEntry, NodeDefLocation, NodeDefState, NodeDefUpdates};
+use lpc_model::NodeDefChangeDetail;
 
 pub(crate) fn state_changed(before: &NodeDefState, after: &NodeDefState) -> bool {
     match (before, after) {
@@ -22,10 +22,10 @@ pub(crate) fn state_changed(before: &NodeDefState, after: &NodeDefState) -> bool
 }
 
 pub(crate) fn build_change_details(
-    before: &BTreeMap<NodeDefLoc, NodeDefState>,
+    before: &BTreeMap<NodeDefLocation, NodeDefState>,
     updates: &NodeDefUpdates,
-    entries: &BTreeMap<NodeDefLoc, NodeDefEntry>,
-) -> Vec<(NodeDefLoc, DefChangeDetail)> {
+    entries: &BTreeMap<NodeDefLocation, NodeDefEntry>,
+) -> Vec<(NodeDefLocation, NodeDefChangeDetail)> {
     updates
         .changed
         .iter()
@@ -37,19 +37,19 @@ pub(crate) fn build_change_details(
         .collect()
 }
 
-fn classify_def_change(before: &NodeDefState, after: &NodeDefState) -> DefChangeDetail {
+fn classify_def_change(before: &NodeDefState, after: &NodeDefState) -> NodeDefChangeDetail {
     match (before, after) {
         (_, NodeDefState::ParseError(_)) if !matches!(before, NodeDefState::ParseError(_)) => {
-            DefChangeDetail::EnteredError
+            NodeDefChangeDetail::EnteredError
         }
-        (NodeDefState::ParseError(_), NodeDefState::Loaded(_)) => DefChangeDetail::LeftError,
+        (NodeDefState::ParseError(_), NodeDefState::Loaded(_)) => NodeDefChangeDetail::LeftError,
         (NodeDefState::Loaded(b), NodeDefState::Loaded(a)) if b.kind() != a.kind() => {
-            DefChangeDetail::KindChanged {
+            NodeDefChangeDetail::KindChanged {
                 from: b.kind(),
                 to: a.kind(),
             }
         }
-        _ => DefChangeDetail::Content,
+        _ => NodeDefChangeDetail::Content,
     }
 }
 

@@ -3,10 +3,10 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use lpc_model::{ArtifactSpec, Revision};
+use lpc_model::{ArtifactLocation, ArtifactSpec, Revision};
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath, LpPathBuf};
 
-use super::{ArtifactEntry, ArtifactError, ArtifactLocation, ArtifactReadFailure, ArtifactReadState};
+use super::{ArtifactEntry, ArtifactError, ArtifactReadFailure, ArtifactReadState};
 
 /// Catalog of project file artifacts keyed by [`ArtifactLocation`].
 ///
@@ -29,7 +29,11 @@ impl ArtifactStore {
     }
 
     /// Register a resolved location, or return the existing entry's location.
-    pub fn register_location(&mut self, location: ArtifactLocation, frame: Revision) -> ArtifactLocation {
+    pub fn register_location(
+        &mut self,
+        location: ArtifactLocation,
+        frame: Revision,
+    ) -> ArtifactLocation {
         if let Some(entry) = self.by_location.get(&location) {
             return entry.location.clone();
         }
@@ -50,10 +54,7 @@ impl ArtifactStore {
         frame: Revision,
     ) -> Result<ArtifactLocation, ArtifactError> {
         let location = ArtifactLocation::try_from_specifier(specifier)?;
-        let path = location
-            .file_path()
-            .cloned()
-            .ok_or_else(|| ArtifactError::internal("expected file artifact location"))?;
+        let path = location.file_path().clone();
         Ok(self.register_file(path, frame))
     }
 
@@ -74,7 +75,7 @@ impl ArtifactStore {
             .map(|entry| entry.location.clone())
     }
 
-    pub fn locations(&self) -> impl Iterator<Item =ArtifactLocation> + '_ {
+    pub fn locations(&self) -> impl Iterator<Item = ArtifactLocation> + '_ {
         self.by_location
             .values()
             .map(|entry| entry.location.clone())
@@ -91,10 +92,7 @@ impl ArtifactStore {
         location: &ArtifactLocation,
         fs: &dyn LpFs,
     ) -> Result<Vec<u8>, ArtifactError> {
-        let path = location
-            .file_path()
-            .cloned()
-            .ok_or_else(|| ArtifactError::internal("expected file artifact location"))?;
+        let path = location.file_path().clone();
 
         if self.entry(location).is_none() {
             return Err(ArtifactError::UnknownArtifact {
@@ -137,9 +135,7 @@ impl Default for ArtifactStore {
 impl ArtifactStore {
     fn apply_fs_change(&mut self, change: &FsEvent, frame: Revision) {
         for entry in self.by_location.values_mut() {
-            let Some(path) = entry.location.file_path() else {
-                continue;
-            };
+            let path = entry.location.file_path();
             if path != &change.path {
                 continue;
             }

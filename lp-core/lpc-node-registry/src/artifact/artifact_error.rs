@@ -2,8 +2,8 @@
 
 use alloc::string::String;
 
-use super::ArtifactLocation;
 use super::ArtifactReadFailure;
+use lpc_model::{ArtifactLocation, ArtifactLocationError};
 
 /// Errors returned by [`super::ArtifactStore`] and read operations.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -18,8 +18,10 @@ pub enum ArtifactError {
     Internal(String),
 }
 
-impl ArtifactError {
-    pub(crate) fn internal(message: impl Into<String>) -> Self {
-        Self::Internal(message.into())
+impl From<ArtifactLocationError> for ArtifactError {
+    fn from(err: ArtifactLocationError) -> Self {
+        match err {
+            ArtifactLocationError::Resolution(message) => Self::Resolution(message),
+        }
     }
 }

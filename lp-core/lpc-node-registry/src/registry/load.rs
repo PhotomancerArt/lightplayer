@@ -5,7 +5,7 @@ use alloc::string::{String, ToString};
 use lpc_model::{NodeDef, NodeInvocation, Revision, SlotPath, resolve_artifact_specifier};
 use lpfs::{LpFs, LpPath};
 
-use super::{NodeDefLoc, NodeDefRegistry, NodeDefState, ParseCtx, RegistryError};
+use super::{NodeDefLocation, NodeDefRegistry, NodeDefState, ParseCtx, RegistryError};
 
 impl NodeDefRegistry {
     /// Load all defs reachable from a root node-definition TOML file.
@@ -17,7 +17,7 @@ impl NodeDefRegistry {
         root_path: &LpPath,
         frame: Revision,
         ctx: &ParseCtx<'_>,
-    ) -> Result<NodeDefLoc, RegistryError> {
+    ) -> Result<NodeDefLocation, RegistryError> {
         if !self.defs.is_empty() {
             return Err(RegistryError::NotEmpty);
         }
@@ -41,10 +41,10 @@ impl NodeDefRegistry {
         frame: Revision,
         fs: &dyn LpFs,
         ctx: &ParseCtx<'_>,
-    ) -> Result<NodeDefLoc, RegistryError> {
+    ) -> Result<NodeDefLocation, RegistryError> {
         let revision = self.store.revision(&location).unwrap_or(frame);
         let state = self.read_artifact_state(&location, fs, ctx)?;
-        let loc = NodeDefLoc::artifact_root(location.clone());
+        let loc = NodeDefLocation::artifact_root(location.clone());
         self.register_def_at_location(loc.clone(), state.clone(), revision)?;
         if let NodeDefState::Loaded(def) = state {
             self.register_invocations(&location, file_path, def, SlotPath::root(), frame, fs, ctx)?;
@@ -76,7 +76,7 @@ impl NodeDefRegistry {
                             }
                         })?;
                     let child_location = self.store.register_file(child_path.clone(), frame);
-                    let child_loc = NodeDefLoc::artifact_root(child_location.clone());
+                    let child_loc = NodeDefLocation::artifact_root(child_location.clone());
                     if !self.defs.contains_key(&child_loc) {
                         self.register_artifact_subtree(
                             child_location,
@@ -88,7 +88,7 @@ impl NodeDefRegistry {
                     }
                 }
                 NodeInvocation::Def(body) => {
-                    let loc = NodeDefLoc {
+                    let loc = NodeDefLocation {
                         artifact: location.clone(),
                         path: site.path.clone(),
                     };

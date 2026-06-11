@@ -4,8 +4,8 @@ use alloc::format;
 use alloc::string::{String, ToString};
 
 use lpc_model::{
-    ArtifactBodyEdit, ArtifactOverlay, LpPathBuf, ProjectOverlay, Revision, SlotPath,
-    SourceFileSlot, SourcePath,
+    ArtifactBodyEdit, ArtifactLocation, ArtifactOverlay, LpPathBuf, ProjectOverlay, Revision,
+    SlotPath, SourceFileSlot, SourcePath,
 };
 use lpfs::LpFs;
 
@@ -99,7 +99,7 @@ fn materialize_file_artifact_overlay(
     authored_path: &SourcePath,
     slot: &SourceFileSlot,
 ) -> Result<Option<MaterializedSource>, MaterializeError> {
-    let Some(pending) = overlay.artifact(resolved_path) else {
+    let Some(pending) = overlay.artifact(&ArtifactLocation::file(resolved_path.clone())) else {
         return Ok(None);
     };
     match pending {
@@ -242,7 +242,7 @@ mod tests {
 
         let mut overlay = ProjectOverlay::new();
         overlay.set_artifact_body(
-            LpPathBuf::from("/shader.glsl"),
+            ArtifactLocation::file("/shader.glsl"),
             ArtifactBodyEdit::ReplaceBody(b"v2-overlay".to_vec()),
         );
 
@@ -274,7 +274,10 @@ mod tests {
             resolve_source_file(&mut store, containing, &slot, Revision::new(1)).expect("resolve");
 
         let mut overlay = ProjectOverlay::new();
-        overlay.set_artifact_body(LpPathBuf::from("/shader.glsl"), ArtifactBodyEdit::Delete);
+        overlay.set_artifact_body(
+            ArtifactLocation::file("/shader.glsl"),
+            ArtifactBodyEdit::Delete,
+        );
 
         let err = materialize_source(
             &mut store,

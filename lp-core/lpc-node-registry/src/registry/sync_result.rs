@@ -2,24 +2,13 @@
 
 use alloc::vec::Vec;
 
-use lpc_model::NodeKind;
-
-use super::{NodeDefLoc, NodeDefUpdates};
-
-/// Factual classification of a def change (not engine policy).
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum DefChangeDetail {
-    Content,
-    KindChanged { from: NodeKind, to: NodeKind },
-    EnteredError,
-    LeftError,
-}
+use lpc_model::{NodeDefChangeDetail, NodeDefLocation, NodeDefUpdates};
 
 /// Factual diff after applying a change batch and updating registry state.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SyncResult {
     pub def_updates: NodeDefUpdates,
-    pub change_details: Vec<(NodeDefLoc, DefChangeDetail)>,
+    pub change_details: Vec<(NodeDefLocation, NodeDefChangeDetail)>,
 }
 
 impl SyncResult {
