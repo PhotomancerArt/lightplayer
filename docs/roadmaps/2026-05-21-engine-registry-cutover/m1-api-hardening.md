@@ -43,8 +43,8 @@ Deliverables live in that plan directory:
 
 | # | Question | Context | Suggested default |
 |---|----------|---------|-------------------|
-| A1 | Which types live in `lpc-model::edit`? | Today in `lpc-node-registry/src/edit/` | `SlotEdit`, `AssetEdit`, `ArtifactEdit`, `EditBatch`, `EditBatchId`, `EditTarget`, shared errors |
-| A2 | Does `SyncOp` live in model? | Wire likely mirrors registry ingress | **Yes** — serde enum in model; registry `sync()` takes it |
+| A1 | Which types live in `lpc-model::edit`? | Portable edit vocabulary must be shared by wire and registry | `SlotEdit`, `ArtifactBodyEdit`, `ArtifactEdit`, `ProjectEditBatch`, command ids/results, portable definition locations |
+| A2 | Does `SyncOp` live in model? | `SyncOp` mixes client edits with server-local fs events | **No** — client wire uses project edit batches; registry `SyncOp::Fs` remains local |
 | A3 | `EditTarget::Id(ArtifactId)` on wire? | Id is registry-internal | **Path only** on wire; registry resolves id locally if kept in model |
 | A4 | `EditError` in model vs wire-only rejections? | Two layers today | Model: apply errors; wire: request rejections + mapping table |
 | A5 | `schemars` on model edit types? | Wire has schema-gen | Mirror `lpc-wire` pattern via model feature flag |
@@ -55,7 +55,7 @@ Deliverables live in that plan directory:
 | # | Question | Context | Suggested default |
 |---|----------|---------|-------------------|
 | B1 | Piggyback on `ProjectReadRequest` vs new message? | Mutations already piggybacked | TBD — document tradeoffs in M1 |
-| B2 | Wire op set = full `SyncOp` or subset? | Fs likely server-local | Client: Apply, Remove, ClearPending, Commit, Discard; no Fs on wire |
+| B2 | Wire op set = full `SyncOp` or subset? | Fs events are server-local | Client: apply artifact edit, remove pending artifact, discard overlay, commit; no Fs on wire |
 | B3 | Response carries `SyncOutcome`? | Today only mutation accept/reject | Extend `ProjectReadResponse` with pending + commit summary |
 | B4 | Optimistic concurrency model? | Slot mutation uses shape/data `Revision` CAS | Overlay model: pending until commit; define conflict rules for concurrent Apply |
 
@@ -79,7 +79,7 @@ Deliverables live in that plan directory:
 
 | # | Question | Context | Suggested default |
 |---|----------|---------|-------------------|
-| E1 | Explicit Commit on wire? | Registry already has `SyncOp::Commit` | **Yes** — client drives commit; server does not auto-commit edits |
+| E1 | Explicit Commit on wire? | Registry commit is exposed through `ProjectEditOp::Commit` | **Yes** — client drives commit; server does not auto-commit edits |
 | E2 | Discard / ClearPending exposure? | Registry supports both | Wire both for editor reset |
 | E3 | Read effective vs committed in project read? | `NodeDefView` vs `get()` | Define query flag or always effective for editor |
 
@@ -90,14 +90,14 @@ Current production edit path (debug UI):
 | Capability | Today (`WireSlotMutation`) | Edit language equivalent | M1 note |
 |------------|---------------------------|--------------------------|---------|
 | Value leaf edit | `SetValue` on `node.<id>.def` + `SlotPath` | `AssignValue` on artifact path + path | Needs C2 mapping |
-| Enum / kind change | Not on wire | `UseEnumVariant` | UI gap — plan or defer |
-| Map insert/remove | Not on wire | `MapInsert` / `MapRemove` | UI gap |
-| Option some/none | Not on wire | `UseOption` | UI gap |
-| Asset file body | Not on wire | `AssetEdit::ReplaceBody` | UI gap (shader editor future) |
-| Delete file | Not on wire | `AssetEdit::Delete` | UI gap |
+| Enum / kind change | Not on wire | `EnsurePresent` on variant path | POC |
+| Map insert/remove | Not on wire | `EnsurePresent` / `Remove` | POC |
+| Option some/none | Not on wire | `EnsurePresent` / `Remove` | POC |
+| Artifact body replace | Not on wire | `ArtifactBodyEdit::ReplaceBody` | POC |
+| Artifact delete | Not on wire | `ArtifactBodyEdit::Delete` | POC |
 | Pending indicator | `SlotMirrorView.pending` + mutation id | Client overlay mirror TBD | Redesign in M2/M3 |
 | Conflict handling | shape/data revision CAS | TBD (B4) | M1 must decide |
-| Commit | Immediate apply to engine memory | `SyncOp::Commit` | **Behavior change** — UI must add commit |
+| Commit | Immediate apply to engine memory | `ProjectEditOp::Commit` | **Behavior change** — UI must add commit |
 | Error display | `WireSlotMutationRejection` | `EditError` / wire rejection | Map in M1 |
 
 **M1 deliverable:** explicit v1 parity target — which rows are cutover blockers vs

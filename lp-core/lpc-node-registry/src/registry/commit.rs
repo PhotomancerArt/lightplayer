@@ -74,7 +74,7 @@ pub(crate) fn commit_slot_overlay(
         return Err(err);
     }
 
-    if let Err(err) = registry.reconcile_artifacts() {
+    if let Err(err) = registry.reconcile_artifacts(&mut def_updates) {
         registry.restore_entry_states(&before);
         return Err(err.into());
     }

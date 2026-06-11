@@ -22,10 +22,10 @@ No commit step. No overlay. Effective = committed = engine memory.
 ```text
 User edits control
   → Resolve (artifact_path, slot_path)   ← NEW: needs read metadata (M1 C2)
-  → Build ArtifactEdit::Slot { AssignValue, … }
-  → SyncOp::Apply (pending overlay)
+  → Build ArtifactEdit::Slot { AssignValue, EnsurePresent, Remove }
+  → ProjectEditBatch apply command (pending overlay)
   → Optional: read effective via project read
-  → User commits → SyncOp::Commit → fs + engine refresh
+  → User commits → ProjectEditBatch commit command → fs + engine refresh
 ```
 
 ## Capability matrix
@@ -36,10 +36,10 @@ User edits control
 | 2 | See edit errors inline | `WireSlotMutationRejection` | TBD wire rejection | **Yes** | Map error enums in M1 |
 | 3 | Pending / in-flight indicator | per-slot mutation id | client pending overlay | **Yes** | Redesign mirror model |
 | 4 | Optimistic local preview | pending queue, no local write | overlay mirror or wait for read | **TBD** | M1 B4 |
-| 5 | Change node kind | not in UI | `UseEnumVariant` | No v1? | Unless needed for examples |
-| 6 | Map / playlist entry edits | not in UI | `MapInsert`, etc. | No v1 | Harness only |
-| 7 | Option fields | not in UI | `UseOption` | No v1 | |
-| 8 | Edit GLSL source | not via mutation | `AssetEdit::ReplaceBody` | No v1 | Future asset editor |
+| 5 | Change node kind | not in UI | `EnsurePresent` on variant path | POC | Default-based kind switch |
+| 6 | Map / playlist entry edits | not in UI | `EnsurePresent` / `Remove` | POC | SlotPath identity creates map keys |
+| 7 | Option fields | not in UI | `EnsurePresent` / `Remove` | POC | No separate option op |
+| 8 | Edit GLSL source | not via mutation | `ArtifactBodyEdit::ReplaceBody` | POC | Future asset editor |
 | 9 | Commit / discard | N/A (instant) | explicit ops | **Yes** | UX change — add UI affordance? |
 | 10 | Node tree slot read | `node.<id>.def` roots in project read | effective defs from registry | **Yes** | Read path must use NodeDefView |
 

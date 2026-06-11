@@ -191,32 +191,80 @@ impl NodeDefRegistry {
         self.store.register_file(path, frame)
     }
 
-    fn referenced_locations(&self) -> BTreeSet<ArtifactLoc> {
-        let mut referenced = self
-            .defs
-            .keys()
-            .map(|loc| loc.artifact.clone())
-            .collect::<BTreeSet<_>>();
+    fn referenced_locations(&self) -> Result<BTreeSet<ArtifactLoc>, RegistryError> {
+        let Some(root) = self.root.as_ref() else {
+            return Ok(self.store.locations().collect());
+        };
+        let mut referenced = BTreeSet::new();
+        let mut visited_defs = BTreeSet::new();
+        self.collect_referenced_locations(root, &mut referenced, &mut visited_defs)?;
+        Ok(referenced)
+    }
 
-        for (loc, entry) in &self.defs {
-            let NodeDefState::Loaded(def) = &entry.state else {
-                continue;
-            };
-            let Some(containing) = loc.artifact.file_path() else {
-                continue;
-            };
-            if let Ok(paths) = def.referenced_asset_paths(containing.as_path()) {
-                for path in paths {
-                    referenced.insert(ArtifactLoc::location_for_path(path.as_path()));
+    fn collect_referenced_locations(
+        &self,
+        loc: &NodeDefLoc,
+        referenced: &mut BTreeSet<ArtifactLoc>,
+        visited_defs: &mut BTreeSet<NodeDefLoc>,
+    ) -> Result<(), RegistryError> {
+        if !visited_defs.insert(loc.clone()) {
+            return Ok(());
+        }
+        referenced.insert(loc.artifact.clone());
+
+        let Some(entry) = self.defs.get(loc) else {
+            return Ok(());
+        };
+        let NodeDefState::Loaded(def) = &entry.state else {
+            return Ok(());
+        };
+        let Some(containing) = loc.artifact.file_path() else {
+            return Ok(());
+        };
+
+        for path in def
+            .referenced_asset_paths(containing.as_path())
+            .map_err(|err| RegistryError::SpecifierResolution {
+                message: String::from(err.to_string()),
+            })?
+        {
+            referenced.insert(ArtifactLoc::location_for_path(path.as_path()));
+        }
+
+        for site in def.invocation_sites(&loc.path) {
+            match &site.invocation {
+                NodeInvocation::Unset => {}
+                NodeInvocation::Ref(_) => {
+                    let Some(specifier) = site.invocation.ref_specifier() else {
+                        continue;
+                    };
+                    let child_path = resolve_artifact_specifier(containing.as_path(), &specifier)
+                        .map_err(|err| RegistryError::SpecifierResolution {
+                        message: String::from(err.to_string()),
+                    })?;
+                    let child_loc = NodeDefLoc::artifact_root(ArtifactLoc::location_for_path(
+                        child_path.as_path(),
+                    ));
+                    self.collect_referenced_locations(&child_loc, referenced, visited_defs)?;
+                }
+                NodeInvocation::Def(_) => {
+                    let child_loc = NodeDefLoc {
+                        artifact: loc.artifact.clone(),
+                        path: site.path,
+                    };
+                    self.collect_referenced_locations(&child_loc, referenced, visited_defs)?;
                 }
             }
         }
 
-        referenced
+        Ok(())
     }
 
-    pub(crate) fn reconcile_artifacts(&mut self) -> Result<(), RegistryError> {
-        let referenced = self.referenced_locations();
+    pub(crate) fn reconcile_artifacts(
+        &mut self,
+        updates: &mut NodeDefUpdates,
+    ) -> Result<(), RegistryError> {
+        let referenced = self.referenced_locations()?;
         let to_unregister: Vec<ArtifactLoc> = self
             .store
             .locations()
@@ -225,6 +273,19 @@ impl NodeDefRegistry {
 
         for location in to_unregister {
             self.store.unregister(&location)?;
+            let removed: Vec<NodeDefLoc> = self
+                .defs
+                .keys()
+                .filter(|loc| loc.artifact == location)
+                .cloned()
+                .collect();
+            for loc in removed {
+                updates.push_removed(loc.clone());
+                self.defs.remove(&loc);
+                if self.root.as_ref() == Some(&loc) {
+                    self.root = None;
+                }
+            }
         }
         Ok(())
     }

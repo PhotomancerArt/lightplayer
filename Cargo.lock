@@ -4094,6 +4094,7 @@ name = "lpc-node-registry"
 version = "40.0.0"
 dependencies = [
  "lpc-model",
+ "lpc-wire",
  "lpfs",
  "serde",
  "serde_json",

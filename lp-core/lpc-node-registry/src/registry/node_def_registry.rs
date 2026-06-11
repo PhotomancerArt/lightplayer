@@ -2,7 +2,7 @@
 
 use alloc::collections::BTreeMap;
 
-use lpc_model::{Revision, SlotPath};
+use lpc_model::{ArtifactBodyEdit, Revision, SlotPath};
 use lpfs::{LpFs, LpPath, LpPathBuf};
 
 use crate::edit_apply::EditError;
@@ -61,16 +61,37 @@ impl NodeDefRegistry {
         self.queue_slot_edit(path, &op, fs, ctx, frame)
     }
 
+    /// Set pending artifact body state for one artifact path.
+    pub fn set_pending_artifact_body(
+        &mut self,
+        path: LpPathBuf,
+        edit: ArtifactBodyEdit,
+    ) -> Result<(), EditError> {
+        super::path_validation::require_absolute_path(path.clone())?;
+        let location = self.location_for_pending_path(LpPath::new(path.as_str()));
+        self.overlay
+            .ensure_pending(location)
+            .set_artifact_body(edit);
+        Ok(())
+    }
+
     /// Set pending asset state for one artifact path.
     pub fn set_pending_asset(
         &mut self,
         path: LpPathBuf,
         asset: AssetEdit,
     ) -> Result<(), EditError> {
-        super::path_validation::require_absolute_path(path.clone())?;
-        let location = self.location_for_pending_path(LpPath::new(path.as_str()));
-        self.overlay.ensure_pending(location).set_asset(asset);
-        Ok(())
+        match asset.into_artifact_body() {
+            Some(edit) => self.set_pending_artifact_body(path, edit),
+            None => {
+                super::path_validation::require_absolute_path(path.clone())?;
+                let location = self.location_for_pending_path(LpPath::new(path.as_str()));
+                self.overlay
+                    .ensure_pending(location)
+                    .set_asset(AssetEdit::None);
+                Ok(())
+            }
+        }
     }
 
     /// Merge pending overlay edits into the registry overlay.

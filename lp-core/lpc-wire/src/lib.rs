@@ -11,6 +11,7 @@ pub mod json;
 pub mod message;
 pub mod messages;
 pub mod project;
+pub mod project_edit;
 pub mod serde_base64;
 pub mod server;
 pub mod slot;
@@ -34,6 +35,7 @@ pub use project::{
     WireResourceSummary, WireRuntimeBufferKind, WireRuntimeBufferMetadataPayload,
     WireRuntimeBufferPayload, WireTextureFormat,
 };
+pub use project_edit::{WireProjectEditRequest, WireProjectEditResponse};
 pub use server::{
     AvailableProject, ClientMsgBody, FsRequest, FsResponse, LoadedProject, MemoryStats,
     SampleStats, ServerConfig, ServerMsgBody,

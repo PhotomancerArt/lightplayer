@@ -12,12 +12,13 @@
 - **Why:** Avoid wire/registry churn; user-requested gate.
 - **Revisit when:** M1 exit criteria met.
 
-#### Edit vocabulary in lpc-model (intent)
+#### Edit vocabulary in lpc-model
 
-- **Decision:** Shared serde edit types **should** live in **`lpc-model::edit`**.
+- **Decision:** Shared serde edit types live in **`lpc-model::edit`**.
 - **Why:** Wire + registry need one vocabulary; wire cannot depend on registry.
-- **Status:** **Pending M1 sign-off** — module layout and type list in
-  `m1-api-hardening/00-design.md`.
+- **Status:** Implemented for the registry wire-edit POC with `SlotEdit`,
+  `ArtifactBodyEdit`, `ArtifactEdit`, `ProjectEditBatch`, command results, and
+  portable definition locations.
 
 #### Edit types are still not SlotData
 
@@ -32,9 +33,29 @@
 
 #### Wire addressing
 
-- **Decision:** TBD in M1 — **lean** artifact path + `SlotPath` for edits.
+- **Decision:** Authored edits use artifact path + `SlotPath`; read/UI metadata
+  will bridge runtime nodes to those edit addresses during cutover.
 - **Rejected for now:** Keeping `node.<id>.def` as the edit wire root.
 - **Revisit when:** M1 UI parity doc — may require read metadata, not second root.
+
+#### Artifact body edit naming
+
+- **Decision:** New shared/wire-facing byte-level operations use
+  `ArtifactBodyEdit`, not `AssetEdit`.
+- **Why:** The operation can replace or delete any artifact body, including
+  `.toml` definitions. "Asset" remains useful for non-def referenced files such
+  as GLSL/SVG bodies.
+- **Status:** Implemented for the POC. Registry keeps `AssetEdit` compatibility
+  wrappers until cleanup removes the legacy name.
+
+#### Project edit batches, not registry SyncOp on wire
+
+- **Decision:** Client-authored edit commands use `ProjectEditBatch` /
+  `ProjectEditOp`; registry `SyncOp::Fs` stays server-local.
+- **Why:** `SyncOp` mixes client edit intent with filesystem watcher events.
+  Exposing it would leak registry mechanics into the wire contract.
+- **Status:** Implemented for the POC with `lpc-wire::WireProjectEditRequest`
+  and `WireProjectEditResponse` wrappers.
 
 #### Legacy mutation cleanup
 

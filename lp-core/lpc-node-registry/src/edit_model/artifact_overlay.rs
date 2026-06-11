@@ -1,9 +1,9 @@
-//! Address-keyed pending artifact edits (slot upserts and asset replacements).
+//! Address-keyed pending artifact edits (slot upserts and body replacements).
 
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use lpc_model::{NodeDef, SlotPath};
+use lpc_model::{ArtifactBodyEdit, NodeDef, SlotPath};
 
 use crate::ArtifactLoc;
 
@@ -20,10 +20,15 @@ pub struct ArtifactOverlay {
 pub struct ArtifactEdits {
     /// Pending slot ops in apply order. Same [`SlotEdit::path`] upserts in place.
     slot_edits: Vec<SlotEdit>,
+    /// Pending whole-body operation for this artifact.
+    pub body_edit: Option<ArtifactBodyEdit>,
     pub asset_edit: AssetEdit,
 }
 
-/// Pending asset body or deletion for one artifact.
+/// Legacy pending artifact body or deletion state for one artifact.
+///
+/// Prefer [`ArtifactBodyEdit`] in new APIs. `None` is kept here because the
+/// registry overlay stores absence and body edits in one compatibility field.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub enum AssetEdit {
     #[default]
@@ -33,8 +38,9 @@ pub enum AssetEdit {
 }
 
 impl ArtifactEdits {
-    /// Insert or replace the pending edit; clears asset pending.
+    /// Insert or replace the pending edit; clears body pending.
     pub fn upsert_slot(&mut self, edit: SlotEdit) {
+        self.body_edit = None;
         self.asset_edit = AssetEdit::None;
         let target = edit.path().clone();
         let clear_scopes = structural_clear_scopes(&edit);
@@ -71,14 +77,22 @@ impl ArtifactEdits {
         self.slot_edits.push(edit);
     }
 
-    /// Set asset pending state; clears all slot edits.
+    /// Set artifact body pending state; clears all slot edits.
+    pub fn set_artifact_body(&mut self, edit: ArtifactBodyEdit) {
+        self.body_edit = Some(edit.clone());
+        self.asset_edit = AssetEdit::from(edit);
+        self.slot_edits.clear();
+    }
+
+    /// Set legacy asset/body pending state; clears all slot edits.
     pub fn set_asset(&mut self, asset: AssetEdit) {
+        self.body_edit = asset.clone().into_artifact_body();
         self.asset_edit = asset;
         self.slot_edits.clear();
     }
 
     pub fn is_empty(&self) -> bool {
-        matches!(self.asset_edit, AssetEdit::None) && self.slot_edits.is_empty()
+        self.body_edit.is_none() && self.slot_edits.is_empty()
     }
 
     pub fn slot_edits(&self) -> impl Iterator<Item = &SlotEdit> {
@@ -93,6 +107,10 @@ impl ArtifactEdits {
         &self.asset_edit
     }
 
+    pub fn artifact_body_pending(&self) -> Option<&ArtifactBodyEdit> {
+        self.body_edit.as_ref()
+    }
+
     pub fn has_pending_at_path(&self, path: &SlotPath) -> bool {
         self.slot_edits.iter().any(|edit| edit.path() == path)
     }
@@ -102,8 +120,27 @@ impl ArtifactEdits {
         for op in other.slot_edits() {
             self.upsert_slot(op.clone());
         }
-        if !matches!(other.asset_pending(), AssetEdit::None) {
-            self.set_asset(other.asset_pending().clone());
+        if let Some(edit) = other.artifact_body_pending() {
+            self.set_artifact_body(edit.clone());
+        }
+    }
+}
+
+impl From<ArtifactBodyEdit> for AssetEdit {
+    fn from(edit: ArtifactBodyEdit) -> Self {
+        match edit {
+            ArtifactBodyEdit::Delete => Self::Delete,
+            ArtifactBodyEdit::ReplaceBody(bytes) => Self::ReplaceBody(bytes),
+        }
+    }
+}
+
+impl AssetEdit {
+    pub fn into_artifact_body(self) -> Option<ArtifactBodyEdit> {
+        match self {
+            Self::None => None,
+            Self::Delete => Some(ArtifactBodyEdit::Delete),
+            Self::ReplaceBody(bytes) => Some(ArtifactBodyEdit::ReplaceBody(bytes)),
         }
     }
 }

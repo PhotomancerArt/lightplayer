@@ -101,7 +101,7 @@ impl NodeDefRegistry {
             self.sync_def_artifact(location, fs, frame, ctx, &mut def_updates);
         }
 
-        let _ = self.reconcile_artifacts();
+        let _ = self.reconcile_artifacts(&mut def_updates);
 
         let change_details = build_change_details(&before, &def_updates, &self.defs);
         SyncResult {

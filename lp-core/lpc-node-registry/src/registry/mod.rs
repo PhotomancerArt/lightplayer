@@ -14,6 +14,7 @@ mod node_def_state;
 mod node_def_updates;
 mod parse_ctx;
 pub mod path_validation;
+mod project_edit;
 mod queue_edit;
 mod registry_change;
 mod registry_error;

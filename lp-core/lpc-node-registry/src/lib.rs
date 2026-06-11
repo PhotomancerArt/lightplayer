@@ -36,7 +36,9 @@ pub use artifact::{
 };
 #[cfg(feature = "diff")]
 pub use diff::{DiffError, ProjectSnapshot, assert_equivalent, diff};
-pub use edit::{ArtifactEdits, ArtifactOverlay, AssetEdit, CommitError, EditError, SlotEdit};
+pub use edit::{
+    ArtifactBodyEdit, ArtifactEdits, ArtifactOverlay, AssetEdit, CommitError, EditError, SlotEdit,
+};
 #[allow(deprecated, reason = "legacy sync op alias for migration")]
 pub use registry::RegistryChange;
 pub use registry::{

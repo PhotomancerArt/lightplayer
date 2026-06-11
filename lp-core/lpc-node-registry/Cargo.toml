@@ -22,6 +22,7 @@ lpfs = { path = "../../lp-base/lpfs", default-features = false }
 serde = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
+lpc-wire = { path = "../lpc-wire", default-features = false }
 serde_json = { workspace = true }
 
 [lints]
