@@ -1,7 +1,8 @@
 mod support;
 
 use lpc_model::{
-    NodeDefLocation, NodeDefState, ProjectNodeLocation, ProjectNodeOrigin, ProjectNodePlacement, SlotPath,
+    NodeDefLocation, NodeDefState, ProjectNodeLocation, ProjectNodeOrigin, ProjectNodePlacement,
+    SlotPath,
 };
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpfs::{LpFsMemory, LpPath};

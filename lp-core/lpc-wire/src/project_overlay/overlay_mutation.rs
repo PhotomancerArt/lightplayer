@@ -1,6 +1,6 @@
 //! Project overlay mutation envelopes.
 
-use lpc_model::project::overlay_mutation::mutation_cmd::{MutationCmdBatch, MutationCmdBatchResult};
+use lpc_model::{MutationCmdBatch, MutationCmdBatchResult};
 
 /// Wire request for an ordered overlay mutation batch.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -31,12 +31,9 @@ mod tests {
     use super::*;
     use alloc::vec;
     use lpc_model::{
-        ArtifactLocation, AssetOverlay,
-        SlotEdit,
-        SlotPath,
+        ArtifactLocation, AssetOverlay, MutationCmd, MutationCmdId, MutationCmdResult,
+        MutationEffect, MutationOp, SlotEdit, SlotPath,
     };
-    use lpc_model::project::overlay_mutation::mutation_cmd::{MutationCmd, MutationCmdId, MutationCmdResult, MutationEffect};
-    use lpc_model::project::overlay_mutation::mutation_op::MutationOp;
 
     #[test]
     fn overlay_mutation_request_round_trips() {

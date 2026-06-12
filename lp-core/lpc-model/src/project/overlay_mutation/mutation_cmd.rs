@@ -1,8 +1,12 @@
-use std::prelude::rust_2015::{String, Vec};
-use crate::MutationOp;
+use alloc::string::String;
+use alloc::vec::Vec;
+
+use super::MutationOp;
+
 /// Ordered overlay mutation command batch.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MutationCmdBatch {
+    /// Commands to apply in order.
     pub commands: Vec<MutationCmd>,
 }
 
@@ -15,6 +19,7 @@ impl MutationCmdBatch {
 /// Ordered result for an [`MutationCmdBatch`].
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MutationCmdBatchResult {
+    /// Per-command results in command order.
     pub results: Vec<MutationCmdResult>,
 }
 
@@ -54,14 +59,18 @@ impl MutationCmdId {
 /// One overlay mutation command with client correlation id.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MutationCmd {
+    /// Client-supplied command id for result correlation.
     pub id: MutationCmdId,
+    /// Mutation operation to apply.
     pub mutation: MutationOp,
 }
 
 /// Result for one overlay mutation command.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MutationCmdResult {
+    /// Command id copied from the input command.
     pub id: MutationCmdId,
+    /// Accepted or rejected status for the command.
     pub status: MutationCmdStatus,
 }
 
@@ -85,7 +94,9 @@ impl MutationCmdResult {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case", tag = "status")]
 pub enum MutationCmdStatus {
+    /// Mutation was accepted and applied to the overlay.
     Accepted { effect: MutationEffect },
+    /// Mutation was rejected without changing the overlay.
     Rejected { rejection: MutationRejection },
 }
 
@@ -93,6 +104,7 @@ pub enum MutationCmdStatus {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case", tag = "effect")]
 pub enum MutationEffect {
+    /// Whether the accepted mutation changed canonical overlay state.
     OverlayChanged { changed: bool },
 }
 
@@ -100,15 +112,20 @@ pub enum MutationEffect {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MutationRejectionReason {
+    /// Mutation referenced an invalid slot or artifact path.
     InvalidPath,
+    /// Mutation was well-formed but edit application failed.
     EditFailed,
+    /// Mutation is not supported by the current registry implementation.
     Unsupported,
 }
 
 /// Stable rejection for an overlay mutation command.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MutationRejection {
+    /// Stable rejection category.
     pub reason: MutationRejectionReason,
+    /// Human-readable rejection detail.
     pub message: String,
 }
 

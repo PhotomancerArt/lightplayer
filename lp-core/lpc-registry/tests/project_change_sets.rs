@@ -1,10 +1,10 @@
 mod support;
 
 use lpc_model::{
-    AssetChange, AssetChangeKind, AssetOverlay, NodeDefChange, NodeDefChangeKind, NodeKind,
+    AssetChange, AssetChangeKind, AssetOverlay, MutationOp, NodeDefChange, NodeDefChangeKind,
+    NodeKind,
 };
-use lpc_model::project::overlay_mutation::mutation_op::MutationOp;
-use support::{artifact, artifact_asset, root_def, RegistryScenario};
+use support::{RegistryScenario, artifact, artifact_asset, root_def};
 
 #[test]
 fn shader_source_file_refresh_reports_one_asset_body_change() {

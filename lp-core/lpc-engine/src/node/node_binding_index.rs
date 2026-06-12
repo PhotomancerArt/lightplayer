@@ -19,7 +19,9 @@ pub(super) struct NodeBindingIndex {
 }
 
 impl NodeBindingIndex {
-    pub(super) fn rebuild<N>(entries: &[Option<RuntimeNodeEntry<N>>]) -> Result<Self, BindingError> {
+    pub(super) fn rebuild<N>(
+        entries: &[Option<RuntimeNodeEntry<N>>],
+    ) -> Result<Self, BindingError> {
         let mut index = Self::default();
 
         for entry in entries.iter().filter_map(|entry| entry.as_ref()) {

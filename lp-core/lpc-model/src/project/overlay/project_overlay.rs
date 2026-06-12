@@ -1,14 +1,20 @@
-//! Canonical pending edits for a project.
-
 use alloc::collections::BTreeMap;
 
 use crate::{ArtifactLocation, SlotPath};
-use crate::MutationOp;
+
+use crate::project::overlay_mutation::MutationOp;
+
 use super::{ArtifactOverlay, AssetOverlay, SlotEdit, SlotOverlay};
 
-/// Current project-wide pending edit intent.
+/// Canonical pending edits for a project.
+///
+/// A project overlay is keyed by artifact location. Each artifact entry holds
+/// the current pending intent for that artifact, either structured slot edits or
+/// a whole-body asset edit. Empty artifact overlays are removed so the overlay
+/// stays canonical.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProjectOverlay {
+    /// Pending edits keyed by target artifact.
     pub artifacts: BTreeMap<ArtifactLocation, ArtifactOverlay>,
 }
 

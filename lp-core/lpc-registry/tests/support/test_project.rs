@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 
-use lpc_model::AssetOverlay;
-use lpc_model::project::overlay_mutation::mutation_cmd::{MutationCmd, MutationCmdBatch, MutationCmdId};
-use lpc_model::project::overlay_mutation::mutation_op::MutationOp;
+use lpc_model::{AssetOverlay, MutationCmd, MutationCmdBatch, MutationCmdId, MutationOp};
 use lpfs::{LpFsMemory, LpPath};
 
 use super::{artifact, project_files};

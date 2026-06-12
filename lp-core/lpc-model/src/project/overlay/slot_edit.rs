@@ -1,11 +1,17 @@
-//! Structured slot edits within an authored `.toml` artifact.
+//! Structured slot edits within an authored node-definition artifact.
+//!
+//! Slot edits are the smallest overlay operation for TOML-shaped node
+//! definitions. They use [`crate::SlotPath`] so callers can edit maps, options,
+//! enum variants, and value leaves without replacing the whole artifact body.
 
 use crate::{LpValue, SlotPath};
 
 /// One slot-tree edit within an authored artifact.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SlotEdit {
+    /// Target slot path inside the artifact's node definition.
     pub path: SlotPath,
+    /// Operation to apply at `path`.
     pub op: SlotEditOp,
 }
 

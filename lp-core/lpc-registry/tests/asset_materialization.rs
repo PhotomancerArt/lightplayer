@@ -1,12 +1,11 @@
 mod support;
 
 use lpc_model::{
-    ArtifactLocation, AssetOverlay, AssetSource, NodeDefLocation, SlotPath,
+    ArtifactLocation, AssetOverlay, AssetSource, MutationOp, NodeDefLocation, SlotPath,
 };
-use lpc_model::project::overlay_mutation::mutation_op::MutationOp;
 use lpc_registry::MaterializeAssetError;
 
-use support::{artifact, artifact_asset, RegistryScenario};
+use support::{RegistryScenario, artifact, artifact_asset};
 
 #[test]
 fn materializes_committed_shader_source_and_fixture_assets() {

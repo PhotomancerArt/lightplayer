@@ -1,14 +1,18 @@
-//! Effective project graph node identity.
-
 use alloc::vec::Vec;
 
 use crate::SlotPath;
 
 /// Deterministic identity for one effective project node instance.
 ///
-/// A project node key is authored-topology identity, not runtime identity. The
-/// root key has no segments; child keys append the authored invocation slot path
-/// at each parent step.
+/// A project node location identifies a node occurrence in the expanded
+/// [`crate::ProjectTree`]. It is distinct from [`crate::NodeDefLocation`]:
+/// definition locations identify authored data, while project node locations
+/// identify places where definitions are invoked from the project root.
+///
+/// The root location has no segments. A child location appends the child
+/// invocation slot path to its parent's segment list, so nested children are
+/// identified by invocation ancestry rather than by definition location or
+/// runtime [`crate::NodeId`].
 #[derive(
     Clone,
     Debug,
@@ -22,6 +26,7 @@ use crate::SlotPath;
     serde::Deserialize,
 )]
 pub struct ProjectNodeLocation {
+    /// Authored invocation path segments from the project root to this node.
     pub segments: Vec<LocationSeg>,
 }
 
@@ -48,6 +53,7 @@ impl ProjectNodeLocation {
     Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
 )]
 pub struct LocationSeg {
+    /// Slot path of the child invocation within its parent definition.
     pub slot: SlotPath,
 }
 

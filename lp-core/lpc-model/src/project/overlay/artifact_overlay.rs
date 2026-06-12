@@ -1,12 +1,16 @@
-//! Canonical pending edits for one artifact.
-
 use super::{AssetOverlay, SlotEdit, SlotOverlay};
 
 /// Current pending intent for one artifact.
+///
+/// An artifact overlay is exclusive: an artifact is either edited structurally
+/// through slot edits or edited as a whole asset body. Switching between those
+/// modes replaces the previous pending intent for that artifact.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case", tag = "kind")]
 pub enum ArtifactOverlay {
+    /// Structured edits to an authored node-definition artifact.
     Slot { overlay: SlotOverlay },
+    /// Whole-body edit to an asset or definition artifact.
     Asset { overlay: AssetOverlay },
 }
 

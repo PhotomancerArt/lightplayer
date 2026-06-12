@@ -1,10 +1,9 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    ArtifactLocation, AssetOverlay, AssetSource, AssetState, NodeDefLocation,
-    Revision, SlotShapeRegistry,
+    ArtifactLocation, AssetOverlay, AssetSource, AssetState, MutationOp, NodeDefLocation, Revision,
+    SlotShapeRegistry,
 };
-use lpc_model::project::overlay_mutation::mutation_op::MutationOp;
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpfs::{LpFsMemory, LpPath};
 

@@ -1,9 +1,8 @@
 use lpc_model::{
     ArtifactLocation, AssetBodySource, AssetChangeKind, AssetOverlay, AssetSource, AssetState,
-    LpValue, NodeDefChangeKind, NodeDefLocation, NodeDefState, Revision, SlotEdit,
+    LpValue, MutationOp, NodeDefChangeKind, NodeDefLocation, NodeDefState, Revision, SlotEdit,
     SlotPath, SlotShapeRegistry,
 };
-use lpc_model::project::overlay_mutation::mutation_op::MutationOp;
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpfs::{FsEvent, FsEventKind, LpFs, LpFsMemory, LpPath, LpPathBuf};
 

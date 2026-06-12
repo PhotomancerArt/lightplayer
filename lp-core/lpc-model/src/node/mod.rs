@@ -13,14 +13,16 @@ pub mod relative_node_ref;
 pub mod tree_path;
 
 pub use crate::nodes::node_def::{NodeArtifact, NodeDef};
-pub use kind::NodeKind;
-pub use crate::project::overlay_mutation::node_def_change_set::{NodeDefChange, NodeDefChangeKind, NodeDefChangeSet};
 pub use crate::project::inventory::node_def_entry::NodeDefEntry;
 pub use crate::project::inventory::node_def_location::NodeDefLocation;
 pub use crate::project::inventory::node_def_state::{NodeDefState, NodeDefValidationError};
-pub use crate::project::inventory::node_def_updates::{NodeDefChangeDetail, NodeDefUpdates};
-pub use node_id::NodeId;
+pub use crate::project::overlay_commit::node_def_updates::{NodeDefChangeDetail, NodeDefUpdates};
+pub use crate::project::overlay_mutation::node_def_change_set::{
+    NodeDefChange, NodeDefChangeKind, NodeDefChangeSet,
+};
 pub use crate::slots::node_invocation_slot::{NodeInvocation, NodeInvocationSlot};
+pub use kind::NodeKind;
+pub use node_id::NodeId;
 pub use node_name::{NodeName, NodeNameError};
 pub use relative_node_ref::{RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc};
 pub use tree_path::TreePath;

@@ -1,9 +1,7 @@
 use lpc_model::{
-    AssetSource, CommitResult, MutationBatchResults,
-    MutationResult, Revision, SlotShapeRegistry,
+    AssetSource, CommitResult, MutationBatchResults, MutationCmdBatch, MutationOp, MutationResult,
+    Revision, SlotShapeRegistry,
 };
-use lpc_model::project::overlay_mutation::mutation_cmd::MutationCmdBatch;
-use lpc_model::project::overlay_mutation::mutation_op::MutationOp;
 use lpc_registry::{
     LoadResult, MaterializeAssetError, MaterializedAsset, MaterializedTextAsset, ParseCtx,
     ProjectRegistry,
@@ -98,8 +96,7 @@ impl RegistryScenario {
         let ctx = ParseCtx {
             shapes: &self.shapes,
         };
-        self.registry
-            .mutate_batch(&self.fs, batch, frame, &ctx)
+        self.registry.mutate_batch(&self.fs, batch, frame, &ctx)
     }
 
     pub fn commit(&mut self) -> CommitResult {

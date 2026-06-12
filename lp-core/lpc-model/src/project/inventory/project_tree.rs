@@ -1,16 +1,26 @@
-//! Effective project graph topology.
-
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
 use crate::{AssetSource, NodeDefLocation, ProjectNode, ProjectNodeLocation};
 
-/// Effective post-overlay project node graph and reverse indexes.
+/// Effective post-overlay project node occurrences and reverse indexes.
+///
+/// `ProjectTree` contains expanded node occurrences reachable from the project
+/// root. It is tree-shaped because each occurrence has one parent, even when
+/// multiple occurrences point at the same [`crate::NodeDefLocation`].
+///
+/// Reverse indexes connect tree occurrences back to shared definitions and
+/// assets so runtime projection can answer "which node occurrences use this?"
+/// without re-walking authored definitions.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProjectTree {
+    /// Location of the project root occurrence.
     pub root: ProjectNodeLocation,
+    /// All effective node occurrences keyed by project-node location.
     pub nodes: BTreeMap<ProjectNodeLocation, ProjectNode>,
+    /// Reverse index from definition location to node occurrences using it.
     pub def_instances: BTreeMap<NodeDefLocation, Vec<ProjectNodeLocation>>,
+    /// Reverse index from asset source to node occurrences whose defs reference it.
     pub asset_consumers: BTreeMap<AssetSource, Vec<ProjectNodeLocation>>,
 }
 

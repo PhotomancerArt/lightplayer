@@ -1,5 +1,3 @@
-//! Canonical pending slot edits for one authored artifact.
-
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
@@ -7,9 +5,14 @@ use crate::{NodeDef, SlotPath, SlotPathSegment};
 
 use super::{SlotEdit, SlotEditOp};
 
-/// Current pending slot intent keyed by target path.
+/// Canonical pending slot edits for one authored artifact.
+///
+/// A slot overlay keeps only the latest meaningful intent for each path. When a
+/// structural edit makes descendant edits stale, those descendants are removed
+/// so the overlay can be applied deterministically.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SlotOverlay {
+    /// Pending slot operations keyed by target slot path.
     pub edits: BTreeMap<SlotPath, SlotEditOp>,
 }
 

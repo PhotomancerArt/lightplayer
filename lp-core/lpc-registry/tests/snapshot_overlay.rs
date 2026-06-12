@@ -1,6 +1,5 @@
-use lpc_model::{ArtifactOverlay, Revision, SlotShapeRegistry};
-use lpc_model::project::overlay_mutation::mutation_op::MutationOp;
-use lpc_registry::{derive_overlay_between_snapshots, ParseCtx, ProjectRegistry, ProjectSnapshot};
+use lpc_model::{ArtifactOverlay, MutationOp, Revision, SlotShapeRegistry};
+use lpc_registry::{ParseCtx, ProjectRegistry, ProjectSnapshot, derive_overlay_between_snapshots};
 use lpfs::{LpFsMemory, LpPath, LpPathBuf};
 
 fn parse_ctx<'a>(shapes: &'a SlotShapeRegistry) -> ParseCtx<'a> {

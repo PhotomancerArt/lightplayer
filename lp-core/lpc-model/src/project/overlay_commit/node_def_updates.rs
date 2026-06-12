@@ -1,4 +1,8 @@
 //! Definition update summaries.
+//!
+//! These are compact summaries for consumers that need to know which
+//! definitions were added, changed, or removed without carrying full before/after
+//! inventory snapshots.
 
 use alloc::vec::Vec;
 
@@ -7,8 +11,11 @@ use crate::{NodeDefLocation, NodeKind};
 /// Added, changed, and removed node definitions.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct NodeDefUpdates {
+    /// Newly referenced definition locations.
     pub added: Vec<NodeDefLocation>,
+    /// Previously referenced definition locations whose effective state changed.
     pub changed: Vec<NodeDefLocation>,
+    /// Definition locations that are no longer referenced.
     pub removed: Vec<NodeDefLocation>,
 }
 
@@ -44,9 +51,13 @@ impl NodeDefUpdates {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum NodeDefChangeDetail {
+    /// Definition body changed without changing node kind.
     Content,
+    /// Definition body changed to another node kind.
     KindChanged { from: NodeKind, to: NodeKind },
+    /// Definition moved from loaded state into an error state.
     EnteredError,
+    /// Definition moved from an error state into loaded state.
     LeftError,
 }
 
