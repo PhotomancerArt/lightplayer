@@ -1,9 +1,8 @@
 use std::collections::BTreeMap;
 
-use lpc_model::{
-    AssetOverlay, OverlayMutation, OverlayMutationBatch, OverlayMutationCommand,
-    OverlayMutationCommandId,
-};
+use lpc_model::AssetOverlay;
+use lpc_model::project::overlay_mutation::mutation_cmd::{MutationCmd, MutationCmdBatch, MutationCmdId};
+use lpc_model::project::overlay_mutation::mutation_op::MutationOp;
 use lpfs::{LpFsMemory, LpPath};
 
 use super::{artifact, project_files};
@@ -37,14 +36,14 @@ impl TestProject {
         fs
     }
 
-    pub fn replace_body_batch(&self) -> OverlayMutationBatch {
-        OverlayMutationBatch::new(
+    pub fn replace_body_batch(&self) -> MutationCmdBatch {
+        MutationCmdBatch::new(
             self.files
                 .iter()
                 .enumerate()
-                .map(|(index, (path, bytes))| OverlayMutationCommand {
-                    id: OverlayMutationCommandId::new(index as u64 + 1),
-                    mutation: OverlayMutation::SetArtifactBody {
+                .map(|(index, (path, bytes))| MutationCmd {
+                    id: MutationCmdId::new(index as u64 + 1),
+                    mutation: MutationOp::SetArtifactBody {
                         artifact: artifact(path),
                         edit: AssetOverlay::ReplaceBody(bytes.clone()),
                     },

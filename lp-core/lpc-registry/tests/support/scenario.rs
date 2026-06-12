@@ -1,7 +1,9 @@
 use lpc_model::{
-    AssetSource, CommitResult, OverlayMutation, OverlayMutationBatch, MutationBatchResults,
+    AssetSource, CommitResult, MutationBatchResults,
     MutationResult, Revision, SlotShapeRegistry,
 };
+use lpc_model::project::overlay_mutation::mutation_cmd::MutationCmdBatch;
+use lpc_model::project::overlay_mutation::mutation_op::MutationOp;
 use lpc_registry::{
     LoadResult, MaterializeAssetError, MaterializedAsset, MaterializedTextAsset, ParseCtx,
     ProjectRegistry,
@@ -81,7 +83,7 @@ impl RegistryScenario {
             .expect("load project root")
     }
 
-    pub fn apply(&mut self, mutation: OverlayMutation) -> MutationResult {
+    pub fn apply(&mut self, mutation: MutationOp) -> MutationResult {
         let frame = self.next_revision();
         let ctx = ParseCtx {
             shapes: &self.shapes,
@@ -91,7 +93,7 @@ impl RegistryScenario {
             .expect("apply overlay mutation")
     }
 
-    pub fn apply_batch(&mut self, batch: OverlayMutationBatch) -> MutationBatchResults {
+    pub fn apply_batch(&mut self, batch: MutationCmdBatch) -> MutationBatchResults {
         let frame = self.next_revision();
         let ctx = ParseCtx {
             shapes: &self.shapes,

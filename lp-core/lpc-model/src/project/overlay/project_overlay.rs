@@ -3,8 +3,8 @@
 use alloc::collections::BTreeMap;
 
 use crate::{ArtifactLocation, SlotPath};
-
-use super::{ArtifactOverlay, AssetOverlay, OverlayMutation, SlotEdit, SlotOverlay};
+use crate::MutationOp;
+use super::{ArtifactOverlay, AssetOverlay, SlotEdit, SlotOverlay};
 
 /// Current project-wide pending edit intent.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -78,17 +78,17 @@ impl ProjectOverlay {
         changed
     }
 
-    pub fn apply_mutation(&mut self, mutation: OverlayMutation) -> bool {
+    pub fn apply_mutation(&mut self, mutation: MutationOp) -> bool {
         match mutation {
-            OverlayMutation::PutSlotEdit { artifact, edit } => self.put_slot_edit(artifact, edit),
-            OverlayMutation::RemoveSlotEdit { artifact, path } => {
+            MutationOp::PutSlotEdit { artifact, edit } => self.put_slot_edit(artifact, edit),
+            MutationOp::RemoveSlotEdit { artifact, path } => {
                 self.remove_slot_edit(&artifact, &path)
             }
-            OverlayMutation::SetArtifactBody { artifact, edit } => {
+            MutationOp::SetArtifactBody { artifact, edit } => {
                 self.set_artifact_body(artifact, edit)
             }
-            OverlayMutation::ClearArtifact { artifact } => self.clear_artifact(&artifact),
-            OverlayMutation::Clear => self.clear(),
+            MutationOp::ClearArtifact { artifact } => self.clear_artifact(&artifact),
+            MutationOp::Clear => self.clear(),
         }
     }
 
@@ -163,7 +163,7 @@ mod tests {
         let artifact_path = ArtifactLocation::file("/project.toml");
         let slot_path = SlotPath::parse("nodes[clock]").unwrap();
 
-        assert!(overlay.apply_mutation(OverlayMutation::PutSlotEdit {
+        assert!(overlay.apply_mutation(MutationOp::PutSlotEdit {
             artifact: artifact_path.clone(),
             edit: SlotEdit::ensure_present(slot_path.clone()),
         }));

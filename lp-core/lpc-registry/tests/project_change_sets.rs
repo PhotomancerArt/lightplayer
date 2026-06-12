@@ -2,9 +2,9 @@ mod support;
 
 use lpc_model::{
     AssetChange, AssetChangeKind, AssetOverlay, NodeDefChange, NodeDefChangeKind, NodeKind,
-    OverlayMutation,
 };
-use support::{RegistryScenario, artifact, artifact_asset, root_def};
+use lpc_model::project::overlay_mutation::mutation_op::MutationOp;
+use support::{artifact, artifact_asset, root_def, RegistryScenario};
 
 #[test]
 fn shader_source_file_refresh_reports_one_asset_body_change() {
@@ -28,7 +28,7 @@ fn shader_source_file_refresh_reports_one_asset_body_change() {
 fn changing_shader_def_kind_removes_its_referenced_source_asset() {
     let (mut scenario, _) = RegistryScenario::load_fixture("fyeah-sign");
 
-    let result = scenario.apply(OverlayMutation::SetArtifactBody {
+    let result = scenario.apply(MutationOp::SetArtifactBody {
         artifact: artifact("/idle.toml"),
         edit: AssetOverlay::ReplaceBody(br#"kind = "Clock""#.to_vec()),
     });

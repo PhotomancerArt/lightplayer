@@ -1,18 +1,19 @@
 //! Results from applying overlay mutations to an effective project inventory.
 
-use crate::{OverlayMutationBatchResult, ProjectChangeSet, Revision};
+use crate::{ProjectChangeSet, Revision};
+use crate::project::overlay_mutation::mutation_cmd::MutationCmdBatchResult;
 
 /// Ordered command results plus the aggregate effective project change set.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct MutationBatchResults {
-    pub commands: OverlayMutationBatchResult,
+    pub commands: MutationCmdBatchResult,
     pub overlay_revision: Revision,
     pub changes: ProjectChangeSet,
 }
 
 impl MutationBatchResults {
     pub fn new(
-        commands: OverlayMutationBatchResult,
+        commands: MutationCmdBatchResult,
         overlay_revision: Revision,
         changes: ProjectChangeSet,
     ) -> Self {

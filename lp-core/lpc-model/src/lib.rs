@@ -84,10 +84,8 @@ pub use value::{LpType, LpValue, ModelEnumVariant, ModelStructMember};
 pub use config::DEFAULT_SERIAL_BAUD_RATE;
 pub use control::{ControlMessage, TriggerEvent, CONTROL_MESSAGE_SHAPE_NAME};
 pub use project::overlay::{
-    ArtifactOverlay, AssetOverlay, OverlayMutation, OverlayMutationBatch,
-    OverlayMutationBatchResult, OverlayMutationCommand, OverlayMutationCommandId,
-    OverlayMutationCommandResult, OverlayMutationCommandStatus, OverlayMutationEffect,
-    OverlayMutationRejection, OverlayMutationRejectionReason, ProjectCommitSummary, ProjectOverlay,
+    ArtifactOverlay, AssetOverlay,
+    ProjectCommitSummary, ProjectOverlay,
     SlotEdit, SlotEditOp, SlotOverlay,
 };
 pub use hardware_endpoint_spec::{HardwareEndpointSpec, HardwareEndpointSpecError};
@@ -123,6 +121,16 @@ pub use project::{
     ProjectNodePlacement, ProjectTree, Revision,
 };
 pub use project::{advance_revision, current_revision, set_current_revision};
+pub use project::overlay_mutation::mutation_cmd::MutationCmd;
+pub use project::overlay_mutation::mutation_cmd::MutationCmdId;
+pub use project::overlay_mutation::mutation_cmd::MutationCmdResult;
+pub use project::overlay_mutation::mutation_cmd::MutationCmdStatus;
+pub use project::overlay_mutation::mutation_cmd::MutationEffect;
+pub use project::overlay_mutation::mutation_cmd::MutationRejectionReason;
+pub use project::overlay_mutation::mutation_cmd::MutationCmdBatch;
+pub use project::overlay_mutation::mutation_cmd::MutationCmdBatchResult;
+pub use project::overlay_mutation::mutation_op::MutationOp;
+pub use project::overlay_mutation::mutation_cmd::MutationRejection;
 pub use resource::{runtime_buffer_resource_shape, ResourceDomain, ResourceRef, RuntimeBufferId};
 pub use server::server_config::ServerConfig;
 pub use slot::{

@@ -1,15 +1,15 @@
 //! Project overlay mutation envelopes.
 
-use lpc_model::{OverlayMutationBatch, OverlayMutationBatchResult};
+use lpc_model::project::overlay_mutation::mutation_cmd::{MutationCmdBatch, MutationCmdBatchResult};
 
 /// Wire request for an ordered overlay mutation batch.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WireOverlayMutationRequest {
-    pub batch: OverlayMutationBatch,
+    pub batch: MutationCmdBatch,
 }
 
 impl WireOverlayMutationRequest {
-    pub fn new(batch: OverlayMutationBatch) -> Self {
+    pub fn new(batch: MutationCmdBatch) -> Self {
         Self { batch }
     }
 }
@@ -17,11 +17,11 @@ impl WireOverlayMutationRequest {
 /// Wire response for an ordered overlay mutation batch.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WireOverlayMutationResponse {
-    pub result: OverlayMutationBatchResult,
+    pub result: MutationCmdBatchResult,
 }
 
 impl WireOverlayMutationResponse {
-    pub fn new(result: OverlayMutationBatchResult) -> Self {
+    pub fn new(result: MutationCmdBatchResult) -> Self {
         Self { result }
     }
 }
@@ -31,24 +31,26 @@ mod tests {
     use super::*;
     use alloc::vec;
     use lpc_model::{
-        ArtifactLocation, AssetOverlay, OverlayMutation, OverlayMutationCommand,
-        OverlayMutationCommandId, OverlayMutationCommandResult, OverlayMutationEffect, SlotEdit,
+        ArtifactLocation, AssetOverlay,
+        SlotEdit,
         SlotPath,
     };
+    use lpc_model::project::overlay_mutation::mutation_cmd::{MutationCmd, MutationCmdId, MutationCmdResult, MutationEffect};
+    use lpc_model::project::overlay_mutation::mutation_op::MutationOp;
 
     #[test]
     fn overlay_mutation_request_round_trips() {
-        let request = WireOverlayMutationRequest::new(OverlayMutationBatch::new(vec![
-            OverlayMutationCommand {
-                id: OverlayMutationCommandId::new(1),
-                mutation: OverlayMutation::PutSlotEdit {
+        let request = WireOverlayMutationRequest::new(MutationCmdBatch::new(vec![
+            MutationCmd {
+                id: MutationCmdId::new(1),
+                mutation: MutationOp::PutSlotEdit {
                     artifact: ArtifactLocation::file("/project.toml"),
                     edit: SlotEdit::ensure_present(SlotPath::parse("nodes[clock]").unwrap()),
                 },
             },
-            OverlayMutationCommand {
-                id: OverlayMutationCommandId::new(2),
-                mutation: OverlayMutation::SetArtifactBody {
+            MutationCmd {
+                id: MutationCmdId::new(2),
+                mutation: MutationOp::SetArtifactBody {
                     artifact: ArtifactLocation::file("/shader.glsl"),
                     edit: AssetOverlay::ReplaceBody(b"void main() {}".to_vec()),
                 },
@@ -65,10 +67,10 @@ mod tests {
 
     #[test]
     fn overlay_mutation_response_round_trips() {
-        let response = WireOverlayMutationResponse::new(OverlayMutationBatchResult::new(vec![
-            OverlayMutationCommandResult::accepted(
-                OverlayMutationCommandId::new(1),
-                OverlayMutationEffect::OverlayChanged { changed: true },
+        let response = WireOverlayMutationResponse::new(MutationCmdBatchResult::new(vec![
+            MutationCmdResult::accepted(
+                MutationCmdId::new(1),
+                MutationEffect::OverlayChanged { changed: true },
             ),
         ]));
 

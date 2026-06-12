@@ -14,7 +14,7 @@ pub mod tree_path;
 
 pub use crate::nodes::node_def::{NodeArtifact, NodeDef};
 pub use kind::NodeKind;
-pub use crate::project::mutation::node_def_change_set::{NodeDefChange, NodeDefChangeKind, NodeDefChangeSet};
+pub use crate::project::overlay_mutation::node_def_change_set::{NodeDefChange, NodeDefChangeKind, NodeDefChangeSet};
 pub use crate::project::inventory::node_def_entry::NodeDefEntry;
 pub use crate::project::inventory::node_def_location::NodeDefLocation;
 pub use crate::project::inventory::node_def_state::{NodeDefState, NodeDefValidationError};

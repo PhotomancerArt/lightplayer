@@ -4,20 +4,21 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpc_model::{
-    ArtifactChangeSet, ArtifactLocation, ArtifactOverlay, AssetOverlay, CommitResult, NodeDefEntry,
-    NodeDefLocation, NodeDefState, OverlayMutation, OverlayMutationBatch,
-    OverlayMutationBatchResult, OverlayMutationCommandResult, OverlayMutationEffect,
-    MutationBatchResults, MutationResult, ProjectInventory, ProjectOverlay, Revision,
+    ArtifactChangeSet, ArtifactLocation, ArtifactOverlay, AssetOverlay, CommitResult, MutationBatchResults,
+    MutationResult, NodeDefEntry,
+    NodeDefLocation, NodeDefState, ProjectInventory, ProjectOverlay, Revision,
     WithRevision,
 };
+use lpc_model::project::overlay_mutation::mutation_cmd::{MutationCmdBatch, MutationCmdBatchResult, MutationCmdResult, MutationEffect};
+use lpc_model::project::overlay_mutation::mutation_op::MutationOp;
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath};
 
 use crate::overlay::inventory_change_set::change_set_between;
 use crate::overlay::project_inventory_derivation::derive_effective_inventory;
 use crate::{
-    ArtifactStore, CommitError, LoadResult, ParseCtx, RegistryError,
-    asset::{MaterializeAssetError, MaterializedAsset, MaterializedTextAsset},
-    overlay::{EditApplyError, serialize_slot_draft},
+    asset::{MaterializeAssetError, MaterializedAsset, MaterializedTextAsset}, overlay::{serialize_slot_draft, EditApplyError}, ArtifactStore, CommitError, LoadResult,
+    ParseCtx,
+    RegistryError,
 };
 
 /// Canonical registry for a loaded project.
@@ -60,7 +61,7 @@ impl ProjectRegistry {
     pub fn mutate(
         &mut self,
         fs: &dyn LpFs,
-        mutation: OverlayMutation,
+        mutation: MutationOp,
         frame: Revision,
         ctx: &ParseCtx<'_>,
     ) -> Result<MutationResult, EditApplyError> {
@@ -83,7 +84,7 @@ impl ProjectRegistry {
     pub fn mutate_batch(
         &mut self,
         fs: &dyn LpFs,
-        batch: OverlayMutationBatch,
+        batch: MutationCmdBatch,
         frame: Revision,
         ctx: &ParseCtx<'_>,
     ) -> MutationBatchResults {
@@ -94,9 +95,9 @@ impl ProjectRegistry {
         for command in batch.commands {
             let changed = self.overlay.get_mut().apply_mutation(command.mutation);
             any_changed |= changed;
-            results.push(OverlayMutationCommandResult::accepted(
+            results.push(MutationCmdResult::accepted(
                 command.id,
-                OverlayMutationEffect::OverlayChanged { changed },
+                MutationEffect::OverlayChanged { changed },
             ));
         }
         if any_changed {
@@ -108,7 +109,7 @@ impl ProjectRegistry {
         self.inventory = after;
 
         MutationBatchResults::new(
-            OverlayMutationBatchResult::new(results),
+            MutationCmdBatchResult::new(results),
             self.overlay.changed_at(),
             changes,
         )

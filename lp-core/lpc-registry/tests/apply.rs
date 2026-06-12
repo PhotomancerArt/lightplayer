@@ -1,8 +1,9 @@
 use lpc_model::{
     ArtifactLocation, AssetBodySource, AssetChangeKind, AssetOverlay, AssetSource, AssetState,
-    LpValue, NodeDefChangeKind, NodeDefLocation, NodeDefState, OverlayMutation, Revision, SlotEdit,
+    LpValue, NodeDefChangeKind, NodeDefLocation, NodeDefState, Revision, SlotEdit,
     SlotPath, SlotShapeRegistry,
 };
+use lpc_model::project::overlay_mutation::mutation_op::MutationOp;
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpfs::{FsEvent, FsEventKind, LpFs, LpFsMemory, LpPath, LpPathBuf};
 
@@ -95,7 +96,7 @@ fn apply_body_overlay_changes_referenced_node_def_and_assets() {
     let result = registry
         .mutate(
             &fs,
-            OverlayMutation::SetArtifactBody {
+            MutationOp::SetArtifactBody {
                 artifact: shader_location.clone(),
                 edit: AssetOverlay::ReplaceBody(br#"kind = "Clock""#.to_vec()),
             },
@@ -137,7 +138,7 @@ fn apply_asset_overlay_changes_referenced_asset() {
     let result = registry
         .mutate(
             &fs,
-            OverlayMutation::SetArtifactBody {
+            MutationOp::SetArtifactBody {
                 artifact: asset.clone(),
                 edit: AssetOverlay::ReplaceBody(
                     b"void main() { gl_FragColor = vec4(1.0); }".to_vec(),
@@ -173,7 +174,7 @@ fn discard_overlay_returns_inventory_to_committed_state() {
     registry
         .mutate(
             &fs,
-            OverlayMutation::SetArtifactBody {
+            MutationOp::SetArtifactBody {
                 artifact: asset.clone(),
                 edit: AssetOverlay::Delete,
             },
@@ -214,7 +215,7 @@ fn commit_overlay_writes_artifact_without_runtime_project_change() {
     registry
         .mutate(
             &fs,
-            OverlayMutation::SetArtifactBody {
+            MutationOp::SetArtifactBody {
                 artifact: asset.clone(),
                 edit: AssetOverlay::ReplaceBody(body.clone()),
             },
@@ -247,7 +248,7 @@ fn commit_slot_overlay_writes_effective_node_def() {
     registry
         .mutate(
             &fs,
-            OverlayMutation::PutSlotEdit {
+            MutationOp::PutSlotEdit {
                 artifact: clock.clone(),
                 edit: SlotEdit::assign_value(
                     SlotPath::parse("controls.rate").unwrap(),

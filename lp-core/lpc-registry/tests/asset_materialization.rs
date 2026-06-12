@@ -1,11 +1,12 @@
 mod support;
 
 use lpc_model::{
-    ArtifactLocation, AssetOverlay, AssetSource, NodeDefLocation, OverlayMutation, SlotPath,
+    ArtifactLocation, AssetOverlay, AssetSource, NodeDefLocation, SlotPath,
 };
+use lpc_model::project::overlay_mutation::mutation_op::MutationOp;
 use lpc_registry::MaterializeAssetError;
 
-use support::{RegistryScenario, artifact, artifact_asset};
+use support::{artifact, artifact_asset, RegistryScenario};
 
 #[test]
 fn materializes_committed_shader_source_and_fixture_assets() {
@@ -29,7 +30,7 @@ fn materialization_uses_overlay_replacement_and_reports_delete() {
     let (mut scenario, _) = RegistryScenario::load_fixture("fyeah-sign");
     let source = artifact_asset("/idle.glsl");
 
-    scenario.apply(OverlayMutation::SetArtifactBody {
+    scenario.apply(MutationOp::SetArtifactBody {
         artifact: artifact("/idle.glsl"),
         edit: AssetOverlay::ReplaceBody(b"overlay shader".to_vec()),
     });
@@ -38,7 +39,7 @@ fn materialization_uses_overlay_replacement_and_reports_delete() {
         .expect("overlay text");
     assert_eq!(replaced.text, "overlay shader");
 
-    scenario.apply(OverlayMutation::SetArtifactBody {
+    scenario.apply(MutationOp::SetArtifactBody {
         artifact: artifact("/idle.glsl"),
         edit: AssetOverlay::Delete,
     });
@@ -92,7 +93,7 @@ fn materialization_rejects_unref_and_invalid_utf8_text() {
         }
     );
 
-    scenario.apply(OverlayMutation::SetArtifactBody {
+    scenario.apply(MutationOp::SetArtifactBody {
         artifact: ArtifactLocation::file("/idle.glsl"),
         edit: AssetOverlay::ReplaceBody(vec![0xff]),
     });

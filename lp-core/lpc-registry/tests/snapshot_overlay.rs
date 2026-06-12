@@ -1,5 +1,6 @@
-use lpc_model::{ArtifactOverlay, OverlayMutation, Revision, SlotShapeRegistry};
-use lpc_registry::{ParseCtx, ProjectRegistry, ProjectSnapshot, derive_overlay_between_snapshots};
+use lpc_model::{ArtifactOverlay, Revision, SlotShapeRegistry};
+use lpc_model::project::overlay_mutation::mutation_op::MutationOp;
+use lpc_registry::{derive_overlay_between_snapshots, ParseCtx, ProjectRegistry, ProjectSnapshot};
 use lpfs::{LpFsMemory, LpPath, LpPathBuf};
 
 fn parse_ctx<'a>(shapes: &'a SlotShapeRegistry) -> ParseCtx<'a> {
@@ -33,7 +34,7 @@ kind = "Clock"
         registry
             .mutate(
                 &fs,
-                OverlayMutation::SetArtifactBody {
+                MutationOp::SetArtifactBody {
                     artifact: artifact.clone(),
                     edit: edit.clone(),
                 },
