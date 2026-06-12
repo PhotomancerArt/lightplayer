@@ -8,12 +8,15 @@ use alloc::vec::Vec;
 use crate::OutputError;
 
 use crate::{
-    HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
-    HardwareEndpointError, HwEndpointId, HwEndpointKind, HwEndpointSpec,
-    HwEndpointStatus, HardwareLease, HwRegistry, Ws281xConfig, Ws281xDriver,
-    Ws281xOutput,
+    HardwareEndpointError, HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
+    HwEndpointId, HwEndpointKind, HwEndpointSpec, HwEndpointStatus, HwRegistry, Ws281xConfig,
+    Ws281xDriver, Ws281xOutput,
 };
 
+/// Manifest-backed virtual WS281x driver for tests and emulation.
+///
+/// The driver exposes WS281x endpoints for GPIO output resources when the
+/// manifest also contains the configured RMT/WS281x timing resource.
 pub struct VirtualWs281xDriver {
     registry: Rc<HwRegistry>,
     driver_id: String,
@@ -50,9 +53,7 @@ impl VirtualWs281xDriver {
             HwEndpointStatus::InUse { claimant } => HwEndpointStatus::Unavailable {
                 reason: format!("WS281x timing resource is in use by {claimant}"),
             },
-            HwEndpointStatus::Unavailable { reason } => {
-                HwEndpointStatus::Unavailable { reason }
-            }
+            HwEndpointStatus::Unavailable { reason } => HwEndpointStatus::Unavailable { reason },
         }
     }
 
@@ -142,16 +143,20 @@ impl Ws281xDriver for VirtualWs281xDriver {
     }
 }
 
+/// In-memory WS281x output used by [`VirtualWs281xDriver`].
+///
+/// It stores the most recent raw RGB byte frame and releases its hardware lease
+/// when dropped.
 pub struct VirtualWs281xOutput {
     registry: Rc<HwRegistry>,
     lease: Option<HardwareLease>,
     byte_count: u32,
-    data: Vec<u16>,
+    data: Vec<u8>,
 }
 
 impl VirtualWs281xOutput {
     fn new(registry: Rc<HwRegistry>, lease: HardwareLease, byte_count: u32) -> Self {
-        let data_len = u16_len_for_byte_count(byte_count);
+        let data_len = byte_len_for_byte_count(byte_count);
         Self {
             registry,
             lease: Some(lease),
@@ -160,7 +165,7 @@ impl VirtualWs281xOutput {
         }
     }
 
-    pub fn data(&self) -> &[u16] {
+    pub fn data(&self) -> &[u8] {
         &self.data
     }
 
@@ -172,7 +177,7 @@ impl VirtualWs281xOutput {
 }
 
 impl Ws281xOutput for VirtualWs281xOutput {
-    fn write(&mut self, data: &[u16]) -> Result<(), OutputError> {
+    fn write(&mut self, data: &[u8]) -> Result<(), OutputError> {
         let expected_len = self.data.len();
         if data.len() > expected_len {
             let new_len = (data.len() / 3) * 3;
@@ -193,7 +198,8 @@ impl Ws281xOutput for VirtualWs281xOutput {
     fn resize(&mut self, config: Ws281xConfig) -> Result<(), OutputError> {
         validate_ws281x_byte_count(config.byte_count()).map_err(endpoint_error_to_output_error)?;
         self.byte_count = config.byte_count();
-        self.data.resize(u16_len_for_byte_count(self.byte_count), 0);
+        self.data
+            .resize(byte_len_for_byte_count(self.byte_count), 0);
         Ok(())
     }
 }
@@ -213,7 +219,7 @@ fn validate_ws281x_byte_count(byte_count: u32) -> Result<(), HardwareEndpointErr
     Ok(())
 }
 
-fn u16_len_for_byte_count(byte_count: u32) -> usize {
+fn byte_len_for_byte_count(byte_count: u32) -> usize {
     ((byte_count / 3) as usize) * 3
 }
 

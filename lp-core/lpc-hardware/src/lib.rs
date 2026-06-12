@@ -1,11 +1,25 @@
-//! Hardware capabilities, manifests, endpoint routing, and driver traits.
+//! Hardware discovery, ownership, and driver contracts.
+//!
+//! `lpc-hardware` describes the board-facing side of LightPlayer without tying
+//! it to one firmware target. A [`HwManifest`] lists concrete [`HwResource`]s
+//! such as GPIO pins, RMT channels, and radios. A [`HwRegistry`] owns the live
+//! claim/lease state for those resources so independent drivers cannot open the
+//! same pin or peripheral at the same time.
+//!
+//! Drivers expose user-facing [`HwEndpoint`]s from those resources. The
+//! [`HardwareSystem`] is the small router that collects registered drivers,
+//! lists endpoints, and opens an endpoint by authored [`HwEndpointSpec`],
+//! internal [`HwEndpointId`], or physical [`HwAddress`].
+//!
+//! Rendering and protocol-adjacent color processing live above this crate. For
+//! example, [`Ws281xOutput`] accepts already-rendered RGB bytes; display
+//! pipeline options remain in `lpc-shared`.
 
 #![no_std]
 extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
-pub mod display_pipeline_options;
 pub mod drivers;
 pub mod endpoint;
 pub mod hw_error;
@@ -15,15 +29,14 @@ pub mod output_error;
 pub mod registry;
 pub mod resource;
 
-pub use display_pipeline_options::DisplayPipelineOptions;
 pub use output_error::OutputError;
 
-pub use drivers::hw_driver::HwDriver;
 pub use drivers::button::button_debouncer::ButtonDebouncer;
 pub use drivers::button::button_driver::{ButtonConfig, ButtonDriver, ButtonInput};
 pub use drivers::button::button_event::{ButtonEvent, ButtonEventKind};
 pub use drivers::button::virtual_button::VirtualButton;
 pub use drivers::button::virtual_button_driver::VirtualButtonDriver;
+pub use drivers::hw_driver::HwDriver;
 pub use drivers::radio::radio_channel::{
     RadioChannelId, RadioDeviceId, RadioDrainReport, RadioEventId,
 };

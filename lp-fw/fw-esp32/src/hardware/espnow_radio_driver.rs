@@ -16,11 +16,10 @@ use esp_radio::esp_now::{
 };
 use esp_radio::wifi::{ControllerConfig, WifiController};
 use lpc_hardware::{
-    HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
-    HardwareEndpointError, HwEndpointId, HwEndpointKind, HwEndpointSpec,
-    HwEndpointStatus, HardwareLease, HwRegistry, RADIO_MAX_PACKET_LEN, RadioChannelId,
-    RadioConfig, RadioDevice, RadioDeviceId, RadioDrainReport, RadioDriver, RadioEventId,
-    RadioMessage, RadioMessageKind,
+    HardwareEndpointError, HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
+    HwEndpointId, HwEndpointKind, HwEndpointSpec, HwEndpointStatus, HwRegistry,
+    RADIO_MAX_PACKET_LEN, RadioChannelId, RadioConfig, RadioDevice, RadioDeviceId,
+    RadioDrainReport, RadioDriver, RadioEventId, RadioMessage, RadioMessageKind,
 };
 
 const DRIVER_ID: &str = "esp32-espnow-radio0";
@@ -150,10 +149,9 @@ impl RadioDriver for Esp32EspNowRadioDriver {
 
         self.registry
             .ensure_capability(&self.address, HwCapability::Radio)?;
-        let lease = self.registry.claim_bundle(HwClaim::new(
-            self.driver_id(),
-            vec![self.address.clone()],
-        ))?;
+        let lease = self
+            .registry
+            .claim_bundle(HwClaim::new(self.driver_id(), vec![self.address.clone()]))?;
 
         let esp_now = self.controller.esp_now();
         if let Err(error) = esp_now.set_channel(channel) {

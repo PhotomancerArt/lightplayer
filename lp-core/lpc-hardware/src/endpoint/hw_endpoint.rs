@@ -4,6 +4,11 @@ use lpc_model::HwEndpointSpec;
 
 use crate::{HwAddress, HwEndpointId, HwEndpointKind, HwEndpointStatus};
 
+/// Openable hardware surface reported by a driver.
+///
+/// An endpoint binds an authored [`HwEndpointSpec`] to a concrete
+/// [`HwAddress`], a driver, and a current [`HwEndpointStatus`]. Callers open
+/// endpoints through [`crate::HardwareSystem`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HwEndpoint {
     id: HwEndpointId,

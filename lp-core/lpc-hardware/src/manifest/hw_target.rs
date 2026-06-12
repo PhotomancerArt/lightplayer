@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+/// Build or runtime target that a board manifest describes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum HardwareTarget {

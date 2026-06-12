@@ -2,10 +2,15 @@ use alloc::rc::Rc;
 use alloc::vec;
 
 use crate::{
-    ButtonDebouncer, ButtonEvent, HwAddress, HwCapability, HwClaim,
-    HwError, HardwareLease, HwRegistry,
+    ButtonDebouncer, ButtonEvent, HardwareLease, HwAddress, HwCapability, HwClaim, HwError,
+    HwRegistry,
 };
 
+/// Small standalone virtual button handle.
+///
+/// This predates the endpoint-oriented [`VirtualButtonDriver`](crate::VirtualButtonDriver)
+/// and remains useful in tests that want to claim a GPIO directly and feed
+/// samples manually.
 pub struct VirtualButton {
     registry: Rc<HwRegistry>,
     source: HwAddress,
@@ -14,15 +19,10 @@ pub struct VirtualButton {
 }
 
 impl VirtualButton {
-    pub fn open_gpio(
-        registry: Rc<HwRegistry>,
-        pin: u32,
-        stable_ms: u64,
-    ) -> Result<Self, HwError> {
+    pub fn open_gpio(registry: Rc<HwRegistry>, pin: u32, stable_ms: u64) -> Result<Self, HwError> {
         let source = HwAddress::gpio(pin);
         registry.ensure_capability(&source, HwCapability::GpioInput)?;
-        let lease =
-            registry.claim_bundle(HwClaim::new("virtual-button", vec![source.clone()]))?;
+        let lease = registry.claim_bundle(HwClaim::new("virtual-button", vec![source.clone()]))?;
         Ok(Self {
             registry,
             source: source.clone(),
@@ -57,8 +57,7 @@ impl Drop for VirtualButton {
 mod tests {
     use super::*;
     use crate::{
-        HardwareEndpointError, HwEndpointSpec, HwManifest, HwResource,
-        HardwareSystem, Ws281xConfig,
+        HardwareEndpointError, HardwareSystem, HwEndpointSpec, HwManifest, HwResource, Ws281xConfig,
     };
 
     #[test]
@@ -68,7 +67,7 @@ mod tests {
         let system = HardwareSystem::with_virtual_drivers(registry);
         let endpoint = endpoint("ws281x:rmt:GPIO4");
 
-        let result = system.open_ws281x_by_spec(&endpoint, Ws281xConfig::new(3, None));
+        let result = system.open_ws281x_by_spec(&endpoint, Ws281xConfig::new(3));
 
         assert!(matches!(
             result,
@@ -83,7 +82,7 @@ mod tests {
         let registry = Rc::new(HwRegistry::new(test_manifest()));
         let system = HardwareSystem::with_virtual_drivers(Rc::clone(&registry));
         let _output = system
-            .open_ws281x_by_spec(&endpoint("ws281x:rmt:GPIO4"), Ws281xConfig::new(3, None))
+            .open_ws281x_by_spec(&endpoint("ws281x:rmt:GPIO4"), Ws281xConfig::new(3))
             .unwrap();
 
         let result = VirtualButton::open_gpio(registry, 4, 30);
@@ -99,7 +98,7 @@ mod tests {
         let registry = Rc::new(HwRegistry::new(test_manifest()));
         let system = HardwareSystem::with_virtual_drivers(Rc::clone(&registry));
         let _output = system
-            .open_ws281x_by_spec(&endpoint("ws281x:rmt:GPIO18"), Ws281xConfig::new(3, None))
+            .open_ws281x_by_spec(&endpoint("ws281x:rmt:GPIO18"), Ws281xConfig::new(3))
             .unwrap();
 
         let button = VirtualButton::open_gpio(Rc::clone(&registry), 4, 30).unwrap();
@@ -115,10 +114,7 @@ mod tests {
 
         let result = VirtualButton::open_gpio(registry, 12, 30);
 
-        assert!(matches!(
-            result,
-            Err(HwError::ReservedResource { .. })
-        ));
+        assert!(matches!(result, Err(HwError::ReservedResource { .. })));
     }
 
     #[test]
@@ -138,27 +134,18 @@ mod tests {
             [
                 HwResource::new(
                     HwAddress::gpio(4),
-                    [
-                        HwCapability::GpioOutput,
-                        HwCapability::GpioInput,
-                    ],
+                    [HwCapability::GpioOutput, HwCapability::GpioInput],
                     "GPIO4",
                 ),
                 HwResource::new(
                     HwAddress::gpio(12),
-                    [
-                        HwCapability::GpioOutput,
-                        HwCapability::GpioInput,
-                    ],
+                    [HwCapability::GpioOutput, HwCapability::GpioInput],
                     "GPIO12",
                 )
                 .reserved("reserved for test"),
                 HwResource::new(
                     HwAddress::gpio(18),
-                    [
-                        HwCapability::GpioOutput,
-                        HwCapability::GpioInput,
-                    ],
+                    [HwCapability::GpioOutput, HwCapability::GpioInput],
                     "GPIO18",
                 ),
                 HwResource::new(

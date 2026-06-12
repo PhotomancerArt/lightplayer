@@ -3,33 +3,35 @@ use core::fmt;
 
 use crate::{HwAddress, HwCapability, HwLeaseId};
 
+/// Resource-level hardware errors.
+///
+/// These errors come from address validation, manifest lookup, and registry
+/// claim/release operations. Endpoint-opening code wraps them in
+/// [`crate::HardwareEndpointError`] when appropriate.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HwError {
-    InvalidAddress {
-        address: String,
-    },
-    UnknownResource {
-        address: HwAddress,
-    },
-    ReservedResource {
-        address: HwAddress,
-        reason: String,
-    },
+    /// Address path is malformed.
+    InvalidAddress { address: String },
+    /// Address is not present in the manifest.
+    UnknownResource { address: HwAddress },
+    /// Resource is deliberately disabled in the manifest.
+    ReservedResource { address: HwAddress, reason: String },
+    /// Resource exists but does not advertise the requested capability.
     UnsupportedCapability {
         address: HwAddress,
         capability: HwCapability,
     },
+    /// Resource is already held by another active lease.
     ResourceAlreadyClaimed {
         address: HwAddress,
         claimant: String,
     },
-    DuplicateAddressInClaim {
-        address: HwAddress,
-    },
+    /// One claim listed the same address more than once.
+    DuplicateAddressInClaim { address: HwAddress },
+    /// Claims must reserve at least one resource.
     EmptyClaim,
-    UnknownLease {
-        lease_id: HwLeaseId,
-    },
+    /// Attempted to release a lease the registry no longer knows about.
+    UnknownLease { lease_id: HwLeaseId },
 }
 
 impl fmt::Display for HwError {

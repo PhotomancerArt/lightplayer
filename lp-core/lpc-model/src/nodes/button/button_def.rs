@@ -67,9 +67,7 @@ fn default_id() -> ValueSlot<u32> {
 }
 
 fn default_endpoint() -> ValueSlot<HwEndpointSpec> {
-    ValueSlot::new(HwEndpointSpec::from_static(
-        DEFAULT_BUTTON_ENDPOINT_SPEC,
-    ))
+    ValueSlot::new(HwEndpointSpec::from_static(DEFAULT_BUTTON_ENDPOINT_SPEC))
 }
 
 fn default_stable_ms() -> ValueSlot<u32> {

@@ -1,11 +1,18 @@
 use crate::HwAddress;
 
+/// Debounced state transition for a button input.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ButtonEventKind {
+    /// Button became stably pressed.
     Pressed,
+    /// Button became stably released.
     Released,
 }
 
+/// Event produced by [`crate::ButtonInput`].
+///
+/// The sequence counter is local to the opened input and increments on each
+/// debounced transition.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ButtonEvent {
     source: HwAddress,

@@ -1,4 +1,4 @@
-use crate::{HwManifest, HardwareManifestFile};
+use crate::{HardwareManifestFile, HwManifest};
 
 const XIAO_ESP32_C6_TOML: &str = include_str!("../../boards/seeed/xiao-esp32-c6.toml");
 

@@ -3,6 +3,7 @@ use alloc::vec::Vec;
 
 use crate::HwAddress;
 
+/// Opaque identifier assigned by [`crate::HwRegistry`] to an active lease.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct HwLeaseId(u64);
 
@@ -16,6 +17,11 @@ impl HwLeaseId {
     }
 }
 
+/// Active reservation of hardware resources.
+///
+/// Opened devices keep their lease while they own the underlying resource. When
+/// the device closes or is dropped, the lease is released back to the
+/// [`crate::HwRegistry`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HardwareLease {
     id: HwLeaseId,

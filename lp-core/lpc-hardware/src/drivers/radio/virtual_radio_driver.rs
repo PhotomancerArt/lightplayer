@@ -7,15 +7,20 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use crate::{
-    HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
-    HardwareEndpointError, HwEndpointId, HwEndpointKind, HwEndpointSpec,
-    HardwareLease, HwRegistry, RadioChannelId, RadioConfig, RadioDevice, RadioDeviceId,
-    RadioDrainReport, RadioDriver, RadioEventId, RadioMessage, RadioMessageKind,
+    HardwareEndpointError, HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
+    HwEndpointId, HwEndpointKind, HwEndpointSpec, HwRegistry, RadioChannelId, RadioConfig,
+    RadioDevice, RadioDeviceId, RadioDrainReport, RadioDriver, RadioEventId, RadioMessage,
+    RadioMessageKind,
 };
 
 const VIRTUAL_RADIO_DEVICE_ID: RadioDeviceId = RadioDeviceId::new(0);
 const VIRTUAL_RADIO_QUEUE_CAPACITY: usize = 16;
 
+/// Manifest-backed virtual radio driver for tests and emulation.
+///
+/// The driver exposes one radio endpoint for a manifest radio resource. Tests
+/// can inject received packets with [`VirtualRadioDriver::push_received`] and
+/// inspect transmitted packets with [`VirtualRadioDriver::take_sent`].
 #[derive(Clone)]
 pub struct VirtualRadioDriver {
     registry: Rc<HwRegistry>,
@@ -30,11 +35,7 @@ impl VirtualRadioDriver {
         Self::new_with_spec(registry, radio_index, "radio:virtual:0")
     }
 
-    pub fn new_with_spec(
-        registry: Rc<HwRegistry>,
-        radio_index: u8,
-        spec: &'static str,
-    ) -> Self {
+    pub fn new_with_spec(registry: Rc<HwRegistry>, radio_index: u8, spec: &'static str) -> Self {
         Self {
             registry,
             driver_id: alloc::format!("virtual-radio-{radio_index}-{spec}"),
@@ -120,10 +121,9 @@ impl RadioDriver for VirtualRadioDriver {
 
         self.registry
             .ensure_capability(&self.address, HwCapability::Radio)?;
-        let lease = self.registry.claim_bundle(HwClaim::new(
-            self.driver_id(),
-            vec![self.address.clone()],
-        ))?;
+        let lease = self
+            .registry
+            .claim_bundle(HwClaim::new(self.driver_id(), vec![self.address.clone()]))?;
         Ok(Box::new(VirtualRadioDevice::new(
             Rc::clone(&self.registry),
             lease,

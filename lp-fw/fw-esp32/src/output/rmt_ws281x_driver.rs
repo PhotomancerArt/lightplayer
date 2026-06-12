@@ -13,13 +13,10 @@ use esp_hal::Blocking;
 use esp_hal::gpio::interconnect::PeripheralOutput;
 use esp_hal::rmt::{ConfigError as RmtConfigError, Rmt};
 use lpc_hardware::{
-    HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
-    HardwareEndpointError, HwEndpointId, HwEndpointKind, HwEndpointSpec,
-    HwEndpointStatus, HardwareLease, HwRegistry, Ws281xConfig, Ws281xDriver,
-    Ws281xOutput,
+    HardwareEndpointError, HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
+    HwEndpointId, HwEndpointKind, HwEndpointSpec, HwEndpointStatus, HwRegistry, OutputError,
+    Ws281xConfig, Ws281xDriver, Ws281xOutput,
 };
-use lpc_shared::output::OutputDriverOptions;
-use lpc_shared::{DisplayPipeline, OutputError};
 
 use crate::output::{LedChannel, LedTransaction};
 
@@ -95,9 +92,7 @@ impl Esp32RmtWs281xDriver {
             HwEndpointStatus::InUse { claimant } => HwEndpointStatus::Unavailable {
                 reason: format!("RMT timing resource is in use by {claimant}"),
             },
-            HwEndpointStatus::Unavailable { reason } => {
-                HwEndpointStatus::Unavailable { reason }
-            }
+            HwEndpointStatus::Unavailable { reason } => HwEndpointStatus::Unavailable { reason },
         }
     }
 }
@@ -182,21 +177,10 @@ impl Ws281xDriver for Esp32RmtWs281xDriver {
             vec![self.gpio_address.clone(), self.timing_address.clone()],
         ))?;
 
-        let options = config.display_options_cloned().unwrap_or_default();
-        let pipeline =
-            DisplayPipeline::new(config.byte_count() / 3, options.clone()).map_err(|error| {
-                let _ = self.registry.release(&lease);
-                HardwareEndpointError::Other {
-                    message: format!("DisplayPipeline allocation failed: {error}"),
-                }
-            })?;
-
         Ok(Box::new(Esp32RmtWs281xOutput {
             registry: Rc::clone(&self.registry),
             lease: Some(lease),
             byte_count: config.byte_count(),
-            pipeline,
-            options,
         }))
     }
 }
@@ -205,48 +189,24 @@ pub struct Esp32RmtWs281xOutput {
     registry: Rc<HwRegistry>,
     lease: Option<HardwareLease>,
     byte_count: u32,
-    pipeline: DisplayPipeline,
-    options: OutputDriverOptions,
 }
 
 impl Ws281xOutput for Esp32RmtWs281xOutput {
-    fn write(&mut self, data: &[u16]) -> Result<(), OutputError> {
-        let mut num_leds = (self.byte_count / 3) as usize;
-        let expected_len = num_leds * 3;
-
-        if data.len() > expected_len {
-            let new_byte_count = capped_byte_count_for_len(data.len());
-            self.resize(Ws281xConfig::new(
-                new_byte_count,
-                Some(self.options.clone()),
-            ))?;
-            num_leds = (self.byte_count / 3) as usize;
-        } else if data.len() < expected_len {
+    fn write(&mut self, data: &[u8]) -> Result<(), OutputError> {
+        let expected_len = byte_len_for_byte_count(self.byte_count);
+        if data.len() != expected_len {
             return Err(OutputError::DataLengthMismatch {
                 expected: expected_len as u32,
                 actual: data.len(),
             });
         }
 
-        let mut rmt_buffer = Vec::with_capacity(num_leds * 3);
-        rmt_buffer.resize(num_leds * 3, 0);
-
-        self.pipeline.write_frame(0, data);
-        self.pipeline.write_frame(16667, data);
-        self.pipeline.tick(8333, &mut rmt_buffer);
-
-        transmit_rmt_buffer(&rmt_buffer)
+        transmit_rmt_buffer(data)
     }
 
     fn resize(&mut self, config: Ws281xConfig) -> Result<(), OutputError> {
         validate_byte_count(config.byte_count()).map_err(endpoint_error_to_output_error)?;
-        let byte_count = capped_byte_count(config.byte_count());
-        let num_leds = byte_count / 3;
-        if let Some(options) = config.display_options_cloned() {
-            self.options = options;
-        }
-        self.pipeline.resize(num_leds);
-        self.byte_count = byte_count;
+        self.byte_count = capped_byte_count(config.byte_count());
         Ok(())
     }
 }
@@ -312,13 +272,13 @@ fn validate_byte_count(byte_count: u32) -> Result<(), HardwareEndpointError> {
     Ok(())
 }
 
-fn capped_byte_count_for_len(data_len: usize) -> u32 {
-    capped_byte_count(((data_len / 3) * 3) as u32)
-}
-
 fn capped_byte_count(byte_count: u32) -> u32 {
     let max_byte_count = (MAX_LEDS * 3) as u32;
     byte_count.min(max_byte_count)
+}
+
+fn byte_len_for_byte_count(byte_count: u32) -> usize {
+    ((byte_count / 3) as usize) * 3
 }
 
 fn endpoint_error_to_output_error(error: HardwareEndpointError) -> OutputError {

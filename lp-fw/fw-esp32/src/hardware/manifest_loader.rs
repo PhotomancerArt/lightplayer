@@ -3,7 +3,7 @@ extern crate alloc;
 use alloc::string::{String, ToString};
 use core::str;
 
-use lpc_hardware::{HwManifest, HardwareManifestFile, default_esp32c6_hardware_manifest};
+use lpc_hardware::{HardwareManifestFile, HwManifest, default_esp32c6_hardware_manifest};
 use lpfs::LpFs;
 use lpfs::lp_path::AsLpPath;
 

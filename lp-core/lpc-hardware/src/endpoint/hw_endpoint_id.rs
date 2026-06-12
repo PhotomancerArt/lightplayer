@@ -5,6 +5,10 @@ use core::fmt;
 use crate::HwAddress;
 use lpc_model::HwEndpointSpec;
 
+/// Internal endpoint identity scoped to the driver that exposes it.
+///
+/// Endpoint IDs are stable enough for routing inside [`crate::HardwareSystem`].
+/// Authored project files should use [`HwEndpointSpec`] instead.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct HwEndpointId(String);
 

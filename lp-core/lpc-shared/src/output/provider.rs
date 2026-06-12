@@ -1,5 +1,6 @@
+use crate::display_pipeline::DisplayPipelineOptions;
 use lpc_hardware::HwEndpointSpec;
-use lpc_hardware::{DisplayPipelineOptions, OutputError};
+use lpc_hardware::OutputError;
 
 /// Options for output driver (DisplayPipeline). Alias for DisplayPipelineOptions.
 pub type OutputDriverOptions = DisplayPipelineOptions;

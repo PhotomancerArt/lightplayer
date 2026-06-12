@@ -1,8 +1,13 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::{HwAddress, HwCapability, HwResource, HardwareTarget};
+use crate::{HardwareTarget, HwAddress, HwCapability, HwResource};
 
+/// In-memory hardware profile for one board or virtual target.
+///
+/// The manifest is the source of truth for resources known to a
+/// [`crate::HwRegistry`]. Drivers derive [`crate::HwEndpoint`]s from these
+/// resources instead of hard-coding pins in the driver contract.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HwManifest {
     board_id: String,
@@ -43,10 +48,7 @@ impl HwManifest {
             };
             resources.push(HwResource::new(
                 HwAddress::gpio(pin),
-                [
-                    HwCapability::GpioOutput,
-                    HwCapability::GpioInput,
-                ],
+                [HwCapability::GpioOutput, HwCapability::GpioInput],
                 display_label,
             ));
         }

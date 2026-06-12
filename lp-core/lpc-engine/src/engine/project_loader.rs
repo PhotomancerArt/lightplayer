@@ -1626,7 +1626,7 @@ mod tests {
     use alloc::rc::Rc;
     use alloc::sync::Arc;
     use lpc_hardware::{
-        HwAddress, HwRegistry, HardwareSystem, VirtualButtonDriver, VirtualRadioDriver,
+        HardwareSystem, HwAddress, HwRegistry, VirtualButtonDriver, VirtualRadioDriver,
         default_esp32c6_hardware_manifest,
     };
     use lpc_model::{

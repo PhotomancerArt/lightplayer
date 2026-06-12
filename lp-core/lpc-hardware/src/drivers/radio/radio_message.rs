@@ -9,10 +9,14 @@ pub const RADIO_MAX_PAYLOAD_LEN: usize = 64;
 pub const RADIO_WIRE_HEADER_LEN: usize = 17;
 pub const RADIO_MAX_PACKET_LEN: usize = RADIO_WIRE_HEADER_LEN + RADIO_MAX_PAYLOAD_LEN;
 
+/// Application-level kind carried in a radio packet.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RadioMessageKind {
+    /// Button event notification.
     ButtonPress,
+    /// Reserved for control-plane messages.
     ControlMessage,
+    /// Caller-defined message kind.
     Custom(u8),
 }
 
@@ -34,6 +38,10 @@ impl RadioMessageKind {
     }
 }
 
+/// Small fixed-header radio message.
+///
+/// The encoding is intentionally allocation-light and bounded by
+/// [`RADIO_MAX_PACKET_LEN`] so it can be used on embedded transports.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RadioMessage {
     source_device_id: RadioDeviceId,
@@ -161,6 +169,7 @@ impl RadioMessage {
     }
 }
 
+/// Packet encode/decode failure.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RadioPacketError {
     PacketTooShort { len: usize, min: usize },

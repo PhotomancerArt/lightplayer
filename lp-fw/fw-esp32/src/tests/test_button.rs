@@ -6,9 +6,7 @@ extern crate alloc;
 
 use alloc::rc::Rc;
 use embassy_time::{Duration, Instant, Timer};
-use lpc_hardware::{
-    ButtonConfig, ButtonDriver, HwRegistry, default_esp32c6_hardware_manifest,
-};
+use lpc_hardware::{ButtonConfig, ButtonDriver, HwRegistry, default_esp32c6_hardware_manifest};
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
 use crate::hardware::button::Esp32Gpio20ButtonDriver;

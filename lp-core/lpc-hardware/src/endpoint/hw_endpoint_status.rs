@@ -1,5 +1,9 @@
 use alloc::string::String;
 
+/// Current availability of a driver endpoint.
+///
+/// Drivers calculate this from the [`crate::HwRegistry`] and any target-specific
+/// readiness checks, such as whether an ESP32 RMT channel has been initialized.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HwEndpointStatus {
     Available,

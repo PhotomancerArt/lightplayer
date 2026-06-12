@@ -2,10 +2,14 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::{
-    HwDriver, HwEndpoint, HardwareEndpointError, HwEndpointId, RadioChannelId,
-    RadioDrainReport, RadioMessage, RadioMessageKind,
+    HardwareEndpointError, HwDriver, HwEndpoint, HwEndpointId, RadioChannelId, RadioDrainReport,
+    RadioMessage, RadioMessageKind,
 };
 
+/// Radio endpoint configuration.
+///
+/// The optional channel is target-specific setup metadata; logical
+/// subscriptions still happen through [`RadioDevice::subscribe_channel`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RadioConfig {
     channel: Option<u8>,
@@ -27,12 +31,16 @@ impl Default for RadioConfig {
     }
 }
 
+/// Opened packet-radio device.
 pub trait RadioDevice {
+    /// Start receiving messages for a logical channel.
     fn subscribe_channel(&mut self, channel: RadioChannelId) -> Result<(), HardwareEndpointError>;
 
+    /// Stop receiving messages for a logical channel.
     fn unsubscribe_channel(&mut self, channel: RadioChannelId)
     -> Result<(), HardwareEndpointError>;
 
+    /// Send a message on a logical channel.
     fn send_channel(
         &mut self,
         channel: RadioChannelId,
@@ -40,6 +48,7 @@ pub trait RadioDevice {
         payload: &[u8],
     ) -> Result<(), HardwareEndpointError>;
 
+    /// Drain received messages for a channel into `out`.
     fn drain_channel(
         &mut self,
         channel: RadioChannelId,
@@ -47,9 +56,12 @@ pub trait RadioDevice {
     ) -> Result<RadioDrainReport, HardwareEndpointError>;
 }
 
+/// Driver that exposes radio endpoints.
 pub trait RadioDriver: HwDriver {
+    /// List currently known radio endpoints.
     fn endpoints(&self) -> Vec<HwEndpoint>;
 
+    /// Open one endpoint and claim the underlying radio resource.
     fn open(
         &self,
         endpoint_id: &HwEndpointId,

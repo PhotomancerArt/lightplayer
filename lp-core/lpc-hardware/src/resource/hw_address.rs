@@ -4,6 +4,11 @@ use core::fmt;
 
 use crate::HwError;
 
+/// Stable address for a concrete board resource.
+///
+/// Addresses identify physical or logical hardware resources inside a
+/// [`crate::HwManifest`]. They are intentionally separate from user-facing
+/// endpoint specs and board labels, which may vary by driver or board profile.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct HwAddress(String);
 

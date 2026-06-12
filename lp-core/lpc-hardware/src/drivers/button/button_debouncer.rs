@@ -1,5 +1,9 @@
 use crate::{ButtonEvent, ButtonEventKind, HwAddress};
 
+/// Converts noisy raw button samples into stable press/release events.
+///
+/// The debouncer tracks one candidate state and emits only after that state has
+/// stayed unchanged for the configured stable interval.
 #[derive(Debug, Clone)]
 pub struct ButtonDebouncer {
     source: HwAddress,
@@ -11,6 +15,7 @@ pub struct ButtonDebouncer {
 }
 
 impl ButtonDebouncer {
+    /// Default debounce interval used by [`crate::ButtonConfig`].
     pub const DEFAULT_STABLE_MS: u64 = 30;
 
     pub fn new(source: HwAddress, stable_ms: u64) -> Self {

@@ -5,11 +5,13 @@ use core::fmt;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{
-    HwAddress, HwCapability, HwError, HwManifest, HwResource,
-    HardwareTarget,
-};
+use crate::{HardwareTarget, HwAddress, HwCapability, HwError, HwManifest, HwResource};
 
+/// TOML-friendly board manifest file.
+///
+/// This is the serializable form checked into the repo for board profiles. Use
+/// [`HardwareManifestFile::to_manifest`] to validate and convert it into the
+/// runtime [`HwManifest`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HardwareManifestFile {
     pub id: String,
@@ -136,6 +138,10 @@ impl HardwareManifestFile {
     }
 }
 
+/// Board-silkscreen label discovered or recorded during board mapping.
+///
+/// Labels are metadata for humans and tooling. They do not create claimable
+/// resources by themselves; resources come from [`HardwareResourceFile`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HardwareBoardLabelFile {
     pub label: String,
@@ -158,6 +164,7 @@ impl HardwareBoardLabelFile {
     }
 }
 
+/// Verification status for a board label in a manifest file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HardwareBoardLabelStatus {
@@ -168,6 +175,10 @@ pub enum HardwareBoardLabelStatus {
     Skipped,
 }
 
+/// Serializable resource entry in a board manifest file.
+///
+/// GPIO resources are often grouped under `gpio` in TOML for readability, while
+/// non-GPIO resources live under `resource`; both convert to [`HwResource`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HardwareResourceFile {
     pub address: String,
@@ -224,6 +235,7 @@ impl HardwareResourceFile {
     }
 }
 
+/// Errors produced while parsing, validating, or converting a manifest file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HardwareManifestFileError {
     Parse { message: String },

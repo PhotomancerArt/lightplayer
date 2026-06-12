@@ -3,10 +3,15 @@ use alloc::string::{String, ToString};
 use core::cell::RefCell;
 
 use crate::{
-    HwAddress, HwCapability, HwClaim, HwEndpointStatus, HwError,
-    HardwareLease, HwLeaseId, HwManifest,
+    HardwareLease, HwAddress, HwCapability, HwClaim, HwEndpointStatus, HwError, HwLeaseId,
+    HwManifest,
 };
 
+/// Live ownership registry for a hardware manifest.
+///
+/// The registry validates capabilities against the [`HwManifest`], tracks active
+/// [`HardwareLease`]s, and reports endpoint status for drivers. It uses interior
+/// mutability so shared driver handles can coordinate claims in `no_std` code.
 #[derive(Debug)]
 pub struct HwRegistry {
     manifest: HwManifest,
@@ -119,12 +124,12 @@ impl HwRegistry {
         address: &HwAddress,
         capability: HwCapability,
     ) -> Result<(), HwError> {
-        let resource =
-            self.manifest
-                .resource(address)
-                .ok_or_else(|| HwError::UnknownResource {
-                    address: address.clone(),
-                })?;
+        let resource = self
+            .manifest
+            .resource(address)
+            .ok_or_else(|| HwError::UnknownResource {
+                address: address.clone(),
+            })?;
         if !resource.supports(capability) {
             return Err(HwError::UnsupportedCapability {
                 address: address.clone(),
@@ -201,10 +206,7 @@ mod tests {
     fn claim_bundle_is_atomic_when_later_resource_is_claimed() {
         let registry = registry();
         let rmt_lease = registry
-            .claim_bundle(HwClaim::new(
-                "output-a",
-                vec![HwAddress::rmt_ws281x(0)],
-            ))
+            .claim_bundle(HwClaim::new("output-a", vec![HwAddress::rmt_ws281x(0)]))
             .unwrap();
 
         let result = registry.claim_bundle(HwClaim::new(
@@ -241,37 +243,25 @@ mod tests {
         let manifest = HwManifest::new(
             "board",
             "Board",
-            [HwResource::new(
-                HwAddress::gpio(12),
-                [HwCapability::GpioOutput],
-                "GPIO12",
-            )
-            .reserved("crashes during GPIO scan")],
+            [
+                HwResource::new(HwAddress::gpio(12), [HwCapability::GpioOutput], "GPIO12")
+                    .reserved("crashes during GPIO scan"),
+            ],
         );
         let registry = HwRegistry::new(manifest);
 
-        let result = registry.claim_bundle(HwClaim::new(
-            "output",
-            vec![HwAddress::gpio(12)],
-        ));
+        let result = registry.claim_bundle(HwClaim::new("output", vec![HwAddress::gpio(12)]));
 
-        assert!(matches!(
-            result,
-            Err(HwError::ReservedResource { .. })
-        ));
+        assert!(matches!(result, Err(HwError::ReservedResource { .. })));
     }
 
     #[test]
     fn unsupported_capability_fails() {
         let registry = registry();
 
-        let result =
-            registry.ensure_capability(&HwAddress::gpio(18), HwCapability::Radio);
+        let result = registry.ensure_capability(&HwAddress::gpio(18), HwCapability::Radio);
 
-        assert!(matches!(
-            result,
-            Err(HwError::UnsupportedCapability { .. })
-        ));
+        assert!(matches!(result, Err(HwError::UnsupportedCapability { .. })));
     }
 
     fn registry() -> HwRegistry {
@@ -281,10 +271,7 @@ mod tests {
             [
                 HwResource::new(
                     HwAddress::gpio(18),
-                    [
-                        HwCapability::GpioOutput,
-                        HwCapability::GpioInput,
-                    ],
+                    [HwCapability::GpioOutput, HwCapability::GpioInput],
                     "D6",
                 ),
                 HwResource::new(

@@ -5,7 +5,8 @@
 
 mod dither;
 mod lut;
+mod options;
 mod pipeline;
 
-pub use lpc_hardware::DisplayPipelineOptions;
+pub use options::DisplayPipelineOptions;
 pub use pipeline::DisplayPipeline;

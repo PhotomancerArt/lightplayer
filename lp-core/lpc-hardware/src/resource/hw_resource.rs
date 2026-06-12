@@ -3,6 +3,10 @@ use alloc::vec::Vec;
 
 use crate::{HwAddress, HwCapability};
 
+/// One claimable resource in a board manifest.
+///
+/// A resource is addressed by [`HwAddress`], declares the capabilities drivers
+/// may require, and carries human-facing labels/aliases from the board profile.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HwResource {
     address: HwAddress,

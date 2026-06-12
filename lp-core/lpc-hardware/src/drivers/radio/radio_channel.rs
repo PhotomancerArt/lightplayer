@@ -1,3 +1,6 @@
+/// Logical radio channel identifier.
+///
+/// Channels let one opened radio device multiplex independent message streams.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RadioChannelId(u32);
 
@@ -11,6 +14,7 @@ impl RadioChannelId {
     }
 }
 
+/// Device identifier carried on radio messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RadioDeviceId(u32);
 
@@ -24,6 +28,7 @@ impl RadioDeviceId {
     }
 }
 
+/// Per-device event identifier carried on radio messages.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RadioEventId(u32);
 
@@ -37,6 +42,10 @@ impl RadioEventId {
     }
 }
 
+/// Result of draining a radio channel queue.
+///
+/// `dropped_count` and `overflowed` report messages lost before this drain,
+/// which is important for small embedded queues.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct RadioDrainReport {
     drained_count: usize,

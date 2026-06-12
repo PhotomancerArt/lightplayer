@@ -7,12 +7,15 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use crate::{
-    ButtonConfig, ButtonDebouncer, ButtonDriver, ButtonEvent, ButtonInput, HwAddress,
-    HwCapability, HwClaim, HwDriver, HwEndpoint, HardwareEndpointError,
-    HwEndpointId, HwEndpointKind, HwEndpointSpec, HardwareLease,
-    HwRegistry,
+    ButtonConfig, ButtonDebouncer, ButtonDriver, ButtonEvent, ButtonInput, HardwareEndpointError,
+    HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint, HwEndpointId,
+    HwEndpointKind, HwEndpointSpec, HwRegistry,
 };
 
+/// Manifest-backed virtual button driver for tests and emulation.
+///
+/// The driver exposes one button endpoint for every GPIO input resource. Tests
+/// inject raw state with [`VirtualButtonDriver::set_pressed`].
 #[derive(Clone)]
 pub struct VirtualButtonDriver {
     registry: Rc<HwRegistry>,
@@ -177,8 +180,7 @@ mod tests {
     fn virtual_button_driver_polls_injected_state() {
         let registry = Rc::new(HwRegistry::new(test_manifest()));
         let driver = VirtualButtonDriver::new(Rc::clone(&registry));
-        let endpoint_id =
-            HwEndpointId::for_driver_address(driver.driver_id(), &HwAddress::gpio(4));
+        let endpoint_id = HwEndpointId::for_driver_address(driver.driver_id(), &HwAddress::gpio(4));
         let mut input = driver
             .open(&endpoint_id, ButtonConfig::new(10))
             .expect("button opens");

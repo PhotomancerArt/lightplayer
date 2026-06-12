@@ -3,25 +3,25 @@ use core::fmt;
 
 use crate::{HwEndpointId, HwEndpointKind, HwError};
 
+/// Failure while resolving or opening a hardware endpoint.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HardwareEndpointError {
+    /// No registered driver currently exposes the requested endpoint.
     UnknownEndpoint {
         kind: HwEndpointKind,
         endpoint_id: HwEndpointId,
     },
+    /// The endpoint exists but is reserved, already claimed, or not initialized.
     EndpointUnavailable {
         endpoint_id: HwEndpointId,
         reason: String,
     },
-    UnsupportedConfig {
-        reason: String,
-    },
-    Hardware {
-        error: HwError,
-    },
-    Other {
-        message: String,
-    },
+    /// The endpoint exists, but the requested configuration is unsupported.
+    UnsupportedConfig { reason: String },
+    /// Lower-level resource or registry failure.
+    Hardware { error: HwError },
+    /// Target-specific endpoint failure.
+    Other { message: String },
 }
 
 impl fmt::Display for HardwareEndpointError {

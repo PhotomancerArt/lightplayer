@@ -6,8 +6,8 @@ use alloc::format;
 
 use lpc_hardware::{ButtonConfig, ButtonEventKind, ButtonInput};
 use lpc_model::{
-    ButtonDefView, ButtonState, ControlMessage, HwEndpointSpec, MapSlot, Revision,
-    SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
+    ButtonDefView, ButtonState, ControlMessage, HwEndpointSpec, MapSlot, Revision, SlotAccess,
+    SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
 };
 
 use crate::node::{

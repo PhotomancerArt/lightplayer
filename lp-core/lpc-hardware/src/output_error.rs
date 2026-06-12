@@ -3,7 +3,11 @@ use core::fmt;
 
 use crate::HwError;
 
-/// Output provider error type.
+/// Output-channel error type shared by hardware and higher-level providers.
+///
+/// The hardware crate owns this small error so opened outputs such as
+/// [`crate::Ws281xOutput`] can report invalid writes without depending on the
+/// engine/output provider layer.
 #[derive(Debug, Clone)]
 pub enum OutputError {
     /// Pin is already open.

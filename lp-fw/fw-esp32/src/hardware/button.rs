@@ -9,9 +9,9 @@ use core::cell::RefCell;
 
 use esp_hal::gpio::{Input, InputConfig, Pull};
 use lpc_hardware::{
-    ButtonConfig, ButtonDebouncer, ButtonDriver, ButtonEvent, ButtonInput, HwAddress,
-    HwCapability, HwClaim, HwDriver, HwEndpoint, HardwareEndpointError,
-    HwEndpointId, HwEndpointKind, HwError, HardwareLease, HwRegistry,
+    ButtonConfig, ButtonDebouncer, ButtonDriver, ButtonEvent, ButtonInput, HardwareEndpointError,
+    HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint, HwEndpointId,
+    HwEndpointKind, HwError, HwRegistry,
 };
 use lpc_model::HwEndpointSpec;
 

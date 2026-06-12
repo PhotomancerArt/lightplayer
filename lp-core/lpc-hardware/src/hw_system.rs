@@ -3,12 +3,17 @@ use alloc::rc::Rc;
 use alloc::vec::Vec;
 
 use crate::{
-    ButtonConfig, ButtonDriver, ButtonInput, HwAddress, HwEndpoint,
-    HardwareEndpointError, HwEndpointId, HwEndpointKind, HwEndpointSpec,
-    HwRegistry, RadioConfig, RadioDevice, RadioDriver, VirtualButtonDriver,
-    VirtualRadioDriver, VirtualWs281xDriver, Ws281xConfig, Ws281xDriver, Ws281xOutput,
+    ButtonConfig, ButtonDriver, ButtonInput, HardwareEndpointError, HwAddress, HwEndpoint,
+    HwEndpointId, HwEndpointKind, HwEndpointSpec, HwRegistry, RadioConfig, RadioDevice,
+    RadioDriver, VirtualButtonDriver, VirtualRadioDriver, VirtualWs281xDriver, Ws281xConfig,
+    Ws281xDriver, Ws281xOutput,
 };
 
+/// Driver registry and endpoint router for one hardware manifest.
+///
+/// `HardwareSystem` owns the set of registered drivers for a target. It does not
+/// own resources directly; each opened device claims resources through the
+/// shared [`HwRegistry`].
 pub struct HardwareSystem {
     registry: Rc<HwRegistry>,
     ws281x_drivers: Vec<Box<dyn Ws281xDriver>>,
@@ -257,10 +262,7 @@ enum EndpointAddressMatch {
     Missing,
 }
 
-fn endpoint_for_address(
-    endpoints: Vec<HwEndpoint>,
-    address: &HwAddress,
-) -> EndpointAddressMatch {
+fn endpoint_for_address(endpoints: Vec<HwEndpoint>, address: &HwAddress) -> EndpointAddressMatch {
     let mut first_match = None;
     for endpoint in endpoints {
         if endpoint.address() != address {
@@ -279,10 +281,7 @@ fn endpoint_for_address(
     }
 }
 
-fn endpoint_for_spec(
-    endpoints: Vec<HwEndpoint>,
-    spec: &HwEndpointSpec,
-) -> EndpointAddressMatch {
+fn endpoint_for_spec(endpoints: Vec<HwEndpoint>, spec: &HwEndpointSpec) -> EndpointAddressMatch {
     let mut first_match = None;
     for endpoint in endpoints {
         if endpoint.spec() != spec {
@@ -308,9 +307,7 @@ mod tests {
 
     #[test]
     fn virtual_system_lists_three_capability_families() {
-        let registry = Rc::new(HwRegistry::new(
-            HwManifest::virtual_single_rmt_gpio_board(),
-        ));
+        let registry = Rc::new(HwRegistry::new(HwManifest::virtual_single_rmt_gpio_board()));
         let system = HardwareSystem::with_virtual_drivers(registry);
 
         assert!(!system.ws281x_endpoints().is_empty());
@@ -320,12 +317,10 @@ mod tests {
 
     #[test]
     fn virtual_system_opens_ws281x_by_gpio_address() {
-        let registry = Rc::new(HwRegistry::new(
-            HwManifest::virtual_single_rmt_gpio_board(),
-        ));
+        let registry = Rc::new(HwRegistry::new(HwManifest::virtual_single_rmt_gpio_board()));
         let system = HardwareSystem::with_virtual_drivers(Rc::clone(&registry));
         let output = system
-            .open_ws281x_by_address(&HwAddress::gpio(18), Ws281xConfig::new(3, None))
+            .open_ws281x_by_address(&HwAddress::gpio(18), Ws281xConfig::new(3))
             .unwrap();
 
         assert!(registry.is_claimed(&HwAddress::gpio(18)));
@@ -339,13 +334,11 @@ mod tests {
 
     #[test]
     fn virtual_system_opens_ws281x_by_endpoint_spec() {
-        let registry = Rc::new(HwRegistry::new(
-            HwManifest::virtual_single_rmt_gpio_board(),
-        ));
+        let registry = Rc::new(HwRegistry::new(HwManifest::virtual_single_rmt_gpio_board()));
         let system = HardwareSystem::with_virtual_drivers(Rc::clone(&registry));
         let spec = HwEndpointSpec::from_static("ws281x:rmt:D10");
         let output = system
-            .open_ws281x_by_spec(&spec, Ws281xConfig::new(3, None))
+            .open_ws281x_by_spec(&spec, Ws281xConfig::new(3))
             .unwrap();
 
         assert!(registry.is_claimed(&HwAddress::gpio(18)));
@@ -359,13 +352,11 @@ mod tests {
 
     #[test]
     fn virtual_system_reports_unknown_ws281x_endpoint_spec() {
-        let registry = Rc::new(HwRegistry::new(
-            HwManifest::virtual_single_rmt_gpio_board(),
-        ));
+        let registry = Rc::new(HwRegistry::new(HwManifest::virtual_single_rmt_gpio_board()));
         let system = HardwareSystem::with_virtual_drivers(registry);
         let spec = HwEndpointSpec::from_static("ws281x:rmt:NOPE");
 
-        let result = system.open_ws281x_by_spec(&spec, Ws281xConfig::new(3, None));
+        let result = system.open_ws281x_by_spec(&spec, Ws281xConfig::new(3));
 
         assert!(matches!(
             result,
@@ -398,8 +389,7 @@ mod tests {
             .open_button_by_address(&HwAddress::gpio(4), ButtonConfig::default())
             .unwrap();
 
-        let result =
-            system.open_ws281x_by_address(&HwAddress::gpio(4), Ws281xConfig::new(3, None));
+        let result = system.open_ws281x_by_address(&HwAddress::gpio(4), Ws281xConfig::new(3));
 
         assert!(matches!(
             result,
@@ -415,10 +405,7 @@ mod tests {
             [
                 HwResource::new(
                     HwAddress::gpio(4),
-                    [
-                        HwCapability::GpioOutput,
-                        HwCapability::GpioInput,
-                    ],
+                    [HwCapability::GpioOutput, HwCapability::GpioInput],
                     "GPIO4",
                 ),
                 HwResource::new(
@@ -426,11 +413,7 @@ mod tests {
                     [HwCapability::Rmt, HwCapability::Ws281xOutput],
                     "RMT WS281x 0",
                 ),
-                HwResource::new(
-                    HwAddress::radio(0),
-                    [HwCapability::Radio],
-                    "Radio 0",
-                ),
+                HwResource::new(HwAddress::radio(0), [HwCapability::Radio], "Radio 0"),
             ],
         )
     }
