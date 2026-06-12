@@ -1,18 +1,18 @@
 use alloc::string::String;
 
-use crate::node::node_invocation::NodeInvocation;
-use crate::{EnumSlot, MapSlot, OptionSlot, Slotted, ValueSlot};
+use crate::{MapSlot, NodeInvocationSlot, OptionSlot, Slotted, ValueSlot};
 
 /// Authored root project node definition.
 ///
-/// A project is a node artifact with `kind = "Project"`. Its `nodes` table is
-/// the explicit source of child node invocations; the runtime no longer
-/// discovers children from filesystem directories.
+/// A project is a node artifact with `kind = "Project"`. Its `nodes` table
+/// owns named child [`crate::NodeInvocationSlot`] entries; the runtime no
+/// longer discovers children from filesystem directories.
 #[derive(Clone, Debug, Default, PartialEq, Slotted)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ProjectDef {
     pub name: OptionSlot<ValueSlot<String>>,
-    pub nodes: MapSlot<String, EnumSlot<NodeInvocation>>,
+    /// Named child node positions owned by this project.
+    pub nodes: MapSlot<String, NodeInvocationSlot>,
 }
 
 impl ProjectDef {

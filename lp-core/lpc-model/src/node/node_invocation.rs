@@ -1,19 +1,26 @@
-//! Parent-owned instruction to instantiate a child node.
+//! Parent-owned child node invocation.
 //!
-//! The parent owns the invocation namespace. The child node definition may be
-//! unset ([`NodeInvocation::Unset`]), a path specifier ([`NodeInvocation::Ref`]),
-//! or an inline [`NodeDef`] ([`NodeInvocation::Def`]).
+//! A [`NodeInvocation`] is the authored value stored by a parent when it owns a
+//! child node position. It can be unset, reference another node artifact, or
+//! carry an inline [`NodeDef`].
+//!
+//! A [`NodeInvocationSlot`] is the slot wrapper used by slotted node
+//! definitions. Prefer the slot alias for fields in authored model structs, and
+//! use [`NodeInvocation`] for the value after reading or unwrapping the slot.
 
 use alloc::string::ToString;
 
 use crate::artifact::artifact_spec::ArtifactSpec;
 use crate::nodes::node_def::{NodeArtifact, NodeDef};
 use crate::{
-    ArtifactPath, ArtifactPathSlot, FieldSlot, FieldSlotMut, SlotDataAccess, SlotDataMutAccess,
-    SlotShape, Slotted, StaticSlotShape, StaticSlotShapeDescriptor,
+    ArtifactPath, ArtifactPathSlot, EnumSlot, FieldSlot, FieldSlotMut, SlotDataAccess,
+    SlotDataMutAccess, SlotShape, Slotted, StaticSlotShape, StaticSlotShapeDescriptor,
 };
 
-/// Parent-owned child node invocation.
+/// Slot wrapper for an authored child node invocation.
+pub type NodeInvocationSlot = EnumSlot<NodeInvocation>;
+
+/// Authored value for one parent-owned child node position.
 #[derive(Clone, Debug, PartialEq, Slotted)]
 #[slot(enum_encoding = "external", rename_all = "snake_case")]
 pub enum NodeInvocation {
@@ -21,14 +28,14 @@ pub enum NodeInvocation {
     #[default]
     Unset,
     Ref(ArtifactPathSlot),
-    Def(InvocationDefBody),
+    Def(NodeInvocationBody),
 }
 
 /// Inline node definition body referenced by shape id to avoid static descriptor cycles.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct InvocationDefBody(pub NodeArtifact);
+pub struct NodeInvocationBody(pub NodeArtifact);
 
-impl InvocationDefBody {
+impl NodeInvocationBody {
     pub fn new(def: NodeDef) -> Self {
         Self(NodeArtifact::new(def))
     }
@@ -38,7 +45,7 @@ impl InvocationDefBody {
     }
 }
 
-impl FieldSlot for InvocationDefBody {
+impl FieldSlot for NodeInvocationBody {
     const STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR: Option<&'static StaticSlotShapeDescriptor> =
         Some(&StaticSlotShapeDescriptor::Ref {
             id: NodeArtifact::SHAPE_ID,
@@ -53,14 +60,14 @@ impl FieldSlot for InvocationDefBody {
     }
 }
 
-impl FieldSlotMut for InvocationDefBody {
+impl FieldSlotMut for NodeInvocationBody {
     fn slot_field_data_mut(&mut self) -> SlotDataMutAccess<'_> {
         self.0.slot_field_data_mut()
     }
 }
 
 impl NodeInvocation {
-    /// New path-backed invocation.
+    /// Construct a path-backed invocation.
     #[must_use]
     pub fn new(specifier: ArtifactSpec) -> Self {
         Self::path(specifier)
@@ -73,7 +80,7 @@ impl NodeInvocation {
 
     #[must_use]
     pub fn inline(def: NodeDef) -> Self {
-        Self::Def(InvocationDefBody::new(def))
+        Self::Def(NodeInvocationBody::new(def))
     }
 
     pub fn ref_specifier(&self) -> Option<ArtifactSpec> {

@@ -1,8 +1,8 @@
 use alloc::string::String;
 
 use crate::{
-    BindingDefs, ControlMessage, EnumSlot, MapSlot, NodeInvocation, OptionSlot, PositiveF32Slot,
-    Slotted, ValueSlot,
+    BindingDefs, ControlMessage, MapSlot, NodeInvocation, NodeInvocationSlot, OptionSlot,
+    PositiveF32Slot, Slotted, ValueSlot,
 };
 
 /// One authored playlist entry.
@@ -28,8 +28,8 @@ pub struct PlaylistEntry {
     /// Outgoing crossfade duration override in seconds.
     pub fade_after: OptionSlot<PositiveF32Slot>,
 
-    /// Visual child node invocation.
-    pub node: EnumSlot<NodeInvocation>,
+    /// Visual child node position owned by this playlist entry.
+    pub node: NodeInvocationSlot,
 }
 
 impl Default for PlaylistEntry {
@@ -40,7 +40,7 @@ impl Default for PlaylistEntry {
             name: OptionSlot::none(),
             duration: OptionSlot::none(),
             fade_after: OptionSlot::none(),
-            node: EnumSlot::new(NodeInvocation::default()),
+            node: NodeInvocationSlot::new(NodeInvocation::default()),
         }
     }
 }

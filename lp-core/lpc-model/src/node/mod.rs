@@ -26,7 +26,7 @@ pub use node_def_location::NodeDefLocation;
 pub use node_def_state::{NodeDefState, NodeDefValidationError};
 pub use node_def_updates::{NodeDefChangeDetail, NodeDefUpdates};
 pub use node_id::NodeId;
-pub use node_invocation::NodeInvocation;
+pub use node_invocation::{NodeInvocation, NodeInvocationSlot};
 pub use node_name::{NodeName, NodeNameError};
 pub use relative_node_ref::{RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc};
 pub use tree_path::TreePath;

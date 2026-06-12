@@ -10,8 +10,9 @@ use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, ArtifactSpec, AsLpPath, BindingDef, BindingDefs, BindingRef,
     BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode, FixtureSamplingConfig,
-    HardwareEndpointSpec, MapSlot, NodeDef, NodeInvocation, OptionSlot, ProjectDef, Ratio,
-    RatioSlot, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry, ValueSlot,
+    HardwareEndpointSpec, MapSlot, NodeDef, NodeInvocation, NodeInvocationSlot, OptionSlot,
+    ProjectDef, Ratio, RatioSlot, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry,
+    ValueSlot,
 };
 use lpfs::LpFs;
 use lpfs::lp_path::LpPathBuf;
@@ -181,7 +182,7 @@ impl ProjectBuilder {
             let relative_path = path.as_str().trim_start_matches('/');
             nodes.insert(
                 name.clone(),
-                EnumSlot::new(NodeInvocation::new(ArtifactSpec::path(format!(
+                NodeInvocationSlot::new(NodeInvocation::new(ArtifactSpec::path(format!(
                     "./{relative_path}"
                 )))),
             );
