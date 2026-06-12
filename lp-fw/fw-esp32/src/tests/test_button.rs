@@ -6,7 +6,7 @@ extern crate alloc;
 
 use alloc::rc::Rc;
 use embassy_time::{Duration, Instant, Timer};
-use lpc_hardware::hardware::{
+use lpc_hardware::{
     ButtonConfig, ButtonDriver, HardwareRegistry, default_esp32c6_hardware_manifest,
 };
 

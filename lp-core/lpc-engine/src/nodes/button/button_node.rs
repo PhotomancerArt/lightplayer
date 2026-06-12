@@ -4,7 +4,7 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeMap;
 use alloc::format;
 
-use lpc_hardware::hardware::{ButtonConfig, ButtonEventKind, ButtonInput};
+use lpc_hardware::{ButtonConfig, ButtonEventKind, ButtonInput};
 use lpc_model::{
     ButtonDefView, ButtonState, ControlMessage, HardwareEndpointSpec, MapSlot, Revision,
     SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,

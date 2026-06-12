@@ -1,7 +1,7 @@
 use alloc::string::String;
 use core::fmt;
 
-use crate::hardware::HardwareError;
+use crate::HardwareError;
 
 /// Output provider error type.
 #[derive(Debug, Clone)]

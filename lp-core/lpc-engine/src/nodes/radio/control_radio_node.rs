@@ -5,9 +5,7 @@ use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::vec::Vec;
 
-use lpc_hardware::hardware::{
-    RadioChannelId, RadioConfig, RadioDevice, RadioMessage, RadioMessageKind,
-};
+use lpc_hardware::{RadioChannelId, RadioConfig, RadioDevice, RadioMessage, RadioMessageKind};
 use lpc_model::{
     ControlMessage, ControlRadioDefView, ControlRadioState, FromLpValue, HardwareEndpointSpec,
     MapSlot, SlotAccess, SlotData, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,

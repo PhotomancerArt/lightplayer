@@ -100,6 +100,7 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-node-registry/tests" isTestSource="true" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-registry/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-registry/tests" isTestSource="true" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-hardware/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lpfx/lpfx/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>

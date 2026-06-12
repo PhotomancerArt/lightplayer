@@ -13,7 +13,7 @@ use core::cell::RefCell;
 
 use lp_riscv_emu_guest::println;
 use lpc_hardware::OutputError;
-use lpc_hardware::hardware::{
+use lpc_hardware::{
     HardwareEndpointError, HardwareEndpointSpec, HardwareRegistry, HardwareSystem, Ws281xConfig,
     Ws281xOutput,
 };

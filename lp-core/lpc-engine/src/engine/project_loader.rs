@@ -1625,7 +1625,7 @@ mod tests {
 
     use alloc::rc::Rc;
     use alloc::sync::Arc;
-    use lpc_hardware::hardware::{
+    use lpc_hardware::{
         HardwareAddress, HardwareRegistry, HardwareSystem, VirtualButtonDriver, VirtualRadioDriver,
         default_esp32c6_hardware_manifest,
     };
@@ -3073,7 +3073,7 @@ target = "bus#trigger"
         assert_eq!(sent.len(), 1);
         assert_eq!(
             sent[0].kind(),
-            lpc_hardware::hardware::RadioMessageKind::ControlMessage
+            lpc_hardware::RadioMessageKind::ControlMessage
         );
         assert_eq!(sent[0].payload(), &[1, 0, 0, 0, 1, 0, 0, 0]);
     }

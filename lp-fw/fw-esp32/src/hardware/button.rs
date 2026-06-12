@@ -8,7 +8,7 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use esp_hal::gpio::{Input, InputConfig, Pull};
-use lpc_hardware::hardware::{
+use lpc_hardware::{
     ButtonConfig, ButtonDebouncer, ButtonDriver, ButtonEvent, ButtonInput, HardwareAddress,
     HardwareCapability, HardwareClaim, HardwareDriver, HardwareEndpoint, HardwareEndpointError,
     HardwareEndpointId, HardwareEndpointKind, HardwareError, HardwareLease, HardwareRegistry,

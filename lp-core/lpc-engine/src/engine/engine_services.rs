@@ -11,7 +11,7 @@ use core::fmt;
 
 use hashbrown::HashMap;
 use lpc_hardware::OutputError;
-use lpc_hardware::hardware::{
+use lpc_hardware::{
     ButtonConfig, ButtonInput, HardwareEndpointError, HardwareSystem, RadioConfig, RadioDevice,
 };
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};

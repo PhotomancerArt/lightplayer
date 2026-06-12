@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, anyhow, bail};
-use lpc_hardware::hardware::HardwareManifestFile;
+use lpc_hardware::HardwareManifestFile;
 use std::fs;
 use std::path::{Path, PathBuf};
 

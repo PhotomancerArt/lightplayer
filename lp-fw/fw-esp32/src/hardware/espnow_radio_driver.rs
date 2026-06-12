@@ -15,7 +15,7 @@ use esp_radio::esp_now::{
     BROADCAST_ADDRESS, EspNowError, EspNowManager, EspNowReceiver, EspNowSender, ReceivedData,
 };
 use esp_radio::wifi::{ControllerConfig, WifiController};
-use lpc_hardware::hardware::{
+use lpc_hardware::{
     HardwareAddress, HardwareCapability, HardwareClaim, HardwareDriver, HardwareEndpoint,
     HardwareEndpointError, HardwareEndpointId, HardwareEndpointKind, HardwareEndpointSpec,
     HardwareEndpointStatus, HardwareLease, HardwareRegistry, RADIO_MAX_PACKET_LEN, RadioChannelId,

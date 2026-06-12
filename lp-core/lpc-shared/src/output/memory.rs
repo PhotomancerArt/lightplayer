@@ -10,7 +10,7 @@ use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 use lpc_hardware::OutputError;
-use lpc_hardware::hardware::{
+use lpc_hardware::{
     HardwareAddress, HardwareEndpointError, HardwareEndpointSpec, HardwareManifest,
     HardwareRegistry, HardwareSystem, Ws281xConfig, Ws281xOutput,
 };

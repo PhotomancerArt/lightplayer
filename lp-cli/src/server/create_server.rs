@@ -1,6 +1,6 @@
 use crate::commands::serve::init::{create_filesystem, initialize_server};
 use lpa_server::{ButtonService, Graphics, LpGraphics, LpServer, RadioService};
-use lpc_hardware::hardware::{HardwareRegistry, HardwareSystem, default_esp32c6_hardware_manifest};
+use lpc_hardware::{HardwareRegistry, HardwareSystem, default_esp32c6_hardware_manifest};
 use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
 use lpfs::LpFs;

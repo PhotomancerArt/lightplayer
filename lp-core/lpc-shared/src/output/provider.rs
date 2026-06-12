@@ -1,4 +1,4 @@
-use lpc_hardware::hardware::HardwareEndpointSpec;
+use lpc_hardware::HardwareEndpointSpec;
 use lpc_hardware::{DisplayPipelineOptions, OutputError};
 
 /// Options for output driver (DisplayPipeline). Alias for DisplayPipelineOptions.

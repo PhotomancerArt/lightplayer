@@ -119,7 +119,7 @@ pub enum HardwareTargetArg {
     Rv32imacEmu,
 }
 
-impl From<HardwareTargetArg> for lpc_hardware::hardware::HardwareTarget {
+impl From<HardwareTargetArg> for lpc_hardware::HardwareTarget {
     fn from(value: HardwareTargetArg) -> Self {
         match value {
             HardwareTargetArg::Esp32c6 => Self::Esp32c6,

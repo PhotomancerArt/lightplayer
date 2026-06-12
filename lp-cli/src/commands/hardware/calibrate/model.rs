@@ -1,7 +1,5 @@
 use anyhow::{Result, bail};
-use lpc_hardware::hardware::{
-    HardwareBoardLabelFile, HardwareBoardLabelStatus, HardwareManifestFile,
-};
+use lpc_hardware::{HardwareBoardLabelFile, HardwareBoardLabelStatus, HardwareManifestFile};
 
 use super::calibration_manifest_update::{
     apply_mapping, is_provisional_gpio_label, parse_gpio_address,
@@ -246,7 +244,7 @@ fn clear_label_from_gpio_resources(
 }
 
 fn ensure_resource_alias(
-    resource: &mut lpc_hardware::hardware::hardware_manifest_file::HardwareResourceFile,
+    resource: &mut lpc_hardware::manifest::hardware_manifest_file::HardwareResourceFile,
     alias: &str,
 ) {
     if !resource.aliases.iter().any(|existing| existing == alias) {
@@ -333,7 +331,7 @@ fn natural_label_key(label: &str) -> (String, u32, String) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_hardware::hardware::HardwareTarget;
+    use lpc_hardware::HardwareTarget;
 
     #[test]
     fn expands_label_ranges() {

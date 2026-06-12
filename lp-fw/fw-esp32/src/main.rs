@@ -364,7 +364,7 @@ use {
     hardware::button::Esp32Gpio20ButtonDriver,
     hardware::manifest_loader::load_hardware_manifest,
     lpa_server::{ButtonService, Graphics, LpGraphics, LpServer},
-    lpc_hardware::hardware::{HardwareRegistry, HardwareSystem},
+    lpc_hardware::{HardwareRegistry, HardwareSystem},
     lpc_shared::output::OutputProvider,
     lpfs::LpFsMemory,
     output::{Esp32OutputProvider, Esp32RmtWs281xDriver},

@@ -7,7 +7,7 @@ use crate::server::MemoryStatsFn;
 use alloc::{boxed::Box, format, rc::Rc, string::String, sync::Arc};
 use core::cell::RefCell;
 use lpc_engine::{ButtonService, Engine, EngineServices, LpGraphics, ProjectLoader, RadioService};
-use lpc_hardware::hardware::HardwareEndpointSpec;
+use lpc_hardware::HardwareEndpointSpec;
 use lpc_model::{LpPath, LpPathBuf, TreePath, current_revision};
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpc_shared::backtrace;
