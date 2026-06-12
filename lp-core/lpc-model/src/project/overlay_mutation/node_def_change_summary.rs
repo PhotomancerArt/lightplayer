@@ -10,7 +10,7 @@ use crate::{NodeDefLocation, NodeKind};
 
 /// Effective node definition changes visible to runtime/project consumers.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct NodeDefChangeSet {
+pub struct NodeDefChangeSummary {
     /// Newly referenced definition locations.
     pub added: Vec<NodeDefLocation>,
     /// Previously referenced definitions whose effective state changed.
@@ -19,7 +19,7 @@ pub struct NodeDefChangeSet {
     pub removed: Vec<NodeDefLocation>,
 }
 
-impl NodeDefChangeSet {
+impl NodeDefChangeSummary {
     pub fn is_empty(&self) -> bool {
         self.added.is_empty() && self.changed.is_empty() && self.removed.is_empty()
     }

@@ -1,15 +1,15 @@
-//! Coarse project change sets between effective inventories.
+//! Coarse project change summaries between effective inventories.
 
 use lpc_model::{
-    AssetChange, AssetChangeKind, AssetChangeSet, AssetEntry, AssetState, NodeDefChange,
-    NodeDefChangeKind, NodeDefEntry, NodeDefState, ProjectChangeSet, ProjectInventory,
+    AssetChange, AssetChangeKind, AssetChangeSummary, AssetEntry, AssetState, NodeDefChange,
+    NodeDefChangeKind, NodeDefEntry, NodeDefState, ProjectChangeSummary, ProjectInventory,
 };
 
-pub(crate) fn change_set_between(
+pub(crate) fn change_summary_between(
     before: &ProjectInventory,
     after: &ProjectInventory,
-) -> ProjectChangeSet {
-    ProjectChangeSet {
+) -> ProjectChangeSummary {
+    ProjectChangeSummary {
         defs: node_def_changes(before, after),
         assets: asset_changes(before, after),
     }
@@ -18,8 +18,8 @@ pub(crate) fn change_set_between(
 fn node_def_changes(
     before: &ProjectInventory,
     after: &ProjectInventory,
-) -> lpc_model::NodeDefChangeSet {
-    let mut changes = lpc_model::NodeDefChangeSet::default();
+) -> lpc_model::NodeDefChangeSummary {
+    let mut changes = lpc_model::NodeDefChangeSummary::default();
 
     for location in after.defs.keys() {
         if !before.defs.contains_key(location) {
@@ -45,8 +45,8 @@ fn node_def_changes(
     changes
 }
 
-fn asset_changes(before: &ProjectInventory, after: &ProjectInventory) -> AssetChangeSet {
-    let mut changes = AssetChangeSet::default();
+fn asset_changes(before: &ProjectInventory, after: &ProjectInventory) -> AssetChangeSummary {
+    let mut changes = AssetChangeSummary::default();
 
     for source in after.assets.keys() {
         if !before.assets.contains_key(source) {

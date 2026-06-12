@@ -9,7 +9,7 @@ use crate::AssetSource;
 
 /// Effective asset changes visible to runtime/project consumers.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct AssetChangeSet {
+pub struct AssetChangeSummary {
     /// Newly referenced assets.
     pub added: Vec<AssetSource>,
     /// Previously referenced assets whose effective state changed.
@@ -18,7 +18,7 @@ pub struct AssetChangeSet {
     pub removed: Vec<AssetSource>,
 }
 
-impl AssetChangeSet {
+impl AssetChangeSummary {
     pub fn is_empty(&self) -> bool {
         self.added.is_empty() && self.changed.is_empty() && self.removed.is_empty()
     }

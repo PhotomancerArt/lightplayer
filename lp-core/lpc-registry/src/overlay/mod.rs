@@ -2,7 +2,7 @@
 
 mod apply_error;
 mod apply_slot;
-pub mod inventory_change_set;
+pub mod inventory_change_summary;
 pub mod project_inventory_derivation;
 
 pub use apply_error::EditApplyError;

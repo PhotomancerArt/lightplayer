@@ -113,21 +113,21 @@ impl RegistryScenario {
         &mut self,
         path: &str,
         bytes: impl AsRef<[u8]>,
-    ) -> lpc_model::ProjectChangeSet {
+    ) -> lpc_model::ProjectChangeSummary {
         self.fs
             .write_file_mut(LpPath::new(path), bytes.as_ref())
             .expect("replace file");
         self.refresh(path, FsEventKind::Modify)
     }
 
-    pub fn delete_file_and_refresh(&mut self, path: &str) -> lpc_model::ProjectChangeSet {
+    pub fn delete_file_and_refresh(&mut self, path: &str) -> lpc_model::ProjectChangeSummary {
         self.fs
             .delete_file_mut(LpPath::new(path))
             .expect("delete file");
         self.refresh(path, FsEventKind::Delete)
     }
 
-    fn refresh(&mut self, path: &str, kind: FsEventKind) -> lpc_model::ProjectChangeSet {
+    fn refresh(&mut self, path: &str, kind: FsEventKind) -> lpc_model::ProjectChangeSummary {
         let frame = self.next_revision();
         let ctx = ParseCtx {
             shapes: &self.shapes,

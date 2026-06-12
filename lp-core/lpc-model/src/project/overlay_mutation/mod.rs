@@ -9,14 +9,14 @@
 //!
 //! - [`crate::project::overlay`] stores canonical pending edit intent.
 //! - [`crate::project::inventory`] stores the effective project state used to
-//!   compute change sets.
+//!   compute change summaries.
 
-pub mod asset_change_set;
+pub mod asset_change_summary;
 mod mutation_cmd;
 mod mutation_op;
 pub mod mutation_result;
-pub mod node_def_change_set;
-pub mod project_change_set;
+pub mod node_def_change_summary;
+pub mod project_change_summary;
 
 pub use mutation_cmd::{
     MutationCmd, MutationCmdBatch, MutationCmdBatchResult, MutationCmdId, MutationCmdResult,

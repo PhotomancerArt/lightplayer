@@ -4,14 +4,14 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpc_model::{
-    ArtifactChangeSet, ArtifactLocation, ArtifactOverlay, AssetOverlay, CommitResult,
+    ArtifactChangeSummary, ArtifactLocation, ArtifactOverlay, AssetOverlay, CommitResult,
     MutationBatchResults, MutationCmdBatch, MutationCmdBatchResult, MutationCmdResult,
     MutationEffect, MutationOp, MutationResult, NodeDefEntry, NodeDefLocation, NodeDefState,
     ProjectInventory, ProjectOverlay, Revision, WithRevision,
 };
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath};
 
-use crate::overlay::inventory_change_set::change_set_between;
+use crate::overlay::inventory_change_summary::change_summary_between;
 use crate::overlay::project_inventory_derivation::derive_effective_inventory;
 use crate::{
     ArtifactStore, CommitError, LoadResult, ParseCtx, RegistryError,
@@ -50,7 +50,7 @@ impl ProjectRegistry {
 
         self.root = Some(root.clone());
         let after = self.derive_inventory(fs, frame, ctx);
-        let changes = change_set_between(&before, &after);
+        let changes = change_summary_between(&before, &after);
         self.inventory = after;
 
         Ok(LoadResult::new(root, changes))
@@ -69,7 +69,7 @@ impl ProjectRegistry {
             self.overlay.mark_updated(frame);
         }
         let after = self.derive_inventory(fs, frame, ctx);
-        let changes = change_set_between(&before, &after);
+        let changes = change_summary_between(&before, &after);
         self.inventory = after;
 
         Ok(MutationResult::new(
@@ -103,7 +103,7 @@ impl ProjectRegistry {
         }
 
         let after = self.derive_inventory(fs, frame, ctx);
-        let changes = change_set_between(&before, &after);
+        let changes = change_summary_between(&before, &after);
         self.inventory = after;
 
         MutationBatchResults::new(
@@ -118,13 +118,13 @@ impl ProjectRegistry {
         fs: &dyn LpFs,
         frame: Revision,
         ctx: &ParseCtx<'_>,
-    ) -> lpc_model::ProjectChangeSet {
+    ) -> lpc_model::ProjectChangeSummary {
         let before = self.inventory.clone();
         if self.overlay.get_mut().clear() {
             self.overlay.mark_updated(frame);
         }
         let after = self.derive_inventory(fs, frame, ctx);
-        let changes = change_set_between(&before, &after);
+        let changes = change_summary_between(&before, &after);
         self.inventory = after;
         changes
     }
@@ -135,11 +135,11 @@ impl ProjectRegistry {
         events: &[FsEvent],
         frame: Revision,
         ctx: &ParseCtx<'_>,
-    ) -> lpc_model::ProjectChangeSet {
+    ) -> lpc_model::ProjectChangeSummary {
         let before = self.inventory.clone();
         self.artifacts.apply_fs_changes(events, frame);
         let after = self.derive_inventory(fs, frame, ctx);
-        let changes = change_set_between(&before, &after);
+        let changes = change_summary_between(&before, &after);
         self.inventory = after;
         changes
     }
@@ -151,7 +151,7 @@ impl ProjectRegistry {
         ctx: &ParseCtx<'_>,
     ) -> Result<CommitResult, CommitError> {
         let overlay = self.overlay.get().clone();
-        let mut artifact_changes = ArtifactChangeSet::default();
+        let mut artifact_changes = ArtifactChangeSummary::default();
         let mut fs_events = Vec::new();
 
         for (location, overlay) in overlay.iter() {
@@ -228,8 +228,7 @@ impl ProjectRegistry {
         self.inventory = after;
 
         Ok(CommitResult {
-            artifacts: artifact_changes,
-            changes: lpc_model::ProjectChangeSet::default(),
+            artifact_changes: artifact_changes,
         })
     }
 

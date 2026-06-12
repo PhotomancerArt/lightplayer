@@ -27,7 +27,6 @@ pub use crate::project::overlay_mutation::{
 };
 pub use artifact_overlay::ArtifactOverlay;
 pub use asset_overlay::AssetOverlay;
-pub use crate::project::overlay_commit::project_commit_summary::ProjectCommitSummary;
 pub use project_overlay::ProjectOverlay;
 pub use slot_edit::{SlotEdit, SlotEditOp};
 pub use slot_overlay::SlotOverlay;

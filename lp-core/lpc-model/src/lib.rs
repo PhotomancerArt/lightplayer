@@ -60,7 +60,7 @@ pub use value::constraint;
 pub use value::kind;
 
 pub use artifact::{
-    ArtifactChangeSet, ArtifactLocation, ArtifactLocationError, ArtifactReadRoot, ArtifactSpec,
+    ArtifactChangeSummary, ArtifactLocation, ArtifactLocationError, ArtifactReadRoot, ArtifactSpec,
     SrcArtifactLibRef,
 };
 pub use binding::{
@@ -75,7 +75,7 @@ pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRan
 /// meaning owns its storage shape.
 pub use kind::Kind;
 pub use project::asset::{
-    AssetBodySource, AssetChange, AssetChangeKind, AssetChangeSet, AssetEntry, AssetKind,
+    AssetBodySource, AssetChange, AssetChangeKind, AssetChangeSummary, AssetEntry, AssetKind,
     AssetSource, AssetState, ReferencedAsset,
 };
 pub use value::WithRevision;
@@ -88,10 +88,10 @@ pub use lpfs::lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 pub use node::node_prop_spec::NodePropSpec;
 pub use node::tree_path::{NodePathSegment, PathError, TreePath};
 pub use node::{
-    NodeArtifact, NodeDef, NodeDefChange, NodeDefChangeDetail, NodeDefChangeKind, NodeDefChangeSet,
-    NodeDefEntry, NodeDefLocation, NodeDefState, NodeDefUpdates, NodeDefValidationError, NodeId,
-    NodeInvocation, NodeInvocationSlot, NodeKind, NodeName, NodeNameError, RelativeNodeRef,
-    RelativeNodeRefError, RelativeNodeRefSrc,
+    NodeArtifact, NodeDef, NodeDefChange, NodeDefChangeKind, NodeDefChangeSummary, NodeDefEntry,
+    NodeDefLocation, NodeDefState, NodeDefValidationError, NodeId, NodeInvocation,
+    NodeInvocationSlot, NodeKind, NodeName, NodeNameError, RelativeNodeRef, RelativeNodeRefError,
+    RelativeNodeRefSrc,
 };
 pub use nodes::{
     AddSubMode, ArtifactPathResolutionError, ButtonDef, ButtonDefView, ButtonState,
@@ -111,15 +111,14 @@ pub use nodes::{
 };
 pub use product::{ControlExtent, ControlProduct, ProductKind, ProductRef, VisualProduct};
 pub use project::overlay::{
-    ArtifactOverlay, AssetOverlay, ProjectCommitSummary, ProjectOverlay, SlotEdit, SlotEditOp,
-    SlotOverlay,
+    ArtifactOverlay, AssetOverlay, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,
 };
 pub use project::overlay_mutation::{
     MutationCmd, MutationCmdBatch, MutationCmdBatchResult, MutationCmdId, MutationCmdResult,
     MutationCmdStatus, MutationEffect, MutationOp, MutationRejection, MutationRejectionReason,
 };
 pub use project::{
-    CommitResult, LocationSeg, MutationBatchResults, MutationResult, ProjectChangeSet,
+    CommitResult, LocationSeg, MutationBatchResults, MutationResult, ProjectChangeSummary,
     ProjectConfig, ProjectInventory, ProjectNode, ProjectNodeLocation, ProjectNodeOrigin,
     ProjectNodePlacement, ProjectTree, Revision,
 };

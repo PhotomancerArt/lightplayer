@@ -1,4 +1,4 @@
-use crate::{ArtifactChangeSet, ProjectChangeSet};
+use crate::ArtifactChangeSummary;
 
 /// Result from committing pending [`crate::ProjectOverlay`] edits to artifacts.
 ///
@@ -8,13 +8,11 @@ use crate::{ArtifactChangeSet, ProjectChangeSet};
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct CommitResult {
     /// Artifact bodies that were added, changed, or removed on durable storage.
-    pub artifacts: ArtifactChangeSet,
-    /// Effective node definition and asset changes after the commit.
-    pub changes: ProjectChangeSet,
+    pub artifact_changes: ArtifactChangeSummary,
 }
 
 impl CommitResult {
     pub fn is_empty(&self) -> bool {
-        self.artifacts.is_empty() && self.changes.is_empty()
+        self.artifact_changes.is_empty()
     }
 }

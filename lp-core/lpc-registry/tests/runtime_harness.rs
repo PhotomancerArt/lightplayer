@@ -35,7 +35,7 @@ struct RuntimeAssetState {
 }
 
 impl FakeRuntime {
-    fn apply(&mut self, registry: &ProjectRegistry, changes: &lpc_model::ProjectChangeSet) {
+    fn apply(&mut self, registry: &ProjectRegistry, changes: &lpc_model::ProjectChangeSummary) {
         for location in &changes.defs.removed {
             self.nodes.remove(location);
         }
@@ -80,7 +80,7 @@ impl FakeRuntime {
 }
 
 #[test]
-fn fake_runtime_consumes_load_apply_and_commit_change_sets() {
+fn fake_runtime_consumes_load_apply_and_commit_change_summaries() {
     let shapes = SlotShapeRegistry::default();
     let ctx = parse_ctx(&shapes);
     let mut fs = LpFsMemory::new();
@@ -138,10 +138,8 @@ source = { path = "shader.glsl" }
         }
     );
 
-    let before_commit = runtime.assets.clone();
     let commit = registry
         .commit_overlay(&fs, Revision::new(3), &ctx)
         .unwrap();
-    runtime.apply(&registry, &commit.changes);
-    assert_eq!(runtime.assets, before_commit);
+    assert_eq!(commit.artifact_changes.changed, vec![asset]);
 }

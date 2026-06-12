@@ -227,8 +227,7 @@ fn commit_overlay_writes_artifact_without_runtime_project_change() {
         .commit_overlay(&fs, Revision::new(3), &ctx)
         .unwrap();
 
-    assert_eq!(result.artifacts.changed, vec![asset.clone()]);
-    assert!(result.changes.is_empty());
+    assert_eq!(result.artifact_changes.changed, vec![asset.clone()]);
     assert_eq!(fs.read_file(LpPath::new("/shader.glsl")).unwrap(), body);
     assert_eq!(
         registry.asset(&asset_source).unwrap().state,
@@ -264,8 +263,7 @@ fn commit_slot_overlay_writes_effective_node_def() {
         .unwrap();
 
     let text = String::from_utf8(fs.read_file(LpPath::new("/clock.toml")).unwrap()).unwrap();
-    assert_eq!(result.artifacts.changed, vec![clock]);
-    assert!(result.changes.is_empty());
+    assert_eq!(result.artifact_changes.changed, vec![clock]);
     assert!(text.contains("rate = 2"));
 }
 

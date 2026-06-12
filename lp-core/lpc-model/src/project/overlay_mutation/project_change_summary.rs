@@ -1,19 +1,19 @@
-use crate::{AssetChangeSet, NodeDefChangeSet};
+use crate::{AssetChangeSummary, NodeDefChangeSummary};
 
-/// Runtime-facing changes from one effective project inventory to another.
+/// Runtime-facing summary of changes from one effective project inventory to another.
 ///
-/// A project change set is a compact description of how one effective
+/// A project change summary is a compact description of how one effective
 /// [`crate::ProjectInventory`] differs from another. It is intended for runtime
 /// projection and client refresh decisions, not for reconstructing an overlay.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct ProjectChangeSet {
+pub struct ProjectChangeSummary {
     /// Node definition additions, removals, and changes.
-    pub defs: NodeDefChangeSet,
+    pub defs: NodeDefChangeSummary,
     /// Asset additions, removals, and changes.
-    pub assets: AssetChangeSet,
+    pub assets: AssetChangeSummary,
 }
 
-impl ProjectChangeSet {
+impl ProjectChangeSummary {
     pub fn is_empty(&self) -> bool {
         self.defs.is_empty() && self.assets.is_empty()
     }

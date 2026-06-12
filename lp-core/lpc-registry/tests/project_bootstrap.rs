@@ -16,8 +16,7 @@ fn can_create_fyeah_sign_project_from_empty_fs_with_artifact_body_mutations() {
     assert!(apply.changes.is_empty());
 
     let commit = scenario.commit();
-    assert_eq!(commit.artifacts.added.len(), fixture.file_count());
-    assert!(commit.changes.is_empty());
+    assert_eq!(commit.artifact_changes.added.len(), fixture.file_count());
     assert!(
         scenario
             .fs()

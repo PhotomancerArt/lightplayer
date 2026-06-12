@@ -19,8 +19,8 @@ pub mod asset_source;
 pub mod asset_state;
 pub mod referenced_asset;
 
-pub use crate::project::overlay_mutation::asset_change_set::{
-    AssetChange, AssetChangeKind, AssetChangeSet,
+pub use crate::project::overlay_mutation::asset_change_summary::{
+    AssetChange, AssetChangeKind, AssetChangeSummary,
 };
 pub use asset_entry::AssetEntry;
 pub use asset_kind::AssetKind;
