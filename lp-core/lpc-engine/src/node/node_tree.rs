@@ -208,6 +208,16 @@ impl<N> RuntimeNodeTree<N> {
         Ok(())
     }
 
+    pub(crate) fn subtree_ids_depth_first(&self, id: NodeId) -> Result<Vec<NodeId>, TreeError> {
+        let entry = self.get(id).ok_or(TreeError::UnknownNode(id))?;
+        let mut ids = Vec::new();
+        for &child in entry.children.value() {
+            ids.extend(self.subtree_ids_depth_first(child)?);
+        }
+        ids.push(id);
+        Ok(ids)
+    }
+
     /// Add one runtime binding to its owning node and update derived indexes.
     pub fn add_binding(
         &mut self,

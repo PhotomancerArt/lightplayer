@@ -1,4 +1,4 @@
-use crate::{AssetChangeSummary, NodeDefChangeSummary};
+use crate::{AssetChangeSummary, NodeDefChangeSummary, NodeUseChangeSummary};
 
 /// Runtime-facing summary of changes from one effective project inventory to another.
 ///
@@ -11,10 +11,12 @@ pub struct ProjectChangeSummary {
     pub defs: NodeDefChangeSummary,
     /// Asset additions, removals, and changes.
     pub assets: AssetChangeSummary,
+    /// Node-use additions, removals, and structural changes.
+    pub uses: NodeUseChangeSummary,
 }
 
 impl ProjectChangeSummary {
     pub fn is_empty(&self) -> bool {
-        self.defs.is_empty() && self.assets.is_empty()
+        self.defs.is_empty() && self.assets.is_empty() && self.uses.is_empty()
     }
 }

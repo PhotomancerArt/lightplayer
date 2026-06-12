@@ -25,6 +25,9 @@ pub mod project_tree;
 pub use crate::project::overlay_mutation::asset_change_summary::{
     AssetChange, AssetChangeKind, AssetChangeSummary,
 };
+pub use crate::project::overlay_mutation::node_use_change_summary::{
+    NodeUseChange, NodeUseChangeKind, NodeUseChangeSummary,
+};
 pub use asset_entry::AssetEntry;
 pub use asset_kind::AssetKind;
 pub use asset_ref::AssetRef;

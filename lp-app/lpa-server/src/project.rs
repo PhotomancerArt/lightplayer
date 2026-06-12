@@ -7,7 +7,7 @@ use crate::server::MemoryStatsFn;
 use alloc::{boxed::Box, format, rc::Rc, string::String, sync::Arc};
 use core::cell::RefCell;
 use lpc_engine::{ButtonService, Engine, EngineServices, LpGraphics, ProjectLoader, RadioService};
-use lpc_model::{ArtifactSpec, LpPath, LpPathBuf, TreePath, current_revision};
+use lpc_model::{LpPath, LpPathBuf, TreePath, current_revision};
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpc_shared::backtrace;
 use lpc_shared::hardware::HardwareEndpointSpec;
@@ -195,7 +195,14 @@ impl Project {
             self.registry
                 .mutate_batch(&*fs_ref, request.batch, frame, &ctx)
         };
-        self.rebuild_engine_from_registry()?;
+        {
+            let fs_ref = self.fs.borrow();
+            self.runtime
+                .as_mut()
+                .expect("project runtime is only absent while reloading")
+                .apply_project_changes(&*fs_ref, &mut self.registry, &result.changes)
+                .map_err(|e| ServerError::Core(format!("apply project changes: {e}")))?;
+        }
         Ok(WireOverlayMutationResponse::new(result.commands))
     }
 
@@ -206,13 +213,15 @@ impl Project {
         let frame = current_revision();
         let shapes = self.engine().slot_shapes().clone();
         let ctx = ParseCtx { shapes: &shapes };
-        let result = {
+        let (result, committed_fs_version) = {
             let fs_ref = self.fs.borrow();
-            self.registry
+            let result = self
+                .registry
                 .commit_overlay(&*fs_ref, frame, &ctx)
-                .map_err(|e| ServerError::Core(format!("commit overlay: {e:?}")))?
+                .map_err(|e| ServerError::Core(format!("commit overlay: {e:?}")))?;
+            (result, fs_ref.current_version())
         };
-        self.rebuild_engine_from_registry()?;
+        self.last_fs_version = committed_fs_version.next();
         Ok(WireOverlayCommitResponse::new(result))
     }
 
@@ -220,43 +229,19 @@ impl Project {
         let frame = current_revision();
         let shapes = self.engine().slot_shapes().clone();
         let ctx = ParseCtx { shapes: &shapes };
-        {
+        let changes = {
             let fs_ref = self.fs.borrow();
             self.registry
-                .refresh_artifacts(&*fs_ref, events, frame, &ctx);
-        }
-        self.rebuild_engine_from_registry()
-    }
-
-    pub fn rebuild_engine_from_registry(&mut self) -> Result<(), ServerError> {
-        log_memory(self.memory_stats, "project rebuild start");
-        backtrace::set_oom_context("project rebuild: drop old runtime");
-        drop(self.runtime.take());
-        log_memory(self.memory_stats, "project rebuild after drop old runtime");
-        backtrace::set_oom_context("project rebuild: root path");
-        let root_path = project_root_path(&self.name)?;
-        backtrace::set_oom_context("project rebuild: engine services");
-        let services = build_engine_services(
-            root_path,
-            self.output_provider.clone(),
-            self.time_provider.clone(),
-            self.button_service.clone(),
-            self.radio_service.clone(),
-        );
-        let mut runtime = {
-            let fs_ref = self.fs.borrow();
-            ProjectLoader::build_runtime_from_registry(
-                &*fs_ref,
-                &mut self.registry,
-                services,
-                ArtifactSpec::path("/project.toml"),
-            )
-            .map_err(|e| ServerError::Core(format!("Failed to rebuild core project: {e}")))?
+                .refresh_artifacts(&*fs_ref, events, frame, &ctx)
         };
-        runtime.set_graphics(Some(self.graphics.clone()));
-        self.runtime = Some(runtime);
-        log_memory(self.memory_stats, "project rebuild after swap");
-        backtrace::clear_oom_context();
+        {
+            let fs_ref = self.fs.borrow();
+            self.runtime
+                .as_mut()
+                .expect("project runtime is only absent while reloading")
+                .apply_project_changes(&*fs_ref, &mut self.registry, &changes)
+                .map_err(|e| ServerError::Core(format!("apply project changes: {e}")))?;
+        }
         Ok(())
     }
 

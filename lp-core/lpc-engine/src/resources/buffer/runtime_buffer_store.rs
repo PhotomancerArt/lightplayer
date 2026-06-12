@@ -70,6 +70,19 @@ impl RuntimeBufferStore {
         self.owners.get(&id).copied()
     }
 
+    pub fn remove_owned_by(&mut self, owner: NodeId) -> alloc::vec::Vec<RuntimeBufferId> {
+        let ids = self
+            .owners
+            .iter()
+            .filter_map(|(&id, &candidate)| (candidate == owner).then_some(id))
+            .collect::<alloc::vec::Vec<_>>();
+        for id in &ids {
+            self.buffers.remove(id);
+            self.owners.remove(id);
+        }
+        ids
+    }
+
     pub fn get(&self, id: RuntimeBufferId) -> Option<&WithRevision<RuntimeBuffer>> {
         self.buffers.get(&id)
     }
@@ -205,5 +218,25 @@ mod tests {
             )
             .expect_err("unknown id");
         assert_eq!(err, RuntimeBufferError::UnknownBuffer { id: missing });
+    }
+
+    #[test]
+    fn store_removes_buffers_owned_by_node() {
+        let mut store = RuntimeBufferStore::new();
+        let owner = lpc_model::NodeId::new(7);
+        let owned = store.insert_owned(
+            owner,
+            WithRevision::new(Revision::new(1), RuntimeBuffer::raw(vec![1])),
+        );
+        let other = store.insert_owned(
+            lpc_model::NodeId::new(8),
+            WithRevision::new(Revision::new(1), RuntimeBuffer::raw(vec![2])),
+        );
+
+        let removed = store.remove_owned_by(owner);
+
+        assert_eq!(removed, vec![owned]);
+        assert!(store.get(owned).is_none());
+        assert_eq!(store.get(other).unwrap().value().bytes, vec![2]);
     }
 }

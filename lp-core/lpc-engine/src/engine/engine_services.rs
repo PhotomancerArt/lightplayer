@@ -194,6 +194,12 @@ impl EngineServices {
         self.output_sinks.insert(buffer_id, existing);
     }
 
+    pub fn unregister_output_sink(&mut self, buffer_id: RuntimeBufferId) {
+        if let Some(mut existing) = self.output_sinks.remove(&buffer_id) {
+            self.close_output_sink(&mut existing);
+        }
+    }
+
     /// Flush sinks whose backing buffer [`WithRevision::revision`] equals `revision`.
     ///
     /// Temporarily removes the boxed [`OutputProvider`] from `self` so sinks can be mutated without
@@ -441,6 +447,28 @@ mod tests {
             .expect("second handle");
         assert_ne!(first_handle, second_handle);
         assert_eq!(provider.open_channel_count(), 1);
+    }
+
+    #[test]
+    fn unregister_output_sink_closes_open_channel() {
+        let provider = Rc::new(MemoryOutputProvider::new());
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
+            &provider,
+        )))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let buffer_id = output_buffer(&mut buffers, Revision::new(1));
+        let endpoint = endpoint("ws281x:rmt:D10");
+        services.register_output_sink(buffer_id, &OutputDef::new(endpoint.clone()));
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("initial flush");
+        assert!(provider.is_endpoint_open(&endpoint));
+
+        services.unregister_output_sink(buffer_id);
+
+        assert!(!provider.is_endpoint_open(&endpoint));
     }
 
     #[test]

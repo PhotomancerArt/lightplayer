@@ -3,7 +3,7 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use lpc_model::{AssetSource, NodeDefLocation, NodeId, NodeUseLocation};
+use lpc_model::{AssetSource, NodeDefLocation, NodeId, NodeUseLocation, ProjectTree};
 
 /// Engine-local lookup table for the current registry-to-runtime projection.
 ///
@@ -44,6 +44,25 @@ impl ProjectRuntimeIndex {
             .push(node_id);
     }
 
+    pub fn rebuild_asset_consumers(&mut self, tree: &ProjectTree) {
+        self.asset_to_runtime.clear();
+        for (source, consumers) in &tree.asset_consumers {
+            for consumer in consumers {
+                if let Some(node_id) = self.node_id(consumer) {
+                    self.add_asset_consumer(source.clone(), node_id);
+                }
+            }
+        }
+    }
+
+    pub fn remove_runtime_node(&mut self, node_id: NodeId) {
+        if let Some(use_location) = self.runtime_to_node.remove(&node_id) {
+            self.node_to_runtime.remove(&use_location);
+        }
+        remove_node_from_index(&mut self.def_to_runtime, node_id);
+        remove_node_from_index(&mut self.asset_to_runtime, node_id);
+    }
+
     pub fn node_id(&self, use_location: &NodeUseLocation) -> Option<NodeId> {
         self.node_to_runtime.get(use_location).copied()
     }
@@ -72,6 +91,13 @@ impl ProjectRuntimeIndex {
         self.def_to_runtime.clear();
         self.asset_to_runtime.clear();
     }
+}
+
+fn remove_node_from_index<K: Ord>(index: &mut BTreeMap<K, Vec<NodeId>>, node_id: NodeId) {
+    index.retain(|_, nodes| {
+        nodes.retain(|&candidate| candidate != node_id);
+        !nodes.is_empty()
+    });
 }
 
 #[cfg(test)]
@@ -134,6 +160,23 @@ mod tests {
         index.insert_node(use_location.clone(), NodeId::new(0), def_location.clone());
         index.add_asset_consumer(asset.clone(), NodeId::new(0));
         index.clear();
+
+        assert_eq!(index.node_id(&use_location), None);
+        assert!(index.runtime_nodes_for_def(&def_location).is_empty());
+        assert!(index.runtime_nodes_for_asset(&asset).is_empty());
+    }
+
+    #[test]
+    fn remove_runtime_node_prunes_all_indexes() {
+        let mut index = ProjectRuntimeIndex::new();
+        let use_location = NodeUseLocation::root();
+        let def_location = def("/project.toml");
+        let asset = AssetSource::artifact(ArtifactLocation::file("/shader.glsl"));
+        let node = NodeId::new(3);
+
+        index.insert_node(use_location.clone(), node, def_location.clone());
+        index.add_asset_consumer(asset.clone(), node);
+        index.remove_runtime_node(node);
 
         assert_eq!(index.node_id(&use_location), None);
         assert!(index.runtime_nodes_for_def(&def_location).is_empty());

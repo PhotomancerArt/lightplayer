@@ -1,6 +1,7 @@
 //! Load authored `project.toml` node-artifact trees into [`super::Engine`].
 
 use alloc::boxed::Box;
+use alloc::collections::BTreeSet;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
@@ -60,19 +61,20 @@ impl core::fmt::Display for ProjectLoadError {
 
 impl core::error::Error for ProjectLoadError {}
 
-struct ProjectedNode {
-    name: NodeName,
-    parent: Option<NodeId>,
-    def_location: NodeDefLocation,
-    use_location: lpc_model::NodeUseLocation,
-    id: NodeId,
-    kind: NodeKind,
-    provides_default_time_bus: bool,
-    ownership: ProjectedNodeOwnership,
+#[derive(Clone)]
+pub(super) struct ProjectedNode {
+    pub(super) name: NodeName,
+    pub(super) parent: Option<NodeId>,
+    pub(super) def_location: NodeDefLocation,
+    pub(super) use_location: lpc_model::NodeUseLocation,
+    pub(super) id: NodeId,
+    pub(super) kind: NodeKind,
+    pub(super) provides_default_time_bus: bool,
+    pub(super) ownership: ProjectedNodeOwnership,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProjectedNodeOwnership {
+pub(super) enum ProjectedNodeOwnership {
     Root,
     ProjectChild,
     PlaylistEntry { playlist: NodeId, entry: u32 },
@@ -123,33 +125,6 @@ impl ProjectLoader {
         Ok(LoadedProjectRuntime::new(runtime, registry))
     }
 
-    pub fn build_runtime_from_registry(
-        root: &dyn LpFs,
-        registry: &mut ProjectRegistry,
-        services: EngineServices,
-        project_specifier: ArtifactSpec,
-    ) -> Result<Engine, ProjectLoadError> {
-        let project_path = resolve_project_specifier(&project_specifier)?;
-        let project_root = services.project_root().clone();
-        let mut runtime = Engine::with_services(project_root, services);
-        let frame = Revision::new(1);
-        let root_location =
-            registry
-                .root()
-                .cloned()
-                .ok_or_else(|| ProjectLoadError::ProjectToml {
-                    file: project_path.as_str().to_string(),
-                    error: String::from("registry has no loaded project root"),
-                })?;
-
-        Self::validate_loaded_root(registry, &root_location, project_path.as_path())?;
-        let projected_nodes =
-            Self::build_runtime_spine(registry, &mut runtime, project_specifier, frame)?;
-        Self::attach_projected_nodes(root, registry, &mut runtime, &projected_nodes, frame)?;
-
-        Ok(runtime)
-    }
-
     fn validate_loaded_root(
         registry: &ProjectRegistry,
         root: &NodeDefLocation,
@@ -176,6 +151,40 @@ impl ProjectLoader {
         registry: &ProjectRegistry,
         runtime: &mut Engine,
         project_specifier: ArtifactSpec,
+        frame: Revision,
+    ) -> Result<Vec<ProjectedNode>, ProjectLoadError> {
+        let projected_nodes = Self::ensure_runtime_spine(registry, runtime, frame)?;
+
+        let root = runtime.tree().root();
+        {
+            let entry = runtime
+                .tree()
+                .get(root)
+                .ok_or(ProjectLoadError::Tree(TreeError::UnknownNode(root)))?;
+            if entry.def_location.is_none() {
+                return Err(ProjectLoadError::InvalidSourcePath {
+                    path: artifact_specifier_label(&project_specifier),
+                    reason: String::from("registry did not project a root node"),
+                });
+            }
+        }
+        runtime
+            .attach_runtime_node(
+                root,
+                Box::new(CorePlaceholderNode::new_leaf(NodeKind::Project)),
+                frame,
+            )
+            .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                path: artifact_specifier_label(&project_specifier),
+                reason: format!("attach project runtime: {e}"),
+            })?;
+
+        Ok(projected_nodes)
+    }
+
+    pub(super) fn ensure_runtime_spine(
+        registry: &ProjectRegistry,
+        runtime: &mut Engine,
         frame: Revision,
     ) -> Result<Vec<ProjectedNode>, ProjectLoadError> {
         let mut project_nodes = registry
@@ -211,7 +220,8 @@ impl ProjectLoader {
                 .is_error()
                 .then(|| node_def_state_message(&project_node.def_location, &def_entry.state));
 
-            let (node_id, name, parent, ownership) = if project_node.key.is_root() {
+            let existing_node_id = runtime.project_runtime_index().node_id(&project_node.key);
+            let (node_id, name, parent, ownership, inserted) = if project_node.key.is_root() {
                 let root_id = runtime.tree().root();
                 let root_entry = runtime
                     .tree_mut()
@@ -229,6 +239,7 @@ impl ProjectLoader {
                     })?,
                     None,
                     ProjectedNodeOwnership::Root,
+                    existing_node_id.is_none(),
                 )
             } else {
                 let parent_key = project_node.parent.as_ref().ok_or_else(|| {
@@ -249,54 +260,49 @@ impl ProjectLoader {
                     parent,
                     &project_node.def_location,
                 )?;
-                let ty = match def_entry.state.loaded_def() {
-                    Some(def) => node_kind_name(def, &project_node.def_location)?,
-                    None => {
-                        NodeName::parse("node").map_err(|e| ProjectLoadError::InvalidNodeName {
-                            path: def_location_label(&project_node.def_location),
-                            reason: e.to_string(),
-                        })?
-                    }
-                };
-                let node_id = runtime
-                    .tree_mut()
-                    .add_child(
-                        parent,
-                        name.clone(),
-                        ty,
-                        WireChildKind::Input {
-                            source: WireSlotIndex(0),
-                        },
-                        project_node_invocation(&project_node.origin),
-                        frame,
-                    )
-                    .map_err(ProjectLoadError::Tree)?;
-                runtime
-                    .tree_mut()
-                    .get_mut(node_id)
-                    .expect("add_child inserted the node")
-                    .set_project_identity(
-                        project_node.key.clone(),
-                        project_node.def_location.clone(),
-                    );
-                (node_id, name, Some(parent), ownership)
+                if let Some(node_id) = existing_node_id {
+                    (node_id, name, Some(parent), ownership, false)
+                } else {
+                    let ty = match def_entry.state.loaded_def() {
+                        Some(def) => node_kind_name(def, &project_node.def_location)?,
+                        None => NodeName::parse("node").map_err(|e| {
+                            ProjectLoadError::InvalidNodeName {
+                                path: def_location_label(&project_node.def_location),
+                                reason: e.to_string(),
+                            }
+                        })?,
+                    };
+                    let node_id = runtime
+                        .tree_mut()
+                        .add_child(
+                            parent,
+                            name.clone(),
+                            ty,
+                            WireChildKind::Input {
+                                source: WireSlotIndex(0),
+                            },
+                            project_node_invocation(&project_node.origin),
+                            frame,
+                        )
+                        .map_err(ProjectLoadError::Tree)?;
+                    runtime
+                        .tree_mut()
+                        .get_mut(node_id)
+                        .expect("add_child inserted the node")
+                        .set_project_identity(
+                            project_node.key.clone(),
+                            project_node.def_location.clone(),
+                        );
+                    (node_id, name, Some(parent), ownership, true)
+                }
             };
 
-            runtime.project_runtime_index_mut().insert_node(
-                project_node.key.clone(),
-                node_id,
-                project_node.def_location.clone(),
-            );
-            let asset_consumers = registry.inventory().tree.asset_consumers.clone();
-            for (source, consumers) in asset_consumers {
-                if consumers
-                    .iter()
-                    .any(|consumer| consumer == &project_node.key)
-                {
-                    runtime
-                        .project_runtime_index_mut()
-                        .add_asset_consumer(source, node_id);
-                }
+            if inserted {
+                runtime.project_runtime_index_mut().insert_node(
+                    project_node.key.clone(),
+                    node_id,
+                    project_node.def_location.clone(),
+                );
             }
             if let Some(message) = state_error {
                 mark_node_load_error(runtime, node_id, frame, message);
@@ -313,42 +319,53 @@ impl ProjectLoader {
                 ownership,
             });
         }
-
-        let root = runtime.tree().root();
-        {
-            let entry = runtime
-                .tree()
-                .get(root)
-                .ok_or(ProjectLoadError::Tree(TreeError::UnknownNode(root)))?;
-            if entry.def_location.is_none() {
-                return Err(ProjectLoadError::InvalidSourcePath {
-                    path: artifact_specifier_label(&project_specifier),
-                    reason: String::from("registry did not project a root node"),
-                });
-            }
-        }
         runtime
-            .attach_runtime_node(
-                root,
-                Box::new(CorePlaceholderNode::new_leaf(NodeKind::Project)),
-                frame,
-            )
-            .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                path: artifact_specifier_label(&project_specifier),
-                reason: format!("attach project runtime: {e}"),
-            })?;
+            .project_runtime_index_mut()
+            .rebuild_asset_consumers(&registry.inventory().tree);
 
         Ok(projected_nodes)
     }
 
-    fn attach_projected_nodes(
+    pub(super) fn attach_projected_nodes(
         fs: &dyn LpFs,
         registry: &mut ProjectRegistry,
         runtime: &mut Engine,
         projected_nodes: &[ProjectedNode],
         frame: Revision,
     ) -> Result<(), ProjectLoadError> {
+        Self::attach_projected_nodes_filtered(fs, registry, runtime, projected_nodes, None, frame)
+    }
+
+    pub(super) fn attach_selected_projected_nodes(
+        fs: &dyn LpFs,
+        registry: &mut ProjectRegistry,
+        runtime: &mut Engine,
+        projected_nodes: &[ProjectedNode],
+        targets: &BTreeSet<lpc_model::NodeUseLocation>,
+        frame: Revision,
+    ) -> Result<(), ProjectLoadError> {
+        Self::attach_projected_nodes_filtered(
+            fs,
+            registry,
+            runtime,
+            projected_nodes,
+            Some(targets),
+            frame,
+        )
+    }
+
+    fn attach_projected_nodes_filtered(
+        fs: &dyn LpFs,
+        registry: &mut ProjectRegistry,
+        runtime: &mut Engine,
+        projected_nodes: &[ProjectedNode],
+        targets: Option<&BTreeSet<lpc_model::NodeUseLocation>>,
+        frame: Revision,
+    ) -> Result<(), ProjectLoadError> {
         for node in projected_nodes {
+            if !should_attach_projected_node(node, targets) {
+                continue;
+            }
             if node.kind != NodeKind::Clock {
                 continue;
             }
@@ -381,6 +398,9 @@ impl ProjectLoader {
         }
 
         for node in projected_nodes {
+            if !should_attach_projected_node(node, targets) {
+                continue;
+            }
             if node.kind != NodeKind::Button {
                 continue;
             }
@@ -420,6 +440,9 @@ impl ProjectLoader {
         }
 
         for node in projected_nodes {
+            if !should_attach_projected_node(node, targets) {
+                continue;
+            }
             if node.kind != NodeKind::ControlRadio {
                 continue;
             }
@@ -453,6 +476,9 @@ impl ProjectLoader {
         }
 
         for node in projected_nodes {
+            if !should_attach_projected_node(node, targets) {
+                continue;
+            }
             if node.kind != NodeKind::Texture {
                 continue;
             }
@@ -465,6 +491,9 @@ impl ProjectLoader {
         }
 
         for node in projected_nodes {
+            if !should_attach_projected_node(node, targets) {
+                continue;
+            }
             if node.kind != NodeKind::Output {
                 continue;
             }
@@ -516,6 +545,9 @@ impl ProjectLoader {
         }
 
         for node in projected_nodes {
+            if !should_attach_projected_node(node, targets) {
+                continue;
+            }
             if node.kind != NodeKind::Shader {
                 continue;
             }
@@ -565,6 +597,9 @@ impl ProjectLoader {
         }
 
         for node in projected_nodes {
+            if !should_attach_projected_node(node, targets) {
+                continue;
+            }
             if node.kind != NodeKind::ComputeShader {
                 continue;
             }
@@ -634,6 +669,9 @@ impl ProjectLoader {
         }
 
         for node in projected_nodes {
+            if !should_attach_projected_node(node, targets) {
+                continue;
+            }
             if node.kind != NodeKind::Fluid {
                 continue;
             }
@@ -675,6 +713,9 @@ impl ProjectLoader {
         }
 
         for node in projected_nodes {
+            if !should_attach_projected_node(node, targets) {
+                continue;
+            }
             if node.kind != NodeKind::Playlist {
                 continue;
             }
@@ -768,6 +809,9 @@ impl ProjectLoader {
         }
 
         for node in projected_nodes {
+            if !should_attach_projected_node(node, targets) {
+                continue;
+            }
             if node.kind != NodeKind::Fixture {
                 continue;
             }
@@ -818,6 +862,13 @@ impl ProjectLoader {
 
         Ok(())
     }
+}
+
+fn should_attach_projected_node(
+    node: &ProjectedNode,
+    targets: Option<&BTreeSet<lpc_model::NodeUseLocation>>,
+) -> bool {
+    targets.is_none_or(|targets| targets.contains(&node.use_location))
 }
 
 fn mark_node_load_error(runtime: &mut Engine, node_id: NodeId, frame: Revision, message: String) {

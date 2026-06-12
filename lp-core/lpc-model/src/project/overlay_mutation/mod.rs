@@ -16,6 +16,7 @@ mod mutation_cmd;
 mod mutation_op;
 pub mod mutation_result;
 pub mod node_def_change_summary;
+pub mod node_use_change_summary;
 pub mod project_change_summary;
 
 pub use mutation_cmd::{

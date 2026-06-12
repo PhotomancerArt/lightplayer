@@ -10,6 +10,7 @@ mod loaded_project_runtime;
 pub mod memory_pressure;
 #[cfg(test)]
 mod output_flush_tests;
+mod project_apply;
 mod project_loader;
 mod project_read;
 mod project_read_nodes;
@@ -30,6 +31,7 @@ pub use engine_services::{ButtonService, EngineServices, OutputFlushError, Radio
 pub use frame_num::FrameNum;
 pub use frame_time::FrameTime;
 pub use loaded_project_runtime::LoadedProjectRuntime;
+pub use project_apply::RuntimeApplyResult;
 pub use project_loader::{ProjectLoadError, ProjectLoader};
 pub use project_read_stream::EngineProjectReadSource;
 pub use project_runtime_index::ProjectRuntimeIndex;

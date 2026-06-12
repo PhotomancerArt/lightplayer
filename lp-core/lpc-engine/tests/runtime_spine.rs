@@ -15,7 +15,13 @@ use lpc_engine::dataflow::resolver::{
 use lpc_engine::node::{
     MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, TickContext,
 };
-use lpc_model::{Kind, LpValue, NodeId, Revision, bus::ChannelName};
+use lpc_engine::{EngineServices, ProjectLoader};
+use lpc_model::{
+    ArtifactLocation, Kind, LpValue, NodeDefChange, NodeDefChangeKind, NodeId, NodeUseLocation,
+    Revision, SlotPath, TreePath, bus::ChannelName,
+};
+use lpc_registry::ParseCtx;
+use lpfs::{FsEvent, FsEventKind, LpFsMemory, LpPath, LpPathBuf};
 use lps_shared::LpsValueF32;
 
 // --- Tests (concise scenarios; helpers below) ---
@@ -98,7 +104,150 @@ fn runtime_spine_node_export_is_reachable() {
     let _: Option<fn(&dyn lpc_engine::node::NodeRuntime)> = None;
 }
 
+#[test]
+fn project_apply_body_change_does_not_recreate_runtime_node() {
+    let mut fs = clock_project_fs();
+    let services = EngineServices::new(TreePath::parse("/body_change.show").unwrap());
+    let loaded = ProjectLoader::load_from_root(&fs, services).expect("load");
+    let (mut engine, mut registry) = loaded.into_parts();
+    let clock_use = NodeUseLocation::root().child(SlotPath::parse("nodes[clock]").unwrap());
+    let before = engine
+        .project_runtime_index()
+        .node_id(&clock_use)
+        .expect("clock runtime node");
+
+    fs.write_file_mut(
+        LpPath::new("/clock.toml"),
+        br#"
+kind = "Clock"
+
+[controls]
+rate = 2.0
+"#,
+    )
+    .expect("write clock");
+    let shapes = engine.slot_shapes().clone();
+    let changes = registry.refresh_artifacts(
+        &fs,
+        &[FsEvent {
+            path: LpPathBuf::from("/clock.toml"),
+            kind: FsEventKind::Modify,
+        }],
+        Revision::new(2),
+        &ParseCtx { shapes: &shapes },
+    );
+
+    assert_eq!(
+        changes.defs.changed,
+        vec![NodeDefChange::new(
+            lpc_model::NodeDefLocation::artifact_root(ArtifactLocation::file("/clock.toml")),
+            NodeDefChangeKind::Body,
+        )]
+    );
+    assert!(changes.uses.is_empty());
+    let apply = engine
+        .apply_project_changes(&fs, &mut registry, &changes)
+        .expect("apply changes");
+
+    assert!(apply.is_empty());
+    assert_eq!(
+        engine.project_runtime_index().node_id(&clock_use),
+        Some(before)
+    );
+}
+
+#[test]
+fn project_apply_added_node_use_preserves_existing_runtime_node() {
+    let mut fs = clock_project_fs();
+    let services = EngineServices::new(TreePath::parse("/add_use.show").unwrap());
+    let loaded = ProjectLoader::load_from_root(&fs, services).expect("load");
+    let (mut engine, mut registry) = loaded.into_parts();
+    let clock_use = NodeUseLocation::root().child(SlotPath::parse("nodes[clock]").unwrap());
+    let shader_use = NodeUseLocation::root().child(SlotPath::parse("nodes[shader]").unwrap());
+    let clock_before = engine
+        .project_runtime_index()
+        .node_id(&clock_use)
+        .expect("clock runtime node");
+
+    fs.write_file_mut(
+        LpPath::new("/project.toml"),
+        br#"
+kind = "Project"
+
+[nodes.clock]
+ref = "./clock.toml"
+
+[nodes.shader]
+ref = "./shader.toml"
+"#,
+    )
+    .expect("write project");
+    fs.write_file_mut(
+        LpPath::new("/shader.toml"),
+        br#"
+kind = "Shader"
+source = { path = "shader.glsl" }
+"#,
+    )
+    .expect("write shader def");
+    fs.write_file_mut(LpPath::new("/shader.glsl"), b"void main() {}")
+        .expect("write shader source");
+
+    let shapes = engine.slot_shapes().clone();
+    let changes = registry.refresh_artifacts(
+        &fs,
+        &[FsEvent {
+            path: LpPathBuf::from("/project.toml"),
+            kind: FsEventKind::Modify,
+        }],
+        Revision::new(2),
+        &ParseCtx { shapes: &shapes },
+    );
+
+    assert_eq!(changes.uses.added, vec![shader_use.clone()]);
+    let apply = engine
+        .apply_project_changes(&fs, &mut registry, &changes)
+        .expect("apply changes");
+
+    assert_eq!(apply.added_nodes, vec![shader_use.clone()]);
+    assert_eq!(
+        engine.project_runtime_index().node_id(&clock_use),
+        Some(clock_before)
+    );
+    assert!(
+        engine
+            .project_runtime_index()
+            .node_id(&shader_use)
+            .is_some()
+    );
+}
+
 // --- Helpers ---
+
+fn clock_project_fs() -> LpFsMemory {
+    let mut fs = LpFsMemory::new();
+    fs.write_file_mut(
+        LpPath::new("/project.toml"),
+        br#"
+kind = "Project"
+
+[nodes.clock]
+ref = "./clock.toml"
+"#,
+    )
+    .expect("write project");
+    fs.write_file_mut(
+        LpPath::new("/clock.toml"),
+        br#"
+kind = "Clock"
+
+[controls]
+rate = 1.0
+"#,
+    )
+    .expect("write clock");
+    fs
+}
 
 struct ProduceProbeNode {
     query: QueryKey,

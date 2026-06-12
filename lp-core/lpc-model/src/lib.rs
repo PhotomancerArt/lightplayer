@@ -76,7 +76,7 @@ pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRan
 pub use kind::Kind;
 pub use project::inventory::{
     AssetBodySource, AssetChange, AssetChangeKind, AssetChangeSummary, AssetEntry, AssetKind,
-    AssetRef, AssetSource, AssetState,
+    AssetRef, AssetSource, AssetState, NodeUseChange, NodeUseChangeKind, NodeUseChangeSummary,
 };
 pub use value::WithRevision;
 pub use value::{LpType, LpValue, ModelEnumVariant, ModelStructMember};

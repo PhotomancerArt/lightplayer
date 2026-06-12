@@ -2,7 +2,8 @@
 
 use lpc_model::{
     AssetChange, AssetChangeKind, AssetChangeSummary, AssetEntry, AssetState, NodeDefChange,
-    NodeDefChangeKind, NodeDefEntry, NodeDefState, ProjectChangeSummary, ProjectInventory,
+    NodeDefChangeKind, NodeDefEntry, NodeDefState, NodeUseChange, NodeUseChangeKind,
+    NodeUseChangeSummary, ProjectChangeSummary, ProjectInventory, ProjectNode, ProjectNodeOrigin,
 };
 
 pub(crate) fn change_summary_between(
@@ -12,6 +13,72 @@ pub(crate) fn change_summary_between(
     ProjectChangeSummary {
         defs: node_def_changes(before, after),
         assets: asset_changes(before, after),
+        uses: node_use_changes(before, after),
+    }
+}
+
+fn node_use_changes(before: &ProjectInventory, after: &ProjectInventory) -> NodeUseChangeSummary {
+    let mut changes = NodeUseChangeSummary::default();
+
+    for location in after.tree.nodes.keys() {
+        if !before.tree.nodes.contains_key(location) {
+            changes.added.push(location.clone());
+        }
+    }
+    for location in before.tree.nodes.keys() {
+        if !after.tree.nodes.contains_key(location) {
+            changes.removed.push(location.clone());
+        }
+    }
+    for (location, before_node) in &before.tree.nodes {
+        let Some(after_node) = after.tree.nodes.get(location) else {
+            continue;
+        };
+        if let Some(kind) = classify_node_use_change(before_node, after_node) {
+            changes
+                .changed
+                .push(NodeUseChange::new(location.clone(), kind));
+        }
+    }
+
+    changes
+}
+
+fn classify_node_use_change(
+    before: &ProjectNode,
+    after: &ProjectNode,
+) -> Option<NodeUseChangeKind> {
+    if before.parent != after.parent {
+        return Some(NodeUseChangeKind::ParentChanged);
+    }
+    if before.def_location != after.def_location {
+        return Some(NodeUseChangeKind::DefinitionChanged {
+            from: before.def_location.clone(),
+            to: after.def_location.clone(),
+        });
+    }
+    if !same_node_use_origin(&before.origin, &after.origin) {
+        return Some(NodeUseChangeKind::OriginChanged);
+    }
+    None
+}
+
+fn same_node_use_origin(before: &ProjectNodeOrigin, after: &ProjectNodeOrigin) -> bool {
+    match (before, after) {
+        (ProjectNodeOrigin::Root, ProjectNodeOrigin::Root) => true,
+        (
+            ProjectNodeOrigin::Invocation {
+                slot: before_slot,
+                role: before_role,
+                ..
+            },
+            ProjectNodeOrigin::Invocation {
+                slot: after_slot,
+                role: after_role,
+                ..
+            },
+        ) => before_slot == after_slot && before_role == after_role,
+        _ => false,
     }
 }
 

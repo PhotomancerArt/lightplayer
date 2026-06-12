@@ -19,6 +19,7 @@ use lpc_wire::WireNodeStatus;
 use lpfs::FsEvent;
 
 use crate::dataflow::binding::{BindingDraft, BindingError, BindingRef};
+use crate::dataflow::bus::Bus;
 use crate::dataflow::resolver::{
     EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
@@ -152,6 +153,88 @@ impl Engine {
 
     pub fn add_demand_root(&mut self, node: NodeId) {
         self.demand_roots.push(node);
+    }
+
+    pub(crate) fn remove_runtime_subtree(
+        &mut self,
+        node: NodeId,
+        frame: Revision,
+    ) -> Result<(), EngineError> {
+        if node == self.tree.root() {
+            return Err(EngineError::Tree(crate::node::TreeError::RootMutation));
+        }
+        let ids = self.tree.subtree_ids_depth_first(node)?;
+        for &id in &ids {
+            self.cleanup_runtime_node(id, frame)?;
+            self.project_runtime_index.remove_runtime_node(id);
+        }
+        self.demand_roots.retain(|root| !ids.contains(root));
+        self.tree.remove_subtree(node, frame)?;
+        self.resolver.clear_frame_cache();
+        Ok(())
+    }
+
+    pub(crate) fn reattach_runtime_node(
+        &mut self,
+        node: NodeId,
+        runtime: Box<dyn NodeRuntime>,
+        frame: Revision,
+    ) -> Result<(), EngineError> {
+        self.cleanup_runtime_node(node, frame)?;
+        self.attach_runtime_node(node, runtime, frame)?;
+        self.resolver.clear_frame_cache();
+        Ok(())
+    }
+
+    fn cleanup_runtime_node(&mut self, node: NodeId, frame: Revision) -> Result<(), EngineError> {
+        let sink = self.runtime_output_sink_buffer_id(node);
+        if let Some(sink) = sink {
+            self.services.unregister_output_sink(sink);
+        }
+
+        let state = {
+            let entry = self
+                .tree
+                .get_mut(node)
+                .ok_or(EngineError::UnknownNode(node))?;
+            let old_changed_at = entry.state.changed_at();
+            core::mem::replace(
+                &mut entry.state,
+                WithRevision::new(old_changed_at, NodeEntryState::Pending),
+            )
+            .into_value()
+        };
+
+        match state {
+            NodeEntryState::Alive(mut runtime) => {
+                let bus = Bus::new();
+                let mut ctx = crate::node::DestroyCtx::new(node, frame, &bus);
+                runtime
+                    .destroy(&mut ctx)
+                    .map_err(|err| EngineError::node(node, err))?;
+            }
+            NodeEntryState::Pending | NodeEntryState::Failed { .. } => {}
+            NodeEntryState::Executing { call } => {
+                let entry = self
+                    .tree
+                    .get_mut(node)
+                    .ok_or(EngineError::UnknownNode(node))?;
+                entry.set_state(NodeEntryState::Executing { call: call.clone() }, frame);
+                return Err(EngineError::Node {
+                    node,
+                    message: format!(
+                        "cannot remove or reattach node while executing {}",
+                        call.call.label()
+                    ),
+                });
+            }
+        }
+
+        for buffer_id in self.runtime_buffers.remove_owned_by(node) {
+            self.services.unregister_output_sink(buffer_id);
+        }
+        self.demand_roots.retain(|&root| root != node);
+        Ok(())
     }
 
     pub fn add_binding(
