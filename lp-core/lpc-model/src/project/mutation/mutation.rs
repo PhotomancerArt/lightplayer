@@ -5,7 +5,7 @@ use alloc::vec::Vec;
 
 use crate::{ArtifactLocation, SlotPath};
 
-use super::{AssetOverlay, SlotEdit};
+use crate::project::overlay::{AssetOverlay, SlotEdit};
 
 /// One ordered mutation to the canonical project overlay.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

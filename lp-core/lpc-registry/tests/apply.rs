@@ -93,7 +93,7 @@ fn apply_body_overlay_changes_referenced_node_def_and_assets() {
     let shader_location = ArtifactLocation::file("/shader.toml");
 
     let result = registry
-        .apply_mutation(
+        .mutate(
             &fs,
             OverlayMutation::SetArtifactBody {
                 artifact: shader_location.clone(),
@@ -135,7 +135,7 @@ fn apply_asset_overlay_changes_referenced_asset() {
     let asset_source = AssetSource::artifact(asset.clone());
 
     let result = registry
-        .apply_mutation(
+        .mutate(
             &fs,
             OverlayMutation::SetArtifactBody {
                 artifact: asset.clone(),
@@ -171,7 +171,7 @@ fn discard_overlay_returns_inventory_to_committed_state() {
     let asset_source = AssetSource::artifact(asset.clone());
 
     registry
-        .apply_mutation(
+        .mutate(
             &fs,
             OverlayMutation::SetArtifactBody {
                 artifact: asset.clone(),
@@ -212,7 +212,7 @@ fn commit_overlay_writes_artifact_without_runtime_project_change() {
     let body = b"void main() { gl_FragColor = vec4(0.5); }".to_vec();
 
     registry
-        .apply_mutation(
+        .mutate(
             &fs,
             OverlayMutation::SetArtifactBody {
                 artifact: asset.clone(),
@@ -245,7 +245,7 @@ fn commit_slot_overlay_writes_effective_node_def() {
     let clock = ArtifactLocation::file("/clock.toml");
 
     registry
-        .apply_mutation(
+        .mutate(
             &fs,
             OverlayMutation::PutSlotEdit {
                 artifact: clock.clone(),

@@ -25,11 +25,11 @@ pub use contexts::{
 pub use control_node::ControlNode;
 pub use node_call::{NodeCall, NodeCallKey};
 pub use node_def_handle::NodeDefHandle;
-pub use node_entry::NodeEntry;
+pub use node_entry::RuntimeNodeEntry;
 pub use node_entry_state::NodeEntryState;
 pub use node_error::NodeError;
 pub use node_runtime::{NodeRuntime, ProduceResult};
-pub use node_tree::NodeTree;
+pub use node_tree::RuntimeNodeTree;
 pub use render_node::RenderNode;
 pub use runtime_state_shape::RuntimeStateShape;
 pub use sync::tree_deltas_since;

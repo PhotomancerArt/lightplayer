@@ -27,14 +27,14 @@ use crate::dataflow::resolver::{
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
 };
 use crate::gfx::LpGraphics;
-use crate::node::NodeEntry;
+use crate::node::RuntimeNodeEntry;
 use crate::node::catch_node_panic::catch_node_panic;
 use crate::node::{
     ControlRenderContext, ControlRenderServices, NodeCall, NodeCallKey, NodeError,
     NodeResourceInitContext, NodeRuntime, ProduceResult, RenderContext, TickContext,
     VisualRenderServices,
 };
-use crate::node::{NodeEntryState, NodeTree};
+use crate::node::{NodeEntryState, RuntimeNodeTree};
 use crate::products::control::{ControlLayout, ControlRenderRequest, ControlRenderTarget};
 use crate::products::visual::{
     RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleBufferRequest,
@@ -56,7 +56,7 @@ pub struct Engine {
     frame_num: FrameNum,
     revision: Revision,
     frame_time: FrameTime,
-    tree: NodeTree<Box<dyn NodeRuntime>>,
+    tree: RuntimeNodeTree<Box<dyn NodeRuntime>>,
     resolver: Resolver,
     slot_shapes: SlotShapeRegistry,
     runtime_buffers: RuntimeBufferStore,
@@ -79,7 +79,7 @@ impl Engine {
             frame_num: FrameNum::default(),
             revision,
             frame_time: FrameTime::zero(),
-            tree: NodeTree::new(root_path.clone(), revision),
+            tree: RuntimeNodeTree::new(root_path.clone(), revision),
             resolver: Resolver::new(),
             slot_shapes,
             runtime_buffers: RuntimeBufferStore::new(),
@@ -107,11 +107,11 @@ impl Engine {
         self.frame_time
     }
 
-    pub fn tree(&self) -> &NodeTree<Box<dyn NodeRuntime>> {
+    pub fn tree(&self) -> &RuntimeNodeTree<Box<dyn NodeRuntime>> {
         &self.tree
     }
 
-    pub fn tree_mut(&mut self) -> &mut NodeTree<Box<dyn NodeRuntime>> {
+    pub fn tree_mut(&mut self) -> &mut RuntimeNodeTree<Box<dyn NodeRuntime>> {
         &mut self.tree
     }
 
@@ -369,7 +369,7 @@ impl Engine {
 
 /// Host adapter with borrows disjoint from the [`Resolver`] handed to [`EngineSession`].
 struct EngineResolveHost<'a> {
-    tree: &'a mut NodeTree<Box<dyn NodeRuntime>>,
+    tree: &'a mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
     artifacts: &'a ArtifactStore,
     producers_ticked: &'a mut BTreeSet<NodeId>,
     runtime_buffers: &'a mut RuntimeBufferStore,
@@ -1318,7 +1318,7 @@ impl VisualRenderServices for EngineResolveHost<'_> {
 }
 
 fn restore_node_after_failed_render(
-    tree: &mut NodeTree<Box<dyn NodeRuntime>>,
+    tree: &mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
     node_id: NodeId,
     node_runtime: Box<dyn NodeRuntime>,
     revision: Revision,
@@ -1331,7 +1331,7 @@ fn restore_node_after_failed_render(
 }
 
 fn set_entry_status_if_changed<N>(
-    entry: &mut NodeEntry<N>,
+    entry: &mut RuntimeNodeEntry<N>,
     status: WireNodeStatus,
     revision: Revision,
 ) {
@@ -1341,7 +1341,7 @@ fn set_entry_status_if_changed<N>(
 }
 
 fn restore_node_after_failed_render_unit(
-    tree: &mut NodeTree<Box<dyn NodeRuntime>>,
+    tree: &mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
     node_id: NodeId,
     node_runtime: Box<dyn NodeRuntime>,
     revision: Revision,
@@ -1354,7 +1354,7 @@ fn restore_node_after_failed_render_unit(
 }
 
 fn restore_node_after_failed_control(
-    tree: &mut NodeTree<Box<dyn NodeRuntime>>,
+    tree: &mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
     node_id: NodeId,
     node_runtime: Box<dyn NodeRuntime>,
     revision: Revision,

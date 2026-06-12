@@ -7,7 +7,7 @@ use lpc_model::{
     ArtifactChangeSet, ArtifactLocation, ArtifactOverlay, AssetOverlay, CommitResult, NodeDefEntry,
     NodeDefLocation, NodeDefState, OverlayMutation, OverlayMutationBatch,
     OverlayMutationBatchResult, OverlayMutationCommandResult, OverlayMutationEffect,
-    ProjectApplyBatchResult, ProjectApplyResult, ProjectInventory, ProjectOverlay, Revision,
+    MutationBatchResults, MutationResult, ProjectInventory, ProjectOverlay, Revision,
     WithRevision,
 };
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath};
@@ -57,13 +57,13 @@ impl ProjectRegistry {
         Ok(LoadResult::new(root, changes))
     }
 
-    pub fn apply_mutation(
+    pub fn mutate(
         &mut self,
         fs: &dyn LpFs,
         mutation: OverlayMutation,
         frame: Revision,
         ctx: &ParseCtx<'_>,
-    ) -> Result<ProjectApplyResult, EditApplyError> {
+    ) -> Result<MutationResult, EditApplyError> {
         let before = self.inventory.clone();
         let overlay_changed = self.overlay.get_mut().apply_mutation(mutation);
         if overlay_changed {
@@ -73,20 +73,20 @@ impl ProjectRegistry {
         let changes = change_set_between(&before, &after);
         self.inventory = after;
 
-        Ok(ProjectApplyResult::new(
+        Ok(MutationResult::new(
             self.overlay.changed_at(),
             overlay_changed,
             changes,
         ))
     }
 
-    pub fn apply_mutation_batch(
+    pub fn mutate_batch(
         &mut self,
         fs: &dyn LpFs,
         batch: OverlayMutationBatch,
         frame: Revision,
         ctx: &ParseCtx<'_>,
-    ) -> ProjectApplyBatchResult {
+    ) -> MutationBatchResults {
         let before = self.inventory.clone();
         let mut any_changed = false;
         let mut results = Vec::new();
@@ -107,7 +107,7 @@ impl ProjectRegistry {
         let changes = change_set_between(&before, &after);
         self.inventory = after;
 
-        ProjectApplyBatchResult::new(
+        MutationBatchResults::new(
             OverlayMutationBatchResult::new(results),
             self.overlay.changed_at(),
             changes,

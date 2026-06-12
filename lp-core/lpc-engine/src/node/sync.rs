@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use lpc_model::Revision;
 use lpc_wire::WireTreeDelta;
 
-use crate::node::{NodeEntry, NodeTree};
+use crate::node::{RuntimeNodeEntry, RuntimeNodeTree};
 
 /// Generate tree deltas since a given frame.
 ///
@@ -19,11 +19,11 @@ use crate::node::{NodeEntry, NodeTree};
 /// the initial sync to work correctly even though root is created at frame 0.
 ///
 /// `Created` deltas are emitted in parent-before-child order (depth-first pre-order).
-pub fn tree_deltas_since<N>(tree: &NodeTree<N>, since: Revision) -> Vec<WireTreeDelta> {
+pub fn tree_deltas_since<N>(tree: &RuntimeNodeTree<N>, since: Revision) -> Vec<WireTreeDelta> {
     let mut deltas = Vec::new();
 
     // First pass: collect all live entries
-    let entries: Vec<&NodeEntry<N>> = tree.entries().collect();
+    let entries: Vec<&RuntimeNodeEntry<N>> = tree.entries().collect();
 
     // Pass 1: Created entries
     // If since == 0, return all entries. Otherwise, return entries with created_frame > since.
@@ -73,7 +73,7 @@ pub fn tree_deltas_since<N>(tree: &NodeTree<N>, since: Revision) -> Vec<WireTree
 /// If `since == 0`, all entries are included (bulk sync).
 /// Otherwise, only entries with `created_frame > since` are included.
 fn collect_created_deltas<N>(
-    tree: &NodeTree<N>,
+    tree: &RuntimeNodeTree<N>,
     id: lpc_model::NodeId,
     since: Revision,
     deltas: &mut Vec<WireTreeDelta>,
@@ -108,15 +108,15 @@ mod tests {
     use super::tree_deltas_since;
     use crate::artifact::ArtifactId;
     use crate::node::test_placeholder_spine;
-    use crate::node::{NodeEntryState, NodeTree};
+    use crate::node::{NodeEntryState, RuntimeNodeTree};
     use alloc::vec;
     use alloc::vec::Vec;
     use lpc_model::NodeInvocation;
     use lpc_model::{NodeId, NodeName, Revision, TreePath};
     use lpc_wire::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};
 
-    fn make_tree() -> NodeTree<()> {
-        NodeTree::new(TreePath::parse("/root.show").unwrap(), Revision::new(0))
+    fn make_tree() -> RuntimeNodeTree<()> {
+        RuntimeNodeTree::new(TreePath::parse("/root.show").unwrap(), Revision::new(0))
     }
 
     fn spine_placeholder() -> (NodeInvocation, ArtifactId) {

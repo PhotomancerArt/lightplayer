@@ -31,7 +31,7 @@ kind = "Clock"
             panic!("snapshot overlay should only emit body edits");
         };
         registry
-            .apply_mutation(
+            .mutate(
                 &fs,
                 OverlayMutation::SetArtifactBody {
                     artifact: artifact.clone(),

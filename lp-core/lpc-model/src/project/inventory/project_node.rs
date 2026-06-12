@@ -1,18 +1,18 @@
 //! Effective project graph node entry.
 
-use crate::{NodeDefLocation, NodeInvocation, ProjectNodeKey, ProjectNodeRole, SlotPath};
+use crate::{NodeDefLocation, NodeInvocation, ProjectNodeLocation, ProjectNodePlacement, SlotPath};
 
 /// One effective project node instance.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ProjectNodeEntry {
-    pub key: ProjectNodeKey,
-    pub parent: Option<ProjectNodeKey>,
+pub struct ProjectNode {
+    pub key: ProjectNodeLocation,
+    pub parent: Option<ProjectNodeLocation>,
     pub def_location: NodeDefLocation,
     pub origin: ProjectNodeOrigin,
 }
 
-impl ProjectNodeEntry {
-    pub fn root(key: ProjectNodeKey, def_location: NodeDefLocation) -> Self {
+impl ProjectNode {
+    pub fn root(key: ProjectNodeLocation, def_location: NodeDefLocation) -> Self {
         Self {
             key,
             parent: None,
@@ -22,11 +22,11 @@ impl ProjectNodeEntry {
     }
 
     pub fn invocation(
-        key: ProjectNodeKey,
-        parent: ProjectNodeKey,
+        key: ProjectNodeLocation,
+        parent: ProjectNodeLocation,
         def_location: NodeDefLocation,
         slot: SlotPath,
-        role: ProjectNodeRole,
+        role: ProjectNodePlacement,
         invocation: NodeInvocation,
     ) -> Self {
         Self {
@@ -48,7 +48,7 @@ pub enum ProjectNodeOrigin {
     Root,
     Invocation {
         slot: SlotPath,
-        role: ProjectNodeRole,
+        role: ProjectNodePlacement,
         invocation: NodeInvocation,
     },
 }

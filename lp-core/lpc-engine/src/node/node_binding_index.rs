@@ -9,7 +9,7 @@ use crate::dataflow::binding::{
     BindingEntry, BindingError, BindingRef, BindingTarget, channels_touched,
 };
 
-use super::NodeEntry;
+use super::RuntimeNodeEntry;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct NodeBindingIndex {
@@ -19,7 +19,7 @@ pub(super) struct NodeBindingIndex {
 }
 
 impl NodeBindingIndex {
-    pub(super) fn rebuild<N>(entries: &[Option<NodeEntry<N>>]) -> Result<Self, BindingError> {
+    pub(super) fn rebuild<N>(entries: &[Option<RuntimeNodeEntry<N>>]) -> Result<Self, BindingError> {
         let mut index = Self::default();
 
         for entry in entries.iter().filter_map(|entry| entry.as_ref()) {
@@ -85,7 +85,7 @@ impl NodeBindingIndex {
 }
 
 pub(super) fn binding_by_ref<N>(
-    entries: &[Option<NodeEntry<N>>],
+    entries: &[Option<RuntimeNodeEntry<N>>],
     binding_ref: BindingRef,
 ) -> Option<&BindingEntry> {
     entries

@@ -13,7 +13,7 @@ use crate::artifact::ArtifactId;
 use crate::dataflow::binding::{BindingDraft, BindingEntry, BindingError, BindingRef};
 
 use crate::node::node_binding_index::{NodeBindingIndex, binding_by_ref};
-use crate::node::{NodeDefHandle, NodeEntry, TreeError};
+use crate::node::{NodeDefHandle, RuntimeNodeEntry, TreeError};
 
 /// The node tree container.
 ///
@@ -21,8 +21,8 @@ use crate::node::{NodeDefHandle, NodeEntry, TreeError};
 /// is `()` (no Node trait yet). When the Node trait lands, this becomes
 /// `Box<dyn Node>`.
 #[derive(Debug)]
-pub struct NodeTree<N> {
-    nodes: Vec<Option<NodeEntry<N>>>,
+pub struct RuntimeNodeTree<N> {
+    nodes: Vec<Option<RuntimeNodeEntry<N>>>,
     by_path: BTreeMap<TreePath, NodeId>,
     by_sibling: BTreeMap<(NodeId, NodeName), NodeId>,
     binding_index: NodeBindingIndex,
@@ -30,11 +30,11 @@ pub struct NodeTree<N> {
     root: NodeId,
 }
 
-impl<N> NodeTree<N> {
+impl<N> RuntimeNodeTree<N> {
     /// Create a new tree with a root node at the given path and frame.
     pub fn new(root_path: TreePath, frame: Revision) -> Self {
         let root_id = NodeId::new(0);
-        let root_entry = NodeEntry::new(root_id, root_path.clone(), None, None, frame);
+        let root_entry = RuntimeNodeEntry::new(root_id, root_path.clone(), None, None, frame);
 
         let mut nodes = Vec::new();
         nodes.push(Some(root_entry));
@@ -58,12 +58,12 @@ impl<N> NodeTree<N> {
     }
 
     /// Get a reference to an entry by id.
-    pub fn get(&self, id: NodeId) -> Option<&NodeEntry<N>> {
+    pub fn get(&self, id: NodeId) -> Option<&RuntimeNodeEntry<N>> {
         self.nodes.get(id.0 as usize).and_then(|opt| opt.as_ref())
     }
 
     /// Get a mutable reference to an entry by id.
-    pub fn get_mut(&mut self, id: NodeId) -> Option<&mut NodeEntry<N>> {
+    pub fn get_mut(&mut self, id: NodeId) -> Option<&mut RuntimeNodeEntry<N>> {
         self.nodes
             .get_mut(id.0 as usize)
             .and_then(|opt| opt.as_mut())
@@ -80,12 +80,12 @@ impl<N> NodeTree<N> {
     }
 
     /// Iterate over all live entries (skips tombstones).
-    pub fn entries(&self) -> impl Iterator<Item = &NodeEntry<N>> {
+    pub fn entries(&self) -> impl Iterator<Item = &RuntimeNodeEntry<N>> {
         self.nodes.iter().filter_map(|opt| opt.as_ref())
     }
 
     /// Iterate over all live entries mutably (skips tombstones).
-    pub fn entries_mut(&mut self) -> impl Iterator<Item = &mut NodeEntry<N>> {
+    pub fn entries_mut(&mut self) -> impl Iterator<Item = &mut RuntimeNodeEntry<N>> {
         self.nodes.iter_mut().filter_map(|opt| opt.as_mut())
     }
 
@@ -127,7 +127,7 @@ impl<N> NodeTree<N> {
         self.next_id += 1;
 
         // Create entry
-        let child_entry = NodeEntry::new_spine(
+        let child_entry = RuntimeNodeEntry::new_spine(
             child_id,
             child_path.clone(),
             Some(parent),
@@ -335,7 +335,7 @@ impl<N> NodeTree<N> {
 
 #[cfg(test)]
 mod tests {
-    use super::NodeTree;
+    use super::RuntimeNodeTree;
     use crate::artifact::ArtifactId;
     use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
     use crate::node::test_placeholder_spine;
@@ -345,15 +345,15 @@ mod tests {
     use lpc_model::{ChannelName, Kind, LpValue, NodeId, NodeName, Revision, SlotPath, TreePath};
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
-    fn make_tree() -> NodeTree<()> {
-        NodeTree::new(TreePath::parse("/root.show").unwrap(), Revision::new(0))
+    fn make_tree() -> RuntimeNodeTree<()> {
+        RuntimeNodeTree::new(TreePath::parse("/root.show").unwrap(), Revision::new(0))
     }
 
     fn spine_placeholder() -> (NodeInvocation, ArtifactId) {
         test_placeholder_spine()
     }
 
-    fn add_test_child(tree: &mut NodeTree<()>, name: &str) -> NodeId {
+    fn add_test_child(tree: &mut RuntimeNodeTree<()>, name: &str) -> NodeId {
         let root = tree.root();
         let (cfg, art) = spine_placeholder();
         tree.add_child(

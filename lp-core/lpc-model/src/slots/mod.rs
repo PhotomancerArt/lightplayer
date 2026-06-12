@@ -19,6 +19,7 @@ mod source_path;
 mod u32_list;
 mod visual_product;
 mod xy;
+pub mod node_invocation_slot;
 
 pub use affine2d::{Affine2d, Affine2dSlot};
 pub use artifact_path::{ArtifactPath, ArtifactPathSlot};
@@ -39,7 +40,7 @@ pub use xy::{Xy, XySlot};
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{RelativeNodeRef, ResourceRef, Revision, RuntimeBufferId, set_current_revision};
+    use crate::{set_current_revision, RelativeNodeRef, ResourceRef, Revision, RuntimeBufferId};
     use alloc::string::String;
 
     #[derive(serde::Serialize, serde::Deserialize)]

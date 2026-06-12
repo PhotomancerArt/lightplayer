@@ -2,7 +2,7 @@
 
 use crate::{ArtifactLocation, SlotPath};
 
-/// Location of a node definition within an authored artifact.
+/// Location of a node definition within a project
 #[derive(
     Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
 )]

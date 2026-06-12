@@ -1,13 +1,7 @@
 //! **Shared** graph node identifiers and authored node-tree locators.
 
 pub mod kind;
-pub mod node_def_change_set;
-pub mod node_def_entry;
-pub mod node_def_location;
-pub mod node_def_state;
-pub mod node_def_updates;
 pub mod node_id;
-pub mod node_invocation;
 pub mod node_name;
 /// Legacy node/property string parser from the pre-slot property model.
 ///
@@ -20,13 +14,13 @@ pub mod tree_path;
 
 pub use crate::nodes::node_def::{NodeArtifact, NodeDef};
 pub use kind::NodeKind;
-pub use node_def_change_set::{NodeDefChange, NodeDefChangeKind, NodeDefChangeSet};
-pub use node_def_entry::NodeDefEntry;
-pub use node_def_location::NodeDefLocation;
-pub use node_def_state::{NodeDefState, NodeDefValidationError};
-pub use node_def_updates::{NodeDefChangeDetail, NodeDefUpdates};
+pub use crate::project::mutation::node_def_change_set::{NodeDefChange, NodeDefChangeKind, NodeDefChangeSet};
+pub use crate::project::inventory::node_def_entry::NodeDefEntry;
+pub use crate::project::inventory::node_def_location::NodeDefLocation;
+pub use crate::project::inventory::node_def_state::{NodeDefState, NodeDefValidationError};
+pub use crate::project::inventory::node_def_updates::{NodeDefChangeDetail, NodeDefUpdates};
 pub use node_id::NodeId;
-pub use node_invocation::{NodeInvocation, NodeInvocationSlot};
+pub use crate::slots::node_invocation_slot::{NodeInvocation, NodeInvocationSlot};
 pub use node_name::{NodeName, NodeNameError};
 pub use relative_node_ref::{RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc};
 pub use tree_path::TreePath;

@@ -1,7 +1,7 @@
 mod support;
 
 use lpc_model::{
-    NodeDefLocation, NodeDefState, ProjectNodeKey, ProjectNodeOrigin, ProjectNodeRole, SlotPath,
+    NodeDefLocation, NodeDefState, ProjectNodeLocation, ProjectNodeOrigin, ProjectNodePlacement, SlotPath,
 };
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpfs::{LpFsMemory, LpPath};
@@ -11,9 +11,9 @@ use support::{RegistryScenario, artifact, artifact_asset, root_def};
 #[test]
 fn fyeah_sign_graph_contains_project_children_playlist_entries_and_asset_consumers() {
     let (scenario, _) = RegistryScenario::load_fixture("fyeah-sign");
-    let graph = &scenario.registry().inventory().graph;
+    let graph = &scenario.registry().inventory().tree;
 
-    let root = ProjectNodeKey::root();
+    let root = ProjectNodeLocation::root();
     let playlist = root.child(SlotPath::parse("nodes[playlist]").unwrap());
     let idle = playlist.child(SlotPath::parse("entries[1].node").unwrap());
     let blast = playlist.child(SlotPath::parse("entries[2].node").unwrap());
@@ -83,10 +83,10 @@ source = { path = "shader.glsl" }
         )],
         &[("/shader.glsl", b"void main() {}".as_slice())],
     );
-    let graph = &registry.inventory().graph;
+    let graph = &registry.inventory().tree;
     let shader = root_def("/shader.toml");
-    let a = ProjectNodeKey::root().child(SlotPath::parse("nodes[a]").unwrap());
-    let b = ProjectNodeKey::root().child(SlotPath::parse("nodes[b]").unwrap());
+    let a = ProjectNodeLocation::root().child(SlotPath::parse("nodes[a]").unwrap());
+    let b = ProjectNodeLocation::root().child(SlotPath::parse("nodes[b]").unwrap());
 
     assert_eq!(registry.inventory().defs.len(), 2);
     assert_eq!(graph.def_instances.get(&shader).unwrap(), &vec![a, b]);
@@ -115,7 +115,7 @@ ref = "./missing.toml"
         &[],
         &[],
     );
-    let graph = &registry.inventory().graph;
+    let graph = &registry.inventory().tree;
     let inline_clock = NodeDefLocation {
         artifact: artifact("/project.toml"),
         path: SlotPath::parse("nodes[clock]").unwrap(),
@@ -130,21 +130,21 @@ ref = "./missing.toml"
     );
 }
 
-fn assert_project_child(entry: &lpc_model::ProjectNodeEntry, name: &str, expected_def_path: &str) {
+fn assert_project_child(entry: &lpc_model::ProjectNode, name: &str, expected_def_path: &str) {
     assert_eq!(entry.def_location, root_def(expected_def_path));
     let ProjectNodeOrigin::Invocation { role, .. } = &entry.origin else {
         panic!("expected invocation origin");
     };
     assert_eq!(
         role,
-        &ProjectNodeRole::ProjectChild {
+        &ProjectNodePlacement::ProjectChild {
             name: name.to_string()
         }
     );
 }
 
 fn assert_playlist_entry(
-    entry: &lpc_model::ProjectNodeEntry,
+    entry: &lpc_model::ProjectNode,
     key: u32,
     name: Option<&str>,
     expected_def_path: &str,
@@ -155,7 +155,7 @@ fn assert_playlist_entry(
     };
     assert_eq!(
         role,
-        &ProjectNodeRole::PlaylistEntry {
+        &ProjectNodePlacement::PlaylistEntry {
             entry: key,
             name: name.map(str::to_string)
         }

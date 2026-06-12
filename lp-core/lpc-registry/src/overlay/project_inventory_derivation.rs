@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use lpc_model::{
     ArtifactLocation, AssetBodySource, AssetEntry, AssetKind, AssetOverlay, AssetSource,
     AssetState, NodeDefEntry, NodeDefLocation, NodeDefState, NodeInvocation, ProjectInventory,
-    ProjectNodeEntry, ProjectNodeKey, ProjectNodeOrigin, ProjectOverlay, ReferencedAsset, Revision,
+    ProjectNode, ProjectNodeLocation, ProjectNodeOrigin, ProjectOverlay, ReferencedAsset, Revision,
     SlotPath, WithRevision, resolve_artifact_specifier,
 };
 use lpfs::{LpFs, LpPath};
@@ -35,8 +35,8 @@ pub(crate) fn derive_effective_inventory(
     };
 
     if let Some(root) = root {
-        let root_key = ProjectNodeKey::root();
-        derivation.inventory.graph.root = root_key.clone();
+        let root_key = ProjectNodeLocation::root();
+        derivation.inventory.tree.root = root_key.clone();
         derivation.walk_graph_node(
             root_key.clone(),
             None,
@@ -61,14 +61,14 @@ struct InventoryDerivation<'a, 'ctx> {
 impl InventoryDerivation<'_, '_> {
     fn walk_graph_node(
         &mut self,
-        key: ProjectNodeKey,
-        parent: Option<ProjectNodeKey>,
+        key: ProjectNodeLocation,
+        parent: Option<ProjectNodeLocation>,
         location: NodeDefLocation,
         origin: ProjectNodeOrigin,
         ancestry: &mut Vec<NodeDefLocation>,
     ) {
         let (state, revision) = self.ensure_def_entry(location.clone());
-        self.inventory.graph.insert_node(ProjectNodeEntry {
+        self.inventory.tree.insert_node(ProjectNode {
             key: key.clone(),
             parent,
             def_location: location.clone(),
@@ -104,7 +104,7 @@ impl InventoryDerivation<'_, '_> {
 
     fn walk_loaded_def(
         &mut self,
-        key: &ProjectNodeKey,
+        key: &ProjectNodeLocation,
         location: &NodeDefLocation,
         def: &lpc_model::NodeDef,
         revision: Revision,
@@ -213,12 +213,12 @@ impl InventoryDerivation<'_, '_> {
         &mut self,
         asset: ReferencedAsset,
         owner_revision: Revision,
-        consumer: &ProjectNodeKey,
+        consumer: &ProjectNodeLocation,
     ) {
         let revision = self.revision_for_asset(&asset.source, owner_revision);
         let state = self.read_effective_asset(&asset.source);
         self.inventory
-            .graph
+            .tree
             .add_asset_consumer(asset.source.clone(), consumer.clone());
         self.inventory.assets.insert(
             asset.source.clone(),

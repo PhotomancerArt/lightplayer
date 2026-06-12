@@ -24,7 +24,7 @@ use crate::nodes::shader::{ComputeShaderDef, ShaderDef, ShaderSource};
 use crate::nodes::texture::TextureDef;
 use crate::{
     ArtifactLocation, AssetKind, AssetSource, EnumSlot, LpPath, LpPathBuf, NodeDefLocation,
-    NodeInvocation, ProjectNodeRole, ReferencedAsset, SlotAccess, SlotDataAccess,
+    NodeInvocation, ProjectNodePlacement, ReferencedAsset, SlotAccess, SlotDataAccess,
     SlotDataMutAccess, SlotMapKey, SlotMutAccess, SlotName, SlotPath, SlotShapeId,
     SlotShapeRegistry, Slotted, SourcePath, StaticSlotShape,
 };
@@ -88,7 +88,7 @@ pub struct NodeArtifact(pub EnumSlot<NodeDef>);
 pub struct InvocationSite {
     pub path: SlotPath,
     pub invocation: NodeInvocation,
-    pub role: ProjectNodeRole,
+    pub role: ProjectNodePlacement,
 }
 
 /// Borrowed inline text asset body owned by a node definition.
@@ -234,7 +234,7 @@ impl NodeDef {
                     Some(InvocationSite {
                         path: project_node_path(base, name)?,
                         invocation: invocation.value().clone(),
-                        role: ProjectNodeRole::ProjectChild { name: name.clone() },
+                        role: ProjectNodePlacement::ProjectChild { name: name.clone() },
                     })
                 })
                 .collect(),
@@ -246,7 +246,7 @@ impl NodeDef {
                     Some(InvocationSite {
                         path: playlist_entry_node_path(base, *key)?,
                         invocation: entry.node.value().clone(),
-                        role: ProjectNodeRole::PlaylistEntry {
+                        role: ProjectNodePlacement::PlaylistEntry {
                             entry: *key,
                             name: entry.name.data.as_ref().map(|name| name.value().clone()),
                         },

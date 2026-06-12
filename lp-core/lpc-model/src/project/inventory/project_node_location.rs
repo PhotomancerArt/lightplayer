@@ -21,11 +21,11 @@ use crate::SlotPath;
     serde::Serialize,
     serde::Deserialize,
 )]
-pub struct ProjectNodeKey {
-    pub segments: Vec<ProjectNodePathSegment>,
+pub struct ProjectNodeLocation {
+    pub segments: Vec<LocationSeg>,
 }
 
-impl ProjectNodeKey {
+impl ProjectNodeLocation {
     pub fn root() -> Self {
         Self {
             segments: Vec::new(),
@@ -34,7 +34,7 @@ impl ProjectNodeKey {
 
     pub fn child(&self, slot: SlotPath) -> Self {
         let mut segments = self.segments.clone();
-        segments.push(ProjectNodePathSegment { slot });
+        segments.push(LocationSeg { slot });
         Self { segments }
     }
 
@@ -43,11 +43,11 @@ impl ProjectNodeKey {
     }
 }
 
-/// One authored invocation step in a [`ProjectNodeKey`].
+/// One authored invocation step in a [`ProjectNodeLocation`].
 #[derive(
     Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
 )]
-pub struct ProjectNodePathSegment {
+pub struct LocationSeg {
     pub slot: SlotPath,
 }
 
@@ -58,7 +58,7 @@ mod tests {
 
     #[test]
     fn root_key_is_empty() {
-        let key = ProjectNodeKey::root();
+        let key = ProjectNodeLocation::root();
 
         assert!(key.is_root());
         assert!(key.segments.is_empty());
@@ -66,7 +66,7 @@ mod tests {
 
     #[test]
     fn child_key_appends_slot_ancestry() {
-        let root = ProjectNodeKey::root();
+        let root = ProjectNodeLocation::root();
         let first = root.child(SlotPath::parse("nodes[playlist]").unwrap());
         let second = first.child(SlotPath::parse("entries[1].node").unwrap());
 
@@ -78,10 +78,10 @@ mod tests {
 
     #[test]
     fn key_serializes_as_slot_path_segments() {
-        let key = ProjectNodeKey::root().child(SlotPath::parse("nodes[shader]").unwrap());
+        let key = ProjectNodeLocation::root().child(SlotPath::parse("nodes[shader]").unwrap());
 
         let json = serde_json::to_string(&key).unwrap();
-        let round_trip: ProjectNodeKey = serde_json::from_str(&json).unwrap();
+        let round_trip: ProjectNodeLocation = serde_json::from_str(&json).unwrap();
 
         assert_eq!(round_trip, key);
     }

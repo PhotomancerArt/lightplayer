@@ -3,19 +3,19 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use crate::{AssetSource, NodeDefLocation, ProjectNodeEntry, ProjectNodeKey};
+use crate::{AssetSource, NodeDefLocation, ProjectNode, ProjectNodeLocation};
 
 /// Effective post-overlay project node graph and reverse indexes.
 #[derive(Clone, Debug, PartialEq)]
-pub struct ProjectGraph {
-    pub root: ProjectNodeKey,
-    pub nodes: BTreeMap<ProjectNodeKey, ProjectNodeEntry>,
-    pub def_instances: BTreeMap<NodeDefLocation, Vec<ProjectNodeKey>>,
-    pub asset_consumers: BTreeMap<AssetSource, Vec<ProjectNodeKey>>,
+pub struct ProjectTree {
+    pub root: ProjectNodeLocation,
+    pub nodes: BTreeMap<ProjectNodeLocation, ProjectNode>,
+    pub def_instances: BTreeMap<NodeDefLocation, Vec<ProjectNodeLocation>>,
+    pub asset_consumers: BTreeMap<AssetSource, Vec<ProjectNodeLocation>>,
 }
 
-impl ProjectGraph {
-    pub fn new(root: ProjectNodeKey) -> Self {
+impl ProjectTree {
+    pub fn new(root: ProjectNodeLocation) -> Self {
         Self {
             root,
             nodes: BTreeMap::new(),
@@ -24,7 +24,7 @@ impl ProjectGraph {
         }
     }
 
-    pub fn insert_node(&mut self, entry: ProjectNodeEntry) {
+    pub fn insert_node(&mut self, entry: ProjectNode) {
         self.def_instances
             .entry(entry.def_location.clone())
             .or_default()
@@ -32,7 +32,7 @@ impl ProjectGraph {
         self.nodes.insert(entry.key.clone(), entry);
     }
 
-    pub fn add_asset_consumer(&mut self, source: AssetSource, consumer: ProjectNodeKey) {
+    pub fn add_asset_consumer(&mut self, source: AssetSource, consumer: ProjectNodeLocation) {
         self.asset_consumers
             .entry(source)
             .or_default()
@@ -44,8 +44,8 @@ impl ProjectGraph {
     }
 }
 
-impl Default for ProjectGraph {
+impl Default for ProjectTree {
     fn default() -> Self {
-        Self::new(ProjectNodeKey::root())
+        Self::new(ProjectNodeLocation::root())
     }
 }

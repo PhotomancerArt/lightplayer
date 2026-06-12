@@ -19,7 +19,7 @@ use super::NodeDefHandle;
 /// `Box<dyn Node>`.
 ///
 #[derive(Debug)]
-pub struct NodeEntry<N> {
+pub struct RuntimeNodeEntry<N> {
     pub id: NodeId,
     pub path: TreePath,
     pub parent: Option<NodeId>,
@@ -39,7 +39,7 @@ pub struct NodeEntry<N> {
     pub def_handle: NodeDefHandle,
 }
 
-impl<N> NodeEntry<N> {
+impl<N> RuntimeNodeEntry<N> {
     /// Placeholder artifact path for [`Self::new`] (tests and roots without a real spec yet).
     ///
     /// Spine placeholder artifact path: empty authored `""` normalizes to `/` (`lpc_model::LpPathBuf`).
@@ -126,7 +126,7 @@ impl<N> NodeEntry<N> {
 
 #[cfg(test)]
 mod tests {
-    use super::NodeEntry;
+    use super::RuntimeNodeEntry;
     use crate::node::NodeDefHandle;
     use lpc_model::{ArtifactSpec, NodeInvocation};
     use lpc_model::{NodeId, Revision, TreePath};
@@ -135,7 +135,7 @@ mod tests {
     #[test]
     fn node_entry_new_sets_all_frame_counters() {
         let frame = Revision::new(5);
-        let entry: NodeEntry<()> = NodeEntry::new(
+        let entry: RuntimeNodeEntry<()> = RuntimeNodeEntry::new(
             NodeId::new(1),
             TreePath::parse("/main.show").unwrap(),
             None,
@@ -152,7 +152,7 @@ mod tests {
     #[test]
     fn node_entry_set_status_bumps_change_frame() {
         let frame = Revision::new(5);
-        let mut entry: NodeEntry<()> = NodeEntry::new(
+        let mut entry: RuntimeNodeEntry<()> = RuntimeNodeEntry::new(
             NodeId::new(1),
             TreePath::parse("/main.show").unwrap(),
             None,
@@ -170,7 +170,7 @@ mod tests {
     #[test]
     fn node_entry_is_dirty_since() {
         let frame = Revision::new(5);
-        let entry: NodeEntry<()> = NodeEntry::new(
+        let entry: RuntimeNodeEntry<()> = RuntimeNodeEntry::new(
             NodeId::new(1),
             TreePath::parse("/main.show").unwrap(),
             None,
@@ -186,7 +186,7 @@ mod tests {
     fn node_entry_child_kind_is_immutable_conceptually() {
         // Verify we can set it at construction; it's not changed after
         let frame = Revision::new(1);
-        let entry: NodeEntry<()> = NodeEntry::new(
+        let entry: RuntimeNodeEntry<()> = RuntimeNodeEntry::new(
             NodeId::new(2),
             TreePath::parse("/main.show/child.vis").unwrap(),
             Some(NodeId::new(1)),
@@ -208,7 +208,7 @@ mod tests {
         let config = NodeInvocation::new(ArtifactSpec::path("./fluid.vis"));
         let artifact = crate::artifact::ArtifactId::from_raw(7);
         let def_handle = NodeDefHandle::artifact_root(artifact);
-        let entry: NodeEntry<()> = NodeEntry::new_spine(
+        let entry: RuntimeNodeEntry<()> = RuntimeNodeEntry::new_spine(
             NodeId::new(1),
             TreePath::parse("/main.show").unwrap(),
             None,

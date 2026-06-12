@@ -116,7 +116,7 @@ source = { path = "shader.glsl" }
     let asset = ArtifactLocation::file("/shader.glsl");
     let asset_source = AssetSource::artifact(asset.clone());
     let apply = registry
-        .apply_mutation(
+        .mutate(
             &fs,
             OverlayMutation::SetArtifactBody {
                 artifact: asset.clone(),

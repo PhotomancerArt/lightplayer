@@ -36,7 +36,6 @@ pub mod value;
 pub mod bus;
 pub mod config;
 pub mod control;
-pub mod edit;
 pub mod slot_shapes {
     include!(concat!(env!("OUT_DIR"), "/slot_shapes.rs"));
 }
@@ -45,7 +44,6 @@ pub mod slot_views {
 }
 
 pub mod artifact;
-pub mod asset;
 pub mod hardware_endpoint_spec;
 pub mod nodes;
 pub mod product;
@@ -65,7 +63,7 @@ pub use artifact::{
     ArtifactChangeSet, ArtifactLocation, ArtifactLocationError, ArtifactReadRoot, ArtifactSpec,
     SrcArtifactLibRef,
 };
-pub use asset::{
+pub use project::asset::{
     AssetBodySource, AssetChange, AssetChangeKind, AssetChangeSet, AssetEntry, AssetKind,
     AssetSource, AssetState, ReferencedAsset,
 };
@@ -84,8 +82,8 @@ pub use value::WithRevision;
 pub use value::{LpType, LpValue, ModelEnumVariant, ModelStructMember};
 
 pub use config::DEFAULT_SERIAL_BAUD_RATE;
-pub use control::{CONTROL_MESSAGE_SHAPE_NAME, ControlMessage, TriggerEvent};
-pub use edit::{
+pub use control::{ControlMessage, TriggerEvent, CONTROL_MESSAGE_SHAPE_NAME};
+pub use project::overlay::{
     ArtifactOverlay, AssetOverlay, OverlayMutation, OverlayMutationBatch,
     OverlayMutationBatchResult, OverlayMutationCommand, OverlayMutationCommandId,
     OverlayMutationCommandResult, OverlayMutationCommandStatus, OverlayMutationEffect,
@@ -103,29 +101,29 @@ pub use node::{
     RelativeNodeRefError, RelativeNodeRefSrc,
 };
 pub use nodes::{
-    AddSubMode, ArtifactPathResolutionError, ButtonDef, ButtonDefView, ButtonState,
-    ButtonStateView, ClockControls, ClockDef, ClockDefView, ClockState, ColorOrder,
-    ComputeShaderDef, ComputeShaderDefView, ControlRadioDef, ControlRadioDefView,
-    ControlRadioState, ControlRadioStateView, DivMode, FixtureDef, FixtureDefView,
-    FixtureDiagnosticMode, FixtureSamplingConfig, FixtureState, FixtureStateView, FluidDef,
-    FluidDefView, FluidEmitter, FluidState, GlslOpts, GlslOptsView, InlineAssetText,
-    InvocationSite, MappingConfig, MulMode, NodeDefParseError, OutputDef, OutputDefView,
-    OutputDriverOptionsConfig, OutputDriverOptionsConfigView, PathSpec, PlaylistDef,
-    PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState, PlaylistStateView,
-    ProjectDef, ProjectDefView, RingOrder, ScalarHint, ScalarHintView, ShaderDef, ShaderDefView,
-    ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef, ShaderParamDefView, ShaderSlotDef,
-    ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderSource, ShaderState,
-    ShaderStateView, ShaderValueShapeRef, TextureDef, TextureDefView, TextureFormat, TextureState,
-    TextureStateView, generate_compute_shader_header, resolve_artifact_specifier,
+    generate_compute_shader_header, resolve_artifact_specifier, AddSubMode, ArtifactPathResolutionError, ButtonDef,
+    ButtonDefView, ButtonState, ButtonStateView, ClockControls, ClockDef, ClockDefView,
+    ClockState, ColorOrder, ComputeShaderDef, ComputeShaderDefView,
+    ControlRadioDef, ControlRadioDefView, ControlRadioState, ControlRadioStateView, DivMode,
+    FixtureDef, FixtureDefView, FixtureDiagnosticMode, FixtureSamplingConfig, FixtureState,
+    FixtureStateView, FluidDef, FluidDefView, FluidEmitter, FluidState, GlslOpts,
+    GlslOptsView, InlineAssetText, InvocationSite, MappingConfig, MulMode, NodeDefParseError,
+    OutputDef, OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView,
+    PathSpec, PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView,
+    PlaylistState, PlaylistStateView, ProjectDef, ProjectDefView, RingOrder, ScalarHint, ScalarHintView,
+    ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef,
+    ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind,
+    ShaderSource, ShaderState, ShaderStateView, ShaderValueShapeRef, TextureDef, TextureDefView,
+    TextureFormat, TextureState, TextureStateView,
 };
 pub use product::{ControlExtent, ControlProduct, ProductKind, ProductRef, VisualProduct};
 pub use project::{
-    CommitResult, ProjectApplyBatchResult, ProjectApplyResult, ProjectChangeSet, ProjectConfig,
-    ProjectGraph, ProjectInventory, ProjectNodeEntry, ProjectNodeKey, ProjectNodeOrigin,
-    ProjectNodePathSegment, ProjectNodeRole, Revision,
+    CommitResult, LocationSeg, MutationBatchResults, MutationResult, ProjectChangeSet,
+    ProjectConfig, ProjectInventory, ProjectNode, ProjectNodeLocation, ProjectNodeOrigin,
+    ProjectNodePlacement, ProjectTree, Revision,
 };
 pub use project::{advance_revision, current_revision, set_current_revision};
-pub use resource::{ResourceDomain, ResourceRef, RuntimeBufferId, runtime_buffer_resource_shape};
+pub use resource::{runtime_buffer_resource_shape, ResourceDomain, ResourceRef, RuntimeBufferId};
 pub use server::server_config::ServerConfig;
 pub use slot::{
     Affine2d, Affine2dSlot, ArtifactPath, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue,
@@ -136,26 +134,26 @@ pub use slot::{
     VisualProductSlot, Xy, XySlot,
 };
 pub use slot::{
-    DynamicSlotObject, EnumSlot, FieldSlot, FieldSlotMut, MapSlot, MapSlotAccess, MapSlotAccessMut,
-    MapSlotKeyLike, MapSlotMutAccess, OptionSlot, SlotAccess, SlotAccessMut, SlotAccessor,
-    SlotAccessorError, SlotAccessorStep, SlotCustomAccess, SlotCustomMutAccess, SlotData,
-    SlotDataAccess, SlotDataAccessMut, SlotDataMutAccess, SlotDirection, SlotEnum, SlotEnumAccess,
-    SlotEnumAccessMut, SlotEnumDefaultVariant, SlotEnumEncoding, SlotEnumMutAccess, SlotEnumShape,
-    SlotFactory, SlotFactoryError, SlotFactoryFn, SlotFieldReader, SlotFieldShape, SlotLookupError,
-    SlotMapDyn, SlotMapKey, SlotMapKeyShape, SlotMapValueAccessMut, SlotMapValueMutAccess,
-    SlotMerge, SlotMeta, SlotMutAccess, SlotMutationError, SlotName, SlotNameError,
+    create_dynamic_slot_data, ensure_slot_present, insert_slot_map_entry_default, lookup_slot_data, lookup_slot_data_and_shape, lookup_slot_data_mut, remove_slot_map_entry,
+    set_slot_option_none, set_slot_option_some_default, set_slot_value, set_slot_variant_default, slot_data_revision, DynamicSlotObject,
+    EnumSlot, FieldSlot, FieldSlotMut, MapSlot, MapSlotAccess,
+    MapSlotAccessMut, MapSlotKeyLike, MapSlotMutAccess, OptionSlot, SlotAccess, SlotAccessMut,
+    SlotAccessor, SlotAccessorError, SlotAccessorStep, SlotCustomAccess, SlotCustomMutAccess,
+    SlotData, SlotDataAccess, SlotDataAccessMut, SlotDataMutAccess, SlotDirection, SlotEnum,
+    SlotEnumAccess, SlotEnumAccessMut, SlotEnumDefaultVariant, SlotEnumEncoding, SlotEnumMutAccess,
+    SlotEnumShape, SlotFactory, SlotFactoryError, SlotFactoryFn, SlotFieldReader, SlotFieldShape,
+    SlotLookupError, SlotMapDyn, SlotMapKey, SlotMapKeyShape, SlotMapValueAccessMut,
+    SlotMapValueMutAccess, SlotMerge, SlotMeta, SlotMutAccess, SlotMutationError, SlotName, SlotNameError,
     SlotOptionAccess, SlotOptionAccessMut, SlotOptionDyn, SlotOptionMutAccess, SlotOptionReader,
-    SlotOwner, SlotPath, SlotPathError, SlotPathSegment, SlotPolicy, SlotReadContext, SlotRecord,
-    SlotRecordAccess, SlotRecordAccessMut, SlotRecordMutAccess, SlotRecordShape, SlotRef,
-    SlotSemantics, SlotShape, SlotShapeEntry, SlotShapeId, SlotShapeIdError, SlotShapeLookup,
-    SlotShapeRegistry, SlotShapeRegistryError, SlotShapeRegistrySnapshot, SlotShapeView,
-    SlotValueAccess, SlotValueMut, SlotValueMutAccess, SlotValueShapeView, SlotVariantShape,
-    SlotVariantShapeView, SlottedEnum, SlottedEnumMut, StaticLpType, StaticModelEnumVariant,
-    StaticModelStructMember, StaticSlotAccess, StaticSlotEnumEncoding, StaticSlotEnumOption,
-    StaticSlotFieldShape, StaticSlotMeta, StaticSlotShape, StaticSlotShapeDescriptor,
-    StaticSlotValueShape, StaticSlotVariantShape, StaticValueEditorHint, ValueRef, ValueSlot,
-    create_dynamic_slot_data, ensure_slot_present, insert_slot_map_entry_default, lookup_slot_data,
-    lookup_slot_data_and_shape, lookup_slot_data_mut, remove_slot_map_entry, set_slot_option_none,
-    set_slot_option_some_default, set_slot_value, set_slot_variant_default, slot_data_revision,
+    SlotOwner, SlotPath, SlotPathError, SlotPathSegment, SlotPolicy, SlotReadContext,
+    SlotRecord, SlotRecordAccess, SlotRecordAccessMut, SlotRecordMutAccess,
+    SlotRecordShape, SlotRef, SlotSemantics, SlotShape, SlotShapeEntry,
+    SlotShapeId, SlotShapeIdError, SlotShapeLookup, SlotShapeRegistry, SlotShapeRegistryError,
+    SlotShapeRegistrySnapshot, SlotShapeView, SlotValueAccess, SlotValueMut,
+    SlotValueMutAccess, SlotValueShapeView, SlotVariantShape, SlotVariantShapeView,
+    SlottedEnum, SlottedEnumMut, StaticLpType, StaticModelEnumVariant, StaticModelStructMember,
+    StaticSlotAccess, StaticSlotEnumEncoding, StaticSlotEnumOption, StaticSlotFieldShape,
+    StaticSlotMeta, StaticSlotShape, StaticSlotShapeDescriptor, StaticSlotValueShape,
+    StaticSlotVariantShape, StaticValueEditorHint, ValueRef, ValueSlot,
 };
 pub use value::value_path::ValuePath;
