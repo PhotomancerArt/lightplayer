@@ -1,3 +1,3 @@
-pub mod hardware_claim;
-pub mod hardware_lease;
-pub mod hardware_registry;
+pub mod hw_claim;
+pub mod hw_lease;
+pub mod hw_registry;

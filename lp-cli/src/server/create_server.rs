@@ -1,6 +1,6 @@
 use crate::commands::serve::init::{create_filesystem, initialize_server};
 use lpa_server::{ButtonService, Graphics, LpGraphics, LpServer, RadioService};
-use lpc_hardware::{HardwareRegistry, HardwareSystem, default_esp32c6_hardware_manifest};
+use lpc_hardware::{HwRegistry, HardwareSystem, default_esp32c6_hardware_manifest};
 use lpc_model::AsLpPath;
 use lpc_shared::output::MemoryOutputProvider;
 use lpfs::LpFs;
@@ -46,7 +46,7 @@ pub fn create_server(
     // Create output provider
     let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new_permissive()));
     let hardware = Rc::new(HardwareSystem::with_virtual_drivers(Rc::new(
-        HardwareRegistry::new(default_esp32c6_hardware_manifest()),
+        HwRegistry::new(default_esp32c6_hardware_manifest()),
     )));
     let button_service: Rc<dyn ButtonService> = hardware.clone();
     let radio_service: Rc<dyn RadioService> = hardware.clone();

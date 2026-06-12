@@ -11,8 +11,8 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 use lpc_hardware::OutputError;
 use lpc_hardware::{
-    HardwareAddress, HardwareEndpointError, HardwareEndpointSpec, HardwareManifest,
-    HardwareRegistry, HardwareSystem, Ws281xConfig, Ws281xOutput,
+    HwAddress, HardwareEndpointError, HwEndpointSpec, HwManifest,
+    HwRegistry, HardwareSystem, Ws281xConfig, Ws281xOutput,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -23,7 +23,7 @@ enum EndpointValidation {
 
 /// Channel state for in-memory provider
 struct ChannelState {
-    endpoint: HardwareEndpointSpec,
+    endpoint: HwEndpointSpec,
     #[allow(
         dead_code,
         reason = "Stored for validation; may be used for protocol-specific handling"
@@ -54,7 +54,7 @@ pub struct MemoryOutputProvider {
 impl MemoryOutputProvider {
     /// Create a new memory output provider
     pub fn new() -> Self {
-        Self::with_hardware_manifest(HardwareManifest::virtual_single_rmt_gpio_board())
+        Self::with_hardware_manifest(HwManifest::virtual_single_rmt_gpio_board())
     }
 
     /// Create a memory provider that accepts any authored hardware endpoint.
@@ -65,17 +65,17 @@ impl MemoryOutputProvider {
     pub fn new_permissive() -> Self {
         Self::with_validation(
             Rc::new(HardwareSystem::with_virtual_drivers(Rc::new(
-                HardwareRegistry::new(HardwareManifest::virtual_single_rmt_gpio_board()),
+                HwRegistry::new(HwManifest::virtual_single_rmt_gpio_board()),
             ))),
             EndpointValidation::Permissive,
         )
     }
 
-    pub fn with_hardware_manifest(manifest: HardwareManifest) -> Self {
-        Self::with_hardware_registry(Rc::new(HardwareRegistry::new(manifest)))
+    pub fn with_hardware_manifest(manifest: HwManifest) -> Self {
+        Self::with_hardware_registry(Rc::new(HwRegistry::new(manifest)))
     }
 
-    pub fn with_hardware_registry(hardware_registry: Rc<HardwareRegistry>) -> Self {
+    pub fn with_hardware_registry(hardware_registry: Rc<HwRegistry>) -> Self {
         Self::with_hardware_system(Rc::new(HardwareSystem::with_virtual_drivers(
             hardware_registry,
         )))
@@ -117,18 +117,18 @@ impl MemoryOutputProvider {
     pub fn is_pin_open(&self, pin: u32) -> bool {
         self.hardware_system
             .registry()
-            .is_claimed(&HardwareAddress::gpio(pin))
+            .is_claimed(&HwAddress::gpio(pin))
     }
 
     /// Check if an endpoint is currently opened.
-    pub fn is_endpoint_open(&self, endpoint: &HardwareEndpointSpec) -> bool {
+    pub fn is_endpoint_open(&self, endpoint: &HwEndpointSpec) -> bool {
         self.get_handle_for_endpoint(endpoint).is_some()
     }
 
     /// Get the handle for a given endpoint (for testing)
     pub fn get_handle_for_endpoint(
         &self,
-        endpoint: &HardwareEndpointSpec,
+        endpoint: &HwEndpointSpec,
     ) -> Option<OutputChannelHandle> {
         let state = self.state.borrow();
         for (handle, channel_state) in state.channels.iter() {
@@ -148,7 +148,7 @@ impl MemoryOutputProvider {
 impl OutputProvider for MemoryOutputProvider {
     fn open(
         &self,
-        endpoint: &HardwareEndpointSpec,
+        endpoint: &HwEndpointSpec,
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,
@@ -251,7 +251,7 @@ impl OutputProvider for MemoryOutputProvider {
 impl MemoryOutputProvider {
     fn open_ws281x_output(
         &self,
-        endpoint: &HardwareEndpointSpec,
+        endpoint: &HwEndpointSpec,
         byte_count: u32,
         options: Option<OutputDriverOptions>,
     ) -> Result<Box<dyn Ws281xOutput>, OutputError> {
@@ -336,8 +336,8 @@ fn endpoint_error_to_output_error(error: HardwareEndpointError) -> OutputError {
 mod tests {
     use super::*;
 
-    fn endpoint(spec: &'static str) -> HardwareEndpointSpec {
-        HardwareEndpointSpec::from_static(spec)
+    fn endpoint(spec: &'static str) -> HwEndpointSpec {
+        HwEndpointSpec::from_static(spec)
     }
 
     #[test]

@@ -1,3 +1,3 @@
-pub mod hardware_address;
-pub mod hardware_capability;
-pub mod hardware_resource;
+pub mod hw_address;
+pub mod hw_capability;
+pub mod hw_resource;

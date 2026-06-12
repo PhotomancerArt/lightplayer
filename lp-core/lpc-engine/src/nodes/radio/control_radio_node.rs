@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 
 use lpc_hardware::{RadioChannelId, RadioConfig, RadioDevice, RadioMessage, RadioMessageKind};
 use lpc_model::{
-    ControlMessage, ControlRadioDefView, ControlRadioState, FromLpValue, HardwareEndpointSpec,
+    ControlMessage, ControlRadioDefView, ControlRadioState, FromLpValue, HwEndpointSpec,
     MapSlot, SlotAccess, SlotData, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
 };
 
@@ -205,7 +205,7 @@ impl ControlRadioNode {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ControlRadioRuntimeConfig {
-    endpoint: HardwareEndpointSpec,
+    endpoint: HwEndpointSpec,
     channel: RadioChannelId,
     repeat_count: u32,
     wifi_channel: Option<u8>,
@@ -213,7 +213,7 @@ struct ControlRadioRuntimeConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct OpenedRadio {
-    endpoint: HardwareEndpointSpec,
+    endpoint: HwEndpointSpec,
     channel: RadioChannelId,
     wifi_channel: Option<u8>,
 }

@@ -1,22 +1,22 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::{HardwareAddress, HardwareCapability};
+use crate::{HwAddress, HwCapability};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HardwareResource {
-    address: HardwareAddress,
-    capabilities: Vec<HardwareCapability>,
+pub struct HwResource {
+    address: HwAddress,
+    capabilities: Vec<HwCapability>,
     display_label: String,
     aliases: Vec<String>,
     location: Option<String>,
     reserved_reason: Option<String>,
 }
 
-impl HardwareResource {
+impl HwResource {
     pub fn new(
-        address: HardwareAddress,
-        capabilities: impl Into<Vec<HardwareCapability>>,
+        address: HwAddress,
+        capabilities: impl Into<Vec<HwCapability>>,
         display_label: impl Into<String>,
     ) -> Self {
         Self {
@@ -44,11 +44,11 @@ impl HardwareResource {
         self
     }
 
-    pub fn address(&self) -> &HardwareAddress {
+    pub fn address(&self) -> &HwAddress {
         &self.address
     }
 
-    pub fn capabilities(&self) -> &[HardwareCapability] {
+    pub fn capabilities(&self) -> &[HwCapability] {
         &self.capabilities
     }
 
@@ -68,7 +68,7 @@ impl HardwareResource {
         self.reserved_reason.as_deref()
     }
 
-    pub fn supports(&self, capability: HardwareCapability) -> bool {
+    pub fn supports(&self, capability: HwCapability) -> bool {
         self.capabilities.contains(&capability)
     }
 }

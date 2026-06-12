@@ -8,22 +8,22 @@ use alloc::vec::Vec;
 use crate::OutputError;
 
 use crate::{
-    HardwareAddress, HardwareCapability, HardwareClaim, HardwareDriver, HardwareEndpoint,
-    HardwareEndpointError, HardwareEndpointId, HardwareEndpointKind, HardwareEndpointSpec,
-    HardwareEndpointStatus, HardwareLease, HardwareRegistry, Ws281xConfig, Ws281xDriver,
+    HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
+    HardwareEndpointError, HwEndpointId, HwEndpointKind, HwEndpointSpec,
+    HwEndpointStatus, HardwareLease, HwRegistry, Ws281xConfig, Ws281xDriver,
     Ws281xOutput,
 };
 
 pub struct VirtualWs281xDriver {
-    registry: Rc<HardwareRegistry>,
+    registry: Rc<HwRegistry>,
     driver_id: String,
     display_label: String,
-    timing_address: HardwareAddress,
+    timing_address: HwAddress,
 }
 
 impl VirtualWs281xDriver {
-    pub fn new(registry: Rc<HardwareRegistry>, rmt_channel: u8) -> Self {
-        let timing_address = HardwareAddress::rmt_ws281x(rmt_channel);
+    pub fn new(registry: Rc<HwRegistry>, rmt_channel: u8) -> Self {
+        let timing_address = HwAddress::rmt_ws281x(rmt_channel);
         Self {
             registry,
             driver_id: format!("virtual-ws281x-rmt{rmt_channel}"),
@@ -32,34 +32,34 @@ impl VirtualWs281xDriver {
         }
     }
 
-    fn endpoint_id(&self, spec: &HardwareEndpointSpec) -> HardwareEndpointId {
-        HardwareEndpointId::for_driver_spec(self.driver_id(), spec)
+    fn endpoint_id(&self, spec: &HwEndpointSpec) -> HwEndpointId {
+        HwEndpointId::for_driver_spec(self.driver_id(), spec)
     }
 
-    fn endpoint_status(&self, gpio: &HardwareAddress) -> HardwareEndpointStatus {
+    fn endpoint_status(&self, gpio: &HwAddress) -> HwEndpointStatus {
         let gpio_status = self.registry.endpoint_status_for(gpio);
         if !gpio_status.is_available() {
             return gpio_status;
         }
 
         match self.registry.endpoint_status_for(&self.timing_address) {
-            HardwareEndpointStatus::Available => HardwareEndpointStatus::Available,
-            HardwareEndpointStatus::Reserved { reason } => HardwareEndpointStatus::Unavailable {
+            HwEndpointStatus::Available => HwEndpointStatus::Available,
+            HwEndpointStatus::Reserved { reason } => HwEndpointStatus::Unavailable {
                 reason: format!("WS281x timing resource is reserved: {reason}"),
             },
-            HardwareEndpointStatus::InUse { claimant } => HardwareEndpointStatus::Unavailable {
+            HwEndpointStatus::InUse { claimant } => HwEndpointStatus::Unavailable {
                 reason: format!("WS281x timing resource is in use by {claimant}"),
             },
-            HardwareEndpointStatus::Unavailable { reason } => {
-                HardwareEndpointStatus::Unavailable { reason }
+            HwEndpointStatus::Unavailable { reason } => {
+                HwEndpointStatus::Unavailable { reason }
             }
         }
     }
 
     fn gpio_for_endpoint(
         &self,
-        endpoint_id: &HardwareEndpointId,
-    ) -> Result<HardwareAddress, HardwareEndpointError> {
+        endpoint_id: &HwEndpointId,
+    ) -> Result<HwAddress, HardwareEndpointError> {
         for endpoint in self.endpoints() {
             if endpoint.id() == endpoint_id {
                 return Ok(endpoint.address().clone());
@@ -67,13 +67,13 @@ impl VirtualWs281xDriver {
         }
 
         Err(HardwareEndpointError::UnknownEndpoint {
-            kind: HardwareEndpointKind::Ws281x,
+            kind: HwEndpointKind::Ws281x,
             endpoint_id: endpoint_id.clone(),
         })
     }
 }
 
-impl HardwareDriver for VirtualWs281xDriver {
+impl HwDriver for VirtualWs281xDriver {
     fn driver_id(&self) -> &str {
         &self.driver_id
     }
@@ -84,30 +84,30 @@ impl HardwareDriver for VirtualWs281xDriver {
 }
 
 impl Ws281xDriver for VirtualWs281xDriver {
-    fn endpoints(&self) -> Vec<HardwareEndpoint> {
+    fn endpoints(&self) -> Vec<HwEndpoint> {
         let mut endpoints = Vec::new();
         let timing_supported = self
             .registry
-            .ensure_capability(&self.timing_address, HardwareCapability::Rmt)
+            .ensure_capability(&self.timing_address, HwCapability::Rmt)
             .is_ok()
             && self
                 .registry
-                .ensure_capability(&self.timing_address, HardwareCapability::Ws281xOutput)
+                .ensure_capability(&self.timing_address, HwCapability::Ws281xOutput)
                 .is_ok();
         if !timing_supported {
             return endpoints;
         }
 
         for resource in self.registry.manifest().resources() {
-            if !resource.supports(HardwareCapability::GpioOutput) {
+            if !resource.supports(HwCapability::GpioOutput) {
                 continue;
             }
             let address = resource.address().clone();
             let spec = ws281x_rmt_spec(resource.display_label());
-            endpoints.push(HardwareEndpoint::new(
+            endpoints.push(HwEndpoint::new(
                 self.endpoint_id(&spec),
                 spec,
-                HardwareEndpointKind::Ws281x,
+                HwEndpointKind::Ws281x,
                 self.driver_id(),
                 address,
                 resource.display_label(),
@@ -119,18 +119,18 @@ impl Ws281xDriver for VirtualWs281xDriver {
 
     fn open(
         &self,
-        endpoint_id: &HardwareEndpointId,
+        endpoint_id: &HwEndpointId,
         config: Ws281xConfig,
     ) -> Result<Box<dyn Ws281xOutput>, HardwareEndpointError> {
         validate_ws281x_byte_count(config.byte_count())?;
         let gpio = self.gpio_for_endpoint(endpoint_id)?;
         self.registry
-            .ensure_capability(&gpio, HardwareCapability::GpioOutput)?;
+            .ensure_capability(&gpio, HwCapability::GpioOutput)?;
         self.registry
-            .ensure_capability(&self.timing_address, HardwareCapability::Rmt)?;
+            .ensure_capability(&self.timing_address, HwCapability::Rmt)?;
         self.registry
-            .ensure_capability(&self.timing_address, HardwareCapability::Ws281xOutput)?;
-        let lease = self.registry.claim_bundle(HardwareClaim::new(
+            .ensure_capability(&self.timing_address, HwCapability::Ws281xOutput)?;
+        let lease = self.registry.claim_bundle(HwClaim::new(
             self.driver_id(),
             vec![gpio, self.timing_address.clone()],
         ))?;
@@ -143,14 +143,14 @@ impl Ws281xDriver for VirtualWs281xDriver {
 }
 
 pub struct VirtualWs281xOutput {
-    registry: Rc<HardwareRegistry>,
+    registry: Rc<HwRegistry>,
     lease: Option<HardwareLease>,
     byte_count: u32,
     data: Vec<u16>,
 }
 
 impl VirtualWs281xOutput {
-    fn new(registry: Rc<HardwareRegistry>, lease: HardwareLease, byte_count: u32) -> Self {
+    fn new(registry: Rc<HwRegistry>, lease: HardwareLease, byte_count: u32) -> Self {
         let data_len = u16_len_for_byte_count(byte_count);
         Self {
             registry,
@@ -226,7 +226,7 @@ fn endpoint_error_to_output_error(error: HardwareEndpointError) -> OutputError {
     }
 }
 
-fn ws281x_rmt_spec(config: &str) -> HardwareEndpointSpec {
-    HardwareEndpointSpec::parse(format!("ws281x:rmt:{config}"))
+fn ws281x_rmt_spec(config: &str) -> HwEndpointSpec {
+    HwEndpointSpec::parse(format!("ws281x:rmt:{config}"))
         .expect("manifest display label should form a valid endpoint spec")
 }

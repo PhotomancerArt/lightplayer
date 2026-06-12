@@ -16,9 +16,9 @@ use esp_radio::esp_now::{
 };
 use esp_radio::wifi::{ControllerConfig, WifiController};
 use lpc_hardware::{
-    HardwareAddress, HardwareCapability, HardwareClaim, HardwareDriver, HardwareEndpoint,
-    HardwareEndpointError, HardwareEndpointId, HardwareEndpointKind, HardwareEndpointSpec,
-    HardwareEndpointStatus, HardwareLease, HardwareRegistry, RADIO_MAX_PACKET_LEN, RadioChannelId,
+    HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
+    HardwareEndpointError, HwEndpointId, HwEndpointKind, HwEndpointSpec,
+    HwEndpointStatus, HardwareLease, HwRegistry, RADIO_MAX_PACKET_LEN, RadioChannelId,
     RadioConfig, RadioDevice, RadioDeviceId, RadioDrainReport, RadioDriver, RadioEventId,
     RadioMessage, RadioMessageKind,
 };
@@ -31,23 +31,23 @@ const RADIO_QUEUE_CAPACITY: usize = 16;
 const SEEN_RING_LEN: usize = 32;
 
 pub struct Esp32EspNowRadioDriver {
-    registry: Rc<HardwareRegistry>,
+    registry: Rc<HwRegistry>,
     controller: &'static WifiController<'static>,
-    address: HardwareAddress,
+    address: HwAddress,
     device_id: RadioDeviceId,
     default_channel: u8,
 }
 
 impl Esp32EspNowRadioDriver {
     pub fn new(
-        registry: Rc<HardwareRegistry>,
+        registry: Rc<HwRegistry>,
         wifi: WIFI<'static>,
     ) -> Result<Self, HardwareEndpointError> {
         Self::with_channel(registry, wifi, DEFAULT_ESPNOW_CHANNEL)
     }
 
     pub fn with_channel(
-        registry: Rc<HardwareRegistry>,
+        registry: Rc<HwRegistry>,
         wifi: WIFI<'static>,
         default_channel: u8,
     ) -> Result<Self, HardwareEndpointError> {
@@ -63,7 +63,7 @@ impl Esp32EspNowRadioDriver {
         Ok(Self {
             registry,
             controller,
-            address: HardwareAddress::radio(0),
+            address: HwAddress::radio(0),
             device_id: station_device_id(),
             default_channel,
         })
@@ -77,16 +77,16 @@ impl Esp32EspNowRadioDriver {
         self.default_channel
     }
 
-    fn endpoint_id(&self) -> HardwareEndpointId {
-        HardwareEndpointId::for_driver_spec(self.driver_id(), &endpoint_spec())
+    fn endpoint_id(&self) -> HwEndpointId {
+        HwEndpointId::for_driver_spec(self.driver_id(), &endpoint_spec())
     }
 
-    fn endpoint_status(&self) -> HardwareEndpointStatus {
+    fn endpoint_status(&self) -> HwEndpointStatus {
         self.registry.endpoint_status_for(&self.address)
     }
 }
 
-impl HardwareDriver for Esp32EspNowRadioDriver {
+impl HwDriver for Esp32EspNowRadioDriver {
     fn driver_id(&self) -> &str {
         DRIVER_ID
     }
@@ -97,18 +97,18 @@ impl HardwareDriver for Esp32EspNowRadioDriver {
 }
 
 impl RadioDriver for Esp32EspNowRadioDriver {
-    fn endpoints(&self) -> Vec<HardwareEndpoint> {
+    fn endpoints(&self) -> Vec<HwEndpoint> {
         let Some(resource) = self.registry.manifest().resource(&self.address) else {
             return Vec::new();
         };
-        if !resource.supports(HardwareCapability::Radio) {
+        if !resource.supports(HwCapability::Radio) {
             return Vec::new();
         }
 
-        vec![HardwareEndpoint::new(
+        vec![HwEndpoint::new(
             self.endpoint_id(),
             endpoint_spec(),
-            HardwareEndpointKind::Radio,
+            HwEndpointKind::Radio,
             self.driver_id(),
             self.address.clone(),
             resource.display_label(),
@@ -118,12 +118,12 @@ impl RadioDriver for Esp32EspNowRadioDriver {
 
     fn open(
         &self,
-        endpoint_id: &HardwareEndpointId,
+        endpoint_id: &HwEndpointId,
         config: RadioConfig,
     ) -> Result<Box<dyn RadioDevice>, HardwareEndpointError> {
         if endpoint_id != &self.endpoint_id() {
             return Err(HardwareEndpointError::UnknownEndpoint {
-                kind: HardwareEndpointKind::Radio,
+                kind: HwEndpointKind::Radio,
                 endpoint_id: endpoint_id.clone(),
             });
         }
@@ -133,7 +133,7 @@ impl RadioDriver for Esp32EspNowRadioDriver {
 
         let endpoint = self.endpoints().into_iter().next().ok_or_else(|| {
             HardwareEndpointError::UnknownEndpoint {
-                kind: HardwareEndpointKind::Radio,
+                kind: HwEndpointKind::Radio,
                 endpoint_id: endpoint_id.clone(),
             }
         })?;
@@ -149,8 +149,8 @@ impl RadioDriver for Esp32EspNowRadioDriver {
         }
 
         self.registry
-            .ensure_capability(&self.address, HardwareCapability::Radio)?;
-        let lease = self.registry.claim_bundle(HardwareClaim::new(
+            .ensure_capability(&self.address, HwCapability::Radio)?;
+        let lease = self.registry.claim_bundle(HwClaim::new(
             self.driver_id(),
             vec![self.address.clone()],
         ))?;
@@ -182,7 +182,7 @@ impl RadioDriver for Esp32EspNowRadioDriver {
 }
 
 struct Esp32EspNowRadioDevice {
-    registry: Rc<HardwareRegistry>,
+    registry: Rc<HwRegistry>,
     lease: Option<HardwareLease>,
     _manager: EspNowManager<'static>,
     sender: EspNowSender<'static>,
@@ -196,7 +196,7 @@ struct Esp32EspNowRadioDevice {
 
 impl Esp32EspNowRadioDevice {
     fn new(
-        registry: Rc<HardwareRegistry>,
+        registry: Rc<HwRegistry>,
         lease: HardwareLease,
         manager: EspNowManager<'static>,
         sender: EspNowSender<'static>,
@@ -426,8 +426,8 @@ fn station_device_id() -> RadioDeviceId {
     RadioDeviceId::new(u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]))
 }
 
-fn endpoint_spec() -> HardwareEndpointSpec {
-    HardwareEndpointSpec::from_static(ENDPOINT_SPEC)
+fn endpoint_spec() -> HwEndpointSpec {
+    HwEndpointSpec::from_static(ENDPOINT_SPEC)
 }
 
 fn validate_channel(channel: u8) -> Result<(), HardwareEndpointError> {

@@ -1,4 +1,4 @@
-use lpc_hardware::HardwareEndpointSpec;
+use lpc_hardware::HwEndpointSpec;
 use lpc_hardware::{DisplayPipelineOptions, OutputError};
 
 /// Options for output driver (DisplayPipeline). Alias for DisplayPipelineOptions.
@@ -48,7 +48,7 @@ pub trait OutputProvider {
     /// - Hardware initialization failed
     fn open(
         &self,
-        endpoint: &HardwareEndpointSpec,
+        endpoint: &HwEndpointSpec,
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,

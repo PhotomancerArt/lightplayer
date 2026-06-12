@@ -1,4 +1,4 @@
-use crate::{BindingDefs, ControlMessage, HardwareEndpointSpec, MapSlot, Slotted, ValueSlot};
+use crate::{BindingDefs, ControlMessage, HwEndpointSpec, MapSlot, Slotted, ValueSlot};
 
 pub const DEFAULT_CONTROL_RADIO_ENDPOINT_SPEC: &str = "radio:espnow:0";
 pub const DEFAULT_CONTROL_RADIO_CHANNEL: u32 = 1;
@@ -12,7 +12,7 @@ pub struct ControlRadioDef {
     pub bindings: BindingDefs,
 
     /// Hardware endpoint spec, for example `radio:espnow:0`.
-    pub endpoint: ValueSlot<HardwareEndpointSpec>,
+    pub endpoint: ValueSlot<HwEndpointSpec>,
 
     /// Logical LightPlayer radio channel.
     pub channel: ValueSlot<u32>,
@@ -52,7 +52,7 @@ impl ControlRadioDef {
         crate::NodeKind::ControlRadio
     }
 
-    pub fn endpoint(&self) -> &HardwareEndpointSpec {
+    pub fn endpoint(&self) -> &HwEndpointSpec {
         self.endpoint.value()
     }
 }
@@ -66,8 +66,8 @@ pub struct ControlRadioState {
     pub output: MapSlot<u32, ControlMessage>,
 }
 
-fn default_endpoint() -> ValueSlot<HardwareEndpointSpec> {
-    ValueSlot::new(HardwareEndpointSpec::from_static(
+fn default_endpoint() -> ValueSlot<HwEndpointSpec> {
+    ValueSlot::new(HwEndpointSpec::from_static(
         DEFAULT_CONTROL_RADIO_ENDPOINT_SPEC,
     ))
 }

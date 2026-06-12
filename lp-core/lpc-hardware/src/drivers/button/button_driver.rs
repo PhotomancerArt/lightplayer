@@ -1,8 +1,8 @@
 use alloc::boxed::Box;
 
 use crate::{
-    ButtonDebouncer, ButtonEvent, HardwareAddress, HardwareDriver, HardwareEndpoint,
-    HardwareEndpointError, HardwareEndpointId,
+    ButtonDebouncer, ButtonEvent, HwAddress, HwDriver, HwEndpoint,
+    HardwareEndpointError, HwEndpointId,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,17 +27,17 @@ impl Default for ButtonConfig {
 }
 
 pub trait ButtonInput {
-    fn source(&self) -> &HardwareAddress;
+    fn source(&self) -> &HwAddress;
 
     fn poll(&mut self, now_ms: u64) -> Option<ButtonEvent>;
 }
 
-pub trait ButtonDriver: HardwareDriver {
-    fn endpoints(&self) -> alloc::vec::Vec<HardwareEndpoint>;
+pub trait ButtonDriver: HwDriver {
+    fn endpoints(&self) -> alloc::vec::Vec<HwEndpoint>;
 
     fn open(
         &self,
-        endpoint_id: &HardwareEndpointId,
+        endpoint_id: &HwEndpointId,
         config: ButtonConfig,
     ) -> Result<Box<dyn ButtonInput>, HardwareEndpointError>;
 }

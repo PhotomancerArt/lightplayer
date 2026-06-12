@@ -2,13 +2,13 @@ use alloc::format;
 use alloc::string::String;
 use core::fmt;
 
-use crate::HardwareError;
+use crate::HwError;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct HardwareAddress(String);
+pub struct HwAddress(String);
 
-impl HardwareAddress {
-    pub fn new(path: impl Into<String>) -> Result<Self, HardwareError> {
+impl HwAddress {
+    pub fn new(path: impl Into<String>) -> Result<Self, HwError> {
         let path = path.into();
         validate_path(&path)?;
         Ok(Self(path))
@@ -31,20 +31,20 @@ impl HardwareAddress {
     }
 }
 
-impl fmt::Display for HardwareAddress {
+impl fmt::Display for HwAddress {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-fn validate_path(path: &str) -> Result<(), HardwareError> {
+fn validate_path(path: &str) -> Result<(), HwError> {
     if !path.starts_with('/') || path.len() <= 1 {
-        return Err(HardwareError::InvalidAddress {
+        return Err(HwError::InvalidAddress {
             address: path.into(),
         });
     }
     if path.as_bytes().windows(2).any(|w| w == b"//") {
-        return Err(HardwareError::InvalidAddress {
+        return Err(HwError::InvalidAddress {
             address: path.into(),
         });
     }
@@ -57,18 +57,18 @@ mod tests {
 
     #[test]
     fn normalizes_gpio_address() {
-        assert_eq!(HardwareAddress::gpio(18).as_str(), "/gpio/18");
+        assert_eq!(HwAddress::gpio(18).as_str(), "/gpio/18");
     }
 
     #[test]
     fn normalizes_radio_address() {
-        assert_eq!(HardwareAddress::radio(0).as_str(), "/radio/0");
+        assert_eq!(HwAddress::radio(0).as_str(), "/radio/0");
     }
 
     #[test]
     fn rejects_invalid_address() {
-        assert!(HardwareAddress::new("gpio/18").is_err());
-        assert!(HardwareAddress::new("/").is_err());
-        assert!(HardwareAddress::new("/gpio//18").is_err());
+        assert!(HwAddress::new("gpio/18").is_err());
+        assert!(HwAddress::new("/").is_err());
+        assert!(HwAddress::new("/gpio//18").is_err());
     }
 }

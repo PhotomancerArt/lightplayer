@@ -10,7 +10,7 @@ use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, ArtifactSpec, AsLpPath, AssetSlot, BindingDef, BindingDefs, BindingRef,
     BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode, FixtureSamplingConfig,
-    HardwareEndpointSpec, MapSlot, NodeDef, NodeInvocation, NodeInvocationSlot, OptionSlot,
+    HwEndpointSpec, MapSlot, NodeDef, NodeInvocation, NodeInvocationSlot, OptionSlot,
     ProjectDef, Ratio, RatioSlot, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry,
     ValueSlot,
 };
@@ -57,7 +57,7 @@ pub struct ShaderBuilder {
 
 /// Builder for output nodes
 pub struct OutputBuilder {
-    endpoint: HardwareEndpointSpec,
+    endpoint: HwEndpointSpec,
     options: OutputDriverOptionsConfig,
 }
 
@@ -299,14 +299,14 @@ impl ShaderBuilder {
 
 impl OutputBuilder {
     /// Set the hardware endpoint spec.
-    pub fn endpoint(mut self, endpoint: HardwareEndpointSpec) -> Self {
+    pub fn endpoint(mut self, endpoint: HwEndpointSpec) -> Self {
         self.endpoint = endpoint;
         self
     }
 
     /// Set the hardware endpoint spec from text.
     pub fn endpoint_str(mut self, endpoint: &str) -> Self {
-        self.endpoint = HardwareEndpointSpec::parse(endpoint).expect("valid output endpoint spec");
+        self.endpoint = HwEndpointSpec::parse(endpoint).expect("valid output endpoint spec");
         self
     }
 

@@ -1,7 +1,7 @@
 use alloc::string::String;
 use core::fmt;
 
-use crate::HardwareError;
+use crate::HwError;
 
 /// Output provider error type.
 #[derive(Debug, Clone)]
@@ -9,7 +9,7 @@ pub enum OutputError {
     /// Pin is already open.
     PinAlreadyOpen { pin: u32 },
     /// Hardware resource claim failed.
-    Hardware { error: HardwareError },
+    Hardware { error: HwError },
     /// Invalid handle.
     InvalidHandle { handle: i32 },
     /// Invalid configuration.

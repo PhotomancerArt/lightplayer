@@ -1,4 +1,4 @@
-use crate::{BindingDefs, ControlMessage, HardwareEndpointSpec, MapSlot, Slotted, ValueSlot};
+use crate::{BindingDefs, ControlMessage, HwEndpointSpec, MapSlot, Slotted, ValueSlot};
 
 pub const DEFAULT_BUTTON_ENDPOINT_SPEC: &str = "button:gpio:D9";
 
@@ -13,7 +13,7 @@ pub struct ButtonDef {
     pub bindings: BindingDefs,
 
     /// Hardware endpoint spec, for example `button:gpio:D9`.
-    pub endpoint: ValueSlot<HardwareEndpointSpec>,
+    pub endpoint: ValueSlot<HwEndpointSpec>,
 
     /// Stable message id used as the key and payload id for this button.
     pub id: ValueSlot<u32>,
@@ -40,7 +40,7 @@ impl ButtonDef {
         crate::NodeKind::Button
     }
 
-    pub fn endpoint(&self) -> &HardwareEndpointSpec {
+    pub fn endpoint(&self) -> &HwEndpointSpec {
         self.endpoint.value()
     }
 }
@@ -66,8 +66,8 @@ fn default_id() -> ValueSlot<u32> {
     ValueSlot::new(1)
 }
 
-fn default_endpoint() -> ValueSlot<HardwareEndpointSpec> {
-    ValueSlot::new(HardwareEndpointSpec::from_static(
+fn default_endpoint() -> ValueSlot<HwEndpointSpec> {
+    ValueSlot::new(HwEndpointSpec::from_static(
         DEFAULT_BUTTON_ENDPOINT_SPEC,
     ))
 }

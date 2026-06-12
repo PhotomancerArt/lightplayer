@@ -1,4 +1,4 @@
-use crate::HardwareAddress;
+use crate::HwAddress;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ButtonEventKind {
@@ -8,13 +8,13 @@ pub enum ButtonEventKind {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ButtonEvent {
-    source: HardwareAddress,
+    source: HwAddress,
     sequence: u32,
     kind: ButtonEventKind,
 }
 
 impl ButtonEvent {
-    pub fn new(source: HardwareAddress, sequence: u32, kind: ButtonEventKind) -> Self {
+    pub fn new(source: HwAddress, sequence: u32, kind: ButtonEventKind) -> Self {
         Self {
             source,
             sequence,
@@ -22,7 +22,7 @@ impl ButtonEvent {
         }
     }
 
-    pub fn source(&self) -> &HardwareAddress {
+    pub fn source(&self) -> &HwAddress {
         &self.source
     }
 

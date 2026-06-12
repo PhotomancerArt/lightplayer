@@ -1,10 +1,10 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::{HardwareAddress, HardwareCapability, HardwareResource, HardwareTarget};
+use crate::{HwAddress, HwCapability, HwResource, HardwareTarget};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HardwareManifest {
+pub struct HwManifest {
     board_id: String,
     board_name: String,
     target: Option<HardwareTarget>,
@@ -12,14 +12,14 @@ pub struct HardwareManifest {
     product: Option<String>,
     description: Option<String>,
     url: Option<String>,
-    resources: Vec<HardwareResource>,
+    resources: Vec<HwResource>,
 }
 
-impl HardwareManifest {
+impl HwManifest {
     pub fn new(
         board_id: impl Into<String>,
         board_name: impl Into<String>,
-        resources: impl Into<Vec<HardwareResource>>,
+        resources: impl Into<Vec<HwResource>>,
     ) -> Self {
         Self {
             board_id: board_id.into(),
@@ -41,23 +41,23 @@ impl HardwareManifest {
             } else {
                 alloc::format!("GPIO{pin}")
             };
-            resources.push(HardwareResource::new(
-                HardwareAddress::gpio(pin),
+            resources.push(HwResource::new(
+                HwAddress::gpio(pin),
                 [
-                    HardwareCapability::GpioOutput,
-                    HardwareCapability::GpioInput,
+                    HwCapability::GpioOutput,
+                    HwCapability::GpioInput,
                 ],
                 display_label,
             ));
         }
-        resources.push(HardwareResource::new(
-            HardwareAddress::rmt_ws281x(0),
-            [HardwareCapability::Rmt, HardwareCapability::Ws281xOutput],
+        resources.push(HwResource::new(
+            HwAddress::rmt_ws281x(0),
+            [HwCapability::Rmt, HwCapability::Ws281xOutput],
             "RMT WS281x 0",
         ));
-        resources.push(HardwareResource::new(
-            HardwareAddress::radio(0),
-            [HardwareCapability::Radio],
+        resources.push(HwResource::new(
+            HwAddress::radio(0),
+            [HwCapability::Radio],
             "Virtual Radio 0",
         ));
         Self::new("virtual-single-rmt", "Virtual Single-RMT Board", resources)
@@ -93,7 +93,7 @@ impl HardwareManifest {
         self.url.as_deref()
     }
 
-    pub fn resources(&self) -> &[HardwareResource] {
+    pub fn resources(&self) -> &[HwResource] {
         &self.resources
     }
 
@@ -122,13 +122,13 @@ impl HardwareManifest {
         self
     }
 
-    pub fn resource(&self, address: &HardwareAddress) -> Option<&HardwareResource> {
+    pub fn resource(&self, address: &HwAddress) -> Option<&HwResource> {
         self.resources
             .iter()
             .find(|resource| resource.address() == address)
     }
 
-    pub fn with_reserved(mut self, address: HardwareAddress, reason: impl Into<String>) -> Self {
+    pub fn with_reserved(mut self, address: HwAddress, reason: impl Into<String>) -> Self {
         let reason = reason.into();
         if let Some(resource) = self
             .resources
@@ -147,23 +147,23 @@ mod tests {
 
     #[test]
     fn finds_resource_by_internal_address_not_label() {
-        let manifest = HardwareManifest::new(
+        let manifest = HwManifest::new(
             "board",
             "Board",
-            [HardwareResource::new(
-                HardwareAddress::gpio(18),
-                [HardwareCapability::GpioOutput],
+            [HwResource::new(
+                HwAddress::gpio(18),
+                [HwCapability::GpioOutput],
                 "D6",
             )],
         );
 
-        let resource = manifest.resource(&HardwareAddress::gpio(18)).unwrap();
+        let resource = manifest.resource(&HwAddress::gpio(18)).unwrap();
         assert_eq!(resource.display_label(), "D6");
     }
 
     #[test]
     fn stores_optional_board_metadata() {
-        let manifest = HardwareManifest::new("board", "Board", [])
+        let manifest = HwManifest::new("board", "Board", [])
             .with_target(HardwareTarget::Esp32c6)
             .with_vendor("vendor")
             .with_product("product")

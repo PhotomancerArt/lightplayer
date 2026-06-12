@@ -7,7 +7,7 @@ extern crate alloc;
 use alloc::rc::Rc;
 use embassy_time::{Duration, Instant, Timer};
 use lpc_hardware::{
-    ButtonConfig, ButtonDriver, HardwareRegistry, default_esp32c6_hardware_manifest,
+    ButtonConfig, ButtonDriver, HwRegistry, default_esp32c6_hardware_manifest,
 };
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
@@ -21,7 +21,7 @@ pub async fn run_button_test(_: embassy_executor::Spawner) -> ! {
     start_runtime(timg0, sw_int);
     drop(gpio18);
 
-    let hardware_registry = Rc::new(HardwareRegistry::new(default_esp32c6_hardware_manifest()));
+    let hardware_registry = Rc::new(HwRegistry::new(default_esp32c6_hardware_manifest()));
     let button_driver = Esp32Gpio20ButtonDriver::new(hardware_registry, gpio20);
     let button_endpoint = button_driver
         .endpoints()

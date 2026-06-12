@@ -2,7 +2,7 @@ use alloc::boxed::Box;
 use alloc::vec::Vec;
 
 use crate::{
-    HardwareDriver, HardwareEndpoint, HardwareEndpointError, HardwareEndpointId, RadioChannelId,
+    HwDriver, HwEndpoint, HardwareEndpointError, HwEndpointId, RadioChannelId,
     RadioDrainReport, RadioMessage, RadioMessageKind,
 };
 
@@ -47,12 +47,12 @@ pub trait RadioDevice {
     ) -> Result<RadioDrainReport, HardwareEndpointError>;
 }
 
-pub trait RadioDriver: HardwareDriver {
-    fn endpoints(&self) -> Vec<HardwareEndpoint>;
+pub trait RadioDriver: HwDriver {
+    fn endpoints(&self) -> Vec<HwEndpoint>;
 
     fn open(
         &self,
-        endpoint_id: &HardwareEndpointId,
+        endpoint_id: &HwEndpointId,
         config: RadioConfig,
     ) -> Result<Box<dyn RadioDevice>, HardwareEndpointError>;
 }

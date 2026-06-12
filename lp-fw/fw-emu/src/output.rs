@@ -14,7 +14,7 @@ use core::cell::RefCell;
 use lp_riscv_emu_guest::println;
 use lpc_hardware::OutputError;
 use lpc_hardware::{
-    HardwareEndpointError, HardwareEndpointSpec, HardwareRegistry, HardwareSystem, Ws281xConfig,
+    HardwareEndpointError, HwEndpointSpec, HwRegistry, HardwareSystem, Ws281xConfig,
     Ws281xOutput,
 };
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
@@ -34,7 +34,7 @@ impl SyscallOutputProvider {
         dead_code,
         reason = "kept for tests and older callers that construct only a registry"
     )]
-    pub fn new_with_hardware_registry(hardware_registry: Rc<HardwareRegistry>) -> Self {
+    pub fn new_with_hardware_registry(hardware_registry: Rc<HwRegistry>) -> Self {
         Self::new_with_hardware_system(Rc::new(HardwareSystem::with_virtual_drivers(
             hardware_registry,
         )))
@@ -52,7 +52,7 @@ impl SyscallOutputProvider {
 impl OutputProvider for SyscallOutputProvider {
     fn open(
         &self,
-        endpoint: &HardwareEndpointSpec,
+        endpoint: &HwEndpointSpec,
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,
@@ -110,7 +110,7 @@ impl OutputProvider for SyscallOutputProvider {
 impl SyscallOutputProvider {
     fn open_ws281x_output(
         &self,
-        endpoint: &HardwareEndpointSpec,
+        endpoint: &HwEndpointSpec,
         byte_count: u32,
         options: Option<OutputDriverOptions>,
     ) -> Result<Box<dyn Ws281xOutput>, OutputError> {

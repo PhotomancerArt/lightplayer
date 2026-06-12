@@ -1,38 +1,38 @@
 use alloc::string::String;
 use core::fmt;
 
-use crate::{HardwareAddress, HardwareCapability, HardwareLeaseId};
+use crate::{HwAddress, HwCapability, HwLeaseId};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HardwareError {
+pub enum HwError {
     InvalidAddress {
         address: String,
     },
     UnknownResource {
-        address: HardwareAddress,
+        address: HwAddress,
     },
     ReservedResource {
-        address: HardwareAddress,
+        address: HwAddress,
         reason: String,
     },
     UnsupportedCapability {
-        address: HardwareAddress,
-        capability: HardwareCapability,
+        address: HwAddress,
+        capability: HwCapability,
     },
     ResourceAlreadyClaimed {
-        address: HardwareAddress,
+        address: HwAddress,
         claimant: String,
     },
     DuplicateAddressInClaim {
-        address: HardwareAddress,
+        address: HwAddress,
     },
     EmptyClaim,
     UnknownLease {
-        lease_id: HardwareLeaseId,
+        lease_id: HwLeaseId,
     },
 }
 
-impl fmt::Display for HardwareError {
+impl fmt::Display for HwError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidAddress { address } => {

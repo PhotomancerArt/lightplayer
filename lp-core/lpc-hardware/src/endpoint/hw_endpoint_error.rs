@@ -1,23 +1,23 @@
 use alloc::string::String;
 use core::fmt;
 
-use crate::{HardwareEndpointId, HardwareEndpointKind, HardwareError};
+use crate::{HwEndpointId, HwEndpointKind, HwError};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HardwareEndpointError {
     UnknownEndpoint {
-        kind: HardwareEndpointKind,
-        endpoint_id: HardwareEndpointId,
+        kind: HwEndpointKind,
+        endpoint_id: HwEndpointId,
     },
     EndpointUnavailable {
-        endpoint_id: HardwareEndpointId,
+        endpoint_id: HwEndpointId,
         reason: String,
     },
     UnsupportedConfig {
         reason: String,
     },
     Hardware {
-        error: HardwareError,
+        error: HwError,
     },
     Other {
         message: String,
@@ -48,8 +48,8 @@ impl fmt::Display for HardwareEndpointError {
     }
 }
 
-impl From<HardwareError> for HardwareEndpointError {
-    fn from(error: HardwareError) -> Self {
+impl From<HwError> for HardwareEndpointError {
+    fn from(error: HwError) -> Self {
         Self::Hardware { error }
     }
 }

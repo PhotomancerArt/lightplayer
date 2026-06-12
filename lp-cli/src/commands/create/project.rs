@@ -12,7 +12,7 @@ use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, AsLpPath, AssetSlot, BindingDef, BindingDefs, BindingRef, BusSlotRef,
-    Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode, FixtureSamplingConfig, HardwareEndpointSpec,
+    Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode, FixtureSamplingConfig, HwEndpointSpec,
     MapSlot, NodeDef, OptionSlot, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry,
     ValueSlot,
 };
@@ -164,7 +164,7 @@ vec4 render(vec2 pos) {
 
     // Create output node
     let output_config = OutputDef {
-        endpoint: ValueSlot::new(HardwareEndpointSpec::from_static("ws281x:rmt:D10")),
+        endpoint: ValueSlot::new(HwEndpointSpec::from_static("ws281x:rmt:D10")),
         bindings: bus_input_binding_defs("control.out"),
         options: OptionSlot::none(),
     };

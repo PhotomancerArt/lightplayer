@@ -1,16 +1,16 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::HardwareAddress;
+use crate::HwAddress;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HardwareClaim {
+pub struct HwClaim {
     claimant: String,
-    addresses: Vec<HardwareAddress>,
+    addresses: Vec<HwAddress>,
 }
 
-impl HardwareClaim {
-    pub fn new(claimant: impl Into<String>, addresses: impl Into<Vec<HardwareAddress>>) -> Self {
+impl HwClaim {
+    pub fn new(claimant: impl Into<String>, addresses: impl Into<Vec<HwAddress>>) -> Self {
         Self {
             claimant: claimant.into(),
             addresses: addresses.into(),
@@ -21,7 +21,7 @@ impl HardwareClaim {
         &self.claimant
     }
 
-    pub fn addresses(&self) -> &[HardwareAddress] {
+    pub fn addresses(&self) -> &[HwAddress] {
         &self.addresses
     }
 }

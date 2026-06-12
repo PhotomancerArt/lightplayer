@@ -1,14 +1,14 @@
 use alloc::string::String;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum HardwareEndpointStatus {
+pub enum HwEndpointStatus {
     Available,
     InUse { claimant: String },
     Unavailable { reason: String },
     Reserved { reason: String },
 }
 
-impl HardwareEndpointStatus {
+impl HwEndpointStatus {
     pub fn is_available(&self) -> bool {
         matches!(self, Self::Available)
     }

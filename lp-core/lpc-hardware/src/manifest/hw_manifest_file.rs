@@ -6,7 +6,7 @@ use core::fmt;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    HardwareAddress, HardwareCapability, HardwareError, HardwareManifest, HardwareResource,
+    HwAddress, HwCapability, HwError, HwManifest, HwResource,
     HardwareTarget,
 };
 
@@ -101,7 +101,7 @@ impl HardwareManifestFile {
 
         let mut seen = BTreeSet::new();
         for resource in self.gpio.iter().chain(self.resource.iter()) {
-            let address = HardwareAddress::new(resource.address.clone())?;
+            let address = HwAddress::new(resource.address.clone())?;
             if !seen.insert(address.clone()) {
                 return Err(HardwareManifestFileError::Invalid {
                     message: alloc::format!("duplicate resource address: {address}"),
@@ -111,10 +111,10 @@ impl HardwareManifestFile {
         Ok(())
     }
 
-    pub fn to_manifest(&self) -> Result<HardwareManifest, HardwareManifestFileError> {
+    pub fn to_manifest(&self) -> Result<HwManifest, HardwareManifestFileError> {
         self.validate()?;
         let resources = self.resources()?;
-        let mut manifest = HardwareManifest::new(self.id.clone(), self.product.clone(), resources)
+        let mut manifest = HwManifest::new(self.id.clone(), self.product.clone(), resources)
             .with_target(self.target)
             .with_vendor(self.vendor.clone())
             .with_product(self.product.clone());
@@ -127,7 +127,7 @@ impl HardwareManifestFile {
         Ok(manifest)
     }
 
-    fn resources(&self) -> Result<Vec<HardwareResource>, HardwareManifestFileError> {
+    fn resources(&self) -> Result<Vec<HwResource>, HardwareManifestFileError> {
         self.gpio
             .iter()
             .chain(self.resource.iter())
@@ -172,7 +172,7 @@ pub enum HardwareBoardLabelStatus {
 pub struct HardwareResourceFile {
     pub address: String,
     pub display_label: String,
-    pub capabilities: Vec<HardwareCapability>,
+    pub capabilities: Vec<HwCapability>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub aliases: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -185,7 +185,7 @@ impl HardwareResourceFile {
     pub fn new(
         address: impl Into<String>,
         display_label: impl Into<String>,
-        capabilities: impl Into<Vec<HardwareCapability>>,
+        capabilities: impl Into<Vec<HwCapability>>,
     ) -> Self {
         Self {
             address: address.into(),
@@ -197,7 +197,7 @@ impl HardwareResourceFile {
         }
     }
 
-    fn to_resource(&self) -> Result<HardwareResource, HardwareManifestFileError> {
+    fn to_resource(&self) -> Result<HwResource, HardwareManifestFileError> {
         if self.display_label.trim().is_empty() {
             return Err(HardwareManifestFileError::Invalid {
                 message: alloc::format!("{} display_label must not be empty", self.address),
@@ -208,8 +208,8 @@ impl HardwareResourceFile {
                 message: alloc::format!("{} must have at least one capability", self.address),
             });
         }
-        let mut resource = HardwareResource::new(
-            HardwareAddress::new(self.address.clone())?,
+        let mut resource = HwResource::new(
+            HwAddress::new(self.address.clone())?,
             self.capabilities.clone(),
             self.display_label.clone(),
         )
@@ -229,7 +229,7 @@ pub enum HardwareManifestFileError {
     Parse { message: String },
     Serialize { message: String },
     Invalid { message: String },
-    Hardware(HardwareError),
+    Hardware(HwError),
 }
 
 impl fmt::Display for HardwareManifestFileError {
@@ -243,8 +243,8 @@ impl fmt::Display for HardwareManifestFileError {
     }
 }
 
-impl From<HardwareError> for HardwareManifestFileError {
-    fn from(error: HardwareError) -> Self {
+impl From<HwError> for HardwareManifestFileError {
+    fn from(error: HwError) -> Self {
         Self::Hardware(error)
     }
 }
@@ -279,7 +279,7 @@ aliases = ["GPIO18", "IO18"]
         assert_eq!(runtime.target(), Some(HardwareTarget::Esp32c6));
         assert_eq!(runtime.vendor(), Some("seeed"));
         assert_eq!(runtime.product(), Some("XIAO ESP32-C6"));
-        assert!(runtime.resource(&HardwareAddress::gpio(18)).is_some());
+        assert!(runtime.resource(&HwAddress::gpio(18)).is_some());
     }
 
     #[test]
@@ -293,8 +293,8 @@ aliases = ["GPIO18", "IO18"]
             url: None,
             board_label: Vec::new(),
             gpio: alloc::vec![
-                HardwareResourceFile::new("/gpio/1", "GPIO1", [HardwareCapability::GpioOutput]),
-                HardwareResourceFile::new("/gpio/1", "GPIO1", [HardwareCapability::GpioInput]),
+                HardwareResourceFile::new("/gpio/1", "GPIO1", [HwCapability::GpioOutput]),
+                HardwareResourceFile::new("/gpio/1", "GPIO1", [HwCapability::GpioInput]),
             ],
             resource: Vec::new(),
         };

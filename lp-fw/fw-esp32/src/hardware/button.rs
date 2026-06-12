@@ -9,22 +9,22 @@ use core::cell::RefCell;
 
 use esp_hal::gpio::{Input, InputConfig, Pull};
 use lpc_hardware::{
-    ButtonConfig, ButtonDebouncer, ButtonDriver, ButtonEvent, ButtonInput, HardwareAddress,
-    HardwareCapability, HardwareClaim, HardwareDriver, HardwareEndpoint, HardwareEndpointError,
-    HardwareEndpointId, HardwareEndpointKind, HardwareError, HardwareLease, HardwareRegistry,
+    ButtonConfig, ButtonDebouncer, ButtonDriver, ButtonEvent, ButtonInput, HwAddress,
+    HwCapability, HwClaim, HwDriver, HwEndpoint, HardwareEndpointError,
+    HwEndpointId, HwEndpointKind, HwError, HardwareLease, HwRegistry,
 };
-use lpc_model::HardwareEndpointSpec;
+use lpc_model::HwEndpointSpec;
 
 const DRIVER_ID: &str = "esp32-gpio-button";
 const GPIO20_SPEC: &str = "button:gpio:D9";
 
 pub struct Esp32Gpio20ButtonDriver {
-    registry: Rc<HardwareRegistry>,
+    registry: Rc<HwRegistry>,
     input: Rc<RefCell<Option<Input<'static>>>>,
 }
 
 impl Esp32Gpio20ButtonDriver {
-    pub fn new(registry: Rc<HardwareRegistry>, pin: esp_hal::peripherals::GPIO20<'static>) -> Self {
+    pub fn new(registry: Rc<HwRegistry>, pin: esp_hal::peripherals::GPIO20<'static>) -> Self {
         Self {
             registry,
             input: Rc::new(RefCell::new(Some(Input::new(
@@ -34,16 +34,16 @@ impl Esp32Gpio20ButtonDriver {
         }
     }
 
-    fn source() -> HardwareAddress {
-        HardwareAddress::gpio(20)
+    fn source() -> HwAddress {
+        HwAddress::gpio(20)
     }
 
-    fn endpoint_id() -> HardwareEndpointId {
-        HardwareEndpointId::for_driver_address(DRIVER_ID, &Self::source())
+    fn endpoint_id() -> HwEndpointId {
+        HwEndpointId::for_driver_address(DRIVER_ID, &Self::source())
     }
 }
 
-impl HardwareDriver for Esp32Gpio20ButtonDriver {
+impl HwDriver for Esp32Gpio20ButtonDriver {
     fn driver_id(&self) -> &str {
         DRIVER_ID
     }
@@ -54,12 +54,12 @@ impl HardwareDriver for Esp32Gpio20ButtonDriver {
 }
 
 impl ButtonDriver for Esp32Gpio20ButtonDriver {
-    fn endpoints(&self) -> Vec<HardwareEndpoint> {
+    fn endpoints(&self) -> Vec<HwEndpoint> {
         let source = Self::source();
-        vec![HardwareEndpoint::new(
+        vec![HwEndpoint::new(
             Self::endpoint_id(),
-            HardwareEndpointSpec::from_static(GPIO20_SPEC),
-            HardwareEndpointKind::Button,
+            HwEndpointSpec::from_static(GPIO20_SPEC),
+            HwEndpointKind::Button,
             DRIVER_ID,
             source.clone(),
             "D9",
@@ -69,22 +69,22 @@ impl ButtonDriver for Esp32Gpio20ButtonDriver {
 
     fn open(
         &self,
-        endpoint_id: &HardwareEndpointId,
+        endpoint_id: &HwEndpointId,
         config: ButtonConfig,
     ) -> Result<Box<dyn ButtonInput>, HardwareEndpointError> {
         if endpoint_id != &Self::endpoint_id() {
             return Err(HardwareEndpointError::UnknownEndpoint {
-                kind: HardwareEndpointKind::Button,
+                kind: HwEndpointKind::Button,
                 endpoint_id: endpoint_id.clone(),
             });
         }
 
         let source = Self::source();
         self.registry
-            .ensure_capability(&source, HardwareCapability::GpioInput)?;
+            .ensure_capability(&source, HwCapability::GpioInput)?;
         let lease = self
             .registry
-            .claim_bundle(HardwareClaim::new(DRIVER_ID, vec![source.clone()]))?;
+            .claim_bundle(HwClaim::new(DRIVER_ID, vec![source.clone()]))?;
 
         let Some(input) = self.input.borrow_mut().take() else {
             self.registry.release(&lease)?;
@@ -106,8 +106,8 @@ impl ButtonDriver for Esp32Gpio20ButtonDriver {
 }
 
 pub struct Esp32ButtonInput {
-    registry: Rc<HardwareRegistry>,
-    source: HardwareAddress,
+    registry: Rc<HwRegistry>,
+    source: HwAddress,
     input_home: Rc<RefCell<Option<Input<'static>>>>,
     lease: Option<HardwareLease>,
     input: Option<Input<'static>>,
@@ -116,9 +116,9 @@ pub struct Esp32ButtonInput {
 
 impl Esp32ButtonInput {
     fn new_gpio20(
-        registry: Rc<HardwareRegistry>,
+        registry: Rc<HwRegistry>,
         input_home: Rc<RefCell<Option<Input<'static>>>>,
-        source: HardwareAddress,
+        source: HwAddress,
         lease: HardwareLease,
         input: Input<'static>,
         config: ButtonConfig,
@@ -133,7 +133,7 @@ impl Esp32ButtonInput {
         }
     }
 
-    pub fn close(&mut self) -> Result<(), HardwareError> {
+    pub fn close(&mut self) -> Result<(), HwError> {
         let release_result = if let Some(lease) = self.lease.take() {
             self.registry.release(&lease)
         } else {
@@ -147,7 +147,7 @@ impl Esp32ButtonInput {
 }
 
 impl ButtonInput for Esp32ButtonInput {
-    fn source(&self) -> &HardwareAddress {
+    fn source(&self) -> &HwAddress {
         &self.source
     }
 

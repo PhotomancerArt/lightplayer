@@ -1,12 +1,12 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use crate::HardwareAddress;
+use crate::HwAddress;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct HardwareLeaseId(u64);
+pub struct HwLeaseId(u64);
 
-impl HardwareLeaseId {
+impl HwLeaseId {
     pub fn new(id: u64) -> Self {
         Self(id)
     }
@@ -18,16 +18,16 @@ impl HardwareLeaseId {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HardwareLease {
-    id: HardwareLeaseId,
+    id: HwLeaseId,
     claimant: String,
-    addresses: Vec<HardwareAddress>,
+    addresses: Vec<HwAddress>,
 }
 
 impl HardwareLease {
     pub fn new(
-        id: HardwareLeaseId,
+        id: HwLeaseId,
         claimant: impl Into<String>,
-        addresses: impl Into<Vec<HardwareAddress>>,
+        addresses: impl Into<Vec<HwAddress>>,
     ) -> Self {
         Self {
             id,
@@ -36,7 +36,7 @@ impl HardwareLease {
         }
     }
 
-    pub fn id(&self) -> HardwareLeaseId {
+    pub fn id(&self) -> HwLeaseId {
         self.id
     }
 
@@ -44,7 +44,7 @@ impl HardwareLease {
         &self.claimant
     }
 
-    pub fn addresses(&self) -> &[HardwareAddress] {
+    pub fn addresses(&self) -> &[HwAddress] {
         &self.addresses
     }
 }

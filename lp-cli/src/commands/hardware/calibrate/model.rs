@@ -244,7 +244,7 @@ fn clear_label_from_gpio_resources(
 }
 
 fn ensure_resource_alias(
-    resource: &mut lpc_hardware::manifest::hardware_manifest_file::HardwareResourceFile,
+    resource: &mut lpc_hardware::manifest::hw_manifest_file::HardwareResourceFile,
     alias: &str,
 ) {
     if !resource.aliases.iter().any(|existing| existing == alias) {

@@ -6,11 +6,10 @@ extern crate alloc;
 extern crate std;
 
 pub mod display_pipeline_options;
-pub mod driver;
 pub mod drivers;
 pub mod endpoint;
-pub mod hardware_error;
-pub mod hardware_system;
+pub mod hw_error;
+pub mod hw_system;
 pub mod manifest;
 pub mod output_error;
 pub mod registry;
@@ -19,7 +18,7 @@ pub mod resource;
 pub use display_pipeline_options::DisplayPipelineOptions;
 pub use output_error::OutputError;
 
-pub use driver::hardware_driver::HardwareDriver;
+pub use drivers::hw_driver::HwDriver;
 pub use drivers::button::button_debouncer::ButtonDebouncer;
 pub use drivers::button::button_driver::{ButtonConfig, ButtonDriver, ButtonInput};
 pub use drivers::button::button_event::{ButtonEvent, ButtonEventKind};
@@ -36,24 +35,24 @@ pub use drivers::radio::radio_message::{
 pub use drivers::radio::virtual_radio_driver::VirtualRadioDriver;
 pub use drivers::ws281x::virtual_ws281x_driver::{VirtualWs281xDriver, VirtualWs281xOutput};
 pub use drivers::ws281x::ws281x_driver::{Ws281xConfig, Ws281xDriver, Ws281xOutput};
-pub use endpoint::hardware_endpoint::HardwareEndpoint;
-pub use endpoint::hardware_endpoint_error::HardwareEndpointError;
-pub use endpoint::hardware_endpoint_id::HardwareEndpointId;
-pub use endpoint::hardware_endpoint_kind::HardwareEndpointKind;
-pub use endpoint::hardware_endpoint_status::HardwareEndpointStatus;
-pub use hardware_error::HardwareError;
-pub use hardware_system::HardwareSystem;
-pub use lpc_model::HardwareEndpointSpec;
+pub use endpoint::hw_endpoint::HwEndpoint;
+pub use endpoint::hw_endpoint_error::HardwareEndpointError;
+pub use endpoint::hw_endpoint_id::HwEndpointId;
+pub use endpoint::hw_endpoint_kind::HwEndpointKind;
+pub use endpoint::hw_endpoint_status::HwEndpointStatus;
+pub use hw_error::HwError;
+pub use hw_system::HardwareSystem;
+pub use lpc_model::HwEndpointSpec;
 pub use manifest::default_manifests::default_esp32c6_hardware_manifest;
-pub use manifest::hardware_manifest::HardwareManifest;
-pub use manifest::hardware_manifest_file::{
+pub use manifest::hw_manifest::HwManifest;
+pub use manifest::hw_manifest_file::{
     HardwareBoardLabelFile, HardwareBoardLabelStatus, HardwareManifestFile,
     HardwareManifestFileError,
 };
-pub use manifest::hardware_target::HardwareTarget;
-pub use registry::hardware_claim::HardwareClaim;
-pub use registry::hardware_lease::{HardwareLease, HardwareLeaseId};
-pub use registry::hardware_registry::HardwareRegistry;
-pub use resource::hardware_address::HardwareAddress;
-pub use resource::hardware_capability::HardwareCapability;
-pub use resource::hardware_resource::HardwareResource;
+pub use manifest::hw_target::HardwareTarget;
+pub use registry::hw_claim::HwClaim;
+pub use registry::hw_lease::{HardwareLease, HwLeaseId};
+pub use registry::hw_registry::HwRegistry;
+pub use resource::hw_address::HwAddress;
+pub use resource::hw_capability::HwCapability;
+pub use resource::hw_resource::HwResource;

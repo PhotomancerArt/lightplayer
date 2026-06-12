@@ -1626,7 +1626,7 @@ mod tests {
     use alloc::rc::Rc;
     use alloc::sync::Arc;
     use lpc_hardware::{
-        HardwareAddress, HardwareRegistry, HardwareSystem, VirtualButtonDriver, VirtualRadioDriver,
+        HwAddress, HwRegistry, HardwareSystem, VirtualButtonDriver, VirtualRadioDriver,
         default_esp32c6_hardware_manifest,
     };
     use lpc_model::{
@@ -2328,7 +2328,7 @@ order = "inner_first"
     #[test]
     fn playlist_entry_trigger_restarts_active_entry_and_returns_idle() {
         let fs = button_playlist_project_fs();
-        let registry = Rc::new(HardwareRegistry::new(default_esp32c6_hardware_manifest()));
+        let registry = Rc::new(HwRegistry::new(default_esp32c6_hardware_manifest()));
         let driver = VirtualButtonDriver::new(Rc::clone(&registry));
         let control = driver.clone();
         let mut hardware = HardwareSystem::new(registry);
@@ -2349,7 +2349,7 @@ order = "inner_first"
             -1.0
         );
 
-        control.set_pressed(HardwareAddress::gpio(20), true);
+        control.set_pressed(HwAddress::gpio(20), true);
         assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 1);
         assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 2);
         assert_eq!(resolve_playlist_f32(&mut rt, playlist, "entry_time"), 0.0);
@@ -2363,10 +2363,10 @@ order = "inner_first"
         assert!(resolve_playlist_f32(&mut rt, playlist, "entry_time") >= 1.0);
         assert!(resolve_playlist_f32(&mut rt, playlist, "entry_progress") >= 0.25);
 
-        control.set_pressed(HardwareAddress::gpio(20), false);
+        control.set_pressed(HwAddress::gpio(20), false);
         let _ = resolve_playlist_u32(&mut rt, playlist, "active_entry");
         let _ = resolve_playlist_u32(&mut rt, playlist, "active_entry");
-        control.set_pressed(HardwareAddress::gpio(20), true);
+        control.set_pressed(HwAddress::gpio(20), true);
         let _ = resolve_playlist_u32(&mut rt, playlist, "active_entry");
         let _ = resolve_playlist_u32(&mut rt, playlist, "active_entry");
         assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 2);
@@ -2773,7 +2773,7 @@ value = "f32"
     fn button_playlist_example_renders_idle_and_active_after_press() {
         let fs = examples_button_playlist_fs();
         let fs: &dyn LpFs = &fs;
-        let registry = Rc::new(HardwareRegistry::new(default_esp32c6_hardware_manifest()));
+        let registry = Rc::new(HwRegistry::new(default_esp32c6_hardware_manifest()));
         let driver = VirtualButtonDriver::new(Rc::clone(&registry));
         let control = driver.clone();
         let mut hardware = HardwareSystem::new(registry);
@@ -2806,7 +2806,7 @@ value = "f32"
         let idle = render_test_texture_bytes(&mut rt, idle_product);
         assert_nonzero_rgb(&idle, "idle playlist visual");
 
-        control.set_pressed(HardwareAddress::gpio(20), true);
+        control.set_pressed(HwAddress::gpio(20), true);
         tick_with_test_time(&mut rt, &time, 16, "press candidate");
         tick_with_test_time(&mut rt, &time, 30, "press stable");
         assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 2);
@@ -2824,10 +2824,10 @@ value = "f32"
         assert!(resolve_playlist_f32(&mut rt, playlist, "entry_time") >= 1.0);
         assert!(resolve_playlist_f32(&mut rt, playlist, "entry_progress") >= 0.25);
 
-        control.set_pressed(HardwareAddress::gpio(20), false);
+        control.set_pressed(HwAddress::gpio(20), false);
         tick_with_test_time(&mut rt, &time, 16, "release candidate");
         tick_with_test_time(&mut rt, &time, 30, "release stable");
-        control.set_pressed(HardwareAddress::gpio(20), true);
+        control.set_pressed(HwAddress::gpio(20), true);
         tick_with_test_time(&mut rt, &time, 16, "second press candidate");
         tick_with_test_time(&mut rt, &time, 30, "second press stable");
         assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 2);
@@ -2898,7 +2898,7 @@ value = "f32"
     fn button_sign_example_ticks_without_radio_trigger_cycle() {
         let fs = examples_button_sign_fs();
         let fs: &dyn LpFs = &fs;
-        let registry = Rc::new(HardwareRegistry::new(default_esp32c6_hardware_manifest()));
+        let registry = Rc::new(HwRegistry::new(default_esp32c6_hardware_manifest()));
         let hardware = Rc::new(HardwareSystem::with_virtual_drivers(registry));
         let button_service: Rc<dyn ButtonService> = hardware.clone();
         let radio_service: Rc<dyn RadioService> = hardware.clone();
@@ -2916,7 +2916,7 @@ value = "f32"
     fn fyeah_sign_example_ticks_without_radio_trigger_cycle() {
         let fs = examples_fyeah_sign_fs();
         let fs: &dyn LpFs = &fs;
-        let registry = Rc::new(HardwareRegistry::new(default_esp32c6_hardware_manifest()));
+        let registry = Rc::new(HwRegistry::new(default_esp32c6_hardware_manifest()));
         let hardware = Rc::new(HardwareSystem::with_virtual_drivers(registry));
         let button_service: Rc<dyn ButtonService> = hardware.clone();
         let radio_service: Rc<dyn RadioService> = hardware.clone();
@@ -2953,7 +2953,7 @@ stable_ms = 1
         )
         .expect("button");
 
-        let registry = Rc::new(HardwareRegistry::new(default_esp32c6_hardware_manifest()));
+        let registry = Rc::new(HwRegistry::new(default_esp32c6_hardware_manifest()));
         let driver = VirtualButtonDriver::new(Rc::clone(&registry));
         let control = driver.clone();
         let mut hardware = HardwareSystem::new(registry);
@@ -2970,7 +2970,7 @@ stable_ms = 1
             .lookup_sibling(root, NodeName::parse("button").unwrap())
             .expect("button node");
 
-        control.set_pressed(HardwareAddress::gpio(20), true);
+        control.set_pressed(HwAddress::gpio(20), true);
         let held = resolve_button_map(&mut rt, button, "held");
         assert!(!held.entries.contains_key(&SlotMapKey::U32(1)));
 
@@ -2978,7 +2978,7 @@ stable_ms = 1
         let held = resolve_button_map(&mut rt, button, "held");
         assert!(held.entries.contains_key(&SlotMapKey::U32(1)));
 
-        control.set_pressed(HardwareAddress::gpio(20), false);
+        control.set_pressed(HwAddress::gpio(20), false);
         rt.tick(1).expect("release candidate frame");
         assert!(
             resolve_button_map(&mut rt, button, "held")
@@ -3038,7 +3038,7 @@ target = "bus#trigger"
         )
         .expect("radio");
 
-        let registry = Rc::new(HardwareRegistry::new(default_esp32c6_hardware_manifest()));
+        let registry = Rc::new(HwRegistry::new(default_esp32c6_hardware_manifest()));
         let button_driver = VirtualButtonDriver::new(Rc::clone(&registry));
         let button_control = button_driver.clone();
         let radio_driver = VirtualRadioDriver::new(Rc::clone(&registry), 0);
@@ -3060,7 +3060,7 @@ target = "bus#trigger"
             .lookup_sibling(root, NodeName::parse("radio").unwrap())
             .expect("radio node");
 
-        button_control.set_pressed(HardwareAddress::gpio(20), true);
+        button_control.set_pressed(HwAddress::gpio(20), true);
         let first = resolve_node_map(&mut rt, radio, "output", "radio output");
         assert!(first.entries.is_empty());
 

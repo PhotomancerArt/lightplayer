@@ -1,29 +1,29 @@
 use alloc::string::String;
 
-use lpc_model::HardwareEndpointSpec;
+use lpc_model::HwEndpointSpec;
 
-use crate::{HardwareAddress, HardwareEndpointId, HardwareEndpointKind, HardwareEndpointStatus};
+use crate::{HwAddress, HwEndpointId, HwEndpointKind, HwEndpointStatus};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HardwareEndpoint {
-    id: HardwareEndpointId,
-    spec: HardwareEndpointSpec,
-    kind: HardwareEndpointKind,
+pub struct HwEndpoint {
+    id: HwEndpointId,
+    spec: HwEndpointSpec,
+    kind: HwEndpointKind,
     driver_id: String,
-    address: HardwareAddress,
+    address: HwAddress,
     display_label: String,
-    status: HardwareEndpointStatus,
+    status: HwEndpointStatus,
 }
 
-impl HardwareEndpoint {
+impl HwEndpoint {
     pub fn new(
-        id: HardwareEndpointId,
-        spec: HardwareEndpointSpec,
-        kind: HardwareEndpointKind,
+        id: HwEndpointId,
+        spec: HwEndpointSpec,
+        kind: HwEndpointKind,
         driver_id: impl Into<String>,
-        address: HardwareAddress,
+        address: HwAddress,
         display_label: impl Into<String>,
-        status: HardwareEndpointStatus,
+        status: HwEndpointStatus,
     ) -> Self {
         Self {
             id,
@@ -36,15 +36,15 @@ impl HardwareEndpoint {
         }
     }
 
-    pub fn id(&self) -> &HardwareEndpointId {
+    pub fn id(&self) -> &HwEndpointId {
         &self.id
     }
 
-    pub fn spec(&self) -> &HardwareEndpointSpec {
+    pub fn spec(&self) -> &HwEndpointSpec {
         &self.spec
     }
 
-    pub fn kind(&self) -> HardwareEndpointKind {
+    pub fn kind(&self) -> HwEndpointKind {
         self.kind
     }
 
@@ -52,7 +52,7 @@ impl HardwareEndpoint {
         &self.driver_id
     }
 
-    pub fn address(&self) -> &HardwareAddress {
+    pub fn address(&self) -> &HwAddress {
         &self.address
     }
 
@@ -60,7 +60,7 @@ impl HardwareEndpoint {
         &self.display_label
     }
 
-    pub fn status(&self) -> &HardwareEndpointStatus {
+    pub fn status(&self) -> &HwEndpointStatus {
         &self.status
     }
 

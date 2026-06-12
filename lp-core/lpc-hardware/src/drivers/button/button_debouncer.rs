@@ -1,8 +1,8 @@
-use crate::{ButtonEvent, ButtonEventKind, HardwareAddress};
+use crate::{ButtonEvent, ButtonEventKind, HwAddress};
 
 #[derive(Debug, Clone)]
 pub struct ButtonDebouncer {
-    source: HardwareAddress,
+    source: HwAddress,
     stable_state_pressed: bool,
     candidate_state_pressed: bool,
     candidate_since_ms: u64,
@@ -13,7 +13,7 @@ pub struct ButtonDebouncer {
 impl ButtonDebouncer {
     pub const DEFAULT_STABLE_MS: u64 = 30;
 
-    pub fn new(source: HardwareAddress, stable_ms: u64) -> Self {
+    pub fn new(source: HwAddress, stable_ms: u64) -> Self {
         Self {
             source,
             stable_state_pressed: false,
@@ -59,7 +59,7 @@ impl ButtonDebouncer {
 
 impl Default for ButtonDebouncer {
     fn default() -> Self {
-        Self::new(HardwareAddress::gpio(0), Self::DEFAULT_STABLE_MS)
+        Self::new(HwAddress::gpio(0), Self::DEFAULT_STABLE_MS)
     }
 }
 
@@ -69,13 +69,13 @@ mod tests {
 
     #[test]
     fn emits_after_pressed_state_is_stable() {
-        let mut debouncer = ButtonDebouncer::new(HardwareAddress::gpio(4), 30);
+        let mut debouncer = ButtonDebouncer::new(HwAddress::gpio(4), 30);
 
         assert_eq!(debouncer.sample(0, true), None);
         assert_eq!(debouncer.sample(20, true), None);
 
         let event = debouncer.sample(30, true).expect("pressed event");
-        assert_eq!(event.source(), &HardwareAddress::gpio(4));
+        assert_eq!(event.source(), &HwAddress::gpio(4));
         assert_eq!(event.sequence(), 1);
         assert_eq!(event.kind(), ButtonEventKind::Pressed);
         assert!(debouncer.stable_state_pressed());
@@ -83,7 +83,7 @@ mod tests {
 
     #[test]
     fn ignores_bounces_before_stable_interval() {
-        let mut debouncer = ButtonDebouncer::new(HardwareAddress::gpio(4), 30);
+        let mut debouncer = ButtonDebouncer::new(HwAddress::gpio(4), 30);
 
         assert_eq!(debouncer.sample(0, true), None);
         assert_eq!(debouncer.sample(10, false), None);
@@ -96,7 +96,7 @@ mod tests {
 
     #[test]
     fn emits_release_after_pressed() {
-        let mut debouncer = ButtonDebouncer::new(HardwareAddress::gpio(4), 30);
+        let mut debouncer = ButtonDebouncer::new(HwAddress::gpio(4), 30);
 
         assert!(debouncer.sample(0, true).is_none());
         assert!(debouncer.sample(30, true).is_some());

@@ -7,9 +7,9 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use crate::{
-    HardwareAddress, HardwareCapability, HardwareClaim, HardwareDriver, HardwareEndpoint,
-    HardwareEndpointError, HardwareEndpointId, HardwareEndpointKind, HardwareEndpointSpec,
-    HardwareLease, HardwareRegistry, RadioChannelId, RadioConfig, RadioDevice, RadioDeviceId,
+    HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
+    HardwareEndpointError, HwEndpointId, HwEndpointKind, HwEndpointSpec,
+    HardwareLease, HwRegistry, RadioChannelId, RadioConfig, RadioDevice, RadioDeviceId,
     RadioDrainReport, RadioDriver, RadioEventId, RadioMessage, RadioMessageKind,
 };
 
@@ -18,28 +18,28 @@ const VIRTUAL_RADIO_QUEUE_CAPACITY: usize = 16;
 
 #[derive(Clone)]
 pub struct VirtualRadioDriver {
-    registry: Rc<HardwareRegistry>,
+    registry: Rc<HwRegistry>,
     driver_id: String,
-    address: HardwareAddress,
-    endpoint_spec: HardwareEndpointSpec,
+    address: HwAddress,
+    endpoint_spec: HwEndpointSpec,
     state: Rc<RefCell<VirtualRadioState>>,
 }
 
 impl VirtualRadioDriver {
-    pub fn new(registry: Rc<HardwareRegistry>, radio_index: u8) -> Self {
+    pub fn new(registry: Rc<HwRegistry>, radio_index: u8) -> Self {
         Self::new_with_spec(registry, radio_index, "radio:virtual:0")
     }
 
     pub fn new_with_spec(
-        registry: Rc<HardwareRegistry>,
+        registry: Rc<HwRegistry>,
         radio_index: u8,
         spec: &'static str,
     ) -> Self {
         Self {
             registry,
             driver_id: alloc::format!("virtual-radio-{radio_index}-{spec}"),
-            address: HardwareAddress::radio(radio_index),
-            endpoint_spec: HardwareEndpointSpec::from_static(spec),
+            address: HwAddress::radio(radio_index),
+            endpoint_spec: HwEndpointSpec::from_static(spec),
             state: Rc::new(RefCell::new(VirtualRadioState::default())),
         }
     }
@@ -52,12 +52,12 @@ impl VirtualRadioDriver {
         self.state.borrow_mut().sent.drain(..).collect()
     }
 
-    fn endpoint_id(&self) -> HardwareEndpointId {
-        HardwareEndpointId::for_driver_spec(self.driver_id(), &self.endpoint_spec)
+    fn endpoint_id(&self) -> HwEndpointId {
+        HwEndpointId::for_driver_spec(self.driver_id(), &self.endpoint_spec)
     }
 }
 
-impl HardwareDriver for VirtualRadioDriver {
+impl HwDriver for VirtualRadioDriver {
     fn driver_id(&self) -> &str {
         &self.driver_id
     }
@@ -68,18 +68,18 @@ impl HardwareDriver for VirtualRadioDriver {
 }
 
 impl RadioDriver for VirtualRadioDriver {
-    fn endpoints(&self) -> Vec<HardwareEndpoint> {
+    fn endpoints(&self) -> Vec<HwEndpoint> {
         let Some(resource) = self.registry.manifest().resource(&self.address) else {
             return Vec::new();
         };
-        if !resource.supports(HardwareCapability::Radio) {
+        if !resource.supports(HwCapability::Radio) {
             return Vec::new();
         }
 
-        vec![HardwareEndpoint::new(
+        vec![HwEndpoint::new(
             self.endpoint_id(),
             self.endpoint_spec.clone(),
-            HardwareEndpointKind::Radio,
+            HwEndpointKind::Radio,
             self.driver_id(),
             self.address.clone(),
             resource.display_label(),
@@ -89,21 +89,21 @@ impl RadioDriver for VirtualRadioDriver {
 
     fn open(
         &self,
-        endpoint_id: &HardwareEndpointId,
+        endpoint_id: &HwEndpointId,
         config: RadioConfig,
     ) -> Result<Box<dyn RadioDevice>, HardwareEndpointError> {
         let _ = config;
         let expected_id = self.endpoint_id();
         if endpoint_id != &expected_id {
             return Err(HardwareEndpointError::UnknownEndpoint {
-                kind: HardwareEndpointKind::Radio,
+                kind: HwEndpointKind::Radio,
                 endpoint_id: endpoint_id.clone(),
             });
         }
 
         let endpoint = self.endpoints().into_iter().next().ok_or_else(|| {
             HardwareEndpointError::UnknownEndpoint {
-                kind: HardwareEndpointKind::Radio,
+                kind: HwEndpointKind::Radio,
                 endpoint_id: endpoint_id.clone(),
             }
         })?;
@@ -119,8 +119,8 @@ impl RadioDriver for VirtualRadioDriver {
         }
 
         self.registry
-            .ensure_capability(&self.address, HardwareCapability::Radio)?;
-        let lease = self.registry.claim_bundle(HardwareClaim::new(
+            .ensure_capability(&self.address, HwCapability::Radio)?;
+        let lease = self.registry.claim_bundle(HwClaim::new(
             self.driver_id(),
             vec![self.address.clone()],
         ))?;
@@ -216,14 +216,14 @@ impl Default for VirtualRadioQueue {
 }
 
 struct VirtualRadioDevice {
-    registry: Rc<HardwareRegistry>,
+    registry: Rc<HwRegistry>,
     lease: Option<HardwareLease>,
     state: Rc<RefCell<VirtualRadioState>>,
 }
 
 impl VirtualRadioDevice {
     fn new(
-        registry: Rc<HardwareRegistry>,
+        registry: Rc<HwRegistry>,
         lease: HardwareLease,
         state: Rc<RefCell<VirtualRadioState>>,
     ) -> Self {
@@ -289,11 +289,11 @@ impl Drop for VirtualRadioDevice {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{HardwareManifest, HardwareResource};
+    use crate::{HwManifest, HwResource};
 
     #[test]
     fn virtual_radio_records_sent_messages() {
-        let registry = Rc::new(HardwareRegistry::new(test_manifest()));
+        let registry = Rc::new(HwRegistry::new(test_manifest()));
         let driver = VirtualRadioDriver::new(Rc::clone(&registry), 0);
         let mut radio = open_test_radio(&driver);
         let channel = RadioChannelId::new(7);
@@ -313,7 +313,7 @@ mod tests {
 
     #[test]
     fn virtual_radio_subscribes_and_drains_injected_messages() {
-        let registry = Rc::new(HardwareRegistry::new(test_manifest()));
+        let registry = Rc::new(HwRegistry::new(test_manifest()));
         let driver = VirtualRadioDriver::new(Rc::clone(&registry), 0);
         let mut radio = open_test_radio(&driver);
         let channel = RadioChannelId::new(3);
@@ -334,7 +334,7 @@ mod tests {
 
     #[test]
     fn virtual_radio_ignores_unsubscribed_channels() {
-        let registry = Rc::new(HardwareRegistry::new(test_manifest()));
+        let registry = Rc::new(HwRegistry::new(test_manifest()));
         let driver = VirtualRadioDriver::new(Rc::clone(&registry), 0);
         let mut radio = open_test_radio(&driver);
         let channel = RadioChannelId::new(3);
@@ -351,7 +351,7 @@ mod tests {
 
     #[test]
     fn virtual_radio_drops_unsubscribed_channel_queue() {
-        let registry = Rc::new(HardwareRegistry::new(test_manifest()));
+        let registry = Rc::new(HwRegistry::new(test_manifest()));
         let driver = VirtualRadioDriver::new(Rc::clone(&registry), 0);
         let mut radio = open_test_radio(&driver);
         let channel = RadioChannelId::new(3);
@@ -371,7 +371,7 @@ mod tests {
 
     #[test]
     fn virtual_radio_reports_overflow_when_queue_exceeds_capacity() {
-        let registry = Rc::new(HardwareRegistry::new(test_manifest()));
+        let registry = Rc::new(HwRegistry::new(test_manifest()));
         let driver = VirtualRadioDriver::new(Rc::clone(&registry), 0);
         let mut radio = open_test_radio(&driver);
         let channel = RadioChannelId::new(5);
@@ -394,7 +394,7 @@ mod tests {
 
     #[test]
     fn second_radio_open_contends_with_first() {
-        let registry = Rc::new(HardwareRegistry::new(test_manifest()));
+        let registry = Rc::new(HwRegistry::new(test_manifest()));
         let driver = VirtualRadioDriver::new(Rc::clone(&registry), 0);
         let first_radio = open_test_radio(&driver);
         let endpoint_id = driver.endpoint_id();
@@ -410,7 +410,7 @@ mod tests {
 
     #[test]
     fn dropping_radio_releases_endpoint() {
-        let registry = Rc::new(HardwareRegistry::new(test_manifest()));
+        let registry = Rc::new(HwRegistry::new(test_manifest()));
         let driver = VirtualRadioDriver::new(Rc::clone(&registry), 0);
         let radio = open_test_radio(&driver);
         drop(radio);
@@ -418,13 +418,13 @@ mod tests {
         let _ = open_test_radio(&driver);
     }
 
-    fn test_manifest() -> HardwareManifest {
-        HardwareManifest::new(
+    fn test_manifest() -> HwManifest {
+        HwManifest::new(
             "test",
             "Test Board",
-            [HardwareResource::new(
-                HardwareAddress::radio(0),
-                [HardwareCapability::Radio],
+            [HwResource::new(
+                HwAddress::radio(0),
+                [HwCapability::Radio],
                 "Radio 0",
             )],
         )

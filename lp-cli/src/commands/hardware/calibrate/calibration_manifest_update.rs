@@ -1,6 +1,6 @@
 use anyhow::Result;
-use lpc_hardware::manifest::hardware_manifest_file::HardwareResourceFile;
-use lpc_hardware::{HardwareCapability, HardwareManifestFile};
+use lpc_hardware::manifest::hw_manifest_file::HardwareResourceFile;
+use lpc_hardware::{HwCapability, HardwareManifestFile};
 
 const DANGEROUS_REASON: &str = "crashed or timed out during calibration";
 
@@ -87,8 +87,8 @@ fn find_or_insert_gpio<'a>(
         address,
         display_label: fallback_label.into(),
         capabilities: vec![
-            HardwareCapability::GpioOutput,
-            HardwareCapability::GpioInput,
+            HwCapability::GpioOutput,
+            HwCapability::GpioInput,
         ],
         aliases: vec![format!("GPIO{gpio}"), format!("IO{gpio}")],
         location: None,
@@ -119,8 +119,8 @@ mod tests {
             "/gpio/18",
             "GPIO18",
             [
-                HardwareCapability::GpioOutput,
-                HardwareCapability::GpioInput,
+                HwCapability::GpioOutput,
+                HwCapability::GpioInput,
             ],
         ));
 
@@ -152,16 +152,16 @@ mod tests {
             "/gpio/0",
             "D0",
             [
-                HardwareCapability::GpioOutput,
-                HardwareCapability::GpioInput,
+                HwCapability::GpioOutput,
+                HwCapability::GpioInput,
             ],
         ));
         manifest.gpio.push(HardwareResourceFile::new(
             "/gpio/1",
             "GPIO1",
             [
-                HardwareCapability::GpioOutput,
-                HardwareCapability::GpioInput,
+                HwCapability::GpioOutput,
+                HwCapability::GpioInput,
             ],
         ));
         apply_dangerous(&mut manifest, 2).unwrap();

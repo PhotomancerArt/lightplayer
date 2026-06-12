@@ -2,22 +2,22 @@ use alloc::format;
 use alloc::string::String;
 use core::fmt;
 
-use crate::HardwareAddress;
-use lpc_model::HardwareEndpointSpec;
+use crate::HwAddress;
+use lpc_model::HwEndpointSpec;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct HardwareEndpointId(String);
+pub struct HwEndpointId(String);
 
-impl HardwareEndpointId {
+impl HwEndpointId {
     pub fn new(id: impl Into<String>) -> Self {
         Self(id.into())
     }
 
-    pub fn for_driver_address(driver_id: &str, address: &HardwareAddress) -> Self {
+    pub fn for_driver_address(driver_id: &str, address: &HwAddress) -> Self {
         Self(format!("{driver_id}:{}", address.as_str()))
     }
 
-    pub fn for_driver_spec(driver_id: &str, spec: &HardwareEndpointSpec) -> Self {
+    pub fn for_driver_spec(driver_id: &str, spec: &HwEndpointSpec) -> Self {
         Self(format!("{driver_id}:{}", spec.as_str()))
     }
 
@@ -26,7 +26,7 @@ impl HardwareEndpointId {
     }
 }
 
-impl fmt::Display for HardwareEndpointId {
+impl fmt::Display for HwEndpointId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }

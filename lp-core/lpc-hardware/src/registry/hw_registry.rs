@@ -3,14 +3,14 @@ use alloc::string::{String, ToString};
 use core::cell::RefCell;
 
 use crate::{
-    HardwareAddress, HardwareCapability, HardwareClaim, HardwareEndpointStatus, HardwareError,
-    HardwareLease, HardwareLeaseId, HardwareManifest,
+    HwAddress, HwCapability, HwClaim, HwEndpointStatus, HwError,
+    HardwareLease, HwLeaseId, HwManifest,
 };
 
 #[derive(Debug)]
-pub struct HardwareRegistry {
-    manifest: HardwareManifest,
-    state: RefCell<HardwareRegistryState>,
+pub struct HwRegistry {
+    manifest: HwManifest,
+    state: RefCell<HwRegistryState>,
 }
 
 #[derive(Debug, Clone)]
@@ -19,17 +19,17 @@ struct ActiveClaim {
 }
 
 #[derive(Debug, Clone)]
-struct HardwareRegistryState {
+struct HwRegistryState {
     next_lease_id: u64,
-    active_by_address: BTreeMap<HardwareAddress, ActiveClaim>,
-    addresses_by_lease: BTreeMap<HardwareLeaseId, BTreeSet<HardwareAddress>>,
+    active_by_address: BTreeMap<HwAddress, ActiveClaim>,
+    addresses_by_lease: BTreeMap<HwLeaseId, BTreeSet<HwAddress>>,
 }
 
-impl HardwareRegistry {
-    pub fn new(manifest: HardwareManifest) -> Self {
+impl HwRegistry {
+    pub fn new(manifest: HwManifest) -> Self {
         Self {
             manifest,
-            state: RefCell::new(HardwareRegistryState {
+            state: RefCell::new(HwRegistryState {
                 next_lease_id: 1,
                 active_by_address: BTreeMap::new(),
                 addresses_by_lease: BTreeMap::new(),
@@ -37,15 +37,15 @@ impl HardwareRegistry {
         }
     }
 
-    pub fn manifest(&self) -> &HardwareManifest {
+    pub fn manifest(&self) -> &HwManifest {
         &self.manifest
     }
 
-    pub fn claim_bundle(&self, claim: HardwareClaim) -> Result<HardwareLease, HardwareError> {
+    pub fn claim_bundle(&self, claim: HwClaim) -> Result<HardwareLease, HwError> {
         self.validate_claim(&claim)?;
 
         let mut state = self.state.borrow_mut();
-        let lease_id = HardwareLeaseId::new(state.next_lease_id);
+        let lease_id = HwLeaseId::new(state.next_lease_id);
         state.next_lease_id += 1;
 
         let mut addresses = BTreeSet::new();
@@ -67,13 +67,13 @@ impl HardwareRegistry {
         ))
     }
 
-    pub fn release(&self, lease: &HardwareLease) -> Result<(), HardwareError> {
+    pub fn release(&self, lease: &HardwareLease) -> Result<(), HwError> {
         let mut state = self.state.borrow_mut();
         let addresses =
             state
                 .addresses_by_lease
                 .remove(&lease.id())
-                .ok_or(HardwareError::UnknownLease {
+                .ok_or(HwError::UnknownLease {
                     lease_id: lease.id(),
                 })?;
 
@@ -83,11 +83,11 @@ impl HardwareRegistry {
         Ok(())
     }
 
-    pub fn is_claimed(&self, address: &HardwareAddress) -> bool {
+    pub fn is_claimed(&self, address: &HwAddress) -> bool {
         self.state.borrow().active_by_address.contains_key(address)
     }
 
-    pub fn claimant_for(&self, address: &HardwareAddress) -> Option<String> {
+    pub fn claimant_for(&self, address: &HwAddress) -> Option<String> {
         self.state
             .borrow()
             .active_by_address
@@ -95,20 +95,20 @@ impl HardwareRegistry {
             .map(|claim| claim.claimant.clone())
     }
 
-    pub fn endpoint_status_for(&self, address: &HardwareAddress) -> HardwareEndpointStatus {
+    pub fn endpoint_status_for(&self, address: &HwAddress) -> HwEndpointStatus {
         match self.manifest.resource(address) {
             Some(resource) => {
                 if let Some(reason) = resource.reserved_reason() {
-                    HardwareEndpointStatus::Reserved {
+                    HwEndpointStatus::Reserved {
                         reason: reason.into(),
                     }
                 } else if let Some(claimant) = self.claimant_for(address) {
-                    HardwareEndpointStatus::InUse { claimant }
+                    HwEndpointStatus::InUse { claimant }
                 } else {
-                    HardwareEndpointStatus::Available
+                    HwEndpointStatus::Available
                 }
             }
-            None => HardwareEndpointStatus::Unavailable {
+            None => HwEndpointStatus::Unavailable {
                 reason: alloc::format!("unknown hardware resource: {address}"),
             },
         }
@@ -116,17 +116,17 @@ impl HardwareRegistry {
 
     pub fn ensure_capability(
         &self,
-        address: &HardwareAddress,
-        capability: HardwareCapability,
-    ) -> Result<(), HardwareError> {
+        address: &HwAddress,
+        capability: HwCapability,
+    ) -> Result<(), HwError> {
         let resource =
             self.manifest
                 .resource(address)
-                .ok_or_else(|| HardwareError::UnknownResource {
+                .ok_or_else(|| HwError::UnknownResource {
                     address: address.clone(),
                 })?;
         if !resource.supports(capability) {
-            return Err(HardwareError::UnsupportedCapability {
+            return Err(HwError::UnsupportedCapability {
                 address: address.clone(),
                 capability,
             });
@@ -134,16 +134,16 @@ impl HardwareRegistry {
         Ok(())
     }
 
-    fn validate_claim(&self, claim: &HardwareClaim) -> Result<(), HardwareError> {
+    fn validate_claim(&self, claim: &HwClaim) -> Result<(), HwError> {
         if claim.addresses().is_empty() {
-            return Err(HardwareError::EmptyClaim);
+            return Err(HwError::EmptyClaim);
         }
 
         let mut seen = BTreeSet::new();
         let state = self.state.borrow();
         for address in claim.addresses() {
             if !seen.insert(address.clone()) {
-                return Err(HardwareError::DuplicateAddressInClaim {
+                return Err(HwError::DuplicateAddressInClaim {
                     address: address.clone(),
                 });
             }
@@ -151,18 +151,18 @@ impl HardwareRegistry {
             let resource =
                 self.manifest
                     .resource(address)
-                    .ok_or_else(|| HardwareError::UnknownResource {
+                    .ok_or_else(|| HwError::UnknownResource {
                         address: address.clone(),
                     })?;
             if let Some(reason) = resource.reserved_reason() {
-                return Err(HardwareError::ReservedResource {
+                return Err(HwError::ReservedResource {
                     address: address.clone(),
                     reason: reason.into(),
                 });
             }
 
             if let Some(active) = state.active_by_address.get(address) {
-                return Err(HardwareError::ResourceAlreadyClaimed {
+                return Err(HwError::ResourceAlreadyClaimed {
                     address: address.clone(),
                     claimant: active.claimant.clone(),
                 });
@@ -175,49 +175,49 @@ impl HardwareRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::HardwareResource;
+    use crate::HwResource;
     use alloc::vec;
 
     #[test]
     fn claim_bundle_claims_and_releases_resources() {
         let registry = registry();
         let lease = registry
-            .claim_bundle(HardwareClaim::new(
+            .claim_bundle(HwClaim::new(
                 "output",
-                vec![HardwareAddress::gpio(18), HardwareAddress::rmt_ws281x(0)],
+                vec![HwAddress::gpio(18), HwAddress::rmt_ws281x(0)],
             ))
             .unwrap();
 
-        assert!(registry.is_claimed(&HardwareAddress::gpio(18)));
-        assert!(registry.is_claimed(&HardwareAddress::rmt_ws281x(0)));
+        assert!(registry.is_claimed(&HwAddress::gpio(18)));
+        assert!(registry.is_claimed(&HwAddress::rmt_ws281x(0)));
 
         registry.release(&lease).unwrap();
 
-        assert!(!registry.is_claimed(&HardwareAddress::gpio(18)));
-        assert!(!registry.is_claimed(&HardwareAddress::rmt_ws281x(0)));
+        assert!(!registry.is_claimed(&HwAddress::gpio(18)));
+        assert!(!registry.is_claimed(&HwAddress::rmt_ws281x(0)));
     }
 
     #[test]
     fn claim_bundle_is_atomic_when_later_resource_is_claimed() {
         let registry = registry();
         let rmt_lease = registry
-            .claim_bundle(HardwareClaim::new(
+            .claim_bundle(HwClaim::new(
                 "output-a",
-                vec![HardwareAddress::rmt_ws281x(0)],
+                vec![HwAddress::rmt_ws281x(0)],
             ))
             .unwrap();
 
-        let result = registry.claim_bundle(HardwareClaim::new(
+        let result = registry.claim_bundle(HwClaim::new(
             "output-b",
-            vec![HardwareAddress::gpio(18), HardwareAddress::rmt_ws281x(0)],
+            vec![HwAddress::gpio(18), HwAddress::rmt_ws281x(0)],
         ));
 
         assert!(matches!(
             result,
-            Err(HardwareError::ResourceAlreadyClaimed { .. })
+            Err(HwError::ResourceAlreadyClaimed { .. })
         ));
-        assert!(!registry.is_claimed(&HardwareAddress::gpio(18)));
-        assert!(registry.is_claimed(&HardwareAddress::rmt_ws281x(0)));
+        assert!(!registry.is_claimed(&HwAddress::gpio(18)));
+        assert!(registry.is_claimed(&HwAddress::rmt_ws281x(0)));
 
         registry.release(&rmt_lease).unwrap();
     }
@@ -225,39 +225,39 @@ mod tests {
     #[test]
     fn duplicate_address_in_claim_fails() {
         let registry = registry();
-        let result = registry.claim_bundle(HardwareClaim::new(
+        let result = registry.claim_bundle(HwClaim::new(
             "output",
-            vec![HardwareAddress::gpio(18), HardwareAddress::gpio(18)],
+            vec![HwAddress::gpio(18), HwAddress::gpio(18)],
         ));
 
         assert!(matches!(
             result,
-            Err(HardwareError::DuplicateAddressInClaim { .. })
+            Err(HwError::DuplicateAddressInClaim { .. })
         ));
     }
 
     #[test]
     fn reserved_resource_fails() {
-        let manifest = HardwareManifest::new(
+        let manifest = HwManifest::new(
             "board",
             "Board",
-            [HardwareResource::new(
-                HardwareAddress::gpio(12),
-                [HardwareCapability::GpioOutput],
+            [HwResource::new(
+                HwAddress::gpio(12),
+                [HwCapability::GpioOutput],
                 "GPIO12",
             )
             .reserved("crashes during GPIO scan")],
         );
-        let registry = HardwareRegistry::new(manifest);
+        let registry = HwRegistry::new(manifest);
 
-        let result = registry.claim_bundle(HardwareClaim::new(
+        let result = registry.claim_bundle(HwClaim::new(
             "output",
-            vec![HardwareAddress::gpio(12)],
+            vec![HwAddress::gpio(12)],
         ));
 
         assert!(matches!(
             result,
-            Err(HardwareError::ReservedResource { .. })
+            Err(HwError::ReservedResource { .. })
         ));
     }
 
@@ -266,30 +266,30 @@ mod tests {
         let registry = registry();
 
         let result =
-            registry.ensure_capability(&HardwareAddress::gpio(18), HardwareCapability::Radio);
+            registry.ensure_capability(&HwAddress::gpio(18), HwCapability::Radio);
 
         assert!(matches!(
             result,
-            Err(HardwareError::UnsupportedCapability { .. })
+            Err(HwError::UnsupportedCapability { .. })
         ));
     }
 
-    fn registry() -> HardwareRegistry {
-        HardwareRegistry::new(HardwareManifest::new(
+    fn registry() -> HwRegistry {
+        HwRegistry::new(HwManifest::new(
             "board",
             "Board",
             [
-                HardwareResource::new(
-                    HardwareAddress::gpio(18),
+                HwResource::new(
+                    HwAddress::gpio(18),
                     [
-                        HardwareCapability::GpioOutput,
-                        HardwareCapability::GpioInput,
+                        HwCapability::GpioOutput,
+                        HwCapability::GpioInput,
                     ],
                     "D6",
                 ),
-                HardwareResource::new(
-                    HardwareAddress::rmt_ws281x(0),
-                    [HardwareCapability::Rmt, HardwareCapability::Ws281xOutput],
+                HwResource::new(
+                    HwAddress::rmt_ws281x(0),
+                    [HwCapability::Rmt, HwCapability::Ws281xOutput],
                     "RMT0",
                 ),
             ],

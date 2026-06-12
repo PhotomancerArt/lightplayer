@@ -21,7 +21,7 @@ use crate::resource::RuntimeBufferId;
 use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
 use lpc_model::nodes::output::OutputDef;
 use lpc_model::{
-    Dim2u, HardwareEndpointSpec, Kind, LpValue, Revision, ShaderState, SlotAccess, SlotPath,
+    Dim2u, HwEndpointSpec, Kind, LpValue, Revision, ShaderState, SlotAccess, SlotPath,
     SlotShapeRegistry, SlotShapeRegistryError, ToLpValue, TreePath,
 };
 use lpc_registry::ProjectRegistry;
@@ -38,7 +38,7 @@ struct RcMemoryOutput(Rc<MemoryOutputProvider>);
 impl OutputProvider for RcMemoryOutput {
     fn open(
         &self,
-        endpoint: &HardwareEndpointSpec,
+        endpoint: &HwEndpointSpec,
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,
@@ -59,8 +59,8 @@ impl OutputProvider for RcMemoryOutput {
     }
 }
 
-fn endpoint(spec: &'static str) -> HardwareEndpointSpec {
-    HardwareEndpointSpec::from_static(spec)
+fn endpoint(spec: &'static str) -> HwEndpointSpec {
+    HwEndpointSpec::from_static(spec)
 }
 
 struct CountingGraphics {
@@ -279,7 +279,7 @@ fn attach_output_demand_root(
     spine: lpc_model::NodeInvocation,
     frame: Revision,
     name: &str,
-    endpoint: HardwareEndpointSpec,
+    endpoint: HwEndpointSpec,
 ) -> (lpc_model::NodeId, RuntimeBufferId) {
     let out_id = rt
         .tree_mut()
@@ -326,7 +326,7 @@ fn attach_idle_output_sink(
     spine: lpc_model::NodeInvocation,
     frame: Revision,
     name: &str,
-    endpoint: HardwareEndpointSpec,
+    endpoint: HwEndpointSpec,
 ) -> (lpc_model::NodeId, RuntimeBufferId) {
     let out_id = rt
         .tree_mut()

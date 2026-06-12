@@ -17,7 +17,7 @@ use esp_hal::gpio::interconnect::PeripheralOutput;
 use esp_hal::rmt::{ConfigError as RmtConfigError, Rmt};
 use lpc_hardware::OutputError;
 use lpc_hardware::{
-    HardwareEndpointError, HardwareEndpointSpec, HardwareSystem, Ws281xConfig, Ws281xOutput,
+    HardwareEndpointError, HwEndpointSpec, HardwareSystem, Ws281xConfig, Ws281xOutput,
 };
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 
@@ -58,7 +58,7 @@ impl Esp32OutputProvider {
 impl OutputProvider for Esp32OutputProvider {
     fn open(
         &self,
-        endpoint: &HardwareEndpointSpec,
+        endpoint: &HwEndpointSpec,
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,

@@ -15,7 +15,7 @@ use lpc_hardware::{
     ButtonConfig, ButtonInput, HardwareEndpointError, HardwareSystem, RadioConfig, RadioDevice,
 };
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
-use lpc_model::{HardwareEndpointSpec, Revision, TreePath};
+use lpc_model::{HwEndpointSpec, Revision, TreePath};
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::time::TimeProvider;
 
@@ -24,7 +24,7 @@ use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 /// Per-sink channel state for [`EngineServices`] output flushing.
 #[derive(Debug)]
 struct OutputSinkBinding {
-    endpoint: HardwareEndpointSpec,
+    endpoint: HwEndpointSpec,
     display_options: Option<OutputDriverOptions>,
     channel_handle: Option<OutputChannelHandle>,
     last_byte_count: Option<u32>,
@@ -67,7 +67,7 @@ pub struct EngineServices {
 pub trait ButtonService {
     fn open_button_by_spec(
         &self,
-        spec: &HardwareEndpointSpec,
+        spec: &HwEndpointSpec,
         config: ButtonConfig,
     ) -> Result<Box<dyn ButtonInput>, HardwareEndpointError>;
 }
@@ -75,7 +75,7 @@ pub trait ButtonService {
 impl ButtonService for HardwareSystem {
     fn open_button_by_spec(
         &self,
-        spec: &HardwareEndpointSpec,
+        spec: &HwEndpointSpec,
         config: ButtonConfig,
     ) -> Result<Box<dyn ButtonInput>, HardwareEndpointError> {
         HardwareSystem::open_button_by_spec(self, spec, config)
@@ -86,7 +86,7 @@ impl ButtonService for HardwareSystem {
 pub trait RadioService {
     fn open_radio_by_spec(
         &self,
-        spec: &HardwareEndpointSpec,
+        spec: &HwEndpointSpec,
         config: RadioConfig,
     ) -> Result<Box<dyn RadioDevice>, HardwareEndpointError>;
 }
@@ -94,7 +94,7 @@ pub trait RadioService {
 impl RadioService for HardwareSystem {
     fn open_radio_by_spec(
         &self,
-        spec: &HardwareEndpointSpec,
+        spec: &HwEndpointSpec,
         config: RadioConfig,
     ) -> Result<Box<dyn RadioDevice>, HardwareEndpointError> {
         HardwareSystem::open_radio_by_spec(self, spec, config)
@@ -250,7 +250,7 @@ impl Drop for EngineServices {
     }
 }
 
-fn endpoint_from_output_config(config: &OutputDef) -> HardwareEndpointSpec {
+fn endpoint_from_output_config(config: &OutputDef) -> HwEndpointSpec {
     config.endpoint().clone()
 }
 
@@ -370,7 +370,7 @@ mod tests {
 
     use lpc_hardware::OutputError;
     use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
-    use lpc_model::{HardwareEndpointSpec, OptionSlot, Revision, TreePath, WithRevision};
+    use lpc_model::{HwEndpointSpec, OptionSlot, Revision, TreePath, WithRevision};
     use lpc_shared::output::{
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
         OutputProvider,
@@ -528,8 +528,8 @@ mod tests {
         assert_ne!(provider.is_pin_open(18), provider.is_pin_open(19));
     }
 
-    fn endpoint(spec: &'static str) -> HardwareEndpointSpec {
-        HardwareEndpointSpec::from_static(spec)
+    fn endpoint(spec: &'static str) -> HwEndpointSpec {
+        HwEndpointSpec::from_static(spec)
     }
 
     fn output_buffer(store: &mut RuntimeBufferStore, revision: Revision) -> RuntimeBufferId {
@@ -544,7 +544,7 @@ mod tests {
     impl OutputProvider for SharedMemoryOutputProvider {
         fn open(
             &self,
-            endpoint: &HardwareEndpointSpec,
+            endpoint: &HwEndpointSpec,
             byte_count: u32,
             format: OutputFormat,
             options: Option<OutputDriverOptions>,

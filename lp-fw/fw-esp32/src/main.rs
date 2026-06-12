@@ -364,7 +364,7 @@ use {
     hardware::button::Esp32Gpio20ButtonDriver,
     hardware::manifest_loader::load_hardware_manifest,
     lpa_server::{ButtonService, Graphics, LpGraphics, LpServer},
-    lpc_hardware::{HardwareRegistry, HardwareSystem},
+    lpc_hardware::{HwRegistry, HardwareSystem},
     lpc_shared::output::OutputProvider,
     lpfs::LpFsMemory,
     output::{Esp32OutputProvider, Esp32RmtWs281xDriver},
@@ -594,7 +594,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         hardware_manifest.board_id(),
         hardware_manifest.board_name()
     );
-    let hardware_registry = Rc::new(HardwareRegistry::new(hardware_manifest));
+    let hardware_registry = Rc::new(HwRegistry::new(hardware_manifest));
     let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
     hardware_system.add_ws281x_driver(Box::new(Esp32RmtWs281xDriver::new(Rc::clone(
         &hardware_registry,

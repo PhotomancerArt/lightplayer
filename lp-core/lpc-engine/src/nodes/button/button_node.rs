@@ -6,7 +6,7 @@ use alloc::format;
 
 use lpc_hardware::{ButtonConfig, ButtonEventKind, ButtonInput};
 use lpc_model::{
-    ButtonDefView, ButtonState, ControlMessage, HardwareEndpointSpec, MapSlot, Revision,
+    ButtonDefView, ButtonState, ControlMessage, HwEndpointSpec, MapSlot, Revision,
     SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
 };
 
@@ -84,14 +84,14 @@ impl ButtonNode {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ButtonRuntimeConfig {
-    endpoint: HardwareEndpointSpec,
+    endpoint: HwEndpointSpec,
     id: u32,
     stable_ms: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct OpenedButton {
-    endpoint: HardwareEndpointSpec,
+    endpoint: HwEndpointSpec,
     stable_ms: u64,
 }
 

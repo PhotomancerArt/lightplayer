@@ -2,7 +2,7 @@ use alloc::boxed::Box;
 
 use crate::{DisplayPipelineOptions, OutputError};
 
-use crate::{HardwareDriver, HardwareEndpoint, HardwareEndpointError, HardwareEndpointId};
+use crate::{HwDriver, HwEndpoint, HardwareEndpointError, HwEndpointId};
 
 #[derive(Debug, Clone)]
 pub struct Ws281xConfig {
@@ -37,12 +37,12 @@ pub trait Ws281xOutput {
     fn resize(&mut self, config: Ws281xConfig) -> Result<(), OutputError>;
 }
 
-pub trait Ws281xDriver: HardwareDriver {
-    fn endpoints(&self) -> alloc::vec::Vec<HardwareEndpoint>;
+pub trait Ws281xDriver: HwDriver {
+    fn endpoints(&self) -> alloc::vec::Vec<HwEndpoint>;
 
     fn open(
         &self,
-        endpoint_id: &HardwareEndpointId,
+        endpoint_id: &HwEndpointId,
         config: Ws281xConfig,
     ) -> Result<Box<dyn Ws281xOutput>, HardwareEndpointError>;
 }

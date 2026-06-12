@@ -7,21 +7,21 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use crate::{
-    ButtonConfig, ButtonDebouncer, ButtonDriver, ButtonEvent, ButtonInput, HardwareAddress,
-    HardwareCapability, HardwareClaim, HardwareDriver, HardwareEndpoint, HardwareEndpointError,
-    HardwareEndpointId, HardwareEndpointKind, HardwareEndpointSpec, HardwareLease,
-    HardwareRegistry,
+    ButtonConfig, ButtonDebouncer, ButtonDriver, ButtonEvent, ButtonInput, HwAddress,
+    HwCapability, HwClaim, HwDriver, HwEndpoint, HardwareEndpointError,
+    HwEndpointId, HwEndpointKind, HwEndpointSpec, HardwareLease,
+    HwRegistry,
 };
 
 #[derive(Clone)]
 pub struct VirtualButtonDriver {
-    registry: Rc<HardwareRegistry>,
+    registry: Rc<HwRegistry>,
     driver_id: String,
-    pressed_by_address: Rc<RefCell<BTreeMap<HardwareAddress, bool>>>,
+    pressed_by_address: Rc<RefCell<BTreeMap<HwAddress, bool>>>,
 }
 
 impl VirtualButtonDriver {
-    pub fn new(registry: Rc<HardwareRegistry>) -> Self {
+    pub fn new(registry: Rc<HwRegistry>) -> Self {
         Self {
             registry,
             driver_id: String::from("virtual-button"),
@@ -29,20 +29,20 @@ impl VirtualButtonDriver {
         }
     }
 
-    pub fn set_pressed(&self, address: HardwareAddress, pressed: bool) {
+    pub fn set_pressed(&self, address: HwAddress, pressed: bool) {
         self.pressed_by_address
             .borrow_mut()
             .insert(address, pressed);
     }
 
-    fn endpoint_id(&self, address: &HardwareAddress) -> HardwareEndpointId {
-        HardwareEndpointId::for_driver_address(self.driver_id(), address)
+    fn endpoint_id(&self, address: &HwAddress) -> HwEndpointId {
+        HwEndpointId::for_driver_address(self.driver_id(), address)
     }
 
     fn gpio_for_endpoint(
         &self,
-        endpoint_id: &HardwareEndpointId,
-    ) -> Result<HardwareAddress, HardwareEndpointError> {
+        endpoint_id: &HwEndpointId,
+    ) -> Result<HwAddress, HardwareEndpointError> {
         for endpoint in self.endpoints() {
             if endpoint.id() == endpoint_id {
                 return Ok(endpoint.address().clone());
@@ -50,13 +50,13 @@ impl VirtualButtonDriver {
         }
 
         Err(HardwareEndpointError::UnknownEndpoint {
-            kind: HardwareEndpointKind::Button,
+            kind: HwEndpointKind::Button,
             endpoint_id: endpoint_id.clone(),
         })
     }
 }
 
-impl HardwareDriver for VirtualButtonDriver {
+impl HwDriver for VirtualButtonDriver {
     fn driver_id(&self) -> &str {
         &self.driver_id
     }
@@ -67,18 +67,18 @@ impl HardwareDriver for VirtualButtonDriver {
 }
 
 impl ButtonDriver for VirtualButtonDriver {
-    fn endpoints(&self) -> Vec<HardwareEndpoint> {
+    fn endpoints(&self) -> Vec<HwEndpoint> {
         let mut endpoints = Vec::new();
         for resource in self.registry.manifest().resources() {
-            if !resource.supports(HardwareCapability::GpioInput) {
+            if !resource.supports(HwCapability::GpioInput) {
                 continue;
             }
             let address = resource.address().clone();
             let spec = button_gpio_spec(resource.display_label());
-            endpoints.push(HardwareEndpoint::new(
+            endpoints.push(HwEndpoint::new(
                 self.endpoint_id(&address),
                 spec,
-                HardwareEndpointKind::Button,
+                HwEndpointKind::Button,
                 self.driver_id(),
                 address,
                 resource.display_label(),
@@ -90,15 +90,15 @@ impl ButtonDriver for VirtualButtonDriver {
 
     fn open(
         &self,
-        endpoint_id: &HardwareEndpointId,
+        endpoint_id: &HwEndpointId,
         config: ButtonConfig,
     ) -> Result<Box<dyn ButtonInput>, HardwareEndpointError> {
         let source = self.gpio_for_endpoint(endpoint_id)?;
         self.registry
-            .ensure_capability(&source, HardwareCapability::GpioInput)?;
+            .ensure_capability(&source, HwCapability::GpioInput)?;
         let lease = self
             .registry
-            .claim_bundle(HardwareClaim::new(self.driver_id(), vec![source.clone()]))?;
+            .claim_bundle(HwClaim::new(self.driver_id(), vec![source.clone()]))?;
         Ok(Box::new(VirtualButtonInput::new(
             Rc::clone(&self.registry),
             source,
@@ -109,26 +109,26 @@ impl ButtonDriver for VirtualButtonDriver {
     }
 }
 
-fn button_gpio_spec(config: &str) -> HardwareEndpointSpec {
-    HardwareEndpointSpec::parse(alloc::format!("button:gpio:{config}"))
+fn button_gpio_spec(config: &str) -> HwEndpointSpec {
+    HwEndpointSpec::parse(alloc::format!("button:gpio:{config}"))
         .expect("manifest display label should form a valid endpoint spec")
 }
 
 struct VirtualButtonInput {
-    registry: Rc<HardwareRegistry>,
-    source: HardwareAddress,
+    registry: Rc<HwRegistry>,
+    source: HwAddress,
     lease: Option<HardwareLease>,
     debouncer: ButtonDebouncer,
-    pressed_by_address: Rc<RefCell<BTreeMap<HardwareAddress, bool>>>,
+    pressed_by_address: Rc<RefCell<BTreeMap<HwAddress, bool>>>,
 }
 
 impl VirtualButtonInput {
     fn new(
-        registry: Rc<HardwareRegistry>,
-        source: HardwareAddress,
+        registry: Rc<HwRegistry>,
+        source: HwAddress,
         lease: HardwareLease,
         config: ButtonConfig,
-        pressed_by_address: Rc<RefCell<BTreeMap<HardwareAddress, bool>>>,
+        pressed_by_address: Rc<RefCell<BTreeMap<HwAddress, bool>>>,
     ) -> Self {
         Self {
             registry,
@@ -147,7 +147,7 @@ impl VirtualButtonInput {
 }
 
 impl ButtonInput for VirtualButtonInput {
-    fn source(&self) -> &HardwareAddress {
+    fn source(&self) -> &HwAddress {
         &self.source
     }
 
@@ -171,31 +171,31 @@ impl Drop for VirtualButtonInput {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{ButtonEventKind, HardwareManifest, HardwareResource};
+    use crate::{ButtonEventKind, HwManifest, HwResource};
 
     #[test]
     fn virtual_button_driver_polls_injected_state() {
-        let registry = Rc::new(HardwareRegistry::new(test_manifest()));
+        let registry = Rc::new(HwRegistry::new(test_manifest()));
         let driver = VirtualButtonDriver::new(Rc::clone(&registry));
         let endpoint_id =
-            HardwareEndpointId::for_driver_address(driver.driver_id(), &HardwareAddress::gpio(4));
+            HwEndpointId::for_driver_address(driver.driver_id(), &HwAddress::gpio(4));
         let mut input = driver
             .open(&endpoint_id, ButtonConfig::new(10))
             .expect("button opens");
 
-        driver.set_pressed(HardwareAddress::gpio(4), true);
+        driver.set_pressed(HwAddress::gpio(4), true);
         assert!(input.poll(0).is_none());
         let event = input.poll(10).expect("stable press emits event");
         assert_eq!(event.kind(), ButtonEventKind::Pressed);
     }
 
-    fn test_manifest() -> HardwareManifest {
-        HardwareManifest::new(
+    fn test_manifest() -> HwManifest {
+        HwManifest::new(
             "test",
             "Test Board",
-            [HardwareResource::new(
-                HardwareAddress::gpio(4),
-                [HardwareCapability::GpioInput],
+            [HwResource::new(
+                HwAddress::gpio(4),
+                [HwCapability::GpioInput],
                 "GPIO4",
             )],
         )
