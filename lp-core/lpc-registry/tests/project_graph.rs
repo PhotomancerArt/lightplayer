@@ -1,7 +1,7 @@
 mod support;
 
 use lpc_model::{
-    NodeDefLocation, NodeDefState, ProjectNodeLocation, ProjectNodeOrigin, ProjectNodePlacement,
+    NodeDefLocation, NodeDefState, NodeUseLocation, ProjectNodeOrigin, ProjectNodePlacement,
     SlotPath,
 };
 use lpc_registry::{ParseCtx, ProjectRegistry};
@@ -14,7 +14,7 @@ fn fyeah_sign_graph_contains_project_children_playlist_entries_and_asset_consume
     let (scenario, _) = RegistryScenario::load_fixture("fyeah-sign");
     let graph = &scenario.registry().inventory().tree;
 
-    let root = ProjectNodeLocation::root();
+    let root = NodeUseLocation::root();
     let playlist = root.child(SlotPath::parse("nodes[playlist]").unwrap());
     let idle = playlist.child(SlotPath::parse("entries[1].node").unwrap());
     let blast = playlist.child(SlotPath::parse("entries[2].node").unwrap());
@@ -86,8 +86,8 @@ source = { path = "shader.glsl" }
     );
     let graph = &registry.inventory().tree;
     let shader = root_def("/shader.toml");
-    let a = ProjectNodeLocation::root().child(SlotPath::parse("nodes[a]").unwrap());
-    let b = ProjectNodeLocation::root().child(SlotPath::parse("nodes[b]").unwrap());
+    let a = NodeUseLocation::root().child(SlotPath::parse("nodes[a]").unwrap());
+    let b = NodeUseLocation::root().child(SlotPath::parse("nodes[b]").unwrap());
 
     assert_eq!(registry.inventory().defs.len(), 2);
     assert_eq!(graph.def_instances.get(&shader).unwrap(), &vec![a, b]);

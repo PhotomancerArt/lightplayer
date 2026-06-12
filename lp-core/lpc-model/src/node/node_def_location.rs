@@ -1,10 +1,11 @@
 use crate::{ArtifactLocation, SlotPath};
 
-/// Location of a node definition within a project.
+/// Location of authored node definition data within project artifacts.
 ///
-/// A node definition location identifies definition data, not a runtime node
-/// instance. Multiple [`crate::ProjectNode`] occurrences can point at the same
-/// `NodeDefLocation` when a definition artifact is referenced more than once.
+/// `NodeDefLocation` identifies the definition payload itself, not a node use
+/// in the project tree and not a runtime node. Multiple [`crate::ProjectNode`]
+/// uses can point at the same definition when an artifact is referenced more
+/// than once.
 #[derive(
     Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
 )]

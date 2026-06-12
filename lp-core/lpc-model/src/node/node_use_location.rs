@@ -2,12 +2,12 @@ use alloc::vec::Vec;
 
 use crate::SlotPath;
 
-/// Deterministic identity for one effective project node instance.
+/// Deterministic identity for one use of a node definition in a project tree.
 ///
-/// A project node location identifies a node occurrence in the expanded
+/// `NodeUseLocation` identifies a node use in the expanded
 /// [`crate::ProjectTree`]. It is distinct from [`crate::NodeDefLocation`]:
-/// definition locations identify authored data, while project node locations
-/// identify places where definitions are invoked from the project root.
+/// definition locations identify authored data, while use locations identify
+/// places where definitions are invoked from the project root.
 ///
 /// The root location has no segments. A child location appends the child
 /// invocation slot path to its parent's segment list, so nested children are
@@ -25,12 +25,12 @@ use crate::SlotPath;
     serde::Serialize,
     serde::Deserialize,
 )]
-pub struct ProjectNodeLocation {
-    /// Authored invocation path segments from the project root to this node.
+pub struct NodeUseLocation {
+    /// Authored invocation path segments from the project root to this use.
     pub segments: Vec<LocationSeg>,
 }
 
-impl ProjectNodeLocation {
+impl NodeUseLocation {
     pub fn root() -> Self {
         Self {
             segments: Vec::new(),
@@ -48,7 +48,7 @@ impl ProjectNodeLocation {
     }
 }
 
-/// One authored invocation step in a [`ProjectNodeLocation`].
+/// One authored invocation step in a [`NodeUseLocation`].
 #[derive(
     Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
 )]
@@ -64,7 +64,7 @@ mod tests {
 
     #[test]
     fn root_key_is_empty() {
-        let key = ProjectNodeLocation::root();
+        let key = NodeUseLocation::root();
 
         assert!(key.is_root());
         assert!(key.segments.is_empty());
@@ -72,7 +72,7 @@ mod tests {
 
     #[test]
     fn child_key_appends_slot_ancestry() {
-        let root = ProjectNodeLocation::root();
+        let root = NodeUseLocation::root();
         let first = root.child(SlotPath::parse("nodes[playlist]").unwrap());
         let second = first.child(SlotPath::parse("entries[1].node").unwrap());
 
@@ -84,10 +84,10 @@ mod tests {
 
     #[test]
     fn key_serializes_as_slot_path_segments() {
-        let key = ProjectNodeLocation::root().child(SlotPath::parse("nodes[shader]").unwrap());
+        let key = NodeUseLocation::root().child(SlotPath::parse("nodes[shader]").unwrap());
 
         let json = serde_json::to_string(&key).unwrap();
-        let round_trip: ProjectNodeLocation = serde_json::from_str(&json).unwrap();
+        let round_trip: NodeUseLocation = serde_json::from_str(&json).unwrap();
 
         assert_eq!(round_trip, key);
     }

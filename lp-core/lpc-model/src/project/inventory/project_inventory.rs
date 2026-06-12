@@ -13,7 +13,7 @@ pub struct ProjectInventory {
     pub defs: BTreeMap<NodeDefLocation, NodeDefEntry>,
     /// Unique referenced assets keyed by asset source.
     pub assets: BTreeMap<AssetSource, AssetEntry>,
-    /// Expanded effective node occurrences reachable from the project root.
+    /// Expanded effective node uses reachable from the project root.
     pub tree: ProjectTree,
 }
 

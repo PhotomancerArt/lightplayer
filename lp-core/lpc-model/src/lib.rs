@@ -74,9 +74,9 @@ pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRan
 /// New slot-model code should prefer typed slot leaf descriptors whose semantic
 /// meaning owns its storage shape.
 pub use kind::Kind;
-pub use project::asset::{
+pub use project::inventory::{
     AssetBodySource, AssetChange, AssetChangeKind, AssetChangeSummary, AssetEntry, AssetKind,
-    AssetSource, AssetState, ReferencedAsset,
+    AssetRef, AssetSource, AssetState,
 };
 pub use value::WithRevision;
 pub use value::{LpType, LpValue, ModelEnumVariant, ModelStructMember};
@@ -119,7 +119,7 @@ pub use project::overlay_mutation::{
 };
 pub use project::{
     ChangeSummary, CommitResult, LocationSeg, MutationBatchResults, MutationResult,
-    ProjectChangeSummary, ProjectConfig, ProjectInventory, ProjectNode, ProjectNodeLocation,
+    NodeUseLocation, ProjectChangeSummary, ProjectConfig, ProjectInventory, ProjectNode,
     ProjectNodeOrigin, ProjectNodePlacement, ProjectTree, Revision,
 };
 pub use project::{advance_revision, current_revision, set_current_revision};

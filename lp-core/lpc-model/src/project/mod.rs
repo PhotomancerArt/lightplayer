@@ -14,9 +14,8 @@
 //! - [`crate::artifact`] defines artifact identities used by project assets and
 //!   node definitions.
 //! - [`crate::slot`] defines [`crate::SlotPath`], the path language used by
-//!   overlays and project node locations.
+//!   overlays and [`crate::NodeUseLocation`].
 
-pub mod asset;
 pub mod change_summary;
 pub mod config;
 pub mod inventory;
@@ -24,13 +23,13 @@ pub mod overlay;
 pub mod overlay_commit;
 pub mod overlay_mutation;
 
+pub use crate::node::node_use_location::{LocationSeg, NodeUseLocation};
 pub use crate::sync::current_revision::{advance_revision, current_revision, set_current_revision};
 pub use crate::sync::revision::Revision;
 pub use change_summary::ChangeSummary;
 pub use config::ProjectConfig;
 pub use inventory::project_inventory::ProjectInventory;
 pub use inventory::project_node::{ProjectNode, ProjectNodeOrigin};
-pub use inventory::project_node_location::{LocationSeg, ProjectNodeLocation};
 pub use inventory::project_node_placement::ProjectNodePlacement;
 pub use inventory::project_tree::ProjectTree;
 pub use overlay_commit::commit_result::CommitResult;

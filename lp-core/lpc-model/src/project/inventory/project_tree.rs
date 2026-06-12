@@ -1,31 +1,31 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use crate::{AssetSource, NodeDefLocation, ProjectNode, ProjectNodeLocation};
+use crate::{AssetSource, NodeDefLocation, NodeUseLocation, ProjectNode};
 
-/// Effective post-overlay project node occurrences and reverse indexes.
+/// Effective post-overlay project node uses and reverse indexes.
 ///
-/// `ProjectTree` contains expanded node occurrences reachable from the project
-/// root. It is tree-shaped because each occurrence has one parent, even when
-/// multiple occurrences point at the same [`crate::NodeDefLocation`].
+/// `ProjectTree` contains expanded node uses reachable from the project root.
+/// It is tree-shaped because each use has one parent, even when multiple uses
+/// point at the same [`crate::NodeDefLocation`].
 ///
-/// Reverse indexes connect tree occurrences back to shared definitions and
-/// assets so runtime projection can answer "which node occurrences use this?"
-/// without re-walking authored definitions.
+/// Reverse indexes connect tree uses back to shared definitions and assets so
+/// runtime projection can answer "which node uses this?" without re-walking
+/// authored definitions.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProjectTree {
-    /// Location of the project root occurrence.
-    pub root: ProjectNodeLocation,
-    /// All effective node occurrences keyed by project-node location.
-    pub nodes: BTreeMap<ProjectNodeLocation, ProjectNode>,
-    /// Reverse index from definition location to node occurrences using it.
-    pub def_instances: BTreeMap<NodeDefLocation, Vec<ProjectNodeLocation>>,
-    /// Reverse index from asset source to node occurrences whose defs reference it.
-    pub asset_consumers: BTreeMap<AssetSource, Vec<ProjectNodeLocation>>,
+    /// Location of the project root use.
+    pub root: NodeUseLocation,
+    /// All effective node uses keyed by use location.
+    pub nodes: BTreeMap<NodeUseLocation, ProjectNode>,
+    /// Reverse index from definition location to node uses using it.
+    pub def_instances: BTreeMap<NodeDefLocation, Vec<NodeUseLocation>>,
+    /// Reverse index from asset source to node uses whose definitions reference it.
+    pub asset_consumers: BTreeMap<AssetSource, Vec<NodeUseLocation>>,
 }
 
 impl ProjectTree {
-    pub fn new(root: ProjectNodeLocation) -> Self {
+    pub fn new(root: NodeUseLocation) -> Self {
         Self {
             root,
             nodes: BTreeMap::new(),
@@ -42,7 +42,7 @@ impl ProjectTree {
         self.nodes.insert(entry.key.clone(), entry);
     }
 
-    pub fn add_asset_consumer(&mut self, source: AssetSource, consumer: ProjectNodeLocation) {
+    pub fn add_asset_consumer(&mut self, source: AssetSource, consumer: NodeUseLocation) {
         self.asset_consumers
             .entry(source)
             .or_default()
@@ -56,6 +56,6 @@ impl ProjectTree {
 
 impl Default for ProjectTree {
     fn default() -> Self {
-        Self::new(ProjectNodeLocation::root())
+        Self::new(NodeUseLocation::root())
     }
 }

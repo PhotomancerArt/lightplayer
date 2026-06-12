@@ -5,10 +5,10 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpc_model::{
-    ArtifactLocation, AssetBodySource, AssetEntry, AssetKind, AssetOverlay, AssetSource,
-    AssetState, NodeDefEntry, NodeDefLocation, NodeDefState, NodeInvocation, ProjectInventory,
-    ProjectNode, ProjectNodeLocation, ProjectNodeOrigin, ProjectOverlay, ReferencedAsset, Revision,
-    SlotPath, WithRevision, resolve_artifact_specifier,
+    ArtifactLocation, AssetBodySource, AssetEntry, AssetKind, AssetOverlay, AssetRef, AssetSource,
+    AssetState, NodeDefEntry, NodeDefLocation, NodeDefState, NodeInvocation, NodeUseLocation,
+    ProjectInventory, ProjectNode, ProjectNodeOrigin, ProjectOverlay, Revision, SlotPath,
+    WithRevision, resolve_artifact_specifier,
 };
 use lpfs::{LpFs, LpPath};
 
@@ -35,7 +35,7 @@ pub(crate) fn derive_effective_inventory(
     };
 
     if let Some(root) = root {
-        let root_key = ProjectNodeLocation::root();
+        let root_key = NodeUseLocation::root();
         derivation.inventory.tree.root = root_key.clone();
         derivation.walk_graph_node(
             root_key.clone(),
@@ -61,8 +61,8 @@ struct InventoryDerivation<'a, 'ctx> {
 impl InventoryDerivation<'_, '_> {
     fn walk_graph_node(
         &mut self,
-        key: ProjectNodeLocation,
-        parent: Option<ProjectNodeLocation>,
+        key: NodeUseLocation,
+        parent: Option<NodeUseLocation>,
         location: NodeDefLocation,
         origin: ProjectNodeOrigin,
         ancestry: &mut Vec<NodeDefLocation>,
@@ -104,7 +104,7 @@ impl InventoryDerivation<'_, '_> {
 
     fn walk_loaded_def(
         &mut self,
-        key: &ProjectNodeLocation,
+        key: &NodeUseLocation,
         location: &NodeDefLocation,
         def: &lpc_model::NodeDef,
         revision: Revision,
@@ -211,9 +211,9 @@ impl InventoryDerivation<'_, '_> {
 
     fn walk_asset(
         &mut self,
-        asset: ReferencedAsset,
+        asset: AssetRef,
         owner_revision: Revision,
-        consumer: &ProjectNodeLocation,
+        consumer: &NodeUseLocation,
     ) {
         let revision = self.revision_for_asset(&asset.source, owner_revision);
         let state = self.read_effective_asset(&asset.source);
