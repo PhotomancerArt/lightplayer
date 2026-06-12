@@ -16,7 +16,6 @@ use lpc_model::{
 use lpc_registry::ProjectRegistry;
 use lpc_shared::time::TimeProvider;
 use lpc_wire::WireNodeStatus;
-use lpfs::FsEvent;
 
 use crate::dataflow::binding::{BindingDraft, BindingError, BindingRef};
 use crate::dataflow::bus::Bus;
@@ -416,15 +415,6 @@ impl Engine {
         }
 
         self.resolver = resolver;
-        Ok(())
-    }
-
-    /// Accept filesystem changes for direct engine embedders.
-    ///
-    /// The server-owned project wrapper currently reloads the project from its
-    /// filesystem on changes so node definition and shader source updates use
-    /// the same loader path as initial load.
-    pub fn handle_fs_changes(&mut self, _changes: &[FsEvent]) -> Result<(), EngineError> {
         Ok(())
     }
 

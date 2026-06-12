@@ -199,9 +199,8 @@ impl LpServer {
             }
         }
 
-        // Get current_version AFTER collecting all changes but BEFORE processing
-        // This represents the version that will be assigned to the NEXT change
-        // So all changes we're about to process have versions < current_version
+        // Capture the next version before refresh applies anything. The events
+        // in this batch are all older than this marker.
         let current_version = self.base_fs().current_version();
 
         // Now apply changes to projects (mutable borrows)
@@ -212,10 +211,8 @@ impl LpServer {
                     // Note: In no_std context, errors are silently ignored
                     // Errors will be visible when clients read project state.
                 } else {
-                    // Update last processed version to current_version.next() (one more than the next version)
-                    // This ensures that get_changes_since(current_version.next()) will return nothing next time
-                    // because get_changes_since uses >=, and current_version.next() is beyond all changes we processed
-                    // All changes we processed have versions < current_version, so >= current_version.next() returns nothing
+                    // Advance past the batch marker so the same events are not
+                    // returned again by get_changes_since, which is inclusive.
                     project.update_fs_version(current_version.next());
                 }
             }

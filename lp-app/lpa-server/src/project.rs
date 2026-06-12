@@ -28,13 +28,13 @@ pub struct Project {
     path: LpPathBuf,
     /// Chrooted filesystem for this project.
     fs: Rc<RefCell<dyn LpFs>>,
-    /// Shared output provider used when rebuilding engine services.
+    /// Shared output provider used by engine services and manual recovery reloads.
     output_provider: Rc<RefCell<dyn OutputProvider>>,
-    /// Shared time provider used when rebuilding engine services.
+    /// Shared time provider used by engine services and manual recovery reloads.
     time_provider: Option<Rc<dyn TimeProvider>>,
-    /// Shared button service used when rebuilding engine services.
+    /// Shared button service used by engine services and manual recovery reloads.
     button_service: Option<Rc<dyn ButtonService>>,
-    /// Shared radio service used when rebuilding engine services.
+    /// Shared radio service used by engine services and manual recovery reloads.
     radio_service: Option<Rc<dyn RadioService>>,
     /// Optional memory stats callback for project load/reload checkpoints.
     memory_stats: Option<MemoryStatsFn>,
@@ -245,7 +245,11 @@ impl Project {
         Ok(())
     }
 
-    /// Reload the project from the filesystem.
+    /// Manually reload the registry and runtime from durable artifacts.
+    ///
+    /// Normal overlay mutation and filesystem refresh paths use incremental
+    /// registry-driven apply. This is a recovery path for callers that want to
+    /// discard live runtime state and rebuild from the committed filesystem.
     pub fn reload(&mut self) -> Result<(), ServerError> {
         log_memory(self.memory_stats, "project reload start");
         backtrace::set_oom_context("project reload: drop old runtime");

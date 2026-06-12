@@ -1,12 +1,17 @@
-//! Minimal [`crate::node::NodeRuntime`] stubs for M4 source loading before real core nodes land.
+//! Minimal [`crate::node::NodeRuntime`] for projected nodes without behavior.
 
 use lpc_model::NodeKind;
 
 use crate::node::{DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel};
 
-/// Placeholder runtime node used while wiring source load into the core tree.
+/// Runtime placeholder for synthetic projection nodes and load-error entries.
+///
+/// Project projection sometimes needs a runtime tree entry before there is a
+/// concrete behavior to attach, or for a node whose definition is currently in
+/// an error state. This node keeps those entries addressable without producing
+/// values of its own.
 pub struct CorePlaceholderNode {
-    /// `None` for synthetic spine folders (`*.folder` segments).
+    /// `None` for synthetic spine folders.
     pub kind: Option<NodeKind>,
 }
 

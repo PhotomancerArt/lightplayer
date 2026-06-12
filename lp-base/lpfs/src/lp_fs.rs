@@ -100,6 +100,9 @@ pub trait LpFs {
     /// Changes are returned with paths relative to the filesystem root.
     /// Only the latest change per path is returned (if a file was modified
     /// multiple times, only the most recent change is included).
+    ///
+    /// This reports changes tracked or recorded by the filesystem implementation;
+    /// it is not a guarantee that host-native external edits are watched.
     fn get_changes_since(&self, since_version: FsVersion) -> alloc::vec::Vec<FsEvent>;
 
     /// Alias for [`Self::get_changes_since`].

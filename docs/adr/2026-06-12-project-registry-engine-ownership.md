@@ -80,6 +80,11 @@ M4 deliberately uses a full runtime rebuild after accepted overlay edits or
 filesystem refreshes. Incremental runtime updates can later consume registry
 change summaries without changing ownership.
 
+This M4 bridge was superseded by
+`docs/adr/2026-06-12-incremental-runtime-apply.md`: overlay mutation and
+filesystem refresh now apply `ProjectChangeSummary` incrementally, while commit
+is persistence-only and full reload is manual/recovery.
+
 Project reads are runtime queries against `Engine` plus `ProjectRegistry`.
 Overlay reads, overlay mutations, overlay commits, and inventory reads use a
 separate project command API instead of being embedded in project-read
