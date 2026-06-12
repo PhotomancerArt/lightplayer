@@ -1,9 +1,9 @@
 mod support;
 
 use lpc_model::{
-    ArtifactLocation, AssetOverlay, AssetSource, MutationOp, NodeDefLocation, SlotPath,
+    ArtifactLocation, AssetBodyOverlay, AssetLocation, MutationOp, NodeDefLocation, SlotPath,
 };
-use lpc_registry::MaterializeAssetError;
+use lpc_registry::AssetReadError;
 
 use support::{RegistryScenario, artifact, artifact_asset};
 
@@ -31,7 +31,7 @@ fn materialization_uses_overlay_replacement_and_reports_delete() {
 
     scenario.apply(MutationOp::SetArtifactBody {
         artifact: artifact("/idle.glsl"),
-        edit: AssetOverlay::ReplaceBody(b"overlay shader".to_vec()),
+        edit: AssetBodyOverlay::ReplaceBody(b"overlay shader".to_vec()),
     });
     let replaced = scenario
         .materialize_asset_text(&source)
@@ -40,10 +40,10 @@ fn materialization_uses_overlay_replacement_and_reports_delete() {
 
     scenario.apply(MutationOp::SetArtifactBody {
         artifact: artifact("/idle.glsl"),
-        edit: AssetOverlay::Delete,
+        edit: AssetBodyOverlay::Delete,
     });
     let err = scenario.materialize_asset_text(&source).unwrap_err();
-    assert_eq!(err, MaterializeAssetError::Deleted { source });
+    assert_eq!(err, AssetReadError::Deleted { location: source });
 }
 
 #[test]
@@ -61,7 +61,7 @@ source = { glsl = "vec4 render(vec2 pos) { return vec4(1.0); }" }
     );
     scenario.load_root("/project.toml");
 
-    let source = AssetSource::inline(
+    let source = AssetLocation::inline(
         NodeDefLocation {
             artifact: artifact("/project.toml"),
             path: SlotPath::parse("nodes[shader]").unwrap(),
@@ -87,17 +87,17 @@ fn materialization_rejects_unref_and_invalid_utf8_text() {
     let err = scenario.materialize_asset(&unreferenced).unwrap_err();
     assert_eq!(
         err,
-        MaterializeAssetError::UnreferencedAsset {
-            source: unreferenced
+        AssetReadError::UnreferencedAsset {
+            location: unreferenced
         }
     );
 
     scenario.apply(MutationOp::SetArtifactBody {
         artifact: ArtifactLocation::file("/idle.glsl"),
-        edit: AssetOverlay::ReplaceBody(vec![0xff]),
+        edit: AssetBodyOverlay::ReplaceBody(vec![0xff]),
     });
     let err = scenario
         .materialize_asset_text(&artifact_asset("/idle.glsl"))
         .unwrap_err();
-    assert!(matches!(err, MaterializeAssetError::Utf8 { .. }));
+    assert!(matches!(err, AssetReadError::Utf8 { .. }));
 }

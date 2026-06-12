@@ -1,7 +1,7 @@
 use lpc_model::{
-    ArtifactLocation, AssetBodySource, AssetChangeKind, AssetOverlay, AssetSource, AssetState,
-    LpValue, MutationOp, NodeDefChangeKind, NodeDefLocation, NodeDefState, Revision, SlotEdit,
-    SlotPath, SlotShapeRegistry,
+    ArtifactLocation, AssetBodyOrigin, AssetBodyOverlay, AssetChangeKind, AssetLocation,
+    AssetState, LpValue, MutationOp, NodeDefChangeKind, NodeDefLocation, NodeDefState, Revision,
+    SlotEdit, SlotPath, SlotShapeRegistry,
 };
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpfs::{FsEvent, FsEventKind, LpFs, LpFsMemory, LpPath, LpPathBuf};
@@ -97,7 +97,7 @@ fn apply_body_overlay_changes_referenced_node_def_and_assets() {
             &fs,
             MutationOp::SetArtifactBody {
                 artifact: shader_location.clone(),
-                edit: AssetOverlay::ReplaceBody(br#"kind = "Clock""#.to_vec()),
+                edit: AssetBodyOverlay::ReplaceBody(br#"kind = "Clock""#.to_vec()),
             },
             Revision::new(2),
             &ctx,
@@ -117,7 +117,7 @@ fn apply_body_overlay_changes_referenced_node_def_and_assets() {
     );
     assert_eq!(
         result.changes.assets.removed,
-        vec![AssetSource::artifact(ArtifactLocation::file(
+        vec![AssetLocation::artifact(ArtifactLocation::file(
             "/shader.glsl"
         ))]
     );
@@ -132,14 +132,14 @@ fn apply_asset_overlay_changes_referenced_asset() {
     let (fs, shapes, mut registry) = shader_project();
     let ctx = parse_ctx(&shapes);
     let asset = ArtifactLocation::file("/shader.glsl");
-    let asset_source = AssetSource::artifact(asset.clone());
+    let asset_source = AssetLocation::artifact(asset.clone());
 
     let result = registry
         .mutate(
             &fs,
             MutationOp::SetArtifactBody {
                 artifact: asset.clone(),
-                edit: AssetOverlay::ReplaceBody(
+                edit: AssetBodyOverlay::ReplaceBody(
                     b"void main() { gl_FragColor = vec4(1.0); }".to_vec(),
                 ),
             },
@@ -158,7 +158,7 @@ fn apply_asset_overlay_changes_referenced_asset() {
     assert_eq!(
         registry.asset(&asset_source).unwrap().state,
         AssetState::Available {
-            source: AssetBodySource::OverlayReplace
+            origin: AssetBodyOrigin::OverlayReplace
         }
     );
 }
@@ -168,14 +168,14 @@ fn discard_overlay_returns_inventory_to_committed_state() {
     let (fs, shapes, mut registry) = shader_project();
     let ctx = parse_ctx(&shapes);
     let asset = ArtifactLocation::file("/shader.glsl");
-    let asset_source = AssetSource::artifact(asset.clone());
+    let asset_source = AssetLocation::artifact(asset.clone());
 
     registry
         .mutate(
             &fs,
             MutationOp::SetArtifactBody {
                 artifact: asset.clone(),
-                edit: AssetOverlay::Delete,
+                edit: AssetBodyOverlay::Delete,
             },
             Revision::new(2),
             &ctx,
@@ -198,7 +198,7 @@ fn discard_overlay_returns_inventory_to_committed_state() {
     assert_eq!(
         registry.asset(&asset_source).unwrap().state,
         AssetState::Available {
-            source: AssetBodySource::Committed
+            origin: AssetBodyOrigin::Committed
         }
     );
 }
@@ -208,7 +208,7 @@ fn commit_overlay_writes_artifact_without_runtime_project_change() {
     let (fs, shapes, mut registry) = shader_project();
     let ctx = parse_ctx(&shapes);
     let asset = ArtifactLocation::file("/shader.glsl");
-    let asset_source = AssetSource::artifact(asset.clone());
+    let asset_source = AssetLocation::artifact(asset.clone());
     let body = b"void main() { gl_FragColor = vec4(0.5); }".to_vec();
 
     registry
@@ -216,7 +216,7 @@ fn commit_overlay_writes_artifact_without_runtime_project_change() {
             &fs,
             MutationOp::SetArtifactBody {
                 artifact: asset.clone(),
-                edit: AssetOverlay::ReplaceBody(body.clone()),
+                edit: AssetBodyOverlay::ReplaceBody(body.clone()),
             },
             Revision::new(2),
             &ctx,
@@ -232,7 +232,7 @@ fn commit_overlay_writes_artifact_without_runtime_project_change() {
     assert_eq!(
         registry.asset(&asset_source).unwrap().state,
         AssetState::Available {
-            source: AssetBodySource::Committed
+            origin: AssetBodyOrigin::Committed
         }
     );
 }
@@ -272,7 +272,7 @@ fn refresh_artifacts_returns_runtime_asset_changes() {
     let (mut fs, shapes, mut registry) = shader_project();
     let ctx = parse_ctx(&shapes);
     let asset = ArtifactLocation::file("/shader.glsl");
-    let asset_source = AssetSource::artifact(asset.clone());
+    let asset_source = AssetLocation::artifact(asset.clone());
     write_file(
         &mut fs,
         "/shader.glsl",

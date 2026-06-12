@@ -4,7 +4,7 @@ use crate::{ArtifactLocation, SlotPath};
 
 use crate::project::overlay_mutation::MutationOp;
 
-use super::{ArtifactOverlay, AssetOverlay, SlotEdit, SlotOverlay};
+use super::{ArtifactOverlay, AssetBodyOverlay, SlotEdit, SlotOverlay};
 
 /// Canonical pending edits for a project.
 ///
@@ -65,7 +65,11 @@ impl ProjectOverlay {
         changed
     }
 
-    pub fn set_artifact_body(&mut self, artifact: ArtifactLocation, edit: AssetOverlay) -> bool {
+    pub fn set_artifact_body(
+        &mut self,
+        artifact: ArtifactLocation,
+        edit: AssetBodyOverlay,
+    ) -> bool {
         let next = ArtifactOverlay::body(edit);
         if self.artifacts.get(&artifact) == Some(&next) {
             return false;
@@ -133,7 +137,10 @@ mod tests {
     fn body_and_slot_overlays_are_exclusive() {
         let mut overlay = ProjectOverlay::new();
         let path = ArtifactLocation::file("/shader.glsl");
-        overlay.set_artifact_body(path.clone(), AssetOverlay::ReplaceBody(b"body".to_vec()));
+        overlay.set_artifact_body(
+            path.clone(),
+            AssetBodyOverlay::ReplaceBody(b"body".to_vec()),
+        );
         assert!(matches!(
             overlay.artifact(&path),
             Some(ArtifactOverlay::Asset { .. })

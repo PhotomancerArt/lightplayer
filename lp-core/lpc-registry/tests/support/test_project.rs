@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use lpc_model::{AssetOverlay, MutationCmd, MutationCmdBatch, MutationCmdId, MutationOp};
+use lpc_model::{AssetBodyOverlay, MutationCmd, MutationCmdBatch, MutationCmdId, MutationOp};
 use lpfs::{LpFsMemory, LpPath};
 
 use super::{artifact, project_files};
@@ -43,7 +43,7 @@ impl TestProject {
                     id: MutationCmdId::new(index as u64 + 1),
                     mutation: MutationOp::SetArtifactBody {
                         artifact: artifact(path),
-                        edit: AssetOverlay::ReplaceBody(bytes.clone()),
+                        edit: AssetBodyOverlay::ReplaceBody(bytes.clone()),
                     },
                 })
                 .collect(),

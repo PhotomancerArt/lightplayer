@@ -24,7 +24,7 @@ const PATH_KEY: &str = "$path";
 
 /// Backing for an authored source file slot.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SourceFileBacking {
+pub enum AssetSlotValue {
     Path(SourcePath),
     Inline { extension: String, text: String },
 }
@@ -32,14 +32,14 @@ pub enum SourceFileBacking {
 /// Authored file-or-inline UTF-8 source.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SourceFileSlot {
-    backing: SourceFileBacking,
+    backing: AssetSlotValue,
     revision: Revision,
 }
 
 impl Default for SourceFileSlot {
     fn default() -> Self {
         Self {
-            backing: SourceFileBacking::Path(SourcePath::from("")),
+            backing: AssetSlotValue::Path(SourcePath::from("")),
             revision: Revision::default(),
         }
     }
@@ -48,14 +48,14 @@ impl Default for SourceFileSlot {
 impl SourceFileSlot {
     pub fn from_path(path: impl Into<SourcePath>) -> Self {
         Self {
-            backing: SourceFileBacking::Path(path.into()),
+            backing: AssetSlotValue::Path(path.into()),
             revision: current_revision(),
         }
     }
 
     pub fn from_inline(extension: impl Into<String>, text: impl Into<String>) -> Self {
         Self {
-            backing: SourceFileBacking::Inline {
+            backing: AssetSlotValue::Inline {
                 extension: extension.into(),
                 text: text.into(),
             },
@@ -67,27 +67,25 @@ impl SourceFileSlot {
         self.revision
     }
 
-    pub fn backing(&self) -> &SourceFileBacking {
+    pub fn backing(&self) -> &AssetSlotValue {
         &self.backing
     }
 
     pub fn path_value(&self) -> Option<&SourcePath> {
         match &self.backing {
-            SourceFileBacking::Path(path) => Some(path),
-            SourceFileBacking::Inline { .. } => None,
+            AssetSlotValue::Path(path) => Some(path),
+            AssetSlotValue::Inline { .. } => None,
         }
     }
 
     pub fn inline_value(&self) -> Option<(&str, &str)> {
         match &self.backing {
-            SourceFileBacking::Inline { extension, text } => {
-                Some((extension.as_str(), text.as_str()))
-            }
-            SourceFileBacking::Path(_) => None,
+            AssetSlotValue::Inline { extension, text } => Some((extension.as_str(), text.as_str())),
+            AssetSlotValue::Path(_) => None,
         }
     }
 
-    pub(crate) fn set_backing(&mut self, backing: SourceFileBacking) {
+    pub(crate) fn set_backing(&mut self, backing: AssetSlotValue) {
         self.backing = backing;
         self.revision = current_revision();
     }
@@ -116,12 +114,12 @@ impl SourceFileSlot {
     }
 }
 
-fn read_backing<S>(mut value: ValueReader<'_, '_, S>) -> Result<SourceFileBacking, SyntaxError>
+fn read_backing<S>(mut value: ValueReader<'_, '_, S>) -> Result<AssetSlotValue, SyntaxError>
 where
     S: SyntaxEventSource,
 {
     if value.is_string_scalar()? {
-        return Ok(SourceFileBacking::Path(SourcePath::from(value.string()?)));
+        return Ok(AssetSlotValue::Path(SourcePath::from(value.string()?)));
     }
 
     let mut object = value.object()?;
@@ -136,7 +134,7 @@ where
         let path = SourcePath::from(prop.value().string()?);
         drop(prop);
         object.finish()?;
-        return Ok(SourceFileBacking::Path(path));
+        return Ok(AssetSlotValue::Path(path));
     }
 
     let mut inline_key = None;
@@ -156,22 +154,22 @@ where
     let Some(extension) = inline_key else {
         return Err(object.missing_required_field("inline extension key"));
     };
-    Ok(SourceFileBacking::Inline {
+    Ok(AssetSlotValue::Inline {
         extension,
         text: inline_text.unwrap_or_default(),
     })
 }
 
 fn write_backing_json<W>(
-    backing: &SourceFileBacking,
+    backing: &AssetSlotValue,
     value: SlotValueWriter<'_, W>,
 ) -> Result<(), SlotWriteError<W::Error>>
 where
     W: SlotWrite,
 {
     match backing {
-        SourceFileBacking::Path(path) => value.string(path.as_str()),
-        SourceFileBacking::Inline { extension, text } => {
+        AssetSlotValue::Path(path) => value.string(path.as_str()),
+        AssetSlotValue::Inline { extension, text } => {
             let mut object = value.object()?;
             object.prop(extension)?.string(text)?;
             object.finish()
@@ -179,10 +177,10 @@ where
     }
 }
 
-fn write_backing_toml(backing: &SourceFileBacking) -> Result<toml::Value, SlotDataWriteError> {
+fn write_backing_toml(backing: &AssetSlotValue) -> Result<toml::Value, SlotDataWriteError> {
     match backing {
-        SourceFileBacking::Path(path) => Ok(toml::Value::String(path.as_str().to_string())),
-        SourceFileBacking::Inline { extension, text } => {
+        AssetSlotValue::Path(path) => Ok(toml::Value::String(path.as_str().to_string())),
+        AssetSlotValue::Inline { extension, text } => {
             let mut table = toml::map::Map::new();
             table.insert(extension.clone(), toml::Value::String(text.clone()));
             Ok(toml::Value::Table(table))

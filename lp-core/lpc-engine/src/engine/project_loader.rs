@@ -9,7 +9,7 @@ use alloc::vec::Vec;
 use lpc_model::LpType;
 use lpc_model::generate_compute_shader_header;
 use lpc_model::{ArtifactSpec, NodeInvocation, NodeKind};
-use lpc_model::{AssetKind, AssetSource, NodeDefLocation, NodeDefState};
+use lpc_model::{AssetContentType, AssetLocation, NodeDefLocation, NodeDefState};
 use lpc_model::{
     BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, FixtureDef, FluidDef, Kind,
     LpValue, MappingConfig, NodeDef, NodeId, NodeName, PlaylistDef, ProjectNodeOrigin,
@@ -558,7 +558,7 @@ impl ProjectLoader {
                 fs,
                 registry,
                 node,
-                AssetKind::ShaderSource,
+                AssetContentType::ShaderSource,
                 "shader source",
             )?;
             let bindings = config.bindings.clone();
@@ -611,7 +611,7 @@ impl ProjectLoader {
                 fs,
                 registry,
                 node,
-                AssetKind::ComputeShaderSource,
+                AssetContentType::ComputeShaderSource,
                 "compute shader source",
             )?;
             let header =
@@ -1114,7 +1114,7 @@ fn resolve_fixture_mapping(
                 fs,
                 registry,
                 node,
-                AssetKind::FixtureSvg,
+                AssetContentType::FixtureSvg,
                 "fixture SVG",
             )?;
             resolve_svg_path_mapping(
@@ -1172,10 +1172,10 @@ fn materialize_node_text_asset(
     fs: &dyn LpFs,
     registry: &mut ProjectRegistry,
     node: &ProjectedNode,
-    kind: AssetKind,
+    content_type: AssetContentType,
     label: &str,
 ) -> Result<String, ProjectLoadError> {
-    let source = asset_for_node_kind(registry, node, kind)?;
+    let source = asset_for_node_content_type(registry, node, content_type)?;
     registry
         .materialize_asset_text(fs, &source)
         .map(|asset| asset.text)
@@ -1185,11 +1185,11 @@ fn materialize_node_text_asset(
         })
 }
 
-fn asset_for_node_kind(
+fn asset_for_node_content_type(
     registry: &ProjectRegistry,
     node: &ProjectedNode,
-    kind: AssetKind,
-) -> Result<AssetSource, ProjectLoadError> {
+    content_type: AssetContentType,
+) -> Result<AssetLocation, ProjectLoadError> {
     let mut matches = Vec::new();
     for (source, consumers) in &registry.inventory().tree.asset_consumers {
         if !consumers
@@ -1201,7 +1201,7 @@ fn asset_for_node_kind(
         let Some(entry) = registry.asset(source) else {
             continue;
         };
-        if entry.kind == kind {
+        if entry.content_type == content_type {
             matches.push(source.clone());
         }
     }
@@ -1210,11 +1210,11 @@ fn asset_for_node_kind(
         1 => Ok(matches.remove(0)),
         0 => Err(ProjectLoadError::InvalidSourcePath {
             path: node_label(node),
-            reason: format!("node has no referenced {kind:?} asset"),
+            reason: format!("node has no referenced {content_type:?} asset"),
         }),
         _ => Err(ProjectLoadError::InvalidSourcePath {
             path: node_label(node),
-            reason: format!("node has multiple referenced {kind:?} assets"),
+            reason: format!("node has multiple referenced {content_type:?} assets"),
         }),
     }
 }

@@ -23,9 +23,9 @@ use crate::nodes::radio::ControlRadioDef;
 use crate::nodes::shader::{ComputeShaderDef, ShaderDef, ShaderSource};
 use crate::nodes::texture::TextureDef;
 use crate::{
-    ArtifactLocation, AssetKind, AssetRef, AssetSource, EnumSlot, LpPath, LpPathBuf,
-    NodeDefLocation, NodeInvocation, ProjectNodePlacement, SlotAccess, SlotDataAccess,
-    SlotDataMutAccess, SlotMapKey, SlotMutAccess, SlotName, SlotPath, SlotShapeId,
+    ArtifactLocation, AssetContentType, AssetLocation, EnumSlot, LpPath, LpPathBuf,
+    NodeDefLocation, NodeInvocation, ProjectNodePlacement, ReferencedAsset, SlotAccess,
+    SlotDataAccess, SlotDataMutAccess, SlotMapKey, SlotMutAccess, SlotName, SlotPath, SlotShapeId,
     SlotShapeRegistry, Slotted, SourcePath, StaticSlotShape,
 };
 
@@ -266,7 +266,7 @@ impl NodeDef {
             NodeDefLocation::artifact_root(ArtifactLocation::location_for_path(containing_file));
         let mut paths = Vec::new();
         for asset in self.referenced_assets(containing_file, &owner, &SlotPath::root())? {
-            if let AssetSource::Artifact { location } = asset.source {
+            if let AssetLocation::Artifact { location } = asset.location {
                 paths.push(location.file_path().clone());
             }
         }
@@ -279,21 +279,21 @@ impl NodeDef {
         containing_file: &LpPath,
         owner: &NodeDefLocation,
         base: &SlotPath,
-    ) -> Result<Vec<AssetRef>, ArtifactPathResolutionError> {
+    ) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
         match self {
             Self::Shader(shader) => assets_for_shader(
                 shader.shader_source(),
                 containing_file,
                 owner,
                 base,
-                AssetKind::ShaderSource,
+                AssetContentType::ShaderSource,
             ),
             Self::ComputeShader(shader) => assets_for_shader(
                 shader.shader_source(),
                 containing_file,
                 owner,
                 base,
-                AssetKind::ComputeShaderSource,
+                AssetContentType::ComputeShaderSource,
             ),
             Self::Fixture(fixture) => assets_for_fixture(fixture, containing_file),
             _ => Ok(Vec::new()),
@@ -462,17 +462,20 @@ fn assets_for_shader(
     containing_file: &LpPath,
     owner: &NodeDefLocation,
     base: &SlotPath,
-    kind: AssetKind,
-) -> Result<Vec<AssetRef>, ArtifactPathResolutionError> {
+    content_type: AssetContentType,
+) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
     if let Some(path) = source.path_value() {
         let location = ArtifactLocation::file(resolve_source_path(containing_file, path)?);
-        return Ok(vec![AssetRef::new(AssetSource::artifact(location), kind)]);
+        return Ok(vec![ReferencedAsset::new(
+            AssetLocation::artifact(location),
+            content_type,
+        )]);
     }
 
     if source.glsl_value().is_some() {
-        return Ok(vec![AssetRef::new(
-            AssetSource::inline(owner.clone(), source_slot_path(base)),
-            kind,
+        return Ok(vec![ReferencedAsset::new(
+            AssetLocation::inline(owner.clone(), source_slot_path(base)),
+            content_type,
         )]);
     }
 
@@ -482,14 +485,14 @@ fn assets_for_shader(
 fn assets_for_fixture(
     fixture: &FixtureDef,
     containing_file: &LpPath,
-) -> Result<Vec<AssetRef>, ArtifactPathResolutionError> {
+) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
     let MappingConfig::SvgPath { source, .. } = fixture.mapping.value() else {
         return Ok(Vec::new());
     };
     let location = ArtifactLocation::file(resolve_source_path(containing_file, source.value())?);
-    Ok(vec![AssetRef::new(
-        AssetSource::artifact(location),
-        AssetKind::FixtureSvg,
+    Ok(vec![ReferencedAsset::new(
+        AssetLocation::artifact(location),
+        AssetContentType::FixtureSvg,
     )])
 }
 
@@ -1108,9 +1111,9 @@ source = { glsl = "void main() {}" }
             shader
                 .referenced_assets(LpPath::new("/project.toml"), &owner, &owner.path)
                 .unwrap(),
-            vec![AssetRef::new(
-                AssetSource::inline(owner, SlotPath::parse("nodes[shader].source").unwrap()),
-                AssetKind::ShaderSource,
+            vec![ReferencedAsset::new(
+                AssetLocation::inline(owner, SlotPath::parse("nodes[shader].source").unwrap()),
+                AssetContentType::ShaderSource,
             )]
         );
 
@@ -1132,9 +1135,9 @@ sample_diameter = 2.0
             fixture
                 .referenced_assets(LpPath::new("/fixtures/f.toml"), &owner, &owner.path)
                 .unwrap(),
-            vec![AssetRef::new(
-                AssetSource::artifact(ArtifactLocation::file("/fixtures/fixture.svg")),
-                AssetKind::FixtureSvg,
+            vec![ReferencedAsset::new(
+                AssetLocation::artifact(ArtifactLocation::file("/fixtures/fixture.svg")),
+                AssetContentType::FixtureSvg,
             )]
         );
     }

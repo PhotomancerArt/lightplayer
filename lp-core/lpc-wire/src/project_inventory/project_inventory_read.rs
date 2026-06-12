@@ -37,7 +37,7 @@ impl WireProjectInventoryReadResponse {
         defs.sort_by(|a, b| a.location.cmp(&b.location));
 
         let mut assets = inventory.assets.values().cloned().collect::<Vec<_>>();
-        assets.sort_by(|a, b| a.source.cmp(&b.source));
+        assets.sort_by(|a, b| a.location.cmp(&b.location));
 
         let mut nodes = inventory
             .tree

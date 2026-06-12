@@ -1,6 +1,6 @@
 use alloc::collections::BTreeMap;
 
-use crate::{AssetEntry, AssetSource, NodeDefEntry, NodeDefLocation, ProjectTree};
+use crate::{AssetEntry, AssetLocation, NodeDefEntry, NodeDefLocation, ProjectTree};
 
 /// Effective post-overlay project state derived from artifacts plus overlay.
 ///
@@ -12,7 +12,7 @@ pub struct ProjectInventory {
     /// Unique referenced node definitions keyed by definition location.
     pub defs: BTreeMap<NodeDefLocation, NodeDefEntry>,
     /// Unique referenced assets keyed by asset source.
-    pub assets: BTreeMap<AssetSource, AssetEntry>,
+    pub assets: BTreeMap<AssetLocation, AssetEntry>,
     /// Expanded effective node uses reachable from the project root.
     pub tree: ProjectTree,
 }

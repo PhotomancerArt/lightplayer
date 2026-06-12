@@ -4,7 +4,7 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpc_model::{
-    ArtifactChangeSummary, ArtifactLocation, ArtifactOverlay, AssetOverlay, CommitResult,
+    ArtifactChangeSummary, ArtifactLocation, ArtifactOverlay, AssetBodyOverlay, CommitResult,
     MutationBatchResults, MutationCmdBatch, MutationCmdBatchResult, MutationCmdResult,
     MutationEffect, MutationOp, MutationResult, NodeDefEntry, NodeDefLocation, NodeDefState,
     ProjectInventory, ProjectOverlay, Revision, WithRevision,
@@ -15,7 +15,7 @@ use crate::overlay::inventory_change_summary::change_summary_between;
 use crate::overlay::project_inventory_derivation::derive_effective_inventory;
 use crate::{
     ArtifactStore, CommitError, LoadResult, ParseCtx, RegistryError,
-    asset::{MaterializeAssetError, MaterializedAsset, MaterializedTextAsset},
+    asset::{AssetBytes, AssetReadError, AssetText},
     overlay::{EditApplyError, serialize_slot_draft},
 };
 
@@ -161,7 +161,7 @@ impl ProjectRegistry {
                 .unwrap_or(false);
             match overlay {
                 ArtifactOverlay::Asset {
-                    overlay: AssetOverlay::Delete,
+                    overlay: AssetBodyOverlay::Delete,
                 } => {
                     if existed {
                         fs.delete_file(location.file_path().as_path())
@@ -177,7 +177,7 @@ impl ProjectRegistry {
                     });
                 }
                 ArtifactOverlay::Asset {
-                    overlay: AssetOverlay::ReplaceBody(bytes),
+                    overlay: AssetBodyOverlay::ReplaceBody(bytes),
                 } => {
                     fs.write_file(location.file_path().as_path(), bytes)
                         .map_err(|err| CommitError::Filesystem {
@@ -277,15 +277,15 @@ impl ProjectRegistry {
         self.inventory.defs.get(location)
     }
 
-    pub fn asset(&self, source: &lpc_model::AssetSource) -> Option<&lpc_model::AssetEntry> {
+    pub fn asset(&self, source: &lpc_model::AssetLocation) -> Option<&lpc_model::AssetEntry> {
         self.inventory.assets.get(source)
     }
 
     pub fn materialize_asset(
         &mut self,
         fs: &dyn LpFs,
-        source: &lpc_model::AssetSource,
-    ) -> Result<MaterializedAsset, MaterializeAssetError> {
+        source: &lpc_model::AssetLocation,
+    ) -> Result<AssetBytes, AssetReadError> {
         crate::asset::materialize_asset(
             &mut self.artifacts,
             &self.overlay,
@@ -298,8 +298,8 @@ impl ProjectRegistry {
     pub fn materialize_asset_text(
         &mut self,
         fs: &dyn LpFs,
-        source: &lpc_model::AssetSource,
-    ) -> Result<MaterializedTextAsset, MaterializeAssetError> {
+        source: &lpc_model::AssetLocation,
+    ) -> Result<AssetText, AssetReadError> {
         crate::asset::materialize_asset_text(
             &mut self.artifacts,
             &self.overlay,

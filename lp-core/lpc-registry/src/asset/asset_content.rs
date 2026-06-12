@@ -3,13 +3,13 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_model::{AssetKind, AssetSource, Revision};
+use lpc_model::{AssetContentType, AssetLocation, Revision};
 
 /// Effective asset bytes read for compilation, diagnostics, or runtime load.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MaterializedAsset {
-    pub source: AssetSource,
-    pub kind: AssetKind,
+pub struct AssetBytes {
+    pub location: AssetLocation,
+    pub content_type: AssetContentType,
     pub revision: Revision,
     pub bytes: Vec<u8>,
     pub diagnostic_name: String,
@@ -17,9 +17,9 @@ pub struct MaterializedAsset {
 
 /// Effective UTF-8 asset text.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub struct MaterializedTextAsset {
-    pub source: AssetSource,
-    pub kind: AssetKind,
+pub struct AssetText {
+    pub location: AssetLocation,
+    pub content_type: AssetContentType,
     pub revision: Revision,
     pub text: String,
     pub diagnostic_name: String,

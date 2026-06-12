@@ -9,7 +9,7 @@ use alloc::string::String;
 /// Whether an available asset body comes from committed artifacts or overlay.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AssetBodySource {
+pub enum AssetBodyOrigin {
     /// Body comes from committed artifact storage.
     Committed,
     /// Body is embedded inside the owning node definition.
@@ -23,7 +23,7 @@ pub enum AssetBodySource {
 #[serde(rename_all = "snake_case", tag = "state")]
 pub enum AssetState {
     /// The asset body can be materialized from the indicated source.
-    Available { source: AssetBodySource },
+    Available { origin: AssetBodyOrigin },
     /// The referenced artifact does not exist.
     NotFound,
     /// The referenced artifact has been deleted or is pending deletion.

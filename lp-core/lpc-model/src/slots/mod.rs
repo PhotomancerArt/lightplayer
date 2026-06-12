@@ -32,7 +32,7 @@ pub use relative_node_ref::RelativeNodeRefSlot;
 pub use render_order::{RenderOrder, RenderOrderSlot};
 pub use resource_ref::ResourceRefSlot;
 pub(crate) use source_file::SOURCE_FILE_CODEC_ID;
-pub use source_file::{SourceFileBacking, SourceFileSlot};
+pub use source_file::{AssetSlotValue, SourceFileSlot};
 pub use source_path::{SourcePath, SourcePathSlot};
 pub use visual_product::VisualProductSlot;
 pub use xy::{Xy, XySlot};

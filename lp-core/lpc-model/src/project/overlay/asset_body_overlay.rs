@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 /// source assets, fixture SVGs, and full node-definition artifact replacement.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum AssetOverlay {
+pub enum AssetBodyOverlay {
     /// Delete the artifact body from the effective project.
     Delete,
     /// Replace the effective artifact body with these bytes.

@@ -1,11 +1,8 @@
 use lpc_model::{
-    AssetSource, CommitResult, MutationBatchResults, MutationCmdBatch, MutationOp, MutationResult,
-    Revision, SlotShapeRegistry,
+    AssetLocation, CommitResult, MutationBatchResults, MutationCmdBatch, MutationOp,
+    MutationResult, Revision, SlotShapeRegistry,
 };
-use lpc_registry::{
-    LoadResult, MaterializeAssetError, MaterializedAsset, MaterializedTextAsset, ParseCtx,
-    ProjectRegistry,
-};
+use lpc_registry::{AssetBytes, AssetReadError, AssetText, LoadResult, ParseCtx, ProjectRegistry};
 use lpfs::{FsEvent, FsEventKind, LpFsMemory, LpPath, LpPathBuf};
 
 use super::TestProject;
@@ -59,15 +56,15 @@ impl RegistryScenario {
 
     pub fn materialize_asset(
         &mut self,
-        source: &AssetSource,
-    ) -> Result<MaterializedAsset, MaterializeAssetError> {
+        source: &AssetLocation,
+    ) -> Result<AssetBytes, AssetReadError> {
         self.registry.materialize_asset(&self.fs, source)
     }
 
     pub fn materialize_asset_text(
         &mut self,
-        source: &AssetSource,
-    ) -> Result<MaterializedTextAsset, MaterializeAssetError> {
+        source: &AssetLocation,
+    ) -> Result<AssetText, AssetReadError> {
         self.registry.materialize_asset_text(&self.fs, source)
     }
 

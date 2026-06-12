@@ -2,34 +2,34 @@
 
 use alloc::string::String;
 
-use lpc_model::{AssetSource, NodeDefLocation};
+use lpc_model::{AssetLocation, NodeDefLocation};
 
 /// Failure reading the effective body of a referenced project asset.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MaterializeAssetError {
+pub enum AssetReadError {
     UnreferencedAsset {
-        source: AssetSource,
+        location: AssetLocation,
     },
     NotFound {
-        source: AssetSource,
+        location: AssetLocation,
     },
     Deleted {
-        source: AssetSource,
+        location: AssetLocation,
     },
     ReadError {
-        source: AssetSource,
+        location: AssetLocation,
         message: String,
     },
     Utf8 {
-        source: AssetSource,
+        location: AssetLocation,
         message: String,
     },
     Unsupported {
-        source: AssetSource,
+        location: AssetLocation,
         message: String,
     },
     OwnerDefUnavailable {
-        source: AssetSource,
+        location: AssetLocation,
         owner: NodeDefLocation,
     },
 }

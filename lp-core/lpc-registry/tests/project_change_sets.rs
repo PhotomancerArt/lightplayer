@@ -1,7 +1,7 @@
 mod support;
 
 use lpc_model::{
-    AssetChange, AssetChangeKind, AssetOverlay, MutationOp, NodeDefChange, NodeDefChangeKind,
+    AssetBodyOverlay, AssetChange, AssetChangeKind, MutationOp, NodeDefChange, NodeDefChangeKind,
     NodeDefState, NodeKind, NodeUseChange, NodeUseChangeKind, NodeUseLocation, SlotPath,
 };
 use support::{RegistryScenario, artifact, artifact_asset, root_def};
@@ -144,7 +144,7 @@ fn changing_shader_def_kind_removes_its_referenced_source_asset() {
 
     let result = scenario.apply(MutationOp::SetArtifactBody {
         artifact: artifact("/idle.toml"),
-        edit: AssetOverlay::ReplaceBody(br#"kind = "Clock""#.to_vec()),
+        edit: AssetBodyOverlay::ReplaceBody(br#"kind = "Clock""#.to_vec()),
     });
 
     assert_eq!(

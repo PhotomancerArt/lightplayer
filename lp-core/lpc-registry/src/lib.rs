@@ -19,9 +19,9 @@ pub use artifact::{
     ArtifactEntry, ArtifactError, ArtifactLocation, ArtifactReadFailure, ArtifactReadState,
     ArtifactStore,
 };
-pub use asset::{MaterializeAssetError, MaterializedAsset, MaterializedTextAsset};
+pub use asset::{AssetBytes, AssetReadError, AssetText};
 pub use lpc_model::{
-    ArtifactOverlay, AssetOverlay, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,
+    ArtifactOverlay, AssetBodyOverlay, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,
 };
 pub use overlay::{EditApplyError, serialize_slot_draft};
 pub use registry::commit_error::CommitError;

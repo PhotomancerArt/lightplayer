@@ -1,6 +1,6 @@
 use lpc_model::{
-    ArtifactLocation, AssetBodySource, AssetKind, AssetSource, AssetState, NodeDefLocation,
-    NodeDefState, Revision, SlotPath, SlotShapeRegistry,
+    ArtifactLocation, AssetBodyOrigin, AssetContentType, AssetLocation, AssetState,
+    NodeDefLocation, NodeDefState, Revision, SlotPath, SlotShapeRegistry,
 };
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpfs::{LpFsMemory, LpPath};
@@ -54,7 +54,7 @@ render_order = 0
         artifact: ArtifactLocation::file("/project.toml"),
         path: SlotPath::parse("nodes[clock]").unwrap(),
     };
-    let shader_asset = AssetSource::artifact(ArtifactLocation::file("/shader.glsl"));
+    let shader_asset = AssetLocation::artifact(ArtifactLocation::file("/shader.glsl"));
 
     assert_eq!(result.root, root);
     assert!(result.changes.assets.changed.is_empty());
@@ -75,7 +75,7 @@ render_order = 0
     assert_eq!(
         registry.asset(&shader_asset).unwrap().state,
         AssetState::Available {
-            source: AssetBodySource::Committed
+            origin: AssetBodyOrigin::Committed
         }
     );
     assert_eq!(result.changes.defs.added.len(), 3);
@@ -104,7 +104,7 @@ source = { glsl = "void main() {}" }
         .load_root(&fs, LpPath::new("/project.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    let source = AssetSource::inline(
+    let source = AssetLocation::inline(
         NodeDefLocation {
             artifact: ArtifactLocation::file("/project.toml"),
             path: SlotPath::parse("nodes[shader]").unwrap(),
@@ -113,11 +113,11 @@ source = { glsl = "void main() {}" }
     );
     let entry = registry.asset(&source).expect("inline source asset");
 
-    assert_eq!(entry.kind, AssetKind::ShaderSource);
+    assert_eq!(entry.content_type, AssetContentType::ShaderSource);
     assert_eq!(
         entry.state,
         AssetState::Available {
-            source: AssetBodySource::Inline
+            origin: AssetBodyOrigin::Inline
         }
     );
 }
@@ -179,7 +179,7 @@ source = { path = "missing.glsl" }
         .load_root(&fs, LpPath::new("/project.toml"), Revision::new(1), &ctx)
         .unwrap();
 
-    let missing = AssetSource::artifact(ArtifactLocation::file("/missing.glsl"));
+    let missing = AssetLocation::artifact(ArtifactLocation::file("/missing.glsl"));
     assert_eq!(
         registry.asset(&missing).map(|entry| &entry.state),
         Some(&AssetState::NotFound)

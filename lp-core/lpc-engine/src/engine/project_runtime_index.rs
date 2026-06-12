@@ -3,7 +3,7 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use lpc_model::{AssetSource, NodeDefLocation, NodeId, NodeUseLocation, ProjectTree};
+use lpc_model::{AssetLocation, NodeDefLocation, NodeId, NodeUseLocation, ProjectTree};
 
 /// Engine-local lookup table for the current registry-to-runtime projection.
 ///
@@ -15,7 +15,7 @@ pub struct ProjectRuntimeIndex {
     node_to_runtime: BTreeMap<NodeUseLocation, NodeId>,
     runtime_to_node: BTreeMap<NodeId, NodeUseLocation>,
     def_to_runtime: BTreeMap<NodeDefLocation, Vec<NodeId>>,
-    asset_to_runtime: BTreeMap<AssetSource, Vec<NodeId>>,
+    asset_to_runtime: BTreeMap<AssetLocation, Vec<NodeId>>,
 }
 
 impl ProjectRuntimeIndex {
@@ -37,7 +37,7 @@ impl ProjectRuntimeIndex {
             .push(node_id);
     }
 
-    pub fn add_asset_consumer(&mut self, source: AssetSource, node_id: NodeId) {
+    pub fn add_asset_consumer(&mut self, source: AssetLocation, node_id: NodeId) {
         self.asset_to_runtime
             .entry(source)
             .or_default()
@@ -78,7 +78,7 @@ impl ProjectRuntimeIndex {
             .unwrap_or(&[])
     }
 
-    pub fn runtime_nodes_for_asset(&self, source: &AssetSource) -> &[NodeId] {
+    pub fn runtime_nodes_for_asset(&self, source: &AssetLocation) -> &[NodeId] {
         self.asset_to_runtime
             .get(source)
             .map(Vec::as_slice)
@@ -125,7 +125,7 @@ mod tests {
     fn definition_and_asset_indexes_allow_multiple_runtime_nodes() {
         let mut index = ProjectRuntimeIndex::new();
         let def_location = def("/shared.toml");
-        let asset = AssetSource::artifact(ArtifactLocation::file("/shader.glsl"));
+        let asset = AssetLocation::artifact(ArtifactLocation::file("/shader.glsl"));
 
         index.insert_node(
             NodeUseLocation::root(),
@@ -155,7 +155,7 @@ mod tests {
         let mut index = ProjectRuntimeIndex::new();
         let use_location = NodeUseLocation::root();
         let def_location = def("/project.toml");
-        let asset = AssetSource::artifact(ArtifactLocation::file("/shader.glsl"));
+        let asset = AssetLocation::artifact(ArtifactLocation::file("/shader.glsl"));
 
         index.insert_node(use_location.clone(), NodeId::new(0), def_location.clone());
         index.add_asset_consumer(asset.clone(), NodeId::new(0));
@@ -171,7 +171,7 @@ mod tests {
         let mut index = ProjectRuntimeIndex::new();
         let use_location = NodeUseLocation::root();
         let def_location = def("/project.toml");
-        let asset = AssetSource::artifact(ArtifactLocation::file("/shader.glsl"));
+        let asset = AssetLocation::artifact(ArtifactLocation::file("/shader.glsl"));
         let node = NodeId::new(3);
 
         index.insert_node(use_location.clone(), node, def_location.clone());

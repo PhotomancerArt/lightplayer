@@ -1,4 +1,4 @@
-use super::{AssetOverlay, SlotEdit, SlotOverlay};
+use super::{AssetBodyOverlay, SlotEdit, SlotOverlay};
 
 /// Current pending intent for one artifact.
 ///
@@ -11,7 +11,7 @@ pub enum ArtifactOverlay {
     /// Structured edits to an authored node-definition artifact.
     Slot { overlay: SlotOverlay },
     /// Whole-body edit to an asset or definition artifact.
-    Asset { overlay: AssetOverlay },
+    Asset { overlay: AssetBodyOverlay },
 }
 
 impl ArtifactOverlay {
@@ -19,7 +19,7 @@ impl ArtifactOverlay {
         Self::Slot { overlay }
     }
 
-    pub fn body(edit: AssetOverlay) -> Self {
+    pub fn body(edit: AssetBodyOverlay) -> Self {
         Self::Asset { overlay: edit }
     }
 
@@ -34,7 +34,7 @@ impl ArtifactOverlay {
         }
     }
 
-    pub fn as_body(&self) -> Option<&AssetOverlay> {
+    pub fn as_body(&self) -> Option<&AssetBodyOverlay> {
         match self {
             Self::Slot { .. } => None,
             Self::Asset { overlay: edit } => Some(edit),

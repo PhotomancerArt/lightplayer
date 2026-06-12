@@ -3,23 +3,23 @@
 //! These changes are derived by comparing two effective asset inventories. They
 //! tell consumers which asset identities entered, left, or changed state.
 
-use crate::{AssetSource, ChangeSummary};
+use crate::{AssetLocation, ChangeSummary};
 
 /// Effective asset changes visible to runtime/project consumers.
-pub type AssetChangeSummary = ChangeSummary<AssetSource, AssetChange>;
+pub type AssetChangeSummary = ChangeSummary<AssetLocation, AssetChange>;
 
 /// One changed asset and its coarse runtime-facing classification.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AssetChange {
     /// Changed asset identity.
-    pub source: AssetSource,
+    pub location: AssetLocation,
     /// Coarse classification of the change.
     pub kind: AssetChangeKind,
 }
 
 impl AssetChange {
-    pub fn new(source: AssetSource, kind: AssetChangeKind) -> Self {
-        Self { source, kind }
+    pub fn new(location: AssetLocation, kind: AssetChangeKind) -> Self {
+        Self { location, kind }
     }
 }
 

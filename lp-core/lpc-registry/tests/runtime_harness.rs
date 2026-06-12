@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{
-    ArtifactLocation, AssetOverlay, AssetSource, AssetState, MutationOp, NodeDefLocation, Revision,
-    SlotShapeRegistry,
+    ArtifactLocation, AssetBodyOverlay, AssetLocation, AssetState, MutationOp, NodeDefLocation,
+    Revision, SlotShapeRegistry,
 };
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpfs::{LpFsMemory, LpPath};
@@ -19,7 +19,7 @@ fn write_file(fs: &mut LpFsMemory, path: &str, contents: &str) {
 #[derive(Default)]
 struct FakeRuntime {
     nodes: BTreeMap<NodeDefLocation, RuntimeNodeState>,
-    assets: BTreeMap<AssetSource, RuntimeAssetState>,
+    assets: BTreeMap<AssetLocation, RuntimeAssetState>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -52,7 +52,7 @@ impl FakeRuntime {
             self.load_asset(registry, location);
         }
         for change in &changes.assets.changed {
-            self.load_asset(registry, &change.source);
+            self.load_asset(registry, &change.location);
         }
     }
 
@@ -67,7 +67,7 @@ impl FakeRuntime {
         );
     }
 
-    fn load_asset(&mut self, registry: &ProjectRegistry, source: &AssetSource) {
+    fn load_asset(&mut self, registry: &ProjectRegistry, source: &AssetLocation) {
         let entry = registry.asset(source).expect("asset entry");
         self.assets.insert(
             source.clone(),
@@ -114,13 +114,13 @@ source = { path = "shader.glsl" }
     assert_eq!(runtime.assets.len(), 1);
 
     let asset = ArtifactLocation::file("/shader.glsl");
-    let asset_source = AssetSource::artifact(asset.clone());
+    let asset_source = AssetLocation::artifact(asset.clone());
     let apply = registry
         .mutate(
             &fs,
             MutationOp::SetArtifactBody {
                 artifact: asset.clone(),
-                edit: AssetOverlay::ReplaceBody(b"void main() { }".to_vec()),
+                edit: AssetBodyOverlay::ReplaceBody(b"void main() { }".to_vec()),
             },
             Revision::new(2),
             &ctx,
@@ -134,7 +134,7 @@ source = { path = "shader.glsl" }
     assert_eq!(
         registry.asset(&asset_source).unwrap().state,
         AssetState::Available {
-            source: lpc_model::AssetBodySource::OverlayReplace
+            origin: lpc_model::AssetBodyOrigin::OverlayReplace
         }
     );
 

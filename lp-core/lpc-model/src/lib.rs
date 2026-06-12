@@ -75,8 +75,9 @@ pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRan
 /// meaning owns its storage shape.
 pub use kind::Kind;
 pub use project::inventory::{
-    AssetBodySource, AssetChange, AssetChangeKind, AssetChangeSummary, AssetEntry, AssetKind,
-    AssetRef, AssetSource, AssetState, NodeUseChange, NodeUseChangeKind, NodeUseChangeSummary,
+    AssetBodyOrigin, AssetChange, AssetChangeKind, AssetChangeSummary, AssetContentType,
+    AssetEntry, AssetLocation, AssetState, NodeUseChange, NodeUseChangeKind, NodeUseChangeSummary,
+    ReferencedAsset,
 };
 pub use value::WithRevision;
 pub use value::{LpType, LpValue, ModelEnumVariant, ModelStructMember};
@@ -111,7 +112,7 @@ pub use nodes::{
 };
 pub use product::{ControlExtent, ControlProduct, ProductKind, ProductRef, VisualProduct};
 pub use project::overlay::{
-    ArtifactOverlay, AssetOverlay, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,
+    ArtifactOverlay, AssetBodyOverlay, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,
 };
 pub use project::overlay_mutation::{
     MutationCmd, MutationCmdBatch, MutationCmdBatchResult, MutationCmdId, MutationCmdResult,
@@ -126,12 +127,12 @@ pub use project::{advance_revision, current_revision, set_current_revision};
 pub use resource::{ResourceDomain, ResourceRef, RuntimeBufferId, runtime_buffer_resource_shape};
 pub use server::server_config::ServerConfig;
 pub use slot::{
-    Affine2d, Affine2dSlot, ArtifactPath, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue,
-    ControlProductSlot, Dim2u, Dim2uSlot, FromLpValue, OrderedF32, PositiveF32, PositiveF32Slot,
-    Ratio, RatioSlot, RelativeNodeRefSlot, RenderOrder, RenderOrderSlot, ResourceRefSlot,
-    SlotEnumOption, SlotMapValueAccess, SlotValue, SlotValueShape, SourceFileBacking,
-    SourceFileSlot, SourcePath, SourcePathSlot, ToLpValue, ValueEditorHint, ValueRootError,
-    VisualProductSlot, Xy, XySlot,
+    Affine2d, Affine2dSlot, ArtifactPath, ArtifactPathSlot, AssetSlotValue, ColorOrderSlot,
+    ColorOrderValue, ControlProductSlot, Dim2u, Dim2uSlot, FromLpValue, OrderedF32, PositiveF32,
+    PositiveF32Slot, Ratio, RatioSlot, RelativeNodeRefSlot, RenderOrder, RenderOrderSlot,
+    ResourceRefSlot, SlotEnumOption, SlotMapValueAccess, SlotValue, SlotValueShape, SourceFileSlot,
+    SourcePath, SourcePathSlot, ToLpValue, ValueEditorHint, ValueRootError, VisualProductSlot, Xy,
+    XySlot,
 };
 pub use slot::{
     DynamicSlotObject, EnumSlot, FieldSlot, FieldSlotMut, MapSlot, MapSlotAccess, MapSlotAccessMut,

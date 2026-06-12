@@ -1,4 +1,4 @@
-use crate::{ArtifactLocation, AssetOverlay, SlotEdit, SlotPath};
+use crate::{ArtifactLocation, AssetBodyOverlay, SlotEdit, SlotPath};
 
 /// One ordered mutation to the canonical project overlay.
 ///
@@ -27,7 +27,7 @@ pub enum MutationOp {
         /// Artifact whose body should be replaced or deleted.
         artifact: ArtifactLocation,
         /// Whole-body asset edit.
-        edit: AssetOverlay,
+        edit: AssetBodyOverlay,
     },
     /// Remove all pending intent for one artifact.
     ClearArtifact {

@@ -16,7 +16,7 @@
 //!   after overlay application.
 
 pub mod artifact_overlay;
-pub mod asset_overlay;
+pub mod asset_body_overlay;
 pub mod project_overlay;
 pub mod slot_edit;
 pub mod slot_overlay;
@@ -26,7 +26,7 @@ pub use crate::project::overlay_mutation::{
     MutationCmdStatus, MutationEffect, MutationOp, MutationRejection, MutationRejectionReason,
 };
 pub use artifact_overlay::ArtifactOverlay;
-pub use asset_overlay::AssetOverlay;
+pub use asset_body_overlay::AssetBodyOverlay;
 pub use project_overlay::ProjectOverlay;
 pub use slot_edit::{SlotEdit, SlotEditOp};
 pub use slot_overlay::SlotOverlay;

@@ -1,9 +1,9 @@
 mod support;
 
-use lpc_model::{AssetKind, NodeKind};
+use lpc_model::{AssetContentType, NodeKind};
 use lpfs::{LpFs, LpPath};
 use support::{
-    RegistryScenario, TestProject, assert_artifact_asset_kinds, assert_loaded_def_kinds,
+    RegistryScenario, TestProject, assert_artifact_asset_content_types, assert_loaded_def_kinds,
 };
 
 #[test]
@@ -42,12 +42,12 @@ fn can_create_fyeah_sign_project_from_empty_fs_with_artifact_body_mutations() {
             ("/radio.toml", NodeKind::ControlRadio),
         ],
     );
-    assert_artifact_asset_kinds(
+    assert_artifact_asset_content_types(
         scenario.registry(),
         &[
-            ("/blast.glsl", AssetKind::ShaderSource),
-            ("/fyeah-mapping.svg", AssetKind::FixtureSvg),
-            ("/idle.glsl", AssetKind::ShaderSource),
+            ("/blast.glsl", AssetContentType::ShaderSource),
+            ("/fyeah-mapping.svg", AssetContentType::FixtureSvg),
+            ("/idle.glsl", AssetContentType::ShaderSource),
         ],
     );
 }

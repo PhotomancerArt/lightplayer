@@ -31,7 +31,7 @@ mod tests {
     use super::*;
     use alloc::vec;
     use lpc_model::{
-        ArtifactLocation, AssetOverlay, MutationCmd, MutationCmdId, MutationCmdResult,
+        ArtifactLocation, AssetBodyOverlay, MutationCmd, MutationCmdId, MutationCmdResult,
         MutationEffect, MutationOp, SlotEdit, SlotPath,
     };
 
@@ -49,7 +49,7 @@ mod tests {
                 id: MutationCmdId::new(2),
                 mutation: MutationOp::SetArtifactBody {
                     artifact: ArtifactLocation::file("/shader.glsl"),
-                    edit: AssetOverlay::ReplaceBody(b"void main() {}".to_vec()),
+                    edit: AssetBodyOverlay::ReplaceBody(b"void main() {}".to_vec()),
                 },
             },
         ]));

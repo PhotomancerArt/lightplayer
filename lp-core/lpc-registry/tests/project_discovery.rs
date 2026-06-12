@@ -1,8 +1,8 @@
 mod support;
 
-use lpc_model::{AssetKind, NodeKind};
+use lpc_model::{AssetContentType, NodeKind};
 
-use support::{RegistryScenario, assert_artifact_asset_kinds, assert_loaded_def_kinds};
+use support::{RegistryScenario, assert_artifact_asset_content_types, assert_loaded_def_kinds};
 
 #[test]
 fn fyeah_sign_discovers_referenced_node_defs_and_assets() {
@@ -30,12 +30,12 @@ fn fyeah_sign_discovers_referenced_node_defs_and_assets() {
         ],
     );
 
-    assert_artifact_asset_kinds(
+    assert_artifact_asset_content_types(
         registry,
         &[
-            ("/blast.glsl", AssetKind::ShaderSource),
-            ("/fyeah-mapping.svg", AssetKind::FixtureSvg),
-            ("/idle.glsl", AssetKind::ShaderSource),
+            ("/blast.glsl", AssetContentType::ShaderSource),
+            ("/fyeah-mapping.svg", AssetContentType::FixtureSvg),
+            ("/idle.glsl", AssetContentType::ShaderSource),
         ],
     );
 

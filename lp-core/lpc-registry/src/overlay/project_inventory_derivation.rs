@@ -5,10 +5,10 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpc_model::{
-    ArtifactLocation, AssetBodySource, AssetEntry, AssetKind, AssetOverlay, AssetRef, AssetSource,
-    AssetState, NodeDefEntry, NodeDefLocation, NodeDefState, NodeInvocation, NodeUseLocation,
-    ProjectInventory, ProjectNode, ProjectNodeOrigin, ProjectOverlay, Revision, SlotPath,
-    WithRevision, resolve_artifact_specifier,
+    ArtifactLocation, AssetBodyOrigin, AssetBodyOverlay, AssetContentType, AssetEntry,
+    AssetLocation, AssetState, NodeDefEntry, NodeDefLocation, NodeDefState, NodeInvocation,
+    NodeUseLocation, ProjectInventory, ProjectNode, ProjectNodeOrigin, ProjectOverlay,
+    ReferencedAsset, Revision, SlotPath, WithRevision, resolve_artifact_specifier,
 };
 use lpfs::{LpFs, LpPath};
 
@@ -121,7 +121,7 @@ impl InventoryDerivation<'_, '_> {
                 }
             }
             Err(err) => {
-                let source = AssetSource::artifact(ArtifactLocation::file(error_asset_path(
+                let source = AssetLocation::artifact(ArtifactLocation::file(error_asset_path(
                     &location.artifact,
                     &location.path,
                 )));
@@ -130,7 +130,12 @@ impl InventoryDerivation<'_, '_> {
                 };
                 self.inventory.assets.insert(
                     source.clone(),
-                    AssetEntry::new(source, AssetKind::Binary, state, self.overlay.changed_at()),
+                    AssetEntry::new(
+                        source,
+                        AssetContentType::Binary,
+                        state,
+                        self.overlay.changed_at(),
+                    ),
                 );
             }
         }
@@ -211,18 +216,18 @@ impl InventoryDerivation<'_, '_> {
 
     fn walk_asset(
         &mut self,
-        asset: AssetRef,
+        asset: ReferencedAsset,
         owner_revision: Revision,
         consumer: &NodeUseLocation,
     ) {
-        let revision = self.revision_for_asset(&asset.source, owner_revision);
-        let state = self.read_effective_asset(&asset.source);
+        let revision = self.revision_for_asset(&asset.location, owner_revision);
+        let state = self.read_effective_asset(&asset.location);
         self.inventory
             .tree
-            .add_asset_consumer(asset.source.clone(), consumer.clone());
+            .add_asset_consumer(asset.location.clone(), consumer.clone());
         self.inventory.assets.insert(
-            asset.source.clone(),
-            AssetEntry::new(asset.source, asset.kind, state, revision),
+            asset.location.clone(),
+            AssetEntry::new(asset.location, asset.content_type, state, revision),
         );
     }
 
@@ -231,8 +236,8 @@ impl InventoryDerivation<'_, '_> {
 
         if let Some(body) = pending.and_then(|overlay| overlay.as_body()) {
             return match body {
-                AssetOverlay::Delete => NodeDefState::Deleted,
-                AssetOverlay::ReplaceBody(bytes) => match parse_def_bytes(bytes, self.ctx) {
+                AssetBodyOverlay::Delete => NodeDefState::Deleted,
+                AssetBodyOverlay::ReplaceBody(bytes) => match parse_def_bytes(bytes, self.ctx) {
                     Ok(def) => NodeDefState::Loaded(def),
                     Err(err) => NodeDefState::ParseError(parse_error(err)),
                 },
@@ -264,12 +269,12 @@ impl InventoryDerivation<'_, '_> {
         NodeDefState::Loaded(def)
     }
 
-    fn read_effective_asset(&mut self, source: &AssetSource) -> AssetState {
+    fn read_effective_asset(&mut self, source: &AssetLocation) -> AssetState {
         let location = match source {
-            AssetSource::Artifact { location } => location,
-            AssetSource::Inline { .. } => {
+            AssetLocation::Artifact { location } => location,
+            AssetLocation::Inline { .. } => {
                 return AssetState::Available {
-                    source: AssetBodySource::Inline,
+                    origin: AssetBodyOrigin::Inline,
                 };
             }
         };
@@ -283,10 +288,10 @@ impl InventoryDerivation<'_, '_> {
             .artifact(location)
             .and_then(|overlay| overlay.as_body())
         {
-            Some(AssetOverlay::Delete) => return AssetState::Deleted,
-            Some(AssetOverlay::ReplaceBody(_)) => {
+            Some(AssetBodyOverlay::Delete) => return AssetState::Deleted,
+            Some(AssetBodyOverlay::ReplaceBody(_)) => {
                 return AssetState::Available {
-                    source: AssetBodySource::OverlayReplace,
+                    origin: AssetBodyOrigin::OverlayReplace,
                 };
             }
             None => {}
@@ -306,7 +311,7 @@ impl InventoryDerivation<'_, '_> {
 
         match self.artifacts.read_bytes(location, self.fs) {
             Ok(_) => AssetState::Available {
-                source: AssetBodySource::Committed,
+                origin: AssetBodyOrigin::Committed,
             },
             Err(ArtifactError::Read(ArtifactReadFailure::NotFound)) => AssetState::NotFound,
             Err(ArtifactError::Read(ArtifactReadFailure::Deleted)) => AssetState::Deleted,
@@ -324,10 +329,10 @@ impl InventoryDerivation<'_, '_> {
         }
     }
 
-    fn revision_for_asset(&self, source: &AssetSource, owner_revision: Revision) -> Revision {
+    fn revision_for_asset(&self, source: &AssetLocation, owner_revision: Revision) -> Revision {
         match source {
-            AssetSource::Artifact { location } => self.revision_for_artifact(location),
-            AssetSource::Inline { .. } => owner_revision,
+            AssetLocation::Artifact { location } => self.revision_for_artifact(location),
+            AssetLocation::Inline { .. } => owner_revision,
         }
     }
 }

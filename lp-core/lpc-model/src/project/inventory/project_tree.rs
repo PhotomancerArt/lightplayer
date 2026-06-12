@@ -1,7 +1,7 @@
 use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
 
-use crate::{AssetSource, NodeDefLocation, NodeUseLocation, ProjectNode};
+use crate::{AssetLocation, NodeDefLocation, NodeUseLocation, ProjectNode};
 
 /// Effective post-overlay project node uses and reverse indexes.
 ///
@@ -21,7 +21,7 @@ pub struct ProjectTree {
     /// Reverse index from definition location to node uses using it.
     pub def_instances: BTreeMap<NodeDefLocation, Vec<NodeUseLocation>>,
     /// Reverse index from asset source to node uses whose definitions reference it.
-    pub asset_consumers: BTreeMap<AssetSource, Vec<NodeUseLocation>>,
+    pub asset_consumers: BTreeMap<AssetLocation, Vec<NodeUseLocation>>,
 }
 
 impl ProjectTree {
@@ -42,7 +42,7 @@ impl ProjectTree {
         self.nodes.insert(entry.key.clone(), entry);
     }
 
-    pub fn add_asset_consumer(&mut self, source: AssetSource, consumer: NodeUseLocation) {
+    pub fn add_asset_consumer(&mut self, source: AssetLocation, consumer: NodeUseLocation) {
         self.asset_consumers
             .entry(source)
             .or_default()
