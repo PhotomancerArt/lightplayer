@@ -57,7 +57,6 @@ pub struct Engine {
     resolver: Resolver,
     slot_shapes: SlotShapeRegistry,
     runtime_buffers: RuntimeBufferStore,
-    registry: ProjectRegistry,
     project_runtime_index: ProjectRuntimeIndex,
     services: EngineServices,
     demand_roots: Vec<NodeId>,
@@ -80,7 +79,6 @@ impl Engine {
             resolver: Resolver::new(),
             slot_shapes,
             runtime_buffers: RuntimeBufferStore::new(),
-            registry: ProjectRegistry::new(),
             project_runtime_index: ProjectRuntimeIndex::new(),
             services,
             demand_roots: Vec::new(),
@@ -130,14 +128,6 @@ impl Engine {
 
     pub fn runtime_buffers_mut(&mut self) -> &mut RuntimeBufferStore {
         &mut self.runtime_buffers
-    }
-
-    pub fn registry(&self) -> &ProjectRegistry {
-        &self.registry
-    }
-
-    pub fn registry_mut(&mut self) -> &mut ProjectRegistry {
-        &mut self.registry
     }
 
     pub fn project_runtime_index(&self) -> &ProjectRuntimeIndex {
@@ -214,17 +204,19 @@ impl Engine {
         }
     }
 
-    pub(crate) fn loaded_node_def_for_entry<N>(
+    pub(crate) fn loaded_node_def_for_entry<'a, N>(
         &self,
+        registry: &'a ProjectRegistry,
         entry: &RuntimeNodeEntry<N>,
-    ) -> Option<&NodeDef> {
+    ) -> Option<&'a NodeDef> {
         let location = entry.def_location.as_ref()?;
-        loaded_registry_def(&self.registry, location).ok()
+        loaded_registry_def(registry, location).ok()
     }
 
     #[cfg(test)]
     pub(crate) fn load_test_node_defs(
         &mut self,
+        registry: &mut ProjectRegistry,
         defs: &[(NodeId, NodeDef)],
         frame: Revision,
     ) -> Result<(), alloc::string::String> {
@@ -252,7 +244,7 @@ impl Engine {
         let ctx = ParseCtx {
             shapes: &self.slot_shapes,
         };
-        self.registry
+        registry
             .load_root(&fs, "/project.toml".as_path(), frame, &ctx)
             .map_err(|e| format!("{e:?}"))?;
 
@@ -270,12 +262,12 @@ impl Engine {
         Ok(())
     }
 
-    pub fn tick(&mut self, delta_ms: u32) -> Result<(), EngineError> {
+    pub fn tick(&mut self, registry: &ProjectRegistry, delta_ms: u32) -> Result<(), EngineError> {
         lp_perf::emit_begin!(lp_perf::EVENT_FRAME);
         let result = (|| {
-            self.tick_nodes(delta_ms)?;
+            self.tick_nodes(registry, delta_ms)?;
             let revision = self.revision;
-            self.refresh_output_sink_configs();
+            self.refresh_output_sink_configs(registry);
             let buffers = &self.runtime_buffers;
             self.services
                 .flush_dirty_output_sinks(revision, buffers)
@@ -288,13 +280,13 @@ impl Engine {
         result
     }
 
-    fn refresh_output_sink_configs(&mut self) {
+    fn refresh_output_sink_configs(&mut self, registry: &ProjectRegistry) {
         let mut updates = Vec::new();
         for entry in self.tree.entries() {
             let Some(buffer_id) = self.runtime_output_sink_buffer_id(entry.id) else {
                 continue;
             };
-            let Some(NodeDef::Output(def)) = self.loaded_node_def_for_entry(entry) else {
+            let Some(NodeDef::Output(def)) = self.loaded_node_def_for_entry(registry, entry) else {
                 continue;
             };
             updates.push((buffer_id, def.clone()));
@@ -305,7 +297,7 @@ impl Engine {
         }
     }
 
-    fn tick_nodes(&mut self, delta_ms: u32) -> Result<(), EngineError> {
+    fn tick_nodes(&mut self, registry: &ProjectRegistry, delta_ms: u32) -> Result<(), EngineError> {
         self.resolver.clear_frame_cache();
         self.frame_num = self.frame_num.next();
         self.revision = advance_revision();
@@ -323,7 +315,7 @@ impl Engine {
         let radio_service = self.services.radio_service();
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
-            registry: &self.registry,
+            registry,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -355,6 +347,7 @@ impl Engine {
 
     pub(crate) fn render_texture_product(
         &mut self,
+        registry: &ProjectRegistry,
         product: VisualProduct,
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, SessionResolveError> {
@@ -365,7 +358,7 @@ impl Engine {
         let radio_service = self.services.radio_service();
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
-            registry: &self.registry,
+            registry,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -381,15 +374,17 @@ impl Engine {
     #[cfg(test)]
     pub(crate) fn render_texture_for_test(
         &mut self,
+        registry: &ProjectRegistry,
         product: VisualProduct,
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, SessionResolveError> {
-        self.render_texture_product(product, request)
+        self.render_texture_product(registry, product, request)
     }
 
     #[cfg(test)]
     pub(crate) fn render_control_for_test(
         &mut self,
+        registry: &ProjectRegistry,
         product: ControlProduct,
         request: &ControlRenderRequest,
         target: ControlRenderTarget<'_>,
@@ -401,7 +396,7 @@ impl Engine {
         let radio_service = self.services.radio_service();
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
-            registry: &self.registry,
+            registry,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -1434,6 +1429,7 @@ fn loaded_registry_def<'a>(
 #[cfg(test)]
 pub(crate) fn resolve_with_engine_host(
     eng: &mut Engine,
+    registry: &ProjectRegistry,
     key: QueryKey,
     log_level: ResolveLogLevel,
 ) -> Result<(Production, ResolveTrace), SessionResolveError> {
@@ -1448,7 +1444,7 @@ pub(crate) fn resolve_with_engine_host(
     let radio_service = eng.services.radio_service();
     let mut host = EngineResolveHost {
         tree: &mut eng.tree,
-        registry: &eng.registry,
+        registry,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
@@ -1468,6 +1464,7 @@ pub(crate) fn resolve_with_engine_host(
 #[cfg(test)]
 pub(super) fn resolve_twice_same_frame_with_engine_host(
     eng: &mut Engine,
+    registry: &ProjectRegistry,
     key: QueryKey,
 ) -> Result<(Production, Production), SessionResolveError> {
     let fid = eng.revision;
@@ -1485,7 +1482,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
     let radio_service = eng.services.radio_service();
     let mut host = EngineResolveHost {
         tree: &mut eng.tree,
-        registry: &eng.registry,
+        registry,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
@@ -1531,14 +1528,15 @@ mod tests {
     #[test]
     fn tick_advances_frame_num_revision_and_accumulates_frame_time() {
         let mut eng = Engine::new(TreePath::parse("/show.t").expect("path"));
+        let registry = ProjectRegistry::new();
         let initial_revision = eng.revision();
-        eng.tick(10).expect("tick");
+        eng.tick(&registry, 10).expect("tick");
         assert_eq!(eng.frame_num(), FrameNum::new(1));
         assert!(eng.revision() > initial_revision);
         assert_eq!(eng.frame_time().delta_ms, 10);
         assert_eq!(eng.frame_time().total_ms, 10);
         let first_tick_revision = eng.revision();
-        eng.tick(5).expect("tick");
+        eng.tick(&registry, 5).expect("tick");
         assert_eq!(eng.frame_num(), FrameNum::new(2));
         assert!(eng.revision() > first_tick_revision);
         assert_eq!(eng.frame_time().total_ms, 15);
@@ -1547,6 +1545,7 @@ mod tests {
     #[test]
     fn tick_error_sets_node_status_and_restores_runtime() {
         let mut eng = Engine::new(TreePath::parse("/show.t").expect("path"));
+        let registry = ProjectRegistry::new();
         let root = eng.tree().root();
         let cfg = test_placeholder_spine();
         let node = eng
@@ -1582,7 +1581,7 @@ mod tests {
         .expect("bind demand input");
         eng.add_demand_root(node);
 
-        let err = eng.tick(10).expect_err("tick should fail");
+        let err = eng.tick(&registry, 10).expect_err("tick should fail");
         assert!(err.to_string().contains("intentional tick failure"));
 
         let entry = eng.tree().get(node).expect("entry");
@@ -1606,7 +1605,7 @@ mod tests {
             .demand_root("output")
             .build();
 
-        h.engine.tick(1).expect("tick");
+        h.tick(1).expect("tick");
 
         assert_eq!(h.fixture_f32("fixture"), Some(0.75));
         assert_eq!(h.output_f32("output"), Some(0.75));
@@ -1622,7 +1621,7 @@ mod tests {
             .bind_demand_input("fixture", bus("video"))
             .demand_root("fixture")
             .build();
-        h.engine.tick(1).expect("tick");
+        h.tick(1).expect("tick");
         assert!(
             !h.engine.resolver().cache().is_empty(),
             "resolver cache should hold demand-driven values after tick"
@@ -1658,8 +1657,9 @@ mod tests {
             slot: out,
         };
 
-        let (first, second) = super::resolve_twice_same_frame_with_engine_host(&mut h.engine, key)
-            .expect("resolve pair");
+        let (first, second) =
+            super::resolve_twice_same_frame_with_engine_host(&mut h.engine, &h.registry, key)
+                .expect("resolve pair");
         assert!(
             first
                 .as_value()

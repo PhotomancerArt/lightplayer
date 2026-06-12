@@ -5,6 +5,7 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::{NodeId, SlotAccess};
+use lpc_registry::ProjectRegistry;
 use lpc_wire::{
     NodeReadQuery, NodeReadResult, ReadLevel, WireSlotRootSnapshot, WireSlotRootsSnapshot,
     wire_slot_data_from_slot_access,
@@ -17,6 +18,7 @@ use super::Engine;
 impl Engine {
     pub(super) fn read_project_nodes(
         &self,
+        registry: &ProjectRegistry,
         since: Option<lpc_model::Revision>,
         query: NodeReadQuery,
     ) -> NodeReadResult {
@@ -27,7 +29,7 @@ impl Engine {
             }
         };
         let slots = if query.include_slots && query.level == ReadLevel::Detail {
-            Some(self.snapshot_node_slots())
+            Some(self.snapshot_node_slots(registry))
         } else {
             None
         };
@@ -39,11 +41,11 @@ impl Engine {
         }
     }
 
-    fn snapshot_node_slots(&self) -> WireSlotRootsSnapshot {
+    fn snapshot_node_slots(&self, registry: &ProjectRegistry) -> WireSlotRootsSnapshot {
         let mut roots = Vec::new();
 
         for entry in self.tree().entries() {
-            if let Some(def) = self.loaded_node_def_for_entry(entry) {
+            if let Some(def) = self.loaded_node_def_for_entry(registry, entry) {
                 roots.push(WireSlotRootSnapshot {
                     name: node_def_root_name(entry.id),
                     shape: def.shape_id(),

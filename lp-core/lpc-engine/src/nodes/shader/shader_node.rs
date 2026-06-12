@@ -631,6 +631,7 @@ mod tests {
         ArtifactSpec, MapSlot, NodeDef, NodeInvocation, Revision, SlotDataAccess, StaticSlotShape,
         TextureDef, TreePath,
     };
+    use lpc_registry::ProjectRegistry;
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     const DEMO_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float time; vec4 render(vec2 pos) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }";
@@ -647,8 +648,10 @@ mod tests {
         }
     }
 
-    fn build_texture_and_shader_engine() -> (Engine, NodeId, NodeId, VisualProduct) {
+    fn build_texture_and_shader_engine() -> (Engine, ProjectRegistry, NodeId, NodeId, VisualProduct)
+    {
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
+        let mut registry = ProjectRegistry::new();
         engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
@@ -691,6 +694,7 @@ mod tests {
         let shader_def = shader_def_with_time();
         engine
             .load_test_node_defs(
+                &mut registry,
                 &[
                     (tex_id, NodeDef::Texture(TextureDef::new(8, 8))),
                     (sh_id, NodeDef::Shader(shader_def.clone())),
@@ -705,7 +709,7 @@ mod tests {
 
         let rid = VisualProduct::new(sh_id, 0);
 
-        (engine, tex_id, sh_id, rid)
+        (engine, registry, tex_id, sh_id, rid)
     }
 
     #[test]
@@ -729,14 +733,14 @@ mod tests {
 
     #[test]
     fn shader_core_produces_visual_product_value() {
-        let (mut engine, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
-        engine.tick(1000).expect("tick");
+        let (mut engine, registry, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
+        engine.tick(&registry, 1000).expect("tick");
 
         let q = QueryKey::ProducedSlot {
             node: sh_id,
             slot: shader_output_path(),
         };
-        let prod = resolve_with_engine_host(&mut engine, q, ResolveLogLevel::Off)
+        let prod = resolve_with_engine_host(&mut engine, &registry, q, ResolveLogLevel::Off)
             .expect("resolve")
             .0;
         let got_id = match prod.value_leaf().expect("value").get() {
@@ -748,17 +752,18 @@ mod tests {
 
     #[test]
     fn shader_core_visual_product_is_sampleable_red_channel() {
-        let (mut engine, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
-        engine.tick(500).expect("tick");
+        let (mut engine, registry, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
+        engine.tick(&registry, 500).expect("tick");
 
         let q = QueryKey::ProducedSlot {
             node: sh_id,
             slot: shader_output_path(),
         };
-        resolve_with_engine_host(&mut engine, q, ResolveLogLevel::Off).expect("resolve");
+        resolve_with_engine_host(&mut engine, &registry, q, ResolveLogLevel::Off).expect("resolve");
 
         let texture = engine
             .render_texture_for_test(
+                &registry,
                 rid,
                 &crate::products::visual::RenderTextureRequest {
                     width: 8,
@@ -893,14 +898,15 @@ mod tests {
 
     #[test]
     fn shader_compile_cache_survives_unchanged_config_across_frames() {
-        let (mut engine, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
+        let (mut engine, registry, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
         let graphics = Arc::new(CountingGraphics::new());
         engine.set_graphics(Some(graphics.clone()));
 
         for time_ms in [500, 600, 700] {
-            engine.tick(time_ms).expect("tick");
+            engine.tick(&registry, time_ms).expect("tick");
             resolve_with_engine_host(
                 &mut engine,
+                &registry,
                 QueryKey::ProducedSlot {
                     node: sh_id,
                     slot: shader_output_path(),
@@ -910,6 +916,7 @@ mod tests {
             .expect("resolve");
             engine
                 .render_texture_for_test(
+                    &registry,
                     rid,
                     &crate::products::visual::RenderTextureRequest {
                         width: 8,

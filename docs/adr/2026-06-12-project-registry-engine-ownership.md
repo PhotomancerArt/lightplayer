@@ -25,7 +25,9 @@ freshness and effective node-definition state, so keeping a second engine
 artifact truth would make the cutover harder to reason about.
 
 We also considered whether `ProjectOverlay` and `ProjectInventory` should be
-owned directly by `Engine` instead of `ProjectRegistry`.
+owned directly by `Engine` instead of `ProjectRegistry`, and whether
+`ProjectRegistry` should be a field on `Engine` or on the server-side project
+container.
 
 ## Decision
 
@@ -39,8 +41,13 @@ Keep `lpc-registry` as a separate project-state crate.
 - the effective `ProjectInventory`;
 - the root `NodeDefLocation`.
 
-`Engine` owns a `ProjectRegistry`, but does not own the registry's overlay or
-inventory directly. The engine also owns runtime projection state:
+`Engine` does not own `ProjectRegistry`. The server-side project container owns
+both:
+
+- `ProjectRegistry`, the canonical project state;
+- `Engine`, the current runtime projection of that project state.
+
+`Engine` owns runtime projection state:
 
 - `NodeTree<Box<dyn NodeRuntime>>`;
 - runtime buffers and resources;
@@ -56,16 +63,27 @@ and model identities. Runtime tree entries should use project/model identities
 such as `NodeDefLocation` and project node instance keys instead of an engine
 local `ArtifactId`.
 
-`Engine` may expose convenience methods that orchestrate registry operations:
+Project loading returns both sides together through a lightweight
+`LoadedProjectRuntime` wrapper for direct loader callers and tests. Long-lived
+server ownership still lives in the server project container.
+
+The server project container orchestrates registry operations:
 
 ```text
 load project -> registry load -> runtime projection build
-apply overlay mutation -> registry change set -> runtime projection update
-refresh filesystem events -> registry change set -> runtime projection update
+apply overlay mutation -> registry change summary -> rebuild runtime projection
+commit overlay -> write artifacts -> rebuild runtime projection
+refresh filesystem events -> registry change summary -> rebuild runtime projection
 ```
 
-Those methods should preserve the registry as the consistency boundary for
-overlay, inventory, artifact freshness, and project change calculation.
+M4 deliberately uses a full runtime rebuild after accepted overlay edits or
+filesystem refreshes. Incremental runtime updates can later consume registry
+change summaries without changing ownership.
+
+Project reads are runtime queries against `Engine` plus `ProjectRegistry`.
+Overlay reads, overlay mutations, overlay commits, and inventory reads use a
+separate project command API instead of being embedded in project-read
+requests.
 
 ## Consequences
 
@@ -85,3 +103,7 @@ milestone completes.
 
 The crate boundary adds one dependency from `lpc-engine` to `lpc-registry`, but
 keeps project/editor state out of concrete runtime node code.
+
+Removing project mutations from project reads gives the UI an explicit
+read/write split: `ProjectReadRequest` observes runtime state, while
+`WireProjectCommand` carries overlay and inventory operations.

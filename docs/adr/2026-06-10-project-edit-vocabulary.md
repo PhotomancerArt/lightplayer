@@ -7,10 +7,11 @@ Accepted
 ## Context
 
 The registry branch needs a future UI and engine cutover path that edits
-authored project artifacts, not only immediate engine memory. The existing
-`WireSlotMutation*` API is intentionally narrow: it sets value leaves on runtime
-slot roots like `node.<id>.def`, applies immediately, and has no overlay or
-commit concept.
+authored project artifacts, not only immediate engine memory. At the time this
+ADR was written, the temporary `WireSlotMutation*` API was intentionally
+narrow: it set value leaves on runtime slot roots like `node.<id>.def`, applied
+immediately, and had no overlay or commit concept. That temporary API was
+removed during the M4 wire/server cutover.
 
 The first registry wire POC proved useful behavior, but it duplicated the same
 ideas across layers with command-shaped types such as `ArtifactEdit`,
@@ -51,8 +52,8 @@ slot application, effective inventory derivation, filesystem writes/deletes, and
 commit. It does not define a second overlay model and does not depend on
 `lpc-wire` in library code.
 
-The legacy `WireSlotMutation*` path remains during the POC and will be removed
-only after the later UI/server/engine cutover.
+The legacy `WireSlotMutation*` path was allowed during the POC, but M4 removed
+it in favor of overlay project commands.
 
 ## Consequences
 

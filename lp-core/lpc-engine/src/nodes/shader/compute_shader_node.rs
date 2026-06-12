@@ -281,6 +281,7 @@ mod tests {
         ShaderSource, SlotDataAccess, TreePath, ValueSlot, generate_compute_shader_header,
         lookup_slot_data,
     };
+    use lpc_registry::ProjectRegistry;
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     use crate::dataflow::resolver::{QueryKey, ResolveLogLevel};
@@ -289,10 +290,11 @@ mod tests {
 
     #[test]
     fn compute_node_executes_and_publishes_dynamic_state() {
-        let (mut engine, node_id) = build_compute_engine();
+        let (mut engine, registry, node_id) = build_compute_engine();
 
         let phase = resolve_with_engine_host(
             &mut engine,
+            &registry,
             QueryKey::ProducedSlot {
                 node: node_id,
                 slot: SlotPath::parse("phase").expect("phase path"),
@@ -333,11 +335,12 @@ mod tests {
         ));
     }
 
-    fn build_compute_engine() -> (Engine, NodeId) {
-        let registry = lpc_model::SlotShapeRegistry::default();
+    fn build_compute_engine() -> (Engine, ProjectRegistry, NodeId) {
+        let shapes = lpc_model::SlotShapeRegistry::default();
+        let mut registry = ProjectRegistry::new();
 
         let def = compute_def();
-        let header = generate_compute_shader_header(&def, &registry).expect("header");
+        let header = generate_compute_shader_header(&def, &shapes).expect("header");
         let glsl = format!(
             r#"{header}
 void tick() {{
@@ -371,7 +374,11 @@ void tick() {{
             )
             .expect("node");
         engine
-            .load_test_node_defs(&[(node_id, NodeDef::ComputeShader(def.clone()))], frame)
+            .load_test_node_defs(
+                &mut registry,
+                &[(node_id, NodeDef::ComputeShader(def.clone()))],
+                frame,
+            )
             .expect("load test defs");
         engine
             .attach_runtime_node(
@@ -380,7 +387,7 @@ void tick() {{
                 frame,
             )
             .expect("attach");
-        (engine, node_id)
+        (engine, registry, node_id)
     }
 
     fn compute_def() -> ComputeShaderDef {

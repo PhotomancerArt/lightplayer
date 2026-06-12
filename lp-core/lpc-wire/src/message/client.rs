@@ -2,6 +2,7 @@
 
 use crate::messages::ProjectReadRequest;
 use crate::project::WireProjectHandle;
+use crate::project_command::WireProjectCommand;
 use crate::server::FsRequest;
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,10 @@ pub enum ClientRequest {
     ProjectRequest {
         handle: WireProjectHandle,
         request: ProjectReadRequest,
+    },
+    ProjectCommand {
+        handle: WireProjectHandle,
+        command: WireProjectCommand,
     },
     ListAvailableProjects,
     ListLoadedProjects,
@@ -101,6 +106,28 @@ mod tests {
                     request,
                     crate::messages::ProjectReadRequest::default_debug(None)
                 );
+            }
+            _ => panic!("Wrong request type"),
+        }
+    }
+
+    #[test]
+    fn test_project_command() {
+        let req = ClientRequest::ProjectCommand {
+            handle: WireProjectHandle::new(1),
+            command: crate::WireProjectCommand::ReadOverlay {
+                request: crate::WireOverlayReadRequest,
+            },
+        };
+        let json = crate::json::to_string(&req).unwrap();
+        let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
+        match deserialized {
+            ClientRequest::ProjectCommand { handle, command } => {
+                assert_eq!(handle.id(), 1);
+                assert!(matches!(
+                    command,
+                    crate::WireProjectCommand::ReadOverlay { .. }
+                ));
             }
             _ => panic!("Wrong request type"),
         }

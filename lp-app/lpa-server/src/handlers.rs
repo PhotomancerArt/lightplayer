@@ -13,7 +13,8 @@ use lpc_shared::backtrace;
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_wire::{
-    WireServerMessage, WireServerMsgBody as ServerMessagePayload,
+    WireProjectCommand, WireProjectCommandResponse, WireServerMessage,
+    WireServerMsgBody as ServerMessagePayload,
     messages::ClientMessage,
     server::{AvailableProject, FsRequest, FsResponse},
 };
@@ -70,6 +71,11 @@ pub fn handle_client_message(
                 "ProjectRequest must be handled by streaming transport".into(),
             ));
         }
+        lpc_wire::ClientRequest::ProjectCommand { handle, command } => {
+            ServerMessagePayload::ProjectCommand {
+                response: handle_project_command(project_manager, handle, command)?,
+            }
+        }
         lpc_wire::ClientRequest::ListAvailableProjects => {
             handle_list_available_projects(project_manager, base_fs)?
         }
@@ -82,6 +88,39 @@ pub fn handle_client_message(
     };
 
     Ok(WireServerMessage { id, msg: response })
+}
+
+fn handle_project_command(
+    project_manager: &mut ProjectManager,
+    handle: lpc_wire::WireProjectHandle,
+    command: WireProjectCommand,
+) -> Result<WireProjectCommandResponse, ServerError> {
+    let project = project_manager
+        .get_project_mut(handle)
+        .ok_or_else(|| ServerError::ProjectNotFound(format!("handle {}", handle.id())))?;
+
+    match command {
+        WireProjectCommand::ReadOverlay { request: _ } => {
+            Ok(WireProjectCommandResponse::ReadOverlay {
+                response: project.read_overlay(),
+            })
+        }
+        WireProjectCommand::MutateOverlay { request } => {
+            Ok(WireProjectCommandResponse::MutateOverlay {
+                response: project.mutate_overlay(request)?,
+            })
+        }
+        WireProjectCommand::CommitOverlay { request } => {
+            Ok(WireProjectCommandResponse::CommitOverlay {
+                response: project.commit_overlay(request)?,
+            })
+        }
+        WireProjectCommand::ReadInventory { request: _ } => {
+            Ok(WireProjectCommandResponse::ReadInventory {
+                response: project.read_inventory(),
+            })
+        }
+    }
 }
 
 /// Handle a filesystem request

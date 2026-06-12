@@ -293,7 +293,7 @@ mod tests {
     use lpfs::{LpFs, LpFsMemory};
 
     use crate::dataflow::resolver::ResolveLogLevel;
-    use crate::engine::{EngineServices, ProjectLoader, resolve_with_engine_host};
+    use crate::engine::{EngineServices, ProjectLoader};
 
     #[test]
     fn emitters_from_slot_data_reads_value_map() {
@@ -364,15 +364,15 @@ intensity = 2.0
             .expect("fluid node");
         engine.tick(16).expect("tick fluid");
 
-        let (production, _) = resolve_with_engine_host(
-            &mut engine,
-            QueryKey::ProducedSlot {
-                node: fluid,
-                slot: fluid_output_path(),
-            },
-            ResolveLogLevel::Off,
-        )
-        .expect("resolve fluid output");
+        let (production, _) = engine
+            .resolve_with_engine_host(
+                QueryKey::ProducedSlot {
+                    node: fluid,
+                    slot: fluid_output_path(),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("resolve fluid output");
         let LpValue::Product(ProductRef::Visual(product)) =
             production.value_leaf().expect("value").value()
         else {
@@ -479,15 +479,15 @@ source = "bus#fluid.emitters"
             .expect("fluid node");
         engine.tick(16).expect("tick fluid graph");
 
-        let (production, _) = resolve_with_engine_host(
-            &mut engine,
-            QueryKey::ProducedSlot {
-                node: fluid,
-                slot: fluid_output_path(),
-            },
-            ResolveLogLevel::Off,
-        )
-        .expect("resolve fluid output");
+        let (production, _) = engine
+            .resolve_with_engine_host(
+                QueryKey::ProducedSlot {
+                    node: fluid,
+                    slot: fluid_output_path(),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("resolve fluid output");
         let LpValue::Product(ProductRef::Visual(product)) =
             production.value_leaf().expect("value").value()
         else {

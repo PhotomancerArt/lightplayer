@@ -4038,6 +4038,7 @@ dependencies = [
  "lp-perf",
  "lpc-engine",
  "lpc-model",
+ "lpc-registry",
  "lpc-shared",
  "lpc-view",
  "lpc-wire",

@@ -24,6 +24,7 @@ use lpc_model::{
     Dim2u, HardwareEndpointSpec, Kind, LpValue, Revision, ShaderState, SlotAccess, SlotPath,
     SlotShapeRegistry, SlotShapeRegistryError, ToLpValue, TreePath,
 };
+use lpc_registry::ProjectRegistry;
 use lpc_shared::output::{
     MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
 };
@@ -385,6 +386,7 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
     let mut services = EngineServices::new(path.clone());
     services.set_output_provider(Some(Box::new(RcMemoryOutput(Rc::clone(&mem)))));
     let mut rt = Engine::with_services(path, services);
+    let registry = ProjectRegistry::new();
     let graphics = Arc::new(CountingGraphics::new());
     rt.set_graphics(Some(graphics.clone()));
 
@@ -480,8 +482,8 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
         attach_output_demand_root(&mut rt, root, spine.clone(), frame, "out", endpoint.clone());
     bind_output_to_fixture(&mut rt, out_id, fix_id, frame);
 
-    rt.tick(10).expect("tick");
-    rt.tick(10)
+    rt.tick(&registry, 10).expect("tick");
+    rt.tick(&registry, 10)
         .expect("second tick reuses fixture render target");
 
     let handle = mem
@@ -514,6 +516,7 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
     let mut services = EngineServices::new(path.clone());
     services.set_output_provider(Some(Box::new(RcMemoryOutput(Rc::clone(&mem)))));
     let mut rt = Engine::with_services(path, services);
+    let registry = ProjectRegistry::new();
     rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
 
     let ticks = Arc::new(AtomicU32::new(0));
@@ -622,7 +625,7 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
         endpoint_idle.clone(),
     );
 
-    rt.tick(10).expect("tick");
+    rt.tick(&registry, 10).expect("tick");
 
     assert!(
         mem.is_endpoint_open(&endpoint_written),
@@ -641,6 +644,7 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
     let mut services = EngineServices::new(path.clone());
     services.set_output_provider(Some(Box::new(RcMemoryOutput(Rc::clone(&mem)))));
     let mut rt = Engine::with_services(path, services);
+    let registry = ProjectRegistry::new();
     rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
 
     let ticks = Arc::new(AtomicU32::new(0));
@@ -736,7 +740,7 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
         attach_output_demand_root(&mut rt, root, spine.clone(), frame, "out", endpoint.clone());
     bind_output_to_fixture(&mut rt, out_id, fix_id, frame);
 
-    rt.tick(10).expect("tick");
+    rt.tick(&registry, 10).expect("tick");
 
     let ver_frame = rt.runtime_buffers().get(sink).expect("sink").changed_at();
     assert_eq!(

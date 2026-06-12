@@ -5,7 +5,11 @@
 use anyhow::{Error, Result};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_wire::{
-    ProjectReadRequest, ProjectReadResponse, WireProjectHandle as ProjectHandle, WireServerMessage,
+    ProjectReadRequest, ProjectReadResponse, WireOverlayCommitRequest, WireOverlayCommitResponse,
+    WireOverlayMutationRequest, WireOverlayMutationResponse, WireOverlayReadRequest,
+    WireOverlayReadResponse, WireProjectCommand, WireProjectCommandResponse,
+    WireProjectHandle as ProjectHandle, WireProjectInventoryReadRequest,
+    WireProjectInventoryReadResponse, WireServerMessage,
     messages::{ClientMessage, ClientRequest},
     server::{AvailableProject, FsResponse, LoadedProject, ServerMsgBody},
 };
@@ -441,6 +445,98 @@ impl LpClient {
     ) -> Result<ProjectReadResponse> {
         self.project_read(handle, ProjectReadRequest::default_debug(None))
             .await
+    }
+
+    pub async fn project_command(
+        &self,
+        handle: ProjectHandle,
+        command: WireProjectCommand,
+    ) -> Result<WireProjectCommandResponse> {
+        let request = ClientRequest::ProjectCommand { handle, command };
+        let response = self.send_request(request).await?;
+        match response.msg {
+            ServerMsgBody::ProjectCommand { response } => Ok(response),
+            _ => Err(Error::msg(format!(
+                "Unexpected response type for project_command: {:?}",
+                response.msg
+            ))),
+        }
+    }
+
+    pub async fn project_overlay_read(
+        &self,
+        handle: ProjectHandle,
+    ) -> Result<WireOverlayReadResponse> {
+        match self
+            .project_command(
+                handle,
+                WireProjectCommand::ReadOverlay {
+                    request: WireOverlayReadRequest,
+                },
+            )
+            .await?
+        {
+            WireProjectCommandResponse::ReadOverlay { response } => Ok(response),
+            other => Err(Error::msg(format!(
+                "Unexpected project command response for overlay read: {other:?}"
+            ))),
+        }
+    }
+
+    pub async fn project_overlay_mutate(
+        &self,
+        handle: ProjectHandle,
+        request: WireOverlayMutationRequest,
+    ) -> Result<WireOverlayMutationResponse> {
+        match self
+            .project_command(handle, WireProjectCommand::MutateOverlay { request })
+            .await?
+        {
+            WireProjectCommandResponse::MutateOverlay { response } => Ok(response),
+            other => Err(Error::msg(format!(
+                "Unexpected project command response for overlay mutate: {other:?}"
+            ))),
+        }
+    }
+
+    pub async fn project_overlay_commit(
+        &self,
+        handle: ProjectHandle,
+    ) -> Result<WireOverlayCommitResponse> {
+        match self
+            .project_command(
+                handle,
+                WireProjectCommand::CommitOverlay {
+                    request: WireOverlayCommitRequest,
+                },
+            )
+            .await?
+        {
+            WireProjectCommandResponse::CommitOverlay { response } => Ok(response),
+            other => Err(Error::msg(format!(
+                "Unexpected project command response for overlay commit: {other:?}"
+            ))),
+        }
+    }
+
+    pub async fn project_inventory_read(
+        &self,
+        handle: ProjectHandle,
+    ) -> Result<WireProjectInventoryReadResponse> {
+        match self
+            .project_command(
+                handle,
+                WireProjectCommand::ReadInventory {
+                    request: WireProjectInventoryReadRequest,
+                },
+            )
+            .await?
+        {
+            WireProjectCommandResponse::ReadInventory { response } => Ok(response),
+            other => Err(Error::msg(format!(
+                "Unexpected project command response for inventory read: {other:?}"
+            ))),
+        }
     }
 
     /// List available projects on the server filesystem

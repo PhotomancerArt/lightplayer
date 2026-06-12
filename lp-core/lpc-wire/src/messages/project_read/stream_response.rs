@@ -5,7 +5,6 @@ use lpc_model::Revision;
 use crate::json::json_write::JsonWrite;
 use crate::json::json_writer::{JsonWriter, JsonWriterError};
 use crate::project::write_runtime_buffer_payload_json;
-use crate::slot::WireSlotMutationResponse;
 
 use super::{ProjectProbeResult, ProjectReadResponse, ProjectReadResult, ResourceReadResult};
 
@@ -21,9 +20,7 @@ where
     writer: JsonWriter<W>,
     result_count: usize,
     probe_count: usize,
-    mutation_count: usize,
     in_probes: bool,
-    in_mutations: bool,
     finished: bool,
 }
 
@@ -42,9 +39,7 @@ where
             writer,
             result_count: 0,
             probe_count: 0,
-            mutation_count: 0,
             in_probes: false,
-            in_mutations: false,
             finished: false,
         })
     }
@@ -77,21 +72,8 @@ where
         Ok(())
     }
 
-    pub fn write_mutation(
-        &mut self,
-        mutation: &WireSlotMutationResponse,
-    ) -> Result<(), JsonWriterError<W::Error>> {
-        self.begin_mutations()?;
-        if self.mutation_count > 0 {
-            self.writer.write_raw(b",")?;
-        }
-        self.writer.serde(mutation)?;
-        self.mutation_count += 1;
-        Ok(())
-    }
-
     pub fn finish(mut self) -> Result<W, JsonWriterError<W::Error>> {
-        self.begin_mutations()?;
+        self.begin_probes()?;
         self.writer.write_raw(b"]}")?;
         self.finished = true;
         Ok(self.writer.into_inner())
@@ -101,15 +83,6 @@ where
         if !self.in_probes {
             self.writer.write_raw(b"],\"probes\":[")?;
             self.in_probes = true;
-        }
-        Ok(())
-    }
-
-    fn begin_mutations(&mut self) -> Result<(), JsonWriterError<W::Error>> {
-        if !self.in_mutations {
-            self.begin_probes()?;
-            self.writer.write_raw(b"],\"mutations\":[")?;
-            self.in_mutations = true;
         }
         Ok(())
     }
@@ -173,9 +146,6 @@ where
     for probe in &response.probes {
         streamed.write_probe(probe)?;
     }
-    for mutation in &response.mutations {
-        streamed.write_mutation(mutation)?;
-    }
     streamed.finish()
 }
 
@@ -195,7 +165,6 @@ mod tests {
             revision: Revision::new(12),
             results: Vec::new(),
             probes: Vec::new(),
-            mutations: Vec::new(),
         };
 
         assert_streams_to_same_response(&response);
@@ -212,7 +181,6 @@ mod tests {
                 next: None,
             })],
             probes: Vec::new(),
-            mutations: Vec::new(),
         };
 
         assert_streams_to_same_response(&response);
@@ -229,7 +197,6 @@ mod tests {
                 next: None,
             })],
             probes: Vec::new(),
-            mutations: Vec::new(),
         };
         let out =
             write_project_read_response(JsonWriter::new(ChunkCountingWrite::new(8)), &response)
@@ -255,7 +222,6 @@ mod tests {
                 }],
             })],
             probes: Vec::new(),
-            mutations: Vec::new(),
         };
 
         assert_streams_to_same_response(&response);

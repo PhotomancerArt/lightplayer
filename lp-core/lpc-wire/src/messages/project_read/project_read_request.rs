@@ -4,7 +4,6 @@ use super::{
     NodeReadQuery, ProjectProbeRequest, ReadLevel, ResourcePayloadRead, ResourceReadQuery,
     RuntimeReadQuery, ShapeReadQuery,
 };
-use crate::slot::WireSlotMutationRequest;
 use alloc::vec::Vec;
 use lpc_model::Revision;
 
@@ -21,8 +20,6 @@ pub struct ProjectReadRequest {
     pub queries: Vec<ProjectReadQuery>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub probes: Vec<ProjectProbeRequest>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub mutations: Vec<WireSlotMutationRequest>,
 }
 
 impl ProjectReadRequest {
@@ -34,7 +31,6 @@ impl ProjectReadRequest {
             since,
             queries: ProjectReadQuery::default_debug(),
             probes: Vec::new(),
-            mutations: Vec::new(),
         }
     }
 }
@@ -81,7 +77,6 @@ mod tests {
             since: Some(Revision::new(7)),
             queries: ProjectReadQuery::default_debug(),
             probes: vec![ProjectProbeRequest::unsupported_example_for_test()],
-            mutations: Vec::new(),
         };
 
         let json = serde_json::to_string(&request).unwrap();

@@ -5,13 +5,13 @@ use lpc_model::{
     slot_codec::{SlotWriteError, SlotWriter},
     slot_sync_codec::write_slot_snapshot_value,
 };
+use lpc_registry::ProjectRegistry;
 use lpc_wire::json::json_write::JsonWrite;
 use lpc_wire::json::json_writer::{JsonValue, JsonWriter, JsonWriterError};
 use lpc_wire::{
     NodeReadQuery, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery, ProjectReadRequest,
     ProjectReadResult, RuntimeReadQuery, ServerRuntimeStatus, ShapeReadQuery,
-    WireSlotMutationRequest, WireSlotMutationResponse, write_project_read_result_json,
-    write_slot_shape_registry_snapshot_json,
+    write_project_read_result_json, write_slot_shape_registry_snapshot_json,
 };
 
 use crate::node::{NodeEntryState, tree_deltas_since};
@@ -29,26 +29,53 @@ impl Engine {
     /// runtime-buffer payload fields.
     pub fn write_project_read_json<W>(
         &mut self,
+        registry: &ProjectRegistry,
         request: ProjectReadRequest,
         out: W,
     ) -> Result<W, JsonWriterError<W::Error>>
     where
         W: JsonWrite,
     {
-        lpc_shared::transport::ProjectReadJsonSource::write_project_read_json(self, request, out)
+        let mut source = EngineProjectReadSource::new(self, registry);
+        lpc_shared::transport::ProjectReadJsonSource::write_project_read_json(
+            &mut source,
+            request,
+            out,
+        )
     }
 }
 
-impl lpc_shared::transport::ProjectReadJsonSource for Engine {
-    fn project_read_revision(&self) -> lpc_model::Revision {
-        self.revision()
+pub struct EngineProjectReadSource<'a> {
+    engine: &'a mut Engine,
+    registry: &'a ProjectRegistry,
+    server_status: Option<ServerRuntimeStatus>,
+}
+
+impl<'a> EngineProjectReadSource<'a> {
+    pub fn new(engine: &'a mut Engine, registry: &'a ProjectRegistry) -> Self {
+        Self {
+            engine,
+            registry,
+            server_status: None,
+        }
     }
 
-    fn apply_project_mutations(
-        &mut self,
-        mutations: alloc::vec::Vec<WireSlotMutationRequest>,
-    ) -> alloc::vec::Vec<WireSlotMutationResponse> {
-        self.mutate_project_slots(mutations)
+    pub fn with_server_status(
+        engine: &'a mut Engine,
+        registry: &'a ProjectRegistry,
+        server_status: Option<ServerRuntimeStatus>,
+    ) -> Self {
+        Self {
+            engine,
+            registry,
+            server_status,
+        }
+    }
+}
+
+impl lpc_shared::transport::ProjectReadJsonSource for EngineProjectReadSource<'_> {
+    fn project_read_revision(&self) -> lpc_model::Revision {
+        self.engine.revision()
     }
 
     fn write_project_read_result_json<W>(
@@ -62,20 +89,29 @@ impl lpc_shared::transport::ProjectReadJsonSource for Engine {
     {
         match query {
             ProjectReadQuery::Shapes(query) => {
-                return self.write_project_shape_read_result_json(query, out);
+                return self.engine.write_project_shape_read_result_json(query, out);
             }
             ProjectReadQuery::Nodes(query) => {
-                return self.write_project_node_read_result_json(since, query, out);
+                return self.engine.write_project_node_read_result_json(
+                    self.registry,
+                    since,
+                    query,
+                    out,
+                );
             }
             ProjectReadQuery::Runtime(query) => {
-                return self.write_project_runtime_read_result_json(query, None, out);
+                return self.engine.write_project_runtime_read_result_json(
+                    query,
+                    self.server_status.clone(),
+                    out,
+                );
             }
             ProjectReadQuery::Resources(_) => {}
         }
 
         let result = match query {
             ProjectReadQuery::Resources(query) => {
-                ProjectReadResult::Resources(self.read_project_resources(query))
+                ProjectReadResult::Resources(self.engine.read_project_resources(query))
             }
             ProjectReadQuery::Shapes(_)
             | ProjectReadQuery::Nodes(_)
@@ -97,12 +133,13 @@ impl lpc_shared::transport::ProjectReadJsonSource for Engine {
         W: JsonWrite,
     {
         let result = match probe {
-            ProjectProbeRequest::RenderProduct(request) => {
-                ProjectProbeResult::RenderProduct(self.read_project_render_product_probe(request))
-            }
-            ProjectProbeRequest::ExplainSlot(request) => {
-                ProjectProbeResult::ExplainSlot(self.read_project_explain_slot_probe(request))
-            }
+            ProjectProbeRequest::RenderProduct(request) => ProjectProbeResult::RenderProduct(
+                self.engine
+                    .read_project_render_product_probe(self.registry, request),
+            ),
+            ProjectProbeRequest::ExplainSlot(request) => ProjectProbeResult::ExplainSlot(
+                self.engine.read_project_explain_slot_probe(request),
+            ),
         };
         let mut writer = JsonWriter::new(out);
         writer.serde(&result)?;
@@ -159,6 +196,7 @@ impl Engine {
 
     fn write_project_node_read_result_json<W>(
         &mut self,
+        registry: &ProjectRegistry,
         since: Option<lpc_model::Revision>,
         query: NodeReadQuery,
         out: W,
@@ -181,7 +219,7 @@ impl Engine {
             let mut slots = nodes.prop("slots")?.object()?;
             let mut roots = slots.prop("roots")?.array()?;
             for entry in self.tree().entries() {
-                if let Some(def) = self.loaded_node_def_for_entry(entry) {
+                if let Some(def) = self.loaded_node_def_for_entry(registry, entry) {
                     let mut root = roots.item()?.object()?;
                     root.prop("name")?.string(&node_def_root_name(entry.id))?;
                     root.prop("shape")?.serde(&def.shape_id())?;
@@ -255,7 +293,7 @@ mod tests {
         let mut h = EngineTestBuilder::new().output_node("output").build();
         let request = ProjectReadRequest::default_debug(None);
 
-        assert_streams_to_full_response(&mut h.engine, request);
+        assert_streams_to_full_response(&mut h.engine, &h.registry, request);
     }
 
     #[test]
@@ -265,13 +303,14 @@ mod tests {
             Revision::new(1),
             RuntimeBuffer::raw(vec![1, 2, 3, 253, 254, 255]),
         ));
+        let registry = ProjectRegistry::new();
         let mut request = ProjectReadRequest::default_debug(None);
         request.queries[2] = ProjectReadQuery::Resources(ResourceReadQuery {
             level: lpc_wire::ReadLevel::Detail,
             payloads: ResourcePayloadRead::All,
         });
 
-        assert_streams_to_full_response(&mut engine, request);
+        assert_streams_to_full_response(&mut engine, &registry, request);
     }
 
     #[test]
@@ -281,7 +320,7 @@ mod tests {
             .build();
         let request = ProjectReadRequest::default_debug(None);
 
-        assert_detailed_slot_roots_read_through_sync_codec(&mut h.engine, request);
+        assert_detailed_slot_roots_read_through_sync_codec(&mut h.engine, &h.registry, request);
     }
 
     #[test]
@@ -292,7 +331,7 @@ mod tests {
         let request = ProjectReadRequest::default_debug(None);
         let streamed = h
             .engine
-            .write_project_read_json(request, Vec::new())
+            .write_project_read_json(&h.registry, request, Vec::new())
             .expect("stream project read");
         let decoded: ProjectReadResponse =
             lpc_wire::json::from_slice(&streamed).expect("decode streamed project read");
@@ -316,9 +355,11 @@ mod tests {
             Revision::new(1),
             RuntimeBuffer::raw(vec![1, 2, 3, 253, 254, 255]),
         ));
+        let registry = ProjectRegistry::new();
 
         let out = engine
             .write_project_read_json(
+                &registry,
                 ProjectReadRequest::default_debug(None),
                 ChunkCountingWrite::new(16),
             )
@@ -329,10 +370,14 @@ mod tests {
         assert!(out.chunk_count() > 1);
     }
 
-    fn assert_streams_to_full_response(engine: &mut Engine, request: ProjectReadRequest) {
-        let full = engine.read_project(request.clone());
+    fn assert_streams_to_full_response(
+        engine: &mut Engine,
+        registry: &ProjectRegistry,
+        request: ProjectReadRequest,
+    ) {
+        let full = engine.read_project(registry, request.clone());
         let streamed = engine
-            .write_project_read_json(request, Vec::new())
+            .write_project_read_json(registry, request, Vec::new())
             .expect("stream project read");
         let decoded: ProjectReadResponse =
             lpc_wire::json::from_slice(&streamed).expect("decode streamed project read");
@@ -354,10 +399,11 @@ mod tests {
 
     fn assert_detailed_slot_roots_read_through_sync_codec(
         engine: &mut Engine,
+        registry: &ProjectRegistry,
         request: ProjectReadRequest,
     ) {
         let streamed = engine
-            .write_project_read_json(request, Vec::new())
+            .write_project_read_json(registry, request, Vec::new())
             .expect("stream project read");
         let decoded: ProjectReadResponse =
             lpc_wire::json::from_slice(&streamed).expect("decode project read");

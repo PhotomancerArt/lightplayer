@@ -1083,6 +1083,7 @@ mod tests {
 
     use lpc_model::nodes::fixture::{PathSpec, RingOrder};
     use lpc_model::{Dim2u, Kind, LpValue, ToLpValue, TreePath};
+    use lpc_registry::ProjectRegistry;
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
@@ -1341,6 +1342,7 @@ mod tests {
     #[test]
     fn fixture_diagnostic_led_index_bypasses_visual_input_and_marks_count_groups() {
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
+        let registry = ProjectRegistry::new();
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let spine = test_placeholder_spine();
@@ -1393,14 +1395,19 @@ mod tests {
         );
 
         engine.add_demand_root(fix_id);
-        engine.tick(10).unwrap();
+        engine.tick(&registry, 10).unwrap();
 
         let extent = ControlExtent::new(1, 36);
         let request = ControlRenderRequest::unorm16(extent);
         let mut samples = vec![0u16; extent.sample_count() as usize];
         let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
         let layout = engine
-            .render_control_for_test(ControlProduct::new(fix_id, 0, extent), &request, target)
+            .render_control_for_test(
+                &registry,
+                ControlProduct::new(fix_id, 0, extent),
+                &request,
+                target,
+            )
             .expect("control render");
 
         assert_eq!(
@@ -1428,6 +1435,7 @@ mod tests {
     fn fixture_demand_resolve_and_tick_share_one_shader_producer_tick_via_resolver_cache() {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
+        let registry = ProjectRegistry::new();
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let spine = test_placeholder_spine();
@@ -1553,7 +1561,7 @@ mod tests {
             .unwrap();
 
         engine.add_demand_root(fix_id);
-        engine.tick(10).unwrap();
+        engine.tick(&registry, 10).unwrap();
         assert_eq!(ticks.load(Ordering::Relaxed), 1);
     }
 
@@ -1561,6 +1569,7 @@ mod tests {
     fn fixture_direct_sampling_writes_expected_u16_rgb_for_solid_red_product() {
         let ticks = Arc::new(AtomicU32::new(0));
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
+        let registry = ProjectRegistry::new();
         engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
@@ -1687,14 +1696,19 @@ mod tests {
             .unwrap();
 
         engine.add_demand_root(fix_id);
-        engine.tick(10).unwrap();
+        engine.tick(&registry, 10).unwrap();
 
         let extent = ControlExtent::new(1, 3);
         let request = ControlRenderRequest::unorm16(extent);
         let mut samples = vec![0u16; extent.sample_count() as usize];
         let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
         let layout = engine
-            .render_control_for_test(ControlProduct::new(fix_id, 0, extent), &request, target)
+            .render_control_for_test(
+                &registry,
+                ControlProduct::new(fix_id, 0, extent),
+                &request,
+                target,
+            )
             .expect("control render");
 
         assert_eq!(samples, vec![65535u16, 0, 0]);
@@ -1705,6 +1719,7 @@ mod tests {
     #[test]
     fn fixture_direct_sampling_sends_pixel_space_points_and_output_size() {
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
+        let registry = ProjectRegistry::new();
         engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
@@ -1814,14 +1829,19 @@ mod tests {
             .unwrap();
 
         engine.add_demand_root(fix_id);
-        engine.tick(10).unwrap();
+        engine.tick(&registry, 10).unwrap();
 
         let extent = ControlExtent::new(1, 6);
         let request = ControlRenderRequest::unorm16(extent);
         let mut samples = vec![0u16; extent.sample_count() as usize];
         let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
         engine
-            .render_control_for_test(ControlProduct::new(fix_id, 0, extent), &request, target)
+            .render_control_for_test(
+                &registry,
+                ControlProduct::new(fix_id, 0, extent),
+                &request,
+                target,
+            )
             .expect("control render");
 
         assert_eq!(samples, vec![1000u16, 2000, 3000, 4000, 5000, 6000]);

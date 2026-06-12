@@ -22,6 +22,7 @@ std = [
 [dependencies]
 lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
+lpc-registry = { path = "../../lp-core/lpc-registry", default-features = false }
 lpc-wire = { path = "../../lp-core/lpc-wire", default-features = false }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
@@ -31,6 +32,7 @@ log = { workspace = true, default-features = false }
 
 [dev-dependencies]
 lpc-engine = { path = "../../lp-core/lpc-engine", default-features = false, features = ["std"] }
+lpc-registry = { path = "../../lp-core/lpc-registry", default-features = false, features = ["std"] }
 lpc-view = { path = "../../lp-core/lpc-view", default-features = false, features = ["std"] }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, features = ["std"] }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, features = ["std"] }

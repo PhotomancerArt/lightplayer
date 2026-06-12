@@ -205,9 +205,9 @@ impl LpServer {
         let current_version = self.base_fs().current_version();
 
         // Now apply changes to projects (mutable borrows)
-        for (handle, _project_changes) in project_changes_map {
+        for (handle, project_changes) in project_changes_map {
             if let Some(project) = self.project_manager.get_project_mut(handle) {
-                if let Err(_e) = project.reload() {
+                if let Err(_e) = project.refresh_artifacts(&project_changes) {
                     // Log error but continue with other projects
                     // Note: In no_std context, errors are silently ignored
                     // Errors will be visible when clients read project state.
@@ -235,7 +235,7 @@ impl LpServer {
                 );
                 // Ignore errors and continue with other projects
                 // Errors will be visible when clients sync or query project state
-                match project.engine_mut().tick(delta_ms) {
+                match project.tick(delta_ms) {
                     Ok(()) => {
                         log::trace!("LpServer::tick: Project {} tick succeeded", project.name());
                     }
@@ -309,10 +309,8 @@ impl LpServer {
                                 response_count += 1;
                                 continue;
                             };
-                            let mut source = ServerProjectReadSource::new(
-                                project.engine_mut(),
-                                Some(server_status),
-                            );
+                            let mut source =
+                                ServerProjectReadSource::new(project, Some(server_status));
                             transport
                                 .send_project_read(msg_id, handle, &mut source, request)
                                 .await

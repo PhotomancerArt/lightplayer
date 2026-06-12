@@ -9,6 +9,7 @@ use lpc_model::{
     ChannelName, Kind, MapSlot, NodeId, NodeName, Revision, SlotAccess, SlotMapKey, SlotPath,
     SlotPathSegment, SlotShapeRegistry, SlotShapeRegistryError, Slotted, TreePath, ValueSlot,
 };
+use lpc_registry::ProjectRegistry;
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lps_shared::LpsValueF32;
 
@@ -30,6 +31,7 @@ use super::resolve_with_engine_host;
 
 pub(crate) struct EngineTestBuilder {
     engine: Engine,
+    registry: ProjectRegistry,
     labels: BTreeMap<String, NodeId>,
     shader_ticks: BTreeMap<String, Arc<AtomicU32>>,
     fixture_records: BTreeMap<String, RecordedValue>,
@@ -38,6 +40,7 @@ pub(crate) struct EngineTestBuilder {
 
 pub(crate) struct EngineTestHarness {
     pub(crate) engine: Engine,
+    pub(crate) registry: ProjectRegistry,
     labels: BTreeMap<String, NodeId>,
     shader_ticks: BTreeMap<String, Arc<AtomicU32>>,
     fixture_records: BTreeMap<String, RecordedValue>,
@@ -65,6 +68,7 @@ impl EngineTestBuilder {
     pub(crate) fn new() -> Self {
         Self {
             engine: Engine::new(TreePath::parse("/show.test").expect("test root path")),
+            registry: ProjectRegistry::new(),
             labels: BTreeMap::new(),
             shader_ticks: BTreeMap::new(),
             fixture_records: BTreeMap::new(),
@@ -157,6 +161,7 @@ impl EngineTestBuilder {
     pub(crate) fn build(self) -> EngineTestHarness {
         EngineTestHarness {
             engine: self.engine,
+            registry: self.registry,
             labels: self.labels,
             shader_ticks: self.shader_ticks,
             fixture_records: self.fixture_records,
@@ -251,14 +256,29 @@ impl EngineTestHarness {
     }
 
     pub(crate) fn resolve(&mut self, query: QueryKey) -> Result<Production, SessionResolveError> {
-        resolve_with_engine_host(&mut self.engine, query, ResolveLogLevel::Off).map(|(pv, _)| pv)
+        resolve_with_engine_host(
+            &mut self.engine,
+            &self.registry,
+            query,
+            ResolveLogLevel::Off,
+        )
+        .map(|(pv, _)| pv)
     }
 
     pub(crate) fn resolve_with_trace(
         &mut self,
         query: QueryKey,
     ) -> Result<(Production, ResolveTrace), SessionResolveError> {
-        resolve_with_engine_host(&mut self.engine, query, ResolveLogLevel::Basic)
+        resolve_with_engine_host(
+            &mut self.engine,
+            &self.registry,
+            query,
+            ResolveLogLevel::Basic,
+        )
+    }
+
+    pub(crate) fn tick(&mut self, delta_ms: u32) -> Result<(), super::EngineError> {
+        self.engine.tick(&self.registry, delta_ms)
     }
 }
 

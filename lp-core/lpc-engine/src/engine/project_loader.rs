@@ -28,7 +28,7 @@ use crate::nodes::{
     playlist_output_path,
 };
 
-use super::{Engine, EngineServices};
+use super::{Engine, EngineServices, LoadedProjectRuntime};
 
 /// Errors loading an authored project into [`Engine`].
 #[derive(Debug)]
@@ -91,7 +91,7 @@ impl ProjectLoader {
     pub fn load_from_root(
         root: &dyn LpFs,
         services: EngineServices,
-    ) -> Result<Engine, ProjectLoadError> {
+    ) -> Result<LoadedProjectRuntime, ProjectLoadError> {
         Self::load_project_artifact(root, services, ArtifactSpec::path("/project.toml"))
     }
 
@@ -99,36 +99,63 @@ impl ProjectLoader {
         root: &dyn LpFs,
         services: EngineServices,
         project_specifier: ArtifactSpec,
-    ) -> Result<Engine, ProjectLoadError> {
+    ) -> Result<LoadedProjectRuntime, ProjectLoadError> {
         let project_path = resolve_project_specifier(&project_specifier)?;
         let project_root = services.project_root().clone();
         let mut runtime = Engine::with_services(project_root.clone(), services);
+        let mut registry = ProjectRegistry::new();
         let frame = Revision::new(1);
         let shapes = runtime.slot_shapes().clone();
         let ctx = ParseCtx { shapes: &shapes };
 
-        let load_result = runtime
-            .registry_mut()
+        let load_result = registry
             .load_root(root, project_path.as_path(), frame, &ctx)
             .map_err(|e| ProjectLoadError::ProjectToml {
                 file: project_path.as_str().to_string(),
                 error: format!("{e:?}"),
             })?;
-        Self::validate_loaded_root(&runtime, &load_result.root, project_path.as_path())?;
+        Self::validate_loaded_root(&registry, &load_result.root, project_path.as_path())?;
 
-        let projected_nodes = Self::build_runtime_spine(&mut runtime, project_specifier, frame)?;
-        Self::attach_projected_nodes(root, &mut runtime, &projected_nodes, frame)?;
+        let projected_nodes =
+            Self::build_runtime_spine(&registry, &mut runtime, project_specifier.clone(), frame)?;
+        Self::attach_projected_nodes(root, &mut registry, &mut runtime, &projected_nodes, frame)?;
+
+        Ok(LoadedProjectRuntime::new(runtime, registry))
+    }
+
+    pub fn build_runtime_from_registry(
+        root: &dyn LpFs,
+        registry: &mut ProjectRegistry,
+        services: EngineServices,
+        project_specifier: ArtifactSpec,
+    ) -> Result<Engine, ProjectLoadError> {
+        let project_path = resolve_project_specifier(&project_specifier)?;
+        let project_root = services.project_root().clone();
+        let mut runtime = Engine::with_services(project_root, services);
+        let frame = Revision::new(1);
+        let root_location =
+            registry
+                .root()
+                .cloned()
+                .ok_or_else(|| ProjectLoadError::ProjectToml {
+                    file: project_path.as_str().to_string(),
+                    error: String::from("registry has no loaded project root"),
+                })?;
+
+        Self::validate_loaded_root(registry, &root_location, project_path.as_path())?;
+        let projected_nodes =
+            Self::build_runtime_spine(registry, &mut runtime, project_specifier, frame)?;
+        Self::attach_projected_nodes(root, registry, &mut runtime, &projected_nodes, frame)?;
 
         Ok(runtime)
     }
 
     fn validate_loaded_root(
-        runtime: &Engine,
+        registry: &ProjectRegistry,
         root: &NodeDefLocation,
         path: &LpPath,
     ) -> Result<(), ProjectLoadError> {
-        let entry = runtime
-            .registry()
+        let entry = registry
             .def(root)
             .ok_or_else(|| ProjectLoadError::ProjectToml {
                 file: path.as_str().to_string(),
@@ -146,12 +173,12 @@ impl ProjectLoader {
     }
 
     fn build_runtime_spine(
+        registry: &ProjectRegistry,
         runtime: &mut Engine,
         project_specifier: ArtifactSpec,
         frame: Revision,
     ) -> Result<Vec<ProjectedNode>, ProjectLoadError> {
-        let mut project_nodes = runtime
-            .registry()
+        let mut project_nodes = registry
             .inventory()
             .tree
             .nodes
@@ -168,13 +195,12 @@ impl ProjectLoader {
 
         let mut projected_nodes = Vec::new();
         for project_node in project_nodes {
-            let def_entry = runtime
-                .registry()
-                .def(&project_node.def_location)
-                .ok_or_else(|| ProjectLoadError::InvalidSourcePath {
+            let def_entry = registry.def(&project_node.def_location).ok_or_else(|| {
+                ProjectLoadError::InvalidSourcePath {
                     path: def_location_label(&project_node.def_location),
                     reason: String::from("project tree references missing definition entry"),
-                })?;
+                }
+            })?;
             let kind = def_entry.state.kind().unwrap_or(NodeKind::Project);
             let provides_default_time_bus = def_entry
                 .state
@@ -261,7 +287,7 @@ impl ProjectLoader {
                 node_id,
                 project_node.def_location.clone(),
             );
-            let asset_consumers = runtime.registry().inventory().tree.asset_consumers.clone();
+            let asset_consumers = registry.inventory().tree.asset_consumers.clone();
             for (source, consumers) in asset_consumers {
                 if consumers
                     .iter()
@@ -317,6 +343,7 @@ impl ProjectLoader {
 
     fn attach_projected_nodes(
         fs: &dyn LpFs,
+        registry: &mut ProjectRegistry,
         runtime: &mut Engine,
         projected_nodes: &[ProjectedNode],
         frame: Revision,
@@ -325,7 +352,7 @@ impl ProjectLoader {
             if node.kind != NodeKind::Clock {
                 continue;
             }
-            let NodeDef::Clock(config) = projected_node_config(runtime, node)?.clone() else {
+            let NodeDef::Clock(config) = projected_node_config(registry, node)?.clone() else {
                 continue;
             };
             runtime
@@ -357,7 +384,7 @@ impl ProjectLoader {
             if node.kind != NodeKind::Button {
                 continue;
             }
-            let NodeDef::Button(config) = projected_node_config(runtime, node)?.clone() else {
+            let NodeDef::Button(config) = projected_node_config(registry, node)?.clone() else {
                 continue;
             };
             runtime
@@ -396,7 +423,7 @@ impl ProjectLoader {
             if node.kind != NodeKind::ControlRadio {
                 continue;
             }
-            let NodeDef::ControlRadio(config) = projected_node_config(runtime, node)?.clone()
+            let NodeDef::ControlRadio(config) = projected_node_config(registry, node)?.clone()
             else {
                 continue;
             };
@@ -441,7 +468,7 @@ impl ProjectLoader {
             if node.kind != NodeKind::Output {
                 continue;
             }
-            let NodeDef::Output(config) = projected_node_config(runtime, node)?.clone() else {
+            let NodeDef::Output(config) = projected_node_config(registry, node)?.clone() else {
                 continue;
             };
             runtime
@@ -492,12 +519,12 @@ impl ProjectLoader {
             if node.kind != NodeKind::Shader {
                 continue;
             }
-            let NodeDef::Shader(config) = projected_node_config(runtime, node)?.clone() else {
+            let NodeDef::Shader(config) = projected_node_config(registry, node)?.clone() else {
                 continue;
             };
             let glsl_source = materialize_node_text_asset(
                 fs,
-                runtime,
+                registry,
                 node,
                 AssetKind::ShaderSource,
                 "shader source",
@@ -541,13 +568,13 @@ impl ProjectLoader {
             if node.kind != NodeKind::ComputeShader {
                 continue;
             }
-            let NodeDef::ComputeShader(config) = projected_node_config(runtime, node)?.clone()
+            let NodeDef::ComputeShader(config) = projected_node_config(registry, node)?.clone()
             else {
                 continue;
             };
             let source = materialize_node_text_asset(
                 fs,
-                runtime,
+                registry,
                 node,
                 AssetKind::ComputeShaderSource,
                 "compute shader source",
@@ -610,7 +637,7 @@ impl ProjectLoader {
             if node.kind != NodeKind::Fluid {
                 continue;
             }
-            let NodeDef::Fluid(config) = projected_node_config(runtime, node)?.clone() else {
+            let NodeDef::Fluid(config) = projected_node_config(registry, node)?.clone() else {
                 continue;
             };
             runtime
@@ -659,7 +686,7 @@ impl ProjectLoader {
                 output_target,
                 entry_trigger_sources,
             ) = {
-                let NodeDef::Playlist(config) = projected_node_config(runtime, node)? else {
+                let NodeDef::Playlist(config) = projected_node_config(registry, node)? else {
                     continue;
                 };
                 (
@@ -744,10 +771,10 @@ impl ProjectLoader {
             if node.kind != NodeKind::Fixture {
                 continue;
             }
-            let NodeDef::Fixture(config) = projected_node_config(runtime, node)?.clone() else {
+            let NodeDef::Fixture(config) = projected_node_config(registry, node)?.clone() else {
                 continue;
             };
-            match resolve_fixture_mapping(fs, runtime, node, &config) {
+            match resolve_fixture_mapping(fs, registry, node, &config) {
                 Ok(mapping) => {
                     runtime
                         .attach_runtime_node(
@@ -1024,7 +1051,7 @@ fn playlist_entry_trigger_sources(
 
 fn resolve_fixture_mapping(
     fs: &dyn LpFs,
-    runtime: &mut Engine,
+    registry: &mut ProjectRegistry,
     node: &ProjectedNode,
     config: &FixtureDef,
 ) -> Result<MappingConfig, ProjectLoadError> {
@@ -1034,7 +1061,7 @@ fn resolve_fixture_mapping(
         } => {
             let svg = materialize_node_text_asset(
                 fs,
-                runtime,
+                registry,
                 node,
                 AssetKind::FixtureSvg,
                 "fixture SVG",
@@ -1071,15 +1098,16 @@ fn node_kind_name(
 }
 
 fn projected_node_config<'a>(
-    runtime: &'a Engine,
+    registry: &'a ProjectRegistry,
     node: &ProjectedNode,
 ) -> Result<&'a NodeDef, ProjectLoadError> {
-    let entry = runtime.registry().def(&node.def_location).ok_or_else(|| {
-        ProjectLoadError::InvalidSourcePath {
-            path: node_label(node),
-            reason: format!("missing definition payload for node {:?}", node.id),
-        }
-    })?;
+    let entry =
+        registry
+            .def(&node.def_location)
+            .ok_or_else(|| ProjectLoadError::InvalidSourcePath {
+                path: node_label(node),
+                reason: format!("missing definition payload for node {:?}", node.id),
+            })?;
     match &entry.state {
         NodeDefState::Loaded(def) => Ok(def),
         other => Err(ProjectLoadError::InvalidSourcePath {
@@ -1091,14 +1119,13 @@ fn projected_node_config<'a>(
 
 fn materialize_node_text_asset(
     fs: &dyn LpFs,
-    runtime: &mut Engine,
+    registry: &mut ProjectRegistry,
     node: &ProjectedNode,
     kind: AssetKind,
     label: &str,
 ) -> Result<String, ProjectLoadError> {
-    let source = asset_for_node_kind(runtime.registry(), node, kind)?;
-    runtime
-        .registry_mut()
+    let source = asset_for_node_kind(registry, node, kind)?;
+    registry
         .materialize_asset_text(fs, &source)
         .map(|asset| asset.text)
         .map_err(|e| ProjectLoadError::InvalidSourcePath {
@@ -1562,7 +1589,7 @@ mod tests {
     use super::*;
     use crate::dataflow::binding::{BindingPriority, BindingSource, BindingTarget};
     use crate::dataflow::resolver::{Production, QueryKey, ResolveLogLevel};
-    use crate::engine::{ButtonService, RadioService, resolve_with_engine_host};
+    use crate::engine::{ButtonService, RadioService};
     use crate::products::visual::RenderTextureRequest;
 
     fn node_for_def_path(rt: &Engine, path: &str) -> Option<NodeId> {
@@ -1959,54 +1986,54 @@ default = 0.0
             .expect("shader node");
 
         rt.tick(1000).expect("first tick");
-        let first = resolve_with_engine_host(
-            &mut rt,
-            QueryKey::Bus(ChannelName(String::from("time.seconds"))),
-            ResolveLogLevel::Off,
-        )
-        .expect("resolve time bus")
-        .0;
+        let first = rt
+            .resolve_with_engine_host(
+                QueryKey::Bus(ChannelName(String::from("time.seconds"))),
+                ResolveLogLevel::Off,
+            )
+            .expect("resolve time bus")
+            .0;
         assert_eq!(
             *first.value_leaf().expect("time value").value(),
             LpValue::F32(0.0)
         );
-        let shader_first = resolve_with_engine_host(
-            &mut rt,
-            QueryKey::ConsumedSlot {
-                node: shader,
-                slot: SlotPath::parse("time").expect("time slot"),
-            },
-            ResolveLogLevel::Off,
-        )
-        .expect("resolve visual shader time")
-        .0;
+        let shader_first = rt
+            .resolve_with_engine_host(
+                QueryKey::ConsumedSlot {
+                    node: shader,
+                    slot: SlotPath::parse("time").expect("time slot"),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("resolve visual shader time")
+            .0;
         assert_eq!(
             *shader_first.value_leaf().expect("time value").value(),
             LpValue::F32(0.0)
         );
 
         rt.tick(1000).expect("second tick");
-        let second = resolve_with_engine_host(
-            &mut rt,
-            QueryKey::Bus(ChannelName(String::from("time.seconds"))),
-            ResolveLogLevel::Off,
-        )
-        .expect("resolve time bus")
-        .0;
+        let second = rt
+            .resolve_with_engine_host(
+                QueryKey::Bus(ChannelName(String::from("time.seconds"))),
+                ResolveLogLevel::Off,
+            )
+            .expect("resolve time bus")
+            .0;
         assert_eq!(
             *second.value_leaf().expect("time value").value(),
             LpValue::F32(1.0)
         );
-        let shader_second = resolve_with_engine_host(
-            &mut rt,
-            QueryKey::ConsumedSlot {
-                node: shader,
-                slot: SlotPath::parse("time").expect("time slot"),
-            },
-            ResolveLogLevel::Off,
-        )
-        .expect("resolve visual shader time")
-        .0;
+        let shader_second = rt
+            .resolve_with_engine_host(
+                QueryKey::ConsumedSlot {
+                    node: shader,
+                    slot: SlotPath::parse("time").expect("time slot"),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("resolve visual shader time")
+            .0;
         assert_eq!(
             *shader_second.value_leaf().expect("time value").value(),
             LpValue::F32(1.0)
@@ -2038,16 +2065,16 @@ source = { glsl = "vec4 render(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }" }
             .expect("shader node");
 
         rt.tick(16).expect("tick");
-        let production = resolve_with_engine_host(
-            &mut rt,
-            QueryKey::ProducedSlot {
-                node: shader,
-                slot: crate::nodes::shader_output_path(),
-            },
-            ResolveLogLevel::Off,
-        )
-        .expect("resolve shader output")
-        .0;
+        let production = rt
+            .resolve_with_engine_host(
+                QueryKey::ProducedSlot {
+                    node: shader,
+                    slot: crate::nodes::shader_output_path(),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("resolve shader output")
+            .0;
         let LpValue::Product(ProductRef::Visual(product)) =
             production.value_leaf().expect("visual product").value()
         else {
@@ -2502,16 +2529,16 @@ value = "f32"
         rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
         let node = node_for_def_path(&rt, "/compute.toml").expect("compute node");
 
-        let production = resolve_with_engine_host(
-            &mut rt,
-            QueryKey::ProducedSlot {
-                node,
-                slot: SlotPath::parse("phase").expect("phase"),
-            },
-            ResolveLogLevel::Off,
-        )
-        .expect("resolve phase")
-        .0;
+        let production = rt
+            .resolve_with_engine_host(
+                QueryKey::ProducedSlot {
+                    node,
+                    slot: SlotPath::parse("phase").expect("phase"),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("resolve phase")
+            .0;
 
         assert_eq!(
             *production.value_leaf().expect("value").value(),
@@ -2549,30 +2576,30 @@ value = "f32"
             assert!(rt.tree().get(id).expect("entry").state.value().is_alive());
         }
 
-        let (emitters, _) = resolve_with_engine_host(
-            &mut rt,
-            QueryKey::ProducedSlot {
-                node: compute,
-                slot: SlotPath::parse("emitters").expect("emitters"),
-            },
-            ResolveLogLevel::Off,
-        )
-        .expect("compute emitters");
+        let (emitters, _) = rt
+            .resolve_with_engine_host(
+                QueryKey::ProducedSlot {
+                    node: compute,
+                    slot: SlotPath::parse("emitters").expect("emitters"),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("compute emitters");
         let SlotData::Map(map) = emitters.data() else {
             panic!("compute emitters should be a map");
         };
         assert!(!map.entries.is_empty());
         rt.tick(16).expect("tick fluid graph");
 
-        let (fluid_output, _) = resolve_with_engine_host(
-            &mut rt,
-            QueryKey::ProducedSlot {
-                node: fluid,
-                slot: SlotPath::parse("output").expect("output"),
-            },
-            ResolveLogLevel::Off,
-        )
-        .expect("fluid output");
+        let (fluid_output, _) = rt
+            .resolve_with_engine_host(
+                QueryKey::ProducedSlot {
+                    node: fluid,
+                    slot: SlotPath::parse("output").expect("output"),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("fluid output");
         let LpValue::Product(ProductRef::Visual(product)) =
             fluid_output.value_leaf().expect("visual product").value()
         else {
@@ -2609,7 +2636,6 @@ value = "f32"
                     format: WireTextureFormat::Srgb8,
                 },
             )],
-            mutations: alloc::vec::Vec::new(),
         });
         let Some(ProjectProbeResult::RenderProduct(RenderProductProbeResult::Texture {
             format,
@@ -2662,15 +2688,15 @@ value = "f32"
             .expect("shader node");
 
         rt.tick(16).expect("tick trigger graph");
-        let (shader_output, _) = resolve_with_engine_host(
-            &mut rt,
-            QueryKey::ProducedSlot {
-                node: shader,
-                slot: SlotPath::parse("output").expect("output"),
-            },
-            ResolveLogLevel::Off,
-        )
-        .expect("shader output");
+        let (shader_output, _) = rt
+            .resolve_with_engine_host(
+                QueryKey::ProducedSlot {
+                    node: shader,
+                    slot: SlotPath::parse("output").expect("output"),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("shader output");
         let LpValue::Product(ProductRef::Visual(product)) =
             shader_output.value_leaf().expect("visual product").value()
         else {
@@ -2997,7 +3023,10 @@ target = "bus#trigger"
         assert_eq!(sent[0].payload(), &[1, 0, 0, 0, 1, 0, 0, 0]);
     }
 
-    fn render_test_texture_bytes(rt: &mut Engine, product: lpc_model::VisualProduct) -> Vec<u8> {
+    fn render_test_texture_bytes(
+        rt: &mut LoadedProjectRuntime,
+        product: lpc_model::VisualProduct,
+    ) -> Vec<u8> {
         rt.render_texture_for_test(
             product,
             &RenderTextureRequest {
@@ -3041,25 +3070,29 @@ target = "bus#trigger"
         );
     }
 
-    fn resolve_button_map(rt: &mut Engine, button: NodeId, slot: &str) -> lpc_model::SlotMapDyn {
+    fn resolve_button_map(
+        rt: &mut LoadedProjectRuntime,
+        button: NodeId,
+        slot: &str,
+    ) -> lpc_model::SlotMapDyn {
         resolve_node_map(rt, button, slot, "button slot")
     }
 
     fn resolve_node_map(
-        rt: &mut Engine,
+        rt: &mut LoadedProjectRuntime,
         node: NodeId,
         slot: &str,
         label: &str,
     ) -> lpc_model::SlotMapDyn {
-        let (production, _) = resolve_with_engine_host(
-            rt,
-            QueryKey::ProducedSlot {
-                node,
-                slot: SlotPath::parse(slot).expect("map slot"),
-            },
-            ResolveLogLevel::Off,
-        )
-        .expect("map production");
+        let (production, _) = rt
+            .resolve_with_engine_host(
+                QueryKey::ProducedSlot {
+                    node,
+                    slot: SlotPath::parse(slot).expect("map slot"),
+                },
+                ResolveLogLevel::Off,
+            )
+            .expect("map production");
         let SlotData::Map(map) = production.data().clone() else {
             panic!("{label} should be a map");
         };
@@ -3067,7 +3100,7 @@ target = "bus#trigger"
     }
 
     fn resolve_visual_product(
-        rt: &mut Engine,
+        rt: &mut LoadedProjectRuntime,
         node: NodeId,
         slot: &str,
     ) -> lpc_model::VisualProduct {
@@ -3080,7 +3113,7 @@ target = "bus#trigger"
         *product
     }
 
-    fn resolve_playlist_u32(rt: &mut Engine, playlist: NodeId, slot: &str) -> u32 {
+    fn resolve_playlist_u32(rt: &mut LoadedProjectRuntime, playlist: NodeId, slot: &str) -> u32 {
         let production = resolve_playlist_slot(rt, playlist, slot);
         let LpValue::U32(value) = production.value_leaf().expect("playlist value").value() else {
             panic!("playlist slot {slot} should be u32");
@@ -3088,7 +3121,7 @@ target = "bus#trigger"
         *value
     }
 
-    fn resolve_playlist_f32(rt: &mut Engine, playlist: NodeId, slot: &str) -> f32 {
+    fn resolve_playlist_f32(rt: &mut LoadedProjectRuntime, playlist: NodeId, slot: &str) -> f32 {
         let production = resolve_playlist_slot(rt, playlist, slot);
         let LpValue::F32(value) = production.value_leaf().expect("playlist value").value() else {
             panic!("playlist slot {slot} should be f32");
@@ -3096,9 +3129,12 @@ target = "bus#trigger"
         *value
     }
 
-    fn resolve_playlist_slot(rt: &mut Engine, playlist: NodeId, slot: &str) -> Production {
-        resolve_with_engine_host(
-            rt,
+    fn resolve_playlist_slot(
+        rt: &mut LoadedProjectRuntime,
+        playlist: NodeId,
+        slot: &str,
+    ) -> Production {
+        rt.resolve_with_engine_host(
             QueryKey::ProducedSlot {
                 node: playlist,
                 slot: SlotPath::parse(slot).expect("playlist slot"),
@@ -3131,7 +3167,12 @@ target = "bus#trigger"
         }
     }
 
-    fn tick_with_test_time(rt: &mut Engine, time: &TestTimeProvider, delta_ms: u32, label: &str) {
+    fn tick_with_test_time(
+        rt: &mut LoadedProjectRuntime,
+        time: &TestTimeProvider,
+        delta_ms: u32,
+        label: &str,
+    ) {
         time.advance(u64::from(delta_ms));
         rt.tick(delta_ms)
             .unwrap_or_else(|err| panic!("{label}: {err}"));
