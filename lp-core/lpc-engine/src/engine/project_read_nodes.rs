@@ -10,7 +10,6 @@ use lpc_wire::{
     wire_slot_data_from_slot_access,
 };
 
-use crate::artifact::ArtifactState;
 use crate::node::{NodeEntryState, tree_deltas_since};
 
 use super::Engine;
@@ -44,7 +43,7 @@ impl Engine {
         let mut roots = Vec::new();
 
         for entry in self.tree().entries() {
-            if let Some(def) = self.loaded_node_def(entry.artifact()) {
+            if let Some(def) = self.loaded_node_def_for_entry(entry) {
                 roots.push(WireSlotRootSnapshot {
                     name: node_def_root_name(entry.id),
                     shape: def.shape_id(),
@@ -72,22 +71,6 @@ impl Engine {
         }
 
         WireSlotRootsSnapshot { roots }
-    }
-
-    pub(super) fn loaded_node_def(
-        &self,
-        artifact: crate::artifact::ArtifactId,
-    ) -> Option<&lpc_model::NodeDef> {
-        let entry = self.artifacts().entry(&artifact)?;
-        match &entry.state {
-            ArtifactState::Loaded(def)
-            | ArtifactState::Prepared(def)
-            | ArtifactState::Idle(def) => Some(def),
-            ArtifactState::Resolved
-            | ArtifactState::ResolutionError(_)
-            | ArtifactState::LoadError(_)
-            | ArtifactState::PrepareError(_) => None,
-        }
     }
 }
 

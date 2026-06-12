@@ -166,7 +166,7 @@ impl EngineTestBuilder {
 
     fn attach_node(&mut self, label: &str, ty: &str, node: Box<dyn NodeRuntime>) -> NodeId {
         let root = self.engine.tree().root();
-        let (cfg, artifact) = test_placeholder_spine();
+        let cfg = test_placeholder_spine();
         let node_id = self
             .engine
             .tree_mut()
@@ -178,7 +178,6 @@ impl EngineTestBuilder {
                     source: WireSlotIndex(0),
                 },
                 cfg,
-                artifact,
                 Revision::new(1),
             )
             .expect("add test node");

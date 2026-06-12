@@ -616,7 +616,6 @@ mod tests {
     use core::sync::atomic::{AtomicU32, Ordering};
 
     use super::*;
-    use crate::artifact::ArtifactLocation;
     use crate::dataflow::resolver::QueryKey;
     use crate::dataflow::resolver::ResolveLogLevel;
     use crate::engine::Engine;
@@ -654,25 +653,7 @@ mod tests {
         let frame = Revision::new(1);
         let root = engine.tree().root();
         let tex_invocation = NodeInvocation::new(ArtifactSpec::path("tex.toml"));
-        let tex_artifact = engine
-            .artifacts_mut()
-            .acquire_location(ArtifactLocation::file("tex.toml"), frame);
-        engine
-            .artifacts_mut()
-            .load_with(&tex_artifact, frame, |_| {
-                Ok(NodeDef::Texture(TextureDef::new(8, 8)))
-            })
-            .expect("load texture artifact");
         let shader_invocation = NodeInvocation::new(ArtifactSpec::path("shader.toml"));
-        let shader_artifact = engine
-            .artifacts_mut()
-            .acquire_location(ArtifactLocation::file("shader.toml"), frame);
-        engine
-            .artifacts_mut()
-            .load_with(&shader_artifact, frame, |_| {
-                Ok(NodeDef::Shader(shader_def_with_time()))
-            })
-            .expect("load shader artifact");
 
         let tex_id = engine
             .tree_mut()
@@ -684,7 +665,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 tex_invocation,
-                tex_artifact,
                 frame,
             )
             .expect("texture");
@@ -704,12 +684,21 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 shader_invocation,
-                shader_artifact,
                 frame,
             )
             .expect("shader");
 
-        let sh = ShaderNode::new(sh_id, shader_def_with_time(), String::from(DEMO_GLSL));
+        let shader_def = shader_def_with_time();
+        engine
+            .load_test_node_defs(
+                &[
+                    (tex_id, NodeDef::Texture(TextureDef::new(8, 8))),
+                    (sh_id, NodeDef::Shader(shader_def.clone())),
+                ],
+                frame,
+            )
+            .expect("load test defs");
+        let sh = ShaderNode::new(sh_id, shader_def, String::from(DEMO_GLSL));
         engine
             .attach_runtime_node(sh_id, Box::new(sh), frame)
             .expect("attach shader");

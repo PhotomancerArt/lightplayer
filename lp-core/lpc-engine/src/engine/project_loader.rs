@@ -7,19 +7,20 @@ use alloc::vec::Vec;
 
 use lpc_model::LpType;
 use lpc_model::generate_compute_shader_header;
-use lpc_model::nodes::project::project_def::ProjectDef;
-use lpc_model::{ArtifactReadRoot, ArtifactSpec, NodeInvocation, NodeKind};
+use lpc_model::{ArtifactSpec, NodeInvocation, NodeKind};
+use lpc_model::{AssetKind, AssetSource, NodeDefLocation, NodeDefState};
 use lpc_model::{
     BindingDefs, BindingRef as AuthoredBindingRef, ChannelName, FixtureDef, FluidDef, Kind,
-    LpValue, MappingConfig, NodeDef, NodeId, NodeName, PlaylistDef, PlaylistEntry, Revision,
-    ShaderDef, ShaderSlotKind, ShaderSource, SlotPath, SlotShapeRegistry,
+    LpValue, MappingConfig, NodeDef, NodeId, NodeName, PlaylistDef, ProjectNodeOrigin,
+    ProjectNodePlacement, Revision, ShaderDef, ShaderSlotKind, SlotPath,
 };
+use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpc_wire::{WireChildKind, WireNodeStatus, WireSlotIndex};
+use lpfs::LpFs;
 use lpfs::lp_path::{LpPath, LpPathBuf};
 
-use crate::artifact::{ArtifactLocation, ArtifactState};
 use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
-use crate::node::{NodeDefHandle, NodeEntryState, TreeError};
+use crate::node::{NodeEntryState, TreeError};
 use crate::nodes::fixture::mapping::resolve_svg_path_mapping;
 use crate::nodes::{
     ButtonNode, ClockNode, ComputeShaderNode, ControlRadioNode, CorePlaceholderNode, FixtureNode,
@@ -59,24 +60,25 @@ impl core::fmt::Display for ProjectLoadError {
 
 impl core::error::Error for ProjectLoadError {}
 
-struct LoadedNode {
+struct ProjectedNode {
     name: NodeName,
     parent: Option<NodeId>,
-    artifact_path: LpPathBuf,
-    source_base_path: LpPathBuf,
+    def_location: NodeDefLocation,
+    use_location: lpc_model::NodeUseLocation,
     id: NodeId,
     kind: NodeKind,
     provides_default_time_bus: bool,
-    ownership: LoadedNodeOwnership,
+    ownership: ProjectedNodeOwnership,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum LoadedNodeOwnership {
+enum ProjectedNodeOwnership {
+    Root,
     ProjectChild,
     PlaylistEntry { playlist: NodeId, entry: u32 },
 }
 
-impl LoadedNodeOwnership {
+impl ProjectedNodeOwnership {
     fn suppress_visual_default_output(self) -> bool {
         matches!(self, Self::PlaylistEntry { .. })
     }
@@ -86,232 +88,255 @@ impl LoadedNodeOwnership {
 pub struct ProjectLoader;
 
 impl ProjectLoader {
-    pub fn load_from_root<R>(root: &R, services: EngineServices) -> Result<Engine, ProjectLoadError>
-    where
-        R: ArtifactReadRoot + ?Sized,
-        R::Err: core::fmt::Debug,
-    {
+    pub fn load_from_root(
+        root: &dyn LpFs,
+        services: EngineServices,
+    ) -> Result<Engine, ProjectLoadError> {
         Self::load_project_artifact(root, services, ArtifactSpec::path("/project.toml"))
     }
 
-    pub fn load_project_artifact<R>(
-        root: &R,
+    pub fn load_project_artifact(
+        root: &dyn LpFs,
         services: EngineServices,
         project_specifier: ArtifactSpec,
-    ) -> Result<Engine, ProjectLoadError>
-    where
-        R: ArtifactReadRoot + ?Sized,
-        R::Err: core::fmt::Debug,
-    {
+    ) -> Result<Engine, ProjectLoadError> {
         let project_path = resolve_project_specifier(&project_specifier)?;
         let project_root = services.project_root().clone();
         let mut runtime = Engine::with_services(project_root.clone(), services);
-        let project_def = load_project_def(root, &project_path, runtime.slot_shapes())?;
         let frame = Revision::new(1);
-        let root_id = runtime.tree().root();
-        let project_artifact = runtime
-            .artifacts_mut()
-            .acquire_location(ArtifactLocation::file(project_path.clone()), frame);
-        runtime
-            .artifacts_mut()
-            .load_with(&project_artifact, frame, |_location| {
-                Ok(NodeDef::Project(project_def.clone()))
-            })
-            .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                path: project_path.as_str().to_string(),
-                reason: format!("load project artifact payload: {e:?}"),
+        let shapes = runtime.slot_shapes().clone();
+        let ctx = ParseCtx { shapes: &shapes };
+
+        let load_result = runtime
+            .registry_mut()
+            .load_root(root, project_path.as_path(), frame, &ctx)
+            .map_err(|e| ProjectLoadError::ProjectToml {
+                file: project_path.as_str().to_string(),
+                error: format!("{e:?}"),
             })?;
-        let project_invocation = NodeInvocation::new(project_specifier);
+        Self::validate_loaded_root(&runtime, &load_result.root, project_path.as_path())?;
 
-        {
-            let root_entry = runtime
-                .tree_mut()
-                .get_mut(root_id)
-                .ok_or(ProjectLoadError::Tree(TreeError::UnknownNode(root_id)))?;
-            root_entry.config = project_invocation;
-            root_entry.def_handle = NodeDefHandle::artifact_root(project_artifact);
-        }
-        runtime
-            .attach_runtime_node(
-                root_id,
-                Box::new(CorePlaceholderNode::new_leaf(NodeKind::Project)),
-                frame,
-            )
-            .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                path: project_path.as_str().to_string(),
-                reason: format!("attach project runtime: {e}"),
-            })?;
-
-        let mut loaded_nodes = Vec::new();
-        for (name, invocation_slot) in project_def.nodes.entries {
-            let node_name =
-                NodeName::parse(&name).map_err(|e| ProjectLoadError::InvalidNodeName {
-                    path: project_path.as_str().to_string(),
-                    reason: format!("{e}"),
-                })?;
-            Self::load_child_invocation(
-                root,
-                &mut runtime,
-                &mut loaded_nodes,
-                root_id,
-                node_name,
-                invocation_slot.into_inner(),
-                &project_path,
-                LoadedNodeOwnership::ProjectChild,
-                frame,
-            )?;
-        }
-
-        Self::attach_loaded_nodes(root, &mut runtime, &loaded_nodes, frame)?;
+        let projected_nodes = Self::build_runtime_spine(&mut runtime, project_specifier, frame)?;
+        Self::attach_projected_nodes(root, &mut runtime, &projected_nodes, frame)?;
 
         Ok(runtime)
     }
 
-    #[allow(
-        clippy::too_many_arguments,
-        reason = "recursive project loading carries the active tree, artifact, and ownership context"
-    )]
-    fn load_child_invocation<R>(
-        root: &R,
-        runtime: &mut Engine,
-        loaded_nodes: &mut Vec<LoadedNode>,
-        parent_id: NodeId,
-        node_name: NodeName,
-        invocation: NodeInvocation,
-        containing_file: &LpPathBuf,
-        ownership: LoadedNodeOwnership,
-        frame: Revision,
-    ) -> Result<NodeId, ProjectLoadError>
-    where
-        R: ArtifactReadRoot + ?Sized,
-        R::Err: core::fmt::Debug,
-    {
-        let (artifact_path, source_base_path, config, artifact_id) = match &invocation {
-            NodeInvocation::Unset => {
-                return Err(ProjectLoadError::InvalidSourcePath {
-                    path: node_name.as_str().to_string(),
-                    reason: String::from("node invocation is unset"),
-                });
-            }
-            NodeInvocation::Ref(path_slot) => {
-                let path_text = path_slot.value().as_str();
-                if path_text.is_empty() {
-                    return Err(ProjectLoadError::InvalidSourcePath {
-                        path: node_name.as_str().to_string(),
-                        reason: String::from("node invocation ref path is empty"),
-                    });
-                }
-                let artifact_specifier =
-                    ArtifactSpec::parse(path_slot.value().as_str()).map_err(|err| {
-                        ProjectLoadError::InvalidSourcePath {
-                            path: path_slot.value().as_str().to_string(),
-                            reason: err.to_string(),
-                        }
-                    })?;
-                let artifact_path =
-                    resolve_child_artifact_specifier(containing_file, &artifact_specifier)?;
-                let config = load_node_def(root, artifact_path.as_path(), runtime.slot_shapes())?;
-                let artifact_id = runtime
-                    .artifacts_mut()
-                    .acquire_location(ArtifactLocation::file(artifact_path.clone()), frame);
-                (artifact_path.clone(), artifact_path, config, artifact_id)
-            }
-            NodeInvocation::Def(body) => {
-                let artifact_path = inline_node_artifact_path(containing_file, &node_name);
-                let config = body.value().clone();
-                let artifact_id = runtime.artifacts_mut().acquire_location(
-                    ArtifactLocation::inline_node(containing_file.clone(), node_name.as_str()),
-                    frame,
-                );
-                (artifact_path, containing_file.clone(), config, artifact_id)
-            }
-        };
-        runtime
-            .artifacts_mut()
-            .load_with(&artifact_id, frame, |_location| Ok(config.clone()))
-            .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                path: artifact_path.as_str().to_string(),
-                reason: format!("load node artifact payload: {e:?}"),
+    fn validate_loaded_root(
+        runtime: &Engine,
+        root: &NodeDefLocation,
+        path: &LpPath,
+    ) -> Result<(), ProjectLoadError> {
+        let entry = runtime
+            .registry()
+            .def(root)
+            .ok_or_else(|| ProjectLoadError::ProjectToml {
+                file: path.as_str().to_string(),
+                error: String::from("registry did not load the project root"),
             })?;
-        let ty = node_kind_name(&config, artifact_path.as_path())?;
-        let kind = config.kind();
-        let provides_default_time_bus = node_provides_default_time_bus(&config);
-        let leaf_id = runtime
-            .tree_mut()
-            .add_child(
-                parent_id,
-                node_name.clone(),
-                ty,
-                WireChildKind::Input {
-                    source: WireSlotIndex(0),
-                },
-                invocation,
-                artifact_id,
-                frame,
-            )
-            .map_err(ProjectLoadError::Tree)?;
 
-        runtime.insert_artifact_node(artifact_path.clone(), leaf_id);
-        loaded_nodes.push(LoadedNode {
-            name: node_name,
-            parent: Some(parent_id),
-            artifact_path: artifact_path.clone(),
-            source_base_path: source_base_path.clone(),
-            id: leaf_id,
-            kind,
-            provides_default_time_bus,
-            ownership,
-        });
-
-        if let NodeDef::Playlist(config) = &config {
-            for (entry_index, entry) in &config.entries.entries {
-                let child_name = playlist_entry_child_name(&artifact_path, *entry_index, entry)?;
-                Self::load_child_invocation(
-                    root,
-                    runtime,
-                    loaded_nodes,
-                    leaf_id,
-                    child_name,
-                    entry.node.clone().into_inner(),
-                    &source_base_path,
-                    LoadedNodeOwnership::PlaylistEntry {
-                        playlist: leaf_id,
-                        entry: *entry_index,
-                    },
-                    frame,
-                )?;
-            }
+        match &entry.state {
+            NodeDefState::Loaded(NodeDef::Project(_)) => Ok(()),
+            NodeDefState::Loaded(other) => Err(ProjectLoadError::ProjectToml {
+                file: path.as_str().to_string(),
+                error: format!("root artifact must be Project, got {:?}", other.kind()),
+            }),
+            state => Err(project_load_error_for_root_state(path, state)),
         }
-
-        Ok(leaf_id)
     }
 
-    fn attach_loaded_nodes<R>(
-        root: &R,
+    fn build_runtime_spine(
         runtime: &mut Engine,
-        loaded_nodes: &[LoadedNode],
+        project_specifier: ArtifactSpec,
         frame: Revision,
-    ) -> Result<(), ProjectLoadError>
-    where
-        R: ArtifactReadRoot + ?Sized,
-        R::Err: core::fmt::Debug,
-    {
-        for node in loaded_nodes {
+    ) -> Result<Vec<ProjectedNode>, ProjectLoadError> {
+        let mut project_nodes = runtime
+            .registry()
+            .inventory()
+            .tree
+            .nodes
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
+        project_nodes.sort_by(|a, b| {
+            a.key
+                .segments
+                .len()
+                .cmp(&b.key.segments.len())
+                .then_with(|| a.key.cmp(&b.key))
+        });
+
+        let mut projected_nodes = Vec::new();
+        for project_node in project_nodes {
+            let def_entry = runtime
+                .registry()
+                .def(&project_node.def_location)
+                .ok_or_else(|| ProjectLoadError::InvalidSourcePath {
+                    path: def_location_label(&project_node.def_location),
+                    reason: String::from("project tree references missing definition entry"),
+                })?;
+            let kind = def_entry.state.kind().unwrap_or(NodeKind::Project);
+            let provides_default_time_bus = def_entry
+                .state
+                .loaded_def()
+                .is_some_and(node_provides_default_time_bus);
+            let state_error = def_entry
+                .state
+                .is_error()
+                .then(|| node_def_state_message(&project_node.def_location, &def_entry.state));
+
+            let (node_id, name, parent, ownership) = if project_node.key.is_root() {
+                let root_id = runtime.tree().root();
+                let root_entry = runtime
+                    .tree_mut()
+                    .get_mut(root_id)
+                    .ok_or(ProjectLoadError::Tree(TreeError::UnknownNode(root_id)))?;
+                root_entry.set_project_identity(
+                    project_node.key.clone(),
+                    project_node.def_location.clone(),
+                );
+                (
+                    root_id,
+                    NodeName::parse("project").map_err(|e| ProjectLoadError::InvalidNodeName {
+                        path: def_location_label(&project_node.def_location),
+                        reason: e.to_string(),
+                    })?,
+                    None,
+                    ProjectedNodeOwnership::Root,
+                )
+            } else {
+                let parent_key = project_node.parent.as_ref().ok_or_else(|| {
+                    ProjectLoadError::InvalidSourcePath {
+                        path: def_location_label(&project_node.def_location),
+                        reason: String::from("non-root project node has no parent"),
+                    }
+                })?;
+                let parent = runtime
+                    .project_runtime_index()
+                    .node_id(parent_key)
+                    .ok_or_else(|| ProjectLoadError::InvalidSourcePath {
+                        path: def_location_label(&project_node.def_location),
+                        reason: String::from("project node parent was not projected"),
+                    })?;
+                let (name, ownership) = projected_node_name_and_ownership(
+                    &project_node.origin,
+                    parent,
+                    &project_node.def_location,
+                )?;
+                let ty = match def_entry.state.loaded_def() {
+                    Some(def) => node_kind_name(def, &project_node.def_location)?,
+                    None => {
+                        NodeName::parse("node").map_err(|e| ProjectLoadError::InvalidNodeName {
+                            path: def_location_label(&project_node.def_location),
+                            reason: e.to_string(),
+                        })?
+                    }
+                };
+                let node_id = runtime
+                    .tree_mut()
+                    .add_child(
+                        parent,
+                        name.clone(),
+                        ty,
+                        WireChildKind::Input {
+                            source: WireSlotIndex(0),
+                        },
+                        project_node_invocation(&project_node.origin),
+                        frame,
+                    )
+                    .map_err(ProjectLoadError::Tree)?;
+                runtime
+                    .tree_mut()
+                    .get_mut(node_id)
+                    .expect("add_child inserted the node")
+                    .set_project_identity(
+                        project_node.key.clone(),
+                        project_node.def_location.clone(),
+                    );
+                (node_id, name, Some(parent), ownership)
+            };
+
+            runtime.project_runtime_index_mut().insert_node(
+                project_node.key.clone(),
+                node_id,
+                project_node.def_location.clone(),
+            );
+            let asset_consumers = runtime.registry().inventory().tree.asset_consumers.clone();
+            for (source, consumers) in asset_consumers {
+                if consumers
+                    .iter()
+                    .any(|consumer| consumer == &project_node.key)
+                {
+                    runtime
+                        .project_runtime_index_mut()
+                        .add_asset_consumer(source, node_id);
+                }
+            }
+            if let Some(message) = state_error {
+                mark_node_load_error(runtime, node_id, frame, message);
+            }
+
+            projected_nodes.push(ProjectedNode {
+                name,
+                parent,
+                def_location: project_node.def_location,
+                use_location: project_node.key,
+                id: node_id,
+                kind,
+                provides_default_time_bus,
+                ownership,
+            });
+        }
+
+        let root = runtime.tree().root();
+        {
+            let entry = runtime
+                .tree()
+                .get(root)
+                .ok_or(ProjectLoadError::Tree(TreeError::UnknownNode(root)))?;
+            if entry.def_location.is_none() {
+                return Err(ProjectLoadError::InvalidSourcePath {
+                    path: artifact_specifier_label(&project_specifier),
+                    reason: String::from("registry did not project a root node"),
+                });
+            }
+        }
+        runtime
+            .attach_runtime_node(
+                root,
+                Box::new(CorePlaceholderNode::new_leaf(NodeKind::Project)),
+                frame,
+            )
+            .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                path: artifact_specifier_label(&project_specifier),
+                reason: format!("attach project runtime: {e}"),
+            })?;
+
+        Ok(projected_nodes)
+    }
+
+    fn attach_projected_nodes(
+        fs: &dyn LpFs,
+        runtime: &mut Engine,
+        projected_nodes: &[ProjectedNode],
+        frame: Revision,
+    ) -> Result<(), ProjectLoadError> {
+        for node in projected_nodes {
             if node.kind != NodeKind::Clock {
                 continue;
             }
-            let NodeDef::Clock(config) = loaded_node_config(runtime, node)?.clone() else {
+            let NodeDef::Clock(config) = projected_node_config(runtime, node)?.clone() else {
                 continue;
             };
             runtime
                 .attach_runtime_node(node.id, Box::new(ClockNode::new(node.id)), frame)
                 .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                    path: node.artifact_path.as_str().to_string(),
+                    path: node_label(node),
                     reason: format!("attach clock runtime: {e}"),
                 })?;
             register_target_binding(
                 runtime,
-                loaded_nodes,
+                projected_nodes,
                 node,
                 "seconds",
                 &config.bindings,
@@ -319,7 +344,7 @@ impl ProjectLoader {
             )?;
             register_target_binding(
                 runtime,
-                loaded_nodes,
+                projected_nodes,
                 node,
                 "delta_seconds",
                 &config.bindings,
@@ -328,40 +353,62 @@ impl ProjectLoader {
             register_clock_default_time_binding(runtime, node, &config.bindings, frame)?;
         }
 
-        for node in loaded_nodes {
+        for node in projected_nodes {
             if node.kind != NodeKind::Button {
                 continue;
             }
-            let NodeDef::Button(config) = loaded_node_config(runtime, node)?.clone() else {
+            let NodeDef::Button(config) = projected_node_config(runtime, node)?.clone() else {
                 continue;
             };
             runtime
                 .attach_runtime_node(node.id, Box::new(ButtonNode::new()), frame)
                 .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                    path: node.artifact_path.as_str().to_string(),
+                    path: node_label(node),
                     reason: format!("attach button runtime: {e}"),
                 })?;
-            register_target_binding(runtime, loaded_nodes, node, "down", &config.bindings, frame)?;
-            register_target_binding(runtime, loaded_nodes, node, "held", &config.bindings, frame)?;
-            register_target_binding(runtime, loaded_nodes, node, "up", &config.bindings, frame)?;
+            register_target_binding(
+                runtime,
+                projected_nodes,
+                node,
+                "down",
+                &config.bindings,
+                frame,
+            )?;
+            register_target_binding(
+                runtime,
+                projected_nodes,
+                node,
+                "held",
+                &config.bindings,
+                frame,
+            )?;
+            register_target_binding(
+                runtime,
+                projected_nodes,
+                node,
+                "up",
+                &config.bindings,
+                frame,
+            )?;
         }
 
-        for node in loaded_nodes {
+        for node in projected_nodes {
             if node.kind != NodeKind::ControlRadio {
                 continue;
             }
-            let NodeDef::ControlRadio(config) = loaded_node_config(runtime, node)?.clone() else {
+            let NodeDef::ControlRadio(config) = projected_node_config(runtime, node)?.clone()
+            else {
                 continue;
             };
             runtime
                 .attach_runtime_node(node.id, Box::new(ControlRadioNode::new()), frame)
                 .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                    path: node.artifact_path.as_str().to_string(),
+                    path: node_label(node),
                     reason: format!("attach control radio runtime: {e}"),
                 })?;
             register_optional_source_binding(
                 runtime,
-                loaded_nodes,
+                projected_nodes,
                 node,
                 "input",
                 &config.bindings,
@@ -369,7 +416,7 @@ impl ProjectLoader {
             )?;
             register_target_binding(
                 runtime,
-                loaded_nodes,
+                projected_nodes,
                 node,
                 "output",
                 &config.bindings,
@@ -378,35 +425,35 @@ impl ProjectLoader {
             runtime.add_demand_root(node.id);
         }
 
-        for node in loaded_nodes {
+        for node in projected_nodes {
             if node.kind != NodeKind::Texture {
                 continue;
             }
             runtime
                 .attach_runtime_node(node.id, Box::new(TextureNode::new(node.id)), frame)
                 .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                    path: node.artifact_path.as_str().to_string(),
+                    path: node_label(node),
                     reason: format!("attach texture runtime: {e}"),
                 })?;
         }
 
-        for node in loaded_nodes {
+        for node in projected_nodes {
             if node.kind != NodeKind::Output {
                 continue;
             }
-            let NodeDef::Output(config) = loaded_node_config(runtime, node)?.clone() else {
+            let NodeDef::Output(config) = projected_node_config(runtime, node)?.clone() else {
                 continue;
             };
             runtime
                 .attach_runtime_node(node.id, Box::new(OutputNode::new()), frame)
                 .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                    path: node.artifact_path.as_str().to_string(),
+                    path: node_label(node),
                     reason: format!("attach output runtime: {e}"),
                 })?;
             let sink_id = runtime
                 .runtime_output_sink_buffer_id(node.id)
                 .ok_or_else(|| ProjectLoadError::InvalidSourcePath {
-                    path: node.artifact_path.as_str().to_string(),
+                    path: node_label(node),
                     reason: String::from("output runtime node produced no sink buffer"),
                 })?;
             runtime
@@ -427,12 +474,12 @@ impl ProjectLoader {
                     frame,
                 )
                 .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                    path: node.artifact_path.as_str().to_string(),
+                    path: node_label(node),
                     reason: format!("bind output demand slot: {e}"),
                 })?;
             register_source_binding(
                 runtime,
-                loaded_nodes,
+                projected_nodes,
                 node,
                 "input",
                 &config.bindings,
@@ -441,15 +488,20 @@ impl ProjectLoader {
             runtime.add_demand_root(node.id);
         }
 
-        for node in loaded_nodes {
+        for node in projected_nodes {
             if node.kind != NodeKind::Shader {
                 continue;
             }
-            let NodeDef::Shader(config) = loaded_node_config(runtime, node)?.clone() else {
+            let NodeDef::Shader(config) = projected_node_config(runtime, node)?.clone() else {
                 continue;
             };
-            let glsl_source =
-                read_shader_source(root, &node.source_base_path, config.shader_source())?;
+            let glsl_source = materialize_node_text_asset(
+                fs,
+                runtime,
+                node,
+                AssetKind::ShaderSource,
+                "shader source",
+            )?;
             let bindings = config.bindings.clone();
             let consumed_slot_names = config
                 .consumed_slots
@@ -465,15 +517,15 @@ impl ProjectLoader {
                     frame,
                 )
                 .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                    path: node.artifact_path.as_str().to_string(),
+                    path: node_label(node),
                     reason: format!("attach shader runtime: {e}"),
                 })?;
-            register_target_binding(runtime, loaded_nodes, node, "output", &bindings, frame)?;
+            register_target_binding(runtime, projected_nodes, node, "output", &bindings, frame)?;
             register_visual_default_output_binding(runtime, node, &bindings, frame)?;
             for name in consumed_slot_names {
                 register_optional_source_binding(
                     runtime,
-                    loaded_nodes,
+                    projected_nodes,
                     node,
                     name.as_str(),
                     &bindings,
@@ -485,18 +537,25 @@ impl ProjectLoader {
             }
         }
 
-        for node in loaded_nodes {
+        for node in projected_nodes {
             if node.kind != NodeKind::ComputeShader {
                 continue;
             }
-            let NodeDef::ComputeShader(config) = loaded_node_config(runtime, node)?.clone() else {
+            let NodeDef::ComputeShader(config) = projected_node_config(runtime, node)?.clone()
+            else {
                 continue;
             };
-            let source = read_shader_source(root, &node.source_base_path, config.shader_source())?;
+            let source = materialize_node_text_asset(
+                fs,
+                runtime,
+                node,
+                AssetKind::ComputeShaderSource,
+                "compute shader source",
+            )?;
             let header =
                 generate_compute_shader_header(&config, runtime.slot_shapes()).map_err(|e| {
                     ProjectLoadError::InvalidSourcePath {
-                        path: node.artifact_path.as_str().to_string(),
+                        path: node_label(node),
                         reason: format!("generate compute shader header: {e}"),
                     }
                 })?;
@@ -521,14 +580,14 @@ impl ProjectLoader {
                     frame,
                 )
                 .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                    path: node.artifact_path.as_str().to_string(),
+                    path: node_label(node),
                     reason: format!("attach compute shader runtime: {e}"),
                 })?;
 
             for name in consumed_slot_names {
                 register_optional_source_binding(
                     runtime,
-                    loaded_nodes,
+                    projected_nodes,
                     node,
                     name.as_str(),
                     &bindings,
@@ -538,7 +597,7 @@ impl ProjectLoader {
             for name in produced_slot_names {
                 register_target_binding(
                     runtime,
-                    loaded_nodes,
+                    projected_nodes,
                     node,
                     name.as_str(),
                     &bindings,
@@ -547,31 +606,31 @@ impl ProjectLoader {
             }
         }
 
-        for node in loaded_nodes {
+        for node in projected_nodes {
             if node.kind != NodeKind::Fluid {
                 continue;
             }
-            let NodeDef::Fluid(config) = loaded_node_config(runtime, node)?.clone() else {
+            let NodeDef::Fluid(config) = projected_node_config(runtime, node)?.clone() else {
                 continue;
             };
             runtime
                 .attach_runtime_node(node.id, Box::new(FluidNode::new(node.id)), frame)
                 .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                    path: node.artifact_path.as_str().to_string(),
+                    path: node_label(node),
                     reason: format!("attach fluid runtime: {e}"),
                 })?;
             register_optional_source_binding(
                 runtime,
-                loaded_nodes,
+                projected_nodes,
                 node,
                 "time",
                 &config.bindings,
                 frame,
             )?;
-            register_fluid_default_time_binding(runtime, loaded_nodes, node, &config, frame)?;
+            register_fluid_default_time_binding(runtime, projected_nodes, node, &config, frame)?;
             register_optional_source_binding(
                 runtime,
-                loaded_nodes,
+                projected_nodes,
                 node,
                 "emitters",
                 &config.bindings,
@@ -579,7 +638,7 @@ impl ProjectLoader {
             )?;
             register_target_binding(
                 runtime,
-                loaded_nodes,
+                projected_nodes,
                 node,
                 "output",
                 &config.bindings,
@@ -588,7 +647,7 @@ impl ProjectLoader {
             register_visual_default_output_binding(runtime, node, &config.bindings, frame)?;
         }
 
-        for node in loaded_nodes {
+        for node in projected_nodes {
             if node.kind != NodeKind::Playlist {
                 continue;
             }
@@ -600,20 +659,20 @@ impl ProjectLoader {
                 output_target,
                 entry_trigger_sources,
             ) = {
-                let NodeDef::Playlist(config) = loaded_node_config(runtime, node)? else {
+                let NodeDef::Playlist(config) = projected_node_config(runtime, node)? else {
                     continue;
                 };
                 (
                     *config.idle_entry.value(),
                     config.default_fade.value().0,
-                    playlist_runtime_entries(loaded_nodes, node.id, config),
+                    playlist_runtime_entries(projected_nodes, node.id, config),
                     binding_source(&config.bindings, "time")
-                        .map(|source| binding_source_endpoint(loaded_nodes, node, source))
+                        .map(|source| binding_source_endpoint(projected_nodes, node, source))
                         .transpose()?,
                     binding_target(&config.bindings, "output")
-                        .map(|target| binding_target_endpoint(loaded_nodes, node, target))
+                        .map(|target| binding_target_endpoint(projected_nodes, node, target))
                         .transpose()?,
-                    playlist_entry_trigger_sources(loaded_nodes, node, config)?,
+                    playlist_entry_trigger_sources(projected_nodes, node, config)?,
                 )
             };
             if let Some(source) = time_source {
@@ -642,7 +701,7 @@ impl ProjectLoader {
                         frame,
                     )
                     .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                        path: node.artifact_path.as_str().to_string(),
+                        path: node_label(node),
                         reason: format!("register output target binding: {e}"),
                     })?;
             }
@@ -652,7 +711,7 @@ impl ProjectLoader {
             for (entry_index, source) in entry_trigger_sources {
                 let target_slot = SlotPath::parse(&format!("entries[{entry_index}].trigger"))
                     .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                        path: node.artifact_path.as_str().to_string(),
+                        path: node_label(node),
                         reason: format!("invalid playlist entry trigger path: {e}"),
                     })?;
                 register_source_binding_at_path(
@@ -676,19 +735,19 @@ impl ProjectLoader {
                     frame,
                 )
                 .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                    path: node.artifact_path.as_str().to_string(),
+                    path: node_label(node),
                     reason: format!("attach playlist placeholder runtime: {e}"),
                 })?;
         }
 
-        for node in loaded_nodes {
+        for node in projected_nodes {
             if node.kind != NodeKind::Fixture {
                 continue;
             }
-            let NodeDef::Fixture(config) = loaded_node_config(runtime, node)?.clone() else {
+            let NodeDef::Fixture(config) = projected_node_config(runtime, node)?.clone() else {
                 continue;
             };
-            match resolve_fixture_mapping(root, &node.source_base_path, &config) {
+            match resolve_fixture_mapping(fs, runtime, node, &config) {
                 Ok(mapping) => {
                     runtime
                         .attach_runtime_node(
@@ -702,7 +761,7 @@ impl ProjectLoader {
                             frame,
                         )
                         .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                            path: node.artifact_path.as_str().to_string(),
+                            path: node_label(node),
                             reason: format!("attach fixture runtime: {e}"),
                         })?;
                     mark_node_status(runtime, node.id, frame, WireNodeStatus::Ok);
@@ -714,7 +773,7 @@ impl ProjectLoader {
             }
             register_source_binding(
                 runtime,
-                loaded_nodes,
+                projected_nodes,
                 node,
                 "input",
                 &config.bindings,
@@ -722,7 +781,7 @@ impl ProjectLoader {
             )?;
             register_target_binding(
                 runtime,
-                loaded_nodes,
+                projected_nodes,
                 node,
                 "output",
                 &config.bindings,
@@ -741,6 +800,67 @@ fn mark_node_load_error(runtime: &mut Engine, node_id: NodeId, frame: Revision, 
     }
 }
 
+fn project_load_error_for_root_state(path: &LpPath, state: &NodeDefState) -> ProjectLoadError {
+    match state {
+        NodeDefState::NotFound | NodeDefState::Deleted | NodeDefState::ReadError { .. } => {
+            ProjectLoadError::Io {
+                path: path.as_str().to_string(),
+                details: node_def_state_message(
+                    &NodeDefLocation::artifact_root(lpc_model::ArtifactLocation::file(
+                        path.as_str(),
+                    )),
+                    state,
+                ),
+            }
+        }
+        NodeDefState::ParseError(lpc_model::NodeDefParseError::UnknownKind { kind }) => {
+            ProjectLoadError::UnknownKind {
+                path: path.as_str().to_string(),
+                suffix: kind.clone(),
+            }
+        }
+        NodeDefState::ParseError(err) => ProjectLoadError::ProjectToml {
+            file: path.as_str().to_string(),
+            error: err.to_string(),
+        },
+        NodeDefState::ValidationError(err) => ProjectLoadError::ProjectToml {
+            file: path.as_str().to_string(),
+            error: err.message.clone(),
+        },
+        NodeDefState::Loaded(_) => ProjectLoadError::ProjectToml {
+            file: path.as_str().to_string(),
+            error: String::from("root artifact is not a Project"),
+        },
+    }
+}
+
+fn node_def_state_message(location: &NodeDefLocation, state: &NodeDefState) -> String {
+    match state {
+        NodeDefState::Loaded(_) => String::from("loaded"),
+        NodeDefState::NotFound => format!("definition not found: {}", def_location_label(location)),
+        NodeDefState::Deleted => format!("definition deleted: {}", def_location_label(location)),
+        NodeDefState::ReadError { message } => {
+            format!(
+                "definition read error at {}: {message}",
+                def_location_label(location)
+            )
+        }
+        NodeDefState::ParseError(err) => {
+            format!(
+                "definition parse error at {}: {err}",
+                def_location_label(location)
+            )
+        }
+        NodeDefState::ValidationError(err) => {
+            format!(
+                "definition validation error at {}: {}",
+                def_location_label(location),
+                err.message
+            )
+        }
+    }
+}
+
 fn mark_node_status(
     runtime: &mut Engine,
     node_id: NodeId,
@@ -752,77 +872,78 @@ fn mark_node_status(
     }
 }
 
-fn load_project_def<R>(
-    root: &R,
-    path: &LpPathBuf,
-    registry: &SlotShapeRegistry,
-) -> Result<ProjectDef, ProjectLoadError>
-where
-    R: ArtifactReadRoot + ?Sized,
-    R::Err: core::fmt::Debug,
-{
-    let text = read_utf8_file(root, path.as_path())?;
-    match NodeDef::read_toml(registry, &text) {
-        Ok(NodeDef::Project(def)) => Ok(def),
-        Ok(other) => Err(ProjectLoadError::UnknownKind {
-            path: path.as_str().to_string(),
-            suffix: other.kind_name().to_string(),
-        }),
-        Err(lpc_model::NodeDefParseError::UnknownKind { kind }) => {
-            Err(ProjectLoadError::UnknownKind {
-                path: path.as_str().to_string(),
-                suffix: kind,
-            })
-        }
-        Err(lpc_model::NodeDefParseError::Toml { error }) => Err(ProjectLoadError::ProjectToml {
-            file: path.as_str().to_string(),
-            error,
-        }),
+fn projected_node_name_and_ownership(
+    origin: &ProjectNodeOrigin,
+    parent: NodeId,
+    def_location: &NodeDefLocation,
+) -> Result<(NodeName, ProjectedNodeOwnership), ProjectLoadError> {
+    match origin {
+        ProjectNodeOrigin::Root => Ok((
+            NodeName::parse("project").map_err(|e| ProjectLoadError::InvalidNodeName {
+                path: def_location_label(def_location),
+                reason: e.to_string(),
+            })?,
+            ProjectedNodeOwnership::Root,
+        )),
+        ProjectNodeOrigin::Invocation { role, .. } => match role {
+            ProjectNodePlacement::ProjectChild { name } => Ok((
+                NodeName::parse(name).map_err(|e| ProjectLoadError::InvalidNodeName {
+                    path: def_location_label(def_location),
+                    reason: e.to_string(),
+                })?,
+                ProjectedNodeOwnership::ProjectChild,
+            )),
+            ProjectNodePlacement::PlaylistEntry { entry, name } => {
+                let fallback = format!("entry_{entry}");
+                Ok((
+                    NodeName::parse(name.as_deref().unwrap_or(&fallback)).map_err(|e| {
+                        ProjectLoadError::InvalidNodeName {
+                            path: def_location_label(def_location),
+                            reason: e.to_string(),
+                        }
+                    })?,
+                    ProjectedNodeOwnership::PlaylistEntry {
+                        playlist: parent,
+                        entry: *entry,
+                    },
+                ))
+            }
+        },
     }
 }
 
-fn load_node_def<R>(
-    root: &R,
-    path: &LpPath,
-    registry: &SlotShapeRegistry,
-) -> Result<NodeDef, ProjectLoadError>
-where
-    R: ArtifactReadRoot + ?Sized,
-    R::Err: core::fmt::Debug,
-{
-    let text = read_utf8_file(root, path)?;
-    match NodeDef::read_toml(registry, &text) {
-        Ok(NodeDef::Project(_)) => Err(ProjectLoadError::UnknownKind {
-            path: path.as_str().to_string(),
-            suffix: "project".to_string(),
-        }),
-        Ok(def) => Ok(def),
-        Err(lpc_model::NodeDefParseError::UnknownKind { kind }) => {
-            Err(ProjectLoadError::UnknownKind {
-                path: path.as_str().to_string(),
-                suffix: kind,
-            })
-        }
-        Err(lpc_model::NodeDefParseError::Toml { error }) => Err(ProjectLoadError::TomlParse {
-            path: path.as_str().to_string(),
-            error,
-        }),
+fn project_node_invocation(origin: &ProjectNodeOrigin) -> NodeInvocation {
+    match origin {
+        ProjectNodeOrigin::Root => NodeInvocation::Unset,
+        ProjectNodeOrigin::Invocation { invocation, .. } => invocation.clone(),
+    }
+}
+
+fn node_label(node: &ProjectedNode) -> String {
+    def_location_label(&node.def_location)
+}
+
+fn def_location_label(location: &NodeDefLocation) -> String {
+    if location.path.is_root() {
+        location.artifact.file_path().as_str().to_string()
+    } else {
+        format!(
+            "{}#{}",
+            location.artifact.file_path().as_str(),
+            location.path
+        )
+    }
+}
+
+fn artifact_specifier_label(specifier: &ArtifactSpec) -> String {
+    match specifier {
+        ArtifactSpec::Path(path) => path.as_str().to_string(),
+        ArtifactSpec::Lib(lib) => lib.to_string(),
     }
 }
 
 fn resolve_project_specifier(specifier: &ArtifactSpec) -> Result<LpPathBuf, ProjectLoadError> {
     resolve_path_specifier_from_dir(LpPath::new("/"), specifier)
-}
-
-fn resolve_child_artifact_specifier(
-    containing_file: &LpPathBuf,
-    specifier: &ArtifactSpec,
-) -> Result<LpPathBuf, ProjectLoadError> {
-    let parent = containing_file
-        .as_path()
-        .parent()
-        .unwrap_or(LpPath::new("/"));
-    resolve_path_specifier_from_dir(parent, specifier)
 }
 
 fn resolve_path_specifier_from_dir(
@@ -850,58 +971,15 @@ fn resolve_path_specifier_from_dir(
     }
 }
 
-fn resolve_path_relative_to_file(
-    containing_file: &LpPathBuf,
-    path: &LpPathBuf,
-) -> Result<LpPathBuf, ProjectLoadError> {
-    let parent = containing_file
-        .as_path()
-        .parent()
-        .unwrap_or(LpPath::new("/"));
-    parent
-        .to_path_buf()
-        .join_relative(path.as_str())
-        .ok_or_else(|| ProjectLoadError::InvalidSourcePath {
-            path: path.as_str().to_string(),
-            reason: format!(
-                "path cannot be resolved relative to {}",
-                containing_file.as_str()
-            ),
-        })
-}
-
-fn inline_node_artifact_path(project_path: &LpPathBuf, node_name: &NodeName) -> LpPathBuf {
-    LpPathBuf::from(format!(
-        "{}#nodes.{}",
-        project_path.as_str(),
-        node_name.as_str()
-    ))
-}
-
-fn playlist_entry_child_name(
-    playlist_path: &LpPathBuf,
-    entry_index: u32,
-    entry: &PlaylistEntry,
-) -> Result<NodeName, ProjectLoadError> {
-    let name = entry.name.data.as_ref().map_or_else(
-        || format!("entry_{entry_index}"),
-        |name| name.value().clone(),
-    );
-    NodeName::parse(&name).map_err(|e| ProjectLoadError::InvalidNodeName {
-        path: playlist_path.as_str().to_string(),
-        reason: format!("entry {entry_index}: {e}"),
-    })
-}
-
 fn playlist_runtime_entries(
-    loaded_nodes: &[LoadedNode],
+    projected_nodes: &[ProjectedNode],
     playlist: NodeId,
     config: &PlaylistDef,
 ) -> Vec<PlaylistRuntimeEntry> {
-    loaded_nodes
+    projected_nodes
         .iter()
         .filter_map(|node| match node.ownership {
-            LoadedNodeOwnership::PlaylistEntry {
+            ProjectedNodeOwnership::PlaylistEntry {
                 playlist: owner,
                 entry,
             } if owner == playlist => Some(PlaylistRuntimeEntry {
@@ -927,8 +1005,8 @@ fn playlist_runtime_entries(
 }
 
 fn playlist_entry_trigger_sources(
-    loaded_nodes: &[LoadedNode],
-    current: &LoadedNode,
+    projected_nodes: &[ProjectedNode],
+    current: &ProjectedNode,
     config: &PlaylistDef,
 ) -> Result<Vec<(u32, BindingSource)>, ProjectLoadError> {
     let mut sources = Vec::new();
@@ -938,48 +1016,29 @@ fn playlist_entry_trigger_sources(
         };
         sources.push((
             *entry_index,
-            binding_source_endpoint(loaded_nodes, current, source)?,
+            binding_source_endpoint(projected_nodes, current, source)?,
         ));
     }
     Ok(sources)
 }
 
-fn read_shader_source<R>(
-    root: &R,
-    containing_file: &LpPathBuf,
-    source: &ShaderSource,
-) -> Result<String, ProjectLoadError>
-where
-    R: ArtifactReadRoot + ?Sized,
-    R::Err: core::fmt::Debug,
-{
-    match source {
-        ShaderSource::Path(path) => {
-            let shader_path =
-                resolve_path_relative_to_file(containing_file, &path.value().as_path_buf())?;
-            read_utf8_file(root, shader_path.as_path())
-        }
-        ShaderSource::Glsl(source) => Ok(source.value().clone()),
-    }
-}
-
-fn resolve_fixture_mapping<R>(
-    root: &R,
-    containing_file: &LpPathBuf,
+fn resolve_fixture_mapping(
+    fs: &dyn LpFs,
+    runtime: &mut Engine,
+    node: &ProjectedNode,
     config: &FixtureDef,
-) -> Result<MappingConfig, ProjectLoadError>
-where
-    R: ArtifactReadRoot + ?Sized,
-    R::Err: core::fmt::Debug,
-{
+) -> Result<MappingConfig, ProjectLoadError> {
     match config.mapping.value() {
         MappingConfig::SvgPath {
-            source,
-            sample_diameter,
+            sample_diameter, ..
         } => {
-            let svg_path =
-                resolve_path_relative_to_file(containing_file, &source.value().as_path_buf())?;
-            let svg = read_utf8_file(root, svg_path.as_path())?;
+            let svg = materialize_node_text_asset(
+                fs,
+                runtime,
+                node,
+                AssetKind::FixtureSvg,
+                "fixture SVG",
+            )?;
             resolve_svg_path_mapping(
                 &svg,
                 config.render_width(),
@@ -987,7 +1046,7 @@ where
                 sample_diameter.value().0,
             )
             .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                path: svg_path.as_str().to_string(),
+                path: node_label(node),
                 reason: format!("resolve svg fixture mapping: {e}"),
             })
         }
@@ -995,7 +1054,10 @@ where
     }
 }
 
-fn node_kind_name(config: &NodeDef, path: &LpPath) -> Result<NodeName, ProjectLoadError> {
+fn node_kind_name(
+    config: &NodeDef,
+    location: &NodeDefLocation,
+) -> Result<NodeName, ProjectLoadError> {
     let name = match config {
         NodeDef::ComputeShader(_) => "compute_shader",
         NodeDef::ControlRadio(_) => "control_radio",
@@ -1003,33 +1065,78 @@ fn node_kind_name(config: &NodeDef, path: &LpPath) -> Result<NodeName, ProjectLo
         _ => config.kind_name(),
     };
     NodeName::parse(name).map_err(|e| ProjectLoadError::InvalidNodeName {
-        path: path.as_str().to_string(),
+        path: def_location_label(location),
         reason: format!("{e}"),
     })
 }
 
-fn loaded_node_config<'a>(
+fn projected_node_config<'a>(
     runtime: &'a Engine,
-    node: &LoadedNode,
+    node: &ProjectedNode,
 ) -> Result<&'a NodeDef, ProjectLoadError> {
-    let artifact = runtime
-        .tree()
-        .get(node.id)
-        .ok_or(ProjectLoadError::Tree(TreeError::UnknownNode(node.id)))?
-        .artifact();
-    let entry = runtime.artifacts().entry(&artifact).ok_or_else(|| {
+    let entry = runtime.registry().def(&node.def_location).ok_or_else(|| {
         ProjectLoadError::InvalidSourcePath {
-            path: node.artifact_path.as_str().to_string(),
-            reason: format!("missing artifact payload for node {:?}", node.id),
+            path: node_label(node),
+            reason: format!("missing definition payload for node {:?}", node.id),
         }
     })?;
     match &entry.state {
-        ArtifactState::Loaded(def) | ArtifactState::Prepared(def) | ArtifactState::Idle(def) => {
-            Ok(def)
-        }
+        NodeDefState::Loaded(def) => Ok(def),
         other => Err(ProjectLoadError::InvalidSourcePath {
-            path: node.artifact_path.as_str().to_string(),
-            reason: format!("artifact payload is not loaded: {other:?}"),
+            path: node_label(node),
+            reason: format!("definition payload is not loaded: {other:?}"),
+        }),
+    }
+}
+
+fn materialize_node_text_asset(
+    fs: &dyn LpFs,
+    runtime: &mut Engine,
+    node: &ProjectedNode,
+    kind: AssetKind,
+    label: &str,
+) -> Result<String, ProjectLoadError> {
+    let source = asset_for_node_kind(runtime.registry(), node, kind)?;
+    runtime
+        .registry_mut()
+        .materialize_asset_text(fs, &source)
+        .map(|asset| asset.text)
+        .map_err(|e| ProjectLoadError::InvalidSourcePath {
+            path: node_label(node),
+            reason: format!("materialize {label}: {e:?}"),
+        })
+}
+
+fn asset_for_node_kind(
+    registry: &ProjectRegistry,
+    node: &ProjectedNode,
+    kind: AssetKind,
+) -> Result<AssetSource, ProjectLoadError> {
+    let mut matches = Vec::new();
+    for (source, consumers) in &registry.inventory().tree.asset_consumers {
+        if !consumers
+            .iter()
+            .any(|consumer| consumer == &node.use_location)
+        {
+            continue;
+        }
+        let Some(entry) = registry.asset(source) else {
+            continue;
+        };
+        if entry.kind == kind {
+            matches.push(source.clone());
+        }
+    }
+
+    match matches.len() {
+        1 => Ok(matches.remove(0)),
+        0 => Err(ProjectLoadError::InvalidSourcePath {
+            path: node_label(node),
+            reason: format!("node has no referenced {kind:?} asset"),
+        }),
+        _ => Err(ProjectLoadError::InvalidSourcePath {
+            path: node_label(node),
+            reason: format!("node has multiple referenced {kind:?} assets"),
         }),
     }
 }
@@ -1044,29 +1151,32 @@ fn node_provides_default_time_bus(config: &NodeDef) -> bool {
 }
 
 fn resolve_node_loc<'a>(
-    loaded_nodes: &'a [LoadedNode],
-    current: &'a LoadedNode,
+    projected_nodes: &'a [ProjectedNode],
+    current: &'a ProjectedNode,
     loc: &lpc_model::RelativeNodeRef,
     expected: &str,
-) -> Result<&'a LoadedNode, ProjectLoadError> {
-    resolve_relative_node_ref(loaded_nodes, current, loc).ok_or_else(|| {
+) -> Result<&'a ProjectedNode, ProjectLoadError> {
+    resolve_relative_node_ref(projected_nodes, current, loc).ok_or_else(|| {
         ProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
+            path: node_label(current),
             reason: format!("unknown {expected} node ref `{loc}`"),
         }
     })
 }
 
 fn resolve_relative_node_ref<'a>(
-    loaded_nodes: &'a [LoadedNode],
-    current: &'a LoadedNode,
+    projected_nodes: &'a [ProjectedNode],
+    current: &'a ProjectedNode,
     parsed: &lpc_model::RelativeNodeRef,
-) -> Option<&'a LoadedNode> {
+) -> Option<&'a ProjectedNode> {
     let mut node = Some(current);
     let mut virtual_parent = None;
     for _ in 0..parsed.parent_hops() {
         let parent = node?.parent?;
-        if let Some(parent_node) = loaded_nodes.iter().find(|candidate| candidate.id == parent) {
+        if let Some(parent_node) = projected_nodes
+            .iter()
+            .find(|candidate| candidate.id == parent)
+        {
             node = Some(parent_node);
             virtual_parent = None;
         } else {
@@ -1076,7 +1186,7 @@ fn resolve_relative_node_ref<'a>(
     }
     for segment in parsed.segments() {
         let parent = node.map(|node| node.id).or(virtual_parent)?;
-        node = loaded_nodes
+        node = projected_nodes
             .iter()
             .find(|candidate| candidate.parent == Some(parent) && &candidate.name == segment);
         virtual_parent = None;
@@ -1107,21 +1217,21 @@ fn binding_target<'a>(bindings: &'a BindingDefs, slot: &str) -> Option<&'a Autho
 
 fn register_source_binding(
     engine: &mut Engine,
-    loaded_nodes: &[LoadedNode],
-    current: &LoadedNode,
+    projected_nodes: &[ProjectedNode],
+    current: &ProjectedNode,
     slot_name: &str,
     bindings: &BindingDefs,
     frame: Revision,
 ) -> Result<(), ProjectLoadError> {
     let source =
         binding_source(bindings, slot_name).ok_or_else(|| ProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
+            path: node_label(current),
             reason: format!("{slot_name} source binding is missing"),
         })?;
-    let source = binding_source_endpoint(loaded_nodes, current, source)?;
+    let source = binding_source_endpoint(projected_nodes, current, source)?;
     let target_slot =
         SlotPath::parse(slot_name).map_err(|e| ProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
+            path: node_label(current),
             reason: format!("invalid target slot `{slot_name}`: {e}"),
         })?;
     register_source_binding_at_path(engine, current, slot_name, source, target_slot, frame)
@@ -1129,7 +1239,7 @@ fn register_source_binding(
 
 fn register_source_binding_at_path(
     engine: &mut Engine,
-    current: &LoadedNode,
+    current: &ProjectedNode,
     binding_slot_name: &str,
     source: BindingSource,
     target_slot: SlotPath,
@@ -1150,7 +1260,7 @@ fn register_source_binding_at_path(
             frame,
         )
         .map_err(|e| ProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
+            path: node_label(current),
             reason: format!("register {binding_slot_name} source binding: {e}"),
         })?;
     Ok(())
@@ -1158,8 +1268,8 @@ fn register_source_binding_at_path(
 
 fn register_optional_source_binding(
     engine: &mut Engine,
-    loaded_nodes: &[LoadedNode],
-    current: &LoadedNode,
+    projected_nodes: &[ProjectedNode],
+    current: &ProjectedNode,
     slot_name: &str,
     bindings: &BindingDefs,
     frame: Revision,
@@ -1167,13 +1277,13 @@ fn register_optional_source_binding(
     if binding_source(bindings, slot_name).is_none() {
         return Ok(());
     }
-    register_source_binding(engine, loaded_nodes, current, slot_name, bindings, frame)
+    register_source_binding(engine, projected_nodes, current, slot_name, bindings, frame)
 }
 
 fn register_target_binding(
     engine: &mut Engine,
-    loaded_nodes: &[LoadedNode],
-    current: &LoadedNode,
+    projected_nodes: &[ProjectedNode],
+    current: &ProjectedNode,
     slot_name: &str,
     bindings: &BindingDefs,
     frame: Revision,
@@ -1181,10 +1291,10 @@ fn register_target_binding(
     let Some(target) = binding_target(bindings, slot_name) else {
         return Ok(());
     };
-    let target = binding_target_endpoint(loaded_nodes, current, target)?;
+    let target = binding_target_endpoint(projected_nodes, current, target)?;
     let source_slot =
         SlotPath::parse(slot_name).map_err(|e| ProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
+            path: node_label(current),
             reason: format!("invalid source slot `{slot_name}`: {e}"),
         })?;
     engine
@@ -1202,7 +1312,7 @@ fn register_target_binding(
             frame,
         )
         .map_err(|e| ProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
+            path: node_label(current),
             reason: format!("register {slot_name} target binding: {e}"),
         })?;
     Ok(())
@@ -1210,7 +1320,7 @@ fn register_target_binding(
 
 fn register_visual_default_output_binding(
     engine: &mut Engine,
-    current: &LoadedNode,
+    current: &ProjectedNode,
     bindings: &BindingDefs,
     frame: Revision,
 ) -> Result<(), ProjectLoadError> {
@@ -1224,7 +1334,7 @@ fn register_visual_default_output_binding(
 
 fn add_visual_default_output_binding(
     engine: &mut Engine,
-    current: &LoadedNode,
+    current: &ProjectedNode,
     frame: Revision,
 ) -> Result<(), ProjectLoadError> {
     engine
@@ -1242,7 +1352,7 @@ fn add_visual_default_output_binding(
             frame,
         )
         .map_err(|e| ProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
+            path: node_label(current),
             reason: format!("register visual default output binding: {e}"),
         })?;
     Ok(())
@@ -1257,7 +1367,7 @@ fn binding_kind_for_slot(slot_name: &str) -> Kind {
 
 fn register_clock_default_time_binding(
     engine: &mut Engine,
-    current: &LoadedNode,
+    current: &ProjectedNode,
     bindings: &BindingDefs,
     frame: Revision,
 ) -> Result<(), ProjectLoadError> {
@@ -1279,7 +1389,7 @@ fn register_clock_default_time_binding(
             frame,
         )
         .map_err(|e| ProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
+            path: node_label(current),
             reason: format!("register clock default time binding: {e}"),
         })?;
     Ok(())
@@ -1298,7 +1408,7 @@ fn shader_needs_default_time_binding(config: &ShaderDef) -> bool {
 
 fn add_visual_default_time_binding(
     engine: &mut Engine,
-    current: &LoadedNode,
+    current: &ProjectedNode,
     frame: Revision,
 ) -> Result<(), ProjectLoadError> {
     engine
@@ -1316,7 +1426,7 @@ fn add_visual_default_time_binding(
             frame,
         )
         .map_err(|e| ProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
+            path: node_label(current),
             reason: format!("register visual shader default time binding: {e}"),
         })?;
     Ok(())
@@ -1324,12 +1434,13 @@ fn add_visual_default_time_binding(
 
 fn register_fluid_default_time_binding(
     engine: &mut Engine,
-    loaded_nodes: &[LoadedNode],
-    current: &LoadedNode,
+    projected_nodes: &[ProjectedNode],
+    current: &ProjectedNode,
     config: &FluidDef,
     frame: Revision,
 ) -> Result<(), ProjectLoadError> {
-    if binding_source(&config.bindings, "time").is_some() || !has_default_time_bus(loaded_nodes) {
+    if binding_source(&config.bindings, "time").is_some() || !has_default_time_bus(projected_nodes)
+    {
         return Ok(());
     }
     engine
@@ -1347,14 +1458,14 @@ fn register_fluid_default_time_binding(
             frame,
         )
         .map_err(|e| ProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
+            path: node_label(current),
             reason: format!("register fluid default time binding: {e}"),
         })?;
     Ok(())
 }
 
-fn has_default_time_bus(loaded_nodes: &[LoadedNode]) -> bool {
-    loaded_nodes
+fn has_default_time_bus(projected_nodes: &[ProjectedNode]) -> bool {
+    projected_nodes
         .iter()
         .any(|node| node.provides_default_time_bus)
 }
@@ -1364,33 +1475,34 @@ fn is_time_seconds_bus_target(target: &AuthoredBindingRef) -> bool {
 }
 
 fn binding_source_endpoint(
-    loaded_nodes: &[LoadedNode],
-    current: &LoadedNode,
+    projected_nodes: &[ProjectedNode],
+    current: &ProjectedNode,
     endpoint: AuthoredBindingSource<'_>,
 ) -> Result<BindingSource, ProjectLoadError> {
     match endpoint {
         AuthoredBindingSource::Value(value) => Ok(BindingSource::Literal(value.clone())),
         AuthoredBindingSource::Ref(binding_ref) => {
-            binding_ref_source(loaded_nodes, current, binding_ref)
+            binding_ref_source(projected_nodes, current, binding_ref)
         }
     }
 }
 
 fn binding_ref_source(
-    loaded_nodes: &[LoadedNode],
-    current: &LoadedNode,
+    projected_nodes: &[ProjectedNode],
+    current: &ProjectedNode,
     binding_ref: &AuthoredBindingRef,
 ) -> Result<BindingSource, ProjectLoadError> {
     match binding_ref {
         AuthoredBindingRef::Unset => Err(ProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
+            path: node_label(current),
             reason: String::from("binding source cannot be unset"),
         }),
         AuthoredBindingRef::Bus(bus) => Ok(BindingSource::BusChannel(ChannelName(
             bus.slot().to_string(),
         ))),
         AuthoredBindingRef::Node(node_slot) => {
-            let node = resolve_node_loc(loaded_nodes, current, node_slot.node(), "binding source")?;
+            let node =
+                resolve_node_loc(projected_nodes, current, node_slot.node(), "binding source")?;
             Ok(BindingSource::ProducedSlot {
                 node: node.id,
                 slot: node_slot.slot().clone(),
@@ -1400,41 +1512,27 @@ fn binding_ref_source(
 }
 
 fn binding_target_endpoint(
-    loaded_nodes: &[LoadedNode],
-    current: &LoadedNode,
+    projected_nodes: &[ProjectedNode],
+    current: &ProjectedNode,
     endpoint: &AuthoredBindingRef,
 ) -> Result<BindingTarget, ProjectLoadError> {
     match endpoint {
         AuthoredBindingRef::Unset => Err(ProjectLoadError::InvalidSourcePath {
-            path: current.artifact_path.as_str().to_string(),
+            path: node_label(current),
             reason: String::from("binding target cannot be unset"),
         }),
         AuthoredBindingRef::Bus(bus) => Ok(BindingTarget::BusChannel(ChannelName(
             bus.slot().to_string(),
         ))),
         AuthoredBindingRef::Node(node_slot) => {
-            let node = resolve_node_loc(loaded_nodes, current, node_slot.node(), "binding target")?;
+            let node =
+                resolve_node_loc(projected_nodes, current, node_slot.node(), "binding target")?;
             Ok(BindingTarget::ConsumedSlot {
                 node: node.id,
                 slot: node_slot.slot().clone(),
             })
         }
     }
-}
-
-fn read_utf8_file<R>(root: &R, path: &LpPath) -> Result<String, ProjectLoadError>
-where
-    R: ArtifactReadRoot + ?Sized,
-    R::Err: core::fmt::Debug,
-{
-    let data = root.read_file(path).map_err(|e| ProjectLoadError::Io {
-        path: path.as_str().to_string(),
-        details: format!("{e:?}"),
-    })?;
-    String::from_utf8(data).map_err(|e| ProjectLoadError::InvalidSourcePath {
-        path: path.as_str().to_string(),
-        reason: format!("shader source is not UTF-8: {e}"),
-    })
 }
 
 #[cfg(test)]
@@ -1445,7 +1543,9 @@ mod tests {
 
     use alloc::rc::Rc;
     use alloc::sync::Arc;
-    use lpc_model::{NodeName, ProductRef, SlotData, SlotMapKey, TreePath};
+    use lpc_model::{
+        ArtifactLocation, NodeDefLocation, NodeName, ProductRef, SlotData, SlotMapKey, TreePath,
+    };
     use lpc_shared::hardware::{
         HardwareAddress, HardwareRegistry, HardwareSystem, VirtualButtonDriver, VirtualRadioDriver,
         default_esp32c6_hardware_manifest,
@@ -1464,6 +1564,14 @@ mod tests {
     use crate::dataflow::resolver::{Production, QueryKey, ResolveLogLevel};
     use crate::engine::{ButtonService, RadioService, resolve_with_engine_host};
     use crate::products::visual::RenderTextureRequest;
+
+    fn node_for_def_path(rt: &Engine, path: &str) -> Option<NodeId> {
+        let location = NodeDefLocation::artifact_root(ArtifactLocation::file(path));
+        rt.project_runtime_index()
+            .runtime_nodes_for_def(&location)
+            .first()
+            .copied()
+    }
 
     fn flat_project() -> LpFsMemory {
         let fs = LpFsMemory::new();
@@ -1521,7 +1629,7 @@ sample_diameter = 2.0
 
         let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load svg fixture project");
-        assert!(rt.artifact_node_id(LpPath::new("/fixture.toml")).is_some());
+        assert!(node_for_def_path(&rt, "/fixture.toml").is_some());
     }
 
     #[test]
@@ -1556,10 +1664,12 @@ sample_diameter = 2.0
     }
 
     fn assert_fixture_node_error(rt: &Engine, expected: &str) {
-        let fixture = rt
-            .artifact_node_id(LpPath::new("/fixture.toml"))
-            .expect("fixture node");
-        let entry = rt.tree().get(fixture).expect("fixture entry");
+        assert_node_for_def_error(rt, "/fixture.toml", expected);
+    }
+
+    fn assert_node_for_def_error(rt: &Engine, path: &str, expected: &str) {
+        let node = node_for_def_path(rt, path).expect("runtime node");
+        let entry = rt.tree().get(node).expect("runtime entry");
         assert!(matches!(
             entry.status.value(),
             WireNodeStatus::Error(message) if message.contains(expected)
@@ -1748,10 +1858,7 @@ source = "bus#trigger"
             .lookup_sibling(root, NodeName::parse("fixture").unwrap())
             .expect("fixture id");
 
-        assert_eq!(
-            rt.artifact_node_id(LpPath::new("/texture.toml")),
-            Some(tex_id)
-        );
+        assert_eq!(node_for_def_path(&rt, "/texture.toml"), Some(tex_id));
 
         for id in [tex_id, sh_id, out_id, fix_id] {
             let entry = rt.tree().get(id).expect("entry");
@@ -1997,9 +2104,7 @@ source = { path = "shader.glsl" }
 
         let services = EngineServices::new(TreePath::parse("/default_visual.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load");
-        let shader = rt
-            .artifact_node_id(LpPath::new("/shader.toml"))
-            .expect("shader node");
+        let shader = node_for_def_path(&rt, "/shader.toml").expect("shader node");
 
         assert!(rt.tree().bindings().any(|binding| {
             matches!(
@@ -2054,12 +2159,8 @@ order = "inner_first"
 
         let services = EngineServices::new(TreePath::parse("/sibling_ref.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load");
-        let texture = rt
-            .artifact_node_id(LpPath::new("/texture.toml"))
-            .expect("texture node");
-        let fixture = rt
-            .artifact_node_id(LpPath::new("/fixture.toml"))
-            .expect("fixture node");
+        let texture = node_for_def_path(&rt, "/texture.toml").expect("texture node");
+        let fixture = node_for_def_path(&rt, "/fixture.toml").expect("fixture node");
 
         assert!(rt.tree().bindings().any(|binding| {
             matches!(
@@ -2202,7 +2303,7 @@ order = "inner_first"
     }
 
     #[test]
-    fn malformed_node_toml_returns_error() {
+    fn malformed_child_node_toml_projects_error_node() {
         let fs = LpFsMemory::new();
         fs.write_file(
             "/project.toml".as_path(),
@@ -2219,14 +2320,9 @@ ref = "./broken.toml"
 
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
-        let err = match ProjectLoader::load_from_root(&fs, services) {
-            Err(e) => e,
-            Ok(_) => panic!("expected load error"),
-        };
-        assert!(
-            matches!(err, ProjectLoadError::TomlParse { .. }),
-            "expected TomlParse, got {err:?}"
-        );
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load project");
+
+        assert_node_for_def_error(&rt, "/broken.toml", "parse error");
     }
 
     #[test]
@@ -2245,7 +2341,7 @@ ref = "./broken.toml"
     }
 
     #[test]
-    fn unknown_child_kind_returns_toml_parse_error() {
+    fn unknown_child_kind_projects_error_node() {
         let fs = LpFsMemory::new();
         fs.write_file(
             "/project.toml".as_path(),
@@ -2262,14 +2358,9 @@ ref = "./weird.toml"
 
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
-        let err = match ProjectLoader::load_from_root(&fs, services) {
-            Err(e) => e,
-            Ok(_) => panic!("expected load error"),
-        };
-        assert!(
-            matches!(err, ProjectLoadError::UnknownKind { .. }),
-            "expected UnknownKind, got {err:?}"
-        );
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load project");
+
+        assert_node_for_def_error(&rt, "/weird.toml", "unknown node kind");
     }
 
     #[test]
@@ -2326,7 +2417,7 @@ order = "inner_first"
     }
 
     #[test]
-    fn slash_node_ref_is_rejected_during_parse() {
+    fn slash_node_ref_projects_error_node() {
         let fs = flat_project();
         fs.write_file(
             "/fixture.toml".as_path(),
@@ -2364,18 +2455,9 @@ order = "inner_first"
 
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
-        let err = match ProjectLoader::load_from_root(&fs, services) {
-            Err(e) => e,
-            Ok(_) => panic!("expected load error"),
-        };
-        assert!(
-            matches!(
-                err,
-                ProjectLoadError::TomlParse { ref error, .. }
-                    if error.contains("node locations use dot syntax")
-            ),
-            "expected invalid slash node ref parse error, got {err:?}"
-        );
+        let rt = ProjectLoader::load_from_root(&fs, services).expect("load project");
+
+        assert_node_for_def_error(&rt, "/fixture.toml", "node locations use dot syntax");
     }
 
     #[test]
@@ -2418,9 +2500,7 @@ value = "f32"
         let services = EngineServices::new(root_path);
         let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load");
         rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
-        let node = rt
-            .artifact_node_id(LpPath::new("/compute.toml"))
-            .expect("compute node");
+        let node = node_for_def_path(&rt, "/compute.toml").expect("compute node");
 
         let production = resolve_with_engine_host(
             &mut rt,

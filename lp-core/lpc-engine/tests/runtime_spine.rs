@@ -5,7 +5,6 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_engine::artifact::{ArtifactLocation, ArtifactState, ArtifactStore};
 use lpc_engine::dataflow::binding::{
     BindingEntry, BindingPriority, BindingRef, BindingSource, BindingTarget,
 };
@@ -16,48 +15,13 @@ use lpc_engine::dataflow::resolver::{
 use lpc_engine::node::{
     MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, TickContext,
 };
-use lpc_model::{
-    ArtifactSpec, Kind, LpValue, NodeDef, NodeId, NodeInvocation, Revision, TextureDef,
-    bus::ChannelName,
-};
+use lpc_model::{Kind, LpValue, NodeId, Revision, bus::ChannelName};
 use lps_shared::LpsValueF32;
 
 // --- Tests (concise scenarios; helpers below) ---
 
 #[test]
-fn runtime_spine_artifact_acquire_load_release_idle_content_frame_and_refcount() {
-    let mut mgr = ArtifactStore::new();
-    let location = ArtifactLocation::file("dummy/test.lp");
-    let r = mgr.acquire_location(location, Revision::new(1));
-
-    assert_eq!(mgr.refcount(&r), Some(1));
-    assert_eq!(mgr.content_frame(&r), Some(Revision::new(1)));
-
-    mgr.load_with(&r, Revision::new(20), |location| {
-        let ArtifactLocation::File(path) = location else {
-            panic!("expected file artifact location");
-        };
-        assert_eq!(path.as_str(), "dummy/test.lp");
-        Ok(texture_def(12, 8))
-    })
-    .unwrap();
-
-    assert_eq!(mgr.content_frame(&r), Some(Revision::new(20)));
-    let ent = mgr.entry(&r).expect("entry");
-    assert!(
-        matches!(&ent.state, ArtifactState::Loaded(NodeDef::Texture(payload)) if payload.width() == 12)
-    );
-
-    mgr.release(&r, Revision::new(2)).unwrap();
-    let ent = mgr.entry(&r).expect("idle entry kept");
-    assert_eq!(ent.refcount, 0);
-    assert!(
-        matches!(&ent.state, ArtifactState::Idle(NodeDef::Texture(payload)) if payload.height() == 8)
-    );
-}
-
-#[test]
-fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
+fn runtime_spine_tick_context_resolve_bus_query() {
     let channel = ChannelName(String::from("live"));
     let frame = Revision::new(99);
     let binding = BindingEntry {
@@ -68,18 +32,6 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
         version: frame,
         owner: NodeId::new(1),
     };
-
-    let config = NodeInvocation::new(ArtifactSpec::path("e.lp"));
-
-    let mut mgr = ArtifactStore::new();
-    let specifier = config.ref_specifier().unwrap();
-    let ar = mgr.acquire_location(
-        ArtifactLocation::try_from_src_spec(&specifier).unwrap(),
-        Revision::new(0),
-    );
-    mgr.load_with(&ar, Revision::new(40), |_location| Ok(texture_def(7, 7)))
-        .unwrap();
-    let content_frame = mgr.content_frame(&ar).expect("content_frame");
 
     let mut resolver = Resolver::new();
     let mut session = ResolveSession::new(
@@ -128,8 +80,6 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
     let mut ctx = TickContext::new(
         NodeId::new(5),
         frame,
-        ar,
-        content_frame,
         &mut bridge as &mut dyn TickResolver,
         &slot_shapes,
     );
@@ -137,13 +87,6 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
     node.produce(&lpc_model::SlotPath::root(), &mut ctx)
         .unwrap();
     assert_eq!(node.last, Some(2.0));
-
-    assert!(ctx.artifact_changed_since(Revision::new(39)));
-    assert!(!ctx.artifact_changed_since(Revision::new(40)));
-}
-
-fn texture_def(width: u32, height: u32) -> NodeDef {
-    NodeDef::Texture(TextureDef::new(width, height))
 }
 
 #[test]

@@ -276,7 +276,6 @@ fn attach_output_demand_root(
     rt: &mut Engine,
     root: lpc_model::NodeId,
     spine: lpc_model::NodeInvocation,
-    artifact: crate::artifact::ArtifactId,
     frame: Revision,
     name: &str,
     endpoint: HardwareEndpointSpec,
@@ -291,7 +290,6 @@ fn attach_output_demand_root(
                 source: WireSlotIndex(0),
             },
             spine.clone(),
-            artifact,
             frame,
         )
         .unwrap();
@@ -325,7 +323,6 @@ fn attach_idle_output_sink(
     rt: &mut Engine,
     root: lpc_model::NodeId,
     spine: lpc_model::NodeInvocation,
-    artifact: crate::artifact::ArtifactId,
     frame: Revision,
     name: &str,
     endpoint: HardwareEndpointSpec,
@@ -340,7 +337,6 @@ fn attach_idle_output_sink(
                 source: WireSlotIndex(0),
             },
             spine.clone(),
-            artifact,
             frame,
         )
         .unwrap();
@@ -395,7 +391,7 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
     let ticks = Arc::new(AtomicU32::new(0));
     let frame = Revision::new(1);
     let root = rt.tree().root();
-    let (spine, artifact) = test_placeholder_spine();
+    let spine = test_placeholder_spine();
 
     let sh_id = rt
         .tree_mut()
@@ -407,7 +403,6 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
                 source: WireSlotIndex(0),
             },
             spine.clone(),
-            artifact,
             frame,
         )
         .unwrap();
@@ -447,7 +442,6 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
                 source: WireSlotIndex(0),
             },
             spine.clone(),
-            artifact,
             frame,
         )
         .unwrap();
@@ -482,15 +476,8 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
     )
     .unwrap();
 
-    let (out_id, _sink) = attach_output_demand_root(
-        &mut rt,
-        root,
-        spine.clone(),
-        artifact,
-        frame,
-        "out",
-        endpoint.clone(),
-    );
+    let (out_id, _sink) =
+        attach_output_demand_root(&mut rt, root, spine.clone(), frame, "out", endpoint.clone());
     bind_output_to_fixture(&mut rt, out_id, fix_id, frame);
 
     rt.tick(10).expect("tick");
@@ -532,7 +519,7 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
     let ticks = Arc::new(AtomicU32::new(0));
     let frame = Revision::new(1);
     let root = rt.tree().root();
-    let (spine, artifact) = test_placeholder_spine();
+    let spine = test_placeholder_spine();
 
     let sh_id = rt
         .tree_mut()
@@ -544,7 +531,6 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
                 source: WireSlotIndex(0),
             },
             spine.clone(),
-            artifact,
             frame,
         )
         .unwrap();
@@ -584,7 +570,6 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
                 source: WireSlotIndex(0),
             },
             spine.clone(),
-            artifact,
             frame,
         )
         .unwrap();
@@ -623,7 +608,6 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
         &mut rt,
         root,
         spine.clone(),
-        artifact,
         frame,
         "out_written",
         endpoint_written.clone(),
@@ -633,7 +617,6 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
         &mut rt,
         root,
         spine.clone(),
-        artifact,
         frame,
         "out_idle",
         endpoint_idle.clone(),
@@ -663,7 +646,7 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
     let ticks = Arc::new(AtomicU32::new(0));
     let frame = Revision::new(1);
     let root = rt.tree().root();
-    let (spine, artifact) = test_placeholder_spine();
+    let spine = test_placeholder_spine();
 
     let sh_id = rt
         .tree_mut()
@@ -675,7 +658,6 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
                 source: WireSlotIndex(0),
             },
             spine.clone(),
-            artifact,
             frame,
         )
         .unwrap();
@@ -715,7 +697,6 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
                 source: WireSlotIndex(0),
             },
             spine.clone(),
-            artifact,
             frame,
         )
         .unwrap();
@@ -751,15 +732,8 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
     .unwrap();
 
     let endpoint = endpoint("ws281x:rmt:D10");
-    let (out_id, sink) = attach_output_demand_root(
-        &mut rt,
-        root,
-        spine.clone(),
-        artifact,
-        frame,
-        "out",
-        endpoint.clone(),
-    );
+    let (out_id, sink) =
+        attach_output_demand_root(&mut rt, root, spine.clone(), frame, "out", endpoint.clone());
     bind_output_to_fixture(&mut rt, out_id, fix_id, frame);
 
     rt.tick(10).expect("tick");

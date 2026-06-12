@@ -1,4 +1,4 @@
-//! Core runtime owner: [`Engine`] drives frame state, tree, bindings, resolver, and artifacts.
+//! Core runtime owner: [`Engine`] drives frame state, tree, bindings, resolver, and project registry.
 
 mod engine;
 mod engine_error;
@@ -17,6 +17,7 @@ mod project_read_resources;
 mod project_read_runtime;
 mod project_read_shapes;
 mod project_read_stream;
+mod project_runtime_index;
 mod slot_mutation;
 #[cfg(test)]
 pub(crate) mod test_support;
@@ -29,6 +30,7 @@ pub use engine_services::{ButtonService, EngineServices, OutputFlushError, Radio
 pub use frame_num::FrameNum;
 pub use frame_time::FrameTime;
 pub use project_loader::{ProjectLoadError, ProjectLoader};
+pub use project_runtime_index::ProjectRuntimeIndex;
 
 #[cfg(test)]
 pub(crate) use engine::resolve_with_engine_host;

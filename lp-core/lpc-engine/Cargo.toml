@@ -30,6 +30,7 @@ lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 log = { workspace = true, default-features = false }
 
 lpc-model = { path = "../lpc-model", default-features = false }
+lpc-registry = { path = "../lpc-registry", default-features = false }
 lpc-wire = { path = "../lpc-wire", default-features = false }
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }

@@ -11,7 +11,6 @@
 
 extern crate alloc;
 
-pub mod artifact;
 pub mod dataflow;
 pub mod engine;
 pub mod gfx;

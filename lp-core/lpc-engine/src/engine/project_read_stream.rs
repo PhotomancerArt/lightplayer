@@ -181,7 +181,7 @@ impl Engine {
             let mut slots = nodes.prop("slots")?.object()?;
             let mut roots = slots.prop("roots")?.array()?;
             for entry in self.tree().entries() {
-                if let Some(def) = self.loaded_node_def(entry.artifact()) {
+                if let Some(def) = self.loaded_node_def_for_entry(entry) {
                     let mut root = roots.item()?.object()?;
                     root.prop("name")?.string(&node_def_root_name(entry.id))?;
                     root.prop("shape")?.serde(&def.shape_id())?;

@@ -4,23 +4,20 @@ use alloc::boxed::Box;
 use alloc::collections::BTreeSet;
 use alloc::format;
 use alloc::rc::Rc;
-use alloc::string::{String, ToString};
+use alloc::string::ToString;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use hashbrown::HashMap;
-
 use lpc_model::{
-    ControlProduct, NodeDef, NodeId, Revision, SlotAccess, SlotAccessor, SlotData, SlotDirection,
-    SlotMerge, SlotPath, SlotPathSegment, SlotSemantics, SlotShapeLookup, SlotShapeRegistry,
-    SlotShapeView, TreePath, WithRevision, advance_revision, current_revision,
-    lookup_slot_data_and_shape,
+    ControlProduct, NodeDef, NodeDefLocation, NodeDefState, NodeId, Revision, SlotAccess,
+    SlotAccessor, SlotData, SlotDirection, SlotMerge, SlotPath, SlotPathSegment, SlotSemantics,
+    SlotShapeLookup, SlotShapeRegistry, SlotShapeView, TreePath, WithRevision, advance_revision,
+    current_revision, lookup_slot_data_and_shape,
 };
+use lpc_registry::ProjectRegistry;
 use lpc_shared::time::TimeProvider;
 use lpc_wire::WireNodeStatus;
 use lpfs::FsEvent;
-use lpfs::lp_path::{LpPath, LpPathBuf};
 
-use crate::artifact::{ArtifactState, ArtifactStore};
 use crate::dataflow::binding::{BindingDraft, BindingError, BindingRef};
 use crate::dataflow::resolver::{
     EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
@@ -42,7 +39,7 @@ use crate::products::visual::{
 };
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 
-use super::{ButtonService, EngineError, EngineServices, RadioService};
+use super::{ButtonService, EngineError, EngineServices, ProjectRuntimeIndex, RadioService};
 use super::{FrameNum, FrameTime};
 
 /// Conventional demand input used by the M2 engine slice.
@@ -60,9 +57,9 @@ pub struct Engine {
     resolver: Resolver,
     slot_shapes: SlotShapeRegistry,
     runtime_buffers: RuntimeBufferStore,
-    artifacts: ArtifactStore,
+    registry: ProjectRegistry,
+    project_runtime_index: ProjectRuntimeIndex,
     services: EngineServices,
-    artifact_nodes: HashMap<String, NodeId>,
     demand_roots: Vec<NodeId>,
     graphics: Option<Arc<dyn LpGraphics>>,
 }
@@ -83,9 +80,9 @@ impl Engine {
             resolver: Resolver::new(),
             slot_shapes,
             runtime_buffers: RuntimeBufferStore::new(),
-            artifacts: ArtifactStore::new(),
+            registry: ProjectRegistry::new(),
+            project_runtime_index: ProjectRuntimeIndex::new(),
             services,
-            artifact_nodes: HashMap::new(),
             demand_roots: Vec::new(),
             graphics: None,
         }
@@ -93,10 +90,6 @@ impl Engine {
 
     pub fn revision(&self) -> Revision {
         self.revision
-    }
-
-    pub(super) fn set_revision(&mut self, revision: Revision) {
-        self.revision = revision;
     }
 
     pub fn frame_num(&self) -> FrameNum {
@@ -139,12 +132,20 @@ impl Engine {
         &mut self.runtime_buffers
     }
 
-    pub fn artifacts(&self) -> &ArtifactStore {
-        &self.artifacts
+    pub fn registry(&self) -> &ProjectRegistry {
+        &self.registry
     }
 
-    pub fn artifacts_mut(&mut self) -> &mut ArtifactStore {
-        &mut self.artifacts
+    pub fn registry_mut(&mut self) -> &mut ProjectRegistry {
+        &mut self.registry
+    }
+
+    pub fn project_runtime_index(&self) -> &ProjectRuntimeIndex {
+        &self.project_runtime_index
+    }
+
+    pub(crate) fn project_runtime_index_mut(&mut self) -> &mut ProjectRuntimeIndex {
+        &mut self.project_runtime_index
     }
 
     pub fn services(&self) -> &EngineServices {
@@ -153,15 +154,6 @@ impl Engine {
 
     pub fn services_mut(&mut self) -> &mut EngineServices {
         &mut self.services
-    }
-
-    /// Engine [`NodeId`] for a node artifact path, if loaded.
-    pub fn artifact_node_id(&self, path: &LpPath) -> Option<NodeId> {
-        self.artifact_nodes.get(path.as_str()).copied()
-    }
-
-    pub(crate) fn insert_artifact_node(&mut self, path: LpPathBuf, id: NodeId) {
-        self.artifact_nodes.insert(String::from(path.as_str()), id);
     }
 
     pub fn demand_roots(&self) -> &[NodeId] {
@@ -222,6 +214,62 @@ impl Engine {
         }
     }
 
+    pub(crate) fn loaded_node_def_for_entry<N>(
+        &self,
+        entry: &RuntimeNodeEntry<N>,
+    ) -> Option<&NodeDef> {
+        let location = entry.def_location.as_ref()?;
+        loaded_registry_def(&self.registry, location).ok()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn load_test_node_defs(
+        &mut self,
+        defs: &[(NodeId, NodeDef)],
+        frame: Revision,
+    ) -> Result<(), alloc::string::String> {
+        use alloc::format;
+        use alloc::string::String;
+        use lpc_model::{ArtifactLocation, NodeDefLocation};
+        use lpc_registry::ParseCtx;
+        use lpfs::lp_path::AsLpPath;
+        use lpfs::{LpFs, LpFsMemory};
+
+        let fs = LpFsMemory::new();
+        let mut project = String::from("kind = \"Project\"\n");
+        for (index, (_, def)) in defs.iter().enumerate() {
+            let node_path = format!("/test-node-{index}.toml");
+            project.push_str(&format!("\n[nodes.node{index}]\nref = \".{node_path}\"\n"));
+            let text = def
+                .write_toml(&self.slot_shapes)
+                .map_err(|e| e.to_string())?;
+            fs.write_file(node_path.as_path(), text.as_bytes())
+                .map_err(|e| e.to_string())?;
+        }
+        fs.write_file("/project.toml".as_path(), project.as_bytes())
+            .map_err(|e| e.to_string())?;
+
+        let ctx = ParseCtx {
+            shapes: &self.slot_shapes,
+        };
+        self.registry
+            .load_root(&fs, "/project.toml".as_path(), frame, &ctx)
+            .map_err(|e| format!("{e:?}"))?;
+
+        for (index, (node_id, _)) in defs.iter().enumerate() {
+            let location = NodeDefLocation::artifact_root(ArtifactLocation::file(format!(
+                "/test-node-{index}.toml"
+            )));
+            let entry = self
+                .tree
+                .get_mut(*node_id)
+                .ok_or_else(|| format!("unknown test node {node_id:?}"))?;
+            entry.def_location = Some(location);
+        }
+
+        Ok(())
+    }
+
     pub fn tick(&mut self, delta_ms: u32) -> Result<(), EngineError> {
         lp_perf::emit_begin!(lp_perf::EVENT_FRAME);
         let result = (|| {
@@ -246,7 +294,7 @@ impl Engine {
             let Some(buffer_id) = self.runtime_output_sink_buffer_id(entry.id) else {
                 continue;
             };
-            let Some(NodeDef::Output(def)) = self.loaded_node_def(entry.artifact()) else {
+            let Some(NodeDef::Output(def)) = self.loaded_node_def_for_entry(entry) else {
                 continue;
             };
             updates.push((buffer_id, def.clone()));
@@ -275,7 +323,7 @@ impl Engine {
         let radio_service = self.services.radio_service();
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
-            artifacts: &self.artifacts,
+            registry: &self.registry,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -317,7 +365,7 @@ impl Engine {
         let radio_service = self.services.radio_service();
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
-            artifacts: &self.artifacts,
+            registry: &self.registry,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -353,7 +401,7 @@ impl Engine {
         let radio_service = self.services.radio_service();
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
-            artifacts: &self.artifacts,
+            registry: &self.registry,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -370,7 +418,7 @@ impl Engine {
 /// Host adapter with borrows disjoint from the [`Resolver`] handed to [`EngineSession`].
 struct EngineResolveHost<'a> {
     tree: &'a mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
-    artifacts: &'a ArtifactStore,
+    registry: &'a ProjectRegistry,
     producers_ticked: &'a mut BTreeSet<NodeId>,
     runtime_buffers: &'a mut RuntimeBufferStore,
     slot_shapes: &'a SlotShapeRegistry,
@@ -419,19 +467,19 @@ impl EngineResolveHost<'_> {
         node: NodeId,
         slot: &SlotPath,
     ) -> Result<Production, SessionResolveError> {
-        let entry =
+        let _entry =
             self.tree
                 .get(node)
                 .ok_or_else(|| SessionResolveError::UnresolvedConsumedSlot {
                     node,
                     slot: slot.clone(),
                 })?;
-        let product = self
-            .read_authored_def_product(&entry.def_handle, slot)
-            .map_err(|_| SessionResolveError::UnresolvedConsumedSlot {
+        let product = self.read_authored_def_product(node, slot).map_err(|_| {
+            SessionResolveError::UnresolvedConsumedSlot {
                 node,
                 slot: slot.clone(),
-            })?;
+            }
+        })?;
         Ok(Production::new(product, ProductionSource::Default))
     }
 
@@ -441,7 +489,7 @@ impl EngineResolveHost<'_> {
         node: NodeId,
         accessor: &SlotAccessor,
     ) -> Result<Production, SessionResolveError> {
-        let entry =
+        let _entry =
             self.tree
                 .get(node)
                 .ok_or_else(|| SessionResolveError::UnresolvedConsumedSlot {
@@ -449,7 +497,7 @@ impl EngineResolveHost<'_> {
                     slot: accessor.path().clone(),
                 })?;
         let product = self
-            .read_authored_def_product_by_accessor(&entry.def_handle, accessor)
+            .read_authored_def_product_by_accessor(node, accessor)
             .map_err(|_| SessionResolveError::UnresolvedConsumedSlot {
                 node,
                 slot: accessor.path().clone(),
@@ -469,16 +517,10 @@ impl EngineResolveHost<'_> {
 
         let revision = session.revision();
         let restore_frame = session.revision();
-        let (artifact_id, content_frame, mut node_runtime) = {
+        let mut node_runtime = {
             let entry = self.tree.get_mut(node_id).ok_or_else(|| {
                 SessionResolveError::other(format!("produce: unknown node {node_id:?}"))
             })?;
-            let artifact_id = entry.artifact();
-            let content_frame = self
-                .artifacts
-                .content_frame(&artifact_id)
-                .unwrap_or_default();
-
             let old_changed_at = entry.state.changed_at();
             let executing = NodeEntryState::Executing {
                 call: NodeCallKey::new(node_id, NodeCall::ProduceSlot { slot: slot.clone() }),
@@ -506,7 +548,7 @@ impl EngineResolveHost<'_> {
                     )));
                 }
             };
-            (artifact_id, content_frame, node_runtime)
+            node_runtime
         };
 
         let gfx = self.graphics.clone();
@@ -524,8 +566,6 @@ impl EngineResolveHost<'_> {
             let mut tick_ctx = TickContext::with_engine_services(
                 node_id,
                 revision,
-                artifact_id,
-                content_frame,
                 resolver_dyn,
                 slot_shapes,
                 gfx,
@@ -620,15 +660,13 @@ impl ResolveHost for EngineResolveHost<'_> {
     }
 
     fn merge_policy_for_consumed_slot(&self, node: NodeId, slot: &SlotPath) -> SlotMerge {
-        let Some(entry) = self.tree.get(node) else {
+        let Some(_entry) = self.tree.get(node) else {
             return SlotMerge::Latest;
         };
-        if let Ok(Some(policy)) =
-            self.read_shader_consumed_slot_merge_policy(&entry.def_handle, slot)
-        {
+        if let Ok(Some(policy)) = self.read_shader_consumed_slot_merge_policy(node, slot) {
             return policy;
         }
-        self.read_authored_def_slot_semantics(&entry.def_handle, slot)
+        self.read_authored_def_slot_semantics(node, slot)
             .ok()
             .filter(|semantics| semantics.direction == SlotDirection::Consumed)
             .map_or(SlotMerge::Latest, |semantics| semantics.merge)
@@ -678,32 +716,10 @@ impl EngineResolveHost<'_> {
 
     fn read_authored_def_product(
         &self,
-        handle: &crate::node::NodeDefHandle,
+        node: NodeId,
         slot: &SlotPath,
     ) -> Result<SlotData, SessionResolveError> {
-        if !handle.is_artifact_root() {
-            return Err(SessionResolveError::other(format!(
-                "non-root node def handles are not supported yet: {}",
-                handle.path()
-            )));
-        }
-        let entry = self.artifacts.entry(&handle.artifact()).ok_or_else(|| {
-            SessionResolveError::other(format!(
-                "node def artifact {:?} is not loaded",
-                handle.artifact()
-            ))
-        })?;
-        let def = match &entry.state {
-            ArtifactState::Loaded(def)
-            | ArtifactState::Prepared(def)
-            | ArtifactState::Idle(def) => def,
-            other => {
-                return Err(SessionResolveError::other(format!(
-                    "node def artifact {:?} has no loaded payload: {other:?}",
-                    handle.artifact()
-                )));
-            }
-        };
+        let def = self.loaded_node_def(node)?;
         let (data, shape) = lookup_slot_data_and_shape(def, self.slot_shapes, slot)
             .map_err(|e| SessionResolveError::other(format!("authored def lookup: {e}")))?;
         Ok(lpc_wire::snapshot_slot_shape(shape, data, self.slot_shapes))
@@ -711,32 +727,10 @@ impl EngineResolveHost<'_> {
 
     fn read_authored_def_product_by_accessor(
         &self,
-        handle: &crate::node::NodeDefHandle,
+        node: NodeId,
         accessor: &SlotAccessor,
     ) -> Result<SlotData, SessionResolveError> {
-        if !handle.is_artifact_root() {
-            return Err(SessionResolveError::other(format!(
-                "non-root node def handles are not supported yet: {}",
-                handle.path()
-            )));
-        }
-        let entry = self.artifacts.entry(&handle.artifact()).ok_or_else(|| {
-            SessionResolveError::other(format!(
-                "node def artifact {:?} is not loaded",
-                handle.artifact()
-            ))
-        })?;
-        let def = match &entry.state {
-            ArtifactState::Loaded(def)
-            | ArtifactState::Prepared(def)
-            | ArtifactState::Idle(def) => def,
-            other => {
-                return Err(SessionResolveError::other(format!(
-                    "node def artifact {:?} has no loaded payload: {other:?}",
-                    handle.artifact()
-                )));
-            }
-        };
+        let def = self.loaded_node_def(node)?;
         let data = accessor
             .access(def, self.slot_shapes)
             .map_err(|e| SessionResolveError::other(format!("authored def accessor: {e}")))?;
@@ -747,7 +741,7 @@ impl EngineResolveHost<'_> {
 
     fn read_shader_consumed_slot_merge_policy(
         &self,
-        handle: &crate::node::NodeDefHandle,
+        node: NodeId,
         slot: &SlotPath,
     ) -> Result<Option<SlotMerge>, SessionResolveError> {
         let Some(SlotPathSegment::Field(name)) = slot.segments().first() else {
@@ -756,7 +750,7 @@ impl EngineResolveHost<'_> {
         if slot.segments().len() != 1 {
             return Ok(None);
         }
-        let def = self.loaded_node_def(handle)?;
+        let def = self.loaded_node_def(node)?;
         let shader_slot = match def {
             NodeDef::Shader(config) => config.consumed_slots.entries.get(name.as_str()),
             NodeDef::ComputeShader(config) => config.consumed_slots.entries.get(name.as_str()),
@@ -770,63 +764,25 @@ impl EngineResolveHost<'_> {
 
     fn read_authored_def_slot_semantics(
         &self,
-        handle: &crate::node::NodeDefHandle,
+        node: NodeId,
         slot: &SlotPath,
     ) -> Result<SlotSemantics, SessionResolveError> {
-        if !handle.is_artifact_root() {
-            return Err(SessionResolveError::other(format!(
-                "non-root node def handles are not supported yet: {}",
-                handle.path()
-            )));
-        }
-        let entry = self.artifacts.entry(&handle.artifact()).ok_or_else(|| {
-            SessionResolveError::other(format!(
-                "node def artifact {:?} is not loaded",
-                handle.artifact()
-            ))
-        })?;
-        let def = match &entry.state {
-            ArtifactState::Loaded(def)
-            | ArtifactState::Prepared(def)
-            | ArtifactState::Idle(def) => def,
-            other => {
-                return Err(SessionResolveError::other(format!(
-                    "node def artifact {:?} has no loaded payload: {other:?}",
-                    handle.artifact()
-                )));
-            }
-        };
+        let def = self.loaded_node_def(node)?;
         let shape = self.slot_shapes.get_shape(def.shape_id()).ok_or_else(|| {
             SessionResolveError::other(format!("missing node def shape {}", def.shape_id()))
         })?;
         slot_path_semantics(shape, self.slot_shapes, slot)
     }
 
-    fn loaded_node_def(
-        &self,
-        handle: &crate::node::NodeDefHandle,
-    ) -> Result<&NodeDef, SessionResolveError> {
-        if !handle.is_artifact_root() {
-            return Err(SessionResolveError::other(format!(
-                "non-root node def handles are not supported yet: {}",
-                handle.path()
-            )));
-        }
-        let entry = self.artifacts.entry(&handle.artifact()).ok_or_else(|| {
-            SessionResolveError::other(format!(
-                "node def artifact {:?} is not loaded",
-                handle.artifact()
-            ))
+    fn loaded_node_def(&self, node: NodeId) -> Result<&NodeDef, SessionResolveError> {
+        let entry = self
+            .tree
+            .get(node)
+            .ok_or_else(|| SessionResolveError::other(format!("unknown node {node:?}")))?;
+        let location = entry.def_location.as_ref().ok_or_else(|| {
+            SessionResolveError::other(format!("node {node:?} has no project definition location"))
         })?;
-        match &entry.state {
-            ArtifactState::Loaded(def)
-            | ArtifactState::Prepared(def)
-            | ArtifactState::Idle(def) => Ok(def),
-            other => Err(SessionResolveError::other(format!(
-                "node def artifact {:?} has no loaded payload: {other:?}",
-                handle.artifact()
-            ))),
-        }
+        loaded_registry_def(self.registry, location)
     }
 
     fn render_node_texture(
@@ -1373,16 +1329,11 @@ fn consume_tree_node(
 ) -> Result<(), EngineError> {
     let revision = session.revision();
     let restore_frame = session.revision();
-    let (artifact_id, content_frame, mut node_runtime) = {
+    let mut node_runtime = {
         let entry = host
             .tree
             .get_mut(node_id)
             .ok_or(EngineError::UnknownNode(node_id))?;
-        let artifact_id = entry.artifact();
-        let content_frame = host
-            .artifacts
-            .content_frame(&artifact_id)
-            .unwrap_or_default();
 
         let old_changed_at = entry.state.changed_at();
         let executing = NodeEntryState::Executing {
@@ -1409,7 +1360,7 @@ fn consume_tree_node(
                 return Err(EngineError::NotAlive(node_id));
             }
         };
-        (artifact_id, content_frame, node_runtime)
+        node_runtime
     };
 
     let gfx = host.graphics.clone();
@@ -1427,8 +1378,6 @@ fn consume_tree_node(
         let mut tick_ctx = TickContext::with_engine_services(
             node_id,
             revision,
-            artifact_id,
-            content_frame,
             resolver_dyn,
             slot_shapes,
             gfx,
@@ -1463,6 +1412,25 @@ fn consume_tree_node(
     }
 }
 
+fn loaded_registry_def<'a>(
+    registry: &'a ProjectRegistry,
+    location: &NodeDefLocation,
+) -> Result<&'a NodeDef, SessionResolveError> {
+    let entry = registry.def(location).ok_or_else(|| {
+        SessionResolveError::other(format!(
+            "node definition {:?} is not in inventory",
+            location
+        ))
+    })?;
+    match &entry.state {
+        NodeDefState::Loaded(def) => Ok(def),
+        other => Err(SessionResolveError::other(format!(
+            "node definition {:?} has no loaded payload: {other:?}",
+            location
+        ))),
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn resolve_with_engine_host(
     eng: &mut Engine,
@@ -1480,7 +1448,7 @@ pub(crate) fn resolve_with_engine_host(
     let radio_service = eng.services.radio_service();
     let mut host = EngineResolveHost {
         tree: &mut eng.tree,
-        artifacts: &eng.artifacts,
+        registry: &eng.registry,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
@@ -1517,7 +1485,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
     let radio_service = eng.services.radio_service();
     let mut host = EngineResolveHost {
         tree: &mut eng.tree,
-        artifacts: &eng.artifacts,
+        registry: &eng.registry,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
@@ -1580,7 +1548,7 @@ mod tests {
     fn tick_error_sets_node_status_and_restores_runtime() {
         let mut eng = Engine::new(TreePath::parse("/show.t").expect("path"));
         let root = eng.tree().root();
-        let (cfg, artifact) = test_placeholder_spine();
+        let cfg = test_placeholder_spine();
         let node = eng
             .tree_mut()
             .add_child(
@@ -1591,7 +1559,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 cfg,
-                artifact,
                 Revision::new(1),
             )
             .expect("add node");

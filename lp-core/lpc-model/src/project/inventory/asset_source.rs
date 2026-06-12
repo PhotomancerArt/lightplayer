@@ -14,8 +14,6 @@ use crate::{ArtifactLocation, NodeDefLocation, SlotPath};
 pub enum AssetSource {
     // TODO-Assets: I'm not convinced this is the right name. This might be AssetUse or similar?
     //              it should probably be part of AssetSlot once added.
-
-
     /// Asset body lives in a project artifact.
     Artifact {
         /// Artifact location containing the asset body.

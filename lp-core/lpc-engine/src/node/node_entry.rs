@@ -3,14 +3,11 @@
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/01-tree.md` §NodeEntry.
 
 use alloc::vec::Vec;
-use lpc_model::{ArtifactSpec, NodeId, NodeInvocation, Revision, TreePath, WithRevision};
+use lpc_model::{NodeDefLocation, NodeId, NodeUseLocation, Revision, TreePath, WithRevision};
 use lpc_wire::{WireChildKind, WireNodeStatus};
 
-use crate::artifact::ArtifactId;
 use crate::dataflow::binding::BindingSet;
 use crate::node::node_entry_state::NodeEntryState;
-
-use super::NodeDefHandle;
 
 /// Server-side metadata for a node instance.
 ///
@@ -32,23 +29,16 @@ pub struct RuntimeNodeEntry<N> {
 
     pub created_at: Revision,
 
-    /// Authored per-instance config (artifact spec + overrides).
-    pub config: NodeInvocation,
+    /// Stable project-side identity for this runtime node, when projected from a project.
+    pub project_use: Option<NodeUseLocation>,
 
-    /// Runtime handle to this node's authored definition.
-    pub def_handle: NodeDefHandle,
+    /// Effective authored definition backing this runtime node.
+    pub def_location: Option<NodeDefLocation>,
 }
 
 impl<N> RuntimeNodeEntry<N> {
-    /// Placeholder artifact path for [`Self::new`] (tests and roots without a real spec yet).
-    ///
-    /// Spine placeholder artifact path: empty authored `""` normalizes to `/` (`lpc_model::LpPathBuf`).
-    pub(crate) const PLACEHOLDER_ARTIFACT_PATH: &'static str = "/";
-
     /// Create a new entry. Sets `created_at`, `changed_at`, and
     /// `children_changed_at` to `revision`.
-    ///
-    /// Fills spine fields with placeholders: root-normalized artifact path (`/`), handle `0`.
     pub fn new(
         id: NodeId,
         path: TreePath,
@@ -56,25 +46,17 @@ impl<N> RuntimeNodeEntry<N> {
         child_kind: Option<WireChildKind>,
         revision: Revision,
     ) -> Self {
-        Self::new_spine(
-            id,
-            path,
-            parent,
-            child_kind,
-            NodeInvocation::new(ArtifactSpec::path(Self::PLACEHOLDER_ARTIFACT_PATH)),
-            NodeDefHandle::artifact_root(ArtifactId::from_raw(0)),
-            revision,
-        )
+        Self::new_spine(id, path, parent, child_kind, None, None, revision)
     }
 
-    /// Create a new entry with explicit source config and artifact handle.
+    /// Create a new entry with explicit project identity.
     pub fn new_spine(
         id: NodeId,
         path: TreePath,
         parent: Option<NodeId>,
         child_kind: Option<WireChildKind>,
-        config: NodeInvocation,
-        def_handle: NodeDefHandle,
+        project_use: Option<NodeUseLocation>,
+        def_location: Option<NodeDefLocation>,
         revision: Revision,
     ) -> Self {
         Self {
@@ -87,13 +69,18 @@ impl<N> RuntimeNodeEntry<N> {
             state: WithRevision::new(revision, NodeEntryState::Pending),
             bindings: WithRevision::new(revision, BindingSet::new()),
             created_at: revision,
-            config,
-            def_handle,
+            project_use,
+            def_location,
         }
     }
 
-    pub fn artifact(&self) -> ArtifactId {
-        self.def_handle.artifact()
+    pub fn set_project_identity(
+        &mut self,
+        project_use: NodeUseLocation,
+        def_location: NodeDefLocation,
+    ) {
+        self.project_use = Some(project_use);
+        self.def_location = Some(def_location);
     }
 
     /// Set status and bump `changed_at`.
@@ -127,9 +114,9 @@ impl<N> RuntimeNodeEntry<N> {
 #[cfg(test)]
 mod tests {
     use super::RuntimeNodeEntry;
-    use crate::node::NodeDefHandle;
-    use lpc_model::{ArtifactSpec, NodeInvocation};
-    use lpc_model::{NodeId, Revision, TreePath};
+    use lpc_model::{
+        ArtifactLocation, NodeDefLocation, NodeId, NodeUseLocation, Revision, TreePath,
+    };
     use lpc_wire::{WireChildKind, WireNodeStatus, WireSlotIndex};
 
     #[test]
@@ -203,22 +190,20 @@ mod tests {
     }
 
     #[test]
-    fn node_entry_new_spine_stores_config_and_def_handle() {
+    fn node_entry_new_spine_stores_project_identity() {
         let frame = Revision::new(1);
-        let config = NodeInvocation::new(ArtifactSpec::path("./fluid.vis"));
-        let artifact = crate::artifact::ArtifactId::from_raw(7);
-        let def_handle = NodeDefHandle::artifact_root(artifact);
+        let project_use = NodeUseLocation::root();
+        let def_location = NodeDefLocation::artifact_root(ArtifactLocation::file("/project.toml"));
         let entry: RuntimeNodeEntry<()> = RuntimeNodeEntry::new_spine(
             NodeId::new(1),
             TreePath::parse("/main.show").unwrap(),
             None,
             None,
-            config.clone(),
-            def_handle.clone(),
+            Some(project_use.clone()),
+            Some(def_location.clone()),
             frame,
         );
-        assert_eq!(entry.config, config);
-        assert_eq!(entry.def_handle, def_handle);
-        assert_eq!(entry.artifact(), artifact);
+        assert_eq!(entry.project_use, Some(project_use));
+        assert_eq!(entry.def_location, Some(def_location));
     }
 }

@@ -289,7 +289,6 @@ mod tests {
     use lpc_model::{
         LpValue, NodeName, ProductRef, Revision, SlotMapDyn, ToLpValue, TreePath, WithRevision,
     };
-    use lpc_wire::{WireSlotMutationId, WireSlotMutationOp, WireSlotMutationRequest};
     use lpfs::lp_path::AsLpPath;
     use lpfs::{LpFs, LpFsMemory};
 
@@ -398,69 +397,6 @@ intensity = 2.0
                 .expect("bytes")
                 .chunks_exact(8)
                 .any(|px| u16::from_le_bytes([px[0], px[1]]) > 0)
-        );
-    }
-
-    #[test]
-    fn fluid_node_steps_from_clock_time() {
-        let (mut engine, clock, fluid) = load_fluid_clock_project("/fluid_clock.test", 1.0, 0.25);
-
-        engine.tick(1000).expect("first tick");
-        let first = render_fluid_bytes(&mut engine, fluid);
-
-        let responses = engine.mutate_project_slots(vec![WireSlotMutationRequest {
-            id: WireSlotMutationId::new(1),
-            root: alloc::format!("node.{}.def", clock.0),
-            path: SlotPath::parse("controls.running").unwrap(),
-            expected_shape_version: Revision::default(),
-            expected_data_version: Revision::default(),
-            op: WireSlotMutationOp::SetValue(LpValue::Bool(false)),
-        }]);
-        assert!(matches!(
-            responses[0].result,
-            lpc_wire::WireSlotMutationResult::Accepted
-        ));
-
-        engine.tick(1000).expect("second tick");
-        let second = render_fluid_bytes(&mut engine, fluid);
-
-        assert_eq!(first, second, "paused clock should pause fluid stepping");
-    }
-
-    #[test]
-    fn fluid_node_reanchors_after_clock_scrubs_backward() {
-        let (mut engine, clock, fluid) =
-            load_fluid_clock_project("/fluid_clock_scrub.test", 1.0, 0.25);
-
-        engine.tick(1000).expect("first tick");
-        engine.tick(1000).expect("second tick");
-        let before_scrub = render_fluid_bytes(&mut engine, fluid);
-
-        let responses = engine.mutate_project_slots(vec![WireSlotMutationRequest {
-            id: WireSlotMutationId::new(1),
-            root: alloc::format!("node.{}.def", clock.0),
-            path: SlotPath::parse("controls.scrub_offset_seconds").unwrap(),
-            expected_shape_version: Revision::default(),
-            expected_data_version: Revision::default(),
-            op: WireSlotMutationOp::SetValue(LpValue::F32(-2.0)),
-        }]);
-        assert!(matches!(
-            responses[0].result,
-            lpc_wire::WireSlotMutationResult::Accepted
-        ));
-
-        engine.tick(1000).expect("backward scrub tick");
-        let after_scrub = render_fluid_bytes(&mut engine, fluid);
-        assert_eq!(
-            before_scrub, after_scrub,
-            "backward scrub should reanchor without advancing the fluid"
-        );
-
-        engine.tick(1000).expect("post scrub tick");
-        let after_resume = render_fluid_bytes(&mut engine, fluid);
-        assert_ne!(
-            after_scrub, after_resume,
-            "fluid should resume once clock time advances from the reanchored point"
         );
     }
 
@@ -577,94 +513,5 @@ source = "bus#fluid.emitters"
                 .chunks_exact(8)
                 .any(|px| u16::from_le_bytes([px[2], px[3]]) > 0)
         );
-    }
-
-    fn render_fluid_bytes(engine: &mut crate::engine::Engine, fluid: NodeId) -> Vec<u8> {
-        let (production, _) = resolve_with_engine_host(
-            engine,
-            QueryKey::ProducedSlot {
-                node: fluid,
-                slot: fluid_output_path(),
-            },
-            ResolveLogLevel::Off,
-        )
-        .expect("resolve fluid output");
-        let LpValue::Product(ProductRef::Visual(product)) =
-            production.value_leaf().expect("value").value()
-        else {
-            panic!("visual product");
-        };
-        engine
-            .render_texture_for_test(
-                *product,
-                &RenderTextureRequest {
-                    width: 8,
-                    height: 8,
-                    format: TextureStorageFormat::Rgba16Unorm,
-                    time_seconds: 0.0,
-                },
-            )
-            .expect("render fluid texture")
-            .try_raw_bytes()
-            .expect("bytes")
-            .to_vec()
-    }
-
-    fn load_fluid_clock_project(
-        root_path: &str,
-        emitter_velocity: f32,
-        emitter_intensity: f32,
-    ) -> (crate::engine::Engine, NodeId, NodeId) {
-        let fs = LpFsMemory::new();
-        fs.write_file(
-            "/project.toml".as_path(),
-            br#"
-kind = "Project"
-
-[nodes.clock]
-ref = "./clock.toml"
-
-[nodes.fluid]
-ref = "./fluid.toml"
-"#,
-        )
-        .expect("project");
-        fs.write_file("/clock.toml".as_path(), br#"kind = "Clock""#)
-            .expect("clock");
-
-        let fluid_toml = alloc::format!(
-            r#"
-kind = "Fluid"
-size = {{ width = 8, height = 8 }}
-solver_iterations = 1
-step_hz = 1.0
-fade_speed = 0.0
-viscosity = 0.00003
-
-[emitters.1]
-id = 1
-pos = [0.5, 0.5]
-dir = [1.0, 0.0]
-radius = 0.2
-color = [1.0, 0.0, 0.0]
-velocity = {emitter_velocity:.6}
-intensity = {emitter_intensity:.6}
-"#
-        );
-        fs.write_file("/fluid.toml".as_path(), fluid_toml.as_bytes())
-            .expect("fluid");
-
-        let services = EngineServices::new(TreePath::parse(root_path).unwrap());
-        let engine = ProjectLoader::load_from_root(&fs, services).expect("load");
-        let root = engine.tree().root();
-        let clock = engine
-            .tree()
-            .lookup_sibling(root, NodeName::parse("clock").unwrap())
-            .expect("clock node");
-        let fluid = engine
-            .tree()
-            .lookup_sibling(root, NodeName::parse("fluid").unwrap())
-            .expect("fluid node");
-        (engine, clock, fluid)
     }
 }

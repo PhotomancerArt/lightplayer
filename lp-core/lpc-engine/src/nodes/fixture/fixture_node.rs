@@ -1343,7 +1343,7 @@ mod tests {
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
         let frame = Revision::new(1);
         let root = engine.tree().root();
-        let (spine, artifact) = test_placeholder_spine();
+        let spine = test_placeholder_spine();
         let mapping = MappingConfig::path_points_vec(
             vec![PathSpec::ring_array_counts(
                 [0.5, 0.5],
@@ -1367,7 +1367,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 spine,
-                artifact,
                 frame,
             )
             .unwrap();
@@ -1431,7 +1430,7 @@ mod tests {
         let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
         let frame = Revision::new(1);
         let root = engine.tree().root();
-        let (spine, artifact) = test_placeholder_spine();
+        let spine = test_placeholder_spine();
 
         let tex_id = engine
             .tree_mut()
@@ -1443,7 +1442,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 spine.clone(),
-                artifact,
                 frame,
             )
             .unwrap();
@@ -1462,7 +1460,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 spine.clone(),
-                artifact,
                 frame,
             )
             .unwrap();
@@ -1503,7 +1500,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 spine,
-                artifact,
                 frame,
             )
             .unwrap();
@@ -1568,7 +1564,7 @@ mod tests {
         engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
-        let (spine, artifact) = test_placeholder_spine();
+        let spine = test_placeholder_spine();
 
         let tex_id = engine
             .tree_mut()
@@ -1580,7 +1576,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 spine.clone(),
-                artifact,
                 frame,
             )
             .unwrap();
@@ -1599,7 +1594,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 spine.clone(),
-                artifact,
                 frame,
             )
             .unwrap();
@@ -1640,7 +1634,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 spine,
-                artifact,
                 frame,
             )
             .unwrap();
@@ -1715,7 +1708,7 @@ mod tests {
         engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
-        let (spine, artifact) = test_placeholder_spine();
+        let spine = test_placeholder_spine();
 
         let sh_id = engine
             .tree_mut()
@@ -1727,7 +1720,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 spine.clone(),
-                artifact,
                 frame,
             )
             .unwrap();
@@ -1770,7 +1762,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 spine,
-                artifact,
                 frame,
             )
             .unwrap();

@@ -1,18 +1,14 @@
 //! Project slot mutation handling.
 
-use alloc::string::ToString;
 use alloc::vec::Vec;
 use lpc_model::{
-    LpType, LpValue, NodeDef, NodeId, SlotAccess, SlotDataAccess, SlotDataAccessMut, SlotPath,
-    SlotPathSegment, SlotPolicy, SlotShapeLookup, SlotShapeRegistry, SlotShapeView,
-    lookup_slot_data_mut,
+    LpType, LpValue, NodeDef, NodeId, SlotAccess, SlotDataAccess, SlotPath, SlotPathSegment,
+    SlotPolicy, SlotShapeLookup, SlotShapeRegistry, SlotShapeView,
 };
 use lpc_wire::{
     WireSlotMutationOp, WireSlotMutationRejection, WireSlotMutationRequest,
     WireSlotMutationResponse, WireSlotMutationResult,
 };
-
-use crate::artifact::ArtifactState;
 
 use super::Engine;
 
@@ -49,15 +45,23 @@ impl Engine {
             }
             None => return Err(WireSlotMutationRejection::UnknownRoot),
         };
-        let artifact = self
+        let def_location = self
             .tree()
             .get(node_id)
             .ok_or(WireSlotMutationRejection::UnknownRoot)?
-            .artifact();
+            .def_location
+            .clone()
+            .ok_or(WireSlotMutationRejection::UnknownRoot)?;
+
+        if !def_location.path.is_root() {
+            return Err(WireSlotMutationRejection::UnsupportedTarget);
+        }
 
         let target_info = {
             let def = self
-                .loaded_node_def(artifact)
+                .registry()
+                .def(&def_location)
+                .and_then(|entry| entry.state.loaded_def())
                 .ok_or(WireSlotMutationRejection::UnknownRoot)?;
             mutation_target_info(def, self.slot_shapes(), &request.path)?
         };
@@ -71,39 +75,7 @@ impl Engine {
             return Err(WireSlotMutationRejection::WrongType);
         }
 
-        let registry = self.slot_shapes().clone();
-        let revision = lpc_model::advance_revision();
-        self.set_revision(revision);
-        let def = self
-            .loaded_node_def_mut(artifact)
-            .ok_or(WireSlotMutationRejection::UnknownRoot)?;
-        let SlotDataAccessMut::Value(slot) =
-            lookup_slot_data_mut(def, &registry, &request.path).map_err(map_lookup_error)?
-        else {
-            return Err(WireSlotMutationRejection::UnsupportedTarget);
-        };
-        slot.set_lp_value(revision, value)
-            .map_err(|_| WireSlotMutationRejection::WrongType)?;
-
-        Ok(())
-    }
-
-    fn loaded_node_def_mut(
-        &mut self,
-        artifact: crate::artifact::ArtifactId,
-    ) -> Option<&mut NodeDef> {
-        let revision = self.revision();
-        let entry = self.artifacts_mut().entry_mut(&artifact)?;
-        entry.content_frame = revision;
-        match &mut entry.state {
-            ArtifactState::Loaded(def)
-            | ArtifactState::Prepared(def)
-            | ArtifactState::Idle(def) => Some(def),
-            ArtifactState::Resolved
-            | ArtifactState::ResolutionError(_)
-            | ArtifactState::LoadError(_)
-            | ArtifactState::PrepareError(_) => None,
-        }
+        Err(WireSlotMutationRejection::UnsupportedTarget)
     }
 }
 
@@ -235,15 +207,6 @@ fn resolve_shape_ref<'a>(
     Ok(shape)
 }
 
-fn map_lookup_error(error: lpc_model::SlotLookupError) -> WireSlotMutationRejection {
-    let message = error.to_string();
-    if message.contains("unknown") || message.contains("no field") || message.contains("no key") {
-        WireSlotMutationRejection::UnknownPath
-    } else {
-        WireSlotMutationRejection::UnsupportedTarget
-    }
-}
-
 fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
     match (value, ty) {
         (LpValue::String(_), LpType::String)
@@ -290,21 +253,15 @@ fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::string::{String, ToString};
-    use lpc_model::{
-        AsLpPath, ControlExtent, ControlProduct, FixtureDiagnosticMode, NodeName, Revision,
-        ToLpValue, TreePath,
-    };
+    use alloc::string::String;
+    use lpc_model::{AsLpPath, FixtureDiagnosticMode, NodeName, Revision, ToLpValue, TreePath};
     use lpc_wire::WireSlotMutationId;
     use lpfs::{LpFs, LpFsMemory};
 
     use crate::engine::{EngineServices, ProjectLoader};
-    use crate::products::control::{
-        ControlRenderRequest, ControlRenderTarget, ControlSampleFormat,
-    };
 
     #[test]
-    fn accepted_clock_mutation_changes_loaded_def() {
+    fn valid_clock_mutation_is_rejected_until_overlay_api() {
         let fs = clock_project();
         let services = EngineServices::new(TreePath::parse("/clock.show").unwrap());
         let mut engine = ProjectLoader::load_from_root(&fs, services).unwrap();
@@ -316,19 +273,12 @@ mod tests {
 
         assert!(matches!(
             responses[0].result,
-            WireSlotMutationResult::Accepted
+            WireSlotMutationResult::Rejected(WireSlotMutationRejection::UnsupportedTarget)
         ));
-        let def = engine
-            .loaded_node_def(engine.tree().get(clock).unwrap().artifact())
-            .unwrap();
-        let NodeDef::Clock(def) = def else {
-            panic!("clock def");
-        };
-        assert!(!*def.controls.running.value());
     }
 
     #[test]
-    fn accepted_output_mutation_changes_loaded_def() {
+    fn valid_output_mutation_is_rejected_until_overlay_api() {
         let fs = output_project();
         let services = EngineServices::new(TreePath::parse("/output.show").unwrap());
         let mut engine = ProjectLoader::load_from_root(&fs, services).unwrap();
@@ -345,20 +295,12 @@ mod tests {
 
         assert!(matches!(
             responses[0].result,
-            WireSlotMutationResult::Accepted
+            WireSlotMutationResult::Rejected(WireSlotMutationRejection::UnsupportedTarget)
         ));
-        let def = engine
-            .loaded_node_def(engine.tree().get(output).unwrap().artifact())
-            .unwrap();
-        let NodeDef::Output(def) = def else {
-            panic!("output def");
-        };
-        let options = def.options().expect("output options");
-        assert!((options.brightness.value().0 - 0.75).abs() < 0.001);
     }
 
     #[test]
-    fn accepted_fixture_diagnostic_mutation_changes_loaded_def() {
+    fn valid_fixture_diagnostic_mutation_is_rejected_until_overlay_api() {
         let fs = fixture_project();
         let services = EngineServices::new(TreePath::parse("/fixture.show").unwrap());
         let mut engine = ProjectLoader::load_from_root(&fs, services).unwrap();
@@ -375,56 +317,12 @@ mod tests {
 
         assert!(matches!(
             responses[0].result,
-            WireSlotMutationResult::Accepted
+            WireSlotMutationResult::Rejected(WireSlotMutationRejection::UnsupportedTarget)
         ));
-        let def = engine
-            .loaded_node_def(engine.tree().get(fixture).unwrap().artifact())
-            .unwrap();
-        let NodeDef::Fixture(def) = def else {
-            panic!("fixture def");
-        };
-        assert_eq!(
-            *def.diagnostic_mode.value(),
-            FixtureDiagnosticMode::LedIndex
-        );
     }
 
     #[test]
-    fn mutated_fixture_diagnostic_mode_affects_rendered_control_output() {
-        let fs = fixture_project();
-        let services = EngineServices::new(TreePath::parse("/fixture.show").unwrap());
-        let mut engine = ProjectLoader::load_from_root(&fs, services).unwrap();
-        let fixture = node_id(&engine, "fixture");
-        let root = alloc::format!("node.{}.def", fixture.0);
-        let request = mutation_request(
-            &engine,
-            &root,
-            "diagnostic_mode",
-            FixtureDiagnosticMode::LedIndex.to_lp_value(),
-        );
-
-        let responses = engine.mutate_project_slots(Vec::from([request]));
-
-        assert!(matches!(
-            responses[0].result,
-            WireSlotMutationResult::Accepted
-        ));
-        engine.add_demand_root(fixture);
-        engine.tick(10).unwrap();
-
-        let extent = ControlExtent::new(1, 6);
-        let request = ControlRenderRequest::unorm16(extent);
-        let mut samples = alloc::vec![0u16; extent.sample_count() as usize];
-        let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
-        engine
-            .render_control_for_test(ControlProduct::new(fixture, 0, extent), &request, target)
-            .expect("control render");
-
-        assert_eq!(samples, alloc::vec![65535, 0, 0, 0, 65535, 0]);
-    }
-
-    #[test]
-    fn stale_mutation_versions_are_accepted() {
+    fn stale_mutation_versions_are_ignored_by_legacy_validation() {
         let fs = clock_project();
         let services = EngineServices::new(TreePath::parse("/clock.show").unwrap());
         let mut engine = ProjectLoader::load_from_root(&fs, services).unwrap();
@@ -438,15 +336,8 @@ mod tests {
 
         assert!(matches!(
             responses[0].result,
-            WireSlotMutationResult::Accepted
+            WireSlotMutationResult::Rejected(WireSlotMutationRejection::UnsupportedTarget)
         ));
-        let def = engine
-            .loaded_node_def(engine.tree().get(clock).unwrap().artifact())
-            .unwrap();
-        let NodeDef::Clock(def) = def else {
-            panic!("clock def");
-        };
-        assert!((*def.controls.rate.value() - 2.0).abs() < 0.001);
     }
 
     #[test]
@@ -467,7 +358,7 @@ mod tests {
     }
 
     #[test]
-    fn accepted_binding_mutation_changes_loaded_def() {
+    fn valid_binding_mutation_is_rejected_until_overlay_api() {
         let fs = output_project();
         let services = EngineServices::new(TreePath::parse("/output.show").unwrap());
         let mut engine = ProjectLoader::load_from_root(&fs, services).unwrap();
@@ -484,24 +375,8 @@ mod tests {
 
         assert!(matches!(
             responses[0].result,
-            WireSlotMutationResult::Accepted
+            WireSlotMutationResult::Rejected(WireSlotMutationRejection::UnsupportedTarget)
         ));
-        let def = engine
-            .loaded_node_def(engine.tree().get(output).unwrap().artifact())
-            .unwrap();
-        let NodeDef::Output(def) = def else {
-            panic!("output def");
-        };
-        let binding = def.bindings.entries().get("input").expect("input binding");
-        assert_eq!(
-            binding
-                .source
-                .data
-                .as_ref()
-                .map(|source| source.value().to_string()),
-            Some(String::from("bus#control.next"))
-        );
-        assert!(binding.target.is_none());
     }
 
     #[test]
@@ -538,7 +413,7 @@ mod tests {
             panic!("expected def root");
         };
         let def = engine
-            .loaded_node_def(engine.tree().get(node_id).unwrap().artifact())
+            .loaded_node_def_for_entry(engine.tree().get(node_id).unwrap())
             .unwrap();
         let path = SlotPath::parse(path).unwrap();
         mutation_target_info(def, engine.slot_shapes(), &path).unwrap();

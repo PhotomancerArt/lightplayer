@@ -106,7 +106,6 @@ fn collect_created_deltas<N>(
 #[cfg(test)]
 mod tests {
     use super::tree_deltas_since;
-    use crate::artifact::ArtifactId;
     use crate::node::test_placeholder_spine;
     use crate::node::{NodeEntryState, RuntimeNodeTree};
     use alloc::vec;
@@ -119,7 +118,7 @@ mod tests {
         RuntimeNodeTree::new(TreePath::parse("/root.show").unwrap(), Revision::new(0))
     }
 
-    fn spine_placeholder() -> (NodeInvocation, ArtifactId) {
+    fn spine_placeholder() -> NodeInvocation {
         test_placeholder_spine()
     }
 
@@ -129,7 +128,7 @@ mod tests {
         let root = tree.root();
 
         // Add some children
-        let (cfg_a, art_a) = spine_placeholder();
+        let cfg_a = spine_placeholder();
         let a = tree
             .add_child(
                 root,
@@ -139,11 +138,10 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 cfg_a,
-                art_a,
                 Revision::new(1),
             )
             .unwrap();
-        let (cfg_b, art_b) = spine_placeholder();
+        let cfg_b = spine_placeholder();
         let b = tree
             .add_child(
                 root,
@@ -153,7 +151,6 @@ mod tests {
                     source: WireSlotIndex(1),
                 },
                 cfg_b,
-                art_b,
                 Revision::new(2),
             )
             .unwrap();
@@ -188,7 +185,7 @@ mod tests {
         let mut tree = make_tree();
         let root = tree.root();
 
-        let (cfg, art) = spine_placeholder();
+        let cfg = spine_placeholder();
         tree.add_child(
             root,
             NodeName::parse("a").unwrap(),
@@ -197,7 +194,6 @@ mod tests {
                 source: WireSlotIndex(0),
             },
             cfg,
-            art,
             Revision::new(1),
         )
         .unwrap();
@@ -216,7 +212,7 @@ mod tests {
         let mut tree = make_tree();
         let root = tree.root();
 
-        let (cfg, art) = spine_placeholder();
+        let cfg = spine_placeholder();
         let a = tree
             .add_child(
                 root,
@@ -226,7 +222,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 cfg,
-                art,
                 Revision::new(1),
             )
             .unwrap();
@@ -273,7 +268,7 @@ mod tests {
         let root = tree.root();
 
         // Add child at frame 5
-        let (cfg, art) = spine_placeholder();
+        let cfg = spine_placeholder();
         let a = tree
             .add_child(
                 root,
@@ -283,7 +278,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 cfg,
-                art,
                 Revision::new(5),
             )
             .unwrap();
@@ -311,7 +305,7 @@ mod tests {
         let root = tree.root();
 
         // Create nested structure: root -> parent -> child
-        let (cfg_p, art_p) = spine_placeholder();
+        let cfg_p = spine_placeholder();
         let parent = tree
             .add_child(
                 root,
@@ -321,11 +315,10 @@ mod tests {
                     name: NodeName::parse("parent").unwrap(),
                 },
                 cfg_p,
-                art_p,
                 Revision::new(1),
             )
             .unwrap();
-        let (cfg_c, art_c) = spine_placeholder();
+        let cfg_c = spine_placeholder();
         let child = tree
             .add_child(
                 parent,
@@ -335,7 +328,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 cfg_c,
-                art_c,
                 Revision::new(2),
             )
             .unwrap();
@@ -363,7 +355,7 @@ mod tests {
         let mut tree = make_tree();
         let root = tree.root();
 
-        let (cfg, art) = spine_placeholder();
+        let cfg = spine_placeholder();
         let a = tree
             .add_child(
                 root,
@@ -373,7 +365,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 cfg,
-                art,
                 Revision::new(1),
             )
             .unwrap();
@@ -413,7 +404,7 @@ mod tests {
         let mut server_tree = make_tree();
         let root = server_tree.root();
 
-        let (cfg_a, art_a) = spine_placeholder();
+        let cfg_a = spine_placeholder();
         let a = server_tree
             .add_child(
                 root,
@@ -423,11 +414,10 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 cfg_a,
-                art_a,
                 Revision::new(1),
             )
             .unwrap();
-        let (cfg_b, art_b) = spine_placeholder();
+        let cfg_b = spine_placeholder();
         let b = server_tree
             .add_child(
                 root,
@@ -437,7 +427,6 @@ mod tests {
                     source: WireSlotIndex(1),
                 },
                 cfg_b,
-                art_b,
                 Revision::new(2),
             )
             .unwrap();

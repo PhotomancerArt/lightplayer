@@ -6,7 +6,6 @@ mod contexts;
 mod control_node;
 mod node_binding_index;
 mod node_call;
-mod node_def_handle;
 pub mod node_entry;
 pub mod node_entry_state;
 mod node_error;
@@ -24,7 +23,6 @@ pub use contexts::{
 };
 pub use control_node::ControlNode;
 pub use node_call::{NodeCall, NodeCallKey};
-pub use node_def_handle::NodeDefHandle;
 pub use node_entry::RuntimeNodeEntry;
 pub use node_entry_state::NodeEntryState;
 pub use node_error::NodeError;
@@ -36,9 +34,6 @@ pub use sync::tree_deltas_since;
 pub use tree_error::TreeError;
 
 #[cfg(test)]
-pub(crate) fn test_placeholder_spine() -> (lpc_model::NodeInvocation, crate::artifact::ArtifactId) {
-    (
-        lpc_model::NodeInvocation::new(lpc_model::ArtifactSpec::path("__test__.vis")),
-        crate::artifact::ArtifactId::from_raw(0),
-    )
+pub(crate) fn test_placeholder_spine() -> lpc_model::NodeInvocation {
+    lpc_model::NodeInvocation::new(lpc_model::ArtifactSpec::path("__test__.vis"))
 }

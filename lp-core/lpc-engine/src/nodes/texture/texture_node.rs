@@ -128,7 +128,6 @@ impl NodeRuntime for TextureNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::artifact::ArtifactLocation;
     use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
     use crate::dataflow::resolver::{QueryKey, ResolveLogLevel};
     use crate::engine::Engine;
@@ -244,16 +243,7 @@ mod tests {
         let mut engine = Engine::new(TreePath::parse("/t.show").expect("path"));
         let frame = Revision::new(1);
         let root = engine.tree().root();
-        let (spine, _) = test_placeholder_spine();
-        let artifact = engine
-            .artifacts_mut()
-            .acquire_location(ArtifactLocation::file("/texture.toml"), frame);
-        engine
-            .artifacts_mut()
-            .load_with(&artifact, frame, |_location| {
-                Ok(NodeDef::Texture(TextureDef::new(width, height)))
-            })
-            .expect("load texture artifact");
+        let spine = test_placeholder_spine();
         let tid = engine
             .tree_mut()
             .add_child(
@@ -264,10 +254,15 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 spine,
-                artifact,
                 frame,
             )
             .expect("add");
+        engine
+            .load_test_node_defs(
+                &[(tid, NodeDef::Texture(TextureDef::new(width, height)))],
+                frame,
+            )
+            .expect("load test defs");
         let tex = TextureNode::new(tid);
         engine
             .attach_runtime_node(tid, Box::new(tex), frame)

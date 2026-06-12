@@ -90,7 +90,6 @@ mod tests {
     use super::*;
     use alloc::boxed::Box;
 
-    use crate::artifact::ArtifactId;
     use crate::dataflow::resolver::{
         ResolveHost, ResolveSession, ResolveTrace, Resolver, SessionHostResolver, TickResolver,
         resolve_trace::ResolveLogLevel,
@@ -161,8 +160,6 @@ mod tests {
         let mut tick = TickContext::new(
             NodeId::new(0),
             frame,
-            ArtifactId::from_raw(1),
-            Revision::new(0),
             &mut bridge as &mut dyn TickResolver,
             &slot_shapes,
         );

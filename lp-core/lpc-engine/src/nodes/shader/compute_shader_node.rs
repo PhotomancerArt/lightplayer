@@ -283,7 +283,6 @@ mod tests {
     };
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
-    use crate::artifact::ArtifactLocation;
     use crate::dataflow::resolver::{QueryKey, ResolveLogLevel};
     use crate::engine::{Engine, resolve_with_engine_host};
     use crate::node::NodeEntryState;
@@ -357,15 +356,6 @@ void tick() {{
         let mut engine = Engine::new(TreePath::parse("/compute.show").expect("path"));
         engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
         let frame = lpc_model::Revision::new(1);
-        let artifact = engine
-            .artifacts_mut()
-            .acquire_location(ArtifactLocation::file("compute.toml"), frame);
-        engine
-            .artifacts_mut()
-            .load_with(&artifact, frame, |_| {
-                Ok(NodeDef::ComputeShader(def.clone()))
-            })
-            .expect("artifact");
         let root = engine.tree().root();
         let node_id = engine
             .tree_mut()
@@ -377,10 +367,12 @@ void tick() {{
                     source: WireSlotIndex(0),
                 },
                 NodeInvocation::new(ArtifactSpec::path("compute.toml")),
-                artifact,
                 frame,
             )
             .expect("node");
+        engine
+            .load_test_node_defs(&[(node_id, NodeDef::ComputeShader(def.clone()))], frame)
+            .expect("load test defs");
         engine
             .attach_runtime_node(
                 node_id,
