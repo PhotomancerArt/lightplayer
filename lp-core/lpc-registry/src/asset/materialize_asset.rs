@@ -35,10 +35,6 @@ pub fn materialize_asset(
         AssetSource::Inline { owner, path } => {
             materialize_inline_asset(inventory, source, owner, path, entry)
         }
-        AssetSource::Url { .. } => Err(MaterializeAssetError::Unsupported {
-            source: source.clone(),
-            message: String::from("URL assets are not supported yet"),
-        }),
     }
 }
 

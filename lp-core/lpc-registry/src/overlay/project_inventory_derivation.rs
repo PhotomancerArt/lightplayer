@@ -272,11 +272,6 @@ impl InventoryDerivation<'_, '_> {
                     source: AssetBodySource::Inline,
                 };
             }
-            AssetSource::Url { .. } => {
-                return AssetState::ReadError {
-                    message: String::from("URL assets are not supported yet"),
-                };
-            }
         };
 
         self.artifacts
@@ -332,7 +327,7 @@ impl InventoryDerivation<'_, '_> {
     fn revision_for_asset(&self, source: &AssetSource, owner_revision: Revision) -> Revision {
         match source {
             AssetSource::Artifact { location } => self.revision_for_artifact(location),
-            AssetSource::Inline { .. } | AssetSource::Url { .. } => owner_revision,
+            AssetSource::Inline { .. } => owner_revision,
         }
     }
 }

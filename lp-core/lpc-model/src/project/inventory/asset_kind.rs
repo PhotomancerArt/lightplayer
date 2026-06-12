@@ -8,6 +8,10 @@
 )]
 #[serde(rename_all = "snake_case")]
 pub enum AssetKind {
+    // TODO-Assets: it doesn't seem right that AssetKinds should be this specific.
+    //              what purpose does that serve? It seems we may not want this at all
+    //              but instead rely on the slot metadata once we have AssetSlot?
+
     /// GLSL source consumed by a visual shader node.
     ShaderSource,
     /// GLSL source consumed by a compute shader node.
