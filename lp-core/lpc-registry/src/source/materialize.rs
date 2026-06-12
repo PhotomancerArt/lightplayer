@@ -11,36 +11,7 @@ use lpfs::LpFs;
 
 use crate::{ArtifactError, ArtifactReadFailure, ArtifactStore};
 
-use super::{MaterializedSource, ResolveError, SourceFileRef};
-
-/// Context for stable compile/diagnostic labels.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct SourceDiagnosticCtx {
-    pub containing_file: String,
-    pub slot_path: Option<SlotPath>,
-}
-
-/// Errors from [`materialize_source`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum MaterializeError {
-    Unsupported,
-    MissingInlineBody,
-    Utf8 { message: String },
-    Resolve(ResolveError),
-    Artifact(ArtifactError),
-}
-
-impl From<ResolveError> for MaterializeError {
-    fn from(err: ResolveError) -> Self {
-        Self::Resolve(err)
-    }
-}
-
-impl From<ArtifactError> for MaterializeError {
-    fn from(err: ArtifactError) -> Self {
-        Self::Artifact(err)
-    }
-}
+use super::{ResolveError, SourceFileRef};
 
 /// Read source bytes/text transiently and compute the effective revision.
 ///
@@ -133,6 +104,43 @@ fn inline_diagnostic_name(ctx: &SourceDiagnosticCtx, extension: &str) -> String 
         None => format!("{}:source.{}", ctx.containing_file, extension),
     }
 }
+/// UTF-8 source text read transiently for compile or diagnostics.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct MaterializedSource {
+    pub version: Revision,
+    pub text: String,
+    pub diagnostic_name: String,
+}
+
+/// Context for stable compile/diagnostic labels.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct SourceDiagnosticCtx {
+    pub containing_file: String,
+    pub slot_path: Option<SlotPath>,
+}
+
+/// Errors from [`materialize_source`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MaterializeError {
+    Unsupported,
+    MissingInlineBody,
+    Utf8 { message: String },
+    Resolve(ResolveError),
+    Artifact(ArtifactError),
+}
+
+impl From<ResolveError> for MaterializeError {
+    fn from(err: ResolveError) -> Self {
+        Self::Resolve(err)
+    }
+}
+
+impl From<ArtifactError> for MaterializeError {
+    fn from(err: ArtifactError) -> Self {
+        Self::Artifact(err)
+    }
+}
+
 
 #[cfg(test)]
 mod tests {

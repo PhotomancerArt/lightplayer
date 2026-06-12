@@ -22,17 +22,18 @@ pub use artifact::{
 pub use lpc_model::{
     ArtifactOverlay, AssetOverlay, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,
 };
-pub use overlay::{EditApplyError, serialize_slot_draft};
+pub use overlay::{serialize_slot_draft, EditApplyError};
 pub use registry::commit_error::CommitError;
 pub use registry::load_result::LoadResult;
 pub use registry::parse_ctx::ParseCtx;
 pub use registry::project_registry::ProjectRegistry;
 pub use registry::registry_error::RegistryError;
 pub use source::{
-    MaterializeError, MaterializedSource, ResolveError, SourceDiagnosticCtx, SourceFileRef,
-    materialize_source, resolve_source_file,
+    materialize_source, resolve_source_file, MaterializeError, ResolveError,
+    SourceDiagnosticCtx, SourceFileRef,
 };
+pub use source::materialize::MaterializedSource;
 #[cfg(feature = "diff")]
 pub use test::snapshot_overlay::{
-    ProjectSnapshot, SnapshotError, derive_overlay_between_snapshots,
+    derive_overlay_between_snapshots, ProjectSnapshot, SnapshotError,
 };
