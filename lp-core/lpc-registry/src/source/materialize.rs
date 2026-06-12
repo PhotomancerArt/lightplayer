@@ -141,7 +141,6 @@ impl From<ArtifactError> for MaterializeError {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
