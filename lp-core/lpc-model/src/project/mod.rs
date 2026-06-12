@@ -17,6 +17,7 @@
 //!   overlays and project node locations.
 
 pub mod asset;
+pub mod change_summary;
 pub mod config;
 pub mod inventory;
 pub mod overlay;
@@ -25,6 +26,7 @@ pub mod overlay_mutation;
 
 pub use crate::sync::current_revision::{advance_revision, current_revision, set_current_revision};
 pub use crate::sync::revision::Revision;
+pub use change_summary::ChangeSummary;
 pub use config::ProjectConfig;
 pub use inventory::project_inventory::ProjectInventory;
 pub use inventory::project_node::{ProjectNode, ProjectNodeOrigin};

@@ -4,26 +4,10 @@
 //! They tell consumers which definition identities entered, left, or changed
 //! state.
 
-use alloc::vec::Vec;
-
-use crate::{NodeDefLocation, NodeKind};
+use crate::{ChangeSummary, NodeDefLocation, NodeKind};
 
 /// Effective node definition changes visible to runtime/project consumers.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct NodeDefChangeSummary {
-    /// Newly referenced definition locations.
-    pub added: Vec<NodeDefLocation>,
-    /// Previously referenced definitions whose effective state changed.
-    pub changed: Vec<NodeDefChange>,
-    /// Definition locations that are no longer referenced.
-    pub removed: Vec<NodeDefLocation>,
-}
-
-impl NodeDefChangeSummary {
-    pub fn is_empty(&self) -> bool {
-        self.added.is_empty() && self.changed.is_empty() && self.removed.is_empty()
-    }
-}
+pub type NodeDefChangeSummary = ChangeSummary<NodeDefLocation, NodeDefChange>;
 
 /// One changed node definition and its coarse runtime-facing classification.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

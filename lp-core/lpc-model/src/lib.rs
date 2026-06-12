@@ -118,9 +118,9 @@ pub use project::overlay_mutation::{
     MutationCmdStatus, MutationEffect, MutationOp, MutationRejection, MutationRejectionReason,
 };
 pub use project::{
-    CommitResult, LocationSeg, MutationBatchResults, MutationResult, ProjectChangeSummary,
-    ProjectConfig, ProjectInventory, ProjectNode, ProjectNodeLocation, ProjectNodeOrigin,
-    ProjectNodePlacement, ProjectTree, Revision,
+    ChangeSummary, CommitResult, LocationSeg, MutationBatchResults, MutationResult,
+    ProjectChangeSummary, ProjectConfig, ProjectInventory, ProjectNode, ProjectNodeLocation,
+    ProjectNodeOrigin, ProjectNodePlacement, ProjectTree, Revision,
 };
 pub use project::{advance_revision, current_revision, set_current_revision};
 pub use resource::{ResourceDomain, ResourceRef, RuntimeBufferId, runtime_buffer_resource_shape};
