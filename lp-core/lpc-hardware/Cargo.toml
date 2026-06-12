@@ -1,0 +1,19 @@
+[package]
+name = "lpc-hardware"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["std"]
+std = ["toml/std"]
+
+[dependencies]
+lpc-model = { path = "../lpc-model", default-features = false }
+serde = { workspace = true, features = ["derive"] }
+toml = { version = "0.9", default-features = false, features = ["parse", "serde", "display"] }
+
+[lints]
+workspace = true

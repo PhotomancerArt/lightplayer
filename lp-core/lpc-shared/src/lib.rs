@@ -16,7 +16,6 @@ extern crate std;
 pub mod backtrace;
 pub mod error;
 pub mod fps;
-pub mod hardware;
 pub mod stats;
 pub mod util; // Temporarily enabled for Texture
 
@@ -27,7 +26,8 @@ pub mod time;
 pub mod transport;
 
 pub use display_pipeline::{DisplayPipeline, DisplayPipelineOptions};
-pub use error::{DisplayPipelineError, OutputError, TextureError};
+pub use error::{DisplayPipelineError, TextureError};
+pub use lpc_hardware::OutputError;
 // Re-export TransportError from lp-model for convenience
 pub use lpc_wire::TransportError;
 pub use project::ProjectBuilder;

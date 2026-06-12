@@ -6,12 +6,12 @@ extern crate alloc;
 
 use alloc::rc::Rc;
 use embassy_time::{Duration, Instant, Timer};
-use lpc_shared::hardware::{
-    ButtonConfig, ButtonInput, HardwareRegistry, default_esp32c6_hardware_manifest,
+use lpc_hardware::hardware::{
+    ButtonConfig, ButtonDriver, HardwareRegistry, default_esp32c6_hardware_manifest,
 };
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
-use crate::hardware::button::Esp32ButtonInput;
+use crate::hardware::button::Esp32Gpio20ButtonDriver;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(5);
 
@@ -22,9 +22,15 @@ pub async fn run_button_test(_: embassy_executor::Spawner) -> ! {
     drop(gpio18);
 
     let hardware_registry = Rc::new(HardwareRegistry::new(default_esp32c6_hardware_manifest()));
-    let mut button =
-        Esp32ButtonInput::open_gpio20(hardware_registry, gpio20, ButtonConfig::default())
-            .expect("D9/GPIO20 button opens");
+    let button_driver = Esp32Gpio20ButtonDriver::new(hardware_registry, gpio20);
+    let button_endpoint = button_driver
+        .endpoints()
+        .into_iter()
+        .next()
+        .expect("D9/GPIO20 button endpoint exists");
+    let mut button = button_driver
+        .open(button_endpoint.id(), ButtonConfig::default())
+        .expect("D9/GPIO20 button opens");
     let start = Instant::now();
 
     esp_println::println!(

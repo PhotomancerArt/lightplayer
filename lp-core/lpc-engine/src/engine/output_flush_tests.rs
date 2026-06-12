@@ -42,7 +42,7 @@ impl OutputProvider for RcMemoryOutput {
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,
-    ) -> Result<OutputChannelHandle, lpc_shared::error::OutputError> {
+    ) -> Result<OutputChannelHandle, lpc_hardware::OutputError> {
         self.0.open(endpoint, byte_count, format, options)
     }
 
@@ -50,11 +50,11 @@ impl OutputProvider for RcMemoryOutput {
         &self,
         handle: OutputChannelHandle,
         data: &[u16],
-    ) -> Result<(), lpc_shared::error::OutputError> {
+    ) -> Result<(), lpc_hardware::OutputError> {
         self.0.write(handle, data)
     }
 
-    fn close(&self, handle: OutputChannelHandle) -> Result<(), lpc_shared::error::OutputError> {
+    fn close(&self, handle: OutputChannelHandle) -> Result<(), lpc_hardware::OutputError> {
         self.0.close(handle)
     }
 }

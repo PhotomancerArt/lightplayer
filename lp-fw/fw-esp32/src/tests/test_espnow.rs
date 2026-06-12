@@ -13,7 +13,7 @@ use alloc::vec::Vec;
 
 use embassy_time::{Duration, Ticker};
 use esp_println::println;
-use lpc_shared::hardware::{
+use lpc_hardware::hardware::{
     HardwareAddress, HardwareRegistry, HardwareSystem, RadioChannelId, RadioConfig,
     RadioMessageKind, default_esp32c6_hardware_manifest,
 };

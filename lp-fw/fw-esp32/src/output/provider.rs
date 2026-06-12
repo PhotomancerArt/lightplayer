@@ -15,8 +15,8 @@ use core::cell::RefCell;
 use esp_hal::Blocking;
 use esp_hal::gpio::interconnect::PeripheralOutput;
 use esp_hal::rmt::{ConfigError as RmtConfigError, Rmt};
-use lpc_shared::OutputError;
-use lpc_shared::hardware::{
+use lpc_hardware::OutputError;
+use lpc_hardware::hardware::{
     HardwareEndpointError, HardwareEndpointSpec, HardwareSystem, Ws281xConfig, Ws281xOutput,
 };
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};

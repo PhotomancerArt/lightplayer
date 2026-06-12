@@ -3,9 +3,9 @@
 use alloc::vec::Vec;
 
 use crate::display_pipeline::lut::{LUT_LEN, build_lut, lut_interpolate};
-use crate::display_pipeline::options::DisplayPipelineOptions;
 use crate::error::DisplayPipelineError;
 use core::cmp;
+use lpc_hardware::DisplayPipelineOptions;
 
 use super::dither::dither_step;
 

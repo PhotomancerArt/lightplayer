@@ -10,12 +10,12 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use hashbrown::HashMap;
-use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
-use lpc_model::{HardwareEndpointSpec, Revision, TreePath};
-use lpc_shared::error::OutputError;
-use lpc_shared::hardware::{
+use lpc_hardware::OutputError;
+use lpc_hardware::hardware::{
     ButtonConfig, ButtonInput, HardwareEndpointError, HardwareSystem, RadioConfig, RadioDevice,
 };
+use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
+use lpc_model::{HardwareEndpointSpec, Revision, TreePath};
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::time::TimeProvider;
 
@@ -368,9 +368,9 @@ mod tests {
     use alloc::string::ToString;
     use alloc::vec;
 
+    use lpc_hardware::OutputError;
     use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
     use lpc_model::{HardwareEndpointSpec, OptionSlot, Revision, TreePath, WithRevision};
-    use lpc_shared::error::OutputError;
     use lpc_shared::output::{
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
         OutputProvider,

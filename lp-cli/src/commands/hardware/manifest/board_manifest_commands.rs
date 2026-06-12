@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow, bail};
 use dialoguer::{Confirm, Input, Select};
-use lpc_shared::hardware::{HardwareManifestFile, HardwareTarget};
+use lpc_hardware::hardware::{HardwareManifestFile, HardwareTarget};
 use std::io::IsTerminal;
 
 use crate::commands::hardware::args::{

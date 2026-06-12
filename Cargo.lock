@@ -2844,6 +2844,7 @@ dependencies = [
  "lp-riscv-emu-guest",
  "lpa-client",
  "lpa-server",
+ "lpc-hardware",
  "lpc-model",
  "lpc-shared",
  "lpc-view",
@@ -2882,6 +2883,7 @@ dependencies = [
  "lp-perf",
  "lp-shader",
  "lpa-server",
+ "lpc-hardware",
  "lpc-model",
  "lpc-shared",
  "lpc-wire",
@@ -3899,6 +3901,7 @@ dependencies = [
  "lpa-client",
  "lpa-server",
  "lpc-engine",
+ "lpc-hardware",
  "lpc-model",
  "lpc-shared",
  "lpc-view",
@@ -4052,6 +4055,7 @@ dependencies = [
  "log",
  "lp-perf",
  "lpc-engine",
+ "lpc-hardware",
  "lpc-model",
  "lpc-registry",
  "lpc-shared",
@@ -4070,6 +4074,7 @@ dependencies = [
  "log",
  "lp-perf",
  "lp-shader",
+ "lpc-hardware",
  "lpc-model",
  "lpc-registry",
  "lpc-shared",
@@ -4088,6 +4093,15 @@ dependencies = [
  "spin",
  "toml",
  "unwinding",
+]
+
+[[package]]
+name = "lpc-hardware"
+version = "40.0.0"
+dependencies = [
+ "lpc-model",
+ "serde",
+ "toml",
 ]
 
 [[package]]
@@ -4123,12 +4137,12 @@ version = "40.0.0"
 dependencies = [
  "libm",
  "log",
+ "lpc-hardware",
  "lpc-model",
  "lpc-wire",
  "lpfs",
  "lps-shared",
  "serde",
- "toml",
 ]
 
 [[package]]

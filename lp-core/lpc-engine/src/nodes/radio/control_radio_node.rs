@@ -5,12 +5,12 @@ use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::vec::Vec;
 
+use lpc_hardware::hardware::{
+    RadioChannelId, RadioConfig, RadioDevice, RadioMessage, RadioMessageKind,
+};
 use lpc_model::{
     ControlMessage, ControlRadioDefView, ControlRadioState, FromLpValue, HardwareEndpointSpec,
     MapSlot, SlotAccess, SlotData, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
-};
-use lpc_shared::hardware::{
-    RadioChannelId, RadioConfig, RadioDevice, RadioMessage, RadioMessageKind,
 };
 
 use crate::dataflow::resolver::QueryKey;

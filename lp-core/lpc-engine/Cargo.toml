@@ -13,6 +13,7 @@ default = ["std"]
 panic-recovery = ["dep:unwinding"]
 naga = ["lp-shader/naga"]
 std = [
+    "lpc-hardware/std",
     "lpc-shared/std",
     "lpfs/std",
 ]
@@ -30,6 +31,7 @@ lps-q32 = { path = "../../lp-shader/lps-q32", default-features = false }
 log = { workspace = true, default-features = false }
 
 lpc-model = { path = "../lpc-model", default-features = false }
+lpc-hardware = { path = "../lpc-hardware", default-features = false }
 lpc-registry = { path = "../lpc-registry", default-features = false }
 lpc-wire = { path = "../lpc-wire", default-features = false }
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
@@ -52,6 +54,7 @@ lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false }
 lpvm-wasm = { path = "../../lp-shader/lpvm-wasm", default-features = false }
 
 [dev-dependencies]
+lpc-hardware = { path = "../lpc-hardware", default-features = false, features = ["std"] }
 lpc-shared = { path = "../lpc-shared", default-features = false, features = ["std"] }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, features = ["std"] }
 lpc-view = { path = "../lpc-view", default-features = false, features = ["std"] }

@@ -16,6 +16,7 @@ esp32c6 = [
     "esp-hal/esp32c6",
 ]
 server = [
+    "lpc-hardware",
     "lpc-model",
     "lpc-wire",
     "lpa-server",
@@ -24,6 +25,7 @@ server = [
     "ser-write-json",
 ]  # Enable server dependencies (lpa-server, lpc-shared, lpc-model, lpc-wire, lpfs)
 radio = [
+    "lpc-hardware",
     "lpc-shared",
     "esp-radio",
     "esp-radio/esp32c6",
@@ -71,6 +73,7 @@ libm = "0.2"
 # Graphics backend is selected automatically by target architecture
 # (RV32 → lpvm-native::rt_jit on this firmware). No Cargo feature.
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = ["panic-recovery"], optional = true }
+lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false, optional = true }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false, optional = true }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, optional = true }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false, optional = true }

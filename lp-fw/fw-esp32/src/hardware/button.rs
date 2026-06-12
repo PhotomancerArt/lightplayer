@@ -8,12 +8,12 @@ use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use esp_hal::gpio::{Input, InputConfig, Pull};
-use lpc_model::HardwareEndpointSpec;
-use lpc_shared::hardware::{
+use lpc_hardware::hardware::{
     ButtonConfig, ButtonDebouncer, ButtonDriver, ButtonEvent, ButtonInput, HardwareAddress,
     HardwareCapability, HardwareClaim, HardwareDriver, HardwareEndpoint, HardwareEndpointError,
     HardwareEndpointId, HardwareEndpointKind, HardwareError, HardwareLease, HardwareRegistry,
 };
+use lpc_model::HardwareEndpointSpec;
 
 const DRIVER_ID: &str = "esp32-gpio-button";
 const GPIO20_SPEC: &str = "button:gpio:D9";

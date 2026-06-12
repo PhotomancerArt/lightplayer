@@ -1,8 +1,3 @@
-use crate::error::OutputError;
-use crate::hardware::{
-    HardwareAddress, HardwareEndpointError, HardwareEndpointSpec, HardwareManifest,
-    HardwareRegistry, HardwareSystem, Ws281xConfig, Ws281xOutput,
-};
 use crate::output::provider::{
     OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
 };
@@ -14,6 +9,11 @@ use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
+use lpc_hardware::OutputError;
+use lpc_hardware::hardware::{
+    HardwareAddress, HardwareEndpointError, HardwareEndpointSpec, HardwareManifest,
+    HardwareRegistry, HardwareSystem, Ws281xConfig, Ws281xOutput,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EndpointValidation {

@@ -1,7 +1,6 @@
 use alloc::boxed::Box;
 
-use crate::DisplayPipelineOptions;
-use crate::error::OutputError;
+use crate::{DisplayPipelineOptions, OutputError};
 
 use super::{HardwareDriver, HardwareEndpoint, HardwareEndpointError, HardwareEndpointId};
 

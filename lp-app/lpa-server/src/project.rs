@@ -7,10 +7,10 @@ use crate::server::MemoryStatsFn;
 use alloc::{boxed::Box, format, rc::Rc, string::String, sync::Arc};
 use core::cell::RefCell;
 use lpc_engine::{ButtonService, Engine, EngineServices, LpGraphics, ProjectLoader, RadioService};
+use lpc_hardware::hardware::HardwareEndpointSpec;
 use lpc_model::{LpPath, LpPathBuf, TreePath, current_revision};
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpc_shared::backtrace;
-use lpc_shared::hardware::HardwareEndpointSpec;
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::time::TimeProvider;
 use lpc_wire::{
@@ -332,7 +332,7 @@ impl OutputProvider for SharedOutputProvider {
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,
-    ) -> Result<OutputChannelHandle, lpc_shared::error::OutputError> {
+    ) -> Result<OutputChannelHandle, lpc_hardware::OutputError> {
         self.0.borrow().open(endpoint, byte_count, format, options)
     }
 
@@ -340,11 +340,11 @@ impl OutputProvider for SharedOutputProvider {
         &self,
         handle: OutputChannelHandle,
         data: &[u16],
-    ) -> Result<(), lpc_shared::error::OutputError> {
+    ) -> Result<(), lpc_hardware::OutputError> {
         self.0.borrow().write(handle, data)
     }
 
-    fn close(&self, handle: OutputChannelHandle) -> Result<(), lpc_shared::error::OutputError> {
+    fn close(&self, handle: OutputChannelHandle) -> Result<(), lpc_hardware::OutputError> {
         self.0.borrow().close(handle)
     }
 }

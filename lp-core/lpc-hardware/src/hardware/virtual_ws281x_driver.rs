@@ -5,7 +5,7 @@ use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 
-use crate::error::OutputError;
+use crate::OutputError;
 
 use super::{
     HardwareAddress, HardwareCapability, HardwareClaim, HardwareDriver, HardwareEndpoint,

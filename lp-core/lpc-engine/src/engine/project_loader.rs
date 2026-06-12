@@ -1625,12 +1625,12 @@ mod tests {
 
     use alloc::rc::Rc;
     use alloc::sync::Arc;
-    use lpc_model::{
-        ArtifactLocation, NodeDefLocation, NodeName, ProductRef, SlotData, SlotMapKey, TreePath,
-    };
-    use lpc_shared::hardware::{
+    use lpc_hardware::hardware::{
         HardwareAddress, HardwareRegistry, HardwareSystem, VirtualButtonDriver, VirtualRadioDriver,
         default_esp32c6_hardware_manifest,
+    };
+    use lpc_model::{
+        ArtifactLocation, NodeDefLocation, NodeName, ProductRef, SlotData, SlotMapKey, TreePath,
     };
     use lpc_shared::time::TimeProvider;
     use lpc_wire::{
@@ -3073,7 +3073,7 @@ target = "bus#trigger"
         assert_eq!(sent.len(), 1);
         assert_eq!(
             sent[0].kind(),
-            lpc_shared::hardware::RadioMessageKind::ControlMessage
+            lpc_hardware::hardware::RadioMessageKind::ControlMessage
         );
         assert_eq!(sent[0].payload(), &[1, 0, 0, 0, 1, 0, 0, 0]);
     }

@@ -10,6 +10,7 @@ rust-version.workspace = true
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic"] }
 fw-core = { path = "../fw-core", default-features = false, features = ["emu"] }
 lpa-server = { path = "../../lp-app/lpa-server", default-features = false, features = ["panic-recovery"] }
+lpc-hardware = { path = "../../lp-core/lpc-hardware", default-features = false }
 lpc-shared = { path = "../../lp-core/lpc-shared", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 lpc-model = { path = "../../lp-core/lpc-model", default-features = false }
@@ -35,6 +36,7 @@ test_unwind = []
 
 [dev-dependencies]
 lpa-client = { path = "../../lp-app/lpa-client", features = ["serial"] }
+lpc-hardware = { path = "../../lp-core/lpc-hardware" }
 lpc-view = { path = "../../lp-core/lpc-view" }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }

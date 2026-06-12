@@ -12,7 +12,7 @@ use alloc::vec::Vec;
 use esp_hal::Blocking;
 use esp_hal::gpio::interconnect::PeripheralOutput;
 use esp_hal::rmt::{ConfigError as RmtConfigError, Rmt};
-use lpc_shared::hardware::{
+use lpc_hardware::hardware::{
     HardwareAddress, HardwareCapability, HardwareClaim, HardwareDriver, HardwareEndpoint,
     HardwareEndpointError, HardwareEndpointId, HardwareEndpointKind, HardwareEndpointSpec,
     HardwareEndpointStatus, HardwareLease, HardwareRegistry, Ws281xConfig, Ws281xDriver,

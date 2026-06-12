@@ -1,5 +1,5 @@
 use anyhow::Result;
-use lpc_shared::hardware::{
+use lpc_hardware::hardware::{
     HardwareCapability, HardwareManifestFile, hardware_manifest_file::HardwareResourceFile,
 };
 
@@ -110,7 +110,7 @@ fn ensure_alias(resource: &mut HardwareResourceFile, alias: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_shared::hardware::HardwareTarget;
+    use lpc_hardware::hardware::HardwareTarget;
 
     #[test]
     fn mapping_preserves_previous_display_label_as_alias() {
