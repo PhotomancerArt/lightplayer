@@ -24,9 +24,9 @@ use crate::nodes::shader::{ComputeShaderDef, ShaderDef, ShaderSource};
 use crate::nodes::texture::TextureDef;
 use crate::{
     ArtifactLocation, AssetKind, AssetSource, EnumSlot, LpPath, LpPathBuf, NodeDefLocation,
-    NodeInvocation, ReferencedAsset, SlotAccess, SlotDataAccess, SlotDataMutAccess, SlotMapKey,
-    SlotMutAccess, SlotName, SlotPath, SlotShapeId, SlotShapeRegistry, Slotted, SourcePath,
-    StaticSlotShape,
+    NodeInvocation, ProjectNodeRole, ReferencedAsset, SlotAccess, SlotDataAccess,
+    SlotDataMutAccess, SlotMapKey, SlotMutAccess, SlotName, SlotPath, SlotShapeId,
+    SlotShapeRegistry, Slotted, SourcePath, StaticSlotShape,
 };
 
 const PROJECT_VARIANT: &str = "Project";
@@ -88,6 +88,14 @@ pub struct NodeArtifact(pub EnumSlot<NodeDef>);
 pub struct InvocationSite {
     pub path: SlotPath,
     pub invocation: NodeInvocation,
+    pub role: ProjectNodeRole,
+}
+
+/// Borrowed inline text asset body owned by a node definition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InlineAssetText<'a> {
+    pub extension: &'static str,
+    pub text: &'a str,
 }
 
 /// Failure resolving model-authored artifact path references.
@@ -226,6 +234,7 @@ impl NodeDef {
                     Some(InvocationSite {
                         path: project_node_path(base, name)?,
                         invocation: invocation.value().clone(),
+                        role: ProjectNodeRole::ProjectChild { name: name.clone() },
                     })
                 })
                 .collect(),
@@ -237,6 +246,10 @@ impl NodeDef {
                     Some(InvocationSite {
                         path: playlist_entry_node_path(base, *key)?,
                         invocation: entry.node.value().clone(),
+                        role: ProjectNodeRole::PlaylistEntry {
+                            entry: *key,
+                            name: entry.name.data.as_ref().map(|name| name.value().clone()),
+                        },
                     })
                 })
                 .collect(),
@@ -284,6 +297,39 @@ impl NodeDef {
             ),
             Self::Fixture(fixture) => assets_for_fixture(fixture, containing_file),
             _ => Ok(Vec::new()),
+        }
+    }
+
+    /// Inline UTF-8 asset text at `asset_path`, when this definition owns one.
+    pub fn inline_asset_text(
+        &self,
+        owner_path: &SlotPath,
+        asset_path: &SlotPath,
+    ) -> Option<InlineAssetText<'_>> {
+        if asset_path != &source_slot_path(owner_path) {
+            return None;
+        }
+
+        match self {
+            Self::Shader(shader) => {
+                shader
+                    .shader_source()
+                    .glsl_value()
+                    .map(|text| InlineAssetText {
+                        extension: "glsl",
+                        text,
+                    })
+            }
+            Self::ComputeShader(shader) => {
+                shader
+                    .shader_source()
+                    .glsl_value()
+                    .map(|text| InlineAssetText {
+                        extension: "glsl",
+                        text,
+                    })
+            }
+            _ => None,
         }
     }
 

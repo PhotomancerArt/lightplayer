@@ -1,13 +1,14 @@
 //! Effective inventory derivation by walking loaded node definitions.
 
-use alloc::collections::BTreeSet;
 use alloc::format;
 use alloc::string::{String, ToString};
+use alloc::vec::Vec;
 
 use lpc_model::{
     ArtifactLocation, AssetBodySource, AssetEntry, AssetKind, AssetOverlay, AssetSource,
-    AssetState, NodeDefLocation, NodeDefState, NodeInvocation, ProjectInventory, ProjectOverlay,
-    ReferencedAsset, Revision, SlotPath, WithRevision, resolve_artifact_specifier,
+    AssetState, NodeDefEntry, NodeDefLocation, NodeDefState, NodeInvocation, ProjectInventory,
+    ProjectNodeEntry, ProjectNodeKey, ProjectNodeOrigin, ProjectOverlay, ReferencedAsset, Revision,
+    SlotPath, WithRevision, resolve_artifact_specifier,
 };
 use lpfs::{LpFs, LpPath};
 
@@ -31,11 +32,18 @@ pub(crate) fn derive_effective_inventory(
         frame,
         ctx,
         inventory: ProjectInventory::new(),
-        visited_defs: BTreeSet::new(),
     };
 
     if let Some(root) = root {
-        derivation.walk_def_location(root.clone());
+        let root_key = ProjectNodeKey::root();
+        derivation.inventory.graph.root = root_key.clone();
+        derivation.walk_graph_node(
+            root_key.clone(),
+            None,
+            root.clone(),
+            ProjectNodeOrigin::Root,
+            &mut Vec::new(),
+        );
     }
 
     derivation.inventory
@@ -48,34 +56,59 @@ struct InventoryDerivation<'a, 'ctx> {
     frame: Revision,
     ctx: &'a ParseCtx<'ctx>,
     inventory: ProjectInventory,
-    visited_defs: BTreeSet<NodeDefLocation>,
 }
 
 impl InventoryDerivation<'_, '_> {
-    fn walk_def_location(&mut self, location: NodeDefLocation) {
-        if !self.visited_defs.insert(location.clone()) {
+    fn walk_graph_node(
+        &mut self,
+        key: ProjectNodeKey,
+        parent: Option<ProjectNodeKey>,
+        location: NodeDefLocation,
+        origin: ProjectNodeOrigin,
+        ancestry: &mut Vec<NodeDefLocation>,
+    ) {
+        let (state, revision) = self.ensure_def_entry(location.clone());
+        self.inventory.graph.insert_node(ProjectNodeEntry {
+            key: key.clone(),
+            parent,
+            def_location: location.clone(),
+            origin,
+        });
+
+        let NodeDefState::Loaded(def) = state else {
             return;
+        };
+
+        if ancestry.contains(&location) {
+            return;
+        }
+
+        ancestry.push(location.clone());
+        self.walk_loaded_def(&key, &location, &def, revision, ancestry);
+        ancestry.pop();
+    }
+
+    fn ensure_def_entry(&mut self, location: NodeDefLocation) -> (NodeDefState, Revision) {
+        if let Some(entry) = self.inventory.defs.get(&location) {
+            return (entry.state.clone(), entry.revision);
         }
 
         let revision = self.revision_for_artifact(&location.artifact);
         let state = self.read_effective_def(&location.artifact);
         self.inventory.defs.insert(
             location.clone(),
-            lpc_model::NodeDefEntry::new(location.clone(), state.clone(), revision),
+            NodeDefEntry::new(location, state.clone(), revision),
         );
-
-        let NodeDefState::Loaded(def) = state else {
-            return;
-        };
-
-        self.walk_loaded_def(&location, &def, revision);
+        (state, revision)
     }
 
     fn walk_loaded_def(
         &mut self,
+        key: &ProjectNodeKey,
         location: &NodeDefLocation,
         def: &lpc_model::NodeDef,
         revision: Revision,
+        ancestry: &mut Vec<NodeDefLocation>,
     ) {
         match def.referenced_assets(
             location.artifact.file_path().as_path(),
@@ -84,7 +117,7 @@ impl InventoryDerivation<'_, '_> {
         ) {
             Ok(assets) => {
                 for asset in assets {
-                    self.walk_asset(asset, revision);
+                    self.walk_asset(asset, revision, key);
                 }
             }
             Err(err) => {
@@ -108,34 +141,63 @@ impl InventoryDerivation<'_, '_> {
                 NodeInvocation::Def(body) => {
                     let child_location = NodeDefLocation {
                         artifact: location.artifact.clone(),
-                        path: site.path,
+                        path: site.path.clone(),
                     };
                     let child_def = body.value().clone();
                     self.inventory.defs.insert(
                         child_location.clone(),
-                        lpc_model::NodeDefEntry::new(
+                        NodeDefEntry::new(
                             child_location.clone(),
                             NodeDefState::Loaded(child_def.clone()),
                             revision,
                         ),
                     );
-                    self.walk_loaded_def(&child_location, &child_def, revision);
+                    self.walk_graph_node(
+                        key.child(site.path.clone()),
+                        Some(key.clone()),
+                        child_location,
+                        ProjectNodeOrigin::Invocation {
+                            slot: site.path,
+                            role: site.role,
+                            invocation: site.invocation,
+                        },
+                        ancestry,
+                    );
                 }
                 NodeInvocation::Ref(_) => {
-                    self.walk_ref_invocation(
+                    let child_location = self.resolve_ref_invocation(
                         location.artifact.file_path().as_path(),
                         &site.invocation,
+                    );
+                    self.walk_graph_node(
+                        key.child(site.path.clone()),
+                        Some(key.clone()),
+                        child_location,
+                        ProjectNodeOrigin::Invocation {
+                            slot: site.path,
+                            role: site.role,
+                            invocation: site.invocation,
+                        },
+                        ancestry,
                     );
                 }
             }
         }
     }
 
-    fn walk_ref_invocation(&mut self, containing_file: &LpPath, invocation: &NodeInvocation) {
+    fn resolve_ref_invocation(
+        &mut self,
+        containing_file: &LpPath,
+        invocation: &NodeInvocation,
+    ) -> NodeDefLocation {
         let Some(specifier) = invocation.ref_specifier() else {
-            return;
+            let artifact = ArtifactLocation::file(format!(
+                "{}#unresolved-ref:<empty>",
+                containing_file.as_str()
+            ));
+            return NodeDefLocation::artifact_root(artifact);
         };
-        let child_location = match resolve_artifact_specifier(containing_file, &specifier) {
+        match resolve_artifact_specifier(containing_file, &specifier) {
             Ok(path) => {
                 let artifact = self.artifacts.register_file(path, self.frame);
                 NodeDefLocation::artifact_root(artifact)
@@ -144,14 +206,20 @@ impl InventoryDerivation<'_, '_> {
                 let artifact = ArtifactLocation::file(error_ref_path(containing_file, &specifier));
                 NodeDefLocation::artifact_root(artifact)
             }
-        };
-
-        self.walk_def_location(child_location);
+        }
     }
 
-    fn walk_asset(&mut self, asset: ReferencedAsset, owner_revision: Revision) {
+    fn walk_asset(
+        &mut self,
+        asset: ReferencedAsset,
+        owner_revision: Revision,
+        consumer: &ProjectNodeKey,
+    ) {
         let revision = self.revision_for_asset(&asset.source, owner_revision);
         let state = self.read_effective_asset(&asset.source);
+        self.inventory
+            .graph
+            .add_asset_consumer(asset.source.clone(), consumer.clone());
         self.inventory.assets.insert(
             asset.source.clone(),
             AssetEntry::new(asset.source, asset.kind, state, revision),

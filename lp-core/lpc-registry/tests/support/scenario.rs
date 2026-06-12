@@ -1,8 +1,11 @@
 use lpc_model::{
-    CommitResult, OverlayMutation, OverlayMutationBatch, ProjectApplyBatchResult,
+    AssetSource, CommitResult, OverlayMutation, OverlayMutationBatch, ProjectApplyBatchResult,
     ProjectApplyResult, Revision, SlotShapeRegistry,
 };
-use lpc_registry::{LoadResult, ParseCtx, ProjectRegistry};
+use lpc_registry::{
+    LoadResult, MaterializeAssetError, MaterializedAsset, MaterializedTextAsset, ParseCtx,
+    ProjectRegistry,
+};
 use lpfs::{FsEvent, FsEventKind, LpFsMemory, LpPath, LpPathBuf};
 
 use super::TestProject;
@@ -40,8 +43,32 @@ impl RegistryScenario {
         &self.registry
     }
 
+    pub fn registry_mut(&mut self) -> &mut ProjectRegistry {
+        &mut self.registry
+    }
+
     pub fn fs(&self) -> &LpFsMemory {
         &self.fs
+    }
+
+    pub fn write_file(&mut self, path: &str, bytes: impl AsRef<[u8]>) {
+        self.fs
+            .write_file_mut(LpPath::new(path), bytes.as_ref())
+            .expect("write file");
+    }
+
+    pub fn materialize_asset(
+        &mut self,
+        source: &AssetSource,
+    ) -> Result<MaterializedAsset, MaterializeAssetError> {
+        self.registry.materialize_asset(&self.fs, source)
+    }
+
+    pub fn materialize_asset_text(
+        &mut self,
+        source: &AssetSource,
+    ) -> Result<MaterializedTextAsset, MaterializeAssetError> {
+        self.registry.materialize_asset_text(&self.fs, source)
     }
 
     pub fn load_root(&mut self, root_path: &str) -> LoadResult {

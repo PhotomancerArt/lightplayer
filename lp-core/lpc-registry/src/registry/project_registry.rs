@@ -16,6 +16,7 @@ use crate::overlay::inventory_change_set::change_set_between;
 use crate::overlay::project_inventory_derivation::derive_effective_inventory;
 use crate::{
     ArtifactStore, CommitError, LoadResult, ParseCtx, RegistryError,
+    asset::{MaterializeAssetError, MaterializedAsset, MaterializedTextAsset},
     overlay::{EditApplyError, serialize_slot_draft},
 };
 
@@ -280,6 +281,34 @@ impl ProjectRegistry {
 
     pub fn asset(&self, source: &lpc_model::AssetSource) -> Option<&lpc_model::AssetEntry> {
         self.inventory.assets.get(source)
+    }
+
+    pub fn materialize_asset(
+        &mut self,
+        fs: &dyn LpFs,
+        source: &lpc_model::AssetSource,
+    ) -> Result<MaterializedAsset, MaterializeAssetError> {
+        crate::asset::materialize_asset(
+            &mut self.artifacts,
+            &self.overlay,
+            &self.inventory,
+            fs,
+            source,
+        )
+    }
+
+    pub fn materialize_asset_text(
+        &mut self,
+        fs: &dyn LpFs,
+        source: &lpc_model::AssetSource,
+    ) -> Result<MaterializedTextAsset, MaterializeAssetError> {
+        crate::asset::materialize_asset_text(
+            &mut self.artifacts,
+            &self.overlay,
+            &self.inventory,
+            fs,
+            source,
+        )
     }
 
     pub(crate) fn derive_inventory(

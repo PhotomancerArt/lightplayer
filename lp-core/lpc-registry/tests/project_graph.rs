@@ -1,0 +1,193 @@
+mod support;
+
+use lpc_model::{
+    NodeDefLocation, NodeDefState, ProjectNodeKey, ProjectNodeOrigin, ProjectNodeRole, SlotPath,
+};
+use lpc_registry::{ParseCtx, ProjectRegistry};
+use lpfs::{LpFsMemory, LpPath};
+
+use support::{RegistryScenario, artifact, artifact_asset, root_def};
+
+#[test]
+fn fyeah_sign_graph_contains_project_children_playlist_entries_and_asset_consumers() {
+    let (scenario, _) = RegistryScenario::load_fixture("fyeah-sign");
+    let graph = &scenario.registry().inventory().graph;
+
+    let root = ProjectNodeKey::root();
+    let playlist = root.child(SlotPath::parse("nodes[playlist]").unwrap());
+    let idle = playlist.child(SlotPath::parse("entries[1].node").unwrap());
+    let blast = playlist.child(SlotPath::parse("entries[2].node").unwrap());
+
+    assert_eq!(graph.root, root);
+    assert_eq!(graph.nodes.len(), 9);
+    assert_eq!(graph.nodes[&root].def_location, root_def("/project.toml"));
+    assert_project_child(
+        graph.nodes.get(&playlist).unwrap(),
+        "playlist",
+        "/playlist.toml",
+    );
+    assert_playlist_entry(
+        graph.nodes.get(&idle).unwrap(),
+        1,
+        Some("idle"),
+        "/idle.toml",
+    );
+    assert_playlist_entry(
+        graph.nodes.get(&blast).unwrap(),
+        2,
+        Some("blast"),
+        "/blast.toml",
+    );
+
+    assert_eq!(
+        graph
+            .asset_consumers
+            .get(&artifact_asset("/idle.glsl"))
+            .unwrap(),
+        &vec![idle]
+    );
+    assert_eq!(
+        graph
+            .asset_consumers
+            .get(&artifact_asset("/blast.glsl"))
+            .unwrap(),
+        &vec![blast]
+    );
+    assert_eq!(
+        graph
+            .asset_consumers
+            .get(&artifact_asset("/fyeah-mapping.svg"))
+            .unwrap(),
+        &vec![root.child(SlotPath::parse("nodes[fixture]").unwrap())]
+    );
+}
+
+#[test]
+fn duplicate_external_refs_share_def_entry_but_create_distinct_graph_nodes() {
+    let (registry, _) = load_inline_project(
+        r#"
+kind = "Project"
+
+[nodes.a]
+ref = "./shader.toml"
+
+[nodes.b]
+ref = "./shader.toml"
+"#,
+        &[(
+            "/shader.toml",
+            r#"
+kind = "Shader"
+source = { path = "shader.glsl" }
+"#,
+        )],
+        &[("/shader.glsl", b"void main() {}".as_slice())],
+    );
+    let graph = &registry.inventory().graph;
+    let shader = root_def("/shader.toml");
+    let a = ProjectNodeKey::root().child(SlotPath::parse("nodes[a]").unwrap());
+    let b = ProjectNodeKey::root().child(SlotPath::parse("nodes[b]").unwrap());
+
+    assert_eq!(registry.inventory().defs.len(), 2);
+    assert_eq!(graph.def_instances.get(&shader).unwrap(), &vec![a, b]);
+    assert_eq!(
+        graph
+            .asset_consumers
+            .get(&artifact_asset("/shader.glsl"))
+            .unwrap()
+            .len(),
+        2
+    );
+}
+
+#[test]
+fn inline_and_missing_children_are_graph_nodes() {
+    let (registry, _) = load_inline_project(
+        r#"
+kind = "Project"
+
+[nodes.clock.def]
+kind = "Clock"
+
+[nodes.missing]
+ref = "./missing.toml"
+"#,
+        &[],
+        &[],
+    );
+    let graph = &registry.inventory().graph;
+    let inline_clock = NodeDefLocation {
+        artifact: artifact("/project.toml"),
+        path: SlotPath::parse("nodes[clock]").unwrap(),
+    };
+    let missing = root_def("/missing.toml");
+
+    assert!(graph.def_instances.contains_key(&inline_clock));
+    assert!(graph.def_instances.contains_key(&missing));
+    assert_eq!(
+        registry.def(&missing).map(|entry| &entry.state),
+        Some(&NodeDefState::NotFound)
+    );
+}
+
+fn assert_project_child(entry: &lpc_model::ProjectNodeEntry, name: &str, expected_def_path: &str) {
+    assert_eq!(entry.def_location, root_def(expected_def_path));
+    let ProjectNodeOrigin::Invocation { role, .. } = &entry.origin else {
+        panic!("expected invocation origin");
+    };
+    assert_eq!(
+        role,
+        &ProjectNodeRole::ProjectChild {
+            name: name.to_string()
+        }
+    );
+}
+
+fn assert_playlist_entry(
+    entry: &lpc_model::ProjectNodeEntry,
+    key: u32,
+    name: Option<&str>,
+    expected_def_path: &str,
+) {
+    assert_eq!(entry.def_location, root_def(expected_def_path));
+    let ProjectNodeOrigin::Invocation { role, .. } = &entry.origin else {
+        panic!("expected invocation origin");
+    };
+    assert_eq!(
+        role,
+        &ProjectNodeRole::PlaylistEntry {
+            entry: key,
+            name: name.map(str::to_string)
+        }
+    );
+}
+
+fn load_inline_project(
+    project: &str,
+    toml_files: &[(&str, &str)],
+    byte_files: &[(&str, &[u8])],
+) -> (ProjectRegistry, LpFsMemory) {
+    let shapes = lpc_model::SlotShapeRegistry::default();
+    let ctx = ParseCtx { shapes: &shapes };
+    let mut fs = LpFsMemory::new();
+    fs.write_file_mut(LpPath::new("/project.toml"), project.as_bytes())
+        .unwrap();
+    for (path, contents) in toml_files {
+        fs.write_file_mut(LpPath::new(path), contents.as_bytes())
+            .unwrap();
+    }
+    for (path, bytes) in byte_files {
+        fs.write_file_mut(LpPath::new(path), bytes).unwrap();
+    }
+
+    let mut registry = ProjectRegistry::new();
+    registry
+        .load_root(
+            &fs,
+            LpPath::new("/project.toml"),
+            lpc_model::Revision::new(1),
+            &ctx,
+        )
+        .unwrap();
+    (registry, fs)
+}

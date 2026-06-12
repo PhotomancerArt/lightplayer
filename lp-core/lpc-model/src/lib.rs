@@ -108,20 +108,21 @@ pub use nodes::{
     ComputeShaderDef, ComputeShaderDefView, ControlRadioDef, ControlRadioDefView,
     ControlRadioState, ControlRadioStateView, DivMode, FixtureDef, FixtureDefView,
     FixtureDiagnosticMode, FixtureSamplingConfig, FixtureState, FixtureStateView, FluidDef,
-    FluidDefView, FluidEmitter, FluidState, GlslOpts, GlslOptsView, InvocationSite, MappingConfig,
-    MulMode, NodeDefParseError, OutputDef, OutputDefView, OutputDriverOptionsConfig,
-    OutputDriverOptionsConfigView, PathSpec, PlaylistDef, PlaylistDefView, PlaylistEntry,
-    PlaylistEntryView, PlaylistState, PlaylistStateView, ProjectDef, ProjectDefView, RingOrder,
-    ScalarHint, ScalarHintView, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,
-    ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
-    ShaderSlotMappingKind, ShaderSource, ShaderState, ShaderStateView, ShaderValueShapeRef,
-    TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView,
-    generate_compute_shader_header, resolve_artifact_specifier,
+    FluidDefView, FluidEmitter, FluidState, GlslOpts, GlslOptsView, InlineAssetText,
+    InvocationSite, MappingConfig, MulMode, NodeDefParseError, OutputDef, OutputDefView,
+    OutputDriverOptionsConfig, OutputDriverOptionsConfigView, PathSpec, PlaylistDef,
+    PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState, PlaylistStateView,
+    ProjectDef, ProjectDefView, RingOrder, ScalarHint, ScalarHintView, ShaderDef, ShaderDefView,
+    ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef, ShaderParamDefView, ShaderSlotDef,
+    ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderSource, ShaderState,
+    ShaderStateView, ShaderValueShapeRef, TextureDef, TextureDefView, TextureFormat, TextureState,
+    TextureStateView, generate_compute_shader_header, resolve_artifact_specifier,
 };
 pub use product::{ControlExtent, ControlProduct, ProductKind, ProductRef, VisualProduct};
 pub use project::{
     CommitResult, ProjectApplyBatchResult, ProjectApplyResult, ProjectChangeSet, ProjectConfig,
-    ProjectInventory, Revision,
+    ProjectGraph, ProjectInventory, ProjectNodeEntry, ProjectNodeKey, ProjectNodeOrigin,
+    ProjectNodePathSegment, ProjectNodeRole, Revision,
 };
 pub use project::{advance_revision, current_revision, set_current_revision};
 pub use resource::{ResourceDomain, ResourceRef, RuntimeBufferId, runtime_buffer_resource_shape};
