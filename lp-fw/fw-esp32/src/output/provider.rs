@@ -6,12 +6,12 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::ToString;
 use alloc::vec::Vec;
 use core::cell::RefCell;
+use lp_collection::VecMap;
 
 use lpc_hardware::OutputError;
 use lpc_hardware::{
@@ -33,7 +33,7 @@ struct ChannelState {
 /// ESP32 OutputProvider implementation.
 pub struct Esp32OutputProvider {
     hardware_system: Rc<HardwareSystem>,
-    channels: RefCell<BTreeMap<i32, ChannelState>>,
+    channels: RefCell<VecMap<i32, ChannelState>>,
     next_handle: RefCell<i32>,
 }
 
@@ -41,7 +41,7 @@ impl Esp32OutputProvider {
     pub fn new(hardware_system: Rc<HardwareSystem>) -> Self {
         Self {
             hardware_system,
-            channels: RefCell::new(BTreeMap::new()),
+            channels: RefCell::new(VecMap::new()),
             next_handle: RefCell::new(1),
         }
     }

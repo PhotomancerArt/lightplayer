@@ -1,7 +1,7 @@
-use alloc::collections::BTreeSet;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
+use lp_collection::VecSet;
 
 use serde::{Deserialize, Serialize};
 
@@ -87,7 +87,7 @@ impl HardwareManifestFile {
             }
         }
 
-        let mut seen = BTreeSet::new();
+        let mut seen = VecSet::new();
         for label in &self.board_label {
             if label.label.trim().is_empty() {
                 return Err(HardwareManifestFileError::Invalid {
@@ -101,7 +101,7 @@ impl HardwareManifestFile {
             }
         }
 
-        let mut seen = BTreeSet::new();
+        let mut seen = VecSet::new();
         for resource in self.gpio.iter().chain(self.resource.iter()) {
             let address = HwAddress::new(resource.address.clone())?;
             if !seen.insert(address.clone()) {

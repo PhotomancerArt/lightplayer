@@ -1,9 +1,9 @@
 //! Incremental runtime projection from registry project changes.
 
-use alloc::collections::BTreeSet;
 use alloc::format;
 use alloc::string::ToString;
 use alloc::vec::Vec;
+use lp_collection::VecSet;
 
 use lpc_model::{
     AssetChangeKind, AssetLocation, NodeDefChangeKind, NodeId, NodeKind, NodeRuntimeStatus,
@@ -65,9 +65,9 @@ impl Engine {
         }
 
         let frame = lpc_model::current_revision();
-        let mut remove_roots = BTreeSet::new();
-        let mut add_targets = BTreeSet::new();
-        let mut reattach_roots = BTreeSet::new();
+        let mut remove_roots = VecSet::new();
+        let mut add_targets = VecSet::new();
+        let mut reattach_roots = VecSet::new();
 
         for removed in &changes.uses.removed {
             if let Some(parent) = playlist_parent_for_changed_child(registry, removed) {
@@ -307,7 +307,7 @@ fn node_kind_for_use(registry: &ProjectRegistry, location: &NodeUseLocation) -> 
 fn add_subtree_targets(
     registry: &ProjectRegistry,
     root: &NodeUseLocation,
-    targets: &mut BTreeSet<NodeUseLocation>,
+    targets: &mut VecSet<NodeUseLocation>,
 ) {
     for location in registry.inventory().tree.nodes.keys() {
         if is_same_or_descendant(root, location) {

@@ -1,4 +1,4 @@
-use alloc::collections::BTreeMap;
+use lp_collection::VecMap;
 
 use crate::{AssetEntry, AssetLocation, NodeDefEntry, NodeDefLocation, ProjectTree};
 
@@ -10,9 +10,9 @@ use crate::{AssetEntry, AssetLocation, NodeDefEntry, NodeDefLocation, ProjectTre
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ProjectInventory {
     /// Unique referenced node definitions keyed by definition location.
-    pub defs: BTreeMap<NodeDefLocation, NodeDefEntry>,
+    pub defs: VecMap<NodeDefLocation, NodeDefEntry>,
     /// Unique referenced assets keyed by asset source.
-    pub assets: BTreeMap<AssetLocation, AssetEntry>,
+    pub assets: VecMap<AssetLocation, AssetEntry>,
     /// Expanded effective node uses reachable from the project root.
     pub tree: ProjectTree,
 }

@@ -1,8 +1,8 @@
 //! Runtime playlist node: selects and blends owned visual child entries.
 
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use lpc_model::{
     ControlMessage, FromLpValue, NodeId, PlaylistState, SlotAccess, SlotData, SlotPath,
@@ -40,7 +40,7 @@ pub struct PlaylistNode {
     switch_time: f32,
     transition_start_time: f32,
     transition_duration: f32,
-    last_seen_triggers: BTreeMap<(u32, u32), u32>,
+    last_seen_triggers: VecMap<(u32, u32), u32>,
 }
 
 impl PlaylistNode {
@@ -67,7 +67,7 @@ impl PlaylistNode {
             switch_time: 0.0,
             transition_start_time: 0.0,
             transition_duration: 0.0,
-            last_seen_triggers: BTreeMap::new(),
+            last_seen_triggers: VecMap::new(),
         }
     }
 
@@ -388,7 +388,7 @@ pub fn playlist_output_path() -> SlotPath {
 fn detect_triggered_entry(
     ctx: &mut TickContext<'_>,
     entries: &[PlaylistRuntimeEntry],
-    last_seen: &mut BTreeMap<(u32, u32), u32>,
+    last_seen: &mut VecMap<(u32, u32), u32>,
 ) -> Result<Option<u32>, NodeError> {
     let mut triggered = None;
     for entry in entries {

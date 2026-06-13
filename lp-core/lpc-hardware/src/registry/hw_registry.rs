@@ -1,6 +1,6 @@
-use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::string::{String, ToString};
 use core::cell::RefCell;
+use lp_collection::{VecMap, VecSet};
 
 use crate::{
     HardwareLease, HwAddress, HwCapability, HwClaim, HwEndpointStatus, HwError, HwLeaseId,
@@ -26,8 +26,8 @@ struct ActiveClaim {
 #[derive(Debug, Clone)]
 struct HwRegistryState {
     next_lease_id: u64,
-    active_by_address: BTreeMap<HwAddress, ActiveClaim>,
-    addresses_by_lease: BTreeMap<HwLeaseId, BTreeSet<HwAddress>>,
+    active_by_address: VecMap<HwAddress, ActiveClaim>,
+    addresses_by_lease: VecMap<HwLeaseId, VecSet<HwAddress>>,
 }
 
 impl HwRegistry {
@@ -36,8 +36,8 @@ impl HwRegistry {
             manifest,
             state: RefCell::new(HwRegistryState {
                 next_lease_id: 1,
-                active_by_address: BTreeMap::new(),
-                addresses_by_lease: BTreeMap::new(),
+                active_by_address: VecMap::new(),
+                addresses_by_lease: VecMap::new(),
             }),
         }
     }
@@ -53,7 +53,7 @@ impl HwRegistry {
         let lease_id = HwLeaseId::new(state.next_lease_id);
         state.next_lease_id += 1;
 
-        let mut addresses = BTreeSet::new();
+        let mut addresses = VecSet::new();
         for address in claim.addresses() {
             state.active_by_address.insert(
                 address.clone(),
@@ -144,7 +144,7 @@ impl HwRegistry {
             return Err(HwError::EmptyClaim);
         }
 
-        let mut seen = BTreeSet::new();
+        let mut seen = VecSet::new();
         let state = self.state.borrow();
         for address in claim.addresses() {
             if !seen.insert(address.clone()) {

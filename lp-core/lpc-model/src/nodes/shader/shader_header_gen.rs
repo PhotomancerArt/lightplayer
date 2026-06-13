@@ -222,13 +222,13 @@ fn glsl_type_for_lp_type(ty: &LpType) -> Result<String, ShaderHeaderGenError> {
 mod tests {
     use super::*;
     use crate::{AssetSlot, MapSlot, ShaderSlotDef, ShaderSlotMappingDef};
-    use alloc::collections::BTreeMap;
+    use lp_collection::VecMap;
 
     #[test]
     fn shader_header_generates_fluid_emitter_output() {
         let registry = SlotShapeRegistry::default();
 
-        let mut consumed = BTreeMap::new();
+        let mut consumed = VecMap::new();
         consumed.insert(
             String::from("time"),
             ShaderSlotDef {
@@ -243,7 +243,7 @@ mod tests {
             },
         );
 
-        let mut produced = BTreeMap::new();
+        let mut produced = VecMap::new();
         produced.insert(
             String::from("emitters"),
             ShaderSlotDef::map_u32_native(
@@ -272,7 +272,7 @@ mod tests {
 
     #[test]
     fn shader_header_rejects_unknown_native_shape() {
-        let mut produced = BTreeMap::new();
+        let mut produced = VecMap::new();
         produced.insert(
             String::from("emitters"),
             ShaderSlotDef::map_u32_native(

@@ -1,10 +1,11 @@
 use alloc::boxed::Box;
-use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
+use alloc::collections::VecDeque;
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
+use lp_collection::{VecMap, VecSet};
 
 use crate::{
     HardwareEndpointError, HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
@@ -134,8 +135,8 @@ impl RadioDriver for VirtualRadioDriver {
 
 #[derive(Default)]
 struct VirtualRadioState {
-    subscriptions: BTreeSet<RadioChannelId>,
-    received: BTreeMap<RadioChannelId, VirtualRadioQueue>,
+    subscriptions: VecSet<RadioChannelId>,
+    received: VecMap<RadioChannelId, VirtualRadioQueue>,
     sent: Vec<RadioMessage>,
     next_event_id: u32,
 }

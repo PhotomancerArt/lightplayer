@@ -1,12 +1,12 @@
 //! [`Engine`] — owns spine state and mediates [`ResolveHost`] production for produced slots.
 
 use alloc::boxed::Box;
-use alloc::collections::BTreeSet;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::ToString;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use lp_collection::VecSet;
 use lpc_model::{
     ControlProduct, NodeDef, NodeDefLocation, NodeDefState, NodeId, Revision, SlotAccess,
     SlotAccessor, SlotData, SlotDirection, SlotMerge, SlotPath, SlotPathSegment, SlotSemantics,
@@ -390,7 +390,7 @@ impl Engine {
         let trace = ResolveTrace::new(ResolveLogLevel::Off);
         let mut session = EngineSession::new(self.revision, &mut resolver, trace);
 
-        let mut producers_ticked = BTreeSet::new();
+        let mut producers_ticked = VecSet::new();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
         let time_provider = self.services.time_provider();
         let button_service = self.services.button_service();
@@ -424,7 +424,7 @@ impl Engine {
         product: VisualProduct,
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, SessionResolveError> {
-        let mut producers_ticked = BTreeSet::new();
+        let mut producers_ticked = VecSet::new();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
         let time_provider = self.services.time_provider();
         let button_service = self.services.button_service();
@@ -462,7 +462,7 @@ impl Engine {
         request: &ControlRenderRequest,
         target: ControlRenderTarget<'_>,
     ) -> Result<ControlLayout, SessionResolveError> {
-        let mut producers_ticked = BTreeSet::new();
+        let mut producers_ticked = VecSet::new();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
         let time_provider = self.services.time_provider();
         let button_service = self.services.button_service();
@@ -487,7 +487,7 @@ impl Engine {
 struct EngineResolveHost<'a> {
     tree: &'a mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
     registry: &'a ProjectRegistry,
-    producers_ticked: &'a mut BTreeSet<NodeId>,
+    producers_ticked: &'a mut VecSet<NodeId>,
     runtime_buffers: &'a mut RuntimeBufferStore,
     slot_shapes: &'a SlotShapeRegistry,
     graphics: Option<Arc<dyn LpGraphics>>,
@@ -1520,7 +1520,7 @@ pub(crate) fn resolve_with_engine_host(
     let mut resolver_tmp = core::mem::replace(&mut eng.resolver, Resolver::new());
     resolver_tmp.clear_frame_cache();
     let mut session = EngineSession::new(fid, &mut resolver_tmp, ResolveTrace::new(log_level));
-    let mut producers_ticked = BTreeSet::new();
+    let mut producers_ticked = VecSet::new();
     let time_s = eng.frame_time.total_ms as f32 / 1000.0;
     let time_provider = eng.services.time_provider();
     let button_service = eng.services.button_service();
@@ -1558,7 +1558,7 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         &mut resolver_tmp,
         ResolveTrace::new(ResolveLogLevel::Off),
     );
-    let mut producers_ticked = BTreeSet::new();
+    let mut producers_ticked = VecSet::new();
     let time_s = eng.frame_time.total_ms as f32 / 1000.0;
     let time_provider = eng.services.time_provider();
     let button_service = eng.services.button_service();

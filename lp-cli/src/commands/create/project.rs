@@ -3,7 +3,7 @@
 //! Functions for creating new projects with sensible defaults.
 
 use anyhow::{Context, Result};
-use std::collections::BTreeMap;
+use lp_collection::VecMap;
 use std::path::Path;
 
 use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig};
@@ -232,7 +232,7 @@ fn slot_shape_registry() -> SlotShapeRegistry {
 }
 
 fn default_visual_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
-    let mut slots = BTreeMap::new();
+    let mut slots = VecMap::new();
     slots.insert(
         String::from("time"),
         ShaderSlotDef::value_f32("Time", "Project clock time in seconds", 0.0, None),
@@ -259,7 +259,7 @@ fn bus_output_binding_defs(slot: &str) -> BindingDefs {
 }
 
 fn fixture_binding_defs() -> BindingDefs {
-    let mut entries = std::collections::BTreeMap::new();
+    let mut entries = lp_collection::VecMap::new();
     entries.insert(
         String::from("input"),
         BindingDef::source(BindingRef::Bus(BusSlotRef::new(
@@ -276,7 +276,7 @@ fn fixture_binding_defs() -> BindingDefs {
 }
 
 fn single_binding_defs(slot: &str, binding: BindingDef) -> BindingDefs {
-    let mut entries = std::collections::BTreeMap::new();
+    let mut entries = lp_collection::VecMap::new();
     entries.insert(String::from(slot), binding);
     BindingDefs::new(entries)
 }

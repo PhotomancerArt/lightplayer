@@ -3,12 +3,13 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
-use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
+use alloc::collections::VecDeque;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
+use lp_collection::{VecMap, VecSet};
 
 use esp_hal::efuse::{InterfaceMacAddress, interface_mac_address};
 use esp_hal::peripherals::WIFI;
@@ -195,8 +196,8 @@ struct Esp32EspNowRadioDevice {
     esp_now_home: Rc<RefCell<Option<EspNow<'static>>>>,
     esp_now: Option<EspNow<'static>>,
     device_id: RadioDeviceId,
-    subscriptions: BTreeSet<RadioChannelId>,
-    queues: BTreeMap<RadioChannelId, RadioQueue>,
+    subscriptions: VecSet<RadioChannelId>,
+    queues: VecMap<RadioChannelId, RadioQueue>,
     next_event_id: u32,
     seen: SeenRing,
 }
@@ -215,8 +216,8 @@ impl Esp32EspNowRadioDevice {
             esp_now_home,
             esp_now: Some(esp_now),
             device_id,
-            subscriptions: BTreeSet::new(),
-            queues: BTreeMap::new(),
+            subscriptions: VecSet::new(),
+            queues: VecMap::new(),
             next_event_id: 0,
             seen: SeenRing::new(),
         }

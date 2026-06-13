@@ -1,7 +1,7 @@
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use base64::Engine;
 
@@ -458,8 +458,8 @@ where
     pub fn string_key_map<T>(
         self,
         mut read_value: impl FnMut(ValueReader<'_, 'a, S>) -> Result<T, SyntaxError>,
-    ) -> Result<BTreeMap<String, T>, SyntaxError> {
-        let mut entries = BTreeMap::new();
+    ) -> Result<VecMap<String, T>, SyntaxError> {
+        let mut entries = VecMap::new();
         let mut object = self.object()?;
         while let Some(mut prop) = object.next_prop()? {
             let key = prop.name().to_string();
@@ -472,8 +472,8 @@ where
     pub fn u32_key_map<T>(
         self,
         mut read_value: impl FnMut(ValueReader<'_, 'a, S>) -> Result<T, SyntaxError>,
-    ) -> Result<BTreeMap<u32, T>, SyntaxError> {
-        let mut entries = BTreeMap::new();
+    ) -> Result<VecMap<u32, T>, SyntaxError> {
+        let mut entries = VecMap::new();
         let mut object = self.object()?;
         while let Some(mut prop) = object.next_prop()? {
             let key = match prop.name().parse::<u32>() {

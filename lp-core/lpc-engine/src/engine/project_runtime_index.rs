@@ -1,7 +1,7 @@
 //! Projection index between project node uses and runtime node ids.
 
-use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use lpc_model::{AssetLocation, NodeDefLocation, NodeId, NodeUseLocation, ProjectTree};
 
@@ -12,10 +12,10 @@ use lpc_model::{AssetLocation, NodeDefLocation, NodeId, NodeUseLocation, Project
 /// without making either identity pretend to be the other.
 #[derive(Debug, Default)]
 pub struct ProjectRuntimeIndex {
-    node_to_runtime: BTreeMap<NodeUseLocation, NodeId>,
-    runtime_to_node: BTreeMap<NodeId, NodeUseLocation>,
-    def_to_runtime: BTreeMap<NodeDefLocation, Vec<NodeId>>,
-    asset_to_runtime: BTreeMap<AssetLocation, Vec<NodeId>>,
+    node_to_runtime: VecMap<NodeUseLocation, NodeId>,
+    runtime_to_node: VecMap<NodeId, NodeUseLocation>,
+    def_to_runtime: VecMap<NodeDefLocation, Vec<NodeId>>,
+    asset_to_runtime: VecMap<AssetLocation, Vec<NodeId>>,
 }
 
 impl ProjectRuntimeIndex {
@@ -93,7 +93,7 @@ impl ProjectRuntimeIndex {
     }
 }
 
-fn remove_node_from_index<K: Ord>(index: &mut BTreeMap<K, Vec<NodeId>>, node_id: NodeId) {
+fn remove_node_from_index<K: Ord>(index: &mut VecMap<K, Vec<NodeId>>, node_id: NodeId) {
     index.retain(|_, nodes| {
         nodes.retain(|&candidate| candidate != node_id);
         !nodes.is_empty()

@@ -284,8 +284,8 @@ pub fn fluid_output_path() -> SlotPath {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::collections::BTreeMap;
     use alloc::sync::Arc;
+    use lp_collection::VecMap;
     use lpc_model::{
         LpValue, NodeName, ProductRef, Revision, SlotMapDyn, ToLpValue, TreePath, WithRevision,
     };
@@ -297,7 +297,7 @@ mod tests {
 
     #[test]
     fn emitters_from_slot_data_reads_value_map() {
-        let mut entries = BTreeMap::new();
+        let mut entries = VecMap::new();
         entries.insert(
             SlotMapKey::U32(4),
             SlotData::Value(WithRevision::new(

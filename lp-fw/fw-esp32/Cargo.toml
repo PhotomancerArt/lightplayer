@@ -49,6 +49,7 @@ test_shader_compile_incremental = ["dep:fw-checks", "dep:lp-shader", "dep:lpvm-n
 test_espnow = ["radio"]  # ESP-NOW broadcast/receive smoke test with simulated 1Hz button events
 
 [dependencies]
+lp-collection = { workspace = true, features = ["serde"] }
 unwinding = { version = "0.2", default-features = false, features = ["unwinder", "fde-static", "personality", "panic"] }
 embassy-executor = "0.10.0"
 embassy-time = "0.5.0"

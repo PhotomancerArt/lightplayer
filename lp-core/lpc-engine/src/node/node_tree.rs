@@ -2,8 +2,8 @@
 //!
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/01-tree.md` §NodeTree.
 
-use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 use lpc_model::{
     ChannelName, NodeId, NodeInvocation, NodeName, NodePathSegment, Revision, SlotPath, TreePath,
 };
@@ -22,8 +22,8 @@ use crate::node::{RuntimeNodeEntry, TreeError};
 #[derive(Debug)]
 pub struct RuntimeNodeTree<N> {
     nodes: Vec<Option<RuntimeNodeEntry<N>>>,
-    by_path: BTreeMap<TreePath, NodeId>,
-    by_sibling: BTreeMap<(NodeId, NodeName), NodeId>,
+    by_path: VecMap<TreePath, NodeId>,
+    by_sibling: VecMap<(NodeId, NodeName), NodeId>,
     binding_index: NodeBindingIndex,
     next_id: u32,
     root: NodeId,
@@ -38,13 +38,13 @@ impl<N> RuntimeNodeTree<N> {
         let mut nodes = Vec::new();
         nodes.push(Some(root_entry));
 
-        let mut by_path = BTreeMap::new();
+        let mut by_path = VecMap::new();
         by_path.insert(root_path, root_id);
 
         Self {
             nodes,
             by_path,
-            by_sibling: BTreeMap::new(),
+            by_sibling: VecMap::new(),
             binding_index: NodeBindingIndex::default(),
             next_id: 1,
             root: root_id,

@@ -1,10 +1,10 @@
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
+use lp_collection::VecMap;
 
 use crate::{
     ButtonConfig, ButtonDebouncer, ButtonDriver, ButtonEvent, ButtonInput, HardwareEndpointError,
@@ -20,7 +20,7 @@ use crate::{
 pub struct VirtualButtonDriver {
     registry: Rc<HwRegistry>,
     driver_id: String,
-    pressed_by_address: Rc<RefCell<BTreeMap<HwAddress, bool>>>,
+    pressed_by_address: Rc<RefCell<VecMap<HwAddress, bool>>>,
 }
 
 impl VirtualButtonDriver {
@@ -28,7 +28,7 @@ impl VirtualButtonDriver {
         Self {
             registry,
             driver_id: String::from("virtual-button"),
-            pressed_by_address: Rc::new(RefCell::new(BTreeMap::new())),
+            pressed_by_address: Rc::new(RefCell::new(VecMap::new())),
         }
     }
 
@@ -122,7 +122,7 @@ struct VirtualButtonInput {
     source: HwAddress,
     lease: Option<HardwareLease>,
     debouncer: ButtonDebouncer,
-    pressed_by_address: Rc<RefCell<BTreeMap<HwAddress, bool>>>,
+    pressed_by_address: Rc<RefCell<VecMap<HwAddress, bool>>>,
 }
 
 impl VirtualButtonInput {
@@ -131,7 +131,7 @@ impl VirtualButtonInput {
         source: HwAddress,
         lease: HardwareLease,
         config: ButtonConfig,
-        pressed_by_address: Rc<RefCell<BTreeMap<HwAddress, bool>>>,
+        pressed_by_address: Rc<RefCell<VecMap<HwAddress, bool>>>,
     ) -> Self {
         Self {
             registry,

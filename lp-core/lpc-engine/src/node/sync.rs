@@ -31,7 +31,7 @@ pub fn tree_deltas_since<N>(tree: &RuntimeNodeTree<N>, since: Revision) -> Vec<W
     collect_created_deltas(tree, tree.root(), since, &mut deltas);
 
     // Collect created ids for exclusion from other delta types
-    let created_ids: alloc::collections::BTreeSet<lpc_model::NodeId> = deltas
+    let created_ids: lp_collection::VecSet<lpc_model::NodeId> = deltas
         .iter()
         .filter_map(|d| {
             if let WireTreeDelta::Created { id, .. } = d {
@@ -398,6 +398,7 @@ mod tests {
     /// Full round-trip test: server tree → deltas → client mirror
     #[test]
     fn tree_round_trip_server_to_client() {
+        use lp_collection::VecSet;
         use lpc_view::{NodeTreeView, apply_tree_deltas};
 
         // Build server tree

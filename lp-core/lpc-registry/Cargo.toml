@@ -13,6 +13,7 @@ std = ["lpc-model/std", "lpfs/std"]
 diff = []
 
 [dependencies]
+lp-collection = { workspace = true, features = ["serde"] }
 lpc-model = { path = "../lpc-model", default-features = false }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 serde = { workspace = true, features = ["derive"] }

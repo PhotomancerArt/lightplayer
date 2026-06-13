@@ -1,10 +1,10 @@
 use alloc::{
-    collections::BTreeMap,
     string::{String, ToString},
     vec::Vec,
 };
 use core::convert::Infallible;
 use core::fmt;
+use lp_collection::VecMap;
 
 use base64::Engine;
 
@@ -278,7 +278,7 @@ where
 
     pub fn string_key_map<T>(
         self,
-        map: &BTreeMap<String, T>,
+        map: &VecMap<String, T>,
         mut write_value: impl FnMut(SlotValueWriter<'_, W>, &T) -> Result<(), SlotWriteError<W::Error>>,
     ) -> Result<(), SlotWriteError<W::Error>> {
         let mut object = self.object()?;
@@ -290,7 +290,7 @@ where
 
     pub fn u32_key_map<T>(
         self,
-        map: &BTreeMap<u32, T>,
+        map: &VecMap<u32, T>,
         mut write_value: impl FnMut(SlotValueWriter<'_, W>, &T) -> Result<(), SlotWriteError<W::Error>>,
     ) -> Result<(), SlotWriteError<W::Error>> {
         let mut object = self.object()?;

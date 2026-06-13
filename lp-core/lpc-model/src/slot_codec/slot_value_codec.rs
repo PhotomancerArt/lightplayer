@@ -1,8 +1,8 @@
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use crate::{
     ControlExtent, ControlProduct, LpType, LpValue, ModelEnumVariant, ModelStructMember, NodeId,
@@ -585,7 +585,7 @@ fn write_lp_struct<W>(
 where
     W: SlotWrite,
 {
-    let values: BTreeMap<&str, &LpValue> = values
+    let values: VecMap<&str, &LpValue> = values
         .iter()
         .map(|(name, value)| (name.as_str(), value))
         .collect();

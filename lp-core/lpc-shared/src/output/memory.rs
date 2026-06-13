@@ -2,13 +2,13 @@ use crate::output::provider::{
     OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
 };
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
+use lp_collection::VecMap;
 use lpc_hardware::OutputError;
 use lpc_hardware::{
     HardwareEndpointError, HardwareSystem, HwAddress, HwEndpointSpec, HwManifest, HwRegistry,
@@ -37,7 +37,7 @@ struct ChannelState {
 
 /// Internal state for memory provider (wrapped in RefCell for interior mutability)
 struct MemoryOutputProviderState {
-    channels: BTreeMap<OutputChannelHandle, ChannelState>,
+    channels: VecMap<OutputChannelHandle, ChannelState>,
     next_handle: i32,
 }
 
@@ -93,7 +93,7 @@ impl MemoryOutputProvider {
             hardware_system,
             endpoint_validation,
             state: RefCell::new(MemoryOutputProviderState {
-                channels: BTreeMap::new(),
+                channels: VecMap::new(),
                 next_handle: 0,
             }),
         }

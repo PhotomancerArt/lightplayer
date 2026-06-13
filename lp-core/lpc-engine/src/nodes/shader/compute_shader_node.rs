@@ -372,9 +372,9 @@ fn resolve_or_default_input(
 #[cfg(all(test, not(any(target_arch = "riscv32", target_arch = "wasm32"))))]
 mod tests {
     use super::*;
-    use alloc::collections::BTreeMap;
     use alloc::string::String;
     use alloc::sync::Arc;
+    use lp_collection::VecMap;
     use lpc_model::{
         ArtifactSpec, AssetSlot, BindingDefs, LpValue, MapSlot, NodeDef, NodeInvocation,
         SlotDataAccess, TreePath, ValueSlot, generate_compute_shader_header, lookup_slot_data,
@@ -489,13 +489,13 @@ void tick() {{
     }
 
     fn compute_def() -> ComputeShaderDef {
-        let mut consumed = BTreeMap::new();
+        let mut consumed = VecMap::new();
         consumed.insert(
             String::from("time"),
             lpc_model::ShaderSlotDef::value_f32("Time", "Seconds", 0.25, None),
         );
 
-        let mut produced = BTreeMap::new();
+        let mut produced = VecMap::new();
         produced.insert(
             String::from("phase"),
             lpc_model::ShaderSlotDef {

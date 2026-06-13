@@ -7,10 +7,10 @@ use crate::{
     WithRevision, current_revision,
 };
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 pub type SlotFactoryFn =
     fn(&SlotShapeRegistry, SlotShapeId) -> Result<Box<dyn SlotMutAccess>, SlotFactoryError>;
@@ -207,7 +207,7 @@ fn create_dynamic_slot_data_for_root(
         }
         SlotShape::Map { .. } => Ok(SlotData::Map(SlotMapDyn::with_revision(
             current_revision(),
-            BTreeMap::new(),
+            VecMap::new(),
         ))),
         SlotShape::Enum { variants, .. } => {
             let variant = variants

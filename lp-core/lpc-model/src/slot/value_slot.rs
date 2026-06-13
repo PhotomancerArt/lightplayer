@@ -2,11 +2,11 @@ use crate::{
     LpValue, Revision, SlotMapKeyShape, SlotShape, StaticSlotMeta, StaticSlotShapeDescriptor,
     WithRevision, current_revision,
 };
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 use core::fmt;
+use lp_collection::VecMap;
 use serde::{
     Deserialize, Deserializer, Serialize, Serializer,
     de::{MapAccess, Visitor},
@@ -167,15 +167,15 @@ pub trait MapSlotKeyLike: Clone + Ord {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct MapSlot<K, V> {
     pub keys_revision: Revision,
-    pub entries: BTreeMap<K, V>,
+    pub entries: VecMap<K, V>,
 }
 
 impl<K: Ord, V> MapSlot<K, V> {
-    pub fn new(entries: BTreeMap<K, V>) -> Self {
+    pub fn new(entries: VecMap<K, V>) -> Self {
         Self::with_version(current_revision(), entries)
     }
 
-    pub fn with_version(keys_revision: Revision, entries: BTreeMap<K, V>) -> Self {
+    pub fn with_version(keys_revision: Revision, entries: VecMap<K, V>) -> Self {
         Self {
             keys_revision,
             entries,
@@ -210,7 +210,7 @@ impl<K: Ord, V> MapSlot<K, V> {
 
 impl<K: Ord, V> Default for MapSlot<K, V> {
     fn default() -> Self {
-        Self::new(BTreeMap::new())
+        Self::new(VecMap::new())
     }
 }
 
@@ -237,15 +237,15 @@ where
     V: schemars::JsonSchema,
 {
     fn schema_name() -> alloc::borrow::Cow<'static, str> {
-        <BTreeMap<String, V> as schemars::JsonSchema>::schema_name()
+        <VecMap<String, V> as schemars::JsonSchema>::schema_name()
     }
 
     fn schema_id() -> alloc::borrow::Cow<'static, str> {
-        <BTreeMap<String, V> as schemars::JsonSchema>::schema_id()
+        <VecMap<String, V> as schemars::JsonSchema>::schema_id()
     }
 
     fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
-        <BTreeMap<String, V> as schemars::JsonSchema>::json_schema(generator)
+        <VecMap<String, V> as schemars::JsonSchema>::json_schema(generator)
     }
 }
 
@@ -277,7 +277,7 @@ where
             where
                 A: MapAccess<'de>,
             {
-                let mut entries = BTreeMap::new();
+                let mut entries = VecMap::new();
                 while let Some((key, value)) = access.next_entry::<String, V>()? {
                     let key = K::from_authored_key(&key).map_err(serde::de::Error::custom)?;
                     entries.insert(key, value);
@@ -595,7 +595,7 @@ mod tests {
             }
         }
 
-        let mut map = MapSlot::new(BTreeMap::<String, Entry>::new());
+        let mut map = MapSlot::new(VecMap::<String, Entry>::new());
         map.insert_with_version(
             Revision::new(3),
             String::from("a"),
@@ -621,7 +621,7 @@ mod tests {
 
     #[test]
     fn map_slot_serializes_as_authored_map_and_stamps_key_version() {
-        let mut entries = BTreeMap::new();
+        let mut entries = VecMap::new();
         entries.insert(
             String::from("speed"),
             ValueSlot::with_version(Revision::new(2), 7_u32),
@@ -641,7 +641,7 @@ mod tests {
 
     #[test]
     fn map_slot_round_trips_numeric_authored_keys() {
-        let mut entries = BTreeMap::new();
+        let mut entries = VecMap::new();
         entries.insert(7_u32, ValueSlot::new(String::from("seven")));
         let map = MapSlot::new(entries);
 

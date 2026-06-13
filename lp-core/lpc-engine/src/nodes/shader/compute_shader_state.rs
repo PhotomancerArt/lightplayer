@@ -1,9 +1,9 @@
 //! Dynamic runtime state root for one compute shader node.
 
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use lpc_model::{
     ComputeShaderDef, LpType, Revision, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind,
@@ -204,7 +204,7 @@ fn empty_data_for_slot(slot: &ShaderSlotDef, revision: Revision) -> SlotData {
         )),
         ShaderSlotKind::Map => SlotData::Map(lpc_model::SlotMapDyn::with_revision(
             revision,
-            BTreeMap::new(),
+            VecMap::new(),
         )),
     }
 }

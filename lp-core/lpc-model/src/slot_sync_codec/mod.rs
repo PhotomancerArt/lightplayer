@@ -21,11 +21,11 @@ mod tests {
         SlotMapKeyShape, SlotOptionDyn, SlotRecord, SlotShape, SlotShapeId, SlotShapeRegistry,
         WithRevision,
     };
-    use alloc::collections::BTreeMap;
     use alloc::string::String;
     use alloc::string::ToString;
     use alloc::vec;
     use alloc::vec::Vec;
+    use lp_collection::VecMap;
 
     #[test]
     fn sync_snapshot_preserves_revisions_and_map_keys() {
@@ -95,7 +95,7 @@ mod tests {
                 SlotData::Value(WithRevision::new(Revision::new(3), LpValue::Bool(true))),
                 SlotData::Map(SlotMapDyn::with_revision(
                     Revision::new(5),
-                    BTreeMap::from([(
+                    VecMap::from([(
                         SlotMapKey::String(String::from("gain")),
                         SlotData::Value(WithRevision::new(Revision::new(8), LpValue::U32(42))),
                     )]),

@@ -1,5 +1,5 @@
-use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use crate::{AssetLocation, NodeDefLocation, NodeUseLocation, ProjectNode};
 
@@ -17,20 +17,20 @@ pub struct ProjectTree {
     /// Location of the project root use.
     pub root: NodeUseLocation,
     /// All effective node uses keyed by use location.
-    pub nodes: BTreeMap<NodeUseLocation, ProjectNode>,
+    pub nodes: VecMap<NodeUseLocation, ProjectNode>,
     /// Reverse index from definition location to node uses using it.
-    pub def_instances: BTreeMap<NodeDefLocation, Vec<NodeUseLocation>>,
+    pub def_instances: VecMap<NodeDefLocation, Vec<NodeUseLocation>>,
     /// Reverse index from asset source to node uses whose definitions reference it.
-    pub asset_consumers: BTreeMap<AssetLocation, Vec<NodeUseLocation>>,
+    pub asset_consumers: VecMap<AssetLocation, Vec<NodeUseLocation>>,
 }
 
 impl ProjectTree {
     pub fn new(root: NodeUseLocation) -> Self {
         Self {
             root,
-            nodes: BTreeMap::new(),
-            def_instances: BTreeMap::new(),
-            asset_consumers: BTreeMap::new(),
+            nodes: VecMap::new(),
+            def_instances: VecMap::new(),
+            asset_consumers: VecMap::new(),
         }
     }
 

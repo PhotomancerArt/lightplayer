@@ -1,6 +1,6 @@
 //! Engine-managed storage for versioned runtime buffers.
 
-use alloc::collections::BTreeMap;
+use lp_collection::VecMap;
 
 use lpc_model::{NodeId, Revision, WithRevision};
 
@@ -25,8 +25,8 @@ impl RuntimeBufferError {
 /// the lifetime of this store.
 pub struct RuntimeBufferStore {
     next_id: u32,
-    buffers: BTreeMap<RuntimeBufferId, WithRevision<RuntimeBuffer>>,
-    owners: BTreeMap<RuntimeBufferId, NodeId>,
+    buffers: VecMap<RuntimeBufferId, WithRevision<RuntimeBuffer>>,
+    owners: VecMap<RuntimeBufferId, NodeId>,
 }
 
 impl RuntimeBufferStore {
@@ -34,8 +34,8 @@ impl RuntimeBufferStore {
     pub fn new() -> Self {
         Self {
             next_id: 0,
-            buffers: BTreeMap::new(),
-            owners: BTreeMap::new(),
+            buffers: VecMap::new(),
+            owners: VecMap::new(),
         }
     }
 

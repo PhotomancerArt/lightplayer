@@ -1,4 +1,4 @@
-use alloc::collections::BTreeMap;
+use lp_collection::VecMap;
 
 use crate::{ArtifactLocation, SlotPath};
 
@@ -15,7 +15,7 @@ use super::{ArtifactOverlay, AssetBodyOverlay, SlotEdit, SlotOverlay};
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ProjectOverlay {
     /// Pending edits keyed by target artifact.
-    pub artifacts: BTreeMap<ArtifactLocation, ArtifactOverlay>,
+    pub artifacts: VecMap<ArtifactLocation, ArtifactOverlay>,
 }
 
 impl ProjectOverlay {

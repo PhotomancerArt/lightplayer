@@ -1,9 +1,9 @@
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicU32, Ordering};
+use lp_collection::VecMap;
 
 use lpc_model::{
     ChannelName, Kind, MapSlot, NodeId, NodeName, Revision, SlotAccess, SlotMapKey, SlotPath,
@@ -32,19 +32,19 @@ use super::resolve_with_engine_host;
 pub(crate) struct EngineTestBuilder {
     engine: Engine,
     registry: ProjectRegistry,
-    labels: BTreeMap<String, NodeId>,
-    shader_ticks: BTreeMap<String, Arc<AtomicU32>>,
-    fixture_records: BTreeMap<String, RecordedValue>,
-    output_records: BTreeMap<String, RecordedValue>,
+    labels: VecMap<String, NodeId>,
+    shader_ticks: VecMap<String, Arc<AtomicU32>>,
+    fixture_records: VecMap<String, RecordedValue>,
+    output_records: VecMap<String, RecordedValue>,
 }
 
 pub(crate) struct EngineTestHarness {
     pub(crate) engine: Engine,
     pub(crate) registry: ProjectRegistry,
-    labels: BTreeMap<String, NodeId>,
-    shader_ticks: BTreeMap<String, Arc<AtomicU32>>,
-    fixture_records: BTreeMap<String, RecordedValue>,
-    output_records: BTreeMap<String, RecordedValue>,
+    labels: VecMap<String, NodeId>,
+    shader_ticks: VecMap<String, Arc<AtomicU32>>,
+    fixture_records: VecMap<String, RecordedValue>,
+    output_records: VecMap<String, RecordedValue>,
 }
 
 pub(crate) struct OutputSpec {
@@ -69,10 +69,10 @@ impl EngineTestBuilder {
         Self {
             engine: Engine::new(TreePath::parse("/show.test").expect("test root path")),
             registry: ProjectRegistry::new(),
-            labels: BTreeMap::new(),
-            shader_ticks: BTreeMap::new(),
-            fixture_records: BTreeMap::new(),
-            output_records: BTreeMap::new(),
+            labels: VecMap::new(),
+            shader_ticks: VecMap::new(),
+            fixture_records: VecMap::new(),
+            output_records: VecMap::new(),
         }
     }
 
@@ -292,7 +292,7 @@ impl OutputSpec {
 }
 
 impl TestBindingSource {
-    fn into_binding_source(self, labels: &BTreeMap<String, NodeId>) -> BindingSource {
+    fn into_binding_source(self, labels: &VecMap<String, NodeId>) -> BindingSource {
         match self {
             Self::Literal(value) => {
                 BindingSource::Literal(lpc_model::LpValue::F32(f32_value(value)))
@@ -305,7 +305,7 @@ impl TestBindingSource {
         }
     }
 
-    fn owner(&self, labels: &BTreeMap<String, NodeId>) -> NodeId {
+    fn owner(&self, labels: &VecMap<String, NodeId>) -> NodeId {
         match self {
             Self::ProducedSlot { label, .. } => *labels.get(label).expect("produced slot label"),
             Self::Literal(_) | Self::Bus(_) => NodeId::new(0),
@@ -393,7 +393,7 @@ pub(crate) struct DummyShaderState {
 
 impl DummyShaderNode {
     fn new(slot: SlotPath, value: LpsValueF32, tick_count: Arc<AtomicU32>) -> Self {
-        let mut outputs = BTreeMap::new();
+        let mut outputs = VecMap::new();
         outputs.insert(output_key(&slot), ValueSlot::new(f32_value(value)));
         Self {
             state: DummyShaderState {

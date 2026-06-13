@@ -1,0 +1,19 @@
+[package]
+name = "lp-collection"
+version = "1.0.0"
+authors.workspace = true
+edition.workspace = true
+license = "Apache-2.0 WITH LLVM-exception"
+rust-version.workspace = true
+description = "Embedded/low-memory friendly collections: chunked structures plus sorted-vec map/set"
+
+[features]
+default = []
+serde = ["dep:serde"]
+
+[dependencies]
+rustc-hash = { version = "2.0.0", default-features = false }
+serde = { version = "1", default-features = false, features = ["alloc"], optional = true }
+
+[dev-dependencies]
+serde_json = { version = "1", default-features = false, features = ["alloc"] }

@@ -36,16 +36,16 @@ impl QueryKey {
 #[cfg(test)]
 mod tests {
     use super::QueryKey;
-    use alloc::collections::BTreeMap;
     use alloc::string::String;
     use alloc::vec::Vec;
+    use lp_collection::VecMap;
     use lpc_model::ChannelName;
     use lpc_model::NodeId;
     use lpc_model::SlotPath;
 
     #[test]
     fn query_key_works_as_btree_map_key() {
-        let mut m = BTreeMap::new();
+        let mut m = VecMap::new();
         let k1 = QueryKey::Bus(ChannelName(String::from("a")));
         let k2 = QueryKey::Bus(ChannelName(String::from("b")));
         m.insert(k1.clone(), 1u32);

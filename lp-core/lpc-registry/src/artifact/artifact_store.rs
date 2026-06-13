@@ -1,7 +1,7 @@
 //! Project artifact catalog: locations, freshness, transient reads.
 
-use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use lpc_model::{ArtifactLocation, ArtifactSpec, Revision};
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath, LpPathBuf};
@@ -13,13 +13,13 @@ use super::{ArtifactEntry, ArtifactError, ArtifactReadFailure, ArtifactReadState
 /// An artifact remains registered until [`Self::unregister`]. Registration is
 /// idempotent: [`Self::register_file`] returns the same location for the same path.
 pub struct ArtifactStore {
-    by_location: BTreeMap<ArtifactLocation, ArtifactEntry>,
+    by_location: VecMap<ArtifactLocation, ArtifactEntry>,
 }
 
 impl ArtifactStore {
     pub fn new() -> Self {
         Self {
-            by_location: BTreeMap::new(),
+            by_location: VecMap::new(),
         }
     }
 

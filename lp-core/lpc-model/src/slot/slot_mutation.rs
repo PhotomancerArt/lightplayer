@@ -924,8 +924,8 @@ mod tests {
         SlotShapeId, SlotShapeRegistry, SlottedEnum, SlottedEnumMut, StaticSlotShape, ValueSlot,
     };
     use alloc::boxed::Box;
-    use alloc::collections::BTreeMap;
     use alloc::vec;
+    use lp_collection::VecMap;
 
     #[derive(crate::Slotted)]
     struct MutRoot {
@@ -1408,7 +1408,7 @@ mod tests {
     fn test_root() -> MutRoot {
         MutRoot {
             gain: ValueSlot::new(1.0),
-            params: MapSlot::new(BTreeMap::from([(
+            params: MapSlot::new(VecMap::from([(
                 String::from("exposure"),
                 ValueSlot::new(1.0),
             )])),

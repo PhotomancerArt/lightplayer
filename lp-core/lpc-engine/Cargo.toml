@@ -19,6 +19,7 @@ std = [
 ]
 
 [dependencies]
+lp-collection = { workspace = true, features = ["serde"] }
 unwinding = { version = "0.2", optional = true, default-features = false, features = ["panic"] }
 serde = { workspace = true, features = ["derive"] }
 hashbrown = { workspace = true }

@@ -488,7 +488,7 @@ where
 mod tests {
     use super::*;
     use crate::{MapSlot, ValueSlot};
-    use alloc::collections::BTreeMap;
+    use lp_collection::VecMap;
 
     #[test]
     fn slot_mut_value_sets_lp_value() {
@@ -514,7 +514,7 @@ mod tests {
 
     #[test]
     fn slot_mut_map_accesses_existing_key() {
-        let mut map = MapSlot::new(BTreeMap::from([(
+        let mut map = MapSlot::new(VecMap::from([(
             String::from("speed"),
             ValueSlot::with_version(Revision::new(1), 3.0_f32),
         )]));

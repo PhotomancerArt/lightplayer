@@ -1,5 +1,5 @@
-use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use crate::{NodeDef, SlotPath, SlotPathSegment};
 
@@ -13,7 +13,7 @@ use super::{SlotEdit, SlotEditOp};
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SlotOverlay {
     /// Pending slot operations keyed by target slot path.
-    pub edits: BTreeMap<SlotPath, SlotEditOp>,
+    pub edits: VecMap<SlotPath, SlotEditOp>,
 }
 
 impl SlotOverlay {

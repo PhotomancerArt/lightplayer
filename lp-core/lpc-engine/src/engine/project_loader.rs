@@ -1,10 +1,10 @@
 //! Load authored `project.toml` node-artifact trees into [`super::Engine`].
 
 use alloc::boxed::Box;
-use alloc::collections::BTreeSet;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use lp_collection::VecSet;
 
 use lpc_model::LpType;
 use lpc_model::{ArtifactSpec, NodeInvocation, NodeKind};
@@ -340,7 +340,7 @@ impl ProjectLoader {
         registry: &mut ProjectRegistry,
         runtime: &mut Engine,
         projected_nodes: &[ProjectedNode],
-        targets: &BTreeSet<lpc_model::NodeUseLocation>,
+        targets: &VecSet<lpc_model::NodeUseLocation>,
         frame: Revision,
     ) -> Result<(), ProjectLoadError> {
         Self::attach_projected_nodes_filtered(
@@ -358,7 +358,7 @@ impl ProjectLoader {
         registry: &mut ProjectRegistry,
         runtime: &mut Engine,
         projected_nodes: &[ProjectedNode],
-        targets: Option<&BTreeSet<lpc_model::NodeUseLocation>>,
+        targets: Option<&VecSet<lpc_model::NodeUseLocation>>,
         frame: Revision,
     ) -> Result<(), ProjectLoadError> {
         for node in projected_nodes {
@@ -871,7 +871,7 @@ impl ProjectLoader {
 
 fn should_attach_projected_node(
     node: &ProjectedNode,
-    targets: Option<&BTreeSet<lpc_model::NodeUseLocation>>,
+    targets: Option<&VecSet<lpc_model::NodeUseLocation>>,
 ) -> bool {
     targets.is_none_or(|targets| targets.contains(&node.use_location))
 }

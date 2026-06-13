@@ -1,7 +1,7 @@
 //! Derived indexes over bindings stored on node entries.
 
-use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use lpc_model::{ChannelName, Kind, NodeId, SlotPath};
 
@@ -13,9 +13,9 @@ use super::RuntimeNodeEntry;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct NodeBindingIndex {
-    consumed_targets: BTreeMap<(NodeId, SlotPath), Vec<BindingRef>>,
-    bus_targets: BTreeMap<ChannelName, Vec<BindingRef>>,
-    channel_kinds: BTreeMap<ChannelName, Kind>,
+    consumed_targets: VecMap<(NodeId, SlotPath), Vec<BindingRef>>,
+    bus_targets: VecMap<ChannelName, Vec<BindingRef>>,
+    channel_kinds: VecMap<ChannelName, Kind>,
 }
 
 impl NodeBindingIndex {

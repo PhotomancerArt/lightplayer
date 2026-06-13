@@ -1,8 +1,8 @@
 //! Snapshot-to-overlay helper for test/bootstrap workflows.
 
-use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use lpc_model::{ArtifactLocation, AssetBodyOverlay, ProjectOverlay};
 use lpfs::{LpFs, LpPath, LpPathBuf};
@@ -10,7 +10,7 @@ use lpfs::{LpFs, LpPath, LpPathBuf};
 /// Raw project files keyed by absolute project path.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ProjectSnapshot {
-    files: BTreeMap<String, Vec<u8>>,
+    files: VecMap<String, Vec<u8>>,
 }
 
 impl ProjectSnapshot {
@@ -22,7 +22,7 @@ impl ProjectSnapshot {
         let paths = fs
             .list_dir(LpPath::new("/"), true)
             .map_err(snapshot_fs_error)?;
-        let mut files = BTreeMap::new();
+        let mut files = VecMap::new();
         for path in paths {
             if fs.is_dir(path.as_path()).map_err(snapshot_fs_error)? {
                 continue;

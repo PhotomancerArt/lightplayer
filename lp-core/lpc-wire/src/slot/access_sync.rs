@@ -1,7 +1,7 @@
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::string::ToString;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 use lpc_model::{
     Revision, SlotAccess, SlotData, SlotDataAccess, SlotMapDyn, SlotName, SlotOptionDyn, SlotPath,
     SlotShape, SlotShapeId, SlotShapeLookup, SlotShapeRegistry, SlotShapeView, WithRevision,
@@ -104,7 +104,7 @@ pub fn snapshot_slot_shape(
         }
         SlotDataAccess::Map(map) => {
             let value = shape.map_value().expect("slot shape/data mismatch");
-            let mut entries = BTreeMap::new();
+            let mut entries = VecMap::new();
             for key in map.keys() {
                 entries.insert(
                     key.clone(),

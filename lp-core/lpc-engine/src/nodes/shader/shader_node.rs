@@ -657,11 +657,11 @@ pub(super) fn map_model_q32_options(opts: &GlslOpts) -> lps_q32::q32_options::Q3
 
 #[cfg(test)]
 mod tests {
-    use alloc::collections::BTreeMap;
     use alloc::string::String;
     use alloc::sync::Arc;
     use alloc::vec;
     use core::sync::atomic::{AtomicU32, Ordering};
+    use lp_collection::VecMap;
 
     use super::*;
     use crate::dataflow::resolver::QueryKey;
@@ -685,7 +685,7 @@ mod tests {
     const DEMO_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float time; vec4 render(vec2 pos) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }";
 
     fn shader_def_with_time() -> ShaderDef {
-        let mut consumed_slots = BTreeMap::new();
+        let mut consumed_slots = VecMap::new();
         consumed_slots.insert(
             String::from("time"),
             ShaderSlotDef::value_f32("Time", "Seconds", 0.5, None),

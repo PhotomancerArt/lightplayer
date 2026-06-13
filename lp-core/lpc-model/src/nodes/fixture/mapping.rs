@@ -1,5 +1,5 @@
-use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -68,7 +68,7 @@ impl MappingConfig {
     }
 
     pub fn path_points_vec(paths: Vec<PathSpec>, sample_diameter: f32) -> Self {
-        let mut entries = BTreeMap::new();
+        let mut entries = VecMap::new();
         for (index, path) in paths.into_iter().enumerate() {
             entries.insert(index as u32, EnumSlot::new(path));
         }
@@ -113,7 +113,7 @@ impl PathSpec {
         offset_angle: f32,
         order: RingOrder,
     ) -> Self {
-        let mut counts = BTreeMap::new();
+        let mut counts = VecMap::new();
         for (index, count) in ring_lamp_counts.iter().copied().enumerate() {
             counts.insert(index as u32, ValueSlot::new(count));
         }
@@ -129,7 +129,7 @@ impl PathSpec {
     }
 
     pub fn point_list(first_channel: u32, points: impl IntoIterator<Item = [f32; 2]>) -> Self {
-        let mut entries = BTreeMap::new();
+        let mut entries = VecMap::new();
         for (index, point) in points.into_iter().enumerate() {
             entries.insert(index as u32, XySlot::new(Xy(point)));
         }
