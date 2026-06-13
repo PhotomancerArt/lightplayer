@@ -11,10 +11,10 @@ use lpc_model::nodes::output::OutputDef;
 use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
-    Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingRef, BusSlotRef, Dim2u,
-    Dim2uSlot, EnumSlot, FixtureDiagnosticMode, FixtureSamplingConfig, HardwareEndpointSpec,
-    MapSlot, NodeDef, OptionSlot, RenderOrder, RenderOrderSlot, ShaderSource, SlotPath,
-    SlotShapeRegistry, ValueSlot,
+    Affine2d, Affine2dSlot, AsLpPath, AssetSlot, BindingDef, BindingDefs, BindingRef, BusSlotRef,
+    Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode, FixtureSamplingConfig, HardwareEndpointSpec,
+    MapSlot, NodeDef, OptionSlot, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry,
+    ValueSlot,
 };
 use lpfs::LpFs;
 
@@ -82,7 +82,7 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
 
     // Create shader node
     let shader_config = ShaderDef {
-        source: EnumSlot::new(ShaderSource::path("shader.glsl")),
+        source: AssetSlot::path("shader.glsl"),
         render_order: RenderOrderSlot::new(RenderOrder(0)),
         bindings: bus_output_binding_defs("visual.out"),
         glsl_opts: lpc_model::GlslOpts::default(),
