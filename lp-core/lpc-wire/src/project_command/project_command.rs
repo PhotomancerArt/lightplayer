@@ -8,7 +8,7 @@ use crate::{
 
 /// Project command request.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case", tag = "command")]
+#[serde(rename_all = "snake_case")]
 pub enum WireProjectCommand {
     ReadOverlay {
         request: WireOverlayReadRequest,
@@ -26,7 +26,7 @@ pub enum WireProjectCommand {
 
 /// Project command response.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case", tag = "command")]
+#[serde(rename_all = "snake_case")]
 pub enum WireProjectCommandResponse {
     ReadOverlay {
         response: WireOverlayReadResponse,

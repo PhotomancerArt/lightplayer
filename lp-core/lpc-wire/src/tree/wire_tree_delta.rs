@@ -8,7 +8,7 @@ use lpc_model::project::Revision;
 /// Structural delta for the node tree (wire shape).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(tag = "delta", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum WireTreeDelta {
     /// First time the client sees this entry.
     Created {

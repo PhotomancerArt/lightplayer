@@ -10,7 +10,7 @@ use crate::{ArtifactLocation, NodeDefLocation, SlotPath};
 #[derive(
     Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, serde::Serialize, serde::Deserialize,
 )]
-#[serde(rename_all = "snake_case", tag = "kind")]
+#[serde(rename_all = "snake_case")]
 pub enum AssetLocation {
     /// Asset body lives in a project artifact.
     Artifact {

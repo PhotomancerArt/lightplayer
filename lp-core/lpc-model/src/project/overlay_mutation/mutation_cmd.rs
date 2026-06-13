@@ -92,7 +92,7 @@ impl MutationCmdResult {
 
 /// Accepted or rejected overlay mutation status.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case", tag = "status")]
+#[serde(rename_all = "snake_case")]
 pub enum MutationCmdStatus {
     /// Mutation was accepted and applied to the overlay.
     Accepted { effect: MutationEffect },
@@ -102,7 +102,7 @@ pub enum MutationCmdStatus {
 
 /// Observable effect of an accepted overlay mutation.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case", tag = "effect")]
+#[serde(rename_all = "snake_case")]
 pub enum MutationEffect {
     /// Whether the accepted mutation changed canonical overlay state.
     OverlayChanged { changed: bool },

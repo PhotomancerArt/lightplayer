@@ -12,7 +12,7 @@ use super::{SlotMeta, stable_hash::fnv1a_32};
 /// shapes provide named or keyed structure around those leaves.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case", tag = "kind")]
+#[serde(rename_all = "snake_case")]
 pub enum SlotShape {
     Ref {
         id: SlotShapeId,
@@ -127,7 +127,7 @@ impl core::error::Error for SlotShapeIdError {}
 /// runtime data model is always one active variant plus that variant's payload.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case", tag = "kind")]
+#[serde(rename_all = "snake_case")]
 pub enum SlotEnumEncoding {
     /// Store the active variant in a discriminator field, such as
     /// `kind = "Variant"`, with the payload flattened beside it.
@@ -361,7 +361,7 @@ mod tests {
 
     #[test]
     fn enum_encoding_defaults_to_tagged_kind() {
-        let json = r#"{"kind":"enum","variants":[]}"#;
+        let json = r#"{"enum":{"variants":[]}}"#;
 
         let shape: SlotShape = serde_json::from_str(json).unwrap();
 

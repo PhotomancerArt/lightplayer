@@ -6,7 +6,7 @@ use super::{AssetBodyOverlay, SlotEdit, SlotOverlay};
 /// through slot edits or edited as a whole asset body. Switching between those
 /// modes replaces the previous pending intent for that artifact.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
+#[serde(rename_all = "snake_case")]
 pub enum ArtifactOverlay {
     /// Structured edits to an authored node-definition artifact.
     Slot { overlay: SlotOverlay },

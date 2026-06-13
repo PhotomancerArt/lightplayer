@@ -6,7 +6,7 @@ use crate::{ArtifactLocation, AssetBodyOverlay, SlotEdit, SlotPath};
 /// result status. It is intentionally close to [`crate::ProjectOverlay`]'s CRUD
 /// operations.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case", tag = "op")]
+#[serde(rename_all = "snake_case")]
 pub enum MutationOp {
     /// Add or replace one pending slot edit for an artifact.
     PutSlotEdit {

@@ -20,7 +20,7 @@ pub enum AssetBodyOrigin {
 
 /// Effective state for a referenced project asset.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case", tag = "state")]
+#[serde(rename_all = "snake_case")]
 pub enum AssetState {
     /// The asset body can be materialized from the indicated source.
     Available { origin: AssetBodyOrigin },

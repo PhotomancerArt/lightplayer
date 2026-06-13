@@ -5,7 +5,7 @@ use alloc::string::String;
 /// Client-side view of a node's lifecycle state.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(tag = "state", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum WireEntryState {
     Pending,
     Alive,

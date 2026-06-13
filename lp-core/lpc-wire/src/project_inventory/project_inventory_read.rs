@@ -75,7 +75,7 @@ impl WireNodeDefInventoryEntry {
 
 /// Serializable summary of definition state.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case", tag = "state")]
+#[serde(rename_all = "snake_case")]
 pub enum WireNodeDefInventoryState {
     Loaded { kind: NodeKind },
     NotFound,
@@ -129,7 +129,7 @@ impl WireProjectNodeInventoryEntry {
 
 /// Serializable summary of project node origin.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case", tag = "origin")]
+#[serde(rename_all = "snake_case")]
 pub enum WireProjectNodeOrigin {
     Root,
     Invocation {

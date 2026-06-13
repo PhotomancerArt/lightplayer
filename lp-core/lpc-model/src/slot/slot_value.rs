@@ -57,7 +57,7 @@ impl SlotValueShape {
 /// Editor hint for a slot value leaf.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case", tag = "kind")]
+#[serde(rename_all = "snake_case")]
 pub enum ValueEditorHint {
     #[default]
     Plain,
