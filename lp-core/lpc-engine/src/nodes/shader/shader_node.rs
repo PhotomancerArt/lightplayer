@@ -536,6 +536,13 @@ impl RenderNode for ShaderNode {
         }
 
         if !self.ensure_compiled(ctx)? {
+            log::warn!(
+                "[shader-node] rendering black fallback texture (node={:?}): {}",
+                self.node_id,
+                self.compilation_error
+                    .as_deref()
+                    .unwrap_or("shader not compiled")
+            );
             target.data_mut().fill(0);
             return Ok(());
         }
@@ -569,6 +576,13 @@ impl RenderNode for ShaderNode {
         }
 
         if !self.ensure_compiled(ctx)? {
+            log::warn!(
+                "[shader-node] sampling black fallback (node={:?}): {}",
+                self.node_id,
+                self.compilation_error
+                    .as_deref()
+                    .unwrap_or("shader not compiled")
+            );
             target.samples.data_mut().fill(0);
             return Ok(());
         }

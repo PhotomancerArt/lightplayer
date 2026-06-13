@@ -2734,12 +2734,13 @@ value = "f32"
         );
     }
 
-    // Quarantined: renders black under heavy parallel CPU load (reproduces under
-    // `just ci` where filetests run concurrently; passes 20/20 standalone). Not
-    // the ambient-revision race (per-thread isolation didn't fix it) and no
-    // wall-clock in the path — points to a data race in the shared render/JIT
-    // backend exposed by thread preemption. Pre-existing; tracked separately.
-    #[ignore = "flaky under heavy parallel load; render/JIT data race, tracked separately"]
+    // Previously quarantined as a "render/JIT data race" because it rendered black
+    // under heavy parallel load (`just ci`). Root cause: "black" is a *swallowed
+    // shader-compile failure* — `ShaderNode::ensure_compiled` fills the target with
+    // zeros and returns Ok when compilation fails (shader_node.rs), and a compile
+    // panic is caught and funneled to the same fallback. The brightness assertion
+    // below now surfaces any such compile/runtime error instead of an opaque black
+    // frame, so a future flake reports the real cranelift/frontend message.
     #[test]
     fn events_example_merges_bus_maps_into_visual_shader() {
         let fs = examples_events_fs();
@@ -2770,11 +2771,11 @@ value = "f32"
             panic!("shader output should be a visual product");
         };
         let first = render_test_texture_bytes(&mut rt, *product);
-        assert_bright_event_pixels(&first);
+        assert_bright_event_pixels(&mut rt, &first);
 
         rt.tick(500).expect("advance trigger graph");
         let second = render_test_texture_bytes(&mut rt, *product);
-        assert_bright_event_pixels(&second);
+        assert_bright_event_pixels(&mut rt, &second);
         assert_ne!(
             first, second,
             "event example should blink as scheduled events fire and clear"
@@ -3138,7 +3139,7 @@ target = "bus#trigger"
         );
     }
 
-    fn assert_bright_event_pixels(bytes: &[u8]) {
+    fn assert_bright_event_pixels(rt: &mut LoadedProjectRuntime, bytes: &[u8]) {
         let max_rgb = bytes
             .chunks_exact(8)
             .flat_map(|px| {
@@ -3151,10 +3152,34 @@ target = "bus#trigger"
             .max()
             .unwrap_or(0);
 
-        assert!(
-            max_rgb > 10_000,
-            "trigger event circles should render bright RGB pixels"
-        );
+        if max_rgb <= 10_000 {
+            // A black/dim frame here means a shader compile failed and was swallowed
+            // into a zero-filled fallback render. Surface the real error(s) so the
+            // failure is diagnosable instead of an opaque "not bright" assertion.
+            let errors = collect_node_compile_errors(rt);
+            panic!(
+                "trigger event circles should render bright RGB pixels, but max_rgb={max_rgb} \
+                 (a shader likely failed to compile and rendered a black fallback). \
+                 Node compile/runtime errors: {errors:?}"
+            );
+        }
+    }
+
+    /// Collect compile/runtime errors the engine otherwise hides behind a black
+    /// fallback render. Compute shaders (`event_a`/`event_b`) compile during tick,
+    /// but the visual shader compiles lazily at render time, so refresh node
+    /// statuses with a zero-delta tick before reading them.
+    fn collect_node_compile_errors(rt: &mut LoadedProjectRuntime) -> Vec<String> {
+        let _ = rt.tick(0);
+        rt.tree()
+            .entries()
+            .filter_map(|entry| match entry.status.value() {
+                NodeRuntimeStatus::Error(message) => {
+                    Some(format!("{:?}: {message}", entry.path))
+                }
+                _ => None,
+            })
+            .collect()
     }
 
     fn resolve_button_map(
