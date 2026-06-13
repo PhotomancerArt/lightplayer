@@ -1,9 +1,11 @@
 //! Engine spine [`NodeRuntime`] trait: produce, consume, destroy, memory pressure, and runtime state.
 
 use crate::resource::RuntimeBufferId;
-use lpc_model::{SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError};
+use lpc_model::{AssetLocation, SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError};
 
-use super::contexts::{DestroyCtx, MemPressureCtx, NodeResourceInitContext, TickContext};
+use super::contexts::{
+    AssetRefreshContext, DestroyCtx, MemPressureCtx, NodeResourceInitContext, TickContext,
+};
 use super::node_error::NodeError;
 use super::{ControlNode, RenderNode};
 use crate::engine::memory_pressure::PressureLevel;
@@ -13,6 +15,17 @@ use crate::engine::memory_pressure::PressureLevel;
 pub enum ProduceResult {
     Produced,
     Unsupported,
+}
+
+/// Result of asking a runtime node to refresh an asset it may consume.
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum AssetRefreshResult {
+    /// The node does not consume this asset.
+    Unused,
+    /// The node consumes the asset, but the effective asset body did not change.
+    Unchanged,
+    /// The node refreshed internal state from the new effective asset body.
+    Refreshed,
 }
 
 /// Runtime node instance for the demand-driven engine spine.
@@ -43,6 +56,18 @@ pub trait NodeRuntime {
     /// produce values can keep the no-op default.
     fn consume(&mut self, _ctx: &mut TickContext<'_>) -> Result<(), NodeError> {
         Ok(())
+    }
+
+    /// Refresh a referenced asset after the project registry reports an effective asset change.
+    ///
+    /// Nodes that compile or cache asset bodies should compare the incoming asset's revision to
+    /// the revision they last consumed and invalidate only their own cached runtime state.
+    fn refresh_asset(
+        &mut self,
+        _location: &AssetLocation,
+        _ctx: &mut AssetRefreshContext<'_>,
+    ) -> Result<AssetRefreshResult, NodeError> {
+        Ok(AssetRefreshResult::Unused)
     }
 
     fn destroy(&mut self, ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError>;
@@ -94,7 +119,7 @@ mod tests {
         ResolveHost, ResolveSession, ResolveTrace, Resolver, SessionHostResolver, TickResolver,
         resolve_trace::ResolveLogLevel,
     };
-    use lpc_model::{NodeId, Revision, SlotShapeRegistry};
+    use lpc_model::{AssetLocation, NodeId, Revision, SlotShapeRegistry};
 
     struct EmptyResolveHost;
 
@@ -169,6 +194,24 @@ mod tests {
                 .produce(&SlotPath::root(), &mut tick)
                 .expect("produce"),
             ProduceResult::Unsupported
+        );
+    }
+
+    #[test]
+    fn default_asset_refresh_is_unused() {
+        let mut node = DummyNode::new();
+        let fs = lpfs::LpFsMemory::new();
+        let mut registry = lpc_registry::ProjectRegistry::new();
+        let slot_shapes = SlotShapeRegistry::default();
+        let mut ctx = AssetRefreshContext::new(&fs, &mut registry, &slot_shapes, Revision::new(1));
+
+        assert_eq!(
+            node.refresh_asset(
+                &AssetLocation::artifact(lpc_model::ArtifactLocation::file("/shader.glsl")),
+                &mut ctx,
+            )
+            .expect("refresh"),
+            AssetRefreshResult::Unused
         );
     }
 }

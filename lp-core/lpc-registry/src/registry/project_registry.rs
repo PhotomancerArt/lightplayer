@@ -295,6 +295,16 @@ impl ProjectRegistry {
         )
     }
 
+    pub fn read_asset_bytes_if_changed(
+        &mut self,
+        fs: &dyn LpFs,
+        location: &lpc_model::AssetLocation,
+        since: Revision,
+    ) -> Result<Option<AssetBytes>, AssetReadError> {
+        let asset = self.materialize_asset(fs, location)?;
+        Ok(asset.changed_since(since).then_some(asset))
+    }
+
     pub fn materialize_asset_text(
         &mut self,
         fs: &dyn LpFs,
@@ -307,6 +317,16 @@ impl ProjectRegistry {
             fs,
             source,
         )
+    }
+
+    pub fn read_asset_text_if_changed(
+        &mut self,
+        fs: &dyn LpFs,
+        location: &lpc_model::AssetLocation,
+        since: Revision,
+    ) -> Result<Option<AssetText>, AssetReadError> {
+        let asset = self.materialize_asset_text(fs, location)?;
+        Ok(asset.changed_since(since).then_some(asset))
     }
 
     pub(crate) fn derive_inventory(

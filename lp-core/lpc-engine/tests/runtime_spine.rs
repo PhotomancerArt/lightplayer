@@ -17,8 +17,8 @@ use lpc_engine::node::{
 };
 use lpc_engine::{EngineServices, ProjectLoader};
 use lpc_model::{
-    ArtifactLocation, Kind, LpValue, NodeDefChange, NodeDefChangeKind, NodeId, NodeUseLocation,
-    Revision, SlotPath, TreePath, bus::ChannelName,
+    ArtifactLocation, AssetChange, AssetChangeKind, AssetLocation, Kind, LpValue, NodeDefChange,
+    NodeDefChangeKind, NodeId, NodeUseLocation, Revision, SlotPath, TreePath, bus::ChannelName,
 };
 use lpc_registry::ParseCtx;
 use lpfs::{FsEvent, FsEventKind, LpFsMemory, LpPath, LpPathBuf};
@@ -222,6 +222,59 @@ source = { path = "shader.glsl" }
     );
 }
 
+#[test]
+fn project_apply_asset_body_change_refreshes_existing_shader_node() {
+    let mut fs = shader_project_fs();
+    let services = EngineServices::new(TreePath::parse("/shader_asset_change.show").unwrap());
+    let loaded = ProjectLoader::load_from_root(&fs, services).expect("load");
+    let (mut engine, mut registry) = loaded.into_parts();
+    let shader_use = NodeUseLocation::root().child(SlotPath::parse("nodes[shader]").unwrap());
+    let shader_before = engine
+        .project_runtime_index()
+        .node_id(&shader_use)
+        .expect("shader runtime node");
+    let shader_asset = AssetLocation::artifact(ArtifactLocation::file("/shader.glsl"));
+
+    fs.write_file_mut(
+        LpPath::new("/shader.glsl"),
+        b"vec4 render(vec2 pos) { return vec4(pos.x, 0.0, 0.0, 1.0); }",
+    )
+    .expect("write shader source");
+    let shapes = engine.slot_shapes().clone();
+    let changes = registry.refresh_artifacts(
+        &fs,
+        &[FsEvent {
+            path: LpPathBuf::from("/shader.glsl"),
+            kind: FsEventKind::Modify,
+        }],
+        Revision::new(2),
+        &ParseCtx { shapes: &shapes },
+    );
+
+    assert_eq!(
+        changes.assets.changed,
+        vec![AssetChange::new(
+            shader_asset.clone(),
+            AssetChangeKind::Body
+        )]
+    );
+    assert!(changes.defs.is_empty());
+    assert!(changes.uses.is_empty());
+    let apply = engine
+        .apply_project_changes(&fs, &mut registry, &changes)
+        .expect("apply changes");
+
+    assert_eq!(apply.refreshed_assets, vec![shader_asset]);
+    assert_eq!(apply.refreshed_nodes, vec![shader_use.clone()]);
+    assert!(apply.added_nodes.is_empty());
+    assert!(apply.removed_nodes.is_empty());
+    assert!(apply.reattached_nodes.is_empty());
+    assert_eq!(
+        engine.project_runtime_index().node_id(&shader_use),
+        Some(shader_before)
+    );
+}
+
 // --- Helpers ---
 
 fn clock_project_fs() -> LpFsMemory {
@@ -246,6 +299,34 @@ rate = 1.0
 "#,
     )
     .expect("write clock");
+    fs
+}
+
+fn shader_project_fs() -> LpFsMemory {
+    let mut fs = LpFsMemory::new();
+    fs.write_file_mut(
+        LpPath::new("/project.toml"),
+        br#"
+kind = "Project"
+
+[nodes.shader]
+ref = "./shader.toml"
+"#,
+    )
+    .expect("write project");
+    fs.write_file_mut(
+        LpPath::new("/shader.toml"),
+        br#"
+kind = "Shader"
+source = "shader.glsl"
+"#,
+    )
+    .expect("write shader def");
+    fs.write_file_mut(
+        LpPath::new("/shader.glsl"),
+        b"vec4 render(vec2 pos) { return vec4(0.0, pos.y, 0.0, 1.0); }",
+    )
+    .expect("write shader source");
     fs
 }
 

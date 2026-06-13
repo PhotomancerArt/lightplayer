@@ -182,7 +182,7 @@ mod tests {
         );
 
         let def = ComputeShaderDef {
-            source: lpc_model::EnumSlot::new(lpc_model::ShaderSource::path("emitters.glsl")),
+            source: lpc_model::AssetSlot::path("emitters.glsl"),
             bindings: BindingDefs::default(),
             glsl_opts: lpc_model::GlslOpts::default(),
             consumed_slots: MapSlot::new(consumed),
@@ -261,7 +261,7 @@ void tick() {{
         );
 
         let def = ComputeShaderDef {
-            source: lpc_model::EnumSlot::new(lpc_model::ShaderSource::path("events.glsl")),
+            source: lpc_model::AssetSlot::path("events.glsl"),
             bindings: BindingDefs::default(),
             glsl_opts: lpc_model::GlslOpts::default(),
             consumed_slots: MapSlot::new(consumed),

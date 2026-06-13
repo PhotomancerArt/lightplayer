@@ -15,6 +15,12 @@ pub struct AssetBytes {
     pub diagnostic_name: String,
 }
 
+impl AssetBytes {
+    pub fn changed_since(&self, revision: Revision) -> bool {
+        self.revision > revision
+    }
+}
+
 /// Effective UTF-8 asset text.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AssetText {
@@ -23,4 +29,10 @@ pub struct AssetText {
     pub revision: Revision,
     pub text: String,
     pub diagnostic_name: String,
+}
+
+impl AssetText {
+    pub fn changed_since(&self, revision: Revision) -> bool {
+        self.revision > revision
+    }
 }

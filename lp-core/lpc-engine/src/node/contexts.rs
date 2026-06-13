@@ -21,10 +21,12 @@ use crate::products::visual::{
 };
 use crate::resource::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
 use lpc_model::{
-    FromLpValue, NodeId, Revision, SlotAccess, SlotAccessor, SlotPath, SlotShapeRegistry,
-    WithRevision, bus::ChannelName, lookup_slot_data_and_shape,
+    AssetLocation, FromLpValue, NodeId, Revision, SlotAccess, SlotAccessor, SlotPath,
+    SlotShapeRegistry, WithRevision, bus::ChannelName, lookup_slot_data_and_shape,
 };
+use lpc_registry::{AssetBytes, AssetReadError, AssetText, ProjectRegistry};
 use lpc_shared::time::TimeProvider;
+use lpfs::LpFs;
 use lps_shared::LpsValueF32;
 
 use super::node_error::NodeError;
@@ -50,6 +52,64 @@ impl<'a> NodeResourceInitContext<'a> {
         buffer: WithRevision<RuntimeBuffer>,
     ) -> RuntimeBufferId {
         self.runtime_buffers.insert_owned(self.node_id, buffer)
+    }
+}
+
+/// Context for [`super::NodeRuntime::refresh_asset`].
+pub struct AssetRefreshContext<'a> {
+    fs: &'a dyn LpFs,
+    registry: &'a mut ProjectRegistry,
+    slot_shapes: &'a SlotShapeRegistry,
+    revision: Revision,
+}
+
+impl<'a> AssetRefreshContext<'a> {
+    pub fn new(
+        fs: &'a dyn LpFs,
+        registry: &'a mut ProjectRegistry,
+        slot_shapes: &'a SlotShapeRegistry,
+        revision: Revision,
+    ) -> Self {
+        Self {
+            fs,
+            registry,
+            slot_shapes,
+            revision,
+        }
+    }
+
+    pub fn fs(&self) -> &dyn LpFs {
+        self.fs
+    }
+
+    pub fn registry(&mut self) -> &mut ProjectRegistry {
+        self.registry
+    }
+
+    pub fn slot_shapes(&self) -> &SlotShapeRegistry {
+        self.slot_shapes
+    }
+
+    pub fn revision(&self) -> Revision {
+        self.revision
+    }
+
+    pub fn read_asset_bytes_if_changed(
+        &mut self,
+        location: &AssetLocation,
+        since: Revision,
+    ) -> Result<Option<AssetBytes>, AssetReadError> {
+        self.registry
+            .read_asset_bytes_if_changed(self.fs, location, since)
+    }
+
+    pub fn read_asset_text_if_changed(
+        &mut self,
+        location: &AssetLocation,
+        since: Revision,
+    ) -> Result<Option<AssetText>, AssetReadError> {
+        self.registry
+            .read_asset_text_if_changed(self.fs, location, since)
     }
 }
 

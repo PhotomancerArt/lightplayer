@@ -18,8 +18,8 @@ pub use fixture::{
 };
 pub use fluid::{FluidDef, FluidDefView, FluidEmitter, FluidState};
 pub use node_def::{
-    ArtifactPathResolutionError, InlineAssetText, InvocationSite, NodeArtifact, NodeDef,
-    NodeDefParseError, NodeDefWriteError, resolve_artifact_specifier,
+    ArtifactPathResolutionError, InlineAssetBytes, InlineAssetText, InvocationSite, NodeArtifact,
+    NodeDef, NodeDefParseError, NodeDefWriteError, resolve_artifact_specifier,
 };
 pub use output::{
     OutputDef, OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView,
@@ -34,7 +34,7 @@ pub use shader::{
     AddSubMode, ComputeShaderDef, ComputeShaderDefView, DivMode, GlslOpts, GlslOptsView, MulMode,
     ScalarHint, ScalarHintView, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,
     ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
-    ShaderSlotMappingKind, ShaderSource, ShaderState, ShaderStateView, ShaderValueShapeRef,
+    ShaderSlotMappingKind, ShaderState, ShaderStateView, ShaderValueShapeRef,
     generate_compute_shader_header,
 };
 pub use texture::{TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView};

@@ -6,11 +6,13 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    NodeDefChangeKind, NodeKind, NodeUseChangeKind, NodeUseLocation, ProjectChangeSummary,
+    AssetChangeKind, AssetLocation, NodeDefChangeKind, NodeId, NodeKind, NodeUseChangeKind,
+    NodeUseLocation, ProjectChangeSummary,
 };
 use lpc_registry::ProjectRegistry;
 use lpfs::LpFs;
 
+use crate::node::{AssetRefreshContext, AssetRefreshResult, NodeEntryState};
 use crate::nodes::CorePlaceholderNode;
 
 use super::{Engine, ProjectLoadError, ProjectLoader};
@@ -24,6 +26,10 @@ pub struct RuntimeApplyResult {
     pub added_nodes: Vec<NodeUseLocation>,
     /// Existing use locations rebuilt by remove/reproject.
     pub reattached_nodes: Vec<NodeUseLocation>,
+    /// Effective assets that refreshed at least one existing runtime node.
+    pub refreshed_assets: Vec<AssetLocation>,
+    /// Existing runtime node uses refreshed from changed effective assets.
+    pub refreshed_nodes: Vec<NodeUseLocation>,
     /// Node uses that could not be applied.
     pub failed_nodes: Vec<NodeUseLocation>,
 }
@@ -33,6 +39,8 @@ impl RuntimeApplyResult {
         self.removed_nodes.is_empty()
             && self.added_nodes.is_empty()
             && self.reattached_nodes.is_empty()
+            && self.refreshed_assets.is_empty()
+            && self.refreshed_nodes.is_empty()
             && self.failed_nodes.is_empty()
     }
 }
@@ -134,9 +142,11 @@ impl Engine {
                         alloc::boxed::Box::new(CorePlaceholderNode::new_leaf(NodeKind::Project)),
                         frame,
                     )
-                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
-                        path: format_node_use(&location),
-                        reason: format!("reattach runtime root: {e}"),
+                    .map_err(|e| {
+                        ProjectLoadError::InvalidProjectReference {
+                            path: format_node_use(&location),
+                            reason: format!("reattach runtime root: {e}"),
+                        }
                     })?;
                     result.reattached_nodes.push(location);
                 }
@@ -146,7 +156,7 @@ impl Engine {
                 continue;
             };
             self.remove_runtime_subtree(node_id, frame).map_err(|e| {
-                ProjectLoadError::InvalidSourcePath {
+                ProjectLoadError::InvalidProjectReference {
                     path: format_node_use(&location),
                     reason: format!("remove runtime subtree: {e}"),
                 }
@@ -179,11 +189,87 @@ impl Engine {
             }
         }
 
+        for location in changed_effective_assets(changes) {
+            let node_ids = self
+                .project_runtime_index()
+                .runtime_nodes_for_asset(location)
+                .to_vec();
+            if node_ids.is_empty() {
+                continue;
+            }
+            let refreshed_nodes =
+                self.refresh_project_asset_consumers(fs, registry, location, node_ids, frame)?;
+            if !refreshed_nodes.is_empty() {
+                result.refreshed_assets.push(location.clone());
+                result.refreshed_nodes.extend(refreshed_nodes);
+            }
+        }
+
         self.project_runtime_index_mut()
             .rebuild_asset_consumers(&registry.inventory().tree);
         self.resolver_mut().clear_frame_cache();
         Ok(result)
     }
+
+    fn refresh_project_asset_consumers(
+        &mut self,
+        fs: &dyn LpFs,
+        registry: &mut ProjectRegistry,
+        location: &AssetLocation,
+        node_ids: Vec<NodeId>,
+        frame: lpc_model::Revision,
+    ) -> Result<Vec<NodeUseLocation>, ProjectLoadError> {
+        let mut targets = Vec::new();
+        for node_id in node_ids {
+            let Some(use_location) = self.project_runtime_index().use_location(node_id) else {
+                continue;
+            };
+            targets.push((node_id, use_location.clone()));
+        }
+
+        let slot_shapes = self.slot_shapes().clone();
+        let mut refreshed = Vec::new();
+        for (node_id, use_location) in targets {
+            let entry = self.tree_mut().get_mut(node_id).ok_or(
+                ProjectLoadError::InvalidProjectReference {
+                    path: format_node_use(&use_location),
+                    reason: format!("asset consumer runtime node {node_id:?} is missing"),
+                },
+            )?;
+            let NodeEntryState::Alive(runtime) = entry.state.get_mut() else {
+                continue;
+            };
+            let mut ctx = AssetRefreshContext::new(fs, registry, &slot_shapes, frame);
+            match runtime.refresh_asset(location, &mut ctx).map_err(|e| {
+                ProjectLoadError::InvalidProjectReference {
+                    path: format_node_use(&use_location),
+                    reason: format!("refresh asset {location:?}: {e}"),
+                }
+            })? {
+                AssetRefreshResult::Unused | AssetRefreshResult::Unchanged => {}
+                AssetRefreshResult::Refreshed => {
+                    entry.state.mark_updated(frame);
+                    refreshed.push(use_location);
+                }
+            }
+        }
+
+        Ok(refreshed)
+    }
+}
+
+fn changed_effective_assets(
+    changes: &ProjectChangeSummary,
+) -> impl Iterator<Item = &AssetLocation> {
+    changes
+        .assets
+        .changed
+        .iter()
+        .filter_map(|change| match change.kind {
+            AssetChangeKind::Body | AssetChangeKind::EnteredError | AssetChangeKind::LeftError => {
+                Some(&change.location)
+            }
+        })
 }
 
 fn playlist_parent_for_changed_child(

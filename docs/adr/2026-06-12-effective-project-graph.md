@@ -7,7 +7,7 @@ Accepted
 ## Context
 
 `ProjectRegistry` currently derives an effective `ProjectInventory` containing
-node definitions keyed by `NodeDefLocation` and assets keyed by `AssetSource`.
+node definitions keyed by `NodeDefLocation` and assets keyed by `AssetLocation`.
 That flat inventory is enough to answer "which definitions and assets are
 currently referenced?", but it is not enough to build or update the engine
 runtime tree.
@@ -58,7 +58,7 @@ The graph needs enough data for engine projection:
 - resolved `NodeDefLocation`;
 - role or ownership metadata, such as root, project child, and playlist entry;
 - indexes from `NodeDefLocation` to project node instances;
-- indexes from `AssetSource` to project node instances that consume the asset.
+- indexes from `AssetLocation` to project node instances that consume the asset.
 
 `ProjectNodeKey` should be deterministic, serializable, stable across refreshes
 when authored topology does not change, distinct from `NodeDefLocation`, and

@@ -20,13 +20,13 @@ use crate::nodes::output::OutputDef;
 use crate::nodes::playlist::PlaylistDef;
 use crate::nodes::project::ProjectDef;
 use crate::nodes::radio::ControlRadioDef;
-use crate::nodes::shader::{ComputeShaderDef, ShaderDef, ShaderSource};
+use crate::nodes::shader::{ComputeShaderDef, ShaderDef};
 use crate::nodes::texture::TextureDef;
 use crate::{
-    ArtifactLocation, AssetContentType, AssetLocation, EnumSlot, LpPath, LpPathBuf,
-    NodeDefLocation, NodeInvocation, ProjectNodePlacement, ReferencedAsset, SlotAccess,
+    ArtifactLocation, AssetContentType, AssetLocation, AssetSlot, AssetSlotValue, EnumSlot, LpPath,
+    LpPathBuf, NodeDefLocation, NodeInvocation, ProjectNodePlacement, ReferencedAsset, SlotAccess,
     SlotDataAccess, SlotDataMutAccess, SlotMapKey, SlotMutAccess, SlotName, SlotPath, SlotShapeId,
-    SlotShapeRegistry, Slotted, SourcePath, StaticSlotShape,
+    SlotShapeRegistry, Slotted, StaticSlotShape,
 };
 
 const PROJECT_VARIANT: &str = "Project";
@@ -94,8 +94,15 @@ pub struct InvocationSite {
 /// Borrowed inline text asset body owned by a node definition.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct InlineAssetText<'a> {
-    pub extension: &'static str,
+    pub extension: &'a str,
     pub text: &'a str,
+}
+
+/// Borrowed inline byte asset body owned by a node definition.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InlineAssetBytes<'a> {
+    pub extension: Option<&'a str>,
+    pub bytes: &'a [u8],
 }
 
 /// Failure resolving model-authored artifact path references.
@@ -295,7 +302,7 @@ impl NodeDef {
                 base,
                 AssetContentType::ComputeShaderSource,
             ),
-            Self::Fixture(fixture) => assets_for_fixture(fixture, containing_file),
+            Self::Fixture(fixture) => assets_for_fixture(fixture, containing_file, owner, base),
             _ => Ok(Vec::new()),
         }
     }
@@ -306,28 +313,45 @@ impl NodeDef {
         owner_path: &SlotPath,
         asset_path: &SlotPath,
     ) -> Option<InlineAssetText<'_>> {
-        if asset_path != &source_slot_path(owner_path) {
-            return None;
-        }
-
         match self {
-            Self::Shader(shader) => {
-                shader
-                    .shader_source()
-                    .glsl_value()
-                    .map(|text| InlineAssetText {
-                        extension: "glsl",
-                        text,
-                    })
+            Self::Shader(shader) if asset_path == &source_slot_path(owner_path) => {
+                inline_text_from_slot(shader.shader_source(), "glsl")
             }
-            Self::ComputeShader(shader) => {
-                shader
-                    .shader_source()
-                    .glsl_value()
-                    .map(|text| InlineAssetText {
-                        extension: "glsl",
-                        text,
-                    })
+            Self::ComputeShader(shader) if asset_path == &source_slot_path(owner_path) => {
+                inline_text_from_slot(shader.shader_source(), "glsl")
+            }
+            Self::Fixture(fixture)
+                if asset_path == &fixture_mapping_source_slot_path(owner_path) =>
+            {
+                let MappingConfig::SvgPath { source, .. } = fixture.mapping.value() else {
+                    return None;
+                };
+                inline_text_from_slot(source, "svg")
+            }
+            _ => None,
+        }
+    }
+
+    /// Inline binary asset bytes at `asset_path`, when this definition owns one.
+    pub fn inline_asset_bytes(
+        &self,
+        owner_path: &SlotPath,
+        asset_path: &SlotPath,
+    ) -> Option<InlineAssetBytes<'_>> {
+        match self {
+            Self::Shader(shader) if asset_path == &source_slot_path(owner_path) => {
+                inline_bytes_from_slot(shader.shader_source())
+            }
+            Self::ComputeShader(shader) if asset_path == &source_slot_path(owner_path) => {
+                inline_bytes_from_slot(shader.shader_source())
+            }
+            Self::Fixture(fixture)
+                if asset_path == &fixture_mapping_source_slot_path(owner_path) =>
+            {
+                let MappingConfig::SvgPath { source, .. } = fixture.mapping.value() else {
+                    return None;
+                };
+                inline_bytes_from_slot(source)
             }
             _ => None,
         }
@@ -458,54 +482,87 @@ fn playlist_entry_node_path(base: &SlotPath, key: u32) -> Option<SlotPath> {
 }
 
 fn assets_for_shader(
-    source: &ShaderSource,
+    source: &AssetSlot,
     containing_file: &LpPath,
     owner: &NodeDefLocation,
     base: &SlotPath,
     content_type: AssetContentType,
 ) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
-    if let Some(path) = source.path_value() {
-        let location = ArtifactLocation::file(resolve_source_path(containing_file, path)?);
-        return Ok(vec![ReferencedAsset::new(
-            AssetLocation::artifact(location),
-            content_type,
-        )]);
-    }
-
-    if source.glsl_value().is_some() {
-        return Ok(vec![ReferencedAsset::new(
-            AssetLocation::inline(owner.clone(), source_slot_path(base)),
-            content_type,
-        )]);
-    }
-
-    Ok(Vec::new())
+    assets_for_slot(
+        source,
+        containing_file,
+        owner,
+        source_slot_path(base),
+        content_type,
+    )
 }
 
 fn assets_for_fixture(
     fixture: &FixtureDef,
     containing_file: &LpPath,
+    owner: &NodeDefLocation,
+    base: &SlotPath,
 ) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
     let MappingConfig::SvgPath { source, .. } = fixture.mapping.value() else {
         return Ok(Vec::new());
     };
-    let location = ArtifactLocation::file(resolve_source_path(containing_file, source.value())?);
-    Ok(vec![ReferencedAsset::new(
-        AssetLocation::artifact(location),
+    assets_for_slot(
+        source,
+        containing_file,
+        owner,
+        fixture_mapping_source_slot_path(base),
         AssetContentType::FixtureSvg,
-    )])
+    )
+}
+
+fn assets_for_slot(
+    slot: &AssetSlot,
+    containing_file: &LpPath,
+    owner: &NodeDefLocation,
+    asset_path: SlotPath,
+    content_type: AssetContentType,
+) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
+    match slot.value() {
+        AssetSlotValue::Artifact(specifier) => {
+            let location =
+                ArtifactLocation::file(resolve_artifact_specifier(containing_file, specifier)?);
+            Ok(vec![ReferencedAsset::new(
+                AssetLocation::artifact(location),
+                content_type,
+            )])
+        }
+        AssetSlotValue::InlineText { .. } | AssetSlotValue::InlineBytes { .. } => {
+            Ok(vec![ReferencedAsset::new(
+                AssetLocation::inline(owner.clone(), asset_path),
+                content_type,
+            )])
+        }
+    }
 }
 
 fn source_slot_path(base: &SlotPath) -> SlotPath {
     base.child(SlotName::parse("source").expect("source is a valid slot name"))
 }
 
-fn resolve_source_path(
-    containing_file: &LpPath,
-    path: &SourcePath,
-) -> Result<LpPathBuf, ArtifactPathResolutionError> {
-    let specifier = ArtifactSpec::path(path.as_path_buf());
-    resolve_artifact_specifier(containing_file, &specifier)
+fn fixture_mapping_source_slot_path(base: &SlotPath) -> SlotPath {
+    base.child(SlotName::parse("mapping").expect("mapping is a valid slot name"))
+        .child(SlotName::parse("source").expect("source is a valid slot name"))
+}
+
+fn inline_text_from_slot<'a>(
+    slot: &'a AssetSlot,
+    default_extension: &'static str,
+) -> Option<InlineAssetText<'a>> {
+    let (extension, text) = slot.inline_text_value()?;
+    Some(InlineAssetText {
+        extension: extension.unwrap_or(default_extension),
+        text,
+    })
+}
+
+fn inline_bytes_from_slot(slot: &AssetSlot) -> Option<InlineAssetBytes<'_>> {
+    let (extension, bytes) = slot.inline_bytes_value()?;
+    Some(InlineAssetBytes { extension, bytes })
 }
 
 pub fn resolve_artifact_specifier(
@@ -835,7 +892,10 @@ sample_diameter = 2.0
         else {
             panic!("expected SvgPath mapping");
         };
-        assert_eq!(source.value().as_str(), "./fyeah-mapping.svg");
+        assert_eq!(
+            source.artifact_value().unwrap().to_string(),
+            "fyeah-mapping.svg"
+        );
         assert_eq!(sample_diameter.value().0, 2.0);
     }
 

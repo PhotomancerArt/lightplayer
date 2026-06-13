@@ -6,14 +6,14 @@
 
 use alloc::string::String;
 
-use crate::nodes::shader::{GlslOpts, ShaderSlotDef, ShaderSource};
-use crate::{BindingDefs, EnumSlot, MapSlot, Slotted};
+use crate::nodes::shader::{GlslOpts, ShaderSlotDef};
+use crate::{AssetSlot, BindingDefs, MapSlot, Slotted};
 
 /// Authored serial compute shader definition.
 #[derive(Debug, Clone, PartialEq, Slotted)]
 pub struct ComputeShaderDef {
     /// Authored shader source.
-    pub source: EnumSlot<ShaderSource>,
+    pub source: AssetSlot,
     /// Authored slot bindings for compute shader consumed and produced slots.
     pub bindings: BindingDefs,
     /// GLSL compilation options.
@@ -29,7 +29,7 @@ pub struct ComputeShaderDef {
 impl Default for ComputeShaderDef {
     fn default() -> Self {
         Self {
-            source: EnumSlot::new(ShaderSource::path("main.glsl")),
+            source: AssetSlot::path("main.glsl"),
             bindings: BindingDefs::default(),
             glsl_opts: GlslOpts::default(),
             consumed_slots: MapSlot::default(),
@@ -41,8 +41,8 @@ impl Default for ComputeShaderDef {
 impl ComputeShaderDef {
     pub const KIND: &'static str = "shader/compute";
 
-    pub fn shader_source(&self) -> &ShaderSource {
-        self.source.value()
+    pub fn shader_source(&self) -> &AssetSlot {
+        &self.source
     }
 
     pub fn kind(&self) -> crate::NodeKind {

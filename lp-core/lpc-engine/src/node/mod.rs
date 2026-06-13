@@ -18,7 +18,7 @@ pub mod tree_error;
 
 pub use crate::engine::memory_pressure::PressureLevel;
 pub use contexts::{
-    ControlRenderContext, ControlRenderServices, DestroyCtx, MemPressureCtx,
+    AssetRefreshContext, ControlRenderContext, ControlRenderServices, DestroyCtx, MemPressureCtx,
     NodeResourceInitContext, RenderContext, TickContext, VisualRenderServices,
 };
 pub use control_node::ControlNode;
@@ -26,7 +26,7 @@ pub use node_call::{NodeCall, NodeCallKey};
 pub use node_entry::RuntimeNodeEntry;
 pub use node_entry_state::NodeEntryState;
 pub use node_error::NodeError;
-pub use node_runtime::{NodeRuntime, ProduceResult};
+pub use node_runtime::{AssetRefreshResult, NodeRuntime, ProduceResult};
 pub use node_tree::RuntimeNodeTree;
 pub use render_node::RenderNode;
 pub use runtime_state_shape::RuntimeStateShape;

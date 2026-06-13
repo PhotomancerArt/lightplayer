@@ -6,16 +6,19 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    AddSubMode, ComputeShaderDef, DivMode, MulMode, NodeId, SlotAccess, SlotPath,
-    SlotShapeRegistry, SlotShapeRegistryError,
+    AddSubMode, AssetLocation, ComputeShaderDef, DivMode, MulMode, NodeId, Revision,
+    ShaderHeaderGenError, SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
+    generate_compute_shader_header,
 };
+use lpc_registry::AssetText;
 use lps_shared::LpsValueF32;
 
 use crate::dataflow::resolver::QueryKey;
 use crate::gfx::{LpComputeShader, ShaderCompileOptions, compute_desc_from_model_def};
 use crate::node::catch_node_panic::catch_panic;
 use crate::node::{
-    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, TickContext,
+    AssetRefreshContext, AssetRefreshResult, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
+    PressureLevel, ProduceResult, TickContext,
 };
 
 use super::compute_materialize::materialize_produced_slot;
@@ -30,6 +33,7 @@ use super::shader_node::{
 pub struct ComputeShaderNode {
     node_id: NodeId,
     def: ComputeShaderDef,
+    source_asset: Option<RuntimeSourceAsset>,
     glsl_source: String,
     shader: Option<Box<dyn LpComputeShader>>,
     compilation_error: Option<String>,
@@ -47,6 +51,7 @@ impl ComputeShaderNode {
         Self {
             node_id,
             def,
+            source_asset: None,
             glsl_source,
             shader: None,
             compilation_error: None,
@@ -54,8 +59,39 @@ impl ComputeShaderNode {
         }
     }
 
+    pub fn from_asset_text(
+        node_id: NodeId,
+        def: ComputeShaderDef,
+        source: AssetText,
+        slot_shapes: &SlotShapeRegistry,
+        revision: Revision,
+    ) -> Result<Self, ShaderHeaderGenError> {
+        let glsl_source = compute_glsl_source(&def, &source.text, slot_shapes)?;
+        let mut node = Self::new(node_id, def, glsl_source, revision);
+        node.source_asset = Some(RuntimeSourceAsset {
+            location: source.location,
+            revision: source.revision,
+        });
+        Ok(node)
+    }
+
     pub fn compilation_error(&self) -> Option<&str> {
         self.compilation_error.as_deref()
+    }
+
+    fn refresh_source_asset(
+        &mut self,
+        source: AssetText,
+        slot_shapes: &SlotShapeRegistry,
+    ) -> Result<(), ShaderHeaderGenError> {
+        self.glsl_source = compute_glsl_source(&self.def, &source.text, slot_shapes)?;
+        self.source_asset = Some(RuntimeSourceAsset {
+            location: source.location,
+            revision: source.revision,
+        });
+        self.shader = None;
+        self.compilation_error = None;
+        Ok(())
     }
 
     fn ensure_compiled(&mut self, ctx: &TickContext<'_>) -> Result<(), NodeError> {
@@ -220,6 +256,36 @@ impl NodeRuntime for ComputeShaderNode {
         Ok(ProduceResult::Produced)
     }
 
+    fn refresh_asset(
+        &mut self,
+        location: &AssetLocation,
+        ctx: &mut AssetRefreshContext<'_>,
+    ) -> Result<AssetRefreshResult, NodeError> {
+        let Some(source_asset) = &self.source_asset else {
+            return Ok(AssetRefreshResult::Unused);
+        };
+        if location != &source_asset.location {
+            return Ok(AssetRefreshResult::Unused);
+        }
+
+        let source = match ctx.read_asset_text_if_changed(location, source_asset.revision) {
+            Ok(Some(source)) => source,
+            Ok(None) => return Ok(AssetRefreshResult::Unchanged),
+            Err(err) => {
+                self.shader = None;
+                self.compilation_error = Some(format!("read compute shader source: {err:?}"));
+                return Ok(AssetRefreshResult::Refreshed);
+            }
+        };
+
+        let slot_shapes = ctx.slot_shapes();
+        if let Err(err) = self.refresh_source_asset(source, slot_shapes) {
+            self.shader = None;
+            self.compilation_error = Some(format!("generate compute shader header: {err}"));
+        }
+        Ok(AssetRefreshResult::Refreshed)
+    }
+
     fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
         Ok(())
     }
@@ -245,6 +311,21 @@ impl NodeRuntime for ComputeShaderNode {
             _ => SlotShapeRegistryError::MissingReferencedShape(self.state.shape_id()),
         })
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct RuntimeSourceAsset {
+    location: AssetLocation,
+    revision: Revision,
+}
+
+fn compute_glsl_source(
+    def: &ComputeShaderDef,
+    source: &str,
+    slot_shapes: &SlotShapeRegistry,
+) -> Result<String, ShaderHeaderGenError> {
+    let header = generate_compute_shader_header(def, slot_shapes)?;
+    Ok(format!("{header}\n{source}"))
 }
 
 fn resolve_or_default_input(
@@ -277,9 +358,8 @@ mod tests {
     use alloc::string::String;
     use alloc::sync::Arc;
     use lpc_model::{
-        ArtifactSpec, BindingDefs, EnumSlot, LpValue, MapSlot, NodeDef, NodeInvocation,
-        ShaderSource, SlotDataAccess, TreePath, ValueSlot, generate_compute_shader_header,
-        lookup_slot_data,
+        ArtifactSpec, AssetSlot, BindingDefs, LpValue, MapSlot, NodeDef, NodeInvocation,
+        SlotDataAccess, TreePath, ValueSlot, generate_compute_shader_header, lookup_slot_data,
     };
     use lpc_registry::ProjectRegistry;
     use lpc_wire::{WireChildKind, WireSlotIndex};
@@ -420,7 +500,7 @@ void tick() {{
         );
 
         ComputeShaderDef {
-            source: EnumSlot::new(ShaderSource::path("emitters.glsl")),
+            source: AssetSlot::path("emitters.glsl"),
             bindings: BindingDefs::default(),
             glsl_opts: lpc_model::GlslOpts::default(),
             consumed_slots: MapSlot::new(consumed),

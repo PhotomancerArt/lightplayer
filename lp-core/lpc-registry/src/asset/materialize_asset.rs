@@ -4,8 +4,8 @@ use alloc::format;
 use alloc::string::{String, ToString};
 
 use lpc_model::{
-    ArtifactLocation, ArtifactOverlay, AssetBodyOverlay, AssetContentType, AssetEntry,
-    AssetLocation, NodeDefState, ProjectInventory, ProjectOverlay, WithRevision,
+    ArtifactLocation, ArtifactOverlay, AssetBodyOverlay, AssetEntry, AssetLocation, NodeDefState,
+    ProjectInventory, ProjectOverlay, WithRevision,
 };
 use lpfs::LpFs;
 
@@ -115,16 +115,6 @@ fn materialize_inline_asset(
     path: &lpc_model::SlotPath,
     entry: &AssetEntry,
 ) -> Result<AssetBytes, AssetReadError> {
-    if !matches!(
-        entry.content_type,
-        AssetContentType::ShaderSource | AssetContentType::ComputeShaderSource
-    ) {
-        return Err(AssetReadError::Unsupported {
-            location: source.clone(),
-            message: String::from("inline binary assets are not supported yet"),
-        });
-    }
-
     let Some(owner_entry) = inventory.defs.get(owner) else {
         return Err(AssetReadError::OwnerDefUnavailable {
             location: source.clone(),
@@ -138,25 +128,46 @@ fn materialize_inline_asset(
         });
     };
 
-    let Some(text) = def.inline_asset_text(&owner.path, path) else {
-        return Err(AssetReadError::Unsupported {
+    if let Some(text) = def.inline_asset_text(&owner.path, path) {
+        return Ok(AssetBytes {
             location: source.clone(),
-            message: String::from("inline asset source is not supported by this node definition"),
+            content_type: entry.content_type,
+            revision: entry.revision,
+            bytes: text.text.as_bytes().to_vec(),
+            diagnostic_name: inline_asset_diagnostic_name(owner, path, Some(text.extension)),
         });
-    };
+    }
 
-    Ok(AssetBytes {
+    if let Some(bytes) = def.inline_asset_bytes(&owner.path, path) {
+        return Ok(AssetBytes {
+            location: source.clone(),
+            content_type: entry.content_type,
+            revision: entry.revision,
+            bytes: bytes.bytes.to_vec(),
+            diagnostic_name: inline_asset_diagnostic_name(owner, path, bytes.extension),
+        });
+    }
+
+    Err(AssetReadError::Unsupported {
         location: source.clone(),
-        content_type: entry.content_type,
-        revision: entry.revision,
-        bytes: text.text.as_bytes().to_vec(),
-        diagnostic_name: format!(
+        message: String::from("inline asset body is not supported by this node definition"),
+    })
+}
+
+fn inline_asset_diagnostic_name(
+    owner: &lpc_model::NodeDefLocation,
+    path: &lpc_model::SlotPath,
+    extension: Option<&str>,
+) -> String {
+    match extension {
+        Some(extension) => format!(
             "{}:{}.{}",
             owner.artifact.file_path().as_str(),
             path,
-            text.extension
+            extension
         ),
-    })
+        None => format!("{}:{}", owner.artifact.file_path().as_str(), path),
+    }
 }
 
 fn error_from_artifact(source: &AssetLocation, err: ArtifactError) -> AssetReadError {

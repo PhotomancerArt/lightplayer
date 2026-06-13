@@ -221,7 +221,7 @@ fn glsl_type_for_lp_type(ty: &LpType) -> Result<String, ShaderHeaderGenError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{MapSlot, ShaderSlotDef, ShaderSlotMappingDef, ShaderSource};
+    use crate::{AssetSlot, MapSlot, ShaderSlotDef, ShaderSlotMappingDef};
     use alloc::collections::BTreeMap;
 
     #[test]
@@ -253,7 +253,7 @@ mod tests {
         );
 
         let def = ComputeShaderDef {
-            source: crate::EnumSlot::new(ShaderSource::path("emitters.glsl")),
+            source: AssetSlot::path("emitters.glsl"),
             bindings: crate::BindingDefs::default(),
             glsl_opts: crate::GlslOpts::default(),
             consumed_slots: MapSlot::new(consumed),
@@ -281,7 +281,7 @@ mod tests {
             ),
         );
         let def = ComputeShaderDef {
-            source: crate::EnumSlot::new(ShaderSource::path("emitters.glsl")),
+            source: AssetSlot::path("emitters.glsl"),
             bindings: crate::BindingDefs::default(),
             glsl_opts: crate::GlslOpts::default(),
             consumed_slots: MapSlot::default(),

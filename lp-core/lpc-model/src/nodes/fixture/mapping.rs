@@ -3,8 +3,8 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    EnumSlot, FromLpValue, LpType, LpValue, MapSlot, PositiveF32, PositiveF32Slot, SlotEnumOption,
-    SlotMeta, SlotShapeId, SlotValue, SlotValueShape, Slotted, SourcePath, SourcePathSlot,
+    AssetSlot, EnumSlot, FromLpValue, LpPathBuf, LpType, LpValue, MapSlot, PositiveF32,
+    PositiveF32Slot, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, Slotted,
     StaticLpType, StaticSlotEnumOption, StaticSlotMeta, StaticSlotValueShape,
     StaticValueEditorHint, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot, Xy, XySlot,
 };
@@ -24,7 +24,7 @@ pub enum MappingConfig {
 
     /// A mapping imported from a small, strict SVG path subset at project-load time.
     SvgPath {
-        source: SourcePathSlot,
+        source: AssetSlot,
         sample_diameter: PositiveF32Slot,
     },
 }
@@ -75,9 +75,9 @@ impl MappingConfig {
         Self::path_points(MapSlot::new(entries), sample_diameter)
     }
 
-    pub fn svg_path(source: impl Into<SourcePath>, sample_diameter: f32) -> Self {
+    pub fn svg_path(source: impl Into<LpPathBuf>, sample_diameter: f32) -> Self {
         Self::SvgPath {
-            source: SourcePathSlot::new(source.into()),
+            source: AssetSlot::path(source),
             sample_diameter: PositiveF32Slot::new(PositiveF32(sample_diameter)),
         }
     }

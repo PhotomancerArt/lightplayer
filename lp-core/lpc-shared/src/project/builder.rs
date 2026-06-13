@@ -5,10 +5,10 @@ use core::cell::RefCell;
 use lpc_model::GlslOpts;
 use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec, RingOrder};
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
-use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef, ShaderSource};
+use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
-    Affine2d, Affine2dSlot, ArtifactSpec, AsLpPath, BindingDef, BindingDefs, BindingRef,
+    Affine2d, Affine2dSlot, ArtifactSpec, AsLpPath, AssetSlot, BindingDef, BindingDefs, BindingRef,
     BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode, FixtureSamplingConfig,
     HardwareEndpointSpec, MapSlot, NodeDef, NodeInvocation, NodeInvocationSlot, OptionSlot,
     ProjectDef, Ratio, RatioSlot, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry,
@@ -274,7 +274,7 @@ impl ShaderBuilder {
         let source_file = format!("{node_name}.glsl");
 
         let config = ShaderDef {
-            source: EnumSlot::new(ShaderSource::path(source_file)),
+            source: AssetSlot::path(source_file),
             render_order: RenderOrderSlot::new(RenderOrder(self.render_order)),
             bindings: bus_output_binding_defs("visual.out"),
             glsl_opts: GlslOpts::default(),

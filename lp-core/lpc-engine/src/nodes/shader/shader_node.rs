@@ -6,11 +6,13 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpc_model::{
-    AddSubMode, DivMode, GlslOpts, MapSlot, MulMode, NodeId, ShaderMapKeyDef, ShaderSlotDef,
-    ShaderSlotKind, ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef, SlotAccess, SlotPath,
-    SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape, ValueSlot,
+    AddSubMode, AssetLocation, DivMode, GlslOpts, MapSlot, MulMode, NodeId, Revision,
+    ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingKind, ShaderState,
+    ShaderValueShapeRef, SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
+    StaticSlotShape, ValueSlot,
 };
 use lpc_model::{ShaderDef, SlotAccessor};
+use lpc_registry::AssetText;
 use lps_shared::LpsValueF32;
 use lps_shared::TextureBuffer;
 
@@ -19,8 +21,8 @@ use crate::gfx::uniforms::{VisualUniform, build_uniforms};
 use crate::gfx::{LpShader, ShaderCompileOptions, ShaderCompileStats};
 use crate::node::catch_node_panic::catch_panic;
 use crate::node::{
-    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
-    RenderContext, RenderNode, RuntimeStateShape, TickContext,
+    AssetRefreshContext, AssetRefreshResult, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
+    PressureLevel, ProduceResult, RenderContext, RenderNode, RuntimeStateShape, TickContext,
 };
 use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use crate::products::visual::{VisualSampleBufferRequest, VisualSampleTarget};
@@ -32,6 +34,8 @@ const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 /// Shader producer wired to the core engine.
 pub struct ShaderNode {
     node_id: NodeId,
+    source_location: AssetLocation,
+    source_revision: Revision,
     glsl_source: String,
     consumed_slots: MapSlot<String, ShaderSlotDef>,
     glsl_opts: GlslOpts,
@@ -43,11 +47,13 @@ pub struct ShaderNode {
 }
 
 impl ShaderNode {
-    pub fn new(node_id: NodeId, def: ShaderDef, glsl_source: String) -> Self {
+    pub fn new(node_id: NodeId, def: ShaderDef, source: AssetText) -> Self {
         let visual_uniforms = default_uniforms(&def.consumed_slots);
         Self {
             node_id,
-            glsl_source,
+            source_location: source.location,
+            source_revision: source.revision,
+            glsl_source: source.text,
             consumed_slots: def.consumed_slots,
             glsl_opts: def.glsl_opts,
             visual_uniforms,
@@ -68,6 +74,13 @@ impl ShaderNode {
 
     pub fn compilation_error(&self) -> Option<&str> {
         self.compilation_error.as_deref()
+    }
+
+    fn refresh_source(&mut self, source: AssetText) {
+        self.source_revision = source.revision;
+        self.glsl_source = source.text;
+        self.shader = None;
+        self.compilation_error = None;
     }
 
     fn ensure_compiled(&mut self, ctx: &RenderContext<'_>) -> Result<(), NodeError> {
@@ -200,6 +213,29 @@ impl NodeRuntime for ShaderNode {
             .output
             .set_with_version(ctx.revision(), VisualProduct::new(self.node_id, 0));
         Ok(ProduceResult::Produced)
+    }
+
+    fn refresh_asset(
+        &mut self,
+        location: &AssetLocation,
+        ctx: &mut AssetRefreshContext<'_>,
+    ) -> Result<AssetRefreshResult, NodeError> {
+        if location != &self.source_location {
+            return Ok(AssetRefreshResult::Unused);
+        }
+
+        let source = match ctx.read_asset_text_if_changed(location, self.source_revision) {
+            Ok(Some(source)) => source,
+            Ok(None) => return Ok(AssetRefreshResult::Unchanged),
+            Err(err) => {
+                self.shader = None;
+                self.compilation_error = Some(format!("read shader source: {err:?}"));
+                return Ok(AssetRefreshResult::Refreshed);
+            }
+        };
+
+        self.refresh_source(source);
+        Ok(AssetRefreshResult::Refreshed)
     }
 
     fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
@@ -628,10 +664,10 @@ mod tests {
         VisualSampleTarget, texel_center_to_uv_q16,
     };
     use lpc_model::{
-        ArtifactSpec, MapSlot, NodeDef, NodeInvocation, Revision, SlotDataAccess, StaticSlotShape,
-        TextureDef, TreePath,
+        ArtifactLocation, ArtifactSpec, AssetContentType, MapSlot, NodeDef, NodeInvocation,
+        Revision, SlotDataAccess, StaticSlotShape, TextureDef, TreePath,
     };
-    use lpc_registry::ProjectRegistry;
+    use lpc_registry::{AssetText, ProjectRegistry};
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     const DEMO_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float time; vec4 render(vec2 pos) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }";
@@ -645,6 +681,16 @@ mod tests {
         ShaderDef {
             consumed_slots: MapSlot::new(consumed_slots),
             ..ShaderDef::default()
+        }
+    }
+
+    fn shader_asset_text(source: impl Into<String>, revision: Revision) -> AssetText {
+        AssetText {
+            location: AssetLocation::artifact(ArtifactLocation::file("/shader.glsl")),
+            content_type: AssetContentType::ShaderSource,
+            revision,
+            text: source.into(),
+            diagnostic_name: String::from("/shader.glsl"),
         }
     }
 
@@ -702,7 +748,7 @@ mod tests {
                 frame,
             )
             .expect("load test defs");
-        let sh = ShaderNode::new(sh_id, shader_def, String::from(DEMO_GLSL));
+        let sh = ShaderNode::new(sh_id, shader_def, shader_asset_text(DEMO_GLSL, frame));
         engine
             .attach_runtime_node(sh_id, Box::new(sh), frame)
             .expect("attach shader");
@@ -714,7 +760,11 @@ mod tests {
 
     #[test]
     fn shader_render_output_is_on_runtime_state_slot_root() {
-        let node = ShaderNode::new(NodeId::new(1), ShaderDef::default(), String::new());
+        let node = ShaderNode::new(
+            NodeId::new(1),
+            ShaderDef::default(),
+            shader_asset_text("", Revision::new(1)),
+        );
 
         let state = node.runtime_state_slots().expect("shader state slots");
         assert_eq!(state.shape_id(), ShaderState::SHAPE_ID);
@@ -792,7 +842,11 @@ mod tests {
             "layout(binding = 0) uniform vec2 outputSize;\n\
              vec4 render(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
         );
-        let mut node = ShaderNode::new(NodeId::new(1), ShaderDef::default(), source);
+        let mut node = ShaderNode::new(
+            NodeId::new(1),
+            ShaderDef::default(),
+            shader_asset_text(source, Revision::new(1)),
+        );
         let mut ctx = crate::node::RenderContext::new(
             NodeId::new(1),
             Revision::new(1),
@@ -834,7 +888,11 @@ mod tests {
             "layout(binding = 0) uniform vec2 outputSize;\n\
              vec4 render(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
         );
-        let mut node = ShaderNode::new(NodeId::new(1), ShaderDef::default(), source);
+        let mut node = ShaderNode::new(
+            NodeId::new(1),
+            ShaderDef::default(),
+            shader_asset_text(source, Revision::new(1)),
+        );
         let mut ctx = crate::node::RenderContext::new(
             NodeId::new(1),
             Revision::new(1),

@@ -7,7 +7,6 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpc_model::LpType;
-use lpc_model::generate_compute_shader_header;
 use lpc_model::{ArtifactSpec, NodeInvocation, NodeKind};
 use lpc_model::{AssetContentType, AssetLocation, NodeDefLocation, NodeDefState};
 use lpc_model::{
@@ -15,7 +14,7 @@ use lpc_model::{
     LpValue, MappingConfig, NodeDef, NodeId, NodeName, PlaylistDef, ProjectNodeOrigin,
     ProjectNodePlacement, Revision, ShaderDef, ShaderSlotKind, SlotPath,
 };
-use lpc_registry::{ParseCtx, ProjectRegistry};
+use lpc_registry::{AssetText, ParseCtx, ProjectRegistry};
 use lpc_wire::{WireChildKind, WireNodeStatus, WireSlotIndex};
 use lpfs::LpFs;
 use lpfs::lp_path::{LpPath, LpPathBuf};
@@ -37,7 +36,7 @@ pub enum ProjectLoadError {
     Io { path: String, details: String },
     ProjectToml { file: String, error: String },
     UnknownKind { path: String, suffix: String },
-    InvalidSourcePath { path: String, reason: String },
+    InvalidProjectReference { path: String, reason: String },
     TomlParse { path: String, error: String },
     InvalidNodeName { path: String, reason: String },
     Tree(TreeError),
@@ -49,8 +48,8 @@ impl core::fmt::Display for ProjectLoadError {
             Self::Io { path, details } => write!(f, "io error at {path}: {details}"),
             Self::ProjectToml { file, error } => write!(f, "parse {file}: {error}"),
             Self::UnknownKind { path, suffix } => write!(f, "{path}: unknown node kind `{suffix}`"),
-            Self::InvalidSourcePath { path, reason } => {
-                write!(f, "source path {path}: {reason}")
+            Self::InvalidProjectReference { path, reason } => {
+                write!(f, "project reference {path}: {reason}")
             }
             Self::TomlParse { path, error } => write!(f, "{path}: TOML parse failed: {error}"),
             Self::InvalidNodeName { path, reason } => write!(f, "{path}: invalid name: {reason}"),
@@ -162,7 +161,7 @@ impl ProjectLoader {
                 .get(root)
                 .ok_or(ProjectLoadError::Tree(TreeError::UnknownNode(root)))?;
             if entry.def_location.is_none() {
-                return Err(ProjectLoadError::InvalidSourcePath {
+                return Err(ProjectLoadError::InvalidProjectReference {
                     path: artifact_specifier_label(&project_specifier),
                     reason: String::from("registry did not project a root node"),
                 });
@@ -174,7 +173,7 @@ impl ProjectLoader {
                 Box::new(CorePlaceholderNode::new_leaf(NodeKind::Project)),
                 frame,
             )
-            .map_err(|e| ProjectLoadError::InvalidSourcePath {
+            .map_err(|e| ProjectLoadError::InvalidProjectReference {
                 path: artifact_specifier_label(&project_specifier),
                 reason: format!("attach project runtime: {e}"),
             })?;
@@ -205,7 +204,7 @@ impl ProjectLoader {
         let mut projected_nodes = Vec::new();
         for project_node in project_nodes {
             let def_entry = registry.def(&project_node.def_location).ok_or_else(|| {
-                ProjectLoadError::InvalidSourcePath {
+                ProjectLoadError::InvalidProjectReference {
                     path: def_location_label(&project_node.def_location),
                     reason: String::from("project tree references missing definition entry"),
                 }
@@ -243,7 +242,7 @@ impl ProjectLoader {
                 )
             } else {
                 let parent_key = project_node.parent.as_ref().ok_or_else(|| {
-                    ProjectLoadError::InvalidSourcePath {
+                    ProjectLoadError::InvalidProjectReference {
                         path: def_location_label(&project_node.def_location),
                         reason: String::from("non-root project node has no parent"),
                     }
@@ -251,7 +250,7 @@ impl ProjectLoader {
                 let parent = runtime
                     .project_runtime_index()
                     .node_id(parent_key)
-                    .ok_or_else(|| ProjectLoadError::InvalidSourcePath {
+                    .ok_or_else(|| ProjectLoadError::InvalidProjectReference {
                         path: def_location_label(&project_node.def_location),
                         reason: String::from("project node parent was not projected"),
                     })?;
@@ -374,7 +373,7 @@ impl ProjectLoader {
             };
             runtime
                 .attach_runtime_node(node.id, Box::new(ClockNode::new(node.id)), frame)
-                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                .map_err(|e| ProjectLoadError::InvalidProjectReference {
                     path: node_label(node),
                     reason: format!("attach clock runtime: {e}"),
                 })?;
@@ -409,7 +408,7 @@ impl ProjectLoader {
             };
             runtime
                 .attach_runtime_node(node.id, Box::new(ButtonNode::new()), frame)
-                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                .map_err(|e| ProjectLoadError::InvalidProjectReference {
                     path: node_label(node),
                     reason: format!("attach button runtime: {e}"),
                 })?;
@@ -452,7 +451,7 @@ impl ProjectLoader {
             };
             runtime
                 .attach_runtime_node(node.id, Box::new(ControlRadioNode::new()), frame)
-                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                .map_err(|e| ProjectLoadError::InvalidProjectReference {
                     path: node_label(node),
                     reason: format!("attach control radio runtime: {e}"),
                 })?;
@@ -484,7 +483,7 @@ impl ProjectLoader {
             }
             runtime
                 .attach_runtime_node(node.id, Box::new(TextureNode::new(node.id)), frame)
-                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                .map_err(|e| ProjectLoadError::InvalidProjectReference {
                     path: node_label(node),
                     reason: format!("attach texture runtime: {e}"),
                 })?;
@@ -502,13 +501,13 @@ impl ProjectLoader {
             };
             runtime
                 .attach_runtime_node(node.id, Box::new(OutputNode::new()), frame)
-                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                .map_err(|e| ProjectLoadError::InvalidProjectReference {
                     path: node_label(node),
                     reason: format!("attach output runtime: {e}"),
                 })?;
             let sink_id = runtime
                 .runtime_output_sink_buffer_id(node.id)
-                .ok_or_else(|| ProjectLoadError::InvalidSourcePath {
+                .ok_or_else(|| ProjectLoadError::InvalidProjectReference {
                     path: node_label(node),
                     reason: String::from("output runtime node produced no sink buffer"),
                 })?;
@@ -529,7 +528,7 @@ impl ProjectLoader {
                     },
                     frame,
                 )
-                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                .map_err(|e| ProjectLoadError::InvalidProjectReference {
                     path: node_label(node),
                     reason: format!("bind output demand slot: {e}"),
                 })?;
@@ -575,7 +574,7 @@ impl ProjectLoader {
                     Box::new(ShaderNode::new(node.id, config, glsl_source)),
                     frame,
                 )
-                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                .map_err(|e| ProjectLoadError::InvalidProjectReference {
                     path: node_label(node),
                     reason: format!("attach shader runtime: {e}"),
                 })?;
@@ -614,14 +613,6 @@ impl ProjectLoader {
                 AssetContentType::ComputeShaderSource,
                 "compute shader source",
             )?;
-            let header =
-                generate_compute_shader_header(&config, runtime.slot_shapes()).map_err(|e| {
-                    ProjectLoadError::InvalidSourcePath {
-                        path: node_label(node),
-                        reason: format!("generate compute shader header: {e}"),
-                    }
-                })?;
-            let glsl_source = format!("{header}\n{source}");
             let bindings = config.bindings.clone();
             let consumed_slot_names = config
                 .consumed_slots
@@ -638,10 +629,24 @@ impl ProjectLoader {
             runtime
                 .attach_runtime_node(
                     node.id,
-                    Box::new(ComputeShaderNode::new(node.id, config, glsl_source, frame)),
+                    Box::new(
+                        ComputeShaderNode::from_asset_text(
+                            node.id,
+                            config,
+                            source,
+                            runtime.slot_shapes(),
+                            frame,
+                        )
+                        .map_err(|e| {
+                            ProjectLoadError::InvalidProjectReference {
+                                path: node_label(node),
+                                reason: format!("generate compute shader header: {e}"),
+                            }
+                        })?,
+                    ),
                     frame,
                 )
-                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                .map_err(|e| ProjectLoadError::InvalidProjectReference {
                     path: node_label(node),
                     reason: format!("attach compute shader runtime: {e}"),
                 })?;
@@ -680,7 +685,7 @@ impl ProjectLoader {
             };
             runtime
                 .attach_runtime_node(node.id, Box::new(FluidNode::new(node.id)), frame)
-                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                .map_err(|e| ProjectLoadError::InvalidProjectReference {
                     path: node_label(node),
                     reason: format!("attach fluid runtime: {e}"),
                 })?;
@@ -768,7 +773,7 @@ impl ProjectLoader {
                         },
                         frame,
                     )
-                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
                         path: node_label(node),
                         reason: format!("register output target binding: {e}"),
                     })?;
@@ -778,7 +783,7 @@ impl ProjectLoader {
             }
             for (entry_index, source) in entry_trigger_sources {
                 let target_slot = SlotPath::parse(&format!("entries[{entry_index}].trigger"))
-                    .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
                         path: node_label(node),
                         reason: format!("invalid playlist entry trigger path: {e}"),
                     })?;
@@ -802,7 +807,7 @@ impl ProjectLoader {
                     )),
                     frame,
                 )
-                .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                .map_err(|e| ProjectLoadError::InvalidProjectReference {
                     path: node_label(node),
                     reason: format!("attach playlist placeholder runtime: {e}"),
                 })?;
@@ -831,7 +836,7 @@ impl ProjectLoader {
                             )),
                             frame,
                         )
-                        .map_err(|e| ProjectLoadError::InvalidSourcePath {
+                        .map_err(|e| ProjectLoadError::InvalidProjectReference {
                             path: node_label(node),
                             reason: format!("attach fixture runtime: {e}"),
                         })?;
@@ -1036,13 +1041,13 @@ fn resolve_path_specifier_from_dir(
                 base_dir
                     .to_path_buf()
                     .join_relative(path.as_str())
-                    .ok_or_else(|| ProjectLoadError::InvalidSourcePath {
+                    .ok_or_else(|| ProjectLoadError::InvalidProjectReference {
                         path: path.as_str().to_string(),
                         reason: format!("path cannot be resolved relative to {base_dir:?}"),
                     })
             }
         }
-        ArtifactSpec::Lib(lib) => Err(ProjectLoadError::InvalidSourcePath {
+        ArtifactSpec::Lib(lib) => Err(ProjectLoadError::InvalidProjectReference {
             path: lib.to_string(),
             reason: String::from("library artifact specifiers are not supported for nodes yet"),
         }),
@@ -1118,12 +1123,12 @@ fn resolve_fixture_mapping(
                 "fixture SVG",
             )?;
             resolve_svg_path_mapping(
-                &svg,
+                &svg.text,
                 config.render_width(),
                 config.render_height(),
                 sample_diameter.value().0,
             )
-            .map_err(|e| ProjectLoadError::InvalidSourcePath {
+            .map_err(|e| ProjectLoadError::InvalidProjectReference {
                 path: node_label(node),
                 reason: format!("resolve svg fixture mapping: {e}"),
             })
@@ -1152,16 +1157,15 @@ fn projected_node_config<'a>(
     registry: &'a ProjectRegistry,
     node: &ProjectedNode,
 ) -> Result<&'a NodeDef, ProjectLoadError> {
-    let entry =
-        registry
-            .def(&node.def_location)
-            .ok_or_else(|| ProjectLoadError::InvalidSourcePath {
-                path: node_label(node),
-                reason: format!("missing definition payload for node {:?}", node.id),
-            })?;
+    let entry = registry.def(&node.def_location).ok_or_else(|| {
+        ProjectLoadError::InvalidProjectReference {
+            path: node_label(node),
+            reason: format!("missing definition payload for node {:?}", node.id),
+        }
+    })?;
     match &entry.state {
         NodeDefState::Loaded(def) => Ok(def),
-        other => Err(ProjectLoadError::InvalidSourcePath {
+        other => Err(ProjectLoadError::InvalidProjectReference {
             path: node_label(node),
             reason: format!("definition payload is not loaded: {other:?}"),
         }),
@@ -1174,15 +1178,14 @@ fn materialize_node_text_asset(
     node: &ProjectedNode,
     content_type: AssetContentType,
     label: &str,
-) -> Result<String, ProjectLoadError> {
+) -> Result<AssetText, ProjectLoadError> {
     let source = asset_for_node_content_type(registry, node, content_type)?;
-    registry
-        .materialize_asset_text(fs, &source)
-        .map(|asset| asset.text)
-        .map_err(|e| ProjectLoadError::InvalidSourcePath {
+    registry.materialize_asset_text(fs, &source).map_err(|e| {
+        ProjectLoadError::InvalidProjectReference {
             path: node_label(node),
             reason: format!("materialize {label}: {e:?}"),
-        })
+        }
+    })
 }
 
 fn asset_for_node_content_type(
@@ -1208,11 +1211,11 @@ fn asset_for_node_content_type(
 
     match matches.len() {
         1 => Ok(matches.remove(0)),
-        0 => Err(ProjectLoadError::InvalidSourcePath {
+        0 => Err(ProjectLoadError::InvalidProjectReference {
             path: node_label(node),
             reason: format!("node has no referenced {content_type:?} asset"),
         }),
-        _ => Err(ProjectLoadError::InvalidSourcePath {
+        _ => Err(ProjectLoadError::InvalidProjectReference {
             path: node_label(node),
             reason: format!("node has multiple referenced {content_type:?} assets"),
         }),
@@ -1235,7 +1238,7 @@ fn resolve_node_loc<'a>(
     expected: &str,
 ) -> Result<&'a ProjectedNode, ProjectLoadError> {
     resolve_relative_node_ref(projected_nodes, current, loc).ok_or_else(|| {
-        ProjectLoadError::InvalidSourcePath {
+        ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
             reason: format!("unknown {expected} node ref `{loc}`"),
         }
@@ -1301,14 +1304,15 @@ fn register_source_binding(
     bindings: &BindingDefs,
     frame: Revision,
 ) -> Result<(), ProjectLoadError> {
-    let source =
-        binding_source(bindings, slot_name).ok_or_else(|| ProjectLoadError::InvalidSourcePath {
+    let source = binding_source(bindings, slot_name).ok_or_else(|| {
+        ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
             reason: format!("{slot_name} source binding is missing"),
-        })?;
+        }
+    })?;
     let source = binding_source_endpoint(projected_nodes, current, source)?;
     let target_slot =
-        SlotPath::parse(slot_name).map_err(|e| ProjectLoadError::InvalidSourcePath {
+        SlotPath::parse(slot_name).map_err(|e| ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
             reason: format!("invalid target slot `{slot_name}`: {e}"),
         })?;
@@ -1337,7 +1341,7 @@ fn register_source_binding_at_path(
             },
             frame,
         )
-        .map_err(|e| ProjectLoadError::InvalidSourcePath {
+        .map_err(|e| ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
             reason: format!("register {binding_slot_name} source binding: {e}"),
         })?;
@@ -1371,7 +1375,7 @@ fn register_target_binding(
     };
     let target = binding_target_endpoint(projected_nodes, current, target)?;
     let source_slot =
-        SlotPath::parse(slot_name).map_err(|e| ProjectLoadError::InvalidSourcePath {
+        SlotPath::parse(slot_name).map_err(|e| ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
             reason: format!("invalid source slot `{slot_name}`: {e}"),
         })?;
@@ -1389,7 +1393,7 @@ fn register_target_binding(
             },
             frame,
         )
-        .map_err(|e| ProjectLoadError::InvalidSourcePath {
+        .map_err(|e| ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
             reason: format!("register {slot_name} target binding: {e}"),
         })?;
@@ -1429,7 +1433,7 @@ fn add_visual_default_output_binding(
             },
             frame,
         )
-        .map_err(|e| ProjectLoadError::InvalidSourcePath {
+        .map_err(|e| ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
             reason: format!("register visual default output binding: {e}"),
         })?;
@@ -1466,7 +1470,7 @@ fn register_clock_default_time_binding(
             },
             frame,
         )
-        .map_err(|e| ProjectLoadError::InvalidSourcePath {
+        .map_err(|e| ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
             reason: format!("register clock default time binding: {e}"),
         })?;
@@ -1503,7 +1507,7 @@ fn add_visual_default_time_binding(
             },
             frame,
         )
-        .map_err(|e| ProjectLoadError::InvalidSourcePath {
+        .map_err(|e| ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
             reason: format!("register visual shader default time binding: {e}"),
         })?;
@@ -1535,7 +1539,7 @@ fn register_fluid_default_time_binding(
             },
             frame,
         )
-        .map_err(|e| ProjectLoadError::InvalidSourcePath {
+        .map_err(|e| ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
             reason: format!("register fluid default time binding: {e}"),
         })?;
@@ -1571,7 +1575,7 @@ fn binding_ref_source(
     binding_ref: &AuthoredBindingRef,
 ) -> Result<BindingSource, ProjectLoadError> {
     match binding_ref {
-        AuthoredBindingRef::Unset => Err(ProjectLoadError::InvalidSourcePath {
+        AuthoredBindingRef::Unset => Err(ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
             reason: String::from("binding source cannot be unset"),
         }),
@@ -1595,7 +1599,7 @@ fn binding_target_endpoint(
     endpoint: &AuthoredBindingRef,
 ) -> Result<BindingTarget, ProjectLoadError> {
     match endpoint {
-        AuthoredBindingRef::Unset => Err(ProjectLoadError::InvalidSourcePath {
+        AuthoredBindingRef::Unset => Err(ProjectLoadError::InvalidProjectReference {
             path: node_label(current),
             reason: String::from("binding target cannot be unset"),
         }),
@@ -2487,7 +2491,7 @@ order = "inner_first"
         assert!(
             matches!(
                 err,
-                ProjectLoadError::InvalidSourcePath { ref reason, .. }
+                ProjectLoadError::InvalidProjectReference { ref reason, .. }
                     if reason.contains("unknown binding source node ref `..missing`")
             ),
             "expected missing binding source ref, got {err:?}"

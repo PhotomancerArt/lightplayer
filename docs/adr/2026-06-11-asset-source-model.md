@@ -1,4 +1,4 @@
-# ADR 2026-06-11: Asset Source Model
+# ADR 2026-06-11: Asset Location Model
 
 ## Status
 
@@ -22,27 +22,28 @@ Make assets a first-class `lpc-model::asset` concept.
 `ArtifactLocation` remains durable file identity. It answers "which file-like
 artifact is this?"
 
-`AssetSource` is project asset identity. It answers "where does this referenced
+`AssetLocation` is project asset identity. It answers "where does this referenced
 project asset come from?" Initial variants are:
 
 - artifact-backed assets, identified by `ArtifactLocation`;
 - inline assets, identified by owner `NodeDefLocation` plus `SlotPath`;
-- URL assets as reserved future vocabulary.
 
-`AssetKind` is the specialization point for how callers should interpret or
+URL-backed assets should be modeled as future `ArtifactLocation` variants, not
+as a separate asset location kind.
+
+`AssetContentType` is the specialization point for how callers should interpret or
 materialize bytes/text. Initial kinds include shader source, compute shader
 source, fixture SVG, image, text, and binary.
 
-`ProjectInventory.assets` is keyed by `AssetSource`, and `AssetEntry` carries
-the `AssetKind`, state, and revision. Inline assets are inventory entries, but
+`ProjectInventory.assets` is keyed by `AssetLocation`, and `AssetEntry` carries
+the `AssetContentType`, state, and revision. Inline assets are inventory entries, but
 they are not registered in `ArtifactStore`. Artifact-backed assets continue to
 use `ArtifactStore` for durable location tracking, filesystem reads, overlay
 body replacement, and filesystem change revisions.
 
-Source-file APIs remain named `source` where they specifically deal with
-authored source text. They now sit under the asset model: a file-backed
-`SourceFileRef` carries an `AssetSource`, and source materialization is a
-text-specific wrapper over asset-backed bytes plus inline slot text.
+Source-file APIs may remain named `source` where they specifically deal with
+authored source text. They sit under the asset model: source materialization is
+a text-specific wrapper over effective asset bytes plus inline slot text.
 
 Normal registry operation does not scan or snapshot every file. Assets and
 definitions are discovered by walking static authored references in the current
@@ -53,11 +54,12 @@ effective project graph.
 The project view can represent file-backed shader sources, inline shader
 sources, fixture SVGs, and future image assets with one inventory shape.
 
-Engine/runtime consumers can key loaded assets by `AssetSource` instead of
+Engine/runtime consumers can key loaded assets by `AssetLocation` instead of
 assuming every runtime asset maps directly to a file.
 
 The model still assumes statically discoverable references. Dynamic asset or
 node-definition references will need a later design.
 
-`AssetKind::Image` exists as vocabulary before image loading is implemented, so
-image support can reuse the same identity and inventory path when it arrives.
+`AssetContentType::Image` exists as vocabulary before image loading is
+implemented, so image support can reuse the same identity and inventory path
+when it arrives.

@@ -42,7 +42,7 @@ artifacts + overlay -> ProjectInventory { defs, assets }
 project state. It contains:
 
 - `NodeDefEntry` keyed by `NodeDefLocation`;
-- `AssetEntry` keyed by `AssetSource`, where file-backed sources wrap an
+- `AssetEntry` keyed by `AssetLocation`, where file-backed sources wrap an
   `ArtifactLocation` and inline sources are identified by owner `NodeDefLocation`
   plus `SlotPath`.
 - loaded and error states for both definitions and assets.
