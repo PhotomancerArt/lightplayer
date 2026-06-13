@@ -215,7 +215,7 @@ aliases = ["IO15"]
 
 [[gpio]]
 address = "/gpio/16"
-display_label = "d6"
+display_label = "D6"
 capabilities = [
     "gpio-output",
     "gpio-input",
@@ -227,7 +227,7 @@ aliases = [
 
 [[gpio]]
 address = "/gpio/17"
-display_label = "d7"
+display_label = "D7"
 capabilities = [
     "gpio-output",
     "gpio-input",
@@ -239,7 +239,7 @@ aliases = [
 
 [[gpio]]
 address = "/gpio/18"
-display_label = "d10"
+display_label = "D10"
 capabilities = [
     "gpio-output",
     "gpio-input",
@@ -252,7 +252,7 @@ location = "known WS281x output header"
 
 [[gpio]]
 address = "/gpio/19"
-display_label = "d8"
+display_label = "D8"
 capabilities = [
     "gpio-output",
     "gpio-input",

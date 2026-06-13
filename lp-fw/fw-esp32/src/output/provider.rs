@@ -13,17 +13,12 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
-use esp_hal::Blocking;
-use esp_hal::gpio::interconnect::PeripheralOutput;
-use esp_hal::rmt::{ConfigError as RmtConfigError, Rmt};
 use lpc_hardware::OutputError;
 use lpc_hardware::{
     HardwareEndpointError, HardwareSystem, HwEndpointSpec, Ws281xConfig, Ws281xOutput,
 };
 use lpc_shared::DisplayPipeline;
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
-
-use crate::output::Esp32RmtWs281xDriver;
 
 const MAX_LEDS: usize = 256;
 const FRAME_INTERVAL_US: u64 = 16_667;
@@ -49,17 +44,6 @@ impl Esp32OutputProvider {
             channels: RefCell::new(BTreeMap::new()),
             next_handle: RefCell::new(1),
         }
-    }
-
-    pub fn init_rmt<O>(
-        rmt: Rmt<'static, Blocking>,
-        pin: O,
-        num_leds: usize,
-    ) -> Result<(), RmtConfigError>
-    where
-        O: PeripheralOutput<'static>,
-    {
-        Esp32RmtWs281xDriver::init_rmt(rmt, pin, num_leds)
     }
 }
 

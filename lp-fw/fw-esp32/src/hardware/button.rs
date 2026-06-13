@@ -1,13 +1,12 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
+use alloc::format;
 use alloc::rc::Rc;
-use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
-use core::cell::RefCell;
 
-use esp_hal::gpio::{Input, InputConfig, Pull};
+use esp_hal::gpio::{AnyPin, Input, InputConfig, Pull};
 use lpc_hardware::{
     ButtonConfig, ButtonDebouncer, ButtonDriver, ButtonEvent, ButtonInput, HardwareEndpointError,
     HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint, HwEndpointId,
@@ -16,55 +15,72 @@ use lpc_hardware::{
 use lpc_model::HwEndpointSpec;
 
 const DRIVER_ID: &str = "esp32-gpio-button";
-const GPIO20_SPEC: &str = "button:gpio:D9";
+const DISPLAY_LABEL: &str = "ESP32 GPIO Button";
+const MAX_ESP32C6_GPIO: u8 = 30;
 
-pub struct Esp32Gpio20ButtonDriver {
+pub struct Esp32GpioButtonDriver {
     registry: Rc<HwRegistry>,
-    input: Rc<RefCell<Option<Input<'static>>>>,
 }
 
-impl Esp32Gpio20ButtonDriver {
-    pub fn new(registry: Rc<HwRegistry>, pin: esp_hal::peripherals::GPIO20<'static>) -> Self {
-        Self {
-            registry,
-            input: Rc::new(RefCell::new(Some(Input::new(
-                pin,
-                InputConfig::default().with_pull(Pull::Up),
-            )))),
+impl Esp32GpioButtonDriver {
+    pub fn new(registry: Rc<HwRegistry>) -> Self {
+        Self { registry }
+    }
+
+    fn endpoint_id(address: &HwAddress) -> HwEndpointId {
+        HwEndpointId::for_driver_address(DRIVER_ID, address)
+    }
+
+    fn gpio_for_endpoint(
+        &self,
+        endpoint_id: &HwEndpointId,
+    ) -> Result<HwAddress, HardwareEndpointError> {
+        for endpoint in self.endpoints() {
+            if endpoint.id() == endpoint_id {
+                return Ok(endpoint.address().clone());
+            }
         }
-    }
 
-    fn source() -> HwAddress {
-        HwAddress::gpio(20)
-    }
-
-    fn endpoint_id() -> HwEndpointId {
-        HwEndpointId::for_driver_address(DRIVER_ID, &Self::source())
+        Err(HardwareEndpointError::UnknownEndpoint {
+            kind: HwEndpointKind::Button,
+            endpoint_id: endpoint_id.clone(),
+        })
     }
 }
 
-impl HwDriver for Esp32Gpio20ButtonDriver {
+impl HwDriver for Esp32GpioButtonDriver {
     fn driver_id(&self) -> &str {
         DRIVER_ID
     }
 
     fn display_label(&self) -> &str {
-        "ESP32 GPIO Button"
+        DISPLAY_LABEL
     }
 }
 
-impl ButtonDriver for Esp32Gpio20ButtonDriver {
+impl ButtonDriver for Esp32GpioButtonDriver {
     fn endpoints(&self) -> Vec<HwEndpoint> {
-        let source = Self::source();
-        vec![HwEndpoint::new(
-            Self::endpoint_id(),
-            HwEndpointSpec::from_static(GPIO20_SPEC),
-            HwEndpointKind::Button,
-            DRIVER_ID,
-            source.clone(),
-            "D9",
-            self.registry.endpoint_status_for(&source),
-        )]
+        let mut endpoints = Vec::new();
+        for resource in self.registry.manifest().resources() {
+            if !resource.supports(HwCapability::GpioInput) {
+                continue;
+            }
+            if !has_board_assigned_label(resource.address(), resource.display_label()) {
+                continue;
+            }
+            let address = resource.address().clone();
+            let spec = button_gpio_spec(resource.display_label());
+            endpoints.push(HwEndpoint::new(
+                Self::endpoint_id(&address),
+                spec,
+                HwEndpointKind::Button,
+                DRIVER_ID,
+                address,
+                resource.display_label(),
+                self.registry.endpoint_status_for(resource.address()),
+            ));
+        }
+        endpoints
     }
 
     fn open(
@@ -72,31 +88,23 @@ impl ButtonDriver for Esp32Gpio20ButtonDriver {
         endpoint_id: &HwEndpointId,
         config: ButtonConfig,
     ) -> Result<Box<dyn ButtonInput>, HardwareEndpointError> {
-        if endpoint_id != &Self::endpoint_id() {
-            return Err(HardwareEndpointError::UnknownEndpoint {
-                kind: HwEndpointKind::Button,
-                endpoint_id: endpoint_id.clone(),
-            });
-        }
-
-        let source = Self::source();
+        let source = self.gpio_for_endpoint(endpoint_id)?;
+        let gpio = gpio_number(&source)?;
         self.registry
             .ensure_capability(&source, HwCapability::GpioInput)?;
         let lease = self
             .registry
             .claim_bundle(HwClaim::new(DRIVER_ID, vec![source.clone()]))?;
 
-        let Some(input) = self.input.borrow_mut().take() else {
-            self.registry.release(&lease)?;
-            return Err(HardwareEndpointError::EndpointUnavailable {
-                endpoint_id: endpoint_id.clone(),
-                reason: String::from("GPIO20 is already open"),
-            });
-        };
+        let input = Input::new(
+            // Board init drops the concrete HAL GPIO token after startup. The hardware registry
+            // owns logical exclusivity, so the driver recreates the erased pin after claiming it.
+            unsafe { AnyPin::steal(gpio) },
+            InputConfig::default().with_pull(Pull::Up),
+        );
 
-        Ok(Box::new(Esp32ButtonInput::new_gpio20(
+        Ok(Box::new(Esp32ButtonInput::new(
             Rc::clone(&self.registry),
-            Rc::clone(&self.input),
             source,
             lease,
             input,
@@ -108,16 +116,14 @@ impl ButtonDriver for Esp32Gpio20ButtonDriver {
 pub struct Esp32ButtonInput {
     registry: Rc<HwRegistry>,
     source: HwAddress,
-    input_home: Rc<RefCell<Option<Input<'static>>>>,
     lease: Option<HardwareLease>,
     input: Option<Input<'static>>,
     debouncer: ButtonDebouncer,
 }
 
 impl Esp32ButtonInput {
-    fn new_gpio20(
+    fn new(
         registry: Rc<HwRegistry>,
-        input_home: Rc<RefCell<Option<Input<'static>>>>,
         source: HwAddress,
         lease: HardwareLease,
         input: Input<'static>,
@@ -126,7 +132,6 @@ impl Esp32ButtonInput {
         Self {
             registry,
             source: source.clone(),
-            input_home,
             lease: Some(lease),
             input: Some(input),
             debouncer: ButtonDebouncer::new(source, config.stable_ms()),
@@ -139,9 +144,7 @@ impl Esp32ButtonInput {
         } else {
             Ok(())
         };
-        if let Some(input) = self.input.take() {
-            *self.input_home.borrow_mut() = Some(input);
-        }
+        let _ = self.input.take();
         release_result
     }
 }
@@ -161,4 +164,35 @@ impl Drop for Esp32ButtonInput {
     fn drop(&mut self) {
         let _ = self.close();
     }
+}
+
+fn gpio_number(address: &HwAddress) -> Result<u8, HardwareEndpointError> {
+    let Some(raw) = address.as_str().strip_prefix("/gpio/") else {
+        return Err(HardwareEndpointError::UnsupportedConfig {
+            reason: format!("button endpoint address is not a GPIO: {address}"),
+        });
+    };
+    let gpio = raw
+        .parse::<u8>()
+        .map_err(|_| HardwareEndpointError::UnsupportedConfig {
+            reason: format!("invalid ESP32 GPIO address: {address}"),
+        })?;
+    if gpio > MAX_ESP32C6_GPIO {
+        return Err(HardwareEndpointError::UnsupportedConfig {
+            reason: format!("ESP32-C6 GPIO {gpio} is outside the supported range"),
+        });
+    }
+    Ok(gpio)
+}
+
+fn button_gpio_spec(config: &str) -> HwEndpointSpec {
+    HwEndpointSpec::parse(alloc::format!("button:gpio:{config}"))
+        .expect("manifest display label should form a valid endpoint spec")
+}
+
+fn has_board_assigned_label(address: &HwAddress, display_label: &str) -> bool {
+    let Ok(gpio) = gpio_number(address) else {
+        return false;
+    };
+    !display_label.eq_ignore_ascii_case(&format!("GPIO{gpio}"))
 }

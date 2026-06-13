@@ -361,7 +361,7 @@ use {
     alloc::{boxed::Box, rc::Rc, sync::Arc},
     board::esp32c6::init::{init_board, start_runtime},
     core::cell::RefCell,
-    hardware::button::Esp32Gpio20ButtonDriver,
+    hardware::button::Esp32GpioButtonDriver,
     hardware::manifest_loader::load_hardware_manifest,
     lpa_server::{ButtonService, Graphics, LpGraphics, LpServer},
     lpc_hardware::{HardwareSystem, HwRegistry},
@@ -500,7 +500,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 
     // Initialize board (clock, heap, runtime) and get hardware peripherals
     esp_println::println!("[INIT] Initializing board...");
-    let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, flash, _gpio4, gpio20, wifi) =
+    let (sw_int, timg0, rmt_peripheral, usb_device, _gpio18, flash, _gpio4, _gpio20, wifi) =
         init_board();
     esp_println::println!("[INIT] Board initialized, starting runtime...");
     start_runtime(timg0, sw_int);
@@ -596,13 +596,13 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     );
     let hardware_registry = Rc::new(HwRegistry::new(hardware_manifest));
     let mut hardware_system = HardwareSystem::new(Rc::clone(&hardware_registry));
-    hardware_system.add_ws281x_driver(Box::new(Esp32RmtWs281xDriver::new(Rc::clone(
+    hardware_system.add_ws281x_driver(Box::new(Esp32RmtWs281xDriver::new(
+        Rc::clone(&hardware_registry),
+        rmt,
+    )));
+    hardware_system.add_button_driver(Box::new(Esp32GpioButtonDriver::new(Rc::clone(
         &hardware_registry,
     ))));
-    hardware_system.add_button_driver(Box::new(Esp32Gpio20ButtonDriver::new(
-        Rc::clone(&hardware_registry),
-        gpio20,
-    )));
     #[cfg(feature = "radio")]
     {
         let radio_driver = Esp32EspNowRadioDriver::new(Rc::clone(&hardware_registry), wifi)
@@ -621,16 +621,6 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     // Initialize output provider
     esp_println::println!("[INIT] Creating output provider...");
     let output_provider = Esp32OutputProvider::new(Rc::clone(&hardware_system));
-
-    // Initialize RMT channel with GPIO18 (hardcoded for now)
-    // Use 256 LEDs as a reasonable default (will work for demo project which has 241 LEDs)
-    const NUM_LEDS: usize = 256;
-    esp_println::println!(
-        "[INIT] Initializing RMT channel with GPIO18, {} LEDs...",
-        NUM_LEDS
-    );
-    Esp32OutputProvider::init_rmt(rmt, gpio18, NUM_LEDS).expect("Failed to initialize RMT channel");
-    esp_println::println!("[INIT] RMT channel initialized");
 
     let output_provider: Rc<RefCell<dyn OutputProvider>> = Rc::new(RefCell::new(output_provider));
     esp_println::println!("[INIT] Output provider created");

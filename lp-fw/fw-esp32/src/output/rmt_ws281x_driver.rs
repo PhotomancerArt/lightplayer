@@ -8,10 +8,11 @@ use alloc::rc::Rc;
 use alloc::string::ToString;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::cell::RefCell;
 
 use esp_hal::Blocking;
-use esp_hal::gpio::interconnect::PeripheralOutput;
-use esp_hal::rmt::{ConfigError as RmtConfigError, Rmt};
+use esp_hal::gpio::AnyPin;
+use esp_hal::rmt::Rmt;
 use lpc_hardware::{
     HardwareEndpointError, HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
     HwEndpointId, HwEndpointKind, HwEndpointSpec, HwEndpointStatus, HwRegistry, OutputError,
@@ -22,67 +23,48 @@ use crate::output::{LedChannel, LedTransaction};
 
 const DRIVER_ID: &str = "esp32-rmt-ws281x0";
 const DISPLAY_LABEL: &str = "ESP32 RMT WS281x 0";
-const OUTPUT_GPIO: u32 = 18;
 const MAX_LEDS: usize = 256;
-const ENDPOINT_SPEC: &str = "ws281x:rmt:D10";
+const MAX_ESP32C6_GPIO: u8 = 30;
 
-// Unsafe static to store the currently initialized GPIO18-backed LED channel.
+// Unsafe static to store the currently initialized LED channel.
 // This is needed because LedChannel has lifetime constraints that do not fit the
 // trait object owned by the root hardware system.
 static mut LED_CHANNEL: Option<LedChannel<'static>> = None;
+static mut LED_GPIO: Option<u32> = None;
 static mut CURRENT_TRANSACTION: Option<LedTransaction<'static>> = None;
 
 pub struct Esp32RmtWs281xDriver {
     registry: Rc<HwRegistry>,
-    gpio_address: HwAddress,
     timing_address: HwAddress,
+    rmt: Rc<RefCell<Option<Rmt<'static, Blocking>>>>,
 }
 
 impl Esp32RmtWs281xDriver {
-    pub fn new(registry: Rc<HwRegistry>) -> Self {
+    pub fn new(registry: Rc<HwRegistry>, rmt: Rmt<'static, Blocking>) -> Self {
         Self {
             registry,
-            gpio_address: HwAddress::gpio(OUTPUT_GPIO),
             timing_address: HwAddress::rmt_ws281x(0),
+            rmt: Rc::new(RefCell::new(Some(rmt))),
         }
     }
 
-    pub fn init_rmt<O>(
-        rmt: Rmt<'static, Blocking>,
-        pin: O,
-        num_leds: usize,
-    ) -> Result<(), RmtConfigError>
-    where
-        O: PeripheralOutput<'static>,
-    {
-        unsafe {
-            let channel_ptr = core::ptr::addr_of_mut!(LED_CHANNEL);
-            if (*channel_ptr).is_some() {
-                return Ok(());
-            }
-            let channel = LedChannel::new(rmt, pin, num_leds)?;
-            (*channel_ptr) = Some(core::mem::transmute(channel));
-        }
-        Ok(())
+    fn endpoint_id(&self, spec: &HwEndpointSpec) -> HwEndpointId {
+        HwEndpointId::for_driver_spec(self.driver_id(), spec)
     }
 
-    fn endpoint_id(&self) -> HwEndpointId {
-        HwEndpointId::for_driver_spec(self.driver_id(), &endpoint_spec())
-    }
-
-    fn endpoint_status(&self) -> HwEndpointStatus {
-        let gpio_status = self.registry.endpoint_status_for(&self.gpio_address);
+    fn endpoint_status(&self, gpio_address: &HwAddress) -> HwEndpointStatus {
+        let gpio_status = self.registry.endpoint_status_for(gpio_address);
         if !gpio_status.is_available() {
             return gpio_status;
         }
 
         match self.registry.endpoint_status_for(&self.timing_address) {
             HwEndpointStatus::Available => {
-                if rmt_channel_is_initialized() {
+                if rmt_channel_is_available_for(gpio_address) {
                     HwEndpointStatus::Available
                 } else {
                     HwEndpointStatus::Unavailable {
-                        reason: "RMT channel is not initialized".into(),
+                        reason: "RMT channel is already initialized for another GPIO".into(),
                     }
                 }
             }
@@ -94,6 +76,61 @@ impl Esp32RmtWs281xDriver {
             },
             HwEndpointStatus::Unavailable { reason } => HwEndpointStatus::Unavailable { reason },
         }
+    }
+
+    fn gpio_for_endpoint(
+        &self,
+        endpoint_id: &HwEndpointId,
+    ) -> Result<HwAddress, HardwareEndpointError> {
+        for endpoint in self.endpoints() {
+            if endpoint.id() == endpoint_id {
+                return Ok(endpoint.address().clone());
+            }
+        }
+
+        Err(HardwareEndpointError::UnknownEndpoint {
+            kind: HwEndpointKind::Ws281x,
+            endpoint_id: endpoint_id.clone(),
+        })
+    }
+
+    fn ensure_rmt_initialized(
+        &self,
+        gpio_address: &HwAddress,
+        num_leds: usize,
+    ) -> Result<(), HardwareEndpointError> {
+        let gpio = u32::from(gpio_number(gpio_address)?);
+        unsafe {
+            let channel_ptr = core::ptr::addr_of_mut!(LED_CHANNEL);
+            let gpio_ptr = core::ptr::addr_of_mut!(LED_GPIO);
+            if (*channel_ptr).is_some() {
+                if (*gpio_ptr) == Some(gpio) {
+                    return Ok(());
+                }
+                return Err(HardwareEndpointError::EndpointUnavailable {
+                    endpoint_id: HwEndpointId::new(gpio_address.as_str()),
+                    reason: "RMT channel is already initialized for another GPIO".into(),
+                });
+            }
+
+            let Some(rmt) = self.rmt.borrow_mut().take() else {
+                return Err(HardwareEndpointError::EndpointUnavailable {
+                    endpoint_id: HwEndpointId::new(gpio_address.as_str()),
+                    reason: "RMT peripheral is already in use".into(),
+                });
+            };
+            // Board init drops the concrete HAL GPIO token after startup. The hardware registry
+            // owns logical exclusivity, so the driver recreates the erased pin after claiming it.
+            let pin = AnyPin::steal(gpio as u8);
+            let channel = LedChannel::new(rmt, pin, num_leds).map_err(|error| {
+                HardwareEndpointError::Other {
+                    message: format!("RMT channel init failed: {error:?}"),
+                }
+            })?;
+            (*channel_ptr) = Some(core::mem::transmute(channel));
+            (*gpio_ptr) = Some(gpio);
+        }
+        Ok(())
     }
 }
 
@@ -109,14 +146,10 @@ impl HwDriver for Esp32RmtWs281xDriver {
 
 impl Ws281xDriver for Esp32RmtWs281xDriver {
     fn endpoints(&self) -> Vec<HwEndpoint> {
-        let Some(resource) = self.registry.manifest().resource(&self.gpio_address) else {
-            return Vec::new();
-        };
-        if !resource.supports(HwCapability::GpioOutput)
-            || self
-                .registry
-                .ensure_capability(&self.timing_address, HwCapability::Rmt)
-                .is_err()
+        if self
+            .registry
+            .ensure_capability(&self.timing_address, HwCapability::Rmt)
+            .is_err()
             || self
                 .registry
                 .ensure_capability(&self.timing_address, HwCapability::Ws281xOutput)
@@ -125,15 +158,26 @@ impl Ws281xDriver for Esp32RmtWs281xDriver {
             return Vec::new();
         }
 
-        vec![HwEndpoint::new(
-            self.endpoint_id(),
-            endpoint_spec(),
-            HwEndpointKind::Ws281x,
-            self.driver_id(),
-            self.gpio_address.clone(),
-            resource.display_label(),
-            self.endpoint_status(),
-        )]
+        let mut endpoints = Vec::new();
+        for resource in self.registry.manifest().resources() {
+            if !resource.supports(HwCapability::GpioOutput)
+                || !has_board_assigned_label(resource.address(), resource.display_label())
+            {
+                continue;
+            }
+            let address = resource.address().clone();
+            let spec = ws281x_rmt_spec(resource.display_label());
+            endpoints.push(HwEndpoint::new(
+                self.endpoint_id(&spec),
+                spec,
+                HwEndpointKind::Ws281x,
+                self.driver_id(),
+                address,
+                resource.display_label(),
+                self.endpoint_status(resource.address()),
+            ));
+        }
+        endpoints
     }
 
     fn open(
@@ -141,20 +185,17 @@ impl Ws281xDriver for Esp32RmtWs281xDriver {
         endpoint_id: &HwEndpointId,
         config: Ws281xConfig,
     ) -> Result<Box<dyn Ws281xOutput>, HardwareEndpointError> {
-        if endpoint_id != &self.endpoint_id() {
-            return Err(HardwareEndpointError::UnknownEndpoint {
-                kind: HwEndpointKind::Ws281x,
-                endpoint_id: endpoint_id.clone(),
-            });
-        }
+        let gpio_address = self.gpio_for_endpoint(endpoint_id)?;
         validate_byte_count(config.byte_count())?;
 
-        let endpoint = self.endpoints().into_iter().next().ok_or_else(|| {
-            HardwareEndpointError::UnknownEndpoint {
+        let endpoint = self
+            .endpoints()
+            .into_iter()
+            .find(|endpoint| endpoint.id() == endpoint_id)
+            .ok_or_else(|| HardwareEndpointError::UnknownEndpoint {
                 kind: HwEndpointKind::Ws281x,
                 endpoint_id: endpoint_id.clone(),
-            }
-        })?;
+            })?;
         if !endpoint.is_available() {
             return Err(HardwareEndpointError::EndpointUnavailable {
                 endpoint_id: endpoint_id.clone(),
@@ -167,15 +208,23 @@ impl Ws281xDriver for Esp32RmtWs281xDriver {
         }
 
         self.registry
-            .ensure_capability(&self.gpio_address, HwCapability::GpioOutput)?;
+            .ensure_capability(&gpio_address, HwCapability::GpioOutput)?;
         self.registry
             .ensure_capability(&self.timing_address, HwCapability::Rmt)?;
         self.registry
             .ensure_capability(&self.timing_address, HwCapability::Ws281xOutput)?;
         let lease = self.registry.claim_bundle(HwClaim::new(
             self.driver_id(),
-            vec![self.gpio_address.clone(), self.timing_address.clone()],
+            vec![gpio_address.clone(), self.timing_address.clone()],
         ))?;
+
+        if let Err(error) = self.ensure_rmt_initialized(
+            &gpio_address,
+            capped_byte_count(config.byte_count()) as usize / 3,
+        ) {
+            let _ = self.registry.release(&lease);
+            return Err(error);
+        }
 
         Ok(Box::new(Esp32RmtWs281xOutput {
             registry: Rc::clone(&self.registry),
@@ -221,15 +270,15 @@ impl Drop for Esp32RmtWs281xOutput {
     }
 }
 
-fn rmt_channel_is_initialized() -> bool {
+fn rmt_channel_is_available_for(gpio_address: &HwAddress) -> bool {
+    let Ok(gpio) = gpio_number(gpio_address) else {
+        return false;
+    };
     unsafe {
         let channel_ptr = core::ptr::addr_of!(LED_CHANNEL);
-        (*channel_ptr).is_some()
+        let gpio_ptr = core::ptr::addr_of!(LED_GPIO);
+        (*channel_ptr).is_none() || (*gpio_ptr) == Some(u32::from(gpio))
     }
-}
-
-fn endpoint_spec() -> HwEndpointSpec {
-    HwEndpointSpec::from_static(ENDPOINT_SPEC)
 }
 
 fn transmit_rmt_buffer(rmt_buffer: &[u8]) -> Result<(), OutputError> {
@@ -288,4 +337,35 @@ fn endpoint_error_to_output_error(error: HardwareEndpointError) -> OutputError {
             reason: other.to_string(),
         },
     }
+}
+
+fn gpio_number(address: &HwAddress) -> Result<u8, HardwareEndpointError> {
+    let Some(raw) = address.as_str().strip_prefix("/gpio/") else {
+        return Err(HardwareEndpointError::UnsupportedConfig {
+            reason: format!("WS281x endpoint address is not a GPIO: {address}"),
+        });
+    };
+    let gpio = raw
+        .parse::<u8>()
+        .map_err(|_| HardwareEndpointError::UnsupportedConfig {
+            reason: format!("invalid ESP32 GPIO address: {address}"),
+        })?;
+    if gpio > MAX_ESP32C6_GPIO {
+        return Err(HardwareEndpointError::UnsupportedConfig {
+            reason: format!("ESP32-C6 GPIO {gpio} is outside the supported range"),
+        });
+    }
+    Ok(gpio)
+}
+
+fn has_board_assigned_label(address: &HwAddress, display_label: &str) -> bool {
+    let Ok(gpio) = gpio_number(address) else {
+        return false;
+    };
+    !display_label.eq_ignore_ascii_case(&format!("GPIO{gpio}"))
+}
+
+fn ws281x_rmt_spec(config: &str) -> HwEndpointSpec {
+    HwEndpointSpec::parse(format!("ws281x:rmt:{config}"))
+        .expect("manifest display label should form a valid endpoint spec")
 }
