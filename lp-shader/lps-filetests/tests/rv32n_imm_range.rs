@@ -11,7 +11,7 @@
 //! return, runs it through `NativeEmuEngine` in `FloatMode::Q32`, and
 //! checks the result against `i32`-wrapping LPIR semantics.
 
-use std::collections::BTreeMap;
+use lp_collection::VecMap;
 
 use lpir::builder::FunctionBuilder;
 use lpir::{FloatMode, FuncId, IrType, LpirModule, LpirOp};
@@ -204,7 +204,7 @@ where
 
     let module = LpirModule {
         imports: vec![],
-        functions: BTreeMap::from([(FuncId(0), func)]),
+        functions: VecMap::from([(FuncId(0), func)]),
     };
 
     let sig = LpsModuleSig {

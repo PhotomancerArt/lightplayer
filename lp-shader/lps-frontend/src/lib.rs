@@ -599,7 +599,8 @@ float test_main() {
         let ret = g
             .body
             .iter()
-            .rfind(|op| matches!(op, LpirOp::Return { .. }))
+            .filter(|op| matches!(op, LpirOp::Return { .. }))
+            .last()
             .expect("return op");
         match ret {
             LpirOp::Return { values } => assert_eq!(values.count, 0),

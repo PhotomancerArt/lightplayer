@@ -10,6 +10,7 @@ workspace = true
 
 [dependencies]
 lps-shared = { path = "../lps-shared" }
+lp-collection = { workspace = true }
 lps-diagnostics = { path = "../lps-diagnostics", features = ["std"] }
 lps-frontend = { path = "../lps-frontend" }
 lps-glsl = { path = "../lps-glsl" }

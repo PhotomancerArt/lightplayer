@@ -1,10 +1,10 @@
 //! Compile GLSL source for a specific target (one LPVM module per file).
 
 use crate::targets::Target;
+use lp_collection::VecMap;
 use lp_riscv_emu::LogLevel;
 use lpir::CompilerConfig;
 use lps_shared::TextureBindingSpec;
-use std::collections::BTreeMap;
 use std::sync::Mutex;
 
 use super::filetest_lpvm::CompiledShader;
@@ -62,7 +62,7 @@ pub fn compile_for_target(
     _relative_path: &str,
     log_level: LogLevel,
     compiler_config: &CompilerConfig,
-    texture_specs: &BTreeMap<String, TextureBindingSpec>,
+    texture_specs: &VecMap<String, TextureBindingSpec>,
 ) -> anyhow::Result<CompiledShader> {
     CompiledShader::compile_glsl(source, target, log_level, compiler_config, texture_specs)
 }
@@ -102,7 +102,7 @@ uniform sampler2D tex;
 "#;
         let target = jit_q32_target();
         let cfg = CompilerConfig::default();
-        let empty = BTreeMap::new();
+        let empty = VecMap::new();
         let err = match compile_for_target(glsl, &target, "", LogLevel::None, &cfg, &empty) {
             Err(e) => e,
             Ok(_) => panic!("expected texture spec validation error"),
@@ -122,7 +122,7 @@ uniform sampler2D tex;
 "#;
         let target = jit_q32_target();
         let cfg = CompilerConfig::default();
-        let mut specs = BTreeMap::new();
+        let mut specs = VecMap::new();
         specs.insert(String::from("tex"), sample_spec());
         compile_for_target(glsl, &target, "", LogLevel::None, &cfg, &specs)
             .expect("compile with matching texture spec");
@@ -135,7 +135,7 @@ float add(float a, float b) { return a + b; }
 "#;
         let target = jit_q32_target();
         let cfg = CompilerConfig::default();
-        let mut specs = BTreeMap::new();
+        let mut specs = VecMap::new();
         specs.insert(String::from("orphanTex"), sample_spec());
         let err = match compile_for_target(glsl, &target, "", LogLevel::None, &cfg, &specs) {
             Err(e) => e,

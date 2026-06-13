@@ -381,7 +381,11 @@ mod tests {
             panic!("expected shader node TOML");
         };
         assert_eq!(
-            shader_config.shader_source().path_value().unwrap().as_str(),
+            shader_config
+                .shader_source()
+                .artifact_value()
+                .unwrap()
+                .to_string(),
             "shader.glsl"
         );
         assert!(matches!(
