@@ -55,7 +55,7 @@ impl<T> ChunkedVec<T> {
     /// Create a ChunkedVec with capacity for at least `cap` elements.
     /// The last chunk starts empty and grows normally up to CHUNK_SIZE.
     pub fn with_capacity(cap: usize) -> Self {
-        let n_chunks = (cap + CHUNK_SIZE - 1) / CHUNK_SIZE;
+        let n_chunks = cap.div_ceil(CHUNK_SIZE);
         let mut chunks = Vec::with_capacity(n_chunks.max(1));
         if cap > 0 {
             chunks.push(Vec::new());
@@ -65,6 +65,10 @@ impl<T> ChunkedVec<T> {
 
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     /// Asserts all inner Vecs have len and capacity ≤ CHUNK_SIZE.
@@ -118,7 +122,7 @@ impl<T> ChunkedVec<T> {
     {
         if new_len <= self.len {
             self.len = new_len;
-            let keep_chunks = (new_len + CHUNK_SIZE - 1) / CHUNK_SIZE;
+            let keep_chunks = new_len.div_ceil(CHUNK_SIZE);
             if keep_chunks == 0 {
                 self.chunks.clear();
                 return;
@@ -255,15 +259,13 @@ impl<'a, T> Iterator for Iter<'a, T> {
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if let Some(ref mut it) = self.current {
-                if let Some(x) = it.next() {
-                    return Some(x);
-                }
+            if let Some(ref mut it) = self.current
+                && let Some(x) = it.next()
+            {
+                return Some(x);
             }
             self.current = self.chunks.next().map(|c| c.iter());
-            if self.current.is_none() {
-                return None;
-            }
+            self.current.as_ref()?;
         }
     }
 }

@@ -227,9 +227,7 @@ impl ProjectRegistry {
         let after = self.derive_inventory(fs, frame, ctx);
         self.inventory = after;
 
-        Ok(CommitResult {
-            artifact_changes: artifact_changes,
-        })
+        Ok(CommitResult { artifact_changes })
     }
 
     fn materialize_node_def_bytes_for_commit(

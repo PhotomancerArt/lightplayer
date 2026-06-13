@@ -1495,16 +1495,12 @@ fn loaded_registry_def<'a>(
     location: &NodeDefLocation,
 ) -> Result<&'a NodeDef, SessionResolveError> {
     let entry = registry.def(location).ok_or_else(|| {
-        SessionResolveError::other(format!(
-            "node definition {:?} is not in inventory",
-            location
-        ))
+        SessionResolveError::other(format!("node definition {location:?} is not in inventory"))
     })?;
     match &entry.state {
         NodeDefState::Loaded(def) => Ok(def),
         other => Err(SessionResolveError::other(format!(
-            "node definition {:?} has no loaded payload: {other:?}",
-            location
+            "node definition {location:?} has no loaded payload: {other:?}"
         ))),
     }
 }
