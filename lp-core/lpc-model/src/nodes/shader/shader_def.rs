@@ -55,7 +55,7 @@ mod tests {
     use crate::nodes::shader::{AddSubMode, DivMode, MulMode};
     use crate::{
         NodeDef, NodeKind, RenderOrder, ShaderDefView, SlotPath, SlotRecordShape, SlotShape,
-        SlotShapeRegistry,
+        SlotShapeRegistry, StaticSlotShape, StaticSlotShapeDescriptor,
     };
     use alloc::string::ToString;
 
@@ -106,8 +106,6 @@ mod tests {
 
     #[test]
     fn shader_def_shape_references_nested_static_records() {
-        use crate::StaticSlotShape;
-
         let SlotShape::Record {
             fields: shader_fields,
             ..
@@ -124,9 +122,10 @@ mod tests {
             .find(|field| field.name.as_str() == "glsl_opts")
             .expect("glsl_opts field");
         assert_eq!(
-            glsl_opts.shape,
-            SlotShape::reference(<GlslOpts as StaticSlotShape>::SHAPE_ID),
-            "glsl_opts should reference the GlslOpts record shape"
+            &glsl_opts.shape,
+            &SlotShape::Ref {
+                id: GlslOpts::SHAPE_ID
+            }
         );
 
         let param_defs = shader_fields
@@ -138,8 +137,9 @@ mod tests {
         };
         assert_eq!(
             value.as_ref(),
-            &SlotShape::reference(<ShaderParamDef as StaticSlotShape>::SHAPE_ID),
-            "param_defs value should reference the shader param record"
+            &SlotShape::Ref {
+                id: ShaderParamDef::SHAPE_ID
+            }
         );
 
         let consumed = shader_fields
@@ -151,8 +151,51 @@ mod tests {
         };
         assert_eq!(
             value.as_ref(),
-            &SlotShape::reference(<ShaderSlotDef as StaticSlotShape>::SHAPE_ID),
-            "consumed value should reference the shader slot record"
+            &SlotShape::Ref {
+                id: ShaderSlotDef::SHAPE_ID
+            }
+        );
+
+        let static_shape =
+            crate::slot_shapes::static_slot_shape(ShaderDef::SHAPE_ID).expect("static shape");
+        let StaticSlotShapeDescriptor::Record { fields, .. } = *static_shape else {
+            panic!("static shader shape");
+        };
+        let glsl_opts = fields
+            .iter()
+            .find(|field| field.name == "glsl_opts")
+            .expect("static glsl_opts field");
+        assert_eq!(
+            glsl_opts.shape,
+            &StaticSlotShapeDescriptor::Ref {
+                id: GlslOpts::SHAPE_ID
+            }
+        );
+        let param_defs = fields
+            .iter()
+            .find(|field| field.name == "param_defs")
+            .expect("static param_defs field");
+        let StaticSlotShapeDescriptor::Map { value, .. } = *param_defs.shape else {
+            panic!("static param_defs map");
+        };
+        assert_eq!(
+            value,
+            &StaticSlotShapeDescriptor::Ref {
+                id: ShaderParamDef::SHAPE_ID
+            }
+        );
+        let consumed = fields
+            .iter()
+            .find(|field| field.name == "consumed")
+            .expect("static consumed field");
+        let StaticSlotShapeDescriptor::Map { value, .. } = *consumed.shape else {
+            panic!("static consumed map");
+        };
+        assert_eq!(
+            value,
+            &StaticSlotShapeDescriptor::Ref {
+                id: ShaderSlotDef::SHAPE_ID
+            }
         );
     }
 

@@ -141,6 +141,11 @@ impl HwManifest {
         }
         self
     }
+
+    pub fn map_resources(mut self, map_fn: impl Fn(HwResource) -> HwResource) -> Self {
+        self.resources = self.resources.into_iter().map(map_fn).collect();
+        self
+    }
 }
 
 #[cfg(test)]

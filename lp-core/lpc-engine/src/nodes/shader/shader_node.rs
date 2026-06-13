@@ -335,6 +335,13 @@ pub(super) fn sync_shader_slot_def_from_authored(
             changed |= set_slot_if_changed(min, value);
         }
     }
+    if let Some(max) = slot.max.data.as_mut() {
+        if let Some(value) =
+            try_read_authored_value::<f32>(ctx, &alloc::format!("{base_path}.max.some"))?
+        {
+            changed |= set_slot_if_changed(max, value);
+        }
+    }
     if let Some(mapping) = slot.mapping.data.as_mut() {
         if let Some(value) = try_read_authored_value::<ShaderSlotMappingKind>(
             ctx,

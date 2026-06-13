@@ -11,7 +11,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Timer};
 use embedded_io_async::{Read, Write};
-use esp_hal::{rmt::Rmt, time::Rate, usb::usb_serial_jtag::UsbSerialJtag};
+use esp_hal::{rmt::Rmt, time::Rate, usb_serial_jtag::UsbSerialJtag};
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
 use crate::output::LedChannel;

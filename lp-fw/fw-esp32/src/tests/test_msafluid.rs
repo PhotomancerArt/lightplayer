@@ -17,7 +17,7 @@ use alloc::rc::Rc;
 use alloc::vec::Vec;
 use core::cell::RefCell;
 
-use esp_hal::usb::usb_serial_jtag::UsbSerialJtag;
+use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use log::info;
 use lps_q32::Q32;
 

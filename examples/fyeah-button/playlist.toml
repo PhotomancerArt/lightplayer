@@ -6,9 +6,9 @@ default_fade = 0.35
 source = "bus#time.seconds"
 
 [entries.1]
-name = "idle"
+name = "attract"
 fade_after = 0.12
-node = { ref = "./idle.toml" }
+node = { ref = "./attract.toml" }
 
 [entries.2]
 name = "blast"

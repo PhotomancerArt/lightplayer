@@ -14,7 +14,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Timer};
 use embedded_io_async::{Read, Write};
-use esp_hal::usb::usb_serial_jtag::UsbSerialJtag;
+use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use fw_core::message_router::MessageRouter;
 use log;
 #[cfg(feature = "server")]

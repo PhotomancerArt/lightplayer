@@ -30,7 +30,7 @@ pub async fn run_gpio_calibration_test(_: embassy_executor::Spawner) -> ! {
     drop(gpio18);
     drop(gpio4);
 
-    let usb_serial = esp_hal::usb::usb_serial_jtag::UsbSerialJtag::new(usb_device);
+    let usb_serial = esp_hal::usb_serial_jtag::UsbSerialJtag::new(usb_device);
     let mut serial = Esp32UsbSerialIo::new(usb_serial);
 
     Timer::after(Duration::from_millis(100)).await;

@@ -64,6 +64,8 @@ pub(crate) struct SlotEditStatus<'a> {
 /// Returns `Some(value)` only when the user changed a supported writable value.
 pub(crate) fn render_slot_value_editor(
     ui: &mut egui::Ui,
+    root: &str,
+    path: &SlotPath,
     shape: &SlotValueShape,
     policy: SlotPolicy,
     value: &LpValue,
@@ -75,6 +77,7 @@ pub(crate) fn render_slot_value_editor(
     match value {
         LpValue::Bool(value) => render_bool_editor(ui, *value),
         LpValue::F32(value) => render_f32_editor(ui, shape, *value),
+        LpValue::String(value) => render_string_editor(ui, root, path, shape, value),
         _ => None,
     }
 }
@@ -88,6 +91,7 @@ pub(crate) fn slot_value_editor_supported(shape: &SlotValueShape, value: &LpValu
                 | ValueEditorHint::Number { .. }
                 | ValueEditorHint::Slider { .. }
         ),
+        LpValue::String(_) => matches!(shape.editor, ValueEditorHint::Dropdown { .. }),
         _ => false,
     }
 }
@@ -138,6 +142,37 @@ fn render_f32_editor(ui: &mut egui::Ui, shape: &SlotValueShape, value: f32) -> O
     let tolerance = f32_edit_tolerance(&shape.editor);
     (response.changed() && response_was_user_edit(&response) && (edited - value).abs() > tolerance)
         .then_some(LpValue::F32(edited))
+}
+
+fn render_string_editor(
+    ui: &mut egui::Ui,
+    root: &str,
+    path: &SlotPath,
+    shape: &SlotValueShape,
+    value: &str,
+) -> Option<LpValue> {
+    let ValueEditorHint::Dropdown { options } = &shape.editor else {
+        return None;
+    };
+
+    let mut edited = value.to_string();
+    let selected_text = options
+        .iter()
+        .find(|option| option.value == value)
+        .map(|option| option.label.as_str())
+        .unwrap_or(value);
+    let mut changed = false;
+    egui::ComboBox::from_id_salt((root, path))
+        .selected_text(selected_text)
+        .show_ui(ui, |ui| {
+            for option in options {
+                changed |= ui
+                    .selectable_value(&mut edited, option.value.clone(), option.label.as_str())
+                    .changed();
+            }
+        });
+
+    (changed && edited != value).then_some(LpValue::String(edited))
 }
 
 fn response_was_user_edit(response: &egui::Response) -> bool {

@@ -671,7 +671,7 @@ fn render_value_cell(
         _ => {
             let rendered_editor = policy.writable && slot_value_editor_supported(shape, value);
             if rendered_editor {
-                if let Some(edited) = render_slot_value_editor(ui, shape, policy, value)
+                if let Some(edited) = render_slot_value_editor(ui, root, path, shape, policy, value)
                     && let Some(edit_intents) = edit_intents
                 {
                     edit_intents.push(SlotEditIntent {

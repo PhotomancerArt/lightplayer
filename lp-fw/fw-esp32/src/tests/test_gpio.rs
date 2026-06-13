@@ -64,7 +64,7 @@ pub async fn run_gpio_test(_: embassy_executor::Spawner) -> ! {
     start_runtime(timg0, sw_int);
 
     // Initialize USB-serial for logging
-    let usb_serial = esp_hal::usb::usb_serial_jtag::UsbSerialJtag::new(usb_device);
+    let usb_serial = esp_hal::usb_serial_jtag::UsbSerialJtag::new(usb_device);
     let usb_serial_async = usb_serial.into_async();
     let serial_io = Esp32UsbSerialIo::new(usb_serial_async);
     let serial_io_shared = Rc::new(RefCell::new(serial_io));

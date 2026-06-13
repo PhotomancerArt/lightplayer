@@ -9,7 +9,7 @@ extern crate alloc;
 use alloc::rc::Rc;
 use core::cell::RefCell;
 
-use esp_hal::usb::usb_serial_jtag::UsbSerialJtag;
+use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use log::info;
 
 use crate::board::esp32c6::init::{init_board, start_runtime};

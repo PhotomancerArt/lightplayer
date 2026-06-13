@@ -29,7 +29,7 @@ pub async fn run_dithering_test(_: embassy_executor::Spawner) -> ! {
         init_board();
     start_runtime(timg0, sw_int);
 
-    let usb_serial = esp_hal::usb::usb_serial_jtag::UsbSerialJtag::new(usb_device);
+    let usb_serial = esp_hal::usb_serial_jtag::UsbSerialJtag::new(usb_device);
     let serial_io = Esp32UsbSerialIo::new(usb_serial);
     let serial_io_shared = Rc::new(RefCell::new(serial_io));
 

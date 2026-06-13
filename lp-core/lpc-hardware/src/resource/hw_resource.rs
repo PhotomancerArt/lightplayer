@@ -48,6 +48,16 @@ impl HwResource {
         self
     }
 
+    pub fn clear_reservation(mut self) -> Self {
+        self.reserved_reason = None;
+        self
+    }
+
+    pub fn with_display_label(mut self, display_label: impl Into<String>) -> Self {
+        self.display_label = display_label.into();
+        self
+    }
+
     pub fn address(&self) -> &HwAddress {
         &self.address
     }

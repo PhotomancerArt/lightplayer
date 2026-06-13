@@ -10,7 +10,7 @@ use alloc::rc::Rc;
 use alloc::sync::Arc;
 use core::cell::RefCell;
 
-use esp_hal::usb::usb_serial_jtag::UsbSerialJtag;
+use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use log::info;
 use lp_shader::LpsEngine;
 use lpvm_native::{BuiltinTable, NativeCompileOptions, NativeJitEngine};

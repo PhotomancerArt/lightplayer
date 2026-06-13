@@ -15,7 +15,7 @@ use core::cell::RefCell;
 use embassy_time::{Duration, Instant, Timer};
 use esp_hal::rmt::Rmt;
 use esp_hal::time::Rate;
-use esp_hal::usb::usb_serial_jtag::UsbSerialJtag;
+use esp_hal::usb_serial_jtag::UsbSerialJtag;
 use log::info;
 use lpc_shared::{DisplayPipeline, DisplayPipelineOptions};
 

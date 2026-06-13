@@ -23,6 +23,7 @@ pub struct ShaderSlotDef {
     pub key: OptionSlot<ValueSlot<ShaderMapKeyDef>>,
     pub default: OptionSlot<ValueSlot<f32>>,
     pub min: OptionSlot<ValueSlot<f32>>,
+    pub max: OptionSlot<ValueSlot<f32>>,
     pub mapping: OptionSlot<ShaderSlotMappingDef>,
     pub label: ValueSlot<String>,
     pub description: ValueSlot<String>,
@@ -38,6 +39,7 @@ impl ShaderSlotDef {
             min: min
                 .map(ValueSlot::new)
                 .map_or_else(OptionSlot::none, OptionSlot::some),
+            max: OptionSlot::none(),
             mapping: OptionSlot::none(),
             label: ValueSlot::new(String::from(label)),
             description: ValueSlot::new(String::from(description)),
@@ -51,6 +53,7 @@ impl ShaderSlotDef {
             key: OptionSlot::some(ValueSlot::new(ShaderMapKeyDef::U32)),
             default: OptionSlot::none(),
             min: OptionSlot::none(),
+            max: OptionSlot::none(),
             mapping: OptionSlot::some(mapping),
             label: ValueSlot::default(),
             description: ValueSlot::default(),
