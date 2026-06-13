@@ -28,7 +28,10 @@ const BYTES_KEY: &str = "bytes";
 const EXTENSION_KEY: &str = "extension";
 
 /// Authored asset slot value.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+///
+/// An artifact reference round-trips as a bare authored path string
+/// (`"shader.glsl"`); inline bodies are tables keyed by `text`/`bytes`.
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub enum AssetSlotValue {
     /// Asset body lives in another artifact.
@@ -45,12 +48,117 @@ pub enum AssetSlotValue {
     },
 }
 
+// Hand-written, streaming serde for the compact authored form. This is
+// deliberately NOT `#[serde(untagged)]`: untagged (like internally-tagged)
+// buffers the whole input into serde's `Content` tree and re-parses, which
+// monomorphizes the heavy `Content` machinery into the deserialize graph — the
+// exact flash cost the externally-tagged-enum work removed. A `Visitor`
+// dispatches on the input shape (string vs map) in a single streaming pass.
+impl serde::Serialize for AssetSlotValue {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        match self {
+            Self::Artifact(spec) => spec.serialize(serializer),
+            Self::InlineText { extension, text } => {
+                let mut map = serializer.serialize_map(None)?;
+                if let Some(extension) = extension {
+                    map.serialize_entry(EXTENSION_KEY, extension)?;
+                }
+                map.serialize_entry("text", text)?;
+                map.end()
+            }
+            Self::InlineBytes { extension, bytes } => {
+                let mut map = serializer.serialize_map(None)?;
+                if let Some(extension) = extension {
+                    map.serialize_entry(EXTENSION_KEY, extension)?;
+                }
+                map.serialize_entry(BYTES_KEY, bytes)?;
+                map.end()
+            }
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for AssetSlotValue {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        struct AssetSlotValueVisitor;
+
+        impl<'de> serde::de::Visitor<'de> for AssetSlotValueVisitor {
+            type Value = AssetSlotValue;
+
+            fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                f.write_str("an artifact path string or an inline asset table")
+            }
+
+            fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
+                ArtifactSpec::parse(value)
+                    .map(AssetSlotValue::Artifact)
+                    .map_err(serde::de::Error::custom)
+            }
+
+            fn visit_string<E: serde::de::Error>(self, value: String) -> Result<Self::Value, E> {
+                self.visit_str(&value)
+            }
+
+            fn visit_map<M: serde::de::MapAccess<'de>>(
+                self,
+                mut map: M,
+            ) -> Result<Self::Value, M::Error> {
+                let mut extension: Option<Option<String>> = None;
+                let mut text: Option<String> = None;
+                let mut bytes: Option<Vec<u8>> = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    match key.as_str() {
+                        EXTENSION_KEY => extension = Some(map.next_value()?),
+                        "text" => text = Some(map.next_value()?),
+                        BYTES_KEY => bytes = Some(map.next_value()?),
+                        _ => {
+                            map.next_value::<serde::de::IgnoredAny>()?;
+                        }
+                    }
+                }
+                let extension = extension.unwrap_or(None);
+                match (text, bytes) {
+                    (Some(text), None) => Ok(AssetSlotValue::InlineText { extension, text }),
+                    (None, Some(bytes)) => Ok(AssetSlotValue::InlineBytes { extension, bytes }),
+                    (None, None) => Err(serde::de::Error::custom(
+                        "inline asset table requires a `text` or `bytes` field",
+                    )),
+                    (Some(_), Some(_)) => Err(serde::de::Error::custom(
+                        "inline asset table has both `text` and `bytes`",
+                    )),
+                }
+            }
+        }
+
+        deserializer.deserialize_any(AssetSlotValueVisitor)
+    }
+}
+
 /// Authored artifact-or-inline asset reference.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct AssetSlot {
     value: AssetSlotValue,
     revision: Revision,
+}
+
+// Like the other semantic slot wrappers (see `ValueSlot`), an asset slot
+// serializes as its bare authored value and stamps the ambient revision on
+// deserialize, rather than exposing the internal `revision` field on the wire.
+impl serde::Serialize for AssetSlot {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.value.serialize(serializer)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for AssetSlot {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self {
+            value: AssetSlotValue::deserialize(deserializer)?,
+            revision: current_revision(),
+        })
+    }
 }
 
 impl Default for AssetSlot {

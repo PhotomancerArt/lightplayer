@@ -59,12 +59,14 @@ fn real_source_defs_sync_as_slot_roots() {
     );
 
     let shader_data = root_data(&sync, &registry, "shader");
+    // `source` is an AssetSlot: a custom slot whose synced snapshot is the bare
+    // authored artifact path value, not a record with a `path` field.
     assert_value(
         select(
             &shader_data,
             ShaderDef::SHAPE_ID.slot_shape_from(&shape_registry),
             &shape_registry,
-            "source.path",
+            "source",
         ),
         LpValue::String(String::from("shader.glsl")),
     );
