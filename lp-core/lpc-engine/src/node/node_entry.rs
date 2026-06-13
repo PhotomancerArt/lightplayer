@@ -4,7 +4,7 @@
 
 use alloc::vec::Vec;
 use lpc_model::{NodeDefLocation, NodeId, NodeUseLocation, Revision, TreePath, WithRevision};
-use lpc_wire::{WireChildKind, WireNodeStatus};
+use lpc_wire::{NodeRuntimeStatus, WireChildKind};
 
 use crate::dataflow::binding::BindingSet;
 use crate::node::node_entry_state::NodeEntryState;
@@ -23,7 +23,7 @@ pub struct RuntimeNodeEntry<N> {
     pub child_kind: Option<WireChildKind>, // None for root; immutable for entry's lifetime
     pub children: WithRevision<Vec<NodeId>>, // ordered
 
-    pub status: WithRevision<WireNodeStatus>,
+    pub status: WithRevision<NodeRuntimeStatus>,
     pub state: WithRevision<NodeEntryState<N>>,
     pub bindings: WithRevision<BindingSet>,
 
@@ -65,7 +65,7 @@ impl<N> RuntimeNodeEntry<N> {
             parent,
             child_kind,
             children: WithRevision::new(revision, Vec::new()),
-            status: WithRevision::new(revision, WireNodeStatus::Created),
+            status: WithRevision::new(revision, NodeRuntimeStatus::Created),
             state: WithRevision::new(revision, NodeEntryState::Pending),
             bindings: WithRevision::new(revision, BindingSet::new()),
             created_at: revision,
@@ -84,7 +84,7 @@ impl<N> RuntimeNodeEntry<N> {
     }
 
     /// Set status and bump `changed_at`.
-    pub fn set_status(&mut self, status: WireNodeStatus, revision: Revision) {
+    pub fn set_status(&mut self, status: NodeRuntimeStatus, revision: Revision) {
         self.status.set(revision, status);
     }
 
@@ -117,7 +117,7 @@ mod tests {
     use lpc_model::{
         ArtifactLocation, NodeDefLocation, NodeId, NodeUseLocation, Revision, TreePath,
     };
-    use lpc_wire::{WireChildKind, WireNodeStatus, WireSlotIndex};
+    use lpc_wire::{NodeRuntimeStatus, WireChildKind, WireSlotIndex};
 
     #[test]
     fn node_entry_new_sets_all_frame_counters() {
@@ -132,7 +132,7 @@ mod tests {
         assert_eq!(entry.created_at.0, 5);
         assert_eq!(entry.changed_at().0, 5);
         assert_eq!(entry.children_changed_at().0, 5);
-        assert_eq!(*entry.status.value(), WireNodeStatus::Created);
+        assert_eq!(*entry.status.value(), NodeRuntimeStatus::Created);
         assert!(entry.state.value().is_pending());
     }
 
@@ -146,8 +146,8 @@ mod tests {
             None,
             frame,
         );
-        entry.set_status(WireNodeStatus::Ok, Revision::new(10));
-        assert_eq!(*entry.status.value(), WireNodeStatus::Ok);
+        entry.set_status(NodeRuntimeStatus::Ok, Revision::new(10));
+        assert_eq!(*entry.status.value(), NodeRuntimeStatus::Ok);
         assert_eq!(entry.changed_at().0, 10);
         // created_frame and children_ver unchanged
         assert_eq!(entry.created_at.0, 5);

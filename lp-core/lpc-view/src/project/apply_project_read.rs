@@ -77,8 +77,8 @@ mod tests {
     use alloc::vec;
     use lpc_model::{NodeId, Revision, TreePath};
     use lpc_wire::{
-        NodeReadResult, ProjectReadResponse, ReadLevel, ResourceReadResult, WireEntryState,
-        WireNodeStatus, WireTreeDelta,
+        NodeReadResult, NodeRuntimeStatus, ProjectReadResponse, ReadLevel, ResourceReadResult,
+        WireEntryState, WireTreeDelta,
     };
 
     #[test]
@@ -94,7 +94,7 @@ mod tests {
                     parent: None,
                     child_kind: None,
                     children: vec![],
-                    status: WireNodeStatus::Created,
+                    status: NodeRuntimeStatus::Created,
                     state: WireEntryState::Pending,
                     created_frame: Revision::new(0),
                     change_frame: Revision::new(0),

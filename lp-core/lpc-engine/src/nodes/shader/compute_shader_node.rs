@@ -6,9 +6,9 @@ use alloc::string::String;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    AddSubMode, AssetLocation, ComputeShaderDef, DivMode, MulMode, NodeId, Revision,
-    ShaderHeaderGenError, SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
-    generate_compute_shader_header,
+    AddSubMode, AssetLocation, ComputeShaderDef, DivMode, MulMode, NodeId, NodeRuntimeStatus,
+    Revision, ShaderHeaderGenError, SlotAccess, SlotPath, SlotShapeRegistry,
+    SlotShapeRegistryError, generate_compute_shader_header,
 };
 use lpc_registry::AssetText;
 use lps_shared::LpsValueF32;
@@ -94,12 +94,12 @@ impl ComputeShaderNode {
         Ok(())
     }
 
-    fn ensure_compiled(&mut self, ctx: &TickContext<'_>) -> Result<(), NodeError> {
+    fn ensure_compiled(&mut self, ctx: &TickContext<'_>) -> Result<bool, NodeError> {
         if self.shader.is_some() {
-            return Ok(());
+            return Ok(true);
         }
-        if let Some(error) = &self.compilation_error {
-            return Err(NodeError::msg(format!("compute shader compile: {error}")));
+        if self.compilation_error.is_some() {
+            return Ok(false);
         }
 
         let graphics = ctx
@@ -110,13 +110,23 @@ impl ComputeShaderNode {
             max_errors: Some(20),
             ..Default::default()
         };
-        let desc = compute_desc_from_model_def(
+        let desc = match compute_desc_from_model_def(
             self.glsl_source.as_str(),
             &self.def,
             ctx.slot_shapes(),
             compile_opts.to_compiler_config(),
-        )
-        .map_err(|e| NodeError::msg(format!("compute descriptor: {e}")))?;
+        ) {
+            Ok(desc) => desc,
+            Err(error) => {
+                let error = format!("compute descriptor: {error}");
+                self.compilation_error = Some(error.clone());
+                log::warn!(
+                    "[compute-shader-node] descriptor generation failed (node={:?}): {error}",
+                    self.node_id
+                );
+                return Ok(false);
+            }
+        };
 
         log::info!(
             "[compute-shader-node] compilation starting (node={:?}, {} bytes)",
@@ -142,10 +152,10 @@ impl ComputeShaderNode {
                     self.node_id,
                     format_compile_stats(compile_elapsed_ms, stats)
                 );
-                Ok(())
+                Ok(true)
             }
             Err(error) => {
-                self.compilation_error = Some(error.clone());
+                self.compilation_error = Some(format!("compute shader compile: {error}"));
                 self.shader = None;
                 if let Some(compile_elapsed_ms) = compile_elapsed_ms {
                     log::warn!(
@@ -159,7 +169,7 @@ impl ComputeShaderNode {
                         self.node_id
                     );
                 }
-                Err(NodeError::msg(format!("compute shader compile: {error}")))
+                Ok(false)
             }
         }
     }
@@ -244,7 +254,9 @@ impl NodeRuntime for ComputeShaderNode {
             .iter()
             .map(|(name, value)| (name.as_str(), value.clone()))
             .collect();
-        self.ensure_compiled(ctx)?;
+        if !self.ensure_compiled(ctx)? {
+            return Ok(ProduceResult::Produced);
+        }
         let shader = self
             .shader
             .as_mut()
@@ -296,6 +308,12 @@ impl NodeRuntime for ComputeShaderNode {
         _ctx: &mut MemPressureCtx<'_>,
     ) -> Result<(), NodeError> {
         Ok(())
+    }
+
+    fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
+        self.compilation_error
+            .as_ref()
+            .map(|error| NodeRuntimeStatus::Error(error.clone()))
     }
 
     fn runtime_state_slots(&self) -> Option<&dyn SlotAccess> {

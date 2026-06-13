@@ -1,7 +1,10 @@
 //! Engine spine [`NodeRuntime`] trait: produce, consume, destroy, memory pressure, and runtime state.
 
 use crate::resource::RuntimeBufferId;
-use lpc_model::{AssetLocation, SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError};
+use lpc_model::{
+    AssetLocation, NodeRuntimeStatus, SlotAccess, SlotPath, SlotShapeRegistry,
+    SlotShapeRegistryError,
+};
 
 use super::contexts::{
     AssetRefreshContext, DestroyCtx, MemPressureCtx, NodeResourceInitContext, TickContext,
@@ -77,6 +80,15 @@ pub trait NodeRuntime {
         level: PressureLevel,
         ctx: &mut MemPressureCtx<'_>,
     ) -> Result<(), NodeError>;
+
+    /// Current runtime health, when the node has a more specific status than "ok".
+    ///
+    /// Returning `None` lets the engine report [`NodeRuntimeStatus::Ok`] after a successful
+    /// runtime operation. Nodes with cached/degraded internal state can return an error or
+    /// warning while still rendering fallback output or otherwise keeping the runtime alive.
+    fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
+        None
+    }
 
     /// Node-owned runtime state exposed as a slot root.
     ///

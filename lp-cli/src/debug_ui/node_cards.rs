@@ -3,7 +3,7 @@
 use eframe::egui;
 use lpc_model::{NodeId, ResourceRef, SlotData};
 use lpc_view::project::ProjectView;
-use lpc_wire::{WireEntryState, WireNodeStatus};
+use lpc_wire::{NodeRuntimeStatus, WireEntryState};
 
 use super::format::format_resource_metadata;
 use super::inspector::InspectorSelection;
@@ -663,13 +663,13 @@ fn node_kind_from_path_tag(tag: &str) -> Option<&'static str> {
     }
 }
 
-fn status_label(status: &WireNodeStatus) -> &str {
+fn status_label(status: &NodeRuntimeStatus) -> &str {
     match status {
-        WireNodeStatus::Created => "created",
-        WireNodeStatus::InitError(_) => "init error",
-        WireNodeStatus::Ok => "ok",
-        WireNodeStatus::Warn(_) => "warn",
-        WireNodeStatus::Error(_) => "error",
+        NodeRuntimeStatus::Created => "created",
+        NodeRuntimeStatus::InitError(_) => "init error",
+        NodeRuntimeStatus::Ok => "ok",
+        NodeRuntimeStatus::Warn(_) => "warn",
+        NodeRuntimeStatus::Error(_) => "error",
     }
 }
 
@@ -681,12 +681,12 @@ fn state_label(state: &WireEntryState) -> &str {
     }
 }
 
-fn node_status_color(status: &WireNodeStatus, state: &WireEntryState) -> egui::Color32 {
+fn node_status_color(status: &NodeRuntimeStatus, state: &WireEntryState) -> egui::Color32 {
     match (status, state) {
-        (WireNodeStatus::Error(_) | WireNodeStatus::InitError(_), _)
+        (NodeRuntimeStatus::Error(_) | NodeRuntimeStatus::InitError(_), _)
         | (_, WireEntryState::Failed { .. }) => egui::Color32::from_rgb(220, 75, 72),
-        (WireNodeStatus::Warn(_), _) => egui::Color32::from_rgb(214, 159, 43),
-        (WireNodeStatus::Ok, WireEntryState::Alive) => egui::Color32::from_rgb(76, 174, 114),
+        (NodeRuntimeStatus::Warn(_), _) => egui::Color32::from_rgb(214, 159, 43),
+        (NodeRuntimeStatus::Ok, WireEntryState::Alive) => egui::Color32::from_rgb(76, 174, 114),
         _ => egui::Color32::from_rgb(112, 144, 191),
     }
 }

@@ -6,8 +6,8 @@ use alloc::string::ToString;
 use alloc::vec::Vec;
 
 use lpc_model::{
-    AssetChangeKind, AssetLocation, NodeDefChangeKind, NodeId, NodeKind, NodeUseChangeKind,
-    NodeUseLocation, ProjectChangeSummary,
+    AssetChangeKind, AssetLocation, NodeDefChangeKind, NodeId, NodeKind, NodeRuntimeStatus,
+    NodeUseChangeKind, NodeUseLocation, ProjectChangeSummary,
 };
 use lpc_registry::ProjectRegistry;
 use lpfs::LpFs;
@@ -240,21 +240,34 @@ impl Engine {
                 continue;
             };
             let mut ctx = AssetRefreshContext::new(fs, registry, &slot_shapes, frame);
-            match runtime.refresh_asset(location, &mut ctx).map_err(|e| {
+            let refresh_result = runtime.refresh_asset(location, &mut ctx).map_err(|e| {
                 ProjectLoadError::InvalidProjectReference {
                     path: format_node_use(&use_location),
                     reason: format!("refresh asset {location:?}: {e}"),
                 }
-            })? {
+            })?;
+            let runtime_status = runtime.runtime_status().unwrap_or(NodeRuntimeStatus::Ok);
+            match refresh_result {
                 AssetRefreshResult::Unused | AssetRefreshResult::Unchanged => {}
                 AssetRefreshResult::Refreshed => {
                     entry.state.mark_updated(frame);
+                    set_entry_status_if_changed(entry, runtime_status, frame);
                     refreshed.push(use_location);
                 }
             }
         }
 
         Ok(refreshed)
+    }
+}
+
+fn set_entry_status_if_changed<N>(
+    entry: &mut crate::node::RuntimeNodeEntry<N>,
+    status: NodeRuntimeStatus,
+    revision: lpc_model::Revision,
+) {
+    if entry.status.value() != &status {
+        entry.set_status(status, revision);
     }
 }
 

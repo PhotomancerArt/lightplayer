@@ -145,7 +145,9 @@ pub fn apply_tree_deltas(
 mod tests {
     use super::{NodeTreeView, TreeEntryView, apply_tree_delta};
     use lpc_model::{NodeId, NodeName, Revision, TreePath};
-    use lpc_wire::{WireChildKind, WireEntryState, WireNodeStatus, WireSlotIndex, WireTreeDelta};
+    use lpc_wire::{
+        NodeRuntimeStatus, WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta,
+    };
 
     fn make_tree_with_root() -> NodeTreeView {
         let mut tree = NodeTreeView::new();
@@ -154,7 +156,7 @@ mod tests {
             TreePath::parse("/root.show").unwrap(),
             None,
             None,
-            WireNodeStatus::Created,
+            NodeRuntimeStatus::Created,
             WireEntryState::Pending,
             Revision::new(0),
             Revision::new(0),
@@ -176,7 +178,7 @@ mod tests {
                 source: WireSlotIndex(0),
             }),
             children: alloc::vec![],
-            status: WireNodeStatus::Created,
+            status: NodeRuntimeStatus::Created,
             state: WireEntryState::Pending,
             created_frame: Revision::new(1),
             change_frame: Revision::new(1),
@@ -201,7 +203,7 @@ mod tests {
             Some(WireChildKind::Input {
                 source: WireSlotIndex(0),
             }),
-            WireNodeStatus::Created,
+            NodeRuntimeStatus::Created,
             WireEntryState::Pending,
             Revision::new(1),
             Revision::new(1),
@@ -212,7 +214,7 @@ mod tests {
         // Apply status change
         let delta = WireTreeDelta::EntryChanged {
             id: NodeId::new(1),
-            status: WireNodeStatus::Ok,
+            status: NodeRuntimeStatus::Ok,
             state: WireEntryState::Alive,
             change_frame: Revision::new(5),
         };
@@ -220,7 +222,7 @@ mod tests {
         apply_tree_delta(&mut tree, &delta, Revision::new(5)).unwrap();
 
         let entry = tree.get(NodeId::new(1)).unwrap();
-        assert!(matches!(entry.status, WireNodeStatus::Ok));
+        assert!(matches!(entry.status, NodeRuntimeStatus::Ok));
         assert!(matches!(entry.state, WireEntryState::Alive));
         assert_eq!(entry.change_frame.0, 5);
     }
@@ -237,7 +239,7 @@ mod tests {
             Some(WireChildKind::Input {
                 source: WireSlotIndex(0),
             }),
-            WireNodeStatus::Created,
+            NodeRuntimeStatus::Created,
             WireEntryState::Pending,
             Revision::new(1),
             Revision::new(1),
@@ -271,7 +273,7 @@ mod tests {
             Some(WireChildKind::Input {
                 source: WireSlotIndex(0),
             }),
-            WireNodeStatus::Created,
+            NodeRuntimeStatus::Created,
             WireEntryState::Pending,
             Revision::new(1),
             Revision::new(1),
@@ -284,7 +286,7 @@ mod tests {
             Some(WireChildKind::Input {
                 source: WireSlotIndex(1),
             }),
-            WireNodeStatus::Created,
+            NodeRuntimeStatus::Created,
             WireEntryState::Pending,
             Revision::new(1),
             Revision::new(1),
@@ -326,7 +328,7 @@ mod tests {
             Some(WireChildKind::Sidecar {
                 name: NodeName::parse("parent").unwrap(),
             }),
-            WireNodeStatus::Created,
+            NodeRuntimeStatus::Created,
             WireEntryState::Pending,
             Revision::new(1),
             Revision::new(1),
@@ -339,7 +341,7 @@ mod tests {
             Some(WireChildKind::Input {
                 source: WireSlotIndex(0),
             }),
-            WireNodeStatus::Created,
+            NodeRuntimeStatus::Created,
             WireEntryState::Pending,
             Revision::new(2),
             Revision::new(2),
@@ -379,7 +381,7 @@ mod tests {
 
         let delta = WireTreeDelta::EntryChanged {
             id: NodeId::new(99), // doesn't exist
-            status: WireNodeStatus::Ok,
+            status: NodeRuntimeStatus::Ok,
             state: WireEntryState::Alive,
             change_frame: Revision::new(5),
         };

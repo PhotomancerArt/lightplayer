@@ -139,8 +139,27 @@ impl AssetSlot {
     }
 
     pub(crate) fn set_value(&mut self, value: AssetSlotValue) {
+        self.set_value_with_revision(current_revision(), value);
+    }
+
+    pub(crate) fn set_value_with_revision(&mut self, revision: Revision, value: AssetSlotValue) {
         self.value = value;
-        self.revision = current_revision();
+        self.revision = revision;
+    }
+
+    pub(crate) fn set_from_lp_value(
+        &mut self,
+        revision: Revision,
+        value: LpValue,
+    ) -> Result<(), String> {
+        let LpValue::String(value) = value else {
+            return Err(format!(
+                "asset slot assignment expects string, got {value:?}"
+            ));
+        };
+        let value = read_artifact_spec(value).map_err(|err| err.to_string())?;
+        self.set_value_with_revision(revision, value);
+        Ok(())
     }
 
     pub(crate) fn read_slot<S>(&mut self, value: ValueReader<'_, '_, S>) -> Result<(), SyntaxError>

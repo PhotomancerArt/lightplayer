@@ -412,6 +412,25 @@ fn render_named_slot_shape_row(
         return;
     };
 
+    if let SlotShape::Custom { shape, .. } = shape {
+        render_named_slot_shape_row(
+            ui,
+            registry,
+            root,
+            path,
+            policy,
+            name,
+            shape,
+            data,
+            depth,
+            id_path,
+            selection,
+            status,
+            edit_intents,
+        );
+        return;
+    }
+
     match (shape, data) {
         (SlotShape::Unit { .. }, SlotData::Unit { revision }) => {
             row(ui, depth, name, "unit", format!("rev {}", revision.0));

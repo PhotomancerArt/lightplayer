@@ -229,7 +229,7 @@ mod tests {
         // Change status at frame 5
         tree.get_mut(a)
             .unwrap()
-            .set_status(lpc_wire::WireNodeStatus::Ok, Revision::new(5));
+            .set_status(lpc_wire::NodeRuntimeStatus::Ok, Revision::new(5));
 
         let deltas = tree_deltas_since(&tree, Revision::new(0));
 
@@ -258,7 +258,7 @@ mod tests {
         assert_eq!(changed.len(), 1);
         if let WireTreeDelta::EntryChanged { id, status, .. } = changed[0] {
             assert_eq!(*id, a);
-            assert!(matches!(status, lpc_wire::WireNodeStatus::Ok));
+            assert!(matches!(status, lpc_wire::NodeRuntimeStatus::Ok));
         }
     }
 
@@ -468,7 +468,7 @@ mod tests {
         {
             let b_entry = server_tree.get_mut(b).unwrap();
             b_entry.set_state(NodeEntryState::Alive(()), Revision::new(5));
-            b_entry.set_status(lpc_wire::WireNodeStatus::Ok, Revision::new(5));
+            b_entry.set_status(lpc_wire::NodeRuntimeStatus::Ok, Revision::new(5));
         }
 
         // Get deltas since frame 2 (after b was created)
@@ -481,7 +481,7 @@ mod tests {
         assert!(client_tree.get(a).is_none()); // a removed
         assert!(client_tree.get(b).is_some()); // b still there
         let client_b = client_tree.get(b).unwrap();
-        assert!(matches!(client_b.status, lpc_wire::WireNodeStatus::Ok));
+        assert!(matches!(client_b.status, lpc_wire::NodeRuntimeStatus::Ok));
         assert!(matches!(client_b.state, WireEntryState::Alive));
 
         // Verify root's children list updated

@@ -15,7 +15,7 @@ surface, but it should not become a second slot/model crate.
 **Naming:** Envelope and directional types (`Message`, `ClientMessage`,
 `ClientRequest`, `ServerMessage`, `FsRequest`, …) already imply the wire
 contract. Use `Wire*` when a noun also exists in model/source/view/engine form
-and needs disambiguation — for example `WireTreeDelta`, `WireNodeStatus`,
+and needs disambiguation — for example `WireTreeDelta`,
 `LegacyWireNodeSpecifier`, `WireSlotIndex`.
 
 `no_std`, designed for embedded-compatible transports. It should not depend on

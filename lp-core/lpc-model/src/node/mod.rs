@@ -10,6 +10,7 @@ pub mod node_name;
 /// [`crate::ValueRef`] only when it explicitly needs to project inside an
 /// atomic slot value.
 pub mod node_prop_spec;
+pub mod node_runtime_status;
 pub mod node_use_location;
 pub mod relative_node_ref;
 pub mod tree_path;
@@ -25,6 +26,7 @@ pub use kind::NodeKind;
 pub use node_def_location::NodeDefLocation;
 pub use node_id::NodeId;
 pub use node_name::{NodeName, NodeNameError};
+pub use node_runtime_status::NodeRuntimeStatus;
 pub use node_use_location::{LocationSeg, NodeUseLocation};
 pub use relative_node_ref::{RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc};
 pub use tree_path::TreePath;

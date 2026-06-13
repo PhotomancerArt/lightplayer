@@ -32,7 +32,7 @@ pub use messages::{
     write_server_message,
 };
 pub use project::{
-    WireChannelSampleFormat, WireColorLayout, WireNodeStatus, WireProjectHandle,
+    NodeRuntimeStatus, WireChannelSampleFormat, WireColorLayout, WireProjectHandle,
     WireResourceAvailability, WireResourceKindSummary, WireResourceMetadataSummary,
     WireResourceSummary, WireRuntimeBufferKind, WireRuntimeBufferMetadataPayload,
     WireRuntimeBufferPayload, WireTextureFormat,

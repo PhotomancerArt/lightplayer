@@ -6,7 +6,7 @@
 
 use alloc::vec::Vec;
 use lpc_model::{NodeId, Revision, TreePath};
-use lpc_wire::{WireChildKind, WireEntryState, WireNodeStatus};
+use lpc_wire::{NodeRuntimeStatus, WireChildKind, WireEntryState};
 
 /// Mirror of wire/node tree metadata (`NodeEntry` on engine) without node payloads.
 ///
@@ -20,7 +20,7 @@ pub struct TreeEntryView {
     pub child_kind: Option<WireChildKind>,
     pub children: Vec<NodeId>,
 
-    pub status: WireNodeStatus,
+    pub status: NodeRuntimeStatus,
     pub state: WireEntryState,
 
     pub created_frame: Revision,
@@ -39,7 +39,7 @@ impl TreeEntryView {
         path: TreePath,
         parent: Option<NodeId>,
         child_kind: Option<WireChildKind>,
-        status: WireNodeStatus,
+        status: NodeRuntimeStatus,
         state: WireEntryState,
         created_frame: Revision,
         change_frame: Revision,

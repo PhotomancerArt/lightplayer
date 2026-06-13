@@ -238,6 +238,9 @@ fn set_slot_value_in_shape(
 ) -> Result<(), SlotMutationError> {
     let shape = resolve_ref_shape(shape, registry)?;
     let Some((head, tail)) = segments.split_first() else {
+        if let Some(codec) = shape.custom_codec() {
+            return set_custom_slot_value(data, codec, revision, value);
+        }
         return match (shape.value_shape(), data) {
             (Some(shape), SlotDataMutAccess::Value(value_slot)) => {
                 let ty = shape.ty_owned();
@@ -321,6 +324,35 @@ fn set_slot_value_in_shape(
             display_key(key)
         ))),
     }
+}
+
+fn set_custom_slot_value(
+    data: SlotDataMutAccess<'_>,
+    codec: crate::SlotShapeId,
+    revision: Revision,
+    value: LpValue,
+) -> Result<(), SlotMutationError> {
+    let SlotDataMutAccess::Custom(custom) = data else {
+        return Err(SlotMutationError::unsupported_target(
+            "slot path resolves to custom shape but not custom data",
+        ));
+    };
+    if codec == crate::slots::ASSET_SLOT_CODEC_ID {
+        let Some(slot) = custom
+            .as_any_mut()
+            .downcast_mut::<crate::slots::AssetSlot>()
+        else {
+            return Err(SlotMutationError::unsupported_target(
+                "asset slot codec expected AssetSlot data",
+            ));
+        };
+        return slot
+            .set_from_lp_value(revision, value)
+            .map_err(SlotMutationError::wrong_type);
+    }
+    Err(SlotMutationError::unsupported_target(format!(
+        "set value mutation does not support custom slot codec {codec}"
+    )))
 }
 
 fn set_slot_variant_default_in_shape(
@@ -887,9 +919,9 @@ fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
 mod tests {
     use super::*;
     use crate::{
-        EnumSlot, MapSlot, OptionSlot, SlotDataAccess, SlotEnumShape, SlotMapValueAccess,
-        SlotMapValueMutAccess, SlotMeta, SlotRecordAccess, SlotRecordMutAccess, SlotShapeId,
-        SlotShapeRegistry, SlottedEnum, SlottedEnumMut, StaticSlotShape, ValueSlot,
+        AssetSlot, EnumSlot, MapSlot, OptionSlot, SlotDataAccess, SlotEnumShape,
+        SlotMapValueAccess, SlotMapValueMutAccess, SlotMeta, SlotRecordAccess, SlotRecordMutAccess,
+        SlotShapeId, SlotShapeRegistry, SlottedEnum, SlottedEnumMut, StaticSlotShape, ValueSlot,
     };
     use alloc::boxed::Box;
     use alloc::collections::BTreeMap;
@@ -902,6 +934,11 @@ mod tests {
         pub enabled: OptionSlot<ValueSlot<bool>>,
         pub payload: ValueSlot<LpValue>,
         pub mode: EnumSlot<TestEnum>,
+    }
+
+    #[derive(crate::Slotted)]
+    struct AssetRoot {
+        pub source: AssetSlot,
     }
 
     enum TestEnum {
@@ -1029,6 +1066,36 @@ mod tests {
 
         assert_eq!(root.gain.value(), &2.0);
         assert_eq!(root.gain.revision(), Revision::new(5));
+    }
+
+    #[test]
+    fn slot_mutation_sets_asset_slot_from_string_snapshot() {
+        let mut root = AssetRoot {
+            source: AssetSlot::path("old.glsl"),
+        };
+        let mut registry = SlotShapeRegistry::default();
+        registry
+            .ensure_shape_named(
+                AssetRoot::SHAPE_ID,
+                AssetRoot::shape_name().expect("shape name"),
+                AssetRoot::slot_shape(),
+            )
+            .unwrap();
+
+        set_slot_value(
+            &mut root,
+            &registry,
+            &SlotPath::parse("source").unwrap(),
+            Revision::new(11),
+            LpValue::String(String::from("new.glsl")),
+        )
+        .unwrap();
+
+        assert_eq!(
+            root.source.artifact_value().unwrap().to_string(),
+            "new.glsl"
+        );
+        assert_eq!(root.source.revision(), Revision::new(11));
     }
 
     #[test]

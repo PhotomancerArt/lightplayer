@@ -15,7 +15,7 @@ use lpc_model::{
     ProjectNodePlacement, Revision, ShaderDef, ShaderSlotKind, SlotPath,
 };
 use lpc_registry::{AssetText, ParseCtx, ProjectRegistry};
-use lpc_wire::{WireChildKind, WireNodeStatus, WireSlotIndex};
+use lpc_wire::{NodeRuntimeStatus, WireChildKind, WireSlotIndex};
 use lpfs::LpFs;
 use lpfs::lp_path::{LpPath, LpPathBuf};
 
@@ -840,7 +840,7 @@ impl ProjectLoader {
                             path: node_label(node),
                             reason: format!("attach fixture runtime: {e}"),
                         })?;
-                    mark_node_status(runtime, node.id, frame, WireNodeStatus::Ok);
+                    mark_node_status(runtime, node.id, frame, NodeRuntimeStatus::Ok);
                 }
                 Err(error) => {
                     let message = error.to_string();
@@ -878,7 +878,7 @@ fn should_attach_projected_node(
 
 fn mark_node_load_error(runtime: &mut Engine, node_id: NodeId, frame: Revision, message: String) {
     if let Some(entry) = runtime.tree_mut().get_mut(node_id) {
-        entry.set_status(WireNodeStatus::Error(message.clone()), frame);
+        entry.set_status(NodeRuntimeStatus::Error(message.clone()), frame);
         entry.set_state(NodeEntryState::Failed { reason: message }, frame);
     }
 }
@@ -948,7 +948,7 @@ fn mark_node_status(
     runtime: &mut Engine,
     node_id: NodeId,
     frame: Revision,
-    status: WireNodeStatus,
+    status: NodeRuntimeStatus,
 ) {
     if let Some(entry) = runtime.tree_mut().get_mut(node_id) {
         entry.set_status(status, frame);
@@ -1754,7 +1754,7 @@ sample_diameter = 2.0
         let entry = rt.tree().get(node).expect("runtime entry");
         assert!(matches!(
             entry.status.value(),
-            WireNodeStatus::Error(message) if message.contains(expected)
+            NodeRuntimeStatus::Error(message) if message.contains(expected)
         ));
         assert!(matches!(
             entry.state.value(),

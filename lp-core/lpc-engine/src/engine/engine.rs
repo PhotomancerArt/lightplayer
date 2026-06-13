@@ -15,7 +15,7 @@ use lpc_model::{
 };
 use lpc_registry::ProjectRegistry;
 use lpc_shared::time::TimeProvider;
-use lpc_wire::WireNodeStatus;
+use lpc_wire::NodeRuntimeStatus;
 
 use crate::dataflow::binding::{BindingDraft, BindingError, BindingRef};
 use crate::dataflow::bus::Bus;
@@ -648,11 +648,12 @@ impl EngineResolveHost<'_> {
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
             SessionResolveError::other(format!("produce: unknown node {node_id:?}"))
         })?;
+        let runtime_status = runtime_status_or_ok(&*node_runtime);
         entry.set_state(NodeEntryState::Alive(node_runtime), restore_frame);
 
         match produce_result {
             Ok(ProduceResult::Produced) => {
-                set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
+                set_entry_status_if_changed(entry, runtime_status, revision);
                 self.producers_ticked.insert(node_id);
                 Ok(())
             }
@@ -663,7 +664,7 @@ impl EngineResolveHost<'_> {
                 let message = e.to_string();
                 set_entry_status_if_changed(
                     entry,
-                    WireNodeStatus::Error(message.clone()),
+                    NodeRuntimeStatus::Error(message.clone()),
                     revision,
                 );
                 Err(SessionResolveError::other(format!(
@@ -920,18 +921,19 @@ impl EngineResolveHost<'_> {
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
             SessionResolveError::other(format!("render: unknown node {node_id:?}"))
         })?;
+        let runtime_status = runtime_status_or_ok(&*node_runtime);
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
 
         match result {
             Ok(product) => {
-                set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
+                set_entry_status_if_changed(entry, runtime_status, revision);
                 Ok(product)
             }
             Err(e) => {
                 let message = e.to_string();
                 set_entry_status_if_changed(
                     entry,
-                    WireNodeStatus::Error(message.clone()),
+                    NodeRuntimeStatus::Error(message.clone()),
                     revision,
                 );
                 Err(SessionResolveError::other(format!("render: {message}")))
@@ -1007,18 +1009,19 @@ impl EngineResolveHost<'_> {
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
             SessionResolveError::other(format!("render: unknown node {node_id:?}"))
         })?;
+        let runtime_status = runtime_status_or_ok(&*node_runtime);
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
 
         match result {
             Ok(()) => {
-                set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
+                set_entry_status_if_changed(entry, runtime_status, revision);
                 Ok(())
             }
             Err(e) => {
                 let message = e.to_string();
                 set_entry_status_if_changed(
                     entry,
-                    WireNodeStatus::Error(message.clone()),
+                    NodeRuntimeStatus::Error(message.clone()),
                     revision,
                 );
                 Err(SessionResolveError::other(format!("render: {message}")))
@@ -1094,18 +1097,19 @@ impl EngineResolveHost<'_> {
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
             SessionResolveError::other(format!("sample visual: unknown node {node_id:?}"))
         })?;
+        let runtime_status = runtime_status_or_ok(&*node_runtime);
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
 
         match result {
             Ok(()) => {
-                set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
+                set_entry_status_if_changed(entry, runtime_status, revision);
                 Ok(())
             }
             Err(e) => {
                 let message = e.to_string();
                 set_entry_status_if_changed(
                     entry,
-                    WireNodeStatus::Error(message.clone()),
+                    NodeRuntimeStatus::Error(message.clone()),
                     revision,
                 );
                 Err(SessionResolveError::other(format!(
@@ -1182,18 +1186,19 @@ impl EngineResolveHost<'_> {
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
             SessionResolveError::other(format!("control render: unknown node {node_id:?}"))
         })?;
+        let runtime_status = runtime_status_or_ok(&*node_runtime);
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
 
         match result {
             Ok(layout) => {
-                set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
+                set_entry_status_if_changed(entry, runtime_status, revision);
                 Ok(layout)
             }
             Err(e) => {
                 let message = e.to_string();
                 set_entry_status_if_changed(
                     entry,
-                    WireNodeStatus::Error(message.clone()),
+                    NodeRuntimeStatus::Error(message.clone()),
                     revision,
                 );
                 Err(SessionResolveError::other(format!(
@@ -1356,12 +1361,16 @@ fn restore_node_after_failed_render(
 
 fn set_entry_status_if_changed<N>(
     entry: &mut RuntimeNodeEntry<N>,
-    status: WireNodeStatus,
+    status: NodeRuntimeStatus,
     revision: Revision,
 ) {
     if entry.status.value() != &status {
         entry.set_status(status, revision);
     }
+}
+
+fn runtime_status_or_ok(node: &dyn NodeRuntime) -> NodeRuntimeStatus {
+    node.runtime_status().unwrap_or(NodeRuntimeStatus::Ok)
 }
 
 fn restore_node_after_failed_render_unit(
@@ -1461,17 +1470,18 @@ fn consume_tree_node(
         .tree
         .get_mut(node_id)
         .ok_or(EngineError::UnknownNode(node_id))?;
+    let runtime_status = runtime_status_or_ok(&*node_runtime);
     entry.set_state(NodeEntryState::Alive(node_runtime), restore_frame);
 
     match consume_result {
         Ok(()) => {
-            set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
+            set_entry_status_if_changed(entry, runtime_status, revision);
             host.producers_ticked.insert(node_id);
             Ok(())
         }
         Err(e) => {
             let message = e.to_string();
-            set_entry_status_if_changed(entry, WireNodeStatus::Error(message.clone()), revision);
+            set_entry_status_if_changed(entry, NodeRuntimeStatus::Error(message.clone()), revision);
             Err(EngineError::Node {
                 node: node_id,
                 message,
@@ -1661,7 +1671,7 @@ mod tests {
         assert!(matches!(entry.state.value(), NodeEntryState::Alive(_)));
         assert!(matches!(
             entry.status.value(),
-            WireNodeStatus::Error(message) if message == "intentional tick failure"
+            NodeRuntimeStatus::Error(message) if message == "intentional tick failure"
         ));
     }
 

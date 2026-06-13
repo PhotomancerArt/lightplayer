@@ -1,6 +1,6 @@
 use lpc_model::NodeKind;
 use lpc_model::{LpPathBuf, Revision};
-use lpc_wire::WireNodeStatus;
+use lpc_wire::NodeRuntimeStatus;
 
 use super::resource_cache::ClientResourceCache;
 use crate::slot::SlotMirrorView;
@@ -12,9 +12,9 @@ pub struct StatusChangeView {
     /// Node path.
     pub path: LpPathBuf,
     /// Previous status.
-    pub old_status: WireNodeStatus,
+    pub old_status: NodeRuntimeStatus,
     /// New status.
-    pub new_status: WireNodeStatus,
+    pub new_status: NodeRuntimeStatus,
 }
 
 /// Node-centric client-side project mirror.
@@ -33,7 +33,7 @@ pub struct ProjectView {
 pub struct NodeEntryView {
     pub path: LpPathBuf,
     pub kind: NodeKind,
-    pub status: WireNodeStatus,
+    pub status: NodeRuntimeStatus,
     pub status_ver: Revision,
 }
 

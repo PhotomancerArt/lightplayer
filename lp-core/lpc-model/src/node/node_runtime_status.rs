@@ -1,12 +1,12 @@
-//! Wire-visible node lifecycle status.
+//! Shared runtime node lifecycle and health status.
 
 use alloc::string::String;
 use serde::{Deserialize, Serialize};
 
-/// Node lifecycle / health status on the wire.
+/// Node lifecycle and health status reported by the runtime tree.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-pub enum WireNodeStatus {
+pub enum NodeRuntimeStatus {
     /// Created but not yet initialized.
     Created,
     /// Error initializing the node.
@@ -24,13 +24,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn wire_node_status_variants() {
-        let status = WireNodeStatus::Created;
-        assert_eq!(status, WireNodeStatus::Created);
+    fn node_runtime_status_variants() {
+        let status = NodeRuntimeStatus::Created;
+        assert_eq!(status, NodeRuntimeStatus::Created);
 
-        let status = WireNodeStatus::InitError("test error".into());
+        let status = NodeRuntimeStatus::InitError("test error".into());
         match status {
-            WireNodeStatus::InitError(msg) => assert_eq!(msg, "test error"),
+            NodeRuntimeStatus::InitError(msg) => assert_eq!(msg, "test error"),
             _ => panic!("Expected InitError"),
         }
     }

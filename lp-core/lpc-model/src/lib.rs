@@ -91,8 +91,8 @@ pub use node::tree_path::{NodePathSegment, PathError, TreePath};
 pub use node::{
     NodeArtifact, NodeDef, NodeDefChange, NodeDefChangeKind, NodeDefChangeSummary, NodeDefEntry,
     NodeDefLocation, NodeDefState, NodeDefValidationError, NodeId, NodeInvocation,
-    NodeInvocationSlot, NodeKind, NodeName, NodeNameError, RelativeNodeRef, RelativeNodeRefError,
-    RelativeNodeRefSrc,
+    NodeInvocationSlot, NodeKind, NodeName, NodeNameError, NodeRuntimeStatus, RelativeNodeRef,
+    RelativeNodeRefError, RelativeNodeRefSrc,
 };
 pub use nodes::{
     AddSubMode, ArtifactPathResolutionError, ButtonDef, ButtonDefView, ButtonState,
