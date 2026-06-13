@@ -136,7 +136,9 @@ impl Esp32RmtWs281xDriver {
             // owns logical exclusivity, so the driver recreates the erased pin after claiming it.
             let pin = AnyPin::steal(gpio as u8);
             let channel = LedChannel::new(rmt, pin, num_leds).map_err(|error| {
-                log::error!("ensure_rmt_initialized: LedChannel::new failed on GPIO{gpio}: {error:?}");
+                log::error!(
+                    "ensure_rmt_initialized: LedChannel::new failed on GPIO{gpio}: {error:?}"
+                );
                 HardwareEndpointError::Other {
                     message: format!("RMT channel init failed: {error:?}"),
                 }
