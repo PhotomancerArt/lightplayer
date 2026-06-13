@@ -105,8 +105,15 @@ impl Esp32RmtWs281xDriver {
             let gpio_ptr = core::ptr::addr_of_mut!(LED_GPIO);
             if (*channel_ptr).is_some() {
                 if (*gpio_ptr) == Some(gpio) {
+                    log::info!(
+                        "ensure_rmt_initialized: reusing existing RMT channel on GPIO{gpio} ({num_leds} LEDs)"
+                    );
                     return Ok(());
                 }
+                log::warn!(
+                    "ensure_rmt_initialized: RMT channel already bound to GPIO{:?}, cannot reinit on GPIO{gpio}",
+                    *gpio_ptr
+                );
                 return Err(HardwareEndpointError::EndpointUnavailable {
                     endpoint_id: HwEndpointId::new(gpio_address.as_str()),
                     reason: "RMT channel is already initialized for another GPIO".into(),
@@ -114,21 +121,29 @@ impl Esp32RmtWs281xDriver {
             }
 
             let Some(rmt) = self.rmt.borrow_mut().take() else {
+                log::warn!(
+                    "ensure_rmt_initialized: RMT peripheral already taken; cannot init GPIO{gpio}"
+                );
                 return Err(HardwareEndpointError::EndpointUnavailable {
                     endpoint_id: HwEndpointId::new(gpio_address.as_str()),
                     reason: "RMT peripheral is already in use".into(),
                 });
             };
+            log::info!(
+                "ensure_rmt_initialized: initializing RMT WS281x channel on GPIO{gpio} ({num_leds} LEDs)"
+            );
             // Board init drops the concrete HAL GPIO token after startup. The hardware registry
             // owns logical exclusivity, so the driver recreates the erased pin after claiming it.
             let pin = AnyPin::steal(gpio as u8);
             let channel = LedChannel::new(rmt, pin, num_leds).map_err(|error| {
+                log::error!("ensure_rmt_initialized: LedChannel::new failed on GPIO{gpio}: {error:?}");
                 HardwareEndpointError::Other {
                     message: format!("RMT channel init failed: {error:?}"),
                 }
             })?;
             (*channel_ptr) = Some(core::mem::transmute(channel));
             (*gpio_ptr) = Some(gpio);
+            log::info!("ensure_rmt_initialized: RMT WS281x channel ready on GPIO{gpio}");
         }
         Ok(())
     }
@@ -187,6 +202,11 @@ impl Ws281xDriver for Esp32RmtWs281xDriver {
     ) -> Result<Box<dyn Ws281xOutput>, HardwareEndpointError> {
         let gpio_address = self.gpio_for_endpoint(endpoint_id)?;
         validate_byte_count(config.byte_count())?;
+        log::info!(
+            "Esp32RmtWs281xDriver::open: endpoint={endpoint_id}, gpio={}, byte_count={}",
+            gpio_address.as_str(),
+            config.byte_count()
+        );
 
         let endpoint = self
             .endpoints()

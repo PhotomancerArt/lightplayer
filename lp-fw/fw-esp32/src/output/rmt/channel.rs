@@ -89,6 +89,8 @@ impl<'ch> LedChannel<'ch> {
     where
         O: PeripheralOutput<'ch>,
     {
+        log::info!("LedChannel::new: configuring RMT channel{RMT_CH_IDX} for {num_leds} LEDs");
+
         // Set up interrupt handler (only needs to be done once, but safe to call multiple times)
         // TODO: Use a static flag to only set up once
         let handler = InterruptHandler::new(rmt_interrupt_handler, Priority::max());
