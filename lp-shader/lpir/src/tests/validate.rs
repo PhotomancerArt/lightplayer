@@ -1,9 +1,9 @@
 //! Validator positive and negative tests.
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use crate::builder::FunctionBuilder;
 use crate::lpir_module::{ImportDecl, IrFunction, LpirModule, VMCTX_VREG};
@@ -98,7 +98,7 @@ fn validate_err_break_outside_loop() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: BTreeMap::from([(FuncId(0), f)]),
+        functions: VecMap::from([(FuncId(0), f)]),
     };
     let errs = validate_module(&m).expect_err("expected validation errors");
     assert!(errs.iter().any(|e| e.message.contains("loop")));
@@ -153,7 +153,7 @@ fn validate_err_undefined_vreg() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: BTreeMap::from([(FuncId(0), f)]),
+        functions: VecMap::from([(FuncId(0), f)]),
     };
     let errs =
         validate_function(m.functions.values().next().unwrap(), &m).expect_err("undefined v0");
@@ -180,7 +180,7 @@ fn validate_err_copy_type_mismatch() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: BTreeMap::from([(FuncId(0), f)]),
+        functions: VecMap::from([(FuncId(0), f)]),
     };
     let errs = validate_module(&m).expect_err("copy types");
     assert!(errs.iter().any(|e| e.message.contains("copy")));
@@ -206,7 +206,7 @@ fn validate_err_call_arity() {
             needs_vmctx: false,
             sret: false,
         }],
-        functions: BTreeMap::from([(FuncId(0), func)]),
+        functions: VecMap::from([(FuncId(0), func)]),
     };
     let errs = validate_module(&m).expect_err("call arity");
     assert!(errs.iter().any(|e| e.message.contains("arg count")));
@@ -233,7 +233,7 @@ fn validate_err_callee_oob() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: BTreeMap::from([(FuncId(0), f)]),
+        functions: VecMap::from([(FuncId(0), f)]),
     };
     let errs = validate_module(&m).expect_err("callee");
     assert!(errs.iter().any(|e| e.message.contains("callee")));
@@ -255,7 +255,7 @@ fn validate_err_continue_outside_loop() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: BTreeMap::from([(FuncId(0), f)]),
+        functions: VecMap::from([(FuncId(0), f)]),
     };
     let errs = validate_module(&m).expect_err("continue");
     assert!(errs.iter().any(|e| e.message.contains("loop")));
@@ -294,7 +294,7 @@ fn validate_err_duplicate_switch_case() {
     let f = b.finish();
     let m = LpirModule {
         imports: Vec::new(),
-        functions: BTreeMap::from([(FuncId(0), f)]),
+        functions: VecMap::from([(FuncId(0), f)]),
     };
     let errs = validate_module(&m).expect_err("dup case");
     assert!(
@@ -328,7 +328,7 @@ fn validate_err_return_value_type() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: BTreeMap::from([(FuncId(0), f)]),
+        functions: VecMap::from([(FuncId(0), f)]),
     };
     let errs = validate_module(&m).expect_err("return type");
     assert!(errs.iter().any(|e| e.message.contains("return value")));
@@ -353,7 +353,7 @@ fn validate_err_vreg_pool_oob() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: BTreeMap::from([(FuncId(0), f)]),
+        functions: VecMap::from([(FuncId(0), f)]),
     };
     let errs = validate_module(&m).expect_err("pool");
     assert!(errs.iter().any(|e| e.message.contains("pool")));
@@ -455,7 +455,7 @@ fn validate_err_slot_addr_oob() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: BTreeMap::from([(FuncId(0), f)]),
+        functions: VecMap::from([(FuncId(0), f)]),
     };
     let errs = validate_function(m.functions.values().next().unwrap(), &m).expect_err("bad slot");
     assert!(errs.iter().any(|e| e.message.contains("slot")));
@@ -480,7 +480,7 @@ fn validate_err_sret_with_return_types() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: BTreeMap::from([(FuncId(0), f)]),
+        functions: VecMap::from([(FuncId(0), f)]),
     };
     let errs = validate_module(&m).expect_err("sret return_types");
     assert!(
@@ -508,7 +508,7 @@ fn validate_err_sret_wrong_vreg_index() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: BTreeMap::from([(FuncId(0), f)]),
+        functions: VecMap::from([(FuncId(0), f)]),
     };
     let errs = validate_module(&m).expect_err("sret index");
     assert!(errs.iter().any(|e| e.message.contains("vmctx+1")));
@@ -539,7 +539,7 @@ fn validate_err_sret_return_values() {
     };
     let m = LpirModule {
         imports: Vec::new(),
-        functions: BTreeMap::from([(FuncId(0), f)]),
+        functions: VecMap::from([(FuncId(0), f)]),
     };
     let errs = validate_module(&m).expect_err("sret return values");
     assert!(
@@ -560,7 +560,7 @@ fn validate_err_import_sret_nonempty_returns() {
             needs_vmctx: false,
             sret: true,
         }],
-        functions: BTreeMap::new(),
+        functions: VecMap::new(),
     };
     let errs = validate_module(&m).expect_err("import sret rets");
     assert!(
@@ -581,7 +581,7 @@ fn validate_err_import_sret_first_not_ptr() {
             needs_vmctx: false,
             sret: true,
         }],
-        functions: BTreeMap::new(),
+        functions: VecMap::new(),
     };
     let errs = validate_module(&m).expect_err("import sret ptr");
     assert!(errs.iter().any(|e| e.message.contains("first param_types")));

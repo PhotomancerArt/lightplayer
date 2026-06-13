@@ -310,9 +310,9 @@ pub fn compile_module(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::collections::BTreeMap;
     use alloc::string::String;
     use alloc::vec;
+    use lp_collection::VecMap;
 
     use lpir::{FuncId, IrFunction, IrType, LpirModule, LpirOp, VReg, types::VRegRange};
     use lps_shared::{LpsFnKind, LpsFnSig, LpsModuleSig, LpsType};
@@ -340,7 +340,7 @@ mod tests {
     fn test_compile_module_empty() {
         let ir = LpirModule {
             imports: vec![],
-            functions: BTreeMap::new(),
+            functions: VecMap::new(),
         };
         let sig = LpsModuleSig::default();
         let result = compile_module(
@@ -359,7 +359,7 @@ mod tests {
     fn test_compile_simple_iconst() {
         let ir = LpirModule {
             imports: vec![],
-            functions: BTreeMap::from([(
+            functions: VecMap::from([(
                 FuncId(0),
                 IrFunction {
                     name: String::from("test"),
@@ -440,7 +440,7 @@ mod tests {
         };
         let ir = LpirModule {
             imports: vec![],
-            functions: BTreeMap::from([(FuncId(0), func)]),
+            functions: VecMap::from([(FuncId(0), func)]),
         };
         let sig = LpsModuleSig {
             functions: vec![LpsFnSig {
@@ -500,7 +500,7 @@ mod tests {
     fn simple_iconst_module() -> (LpirModule, LpsModuleSig) {
         let ir = LpirModule {
             imports: vec![],
-            functions: BTreeMap::from([(
+            functions: VecMap::from([(
                 FuncId(0),
                 IrFunction {
                     name: String::from("test"),

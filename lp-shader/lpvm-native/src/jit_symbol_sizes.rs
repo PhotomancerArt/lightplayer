@@ -1,11 +1,11 @@
 //! Sorted JIT entry offsets → per-function sizes (`next - cur`, last uses `buffer_len`).
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 /// Sort `name → byte offset` by offset, then name.
-pub(crate) fn sort_by_offset<'a>(map: &'a BTreeMap<String, usize>) -> Vec<(&'a str, u32)> {
+pub(crate) fn sort_by_offset<'a>(map: &'a VecMap<String, usize>) -> Vec<(&'a str, u32)> {
     let mut sorted: Vec<(&'a str, u32)> = map
         .iter()
         .map(|(name, off)| (name.as_str(), *off as u32))
@@ -39,7 +39,7 @@ mod tests {
 
     #[test]
     fn sizes_from_btreemap_offsets() {
-        let mut offsets = BTreeMap::new();
+        let mut offsets = VecMap::new();
         offsets.insert("alpha".to_string(), 0);
         offsets.insert("beta".to_string(), 0x40);
         offsets.insert("gamma".to_string(), 0x60);

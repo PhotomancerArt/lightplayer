@@ -6,9 +6,9 @@
 //!
 //! Naga then emits a sampled 2D `Image` in `AddressSpace::Handle` for the separate-texture form.
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec;
+use lp_collection::VecMap;
 
 use lps_shared::LayoutRules;
 use lps_shared::layout::{type_alignment, type_size};
@@ -251,7 +251,7 @@ vec4 render(vec2 pos) {
 }
 "#;
     let naga = compile(glsl).expect("compile");
-    let mut texture_specs = BTreeMap::new();
+    let mut texture_specs = VecMap::new();
     texture_specs.insert(String::from("inputColor"), sample_texture_binding_spec());
     let options = LowerOptions {
         texture_specs,
@@ -298,7 +298,7 @@ vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }
 "#;
     let naga = compile(glsl).expect("parse");
     let spec = sample_texture_binding_spec();
-    let mut texture_specs = BTreeMap::new();
+    let mut texture_specs = VecMap::new();
     texture_specs.insert(String::from("inputColor"), spec.clone());
     let options = LowerOptions {
         texture_specs,
@@ -315,7 +315,7 @@ uniform sampler2D inputColor;
 vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }
 "#;
     let naga = compile(glsl).expect("parse");
-    let mut texture_specs = BTreeMap::new();
+    let mut texture_specs = VecMap::new();
     // Non-empty options → validation runs; wrong key so `inputColor` is still missing.
     texture_specs.insert(String::from("otherSampler"), sample_texture_binding_spec());
     let options = LowerOptions {
@@ -336,7 +336,7 @@ fn lower_with_options_extra_spec_errors_with_spec_name() {
 float f() { return 1.0; }
 "#;
     let naga = compile(glsl).expect("parse");
-    let mut texture_specs = BTreeMap::new();
+    let mut texture_specs = VecMap::new();
     texture_specs.insert(String::from("onlyInSpecMap"), sample_texture_binding_spec());
     let options = LowerOptions {
         texture_specs,
@@ -359,7 +359,7 @@ vec4 render(vec2 pos) {
 }
 "#;
     let naga = compile(glsl).expect("compile");
-    let mut texture_specs = BTreeMap::new();
+    let mut texture_specs = VecMap::new();
     texture_specs.insert(String::from("inputColor"), sample_texture_binding_spec());
     let opts = LowerOptions {
         texture_specs,
@@ -380,7 +380,7 @@ vec4 render(vec2 pos) {
 }
 "#;
     let naga = compile(glsl).expect("compile");
-    let mut texture_specs = BTreeMap::new();
+    let mut texture_specs = VecMap::new();
     texture_specs.insert(String::from("inputColor"), sample_texture_binding_spec());
     let opts = LowerOptions {
         texture_specs,
@@ -404,7 +404,7 @@ vec4 render(vec2 pos) {
 }
 "#;
     let naga = compile(glsl).expect("compile");
-    let mut texture_specs = BTreeMap::new();
+    let mut texture_specs = VecMap::new();
     texture_specs.insert(String::from("inputColor"), sample_texture_binding_spec());
     let opts = LowerOptions {
         texture_specs,

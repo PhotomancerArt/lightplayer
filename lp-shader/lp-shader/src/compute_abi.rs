@@ -1,9 +1,9 @@
 //! Serial compute shader ABI validation.
 
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
+use lp_collection::VecMap;
 
 use lps_shared::path_resolve::LpsTypePathExt;
 use lps_shared::{LpsModuleSig, LpsType};
@@ -21,9 +21,9 @@ pub const COMPUTE_TICK_FN: &str = "tick";
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ComputeAbi {
     /// Uniform-backed values written before each compute tick.
-    pub consumed: BTreeMap<String, LpsType>,
+    pub consumed: VecMap<String, LpsType>,
     /// Private-global-backed values read after a compute tick.
-    pub produced: BTreeMap<String, ComputeOutputAbi>,
+    pub produced: VecMap<String, ComputeOutputAbi>,
 }
 
 /// Expected shader-visible representation of a produced slot.

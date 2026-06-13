@@ -1,9 +1,9 @@
 //! Module and function containers.
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
 use core::ops::{Index, IndexMut};
+use lp_collection::VecMap;
 
 use lp_collection::{ChunkedVec, chunked_vec};
 
@@ -204,7 +204,7 @@ impl IrFunction {
 #[derive(Clone, Debug, Default)]
 pub struct LpirModule {
     pub imports: Vec<ImportDecl>,
-    pub functions: BTreeMap<FuncId, IrFunction>,
+    pub functions: VecMap<FuncId, IrFunction>,
 }
 
 impl LpirModule {

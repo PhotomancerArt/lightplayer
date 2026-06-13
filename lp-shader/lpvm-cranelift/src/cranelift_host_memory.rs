@@ -1,11 +1,11 @@
 //! Global-allocator linear [`LpvmMemory`] for Cranelift JIT (any target with [`alloc`]).
 //!
 //! Guest and host share one address space: [`LpvmBuffer::guest_base`] equals the zero-extended
-//! host pointer. A [`spin::Mutex`] + [`BTreeMap`] tracks live allocations so `free`/`realloc`
+//! host pointer. A [`spin::Mutex`] + [`VecMap`] tracks live allocations so `free`/`realloc`
 //! only accept buffers this allocator created (Rust's global `dealloc` needs the exact layout).
 
 use alloc::alloc::{alloc, dealloc, realloc};
-use alloc::collections::BTreeMap;
+use lp_collection::VecMap;
 
 use core::alloc::Layout;
 
@@ -14,13 +14,13 @@ use spin::Mutex;
 
 /// Real `alloc` / `dealloc` / `realloc` via the global allocator (host or embedded `#[global_allocator]`).
 pub struct CraneliftHostMemory {
-    live: Mutex<BTreeMap<u64, (usize, usize)>>,
+    live: Mutex<VecMap<u64, (usize, usize)>>,
 }
 
 impl CraneliftHostMemory {
     pub fn new() -> Self {
         Self {
-            live: Mutex::new(BTreeMap::new()),
+            live: Mutex::new(VecMap::new()),
         }
     }
 

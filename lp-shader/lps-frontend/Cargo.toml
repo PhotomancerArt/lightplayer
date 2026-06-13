@@ -9,6 +9,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+lp-collection = { workspace = true, features = ["serde"] }
 libm = "0.2"
 smallvec = { version = "1", default-features = false }
 lps-shared = { path = "../lps-shared" }

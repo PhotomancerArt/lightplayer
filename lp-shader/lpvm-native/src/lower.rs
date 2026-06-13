@@ -3583,7 +3583,7 @@ mod tests {
     #[test]
     fn lower_ops_populates_region_tree() {
         use crate::region::{REGION_ID_NONE, Region};
-        use alloc::collections::BTreeMap;
+        use lp_collection::VecMap;
         use lpir::FuncId;
         use lpir::types::VRegRange;
 
@@ -3615,7 +3615,7 @@ mod tests {
 
         let ir = LpirModule {
             imports: vec![],
-            functions: BTreeMap::from([(FuncId(0), func.clone())]),
+            functions: VecMap::from([(FuncId(0), func.clone())]),
         };
         let sig = LpsModuleSig::default();
         let abi = ModuleAbi::from_ir_and_sig(crate::isa::IsaTarget::Rv32imac, &ir, &sig);

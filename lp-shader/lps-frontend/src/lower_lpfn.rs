@@ -1,9 +1,9 @@
 //! LPFX builtin calls → `@lpfn::…` imports, scalar and vector value arguments, and out-parameters.
 
-use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::{VecMap, VecSet};
 
 use lpir::{CalleeRef, ImportDecl, IrType, LpirOp, ModuleBuilder, VReg};
 use naga::{
@@ -31,9 +31,9 @@ pub(crate) enum LpfnArgKind {
 pub(crate) fn register_lpfn_imports(
     mb: &mut ModuleBuilder,
     naga_module: &NagaModule,
-) -> Result<BTreeMap<Handle<Function>, CalleeRef>, LowerError> {
+) -> Result<VecMap<Handle<Function>, CalleeRef>, LowerError> {
     let handles = collect_lpfn_callee_handles(naga_module);
-    let mut map = BTreeMap::new();
+    let mut map = VecMap::new();
     for h in handles {
         let decl = build_lpfn_import_decl(&naga_module.module, h)?;
         let r = mb.add_import(decl);
@@ -43,7 +43,7 @@ pub(crate) fn register_lpfn_imports(
 }
 
 fn collect_lpfn_callee_handles(naga_module: &NagaModule) -> Vec<Handle<Function>> {
-    let mut seen = BTreeSet::new();
+    let mut seen = VecSet::new();
     for (fh, _) in &naga_module.functions {
         let f = &naga_module.module.functions[*fh];
         walk_block_for_lpfn_calls(&naga_module.module, f, &f.body, &mut seen);
@@ -55,7 +55,7 @@ fn walk_block_for_lpfn_calls(
     module: &Module,
     func: &Function,
     block: &Block,
-    seen: &mut BTreeSet<Handle<Function>>,
+    seen: &mut VecSet<Handle<Function>>,
 ) {
     for stmt in block.iter() {
         match stmt {

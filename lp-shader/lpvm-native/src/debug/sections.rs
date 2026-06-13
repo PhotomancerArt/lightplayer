@@ -1,7 +1,7 @@
 //! Structured debug sections for [`crate::compile::compile_function`] (`feature = "debug"`).
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
+use lp_collection::VecMap;
 
 use lpir::{IrFunction, LpirModule};
 
@@ -19,10 +19,10 @@ pub fn build_debug_sections(
     alloc_output: &AllocOutput,
     func_abi: &FuncAbi,
     symbols: &ModuleSymbols,
-) -> BTreeMap<String, String> {
+) -> VecMap<String, String> {
     #[cfg(feature = "debug")]
     {
-        let mut sections = BTreeMap::new();
+        let mut sections = VecMap::new();
 
         let interleaved = crate::regalloc::render::render_interleaved(
             func,
@@ -64,6 +64,6 @@ pub fn build_debug_sections(
     #[cfg(not(feature = "debug"))]
     {
         let _ = (func, ir, lowered, code, alloc_output, func_abi, symbols);
-        BTreeMap::new()
+        VecMap::new()
     }
 }

@@ -1,9 +1,9 @@
 //! Stack-slot arrays: zero-fill, initializer lists, indexed load/store with bounds clamping.
 
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use smallvec::smallvec;
 
@@ -711,9 +711,9 @@ fn collect_flat_compose_components(
 /// GLSL uses the leftmost `[]` size, which matches `dimensions[last]` in our shape walk.
 pub(crate) fn scan_naga_multidim_array_length_literals(
     func: &Function,
-    aggregate_map: &BTreeMap<Handle<LocalVariable>, AggregateInfo>,
-) -> BTreeMap<Handle<Expression>, i32> {
-    let mut fixes = BTreeMap::new();
+    aggregate_map: &VecMap<Handle<LocalVariable>, AggregateInfo>,
+) -> VecMap<Handle<Expression>, i32> {
+    let mut fixes = VecMap::new();
     let entries: Vec<(usize, Handle<Expression>, &Expression)> = func
         .expressions
         .iter()

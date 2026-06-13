@@ -1,8 +1,8 @@
 //! Concatenate emitted functions, record relocations, patch auipc+jalr at finalize.
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
@@ -39,7 +39,7 @@ pub fn compile_module_jit(
     builtin_table: &BuiltinTable,
     options: &NativeCompileOptions,
     isa: IsaTarget,
-) -> Result<(JitBuffer, BTreeMap<String, usize>), NativeError> {
+) -> Result<(JitBuffer, VecMap<String, usize>), NativeError> {
     let float_mode = options.float_mode;
 
     // 1. Compile module
@@ -60,7 +60,7 @@ pub(crate) fn link_compiled_module_jit(
     compiled: CompiledModule,
     builtin_table: &BuiltinTable,
     isa: IsaTarget,
-) -> Result<(JitBuffer, BTreeMap<String, usize>), NativeError> {
+) -> Result<(JitBuffer, VecMap<String, usize>), NativeError> {
     // 2. Link JIT image with builtin resolution
     lp_perf::emit_begin!(EVENT_SHADER_LINK);
     let link_result = link_jit(&compiled, isa, |sym| {
@@ -86,7 +86,7 @@ pub(crate) fn link_compiled_module_jit(
 }
 
 /// Builds [`JitSymbolEntry`] records (names in `name_buf`) and notifies the profiler sink.
-fn emit_jit_symbols(buffer_base: u32, buffer_len: u32, entry_offsets: &BTreeMap<String, usize>) {
+fn emit_jit_symbols(buffer_base: u32, buffer_len: u32, entry_offsets: &VecMap<String, usize>) {
     if entry_offsets.is_empty() {
         return;
     }

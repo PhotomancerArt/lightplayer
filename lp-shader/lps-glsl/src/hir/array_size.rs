@@ -1,9 +1,9 @@
-use alloc::collections::BTreeMap;
 use alloc::string::String;
+use lp_collection::VecMap;
 
 use crate::{Token, TokenKind, lex};
 
-pub(super) type ArraySizeConsts = BTreeMap<String, u32>;
+pub(super) type ArraySizeConsts = VecMap<String, u32>;
 
 pub(super) fn eval_array_size_expr(source: &str, consts: &ArraySizeConsts) -> Option<u32> {
     let tokens = lex(source).ok()?;

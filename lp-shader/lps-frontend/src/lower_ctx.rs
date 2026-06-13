@@ -1,10 +1,10 @@
 //! Per-function lowering context (builder, expression cache, local maps).
 
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use lpir::{CalleeRef, FunctionBuilder, IrType, LpirModule, LpirOp, SlotId, VReg};
 use naga::{
@@ -83,20 +83,20 @@ pub(crate) struct GlobalVarInfo {
 }
 
 /// Map from Naga GlobalVariable handle to its lowering info.
-pub(crate) type GlobalVarMap = BTreeMap<Handle<GlobalVariable>, GlobalVarInfo>;
+pub(crate) type GlobalVarMap = VecMap<Handle<GlobalVariable>, GlobalVarInfo>;
 
 /// Naga stores `uniform Block { } name` instance as a function [`LocalVariable`] initialized from
 /// the corresponding [`GlobalVariable`]; map proxy locals to that global for VMContext loads.
 fn scan_uniform_instance_local_to_global(
     module: &Module,
     func: &Function,
-) -> BTreeMap<Handle<LocalVariable>, Handle<GlobalVariable>> {
-    let mut m = BTreeMap::new();
+) -> VecMap<Handle<LocalVariable>, Handle<GlobalVariable>> {
+    let mut m = VecMap::new();
     fn walk_block(
         block: &naga::Block,
         module: &Module,
         func: &Function,
-        m: &mut BTreeMap<Handle<LocalVariable>, Handle<GlobalVariable>>,
+        m: &mut VecMap<Handle<LocalVariable>, Handle<GlobalVariable>>,
     ) {
         for stmt in block.iter() {
             match stmt {
@@ -263,34 +263,34 @@ pub(crate) struct LowerCtx<'a> {
     pub func: &'a Function,
     pub ir_module: Option<&'a LpirModule>,
     pub expr_cache: Vec<Option<VRegVec>>,
-    pub local_map: BTreeMap<Handle<LocalVariable>, VRegVec>,
+    pub local_map: VecMap<Handle<LocalVariable>, VRegVec>,
     /// Stack (and `in` by-value) aggregates keyed by [`LocalVariable`].
-    pub aggregate_map: BTreeMap<Handle<LocalVariable>, AggregateInfo>,
+    pub aggregate_map: VecMap<Handle<LocalVariable>, AggregateInfo>,
     /// Call results for functions returning an aggregate: [`Expression::CallResult`] → stack slot
     /// (same layout as `aggregate_map` entries, always [`AggregateSlot::Local`]).
-    pub(crate) call_result_aggregates: BTreeMap<Handle<Expression>, AggregateInfo>,
+    pub(crate) call_result_aggregates: VecMap<Handle<Expression>, AggregateInfo>,
     /// Naga emits `.length()` on multi-dim arrays as the outer type-tree size, not GLSL's leftmost `[]`.
     /// Pairs `Load(array)` + `Literal(U32)` (and chained `Literal(I32)` copies) get corrected values here.
-    pub(crate) array_length_literal_fixes: BTreeMap<Handle<Expression>, i32>,
-    pub param_aliases: BTreeMap<Handle<LocalVariable>, VRegVec>,
+    pub(crate) array_length_literal_fixes: VecMap<Handle<Expression>, i32>,
+    pub param_aliases: VecMap<Handle<LocalVariable>, VRegVec>,
     /// VRegs per function argument: scalars/vectors (flattened), or one pointer for aggregates / `inout` bases.
-    pub(crate) arg_vregs: BTreeMap<u32, VRegVec>,
+    pub(crate) arg_vregs: VecMap<u32, VRegVec>,
     /// `in`/`out`/`inout` parameters: Naga type handle of the pointee (for Load/Store).
-    pub(crate) pointer_args: BTreeMap<u32, Handle<Type>>,
-    pub func_map: BTreeMap<Handle<Function>, CalleeRef>,
-    pub import_map: BTreeMap<String, CalleeRef>,
-    pub lpfn_map: BTreeMap<Handle<Function>, CalleeRef>,
+    pub(crate) pointer_args: VecMap<u32, Handle<Type>>,
+    pub func_map: VecMap<Handle<Function>, CalleeRef>,
+    pub import_map: VecMap<String, CalleeRef>,
+    pub lpfn_map: VecMap<Handle<Function>, CalleeRef>,
     pub return_types: Vec<IrType>,
     /// Present when the shader function returns an aggregate by sret (LPIR void return, memcpy to `addr`).
     pub sret: Option<SretCtx>,
     /// Map from Naga GlobalVariable handle to VMContext / lowering info.
     pub(crate) global_map: GlobalVarMap,
     /// [`Expression::index`] → deferred uniform array field / indexed element (see [`UniformVmctxDeferred`]).
-    pub(crate) uniform_vmctx_deferred: BTreeMap<usize, UniformVmctxDeferred>,
+    pub(crate) uniform_vmctx_deferred: VecMap<usize, UniformVmctxDeferred>,
     /// `uniform Block { } instance` locals → backing [`GlobalVariable`] (uniform).
-    pub(crate) uniform_instance_locals: BTreeMap<Handle<LocalVariable>, Handle<GlobalVariable>>,
+    pub(crate) uniform_instance_locals: VecMap<Handle<LocalVariable>, Handle<GlobalVariable>>,
     /// Compile-time [`TextureBindingSpec`] keyed by sampler uniform name ([`crate::LowerOptions`]).
-    pub(crate) texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
+    pub(crate) texture_specs: &'a VecMap<String, TextureBindingSpec>,
     /// Mirrors [`crate::LowerOptions::texel_fetch_bounds`] for `texelFetch` lowering.
     pub(crate) texel_fetch_bounds: lpir::TexelFetchBoundsMode,
     /// Uniform block metadata for canonical paths and std430 offsets (same as [`LpsModuleSig::uniforms_type`]).
@@ -302,11 +302,11 @@ impl<'a> LowerCtx<'a> {
         module: &'a Module,
         func: &'a Function,
         name: &str,
-        func_map: &BTreeMap<Handle<Function>, CalleeRef>,
-        import_map: &BTreeMap<String, CalleeRef>,
-        lpfn_map: &BTreeMap<Handle<Function>, CalleeRef>,
+        func_map: &VecMap<Handle<Function>, CalleeRef>,
+        import_map: &VecMap<String, CalleeRef>,
+        lpfn_map: &VecMap<Handle<Function>, CalleeRef>,
         global_map: GlobalVarMap,
-        texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
+        texture_specs: &'a VecMap<String, TextureBindingSpec>,
         texel_fetch_bounds: lpir::TexelFetchBoundsMode,
         uniforms_type: Option<&'a LpsType>,
     ) -> Result<Self, LowerError> {
@@ -326,8 +326,8 @@ impl<'a> LowerCtx<'a> {
             None
         };
 
-        let mut arg_vregs: BTreeMap<u32, VRegVec> = BTreeMap::new();
-        let mut pointer_args: BTreeMap<u32, Handle<Type>> = BTreeMap::new();
+        let mut arg_vregs: VecMap<u32, VRegVec> = VecMap::new();
+        let mut pointer_args: VecMap<u32, Handle<Type>> = VecMap::new();
         let mut pending_in_aggregate_specs: Vec<PendingInAggregateValueArg> = Vec::new();
         for (i, arg) in func.arguments.iter().enumerate() {
             let inner = &module.types[arg.ty].inner;
@@ -378,8 +378,8 @@ impl<'a> LowerCtx<'a> {
 
         let in_aggregate_read_only = in_aggregate_param_read_only(module, func)?;
 
-        let mut pending_in_aggregate_value_param: BTreeMap<Handle<LocalVariable>, AggregateInfo> =
-            BTreeMap::new();
+        let mut pending_in_aggregate_value_param: VecMap<Handle<LocalVariable>, AggregateInfo> =
+            VecMap::new();
         for spec in pending_in_aggregate_specs {
             let use_readonly = in_aggregate_read_only
                 .get(&spec.arg_i)
@@ -427,15 +427,15 @@ impl<'a> LowerCtx<'a> {
         }
 
         let param_idx = scan_param_argument_indices(module, func);
-        let mut param_aliases: BTreeMap<Handle<LocalVariable>, VRegVec> = BTreeMap::new();
+        let mut param_aliases: VecMap<Handle<LocalVariable>, VRegVec> = VecMap::new();
         for (lv, arg_i) in &param_idx {
             if let Some(vs) = arg_vregs.get(arg_i) {
                 param_aliases.insert(*lv, vs.clone());
             }
         }
 
-        let mut local_map: BTreeMap<Handle<LocalVariable>, VRegVec> = BTreeMap::new();
-        let mut aggregate_map: BTreeMap<Handle<LocalVariable>, AggregateInfo> = BTreeMap::new();
+        let mut local_map: VecMap<Handle<LocalVariable>, VRegVec> = VecMap::new();
+        let mut aggregate_map: VecMap<Handle<LocalVariable>, AggregateInfo> = VecMap::new();
         for (lv_handle, var) in func.local_variables.iter() {
             if param_aliases.contains_key(&lv_handle) {
                 continue;
@@ -567,7 +567,7 @@ impl<'a> LowerCtx<'a> {
             expr_cache,
             local_map,
             aggregate_map,
-            call_result_aggregates: BTreeMap::new(),
+            call_result_aggregates: VecMap::new(),
             array_length_literal_fixes,
             param_aliases,
             arg_vregs,
@@ -578,7 +578,7 @@ impl<'a> LowerCtx<'a> {
             return_types,
             sret,
             global_map,
-            uniform_vmctx_deferred: BTreeMap::new(),
+            uniform_vmctx_deferred: VecMap::new(),
             uniform_instance_locals,
             texture_specs,
             texel_fetch_bounds,
@@ -753,13 +753,13 @@ impl<'a> LowerCtx<'a> {
 fn scan_param_argument_indices(
     module: &Module,
     func: &Function,
-) -> BTreeMap<Handle<LocalVariable>, u32> {
-    let mut m = BTreeMap::new();
+) -> VecMap<Handle<LocalVariable>, u32> {
+    let mut m = VecMap::new();
     fn walk_block(
         block: &naga::Block,
         module: &Module,
         func: &Function,
-        m: &mut BTreeMap<Handle<LocalVariable>, u32>,
+        m: &mut VecMap<Handle<LocalVariable>, u32>,
     ) {
         for stmt in block.iter() {
             match stmt {

@@ -3,8 +3,8 @@
 //! Used to elide the entry `Memcpy` from the pointer parameter into a stack slot when the
 //! aggregate is never written and is not passed onward as a callee `inout`/`out` argument.
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
+use lp_collection::VecMap;
 
 use naga::{
     AddressSpace, Block, Expression, Function, Handle, LocalVariable, Module, Statement, TypeInner,
@@ -26,8 +26,8 @@ use crate::lower_struct::peel_struct_access_index_chain_to_local;
 pub(crate) fn in_aggregate_param_read_only(
     module: &Module,
     func: &Function,
-) -> Result<BTreeMap<u32, bool>, LowerError> {
-    let mut out = BTreeMap::new();
+) -> Result<VecMap<u32, bool>, LowerError> {
+    let mut out = VecMap::new();
     for (i, arg) in func.arguments.iter().enumerate() {
         let i = i as u32;
         match &module.types[arg.ty].inner {

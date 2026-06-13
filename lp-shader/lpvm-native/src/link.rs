@@ -1,8 +1,8 @@
 //! Linking: relocation resolution and output generation (JIT / ELF).
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 use object::write::{Object, Relocation, StandardSection, Symbol, SymbolId, SymbolSection};
 use object::{BinaryFormat, Endianness, FileFlags, SymbolFlags, SymbolKind, SymbolScope, elf};
 
@@ -16,7 +16,7 @@ pub struct LinkedJitImage {
     /// Executable machine code bytes.
     pub code: Vec<u8>,
     /// Function name → offset in code.
-    pub entries: BTreeMap<String, usize>,
+    pub entries: VecMap<String, usize>,
 }
 
 /// Resolve all relocations and produce a JIT-ready image.
@@ -37,7 +37,7 @@ where
 {
     // Concatenate all function code
     let mut code = Vec::new();
-    let mut entries = BTreeMap::new();
+    let mut entries = VecMap::new();
     let mut func_offsets = Vec::with_capacity(module.functions.len());
 
     for func in &module.functions {
@@ -118,7 +118,7 @@ pub fn link_elf(module: &CompiledModule, isa: IsaTarget) -> Result<Vec<u8>, Nati
     };
 
     let text = obj.section_id(StandardSection::Text);
-    let mut symbol_ids: BTreeMap<String, SymbolId> = BTreeMap::new();
+    let mut symbol_ids: VecMap<String, SymbolId> = VecMap::new();
 
     // Add all function symbols first (before appending section data)
     for (idx, func) in module.functions.iter().enumerate() {

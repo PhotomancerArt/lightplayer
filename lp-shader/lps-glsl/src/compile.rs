@@ -3,12 +3,12 @@ use lps_shared::{LpsModuleSig, TextureBindingSpec};
 
 use crate::{CompileJob, CompileStepResult, Diagnostic, TopLevelIndex};
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
+use lp_collection::VecMap;
 
 #[derive(Debug, Clone, Default)]
 pub struct CompileOptions {
-    pub texture_specs: BTreeMap<String, TextureBindingSpec>,
+    pub texture_specs: VecMap<String, TextureBindingSpec>,
     pub texel_fetch_bounds: lpir::TexelFetchBoundsMode,
 }
 

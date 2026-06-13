@@ -12,6 +12,7 @@ use crate::native_options::NativeCompileOptions;
 use super::builtins::BuiltinTable;
 use super::compiler::link_compiled_module_jit;
 use super::module::{NativeJitModule, NativeJitModuleInner, build_entry_info};
+use lp_collection::VecMap;
 
 enum NativeJitCompileStage {
     Backend(NativeCompileJob),
@@ -24,8 +25,7 @@ pub struct NativeJitCompileJob {
     options: NativeCompileOptions,
     isa: IsaTarget,
     stage: NativeJitCompileStage,
-    entry_info:
-        alloc::collections::BTreeMap<alloc::string::String, super::module::NativeJitEntryInfo>,
+    entry_info: lp_collection::VecMap<alloc::string::String, super::module::NativeJitEntryInfo>,
 }
 
 impl NativeJitCompileJob {

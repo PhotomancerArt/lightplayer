@@ -3,9 +3,9 @@
 //! Keeps `TraceSink`, `TracePush`, and trace-derived helpers in one place so
 //! `walk.rs` and `AllocOutput` stay free of scattered `#[cfg(feature = "debug")]`.
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 pub use crate::regalloc::trace::TraceEntry;
 
@@ -54,11 +54,11 @@ fn is_entry_trace_mnemonic(m: &str) -> bool {
 /// Non-entry trace rows grouped by VInst index (forward order).
 pub fn trace_by_vinst_or_empty(
     output: &crate::regalloc::AllocOutput,
-) -> BTreeMap<usize, Vec<&TraceEntry>> {
+) -> VecMap<usize, Vec<&TraceEntry>> {
     #[cfg(feature = "debug")]
     {
         let trace = &output.trace;
-        let mut map: BTreeMap<usize, Vec<&TraceEntry>> = BTreeMap::new();
+        let mut map: VecMap<usize, Vec<&TraceEntry>> = VecMap::new();
         for entry in trace.entries.iter().rev() {
             if !is_entry_trace_mnemonic(&entry.vinst_mnemonic) {
                 map.entry(entry.vinst_idx).or_default().push(entry);
@@ -72,7 +72,7 @@ pub fn trace_by_vinst_or_empty(
     #[cfg(not(feature = "debug"))]
     {
         let _ = output;
-        BTreeMap::new()
+        VecMap::new()
     }
 }
 

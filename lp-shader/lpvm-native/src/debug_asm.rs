@@ -69,7 +69,7 @@ mod tests {
     use alloc::string::String;
     use alloc::vec;
 
-    use alloc::collections::BTreeMap;
+    use lp_collection::VecMap;
 
     use lpir::types::VRegRange;
     use lpir::{FuncId, IrFunction, IrType, LpirModule, LpirOp, VReg};
@@ -81,7 +81,7 @@ mod tests {
     fn compile_module_asm_contains_lpir() {
         let ir = LpirModule {
             imports: vec![],
-            functions: BTreeMap::from([(
+            functions: VecMap::from([(
                 FuncId(0),
                 IrFunction {
                     name: String::from("add"),

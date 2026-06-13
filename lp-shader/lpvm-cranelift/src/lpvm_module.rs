@@ -1,10 +1,10 @@
 //! LPVM trait implementation: [`CraneliftModule`] wraps the live JIT ([`crate::jit_module::JitModule`])
 //! in [`Arc`] so finalized code stays valid and [`Clone`] is cheap.
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use cranelift_codegen::ir::Signature;
 use lpir::FloatMode;
@@ -45,7 +45,7 @@ impl CraneliftModule {
         self.0.glsl_meta()
     }
 
-    pub(crate) fn name_to_index(&self) -> &BTreeMap<String, usize> {
+    pub(crate) fn name_to_index(&self) -> &VecMap<String, usize> {
         &self.0.name_to_index
     }
 
@@ -53,7 +53,7 @@ impl CraneliftModule {
         &self.0.ir_param_counts
     }
 
-    pub(crate) fn logical_return_words(&self) -> &BTreeMap<String, usize> {
+    pub(crate) fn logical_return_words(&self) -> &VecMap<String, usize> {
         &self.0.logical_return_words
     }
 

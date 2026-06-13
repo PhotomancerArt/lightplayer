@@ -1,6 +1,6 @@
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use lpir::{FloatMode, LpirModule};
 use lps_shared::{LpsFnKind, LpsFnSig, LpsModuleSig, LpsType};
@@ -27,7 +27,7 @@ pub struct NativeCompileJob {
     float_mode: FloatMode,
     options: NativeCompileOptions,
     isa: IsaTarget,
-    sig_map: BTreeMap<String, LpsFnSig>,
+    sig_map: VecMap<String, LpsFnSig>,
 }
 
 impl NativeCompileJob {
@@ -39,7 +39,7 @@ impl NativeCompileJob {
         isa: IsaTarget,
     ) -> Self {
         let function_count = ir.functions.len();
-        let mut sig_map = BTreeMap::new();
+        let mut sig_map = VecMap::new();
         for function in sig.functions.iter().cloned() {
             sig_map.insert(function.name.clone(), function);
         }

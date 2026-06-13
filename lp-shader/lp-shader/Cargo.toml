@@ -14,6 +14,7 @@ std = []
 naga = ["dep:lps-frontend"]
 
 [dependencies]
+lp-collection = { workspace = true, features = ["serde"] }
 lpir = { path = "../lpir" }
 lps-shared = { path = "../lps-shared" }
 lpvm = { path = "../lpvm" }

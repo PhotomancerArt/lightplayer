@@ -1,8 +1,8 @@
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use lpir::{
     CalleeRef, FuncId, FunctionBuilder, ImportDecl, IrType, LpirModule, LpirOp, ModuleBuilder,
@@ -39,7 +39,7 @@ pub struct LoweredModule {
 
 pub fn lower_hir(module: HirModule) -> Result<LoweredModule, Diagnostic> {
     let mut mb = ModuleBuilder::new();
-    let mut import_map = BTreeMap::new();
+    let mut import_map = VecMap::new();
     for import in &module.imports {
         let callee = mb.add_import(ImportDecl {
             module_name: import.module_name.clone(),
@@ -77,7 +77,7 @@ pub fn lower_hir(module: HirModule) -> Result<LoweredModule, Diagnostic> {
 fn lower_function(
     function: &HirFunction,
     module: &HirModule,
-    import_map: &BTreeMap<ImportKey, CalleeRef>,
+    import_map: &VecMap<ImportKey, CalleeRef>,
 ) -> Result<lpir::IrFunction, Diagnostic> {
     let return_types = scalar_ir_types(&function.return_ty)?;
     let mut fb = FunctionBuilder::new(&function.name, &return_types);
@@ -129,9 +129,9 @@ struct LowerCtx<'a> {
     params: Vec<LowerValue>,
     locals: Vec<LocalStorage>,
     arena: &'a HirArena,
-    import_map: &'a BTreeMap<ImportKey, CalleeRef>,
+    import_map: &'a VecMap<ImportKey, CalleeRef>,
     param_qualifiers: Vec<ParamQualifier>,
-    texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
+    texture_specs: &'a VecMap<String, TextureBindingSpec>,
     texel_fetch_bounds: lpir::TexelFetchBoundsMode,
 }
 

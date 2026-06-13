@@ -3,9 +3,9 @@
 use crate::path::parse_path;
 use crate::path_resolve::LpsTypePathExt;
 use crate::{LpsModuleSig, LpsType, StructMember, TextureBindingSpec};
-use alloc::collections::{BTreeMap, BTreeSet};
 use alloc::format;
 use alloc::string::String;
+use lp_collection::{VecMap, VecSet};
 
 /// Every [`LpsType::Texture2D`] uniform in [`LpsModuleSig::uniforms_type`] must have a matching
 /// spec entry; every spec key must name a declared sampler. Empty specs with no texture uniforms
@@ -15,7 +15,7 @@ use alloc::string::String;
 /// is present but not a struct.
 pub fn validate_texture_binding_specs_against_module(
     meta: &LpsModuleSig,
-    specs: &BTreeMap<String, TextureBindingSpec>,
+    specs: &VecMap<String, TextureBindingSpec>,
 ) -> Result<(), String> {
     let declared = declared_texture2d_paths(meta)?;
     for name in &declared {
@@ -35,16 +35,16 @@ pub fn validate_texture_binding_specs_against_module(
     Ok(())
 }
 
-fn declared_texture2d_paths(meta: &LpsModuleSig) -> Result<BTreeSet<String>, String> {
+fn declared_texture2d_paths(meta: &LpsModuleSig) -> Result<VecSet<String>, String> {
     let Some(u) = meta.uniforms_type.as_ref() else {
-        return Ok(BTreeSet::new());
+        return Ok(VecSet::new());
     };
     let LpsType::Struct { members, .. } = u else {
         return Err(String::from(
             "uniforms metadata is not a struct (cannot validate texture bindings)",
         ));
     };
-    let mut out = BTreeSet::new();
+    let mut out = VecSet::new();
     collect_texture2d_paths_from_members(u, members, &[], &mut out)?;
     Ok(out)
 }
@@ -55,7 +55,7 @@ fn collect_texture2d_paths_from_members(
     uniforms_root: &LpsType,
     members: &[StructMember],
     prefix: &[String],
-    out: &mut BTreeSet<String>,
+    out: &mut VecSet<String>,
 ) -> Result<(), String> {
     for m in members {
         match &m.ty {
@@ -176,7 +176,7 @@ mod tests {
             globals_type: None,
             ..Default::default()
         };
-        let specs = BTreeMap::new();
+        let specs = VecMap::new();
         let err = validate_texture_binding_specs_against_module(&meta, &specs).unwrap_err();
         assert!(
             err.contains("inputColor") && err.contains("no texture binding spec"),
@@ -195,7 +195,7 @@ mod tests {
             globals_type: None,
             ..Default::default()
         };
-        let mut specs = BTreeMap::new();
+        let mut specs = VecMap::new();
         specs.insert(
             String::from("extraTex"),
             TextureBindingSpec {
@@ -227,7 +227,7 @@ mod tests {
             globals_type: None,
             ..Default::default()
         };
-        let mut specs = BTreeMap::new();
+        let mut specs = VecMap::new();
         specs.insert(
             String::from("u_tex"),
             TextureBindingSpec {
@@ -267,7 +267,7 @@ mod tests {
             globals_type: None,
             ..Default::default()
         };
-        let mut specs = BTreeMap::new();
+        let mut specs = VecMap::new();
         specs.insert(
             String::from("params.gradient"),
             TextureBindingSpec {
@@ -301,7 +301,7 @@ mod tests {
             globals_type: None,
             ..Default::default()
         };
-        let specs = BTreeMap::new();
+        let specs = VecMap::new();
         let err = validate_texture_binding_specs_against_module(&meta, &specs).unwrap_err();
         assert!(
             err.contains("params.gradient") && err.contains("no texture binding spec"),
@@ -329,7 +329,7 @@ mod tests {
             globals_type: None,
             ..Default::default()
         };
-        let mut specs = BTreeMap::new();
+        let mut specs = VecMap::new();
         specs.insert(
             String::from("params.gradient"),
             TextureBindingSpec {
@@ -383,7 +383,7 @@ mod tests {
             globals_type: None,
             ..Default::default()
         };
-        let mut specs = BTreeMap::new();
+        let mut specs = VecMap::new();
         for path in ["inputColor", "params.gradient"] {
             specs.insert(
                 String::from(path),
@@ -425,7 +425,7 @@ mod tests {
             globals_type: None,
             ..Default::default()
         };
-        validate_texture_binding_specs_against_module(&meta, &BTreeMap::new()).unwrap();
+        validate_texture_binding_specs_against_module(&meta, &VecMap::new()).unwrap();
     }
 
     #[test]
@@ -442,7 +442,7 @@ mod tests {
             globals_type: None,
             ..Default::default()
         };
-        let specs = BTreeMap::new();
+        let specs = VecMap::new();
         let err = validate_texture_binding_specs_against_module(&meta, &specs).unwrap_err();
         assert!(err.contains("no name"), "{err}");
     }
@@ -464,7 +464,7 @@ mod tests {
             globals_type: None,
             ..Default::default()
         };
-        let mut specs = BTreeMap::new();
+        let mut specs = VecMap::new();
         specs.insert(
             String::from("ignored"),
             TextureBindingSpec {
@@ -507,7 +507,7 @@ mod tests {
             globals_type: None,
             ..Default::default()
         };
-        let specs = BTreeMap::new();
+        let specs = VecMap::new();
         let err = validate_texture_binding_specs_against_module(&meta, &specs).unwrap_err();
         assert!(
             err.contains("uniform arrays") && err.contains("layers"),
@@ -523,7 +523,7 @@ mod tests {
             globals_type: None,
             ..Default::default()
         };
-        let specs = BTreeMap::new();
+        let specs = VecMap::new();
         validate_texture_binding_specs_against_module(&meta, &specs).unwrap();
     }
 
@@ -551,7 +551,7 @@ mod tests {
             ..Default::default()
         };
         // No texture specs needed - should pass
-        validate_texture_binding_specs_against_module(&meta, &BTreeMap::new()).unwrap();
+        validate_texture_binding_specs_against_module(&meta, &VecMap::new()).unwrap();
     }
 
     /// Test for truly anonymous members (name: None) - should be skipped
@@ -576,6 +576,6 @@ mod tests {
             ..Default::default()
         };
         // Should pass - anonymous scalar members are skipped
-        validate_texture_binding_specs_against_module(&meta, &BTreeMap::new()).unwrap();
+        validate_texture_binding_specs_against_module(&meta, &VecMap::new()).unwrap();
     }
 }

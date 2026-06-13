@@ -1,11 +1,11 @@
 //! Naga module → LPIR [`lpir::LpirModule`] lowering entry point.
 
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use lpir::{
     CalleeRef, FuncId, FunctionBuilder, ImportDecl, IrFunction, IrType, LpirModule, LpirOp,
@@ -29,7 +29,7 @@ pub struct LowerOptions {
     /// When non-empty, must match every `Texture2D` uniform (validated before lowering; see
     /// [`lps_shared::validate_texture_binding_specs_against_module`]). An empty map skips that check
     /// so `lower()` stays usable when specs are applied later.
-    pub texture_specs: BTreeMap<String, TextureBindingSpec>,
+    pub texture_specs: VecMap<String, TextureBindingSpec>,
     /// Whether `texelFetch` lowering emits coordinate clamp ops (see [`lpir::TexelFetchBoundsMode`]).
     pub texel_fetch_bounds: lpir::TexelFetchBoundsMode,
 }
@@ -37,7 +37,7 @@ pub struct LowerOptions {
 impl Default for LowerOptions {
     fn default() -> Self {
         Self {
-            texture_specs: BTreeMap::new(),
+            texture_specs: VecMap::new(),
             texel_fetch_bounds: lpir::TexelFetchBoundsMode::default(),
         }
     }
@@ -64,7 +64,7 @@ pub fn lower_with_options(
     let mut import_map = register_math_imports(&mut mb);
     import_map.extend(register_texture_imports(&mut mb));
     let lpfn_map = lower_lpfn::register_lpfn_imports(&mut mb, naga_module)?;
-    let mut func_map: BTreeMap<Handle<Function>, CalleeRef> = BTreeMap::new();
+    let mut func_map: VecMap<Handle<Function>, CalleeRef> = VecMap::new();
     for (i, (handle, _)) in naga_module.functions.iter().enumerate() {
         func_map.insert(*handle, CalleeRef::Local(FuncId(i as u16)));
     }
@@ -152,9 +152,9 @@ fn compute_global_layout(
 ) -> Result<(GlobalVarMap, Option<LpsType>, Option<LpsType>), LowerError> {
     type GlobalKey = (Option<String>, AddressSpace);
 
-    let mut groups: BTreeMap<GlobalKey, Vec<Handle<GlobalVariable>>> = BTreeMap::new();
+    let mut groups: VecMap<GlobalKey, Vec<Handle<GlobalVariable>>> = VecMap::new();
     let mut key_order: Vec<GlobalKey> = Vec::new();
-    let mut seen_key: BTreeMap<GlobalKey, ()> = BTreeMap::new();
+    let mut seen_key: VecMap<GlobalKey, ()> = VecMap::new();
 
     for (h, gv) in module.global_variables.iter() {
         let key = (gv.name.clone(), gv.space);
@@ -164,7 +164,7 @@ fn compute_global_layout(
         }
     }
 
-    let mut global_map: GlobalVarMap = BTreeMap::new();
+    let mut global_map: GlobalVarMap = VecMap::new();
     let mut uniforms_members: Vec<StructMember> = Vec::new();
     let mut globals_members: Vec<StructMember> = Vec::new();
 
@@ -486,8 +486,8 @@ fn push_literal_to_builder(fb: &mut FunctionBuilder, lit: &naga::Literal) -> Opt
     }
 }
 
-fn register_math_imports(mb: &mut ModuleBuilder) -> BTreeMap<String, CalleeRef> {
-    let mut m = BTreeMap::new();
+fn register_math_imports(mb: &mut ModuleBuilder) -> VecMap<String, CalleeRef> {
+    let mut m = VecMap::new();
     let mut reg =
         |module: &str, name: &str, params: &[IrType], rets: &[IrType], needs_vmctx: bool| {
             let r = mb.add_import(ImportDecl {
@@ -530,8 +530,8 @@ fn register_math_imports(mb: &mut ModuleBuilder) -> BTreeMap<String, CalleeRef> 
 }
 
 /// `@texture::*` sampler builtins (result pointer ABI; [`ImportDecl::sret`]).
-fn register_texture_imports(mb: &mut ModuleBuilder) -> BTreeMap<String, CalleeRef> {
-    let mut m = BTreeMap::new();
+fn register_texture_imports(mb: &mut ModuleBuilder) -> VecMap<String, CalleeRef> {
+    let mut m = VecMap::new();
     let mut reg = |func_name: &str, user_param_count: usize| {
         let mut param_types = Vec::with_capacity(user_param_count);
         param_types.push(IrType::Pointer);
@@ -560,11 +560,11 @@ fn lower_function(
     module: &Module,
     func: &Function,
     name: &str,
-    func_map: &BTreeMap<Handle<Function>, CalleeRef>,
-    import_map: &BTreeMap<String, CalleeRef>,
-    lpfn_map: &BTreeMap<Handle<Function>, CalleeRef>,
+    func_map: &VecMap<Handle<Function>, CalleeRef>,
+    import_map: &VecMap<String, CalleeRef>,
+    lpfn_map: &VecMap<Handle<Function>, CalleeRef>,
     global_map: GlobalVarMap,
-    texture_specs: &BTreeMap<String, TextureBindingSpec>,
+    texture_specs: &VecMap<String, TextureBindingSpec>,
     texel_fetch_bounds: lpir::TexelFetchBoundsMode,
     uniforms_type: Option<&LpsType>,
 ) -> Result<IrFunction, LowerError> {
