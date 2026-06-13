@@ -53,7 +53,7 @@ impl Esp32EspNowRadioDriver {
     ) -> Result<Self, HardwareEndpointError> {
         validate_channel(default_channel)?;
         let controller =
-            esp_radio::wifi::new(wifi, ControllerConfig::default()).map_err(|error| {
+            WifiController::new(wifi, ControllerConfig::default()).map_err(|error| {
                 HardwareEndpointError::Other {
                     message: format!("ESP-NOW Wi-Fi init failed: {error:?}"),
                 }

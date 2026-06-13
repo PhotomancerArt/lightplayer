@@ -8,7 +8,7 @@
 extern crate alloc;
 
 use alloc::format;
-use esp_hal::{Blocking, usb_serial_jtag::UsbSerialJtag};
+use esp_hal::{Blocking, usb::usb_serial_jtag::UsbSerialJtag};
 use fw_core::serial::{SerialError, SerialIo};
 
 /// ESP32 USB-serial SerialIo implementation

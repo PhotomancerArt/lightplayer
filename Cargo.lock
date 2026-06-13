@@ -2211,7 +2211,9 @@ dependencies = [
  "esp32",
  "esp32c2",
  "esp32c3",
+ "esp32c5",
  "esp32c6",
+ "esp32c61",
  "esp32h2",
  "esp32p4",
  "esp32s2",
@@ -2226,6 +2228,7 @@ dependencies = [
  "rand_core 0.6.4",
  "rand_core 0.9.5",
  "riscv",
+ "static_cell",
  "strum",
  "ufmt-write",
  "xtensa-lx",
@@ -2278,7 +2281,7 @@ dependencies = [
 
 [[package]]
 name = "esp-radio"
-version = "0.18.0"
+version = "1.0.0-beta.0"
 dependencies = [
  "allocator-api2 0.3.1",
  "cfg-if",
@@ -2463,7 +2466,7 @@ dependencies = [
 [[package]]
 name = "esp32"
 version = "0.40.2"
-source = "git+https://github.com/esp-rs/esp-pacs?rev=ddcad65f6cbc6dff463a6bb3e49fb80261fd9956#ddcad65f6cbc6dff463a6bb3e49fb80261fd9956"
+source = "git+https://github.com/esp-rs/esp-pacs?rev=48b6dece6#48b6dece61a3c86e9b80de968c5efba1d25184a8"
 dependencies = [
  "vcell",
 ]
@@ -2471,8 +2474,7 @@ dependencies = [
 [[package]]
 name = "esp32c2"
 version = "0.29.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ef0b623533bbaa37e348c18b6b41cfd5b47c3cb64a4b9e44f0295941d62aa2e"
+source = "git+https://github.com/esp-rs/esp-pacs?rev=48b6dece6#48b6dece61a3c86e9b80de968c5efba1d25184a8"
 dependencies = [
  "vcell",
 ]
@@ -2480,8 +2482,15 @@ dependencies = [
 [[package]]
 name = "esp32c3"
 version = "0.32.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "21e89ed62cf6c043a6d29c520b02a13b359ec8a75d67b65d4330ed717d15fe97"
+source = "git+https://github.com/esp-rs/esp-pacs?rev=48b6dece6#48b6dece61a3c86e9b80de968c5efba1d25184a8"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
+name = "esp32c5"
+version = "0.2.2"
+source = "git+https://github.com/esp-rs/esp-pacs?rev=48b6dece6#48b6dece61a3c86e9b80de968c5efba1d25184a8"
 dependencies = [
  "vcell",
 ]
@@ -2489,8 +2498,15 @@ dependencies = [
 [[package]]
 name = "esp32c6"
 version = "0.23.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c58f34ff2633968c12125efc7f4f8f101078d5d34c7cb60eab82268db20986f9"
+source = "git+https://github.com/esp-rs/esp-pacs?rev=48b6dece6#48b6dece61a3c86e9b80de968c5efba1d25184a8"
+dependencies = [
+ "vcell",
+]
+
+[[package]]
+name = "esp32c61"
+version = "0.3.2"
+source = "git+https://github.com/esp-rs/esp-pacs?rev=48b6dece6#48b6dece61a3c86e9b80de968c5efba1d25184a8"
 dependencies = [
  "vcell",
 ]
@@ -2498,8 +2514,7 @@ dependencies = [
 [[package]]
 name = "esp32h2"
 version = "0.19.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c5bab026020ed4606ce113b6fde598dbc48f7eefcc46e9469ece77cc2b1aa4be"
+source = "git+https://github.com/esp-rs/esp-pacs?rev=48b6dece6#48b6dece61a3c86e9b80de968c5efba1d25184a8"
 dependencies = [
  "vcell",
 ]
@@ -2507,7 +2522,7 @@ dependencies = [
 [[package]]
 name = "esp32p4"
 version = "0.2.0"
-source = "git+https://github.com/esp-rs/esp-pacs?rev=0f4c316adbdbddb2479f50a5b931776b9655b23f#0f4c316adbdbddb2479f50a5b931776b9655b23f"
+source = "git+https://github.com/esp-rs/esp-pacs?rev=48b6dece6#48b6dece61a3c86e9b80de968c5efba1d25184a8"
 dependencies = [
  "critical-section",
  "vcell",
@@ -2516,7 +2531,7 @@ dependencies = [
 [[package]]
 name = "esp32s2"
 version = "0.31.2"
-source = "git+https://github.com/esp-rs/esp-pacs?rev=0f4c316adbdbddb2479f50a5b931776b9655b23f#0f4c316adbdbddb2479f50a5b931776b9655b23f"
+source = "git+https://github.com/esp-rs/esp-pacs?rev=48b6dece6#48b6dece61a3c86e9b80de968c5efba1d25184a8"
 dependencies = [
  "vcell",
 ]
@@ -2524,7 +2539,7 @@ dependencies = [
 [[package]]
 name = "esp32s3"
 version = "0.35.2"
-source = "git+https://github.com/esp-rs/esp-pacs?rev=0f4c316adbdbddb2479f50a5b931776b9655b23f#0f4c316adbdbddb2479f50a5b931776b9655b23f"
+source = "git+https://github.com/esp-rs/esp-pacs?rev=48b6dece6#48b6dece61a3c86e9b80de968c5efba1d25184a8"
 dependencies = [
  "vcell",
 ]
@@ -6423,6 +6438,15 @@ name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
+
+[[package]]
+name = "static_cell"
+version = "2.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0530892bb4fa575ee0da4b86f86c667132a94b74bb72160f58ee5a4afec74c23"
+dependencies = [
+ "portable-atomic",
+]
 
 [[package]]
 name = "strict-num"
