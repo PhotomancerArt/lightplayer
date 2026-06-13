@@ -8,12 +8,11 @@ use alloc::format;
 use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
+use core::cell::RefCell;
 
 use esp_hal::efuse::{InterfaceMacAddress, interface_mac_address};
 use esp_hal::peripherals::WIFI;
-use esp_radio::esp_now::{
-    BROADCAST_ADDRESS, EspNowError, EspNowManager, EspNowReceiver, EspNowSender, ReceivedData,
-};
+use esp_radio::esp_now::{BROADCAST_ADDRESS, EspNow, EspNowError, ReceivedData};
 use esp_radio::wifi::{ControllerConfig, WifiController};
 use lpc_hardware::{
     HardwareEndpointError, HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
@@ -31,7 +30,8 @@ const SEEN_RING_LEN: usize = 32;
 
 pub struct Esp32EspNowRadioDriver {
     registry: Rc<HwRegistry>,
-    controller: &'static WifiController<'static>,
+    _controller: WifiController<'static>,
+    esp_now: Rc<RefCell<Option<EspNow<'static>>>>,
     address: HwAddress,
     device_id: RadioDeviceId,
     default_channel: u8,
@@ -51,17 +51,15 @@ impl Esp32EspNowRadioDriver {
         default_channel: u8,
     ) -> Result<Self, HardwareEndpointError> {
         validate_channel(default_channel)?;
-        let controller =
-            WifiController::new(wifi, ControllerConfig::default()).map_err(|error| {
-                HardwareEndpointError::Other {
-                    message: format!("ESP-NOW Wi-Fi init failed: {error:?}"),
-                }
+        let (controller, interfaces) = esp_radio::wifi::new(wifi, ControllerConfig::default())
+            .map_err(|error| HardwareEndpointError::Other {
+                message: format!("ESP-NOW Wi-Fi init failed: {error:?}"),
             })?;
-        let controller = Box::leak(Box::new(controller));
 
         Ok(Self {
             registry,
-            controller,
+            _controller: controller,
+            esp_now: Rc::new(RefCell::new(Some(interfaces.esp_now))),
             address: HwAddress::radio(0),
             device_id: station_device_id(),
             default_channel,
@@ -81,7 +79,14 @@ impl Esp32EspNowRadioDriver {
     }
 
     fn endpoint_status(&self) -> HwEndpointStatus {
-        self.registry.endpoint_status_for(&self.address)
+        let status = self.registry.endpoint_status_for(&self.address);
+        if status.is_available() && self.esp_now.borrow().is_none() {
+            HwEndpointStatus::Unavailable {
+                reason: "ESP-NOW interface is already open".into(),
+            }
+        } else {
+            status
+        }
     }
 }
 
@@ -153,8 +158,15 @@ impl RadioDriver for Esp32EspNowRadioDriver {
             .registry
             .claim_bundle(HwClaim::new(self.driver_id(), vec![self.address.clone()]))?;
 
-        let esp_now = self.controller.esp_now();
+        let Some(esp_now) = self.esp_now.borrow_mut().take() else {
+            let _ = self.registry.release(&lease);
+            return Err(HardwareEndpointError::EndpointUnavailable {
+                endpoint_id: endpoint_id.clone(),
+                reason: "ESP-NOW interface is already open".into(),
+            });
+        };
         if let Err(error) = esp_now.set_channel(channel) {
+            *self.esp_now.borrow_mut() = Some(esp_now);
             let _ = self.registry.release(&lease);
             return Err(map_esp_now_error("set channel", error));
         }
@@ -166,14 +178,12 @@ impl RadioDriver for Esp32EspNowRadioDriver {
                 log::warn!("[fw-esp32] ESP-NOW version query failed: {error:?}");
             }
         }
-        let (manager, sender, receiver) = esp_now.split();
 
         Ok(Box::new(Esp32EspNowRadioDevice::new(
             Rc::clone(&self.registry),
             lease,
-            manager,
-            sender,
-            receiver,
+            Rc::clone(&self.esp_now),
+            esp_now,
             self.device_id,
         )))
     }
@@ -182,9 +192,8 @@ impl RadioDriver for Esp32EspNowRadioDriver {
 struct Esp32EspNowRadioDevice {
     registry: Rc<HwRegistry>,
     lease: Option<HardwareLease>,
-    _manager: EspNowManager<'static>,
-    sender: EspNowSender<'static>,
-    receiver: EspNowReceiver<'static>,
+    esp_now_home: Rc<RefCell<Option<EspNow<'static>>>>,
+    esp_now: Option<EspNow<'static>>,
     device_id: RadioDeviceId,
     subscriptions: BTreeSet<RadioChannelId>,
     queues: BTreeMap<RadioChannelId, RadioQueue>,
@@ -196,17 +205,15 @@ impl Esp32EspNowRadioDevice {
     fn new(
         registry: Rc<HwRegistry>,
         lease: HardwareLease,
-        manager: EspNowManager<'static>,
-        sender: EspNowSender<'static>,
-        receiver: EspNowReceiver<'static>,
+        esp_now_home: Rc<RefCell<Option<EspNow<'static>>>>,
+        esp_now: EspNow<'static>,
         device_id: RadioDeviceId,
     ) -> Self {
         Self {
             registry,
             lease: Some(lease),
-            _manager: manager,
-            sender,
-            receiver,
+            esp_now_home,
+            esp_now: Some(esp_now),
             device_id,
             subscriptions: BTreeSet::new(),
             queues: BTreeMap::new(),
@@ -222,7 +229,10 @@ impl Esp32EspNowRadioDevice {
     }
 
     fn pull_received(&mut self) {
-        while let Some(received) = self.receiver.receive() {
+        loop {
+            let Some(received) = self.esp_now.as_ref().and_then(EspNow::receive) else {
+                break;
+            };
             self.process_received(received);
         }
     }
@@ -261,6 +271,14 @@ impl Esp32EspNowRadioDevice {
     }
 
     fn close(&mut self) {
+        if let Some(esp_now) = self.esp_now.take() {
+            let mut esp_now_home = self.esp_now_home.borrow_mut();
+            if esp_now_home.is_none() {
+                *esp_now_home = Some(esp_now);
+            } else {
+                log::warn!("Esp32EspNowRadioDevice: ESP-NOW interface was already returned");
+            }
+        }
         if let Some(lease) = self.lease.take() {
             if let Err(error) = self.registry.release(&lease) {
                 log::warn!("Esp32EspNowRadioDevice: failed to release hardware lease: {error}");
@@ -299,7 +317,14 @@ impl RadioDevice for Esp32EspNowRadioDevice {
         )?;
         let mut packet = [0u8; RADIO_MAX_PACKET_LEN];
         let len = message.encode(&mut packet);
-        self.sender
+        let esp_now =
+            self.esp_now
+                .as_mut()
+                .ok_or_else(|| HardwareEndpointError::EndpointUnavailable {
+                    endpoint_id: HwEndpointId::new(ENDPOINT_SPEC),
+                    reason: "ESP-NOW interface is closed".into(),
+                })?;
+        esp_now
             .send(&BROADCAST_ADDRESS, &packet[..len])
             .map_err(|error| map_esp_now_error("send", error))?
             .wait()
