@@ -176,11 +176,21 @@ pub(crate) fn derive_record(
         }
 
         impl ::lpc_model::FieldSlot for #ident {
+            // When a record type appears inside another shape (a struct field or
+            // enum variant payload) it is emitted as a reference to its own
+            // catalog entry rather than re-inlining the full record. The
+            // canonical shape (`slot_shape`/`STATIC_SLOT_SHAPE_DESCRIPTOR`) keeps
+            // the full record; every embedding site resolves the id through the
+            // registry. This keeps the shape registry de-duplicated: each record
+            // is described once instead of once per embedding. Use
+            // `#[slot(record)]` on a field to force the old inline behavior.
             const STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR: Option<&'static ::lpc_model::StaticSlotShapeDescriptor> =
-                <Self as ::lpc_model::SlotRecordShape>::STATIC_SLOT_RECORD_SHAPE_DESCRIPTOR;
+                Some(&::lpc_model::StaticSlotShapeDescriptor::Ref {
+                    id: <Self as ::lpc_model::StaticSlotShape>::SHAPE_ID,
+                });
 
             fn slot_field_shape() -> ::lpc_model::SlotShape {
-                <Self as ::lpc_model::SlotRecordShape>::slot_record_shape()
+                ::lpc_model::SlotShape::reference(<Self as ::lpc_model::StaticSlotShape>::SHAPE_ID)
             }
 
             fn slot_field_data(&self) -> ::lpc_model::SlotDataAccess<'_> {

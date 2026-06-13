@@ -105,7 +105,9 @@ mod tests {
     }
 
     #[test]
-    fn shader_def_shape_embeds_nested_static_records() {
+    fn shader_def_shape_references_nested_static_records() {
+        use crate::StaticSlotShape;
+
         let SlotShape::Record {
             fields: shader_fields,
             ..
@@ -114,16 +116,18 @@ mod tests {
             panic!("shader record shape");
         };
 
+        // Nested static records are referenced by shape id, not re-inlined, so
+        // the registry describes each record exactly once. See the `FieldSlot`
+        // derive in lpc-slot-macros.
         let glsl_opts = shader_fields
             .iter()
             .find(|field| field.name.as_str() == "glsl_opts")
             .expect("glsl_opts field");
-        let SlotShape::Record { fields, .. } = &glsl_opts.shape else {
-            panic!("glsl_opts record shape");
-        };
-        assert_eq!(fields[0].name.as_str(), "add_sub");
-        assert_eq!(fields[1].name.as_str(), "mul");
-        assert_eq!(fields[2].name.as_str(), "div");
+        assert_eq!(
+            glsl_opts.shape,
+            SlotShape::reference(<GlslOpts as StaticSlotShape>::SHAPE_ID),
+            "glsl_opts should reference the GlslOpts record shape"
+        );
 
         let param_defs = shader_fields
             .iter()
@@ -132,9 +136,10 @@ mod tests {
         let SlotShape::Map { value, .. } = &param_defs.shape else {
             panic!("param_defs map shape");
         };
-        assert!(
-            matches!(value.as_ref(), SlotShape::Record { .. }),
-            "param_defs value should embed shader param record"
+        assert_eq!(
+            value.as_ref(),
+            &SlotShape::reference(<ShaderParamDef as StaticSlotShape>::SHAPE_ID),
+            "param_defs value should reference the shader param record"
         );
 
         let consumed = shader_fields
@@ -144,9 +149,10 @@ mod tests {
         let SlotShape::Map { value, .. } = &consumed.shape else {
             panic!("consumed map shape");
         };
-        assert!(
-            matches!(value.as_ref(), SlotShape::Record { .. }),
-            "consumed value should embed shader slot record"
+        assert_eq!(
+            value.as_ref(),
+            &SlotShape::reference(<ShaderSlotDef as StaticSlotShape>::SHAPE_ID),
+            "consumed value should reference the shader slot record"
         );
     }
 
