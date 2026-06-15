@@ -1,3 +1,8 @@
+# Pinned nightly: this is a build-std project, and the `unwinding` crate is bound
+# to the nightly `core::intrinsics::catch_unwind` ABI (0.2.8 = integer return;
+# 0.2.9 switched to the bool return introduced in a later nightly). An unpinned
+# `nightly` drifts CI onto a newer toolchain than local dev and breaks the build.
+# Bump this date and the matching `unwinding` version together, deliberately.
 [toolchain]
-channel = "nightly"
-components = ["rustfmt", "clippy"]
+channel = "nightly-2026-04-27"
+components = ["rustfmt", "clippy", "rust-src"]

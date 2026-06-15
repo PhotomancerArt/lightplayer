@@ -3174,9 +3174,7 @@ target = "bus#trigger"
         rt.tree()
             .entries()
             .filter_map(|entry| match entry.status.value() {
-                NodeRuntimeStatus::Error(message) => {
-                    Some(format!("{:?}: {message}", entry.path))
-                }
+                NodeRuntimeStatus::Error(message) => Some(format!("{:?}: {message}", entry.path)),
                 _ => None,
             })
             .collect()

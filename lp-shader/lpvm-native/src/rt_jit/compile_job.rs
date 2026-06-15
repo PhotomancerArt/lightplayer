@@ -12,7 +12,6 @@ use crate::native_options::NativeCompileOptions;
 use super::builtins::BuiltinTable;
 use super::compiler::link_compiled_module_jit;
 use super::module::{NativeJitModule, NativeJitModuleInner, build_entry_info};
-use lp_collection::VecMap;
 
 enum NativeJitCompileStage {
     Backend(NativeCompileJob),
