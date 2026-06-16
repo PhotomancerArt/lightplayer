@@ -1,8 +1,8 @@
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use lps_shared::{FnParam, LayoutRules, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, StructMember};
 
@@ -61,15 +61,15 @@ enum HirBuildState {
 struct HirBuildFunctionState {
     array_size_consts: ArraySizeConsts,
     structs: StructTypes,
-    uniforms: BTreeMap<String, UniformInfo>,
+    uniforms: VecMap<String, UniformInfo>,
     uniforms_type: Option<LpsType>,
-    global_vars: BTreeMap<String, GlobalInfo>,
+    global_vars: VecMap<String, GlobalInfo>,
     globals_type: Option<LpsType>,
     global_inits: Vec<GlobalInit>,
     functions_sigs: Vec<FunctionSig>,
     imports: ImportRegistry,
-    globals: BTreeMap<String, GlobalConst>,
-    body_map: BTreeMap<String, ParsedFunctionBody>,
+    globals: VecMap<String, GlobalConst>,
+    body_map: VecMap<String, ParsedFunctionBody>,
     functions: Vec<HirFunction>,
     function_meta: Vec<LpsFnSig>,
     next_function: usize,
@@ -613,7 +613,7 @@ fn build_array_size_consts(
     tokens: &[Token],
     index: &TopLevelIndex,
 ) -> Result<ArraySizeConsts, Diagnostic> {
-    let mut consts = BTreeMap::new();
+    let mut consts = VecMap::new();
     for konst in &index.consts {
         if !matches!(konst.ty.name.as_str(), "int" | "uint") {
             continue;
@@ -667,7 +667,7 @@ fn build_struct_types(
     index: &TopLevelIndex,
     array_size_consts: &ArraySizeConsts,
 ) -> Result<StructTypes, Diagnostic> {
-    let mut structs = BTreeMap::new();
+    let mut structs = VecMap::new();
     for decl in &index.structs {
         let mut members = Vec::new();
         for member in &decl.members {
@@ -723,8 +723,8 @@ fn build_uniforms(
     index: &TopLevelIndex,
     structs: &StructTypes,
     array_size_consts: &ArraySizeConsts,
-) -> Result<(BTreeMap<String, UniformInfo>, Option<LpsType>, usize), Diagnostic> {
-    let mut uniforms = BTreeMap::new();
+) -> Result<(VecMap<String, UniformInfo>, Option<LpsType>, usize), Diagnostic> {
+    let mut uniforms = VecMap::new();
     let mut members = Vec::new();
     let mut offset = lps_shared::VMCTX_HEADER_SIZE;
     for uniform in &index.uniforms {
@@ -764,8 +764,8 @@ struct GlobalInit {
 
 fn function_body_map(
     bodies: Vec<(String, ParsedFunctionBody)>,
-) -> BTreeMap<String, ParsedFunctionBody> {
-    let mut body_map = BTreeMap::new();
+) -> VecMap<String, ParsedFunctionBody> {
+    let mut body_map = VecMap::new();
     for (name, body) in bodies {
         body_map.insert(name, body);
     }
@@ -779,16 +779,9 @@ fn build_global_vars(
     structs: &StructTypes,
     array_size_consts: &ArraySizeConsts,
     uniforms_size: usize,
-) -> Result<
-    (
-        BTreeMap<String, GlobalInfo>,
-        Option<LpsType>,
-        Vec<GlobalInit>,
-    ),
-    Diagnostic,
-> {
+) -> Result<(VecMap<String, GlobalInfo>, Option<LpsType>, Vec<GlobalInit>), Diagnostic> {
     let mut order = Vec::<String>::new();
-    let mut by_name = BTreeMap::<String, (LpsType, Span, Option<Span>)>::new();
+    let mut by_name = VecMap::<String, (LpsType, Span, Option<Span>)>::new();
     for global in &index.globals {
         let ty = type_ref_to_lps_with_structs(&global.ty, structs, array_size_consts)?;
         if let Some((existing_ty, _span, init_span)) = by_name.get_mut(&global.name) {
@@ -807,7 +800,7 @@ fn build_global_vars(
         by_name.insert(global.name.clone(), (ty, global.span, global.init_span));
     }
 
-    let mut globals = BTreeMap::new();
+    let mut globals = VecMap::new();
     let mut members = Vec::new();
     let mut inits = Vec::new();
     let mut offset = lps_shared::VMCTX_HEADER_SIZE + uniforms_size;
@@ -850,15 +843,15 @@ fn build_global_consts(
     source: &str,
     tokens: &[Token],
     index: &TopLevelIndex,
-    uniforms: &BTreeMap<String, UniformInfo>,
-    global_vars: &BTreeMap<String, GlobalInfo>,
+    uniforms: &VecMap<String, UniformInfo>,
+    global_vars: &VecMap<String, GlobalInfo>,
     functions: &[FunctionSig],
     structs: &StructTypes,
     array_size_consts: &ArraySizeConsts,
     imports: &mut ImportRegistry,
-    texture_specs: &BTreeMap<String, lps_shared::TextureBindingSpec>,
-) -> Result<BTreeMap<String, GlobalConst>, Diagnostic> {
-    let mut globals = BTreeMap::new();
+    texture_specs: &VecMap<String, lps_shared::TextureBindingSpec>,
+) -> Result<VecMap<String, GlobalConst>, Diagnostic> {
+    let mut globals = VecMap::new();
     for konst in &index.consts {
         let ty = type_ref_to_lps_with_structs(&konst.ty, structs, array_size_consts)?;
         let Some(init_span) = konst.init_span else {
@@ -900,13 +893,13 @@ fn synthesize_shader_init(
     tokens: &[Token],
     inits: &[GlobalInit],
     functions: &[FunctionSig],
-    uniforms: &BTreeMap<String, UniformInfo>,
-    global_consts: &BTreeMap<String, GlobalConst>,
-    global_vars: &BTreeMap<String, GlobalInfo>,
+    uniforms: &VecMap<String, UniformInfo>,
+    global_consts: &VecMap<String, GlobalConst>,
+    global_vars: &VecMap<String, GlobalInfo>,
     structs: &StructTypes,
     array_size_consts: &ArraySizeConsts,
     imports: &mut ImportRegistry,
-    texture_specs: &BTreeMap<String, lps_shared::TextureBindingSpec>,
+    texture_specs: &VecMap<String, lps_shared::TextureBindingSpec>,
 ) -> Result<Option<HirFunction>, Diagnostic> {
     if inits.is_empty() {
         return Ok(None);

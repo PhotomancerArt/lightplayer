@@ -1,8 +1,8 @@
 //! Host JIT module: finalized code, GLSL metadata, signatures.
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use cranelift_codegen::ir::{Signature, types};
 use cranelift_codegen::isa::{CallConv, OwnedTargetIsa};
@@ -30,10 +30,10 @@ pub(crate) struct JitModule {
     pub(crate) glsl_meta: LpsModuleSig,
     pub(crate) func_names: Vec<String>,
     pub(crate) func_ids: Vec<FuncId>,
-    pub(crate) name_to_index: BTreeMap<String, usize>,
-    pub(crate) signatures: BTreeMap<String, Signature>,
+    pub(crate) name_to_index: VecMap<String, usize>,
+    pub(crate) signatures: VecMap<String, Signature>,
     /// Scalar return words per function (LPIR), even when the ABI uses StructReturn (empty `returns`).
-    pub(crate) logical_return_words: BTreeMap<String, usize>,
+    pub(crate) logical_return_words: VecMap<String, usize>,
     pub(crate) ir_param_counts: Vec<u16>,
     pub(crate) call_conv: CallConv,
     pub(crate) pointer_type: types::Type,

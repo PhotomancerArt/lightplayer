@@ -59,7 +59,10 @@ pub mod sync;
 pub use value::constraint;
 pub use value::kind;
 
-pub use artifact::{ArtifactLocator, ArtifactReadRoot, SrcArtifactLibRef};
+pub use artifact::{
+    ArtifactChangeSummary, ArtifactLocation, ArtifactLocationError, ArtifactReadRoot, ArtifactSpec,
+    SrcArtifactLibRef,
+};
 pub use binding::{
     BindingDef, BindingDefError, BindingDefView, BindingDefs, BindingRef, BindingRefError,
     BusSlotRef, BusSlotRefError, NodeSlotRef, NodeSlotRefError,
@@ -71,45 +74,64 @@ pub use constraint::{Constraint, ConstraintChoice, ConstraintFree, ConstraintRan
 /// New slot-model code should prefer typed slot leaf descriptors whose semantic
 /// meaning owns its storage shape.
 pub use kind::Kind;
+pub use project::inventory::{
+    AssetBodyOrigin, AssetChange, AssetChangeKind, AssetChangeSummary, AssetContentType,
+    AssetEntry, AssetLocation, AssetState, NodeUseChange, NodeUseChangeKind, NodeUseChangeSummary,
+    ReferencedAsset,
+};
 pub use value::WithRevision;
 pub use value::{LpType, LpValue, ModelEnumVariant, ModelStructMember};
 
 pub use config::DEFAULT_SERIAL_BAUD_RATE;
 pub use control::{CONTROL_MESSAGE_SHAPE_NAME, ControlMessage, TriggerEvent};
-pub use hardware_endpoint_spec::{HardwareEndpointSpec, HardwareEndpointSpecError};
+pub use hardware_endpoint_spec::{HardwareEndpointSpecError, HwEndpointSpec};
 pub use lpfs::lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 pub use node::node_prop_spec::NodePropSpec;
 pub use node::tree_path::{NodePathSegment, PathError, TreePath};
 pub use node::{
-    NodeArtifact, NodeDef, NodeDefRef, NodeId, NodeInvocation, NodeKind, NodeName, NodeNameError,
-    RelativeNodeRef, RelativeNodeRefError, RelativeNodeRefSrc,
+    NodeArtifact, NodeDef, NodeDefChange, NodeDefChangeKind, NodeDefChangeSummary, NodeDefEntry,
+    NodeDefLocation, NodeDefState, NodeDefValidationError, NodeId, NodeInvocation,
+    NodeInvocationSlot, NodeKind, NodeName, NodeNameError, NodeRuntimeStatus, RelativeNodeRef,
+    RelativeNodeRefError, RelativeNodeRefSrc,
 };
 pub use nodes::{
-    AddSubMode, ButtonDef, ButtonDefView, ButtonState, ButtonStateView, ClockControls, ClockDef,
-    ClockDefView, ClockState, ColorOrder, ComputeShaderDef, ComputeShaderDefView, ControlRadioDef,
-    ControlRadioDefView, ControlRadioState, ControlRadioStateView, DivMode, FixtureDef,
-    FixtureDefView, FixtureDiagnosticMode, FixtureSamplingConfig, FixtureState, FixtureStateView,
-    FluidDef, FluidDefView, FluidEmitter, FluidState, GlslOpts, GlslOptsView, MappingConfig,
-    MulMode, NodeDefParseError, OutputDef, OutputDefView, OutputDriverOptionsConfig,
-    OutputDriverOptionsConfigView, PathSpec, PlaylistDef, PlaylistDefView, PlaylistEntry,
-    PlaylistEntryView, PlaylistState, PlaylistStateView, ProjectDef, ProjectDefView, RingOrder,
-    ScalarHint, ScalarHintView, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,
-    ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
-    ShaderSlotMappingKind, ShaderSource, ShaderState, ShaderStateView, ShaderValueShapeRef,
-    TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView,
-    generate_compute_shader_header,
+    AddSubMode, ArtifactPathResolutionError, ButtonDef, ButtonDefView, ButtonState,
+    ButtonStateView, ClockControls, ClockDef, ClockDefView, ClockState, ColorOrder,
+    ComputeShaderDef, ComputeShaderDefView, ControlRadioDef, ControlRadioDefView,
+    ControlRadioState, ControlRadioStateView, DivMode, FixtureDef, FixtureDefView,
+    FixtureDiagnosticMode, FixtureSamplingConfig, FixtureState, FixtureStateView, FluidDef,
+    FluidDefView, FluidEmitter, FluidState, GlslOpts, GlslOptsView, InlineAssetBytes,
+    InlineAssetText, InvocationSite, MappingConfig, MulMode, NodeDefParseError, OutputDef,
+    OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView, PathSpec, PlaylistDef,
+    PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState, PlaylistStateView,
+    ProjectDef, ProjectDefView, RingOrder, ScalarHint, ScalarHintView, ShaderDef, ShaderDefView,
+    ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef, ShaderParamDefView, ShaderSlotDef,
+    ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderState, ShaderStateView,
+    ShaderValueShapeRef, TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView,
+    generate_compute_shader_header, resolve_artifact_specifier,
 };
 pub use product::{ControlExtent, ControlProduct, ProductKind, ProductRef, VisualProduct};
-pub use project::{ProjectConfig, Revision};
+pub use project::overlay::{
+    ArtifactOverlay, AssetBodyOverlay, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,
+};
+pub use project::overlay_mutation::{
+    MutationCmd, MutationCmdBatch, MutationCmdBatchResult, MutationCmdId, MutationCmdResult,
+    MutationCmdStatus, MutationEffect, MutationOp, MutationRejection, MutationRejectionReason,
+};
+pub use project::{
+    ChangeSummary, CommitResult, LocationSeg, MutationBatchResults, MutationResult,
+    NodeUseLocation, ProjectChangeSummary, ProjectConfig, ProjectInventory, ProjectNode,
+    ProjectNodeOrigin, ProjectNodePlacement, ProjectTree, Revision,
+};
 pub use project::{advance_revision, current_revision, set_current_revision};
 pub use resource::{ResourceDomain, ResourceRef, RuntimeBufferId, runtime_buffer_resource_shape};
 pub use server::server_config::ServerConfig;
 pub use slot::{
-    Affine2d, Affine2dSlot, ArtifactPath, ArtifactPathSlot, ColorOrderSlot, ColorOrderValue,
-    ControlProductSlot, Dim2u, Dim2uSlot, FromLpValue, OrderedF32, PositiveF32, PositiveF32Slot,
-    Ratio, RatioSlot, RelativeNodeRefSlot, RenderOrder, RenderOrderSlot, ResourceRefSlot,
-    SlotEnumOption, SlotMapValueAccess, SlotValue, SlotValueShape, SourcePath, SourcePathSlot,
-    ToLpValue, ValueEditorHint, ValueRootError, VisualProductSlot, Xy, XySlot,
+    Affine2d, Affine2dSlot, ArtifactPath, ArtifactPathSlot, AssetSlot, AssetSlotValue,
+    ColorOrderSlot, ColorOrderValue, ControlProductSlot, Dim2u, Dim2uSlot, FromLpValue, OrderedF32,
+    PositiveF32, PositiveF32Slot, Ratio, RatioSlot, RelativeNodeRefSlot, RenderOrder,
+    RenderOrderSlot, ResourceRefSlot, SlotEnumOption, SlotMapValueAccess, SlotValue,
+    SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError, VisualProductSlot, Xy, XySlot,
 };
 pub use slot::{
     DynamicSlotObject, EnumSlot, FieldSlot, FieldSlotMut, MapSlot, MapSlotAccess, MapSlotAccessMut,
@@ -130,8 +152,8 @@ pub use slot::{
     StaticModelStructMember, StaticSlotAccess, StaticSlotEnumEncoding, StaticSlotEnumOption,
     StaticSlotFieldShape, StaticSlotMeta, StaticSlotShape, StaticSlotShapeDescriptor,
     StaticSlotValueShape, StaticSlotVariantShape, StaticValueEditorHint, ValueRef, ValueSlot,
-    create_dynamic_slot_data, insert_slot_map_entry_default, lookup_slot_data,
-    lookup_slot_data_and_shape, lookup_slot_data_mut, set_slot_option_some_default, set_slot_value,
-    set_slot_variant_default, slot_data_revision,
+    create_dynamic_slot_data, ensure_slot_present, insert_slot_map_entry_default, lookup_slot_data,
+    lookup_slot_data_and_shape, lookup_slot_data_mut, remove_slot_map_entry, set_slot_option_none,
+    set_slot_option_some_default, set_slot_value, set_slot_variant_default, slot_data_revision,
 };
 pub use value::value_path::ValuePath;

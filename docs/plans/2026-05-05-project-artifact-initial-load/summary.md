@@ -4,7 +4,7 @@
 
 - Added project artifacts as the root authored entry point: `project.toml` now carries `kind = "project"` and a `[nodes.*]` map of named node invocations.
 - Introduced source-side `Def` types for authored node bodies: `ProjectDef`, `TextureDef`, `ShaderDef`, `OutputDef`, and `FixtureDef`.
-- Introduced `NodeInvocation` for "use this node here" authoring, currently backed by artifact locators and shaped for future params/bindings.
+- Introduced `NodeInvocation` for "use this node here" authoring, currently backed by artifact specifiers and shaped for future params/bindings.
 - Added relative dot `NodeLoc` parsing in `lpc-model` and loader-side resolution for sibling/current/parent references.
 - Reworked `CoreProjectLoader` to start from `/project.toml`, load declared artifact files, build the root `Project` node, and attach declared child nodes without directory discovery.
 - Flattened the active examples to file-referenced artifacts: `project.toml`, node `.toml` files, and `shader.glsl`.
@@ -27,7 +27,7 @@
 
 #### `Def`, `Invocation`, `Locator`, `Ref`
 
-- **Decision:** use `*Def` for authored node bodies, `NodeInvocation` for a node used at a place in a project, `ArtifactLocator` for source-side external locations, and reserve `Ref` language for runtime references.
+- **Decision:** use `*Def` for authored node bodies, `NodeInvocation` for a node used at a place in a project, `ArtifactSpecifier` for source-side external locations, and reserve `Ref` language for runtime references.
 - **Why:** this keeps the "what is defined" and "where it is used" concepts distinct without overloading `Spec`.
 - **Rejected alternatives:** `NodeSpec` as both path reference and full definition, and `ArtifactRef` for source authoring paths.
 

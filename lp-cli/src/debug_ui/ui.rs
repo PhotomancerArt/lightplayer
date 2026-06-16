@@ -6,22 +6,30 @@ use std::time::{Duration, Instant};
 
 use crate::client::LpClient;
 use eframe::egui;
-use lpc_model::{Revision, SlotShapeId};
+use lpc_model::{
+    MutationCmd, MutationCmdBatch, MutationCmdId, MutationOp, NodeId, Revision, SlotEdit, SlotPath,
+    SlotShapeId,
+};
 use lpc_view::{ProjectView, apply_project_read_response};
 use lpc_wire::{
     NodeReadQuery, NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery,
     ProjectReadRequest, ProjectReadResponse, ProjectReadResult as WireProjectReadResult, ReadLevel,
     RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery,
     RuntimeReadQuery, RuntimeReadResult, ShapeReadQuery, ShapeReadResult,
-    WireProjectHandle as ProjectHandle, WireSlotMutationId, WireSlotMutationRequest,
-    WireTextureFormat,
+    WireOverlayMutationRequest, WireProjectHandle as ProjectHandle,
+    WireProjectInventoryReadResponse, WireTextureFormat,
 };
 
 use super::inspector::{InspectorSelection, render_debug_inspector};
 use super::node_cards::render_node_workspace;
 use super::slot_edit::{SlotEditIntent, SlotEditKey, SlotEditStatusContext};
 
-type ProjectReadResult = Result<lpc_wire::ProjectReadResponse, String>;
+type DebugUiResult = Result<DebugUiMessage, String>;
+
+enum DebugUiMessage {
+    ProjectRead(ProjectReadResponse),
+    Inventory(WireProjectInventoryReadResponse),
+}
 
 const TARGET_UI_FPS: u64 = 30;
 const TARGET_UI_FRAME_MS: u64 = 1000 / TARGET_UI_FPS;
@@ -35,8 +43,8 @@ pub struct DebugUiState {
     project_handle: ProjectHandle,
     async_client: LpClient,
     runtime_handle: tokio::runtime::Handle,
-    response_tx: std::sync::mpsc::Sender<ProjectReadResult>,
-    response_rx: std::sync::mpsc::Receiver<ProjectReadResult>,
+    response_tx: std::sync::mpsc::Sender<DebugUiResult>,
+    response_rx: std::sync::mpsc::Receiver<DebugUiResult>,
     last_poll: Instant,
     poll_in_flight: bool,
     last_error: Option<String>,
@@ -45,9 +53,10 @@ pub struct DebugUiState {
     last_runtime_status: Option<RuntimeReadResult>,
     shapes_synced: bool,
     next_shape_cursor: Option<SlotShapeId>,
-    next_mutation_id: u64,
-    queued_mutations: BTreeMap<SlotEditKey, SlotEditIntent>,
-    last_mutation_by_slot: BTreeMap<SlotEditKey, WireSlotMutationId>,
+    next_overlay_cmd_id: u64,
+    queued_edits: BTreeMap<SlotEditKey, SlotEditIntent>,
+    slot_edit_errors: BTreeMap<SlotEditKey, String>,
+    project_inventory: Option<WireProjectInventoryReadResponse>,
 }
 
 impl DebugUiState {
@@ -74,9 +83,10 @@ impl DebugUiState {
             last_runtime_status: None,
             shapes_synced: false,
             next_shape_cursor: None,
-            next_mutation_id: 1,
-            queued_mutations: BTreeMap::new(),
-            last_mutation_by_slot: BTreeMap::new(),
+            next_overlay_cmd_id: 1,
+            queued_edits: BTreeMap::new(),
+            slot_edit_errors: BTreeMap::new(),
+            project_inventory: None,
         }
     }
 
@@ -84,7 +94,7 @@ impl DebugUiState {
         while let Ok(result) = self.response_rx.try_recv() {
             self.poll_in_flight = false;
             match result {
-                Ok(response) => {
+                Ok(DebugUiMessage::ProjectRead(response)) => {
                     let paged_shape_sync_in_progress = !self.shapes_synced;
                     if let Some(probe) = response.probes.iter().find_map(render_product_probe) {
                         self.last_render_product_probe = Some(probe.clone());
@@ -108,6 +118,10 @@ impl DebugUiState {
                         }
                     }
                 }
+                Ok(DebugUiMessage::Inventory(inventory)) => {
+                    self.project_inventory = Some(inventory);
+                    self.last_error = None;
+                }
                 Err(error) => {
                     self.last_error = Some(error);
                 }
@@ -122,29 +136,65 @@ impl DebugUiState {
 
         self.last_poll = Instant::now();
         self.poll_in_flight = true;
-        let request = if self.shapes_synced {
-            let mutations = self.prepare_queued_mutations();
+        if self.shapes_synced && !self.queued_edits.is_empty() && self.project_inventory.is_none() {
+            let client = self.async_client.clone();
+            let handle = self.project_handle;
+            let tx = self.response_tx.clone();
+            let repaint = ctx.clone();
+            self.runtime_handle.spawn(async move {
+                let result = client
+                    .project_inventory_read(handle)
+                    .await
+                    .map(DebugUiMessage::Inventory)
+                    .map_err(|error| error.to_string());
+                let _ = tx.send(result);
+                repaint.request_repaint();
+            });
+            return;
+        }
+
+        let read_context = if self.shapes_synced {
+            let mutation = self.prepare_queued_overlay_mutation();
             let (since, needs_slot_snapshot, selected_resource, selected_visual_product) =
                 self.next_project_read_context();
-            let include_slots = needs_slot_snapshot || !mutations.is_empty();
-            debug_ui_project_read(
+            let include_slots = needs_slot_snapshot || mutation.is_some();
+            (
                 since,
                 include_slots,
                 selected_resource,
                 selected_visual_product,
-                mutations,
+                mutation,
+            )
+        } else {
+            (None, false, None, None, None)
+        };
+        let request = if self.shapes_synced {
+            debug_ui_project_read(
+                read_context.0,
+                read_context.1,
+                read_context.2,
+                read_context.3,
             )
         } else {
             debug_ui_shape_sync_read(self.next_shape_cursor)
         };
+        let mutation = read_context.4;
         let client = self.async_client.clone();
         let handle = self.project_handle;
         let tx = self.response_tx.clone();
         let repaint = ctx.clone();
         self.runtime_handle.spawn(async move {
+            if let Some(mutation) = mutation {
+                if let Err(error) = client.project_overlay_mutate(handle, mutation).await {
+                    let _ = tx.send(Err(error.to_string()));
+                    repaint.request_repaint();
+                    return;
+                }
+            }
             let result = client
                 .project_read(handle, request)
                 .await
+                .map(DebugUiMessage::ProjectRead)
                 .map_err(|error| error.to_string());
             let _ = tx.send(result);
             repaint.request_repaint();
@@ -186,54 +236,101 @@ impl DebugUiState {
         }
 
         for intent in intents {
-            self.queued_mutations.insert(intent.key(), intent);
+            self.queued_edits.insert(intent.key(), intent);
         }
     }
 
-    fn prepare_queued_mutations(&mut self) -> Vec<WireSlotMutationRequest> {
-        if self.queued_mutations.is_empty() {
-            return Vec::new();
+    fn prepare_queued_overlay_mutation(&mut self) -> Option<WireOverlayMutationRequest> {
+        if self.queued_edits.is_empty() {
+            return None;
         }
 
-        let queued = core::mem::take(&mut self.queued_mutations);
-        let mut requests = Vec::new();
-        let mut next_mutation_id = self.next_mutation_id;
+        let Some(inventory) = &self.project_inventory else {
+            return None;
+        };
+
+        let queued = core::mem::take(&mut self.queued_edits);
+        let mut commands = Vec::new();
+        let mut next_overlay_cmd_id = self.next_overlay_cmd_id;
         let mut last_error = None;
 
         match self.project_view.lock() {
-            Ok(mut view) => {
+            Ok(view) => {
                 for (key, intent) in queued {
-                    let id = WireSlotMutationId::new(next_mutation_id);
-                    next_mutation_id = next_mutation_id.saturating_add(1);
-                    match view.slots.prepare_set_value(
-                        id,
-                        &intent.root,
-                        intent.path.clone(),
-                        intent.value,
-                    ) {
-                        Ok(request) => {
-                            self.last_mutation_by_slot.insert(key, id);
-                            requests.push(request);
-                        }
-                        Err(error) => {
-                            last_error = Some(format!("slot edit rejected locally: {error}"));
-                        }
+                    if let Err(error) =
+                        view.slots
+                            .validate_set_value(&intent.root, &intent.path, &intent.value)
+                    {
+                        let message = format!("slot edit rejected locally: {error}");
+                        self.slot_edit_errors.insert(key, message.clone());
+                        last_error = Some(message);
+                        continue;
                     }
+
+                    let Some((artifact, path)) = overlay_target_for_slot_edit(inventory, &intent)
+                    else {
+                        let message = format!("slot edit target is not an authored node def root");
+                        self.slot_edit_errors.insert(key, message.clone());
+                        last_error = Some(message);
+                        continue;
+                    };
+
+                    let id = MutationCmdId::new(next_overlay_cmd_id);
+                    next_overlay_cmd_id = next_overlay_cmd_id.saturating_add(1);
+                    self.slot_edit_errors.remove(&key);
+                    commands.push(MutationCmd {
+                        id,
+                        mutation: MutationOp::PutSlotEdit {
+                            artifact,
+                            edit: SlotEdit::assign_value(path, intent.value),
+                        },
+                    });
+                }
+                if commands.is_empty() {
+                    if let Some(error) = last_error {
+                        self.last_error = Some(error);
+                    }
+                    self.next_overlay_cmd_id = next_overlay_cmd_id;
+                    return None;
                 }
             }
             Err(_) => {
                 self.last_error = Some(String::from("Project view locked"));
-                self.queued_mutations = queued;
-                return Vec::new();
+                self.queued_edits = queued;
+                return None;
             }
         }
 
-        self.next_mutation_id = next_mutation_id;
+        self.next_overlay_cmd_id = next_overlay_cmd_id;
         if let Some(error) = last_error {
             self.last_error = Some(error);
         }
-        requests
+        Some(WireOverlayMutationRequest::new(MutationCmdBatch::new(
+            commands,
+        )))
     }
+}
+
+fn overlay_target_for_slot_edit(
+    inventory: &WireProjectInventoryReadResponse,
+    intent: &SlotEditIntent,
+) -> Option<(lpc_model::ArtifactLocation, SlotPath)> {
+    let node_id = node_id_from_def_root(&intent.root)?;
+    let node = inventory
+        .nodes
+        .iter()
+        .find(|node| node.runtime_id == Some(node_id))?;
+    let mut segments = node.def_location.path.segments().to_vec();
+    segments.extend(intent.path.segments().iter().cloned());
+    Some((
+        node.def_location.artifact.clone(),
+        SlotPath::from_segments(segments),
+    ))
+}
+
+fn node_id_from_def_root(root: &str) -> Option<NodeId> {
+    let value = root.strip_prefix("node.")?.strip_suffix(".def")?;
+    value.parse::<u32>().ok().map(NodeId::new)
 }
 
 fn render_product_probe(probe: &ProjectProbeResult) -> Option<&RenderProductProbeResult> {
@@ -268,10 +365,7 @@ fn apply_debug_ui_project_read_response(
                 view.slots.apply_registry_page(registry);
             }
         }
-        if response.results.is_empty()
-            && response.probes.is_empty()
-            && response.mutations.is_empty()
-        {
+        if response.results.is_empty() && response.probes.is_empty() {
             return Ok(());
         }
     }
@@ -296,7 +390,6 @@ fn debug_ui_project_read(
     include_slots: bool,
     selected_resource: Option<lpc_model::ResourceRef>,
     selected_visual_product: Option<lpc_model::VisualProduct>,
-    mutations: Vec<WireSlotMutationRequest>,
 ) -> ProjectReadRequest {
     let mut queries = Vec::new();
     queries.push(ProjectReadQuery::Nodes(NodeReadQuery {
@@ -331,7 +424,6 @@ fn debug_ui_project_read(
         since,
         queries,
         probes,
-        mutations,
     }
 }
 
@@ -344,7 +436,6 @@ fn debug_ui_shape_sync_read(after: Option<SlotShapeId>) -> ProjectReadRequest {
             limit: Some(SHAPE_SYNC_PAGE_LIMIT),
         })]),
         probes: Vec::new(),
-        mutations: Vec::new(),
     }
 }
 
@@ -379,7 +470,7 @@ impl eframe::App for DebugUiState {
                 ui.label("Project view locked");
                 return;
             };
-            let status = SlotEditStatusContext::new(&self.last_mutation_by_slot, &view.slots);
+            let status = SlotEditStatusContext::new(&self.slot_edit_errors);
             render_node_workspace(
                 ui,
                 &view,
@@ -428,7 +519,6 @@ mod tests {
                 next: None,
             })],
             probes: vec![],
-            mutations: vec![],
         };
 
         apply_debug_ui_project_read_response(&mut view, response, true).unwrap();
@@ -445,7 +535,6 @@ mod tests {
 
         assert_eq!(request.since, None);
         assert!(request.probes.is_empty());
-        assert!(request.mutations.is_empty());
         assert_eq!(request.queries.len(), 1);
         assert_eq!(
             request.queries[0],

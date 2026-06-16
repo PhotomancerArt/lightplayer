@@ -14,6 +14,7 @@ std = []
 schemars = ["dep:schemars"]
 
 [dependencies]
+lp-collection = { workspace = true, features = ["serde"] }
 lps-q32 = { path = "../lps-q32" }
 serde = { workspace = true, features = ["derive"] }
 schemars = { workspace = true, optional = true }

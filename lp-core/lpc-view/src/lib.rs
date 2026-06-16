@@ -19,5 +19,5 @@ pub use project::{
     ClientResourceCache, NodeEntryView, ProjectReadApplyError, ProjectView, StatusChangeView,
     apply_project_read_response,
 };
-pub use slot::{PendingSlotMutation, SlotMirrorError, SlotMirrorView};
+pub use slot::{SlotMirrorError, SlotMirrorView};
 pub use tree::{ApplyError, NodeTreeView, TreeEntryView, apply_tree_delta, apply_tree_deltas};

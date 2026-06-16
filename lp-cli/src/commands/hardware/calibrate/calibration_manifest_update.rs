@@ -1,7 +1,6 @@
 use anyhow::Result;
-use lpc_shared::hardware::{
-    HardwareCapability, HardwareManifestFile, hardware_manifest_file::HardwareResourceFile,
-};
+use lpc_hardware::manifest::hw_manifest_file::HardwareResourceFile;
+use lpc_hardware::{HardwareManifestFile, HwCapability};
 
 const DANGEROUS_REASON: &str = "crashed or timed out during calibration";
 
@@ -87,10 +86,7 @@ fn find_or_insert_gpio<'a>(
     manifest.gpio.push(HardwareResourceFile {
         address,
         display_label: fallback_label.into(),
-        capabilities: vec![
-            HardwareCapability::GpioOutput,
-            HardwareCapability::GpioInput,
-        ],
+        capabilities: vec![HwCapability::GpioOutput, HwCapability::GpioInput],
         aliases: vec![format!("GPIO{gpio}"), format!("IO{gpio}")],
         location: None,
         reserved_reason: None,
@@ -110,7 +106,7 @@ fn ensure_alias(resource: &mut HardwareResourceFile, alias: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpc_shared::hardware::HardwareTarget;
+    use lpc_hardware::HardwareTarget;
 
     #[test]
     fn mapping_preserves_previous_display_label_as_alias() {
@@ -119,10 +115,7 @@ mod tests {
         manifest.gpio.push(HardwareResourceFile::new(
             "/gpio/18",
             "GPIO18",
-            [
-                HardwareCapability::GpioOutput,
-                HardwareCapability::GpioInput,
-            ],
+            [HwCapability::GpioOutput, HwCapability::GpioInput],
         ));
 
         apply_mapping(&mut manifest, 18, "D6").unwrap();
@@ -152,18 +145,12 @@ mod tests {
         manifest.gpio.push(HardwareResourceFile::new(
             "/gpio/0",
             "D0",
-            [
-                HardwareCapability::GpioOutput,
-                HardwareCapability::GpioInput,
-            ],
+            [HwCapability::GpioOutput, HwCapability::GpioInput],
         ));
         manifest.gpio.push(HardwareResourceFile::new(
             "/gpio/1",
             "GPIO1",
-            [
-                HardwareCapability::GpioOutput,
-                HardwareCapability::GpioInput,
-            ],
+            [HwCapability::GpioOutput, HwCapability::GpioInput],
         ));
         apply_dangerous(&mut manifest, 2).unwrap();
 

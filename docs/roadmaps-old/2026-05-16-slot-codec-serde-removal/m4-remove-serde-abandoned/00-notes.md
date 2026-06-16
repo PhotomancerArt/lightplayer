@@ -159,7 +159,7 @@ Examples:
 - `value/value_path.rs`
 - `project/config.rs`
 - `server/server_config.rs`
-- `artifact/artifact_loc.rs`
+- `artifact/artifact_specifier.rs`
 
 Some of these are not slot-authored node definitions but still live in
 `lpc-model`. Each needs a decision: convert to slot/value codecs, move serde

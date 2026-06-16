@@ -2,11 +2,11 @@
 
 use alloc::vec::Vec;
 
-use alloc::collections::BTreeMap;
 use cranelift_codegen::ir::{AbiParam, ArgumentPurpose, Signature, types};
 use cranelift_codegen::ir::{Block, FuncRef, InstBuilder, StackSlot, TrapCode, Value};
 use cranelift_codegen::isa::{CallConv, TargetIsa};
 use cranelift_frontend::{FunctionBuilder, Variable};
+use lp_collection::VecMap;
 
 use lpir::FloatMode;
 use lpir::lpir_module::{IrFunction, LpirModule};
@@ -37,8 +37,8 @@ pub(crate) struct EmitCtx<'a> {
     pub import_func_refs: &'a [FuncRef],
     pub slots: &'a [StackSlot],
     pub ir: &'a LpirModule,
-    /// Rank `0..functions.len()-1` for each [`LpirFuncId`] (BTreeMap key order).
-    pub func_id_to_ir_rank: &'a BTreeMap<LpirFuncId, usize>,
+    /// Rank `0..functions.len()-1` for each [`LpirFuncId`] (VecMap key order).
+    pub func_id_to_ir_rank: &'a VecMap<LpirFuncId, usize>,
     pub pointer_type: types::Type,
     /// `SlotAddr` definition and transitive `Iadd` results use native pointer SSA type (see `vreg_wide_addr_chain`).
     pub vreg_wide_addr: Vec<bool>,
@@ -46,7 +46,7 @@ pub(crate) struct EmitCtx<'a> {
     pub lpir_builtins: Option<LpirBuiltinRefs>,
     /// `IrFunction::sret_arg` is set (Cranelift `StructReturn` on the sret pointer param).
     pub uses_struct_return: bool,
-    /// Per local function (IR rank, BTreeMap key order): does the callee's Cranelift signature
+    /// Per local function (IR rank, VecMap key order): does the callee's Cranelift signature
     /// use `StructReturn`? Needed at call sites to allocate a buffer for implicit multi-scalar
     /// sret callees (e.g. RV32 `vec3 foo()` callee with no `sret_arg` LPIR vreg) and load
     /// results back from the buffer.

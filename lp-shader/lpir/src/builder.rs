@@ -1,8 +1,8 @@
 //! Stack-based builders for [`crate::lpir_module::IrFunction`] and [`crate::lpir_module::LpirModule`].
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use crate::lpir_module::{ImportDecl, IrFunction, LpirBody, LpirModule, SlotDecl, VMCTX_VREG};
 use crate::lpir_op::LpirOp;
@@ -469,7 +469,7 @@ impl FunctionBuilder {
 /// Build an [`LpirModule`].
 pub struct ModuleBuilder {
     imports: Vec<ImportDecl>,
-    functions: BTreeMap<FuncId, IrFunction>,
+    functions: VecMap<FuncId, IrFunction>,
     next_func_id: u16,
 }
 
@@ -477,7 +477,7 @@ impl Default for ModuleBuilder {
     fn default() -> Self {
         Self {
             imports: Vec::new(),
-            functions: BTreeMap::new(),
+            functions: VecMap::new(),
             next_func_id: 0,
         }
     }

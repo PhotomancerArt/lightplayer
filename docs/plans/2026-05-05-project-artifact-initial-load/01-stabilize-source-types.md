@@ -6,7 +6,7 @@ Stabilize the already-started rename/move state before changing loader behavior.
 
 In scope:
 
-- Update rustdocs/comments for `ArtifactLocator`, engine-side `ArtifactLocation`, `NodeInvocation`, `NodeDef`, `NodeLoc`, and concrete `*Def` types.
+- Update rustdocs/comments for `ArtifactSpecifier`, engine-side `ArtifactLocation`, `NodeInvocation`, `NodeDef`, `NodeLoc`, and concrete `*Def` types.
 - Add/finish `ProjectDef` in `lpc-source/src/node/project/`.
 - Keep concrete node bodies named `TextureDef`, `ShaderDef`, `OutputDef`, `FixtureDef`, and `ProjectDef`.
 - Keep `NodeLoc` as a source string wrapper for now, but add parsing/validation helpers for the relative dot syntax described in `00-design.md`.
@@ -42,7 +42,7 @@ Out of scope:
 
 Relevant files:
 
-- `lp-core/lpc-source/src/artifact/artifact_loc.rs`
+- `lp-core/lpc-source/src/artifact/artifact_specifier.rs`
 - `lp-core/lpc-engine/src/artifact/artifact_location.rs`
 - `lp-core/lpc-source/src/node/node_invocation.rs`
 - `lp-core/lpc-source/src/node/node_def.rs`
@@ -79,7 +79,7 @@ Use `BTreeMap<NodeName, NodeInvocation>` or the closest existing no_std-friendly
 
 Update unit tests for:
 
-- `ArtifactLocator` path/lib round trips still pass.
+- `ArtifactSpecifier` path/lib round trips still pass.
 - `NodeInvocation` TOML form for `[nodes.foo] artifact = "./foo.toml"`.
 - `NodeLoc` accepts valid relative dot examples and rejects slash paths, empty strings, and absolute-looking node paths.
 - `ProjectDef` deserializes a minimal `kind = "project"` TOML with a named `nodes` table.

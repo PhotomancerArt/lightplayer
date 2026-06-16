@@ -3,15 +3,13 @@ extern crate alloc;
 use alloc::string::{String, ToString};
 use core::str;
 
-use lpc_shared::hardware::{
-    HardwareManifest, HardwareManifestFile, default_esp32c6_hardware_manifest,
-};
+use lpc_hardware::{HardwareManifestFile, HwManifest, default_esp32c6_hardware_manifest};
 use lpfs::LpFs;
 use lpfs::lp_path::AsLpPath;
 
 const HARDWARE_MANIFEST_PATH: &str = "/hardware.toml";
 
-pub fn load_hardware_manifest(fs: &dyn LpFs) -> HardwareManifest {
+pub fn load_hardware_manifest(fs: &dyn LpFs) -> HwManifest {
     match fs.read_file(HARDWARE_MANIFEST_PATH.as_path()) {
         Ok(bytes) => parse_override(&bytes).unwrap_or_else(|message| {
             log::warn!(
@@ -29,7 +27,7 @@ pub fn load_hardware_manifest(fs: &dyn LpFs) -> HardwareManifest {
     }
 }
 
-fn parse_override(bytes: &[u8]) -> Result<HardwareManifest, String> {
+fn parse_override(bytes: &[u8]) -> Result<HwManifest, String> {
     let text = str::from_utf8(bytes).map_err(|error| error.to_string())?;
     HardwareManifestFile::read_toml(text)
         .and_then(|manifest| manifest.to_manifest())

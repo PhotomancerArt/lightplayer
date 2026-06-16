@@ -10,7 +10,7 @@ mod tests {
     use crate::kind::{Colorspace, Dimension, InterpMethod, Kind, Unit};
     use crate::presentation::Presentation;
     use crate::{
-        ArtifactLocator, ChannelName, Effect, EffectRef, Live, LiveCandidate, NodeId, NodeName,
+        ArtifactSpecifier, ChannelName, Effect, EffectRef, Live, LiveCandidate, NodeId, NodeName,
         NodePropSpec, ParamsTable, Pattern, Playlist, PlaylistBehavior, PlaylistEntry, ShaderRef,
         SrcBinding, SrcShape, SrcSlot, SrcTextureSpec, SrcValueSpec, Stack, Transition,
         TransitionRef, TreePath, VisualInput,
@@ -47,7 +47,7 @@ mod tests {
     }
     #[test]
     fn schema_artifact_spec() {
-        assert_schema_compiles!(ArtifactLocator);
+        assert_schema_compiles!(ArtifactSpecifier);
     }
     #[test]
     fn schema_channel_name() {

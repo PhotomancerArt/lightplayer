@@ -1,16 +1,14 @@
 //! Runtime control radio node: mirrors control events between a graph bus and radio channel.
 
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
+use lpc_hardware::{RadioChannelId, RadioConfig, RadioDevice, RadioMessage, RadioMessageKind};
 use lpc_model::{
-    ControlMessage, ControlRadioDefView, ControlRadioState, FromLpValue, HardwareEndpointSpec,
-    MapSlot, SlotAccess, SlotData, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
-};
-use lpc_shared::hardware::{
-    RadioChannelId, RadioConfig, RadioDevice, RadioMessage, RadioMessageKind,
+    ControlMessage, ControlRadioDefView, ControlRadioState, FromLpValue, HwEndpointSpec, MapSlot,
+    SlotAccess, SlotData, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
 };
 
 use crate::dataflow::resolver::QueryKey;
@@ -112,7 +110,7 @@ impl ControlRadioNode {
         &mut self,
         ctx: &mut TickContext<'_>,
         repeat_count: u32,
-        accepted: &mut BTreeMap<u32, ControlMessage>,
+        accepted: &mut VecMap<u32, ControlMessage>,
     ) -> Result<(), NodeError> {
         for message in resolve_input_messages(ctx)? {
             let key = ControlMessageKey::from(message);
@@ -157,7 +155,7 @@ impl ControlRadioNode {
     fn receive_remote(
         &mut self,
         channel: RadioChannelId,
-        accepted: &mut BTreeMap<u32, ControlMessage>,
+        accepted: &mut VecMap<u32, ControlMessage>,
     ) -> Result<(), NodeError> {
         self.receive_buffer.clear();
         self.device
@@ -186,17 +184,17 @@ impl ControlRadioNode {
     fn publish_output(
         &mut self,
         ctx: &mut TickContext<'_>,
-        accepted: BTreeMap<u32, ControlMessage>,
+        accepted: VecMap<u32, ControlMessage>,
     ) -> Result<(), NodeError> {
         self.state.output = MapSlot::with_version(ctx.revision(), accepted);
         ctx.publish_runtime_slot(&self.state, control_radio_output_path())
     }
 
-    fn current_frame_output(&self, revision: lpc_model::Revision) -> BTreeMap<u32, ControlMessage> {
+    fn current_frame_output(&self, revision: lpc_model::Revision) -> VecMap<u32, ControlMessage> {
         if self.state.output.keys_revision == revision {
             self.state.output.entries.clone()
         } else {
-            BTreeMap::new()
+            VecMap::new()
         }
     }
 
@@ -207,7 +205,7 @@ impl ControlRadioNode {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ControlRadioRuntimeConfig {
-    endpoint: HardwareEndpointSpec,
+    endpoint: HwEndpointSpec,
     channel: RadioChannelId,
     repeat_count: u32,
     wifi_channel: Option<u8>,
@@ -215,7 +213,7 @@ struct ControlRadioRuntimeConfig {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct OpenedRadio {
-    endpoint: HardwareEndpointSpec,
+    endpoint: HwEndpointSpec,
     channel: RadioChannelId,
     wifi_channel: Option<u8>,
 }

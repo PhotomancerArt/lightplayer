@@ -1,7 +1,7 @@
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use crate::slot_codec::{JsonSyntaxSource, SyntaxError, SyntaxEventSource, ValueReader};
 use crate::{
@@ -203,11 +203,11 @@ fn read_entries<S>(
     value: ValueReader<'_, '_, S>,
     key_shape: SlotMapKeyShape,
     value_shape: SlotShapeView<'_>,
-) -> Result<BTreeMap<SlotMapKey, SlotData>, SyntaxError>
+) -> Result<VecMap<SlotMapKey, SlotData>, SyntaxError>
 where
     S: SyntaxEventSource,
 {
-    let mut entries = BTreeMap::new();
+    let mut entries = VecMap::new();
     let mut array = value.array()?;
     while let Some(item) = array.next_item()? {
         let (key, data) = read_entry(registry, item, key_shape, value_shape)?;

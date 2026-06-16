@@ -1,7 +1,7 @@
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use lps_shared::LpsType;
 
@@ -23,7 +23,7 @@ pub(super) struct GlobalConst {
 
 #[derive(Debug, Default)]
 pub(super) struct ImportRegistry {
-    pub(super) imports: BTreeMap<ImportKey, ImportInfo>,
+    pub(super) imports: VecMap<ImportKey, ImportInfo>,
 }
 
 impl ImportRegistry {

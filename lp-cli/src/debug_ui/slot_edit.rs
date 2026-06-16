@@ -4,8 +4,6 @@ use std::collections::BTreeMap;
 
 use eframe::egui;
 use lpc_model::{LpValue, SlotPath, SlotPolicy, SlotValueShape, ValueEditorHint};
-use lpc_view::SlotMirrorView;
-use lpc_wire::{WireSlotMutationId, WireSlotMutationRejection};
 
 /// Stable UI key for a slot mutation target.
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -37,38 +35,28 @@ impl SlotEditIntent {
     }
 }
 
-/// Read-only mutation status lookup for value rows.
+/// Read-only edit status lookup for value rows.
 pub(crate) struct SlotEditStatusContext<'a> {
-    last_mutation_by_slot: &'a BTreeMap<SlotEditKey, WireSlotMutationId>,
-    slots: &'a SlotMirrorView,
+    errors_by_slot: &'a BTreeMap<SlotEditKey, String>,
 }
 
 impl<'a> SlotEditStatusContext<'a> {
-    pub fn new(
-        last_mutation_by_slot: &'a BTreeMap<SlotEditKey, WireSlotMutationId>,
-        slots: &'a SlotMirrorView,
-    ) -> Self {
-        Self {
-            last_mutation_by_slot,
-            slots,
-        }
+    pub fn new(errors_by_slot: &'a BTreeMap<SlotEditKey, String>) -> Self {
+        Self { errors_by_slot }
     }
 
     pub fn status(&self, root: &str, path: &SlotPath) -> SlotEditStatus<'_> {
         let key = SlotEditKey::new(root, path.clone());
-        let Some(id) = self.last_mutation_by_slot.get(&key).copied() else {
-            return SlotEditStatus::default();
-        };
         SlotEditStatus {
-            error: self.slots.error(id),
+            error: self.errors_by_slot.get(&key).map(String::as_str),
         }
     }
 }
 
-/// Per-row mutation status.
+/// Per-row edit status.
 #[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct SlotEditStatus<'a> {
-    pub error: Option<&'a WireSlotMutationRejection>,
+    pub error: Option<&'a str>,
 }
 
 /// Render a supported editor for one slot value leaf.
@@ -111,7 +99,7 @@ pub(crate) fn slot_value_editor_supported(shape: &SlotValueShape, value: &LpValu
 pub(crate) fn render_slot_edit_status(ui: &mut egui::Ui, status: SlotEditStatus<'_>) {
     if let Some(error) = status.error {
         ui.colored_label(egui::Color32::LIGHT_RED, "rejected")
-            .on_hover_text(format!("{error:?}"));
+            .on_hover_text(error);
     }
 }
 

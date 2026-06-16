@@ -1,18 +1,18 @@
 use alloc::string::String;
 
-use crate::node::node_invocation::NodeInvocation;
-use crate::{MapSlot, OptionSlot, Slotted, ValueSlot};
+use crate::{MapSlot, NodeInvocationSlot, OptionSlot, Slotted, ValueSlot};
 
 /// Authored root project node definition.
 ///
-/// A project is a node artifact with `kind = "Project"`. Its `nodes` table is
-/// the explicit source of child node invocations; the runtime no longer
-/// discovers children from filesystem directories.
+/// A project is a node artifact with `kind = "Project"`. Its `nodes` table
+/// owns named child [`crate::NodeInvocationSlot`] entries; the runtime no
+/// longer discovers children from filesystem directories.
 #[derive(Clone, Debug, Default, PartialEq, Slotted)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ProjectDef {
     pub name: OptionSlot<ValueSlot<String>>,
-    pub nodes: MapSlot<String, NodeInvocation>,
+    /// Named child node positions owned by this project.
+    pub nodes: MapSlot<String, NodeInvocationSlot>,
 }
 
 impl ProjectDef {
@@ -43,10 +43,10 @@ mod tests {
             name = "basic"
 
             [nodes.texture]
-            def = { path = "./texture.toml" }
+            ref = "./texture.toml"
 
             [nodes.shader]
-            def = { path = "./shader.toml" }
+            ref = "./shader.toml"
         "#;
         let def = NodeDef::read_toml(&registry(), toml).unwrap();
         let NodeDef::Project(def) = def else {
@@ -68,7 +68,7 @@ mod tests {
             artifact = "./texture.toml"
         "#;
         let err = NodeDef::read_toml(&registry(), toml).unwrap_err();
-        assert!(err.to_string().contains("def"));
+        assert!(err.to_string().contains("ref"));
     }
 
     #[test]
@@ -76,15 +76,18 @@ mod tests {
         let toml = r#"
             kind = "Project"
 
-            [nodes.clock]
-            def = { kind = "Clock" }
+            [nodes.clock.def]
+            kind = "Clock"
         "#;
         let def = NodeDef::read_toml(&registry(), toml).unwrap();
         let NodeDef::Project(def) = def else {
             panic!("expected project def");
         };
         let clock = def.nodes.entries.get("clock").expect("clock");
-        assert!(matches!(clock.inline_def(), Some(NodeDef::Clock(_))));
+        assert!(matches!(
+            clock.value().inline_def(),
+            Some(NodeDef::Clock(_))
+        ));
     }
 
     fn registry() -> SlotShapeRegistry {

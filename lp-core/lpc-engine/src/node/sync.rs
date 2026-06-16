@@ -6,7 +6,7 @@ use alloc::vec::Vec;
 use lpc_model::Revision;
 use lpc_wire::WireTreeDelta;
 
-use crate::node::{NodeEntry, NodeTree};
+use crate::node::{RuntimeNodeEntry, RuntimeNodeTree};
 
 /// Generate tree deltas since a given frame.
 ///
@@ -19,11 +19,11 @@ use crate::node::{NodeEntry, NodeTree};
 /// the initial sync to work correctly even though root is created at frame 0.
 ///
 /// `Created` deltas are emitted in parent-before-child order (depth-first pre-order).
-pub fn tree_deltas_since<N>(tree: &NodeTree<N>, since: Revision) -> Vec<WireTreeDelta> {
+pub fn tree_deltas_since<N>(tree: &RuntimeNodeTree<N>, since: Revision) -> Vec<WireTreeDelta> {
     let mut deltas = Vec::new();
 
     // First pass: collect all live entries
-    let entries: Vec<&NodeEntry<N>> = tree.entries().collect();
+    let entries: Vec<&RuntimeNodeEntry<N>> = tree.entries().collect();
 
     // Pass 1: Created entries
     // If since == 0, return all entries. Otherwise, return entries with created_frame > since.
@@ -31,7 +31,7 @@ pub fn tree_deltas_since<N>(tree: &NodeTree<N>, since: Revision) -> Vec<WireTree
     collect_created_deltas(tree, tree.root(), since, &mut deltas);
 
     // Collect created ids for exclusion from other delta types
-    let created_ids: alloc::collections::BTreeSet<lpc_model::NodeId> = deltas
+    let created_ids: lp_collection::VecSet<lpc_model::NodeId> = deltas
         .iter()
         .filter_map(|d| {
             if let WireTreeDelta::Created { id, .. } = d {
@@ -73,7 +73,7 @@ pub fn tree_deltas_since<N>(tree: &NodeTree<N>, since: Revision) -> Vec<WireTree
 /// If `since == 0`, all entries are included (bulk sync).
 /// Otherwise, only entries with `created_frame > since` are included.
 fn collect_created_deltas<N>(
-    tree: &NodeTree<N>,
+    tree: &RuntimeNodeTree<N>,
     id: lpc_model::NodeId,
     since: Revision,
     deltas: &mut Vec<WireTreeDelta>,
@@ -106,20 +106,19 @@ fn collect_created_deltas<N>(
 #[cfg(test)]
 mod tests {
     use super::tree_deltas_since;
-    use crate::artifact::ArtifactId;
     use crate::node::test_placeholder_spine;
-    use crate::node::{NodeEntryState, NodeTree};
+    use crate::node::{NodeEntryState, RuntimeNodeTree};
     use alloc::vec;
     use alloc::vec::Vec;
     use lpc_model::NodeInvocation;
     use lpc_model::{NodeId, NodeName, Revision, TreePath};
     use lpc_wire::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};
 
-    fn make_tree() -> NodeTree<()> {
-        NodeTree::new(TreePath::parse("/root.show").unwrap(), Revision::new(0))
+    fn make_tree() -> RuntimeNodeTree<()> {
+        RuntimeNodeTree::new(TreePath::parse("/root.show").unwrap(), Revision::new(0))
     }
 
-    fn spine_placeholder() -> (NodeInvocation, ArtifactId) {
+    fn spine_placeholder() -> NodeInvocation {
         test_placeholder_spine()
     }
 
@@ -129,7 +128,7 @@ mod tests {
         let root = tree.root();
 
         // Add some children
-        let (cfg_a, art_a) = spine_placeholder();
+        let cfg_a = spine_placeholder();
         let a = tree
             .add_child(
                 root,
@@ -139,11 +138,10 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 cfg_a,
-                art_a,
                 Revision::new(1),
             )
             .unwrap();
-        let (cfg_b, art_b) = spine_placeholder();
+        let cfg_b = spine_placeholder();
         let b = tree
             .add_child(
                 root,
@@ -153,7 +151,6 @@ mod tests {
                     source: WireSlotIndex(1),
                 },
                 cfg_b,
-                art_b,
                 Revision::new(2),
             )
             .unwrap();
@@ -188,7 +185,7 @@ mod tests {
         let mut tree = make_tree();
         let root = tree.root();
 
-        let (cfg, art) = spine_placeholder();
+        let cfg = spine_placeholder();
         tree.add_child(
             root,
             NodeName::parse("a").unwrap(),
@@ -197,7 +194,6 @@ mod tests {
                 source: WireSlotIndex(0),
             },
             cfg,
-            art,
             Revision::new(1),
         )
         .unwrap();
@@ -216,7 +212,7 @@ mod tests {
         let mut tree = make_tree();
         let root = tree.root();
 
-        let (cfg, art) = spine_placeholder();
+        let cfg = spine_placeholder();
         let a = tree
             .add_child(
                 root,
@@ -226,7 +222,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 cfg,
-                art,
                 Revision::new(1),
             )
             .unwrap();
@@ -234,7 +229,7 @@ mod tests {
         // Change status at frame 5
         tree.get_mut(a)
             .unwrap()
-            .set_status(lpc_wire::WireNodeStatus::Ok, Revision::new(5));
+            .set_status(lpc_wire::NodeRuntimeStatus::Ok, Revision::new(5));
 
         let deltas = tree_deltas_since(&tree, Revision::new(0));
 
@@ -263,7 +258,7 @@ mod tests {
         assert_eq!(changed.len(), 1);
         if let WireTreeDelta::EntryChanged { id, status, .. } = changed[0] {
             assert_eq!(*id, a);
-            assert!(matches!(status, lpc_wire::WireNodeStatus::Ok));
+            assert!(matches!(status, lpc_wire::NodeRuntimeStatus::Ok));
         }
     }
 
@@ -273,7 +268,7 @@ mod tests {
         let root = tree.root();
 
         // Add child at frame 5
-        let (cfg, art) = spine_placeholder();
+        let cfg = spine_placeholder();
         let a = tree
             .add_child(
                 root,
@@ -283,7 +278,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 cfg,
-                art,
                 Revision::new(5),
             )
             .unwrap();
@@ -311,7 +305,7 @@ mod tests {
         let root = tree.root();
 
         // Create nested structure: root -> parent -> child
-        let (cfg_p, art_p) = spine_placeholder();
+        let cfg_p = spine_placeholder();
         let parent = tree
             .add_child(
                 root,
@@ -321,11 +315,10 @@ mod tests {
                     name: NodeName::parse("parent").unwrap(),
                 },
                 cfg_p,
-                art_p,
                 Revision::new(1),
             )
             .unwrap();
-        let (cfg_c, art_c) = spine_placeholder();
+        let cfg_c = spine_placeholder();
         let child = tree
             .add_child(
                 parent,
@@ -335,7 +328,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 cfg_c,
-                art_c,
                 Revision::new(2),
             )
             .unwrap();
@@ -363,7 +355,7 @@ mod tests {
         let mut tree = make_tree();
         let root = tree.root();
 
-        let (cfg, art) = spine_placeholder();
+        let cfg = spine_placeholder();
         let a = tree
             .add_child(
                 root,
@@ -373,7 +365,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 cfg,
-                art,
                 Revision::new(1),
             )
             .unwrap();
@@ -407,13 +398,14 @@ mod tests {
     /// Full round-trip test: server tree → deltas → client mirror
     #[test]
     fn tree_round_trip_server_to_client() {
+        use lp_collection::VecSet;
         use lpc_view::{NodeTreeView, apply_tree_deltas};
 
         // Build server tree
         let mut server_tree = make_tree();
         let root = server_tree.root();
 
-        let (cfg_a, art_a) = spine_placeholder();
+        let cfg_a = spine_placeholder();
         let a = server_tree
             .add_child(
                 root,
@@ -423,11 +415,10 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 cfg_a,
-                art_a,
                 Revision::new(1),
             )
             .unwrap();
-        let (cfg_b, art_b) = spine_placeholder();
+        let cfg_b = spine_placeholder();
         let b = server_tree
             .add_child(
                 root,
@@ -437,7 +428,6 @@ mod tests {
                     source: WireSlotIndex(1),
                 },
                 cfg_b,
-                art_b,
                 Revision::new(2),
             )
             .unwrap();
@@ -479,7 +469,7 @@ mod tests {
         {
             let b_entry = server_tree.get_mut(b).unwrap();
             b_entry.set_state(NodeEntryState::Alive(()), Revision::new(5));
-            b_entry.set_status(lpc_wire::WireNodeStatus::Ok, Revision::new(5));
+            b_entry.set_status(lpc_wire::NodeRuntimeStatus::Ok, Revision::new(5));
         }
 
         // Get deltas since frame 2 (after b was created)
@@ -492,7 +482,7 @@ mod tests {
         assert!(client_tree.get(a).is_none()); // a removed
         assert!(client_tree.get(b).is_some()); // b still there
         let client_b = client_tree.get(b).unwrap();
-        assert!(matches!(client_b.status, lpc_wire::WireNodeStatus::Ok));
+        assert!(matches!(client_b.status, lpc_wire::NodeRuntimeStatus::Ok));
         assert!(matches!(client_b.state, WireEntryState::Alive));
 
         // Verify root's children list updated

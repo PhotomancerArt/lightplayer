@@ -9,13 +9,13 @@ use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::ToString;
+use alloc::vec::Vec;
 use core::cell::RefCell;
 
 use lp_riscv_emu_guest::println;
-use lpc_shared::OutputError;
-use lpc_shared::hardware::{
-    HardwareEndpointError, HardwareEndpointSpec, HardwareRegistry, HardwareSystem, Ws281xConfig,
-    Ws281xOutput,
+use lpc_hardware::OutputError;
+use lpc_hardware::{
+    HardwareEndpointError, HardwareSystem, HwEndpointSpec, HwRegistry, Ws281xConfig, Ws281xOutput,
 };
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 
@@ -34,7 +34,7 @@ impl SyscallOutputProvider {
         dead_code,
         reason = "kept for tests and older callers that construct only a registry"
     )]
-    pub fn new_with_hardware_registry(hardware_registry: Rc<HardwareRegistry>) -> Self {
+    pub fn new_with_hardware_registry(hardware_registry: Rc<HwRegistry>) -> Self {
         Self::new_with_hardware_system(Rc::new(HardwareSystem::with_virtual_drivers(
             hardware_registry,
         )))
@@ -52,7 +52,7 @@ impl SyscallOutputProvider {
 impl OutputProvider for SyscallOutputProvider {
     fn open(
         &self,
-        endpoint: &HardwareEndpointSpec,
+        endpoint: &HwEndpointSpec,
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,
@@ -90,7 +90,9 @@ impl OutputProvider for SyscallOutputProvider {
             .ok_or_else(|| OutputError::InvalidHandle {
                 handle: handle.as_i32(),
             })?;
-        output.write(data)?;
+        let mut raw = Vec::with_capacity(data.len());
+        render_rgb8(data, &mut raw);
+        output.write(&raw)?;
         println!("[output] write: handle={:?}, len={}", handle, data.len());
         Ok(())
     }
@@ -110,14 +112,20 @@ impl OutputProvider for SyscallOutputProvider {
 impl SyscallOutputProvider {
     fn open_ws281x_output(
         &self,
-        endpoint: &HardwareEndpointSpec,
+        endpoint: &HwEndpointSpec,
         byte_count: u32,
         options: Option<OutputDriverOptions>,
     ) -> Result<Box<dyn Ws281xOutput>, OutputError> {
+        let _ = options;
         self.hardware_system
-            .open_ws281x_by_spec(endpoint, Ws281xConfig::new(byte_count, options))
+            .open_ws281x_by_spec(endpoint, Ws281xConfig::new(byte_count))
             .map_err(endpoint_error_to_output_error)
     }
+}
+
+fn render_rgb8(data: &[u16], out: &mut Vec<u8>) {
+    out.clear();
+    out.extend(data.iter().map(|sample| (sample >> 8) as u8));
 }
 
 fn endpoint_error_to_output_error(error: HardwareEndpointError) -> OutputError {

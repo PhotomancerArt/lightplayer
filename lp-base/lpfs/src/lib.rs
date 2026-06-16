@@ -23,7 +23,9 @@ pub mod lp_path;
 pub use lp_path::{AsLpPath, AsLpPathBuf, LpPath, LpPathBuf};
 
 pub use error::FsError;
-pub use fs_event::{ChangeType, FsChange, FsVersion};
+#[allow(deprecated, reason = "legacy fs event type aliases for migration")]
+pub use fs_event::{ChangeType, FsChange};
+pub use fs_event::{FsEvent, FsEventKind, FsVersion};
 pub use impls::lp_fs_mem::LpFsMemory;
 pub use lp_fs::LpFs;
 pub use lp_fs_view::LpFsView;

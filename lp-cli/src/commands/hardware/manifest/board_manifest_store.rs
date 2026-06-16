@@ -1,5 +1,5 @@
 use anyhow::{Context, Result, anyhow, bail};
-use lpc_shared::hardware::HardwareManifestFile;
+use lpc_hardware::HardwareManifestFile;
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -12,7 +12,7 @@ impl BoardManifestStore {
         let repo_root = find_repo_root(repo)?;
         let boards_dir = match boards_dir {
             Some(path) => path,
-            None => repo_root.join("lp-core/lpc-shared/boards"),
+            None => repo_root.join("lp-core/lpc-hardware/boards"),
         };
         Ok(Self { boards_dir })
     }

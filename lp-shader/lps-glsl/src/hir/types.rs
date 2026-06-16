@@ -1,6 +1,6 @@
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use lps_shared::{LpsModuleSig, LpsType, ParamQualifier, TextureBindingSpec};
 
@@ -12,10 +12,10 @@ use crate::body::{BinaryOp, IncDecOp, UnaryOp};
 pub struct HirModule {
     pub functions: Vec<HirFunction>,
     pub meta: LpsModuleSig,
-    pub uniforms: BTreeMap<String, UniformInfo>,
-    pub globals: BTreeMap<String, GlobalInfo>,
+    pub uniforms: VecMap<String, UniformInfo>,
+    pub globals: VecMap<String, GlobalInfo>,
     pub imports: Vec<ImportInfo>,
-    pub texture_specs: BTreeMap<String, TextureBindingSpec>,
+    pub texture_specs: VecMap<String, TextureBindingSpec>,
     pub texel_fetch_bounds: lpir::TexelFetchBoundsMode,
 }
 
@@ -42,7 +42,7 @@ pub struct ImportInfo {
     pub sret: bool,
 }
 
-pub(super) type StructTypes = BTreeMap<String, LpsType>;
+pub(super) type StructTypes = VecMap<String, LpsType>;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum ImportKey {

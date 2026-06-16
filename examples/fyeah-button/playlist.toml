@@ -8,13 +8,13 @@ source = "bus#time.seconds"
 [entries.1]
 name = "attract"
 fade_after = 0.12
-node = { def = { path = "./attract.toml" } }
+node = { ref = "./attract.toml" }
 
 [entries.2]
 name = "blast"
 duration = 6.0
 fade_after = 2.0
-node = { def = { path = "./blast.toml" } }
+node = { ref = "./blast.toml" }
 
 [entries.2.bindings.trigger]
 source = "bus#trigger"

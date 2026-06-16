@@ -7,6 +7,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+lp-collection = { workspace = true, features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 log = { workspace = true }
 anyhow = "1"
@@ -25,6 +26,7 @@ notify = "6"
 lpc-model = { path = "../lp-core/lpc-model" }
 lpc-wire = { path = "../lp-core/lpc-wire" }
 lpa-server = { path = "../lp-app/lpa-server" }
+lpc-hardware = { path = "../lp-core/lpc-hardware" }
 lpc-shared = { path = "../lp-core/lpc-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }
 lpc-view = { path = "../lp-core/lpc-view" }
@@ -51,6 +53,7 @@ rustc-demangle = "0.1"
 tempfile = "3"
 lpc-engine = { path = "../lp-core/lpc-engine" }
 lpa-server = { path = "../lp-app/lpa-server" }
+lpc-hardware = { path = "../lp-core/lpc-hardware" }
 lpc-shared = { path = "../lp-core/lpc-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }
 lpc-model = { path = "../lp-core/lpc-model" }

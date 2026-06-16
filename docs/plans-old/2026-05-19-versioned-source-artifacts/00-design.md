@@ -25,7 +25,7 @@ The plan introduces:
 ```text
 lp-core/lpc-model/src/
   artifact/
-    artifact_loc.rs
+    artifact_specifier.rs
     artifact_read_root.rs
   node/
     node_invocation.rs
@@ -107,7 +107,7 @@ pub struct NodeInvocation {
 }
 
 pub enum NodeDefRef {
-    Path { path: ArtifactLocator },
+    Path { path: ArtifactSpecifier },
     Inline(Box<NodeDef>),
 }
 ```
@@ -155,13 +155,13 @@ Model direction:
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Slotted)]
 #[slot(enum_encoding = "external", rename_all = "snake_case")]
 pub enum ShaderSource {
-    Path(ArtifactLocator),
+    Path(ArtifactSpecifier),
     Glsl(String),
 }
 ```
 
-If `ArtifactLocator` is awkward as a direct slot value, use a new
-`SourcePath`/`ShaderSourcePath` wrapper that parses into `ArtifactLocator`.
+If `ArtifactSpecifier` is awkward as a direct slot value, use a new
+`SourcePath`/`ShaderSourcePath` wrapper that parses into `ArtifactSpecifier`.
 Do not expose `artifact` as the canonical authored field.
 
 Breaking migration:

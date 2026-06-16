@@ -1,6 +1,6 @@
 //! Structural tree deltas for engine↔client sync (`WireTreeDelta`).
 
-use crate::project::WireNodeStatus;
+use crate::project::NodeRuntimeStatus;
 use crate::tree::{WireChildKind, WireEntryState};
 use lpc_model::node::{NodeId, TreePath};
 use lpc_model::project::Revision;
@@ -8,7 +8,7 @@ use lpc_model::project::Revision;
 /// Structural delta for the node tree (wire shape).
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(tag = "delta", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum WireTreeDelta {
     /// First time the client sees this entry.
     Created {
@@ -17,7 +17,7 @@ pub enum WireTreeDelta {
         parent: Option<NodeId>,
         child_kind: Option<WireChildKind>,
         children: alloc::vec::Vec<NodeId>,
-        status: WireNodeStatus,
+        status: NodeRuntimeStatus,
         state: WireEntryState,
         created_frame: Revision,
         change_frame: Revision,
@@ -27,7 +27,7 @@ pub enum WireTreeDelta {
     /// Status/state changed on an existing entry.
     EntryChanged {
         id: NodeId,
-        status: WireNodeStatus,
+        status: NodeRuntimeStatus,
         state: WireEntryState,
         change_frame: Revision,
     },
@@ -43,7 +43,7 @@ pub enum WireTreeDelta {
 #[cfg(test)]
 mod tests {
     use super::WireTreeDelta;
-    use crate::project::WireNodeStatus;
+    use crate::project::NodeRuntimeStatus;
     use crate::tree::{WireChildKind, WireEntryState, WireSlotIndex};
     use lpc_model::node::{NodeId, TreePath};
     use lpc_model::project::Revision;
@@ -58,7 +58,7 @@ mod tests {
                 source: WireSlotIndex(0),
             }),
             children: alloc::vec![NodeId::new(8), NodeId::new(9)],
-            status: WireNodeStatus::Created,
+            status: NodeRuntimeStatus::Created,
             state: WireEntryState::Pending,
             created_frame: Revision::new(1),
             change_frame: Revision::new(1),
@@ -73,7 +73,7 @@ mod tests {
     fn tree_delta_entry_changed_round_trips() {
         let delta = WireTreeDelta::EntryChanged {
             id: NodeId::new(7),
-            status: WireNodeStatus::Ok,
+            status: NodeRuntimeStatus::Ok,
             state: WireEntryState::Alive,
             change_frame: Revision::new(42),
         };
@@ -102,7 +102,7 @@ mod tests {
             parent: None,
             child_kind: None,
             children: alloc::vec![],
-            status: WireNodeStatus::Created,
+            status: NodeRuntimeStatus::Created,
             state: WireEntryState::Pending,
             created_frame: Revision::new(0),
             change_frame: Revision::new(0),

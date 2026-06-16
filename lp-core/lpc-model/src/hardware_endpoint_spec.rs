@@ -12,9 +12,9 @@ use crate::{
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-pub struct HardwareEndpointSpec(String);
+pub struct HwEndpointSpec(String);
 
-impl HardwareEndpointSpec {
+impl HwEndpointSpec {
     pub fn parse(spec: impl Into<String>) -> Result<Self, HardwareEndpointSpecError> {
         let spec = spec.into();
         validate_spec(&spec)?;
@@ -42,19 +42,19 @@ impl HardwareEndpointSpec {
     }
 }
 
-impl Default for HardwareEndpointSpec {
+impl Default for HwEndpointSpec {
     fn default() -> Self {
         Self::from_static("unset:unset:unset")
     }
 }
 
-impl fmt::Display for HardwareEndpointSpec {
+impl fmt::Display for HwEndpointSpec {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl FromStr for HardwareEndpointSpec {
+impl FromStr for HwEndpointSpec {
     type Err = HardwareEndpointSpecError;
 
     fn from_str(spec: &str) -> Result<Self, Self::Err> {
@@ -62,7 +62,7 @@ impl FromStr for HardwareEndpointSpec {
     }
 }
 
-impl Serialize for HardwareEndpointSpec {
+impl Serialize for HwEndpointSpec {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -71,7 +71,7 @@ impl Serialize for HardwareEndpointSpec {
     }
 }
 
-impl<'de> Deserialize<'de> for HardwareEndpointSpec {
+impl<'de> Deserialize<'de> for HwEndpointSpec {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
@@ -81,13 +81,13 @@ impl<'de> Deserialize<'de> for HardwareEndpointSpec {
     }
 }
 
-impl ToLpValue for HardwareEndpointSpec {
+impl ToLpValue for HwEndpointSpec {
     fn to_lp_value(&self) -> LpValue {
         LpValue::String(self.0.clone())
     }
 }
 
-impl FromLpValue for HardwareEndpointSpec {
+impl FromLpValue for HwEndpointSpec {
     fn from_lp_value(value: &LpValue) -> Result<Self, ValueRootError> {
         match value {
             LpValue::String(value) => {
@@ -100,7 +100,7 @@ impl FromLpValue for HardwareEndpointSpec {
     }
 }
 
-impl SlotValue for HardwareEndpointSpec {
+impl SlotValue for HwEndpointSpec {
     const SHAPE_ID: SlotShapeId = SlotShapeId::from_static_name("HardwareEndpointSpec");
     const STATIC_VALUE_SHAPE_DESCRIPTOR: Option<StaticSlotValueShape> = Some(
         StaticSlotValueShape::new(Self::SHAPE_ID, StaticLpType::String),
@@ -193,7 +193,7 @@ mod tests {
 
     #[test]
     fn endpoint_spec_splits_three_parts() {
-        let spec = HardwareEndpointSpec::parse("ws281x:rmt:D10").unwrap();
+        let spec = HwEndpointSpec::parse("ws281x:rmt:D10").unwrap();
 
         assert_eq!(spec.capability(), "ws281x");
         assert_eq!(spec.driver(), "rmt");
@@ -205,7 +205,7 @@ mod tests {
     fn endpoint_spec_rejects_malformed_values() {
         for spec in ["ws281x:rmt", "ws281x:rmt:", ":rmt:D10", "ws281x:rmt:D10:x"] {
             assert!(
-                HardwareEndpointSpec::parse(spec).is_err(),
+                HwEndpointSpec::parse(spec).is_err(),
                 "{spec} should be rejected"
             );
         }
@@ -213,10 +213,10 @@ mod tests {
 
     #[test]
     fn endpoint_spec_round_trips_through_lp_value() {
-        let spec = HardwareEndpointSpec::parse("ws281x:rmt:D10").unwrap();
+        let spec = HwEndpointSpec::parse("ws281x:rmt:D10").unwrap();
 
         assert_eq!(
-            HardwareEndpointSpec::from_lp_value(&spec.to_lp_value()).unwrap(),
+            HwEndpointSpec::from_lp_value(&spec.to_lp_value()).unwrap(),
             spec
         );
     }

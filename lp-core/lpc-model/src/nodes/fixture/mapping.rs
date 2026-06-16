@@ -1,10 +1,10 @@
-use alloc::collections::BTreeMap;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    EnumSlot, FromLpValue, LpType, LpValue, MapSlot, PositiveF32, PositiveF32Slot, SlotEnumOption,
-    SlotMeta, SlotShapeId, SlotValue, SlotValueShape, Slotted, SourcePath, SourcePathSlot,
+    AssetSlot, EnumSlot, FromLpValue, LpPathBuf, LpType, LpValue, MapSlot, PositiveF32,
+    PositiveF32Slot, SlotEnumOption, SlotMeta, SlotShapeId, SlotValue, SlotValueShape, Slotted,
     StaticLpType, StaticSlotEnumOption, StaticSlotMeta, StaticSlotValueShape,
     StaticValueEditorHint, ToLpValue, ValueEditorHint, ValueRootError, ValueSlot, Xy, XySlot,
 };
@@ -24,7 +24,7 @@ pub enum MappingConfig {
 
     /// A mapping imported from a small, strict SVG path subset at project-load time.
     SvgPath {
-        source: SourcePathSlot,
+        source: AssetSlot,
         sample_diameter: PositiveF32Slot,
     },
 }
@@ -68,16 +68,16 @@ impl MappingConfig {
     }
 
     pub fn path_points_vec(paths: Vec<PathSpec>, sample_diameter: f32) -> Self {
-        let mut entries = BTreeMap::new();
+        let mut entries = VecMap::new();
         for (index, path) in paths.into_iter().enumerate() {
             entries.insert(index as u32, EnumSlot::new(path));
         }
         Self::path_points(MapSlot::new(entries), sample_diameter)
     }
 
-    pub fn svg_path(source: impl Into<SourcePath>, sample_diameter: f32) -> Self {
+    pub fn svg_path(source: impl Into<LpPathBuf>, sample_diameter: f32) -> Self {
         Self::SvgPath {
-            source: SourcePathSlot::new(source.into()),
+            source: AssetSlot::path(source),
             sample_diameter: PositiveF32Slot::new(PositiveF32(sample_diameter)),
         }
     }
@@ -113,7 +113,7 @@ impl PathSpec {
         offset_angle: f32,
         order: RingOrder,
     ) -> Self {
-        let mut counts = BTreeMap::new();
+        let mut counts = VecMap::new();
         for (index, count) in ring_lamp_counts.iter().copied().enumerate() {
             counts.insert(index as u32, ValueSlot::new(count));
         }
@@ -129,7 +129,7 @@ impl PathSpec {
     }
 
     pub fn point_list(first_channel: u32, points: impl IntoIterator<Item = [f32; 2]>) -> Self {
-        let mut entries = BTreeMap::new();
+        let mut entries = VecMap::new();
         for (index, point) in points.into_iter().enumerate() {
             entries.insert(index as u32, XySlot::new(Xy(point)));
         }

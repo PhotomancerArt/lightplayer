@@ -43,7 +43,7 @@ jobs:
   #     - name: Install Rust toolchain
   #       uses: dtolnay/rust-toolchain@stable
   #       with:
-  #         toolchain: nightly
+  #         toolchain: nightly-2026-04-27
   #         components: rustfmt, clippy, rust-src
   #
   #     - name: Install RISC-V target
@@ -87,10 +87,11 @@ jobs:
           repository: light-player/lp-regalloc2
           path: lp-regalloc2
 
+      # Toolchain is pinned in lp2025/rust-toolchain.toml; keep this in sync.
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: nightly
+          toolchain: nightly-2026-04-27
           components: rustfmt, clippy, rust-src
 
       - name: Install RISC-V target

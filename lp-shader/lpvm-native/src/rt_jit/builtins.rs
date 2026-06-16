@@ -1,22 +1,22 @@
 //! Builtin symbol table for JIT relocation (filled once, then `O(log n)` lookup).
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use lps_builtin_ids::BuiltinId;
 use lps_builtins::jit_builtin_code_ptr;
 
 /// Maps `extern "C"` symbol name → address for auipc+jalr fixups.
 pub struct BuiltinTable {
-    symbols: BTreeMap<String, usize>,
+    symbols: VecMap<String, usize>,
 }
 
 impl BuiltinTable {
     #[must_use]
     pub fn new() -> Self {
         Self {
-            symbols: BTreeMap::new(),
+            symbols: VecMap::new(),
         }
     }
 

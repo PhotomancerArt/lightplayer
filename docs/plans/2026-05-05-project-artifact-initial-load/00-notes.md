@@ -63,7 +63,7 @@ load the project root through `ArtifactManager`.
 
 RustRover-assisted renames/moves have already started:
 
-- `SrcArtifactSpec` has moved/renamed to `ArtifactLocator`.
+- `SrcArtifactSpec` has moved/renamed to `ArtifactSpecifier`.
 - `SrcNodeConfig` has moved/renamed to `NodeInvocation`.
 - `TextureConfig` / `ShaderConfig` / `OutputConfig` / `FixtureConfig` have moved
   to `TextureDef` / `ShaderDef` / `OutputDef` / `FixtureDef` under
@@ -86,18 +86,18 @@ encouraged.
 
 Terminology direction:
 
-- `ArtifactLocator`: authored outside-world locator for a loadable artifact
+- `ArtifactSpecifier`: authored outside-world locator for a loadable artifact
   (`Path`, future builtin/library variants). This is the source-side form of
   "where to load a node definition from".
 - Engine-side `ArtifactLocation`: resolved runtime/cache key used by
   `ArtifactManager`. This can stay separate from source-side
-  `ArtifactLocator`.
+  `ArtifactSpecifier`.
 - `NodeInvocation`: parent-owned instruction to instantiate a node at a `nodes`
   table key. Desired shape:
 
 ```rust
 pub enum NodeInvocation {
-    Artifact(ArtifactLocator),
+    Artifact(ArtifactSpecifier),
     Inline(NodeDef),
 }
 ```
@@ -324,7 +324,7 @@ Context: Many tests and server/CLI paths call `load_from_root`. The new desired
 runtime API is "provide the project artifact spec."
 
 Answer: demolish the old loading path as part of this plan. The core runtime
-starts at `/project.toml` (or an explicitly supplied `ArtifactLocator`) and
+starts at `/project.toml` (or an explicitly supplied `ArtifactSpecifier`) and
 loads from the project artifact. Remove directory discovery and `/project.json`
 from the core initial-load path rather than preserving a compatibility wrapper.
 Flatten `examples/basic` early, validate the idea there, then migrate remaining
@@ -365,7 +365,7 @@ not the authored node spec itself. `SrcArtifactSpec` is already widespread and
 works, but "spec" now risks meaning both reference and definition.
 
 Answer: already started. `SrcArtifactSpec` has moved/renamed to
-`ArtifactLocator`. The plan should stabilize comments, tests, and relative path
+`ArtifactSpecifier`. The plan should stabilize comments, tests, and relative path
 semantics around that name. Keep engine-side `ArtifactLocation` as the resolved
 artifact-manager key.
 
@@ -429,7 +429,7 @@ Initial audit set:
 
 | Existing type | Current role | Likely action |
 | --- | --- | --- |
-| `lpc_source::ArtifactLocator` | authored artifact path/lib locator | keep and stabilize source-side relative path semantics |
+| `lpc_model::ArtifactSpecifier` | authored artifact path/lib locator | keep and stabilize source-side relative path semantics |
 | `lpc_engine::ArtifactLocation` | resolved artifact-manager key | keep, maybe document as engine-side resolved locator |
 | `lpc_source::NodeInvocation` | currently struct `{ artifact, overrides }` | stabilize as the artifact-only invocation shape for this plan; inline variant can wait |
 | `lpc_model::NodeLoc` | string wrapper for another node | keep wrapper; add relative dot-syntax parser/resolution semantics and rustdocs |

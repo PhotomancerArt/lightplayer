@@ -1,0 +1,26 @@
+[package]
+name = "lpc-registry"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[features]
+default = ["std", "diff"]
+std = ["lpc-model/std", "lpfs/std"]
+# Host/CI harness helpers. Omit on embedded.
+diff = []
+
+[dependencies]
+lp-collection = { workspace = true, features = ["serde"] }
+lpc-model = { path = "../lpc-model", default-features = false }
+lpfs = { path = "../../lp-base/lpfs", default-features = false }
+serde = { workspace = true, features = ["derive"] }
+
+[dev-dependencies]
+lpc-wire = { path = "../lpc-wire", default-features = false }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

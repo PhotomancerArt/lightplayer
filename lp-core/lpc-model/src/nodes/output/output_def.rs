@@ -1,11 +1,11 @@
-use crate::{BindingDefs, HardwareEndpointSpec, OptionSlot, Ratio, RatioSlot, Slotted, ValueSlot};
+use crate::{BindingDefs, HwEndpointSpec, OptionSlot, Ratio, RatioSlot, Slotted, ValueSlot};
 
 pub const DEFAULT_OUTPUT_ENDPOINT_SPEC: &str = "ws281x:rmt:D10";
 
 /// Authored hardware output node definition.
 #[derive(Debug, Clone, PartialEq, Slotted)]
 pub struct OutputDef {
-    pub endpoint: ValueSlot<HardwareEndpointSpec>,
+    pub endpoint: ValueSlot<HwEndpointSpec>,
     /// Authored slot bindings for output inputs.
     pub bindings: BindingDefs,
     /// Optional display pipeline options.
@@ -15,7 +15,7 @@ pub struct OutputDef {
 impl OutputDef {
     pub const KIND: &'static str = "output";
 
-    pub fn new(endpoint: HardwareEndpointSpec) -> Self {
+    pub fn new(endpoint: HwEndpointSpec) -> Self {
         Self {
             endpoint: ValueSlot::new(endpoint),
             bindings: BindingDefs::default(),
@@ -23,11 +23,11 @@ impl OutputDef {
         }
     }
 
-    pub fn default_endpoint() -> HardwareEndpointSpec {
-        HardwareEndpointSpec::from_static(DEFAULT_OUTPUT_ENDPOINT_SPEC)
+    pub fn default_endpoint() -> HwEndpointSpec {
+        HwEndpointSpec::from_static(DEFAULT_OUTPUT_ENDPOINT_SPEC)
     }
 
-    pub fn endpoint(&self) -> &HardwareEndpointSpec {
+    pub fn endpoint(&self) -> &HwEndpointSpec {
         self.endpoint.value()
     }
 
@@ -94,7 +94,7 @@ mod tests {
 
     #[test]
     fn test_output_def_kind() {
-        let def = OutputDef::new(HardwareEndpointSpec::from_static("ws281x:rmt:D10"));
+        let def = OutputDef::new(HwEndpointSpec::from_static("ws281x:rmt:D10"));
         assert_eq!(def.kind(), NodeKind::Output);
         assert_eq!(def.endpoint().as_str(), "ws281x:rmt:D10");
     }

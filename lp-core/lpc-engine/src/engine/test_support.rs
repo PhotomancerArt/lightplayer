@@ -1,14 +1,15 @@
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::sync::Arc;
 use core::sync::atomic::{AtomicU32, Ordering};
+use lp_collection::VecMap;
 
 use lpc_model::{
     ChannelName, Kind, MapSlot, NodeId, NodeName, Revision, SlotAccess, SlotMapKey, SlotPath,
     SlotPathSegment, SlotShapeRegistry, SlotShapeRegistryError, Slotted, TreePath, ValueSlot,
 };
+use lpc_registry::ProjectRegistry;
 use lpc_wire::{WireChildKind, WireSlotIndex};
 use lps_shared::LpsValueF32;
 
@@ -30,18 +31,20 @@ use super::resolve_with_engine_host;
 
 pub(crate) struct EngineTestBuilder {
     engine: Engine,
-    labels: BTreeMap<String, NodeId>,
-    shader_ticks: BTreeMap<String, Arc<AtomicU32>>,
-    fixture_records: BTreeMap<String, RecordedValue>,
-    output_records: BTreeMap<String, RecordedValue>,
+    registry: ProjectRegistry,
+    labels: VecMap<String, NodeId>,
+    shader_ticks: VecMap<String, Arc<AtomicU32>>,
+    fixture_records: VecMap<String, RecordedValue>,
+    output_records: VecMap<String, RecordedValue>,
 }
 
 pub(crate) struct EngineTestHarness {
     pub(crate) engine: Engine,
-    labels: BTreeMap<String, NodeId>,
-    shader_ticks: BTreeMap<String, Arc<AtomicU32>>,
-    fixture_records: BTreeMap<String, RecordedValue>,
-    output_records: BTreeMap<String, RecordedValue>,
+    pub(crate) registry: ProjectRegistry,
+    labels: VecMap<String, NodeId>,
+    shader_ticks: VecMap<String, Arc<AtomicU32>>,
+    fixture_records: VecMap<String, RecordedValue>,
+    output_records: VecMap<String, RecordedValue>,
 }
 
 pub(crate) struct OutputSpec {
@@ -65,10 +68,11 @@ impl EngineTestBuilder {
     pub(crate) fn new() -> Self {
         Self {
             engine: Engine::new(TreePath::parse("/show.test").expect("test root path")),
-            labels: BTreeMap::new(),
-            shader_ticks: BTreeMap::new(),
-            fixture_records: BTreeMap::new(),
-            output_records: BTreeMap::new(),
+            registry: ProjectRegistry::new(),
+            labels: VecMap::new(),
+            shader_ticks: VecMap::new(),
+            fixture_records: VecMap::new(),
+            output_records: VecMap::new(),
         }
     }
 
@@ -157,6 +161,7 @@ impl EngineTestBuilder {
     pub(crate) fn build(self) -> EngineTestHarness {
         EngineTestHarness {
             engine: self.engine,
+            registry: self.registry,
             labels: self.labels,
             shader_ticks: self.shader_ticks,
             fixture_records: self.fixture_records,
@@ -166,7 +171,7 @@ impl EngineTestBuilder {
 
     fn attach_node(&mut self, label: &str, ty: &str, node: Box<dyn NodeRuntime>) -> NodeId {
         let root = self.engine.tree().root();
-        let (cfg, artifact) = test_placeholder_spine();
+        let cfg = test_placeholder_spine();
         let node_id = self
             .engine
             .tree_mut()
@@ -178,7 +183,6 @@ impl EngineTestBuilder {
                     source: WireSlotIndex(0),
                 },
                 cfg,
-                artifact,
                 Revision::new(1),
             )
             .expect("add test node");
@@ -252,14 +256,29 @@ impl EngineTestHarness {
     }
 
     pub(crate) fn resolve(&mut self, query: QueryKey) -> Result<Production, SessionResolveError> {
-        resolve_with_engine_host(&mut self.engine, query, ResolveLogLevel::Off).map(|(pv, _)| pv)
+        resolve_with_engine_host(
+            &mut self.engine,
+            &self.registry,
+            query,
+            ResolveLogLevel::Off,
+        )
+        .map(|(pv, _)| pv)
     }
 
     pub(crate) fn resolve_with_trace(
         &mut self,
         query: QueryKey,
     ) -> Result<(Production, ResolveTrace), SessionResolveError> {
-        resolve_with_engine_host(&mut self.engine, query, ResolveLogLevel::Basic)
+        resolve_with_engine_host(
+            &mut self.engine,
+            &self.registry,
+            query,
+            ResolveLogLevel::Basic,
+        )
+    }
+
+    pub(crate) fn tick(&mut self, delta_ms: u32) -> Result<(), super::EngineError> {
+        self.engine.tick(&self.registry, delta_ms)
     }
 }
 
@@ -273,7 +292,7 @@ impl OutputSpec {
 }
 
 impl TestBindingSource {
-    fn into_binding_source(self, labels: &BTreeMap<String, NodeId>) -> BindingSource {
+    fn into_binding_source(self, labels: &VecMap<String, NodeId>) -> BindingSource {
         match self {
             Self::Literal(value) => {
                 BindingSource::Literal(lpc_model::LpValue::F32(f32_value(value)))
@@ -286,7 +305,7 @@ impl TestBindingSource {
         }
     }
 
-    fn owner(&self, labels: &BTreeMap<String, NodeId>) -> NodeId {
+    fn owner(&self, labels: &VecMap<String, NodeId>) -> NodeId {
         match self {
             Self::ProducedSlot { label, .. } => *labels.get(label).expect("produced slot label"),
             Self::Literal(_) | Self::Bus(_) => NodeId::new(0),
@@ -374,7 +393,7 @@ pub(crate) struct DummyShaderState {
 
 impl DummyShaderNode {
     fn new(slot: SlotPath, value: LpsValueF32, tick_count: Arc<AtomicU32>) -> Self {
-        let mut outputs = BTreeMap::new();
+        let mut outputs = VecMap::new();
         outputs.insert(output_key(&slot), ValueSlot::new(f32_value(value)));
         Self {
             state: DummyShaderState {

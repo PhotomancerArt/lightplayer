@@ -3,7 +3,7 @@
 //! Functions for creating new projects with sensible defaults.
 
 use anyhow::{Context, Result};
-use std::collections::BTreeMap;
+use lp_collection::VecMap;
 use std::path::Path;
 
 use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig};
@@ -11,10 +11,10 @@ use lpc_model::nodes::output::OutputDef;
 use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
-    Affine2d, Affine2dSlot, AsLpPath, BindingDef, BindingDefs, BindingRef, BusSlotRef, Dim2u,
-    Dim2uSlot, EnumSlot, FixtureDiagnosticMode, FixtureSamplingConfig, HardwareEndpointSpec,
-    MapSlot, NodeDef, OptionSlot, RenderOrder, RenderOrderSlot, ShaderSource, SlotPath,
-    SlotShapeRegistry, ValueSlot,
+    Affine2d, Affine2dSlot, AsLpPath, AssetSlot, BindingDef, BindingDefs, BindingRef, BusSlotRef,
+    Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode, FixtureSamplingConfig, HwEndpointSpec,
+    MapSlot, NodeDef, OptionSlot, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry,
+    ValueSlot,
 };
 use lpfs::LpFs;
 
@@ -82,7 +82,7 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
 
     // Create shader node
     let shader_config = ShaderDef {
-        source: EnumSlot::new(ShaderSource::path("shader.glsl")),
+        source: AssetSlot::path("shader.glsl"),
         render_order: RenderOrderSlot::new(RenderOrder(0)),
         bindings: bus_output_binding_defs("visual.out"),
         glsl_opts: lpc_model::GlslOpts::default(),
@@ -164,7 +164,7 @@ vec4 render(vec2 pos) {
 
     // Create output node
     let output_config = OutputDef {
-        endpoint: ValueSlot::new(HardwareEndpointSpec::from_static("ws281x:rmt:D10")),
+        endpoint: ValueSlot::new(HwEndpointSpec::from_static("ws281x:rmt:D10")),
         bindings: bus_input_binding_defs("control.out"),
         options: OptionSlot::none(),
     };
@@ -232,7 +232,7 @@ fn slot_shape_registry() -> SlotShapeRegistry {
 }
 
 fn default_visual_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
-    let mut slots = BTreeMap::new();
+    let mut slots = VecMap::new();
     slots.insert(
         String::from("time"),
         ShaderSlotDef::value_f32("Time", "Project clock time in seconds", 0.0, None),
@@ -259,7 +259,7 @@ fn bus_output_binding_defs(slot: &str) -> BindingDefs {
 }
 
 fn fixture_binding_defs() -> BindingDefs {
-    let mut entries = std::collections::BTreeMap::new();
+    let mut entries = lp_collection::VecMap::new();
     entries.insert(
         String::from("input"),
         BindingDef::source(BindingRef::Bus(BusSlotRef::new(
@@ -276,7 +276,7 @@ fn fixture_binding_defs() -> BindingDefs {
 }
 
 fn single_binding_defs(slot: &str, binding: BindingDef) -> BindingDefs {
-    let mut entries = std::collections::BTreeMap::new();
+    let mut entries = lp_collection::VecMap::new();
     entries.insert(String::from(slot), binding);
     BindingDefs::new(entries)
 }
@@ -381,7 +381,11 @@ mod tests {
             panic!("expected shader node TOML");
         };
         assert_eq!(
-            shader_config.shader_source().path_value().unwrap().as_str(),
+            shader_config
+                .shader_source()
+                .artifact_value()
+                .unwrap()
+                .to_string(),
             "shader.glsl"
         );
         assert!(matches!(

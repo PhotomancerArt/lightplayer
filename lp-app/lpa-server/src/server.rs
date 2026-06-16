@@ -16,7 +16,7 @@ use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::ServerTransport;
 use lpc_wire::{ClientRequest, WireMessage, WireServerMessage};
-use lpfs::{FsChange, LpFs};
+use lpfs::{FsEvent, LpFs};
 
 /// Optional callback returning (free_bytes, used_bytes) for memory logging.
 /// Platforms without heap stats (e.g. fw-emu) pass `None`.
@@ -160,7 +160,7 @@ impl LpServer {
         );
 
         // Collect changes per project
-        let mut project_changes_map: HashMap<_, Vec<FsChange>> = HashMap::new();
+        let mut project_changes_map: HashMap<_, Vec<FsEvent>> = HashMap::new();
 
         for (handle, project_path) in &project_info {
             if let Some(project) = self.project_manager.get_project(*handle) {
@@ -178,14 +178,14 @@ impl LpServer {
                 // Build project prefix path using join - ensure it ends with /
                 let project_prefix_buf = LpPathBuf::from("/").join(project_path.as_str()).join("");
                 let project_prefix = project_prefix_buf.as_str();
-                let project_changes: Vec<FsChange> = base_changes
+                let project_changes: Vec<FsEvent> = base_changes
                     .into_iter()
                     .filter_map(|change| {
                         // Use LpPath to strip prefix and normalize
                         if let Some(stripped) = change.path.strip_prefix(project_prefix) {
-                            Some(FsChange {
+                            Some(FsEvent {
                                 path: stripped.to_path_buf(),
-                                change_type: change.change_type,
+                                kind: change.kind,
                             })
                         } else {
                             None
@@ -199,23 +199,20 @@ impl LpServer {
             }
         }
 
-        // Get current_version AFTER collecting all changes but BEFORE processing
-        // This represents the version that will be assigned to the NEXT change
-        // So all changes we're about to process have versions < current_version
+        // Capture the next version before refresh applies anything. The events
+        // in this batch are all older than this marker.
         let current_version = self.base_fs().current_version();
 
         // Now apply changes to projects (mutable borrows)
-        for (handle, _project_changes) in project_changes_map {
+        for (handle, project_changes) in project_changes_map {
             if let Some(project) = self.project_manager.get_project_mut(handle) {
-                if let Err(_e) = project.reload() {
+                if let Err(_e) = project.refresh_artifacts(&project_changes) {
                     // Log error but continue with other projects
                     // Note: In no_std context, errors are silently ignored
                     // Errors will be visible when clients read project state.
                 } else {
-                    // Update last processed version to current_version.next() (one more than the next version)
-                    // This ensures that get_changes_since(current_version.next()) will return nothing next time
-                    // because get_changes_since uses >=, and current_version.next() is beyond all changes we processed
-                    // All changes we processed have versions < current_version, so >= current_version.next() returns nothing
+                    // Advance past the batch marker so the same events are not
+                    // returned again by get_changes_since, which is inclusive.
                     project.update_fs_version(current_version.next());
                 }
             }
@@ -235,7 +232,7 @@ impl LpServer {
                 );
                 // Ignore errors and continue with other projects
                 // Errors will be visible when clients sync or query project state
-                match project.engine_mut().tick(delta_ms) {
+                match project.tick(delta_ms) {
                     Ok(()) => {
                         log::trace!("LpServer::tick: Project {} tick succeeded", project.name());
                     }
@@ -309,10 +306,8 @@ impl LpServer {
                                 response_count += 1;
                                 continue;
                             };
-                            let mut source = ServerProjectReadSource::new(
-                                project.engine_mut(),
-                                Some(server_status),
-                            );
+                            let mut source =
+                                ServerProjectReadSource::new(project, Some(server_status));
                             transport
                                 .send_project_read(msg_id, handle, &mut source, request)
                                 .await

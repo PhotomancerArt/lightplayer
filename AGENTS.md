@@ -137,6 +137,31 @@ just build-rv32         # cargo build --target riscv32imac-... -p ...
 just build              # parallel: host + rv32
 ```
 
+### ESP32 linked-build pitfall
+
+For `fw-esp32`, **linked firmware builds, size measurements, and bloat
+analysis must run from `lp-fw/fw-esp32/`** (or through a just recipe that
+`cd`s there first, such as `just build-fw-esp32`). The crate-local
+`.cargo/config.toml` and linker setup are part of the build.
+
+This is fine from the workspace root because it does not final-link:
+
+```bash
+cargo check -p fw-esp32 --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
+```
+
+For a real linked ELF or size numbers, do this instead:
+
+```bash
+cd lp-fw/fw-esp32
+cargo build --target riscv32imac-unknown-none-elf --profile release-esp32 --features esp32c6,server
+rust-size ../../target/riscv32imac-unknown-none-elf/release-esp32/fw-esp32
+```
+
+Running `cargo build -p fw-esp32 ...` from the workspace root can fail at final
+link with `memory region not defined: ROTEXT`, because it bypasses the
+crate-local firmware build context.
+
 For targeted host validation of specific crates:
 
 ```bash

@@ -422,7 +422,7 @@ mod tests {
     #[test]
     fn runtime_validate_errors_on_missing_fixture() {
         use std::collections::BTreeMap;
-        let mut specs = BTreeMap::new();
+        let mut specs = TextureSpecs::new();
         specs.insert(
             "tex".into(),
             sample_spec(
@@ -439,7 +439,7 @@ mod tests {
     #[test]
     fn runtime_validate_errors_on_extra_fixture() {
         use std::collections::BTreeMap;
-        let specs: TextureSpecs = BTreeMap::new();
+        let specs: TextureSpecs = TextureSpecs::new();
         let mut fixtures = BTreeMap::new();
         fixtures.insert(
             "orphan".into(),
@@ -462,7 +462,7 @@ mod tests {
     #[test]
     fn runtime_validate_errors_on_format_mismatch() {
         use std::collections::BTreeMap;
-        let mut specs = BTreeMap::new();
+        let mut specs = TextureSpecs::new();
         specs.insert(
             "tex".into(),
             sample_spec(
@@ -492,7 +492,7 @@ mod tests {
     #[test]
     fn runtime_validate_errors_on_height_one_mismatch() {
         use std::collections::BTreeMap;
-        let mut specs = BTreeMap::new();
+        let mut specs = TextureSpecs::new();
         specs.insert(
             "tex".into(),
             sample_spec(TextureStorageFormat::R16Unorm, TextureShapeHint::HeightOne),

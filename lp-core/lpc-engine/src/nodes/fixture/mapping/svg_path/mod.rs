@@ -6,7 +6,7 @@ mod svg_path_fit;
 mod svg_path_group;
 mod svg_path_parser;
 
-use alloc::collections::BTreeMap;
+use lp_collection::VecMap;
 
 use lpc_model::nodes::fixture::{MappingConfig, PathSpec};
 use lpc_model::{EnumSlot, MapSlot};
@@ -26,7 +26,7 @@ pub fn resolve_svg_path_mapping(
     let mut parsed = parse_svg_path_groups(svg)?;
     parsed.groups.sort_by_key(|group| group.path_index);
 
-    let mut paths = BTreeMap::new();
+    let mut paths = VecMap::new();
     let mut first_channel = 0u32;
     let mut previous_path_index = None;
     for group in &parsed.groups {

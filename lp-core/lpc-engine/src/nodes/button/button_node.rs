@@ -1,14 +1,14 @@
 //! Runtime hardware button node: polls a debounced input and produces control maps.
 
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::format;
+use lp_collection::VecMap;
 
+use lpc_hardware::{ButtonConfig, ButtonEventKind, ButtonInput};
 use lpc_model::{
-    ButtonDefView, ButtonState, ControlMessage, HardwareEndpointSpec, MapSlot, Revision,
-    SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
+    ButtonDefView, ButtonState, ControlMessage, HwEndpointSpec, MapSlot, Revision, SlotAccess,
+    SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
 };
-use lpc_shared::hardware::{ButtonConfig, ButtonEventKind, ButtonInput};
 
 use crate::node::{
     DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
@@ -84,14 +84,14 @@ impl ButtonNode {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct ButtonRuntimeConfig {
-    endpoint: HardwareEndpointSpec,
+    endpoint: HwEndpointSpec,
     id: u32,
     stable_ms: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct OpenedButton {
-    endpoint: HardwareEndpointSpec,
+    endpoint: HwEndpointSpec,
     stable_ms: u64,
 }
 
@@ -167,7 +167,7 @@ impl NodeRuntime for ButtonNode {
 }
 
 fn one_message_map(revision: Revision, id: u32, seq: u32) -> MapSlot<u32, ControlMessage> {
-    let mut entries = BTreeMap::new();
+    let mut entries = VecMap::new();
     entries.insert(id, ControlMessage::new(id, seq));
     MapSlot::with_version(revision, entries)
 }

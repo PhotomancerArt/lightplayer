@@ -1,0 +1,13 @@
+kind = "Shader"
+source = { path = "idle.glsl" }
+render_order = 0
+
+[glsl_opts]
+add_sub = "wrapping"
+mul = "wrapping"
+div = "reciprocal"
+
+[consumed.time]
+kind = "value"
+value = "f32"
+default = 0.0

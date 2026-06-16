@@ -1,40 +1,37 @@
 //! [`Engine`] — owns spine state and mediates [`ResolveHost`] production for produced slots.
 
 use alloc::boxed::Box;
-use alloc::collections::BTreeSet;
 use alloc::format;
 use alloc::rc::Rc;
-use alloc::string::{String, ToString};
+use alloc::string::ToString;
 use alloc::sync::Arc;
 use alloc::vec::Vec;
-use hashbrown::HashMap;
-
+use lp_collection::VecSet;
 use lpc_model::{
-    ControlProduct, NodeDef, NodeId, Revision, SlotAccess, SlotAccessor, SlotData, SlotDirection,
-    SlotMerge, SlotPath, SlotPathSegment, SlotSemantics, SlotShapeLookup, SlotShapeRegistry,
-    SlotShapeView, TreePath, WithRevision, advance_revision, current_revision,
-    lookup_slot_data_and_shape,
+    ControlProduct, NodeDef, NodeDefLocation, NodeDefState, NodeId, Revision, SlotAccess,
+    SlotAccessor, SlotData, SlotDirection, SlotMerge, SlotPath, SlotPathSegment, SlotSemantics,
+    SlotShapeLookup, SlotShapeRegistry, SlotShapeView, TreePath, WithRevision, advance_revision,
+    current_revision, lookup_slot_data_and_shape,
 };
+use lpc_registry::ProjectRegistry;
 use lpc_shared::time::TimeProvider;
-use lpc_wire::WireNodeStatus;
-use lpfs::FsChange;
-use lpfs::lp_path::{LpPath, LpPathBuf};
+use lpc_wire::NodeRuntimeStatus;
 
-use crate::artifact::{ArtifactState, ArtifactStore};
 use crate::dataflow::binding::{BindingDraft, BindingError, BindingRef};
+use crate::dataflow::bus::Bus;
 use crate::dataflow::resolver::{
     EngineSession, Production, ProductionSource, QueryKey, ResolveHost, ResolveLogLevel,
     ResolveTrace, Resolver, SessionHostResolver, SessionResolveError, TickResolver,
 };
 use crate::gfx::LpGraphics;
-use crate::node::NodeEntry;
+use crate::node::RuntimeNodeEntry;
 use crate::node::catch_node_panic::catch_node_panic;
 use crate::node::{
     ControlRenderContext, ControlRenderServices, NodeCall, NodeCallKey, NodeError,
     NodeResourceInitContext, NodeRuntime, ProduceResult, RenderContext, TickContext,
     VisualRenderServices,
 };
-use crate::node::{NodeEntryState, NodeTree};
+use crate::node::{NodeEntryState, RuntimeNodeTree};
 use crate::products::control::{ControlLayout, ControlRenderRequest, ControlRenderTarget};
 use crate::products::visual::{
     RenderTextureRequest, TextureRenderProduct, VisualProduct, VisualSampleBufferRequest,
@@ -42,7 +39,7 @@ use crate::products::visual::{
 };
 use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 
-use super::{ButtonService, EngineError, EngineServices, RadioService};
+use super::{ButtonService, EngineError, EngineServices, ProjectRuntimeIndex, RadioService};
 use super::{FrameNum, FrameTime};
 
 /// Conventional demand input used by the M2 engine slice.
@@ -56,13 +53,12 @@ pub struct Engine {
     frame_num: FrameNum,
     revision: Revision,
     frame_time: FrameTime,
-    tree: NodeTree<Box<dyn NodeRuntime>>,
+    tree: RuntimeNodeTree<Box<dyn NodeRuntime>>,
     resolver: Resolver,
     slot_shapes: SlotShapeRegistry,
     runtime_buffers: RuntimeBufferStore,
-    artifacts: ArtifactStore,
+    project_runtime_index: ProjectRuntimeIndex,
     services: EngineServices,
-    artifact_nodes: HashMap<String, NodeId>,
     demand_roots: Vec<NodeId>,
     graphics: Option<Arc<dyn LpGraphics>>,
 }
@@ -79,13 +75,12 @@ impl Engine {
             frame_num: FrameNum::default(),
             revision,
             frame_time: FrameTime::zero(),
-            tree: NodeTree::new(root_path.clone(), revision),
+            tree: RuntimeNodeTree::new(root_path.clone(), revision),
             resolver: Resolver::new(),
             slot_shapes,
             runtime_buffers: RuntimeBufferStore::new(),
-            artifacts: ArtifactStore::new(),
+            project_runtime_index: ProjectRuntimeIndex::new(),
             services,
-            artifact_nodes: HashMap::new(),
             demand_roots: Vec::new(),
             graphics: None,
         }
@@ -93,10 +88,6 @@ impl Engine {
 
     pub fn revision(&self) -> Revision {
         self.revision
-    }
-
-    pub(super) fn set_revision(&mut self, revision: Revision) {
-        self.revision = revision;
     }
 
     pub fn frame_num(&self) -> FrameNum {
@@ -107,11 +98,11 @@ impl Engine {
         self.frame_time
     }
 
-    pub fn tree(&self) -> &NodeTree<Box<dyn NodeRuntime>> {
+    pub fn tree(&self) -> &RuntimeNodeTree<Box<dyn NodeRuntime>> {
         &self.tree
     }
 
-    pub fn tree_mut(&mut self) -> &mut NodeTree<Box<dyn NodeRuntime>> {
+    pub fn tree_mut(&mut self) -> &mut RuntimeNodeTree<Box<dyn NodeRuntime>> {
         &mut self.tree
     }
 
@@ -139,12 +130,12 @@ impl Engine {
         &mut self.runtime_buffers
     }
 
-    pub fn artifacts(&self) -> &ArtifactStore {
-        &self.artifacts
+    pub fn project_runtime_index(&self) -> &ProjectRuntimeIndex {
+        &self.project_runtime_index
     }
 
-    pub fn artifacts_mut(&mut self) -> &mut ArtifactStore {
-        &mut self.artifacts
+    pub(crate) fn project_runtime_index_mut(&mut self) -> &mut ProjectRuntimeIndex {
+        &mut self.project_runtime_index
     }
 
     pub fn services(&self) -> &EngineServices {
@@ -155,21 +146,94 @@ impl Engine {
         &mut self.services
     }
 
-    /// Engine [`NodeId`] for a node artifact path, if loaded.
-    pub fn artifact_node_id(&self, path: &LpPath) -> Option<NodeId> {
-        self.artifact_nodes.get(path.as_str()).copied()
-    }
-
-    pub(crate) fn insert_artifact_node(&mut self, path: LpPathBuf, id: NodeId) {
-        self.artifact_nodes.insert(String::from(path.as_str()), id);
-    }
-
     pub fn demand_roots(&self) -> &[NodeId] {
         &self.demand_roots
     }
 
     pub fn add_demand_root(&mut self, node: NodeId) {
         self.demand_roots.push(node);
+    }
+
+    pub(crate) fn remove_runtime_subtree(
+        &mut self,
+        node: NodeId,
+        frame: Revision,
+    ) -> Result<(), EngineError> {
+        if node == self.tree.root() {
+            return Err(EngineError::Tree(crate::node::TreeError::RootMutation));
+        }
+        let ids = self.tree.subtree_ids_depth_first(node)?;
+        for &id in &ids {
+            self.cleanup_runtime_node(id, frame)?;
+            self.project_runtime_index.remove_runtime_node(id);
+        }
+        self.demand_roots.retain(|root| !ids.contains(root));
+        self.tree.remove_subtree(node, frame)?;
+        self.resolver.clear_frame_cache();
+        Ok(())
+    }
+
+    pub(crate) fn reattach_runtime_node(
+        &mut self,
+        node: NodeId,
+        runtime: Box<dyn NodeRuntime>,
+        frame: Revision,
+    ) -> Result<(), EngineError> {
+        self.cleanup_runtime_node(node, frame)?;
+        self.attach_runtime_node(node, runtime, frame)?;
+        self.resolver.clear_frame_cache();
+        Ok(())
+    }
+
+    fn cleanup_runtime_node(&mut self, node: NodeId, frame: Revision) -> Result<(), EngineError> {
+        let sink = self.runtime_output_sink_buffer_id(node);
+        if let Some(sink) = sink {
+            self.services.unregister_output_sink(sink);
+        }
+
+        let state = {
+            let entry = self
+                .tree
+                .get_mut(node)
+                .ok_or(EngineError::UnknownNode(node))?;
+            let old_changed_at = entry.state.changed_at();
+            core::mem::replace(
+                &mut entry.state,
+                WithRevision::new(old_changed_at, NodeEntryState::Pending),
+            )
+            .into_value()
+        };
+
+        match state {
+            NodeEntryState::Alive(mut runtime) => {
+                let bus = Bus::new();
+                let mut ctx = crate::node::DestroyCtx::new(node, frame, &bus);
+                runtime
+                    .destroy(&mut ctx)
+                    .map_err(|err| EngineError::node(node, err))?;
+            }
+            NodeEntryState::Pending | NodeEntryState::Failed { .. } => {}
+            NodeEntryState::Executing { call } => {
+                let entry = self
+                    .tree
+                    .get_mut(node)
+                    .ok_or(EngineError::UnknownNode(node))?;
+                entry.set_state(NodeEntryState::Executing { call: call.clone() }, frame);
+                return Err(EngineError::Node {
+                    node,
+                    message: format!(
+                        "cannot remove or reattach node while executing {}",
+                        call.call.label()
+                    ),
+                });
+            }
+        }
+
+        for buffer_id in self.runtime_buffers.remove_owned_by(node) {
+            self.services.unregister_output_sink(buffer_id);
+        }
+        self.demand_roots.retain(|&root| root != node);
+        Ok(())
     }
 
     pub fn add_binding(
@@ -222,12 +286,70 @@ impl Engine {
         }
     }
 
-    pub fn tick(&mut self, delta_ms: u32) -> Result<(), EngineError> {
+    pub(crate) fn loaded_node_def_for_entry<'a, N>(
+        &self,
+        registry: &'a ProjectRegistry,
+        entry: &RuntimeNodeEntry<N>,
+    ) -> Option<&'a NodeDef> {
+        let location = entry.def_location.as_ref()?;
+        loaded_registry_def(registry, location).ok()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn load_test_node_defs(
+        &mut self,
+        registry: &mut ProjectRegistry,
+        defs: &[(NodeId, NodeDef)],
+        frame: Revision,
+    ) -> Result<(), alloc::string::String> {
+        use alloc::format;
+        use alloc::string::String;
+        use lpc_model::{ArtifactLocation, NodeDefLocation};
+        use lpc_registry::ParseCtx;
+        use lpfs::lp_path::AsLpPath;
+        use lpfs::{LpFs, LpFsMemory};
+
+        let fs = LpFsMemory::new();
+        let mut project = String::from("kind = \"Project\"\n");
+        for (index, (_, def)) in defs.iter().enumerate() {
+            let node_path = format!("/test-node-{index}.toml");
+            project.push_str(&format!("\n[nodes.node{index}]\nref = \".{node_path}\"\n"));
+            let text = def
+                .write_toml(&self.slot_shapes)
+                .map_err(|e| e.to_string())?;
+            fs.write_file(node_path.as_path(), text.as_bytes())
+                .map_err(|e| e.to_string())?;
+        }
+        fs.write_file("/project.toml".as_path(), project.as_bytes())
+            .map_err(|e| e.to_string())?;
+
+        let ctx = ParseCtx {
+            shapes: &self.slot_shapes,
+        };
+        registry
+            .load_root(&fs, "/project.toml".as_path(), frame, &ctx)
+            .map_err(|e| format!("{e:?}"))?;
+
+        for (index, (node_id, _)) in defs.iter().enumerate() {
+            let location = NodeDefLocation::artifact_root(ArtifactLocation::file(format!(
+                "/test-node-{index}.toml"
+            )));
+            let entry = self
+                .tree
+                .get_mut(*node_id)
+                .ok_or_else(|| format!("unknown test node {node_id:?}"))?;
+            entry.def_location = Some(location);
+        }
+
+        Ok(())
+    }
+
+    pub fn tick(&mut self, registry: &ProjectRegistry, delta_ms: u32) -> Result<(), EngineError> {
         lp_perf::emit_begin!(lp_perf::EVENT_FRAME);
         let result = (|| {
-            self.tick_nodes(delta_ms)?;
+            self.tick_nodes(registry, delta_ms)?;
             let revision = self.revision;
-            self.refresh_output_sink_configs();
+            self.refresh_output_sink_configs(registry);
             let buffers = &self.runtime_buffers;
             self.services
                 .flush_dirty_output_sinks(revision, buffers)
@@ -240,13 +362,13 @@ impl Engine {
         result
     }
 
-    fn refresh_output_sink_configs(&mut self) {
+    fn refresh_output_sink_configs(&mut self, registry: &ProjectRegistry) {
         let mut updates = Vec::new();
         for entry in self.tree.entries() {
             let Some(buffer_id) = self.runtime_output_sink_buffer_id(entry.id) else {
                 continue;
             };
-            let Some(NodeDef::Output(def)) = self.loaded_node_def(entry.artifact()) else {
+            let Some(NodeDef::Output(def)) = self.loaded_node_def_for_entry(registry, entry) else {
                 continue;
             };
             updates.push((buffer_id, def.clone()));
@@ -257,7 +379,7 @@ impl Engine {
         }
     }
 
-    fn tick_nodes(&mut self, delta_ms: u32) -> Result<(), EngineError> {
+    fn tick_nodes(&mut self, registry: &ProjectRegistry, delta_ms: u32) -> Result<(), EngineError> {
         self.resolver.clear_frame_cache();
         self.frame_num = self.frame_num.next();
         self.revision = advance_revision();
@@ -268,14 +390,14 @@ impl Engine {
         let trace = ResolveTrace::new(ResolveLogLevel::Off);
         let mut session = EngineSession::new(self.revision, &mut resolver, trace);
 
-        let mut producers_ticked = BTreeSet::new();
+        let mut producers_ticked = VecSet::new();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
         let time_provider = self.services.time_provider();
         let button_service = self.services.button_service();
         let radio_service = self.services.radio_service();
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
-            artifacts: &self.artifacts,
+            registry,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -296,28 +418,20 @@ impl Engine {
         Ok(())
     }
 
-    /// Accept filesystem changes for direct engine embedders.
-    ///
-    /// The server-owned project wrapper currently reloads the project from its
-    /// filesystem on changes so node definition and shader source updates use
-    /// the same loader path as initial load.
-    pub fn handle_fs_changes(&mut self, _changes: &[FsChange]) -> Result<(), EngineError> {
-        Ok(())
-    }
-
     pub(crate) fn render_texture_product(
         &mut self,
+        registry: &ProjectRegistry,
         product: VisualProduct,
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, SessionResolveError> {
-        let mut producers_ticked = BTreeSet::new();
+        let mut producers_ticked = VecSet::new();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
         let time_provider = self.services.time_provider();
         let button_service = self.services.button_service();
         let radio_service = self.services.radio_service();
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
-            artifacts: &self.artifacts,
+            registry,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -333,27 +447,29 @@ impl Engine {
     #[cfg(test)]
     pub(crate) fn render_texture_for_test(
         &mut self,
+        registry: &ProjectRegistry,
         product: VisualProduct,
         request: &RenderTextureRequest,
     ) -> Result<TextureRenderProduct, SessionResolveError> {
-        self.render_texture_product(product, request)
+        self.render_texture_product(registry, product, request)
     }
 
     #[cfg(test)]
     pub(crate) fn render_control_for_test(
         &mut self,
+        registry: &ProjectRegistry,
         product: ControlProduct,
         request: &ControlRenderRequest,
         target: ControlRenderTarget<'_>,
     ) -> Result<ControlLayout, SessionResolveError> {
-        let mut producers_ticked = BTreeSet::new();
+        let mut producers_ticked = VecSet::new();
         let time_s = self.frame_time.total_ms as f32 / 1000.0;
         let time_provider = self.services.time_provider();
         let button_service = self.services.button_service();
         let radio_service = self.services.radio_service();
         let mut host = EngineResolveHost {
             tree: &mut self.tree,
-            artifacts: &self.artifacts,
+            registry,
             producers_ticked: &mut producers_ticked,
             runtime_buffers: &mut self.runtime_buffers,
             slot_shapes: &self.slot_shapes,
@@ -369,9 +485,9 @@ impl Engine {
 
 /// Host adapter with borrows disjoint from the [`Resolver`] handed to [`EngineSession`].
 struct EngineResolveHost<'a> {
-    tree: &'a mut NodeTree<Box<dyn NodeRuntime>>,
-    artifacts: &'a ArtifactStore,
-    producers_ticked: &'a mut BTreeSet<NodeId>,
+    tree: &'a mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
+    registry: &'a ProjectRegistry,
+    producers_ticked: &'a mut VecSet<NodeId>,
     runtime_buffers: &'a mut RuntimeBufferStore,
     slot_shapes: &'a SlotShapeRegistry,
     graphics: Option<Arc<dyn LpGraphics>>,
@@ -419,19 +535,19 @@ impl EngineResolveHost<'_> {
         node: NodeId,
         slot: &SlotPath,
     ) -> Result<Production, SessionResolveError> {
-        let entry =
+        let _entry =
             self.tree
                 .get(node)
                 .ok_or_else(|| SessionResolveError::UnresolvedConsumedSlot {
                     node,
                     slot: slot.clone(),
                 })?;
-        let product = self
-            .read_authored_def_product(&entry.def_handle, slot)
-            .map_err(|_| SessionResolveError::UnresolvedConsumedSlot {
+        let product = self.read_authored_def_product(node, slot).map_err(|_| {
+            SessionResolveError::UnresolvedConsumedSlot {
                 node,
                 slot: slot.clone(),
-            })?;
+            }
+        })?;
         Ok(Production::new(product, ProductionSource::Default))
     }
 
@@ -441,7 +557,7 @@ impl EngineResolveHost<'_> {
         node: NodeId,
         accessor: &SlotAccessor,
     ) -> Result<Production, SessionResolveError> {
-        let entry =
+        let _entry =
             self.tree
                 .get(node)
                 .ok_or_else(|| SessionResolveError::UnresolvedConsumedSlot {
@@ -449,7 +565,7 @@ impl EngineResolveHost<'_> {
                     slot: accessor.path().clone(),
                 })?;
         let product = self
-            .read_authored_def_product_by_accessor(&entry.def_handle, accessor)
+            .read_authored_def_product_by_accessor(node, accessor)
             .map_err(|_| SessionResolveError::UnresolvedConsumedSlot {
                 node,
                 slot: accessor.path().clone(),
@@ -469,16 +585,10 @@ impl EngineResolveHost<'_> {
 
         let revision = session.revision();
         let restore_frame = session.revision();
-        let (artifact_id, content_frame, mut node_runtime) = {
+        let mut node_runtime = {
             let entry = self.tree.get_mut(node_id).ok_or_else(|| {
                 SessionResolveError::other(format!("produce: unknown node {node_id:?}"))
             })?;
-            let artifact_id = entry.artifact();
-            let content_frame = self
-                .artifacts
-                .content_frame(&artifact_id)
-                .unwrap_or_default();
-
             let old_changed_at = entry.state.changed_at();
             let executing = NodeEntryState::Executing {
                 call: NodeCallKey::new(node_id, NodeCall::ProduceSlot { slot: slot.clone() }),
@@ -506,7 +616,7 @@ impl EngineResolveHost<'_> {
                     )));
                 }
             };
-            (artifact_id, content_frame, node_runtime)
+            node_runtime
         };
 
         let gfx = self.graphics.clone();
@@ -524,8 +634,6 @@ impl EngineResolveHost<'_> {
             let mut tick_ctx = TickContext::with_engine_services(
                 node_id,
                 revision,
-                artifact_id,
-                content_frame,
                 resolver_dyn,
                 slot_shapes,
                 gfx,
@@ -540,11 +648,12 @@ impl EngineResolveHost<'_> {
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
             SessionResolveError::other(format!("produce: unknown node {node_id:?}"))
         })?;
+        let runtime_status = runtime_status_or_ok(&*node_runtime);
         entry.set_state(NodeEntryState::Alive(node_runtime), restore_frame);
 
         match produce_result {
             Ok(ProduceResult::Produced) => {
-                set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
+                set_entry_status_if_changed(entry, runtime_status, revision);
                 self.producers_ticked.insert(node_id);
                 Ok(())
             }
@@ -555,7 +664,7 @@ impl EngineResolveHost<'_> {
                 let message = e.to_string();
                 set_entry_status_if_changed(
                     entry,
-                    WireNodeStatus::Error(message.clone()),
+                    NodeRuntimeStatus::Error(message.clone()),
                     revision,
                 );
                 Err(SessionResolveError::other(format!(
@@ -620,15 +729,13 @@ impl ResolveHost for EngineResolveHost<'_> {
     }
 
     fn merge_policy_for_consumed_slot(&self, node: NodeId, slot: &SlotPath) -> SlotMerge {
-        let Some(entry) = self.tree.get(node) else {
+        let Some(_entry) = self.tree.get(node) else {
             return SlotMerge::Latest;
         };
-        if let Ok(Some(policy)) =
-            self.read_shader_consumed_slot_merge_policy(&entry.def_handle, slot)
-        {
+        if let Ok(Some(policy)) = self.read_shader_consumed_slot_merge_policy(node, slot) {
             return policy;
         }
-        self.read_authored_def_slot_semantics(&entry.def_handle, slot)
+        self.read_authored_def_slot_semantics(node, slot)
             .ok()
             .filter(|semantics| semantics.direction == SlotDirection::Consumed)
             .map_or(SlotMerge::Latest, |semantics| semantics.merge)
@@ -678,32 +785,10 @@ impl EngineResolveHost<'_> {
 
     fn read_authored_def_product(
         &self,
-        handle: &crate::node::NodeDefHandle,
+        node: NodeId,
         slot: &SlotPath,
     ) -> Result<SlotData, SessionResolveError> {
-        if !handle.is_artifact_root() {
-            return Err(SessionResolveError::other(format!(
-                "non-root node def handles are not supported yet: {}",
-                handle.path()
-            )));
-        }
-        let entry = self.artifacts.entry(&handle.artifact()).ok_or_else(|| {
-            SessionResolveError::other(format!(
-                "node def artifact {:?} is not loaded",
-                handle.artifact()
-            ))
-        })?;
-        let def = match &entry.state {
-            ArtifactState::Loaded(def)
-            | ArtifactState::Prepared(def)
-            | ArtifactState::Idle(def) => def,
-            other => {
-                return Err(SessionResolveError::other(format!(
-                    "node def artifact {:?} has no loaded payload: {other:?}",
-                    handle.artifact()
-                )));
-            }
-        };
+        let def = self.loaded_node_def(node)?;
         let (data, shape) = lookup_slot_data_and_shape(def, self.slot_shapes, slot)
             .map_err(|e| SessionResolveError::other(format!("authored def lookup: {e}")))?;
         Ok(lpc_wire::snapshot_slot_shape(shape, data, self.slot_shapes))
@@ -711,32 +796,10 @@ impl EngineResolveHost<'_> {
 
     fn read_authored_def_product_by_accessor(
         &self,
-        handle: &crate::node::NodeDefHandle,
+        node: NodeId,
         accessor: &SlotAccessor,
     ) -> Result<SlotData, SessionResolveError> {
-        if !handle.is_artifact_root() {
-            return Err(SessionResolveError::other(format!(
-                "non-root node def handles are not supported yet: {}",
-                handle.path()
-            )));
-        }
-        let entry = self.artifacts.entry(&handle.artifact()).ok_or_else(|| {
-            SessionResolveError::other(format!(
-                "node def artifact {:?} is not loaded",
-                handle.artifact()
-            ))
-        })?;
-        let def = match &entry.state {
-            ArtifactState::Loaded(def)
-            | ArtifactState::Prepared(def)
-            | ArtifactState::Idle(def) => def,
-            other => {
-                return Err(SessionResolveError::other(format!(
-                    "node def artifact {:?} has no loaded payload: {other:?}",
-                    handle.artifact()
-                )));
-            }
-        };
+        let def = self.loaded_node_def(node)?;
         let data = accessor
             .access(def, self.slot_shapes)
             .map_err(|e| SessionResolveError::other(format!("authored def accessor: {e}")))?;
@@ -747,7 +810,7 @@ impl EngineResolveHost<'_> {
 
     fn read_shader_consumed_slot_merge_policy(
         &self,
-        handle: &crate::node::NodeDefHandle,
+        node: NodeId,
         slot: &SlotPath,
     ) -> Result<Option<SlotMerge>, SessionResolveError> {
         let Some(SlotPathSegment::Field(name)) = slot.segments().first() else {
@@ -756,7 +819,7 @@ impl EngineResolveHost<'_> {
         if slot.segments().len() != 1 {
             return Ok(None);
         }
-        let def = self.loaded_node_def(handle)?;
+        let def = self.loaded_node_def(node)?;
         let shader_slot = match def {
             NodeDef::Shader(config) => config.consumed_slots.entries.get(name.as_str()),
             NodeDef::ComputeShader(config) => config.consumed_slots.entries.get(name.as_str()),
@@ -770,63 +833,25 @@ impl EngineResolveHost<'_> {
 
     fn read_authored_def_slot_semantics(
         &self,
-        handle: &crate::node::NodeDefHandle,
+        node: NodeId,
         slot: &SlotPath,
     ) -> Result<SlotSemantics, SessionResolveError> {
-        if !handle.is_artifact_root() {
-            return Err(SessionResolveError::other(format!(
-                "non-root node def handles are not supported yet: {}",
-                handle.path()
-            )));
-        }
-        let entry = self.artifacts.entry(&handle.artifact()).ok_or_else(|| {
-            SessionResolveError::other(format!(
-                "node def artifact {:?} is not loaded",
-                handle.artifact()
-            ))
-        })?;
-        let def = match &entry.state {
-            ArtifactState::Loaded(def)
-            | ArtifactState::Prepared(def)
-            | ArtifactState::Idle(def) => def,
-            other => {
-                return Err(SessionResolveError::other(format!(
-                    "node def artifact {:?} has no loaded payload: {other:?}",
-                    handle.artifact()
-                )));
-            }
-        };
+        let def = self.loaded_node_def(node)?;
         let shape = self.slot_shapes.get_shape(def.shape_id()).ok_or_else(|| {
             SessionResolveError::other(format!("missing node def shape {}", def.shape_id()))
         })?;
         slot_path_semantics(shape, self.slot_shapes, slot)
     }
 
-    fn loaded_node_def(
-        &self,
-        handle: &crate::node::NodeDefHandle,
-    ) -> Result<&NodeDef, SessionResolveError> {
-        if !handle.is_artifact_root() {
-            return Err(SessionResolveError::other(format!(
-                "non-root node def handles are not supported yet: {}",
-                handle.path()
-            )));
-        }
-        let entry = self.artifacts.entry(&handle.artifact()).ok_or_else(|| {
-            SessionResolveError::other(format!(
-                "node def artifact {:?} is not loaded",
-                handle.artifact()
-            ))
+    fn loaded_node_def(&self, node: NodeId) -> Result<&NodeDef, SessionResolveError> {
+        let entry = self
+            .tree
+            .get(node)
+            .ok_or_else(|| SessionResolveError::other(format!("unknown node {node:?}")))?;
+        let location = entry.def_location.as_ref().ok_or_else(|| {
+            SessionResolveError::other(format!("node {node:?} has no project definition location"))
         })?;
-        match &entry.state {
-            ArtifactState::Loaded(def)
-            | ArtifactState::Prepared(def)
-            | ArtifactState::Idle(def) => Ok(def),
-            other => Err(SessionResolveError::other(format!(
-                "node def artifact {:?} has no loaded payload: {other:?}",
-                handle.artifact()
-            ))),
-        }
+        loaded_registry_def(self.registry, location)
     }
 
     fn render_node_texture(
@@ -896,18 +921,19 @@ impl EngineResolveHost<'_> {
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
             SessionResolveError::other(format!("render: unknown node {node_id:?}"))
         })?;
+        let runtime_status = runtime_status_or_ok(&*node_runtime);
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
 
         match result {
             Ok(product) => {
-                set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
+                set_entry_status_if_changed(entry, runtime_status, revision);
                 Ok(product)
             }
             Err(e) => {
                 let message = e.to_string();
                 set_entry_status_if_changed(
                     entry,
-                    WireNodeStatus::Error(message.clone()),
+                    NodeRuntimeStatus::Error(message.clone()),
                     revision,
                 );
                 Err(SessionResolveError::other(format!("render: {message}")))
@@ -983,18 +1009,19 @@ impl EngineResolveHost<'_> {
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
             SessionResolveError::other(format!("render: unknown node {node_id:?}"))
         })?;
+        let runtime_status = runtime_status_or_ok(&*node_runtime);
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
 
         match result {
             Ok(()) => {
-                set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
+                set_entry_status_if_changed(entry, runtime_status, revision);
                 Ok(())
             }
             Err(e) => {
                 let message = e.to_string();
                 set_entry_status_if_changed(
                     entry,
-                    WireNodeStatus::Error(message.clone()),
+                    NodeRuntimeStatus::Error(message.clone()),
                     revision,
                 );
                 Err(SessionResolveError::other(format!("render: {message}")))
@@ -1070,18 +1097,19 @@ impl EngineResolveHost<'_> {
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
             SessionResolveError::other(format!("sample visual: unknown node {node_id:?}"))
         })?;
+        let runtime_status = runtime_status_or_ok(&*node_runtime);
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
 
         match result {
             Ok(()) => {
-                set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
+                set_entry_status_if_changed(entry, runtime_status, revision);
                 Ok(())
             }
             Err(e) => {
                 let message = e.to_string();
                 set_entry_status_if_changed(
                     entry,
-                    WireNodeStatus::Error(message.clone()),
+                    NodeRuntimeStatus::Error(message.clone()),
                     revision,
                 );
                 Err(SessionResolveError::other(format!(
@@ -1158,18 +1186,19 @@ impl EngineResolveHost<'_> {
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
             SessionResolveError::other(format!("control render: unknown node {node_id:?}"))
         })?;
+        let runtime_status = runtime_status_or_ok(&*node_runtime);
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
 
         match result {
             Ok(layout) => {
-                set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
+                set_entry_status_if_changed(entry, runtime_status, revision);
                 Ok(layout)
             }
             Err(e) => {
                 let message = e.to_string();
                 set_entry_status_if_changed(
                     entry,
-                    WireNodeStatus::Error(message.clone()),
+                    NodeRuntimeStatus::Error(message.clone()),
                     revision,
                 );
                 Err(SessionResolveError::other(format!(
@@ -1318,7 +1347,7 @@ impl VisualRenderServices for EngineResolveHost<'_> {
 }
 
 fn restore_node_after_failed_render(
-    tree: &mut NodeTree<Box<dyn NodeRuntime>>,
+    tree: &mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
     node_id: NodeId,
     node_runtime: Box<dyn NodeRuntime>,
     revision: Revision,
@@ -1331,8 +1360,8 @@ fn restore_node_after_failed_render(
 }
 
 fn set_entry_status_if_changed<N>(
-    entry: &mut NodeEntry<N>,
-    status: WireNodeStatus,
+    entry: &mut RuntimeNodeEntry<N>,
+    status: NodeRuntimeStatus,
     revision: Revision,
 ) {
     if entry.status.value() != &status {
@@ -1340,8 +1369,12 @@ fn set_entry_status_if_changed<N>(
     }
 }
 
+fn runtime_status_or_ok(node: &dyn NodeRuntime) -> NodeRuntimeStatus {
+    node.runtime_status().unwrap_or(NodeRuntimeStatus::Ok)
+}
+
 fn restore_node_after_failed_render_unit(
-    tree: &mut NodeTree<Box<dyn NodeRuntime>>,
+    tree: &mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
     node_id: NodeId,
     node_runtime: Box<dyn NodeRuntime>,
     revision: Revision,
@@ -1354,7 +1387,7 @@ fn restore_node_after_failed_render_unit(
 }
 
 fn restore_node_after_failed_control(
-    tree: &mut NodeTree<Box<dyn NodeRuntime>>,
+    tree: &mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
     node_id: NodeId,
     node_runtime: Box<dyn NodeRuntime>,
     revision: Revision,
@@ -1373,16 +1406,11 @@ fn consume_tree_node(
 ) -> Result<(), EngineError> {
     let revision = session.revision();
     let restore_frame = session.revision();
-    let (artifact_id, content_frame, mut node_runtime) = {
+    let mut node_runtime = {
         let entry = host
             .tree
             .get_mut(node_id)
             .ok_or(EngineError::UnknownNode(node_id))?;
-        let artifact_id = entry.artifact();
-        let content_frame = host
-            .artifacts
-            .content_frame(&artifact_id)
-            .unwrap_or_default();
 
         let old_changed_at = entry.state.changed_at();
         let executing = NodeEntryState::Executing {
@@ -1409,7 +1437,7 @@ fn consume_tree_node(
                 return Err(EngineError::NotAlive(node_id));
             }
         };
-        (artifact_id, content_frame, node_runtime)
+        node_runtime
     };
 
     let gfx = host.graphics.clone();
@@ -1427,8 +1455,6 @@ fn consume_tree_node(
         let mut tick_ctx = TickContext::with_engine_services(
             node_id,
             revision,
-            artifact_id,
-            content_frame,
             resolver_dyn,
             slot_shapes,
             gfx,
@@ -1444,17 +1470,18 @@ fn consume_tree_node(
         .tree
         .get_mut(node_id)
         .ok_or(EngineError::UnknownNode(node_id))?;
+    let runtime_status = runtime_status_or_ok(&*node_runtime);
     entry.set_state(NodeEntryState::Alive(node_runtime), restore_frame);
 
     match consume_result {
         Ok(()) => {
-            set_entry_status_if_changed(entry, WireNodeStatus::Ok, revision);
+            set_entry_status_if_changed(entry, runtime_status, revision);
             host.producers_ticked.insert(node_id);
             Ok(())
         }
         Err(e) => {
             let message = e.to_string();
-            set_entry_status_if_changed(entry, WireNodeStatus::Error(message.clone()), revision);
+            set_entry_status_if_changed(entry, NodeRuntimeStatus::Error(message.clone()), revision);
             Err(EngineError::Node {
                 node: node_id,
                 message,
@@ -1463,9 +1490,25 @@ fn consume_tree_node(
     }
 }
 
+fn loaded_registry_def<'a>(
+    registry: &'a ProjectRegistry,
+    location: &NodeDefLocation,
+) -> Result<&'a NodeDef, SessionResolveError> {
+    let entry = registry.def(location).ok_or_else(|| {
+        SessionResolveError::other(format!("node definition {location:?} is not in inventory"))
+    })?;
+    match &entry.state {
+        NodeDefState::Loaded(def) => Ok(def),
+        other => Err(SessionResolveError::other(format!(
+            "node definition {location:?} has no loaded payload: {other:?}"
+        ))),
+    }
+}
+
 #[cfg(test)]
 pub(crate) fn resolve_with_engine_host(
     eng: &mut Engine,
+    registry: &ProjectRegistry,
     key: QueryKey,
     log_level: ResolveLogLevel,
 ) -> Result<(Production, ResolveTrace), SessionResolveError> {
@@ -1473,14 +1516,14 @@ pub(crate) fn resolve_with_engine_host(
     let mut resolver_tmp = core::mem::replace(&mut eng.resolver, Resolver::new());
     resolver_tmp.clear_frame_cache();
     let mut session = EngineSession::new(fid, &mut resolver_tmp, ResolveTrace::new(log_level));
-    let mut producers_ticked = BTreeSet::new();
+    let mut producers_ticked = VecSet::new();
     let time_s = eng.frame_time.total_ms as f32 / 1000.0;
     let time_provider = eng.services.time_provider();
     let button_service = eng.services.button_service();
     let radio_service = eng.services.radio_service();
     let mut host = EngineResolveHost {
         tree: &mut eng.tree,
-        artifacts: &eng.artifacts,
+        registry,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
@@ -1500,6 +1543,7 @@ pub(crate) fn resolve_with_engine_host(
 #[cfg(test)]
 pub(super) fn resolve_twice_same_frame_with_engine_host(
     eng: &mut Engine,
+    registry: &ProjectRegistry,
     key: QueryKey,
 ) -> Result<(Production, Production), SessionResolveError> {
     let fid = eng.revision;
@@ -1510,14 +1554,14 @@ pub(super) fn resolve_twice_same_frame_with_engine_host(
         &mut resolver_tmp,
         ResolveTrace::new(ResolveLogLevel::Off),
     );
-    let mut producers_ticked = BTreeSet::new();
+    let mut producers_ticked = VecSet::new();
     let time_s = eng.frame_time.total_ms as f32 / 1000.0;
     let time_provider = eng.services.time_provider();
     let button_service = eng.services.button_service();
     let radio_service = eng.services.radio_service();
     let mut host = EngineResolveHost {
         tree: &mut eng.tree,
-        artifacts: &eng.artifacts,
+        registry,
         producers_ticked: &mut producers_ticked,
         runtime_buffers: &mut eng.runtime_buffers,
         slot_shapes: &eng.slot_shapes,
@@ -1563,14 +1607,15 @@ mod tests {
     #[test]
     fn tick_advances_frame_num_revision_and_accumulates_frame_time() {
         let mut eng = Engine::new(TreePath::parse("/show.t").expect("path"));
+        let registry = ProjectRegistry::new();
         let initial_revision = eng.revision();
-        eng.tick(10).expect("tick");
+        eng.tick(&registry, 10).expect("tick");
         assert_eq!(eng.frame_num(), FrameNum::new(1));
         assert!(eng.revision() > initial_revision);
         assert_eq!(eng.frame_time().delta_ms, 10);
         assert_eq!(eng.frame_time().total_ms, 10);
         let first_tick_revision = eng.revision();
-        eng.tick(5).expect("tick");
+        eng.tick(&registry, 5).expect("tick");
         assert_eq!(eng.frame_num(), FrameNum::new(2));
         assert!(eng.revision() > first_tick_revision);
         assert_eq!(eng.frame_time().total_ms, 15);
@@ -1579,8 +1624,9 @@ mod tests {
     #[test]
     fn tick_error_sets_node_status_and_restores_runtime() {
         let mut eng = Engine::new(TreePath::parse("/show.t").expect("path"));
+        let registry = ProjectRegistry::new();
         let root = eng.tree().root();
-        let (cfg, artifact) = test_placeholder_spine();
+        let cfg = test_placeholder_spine();
         let node = eng
             .tree_mut()
             .add_child(
@@ -1591,7 +1637,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 cfg,
-                artifact,
                 Revision::new(1),
             )
             .expect("add node");
@@ -1615,14 +1660,14 @@ mod tests {
         .expect("bind demand input");
         eng.add_demand_root(node);
 
-        let err = eng.tick(10).expect_err("tick should fail");
+        let err = eng.tick(&registry, 10).expect_err("tick should fail");
         assert!(err.to_string().contains("intentional tick failure"));
 
         let entry = eng.tree().get(node).expect("entry");
         assert!(matches!(entry.state.value(), NodeEntryState::Alive(_)));
         assert!(matches!(
             entry.status.value(),
-            WireNodeStatus::Error(message) if message == "intentional tick failure"
+            NodeRuntimeStatus::Error(message) if message == "intentional tick failure"
         ));
     }
 
@@ -1639,7 +1684,7 @@ mod tests {
             .demand_root("output")
             .build();
 
-        h.engine.tick(1).expect("tick");
+        h.tick(1).expect("tick");
 
         assert_eq!(h.fixture_f32("fixture"), Some(0.75));
         assert_eq!(h.output_f32("output"), Some(0.75));
@@ -1655,7 +1700,7 @@ mod tests {
             .bind_demand_input("fixture", bus("video"))
             .demand_root("fixture")
             .build();
-        h.engine.tick(1).expect("tick");
+        h.tick(1).expect("tick");
         assert!(
             !h.engine.resolver().cache().is_empty(),
             "resolver cache should hold demand-driven values after tick"
@@ -1691,8 +1736,9 @@ mod tests {
             slot: out,
         };
 
-        let (first, second) = super::resolve_twice_same_frame_with_engine_host(&mut h.engine, key)
-            .expect("resolve pair");
+        let (first, second) =
+            super::resolve_twice_same_frame_with_engine_host(&mut h.engine, &h.registry, key)
+                .expect("resolve pair");
         assert!(
             first
                 .as_value()

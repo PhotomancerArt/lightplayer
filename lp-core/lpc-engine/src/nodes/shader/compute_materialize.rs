@@ -1,8 +1,8 @@
 //! Materialize compute shader ABI outputs into slot data.
 
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
+use lp_collection::VecMap;
 
 use lpc_model::{
     Revision, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingKind, SlotData,
@@ -95,7 +95,7 @@ fn materialize_map_slot(
         )));
     };
 
-    let mut entries = BTreeMap::new();
+    let mut entries = VecMap::new();
     for item in items.iter() {
         let key = extract_key(slot_name, key_field, key_def.value(), item)?;
         if key == SlotMapKey::U32(empty_key) {

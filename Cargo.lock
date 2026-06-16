@@ -1070,7 +1070,7 @@ dependencies = [
  "cranelift-isle 0.127.0",
  "hashbrown 0.15.5",
  "log",
- "lp-collection",
+ "lp-collection 1.0.0 (git+https://github.com/light-player/lp-common?branch=main)",
  "regalloc2 0.13.6",
  "rustc-hash 2.1.1",
  "serde",
@@ -2851,6 +2851,7 @@ dependencies = [
  "lp-riscv-emu-guest",
  "lpa-client",
  "lpa-server",
+ "lpc-hardware",
  "lpc-model",
  "lpc-shared",
  "lpc-view",
@@ -2886,9 +2887,11 @@ dependencies = [
  "libm",
  "littlefs-rust",
  "log",
+ "lp-collection 1.0.0",
  "lp-perf",
  "lp-shader",
  "lpa-server",
+ "lpc-hardware",
  "lpc-model",
  "lpc-shared",
  "lpc-wire",
@@ -3902,6 +3905,7 @@ dependencies = [
  "futures-util",
  "fw-checks",
  "log",
+ "lp-collection 1.0.0",
  "lp-perf",
  "lp-riscv-elf",
  "lp-riscv-emu",
@@ -3910,6 +3914,7 @@ dependencies = [
  "lpa-client",
  "lpa-server",
  "lpc-engine",
+ "lpc-hardware",
  "lpc-model",
  "lpc-shared",
  "lpc-view",
@@ -3931,6 +3936,15 @@ dependencies = [
  "toml",
  "tungstenite",
  "unicode-width 0.2.2",
+]
+
+[[package]]
+name = "lp-collection"
+version = "1.0.0"
+dependencies = [
+ "rustc-hash 2.1.1",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
@@ -4023,6 +4037,7 @@ dependencies = [
 name = "lp-shader"
 version = "40.0.0"
 dependencies = [
+ "lp-collection 1.0.0",
  "lpir",
  "lps-frontend",
  "lps-glsl",
@@ -4063,7 +4078,9 @@ dependencies = [
  "log",
  "lp-perf",
  "lpc-engine",
+ "lpc-hardware",
  "lpc-model",
+ "lpc-registry",
  "lpc-shared",
  "lpc-view",
  "lpc-wire",
@@ -4078,9 +4095,12 @@ dependencies = [
  "hashbrown 0.15.5",
  "libm",
  "log",
+ "lp-collection 1.0.0",
  "lp-perf",
  "lp-shader",
+ "lpc-hardware",
  "lpc-model",
+ "lpc-registry",
  "lpc-shared",
  "lpc-view",
  "lpc-wire",
@@ -4100,11 +4120,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpc-hardware"
+version = "40.0.0"
+dependencies = [
+ "lp-collection 1.0.0",
+ "lpc-model",
+ "serde",
+ "toml",
+]
+
+[[package]]
 name = "lpc-model"
 version = "40.0.0"
 dependencies = [
  "base64 0.22.1",
  "hashbrown 0.15.5",
+ "lp-collection 1.0.0",
  "lpc-slot-codegen",
  "lpc-slot-macros",
  "lpfs",
@@ -4116,17 +4147,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpc-registry"
+version = "40.0.0"
+dependencies = [
+ "lp-collection 1.0.0",
+ "lpc-model",
+ "lpc-wire",
+ "lpfs",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lpc-shared"
 version = "40.0.0"
 dependencies = [
  "libm",
  "log",
+ "lp-collection 1.0.0",
+ "lpc-hardware",
  "lpc-model",
  "lpc-wire",
  "lpfs",
  "lps-shared",
  "serde",
- "toml",
 ]
 
 [[package]]
@@ -4147,17 +4191,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lpc-slot-mockup"
-version = "40.0.0"
-dependencies = [
- "lpc-model",
- "lpc-slot-codegen",
- "lpc-view",
- "lpc-wire",
- "toml",
-]
-
-[[package]]
 name = "lpc-view"
 version = "40.0.0"
 dependencies = [
@@ -4171,6 +4204,7 @@ name = "lpc-wire"
 version = "40.0.0"
 dependencies = [
  "base64 0.22.1",
+ "lp-collection 1.0.0",
  "lpc-model",
  "schemars",
  "ser-write-json",
@@ -4226,7 +4260,7 @@ name = "lpir"
 version = "40.0.0"
 dependencies = [
  "libm",
- "lp-collection",
+ "lp-collection 1.0.0",
  "lps-q32",
 ]
 
@@ -4276,6 +4310,7 @@ dependencies = [
  "anyhow",
  "glob",
  "glsl",
+ "lp-collection 1.0.0",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-inst",
@@ -4321,6 +4356,7 @@ name = "lps-frontend"
 version = "40.0.0"
 dependencies = [
  "libm",
+ "lp-collection 1.0.0",
  "lpir",
  "lps-builtin-ids",
  "lps-shared",
@@ -4332,7 +4368,7 @@ dependencies = [
 name = "lps-glsl"
 version = "40.0.0"
 dependencies = [
- "lp-collection",
+ "lp-collection 1.0.0",
  "lpir",
  "lps-shared",
 ]
@@ -4348,6 +4384,7 @@ dependencies = [
 name = "lps-shared"
 version = "40.0.0"
 dependencies = [
+ "lp-collection 1.0.0",
  "lps-q32",
  "schemars",
  "serde",
@@ -4358,6 +4395,7 @@ dependencies = [
 name = "lpvm"
 version = "40.0.0"
 dependencies = [
+ "lp-collection 1.0.0",
  "lpir",
  "lps-q32",
  "lps-shared",
@@ -4374,6 +4412,7 @@ dependencies = [
  "cranelift-native 0.127.0",
  "cranelift-object",
  "libm",
+ "lp-collection 1.0.0",
  "lp-riscv-elf",
  "lpir",
  "lps-builtin-ids",
@@ -4407,6 +4446,7 @@ version = "40.0.0"
 dependencies = [
  "cranelift-codegen 0.127.0",
  "log",
+ "lp-collection 1.0.0",
  "lp-perf",
  "lp-riscv-elf",
  "lp-riscv-emu",
@@ -5671,7 +5711,7 @@ dependencies = [
  "bumpalo",
  "hashbrown 0.15.5",
  "log",
- "lp-collection",
+ "lp-collection 1.0.0 (git+https://github.com/light-player/lp-common?branch=main)",
  "rustc-hash 2.1.1",
  "smallvec",
 ]

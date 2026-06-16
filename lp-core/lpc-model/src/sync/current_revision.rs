@@ -1,7 +1,18 @@
 use crate::Revision;
-use core::sync::atomic::{AtomicI32, Ordering};
 
-static CURRENT_REVISION: AtomicI32 = AtomicI32::new(0);
+// Production: a process-wide atomic, advanced by the single frame-orchestration
+// owner. Test builds: a per-thread cell, so parallel tests that set/advance the
+// ambient revision are isolated and don't race through shared global state
+// (libtest runs tests across many threads). `cfg(test)` is only set when
+// compiling this crate's own tests on the host, never in the firmware
+// (`no_std`) build, which keeps the atomic.
+#[cfg(not(test))]
+static CURRENT_REVISION: core::sync::atomic::AtomicI32 = core::sync::atomic::AtomicI32::new(0);
+
+#[cfg(test)]
+std::thread_local! {
+    static CURRENT_REVISION: core::cell::Cell<i32> = core::cell::Cell::new(0);
+}
 
 /// Current ambient synchronized-state revision.
 ///
@@ -10,7 +21,11 @@ static CURRENT_REVISION: AtomicI32 = AtomicI32::new(0);
 /// the ambient revision advances; data containers should normally read it, not
 /// advance it themselves.
 pub fn current_revision() -> Revision {
-    Revision::new(CURRENT_REVISION.load(Ordering::Relaxed) as i64)
+    #[cfg(not(test))]
+    let raw = CURRENT_REVISION.load(core::sync::atomic::Ordering::Relaxed);
+    #[cfg(test)]
+    let raw = CURRENT_REVISION.with(core::cell::Cell::get);
+    Revision::new(raw as i64)
 }
 
 /// Set the ambient synchronized-state revision.
@@ -19,12 +34,24 @@ pub fn current_revision() -> Revision {
 /// focused tests. Ordinary slot data mutation should stamp the current revision
 /// rather than setting it.
 pub fn set_current_revision(revision: Revision) {
-    CURRENT_REVISION.store(revision.as_i64() as i32, Ordering::Relaxed);
+    let raw = revision.as_i64() as i32;
+    #[cfg(not(test))]
+    CURRENT_REVISION.store(raw, core::sync::atomic::Ordering::Relaxed);
+    #[cfg(test)]
+    CURRENT_REVISION.with(|cell| cell.set(raw));
 }
 
 /// Advance the ambient synchronized-state revision and return the new value.
 pub fn advance_revision() -> Revision {
-    Revision::new((CURRENT_REVISION.fetch_add(1, Ordering::Relaxed) + 1) as i64)
+    #[cfg(not(test))]
+    let next = CURRENT_REVISION.fetch_add(1, core::sync::atomic::Ordering::Relaxed) + 1;
+    #[cfg(test)]
+    let next = CURRENT_REVISION.with(|cell| {
+        let next = cell.get() + 1;
+        cell.set(next);
+        next
+    });
+    Revision::new(next as i64)
 }
 
 #[cfg(test)]

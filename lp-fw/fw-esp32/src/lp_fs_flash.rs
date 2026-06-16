@@ -8,7 +8,7 @@ use core::cell::RefCell;
 use hashbrown::HashMap;
 
 use lpfs::lp_path::{LpPath, LpPathBuf};
-use lpfs::{ChangeType, FsChange, FsError, FsVersion, LpFs, LpFsMemory, LpFsView};
+use lpfs::{FsError, FsEvent, FsEventKind, FsVersion, LpFs, LpFsMemory, LpFsView};
 
 use crate::flash_storage::{LpFlashStorage, lpfs_config};
 use littlefs_rust::{Error as LfsError, FileType as LfsFileType, Filesystem, OpenFlags};
@@ -23,7 +23,7 @@ pub struct LpFsFlash {
 struct LpFsFlashInner {
     fs: Filesystem<LpFlashStorage>,
     current_version: FsVersion,
-    changes: HashMap<LpPathBuf, (FsVersion, ChangeType)>,
+    changes: HashMap<LpPathBuf, (FsVersion, FsEventKind)>,
 }
 
 impl LpFsFlash {
@@ -67,13 +67,11 @@ impl LpFsFlash {
         }
     }
 
-    fn record_change(&self, path: &LpPath, change_type: ChangeType) {
+    fn record_change(&self, path: &LpPath, kind: FsEventKind) {
         let mut inner = self.inner.borrow_mut();
         inner.current_version = inner.current_version.next();
         let version = inner.current_version;
-        inner
-            .changes
-            .insert(path.to_path_buf(), (version, change_type));
+        inner.changes.insert(path.to_path_buf(), (version, kind));
     }
 
     /// Convert LpPath to littlefs path (strip leading /)
@@ -224,12 +222,12 @@ impl LpFs for LpFsFlash {
             .write_file(lfs_path, data)
             .map_err(|e| FsError::Filesystem(format!("write {}: {e}", path.as_str())))?;
         drop(inner);
-        let change_type = if existed {
-            ChangeType::Modify
+        let kind = if existed {
+            FsEventKind::Modify
         } else {
-            ChangeType::Create
+            FsEventKind::Create
         };
-        self.record_change(path, change_type);
+        self.record_change(path, kind);
         Ok(())
     }
 
@@ -362,7 +360,7 @@ impl LpFs for LpFsFlash {
             }
         })?;
         drop(inner);
-        self.record_change(path, ChangeType::Delete);
+        self.record_change(path, FsEventKind::Delete);
         Ok(())
     }
 
@@ -376,7 +374,7 @@ impl LpFs for LpFsFlash {
         }
         let lfs_path = Self::to_lfs_path(path);
         self.delete_dir_recursive(lfs_path)?;
-        self.record_change(path, ChangeType::Delete);
+        self.record_change(path, FsEventKind::Delete);
         Ok(())
     }
 
@@ -405,16 +403,16 @@ impl LpFs for LpFsFlash {
         self.inner.borrow().current_version
     }
 
-    fn get_changes_since(&self, since_version: FsVersion) -> Vec<FsChange> {
+    fn get_changes_since(&self, since_version: FsVersion) -> Vec<FsEvent> {
         self.inner
             .borrow()
             .changes
             .iter()
-            .filter_map(|(path, (version, change_type))| {
+            .filter_map(|(path, (version, kind))| {
                 if *version >= since_version {
-                    Some(FsChange {
+                    Some(FsEvent {
                         path: path.clone(),
-                        change_type: *change_type,
+                        kind: *kind,
                     })
                 } else {
                     None
@@ -430,9 +428,9 @@ impl LpFs for LpFsFlash {
             .retain(|_, (version, _)| *version >= before_version);
     }
 
-    fn record_changes(&mut self, changes: Vec<FsChange>) {
+    fn record_changes(&mut self, changes: Vec<FsEvent>) {
         for change in changes {
-            self.record_change(change.path.as_path(), change.change_type);
+            self.record_change(change.path.as_path(), change.kind);
         }
     }
 }

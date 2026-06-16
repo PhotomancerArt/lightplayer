@@ -1,5 +1,6 @@
 use crate::messages::ProjectReadRequest;
 use crate::project::WireProjectHandle;
+use crate::project_command::{WireProjectCommand, WireProjectCommandResponse};
 use crate::server::fs_api::{FsRequest, FsResponse};
 use alloc::string::String;
 use alloc::vec::Vec;
@@ -19,6 +20,11 @@ pub enum ClientMsgBody {
     ProjectRequest {
         handle: WireProjectHandle,
         request: ProjectReadRequest,
+    },
+    /// Project-specific command request.
+    ProjectCommand {
+        handle: WireProjectHandle,
+        command: WireProjectCommand,
     },
     /// List available projects
     ListAvailableProjects,
@@ -40,6 +46,10 @@ pub enum ServerMsgBody<R> {
     /// Response to ProjectRequest
     ProjectRequest {
         response: R,
+    },
+    /// Response to ProjectCommand
+    ProjectCommand {
+        response: WireProjectCommandResponse,
     },
     /// Response to ListAvailableProjects
     ListAvailableProjects {

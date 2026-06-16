@@ -1,20 +1,13 @@
 use alloc::collections::BTreeMap;
 use alloc::format;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use lpc_model::{
     LpValue, SlotData, SlotPath, SlotShapeId, SlotShapeRegistry, SlotShapeRegistrySnapshot,
     slot_sync_codec::read_slot_snapshot_json,
 };
-use lpc_wire::{
-    WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp, WireSlotMutationRejection,
-    WireSlotMutationRequest, WireSlotMutationResponse, WireSlotMutationResult, WireSlotPatch,
-    WireSlotRootSnapshot, WireSlotRootsSnapshot,
-};
+use lpc_wire::{WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot, WireSlotRootsSnapshot};
 
-use super::apply::{
-    SlotMirrorError, apply_patch, data_version_at, shape_version_for_root, validate_value_at,
-};
-use super::pending::PendingSlotMutation;
+use super::apply::{SlotMirrorError, apply_patch, validate_value_at};
 
 /// Authoritative client-side mirror of synced generic slot data.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -22,8 +15,6 @@ pub struct SlotMirrorView {
     pub registry: SlotShapeRegistry,
     pub root_shapes: BTreeMap<String, SlotShapeId>,
     pub roots: BTreeMap<String, SlotData>,
-    pub pending: BTreeMap<WireSlotMutationId, PendingSlotMutation>,
-    pub errors: BTreeMap<WireSlotMutationId, WireSlotMutationRejection>,
 }
 
 impl SlotMirrorView {
@@ -65,66 +56,21 @@ impl SlotMirrorView {
         Ok(())
     }
 
-    pub fn prepare_set_value(
-        &mut self,
-        id: WireSlotMutationId,
+    pub fn validate_set_value(
+        &self,
         root: &str,
-        path: SlotPath,
-        value: LpValue,
-    ) -> Result<WireSlotMutationRequest, SlotMirrorError> {
+        path: &SlotPath,
+        value: &LpValue,
+    ) -> Result<(), SlotMirrorError> {
         validate_value_at(
             self.roots.get(root).ok_or(SlotMirrorError::UnknownRoot)?,
             self.root_shapes
                 .get(root)
                 .ok_or(SlotMirrorError::UnknownRoot)?,
-            &path,
-            &value,
-            &self.registry,
-        )?;
-
-        let request = WireSlotMutationRequest {
-            id,
-            root: root.to_string(),
-            expected_shape_version: shape_version_for_root(
-                root,
-                &self.root_shapes,
-                &self.registry,
-            )?,
-            expected_data_version: data_version_at(
-                self.roots.get(root).ok_or(SlotMirrorError::UnknownRoot)?,
-                self.root_shapes
-                    .get(root)
-                    .ok_or(SlotMirrorError::UnknownRoot)?,
-                &path,
-                &self.registry,
-            )?,
             path,
-            op: WireSlotMutationOp::SetValue(value),
-        };
-        self.pending
-            .insert(id, PendingSlotMutation::new(request.clone()));
-        self.errors.remove(&id);
-        Ok(request)
-    }
-
-    pub fn apply_mutation_response(&mut self, response: WireSlotMutationResponse) {
-        self.pending.remove(&response.id);
-        match response.result {
-            WireSlotMutationResult::Accepted => {
-                self.errors.remove(&response.id);
-            }
-            WireSlotMutationResult::Rejected(rejection) => {
-                self.errors.insert(response.id, rejection);
-            }
-        }
-    }
-
-    pub fn is_pending(&self, id: WireSlotMutationId) -> bool {
-        self.pending.contains_key(&id)
-    }
-
-    pub fn error(&self, id: WireSlotMutationId) -> Option<&WireSlotMutationRejection> {
-        self.errors.get(&id)
+            value,
+            &self.registry,
+        )
     }
 
     fn read_wire_slot_root(
@@ -152,82 +98,6 @@ mod tests {
     };
 
     #[test]
-    fn set_value_mutation_tracks_pending_without_local_write() {
-        let mut view = fixture();
-        let id = WireSlotMutationId::new(1);
-
-        let request = view
-            .prepare_set_value(
-                id,
-                "engine.shader_node",
-                SlotPath::parse("params.exposure").unwrap(),
-                LpValue::F32(2.0),
-            )
-            .unwrap();
-
-        assert!(view.is_pending(id));
-        assert_eq!(request.expected_shape_version, Revision::new(1));
-        assert_eq!(request.expected_data_version, Revision::new(3));
-        assert_eq!(
-            exposure_value(&view),
-            &WithRevision::new(Revision::new(3), LpValue::F32(1.0))
-        );
-    }
-
-    #[test]
-    fn accepted_response_clears_pending_without_local_write() {
-        let mut view = fixture();
-        let id = WireSlotMutationId::new(1);
-        view.prepare_set_value(
-            id,
-            "engine.shader_node",
-            SlotPath::parse("params.exposure").unwrap(),
-            LpValue::F32(2.0),
-        )
-        .unwrap();
-
-        view.apply_mutation_response(WireSlotMutationResponse {
-            id,
-            result: WireSlotMutationResult::Accepted,
-        });
-
-        assert!(!view.is_pending(id));
-        assert!(view.error(id).is_none());
-        assert_eq!(
-            exposure_value(&view),
-            &WithRevision::new(Revision::new(3), LpValue::F32(1.0))
-        );
-    }
-
-    #[test]
-    fn rejected_response_records_error() {
-        let mut view = fixture();
-        let id = WireSlotMutationId::new(1);
-        view.prepare_set_value(
-            id,
-            "engine.shader_node",
-            SlotPath::parse("params.exposure").unwrap(),
-            LpValue::F32(2.0),
-        )
-        .unwrap();
-
-        view.apply_mutation_response(WireSlotMutationResponse {
-            id,
-            result: WireSlotMutationResult::Rejected(WireSlotMutationRejection::DataConflict {
-                current_version: Revision::new(4),
-            }),
-        });
-
-        assert!(!view.is_pending(id));
-        assert_eq!(
-            view.error(id),
-            Some(&WireSlotMutationRejection::DataConflict {
-                current_version: Revision::new(4)
-            })
-        );
-    }
-
-    #[test]
     fn patches_update_authoritative_mirror() {
         let mut view = fixture();
         view.apply_patches(&[WireSlotPatch {
@@ -249,19 +119,17 @@ mod tests {
     }
 
     #[test]
-    fn wrong_type_is_rejected_before_pending() {
-        let mut view = fixture();
+    fn wrong_type_is_rejected_by_validation() {
+        let view = fixture();
         let err = view
-            .prepare_set_value(
-                WireSlotMutationId::new(1),
+            .validate_set_value(
                 "engine.shader_node",
-                SlotPath::parse("params.exposure").unwrap(),
-                LpValue::Vec3([1.0, 2.0, 3.0]),
+                &SlotPath::parse("params.exposure").unwrap(),
+                &LpValue::Vec3([1.0, 2.0, 3.0]),
             )
             .unwrap_err();
 
         assert_eq!(err, SlotMirrorError::WrongType);
-        assert!(view.pending.is_empty());
     }
 
     fn fixture() -> SlotMirrorView {

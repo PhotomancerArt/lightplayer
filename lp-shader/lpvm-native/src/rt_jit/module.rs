@@ -2,8 +2,8 @@
 
 use alloc::sync::Arc;
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
+use lp_collection::VecMap;
 use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
 use lpvm::{AllocError, LpvmMemory, LpvmModule};
@@ -20,8 +20,8 @@ use super::instance::NativeJitInstance;
 pub(crate) struct NativeJitModuleInner {
     pub meta: LpsModuleSig,
     pub buffer: JitBuffer,
-    pub entry_offsets: BTreeMap<alloc::string::String, usize>,
-    pub entry_info: BTreeMap<alloc::string::String, NativeJitEntryInfo>,
+    pub entry_offsets: VecMap<alloc::string::String, usize>,
+    pub entry_info: VecMap<alloc::string::String, NativeJitEntryInfo>,
     pub options: NativeCompileOptions,
 }
 
@@ -135,8 +135,8 @@ pub(crate) fn build_entry_info(
     ir: &LpirModule,
     meta: &LpsModuleSig,
     isa: IsaTarget,
-) -> Result<BTreeMap<String, NativeJitEntryInfo>, NativeError> {
-    let mut entries = BTreeMap::new();
+) -> Result<VecMap<String, NativeJitEntryInfo>, NativeError> {
+    let mut entries = VecMap::new();
     for ir_func in ir.functions.values() {
         let gfn = meta
             .functions

@@ -3,23 +3,26 @@
 extern crate alloc;
 
 use alloc::boxed::Box;
-use alloc::collections::{BTreeMap, BTreeSet, VecDeque};
+use alloc::collections::VecDeque;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
+use lp_collection::{VecMap, VecSet};
 
 use esp_hal::efuse::{InterfaceMacAddress, interface_mac_address};
 use esp_hal::peripherals::WIFI;
-use esp_radio::esp_now::{BROADCAST_ADDRESS, EspNow, EspNowError, ReceivedData};
+use esp_radio::esp_now::{
+    BROADCAST_ADDRESS, EspNow, EspNowError, EspNowManager, EspNowReceiver, EspNowSender,
+    ReceivedData,
+};
 use esp_radio::wifi::{ControllerConfig, WifiController};
-use lpc_shared::hardware::{
-    HardwareAddress, HardwareCapability, HardwareClaim, HardwareDriver, HardwareEndpoint,
-    HardwareEndpointError, HardwareEndpointId, HardwareEndpointKind, HardwareEndpointSpec,
-    HardwareEndpointStatus, HardwareLease, HardwareRegistry, RADIO_MAX_PACKET_LEN, RadioChannelId,
-    RadioConfig, RadioDevice, RadioDeviceId, RadioDrainReport, RadioDriver, RadioEventId,
-    RadioMessage, RadioMessageKind,
+use lpc_hardware::{
+    HardwareEndpointError, HardwareLease, HwAddress, HwCapability, HwClaim, HwDriver, HwEndpoint,
+    HwEndpointId, HwEndpointKind, HwEndpointSpec, HwEndpointStatus, HwRegistry,
+    RADIO_MAX_PACKET_LEN, RadioChannelId, RadioConfig, RadioDevice, RadioDeviceId,
+    RadioDrainReport, RadioDriver, RadioEventId, RadioMessage, RadioMessageKind,
 };
 
 const DRIVER_ID: &str = "esp32-espnow-radio0";
@@ -30,24 +33,29 @@ const RADIO_QUEUE_CAPACITY: usize = 16;
 const SEEN_RING_LEN: usize = 32;
 
 pub struct Esp32EspNowRadioDriver {
-    registry: Rc<HardwareRegistry>,
-    _controller: &'static WifiController<'static>,
-    esp_now_slot: Rc<RefCell<Option<EspNow<'static>>>>,
-    address: HardwareAddress,
+    registry: Rc<HwRegistry>,
+    // Keep the controller alive: dropping it deinitializes Wi-Fi/ESP-NOW and
+    // invalidates the `'static` interface handed to the open device.
+    _controller: WifiController<'static>,
+    // The single ESP-NOW interface, taken (and `split` into sender/receiver) the
+    // first time the endpoint is opened. The hardware registry lease enforces
+    // exclusive access; this only exists because `split` consumes the interface.
+    esp_now: RefCell<Option<EspNow<'static>>>,
+    address: HwAddress,
     device_id: RadioDeviceId,
     default_channel: u8,
 }
 
 impl Esp32EspNowRadioDriver {
     pub fn new(
-        registry: Rc<HardwareRegistry>,
+        registry: Rc<HwRegistry>,
         wifi: WIFI<'static>,
     ) -> Result<Self, HardwareEndpointError> {
         Self::with_channel(registry, wifi, DEFAULT_ESPNOW_CHANNEL)
     }
 
     pub fn with_channel(
-        registry: Rc<HardwareRegistry>,
+        registry: Rc<HwRegistry>,
         wifi: WIFI<'static>,
         default_channel: u8,
     ) -> Result<Self, HardwareEndpointError> {
@@ -56,13 +64,12 @@ impl Esp32EspNowRadioDriver {
             .map_err(|error| HardwareEndpointError::Other {
                 message: format!("ESP-NOW Wi-Fi init failed: {error:?}"),
             })?;
-        let controller = Box::leak(Box::new(controller));
 
         Ok(Self {
             registry,
             _controller: controller,
-            esp_now_slot: Rc::new(RefCell::new(Some(interfaces.esp_now))),
-            address: HardwareAddress::radio(0),
+            esp_now: RefCell::new(Some(interfaces.esp_now)),
+            address: HwAddress::radio(0),
             device_id: station_device_id(),
             default_channel,
         })
@@ -76,16 +83,16 @@ impl Esp32EspNowRadioDriver {
         self.default_channel
     }
 
-    fn endpoint_id(&self) -> HardwareEndpointId {
-        HardwareEndpointId::for_driver_spec(self.driver_id(), &endpoint_spec())
+    fn endpoint_id(&self) -> HwEndpointId {
+        HwEndpointId::for_driver_spec(self.driver_id(), &endpoint_spec())
     }
 
-    fn endpoint_status(&self) -> HardwareEndpointStatus {
+    fn endpoint_status(&self) -> HwEndpointStatus {
         self.registry.endpoint_status_for(&self.address)
     }
 }
 
-impl HardwareDriver for Esp32EspNowRadioDriver {
+impl HwDriver for Esp32EspNowRadioDriver {
     fn driver_id(&self) -> &str {
         DRIVER_ID
     }
@@ -96,18 +103,18 @@ impl HardwareDriver for Esp32EspNowRadioDriver {
 }
 
 impl RadioDriver for Esp32EspNowRadioDriver {
-    fn endpoints(&self) -> Vec<HardwareEndpoint> {
+    fn endpoints(&self) -> Vec<HwEndpoint> {
         let Some(resource) = self.registry.manifest().resource(&self.address) else {
             return Vec::new();
         };
-        if !resource.supports(HardwareCapability::Radio) {
+        if !resource.supports(HwCapability::Radio) {
             return Vec::new();
         }
 
-        vec![HardwareEndpoint::new(
+        vec![HwEndpoint::new(
             self.endpoint_id(),
             endpoint_spec(),
-            HardwareEndpointKind::Radio,
+            HwEndpointKind::Radio,
             self.driver_id(),
             self.address.clone(),
             resource.display_label(),
@@ -117,12 +124,12 @@ impl RadioDriver for Esp32EspNowRadioDriver {
 
     fn open(
         &self,
-        endpoint_id: &HardwareEndpointId,
+        endpoint_id: &HwEndpointId,
         config: RadioConfig,
     ) -> Result<Box<dyn RadioDevice>, HardwareEndpointError> {
         if endpoint_id != &self.endpoint_id() {
             return Err(HardwareEndpointError::UnknownEndpoint {
-                kind: HardwareEndpointKind::Radio,
+                kind: HwEndpointKind::Radio,
                 endpoint_id: endpoint_id.clone(),
             });
         }
@@ -132,7 +139,7 @@ impl RadioDriver for Esp32EspNowRadioDriver {
 
         let endpoint = self.endpoints().into_iter().next().ok_or_else(|| {
             HardwareEndpointError::UnknownEndpoint {
-                kind: HardwareEndpointKind::Radio,
+                kind: HwEndpointKind::Radio,
                 endpoint_id: endpoint_id.clone(),
             }
         })?;
@@ -148,13 +155,12 @@ impl RadioDriver for Esp32EspNowRadioDriver {
         }
 
         self.registry
-            .ensure_capability(&self.address, HardwareCapability::Radio)?;
-        let lease = self.registry.claim_bundle(HardwareClaim::new(
-            self.driver_id(),
-            vec![self.address.clone()],
-        ))?;
+            .ensure_capability(&self.address, HwCapability::Radio)?;
+        let lease = self
+            .registry
+            .claim_bundle(HwClaim::new(self.driver_id(), vec![self.address.clone()]))?;
 
-        let Some(esp_now) = self.esp_now_slot.borrow_mut().take() else {
+        let Some(esp_now) = self.esp_now.borrow_mut().take() else {
             let _ = self.registry.release(&lease);
             return Err(HardwareEndpointError::EndpointUnavailable {
                 endpoint_id: endpoint_id.clone(),
@@ -162,7 +168,7 @@ impl RadioDriver for Esp32EspNowRadioDriver {
             });
         };
         if let Err(error) = esp_now.set_channel(channel) {
-            *self.esp_now_slot.borrow_mut() = Some(esp_now);
+            *self.esp_now.borrow_mut() = Some(esp_now);
             let _ = self.registry.release(&lease);
             return Err(map_esp_now_error("set channel", error));
         }
@@ -174,45 +180,50 @@ impl RadioDriver for Esp32EspNowRadioDriver {
                 log::warn!("[fw-esp32] ESP-NOW version query failed: {error:?}");
             }
         }
+        let (manager, sender, receiver) = esp_now.split();
 
         Ok(Box::new(Esp32EspNowRadioDevice::new(
             Rc::clone(&self.registry),
-            Rc::clone(&self.esp_now_slot),
             lease,
-            esp_now,
+            manager,
+            sender,
+            receiver,
             self.device_id,
         )))
     }
 }
 
 struct Esp32EspNowRadioDevice {
-    registry: Rc<HardwareRegistry>,
-    esp_now_slot: Rc<RefCell<Option<EspNow<'static>>>>,
+    registry: Rc<HwRegistry>,
     lease: Option<HardwareLease>,
-    esp_now: Option<EspNow<'static>>,
+    _manager: EspNowManager<'static>,
+    sender: EspNowSender<'static>,
+    receiver: EspNowReceiver<'static>,
     device_id: RadioDeviceId,
-    subscriptions: BTreeSet<RadioChannelId>,
-    queues: BTreeMap<RadioChannelId, RadioQueue>,
+    subscriptions: VecSet<RadioChannelId>,
+    queues: VecMap<RadioChannelId, RadioQueue>,
     next_event_id: u32,
     seen: SeenRing,
 }
 
 impl Esp32EspNowRadioDevice {
     fn new(
-        registry: Rc<HardwareRegistry>,
-        esp_now_slot: Rc<RefCell<Option<EspNow<'static>>>>,
+        registry: Rc<HwRegistry>,
         lease: HardwareLease,
-        esp_now: EspNow<'static>,
+        manager: EspNowManager<'static>,
+        sender: EspNowSender<'static>,
+        receiver: EspNowReceiver<'static>,
         device_id: RadioDeviceId,
     ) -> Self {
         Self {
             registry,
-            esp_now_slot,
             lease: Some(lease),
-            esp_now: Some(esp_now),
+            _manager: manager,
+            sender,
+            receiver,
             device_id,
-            subscriptions: BTreeSet::new(),
-            queues: BTreeMap::new(),
+            subscriptions: VecSet::new(),
+            queues: VecMap::new(),
             next_event_id: 0,
             seen: SeenRing::new(),
         }
@@ -225,7 +236,7 @@ impl Esp32EspNowRadioDevice {
     }
 
     fn pull_received(&mut self) {
-        while let Some(received) = self.esp_now.as_mut().and_then(|esp_now| esp_now.receive()) {
+        while let Some(received) = self.receiver.receive() {
             self.process_received(received);
         }
     }
@@ -264,14 +275,6 @@ impl Esp32EspNowRadioDevice {
     }
 
     fn close(&mut self) {
-        if let Some(esp_now) = self.esp_now.take() {
-            let mut esp_now_slot = self.esp_now_slot.borrow_mut();
-            if esp_now_slot.is_none() {
-                *esp_now_slot = Some(esp_now);
-            } else {
-                log::warn!("Esp32EspNowRadioDevice: ESP-NOW interface was already returned");
-            }
-        }
         if let Some(lease) = self.lease.take() {
             if let Err(error) = self.registry.release(&lease) {
                 log::warn!("Esp32EspNowRadioDevice: failed to release hardware lease: {error}");
@@ -310,13 +313,7 @@ impl RadioDevice for Esp32EspNowRadioDevice {
         )?;
         let mut packet = [0u8; RADIO_MAX_PACKET_LEN];
         let len = message.encode(&mut packet);
-        let Some(esp_now) = self.esp_now.as_mut() else {
-            return Err(HardwareEndpointError::EndpointUnavailable {
-                endpoint_id: HardwareEndpointId::for_driver_spec(DRIVER_ID, &endpoint_spec()),
-                reason: "ESP-NOW interface is closed".into(),
-            });
-        };
-        esp_now
+        self.sender
             .send(&BROADCAST_ADDRESS, &packet[..len])
             .map_err(|error| map_esp_now_error("send", error))?
             .wait()
@@ -441,8 +438,8 @@ fn station_device_id() -> RadioDeviceId {
     RadioDeviceId::new(u32::from_le_bytes([bytes[2], bytes[3], bytes[4], bytes[5]]))
 }
 
-fn endpoint_spec() -> HardwareEndpointSpec {
-    HardwareEndpointSpec::from_static(ENDPOINT_SPEC)
+fn endpoint_spec() -> HwEndpointSpec {
+    HwEndpointSpec::from_static(ENDPOINT_SPEC)
 }
 
 fn validate_channel(channel: u8) -> Result<(), HardwareEndpointError> {

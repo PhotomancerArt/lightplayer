@@ -875,8 +875,8 @@ mod tests {
         slot::shape::{enum_external, field, map, option, record, unit, value},
     };
     use alloc::boxed::Box;
-    use alloc::collections::BTreeMap;
     use alloc::vec;
+    use lp_collection::VecMap;
 
     #[test]
     fn dynamic_slot_writer_writes_records_to_json() {
@@ -900,7 +900,7 @@ mod tests {
             )
             .unwrap();
         let data = SlotData::Record(SlotRecord::new(vec![SlotData::Map(SlotMapDyn::new(
-            BTreeMap::from([
+            VecMap::from([
                 (
                     SlotMapKey::String("a".to_string()),
                     SlotData::Value(WithRevision::new(Revision::default(), LpValue::U32(1))),

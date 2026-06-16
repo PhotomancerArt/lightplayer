@@ -761,9 +761,9 @@ vec4 render(vec2 pos) {
 
 #[cfg(test)]
 mod texture_sampling_tests {
-    use alloc::collections::BTreeMap;
     use alloc::format;
     use alloc::string::String;
+    use lp_collection::VecMap;
 
     use naga::{Expression, SampleLevel};
 
@@ -845,7 +845,7 @@ vec4 render(vec2 pos) {
 }
 "#;
         let naga = compile(glsl).expect("compile");
-        let mut specs = BTreeMap::new();
+        let mut specs = VecMap::new();
         specs.insert(String::from("tex"), rgba16_general2d_spec());
         let opts = LowerOptions {
             texture_specs: specs,
@@ -869,7 +869,7 @@ vec4 render(vec2 pos) {
 }
 "#;
         let naga = compile(glsl).expect("compile");
-        let mut specs = BTreeMap::new();
+        let mut specs = VecMap::new();
         specs.insert(String::from("tex"), rgba16_height_one_spec());
         let opts = LowerOptions {
             texture_specs: specs,
@@ -910,7 +910,7 @@ vec4 render(vec2 pos) {
 }
 "#;
         let naga = compile(glsl).expect("compile");
-        let mut specs = BTreeMap::new();
+        let mut specs = VecMap::new();
         specs.insert(
             String::from("tex"),
             TextureBindingSpec {
@@ -968,7 +968,7 @@ vec4 render(vec2 pos) {
     /// texture binding validation even though the outer member has no name.
     #[test]
     fn anonymous_uniform_block_passes_validation() {
-        use alloc::collections::BTreeMap;
+        use lp_collection::VecMap;
         let glsl = r#"
 layout(std430, binding = 0) uniform Decl {
     float time;
@@ -978,7 +978,7 @@ float f() { return time; }
 "#;
         let naga = compile(glsl).expect("compile");
         let (_ir, sig) = lower(&naga).expect("lower");
-        let specs = BTreeMap::new();
+        let specs = VecMap::new();
         let result = lps_shared::validate_texture_binding_specs_against_module(&sig, &specs);
         assert!(result.is_ok(), "Validation failed: {result:?}");
     }

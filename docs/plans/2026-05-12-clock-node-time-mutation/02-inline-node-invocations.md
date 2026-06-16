@@ -52,9 +52,9 @@ pub enum NodeInvocation {
 
 Public helpers:
 
-- `NodeInvocation::new(ArtifactLocator)` remains available for existing tests.
+- `NodeInvocation::new(ArtifactSpecifier)` remains available for existing tests.
 - `NodeInvocation::inline(NodeDef)` may be added.
-- `artifact_locator()` should return `Option`/`Result<Option<_>, _>` or be replaced with clearer helpers.
+- `artifact_specifier()` should return `Option`/`Result<Option<_>, _>` or be replaced with clearer helpers.
 
 TOML forms:
 

@@ -323,6 +323,7 @@ fn into_small_server_msg(
         ServerMsgBody::LoadProject { handle } => ServerMsgBody::LoadProject { handle },
         ServerMsgBody::UnloadProject => ServerMsgBody::UnloadProject,
         ServerMsgBody::ProjectRequest { .. } => return None,
+        ServerMsgBody::ProjectCommand { response } => ServerMsgBody::ProjectCommand { response },
         ServerMsgBody::ListAvailableProjects { projects } => {
             ServerMsgBody::ListAvailableProjects { projects }
         }

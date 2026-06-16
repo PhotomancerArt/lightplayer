@@ -132,7 +132,7 @@ Out of scope:
   - `examples/basic/project.toml` also contains `uid = "basic"`, which is
     currently ignored because `ProjectDef` has no `uid` field.
 - `NodeInvocation`:
-  - fields: `artifact: ArtifactLocator`, `overrides: Vec<(ValuePath, SrcBinding)>`
+  - fields: `artifact: ArtifactSpecifier`, `overrides: Vec<(ValuePath, SrcBinding)>`
   - overrides are transitional and still use `ValuePath` because resolver/binding code has not moved fully to slots.
 - `TextureDef`:
   - fields: `width: u32`, `height: u32`
@@ -271,9 +271,9 @@ Decision: do not add arrays and do not add custom serde that hides arrays behind
 
 Implication: `examples/basic` can change from TOML arrays to keyed path tables if M2 chooses the structured mapping path.
 
-### Artifact Locator And Path Leaves
+### Artifact Specifier And Path Leaves
 
-`ArtifactLocator`, `LpPathBuf`, and `RelativeNodeRef` are authored string-like values with different semantics.
+`ArtifactSpecifier`, `LpPathBuf`, and `RelativeNodeRef` are authored string-like values with different semantics.
 
 Suggested direction: add or reuse semantic leaf shapes/conversions:
 
@@ -281,7 +281,7 @@ Suggested direction: add or reuse semantic leaf shapes/conversions:
 - `LpPathBuf` / GLSL path -> `source_path_shape()` or a more precise
   `LpPathBuf`-backed slot if we decide source defs should retain that concrete
   type.
-- `ArtifactLocator` -> `artifact_path_shape()` or a more specific artifact
+- `ArtifactSpecifier` -> `artifact_path_shape()` or a more specific artifact
   locator field/access implementation in `lpc-source`.
 
 ## Open Questions

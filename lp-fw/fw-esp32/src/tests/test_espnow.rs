@@ -13,9 +13,9 @@ use alloc::vec::Vec;
 
 use embassy_time::{Duration, Ticker};
 use esp_println::println;
-use lpc_shared::hardware::{
-    HardwareAddress, HardwareRegistry, HardwareSystem, RadioChannelId, RadioConfig,
-    RadioMessageKind, default_esp32c6_hardware_manifest,
+use lpc_hardware::{
+    HardwareSystem, HwAddress, HwRegistry, RadioChannelId, RadioConfig, RadioMessageKind,
+    default_esp32c6_hardware_manifest,
 };
 
 use crate::board::esp32c6::init::{init_board, start_runtime};
@@ -29,7 +29,7 @@ pub async fn run_espnow_test(_: embassy_executor::Spawner) -> ! {
     let (sw_int, timg0, _rmt, _usb_device, _gpio18, _flash, _gpio4, _gpio20, wifi) = init_board();
     start_runtime(timg0, sw_int);
 
-    let registry = Rc::new(HardwareRegistry::new(default_esp32c6_hardware_manifest()));
+    let registry = Rc::new(HwRegistry::new(default_esp32c6_hardware_manifest()));
     let mut hardware_system = HardwareSystem::new(Rc::clone(&registry));
     let radio_driver = Esp32EspNowRadioDriver::new(Rc::clone(&registry), wifi)
         .expect("ESP-NOW radio driver initializes");
@@ -38,10 +38,7 @@ pub async fn run_espnow_test(_: embassy_executor::Spawner) -> ! {
     hardware_system.add_radio_driver(Box::new(radio_driver));
 
     let mut radio = hardware_system
-        .open_radio_by_address(
-            &HardwareAddress::radio(0),
-            RadioConfig::new(Some(espnow_channel)),
-        )
+        .open_radio_by_address(&HwAddress::radio(0), RadioConfig::new(Some(espnow_channel)))
         .expect("ESP-NOW radio opens");
     radio
         .subscribe_channel(DIAGNOSTIC_CHANNEL)

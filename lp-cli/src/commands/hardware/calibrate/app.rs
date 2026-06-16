@@ -1,6 +1,6 @@
 use anyhow::{Result, anyhow, bail};
 use dialoguer::Input;
-use lpc_shared::hardware::{HardwareManifestFile, HardwareTarget};
+use lpc_hardware::{HardwareManifestFile, HardwareTarget};
 use std::io::{IsTerminal, stdin};
 use std::time::Duration;
 

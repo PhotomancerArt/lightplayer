@@ -1,9 +1,9 @@
 //! Materialize resolved model slot data into shader ABI input values.
 
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use lpc_model::{
     LpType, LpValue, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingKind,
@@ -143,14 +143,14 @@ fn materialize_map_input(
         set_u32_field(slot_name, item, key_field, empty_key)?;
     }
 
-    let entries: BTreeMap<SlotMapKey, SlotData> = match data {
+    let entries: VecMap<SlotMapKey, SlotData> = match data {
         Some(SlotData::Map(map)) => map.entries.clone(),
         Some(_) => {
             return Err(ShaderInputMaterializeError::ExpectedMap(String::from(
                 slot_name,
             )));
         }
-        None => BTreeMap::new(),
+        None => VecMap::new(),
     };
     if entries.len() > len_usize {
         return Err(ShaderInputMaterializeError::TooManyEntries {
@@ -295,7 +295,7 @@ fn validate_u32_field(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::collections::BTreeMap;
+    use lp_collection::VecMap;
     use lpc_model::{
         CONTROL_MESSAGE_SHAPE_NAME, ControlMessage, Revision, ShaderSlotMappingDef, SlotMapDyn,
         ToLpValue, WithRevision,
@@ -310,7 +310,7 @@ mod tests {
         );
         let data = SlotData::Map(SlotMapDyn::with_revision(
             Revision::new(4),
-            BTreeMap::from([(
+            VecMap::from([(
                 SlotMapKey::U32(7),
                 SlotData::Value(WithRevision::new(
                     Revision::new(4),
@@ -358,7 +358,7 @@ mod tests {
         );
         let data = SlotData::Map(SlotMapDyn::with_revision(
             Revision::new(4),
-            BTreeMap::from([(
+            VecMap::from([(
                 SlotMapKey::U32(7),
                 SlotData::Value(WithRevision::new(
                     Revision::new(4),

@@ -1,7 +1,7 @@
 //! Function signature shapes (no registry / overload resolution).
 
-use alloc::collections::BTreeMap;
 use alloc::{string::String, vec::Vec};
+use lp_collection::VecMap;
 
 use crate::{LayoutRules, LpsType, TextureBindingSpec, VMCTX_HEADER_SIZE};
 
@@ -61,7 +61,7 @@ pub struct LpsModuleSig {
     /// Compile-time [`TextureBindingSpec`] per sampler uniform name. Empty when the module has no
     /// textures or when using the texture-free default lower path; populated after validation by the
     /// options-aware frontend entry.
-    pub texture_specs: BTreeMap<String, TextureBindingSpec>,
+    pub texture_specs: VecMap<String, TextureBindingSpec>,
 }
 
 impl LpsModuleSig {

@@ -1,10 +1,10 @@
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::rc::Rc;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
+use lp_collection::VecMap;
 
 use lps_shared::{
     FnParam, LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, LpsValueF32, ParamQualifier, StructMember,
@@ -1447,7 +1447,7 @@ vec4 render(vec2 pos) {
 }
 
 fn test_meta_params_gradient_rgba16() -> LpsModuleSig {
-    let mut texture_specs = BTreeMap::new();
+    let mut texture_specs = VecMap::new();
     texture_specs.insert(
         String::from("params.gradient"),
         test_default_texture_binding_spec(),
@@ -1649,7 +1649,7 @@ fn render_frame_nested_params_gradient_wrong_texture_value_type_reports_dotted_p
 #[test]
 fn render_frame_nested_params_gradient_height_one_mismatch_reports_dotted_path() {
     let engine = test_engine();
-    let mut texture_specs = BTreeMap::new();
+    let mut texture_specs = VecMap::new();
     texture_specs.insert(
         String::from("params.gradient"),
         texture_binding::height_one(

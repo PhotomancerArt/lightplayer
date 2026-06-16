@@ -15,7 +15,7 @@ use alloc::vec::Vec;
 
 /// Borrowed static shape of a slot tree.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
+#[serde(rename_all = "snake_case")]
 pub enum StaticSlotShapeDescriptor {
     Ref {
         id: SlotShapeId,
@@ -313,7 +313,7 @@ impl StaticModelEnumVariant {
 
 /// Borrowed editor hint for static value shapes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
+#[serde(rename_all = "snake_case")]
 pub enum StaticValueEditorHint {
     #[default]
     Plain,
@@ -388,7 +388,7 @@ impl StaticSlotEnumOption {
 
 /// Borrowed enum syntax for a static enum slot.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "snake_case", tag = "kind")]
+#[serde(rename_all = "snake_case")]
 pub enum StaticSlotEnumEncoding {
     Tagged { field: &'static str },
     External,

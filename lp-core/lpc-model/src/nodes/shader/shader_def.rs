@@ -1,13 +1,13 @@
 use alloc::string::String;
 
-use crate::nodes::shader::{GlslOpts, ShaderParamDef, ShaderSlotDef, ShaderSource};
-use crate::{BindingDefs, EnumSlot, MapSlot, RenderOrderSlot, Slotted};
+use crate::nodes::shader::{GlslOpts, ShaderParamDef, ShaderSlotDef};
+use crate::{AssetSlot, BindingDefs, MapSlot, RenderOrderSlot, Slotted};
 
 /// Authored shader node definition.
 #[derive(Debug, Clone, PartialEq, Slotted)]
 pub struct ShaderDef {
     /// Authored shader source.
-    pub source: EnumSlot<ShaderSource>,
+    pub source: AssetSlot,
     /// Render order - lower numbers render first (default 0)
     pub render_order: RenderOrderSlot,
     /// Authored slot bindings for shader inputs and outputs.
@@ -23,7 +23,7 @@ pub struct ShaderDef {
 impl Default for ShaderDef {
     fn default() -> Self {
         Self {
-            source: EnumSlot::new(ShaderSource::path("main.glsl")),
+            source: AssetSlot::path("main.glsl"),
             render_order: RenderOrderSlot::default(),
             bindings: BindingDefs::default(),
             glsl_opts: GlslOpts::default(),
@@ -36,8 +36,8 @@ impl Default for ShaderDef {
 impl ShaderDef {
     pub const KIND: &'static str = "shader";
 
-    pub fn shader_source(&self) -> &ShaderSource {
-        self.source.value()
+    pub fn shader_source(&self) -> &AssetSlot {
+        &self.source
     }
 
     pub fn render_order(&self) -> i32 {
@@ -62,7 +62,7 @@ mod tests {
     #[test]
     fn test_shader_def_kind() {
         let def = ShaderDef {
-            source: EnumSlot::new(ShaderSource::path("main.glsl")),
+            source: AssetSlot::path("main.glsl"),
             render_order: RenderOrderSlot::new(RenderOrder(0)),
             bindings: BindingDefs::default(),
             glsl_opts: GlslOpts::default(),
@@ -76,7 +76,7 @@ mod tests {
     fn test_shader_def_default() {
         let def = ShaderDef::default();
         assert_eq!(
-            def.shader_source().path_value().unwrap().as_str(),
+            def.shader_source().artifact_value().unwrap().to_string(),
             "main.glsl"
         );
         assert_eq!(def.render_order(), 0);
@@ -114,6 +114,9 @@ mod tests {
             panic!("shader record shape");
         };
 
+        // Nested static records are referenced by shape id, not re-inlined, so
+        // the registry describes each record exactly once. See the `FieldSlot`
+        // derive in lpc-slot-macros.
         let glsl_opts = shader_fields
             .iter()
             .find(|field| field.name.as_str() == "glsl_opts")
@@ -211,7 +214,7 @@ source = { path = "main.glsl" }
             panic!("expected shader");
         };
         assert_eq!(
-            def.shader_source().path_value().unwrap().as_str(),
+            def.shader_source().artifact_value().unwrap().to_string(),
             "main.glsl"
         );
     }
@@ -231,7 +234,13 @@ glsl = "vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }"
         let NodeDef::Shader(def) = def else {
             panic!("expected shader");
         };
-        assert!(def.shader_source().glsl_value().unwrap().contains("render"));
+        assert!(
+            def.shader_source()
+                .inline_text_value()
+                .unwrap()
+                .1
+                .contains("render")
+        );
     }
 
     #[test]

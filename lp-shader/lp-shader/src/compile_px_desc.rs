@@ -1,12 +1,12 @@
 //! Descriptor for pixel shader compilation (GLSL + output format + texture binding specs).
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
+use lp_collection::VecMap;
 
 use lpir::CompilerConfig;
 use lps_shared::{TextureBindingSpec, TextureStorageFormat};
 
-pub type TextureBindingSpecs = BTreeMap<String, TextureBindingSpec>;
+pub type TextureBindingSpecs = VecMap<String, TextureBindingSpec>;
 
 /// Frontend used for GLSL source before LPIR lowering.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

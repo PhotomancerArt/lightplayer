@@ -3,14 +3,11 @@
 //! See `docs/roadmaps/2026-04-28-node-runtime/design/01-tree.md` §NodeEntry.
 
 use alloc::vec::Vec;
-use lpc_model::{ArtifactLocator, NodeId, NodeInvocation, Revision, TreePath, WithRevision};
-use lpc_wire::{WireChildKind, WireNodeStatus};
+use lpc_model::{NodeDefLocation, NodeId, NodeUseLocation, Revision, TreePath, WithRevision};
+use lpc_wire::{NodeRuntimeStatus, WireChildKind};
 
-use crate::artifact::ArtifactId;
 use crate::dataflow::binding::BindingSet;
 use crate::node::node_entry_state::NodeEntryState;
-
-use super::NodeDefHandle;
 
 /// Server-side metadata for a node instance.
 ///
@@ -19,36 +16,29 @@ use super::NodeDefHandle;
 /// `Box<dyn Node>`.
 ///
 #[derive(Debug)]
-pub struct NodeEntry<N> {
+pub struct RuntimeNodeEntry<N> {
     pub id: NodeId,
     pub path: TreePath,
     pub parent: Option<NodeId>,
     pub child_kind: Option<WireChildKind>, // None for root; immutable for entry's lifetime
     pub children: WithRevision<Vec<NodeId>>, // ordered
 
-    pub status: WithRevision<WireNodeStatus>,
+    pub status: WithRevision<NodeRuntimeStatus>,
     pub state: WithRevision<NodeEntryState<N>>,
     pub bindings: WithRevision<BindingSet>,
 
     pub created_at: Revision,
 
-    /// Authored per-instance config (artifact spec + overrides).
-    pub config: NodeInvocation,
+    /// Stable project-side identity for this runtime node, when projected from a project.
+    pub project_use: Option<NodeUseLocation>,
 
-    /// Runtime handle to this node's authored definition.
-    pub def_handle: NodeDefHandle,
+    /// Effective authored definition backing this runtime node.
+    pub def_location: Option<NodeDefLocation>,
 }
 
-impl<N> NodeEntry<N> {
-    /// Placeholder artifact path for [`Self::new`] (tests and roots without a real spec yet).
-    ///
-    /// Spine placeholder artifact path: empty authored `""` normalizes to `/` (`lpc_model::LpPathBuf`).
-    pub(crate) const PLACEHOLDER_ARTIFACT_PATH: &'static str = "/";
-
+impl<N> RuntimeNodeEntry<N> {
     /// Create a new entry. Sets `created_at`, `changed_at`, and
     /// `children_changed_at` to `revision`.
-    ///
-    /// Fills spine fields with placeholders: root-normalized artifact path (`/`), handle `0`.
     pub fn new(
         id: NodeId,
         path: TreePath,
@@ -56,25 +46,17 @@ impl<N> NodeEntry<N> {
         child_kind: Option<WireChildKind>,
         revision: Revision,
     ) -> Self {
-        Self::new_spine(
-            id,
-            path,
-            parent,
-            child_kind,
-            NodeInvocation::new(ArtifactLocator::path(Self::PLACEHOLDER_ARTIFACT_PATH)),
-            NodeDefHandle::artifact_root(ArtifactId::from_raw(0)),
-            revision,
-        )
+        Self::new_spine(id, path, parent, child_kind, None, None, revision)
     }
 
-    /// Create a new entry with explicit source config and artifact handle.
+    /// Create a new entry with explicit project identity.
     pub fn new_spine(
         id: NodeId,
         path: TreePath,
         parent: Option<NodeId>,
         child_kind: Option<WireChildKind>,
-        config: NodeInvocation,
-        def_handle: NodeDefHandle,
+        project_use: Option<NodeUseLocation>,
+        def_location: Option<NodeDefLocation>,
         revision: Revision,
     ) -> Self {
         Self {
@@ -83,21 +65,26 @@ impl<N> NodeEntry<N> {
             parent,
             child_kind,
             children: WithRevision::new(revision, Vec::new()),
-            status: WithRevision::new(revision, WireNodeStatus::Created),
+            status: WithRevision::new(revision, NodeRuntimeStatus::Created),
             state: WithRevision::new(revision, NodeEntryState::Pending),
             bindings: WithRevision::new(revision, BindingSet::new()),
             created_at: revision,
-            config,
-            def_handle,
+            project_use,
+            def_location,
         }
     }
 
-    pub fn artifact(&self) -> ArtifactId {
-        self.def_handle.artifact()
+    pub fn set_project_identity(
+        &mut self,
+        project_use: NodeUseLocation,
+        def_location: NodeDefLocation,
+    ) {
+        self.project_use = Some(project_use);
+        self.def_location = Some(def_location);
     }
 
     /// Set status and bump `changed_at`.
-    pub fn set_status(&mut self, status: WireNodeStatus, revision: Revision) {
+    pub fn set_status(&mut self, status: NodeRuntimeStatus, revision: Revision) {
         self.status.set(revision, status);
     }
 
@@ -126,16 +113,16 @@ impl<N> NodeEntry<N> {
 
 #[cfg(test)]
 mod tests {
-    use super::NodeEntry;
-    use crate::node::NodeDefHandle;
-    use lpc_model::{ArtifactLocator, NodeInvocation};
-    use lpc_model::{NodeId, Revision, TreePath};
-    use lpc_wire::{WireChildKind, WireNodeStatus, WireSlotIndex};
+    use super::RuntimeNodeEntry;
+    use lpc_model::{
+        ArtifactLocation, NodeDefLocation, NodeId, NodeUseLocation, Revision, TreePath,
+    };
+    use lpc_wire::{NodeRuntimeStatus, WireChildKind, WireSlotIndex};
 
     #[test]
     fn node_entry_new_sets_all_frame_counters() {
         let frame = Revision::new(5);
-        let entry: NodeEntry<()> = NodeEntry::new(
+        let entry: RuntimeNodeEntry<()> = RuntimeNodeEntry::new(
             NodeId::new(1),
             TreePath::parse("/main.show").unwrap(),
             None,
@@ -145,22 +132,22 @@ mod tests {
         assert_eq!(entry.created_at.0, 5);
         assert_eq!(entry.changed_at().0, 5);
         assert_eq!(entry.children_changed_at().0, 5);
-        assert_eq!(*entry.status.value(), WireNodeStatus::Created);
+        assert_eq!(*entry.status.value(), NodeRuntimeStatus::Created);
         assert!(entry.state.value().is_pending());
     }
 
     #[test]
     fn node_entry_set_status_bumps_change_frame() {
         let frame = Revision::new(5);
-        let mut entry: NodeEntry<()> = NodeEntry::new(
+        let mut entry: RuntimeNodeEntry<()> = RuntimeNodeEntry::new(
             NodeId::new(1),
             TreePath::parse("/main.show").unwrap(),
             None,
             None,
             frame,
         );
-        entry.set_status(WireNodeStatus::Ok, Revision::new(10));
-        assert_eq!(*entry.status.value(), WireNodeStatus::Ok);
+        entry.set_status(NodeRuntimeStatus::Ok, Revision::new(10));
+        assert_eq!(*entry.status.value(), NodeRuntimeStatus::Ok);
         assert_eq!(entry.changed_at().0, 10);
         // created_frame and children_ver unchanged
         assert_eq!(entry.created_at.0, 5);
@@ -170,7 +157,7 @@ mod tests {
     #[test]
     fn node_entry_is_dirty_since() {
         let frame = Revision::new(5);
-        let entry: NodeEntry<()> = NodeEntry::new(
+        let entry: RuntimeNodeEntry<()> = RuntimeNodeEntry::new(
             NodeId::new(1),
             TreePath::parse("/main.show").unwrap(),
             None,
@@ -186,7 +173,7 @@ mod tests {
     fn node_entry_child_kind_is_immutable_conceptually() {
         // Verify we can set it at construction; it's not changed after
         let frame = Revision::new(1);
-        let entry: NodeEntry<()> = NodeEntry::new(
+        let entry: RuntimeNodeEntry<()> = RuntimeNodeEntry::new(
             NodeId::new(2),
             TreePath::parse("/main.show/child.vis").unwrap(),
             Some(NodeId::new(1)),
@@ -203,22 +190,20 @@ mod tests {
     }
 
     #[test]
-    fn node_entry_new_spine_stores_config_and_def_handle() {
+    fn node_entry_new_spine_stores_project_identity() {
         let frame = Revision::new(1);
-        let config = NodeInvocation::new(ArtifactLocator::path("./fluid.vis"));
-        let artifact = crate::artifact::ArtifactId::from_raw(7);
-        let def_handle = NodeDefHandle::artifact_root(artifact);
-        let entry: NodeEntry<()> = NodeEntry::new_spine(
+        let project_use = NodeUseLocation::root();
+        let def_location = NodeDefLocation::artifact_root(ArtifactLocation::file("/project.toml"));
+        let entry: RuntimeNodeEntry<()> = RuntimeNodeEntry::new_spine(
             NodeId::new(1),
             TreePath::parse("/main.show").unwrap(),
             None,
             None,
-            config.clone(),
-            def_handle.clone(),
+            Some(project_use.clone()),
+            Some(def_location.clone()),
             frame,
         );
-        assert_eq!(entry.config, config);
-        assert_eq!(entry.def_handle, def_handle);
-        assert_eq!(entry.artifact(), artifact);
+        assert_eq!(entry.project_use, Some(project_use));
+        assert_eq!(entry.def_location, Some(def_location));
     }
 }

@@ -14,19 +14,13 @@ use lpc_wire::json::json_write::JsonWrite;
 use lpc_wire::json::json_writer::{JsonWriter, JsonWriterError};
 use lpc_wire::{
     ProjectProbeRequest, ProjectReadQuery, ProjectReadRequest, ProjectReadResponse, TransportError,
-    WireProjectHandle, WireServerMessage, WireSlotMutationRequest, WireSlotMutationResponse,
-    messages::ClientMessage,
+    WireProjectHandle, WireServerMessage, messages::ClientMessage,
 };
 
 /// Source that can write a project-read response to JSON without requiring the
 /// caller to first allocate a full [`ProjectReadResponse`].
 pub trait ProjectReadJsonSource {
     fn project_read_revision(&self) -> Revision;
-
-    fn apply_project_mutations(
-        &mut self,
-        mutations: Vec<WireSlotMutationRequest>,
-    ) -> Vec<WireSlotMutationResponse>;
 
     fn write_project_read_result_json<W>(
         &mut self,
@@ -53,7 +47,6 @@ pub trait ProjectReadJsonSource {
     where
         W: JsonWrite,
     {
-        let mutation_responses = self.apply_project_mutations(request.mutations);
         let mut writer = JsonWriter::new(out);
         writer.write_raw(b"{\"revision\":")?;
         writer.serde(&self.project_read_revision())?;
@@ -75,14 +68,6 @@ pub trait ProjectReadJsonSource {
             }
             let out = self.write_project_probe_result_json(probe, writer.into_inner())?;
             writer = JsonWriter::new(out);
-        }
-
-        writer.write_raw(b"],\"mutations\":[")?;
-        for (index, mutation) in mutation_responses.into_iter().enumerate() {
-            if index > 0 {
-                writer.write_raw(b",")?;
-            }
-            writer.serde(&mutation)?;
         }
 
         writer.write_raw(b"]}")?;

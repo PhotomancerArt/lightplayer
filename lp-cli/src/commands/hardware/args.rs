@@ -22,7 +22,7 @@ pub struct ManifestArgs {
     #[arg(long)]
     pub repo: Option<PathBuf>,
 
-    /// Board manifest directory. Defaults to lp-core/lpc-shared/boards under the repo root.
+    /// Board manifest directory. Defaults to lp-core/lpc-hardware/boards under the repo root.
     #[arg(long)]
     pub boards_dir: Option<PathBuf>,
 
@@ -100,7 +100,7 @@ pub struct CalibrateArgs {
     /// Repository root. Defaults to searching upward from the current directory.
     #[arg(long)]
     pub repo: Option<PathBuf>,
-    /// Board manifest directory. Defaults to lp-core/lpc-shared/boards under the repo root.
+    /// Board manifest directory. Defaults to lp-core/lpc-hardware/boards under the repo root.
     #[arg(long)]
     pub boards_dir: Option<PathBuf>,
     /// Firmware response timeout before a pin is treated as crash-suspect.
@@ -119,7 +119,7 @@ pub enum HardwareTargetArg {
     Rv32imacEmu,
 }
 
-impl From<HardwareTargetArg> for lpc_shared::hardware::HardwareTarget {
+impl From<HardwareTargetArg> for lpc_hardware::HardwareTarget {
     fn from(value: HardwareTargetArg) -> Self {
         match value {
             HardwareTargetArg::Esp32c6 => Self::Esp32c6,

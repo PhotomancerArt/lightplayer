@@ -3,9 +3,9 @@ use crate::{
     FieldSlot, FieldSlotMut, MapSlot, SlotDataAccess, SlotDataMutAccess, SlotMapKeyShape, SlotMeta,
     SlotShape, StaticSlotMeta, StaticSlotShape, StaticSlotShapeDescriptor,
 };
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use core::fmt;
+use lp_collection::VecMap;
 use serde::{Deserialize, Serialize};
 
 /// Authored bindings attached to a node definition.
@@ -19,7 +19,7 @@ use serde::{Deserialize, Serialize};
 pub struct BindingDefs(pub MapSlot<String, BindingDef>);
 
 impl BindingDefs {
-    pub fn new(entries: BTreeMap<String, BindingDef>) -> Self {
+    pub fn new(entries: VecMap<String, BindingDef>) -> Self {
         Self(MapSlot::new(entries))
     }
 
@@ -27,7 +27,7 @@ impl BindingDefs {
         self.0.is_empty()
     }
 
-    pub fn entries(&self) -> &BTreeMap<String, BindingDef> {
+    pub fn entries(&self) -> &VecMap<String, BindingDef> {
         &self.0.entries
     }
 
@@ -123,7 +123,7 @@ target = "bus#visual.out"
 
     #[test]
     fn binding_defs_expose_slot_data_as_map() {
-        let mut entries = BTreeMap::new();
+        let mut entries = VecMap::new();
         entries.insert(
             String::from("output"),
             BindingDef::target(BindingRef::parse("bus#visual.out").unwrap()),
@@ -135,7 +135,7 @@ target = "bus#visual.out"
 
     #[test]
     fn validate_reports_slot_name_for_invalid_binding() {
-        let mut entries = BTreeMap::new();
+        let mut entries = VecMap::new();
         entries.insert(String::from("bad"), BindingDef::default());
         let defs = BindingDefs::new(entries);
 

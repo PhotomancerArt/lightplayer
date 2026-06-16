@@ -72,7 +72,7 @@ pub fn parse_test_file(path: &Path) -> Result<TestFile> {
     let mut pending_set_uniforms: Vec<SetUniform> = Vec::new();
     let mut config_overrides: Vec<(String, String)> = Vec::new();
     let mut seen_compile_opt_keys: HashSet<String> = HashSet::new();
-    let mut texture_specs: test_type::TextureSpecs = std::collections::BTreeMap::new();
+    let mut texture_specs: test_type::TextureSpecs = test_type::TextureSpecs::new();
     let mut texture_fixtures: test_type::TextureFixtures = std::collections::BTreeMap::new();
     let mut in_texture_data: Option<parse_texture::TextureDataPartial> = None;
     let mut pending_setup_failure: Option<String> = None;

@@ -52,7 +52,7 @@ File:
 Current logic:
 
 - Iterates `project_def.nodes`.
-- Extracts `invocation.artifact_locator()`.
+- Extracts `invocation.artifact_specifier()`.
 - Resolves a child artifact path.
 - Reads a child TOML file.
 - Loads `NodeDef` payload into `ArtifactStore`.

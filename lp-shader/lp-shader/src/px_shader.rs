@@ -1,10 +1,10 @@
 //! Compiled pixel shader: module + instance, uniforms at render time.
 
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use core::cell::RefCell;
+use lp_collection::VecMap;
 
 use lps_shared::{
     LpsFnKind, LpsFnSig, LpsModuleSig, LpsType, LpsValueF32, StructMember, TextureBindingSpec,
@@ -298,7 +298,7 @@ fn apply_uniform_fields(
     members: &[StructMember],
     fields: &[(String, LpsValueF32)],
     path_prefix: &str,
-    texture_specs: &BTreeMap<String, TextureBindingSpec>,
+    texture_specs: &VecMap<String, TextureBindingSpec>,
 ) -> Result<(), LpsError> {
     for member in members {
         let name = member

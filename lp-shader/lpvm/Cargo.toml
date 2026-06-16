@@ -14,6 +14,7 @@ default = []
 std = []
 
 [dependencies]
+lp-collection = { workspace = true, features = ["serde"] }
 lps-q32 = { path = "../lps-q32", default-features = false }
 lps-shared = { path = "../lps-shared" }
 lpir = { path = "../lpir" }

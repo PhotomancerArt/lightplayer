@@ -1,11 +1,11 @@
 //! Well-formedness checks for [`LpirModule`] and [`IrFunction`].
 
-use alloc::collections::BTreeSet;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use core::fmt;
+use lp_collection::VecSet;
 
 use crate::lpir_module::{ImportDecl, IrFunction, LpirModule};
 use crate::lpir_op::LpirOp;
@@ -90,7 +90,7 @@ pub fn validate_function(
 }
 
 fn validate_imports(module: &LpirModule, errs: &mut Vec<ValidationError>) {
-    let mut seen: BTreeSet<(&str, &str)> = BTreeSet::new();
+    let mut seen: VecSet<(&str, &str)> = VecSet::new();
     for imp in &module.imports {
         let key = (imp.module_name.as_str(), imp.func_name.as_str());
         if !seen.insert(key) {
@@ -127,7 +127,7 @@ enum StackEntry {
     /// Paired with [`LpirOp::End`] that closes the `Block` region.
     Block,
     Switch {
-        cases: BTreeSet<i32>,
+        cases: VecSet<i32>,
         default_arm: bool,
     },
     Arm,
@@ -327,7 +327,7 @@ fn validate_function_inner(
                 stack.push(StackEntry::Block);
             }
             LpirOp::SwitchStart { .. } => stack.push(StackEntry::Switch {
-                cases: BTreeSet::new(),
+                cases: VecSet::new(),
                 default_arm: false,
             }),
             LpirOp::CaseStart { value, .. } => {

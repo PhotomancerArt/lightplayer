@@ -316,13 +316,13 @@ mod tests {
     use crate::NodeKind;
     use crate::nodes::fixture::mapping::{PathSpec, RingOrder};
     use crate::{Affine2d, FixtureDefView, MapSlot, SlotPath, SlotShapeRegistry};
-    use alloc::collections::BTreeMap;
+    use lp_collection::VecMap;
 
     #[test]
     fn test_fixture_def_kind() {
-        let mut ring_lamp_counts = BTreeMap::new();
+        let mut ring_lamp_counts = VecMap::new();
         ring_lamp_counts.insert(0, ValueSlot::new(1_u32));
-        let mut paths = BTreeMap::new();
+        let mut paths = VecMap::new();
         paths.insert(
             0,
             EnumSlot::new(PathSpec::ring_array(

@@ -1,5 +1,6 @@
 //! Stateless project read builder for [`Engine`].
 
+use lpc_registry::ProjectRegistry;
 use lpc_wire::{
     ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery, ProjectReadRequest,
     ProjectReadResponse, ProjectReadResult,
@@ -9,8 +10,11 @@ use super::Engine;
 
 impl Engine {
     /// Answer one stateless project read request from the current engine state.
-    pub fn read_project(&mut self, request: ProjectReadRequest) -> ProjectReadResponse {
-        let mutations = self.mutate_project_slots(request.mutations);
+    pub fn read_project(
+        &mut self,
+        registry: &ProjectRegistry,
+        request: ProjectReadRequest,
+    ) -> ProjectReadResponse {
         let revision = self.revision();
         let results = request
             .queries
@@ -19,9 +23,9 @@ impl Engine {
                 ProjectReadQuery::Shapes(query) => {
                     ProjectReadResult::Shapes(self.read_project_shapes(query))
                 }
-                ProjectReadQuery::Nodes(query) => {
-                    ProjectReadResult::Nodes(self.read_project_nodes(request.since, query))
-                }
+                ProjectReadQuery::Nodes(query) => ProjectReadResult::Nodes(
+                    self.read_project_nodes(registry, request.since, query),
+                ),
                 ProjectReadQuery::Resources(query) => {
                     ProjectReadResult::Resources(self.read_project_resources(query))
                 }
@@ -35,7 +39,7 @@ impl Engine {
             .into_iter()
             .map(|probe| match probe {
                 ProjectProbeRequest::RenderProduct(request) => ProjectProbeResult::RenderProduct(
-                    self.read_project_render_product_probe(request),
+                    self.read_project_render_product_probe(registry, request),
                 ),
                 ProjectProbeRequest::ExplainSlot(request) => {
                     ProjectProbeResult::ExplainSlot(self.read_project_explain_slot_probe(request))
@@ -47,7 +51,6 @@ impl Engine {
             revision,
             results,
             probes,
-            mutations,
         }
     }
 }
@@ -64,12 +67,13 @@ mod tests {
     #[test]
     fn default_debug_read_returns_shapes_nodes_and_resource_summaries() {
         let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let registry = lpc_registry::ProjectRegistry::new();
         engine.runtime_buffers_mut().insert(WithRevision::new(
             Revision::new(1),
             RuntimeBuffer::output_channels_u16(3, alloc::vec![0, 1, 2, 3, 4, 5]),
         ));
 
-        let response = engine.read_project(ProjectReadRequest::default_debug(None));
+        let response = engine.read_project(&registry, ProjectReadRequest::default_debug(None));
 
         assert_eq!(response.results.len(), 4);
         assert!(matches!(response.results[0], ProjectReadResult::Shapes(_)));
@@ -85,6 +89,7 @@ mod tests {
     #[test]
     fn default_debug_shape_read_is_complete_without_limit() {
         let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let registry = lpc_registry::ProjectRegistry::new();
         let dynamic_ids = (0..70)
             .map(|index| SlotShapeId::new(0x7000_0000 + index))
             .collect::<alloc::vec::Vec<_>>();
@@ -95,7 +100,7 @@ mod tests {
                 .expect("dynamic test shape");
         }
 
-        let response = engine.read_project(ProjectReadRequest::default_debug(None));
+        let response = engine.read_project(&registry, ProjectReadRequest::default_debug(None));
 
         let ProjectReadResult::Shapes(shapes) = &response.results[0] else {
             panic!("first result should be shapes");
@@ -117,7 +122,7 @@ mod tests {
 
         let response = h
             .engine
-            .read_project(ProjectReadRequest::default_debug(None));
+            .read_project(&h.registry, ProjectReadRequest::default_debug(None));
 
         let ProjectReadResult::Nodes(nodes) = &response.results[1] else {
             panic!("second result should be nodes");
@@ -135,13 +140,14 @@ mod tests {
     #[test]
     fn resource_summary_reports_owning_node() {
         let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let registry = lpc_registry::ProjectRegistry::new();
         let owner = lpc_model::NodeId::new(7);
         let buffer_id = engine.runtime_buffers_mut().insert_owned(
             owner,
             WithRevision::new(Revision::new(1), RuntimeBuffer::raw(alloc::vec![1])),
         );
 
-        let response = engine.read_project(ProjectReadRequest::default_debug(None));
+        let response = engine.read_project(&registry, ProjectReadRequest::default_debug(None));
 
         let ProjectReadResult::Resources(resources) = &response.results[2] else {
             panic!("third result should be resources");
@@ -159,6 +165,7 @@ mod tests {
     #[test]
     fn resource_payload_read_all_includes_buffer_bytes() {
         let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let registry = lpc_registry::ProjectRegistry::new();
         engine.runtime_buffers_mut().insert(WithRevision::new(
             Revision::new(1),
             RuntimeBuffer::raw(alloc::vec![1, 2, 3]),
@@ -169,7 +176,7 @@ mod tests {
             level: lpc_wire::ReadLevel::Detail,
             payloads: ResourcePayloadRead::All,
         });
-        let response = engine.read_project(request);
+        let response = engine.read_project(&registry, request);
 
         let ProjectReadResult::Resources(resources) = &response.results[2] else {
             panic!("third result should be resources");

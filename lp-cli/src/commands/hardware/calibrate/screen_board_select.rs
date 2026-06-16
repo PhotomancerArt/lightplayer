@@ -1,6 +1,6 @@
 use anyhow::{Result, bail};
 use dialoguer::Select;
-use lpc_shared::hardware::HardwareTarget;
+use lpc_hardware::HardwareTarget;
 use std::io::{IsTerminal, stdin};
 
 use crate::commands::hardware::manifest::board_manifest_store::BoardManifestStore;

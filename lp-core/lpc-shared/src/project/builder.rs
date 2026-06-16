@@ -1,17 +1,18 @@
 //! Project builder for creating artifact-authored test projects with a fluent API.
 
-use alloc::{collections::BTreeMap, format, rc::Rc, string::String, vec, vec::Vec};
+use alloc::{format, rc::Rc, string::String, vec, vec::Vec};
 use core::cell::RefCell;
+use lp_collection::VecMap;
 use lpc_model::GlslOpts;
 use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec, RingOrder};
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
-use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef, ShaderSource};
+use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
 use lpc_model::nodes::texture::TextureDef;
 use lpc_model::{
-    Affine2d, Affine2dSlot, ArtifactLocator, AsLpPath, BindingDef, BindingDefs, BindingRef,
+    Affine2d, Affine2dSlot, ArtifactSpec, AsLpPath, AssetSlot, BindingDef, BindingDefs, BindingRef,
     BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode, FixtureSamplingConfig,
-    HardwareEndpointSpec, MapSlot, NodeDef, NodeInvocation, OptionSlot, ProjectDef, Ratio,
-    RatioSlot, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry, ValueSlot,
+    HwEndpointSpec, MapSlot, NodeDef, NodeInvocation, NodeInvocationSlot, OptionSlot, ProjectDef,
+    Ratio, RatioSlot, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry, ValueSlot,
 };
 use lpfs::LpFs;
 use lpfs::lp_path::LpPathBuf;
@@ -56,7 +57,7 @@ pub struct ShaderBuilder {
 
 /// Builder for output nodes
 pub struct OutputBuilder {
-    endpoint: HardwareEndpointSpec,
+    endpoint: HwEndpointSpec,
     options: OutputDriverOptionsConfig,
 }
 
@@ -176,12 +177,14 @@ impl ProjectBuilder {
     /// Build completes - writes project.toml and all node artifact files.
     pub fn build(self) {
         let registry = slot_shape_registry();
-        let mut nodes = BTreeMap::new();
+        let mut nodes = VecMap::new();
         for (name, path) in &self.nodes {
             let relative_path = path.as_str().trim_start_matches('/');
             nodes.insert(
                 name.clone(),
-                NodeInvocation::new(ArtifactLocator::path(format!("./{relative_path}"))),
+                NodeInvocationSlot::new(NodeInvocation::new(ArtifactSpec::path(format!(
+                    "./{relative_path}"
+                )))),
             );
         }
         let project = ProjectDef {
@@ -271,7 +274,7 @@ impl ShaderBuilder {
         let source_file = format!("{node_name}.glsl");
 
         let config = ShaderDef {
-            source: EnumSlot::new(ShaderSource::path(source_file)),
+            source: AssetSlot::path(source_file),
             render_order: RenderOrderSlot::new(RenderOrder(self.render_order)),
             bindings: bus_output_binding_defs("visual.out"),
             glsl_opts: GlslOpts::default(),
@@ -296,14 +299,14 @@ impl ShaderBuilder {
 
 impl OutputBuilder {
     /// Set the hardware endpoint spec.
-    pub fn endpoint(mut self, endpoint: HardwareEndpointSpec) -> Self {
+    pub fn endpoint(mut self, endpoint: HwEndpointSpec) -> Self {
         self.endpoint = endpoint;
         self
     }
 
     /// Set the hardware endpoint spec from text.
     pub fn endpoint_str(mut self, endpoint: &str) -> Self {
-        self.endpoint = HardwareEndpointSpec::parse(endpoint).expect("valid output endpoint spec");
+        self.endpoint = HwEndpointSpec::parse(endpoint).expect("valid output endpoint spec");
         self
     }
 
@@ -423,7 +426,7 @@ fn bus_output_binding_defs(slot: &str) -> BindingDefs {
 }
 
 fn default_visual_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
-    let mut slots = BTreeMap::new();
+    let mut slots = VecMap::new();
     slots.insert(
         String::from("time"),
         ShaderSlotDef::value_f32("Time", "Project clock time in seconds", 0.0, None),
@@ -432,7 +435,7 @@ fn default_visual_consumed_slots() -> MapSlot<String, ShaderSlotDef> {
 }
 
 fn fixture_binding_defs() -> BindingDefs {
-    let mut entries = BTreeMap::new();
+    let mut entries = VecMap::new();
     entries.insert(
         String::from("input"),
         BindingDef::source(BindingRef::Bus(BusSlotRef::new(
@@ -449,13 +452,13 @@ fn fixture_binding_defs() -> BindingDefs {
 }
 
 fn single_binding_defs(slot: &str, binding: BindingDef) -> BindingDefs {
-    let mut entries = BTreeMap::new();
+    let mut entries = VecMap::new();
     entries.insert(String::from(slot), binding);
     BindingDefs::new(entries)
 }
 
 fn default_mapping() -> MappingConfig {
-    let mut ring_lamp_counts = BTreeMap::new();
+    let mut ring_lamp_counts = VecMap::new();
     ring_lamp_counts.insert(0, ValueSlot::new(1));
 
     MappingConfig::path_points_vec(
@@ -486,6 +489,7 @@ fn affine2d_from_matrix(matrix: [[f32; 4]; 4]) -> Affine2d {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lp_collection::VecMap;
     use lpc_model::NodeDef;
     use lpfs::LpFsMemory;
 

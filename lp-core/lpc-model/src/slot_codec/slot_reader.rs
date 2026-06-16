@@ -1,7 +1,7 @@
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use base64::Engine;
 
@@ -129,6 +129,18 @@ where
     fn push_back(&mut self, event: SyntaxEvent) {
         debug_assert!(self.replay.is_none());
         self.replay = Some(event);
+    }
+
+    pub(crate) fn peek_event(&mut self) -> Result<Option<SyntaxEvent>, SyntaxError> {
+        if let Some(event) = self.replay.take() {
+            self.replay = Some(event.clone());
+            return Ok(Some(event));
+        }
+        let event = self.source.next_event()?;
+        if let Some(ref evt) = event {
+            self.replay = Some(evt.clone());
+        }
+        Ok(event)
     }
 
     fn skip_value(&mut self) -> Result<(), SyntaxError> {
@@ -446,8 +458,8 @@ where
     pub fn string_key_map<T>(
         self,
         mut read_value: impl FnMut(ValueReader<'_, 'a, S>) -> Result<T, SyntaxError>,
-    ) -> Result<BTreeMap<String, T>, SyntaxError> {
-        let mut entries = BTreeMap::new();
+    ) -> Result<VecMap<String, T>, SyntaxError> {
+        let mut entries = VecMap::new();
         let mut object = self.object()?;
         while let Some(mut prop) = object.next_prop()? {
             let key = prop.name().to_string();
@@ -460,8 +472,8 @@ where
     pub fn u32_key_map<T>(
         self,
         mut read_value: impl FnMut(ValueReader<'_, 'a, S>) -> Result<T, SyntaxError>,
-    ) -> Result<BTreeMap<u32, T>, SyntaxError> {
-        let mut entries = BTreeMap::new();
+    ) -> Result<VecMap<u32, T>, SyntaxError> {
+        let mut entries = VecMap::new();
         let mut object = self.object()?;
         while let Some(mut prop) = object.next_prop()? {
             let key = match prop.name().parse::<u32>() {
@@ -512,6 +524,11 @@ where
             Some(event) => Err(self.reader.error_at(event.span(), "expected bool")),
             None => Err(self.reader.error("expected bool, found end of input")),
         }
+    }
+
+    pub fn is_string_scalar(&mut self) -> Result<bool, SyntaxError> {
+        let event = self.reader.peek_event()?;
+        Ok(matches!(event, Some(SyntaxEvent::StringChunk { .. })))
     }
 
     pub fn string(self) -> Result<String, SyntaxError> {

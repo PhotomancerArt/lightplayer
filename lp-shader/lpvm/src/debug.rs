@@ -6,10 +6,10 @@
 //! - rv32c/rv32n: disasm only
 //! - jit/wasm: (not available)
 
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 /// Per-function compilation debug info.
 #[derive(Clone, Debug, Default)]
@@ -19,7 +19,7 @@ pub struct FunctionDebugInfo {
     /// Static instruction count (from disassembly).
     pub inst_count: usize,
     /// Named sections. Standard keys: "interleaved", "disasm", "vinst", "liveness", "region".
-    pub sections: BTreeMap<String, String>,
+    pub sections: VecMap<String, String>,
 }
 
 impl FunctionDebugInfo {
@@ -28,7 +28,7 @@ impl FunctionDebugInfo {
         Self {
             name: name.into(),
             inst_count: 0,
-            sections: BTreeMap::new(),
+            sections: VecMap::new(),
         }
     }
 
@@ -39,7 +39,7 @@ impl FunctionDebugInfo {
     }
 
     /// Add multiple sections from a map.
-    pub fn with_sections(mut self, sections: BTreeMap<String, String>) -> Self {
+    pub fn with_sections(mut self, sections: VecMap<String, String>) -> Self {
         self.sections = sections;
         self
     }
@@ -55,14 +55,14 @@ impl FunctionDebugInfo {
 #[derive(Clone, Debug, Default)]
 pub struct ModuleDebugInfo {
     /// Function name → debug info.
-    pub functions: BTreeMap<String, FunctionDebugInfo>,
+    pub functions: VecMap<String, FunctionDebugInfo>,
 }
 
 impl ModuleDebugInfo {
     /// Create empty ModuleDebugInfo.
     pub fn new() -> Self {
         Self {
-            functions: BTreeMap::new(),
+            functions: VecMap::new(),
         }
     }
 
@@ -216,7 +216,7 @@ mod tests {
         let help = module.help_text("test.glsl", "rv32n");
         assert!(help.contains("lp-cli shader-debug -t rv32n test.glsl --fn foo"));
         assert!(help.contains("lp-cli shader-debug -t rv32n test.glsl --fn bar"));
-        // BTreeMap iterates in sorted order, so "bar" comes before "foo"
+        // VecMap iterates in sorted order, so "bar" comes before "foo"
         assert!(help.contains("Available functions: bar, foo"));
     }
 

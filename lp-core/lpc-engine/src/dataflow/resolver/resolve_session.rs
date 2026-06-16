@@ -1,8 +1,8 @@
 //! [`EngineSession`] — per-frame demand resolution and engine-dispatched work.
 
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use crate::dataflow::binding::{BindingEntry, BindingRef, BindingSource};
 use crate::dataflow::resolver::production::{Production, ProductionSource};
@@ -286,7 +286,7 @@ fn merge_maps_by_key(
     trace: &ResolveTrace,
 ) -> Result<Production, SessionResolveError> {
     let mut keys_revision = Revision::default();
-    let mut entries = BTreeMap::new();
+    let mut entries = VecMap::new();
     for input in inputs {
         let SlotData::Map(map) = input.data().clone() else {
             return Err(SessionResolveError::other(format!(
@@ -340,8 +340,8 @@ mod tests {
     use crate::dataflow::binding::BindingTarget;
     use crate::dataflow::resolver::resolve_trace::ResolveLogLevel;
     use crate::dataflow::resolver::resolve_trace::ResolveTraceEvent;
-    use alloc::collections::BTreeMap;
     use alloc::string::String;
+    use lp_collection::VecMap;
     use lpc_model::Kind;
     use lpc_model::{ChannelName, LpValue, SlotMapKey, WithRevision};
     use lps_shared::LpsValueF32;
@@ -759,7 +759,7 @@ mod tests {
         }
     }
 
-    fn map_data(revision: Revision, pairs: BTreeMap<u32, u32>) -> SlotData {
+    fn map_data(revision: Revision, pairs: VecMap<u32, u32>) -> SlotData {
         SlotData::Map(SlotMapDyn::with_revision(
             revision,
             pairs

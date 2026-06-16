@@ -84,7 +84,7 @@ pub fn run_error_test(
 
 fn collect_glsl_error_test_diagnostics(
     user_source: &str,
-    texture_specs: &std::collections::BTreeMap<String, lps_shared::TextureBindingSpec>,
+    texture_specs: &crate::parse::test_type::TextureSpecs,
     options: &CompileOptions,
 ) -> Result<(), Vec<GlslError>> {
     let prep = lps_frontend::prepared_glsl_for_compile(user_source);

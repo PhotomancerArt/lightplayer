@@ -1,7 +1,12 @@
-pub mod artifact_loc;
+pub mod artifact_location;
+pub mod artifact_location_error;
 pub mod artifact_read_root;
+pub mod artifact_spec;
 pub mod src_artifact_lib_ref;
 
-pub use artifact_loc::ArtifactLocator;
+pub use crate::project::overlay_commit::artifact_change_summary::ArtifactChangeSummary;
+pub use artifact_location::ArtifactLocation;
+pub use artifact_location_error::ArtifactLocationError;
 pub use artifact_read_root::ArtifactReadRoot;
+pub use artifact_spec::ArtifactSpec;
 pub use src_artifact_lib_ref::SrcArtifactLibRef;

@@ -1,0 +1,30 @@
+//! Errors from applying edits to the slot overlay.
+
+use alloc::string::String;
+use core::fmt;
+
+use crate::ArtifactLocation;
+
+/// Failure applying pending overlay edits.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EditApplyError {
+    InvalidPath { message: String },
+    UnknownArtifact { location: ArtifactLocation },
+    Parse { message: String },
+    SlotMutation { message: String },
+    Serialize { message: String },
+}
+
+impl fmt::Display for EditApplyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidPath { message } => write!(f, "invalid path: {message}"),
+            Self::UnknownArtifact { location } => {
+                write!(f, "unknown artifact {}", location.to_uri())
+            }
+            Self::Parse { message } => write!(f, "parse error: {message}"),
+            Self::SlotMutation { message } => write!(f, "slot mutation error: {message}"),
+            Self::Serialize { message } => write!(f, "serialize error: {message}"),
+        }
+    }
+}

@@ -1,7 +1,7 @@
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use lps_shared::{
     LpsType, ParamQualifier, TextureBindingSpec, TextureShapeHint, TextureStorageFormat,
@@ -36,16 +36,16 @@ use super::{
 pub(super) struct TypeCtx<'a> {
     params: &'a [HirParam],
     functions: &'a [FunctionSig],
-    uniforms: &'a BTreeMap<String, UniformInfo>,
-    globals: &'a BTreeMap<String, GlobalConst>,
-    global_vars: &'a BTreeMap<String, GlobalInfo>,
+    uniforms: &'a VecMap<String, UniformInfo>,
+    globals: &'a VecMap<String, GlobalConst>,
+    global_vars: &'a VecMap<String, GlobalInfo>,
     structs: &'a StructTypes,
     array_size_consts: &'a ArraySizeConsts,
     imports: &'a mut ImportRegistry,
-    texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
+    texture_specs: &'a VecMap<String, TextureBindingSpec>,
     pub(super) locals: Vec<HirLocal>,
     pub(super) arena: HirArena,
-    scopes: Vec<BTreeMap<String, usize>>,
+    scopes: Vec<VecMap<String, usize>>,
     loop_depth: usize,
 }
 
@@ -53,13 +53,13 @@ impl<'a> TypeCtx<'a> {
     pub(super) fn new(
         function: &'a FunctionSig,
         functions: &'a [FunctionSig],
-        uniforms: &'a BTreeMap<String, UniformInfo>,
-        globals: &'a BTreeMap<String, GlobalConst>,
-        global_vars: &'a BTreeMap<String, GlobalInfo>,
+        uniforms: &'a VecMap<String, UniformInfo>,
+        globals: &'a VecMap<String, GlobalConst>,
+        global_vars: &'a VecMap<String, GlobalInfo>,
         structs: &'a StructTypes,
         array_size_consts: &'a ArraySizeConsts,
         imports: &'a mut ImportRegistry,
-        texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
+        texture_specs: &'a VecMap<String, TextureBindingSpec>,
     ) -> Self {
         Self {
             params: &function.params,
@@ -73,20 +73,20 @@ impl<'a> TypeCtx<'a> {
             texture_specs,
             locals: Vec::new(),
             arena: HirArena::default(),
-            scopes: alloc::vec![BTreeMap::new()],
+            scopes: alloc::vec![VecMap::new()],
             loop_depth: 0,
         }
     }
 
     pub(super) fn global_const(
         functions: &'a [FunctionSig],
-        uniforms: &'a BTreeMap<String, UniformInfo>,
-        globals: &'a BTreeMap<String, GlobalConst>,
-        global_vars: &'a BTreeMap<String, GlobalInfo>,
+        uniforms: &'a VecMap<String, UniformInfo>,
+        globals: &'a VecMap<String, GlobalConst>,
+        global_vars: &'a VecMap<String, GlobalInfo>,
         structs: &'a StructTypes,
         array_size_consts: &'a ArraySizeConsts,
         imports: &'a mut ImportRegistry,
-        texture_specs: &'a BTreeMap<String, TextureBindingSpec>,
+        texture_specs: &'a VecMap<String, TextureBindingSpec>,
     ) -> Self {
         Self {
             params: &[],
@@ -100,7 +100,7 @@ impl<'a> TypeCtx<'a> {
             texture_specs,
             locals: Vec::new(),
             arena: HirArena::default(),
-            scopes: alloc::vec![BTreeMap::new()],
+            scopes: alloc::vec![VecMap::new()],
             loop_depth: 0,
         }
     }
@@ -209,10 +209,10 @@ impl<'a> TypeCtx<'a> {
             } => {
                 let condition = self.type_expr(condition)?;
                 let condition = self.coerce_expr(condition, &LpsType::Bool)?;
-                self.scopes.push(BTreeMap::new());
+                self.scopes.push(VecMap::new());
                 let accept = self.type_statements(accept, return_ty)?;
                 self.scopes.pop();
-                self.scopes.push(BTreeMap::new());
+                self.scopes.push(VecMap::new());
                 let reject = self.type_statements(reject, return_ty)?;
                 self.scopes.pop();
                 Ok(alloc::vec![HirStmt::If {
@@ -228,7 +228,7 @@ impl<'a> TypeCtx<'a> {
                 body,
                 span,
             } => {
-                self.scopes.push(BTreeMap::new());
+                self.scopes.push(VecMap::new());
                 let init = self.type_statements(init, return_ty)?;
                 let condition = if let Some(condition) = condition {
                     let condition = self.type_expr(condition)?;
@@ -238,7 +238,7 @@ impl<'a> TypeCtx<'a> {
                         .push_expr(*span, LpsType::Bool, HirExprKind::BoolLiteral(true))
                 };
                 self.loop_depth += 1;
-                self.scopes.push(BTreeMap::new());
+                self.scopes.push(VecMap::new());
                 let body = self.type_statements(body, return_ty)?;
                 self.scopes.pop();
                 let continuing = self.type_statements(continuing, return_ty)?;
@@ -259,7 +259,7 @@ impl<'a> TypeCtx<'a> {
                 let condition = self.type_expr(condition)?;
                 let condition = self.coerce_expr(condition, &LpsType::Bool)?;
                 self.loop_depth += 1;
-                self.scopes.push(BTreeMap::new());
+                self.scopes.push(VecMap::new());
                 let body = self.type_statements(body, return_ty)?;
                 self.scopes.pop();
                 self.loop_depth -= 1;
@@ -269,7 +269,7 @@ impl<'a> TypeCtx<'a> {
                 body, condition, ..
             } => {
                 self.loop_depth += 1;
-                self.scopes.push(BTreeMap::new());
+                self.scopes.push(VecMap::new());
                 let body = self.type_statements(body, return_ty)?;
                 self.scopes.pop();
                 self.loop_depth -= 1;
@@ -290,7 +290,7 @@ impl<'a> TypeCtx<'a> {
                 Ok(alloc::vec![HirStmt::Continue])
             }
             ParsedStmt::Block { statements, .. } => {
-                self.scopes.push(BTreeMap::new());
+                self.scopes.push(VecMap::new());
                 let statements = self.type_statements(statements, return_ty)?;
                 self.scopes.pop();
                 Ok(statements)

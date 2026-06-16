@@ -151,8 +151,8 @@ fn ensure_u32_map_key(slot: &ShaderSlotDef) -> Result<(), ComputeDescError> {
 mod tests {
     use super::*;
     use alloc::boxed::Box;
-    use alloc::collections::BTreeMap;
     use alloc::format;
+    use lp_collection::VecMap;
 
     use lpc_model::{
         BindingDefs, CONTROL_MESSAGE_SHAPE_NAME, MapSlot, ShaderSlotMappingDef, ValueSlot,
@@ -166,13 +166,13 @@ mod tests {
     fn compute_def_header_and_runtime_descriptor_execute() {
         let registry = SlotShapeRegistry::default();
 
-        let mut consumed = BTreeMap::new();
+        let mut consumed = VecMap::new();
         consumed.insert(
             String::from("time"),
             ShaderSlotDef::value_f32("Time", "Seconds", 0.0, None),
         );
 
-        let mut produced = BTreeMap::new();
+        let mut produced = VecMap::new();
         produced.insert(
             String::from("emitters"),
             ShaderSlotDef::map_u32_native(
@@ -182,7 +182,7 @@ mod tests {
         );
 
         let def = ComputeShaderDef {
-            source: lpc_model::EnumSlot::new(lpc_model::ShaderSource::path("emitters.glsl")),
+            source: lpc_model::AssetSlot::path("emitters.glsl"),
             bindings: BindingDefs::default(),
             glsl_opts: lpc_model::GlslOpts::default(),
             consumed_slots: MapSlot::new(consumed),
@@ -236,7 +236,7 @@ void tick() {{
     fn compute_desc_accepts_consumed_sentinel_maps() {
         let registry = SlotShapeRegistry::default();
 
-        let mut consumed = BTreeMap::new();
+        let mut consumed = VecMap::new();
         consumed.insert(
             String::from("events"),
             ShaderSlotDef::map_u32_native(
@@ -245,7 +245,7 @@ void tick() {{
             ),
         );
 
-        let mut produced = BTreeMap::new();
+        let mut produced = VecMap::new();
         produced.insert(
             String::from("phase"),
             ShaderSlotDef {
@@ -262,7 +262,7 @@ void tick() {{
         );
 
         let def = ComputeShaderDef {
-            source: lpc_model::EnumSlot::new(lpc_model::ShaderSource::path("events.glsl")),
+            source: lpc_model::AssetSlot::path("events.glsl"),
             bindings: BindingDefs::default(),
             glsl_opts: lpc_model::GlslOpts::default(),
             consumed_slots: MapSlot::new(consumed),

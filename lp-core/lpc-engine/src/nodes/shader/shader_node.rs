@@ -6,11 +6,13 @@ use alloc::string::{String, ToString};
 use alloc::vec::Vec;
 
 use lpc_model::{
-    AddSubMode, DivMode, GlslOpts, MapSlot, MulMode, NodeId, ShaderMapKeyDef, ShaderSlotDef,
-    ShaderSlotKind, ShaderSlotMappingKind, ShaderState, ShaderValueShapeRef, SlotAccess, SlotPath,
-    SlotShapeRegistry, SlotShapeRegistryError, StaticSlotShape, ValueSlot,
+    AddSubMode, AssetLocation, DivMode, GlslOpts, MapSlot, MulMode, NodeId, NodeRuntimeStatus,
+    Revision, ShaderMapKeyDef, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingKind, ShaderState,
+    ShaderValueShapeRef, SlotAccess, SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
+    StaticSlotShape, ValueSlot,
 };
 use lpc_model::{ShaderDef, SlotAccessor};
+use lpc_registry::AssetText;
 use lps_shared::LpsValueF32;
 use lps_shared::TextureBuffer;
 
@@ -19,8 +21,8 @@ use crate::gfx::uniforms::{VisualUniform, build_uniforms};
 use crate::gfx::{LpShader, ShaderCompileOptions, ShaderCompileStats};
 use crate::node::catch_node_panic::catch_panic;
 use crate::node::{
-    DestroyCtx, MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult,
-    RenderContext, RenderNode, RuntimeStateShape, TickContext,
+    AssetRefreshContext, AssetRefreshResult, DestroyCtx, MemPressureCtx, NodeError, NodeRuntime,
+    PressureLevel, ProduceResult, RenderContext, RenderNode, RuntimeStateShape, TickContext,
 };
 use crate::products::visual::{RenderTextureRequest, TextureRenderProduct, VisualProduct};
 use crate::products::visual::{VisualSampleBufferRequest, VisualSampleTarget};
@@ -32,6 +34,8 @@ const SHADER_COMPILE_MAX_ERRORS: usize = 20;
 /// Shader producer wired to the core engine.
 pub struct ShaderNode {
     node_id: NodeId,
+    source_location: AssetLocation,
+    source_revision: Revision,
     glsl_source: String,
     consumed_slots: MapSlot<String, ShaderSlotDef>,
     glsl_opts: GlslOpts,
@@ -43,11 +47,13 @@ pub struct ShaderNode {
 }
 
 impl ShaderNode {
-    pub fn new(node_id: NodeId, def: ShaderDef, glsl_source: String) -> Self {
+    pub fn new(node_id: NodeId, def: ShaderDef, source: AssetText) -> Self {
         let visual_uniforms = default_uniforms(&def.consumed_slots);
         Self {
             node_id,
-            glsl_source,
+            source_location: source.location,
+            source_revision: source.revision,
+            glsl_source: source.text,
             consumed_slots: def.consumed_slots,
             glsl_opts: def.glsl_opts,
             visual_uniforms,
@@ -70,12 +76,19 @@ impl ShaderNode {
         self.compilation_error.as_deref()
     }
 
-    fn ensure_compiled(&mut self, ctx: &RenderContext<'_>) -> Result<(), NodeError> {
+    fn refresh_source(&mut self, source: AssetText) {
+        self.source_revision = source.revision;
+        self.glsl_source = source.text;
+        self.shader = None;
+        self.compilation_error = None;
+    }
+
+    fn ensure_compiled(&mut self, ctx: &RenderContext<'_>) -> Result<bool, NodeError> {
         if self.shader.is_some() {
-            return Ok(());
+            return Ok(true);
         }
-        if let Some(error) = &self.compilation_error {
-            return Err(NodeError::msg(format!("shader compile: {error}")));
+        if self.compilation_error.is_some() {
+            return Ok(false);
         }
 
         let graphics = ctx
@@ -113,10 +126,10 @@ impl ShaderNode {
                     self.node_id,
                     format_compile_stats(compile_elapsed_ms, stats)
                 );
-                Ok(())
+                Ok(true)
             }
             Err(error) => {
-                self.compilation_error = Some(error.clone());
+                self.compilation_error = Some(format!("shader compile: {error}"));
                 self.shader = None;
                 if let Some(compile_elapsed_ms) = compile_elapsed_ms {
                     log::warn!(
@@ -130,7 +143,7 @@ impl ShaderNode {
                         self.node_id
                     );
                 }
-                Err(NodeError::msg(format!("shader compile: {error}")))
+                Ok(false)
             }
         }
     }
@@ -202,6 +215,29 @@ impl NodeRuntime for ShaderNode {
         Ok(ProduceResult::Produced)
     }
 
+    fn refresh_asset(
+        &mut self,
+        location: &AssetLocation,
+        ctx: &mut AssetRefreshContext<'_>,
+    ) -> Result<AssetRefreshResult, NodeError> {
+        if location != &self.source_location {
+            return Ok(AssetRefreshResult::Unused);
+        }
+
+        let source = match ctx.read_asset_text_if_changed(location, self.source_revision) {
+            Ok(Some(source)) => source,
+            Ok(None) => return Ok(AssetRefreshResult::Unchanged),
+            Err(err) => {
+                self.shader = None;
+                self.compilation_error = Some(format!("read shader source: {err:?}"));
+                return Ok(AssetRefreshResult::Refreshed);
+            }
+        };
+
+        self.refresh_source(source);
+        Ok(AssetRefreshResult::Refreshed)
+    }
+
     fn destroy(&mut self, _ctx: &mut DestroyCtx<'_>) -> Result<(), NodeError> {
         Ok(())
     }
@@ -212,6 +248,12 @@ impl NodeRuntime for ShaderNode {
         _ctx: &mut MemPressureCtx<'_>,
     ) -> Result<(), NodeError> {
         Ok(())
+    }
+
+    fn runtime_status(&self) -> Option<NodeRuntimeStatus> {
+        self.compilation_error
+            .as_ref()
+            .map(|error| NodeRuntimeStatus::Error(error.clone()))
     }
 
     fn runtime_state_slots(&self) -> Option<&dyn SlotAccess> {
@@ -493,7 +535,17 @@ impl RenderNode for ShaderNode {
             )));
         }
 
-        self.ensure_compiled(ctx)?;
+        if !self.ensure_compiled(ctx)? {
+            log::warn!(
+                "[shader-node] rendering black fallback texture (node={:?}): {}",
+                self.node_id,
+                self.compilation_error
+                    .as_deref()
+                    .unwrap_or("shader not compiled")
+            );
+            target.data_mut().fill(0);
+            return Ok(());
+        }
         let uniforms = build_uniforms(request.width, request.height, &self.visual_uniforms);
         let shader = self
             .shader
@@ -523,7 +575,17 @@ impl RenderNode for ShaderNode {
             )));
         }
 
-        self.ensure_compiled(ctx)?;
+        if !self.ensure_compiled(ctx)? {
+            log::warn!(
+                "[shader-node] sampling black fallback (node={:?}): {}",
+                self.node_id,
+                self.compilation_error
+                    .as_deref()
+                    .unwrap_or("shader not compiled")
+            );
+            target.samples.data_mut().fill(0);
+            return Ok(());
+        }
         let uniforms = build_uniforms(
             request.output_width,
             request.output_height,
@@ -616,14 +678,13 @@ pub(super) fn map_model_q32_options(opts: &GlslOpts) -> lps_q32::q32_options::Q3
 
 #[cfg(test)]
 mod tests {
-    use alloc::collections::BTreeMap;
     use alloc::string::String;
     use alloc::sync::Arc;
     use alloc::vec;
     use core::sync::atomic::{AtomicU32, Ordering};
+    use lp_collection::VecMap;
 
     use super::*;
-    use crate::artifact::ArtifactLocation;
     use crate::dataflow::resolver::QueryKey;
     use crate::dataflow::resolver::ResolveLogLevel;
     use crate::engine::Engine;
@@ -636,15 +697,16 @@ mod tests {
         VisualSampleTarget, texel_center_to_uv_q16,
     };
     use lpc_model::{
-        ArtifactLocator, MapSlot, NodeDef, NodeInvocation, Revision, SlotDataAccess,
-        StaticSlotShape, TextureDef, TreePath,
+        ArtifactLocation, ArtifactSpec, AssetContentType, MapSlot, NodeDef, NodeInvocation,
+        NodeRuntimeStatus, Revision, SlotDataAccess, StaticSlotShape, TextureDef, TreePath,
     };
+    use lpc_registry::{AssetText, ProjectRegistry};
     use lpc_wire::{WireChildKind, WireSlotIndex};
 
     const DEMO_GLSL: &str = "layout(binding = 0) uniform vec2 outputSize; layout(binding = 1) uniform float time; vec4 render(vec2 pos) { return vec4(mod(time, 1.0), 0.0, 0.0, 1.0); }";
 
     fn shader_def_with_time() -> ShaderDef {
-        let mut consumed_slots = BTreeMap::new();
+        let mut consumed_slots = VecMap::new();
         consumed_slots.insert(
             String::from("time"),
             ShaderSlotDef::value_f32("Time", "Seconds", 0.5, None),
@@ -655,31 +717,25 @@ mod tests {
         }
     }
 
-    fn build_texture_and_shader_engine() -> (Engine, NodeId, NodeId, VisualProduct) {
+    fn shader_asset_text(source: impl Into<String>, revision: Revision) -> AssetText {
+        AssetText {
+            location: AssetLocation::artifact(ArtifactLocation::file("/shader.glsl")),
+            content_type: AssetContentType::ShaderSource,
+            revision,
+            text: source.into(),
+            diagnostic_name: String::from("/shader.glsl"),
+        }
+    }
+
+    fn build_texture_and_shader_engine() -> (Engine, ProjectRegistry, NodeId, NodeId, VisualProduct)
+    {
         let mut engine = Engine::new(TreePath::parse("/show.t").expect("path"));
+        let mut registry = ProjectRegistry::new();
         engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
         let frame = Revision::new(1);
         let root = engine.tree().root();
-        let tex_invocation = NodeInvocation::new(ArtifactLocator::path("tex.toml"));
-        let tex_artifact = engine
-            .artifacts_mut()
-            .acquire_location(ArtifactLocation::file("tex.toml"), frame);
-        engine
-            .artifacts_mut()
-            .load_with(&tex_artifact, frame, |_| {
-                Ok(NodeDef::Texture(TextureDef::new(8, 8)))
-            })
-            .expect("load texture artifact");
-        let shader_invocation = NodeInvocation::new(ArtifactLocator::path("shader.toml"));
-        let shader_artifact = engine
-            .artifacts_mut()
-            .acquire_location(ArtifactLocation::file("shader.toml"), frame);
-        engine
-            .artifacts_mut()
-            .load_with(&shader_artifact, frame, |_| {
-                Ok(NodeDef::Shader(shader_def_with_time()))
-            })
-            .expect("load shader artifact");
+        let tex_invocation = NodeInvocation::new(ArtifactSpec::path("tex.toml"));
+        let shader_invocation = NodeInvocation::new(ArtifactSpec::path("shader.toml"));
 
         let tex_id = engine
             .tree_mut()
@@ -691,7 +747,6 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 tex_invocation,
-                tex_artifact,
                 frame,
             )
             .expect("texture");
@@ -711,24 +766,38 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 shader_invocation,
-                shader_artifact,
                 frame,
             )
             .expect("shader");
 
-        let sh = ShaderNode::new(sh_id, shader_def_with_time(), String::from(DEMO_GLSL));
+        let shader_def = shader_def_with_time();
+        engine
+            .load_test_node_defs(
+                &mut registry,
+                &[
+                    (tex_id, NodeDef::Texture(TextureDef::new(8, 8))),
+                    (sh_id, NodeDef::Shader(shader_def.clone())),
+                ],
+                frame,
+            )
+            .expect("load test defs");
+        let sh = ShaderNode::new(sh_id, shader_def, shader_asset_text(DEMO_GLSL, frame));
         engine
             .attach_runtime_node(sh_id, Box::new(sh), frame)
             .expect("attach shader");
 
         let rid = VisualProduct::new(sh_id, 0);
 
-        (engine, tex_id, sh_id, rid)
+        (engine, registry, tex_id, sh_id, rid)
     }
 
     #[test]
     fn shader_render_output_is_on_runtime_state_slot_root() {
-        let node = ShaderNode::new(NodeId::new(1), ShaderDef::default(), String::new());
+        let node = ShaderNode::new(
+            NodeId::new(1),
+            ShaderDef::default(),
+            shader_asset_text("", Revision::new(1)),
+        );
 
         let state = node.runtime_state_slots().expect("shader state slots");
         assert_eq!(state.shape_id(), ShaderState::SHAPE_ID);
@@ -747,14 +816,14 @@ mod tests {
 
     #[test]
     fn shader_core_produces_visual_product_value() {
-        let (mut engine, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
-        engine.tick(1000).expect("tick");
+        let (mut engine, registry, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
+        engine.tick(&registry, 1000).expect("tick");
 
         let q = QueryKey::ProducedSlot {
             node: sh_id,
             slot: shader_output_path(),
         };
-        let prod = resolve_with_engine_host(&mut engine, q, ResolveLogLevel::Off)
+        let prod = resolve_with_engine_host(&mut engine, &registry, q, ResolveLogLevel::Off)
             .expect("resolve")
             .0;
         let got_id = match prod.value_leaf().expect("value").get() {
@@ -766,17 +835,18 @@ mod tests {
 
     #[test]
     fn shader_core_visual_product_is_sampleable_red_channel() {
-        let (mut engine, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
-        engine.tick(500).expect("tick");
+        let (mut engine, registry, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
+        engine.tick(&registry, 500).expect("tick");
 
         let q = QueryKey::ProducedSlot {
             node: sh_id,
             slot: shader_output_path(),
         };
-        resolve_with_engine_host(&mut engine, q, ResolveLogLevel::Off).expect("resolve");
+        resolve_with_engine_host(&mut engine, &registry, q, ResolveLogLevel::Off).expect("resolve");
 
         let texture = engine
             .render_texture_for_test(
+                &registry,
                 rid,
                 &crate::products::visual::RenderTextureRequest {
                     width: 8,
@@ -805,7 +875,11 @@ mod tests {
             "layout(binding = 0) uniform vec2 outputSize;\n\
              vec4 render(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
         );
-        let mut node = ShaderNode::new(NodeId::new(1), ShaderDef::default(), source);
+        let mut node = ShaderNode::new(
+            NodeId::new(1),
+            ShaderDef::default(),
+            shader_asset_text(source, Revision::new(1)),
+        );
         let mut ctx = crate::node::RenderContext::new(
             NodeId::new(1),
             Revision::new(1),
@@ -847,7 +921,11 @@ mod tests {
             "layout(binding = 0) uniform vec2 outputSize;\n\
              vec4 render(vec2 pos) { return vec4(pos.x / outputSize.x, pos.y / outputSize.y, 0.0, 1.0); }",
         );
-        let mut node = ShaderNode::new(NodeId::new(1), ShaderDef::default(), source);
+        let mut node = ShaderNode::new(
+            NodeId::new(1),
+            ShaderDef::default(),
+            shader_asset_text(source, Revision::new(1)),
+        );
         let mut ctx = crate::node::RenderContext::new(
             NodeId::new(1),
             Revision::new(1),
@@ -911,14 +989,15 @@ mod tests {
 
     #[test]
     fn shader_compile_cache_survives_unchanged_config_across_frames() {
-        let (mut engine, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
+        let (mut engine, registry, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
         let graphics = Arc::new(CountingGraphics::new());
         engine.set_graphics(Some(graphics.clone()));
 
         for time_ms in [500, 600, 700] {
-            engine.tick(time_ms).expect("tick");
+            engine.tick(&registry, time_ms).expect("tick");
             resolve_with_engine_host(
                 &mut engine,
+                &registry,
                 QueryKey::ProducedSlot {
                     node: sh_id,
                     slot: shader_output_path(),
@@ -928,6 +1007,7 @@ mod tests {
             .expect("resolve");
             engine
                 .render_texture_for_test(
+                    &registry,
                     rid,
                     &crate::products::visual::RenderTextureRequest {
                         width: 8,
@@ -942,9 +1022,136 @@ mod tests {
         assert_eq!(graphics.compile_count(), 1);
     }
 
+    #[test]
+    fn shader_compile_failure_sets_runtime_status_error_and_renders_fallback() {
+        let (mut engine, registry, _tex_id, sh_id, rid) = build_texture_and_shader_engine();
+        let graphics = Arc::new(CountingGraphics::failing());
+        engine.set_graphics(Some(graphics.clone()));
+
+        engine.tick(&registry, 500).expect("tick");
+        resolve_with_engine_host(
+            &mut engine,
+            &registry,
+            QueryKey::ProducedSlot {
+                node: sh_id,
+                slot: shader_output_path(),
+            },
+            ResolveLogLevel::Off,
+        )
+        .expect("resolve");
+        let texture = engine
+            .render_texture_for_test(
+                &registry,
+                rid,
+                &crate::products::visual::RenderTextureRequest {
+                    width: 8,
+                    height: 8,
+                    format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+                    time_seconds: 0.5,
+                },
+            )
+            .expect("fallback render");
+
+        assert_eq!(graphics.compile_count(), 1);
+        assert!(
+            texture
+                .try_raw_bytes()
+                .expect("host texture bytes")
+                .iter()
+                .all(|byte| *byte == 0)
+        );
+
+        let entry = engine.tree().get(sh_id).expect("shader entry");
+        assert!(matches!(
+            entry.status.value(),
+            NodeRuntimeStatus::Error(message)
+                if message.contains("shader compile")
+                    && message.contains("test compile failure")
+        ));
+
+        engine
+            .render_texture_for_test(
+                &registry,
+                rid,
+                &crate::products::visual::RenderTextureRequest {
+                    width: 8,
+                    height: 8,
+                    format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+                    time_seconds: 0.6,
+                },
+            )
+            .expect("cached fallback render");
+        assert_eq!(graphics.compile_count(), 1);
+        assert!(matches!(
+            engine
+                .tree()
+                .get(sh_id)
+                .expect("shader entry")
+                .status
+                .value(),
+            NodeRuntimeStatus::Error(message)
+                if message.contains("shader compile")
+                    && message.contains("test compile failure")
+        ));
+    }
+
+    #[test]
+    fn shader_compile_failure_is_cached_and_renders_fallback() {
+        let graphics = Arc::new(CountingGraphics::failing());
+        let mut node = ShaderNode::new(
+            NodeId::new(1),
+            ShaderDef::default(),
+            shader_asset_text(DEMO_GLSL, Revision::new(1)),
+        );
+        let product = VisualProduct::new(NodeId::new(1), 0);
+        let mut ctx = crate::node::RenderContext::new(
+            NodeId::new(1),
+            Revision::new(1),
+            Some(graphics.clone()),
+            None,
+            0.0,
+        );
+        let request = crate::products::visual::RenderTextureRequest {
+            width: 4,
+            height: 4,
+            format: lps_shared::TextureStorageFormat::Rgba16Unorm,
+            time_seconds: 0.0,
+        };
+
+        let mut texture = graphics.alloc_output_buffer(4, 4).expect("texture");
+        for _ in 0..3 {
+            node.render_texture_into(product, &request, &mut texture, &mut ctx)
+                .expect("fallback render");
+        }
+        assert_eq!(graphics.compile_count(), 1);
+        assert!(node.compilation_error().is_some());
+        assert!(texture.data().iter().all(|byte| *byte == 0));
+
+        let mut points = graphics.alloc_sample_points(1).expect("points");
+        points.data_mut().copy_from_slice(&[0, 0]);
+        let mut samples = graphics.alloc_sample_rgba16(1).expect("samples");
+        node.sample_visual_into(
+            product,
+            VisualSampleBufferRequest {
+                points: &mut points,
+                output_width: 4,
+                output_height: 4,
+                time_seconds: 0.0,
+            },
+            VisualSampleTarget {
+                samples: &mut samples,
+            },
+            &mut ctx,
+        )
+        .expect("fallback sample");
+        assert_eq!(graphics.compile_count(), 1);
+        assert!(samples.data().iter().all(|channel| *channel == 0));
+    }
+
     struct CountingGraphics {
         inner: crate::Graphics,
         compile_count: AtomicU32,
+        fail_compile: bool,
     }
 
     impl CountingGraphics {
@@ -952,6 +1159,14 @@ mod tests {
             Self {
                 inner: crate::Graphics::new(),
                 compile_count: AtomicU32::new(0),
+                fail_compile: false,
+            }
+        }
+
+        fn failing() -> Self {
+            Self {
+                fail_compile: true,
+                ..Self::new()
             }
         }
 
@@ -967,6 +1182,11 @@ mod tests {
             _options: &ShaderCompileOptions,
         ) -> Result<Box<dyn LpShader>, Error> {
             self.compile_count.fetch_add(1, Ordering::Relaxed);
+            if self.fail_compile {
+                return Err(Error::Other {
+                    message: String::from("test compile failure"),
+                });
+            }
             Ok(Box::new(CountingShader))
         }
 

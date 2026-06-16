@@ -2,6 +2,7 @@
 
 use alloc::format;
 
+use lpc_registry::ProjectRegistry;
 use lpc_wire::{
     ExplainSlotProbeRequest, ExplainSlotProbeResult, RenderProductProbeRequest,
     RenderProductProbeResult, SlotExplanation,
@@ -15,6 +16,7 @@ use super::Engine;
 impl Engine {
     pub(super) fn read_project_render_product_probe(
         &mut self,
+        registry: &ProjectRegistry,
         request: RenderProductProbeRequest,
     ) -> RenderProductProbeResult {
         let texture_request = RenderTextureRequest {
@@ -25,7 +27,7 @@ impl Engine {
         };
         let revision = self.revision();
         let product = request.product;
-        match self.render_texture_product(product, &texture_request) {
+        match self.render_texture_product(registry, product, &texture_request) {
             Ok(texture) => {
                 let Some(bytes) = texture.try_raw_bytes() else {
                     return RenderProductProbeResult::Error {

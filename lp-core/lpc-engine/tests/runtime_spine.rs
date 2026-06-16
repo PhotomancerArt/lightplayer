@@ -5,7 +5,6 @@ extern crate alloc;
 use alloc::string::String;
 use alloc::vec::Vec;
 
-use lpc_engine::artifact::{ArtifactLocation, ArtifactState, ArtifactStore};
 use lpc_engine::dataflow::binding::{
     BindingEntry, BindingPriority, BindingRef, BindingSource, BindingTarget,
 };
@@ -16,48 +15,19 @@ use lpc_engine::dataflow::resolver::{
 use lpc_engine::node::{
     MemPressureCtx, NodeError, NodeRuntime, PressureLevel, ProduceResult, TickContext,
 };
-use lpc_model::node::node_invocation::NodeInvocation;
+use lpc_engine::{EngineServices, ProjectLoader};
 use lpc_model::{
-    ArtifactLocator, Kind, LpValue, NodeDef, NodeId, Revision, TextureDef, bus::ChannelName,
+    ArtifactLocation, AssetChange, AssetChangeKind, AssetLocation, Kind, LpValue, NodeDefChange,
+    NodeDefChangeKind, NodeId, NodeUseLocation, Revision, SlotPath, TreePath, bus::ChannelName,
 };
+use lpc_registry::ParseCtx;
+use lpfs::{FsEvent, FsEventKind, LpFsMemory, LpPath, LpPathBuf};
 use lps_shared::LpsValueF32;
 
 // --- Tests (concise scenarios; helpers below) ---
 
 #[test]
-fn runtime_spine_artifact_acquire_load_release_idle_content_frame_and_refcount() {
-    let mut mgr = ArtifactStore::new();
-    let location = ArtifactLocation::file("dummy/test.lp");
-    let r = mgr.acquire_location(location, Revision::new(1));
-
-    assert_eq!(mgr.refcount(&r), Some(1));
-    assert_eq!(mgr.content_frame(&r), Some(Revision::new(1)));
-
-    mgr.load_with(&r, Revision::new(20), |location| {
-        let ArtifactLocation::File(path) = location else {
-            panic!("expected file artifact location");
-        };
-        assert_eq!(path.as_str(), "dummy/test.lp");
-        Ok(texture_def(12, 8))
-    })
-    .unwrap();
-
-    assert_eq!(mgr.content_frame(&r), Some(Revision::new(20)));
-    let ent = mgr.entry(&r).expect("entry");
-    assert!(
-        matches!(&ent.state, ArtifactState::Loaded(NodeDef::Texture(payload)) if payload.width() == 12)
-    );
-
-    mgr.release(&r, Revision::new(2)).unwrap();
-    let ent = mgr.entry(&r).expect("idle entry kept");
-    assert_eq!(ent.refcount, 0);
-    assert!(
-        matches!(&ent.state, ArtifactState::Idle(NodeDef::Texture(payload)) if payload.height() == 8)
-    );
-}
-
-#[test]
-fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
+fn runtime_spine_tick_context_resolve_bus_query() {
     let channel = ChannelName(String::from("live"));
     let frame = Revision::new(99);
     let binding = BindingEntry {
@@ -68,18 +38,6 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
         version: frame,
         owner: NodeId::new(1),
     };
-
-    let config = NodeInvocation::new(ArtifactLocator::path("e.lp"));
-
-    let mut mgr = ArtifactStore::new();
-    let locator = config.def_locator().unwrap().clone();
-    let ar = mgr.acquire_location(
-        ArtifactLocation::try_from_src_spec(&locator).unwrap(),
-        Revision::new(0),
-    );
-    mgr.load_with(&ar, Revision::new(40), |_location| Ok(texture_def(7, 7)))
-        .unwrap();
-    let content_frame = mgr.content_frame(&ar).expect("content_frame");
 
     let mut resolver = Resolver::new();
     let mut session = ResolveSession::new(
@@ -128,8 +86,6 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
     let mut ctx = TickContext::new(
         NodeId::new(5),
         frame,
-        ar,
-        content_frame,
         &mut bridge as &mut dyn TickResolver,
         &slot_shapes,
     );
@@ -137,13 +93,6 @@ fn runtime_spine_tick_context_resolve_bus_query_and_artifact_frames() {
     node.produce(&lpc_model::SlotPath::root(), &mut ctx)
         .unwrap();
     assert_eq!(node.last, Some(2.0));
-
-    assert!(ctx.artifact_changed_since(Revision::new(39)));
-    assert!(!ctx.artifact_changed_since(Revision::new(40)));
-}
-
-fn texture_def(width: u32, height: u32) -> NodeDef {
-    NodeDef::Texture(TextureDef::new(width, height))
 }
 
 #[test]
@@ -155,7 +104,231 @@ fn runtime_spine_node_export_is_reachable() {
     let _: Option<fn(&dyn lpc_engine::node::NodeRuntime)> = None;
 }
 
+#[test]
+fn project_apply_body_change_does_not_recreate_runtime_node() {
+    let mut fs = clock_project_fs();
+    let services = EngineServices::new(TreePath::parse("/body_change.show").unwrap());
+    let loaded = ProjectLoader::load_from_root(&fs, services).expect("load");
+    let (mut engine, mut registry) = loaded.into_parts();
+    let clock_use = NodeUseLocation::root().child(SlotPath::parse("nodes[clock]").unwrap());
+    let before = engine
+        .project_runtime_index()
+        .node_id(&clock_use)
+        .expect("clock runtime node");
+
+    fs.write_file_mut(
+        LpPath::new("/clock.toml"),
+        br#"
+kind = "Clock"
+
+[controls]
+rate = 2.0
+"#,
+    )
+    .expect("write clock");
+    let shapes = engine.slot_shapes().clone();
+    let changes = registry.refresh_artifacts(
+        &fs,
+        &[FsEvent {
+            path: LpPathBuf::from("/clock.toml"),
+            kind: FsEventKind::Modify,
+        }],
+        Revision::new(2),
+        &ParseCtx { shapes: &shapes },
+    );
+
+    assert_eq!(
+        changes.defs.changed,
+        vec![NodeDefChange::new(
+            lpc_model::NodeDefLocation::artifact_root(ArtifactLocation::file("/clock.toml")),
+            NodeDefChangeKind::Body,
+        )]
+    );
+    assert!(changes.uses.is_empty());
+    let apply = engine
+        .apply_project_changes(&fs, &mut registry, &changes)
+        .expect("apply changes");
+
+    assert!(apply.is_empty());
+    assert_eq!(
+        engine.project_runtime_index().node_id(&clock_use),
+        Some(before)
+    );
+}
+
+#[test]
+fn project_apply_added_node_use_preserves_existing_runtime_node() {
+    let mut fs = clock_project_fs();
+    let services = EngineServices::new(TreePath::parse("/add_use.show").unwrap());
+    let loaded = ProjectLoader::load_from_root(&fs, services).expect("load");
+    let (mut engine, mut registry) = loaded.into_parts();
+    let clock_use = NodeUseLocation::root().child(SlotPath::parse("nodes[clock]").unwrap());
+    let shader_use = NodeUseLocation::root().child(SlotPath::parse("nodes[shader]").unwrap());
+    let clock_before = engine
+        .project_runtime_index()
+        .node_id(&clock_use)
+        .expect("clock runtime node");
+
+    fs.write_file_mut(
+        LpPath::new("/project.toml"),
+        br#"
+kind = "Project"
+
+[nodes.clock]
+ref = "./clock.toml"
+
+[nodes.shader]
+ref = "./shader.toml"
+"#,
+    )
+    .expect("write project");
+    fs.write_file_mut(
+        LpPath::new("/shader.toml"),
+        br#"
+kind = "Shader"
+source = { path = "shader.glsl" }
+"#,
+    )
+    .expect("write shader def");
+    fs.write_file_mut(LpPath::new("/shader.glsl"), b"void main() {}")
+        .expect("write shader source");
+
+    let shapes = engine.slot_shapes().clone();
+    let changes = registry.refresh_artifacts(
+        &fs,
+        &[FsEvent {
+            path: LpPathBuf::from("/project.toml"),
+            kind: FsEventKind::Modify,
+        }],
+        Revision::new(2),
+        &ParseCtx { shapes: &shapes },
+    );
+
+    assert_eq!(changes.uses.added, vec![shader_use.clone()]);
+    let apply = engine
+        .apply_project_changes(&fs, &mut registry, &changes)
+        .expect("apply changes");
+
+    assert_eq!(apply.added_nodes, vec![shader_use.clone()]);
+    assert_eq!(
+        engine.project_runtime_index().node_id(&clock_use),
+        Some(clock_before)
+    );
+    assert!(
+        engine
+            .project_runtime_index()
+            .node_id(&shader_use)
+            .is_some()
+    );
+}
+
+#[test]
+fn project_apply_asset_body_change_refreshes_existing_shader_node() {
+    let mut fs = shader_project_fs();
+    let services = EngineServices::new(TreePath::parse("/shader_asset_change.show").unwrap());
+    let loaded = ProjectLoader::load_from_root(&fs, services).expect("load");
+    let (mut engine, mut registry) = loaded.into_parts();
+    let shader_use = NodeUseLocation::root().child(SlotPath::parse("nodes[shader]").unwrap());
+    let shader_before = engine
+        .project_runtime_index()
+        .node_id(&shader_use)
+        .expect("shader runtime node");
+    let shader_asset = AssetLocation::artifact(ArtifactLocation::file("/shader.glsl"));
+
+    fs.write_file_mut(
+        LpPath::new("/shader.glsl"),
+        b"vec4 render(vec2 pos) { return vec4(pos.x, 0.0, 0.0, 1.0); }",
+    )
+    .expect("write shader source");
+    let shapes = engine.slot_shapes().clone();
+    let changes = registry.refresh_artifacts(
+        &fs,
+        &[FsEvent {
+            path: LpPathBuf::from("/shader.glsl"),
+            kind: FsEventKind::Modify,
+        }],
+        Revision::new(2),
+        &ParseCtx { shapes: &shapes },
+    );
+
+    assert_eq!(
+        changes.assets.changed,
+        vec![AssetChange::new(
+            shader_asset.clone(),
+            AssetChangeKind::Body
+        )]
+    );
+    assert!(changes.defs.is_empty());
+    assert!(changes.uses.is_empty());
+    let apply = engine
+        .apply_project_changes(&fs, &mut registry, &changes)
+        .expect("apply changes");
+
+    assert_eq!(apply.refreshed_assets, vec![shader_asset]);
+    assert_eq!(apply.refreshed_nodes, vec![shader_use.clone()]);
+    assert!(apply.added_nodes.is_empty());
+    assert!(apply.removed_nodes.is_empty());
+    assert!(apply.reattached_nodes.is_empty());
+    assert_eq!(
+        engine.project_runtime_index().node_id(&shader_use),
+        Some(shader_before)
+    );
+}
+
 // --- Helpers ---
+
+fn clock_project_fs() -> LpFsMemory {
+    let mut fs = LpFsMemory::new();
+    fs.write_file_mut(
+        LpPath::new("/project.toml"),
+        br#"
+kind = "Project"
+
+[nodes.clock]
+ref = "./clock.toml"
+"#,
+    )
+    .expect("write project");
+    fs.write_file_mut(
+        LpPath::new("/clock.toml"),
+        br#"
+kind = "Clock"
+
+[controls]
+rate = 1.0
+"#,
+    )
+    .expect("write clock");
+    fs
+}
+
+fn shader_project_fs() -> LpFsMemory {
+    let mut fs = LpFsMemory::new();
+    fs.write_file_mut(
+        LpPath::new("/project.toml"),
+        br#"
+kind = "Project"
+
+[nodes.shader]
+ref = "./shader.toml"
+"#,
+    )
+    .expect("write project");
+    fs.write_file_mut(
+        LpPath::new("/shader.toml"),
+        br#"
+kind = "Shader"
+source = "shader.glsl"
+"#,
+    )
+    .expect("write shader def");
+    fs.write_file_mut(
+        LpPath::new("/shader.glsl"),
+        b"vec4 render(vec2 pos) { return vec4(0.0, pos.y, 0.0, 1.0); }",
+    )
+    .expect("write shader source");
+    fs
+}
 
 struct ProduceProbeNode {
     query: QueryKey,

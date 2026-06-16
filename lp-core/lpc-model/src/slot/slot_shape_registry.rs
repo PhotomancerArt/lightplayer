@@ -9,19 +9,19 @@ use crate::{
     SlotShapeLookup, SlotShapeView, current_revision,
 };
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use core::ops::Bound::{Excluded, Unbounded};
+use lp_collection::VecMap;
 
 /// Registry of id-addressed slot shapes.
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotShapeRegistry {
     pub ids_revision: Revision,
-    shapes: BTreeMap<SlotShapeId, SlotShapeEntry>,
+    shapes: VecMap<SlotShapeId, SlotShapeEntry>,
     #[serde(skip)]
     #[cfg_attr(feature = "schema-gen", schemars(skip))]
-    factories: BTreeMap<SlotShapeId, SlotFactory>,
+    factories: VecMap<SlotShapeId, SlotFactory>,
 }
 
 /// Versioned registry entry for one slot shape.
@@ -490,7 +490,7 @@ impl SlotShapeRegistry {
         after: Option<SlotShapeId>,
         limit: usize,
     ) -> (SlotShapeRegistrySnapshot, Option<SlotShapeId>) {
-        let mut shapes = BTreeMap::new();
+        let mut shapes = VecMap::new();
         let mut last_included = None;
         let mut next = None;
         let limit = limit.max(1);
@@ -520,7 +520,7 @@ impl SlotShapeRegistry {
         after: Option<SlotShapeId>,
         limit: usize,
     ) -> (SlotShapeRegistrySnapshot, Option<SlotShapeId>) {
-        let mut shapes = BTreeMap::new();
+        let mut shapes = VecMap::new();
         let mut cursor = after;
         let mut last_included = None;
         let mut next = None;
@@ -732,7 +732,7 @@ fn min_shape_id(left: Option<SlotShapeId>, right: Option<SlotShapeId>) -> Option
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotShapeRegistrySnapshot {
     pub ids_revision: Revision,
-    pub shapes: BTreeMap<SlotShapeId, SlotShapeEntry>,
+    pub shapes: VecMap<SlotShapeId, SlotShapeEntry>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

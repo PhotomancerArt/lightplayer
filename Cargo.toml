@@ -2,10 +2,12 @@
 members = [
     # lp-base workspace members
     "lp-base/lp-perf",
+    "lp-base/lp-collection",
     "lp-base/lpfs",
     # lp-app workspace members
     "lp-core/lpc-engine",
     "lp-core/lpc-view",
+    "lp-core/lpc-hardware",
     "lp-core/lpc-shared",
     "lp-app/lpa-server",
     "lp-app/lpa-client",
@@ -18,7 +20,7 @@ members = [
     "lp-core/lpc-model",
     "lp-core/lpc-slot-codegen",
     "lp-core/lpc-slot-macros",
-    "lp-core/lpc-slot-mockup",
+    "lp-core/lpc-registry",
     "lp-core/lpc-wire",
     # lps workspace members
     "lp-shader/lps-builtin-ids",
@@ -62,6 +64,7 @@ default-members = [
     # lp-app workspace members
     "lp-core/lpc-engine",
     "lp-core/lpc-view",
+    "lp-core/lpc-hardware",
     "lp-core/lpc-shared",
     "lp-app/lpa-server",
     "lp-app/lpa-client",
@@ -70,6 +73,7 @@ default-members = [
     "lp-fw/fw-tests",
     "lp-cli",
     "lp-core/lpc-model",
+    "lp-core/lpc-registry",
     "lp-core/lpc-wire",
     # lps workspace members (excluding lps-builtins-emu-app)
     "lp-shader/lps-builtin-ids",
@@ -143,7 +147,7 @@ cranelift-interpreter = { git = "https://github.com/light-player/lp-cranelift", 
 
 # regalloc2 - fork (ChunkedVec for OOM mitigation, feature-gating ION allocator)
 regalloc2 = { git = "https://github.com/light-player/lp-regalloc2", branch = "lightplayer", default-features = false, features = ["std"] }
-lp-collection = { git = "https://github.com/light-player/lp-common", branch = "main", default-features = false }
+lp-collection = { path = "lp-base/lp-collection", default-features = false }
 
 # Common dependencies
 

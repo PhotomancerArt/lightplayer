@@ -1,8 +1,8 @@
 use alloc::string::String;
 
 use crate::{
-    BindingDefs, ControlMessage, MapSlot, NodeInvocation, OptionSlot, PositiveF32Slot, Slotted,
-    ValueSlot,
+    BindingDefs, ControlMessage, MapSlot, NodeInvocation, NodeInvocationSlot, OptionSlot,
+    PositiveF32Slot, Slotted, ValueSlot,
 };
 
 /// One authored playlist entry.
@@ -28,8 +28,8 @@ pub struct PlaylistEntry {
     /// Outgoing crossfade duration override in seconds.
     pub fade_after: OptionSlot<PositiveF32Slot>,
 
-    /// Visual child node invocation.
-    pub node: NodeInvocation,
+    /// Visual child node position owned by this playlist entry.
+    pub node: NodeInvocationSlot,
 }
 
 impl Default for PlaylistEntry {
@@ -40,7 +40,7 @@ impl Default for PlaylistEntry {
             name: OptionSlot::none(),
             duration: OptionSlot::none(),
             fade_after: OptionSlot::none(),
-            node: NodeInvocation::default(),
+            node: NodeInvocationSlot::new(NodeInvocation::default()),
         }
     }
 }
@@ -48,9 +48,7 @@ impl Default for PlaylistEntry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{
-        BindingRef, NodeDef, NodeDefRef, SlotDirection, SlotMerge, SlotShape, StaticSlotShape,
-    };
+    use crate::{BindingRef, NodeDef, SlotDirection, SlotMerge, SlotShape, StaticSlotShape};
 
     #[test]
     fn playlist_entry_parses_path_child_and_trigger_binding() {
@@ -62,7 +60,8 @@ kind = "Playlist"
 name = "active"
 duration = 4.0
 fade_after = 0.8
-node = { def = { path = "./active.toml" } }
+[entries.2.node]
+ref = "./active.toml"
 
 [entries.2.bindings.trigger]
 source = "bus#trigger"
@@ -76,7 +75,7 @@ source = "bus#trigger"
         let entry = def.entries.entries.get(&2).expect("entry");
         assert_eq!(entry.name.data.as_ref().unwrap().value().as_str(), "active");
         assert_eq!(entry.duration.data.as_ref().unwrap().value().0, 4.0);
-        assert!(matches!(entry.node.def, NodeDefRef::Path(_)));
+        assert!(matches!(entry.node.value(), NodeInvocation::Ref(_)));
         assert!(matches!(
             entry.bindings.entries()["trigger"].source_ref(),
             Some(BindingRef::Bus(_))
@@ -104,7 +103,10 @@ source = { path = "active.glsl" }
             panic!("playlist def");
         };
         let entry = def.entries.entries.get(&2).expect("entry");
-        assert!(matches!(entry.node.inline_def(), Some(NodeDef::Shader(_))));
+        assert!(matches!(
+            entry.node.value().inline_def(),
+            Some(NodeDef::Shader(_))
+        ));
     }
 
     #[test]

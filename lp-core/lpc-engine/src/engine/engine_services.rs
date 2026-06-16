@@ -10,12 +10,12 @@ use alloc::vec::Vec;
 use core::fmt;
 
 use hashbrown::HashMap;
-use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
-use lpc_model::{HardwareEndpointSpec, Revision, TreePath};
-use lpc_shared::error::OutputError;
-use lpc_shared::hardware::{
+use lpc_hardware::OutputError;
+use lpc_hardware::{
     ButtonConfig, ButtonInput, HardwareEndpointError, HardwareSystem, RadioConfig, RadioDevice,
 };
+use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
+use lpc_model::{HwEndpointSpec, Revision, TreePath};
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::time::TimeProvider;
 
@@ -24,7 +24,7 @@ use crate::resource::{RuntimeBufferId, RuntimeBufferStore};
 /// Per-sink channel state for [`EngineServices`] output flushing.
 #[derive(Debug)]
 struct OutputSinkBinding {
-    endpoint: HardwareEndpointSpec,
+    endpoint: HwEndpointSpec,
     display_options: Option<OutputDriverOptions>,
     channel_handle: Option<OutputChannelHandle>,
     last_byte_count: Option<u32>,
@@ -67,7 +67,7 @@ pub struct EngineServices {
 pub trait ButtonService {
     fn open_button_by_spec(
         &self,
-        spec: &HardwareEndpointSpec,
+        spec: &HwEndpointSpec,
         config: ButtonConfig,
     ) -> Result<Box<dyn ButtonInput>, HardwareEndpointError>;
 }
@@ -75,7 +75,7 @@ pub trait ButtonService {
 impl ButtonService for HardwareSystem {
     fn open_button_by_spec(
         &self,
-        spec: &HardwareEndpointSpec,
+        spec: &HwEndpointSpec,
         config: ButtonConfig,
     ) -> Result<Box<dyn ButtonInput>, HardwareEndpointError> {
         HardwareSystem::open_button_by_spec(self, spec, config)
@@ -86,7 +86,7 @@ impl ButtonService for HardwareSystem {
 pub trait RadioService {
     fn open_radio_by_spec(
         &self,
-        spec: &HardwareEndpointSpec,
+        spec: &HwEndpointSpec,
         config: RadioConfig,
     ) -> Result<Box<dyn RadioDevice>, HardwareEndpointError>;
 }
@@ -94,7 +94,7 @@ pub trait RadioService {
 impl RadioService for HardwareSystem {
     fn open_radio_by_spec(
         &self,
-        spec: &HardwareEndpointSpec,
+        spec: &HwEndpointSpec,
         config: RadioConfig,
     ) -> Result<Box<dyn RadioDevice>, HardwareEndpointError> {
         HardwareSystem::open_radio_by_spec(self, spec, config)
@@ -194,6 +194,12 @@ impl EngineServices {
         self.output_sinks.insert(buffer_id, existing);
     }
 
+    pub fn unregister_output_sink(&mut self, buffer_id: RuntimeBufferId) {
+        if let Some(mut existing) = self.output_sinks.remove(&buffer_id) {
+            self.close_output_sink(&mut existing);
+        }
+    }
+
     /// Flush sinks whose backing buffer [`WithRevision::revision`] equals `revision`.
     ///
     /// Temporarily removes the boxed [`OutputProvider`] from `self` so sinks can be mutated without
@@ -244,7 +250,7 @@ impl Drop for EngineServices {
     }
 }
 
-fn endpoint_from_output_config(config: &OutputDef) -> HardwareEndpointSpec {
+fn endpoint_from_output_config(config: &OutputDef) -> HwEndpointSpec {
     config.endpoint().clone()
 }
 
@@ -362,9 +368,9 @@ mod tests {
     use alloc::string::ToString;
     use alloc::vec;
 
+    use lpc_hardware::OutputError;
     use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
-    use lpc_model::{HardwareEndpointSpec, OptionSlot, Revision, TreePath, WithRevision};
-    use lpc_shared::error::OutputError;
+    use lpc_model::{HwEndpointSpec, OptionSlot, Revision, TreePath, WithRevision};
     use lpc_shared::output::{
         MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat,
         OutputProvider,
@@ -444,6 +450,28 @@ mod tests {
     }
 
     #[test]
+    fn unregister_output_sink_closes_open_channel() {
+        let provider = Rc::new(MemoryOutputProvider::new());
+        let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
+        services.set_output_provider(Some(Box::new(SharedMemoryOutputProvider(Rc::clone(
+            &provider,
+        )))));
+
+        let mut buffers = RuntimeBufferStore::new();
+        let buffer_id = output_buffer(&mut buffers, Revision::new(1));
+        let endpoint = endpoint("ws281x:rmt:D10");
+        services.register_output_sink(buffer_id, &OutputDef::new(endpoint.clone()));
+        services
+            .flush_dirty_output_sinks(Revision::new(1), &buffers)
+            .expect("initial flush");
+        assert!(provider.is_endpoint_open(&endpoint));
+
+        services.unregister_output_sink(buffer_id);
+
+        assert!(!provider.is_endpoint_open(&endpoint));
+    }
+
+    #[test]
     fn engine_services_duplicate_output_pin_reports_hardware_conflict() {
         let provider = Rc::new(MemoryOutputProvider::new());
         let mut services = EngineServices::new(TreePath::parse("/p.show").expect("tree path"));
@@ -500,8 +528,8 @@ mod tests {
         assert_ne!(provider.is_pin_open(18), provider.is_pin_open(19));
     }
 
-    fn endpoint(spec: &'static str) -> HardwareEndpointSpec {
-        HardwareEndpointSpec::from_static(spec)
+    fn endpoint(spec: &'static str) -> HwEndpointSpec {
+        HwEndpointSpec::from_static(spec)
     }
 
     fn output_buffer(store: &mut RuntimeBufferStore, revision: Revision) -> RuntimeBufferId {
@@ -516,7 +544,7 @@ mod tests {
     impl OutputProvider for SharedMemoryOutputProvider {
         fn open(
             &self,
-            endpoint: &HardwareEndpointSpec,
+            endpoint: &HwEndpointSpec,
             byte_count: u32,
             format: OutputFormat,
             options: Option<OutputDriverOptions>,

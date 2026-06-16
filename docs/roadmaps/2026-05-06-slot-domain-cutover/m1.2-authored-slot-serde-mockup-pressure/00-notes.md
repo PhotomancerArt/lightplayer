@@ -69,7 +69,7 @@ Out of scope:
 - Semantic slots wrap `Versioned<T>` and expose metadata/access, but do not yet
   deserialize from authored strings/scalars/records.
 - `SourcePathSlot` and `ArtifactPathSlot` currently store `String`; real source
-  uses `LpPathBuf` and `ArtifactLocator`, so the mockup can either stay stringy
+  uses `LpPathBuf` and `ArtifactSpecifier`, so the mockup can either stay stringy
   for M1.2 or pressure more precise semantic wrappers.
 
 ### Mockup Source Model
@@ -92,7 +92,7 @@ Out of scope:
 Real `lpc-source` remains plain serde structs:
 
 - `ProjectDef.nodes: BTreeMap<NodeName, NodeInvocation>`
-- `NodeInvocation.artifact: ArtifactLocator`
+- `NodeInvocation.artifact: ArtifactSpecifier`
 - `TextureDef.width/height`
 - `ShaderDef.glsl_path: LpPathBuf`
 - `ShaderDef.texture_loc: RelativeNodeRef`
@@ -142,7 +142,7 @@ the mockup or add more precise wrappers before M2.
 Suggested direction: keep mockup path slots string-backed for the first serde
 slice, but add tests that make the authored format explicit. Add a future note
 or M2 task to decide whether real source needs `LpPathBufSlot` and
-`ArtifactLocatorSlot`.
+`ArtifactSpecifierSlot`.
 
 ### Arrays Versus Stable-Key Maps
 

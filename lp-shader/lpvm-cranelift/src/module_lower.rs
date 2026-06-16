@@ -1,8 +1,8 @@
 //! Shared LPIR → Cranelift lowering for any [`cranelift_module::Module`] (JIT or object).
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use cranelift_codegen::ir::{FuncRef, Signature, StackSlot, StackSlotData, StackSlotKind, types};
 use cranelift_codegen::isa::CallConv;
@@ -37,11 +37,11 @@ pub(crate) enum LpirFuncEmitOrder {
 pub(crate) struct LoweredLpirModule {
     pub func_ids: Vec<FuncId>,
     pub func_names: Vec<String>,
-    pub signatures: BTreeMap<String, Signature>,
+    pub signatures: VecMap<String, Signature>,
     /// LPIR scalar return words per function (for StructReturn ABIs where `Signature::returns` is empty).
-    pub logical_return_words: BTreeMap<String, usize>,
+    pub logical_return_words: VecMap<String, usize>,
     pub ir_param_counts: Vec<u16>,
-    pub name_to_index: BTreeMap<String, usize>,
+    pub name_to_index: VecMap<String, usize>,
     pub call_conv: CallConv,
     pub pointer_type: types::Type,
     pub float_mode: FloatMode,
@@ -80,7 +80,7 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
         None
     };
 
-    let func_id_to_ir_rank: BTreeMap<LpirFuncId, usize> = ir
+    let func_id_to_ir_rank: VecMap<LpirFuncId, usize> = ir
         .functions
         .keys()
         .enumerate()
@@ -102,8 +102,8 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
     };
 
     let mut func_ids = Vec::with_capacity(indices.len());
-    let mut signatures = BTreeMap::new();
-    let mut logical_return_words = BTreeMap::new();
+    let mut signatures = VecMap::new();
+    let mut logical_return_words = VecMap::new();
     let mut func_names = Vec::with_capacity(indices.len());
     let mut ir_param_counts = Vec::with_capacity(indices.len());
 
@@ -125,7 +125,7 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
         func_ids.push(id);
     }
 
-    let mut name_to_index = BTreeMap::new();
+    let mut name_to_index = VecMap::new();
     for (j, name) in func_names.iter().enumerate() {
         name_to_index.insert(name.clone(), j);
     }
@@ -138,7 +138,7 @@ pub(crate) fn lower_lpir_into_module<M: Module>(
     }
 
     // Per-IR-rank flag: does the callee's Cranelift signature use StructReturn?
-    // Indexed by IR rank (BTreeMap key order), matching `func_id_to_ir_rank` and `id_at_ir`.
+    // Indexed by IR rank (VecMap key order), matching `func_id_to_ir_rank` and `id_at_ir`.
     let mut callee_struct_return: Vec<bool> = vec![false; ir.functions.len()];
     for (fid, f) in ir.functions.iter() {
         let r = func_id_to_ir_rank[fid];

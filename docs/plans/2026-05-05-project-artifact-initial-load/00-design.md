@@ -14,14 +14,14 @@ with an artifact-rooted load path:
 /project.toml -> ProjectDef -> ProjectNode root -> declared node artifacts
 ```
 
-The core runtime should start from a project artifact locator, load that
+The core runtime should start from a project artifact specifier, load that
 artifact as the root node definition, then instantiate the root `ProjectNode`
 and its declared node artifacts. Directory discovery and special directory
 suffix semantics are removed from the core initial-load path.
 
 In scope:
 
-- Stabilize the new source terminology and rustdocs around `ArtifactLocator`,
+- Stabilize the new source terminology and rustdocs around `ArtifactSpecifier`,
   `NodeInvocation`, `NodeDef`, `NodeLoc`, and concrete `*Def` node bodies.
 - Add `ProjectDef` with `kind = "project"` and a named `nodes` table.
 - Flatten `examples/basic` early to the new canonical source layout.
@@ -54,7 +54,7 @@ lp-core/
 │
 ├── lpc-source/src/
 │   ├── artifact/
-│   │   └── artifact_loc.rs         # UPDATE: ArtifactLocator docs and source-relative path semantics
+│   │   └── artifact_specifier.rs         # UPDATE: ArtifactSpecifier docs and source-relative path semantics
 │   └── node/
 │       ├── node_def.rs             # UPDATE: NodeDef docs/visibility/no_std cleanup
 │       ├── node_invocation.rs      # UPDATE: artifact-only invocation semantics for this plan
@@ -91,7 +91,7 @@ examples/basic/
 ## Conceptual architecture
 
 ```text
-ArtifactLocator("/project.toml")
+ArtifactSpecifier("/project.toml")
         │
         ▼
 load ProjectDef
@@ -110,7 +110,7 @@ ProjectNode becomes runtime root NodeEntry
 The source model has four separate address concepts:
 
 ```text
-ArtifactLocator  authored outside-world locator for a loadable artifact
+ArtifactSpecifier  authored outside-world locator for a loadable artifact
 ArtifactLocation engine-side resolved artifact-manager cache key
 NodeLoc          source-side relative locator into the runtime node tree
 NodeId           resolved runtime handle
@@ -123,9 +123,9 @@ the canonical example.
 
 ## Main components
 
-### ArtifactLocator
+### ArtifactSpecifier
 
-`ArtifactLocator` is the source-side authored locator for loading an artifact.
+`ArtifactSpecifier` is the source-side authored specifier for loading an artifact.
 For this plan the important variant is path-based:
 
 ```toml
@@ -152,7 +152,7 @@ The long-term conceptual shape may be:
 
 ```rust
 pub enum NodeInvocation {
-    Artifact(ArtifactLocator),
+    Artifact(ArtifactSpecifier),
     Inline(NodeDef),
 }
 ```
@@ -244,7 +244,7 @@ Future property references may append `#...`, for example
 The core loader should:
 
 1. Load the project artifact from `/project.toml` or an explicitly supplied
-   `ArtifactLocator`.
+   `ArtifactSpecifier`.
 2. Validate that it is `kind = "project"`.
 3. Create/attach the root `ProjectNode`.
 4. Load all project node invocations into a project-local name index.

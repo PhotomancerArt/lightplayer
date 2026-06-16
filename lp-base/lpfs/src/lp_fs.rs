@@ -8,7 +8,7 @@
 //! provide security by preventing access outside the project directory.
 
 use crate::error::FsError;
-use crate::fs_event::{FsChange, FsVersion};
+use crate::fs_event::{FsEvent, FsVersion};
 use crate::{LpPath, LpPathBuf};
 
 /// Platform-agnostic filesystem trait
@@ -100,7 +100,15 @@ pub trait LpFs {
     /// Changes are returned with paths relative to the filesystem root.
     /// Only the latest change per path is returned (if a file was modified
     /// multiple times, only the most recent change is included).
-    fn get_changes_since(&self, since_version: FsVersion) -> alloc::vec::Vec<FsChange>;
+    ///
+    /// This reports changes tracked or recorded by the filesystem implementation;
+    /// it is not a guarantee that host-native external edits are watched.
+    fn get_changes_since(&self, since_version: FsVersion) -> alloc::vec::Vec<FsEvent>;
+
+    /// Alias for [`Self::get_changes_since`].
+    fn get_events_since(&self, since_version: FsVersion) -> alloc::vec::Vec<FsEvent> {
+        self.get_changes_since(since_version)
+    }
 
     /// Clear changes older than the specified version
     ///
@@ -113,5 +121,5 @@ pub trait LpFs {
     /// Used by filesystem implementations that don't directly track changes
     /// (e.g., `LpFsStd` receiving changes from `FileWatcher`).
     /// Each change is assigned the next version number.
-    fn record_changes(&mut self, changes: alloc::vec::Vec<FsChange>);
+    fn record_changes(&mut self, changes: alloc::vec::Vec<FsEvent>);
 }

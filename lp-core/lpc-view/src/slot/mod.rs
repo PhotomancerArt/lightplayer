@@ -1,9 +1,7 @@
-//! Client-side mirror for generic slot sync and mutation.
+//! Client-side mirror for generic slot sync.
 
 mod apply;
 mod mirror;
-mod pending;
 
 pub use apply::SlotMirrorError;
 pub use mirror::SlotMirrorView;
-pub use pending::PendingSlotMutation;

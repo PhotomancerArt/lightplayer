@@ -1,9 +1,9 @@
 use alloc::collections::BTreeMap;
 use alloc::string::{String, ToString};
 use lpc_model::{
-    LpType, LpValue, ModelStructMember, Revision, SlotData, SlotDataAccess, SlotMapKey,
-    SlotMapKeyShape, SlotPath, SlotPathSegment, SlotShapeId, SlotShapeLookup, SlotShapeRegistry,
-    SlotShapeView, slot_sync_codec::read_slot_snapshot_shape_json,
+    LpType, LpValue, ModelStructMember, SlotData, SlotDataAccess, SlotMapKey, SlotMapKeyShape,
+    SlotPath, SlotPathSegment, SlotShapeId, SlotShapeLookup, SlotShapeRegistry, SlotShapeView,
+    slot_sync_codec::read_slot_snapshot_shape_json,
 };
 use lpc_wire::{WireSlotChange, WireSlotPatch};
 
@@ -46,39 +46,6 @@ pub(super) fn apply_patch(
         .get_mut(&patch.root)
         .ok_or(SlotMirrorError::UnknownRoot)?;
     apply_replace(data, shape_id, &patch.path, &patch.change, registry)
-}
-
-pub(super) fn shape_version_for_root(
-    root: &str,
-    root_shapes: &BTreeMap<String, SlotShapeId>,
-    registry: &SlotShapeRegistry,
-) -> Result<Revision, SlotMirrorError> {
-    let shape_id = root_shapes.get(root).ok_or(SlotMirrorError::UnknownRoot)?;
-    if let Some(entry) = registry.entry(shape_id) {
-        return Ok(entry.changed_at());
-    }
-    registry
-        .get_shape(*shape_id)
-        .map(|_| Revision::default())
-        .ok_or(SlotMirrorError::MissingShape(*shape_id))
-}
-
-pub(super) fn data_version_at(
-    root: &SlotData,
-    shape_id: &SlotShapeId,
-    path: &SlotPath,
-    registry: &SlotShapeRegistry,
-) -> Result<Revision, SlotMirrorError> {
-    let (data, _) = resolve_path(root, shape_id, path, registry)?;
-    match data {
-        SlotDataAccess::Unit(revision) => Ok(revision),
-        SlotDataAccess::Value(value) => Ok(value.changed_at()),
-        SlotDataAccess::Record(record) => Ok(record.fields_revision()),
-        SlotDataAccess::Map(map) => Ok(map.keys_revision()),
-        SlotDataAccess::Enum(en) => Ok(en.variant_revision()),
-        SlotDataAccess::Option(option) => Ok(option.presence_revision()),
-        SlotDataAccess::Custom(custom) => Ok(custom.custom_revision()),
-    }
 }
 
 pub(super) fn validate_value_at(

@@ -5,7 +5,7 @@
 
 use crate::LpFs;
 use crate::error::FsError;
-use crate::fs_event::{FsChange, FsVersion};
+use crate::fs_event::{FsEvent, FsVersion};
 use crate::{LpPath, LpPathBuf};
 use alloc::{
     format,
@@ -235,7 +235,7 @@ impl LpFs for LpFsView {
         self.parent.borrow().current_version()
     }
 
-    fn get_changes_since(&self, since_version: FsVersion) -> Vec<FsChange> {
+    fn get_changes_since(&self, since_version: FsVersion) -> Vec<FsEvent> {
         let parent_changes = self.parent.borrow().get_changes_since(since_version);
         let prefix = &self.prefix;
 
@@ -245,9 +245,9 @@ impl LpFs for LpFsView {
                 if change.path.as_str().starts_with(prefix.as_str()) {
                     // Translate to chrooted-relative path
                     if let Some(chrooted_path) = self.chrooted_path(&change.path) {
-                        Some(FsChange {
+                        Some(FsEvent {
                             path: chrooted_path,
-                            change_type: change.change_type,
+                            kind: change.kind,
                         })
                     } else {
                         None
@@ -263,7 +263,7 @@ impl LpFs for LpFsView {
         // No-op for views (parent manages versions)
     }
 
-    fn record_changes(&mut self, _changes: Vec<FsChange>) {
+    fn record_changes(&mut self, _changes: Vec<FsEvent>) {
         // No-op for views (parent manages versions)
     }
 }

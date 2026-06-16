@@ -1,8 +1,8 @@
 //! Per-function ABI state for register roles, params, return, and allocation.
 
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 use lpir::LpirModule;
 use lps_shared::LpsModuleSig;
@@ -137,7 +137,7 @@ impl FuncAbi {
 #[derive(Clone, Debug)]
 pub struct ModuleAbi {
     isa: IsaTarget,
-    func_abis: BTreeMap<String, FuncAbi>,
+    func_abis: VecMap<String, FuncAbi>,
     max_callee_sret_bytes: u32,
 }
 
@@ -146,7 +146,7 @@ impl ModuleAbi {
     pub fn from_ir_and_sig(isa: IsaTarget, ir: &LpirModule, sig: &LpsModuleSig) -> Self {
         use crate::isa::rv32::abi::func_abi_rv32;
 
-        let mut func_abis = BTreeMap::new();
+        let mut func_abis = VecMap::new();
         let mut max_sret_bytes = 0u32;
 
         for fn_sig in &sig.functions {

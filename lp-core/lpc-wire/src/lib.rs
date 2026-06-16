@@ -11,6 +11,9 @@ pub mod json;
 pub mod message;
 pub mod messages;
 pub mod project;
+pub mod project_command;
+pub mod project_inventory;
+pub mod project_overlay;
 pub mod serde_base64;
 pub mod server;
 pub mod slot;
@@ -29,21 +32,26 @@ pub use messages::{
     write_server_message,
 };
 pub use project::{
-    WireChannelSampleFormat, WireColorLayout, WireNodeStatus, WireProjectHandle,
+    NodeRuntimeStatus, WireChannelSampleFormat, WireColorLayout, WireProjectHandle,
     WireResourceAvailability, WireResourceKindSummary, WireResourceMetadataSummary,
     WireResourceSummary, WireRuntimeBufferKind, WireRuntimeBufferMetadataPayload,
     WireRuntimeBufferPayload, WireTextureFormat,
+};
+pub use project_command::{WireProjectCommand, WireProjectCommandResponse};
+pub use project_inventory::{WireProjectInventoryReadRequest, WireProjectInventoryReadResponse};
+pub use project_overlay::{
+    WireOverlayCommitRequest, WireOverlayCommitResponse, WireOverlayMutationRequest,
+    WireOverlayMutationResponse, WireOverlayReadRequest, WireOverlayReadResponse,
 };
 pub use server::{
     AvailableProject, ClientMsgBody, FsRequest, FsResponse, LoadedProject, MemoryStats,
     SampleStats, ServerConfig, ServerMsgBody,
 };
 pub use slot::{
-    WireSlotChange, WireSlotData, WireSlotFullSync, WireSlotMutationId, WireSlotMutationOp,
-    WireSlotMutationRejection, WireSlotMutationRequest, WireSlotMutationResponse,
-    WireSlotMutationResult, WireSlotPatch, WireSlotRootSnapshot, WireSlotRootsSnapshot,
-    build_slot_full_sync, build_slot_roots_snapshot, collect_slot_diff, snapshot_slot_root,
-    snapshot_slot_shape, wire_slot_data_from_slot_access, write_slot_shape_registry_snapshot_json,
+    WireSlotChange, WireSlotData, WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot,
+    WireSlotRootsSnapshot, build_slot_full_sync, build_slot_roots_snapshot, collect_slot_diff,
+    snapshot_slot_root, snapshot_slot_shape, wire_slot_data_from_slot_access,
+    write_slot_shape_registry_snapshot_json,
 };
 pub use transport_error::TransportError;
 pub use tree::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};

@@ -2,13 +2,13 @@ kind = "Project"
 name = "basic"
 
 [nodes.output]
-def = { path = "./output.toml" }
+ref = "./output.toml"
 
 [nodes.clock]
-def = { path = "./clock.toml" }
+ref = "./clock.toml"
 
 [nodes.shader]
-def = { path = "./shader.toml" }
+ref = "./shader.toml"
 
 [nodes.fixture]
-def = { path = "./fixture.toml" }
+ref = "./fixture.toml"

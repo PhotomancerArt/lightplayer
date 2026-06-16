@@ -1,5 +1,6 @@
 //! LPVM-backed filetest compilation: one module per `.glsl` file, fresh instance per `// run:`.
 
+use lp_collection::VecMap;
 use lp_riscv_emu::{CycleModel, LogLevel};
 use lpir::{CompilerConfig, FloatMode as LpirFloatMode, LpirModule};
 use lps_shared::{LpsFnSig, LpsModuleSig, TextureBindingSpec};
@@ -17,7 +18,6 @@ use lpvm_wasm::{
     WasmOptions as LpvmWasmOptions,
     rt_wasmtime::{WasmLpvmEngine, WasmLpvmInstance, WasmLpvmModule},
 };
-use std::collections::BTreeMap;
 
 use crate::targets::{Backend, FloatMode as TargetFloatMode, Frontend, Target};
 
@@ -173,7 +173,7 @@ impl FiletestInstance {
 
 fn lower_glsl(
     source: &str,
-    texture_specs: &BTreeMap<String, TextureBindingSpec>,
+    texture_specs: &VecMap<String, TextureBindingSpec>,
     texel_fetch_bounds: lpir::TexelFetchBoundsMode,
 ) -> anyhow::Result<(LpirModule, LpsModuleSig)> {
     let naga = lps_frontend::compile(source).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -190,7 +190,7 @@ impl CompiledShader {
         target: &Target,
         emu_log_level: LogLevel,
         compiler_config: &CompilerConfig,
-        texture_specs: &BTreeMap<String, TextureBindingSpec>,
+        texture_specs: &VecMap<String, TextureBindingSpec>,
     ) -> anyhow::Result<Self> {
         let (ir, meta) = match target.frontend {
             Frontend::Naga => lower_glsl(

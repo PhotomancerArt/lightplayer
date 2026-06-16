@@ -1,12 +1,13 @@
 //! Test type enum and related types.
 
 use crate::targets::Annotation;
+use lp_collection::VecMap;
 use lps_shared::TextureBindingSpec;
 use lps_shared::TextureStorageFormat;
 use std::collections::BTreeMap;
 
 /// File-level `// texture-spec:` map keyed by sampler uniform name.
-pub type TextureSpecs = BTreeMap<String, TextureBindingSpec>;
+pub type TextureSpecs = VecMap<String, TextureBindingSpec>;
 /// Parsed `// texture-data:` blocks keyed by name.
 pub type TextureFixtures = BTreeMap<String, TextureFixture>;
 

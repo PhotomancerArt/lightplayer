@@ -67,9 +67,6 @@ pub fn apply_project_read_response(
             ProjectReadResult::Runtime(_) => {}
         }
     }
-    for mutation in response.mutations {
-        view.slots.apply_mutation_response(mutation);
-    }
     view.revision = revision;
     Ok(())
 }
@@ -80,8 +77,8 @@ mod tests {
     use alloc::vec;
     use lpc_model::{NodeId, Revision, TreePath};
     use lpc_wire::{
-        NodeReadResult, ProjectReadResponse, ReadLevel, ResourceReadResult, WireEntryState,
-        WireNodeStatus, WireTreeDelta,
+        NodeReadResult, NodeRuntimeStatus, ProjectReadResponse, ReadLevel, ResourceReadResult,
+        WireEntryState, WireTreeDelta,
     };
 
     #[test]
@@ -97,7 +94,7 @@ mod tests {
                     parent: None,
                     child_kind: None,
                     children: vec![],
-                    status: WireNodeStatus::Created,
+                    status: NodeRuntimeStatus::Created,
                     state: WireEntryState::Pending,
                     created_frame: Revision::new(0),
                     change_frame: Revision::new(0),
@@ -106,7 +103,6 @@ mod tests {
                 slots: None,
             })],
             probes: vec![],
-            mutations: vec![],
         };
 
         apply_project_read_response(&mut view, response).unwrap();
@@ -126,7 +122,6 @@ mod tests {
                 runtime_buffer_payloads: vec![],
             })],
             probes: vec![],
-            mutations: vec![],
         };
 
         apply_project_read_response(&mut view, response).unwrap();

@@ -21,9 +21,10 @@ use crate::resource::RuntimeBufferId;
 use lpc_model::nodes::fixture::{ColorOrder, MappingConfig, PathSpec, RingOrder};
 use lpc_model::nodes::output::OutputDef;
 use lpc_model::{
-    Dim2u, HardwareEndpointSpec, Kind, LpValue, Revision, ShaderState, SlotAccess, SlotPath,
+    Dim2u, HwEndpointSpec, Kind, LpValue, Revision, ShaderState, SlotAccess, SlotPath,
     SlotShapeRegistry, SlotShapeRegistryError, ToLpValue, TreePath,
 };
+use lpc_registry::ProjectRegistry;
 use lpc_shared::output::{
     MemoryOutputProvider, OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
 };
@@ -37,11 +38,11 @@ struct RcMemoryOutput(Rc<MemoryOutputProvider>);
 impl OutputProvider for RcMemoryOutput {
     fn open(
         &self,
-        endpoint: &HardwareEndpointSpec,
+        endpoint: &HwEndpointSpec,
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,
-    ) -> Result<OutputChannelHandle, lpc_shared::error::OutputError> {
+    ) -> Result<OutputChannelHandle, lpc_hardware::OutputError> {
         self.0.open(endpoint, byte_count, format, options)
     }
 
@@ -49,17 +50,17 @@ impl OutputProvider for RcMemoryOutput {
         &self,
         handle: OutputChannelHandle,
         data: &[u16],
-    ) -> Result<(), lpc_shared::error::OutputError> {
+    ) -> Result<(), lpc_hardware::OutputError> {
         self.0.write(handle, data)
     }
 
-    fn close(&self, handle: OutputChannelHandle) -> Result<(), lpc_shared::error::OutputError> {
+    fn close(&self, handle: OutputChannelHandle) -> Result<(), lpc_hardware::OutputError> {
         self.0.close(handle)
     }
 }
 
-fn endpoint(spec: &'static str) -> HardwareEndpointSpec {
-    HardwareEndpointSpec::from_static(spec)
+fn endpoint(spec: &'static str) -> HwEndpointSpec {
+    HwEndpointSpec::from_static(spec)
 }
 
 struct CountingGraphics {
@@ -276,10 +277,9 @@ fn attach_output_demand_root(
     rt: &mut Engine,
     root: lpc_model::NodeId,
     spine: lpc_model::NodeInvocation,
-    artifact: crate::artifact::ArtifactId,
     frame: Revision,
     name: &str,
-    endpoint: HardwareEndpointSpec,
+    endpoint: HwEndpointSpec,
 ) -> (lpc_model::NodeId, RuntimeBufferId) {
     let out_id = rt
         .tree_mut()
@@ -291,7 +291,6 @@ fn attach_output_demand_root(
                 source: WireSlotIndex(0),
             },
             spine.clone(),
-            artifact,
             frame,
         )
         .unwrap();
@@ -325,10 +324,9 @@ fn attach_idle_output_sink(
     rt: &mut Engine,
     root: lpc_model::NodeId,
     spine: lpc_model::NodeInvocation,
-    artifact: crate::artifact::ArtifactId,
     frame: Revision,
     name: &str,
-    endpoint: HardwareEndpointSpec,
+    endpoint: HwEndpointSpec,
 ) -> (lpc_model::NodeId, RuntimeBufferId) {
     let out_id = rt
         .tree_mut()
@@ -340,7 +338,6 @@ fn attach_idle_output_sink(
                 source: WireSlotIndex(0),
             },
             spine.clone(),
-            artifact,
             frame,
         )
         .unwrap();
@@ -389,13 +386,14 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
     let mut services = EngineServices::new(path.clone());
     services.set_output_provider(Some(Box::new(RcMemoryOutput(Rc::clone(&mem)))));
     let mut rt = Engine::with_services(path, services);
+    let registry = ProjectRegistry::new();
     let graphics = Arc::new(CountingGraphics::new());
     rt.set_graphics(Some(graphics.clone()));
 
     let ticks = Arc::new(AtomicU32::new(0));
     let frame = Revision::new(1);
     let root = rt.tree().root();
-    let (spine, artifact) = test_placeholder_spine();
+    let spine = test_placeholder_spine();
 
     let sh_id = rt
         .tree_mut()
@@ -407,7 +405,6 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
                 source: WireSlotIndex(0),
             },
             spine.clone(),
-            artifact,
             frame,
         )
         .unwrap();
@@ -447,7 +444,6 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
                 source: WireSlotIndex(0),
             },
             spine.clone(),
-            artifact,
             frame,
         )
         .unwrap();
@@ -482,19 +478,12 @@ fn engine_output_sink_flush_writes_expected_rgb_via_memory_provider() {
     )
     .unwrap();
 
-    let (out_id, _sink) = attach_output_demand_root(
-        &mut rt,
-        root,
-        spine.clone(),
-        artifact,
-        frame,
-        "out",
-        endpoint.clone(),
-    );
+    let (out_id, _sink) =
+        attach_output_demand_root(&mut rt, root, spine.clone(), frame, "out", endpoint.clone());
     bind_output_to_fixture(&mut rt, out_id, fix_id, frame);
 
-    rt.tick(10).expect("tick");
-    rt.tick(10)
+    rt.tick(&registry, 10).expect("tick");
+    rt.tick(&registry, 10)
         .expect("second tick reuses fixture render target");
 
     let handle = mem
@@ -527,12 +516,13 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
     let mut services = EngineServices::new(path.clone());
     services.set_output_provider(Some(Box::new(RcMemoryOutput(Rc::clone(&mem)))));
     let mut rt = Engine::with_services(path, services);
+    let registry = ProjectRegistry::new();
     rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
 
     let ticks = Arc::new(AtomicU32::new(0));
     let frame = Revision::new(1);
     let root = rt.tree().root();
-    let (spine, artifact) = test_placeholder_spine();
+    let spine = test_placeholder_spine();
 
     let sh_id = rt
         .tree_mut()
@@ -544,7 +534,6 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
                 source: WireSlotIndex(0),
             },
             spine.clone(),
-            artifact,
             frame,
         )
         .unwrap();
@@ -584,7 +573,6 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
                 source: WireSlotIndex(0),
             },
             spine.clone(),
-            artifact,
             frame,
         )
         .unwrap();
@@ -623,7 +611,6 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
         &mut rt,
         root,
         spine.clone(),
-        artifact,
         frame,
         "out_written",
         endpoint_written.clone(),
@@ -633,13 +620,12 @@ fn engine_output_idle_registered_sink_skips_second_pin() {
         &mut rt,
         root,
         spine.clone(),
-        artifact,
         frame,
         "out_idle",
         endpoint_idle.clone(),
     );
 
-    rt.tick(10).expect("tick");
+    rt.tick(&registry, 10).expect("tick");
 
     assert!(
         mem.is_endpoint_open(&endpoint_written),
@@ -658,12 +644,13 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
     let mut services = EngineServices::new(path.clone());
     services.set_output_provider(Some(Box::new(RcMemoryOutput(Rc::clone(&mem)))));
     let mut rt = Engine::with_services(path, services);
+    let registry = ProjectRegistry::new();
     rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
 
     let ticks = Arc::new(AtomicU32::new(0));
     let frame = Revision::new(1);
     let root = rt.tree().root();
-    let (spine, artifact) = test_placeholder_spine();
+    let spine = test_placeholder_spine();
 
     let sh_id = rt
         .tree_mut()
@@ -675,7 +662,6 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
                 source: WireSlotIndex(0),
             },
             spine.clone(),
-            artifact,
             frame,
         )
         .unwrap();
@@ -715,7 +701,6 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
                 source: WireSlotIndex(0),
             },
             spine.clone(),
-            artifact,
             frame,
         )
         .unwrap();
@@ -751,18 +736,11 @@ fn output_demand_marks_output_buffer_dirty_same_frame_before_flush() {
     .unwrap();
 
     let endpoint = endpoint("ws281x:rmt:D10");
-    let (out_id, sink) = attach_output_demand_root(
-        &mut rt,
-        root,
-        spine.clone(),
-        artifact,
-        frame,
-        "out",
-        endpoint.clone(),
-    );
+    let (out_id, sink) =
+        attach_output_demand_root(&mut rt, root, spine.clone(), frame, "out", endpoint.clone());
     bind_output_to_fixture(&mut rt, out_id, fix_id, frame);
 
-    rt.tick(10).expect("tick");
+    rt.tick(&registry, 10).expect("tick");
 
     let ver_frame = rt.runtime_buffers().get(sink).expect("sink").changed_at();
     assert_eq!(

@@ -10,7 +10,7 @@ use super::WireSlotIndex;
 /// How a child relates to its parent for lifecycle purposes.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum WireChildKind {
     /// Structural input from the artifact (`[input]`).
     Input {

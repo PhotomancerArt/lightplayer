@@ -13,25 +13,22 @@ use super::{
 pub(crate) fn read_custom_slot<S>(
     codec: SlotShapeId,
     data: &mut dyn SlotCustomMutAccess,
-    registry: &SlotShapeRegistry,
+    _registry: &SlotShapeRegistry,
     value: ValueReader<'_, '_, S>,
 ) -> Result<(), SyntaxError>
 where
     S: SyntaxEventSource,
 {
-    if codec == crate::node::node_invocation::NODE_INVOCATION_CODEC_ID {
-        let Some(invocation) = data
-            .as_any_mut()
-            .downcast_mut::<crate::node::node_invocation::NodeInvocation>()
-        else {
+    if codec == crate::slots::ASSET_SLOT_CODEC_ID {
+        let Some(slot) = data.as_any_mut().downcast_mut::<crate::slots::AssetSlot>() else {
             value.skip_value()?;
             return Err(SyntaxError::new(
                 "",
                 None,
-                "node def ref codec expected NodeInvocation data",
+                "asset slot codec expected AssetSlot data",
             ));
         };
-        return invocation.read_invocation_slot(registry, value);
+        return slot.read_slot(value);
     }
 
     value.skip_value()?;
@@ -45,22 +42,19 @@ where
 pub(crate) fn write_custom_slot_json<W>(
     codec: SlotShapeId,
     data: &dyn SlotCustomAccess,
-    registry: &SlotShapeRegistry,
+    _registry: &SlotShapeRegistry,
     value: SlotValueWriter<'_, W>,
 ) -> Result<(), SlotWriteError<W::Error>>
 where
     W: SlotWrite,
 {
-    if codec == crate::node::node_invocation::NODE_INVOCATION_CODEC_ID {
-        let Some(invocation) = data
-            .as_any()
-            .downcast_ref::<crate::node::node_invocation::NodeInvocation>()
-        else {
+    if codec == crate::slots::ASSET_SLOT_CODEC_ID {
+        let Some(slot) = data.as_any().downcast_ref::<crate::slots::AssetSlot>() else {
             return Err(SlotWriteError::InvalidSlotData(
-                "node def ref codec expected NodeInvocation data".into(),
+                "asset slot codec expected AssetSlot data".into(),
             ));
         };
-        return invocation.write_invocation_slot_json(registry, value);
+        return slot.write_slot_json(value);
     }
 
     Err(SlotWriteError::InvalidSlotData(format!(
@@ -71,18 +65,15 @@ where
 pub(crate) fn write_custom_slot_toml(
     codec: SlotShapeId,
     data: &dyn SlotCustomAccess,
-    registry: &SlotShapeRegistry,
+    _registry: &SlotShapeRegistry,
 ) -> Result<toml::Value, SlotDataWriteError> {
-    if codec == crate::node::node_invocation::NODE_INVOCATION_CODEC_ID {
-        let Some(invocation) = data
-            .as_any()
-            .downcast_ref::<crate::node::node_invocation::NodeInvocation>()
-        else {
+    if codec == crate::slots::ASSET_SLOT_CODEC_ID {
+        let Some(slot) = data.as_any().downcast_ref::<crate::slots::AssetSlot>() else {
             return Err(SlotDataWriteError::ShapeDataMismatch {
-                message: "node def ref codec expected NodeInvocation data".into(),
+                message: "asset slot codec expected AssetSlot data".into(),
             });
         };
-        return invocation.write_invocation_slot_toml(registry);
+        return slot.write_slot_toml();
     }
 
     Err(SlotDataWriteError::ShapeDataMismatch {
@@ -94,14 +85,11 @@ pub(crate) fn snapshot_custom_slot_data<'a>(
     codec: SlotShapeId,
     data: &'a dyn SlotCustomAccess,
 ) -> Result<SlotDataAccess<'a>, String> {
-    if codec == crate::node::node_invocation::NODE_INVOCATION_CODEC_ID {
-        let Some(invocation) = data
-            .as_any()
-            .downcast_ref::<crate::node::node_invocation::NodeInvocation>()
-        else {
-            return Err("node def ref codec expected NodeInvocation data".into());
+    if codec == crate::slots::ASSET_SLOT_CODEC_ID {
+        let Some(slot) = data.as_any().downcast_ref::<crate::slots::AssetSlot>() else {
+            return Err("asset slot codec expected AssetSlot data".into());
         };
-        return Ok(SlotDataAccess::Record(invocation));
+        return Ok(SlotDataAccess::Value(slot));
     }
 
     Err(format!("unknown custom slot codec {codec}"))

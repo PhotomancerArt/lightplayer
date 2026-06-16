@@ -1,19 +1,19 @@
-use crate::error::OutputError;
-use crate::hardware::{
-    HardwareAddress, HardwareEndpointError, HardwareEndpointSpec, HardwareManifest,
-    HardwareRegistry, HardwareSystem, Ws281xConfig, Ws281xOutput,
-};
 use crate::output::provider::{
     OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider,
 };
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
 use core::cell::RefCell;
+use lp_collection::VecMap;
+use lpc_hardware::OutputError;
+use lpc_hardware::{
+    HardwareEndpointError, HardwareSystem, HwAddress, HwEndpointSpec, HwManifest, HwRegistry,
+    Ws281xConfig, Ws281xOutput,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum EndpointValidation {
@@ -23,7 +23,7 @@ enum EndpointValidation {
 
 /// Channel state for in-memory provider
 struct ChannelState {
-    endpoint: HardwareEndpointSpec,
+    endpoint: HwEndpointSpec,
     #[allow(
         dead_code,
         reason = "Stored for validation; may be used for protocol-specific handling"
@@ -37,7 +37,7 @@ struct ChannelState {
 
 /// Internal state for memory provider (wrapped in RefCell for interior mutability)
 struct MemoryOutputProviderState {
-    channels: BTreeMap<OutputChannelHandle, ChannelState>,
+    channels: VecMap<OutputChannelHandle, ChannelState>,
     next_handle: i32,
 }
 
@@ -54,7 +54,7 @@ pub struct MemoryOutputProvider {
 impl MemoryOutputProvider {
     /// Create a new memory output provider
     pub fn new() -> Self {
-        Self::with_hardware_manifest(HardwareManifest::virtual_single_rmt_gpio_board())
+        Self::with_hardware_manifest(HwManifest::virtual_single_rmt_gpio_board())
     }
 
     /// Create a memory provider that accepts any authored hardware endpoint.
@@ -65,17 +65,17 @@ impl MemoryOutputProvider {
     pub fn new_permissive() -> Self {
         Self::with_validation(
             Rc::new(HardwareSystem::with_virtual_drivers(Rc::new(
-                HardwareRegistry::new(HardwareManifest::virtual_single_rmt_gpio_board()),
+                HwRegistry::new(HwManifest::virtual_single_rmt_gpio_board()),
             ))),
             EndpointValidation::Permissive,
         )
     }
 
-    pub fn with_hardware_manifest(manifest: HardwareManifest) -> Self {
-        Self::with_hardware_registry(Rc::new(HardwareRegistry::new(manifest)))
+    pub fn with_hardware_manifest(manifest: HwManifest) -> Self {
+        Self::with_hardware_registry(Rc::new(HwRegistry::new(manifest)))
     }
 
-    pub fn with_hardware_registry(hardware_registry: Rc<HardwareRegistry>) -> Self {
+    pub fn with_hardware_registry(hardware_registry: Rc<HwRegistry>) -> Self {
         Self::with_hardware_system(Rc::new(HardwareSystem::with_virtual_drivers(
             hardware_registry,
         )))
@@ -93,7 +93,7 @@ impl MemoryOutputProvider {
             hardware_system,
             endpoint_validation,
             state: RefCell::new(MemoryOutputProviderState {
-                channels: BTreeMap::new(),
+                channels: VecMap::new(),
                 next_handle: 0,
             }),
         }
@@ -117,18 +117,18 @@ impl MemoryOutputProvider {
     pub fn is_pin_open(&self, pin: u32) -> bool {
         self.hardware_system
             .registry()
-            .is_claimed(&HardwareAddress::gpio(pin))
+            .is_claimed(&HwAddress::gpio(pin))
     }
 
     /// Check if an endpoint is currently opened.
-    pub fn is_endpoint_open(&self, endpoint: &HardwareEndpointSpec) -> bool {
+    pub fn is_endpoint_open(&self, endpoint: &HwEndpointSpec) -> bool {
         self.get_handle_for_endpoint(endpoint).is_some()
     }
 
     /// Get the handle for a given endpoint (for testing)
     pub fn get_handle_for_endpoint(
         &self,
-        endpoint: &HardwareEndpointSpec,
+        endpoint: &HwEndpointSpec,
     ) -> Option<OutputChannelHandle> {
         let state = self.state.borrow();
         for (handle, channel_state) in state.channels.iter() {
@@ -148,13 +148,11 @@ impl MemoryOutputProvider {
 impl OutputProvider for MemoryOutputProvider {
     fn open(
         &self,
-        endpoint: &HardwareEndpointSpec,
+        endpoint: &HwEndpointSpec,
         byte_count: u32,
         format: OutputFormat,
         options: Option<OutputDriverOptions>,
     ) -> Result<OutputChannelHandle, OutputError> {
-        let _ = options;
-
         // Validate byte_count
         if byte_count == 0 {
             return Err(OutputError::InvalidConfig {
@@ -215,7 +213,7 @@ impl OutputProvider for MemoryOutputProvider {
             channel_state.byte_count = new_len as u32;
             channel_state
                 .output
-                .resize(Ws281xConfig::new(channel_state.byte_count, None))?;
+                .resize(Ws281xConfig::new(channel_state.byte_count))?;
         } else if data.len() < expected_len {
             return Err(OutputError::DataLengthMismatch {
                 expected: expected_len as u32,
@@ -223,7 +221,9 @@ impl OutputProvider for MemoryOutputProvider {
             });
         }
 
-        channel_state.output.write(data)?;
+        let mut raw = Vec::with_capacity(channel_state.data.len());
+        render_rgb8(data, channel_state.data.len(), &mut raw);
+        channel_state.output.write(&raw)?;
 
         // Store data
         let len = channel_state.data.len();
@@ -251,17 +251,18 @@ impl OutputProvider for MemoryOutputProvider {
 impl MemoryOutputProvider {
     fn open_ws281x_output(
         &self,
-        endpoint: &HardwareEndpointSpec,
+        endpoint: &HwEndpointSpec,
         byte_count: u32,
         options: Option<OutputDriverOptions>,
     ) -> Result<Box<dyn Ws281xOutput>, OutputError> {
+        let _ = options;
         match self.endpoint_validation {
             EndpointValidation::HardwareSystem => self
                 .hardware_system
-                .open_ws281x_by_spec(endpoint, Ws281xConfig::new(byte_count, options))
+                .open_ws281x_by_spec(endpoint, Ws281xConfig::new(byte_count))
                 .map_err(endpoint_error_to_output_error),
             EndpointValidation::Permissive => {
-                let _ = (endpoint, options);
+                let _ = endpoint;
                 validate_ws281x_byte_count(byte_count)?;
                 Ok(Box::new(MemoryWs281xOutput::new(byte_count)))
             }
@@ -271,20 +272,20 @@ impl MemoryOutputProvider {
 
 struct MemoryWs281xOutput {
     byte_count: u32,
-    data: Vec<u16>,
+    data: Vec<u8>,
 }
 
 impl MemoryWs281xOutput {
     fn new(byte_count: u32) -> Self {
         Self {
             byte_count,
-            data: vec![0; u16_len_for_byte_count(byte_count)],
+            data: vec![0; byte_len_for_byte_count(byte_count)],
         }
     }
 }
 
 impl Ws281xOutput for MemoryWs281xOutput {
-    fn write(&mut self, data: &[u16]) -> Result<(), OutputError> {
+    fn write(&mut self, data: &[u8]) -> Result<(), OutputError> {
         let expected_len = self.data.len();
         if data.len() > expected_len {
             let new_len = (data.len() / 3) * 3;
@@ -305,7 +306,8 @@ impl Ws281xOutput for MemoryWs281xOutput {
     fn resize(&mut self, config: Ws281xConfig) -> Result<(), OutputError> {
         validate_ws281x_byte_count(config.byte_count())?;
         self.byte_count = config.byte_count();
-        self.data.resize(u16_len_for_byte_count(self.byte_count), 0);
+        self.data
+            .resize(byte_len_for_byte_count(self.byte_count), 0);
         Ok(())
     }
 }
@@ -319,8 +321,13 @@ fn validate_ws281x_byte_count(byte_count: u32) -> Result<(), OutputError> {
     Ok(())
 }
 
-fn u16_len_for_byte_count(byte_count: u32) -> usize {
+fn byte_len_for_byte_count(byte_count: u32) -> usize {
     ((byte_count / 3) as usize) * 3
+}
+
+fn render_rgb8(data: &[u16], len: usize, out: &mut Vec<u8>) {
+    out.clear();
+    out.extend(data[..len].iter().map(|sample| (sample >> 8) as u8));
 }
 
 fn endpoint_error_to_output_error(error: HardwareEndpointError) -> OutputError {
@@ -336,8 +343,8 @@ fn endpoint_error_to_output_error(error: HardwareEndpointError) -> OutputError {
 mod tests {
     use super::*;
 
-    fn endpoint(spec: &'static str) -> HardwareEndpointSpec {
-        HardwareEndpointSpec::from_static(spec)
+    fn endpoint(spec: &'static str) -> HwEndpointSpec {
+        HwEndpointSpec::from_static(spec)
     }
 
     #[test]

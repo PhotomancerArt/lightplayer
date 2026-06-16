@@ -69,7 +69,7 @@ it is not currently packaged as a user-facing deployable CLI:
 - **Project Management** - Creates, initializes, and manages LightPlayer projects
 - **Debug UI** - Visual interface for inspecting node states, outputs, and project structure
 - **Hardware Manifests** - Interactive CRUD and validation for board profiles under
-  `lp-core/lpc-shared/boards`
+  `lp-core/lpc-hardware/boards`
 - **Hardware Calibration** - Host-driven GPIO square-wave calibration that maps board-visible
   silkscreen labels to internal HAL GPIO addresses
 

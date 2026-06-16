@@ -288,7 +288,7 @@ name = "aux"
 
     #[test]
     fn json_writer_writes_string_maps_and_fixed_f32_arrays() {
-        let mut values = alloc::collections::BTreeMap::new();
+        let mut values = lp_collection::VecMap::new();
         values.insert("white_point".to_string(), [0.9, 1.0, 1.0]);
 
         let mut out = Vec::new();

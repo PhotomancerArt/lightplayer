@@ -1,17 +1,12 @@
-//! Generic slot sync and mutation wire payloads.
+//! Generic slot sync wire payloads.
 
 mod access_sync;
-mod mutation;
 mod slot_shape_registry_json;
 mod sync;
 
 pub use access_sync::{
     build_slot_full_sync, build_slot_roots_snapshot, collect_slot_diff, snapshot_slot_root,
     snapshot_slot_shape, wire_slot_data_from_slot_access,
-};
-pub use mutation::{
-    WireSlotMutationId, WireSlotMutationOp, WireSlotMutationRejection, WireSlotMutationRequest,
-    WireSlotMutationResponse, WireSlotMutationResult,
 };
 pub use slot_shape_registry_json::write_slot_shape_registry_snapshot_json;
 pub use sync::{

@@ -1,6 +1,10 @@
-//! Display pipeline options
+//! Display pipeline options.
 
-/// Options for display pipeline (LUT, dithering, interpolation)
+/// Color and temporal-processing options for [`super::DisplayPipeline`].
+///
+/// These options belong with the display pipeline rather than `lpc-hardware`:
+/// hardware outputs receive already-rendered bytes, while the pipeline decides
+/// how 16-bit engine samples become those bytes.
 #[derive(Debug, Clone)]
 pub struct DisplayPipelineOptions {
     /// RGB white point balance

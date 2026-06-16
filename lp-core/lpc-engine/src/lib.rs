@@ -11,7 +11,6 @@
 
 extern crate alloc;
 
-pub mod artifact;
 pub mod dataflow;
 pub mod engine;
 pub mod gfx;
@@ -24,7 +23,7 @@ pub mod resources;
 
 pub use engine::error::Error;
 pub use engine::{
-    ButtonService, Engine, EngineError, EngineServices, FrameNum, FrameTime, OutputFlushError,
-    ProjectLoadError, ProjectLoader, RadioService,
+    ButtonService, Engine, EngineError, EngineProjectReadSource, EngineServices, FrameNum,
+    FrameTime, OutputFlushError, ProjectLoadError, ProjectLoader, RadioService, RuntimeApplyResult,
 };
 pub use gfx::{Graphics, LpGraphics, LpShader, ShaderCompileOptions};

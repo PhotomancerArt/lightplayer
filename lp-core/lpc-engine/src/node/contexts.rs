@@ -6,7 +6,6 @@
 use alloc::rc::Rc;
 use alloc::sync::Arc;
 
-use crate::artifact::ArtifactId;
 use crate::dataflow::bus::Bus;
 use crate::dataflow::resolver::{
     Production, ProductionSource, QueryKey, ResolveError, TickResolver,
@@ -22,10 +21,12 @@ use crate::products::visual::{
 };
 use crate::resource::{RuntimeBuffer, RuntimeBufferId, RuntimeBufferStore};
 use lpc_model::{
-    FromLpValue, NodeId, Revision, SlotAccess, SlotAccessor, SlotPath, SlotShapeRegistry,
-    WithRevision, bus::ChannelName, lookup_slot_data_and_shape,
+    AssetLocation, FromLpValue, NodeId, Revision, SlotAccess, SlotAccessor, SlotPath,
+    SlotShapeRegistry, WithRevision, bus::ChannelName, lookup_slot_data_and_shape,
 };
+use lpc_registry::{AssetBytes, AssetReadError, AssetText, ProjectRegistry};
 use lpc_shared::time::TimeProvider;
+use lpfs::LpFs;
 use lps_shared::LpsValueF32;
 
 use super::node_error::NodeError;
@@ -54,14 +55,70 @@ impl<'a> NodeResourceInitContext<'a> {
     }
 }
 
+/// Context for [`super::NodeRuntime::refresh_asset`].
+pub struct AssetRefreshContext<'a> {
+    fs: &'a dyn LpFs,
+    registry: &'a mut ProjectRegistry,
+    slot_shapes: &'a SlotShapeRegistry,
+    revision: Revision,
+}
+
+impl<'a> AssetRefreshContext<'a> {
+    pub fn new(
+        fs: &'a dyn LpFs,
+        registry: &'a mut ProjectRegistry,
+        slot_shapes: &'a SlotShapeRegistry,
+        revision: Revision,
+    ) -> Self {
+        Self {
+            fs,
+            registry,
+            slot_shapes,
+            revision,
+        }
+    }
+
+    pub fn fs(&self) -> &dyn LpFs {
+        self.fs
+    }
+
+    pub fn registry(&mut self) -> &mut ProjectRegistry {
+        self.registry
+    }
+
+    pub fn slot_shapes(&self) -> &SlotShapeRegistry {
+        self.slot_shapes
+    }
+
+    pub fn revision(&self) -> Revision {
+        self.revision
+    }
+
+    pub fn read_asset_bytes_if_changed(
+        &mut self,
+        location: &AssetLocation,
+        since: Revision,
+    ) -> Result<Option<AssetBytes>, AssetReadError> {
+        self.registry
+            .read_asset_bytes_if_changed(self.fs, location, since)
+    }
+
+    pub fn read_asset_text_if_changed(
+        &mut self,
+        location: &AssetLocation,
+        since: Revision,
+    ) -> Result<Option<AssetText>, AssetReadError> {
+        self.registry
+            .read_asset_text_if_changed(self.fs, location, since)
+    }
+}
+
 /// Context for [`super::NodeRuntime::produce`] and [`super::NodeRuntime::consume`].
 ///
 /// Demand-style reads go through [`TickResolver`] (typically [`crate::dataflow::resolver::SessionHostResolver`]).
 pub struct TickContext<'r> {
     node_id: NodeId,
     revision: Revision,
-    artifact_ref: ArtifactId,
-    artifact_content_frame: Revision,
     resolver: &'r mut dyn TickResolver,
     slot_shapes: &'r SlotShapeRegistry,
     graphics: Option<Arc<dyn LpGraphics>>,
@@ -75,30 +132,16 @@ impl<'r> TickContext<'r> {
     pub fn new(
         node_id: NodeId,
         frame_id: Revision,
-        artifact_ref: ArtifactId,
-        artifact_content_frame: Revision,
         resolver: &'r mut dyn TickResolver,
         slot_shapes: &'r SlotShapeRegistry,
     ) -> Self {
-        Self::with_render_services(
-            node_id,
-            frame_id,
-            artifact_ref,
-            artifact_content_frame,
-            resolver,
-            slot_shapes,
-            None,
-            None,
-            0.0,
-        )
+        Self::with_render_services(node_id, frame_id, resolver, slot_shapes, None, None, 0.0)
     }
 
     /// [`TickContext`] with graphics and frame time.
     pub fn with_render_services(
         node_id: NodeId,
         frame_id: Revision,
-        artifact_ref: ArtifactId,
-        artifact_content_frame: Revision,
         resolver: &'r mut dyn TickResolver,
         slot_shapes: &'r SlotShapeRegistry,
         graphics: Option<Arc<dyn LpGraphics>>,
@@ -108,8 +151,6 @@ impl<'r> TickContext<'r> {
         Self::with_engine_services(
             node_id,
             frame_id,
-            artifact_ref,
-            artifact_content_frame,
             resolver,
             slot_shapes,
             graphics,
@@ -124,8 +165,6 @@ impl<'r> TickContext<'r> {
     pub fn with_engine_services(
         node_id: NodeId,
         frame_id: Revision,
-        artifact_ref: ArtifactId,
-        artifact_content_frame: Revision,
         resolver: &'r mut dyn TickResolver,
         slot_shapes: &'r SlotShapeRegistry,
         graphics: Option<Arc<dyn LpGraphics>>,
@@ -137,8 +176,6 @@ impl<'r> TickContext<'r> {
         Self {
             node_id,
             revision: frame_id,
-            artifact_ref,
-            artifact_content_frame,
             resolver,
             slot_shapes,
             graphics,
@@ -235,18 +272,6 @@ impl<'r> TickContext<'r> {
 
     pub fn slot_shapes(&self) -> &SlotShapeRegistry {
         self.slot_shapes
-    }
-
-    pub fn artifact_ref(&self) -> ArtifactId {
-        self.artifact_ref
-    }
-
-    pub fn artifact_content_frame(&self) -> Revision {
-        self.artifact_content_frame
-    }
-
-    pub fn artifact_changed_since(&self, since: Revision) -> bool {
-        self.artifact_content_frame.0 > since.0
     }
 
     /// Monotonic shader time in seconds for the current engine frame.
@@ -742,7 +767,6 @@ mod tests {
         let mut session = session_bundle(&mut resolver, frame);
         let mut host = PanicProduceHost::default();
         let slot_shapes = SlotShapeRegistry::default();
-        let artifact_ref = ArtifactId::from_raw(1);
 
         let mut bridge = SessionHostResolver {
             session: &mut session,
@@ -751,16 +775,12 @@ mod tests {
         let ctx = TickContext::new(
             NodeId::new(7),
             Revision::new(3),
-            artifact_ref,
-            Revision::new(5),
             &mut bridge as &mut dyn TickResolver,
             &slot_shapes,
         );
 
         assert_eq!(ctx.node_id(), NodeId::new(7));
         assert_eq!(ctx.revision(), Revision::new(3));
-        assert_eq!(ctx.artifact_ref(), artifact_ref);
-        assert_eq!(ctx.artifact_content_frame(), Revision::new(5));
     }
 
     #[test]
@@ -790,8 +810,6 @@ mod tests {
         let mut ctx = TickContext::new(
             NodeId::new(1),
             frame,
-            ArtifactId::from_raw(1),
-            Revision::new(1),
             &mut bridge as &mut dyn TickResolver,
             &slot_shapes,
         );
@@ -832,8 +850,6 @@ mod tests {
         let mut ctx = TickContext::new(
             node,
             frame,
-            ArtifactId::from_raw(1),
-            Revision::new(1),
             &mut bridge as &mut dyn TickResolver,
             &slot_shapes,
         );
@@ -863,8 +879,6 @@ mod tests {
         let mut ctx = TickContext::new(
             node,
             frame,
-            ArtifactId::from_raw(1),
-            Revision::new(1),
             &mut bridge as &mut dyn TickResolver,
             &slot_shapes,
         );
@@ -883,32 +897,6 @@ mod tests {
             *production.value_leaf().expect("leaf").value(),
             LpValue::F32(3.5)
         );
-    }
-
-    #[test]
-    fn tick_context_artifact_changed_since_compares_content_frame() {
-        let mut resolver = Resolver::new();
-        let frame = Revision::new(10);
-        let mut session = session_bundle(&mut resolver, frame);
-        let mut host = PanicProduceHost::default();
-        let slot_shapes = SlotShapeRegistry::default();
-
-        let mut bridge = SessionHostResolver {
-            session: &mut session,
-            host: &mut host,
-        };
-        let ctx = TickContext::new(
-            NodeId::new(1),
-            frame,
-            ArtifactId::from_raw(1),
-            Revision::new(5),
-            &mut bridge as &mut dyn TickResolver,
-            &slot_shapes,
-        );
-
-        assert!(ctx.artifact_changed_since(Revision::new(4)));
-        assert!(!ctx.artifact_changed_since(Revision::new(5)));
-        assert!(!ctx.artifact_changed_since(Revision::new(6)));
     }
 
     struct FixtureProduceHost {
@@ -1008,8 +996,6 @@ mod tests {
         let mut ctx = TickContext::new(
             NodeId::new(2),
             frame,
-            ArtifactId::from_raw(1),
-            Revision::new(1),
             &mut bridge as &mut dyn TickResolver,
             &slot_shapes,
         );
@@ -1048,8 +1034,6 @@ mod tests {
         let mut ctx = TickContext::new(
             node_id,
             frame,
-            ArtifactId::from_raw(1),
-            Revision::new(1),
             &mut bridge as &mut dyn TickResolver,
             &slot_shapes,
         );

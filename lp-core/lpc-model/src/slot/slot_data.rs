@@ -1,8 +1,8 @@
 use crate::{LpValue, Revision, SlotName, WithRevision, current_revision};
 use alloc::boxed::Box;
-use alloc::collections::BTreeMap;
 use alloc::string::String;
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 
 /// Owned dynamic data for a slot-accessible value tree.
 ///
@@ -51,15 +51,15 @@ impl SlotRecord {
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct SlotMapDyn {
     pub keys_revision: Revision,
-    pub entries: BTreeMap<SlotMapKey, SlotData>,
+    pub entries: VecMap<SlotMapKey, SlotData>,
 }
 
 impl SlotMapDyn {
-    pub fn new(entries: BTreeMap<SlotMapKey, SlotData>) -> Self {
+    pub fn new(entries: VecMap<SlotMapKey, SlotData>) -> Self {
         Self::with_revision(current_revision(), entries)
     }
 
-    pub fn with_revision(keys_revision: Revision, entries: BTreeMap<SlotMapKey, SlotData>) -> Self {
+    pub fn with_revision(keys_revision: Revision, entries: VecMap<SlotMapKey, SlotData>) -> Self {
         Self {
             keys_revision,
             entries,
@@ -134,13 +134,13 @@ impl SlotOptionDyn {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::collections::BTreeMap;
     use alloc::string::ToString;
     use alloc::vec;
+    use lp_collection::VecMap;
 
     #[test]
     fn slot_map_key_orders_stable_key_domains() {
-        let mut entries = BTreeMap::new();
+        let mut entries = VecMap::new();
         entries.insert(
             SlotMapKey::U32(2),
             SlotData::Record(SlotRecord::new(vec![])),

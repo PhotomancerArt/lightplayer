@@ -8,10 +8,10 @@ use crate::regalloc::{
     Alloc, AllocOutput, Edit, EditPoint, append_entry_trace_metadata_lines, trace_by_vinst_or_empty,
 };
 use crate::vinst::{IcmpCond, ModuleSymbols, VInst, VReg};
-use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::{String, ToString};
 use alloc::vec::Vec;
+use lp_collection::VecMap;
 use lpir::{FuncId, IrFunction, LpirModule, LpirOp, print_module};
 
 /// Indentation for LPIR body lines (after `; ` in the file).
@@ -41,7 +41,7 @@ fn format_func_header_line(func: &IrFunction, module: &LpirModule, func_abi: &Fu
         .unwrap_or(FuncId(0));
     let m = LpirModule {
         imports: module.imports.clone(),
-        functions: BTreeMap::from([(id, f)]),
+        functions: VecMap::from([(id, f)]),
     };
     let s = print_module(&m);
     s.lines()
@@ -133,8 +133,8 @@ pub fn render_interleaved(
 ) -> String {
     let mut lines = Vec::new();
 
-    let mut vinsts_by_src_op: alloc::collections::BTreeMap<u32, Vec<(usize, &VInst)>> =
-        alloc::collections::BTreeMap::new();
+    let mut vinsts_by_src_op: lp_collection::VecMap<u32, Vec<(usize, &VInst)>> =
+        lp_collection::VecMap::new();
 
     for (inst_idx, inst) in vinsts.iter().enumerate() {
         if let Some(src_op) = inst.src_op() {
@@ -145,7 +145,7 @@ pub fn render_interleaved(
         }
     }
 
-    let mut rendered_vinsts = alloc::collections::BTreeSet::new();
+    let mut rendered_vinsts = lp_collection::VecSet::new();
 
     let trace_by_vinst = trace_by_vinst_or_empty(output);
 
@@ -216,7 +216,7 @@ fn push_vinst_snapshot_block(
     _vinsts: &[VInst],
     vreg_pool: &[VReg],
     output: &AllocOutput,
-    trace_by_vinst: &alloc::collections::BTreeMap<usize, Vec<&TraceEntry>>,
+    trace_by_vinst: &lp_collection::VecMap<usize, Vec<&TraceEntry>>,
     symbols: &ModuleSymbols,
     isa: IsaTarget,
 ) {
@@ -240,7 +240,7 @@ fn push_vinst_snapshot_block_raw(
     inst: &VInst,
     vreg_pool: &[VReg],
     output: &AllocOutput,
-    trace_by_vinst: &alloc::collections::BTreeMap<usize, Vec<&TraceEntry>>,
+    trace_by_vinst: &lp_collection::VecMap<usize, Vec<&TraceEntry>>,
     symbols: &ModuleSymbols,
     indent_vinst: &str,
     _indent_edit_read: &str,

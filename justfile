@@ -28,6 +28,10 @@ install-rv32-target:
         echo "Target {{ rv32_target }} already installed"; \
     fi
 
+# Pin the nightly toolchain + ABI-coupled `unwinding` in lockstep and validate (date defaults to today UTC; see docs/toolchain-notes.md)
+bump-nightly date="":
+    scripts/bump-nightly.sh {{ date }}
+
 # Generate builtin boilerplate code
 generate-builtins:
     cargo run --bin lps-builtins-gen-app -p lps-builtins-gen-app

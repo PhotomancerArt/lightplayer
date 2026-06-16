@@ -10,7 +10,7 @@ use crate::{
 
 /// How a fixture evaluates its input visual product before writing control samples.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[serde(rename_all = "snake_case")]
 pub enum FixtureSamplingConfig {
     /// Sample the shader directly once per fixture lamp.
     Direct,

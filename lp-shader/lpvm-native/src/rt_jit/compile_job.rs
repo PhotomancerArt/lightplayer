@@ -24,8 +24,7 @@ pub struct NativeJitCompileJob {
     options: NativeCompileOptions,
     isa: IsaTarget,
     stage: NativeJitCompileStage,
-    entry_info:
-        alloc::collections::BTreeMap<alloc::string::String, super::module::NativeJitEntryInfo>,
+    entry_info: lp_collection::VecMap<alloc::string::String, super::module::NativeJitEntryInfo>,
 }
 
 impl NativeJitCompileJob {

@@ -2,7 +2,7 @@
 
 use crate::dataflow::bus::bus_error::BusError;
 use crate::dataflow::bus::channel_entry::ChannelEntry;
-use alloc::collections::BTreeMap;
+use lp_collection::VecMap;
 use lpc_model::{ChannelName, Kind, NodeId, Revision, SlotPath};
 use lps_shared::LpsValueF32;
 
@@ -18,13 +18,13 @@ use lps_shared::LpsValueF32;
 /// registration are deferred.
 #[derive(Default)]
 pub struct Bus {
-    channels: BTreeMap<ChannelName, ChannelEntry>,
+    channels: VecMap<ChannelName, ChannelEntry>,
 }
 
 impl Bus {
     pub fn new() -> Self {
         Self {
-            channels: BTreeMap::new(),
+            channels: VecMap::new(),
         }
     }
 

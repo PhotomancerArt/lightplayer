@@ -16,19 +16,19 @@ use lpfs::LpFs;
 const PROJECT_TOML: &[u8] = br#"kind = "Project"
 
 [nodes.output]
-def = { path = "./output.toml" }
+ref = "./output.toml"
 
 [nodes.clock]
-def = { path = "./clock.toml" }
+ref = "./clock.toml"
 
 [nodes.texture]
-def = { path = "./texture.toml" }
+ref = "./texture.toml"
 
 [nodes.shader]
-def = { path = "./shader.toml" }
+ref = "./shader.toml"
 
 [nodes.fixture]
-def = { path = "./fixture.toml" }
+ref = "./fixture.toml"
 "#;
 
 /// TOML for the default clock node.

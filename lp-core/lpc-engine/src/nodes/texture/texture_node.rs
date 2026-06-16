@@ -128,7 +128,6 @@ impl NodeRuntime for TextureNode {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::artifact::ArtifactLocation;
     use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
     use crate::dataflow::resolver::{QueryKey, ResolveLogLevel};
     use crate::engine::Engine;
@@ -136,18 +135,19 @@ mod tests {
     use crate::node::test_placeholder_spine;
     use alloc::boxed::Box;
     use lpc_model::{Dim2u, Kind, LpValue, NodeDef, Revision, TextureDef, ToLpValue, TreePath};
+    use lpc_registry::ProjectRegistry;
     use lpc_wire::{WireChildKind, WireSlotIndex};
     use lps_shared::LpsValueF32;
 
     #[test]
     fn texture_metadata_props_resolve_on_engine() {
-        let (mut engine, tid) = texture_engine(64, 48);
+        let (mut engine, registry, tid) = texture_engine(64, 48);
 
         let w = QueryKey::ConsumedSlot {
             node: tid,
             slot: size_path(),
         };
-        let pv = resolve_with_engine_host(&mut engine, w, ResolveLogLevel::Off)
+        let pv = resolve_with_engine_host(&mut engine, &registry, w, ResolveLogLevel::Off)
             .expect("resolve")
             .0;
         assert_dim2u_value(&pv.as_value().expect("value"), 64, 48);
@@ -155,10 +155,11 @@ mod tests {
 
     #[test]
     fn texture_tick_reads_authored_size_through_slot_view() {
-        let (mut engine, tid) = texture_engine(64, 48);
+        let (mut engine, registry, tid) = texture_engine(64, 48);
 
         let pv = resolve_with_engine_host(
             &mut engine,
+            &registry,
             QueryKey::ProducedSlot {
                 node: tid,
                 slot: SlotPath::parse("width").unwrap(),
@@ -175,7 +176,7 @@ mod tests {
 
     #[test]
     fn texture_tick_uses_bound_size_override() {
-        let (mut engine, tid) = texture_engine(64, 48);
+        let (mut engine, registry, tid) = texture_engine(64, 48);
         engine
             .add_binding(
                 BindingDraft {
@@ -194,6 +195,7 @@ mod tests {
 
         let pv = resolve_with_engine_host(
             &mut engine,
+            &registry,
             QueryKey::ProducedSlot {
                 node: tid,
                 slot: SlotPath::parse("height").unwrap(),
@@ -207,10 +209,11 @@ mod tests {
 
     #[test]
     fn texture_node_exposes_owned_texture_resource_summary() {
-        let (mut engine, tid) = texture_engine(64, 48);
+        let (mut engine, registry, tid) = texture_engine(64, 48);
 
         resolve_with_engine_host(
             &mut engine,
+            &registry,
             QueryKey::ProducedSlot {
                 node: tid,
                 slot: SlotPath::parse("width").unwrap(),
@@ -218,7 +221,8 @@ mod tests {
             ResolveLogLevel::Off,
         )
         .expect("resolve texture width");
-        let response = engine.read_project(lpc_wire::ProjectReadRequest::default_debug(None));
+        let response =
+            engine.read_project(&registry, lpc_wire::ProjectReadRequest::default_debug(None));
 
         let lpc_wire::ProjectReadResult::Resources(resources) = &response.results[2] else {
             panic!("third result should be resources");
@@ -240,20 +244,12 @@ mod tests {
         assert_eq!(texture.owner, Some(tid));
     }
 
-    fn texture_engine(width: u32, height: u32) -> (Engine, NodeId) {
+    fn texture_engine(width: u32, height: u32) -> (Engine, ProjectRegistry, NodeId) {
         let mut engine = Engine::new(TreePath::parse("/t.show").expect("path"));
+        let mut registry = ProjectRegistry::new();
         let frame = Revision::new(1);
         let root = engine.tree().root();
-        let (spine, _) = test_placeholder_spine();
-        let artifact = engine
-            .artifacts_mut()
-            .acquire_location(ArtifactLocation::file("/texture.toml"), frame);
-        engine
-            .artifacts_mut()
-            .load_with(&artifact, frame, |_location| {
-                Ok(NodeDef::Texture(TextureDef::new(width, height)))
-            })
-            .expect("load texture artifact");
+        let spine = test_placeholder_spine();
         let tid = engine
             .tree_mut()
             .add_child(
@@ -264,15 +260,21 @@ mod tests {
                     source: WireSlotIndex(0),
                 },
                 spine,
-                artifact,
                 frame,
             )
             .expect("add");
+        engine
+            .load_test_node_defs(
+                &mut registry,
+                &[(tid, NodeDef::Texture(TextureDef::new(width, height)))],
+                frame,
+            )
+            .expect("load test defs");
         let tex = TextureNode::new(tid);
         engine
             .attach_runtime_node(tid, Box::new(tex), frame)
             .expect("attach");
-        (engine, tid)
+        (engine, registry, tid)
     }
 
     fn texture_size_value(width: u32, height: u32) -> LpValue {
