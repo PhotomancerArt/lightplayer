@@ -25,9 +25,16 @@ emulator. See `docs/reports/2026-03-13-esp32-unwinding-implementation.md` for de
 ## Why the nightly is pinned (and why it's coupled to `unwinding`)
 
 The toolchain is pinned to a dated nightly (e.g. `nightly-2026-04-27`), **not** a
-rolling `nightly`. The pin lives in two places that must stay in sync:
+rolling `nightly`. The pin lives in three places that must stay in sync:
 
-- `rust-toolchain.toml` — drives local dev and any in-repo `cargo`/`rustc` call.
+- `rust-toolchain.toml` (workspace root) — drives local dev and any in-repo
+  `cargo`/`rustc` call.
+- `lp-fw/fw-esp32/rust-toolchain.toml` — a per-crate pin. Several recipes `cd` into
+  `lp-fw/fw-esp32`, so *this* file wins there; it also carries `rust-src` for
+  `-Zbuild-std`. If it drifts from the root pin, the firmware build resolves a
+  different (possibly unpinned) toolchain — which is exactly how CI broke once: the
+  root was pinned but this file still said `nightly`, so the build-std step ran on a
+  rolling nightly with no `rust-src`.
 - `.github/workflows/pre-merge.yml` — the `dtolnay/rust-toolchain` step (CI checks
   out into a subdirectory, so the action can't auto-read the toml; the date is
   passed explicitly).
@@ -56,8 +63,9 @@ just bump-nightly 2026-06-01   # pin to a specific dated nightly
 just bump-nightly              # pin to today's nightly (UTC)
 ```
 
-It (1) rewrites the pin in `rust-toolchain.toml` and the workflow, (2) runs
-`just check` with the current `unwinding` (this compiles `unwinding` under build-std
+It (1) rewrites the pin in every `rust-toolchain.toml` (root + per-crate) and the
+workflow, (2) runs `just check` with the current `unwinding` (this compiles
+`unwinding` under build-std
 via `clippy-rv32`, and also surfaces any new clippy lints from the newer nightly),
 (3) only if that fails, advances `unwinding` to the latest `0.2.x` and re-checks, and
 (4) leaves everything in the working tree for review — it never commits. If the new

@@ -1,3 +1,7 @@
+# fw-esp32 builds with `-Zbuild-std`, so it needs `rust-src`. Keep this pin in
+# lockstep with the workspace `rust-toolchain.toml` (the recipes `cd` into this
+# crate, so this file wins here). `just bump-nightly` updates both. See
+# docs/toolchain-notes.md.
 [toolchain]
-channel = "nightly"
-components = ["rustfmt", "clippy"]
+channel = "nightly-2026-04-27"
+components = ["rustfmt", "clippy", "rust-src"]
