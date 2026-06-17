@@ -2,23 +2,219 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>fw-browser smoke</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #101417;
+      color: #eef4f0;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: grid;
+      grid-template-rows: auto 1fr;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 58px;
+      padding: 12px 18px;
+      border-bottom: 1px solid #263037;
+      background: #151b1f;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 18px;
+      font-weight: 650;
+      letter-spacing: 0;
+    }
+
+    #status {
+      min-width: 210px;
+      text-align: right;
+      font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: #b6c8c0;
+    }
+
+    main {
+      display: grid;
+      grid-template-columns: minmax(320px, 1fr) minmax(320px, 1fr);
+      grid-template-rows: minmax(360px, 1fr) 240px;
+      gap: 1px;
+      background: #263037;
+      min-height: 0;
+    }
+
+    section {
+      min-width: 0;
+      min-height: 0;
+      display: grid;
+      grid-template-rows: auto 1fr;
+      background: #101417;
+    }
+
+    section h2 {
+      margin: 0;
+      padding: 10px 12px;
+      border-bottom: 1px solid #263037;
+      font-size: 13px;
+      font-weight: 650;
+      letter-spacing: 0;
+      color: #c9d8d1;
+      background: #151b1f;
+    }
+
+    .canvas-wrap {
+      min-height: 0;
+      display: grid;
+      place-items: center;
+      padding: 14px;
+    }
+
+    canvas {
+      width: min(100%, 560px);
+      height: auto;
+      aspect-ratio: 1;
+      display: block;
+      image-rendering: pixelated;
+      background: #050607;
+      border: 1px solid #2f3c43;
+    }
+
+    #checks-section,
+    #log-section {
+      min-height: 240px;
+    }
+
+    #checklist {
+      display: grid;
+      gap: 8px;
+      align-content: start;
+      margin: 0;
+      padding: 12px;
+      overflow: auto;
+      list-style: none;
+      background: #0b0f11;
+    }
+
+    .check-item {
+      display: grid;
+      grid-template-columns: 18px 1fr;
+      align-items: center;
+      gap: 8px;
+      min-height: 24px;
+      color: #8ea39a;
+      font-size: 13px;
+    }
+
+    .check-item input {
+      width: 15px;
+      height: 15px;
+      margin: 0;
+      accent-color: #75d99b;
+    }
+
+    .check-item.is-done {
+      color: #d6e4de;
+    }
+
+    #log {
+      margin: 0;
+      padding: 10px 12px;
+      overflow: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      color: #c8d6d0;
+      background: #0b0f11;
+    }
+
+    @media (max-width: 760px) {
+      main {
+        grid-template-columns: 1fr;
+        grid-template-rows: minmax(280px, 38vh) minmax(280px, 38vh) 240px 240px;
+      }
+
+      #checks-section,
+      #log-section {
+        grid-column: auto;
+      }
+
+      header {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      #status {
+        min-width: 0;
+        text-align: left;
+      }
+    }
+  </style>
 </head>
 <body>
-<pre id="out">running</pre>
+<header>
+  <h1>fw-browser smoke</h1>
+  <div id="status">booting</div>
+</header>
+<main>
+  <section>
+    <h2>Render product</h2>
+    <div class="canvas-wrap">
+      <canvas id="render-product" width="64" height="64"></canvas>
+    </div>
+  </section>
+  <section>
+    <h2>Output channels</h2>
+    <div class="canvas-wrap">
+      <canvas id="output-channels" width="520" height="520"></canvas>
+    </div>
+  </section>
+  <section id="checks-section">
+    <h2>Boot checklist</h2>
+    <ul id="checklist">
+      <li class="check-item"><input id="check-worker" type="checkbox" disabled><label for="check-worker">Worker spawned</label></li>
+      <li class="check-item"><input id="check-ready" type="checkbox" disabled><label for="check-ready">Firmware ready</label></li>
+      <li class="check-item"><input id="check-files" type="checkbox" disabled><label for="check-files">Project files written</label></li>
+      <li class="check-item"><input id="check-project" type="checkbox" disabled><label for="check-project">Project loaded</label></li>
+      <li class="check-item"><input id="check-nodes" type="checkbox" disabled><label for="check-nodes">Nodes discovered</label></li>
+      <li class="check-item"><input id="check-render" type="checkbox" disabled><label for="check-render">Render product received</label></li>
+      <li class="check-item"><input id="check-output" type="checkbox" disabled><label for="check-output">Output channels received</label></li>
+      <li class="check-item"><input id="check-smoke" type="checkbox" disabled><label for="check-smoke">Smoke assertions passed</label></li>
+      <li class="check-item"><input id="check-live" type="checkbox" disabled><label for="check-live">Live ticking</label></li>
+    </ul>
+  </section>
+  <section id="log-section">
+    <h2>Worker log</h2>
+    <pre id="log">starting</pre>
+  </section>
+</main>
 <script type="module">
-const out = document.getElementById('out');
+const statusEl = document.getElementById('status');
+const logEl = document.getElementById('log');
+const renderCanvas = document.getElementById('render-product');
+const outputCanvas = document.getElementById('output-channels');
+const logLines = [];
 
 try {
-  const { messages, redValues } = await runSmoke();
-
-  out.textContent = [
-    `ok worker runtime red=${redValues.join(',')}`,
-    ...messages.map((message) => JSON.stringify(message)),
-  ].join('\n');
+  const { frameNum } = await runSmoke();
+  setStatus(`ok frame=${frameNum}`);
   document.documentElement.dataset.smoke = 'ok';
 } catch (error) {
-  out.textContent = `error ${error?.stack || error}`;
+  setStatus('error');
+  appendLog('error', error?.stack || String(error));
   document.documentElement.dataset.smoke = 'error';
   throw error;
 }
@@ -28,37 +224,57 @@ async function runSmoke() {
 
   return new Promise((resolve, reject) => {
     const worker = new Worker('./fw-browser-worker.js', { type: 'module' });
-    const messages = [];
     let nextId = 1;
     let projectHandle = null;
     let outputNodeId = null;
-    const redValues = [];
+    let shaderNodeId = null;
+    let finalFrameNum = 0;
+    let smokeSatisfied = false;
+    let liveReadTimer = null;
+    let projectWriteResponses = 0;
+    const outputSignatures = [];
 
     const timeout = setTimeout(() => {
       worker.terminate();
-      reject(new Error(`timed out waiting for smoke completion; messages=${JSON.stringify(messages)}`));
+      reject(new Error('timed out waiting for smoke completion'));
     }, 15000);
 
     worker.onmessage = (event) => {
       handleWorkerMessage(event.data).catch((error) => {
+        if (smokeSatisfied) {
+          setStatus('live loop error');
+          appendLog('error', error?.stack || String(error));
+          return;
+        }
         clearTimeout(timeout);
+        clearTimeout(liveReadTimer);
         worker.terminate();
         reject(error);
       });
     };
     worker.onerror = (event) => {
+      const error = new Error(event.message);
+      if (smokeSatisfied) {
+        setStatus('worker error');
+        appendLog('error', error.message);
+        return;
+      }
       clearTimeout(timeout);
+      clearTimeout(liveReadTimer);
       worker.terminate();
-      reject(new Error(event.message));
+      reject(error);
     };
+    setCheck('worker');
     worker.postMessage({ kind: 'boot', label: 'smoke-worker' });
 
     async function handleWorkerMessage(message) {
-      messages.push(message);
+      recordWorkerMessage(message);
       if (message.kind === 'status' && message.status === 'error') {
         throw new Error(message.message);
       }
       if (message.kind === 'status' && message.status === 'ready') {
+        setCheck('ready');
+        setStatus('writing project');
         for (const file of projectFiles) {
           sendProtocol({
             filesystem: {
@@ -79,57 +295,93 @@ async function runSmoke() {
 
       const response = JSON.parse(message.frame);
       const msg = response.msg;
-      if (msg?.filesystem?.write?.error) {
-        throw new Error(`filesystem write failed: ${msg.filesystem.write.error}`);
+      if (msg?.filesystem?.write) {
+        if (msg.filesystem.write.error) {
+          throw new Error(`filesystem write failed: ${msg.filesystem.write.error}`);
+        }
+        projectWriteResponses += 1;
+        if (projectWriteResponses === projectFiles.length) {
+          setCheck('files');
+        }
+        return;
       }
       if (msg?.loadProject) {
         projectHandle = msg.loadProject.handle;
-        sendProtocol({
-          projectRequest: {
-            handle: projectHandle,
-            request: {
-              since: null,
-              queries: [
-                {
-                  nodes: {
-                    level: 'detail',
-                    nodes: 'all',
-                    include_slots: false,
-                  },
-                },
-              ],
-              probes: [],
-            },
-          },
-        });
-        tick(16);
+        setCheck('project');
+        setStatus(`loaded project ${projectHandle}`);
+        requestNodeRead();
         return;
       }
-      if (msg?.projectRequest?.response && outputNodeId == null) {
-        outputNodeId = readOutputNodeId(msg.projectRequest.response);
-        requestOutputRead();
+      if (msg?.projectRequest?.response && (outputNodeId == null || shaderNodeId == null)) {
+        const nodeIds = readNodeIds(msg.projectRequest.response);
+        outputNodeId = nodeIds.output;
+        shaderNodeId = nodeIds.shader;
+        setCheck('nodes');
+        requestVisualRead();
         return;
       }
-      if (msg?.projectRequest?.response && outputNodeId != null) {
-        const sample = readOutputSample(msg.projectRequest.response, outputNodeId);
-        redValues.push(sample.red);
-        if (sample.frame_num <= 0 || sample.red <= 0 || sample.green !== 0 || sample.blue !== 0) {
-          throw new Error(`unexpected output sample: ${JSON.stringify(sample)}`);
+      if (msg?.projectRequest?.response && outputNodeId != null && shaderNodeId != null) {
+        const visual = readVisualFrame(msg.projectRequest.response, outputNodeId);
+        finalFrameNum = visual.frame_num;
+        drawRenderProduct(visual.renderProduct);
+        drawOutputChannels(visual.outputChannels);
+        setCheck('render');
+        setCheck('output');
+
+        outputSignatures.push(visual.outputChannels.signature);
+        while (outputSignatures.length > 8) {
+          outputSignatures.shift();
         }
-        if (redValues.length < 3) {
-          requestOutputRead();
-          return;
+        setStatus(`frame=${visual.frame_num}`);
+        if (visual.frame_num <= 0) {
+          throw new Error(`unexpected frame number: ${visual.frame_num}`);
         }
-        if (!(redValues[1] > redValues[0] && redValues[2] > redValues[1])) {
-          throw new Error(`red output should increase across ticks: ${redValues.join(',')}`);
+        if (!smokeSatisfied) {
+          if (!visual.outputChannels.nonblack) {
+            throw new Error('output channels were all black');
+          }
+          if (outputSignatures.length < 3) {
+            requestVisualRead();
+            return;
+          }
+          if (new Set(outputSignatures.slice(0, 3)).size < 2) {
+            throw new Error(`output should change across ticks: ${outputSignatures.slice(0, 3).join(',')}`);
+          }
+          smokeSatisfied = true;
+          setCheck('smoke');
+          clearTimeout(timeout);
+          resolve({ frameNum: finalFrameNum });
+        } else {
+          setCheck('live');
         }
-        clearTimeout(timeout);
-        worker.terminate();
-        resolve({ messages, redValues });
+        scheduleVisualRead();
       }
     }
 
-    function requestOutputRead() {
+    function requestNodeRead() {
+      sendProtocol({
+        projectRequest: {
+          handle: projectHandle,
+          request: {
+            since: null,
+            queries: [
+              {
+                nodes: {
+                  level: 'detail',
+                  nodes: 'all',
+                  include_slots: false,
+                },
+              },
+            ],
+            probes: [],
+          },
+        },
+      });
+      tick(16);
+    }
+
+    function requestVisualRead() {
+      clearTimeout(liveReadTimer);
       sendProtocol({
         projectRequest: {
           handle: projectHandle,
@@ -144,11 +396,27 @@ async function runSmoke() {
                 },
               },
             ],
-            probes: [],
+            probes: [
+              {
+                render_product: {
+                  product: {
+                    node: shaderNodeId,
+                    output: 0,
+                  },
+                  width: 64,
+                  height: 64,
+                  format: 'srgb8',
+                },
+              },
+            ],
           },
         },
       });
       tick(40);
+    }
+
+    function scheduleVisualRead() {
+      liveReadTimer = setTimeout(requestVisualRead, 90);
     }
 
     function sendProtocol(msg) {
@@ -174,7 +442,7 @@ async function fetchSmokeProject() {
     'fixture.toml',
   ];
   return Promise.all(paths.map(async (path) => {
-    const response = await fetch(`./smoke-project/${path}`);
+    const response = await fetch(`./smoke-project/${path}`, { cache: 'no-store' });
     if (!response.ok) {
       throw new Error(`failed to fetch smoke-project/${path}: ${response.status}`);
     }
@@ -182,17 +450,26 @@ async function fetchSmokeProject() {
   }));
 }
 
-function readOutputNodeId(response) {
+function readNodeIds(response) {
   const nodes = response.results?.[0]?.nodes;
   if (!nodes) {
     throw new Error(`missing node read result: ${JSON.stringify(response)}`);
   }
+
+  const ids = {};
   for (const delta of nodes.tree_deltas || []) {
-    if (treePathText(delta.created?.path).endsWith('/output.output')) {
-      return delta.created.id;
+    const path = treePathText(delta.created?.path);
+    if (path.endsWith('/output.output')) {
+      ids.output = delta.created.id;
+    }
+    if (path.endsWith('/shader.shader')) {
+      ids.shader = delta.created.id;
     }
   }
-  throw new Error(`missing output node in deltas: ${JSON.stringify(nodes.tree_deltas)}`);
+  if (ids.output == null || ids.shader == null) {
+    throw new Error(`missing smoke node ids: ${JSON.stringify(nodes.tree_deltas)}`);
+  }
+  return ids;
 }
 
 function treePathText(path) {
@@ -205,12 +482,47 @@ function treePathText(path) {
   return '';
 }
 
-function readOutputSample(response, outputNodeId) {
+function readVisualFrame(response, outputNodeId) {
   const runtime = response.results?.[0]?.runtime;
   const resources = response.results?.[1]?.resources;
   if (!runtime || !resources) {
     throw new Error(`missing runtime/resource read result: ${JSON.stringify(response)}`);
   }
+
+  const outputPayload = findOutputPayload(resources, outputNodeId);
+  const outputBytes = decodeBase64(outputPayload.bytes);
+  const stats = outputStats(outputBytes);
+  const outputChannels = {
+    metadata: outputPayload.metadata.output_channels,
+    bytes: outputBytes,
+    nonblack: stats.nonblack,
+    signature: stats.signature,
+    first: {
+      red: outputBytes[0] | (outputBytes[1] << 8),
+      green: outputBytes[2] | (outputBytes[3] << 8),
+      blue: outputBytes[4] | (outputBytes[5] << 8),
+    },
+  };
+
+  const probe = response.probes?.[0]?.render_product;
+  const texture = probe?.texture;
+  if (!texture) {
+    throw new Error(`missing render-product texture probe: ${JSON.stringify(response.probes)}`);
+  }
+
+  return {
+    frame_num: runtime.project.frame_num,
+    outputChannels,
+    renderProduct: {
+      width: texture.width,
+      height: texture.height,
+      format: texture.format,
+      bytes: decodeBase64(texture.bytes),
+    },
+  };
+}
+
+function findOutputPayload(resources, outputNodeId) {
   const payload = (resources.runtime_buffer_payloads || []).find((candidate) => {
     const summary = (resources.summaries || []).find((entry) => {
       return JSON.stringify(entry.ref) === JSON.stringify(candidate.ref) && entry.owner === outputNodeId;
@@ -220,14 +532,120 @@ function readOutputSample(response, outputNodeId) {
   if (!payload) {
     throw new Error(`missing output payload: ${JSON.stringify(resources)}`);
   }
+  return payload;
+}
 
-  const bytes = decodeBase64(payload.bytes);
+function outputStats(bytes) {
+  let max = 0;
+  let signature = 2166136261;
+  for (let index = 0; index + 5 < bytes.length; index += 6) {
+    const r = bytes[index] | (bytes[index + 1] << 8);
+    const g = bytes[index + 2] | (bytes[index + 3] << 8);
+    const b = bytes[index + 4] | (bytes[index + 5] << 8);
+    max = Math.max(max, r, g, b);
+    signature ^= (r + g * 3 + b * 7 + index) >>> 0;
+    signature = Math.imul(signature, 16777619) >>> 0;
+  }
   return {
-    frame_num: runtime.project.frame_num,
-    red: bytes[0] | (bytes[1] << 8),
-    green: bytes[2] | (bytes[3] << 8),
-    blue: bytes[4] | (bytes[5] << 8),
+    nonblack: max > 0,
+    signature,
   };
+}
+
+function drawRenderProduct(texture) {
+  if (texture.format !== 'srgb8') {
+    throw new Error(`unsupported render product format: ${texture.format}`);
+  }
+  const ctx = renderCanvas.getContext('2d');
+  const image = ctx.createImageData(texture.width, texture.height);
+  for (let src = 0, dst = 0; src < texture.bytes.length; src += 3, dst += 4) {
+    image.data[dst] = texture.bytes[src];
+    image.data[dst + 1] = texture.bytes[src + 1];
+    image.data[dst + 2] = texture.bytes[src + 2];
+    image.data[dst + 3] = 255;
+  }
+  renderCanvas.width = texture.width;
+  renderCanvas.height = texture.height;
+  ctx.putImageData(image, 0, 0);
+}
+
+function drawOutputChannels(output) {
+  const ctx = outputCanvas.getContext('2d');
+  const width = outputCanvas.width;
+  const height = outputCanvas.height;
+  ctx.clearRect(0, 0, width, height);
+  ctx.fillStyle = '#050607';
+  ctx.fillRect(0, 0, width, height);
+
+  const points = outputRingPoints();
+  const count = Math.min(points.length, output.metadata.channels, output.bytes.length / 6);
+  const radius = Math.max(3, Math.floor(width / 72));
+
+  for (let index = 0; index < count; index += 1) {
+    const byteIndex = index * 6;
+    const r = output.bytes[byteIndex] | (output.bytes[byteIndex + 1] << 8);
+    const g = output.bytes[byteIndex + 2] | (output.bytes[byteIndex + 3] << 8);
+    const b = output.bytes[byteIndex + 4] | (output.bytes[byteIndex + 5] << 8);
+    const point = points[index];
+
+    ctx.beginPath();
+    ctx.fillStyle = `rgb(${u16ToSrgb8(r)} ${u16ToSrgb8(g)} ${u16ToSrgb8(b)})`;
+    ctx.arc(point.x * width, point.y * height, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+function outputRingPoints() {
+  const ringCounts = [1, 8, 12, 16, 24, 32, 40, 48, 60];
+  const points = [];
+  const center = 0.5;
+  for (let ring = 0; ring < ringCounts.length; ring += 1) {
+    const count = ringCounts[ring];
+    const radius = ring === 0 ? 0 : 0.06 + ring * 0.052;
+    for (let i = 0; i < count; i += 1) {
+      const angle = -Math.PI / 2 + (i / count) * Math.PI * 2;
+      points.push({
+        x: center + Math.cos(angle) * radius,
+        y: center + Math.sin(angle) * radius,
+      });
+    }
+  }
+  return points;
+}
+
+function recordWorkerMessage(message) {
+  if (message.kind === 'status') {
+    appendLog('status', [message.status, message.message].filter(Boolean).join(' '));
+  } else if (message.kind === 'log') {
+    appendLog(message.level, message.message);
+  } else if (message.kind === 'protocol_out') {
+    const response = JSON.parse(message.frame);
+    appendLog('protocol', `id=${response.id} ${Object.keys(response.msg || {})[0] || 'unknown'}`);
+  } else {
+    appendLog(message.kind || 'message', JSON.stringify(message));
+  }
+}
+
+function appendLog(level, text) {
+  logLines.push(`${new Date().toLocaleTimeString()} ${level.padEnd(8)} ${text}`);
+  while (logLines.length > 160) {
+    logLines.shift();
+  }
+  logEl.textContent = logLines.join('\n');
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function setStatus(text) {
+  statusEl.textContent = text;
+}
+
+function setCheck(id) {
+  const input = document.getElementById(`check-${id}`);
+  if (!input) {
+    return;
+  }
+  input.checked = true;
+  input.closest('.check-item')?.classList.add('is-done');
 }
 
 function decodeBase64(value) {
@@ -237,6 +655,14 @@ function decodeBase64(value) {
     bytes[i] = binary.charCodeAt(i);
   }
   return bytes;
+}
+
+function u16ToSrgb8(value) {
+  const linear = value / 65535;
+  const srgb = linear <= 0.0031308
+    ? linear * 12.92
+    : 1.055 * Math.pow(linear, 1 / 2.4) - 0.055;
+  return Math.max(0, Math.min(255, Math.round(srgb * 255)));
 }
 </script>
 </body>
