@@ -26,6 +26,7 @@ notify = "6"
 lpc-model = { path = "../lp-core/lpc-model" }
 lpc-wire = { path = "../lp-core/lpc-wire" }
 lpa-server = { path = "../lp-app/lpa-server" }
+lpa-link = { path = "../lp-app/lpa-link", features = ["local-host"] }
 lpc-hardware = { path = "../lp-core/lpc-hardware" }
 lpc-shared = { path = "../lp-core/lpc-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }
@@ -48,6 +49,7 @@ lpvm-native = { path = "../lp-shader/lpvm-native", features = ["debug"] }
 lpvm-cranelift = { path = "../lp-shader/lpvm-cranelift", features = ["riscv32-object"] }
 unicode-width = "0.2"
 rustc-demangle = "0.1"
+pollster = "0.3"
 
 [dev-dependencies]
 tempfile = "3"

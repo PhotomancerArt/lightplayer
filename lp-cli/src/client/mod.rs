@@ -3,7 +3,7 @@ pub use lpa_client::*;
 
 // CLI-specific modules
 pub mod client_connect;
-pub mod local_server;
+pub mod local_host;
 pub mod serial_port;
 
 // Re-export CLI-specific types

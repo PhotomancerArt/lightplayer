@@ -24,6 +24,11 @@ impl LocalHostProvider {
         }
     }
 
+    /// Create a spawnable in-process `fw-host` memory runtime endpoint.
+    ///
+    /// The endpoint is not a physical device. Each successful `connect()` call
+    /// starts a new `fw-host` runtime instance and returns a session that owns
+    /// that runtime lifecycle.
     pub fn create_memory_endpoint(&mut self, label: impl Into<String>) -> LinkEndpointId {
         let endpoint_id = LinkEndpointId::new(format!(
             "{}-memory-{}",
@@ -172,6 +177,10 @@ mod tests {
         let mut session = provider.connect(&endpoint_id).await.unwrap();
 
         let connection = session.connection().await.unwrap();
+        assert!(matches!(
+            connection.kind,
+            crate::LinkConnectionKind::LocalHost
+        ));
         let transport = connection.local_host_transport().unwrap();
         let client = LpClient::new_shared(transport);
         let projects = client.project_list_available().await.unwrap();

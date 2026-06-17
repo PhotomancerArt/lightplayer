@@ -2,6 +2,11 @@ use serde::{Deserialize, Serialize};
 
 use crate::{LinkEndpointId, LinkEndpointStatus, LinkManagement, LinkProviderId};
 
+/// A provider-visible target that can be connected to.
+///
+/// Endpoints are not always physical devices. `local-host`, for example,
+/// exposes spawnable host runtime endpoints: connecting to one creates a new
+/// in-process `fw-host` runtime session.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct LinkEndpoint {
     pub id: LinkEndpointId,

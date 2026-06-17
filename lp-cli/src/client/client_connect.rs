@@ -21,14 +21,15 @@ use lpa_client::{ClientTransport, HostSpecifier, WebSocketClientTransport};
 #[cfg(feature = "serial")]
 use std::sync::{Arc, Mutex};
 
-use crate::client::local_server::LocalServerTransport;
+use crate::client::local_host::connect_local_host;
 #[cfg(feature = "serial")]
 use crate::client::serial_port::detect_serial_port;
 
 /// Connect to a server using the specified host specifier
 ///
 /// Creates and returns an appropriate `ClientTransport` based on the `HostSpecifier`.
-/// For `Local`, creates an in-memory server on a separate thread.
+/// For `Local`, creates a `local-host` link session backed by an in-process
+/// `fw-host` runtime.
 ///
 /// # Arguments
 ///
@@ -46,7 +47,7 @@ use crate::client::serial_port::detect_serial_port;
 /// use lpa_client::HostSpecifier;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// // Connect to local in-memory server
+/// // Connect to a local in-process fw-host runtime
 /// let mut transport = client_connect(HostSpecifier::Local)?;
 /// // Note: In real usage, you would use the transport and then close it.
 /// // For doctest purposes, we just demonstrate creation.
@@ -60,9 +61,8 @@ use crate::client::serial_port::detect_serial_port;
 pub fn client_connect(spec: HostSpecifier) -> Result<Box<dyn ClientTransport>> {
     match spec {
         HostSpecifier::Local => {
-            // Create local server transport (now implements ClientTransport directly)
-            let local_server = LocalServerTransport::new()?;
-            Ok(Box::new(local_server))
+            let local_host = connect_local_host()?;
+            Ok(Box::new(local_host))
         }
         HostSpecifier::WebSocket { url } => {
             // WebSocketClientTransport::new is async, but client_connect is sync
