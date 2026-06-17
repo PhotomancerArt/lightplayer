@@ -17,6 +17,8 @@ logic.
   projects, and serving the `lpc-wire` API over app-provided transports.
 - `lpa-client` — client-side transport/API layer for talking to a LightPlayer
   server or firmware target.
+- `lpa-link` — low-level endpoint/link layer for discovery, status,
+  management, diagnostics, logs, and opening server/client connections.
 - `web-demo` — browser demo and tooling for the shader pipeline.
 
 ## Boundary
