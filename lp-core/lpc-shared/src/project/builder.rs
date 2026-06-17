@@ -4,6 +4,7 @@ use alloc::{format, rc::Rc, string::String, vec, vec::Vec};
 use core::cell::RefCell;
 use lp_collection::VecMap;
 use lpc_model::GlslOpts;
+use lpc_model::nodes::clock::ClockDef;
 use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig, PathSpec, RingOrder};
 use lpc_model::nodes::output::{OutputDef, OutputDriverOptionsConfig};
 use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
@@ -21,6 +22,7 @@ use lpfs::lp_path::LpPathBuf;
 pub struct ProjectBuilder {
     fs: Rc<RefCell<dyn LpFs>>,
     name: String,
+    clock_id: u32,
     texture_id: u32,
     shader_id: u32,
     output_id: u32,
@@ -77,6 +79,7 @@ impl ProjectBuilder {
         Self {
             fs,
             name: String::from("Test Project"),
+            clock_id: 1,
             texture_id: 1,
             shader_id: 1,
             output_id: 1,
@@ -148,6 +151,22 @@ impl ProjectBuilder {
             brightness: Some(255),
             gamma_correction: Some(false),
         }
+    }
+
+    /// Add a clock node with defaults.
+    pub fn clock_basic(&mut self) -> LpPathBuf {
+        let id = self.clock_id;
+        self.clock_id += 1;
+
+        let node_name = numbered_node_name("clock", id);
+        let path = artifact_path_for_node(&node_name);
+        let toml = authored_node_toml(&slot_shape_registry(), &NodeDef::Clock(ClockDef::default()));
+
+        self.write_file_helper(path.as_str(), toml.as_bytes())
+            .expect("Failed to write clock artifact");
+        self.register_node(node_name, path.clone());
+
+        path
     }
 
     /// Add a texture node with defaults (16x16)
@@ -489,7 +508,6 @@ fn affine2d_from_matrix(matrix: [[f32; 4]; 4]) -> Affine2d {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lp_collection::VecMap;
     use lpc_model::NodeDef;
     use lpfs::LpFsMemory;
 
