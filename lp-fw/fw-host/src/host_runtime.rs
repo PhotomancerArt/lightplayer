@@ -1,0 +1,168 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
+
+use lpa_client::{ClientTransport, create_local_transport_pair};
+use lpa_server::{ButtonService, Graphics, LpGraphics, LpServer, RadioService};
+use lpc_hardware::{HardwareSystem, HwRegistry, default_esp32c6_hardware_manifest};
+use lpc_model::AsLpPath;
+use lpc_shared::output::MemoryOutputProvider;
+use lpfs::LpFsMemory;
+use tokio::sync::Mutex;
+
+use crate::host_runtime_error::HostRuntimeError;
+use crate::server_loop::run_server_loop_async;
+
+pub struct HostRuntime {
+    server_handle: Option<JoinHandle<()>>,
+    client_transport: Arc<Mutex<Box<dyn ClientTransport>>>,
+    closed: Arc<AtomicBool>,
+}
+
+impl HostRuntime {
+    pub fn start_memory() -> Result<Self, HostRuntimeError> {
+        let (client_transport, server_transport) = create_local_transport_pair();
+        let client_transport: Arc<Mutex<Box<dyn ClientTransport>>> =
+            Arc::new(Mutex::new(Box::new(client_transport)));
+        let closed = Arc::new(AtomicBool::new(false));
+        let closed_for_thread = Arc::clone(&closed);
+
+        let server_handle = thread::Builder::new()
+            .name("fw-host-runtime".to_string())
+            .spawn(move || {
+                let runtime = match tokio::runtime::Runtime::new() {
+                    Ok(runtime) => runtime,
+                    Err(error) => {
+                        eprintln!("{}", HostRuntimeError::RuntimeCreateFailed(error));
+                        closed_for_thread.store(true, Ordering::Relaxed);
+                        return;
+                    }
+                };
+
+                let server = create_memory_server();
+                runtime.block_on(async {
+                    let local_set = tokio::task::LocalSet::new();
+                    let _ = local_set
+                        .run_until(run_server_loop_async(server, server_transport))
+                        .await;
+                });
+                closed_for_thread.store(true, Ordering::Relaxed);
+            })
+            .map_err(HostRuntimeError::SpawnFailed)?;
+
+        Ok(Self {
+            server_handle: Some(server_handle),
+            client_transport,
+            closed,
+        })
+    }
+
+    pub fn client_transport(&self) -> Arc<Mutex<Box<dyn ClientTransport>>> {
+        Arc::clone(&self.client_transport)
+    }
+
+    pub async fn close(&mut self) -> Result<(), HostRuntimeError> {
+        if self.closed.swap(true, Ordering::Relaxed) {
+            return Ok(());
+        }
+
+        {
+            let mut transport = self.client_transport.lock().await;
+            transport
+                .close()
+                .await
+                .map_err(|error| HostRuntimeError::Transport(error.to_string()))?;
+        }
+
+        if let Some(handle) = self.server_handle.take() {
+            let start = Instant::now();
+            loop {
+                if handle.is_finished() {
+                    handle
+                        .join()
+                        .map_err(|_| HostRuntimeError::ServerThreadPanicked)?;
+                    return Ok(());
+                }
+
+                if start.elapsed() > Duration::from_secs(1) {
+                    return Err(HostRuntimeError::ServerThreadStopTimedOut);
+                }
+
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Drop for HostRuntime {
+    fn drop(&mut self) {
+        self.closed.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.server_handle.take() {
+            let start = Instant::now();
+            while !handle.is_finished() && start.elapsed() <= Duration::from_millis(100) {
+                thread::yield_now();
+            }
+            if handle.is_finished() {
+                let _ = handle.join();
+            }
+        }
+    }
+}
+
+fn create_memory_server() -> LpServer {
+    let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new_permissive()));
+    let hardware = Rc::new(HardwareSystem::with_virtual_drivers(Rc::new(
+        HwRegistry::new(default_esp32c6_hardware_manifest()),
+    )));
+    let button_service: Rc<dyn ButtonService> = hardware.clone();
+    let radio_service: Rc<dyn RadioService> = hardware;
+    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
+
+    LpServer::new_with_hardware_services(
+        output_provider,
+        Box::new(LpFsMemory::new()),
+        "/projects/".as_path(),
+        None,
+        None,
+        Some(button_service),
+        Some(radio_service),
+        graphics,
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use lpa_client::LpClient;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn memory_runtime_serves_client_requests_and_shuts_down() {
+        let mut runtime = HostRuntime::start_memory().unwrap();
+        let client = LpClient::new_shared(runtime.client_transport());
+
+        let projects = client.project_list_available().await.unwrap();
+
+        assert!(projects.is_empty());
+        runtime.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn multiple_memory_runtimes_can_run_concurrently() {
+        let mut runtime_a = HostRuntime::start_memory().unwrap();
+        let mut runtime_b = HostRuntime::start_memory().unwrap();
+        let client_a = LpClient::new_shared(runtime_a.client_transport());
+        let client_b = LpClient::new_shared(runtime_b.client_transport());
+
+        assert!(client_a.project_list_available().await.unwrap().is_empty());
+        assert!(client_b.project_list_available().await.unwrap().is_empty());
+
+        runtime_a.close().await.unwrap();
+        runtime_b.close().await.unwrap();
+    }
+}

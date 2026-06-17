@@ -122,6 +122,43 @@ web-demo-deploy: web-demo-build
     git worktree remove --force "$tmp_dir/wt"
 
 # ============================================================================
+# fw-browser (browser/Web Worker runtime proof)
+# ============================================================================
+
+fw-browser-build: install-wasm32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Building fw-browser for wasm32..."
+    cargo build -p fw-browser --target wasm32-unknown-unknown --release
+    if ! command -v wasm-bindgen >/dev/null 2>&1; then
+        echo "wasm-bindgen not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
+        exit 1
+    fi
+    echo "Generating fw-browser JS glue..."
+    wasm-bindgen target/wasm32-unknown-unknown/release/fw_browser.wasm \
+        --out-dir lp-fw/fw-browser/www/pkg --target web
+    echo "Artifacts: lp-fw/fw-browser/www/ (smoke.html, pkg/)"
+
+fw-browser-test: install-wasm32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v wasm-bindgen-test-runner >/dev/null 2>&1; then
+        echo "wasm-bindgen-test-runner not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
+        exit 1
+    fi
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
+        cargo test -p fw-browser --target wasm32-unknown-unknown
+
+fw-browser-smoke: fw-browser-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port="${FW_BROWSER_SMOKE_PORT:-2819}"
+    echo "Serving fw-browser smoke page at http://127.0.0.1:${port}/smoke.html"
+    echo "Success: page shows ok and documentElement.dataset.smoke is 'ok'."
+    cd lp-fw/fw-browser/www
+    python3 -m http.server "${port}" --bind 127.0.0.1
+
+# ============================================================================
 # Build commands - Workspace-wide
 # ============================================================================
 

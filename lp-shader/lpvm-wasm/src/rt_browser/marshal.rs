@@ -5,7 +5,7 @@ use std::format;
 use js_sys::{Array, ArrayBuffer, Reflect, Uint8Array, WebAssembly};
 use lpir::FloatMode;
 use lps_shared::layout::{type_alignment, type_size};
-use lps_shared::{LayoutRules, LpsType};
+use lps_shared::{LayoutRules, LpsTexture2DDescriptor, LpsTexture2DValue, LpsType};
 use lpvm::{LpsValueF32, glsl_component_count};
 use wasm_bindgen::JsValue;
 
@@ -301,6 +301,13 @@ fn collect_js_q32_words(
             }
             Ok(())
         }
+        Texture2D => {
+            for _ in 0..4 {
+                out.push(js_num_as_i32(&slots[*off])?);
+                *off += 1;
+            }
+            Ok(())
+        }
         Array { element, len } => {
             for _ in 0..*len {
                 collect_js_q32_words(element, slots, fm, off, out)?;
@@ -498,6 +505,17 @@ fn decode_lps_from_js_slots(
             }
             Ok((LpsValueF32::Mat4x4(m), 16))
         }
+        Texture2D => Ok((
+            LpsValueF32::Texture2D(LpsTexture2DValue::from_guest_descriptor(
+                LpsTexture2DDescriptor {
+                    ptr: js_num_as_i32(&slots[off])? as u32,
+                    width: js_num_as_i32(&slots[off + 1])? as u32,
+                    height: js_num_as_i32(&slots[off + 2])? as u32,
+                    row_stride: js_num_as_i32(&slots[off + 3])? as u32,
+                },
+            )),
+            4,
+        )),
         Array { element, len } => {
             let mut elems = Vec::with_capacity(*len as usize);
             let mut o = off;
