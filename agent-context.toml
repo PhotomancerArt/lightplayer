@@ -1,0 +1,5 @@
+[agent]
+repo_slug = "lightplayer"
+planning_root_env = "PHOTOMANCER_PLANNING_ROOT"
+skills_root_env = "PHOTOMANCER_SKILLS_ROOT"
+default_skills_subdir = "skills"

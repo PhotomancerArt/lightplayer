@@ -222,6 +222,28 @@ deprecated. Do not adopt it in new code. If a plan file you are executing
 asks for "tests at the top", treat that as a stale instruction and put the
 test module at the bottom anyway.
 
+## Personal planning workflow
+
+New agent planning work uses the Photomancer personal planning workspace, not
+new repo-local plan or roadmap directories.
+
+- Use `pm-plan` for new planning, roadmap, and investigation artifacts.
+- Use `pm-implement` to execute an existing shared `plan.md`.
+- Use `pm-review` for durable review artifacts.
+- Resolve context from `agent-context.toml`; the repo slug is `lightplayer`.
+- Resolve the workspace from `PHOTOMANCER_PLANNING_ROOT`, or from the default
+  `~/.photomancer/planning` link.
+- Store new active artifacts under
+  `<planning-root>/lightplayer/<YYYY-MM-DD>-<name>/`.
+- Store completed artifacts under `<planning-root>/lightplayer/_archive/`.
+- Store review artifacts under `<planning-root>/lightplayer/_reviews/`.
+
+Durable decisions belong in repo ADRs under `docs/adr/`. Intermediate plans,
+phase prompts, review notes, scratch reports, and implementation logs belong in
+the shared planning workspace. Existing `docs/plans`, `docs/plans-old`,
+`docs/roadmaps`, and `docs/roadmaps-old` content is historical and should not
+be migrated unless a separate migration plan asks for it.
+
 ## Validation Commands
 
 These commands must pass for any change touching the shader pipeline:
