@@ -7,41 +7,236 @@
 <body>
 <pre id="out">running</pre>
 <script type="module">
-import init, {
-  fw_browser_init_exports,
-  create_runtime,
-  compile_shader,
-  render_first_pixel,
-  logs,
-  runtime_count,
-} from './pkg/fw_browser.js';
-
-const source = `
-vec4 render(vec2 fragCoord, vec2 outputSize, float time) {
-    return vec4(1.0, 0.0, 0.0, 1.0);
-}
-`;
-
 const out = document.getElementById('out');
 
 try {
-  const exports = await init();
-  fw_browser_init_exports(exports);
-  const runtimeId = create_runtime('smoke');
-  compile_shader(runtimeId, source);
-  const rgba = render_first_pixel(runtimeId, 0);
-  if (runtime_count() !== 1) {
-    throw new Error(`runtime count mismatch: ${runtime_count()}`);
-  }
-  if (rgba === '0,0,0,0') {
-    throw new Error(`unexpected blank pixel: ${rgba}`);
-  }
-  out.textContent = `ok ${rgba}\n${logs(runtimeId)}`;
+  const { messages, redValues } = await runSmoke();
+
+  out.textContent = [
+    `ok worker runtime red=${redValues.join(',')}`,
+    ...messages.map((message) => JSON.stringify(message)),
+  ].join('\n');
   document.documentElement.dataset.smoke = 'ok';
 } catch (error) {
   out.textContent = `error ${error?.stack || error}`;
   document.documentElement.dataset.smoke = 'error';
   throw error;
+}
+
+async function runSmoke() {
+  const projectFiles = await fetchSmokeProject();
+
+  return new Promise((resolve, reject) => {
+    const worker = new Worker('./fw-browser-worker.js', { type: 'module' });
+    const messages = [];
+    let nextId = 1;
+    let projectHandle = null;
+    let outputNodeId = null;
+    const redValues = [];
+
+    const timeout = setTimeout(() => {
+      worker.terminate();
+      reject(new Error(`timed out waiting for smoke completion; messages=${JSON.stringify(messages)}`));
+    }, 15000);
+
+    worker.onmessage = (event) => {
+      handleWorkerMessage(event.data).catch((error) => {
+        clearTimeout(timeout);
+        worker.terminate();
+        reject(error);
+      });
+    };
+    worker.onerror = (event) => {
+      clearTimeout(timeout);
+      worker.terminate();
+      reject(new Error(event.message));
+    };
+    worker.postMessage({ kind: 'boot', label: 'smoke-worker' });
+
+    async function handleWorkerMessage(message) {
+      messages.push(message);
+      if (message.kind === 'status' && message.status === 'error') {
+        throw new Error(message.message);
+      }
+      if (message.kind === 'status' && message.status === 'ready') {
+        for (const file of projectFiles) {
+          sendProtocol({
+            filesystem: {
+              write: {
+                path: `/projects/smoke/${file.path}`,
+                data: file.text,
+              },
+            },
+          });
+          tick(1);
+        }
+        sendProtocol({ loadProject: { path: 'smoke' } });
+        tick(16);
+      }
+      if (message.kind !== 'protocol_out') {
+        return;
+      }
+
+      const response = JSON.parse(message.frame);
+      const msg = response.msg;
+      if (msg?.filesystem?.write?.error) {
+        throw new Error(`filesystem write failed: ${msg.filesystem.write.error}`);
+      }
+      if (msg?.loadProject) {
+        projectHandle = msg.loadProject.handle;
+        sendProtocol({
+          projectRequest: {
+            handle: projectHandle,
+            request: {
+              since: null,
+              queries: [
+                {
+                  nodes: {
+                    level: 'detail',
+                    nodes: 'all',
+                    include_slots: false,
+                  },
+                },
+              ],
+              probes: [],
+            },
+          },
+        });
+        tick(16);
+        return;
+      }
+      if (msg?.projectRequest?.response && outputNodeId == null) {
+        outputNodeId = readOutputNodeId(msg.projectRequest.response);
+        requestOutputRead();
+        return;
+      }
+      if (msg?.projectRequest?.response && outputNodeId != null) {
+        const sample = readOutputSample(msg.projectRequest.response, outputNodeId);
+        redValues.push(sample.red);
+        if (sample.frame_num <= 0 || sample.red <= 0 || sample.green !== 0 || sample.blue !== 0) {
+          throw new Error(`unexpected output sample: ${JSON.stringify(sample)}`);
+        }
+        if (redValues.length < 3) {
+          requestOutputRead();
+          return;
+        }
+        if (!(redValues[1] > redValues[0] && redValues[2] > redValues[1])) {
+          throw new Error(`red output should increase across ticks: ${redValues.join(',')}`);
+        }
+        clearTimeout(timeout);
+        worker.terminate();
+        resolve({ messages, redValues });
+      }
+    }
+
+    function requestOutputRead() {
+      sendProtocol({
+        projectRequest: {
+          handle: projectHandle,
+          request: {
+            since: null,
+            queries: [
+              { runtime: null },
+              {
+                resources: {
+                  level: 'detail',
+                  payloads: 'all',
+                },
+              },
+            ],
+            probes: [],
+          },
+        },
+      });
+      tick(40);
+    }
+
+    function sendProtocol(msg) {
+      worker.postMessage({
+        kind: 'protocol_in',
+        frame: JSON.stringify({ id: nextId++, msg }),
+      });
+    }
+
+    function tick(delta_ms) {
+      worker.postMessage({ kind: 'tick', delta_ms });
+    }
+  });
+}
+
+async function fetchSmokeProject() {
+  const paths = [
+    'project.toml',
+    'clock.toml',
+    'shader.toml',
+    'shader.glsl',
+    'output.toml',
+    'fixture.toml',
+  ];
+  return Promise.all(paths.map(async (path) => {
+    const response = await fetch(`./smoke-project/${path}`);
+    if (!response.ok) {
+      throw new Error(`failed to fetch smoke-project/${path}: ${response.status}`);
+    }
+    return { path, text: await response.text() };
+  }));
+}
+
+function readOutputNodeId(response) {
+  const nodes = response.results?.[0]?.nodes;
+  if (!nodes) {
+    throw new Error(`missing node read result: ${JSON.stringify(response)}`);
+  }
+  for (const delta of nodes.tree_deltas || []) {
+    if (treePathText(delta.created?.path).endsWith('/output.output')) {
+      return delta.created.id;
+    }
+  }
+  throw new Error(`missing output node in deltas: ${JSON.stringify(nodes.tree_deltas)}`);
+}
+
+function treePathText(path) {
+  if (typeof path === 'string') {
+    return path;
+  }
+  if (Array.isArray(path)) {
+    return `/${path.map((segment) => `${segment.name}.${segment.ty}`).join('/')}`;
+  }
+  return '';
+}
+
+function readOutputSample(response, outputNodeId) {
+  const runtime = response.results?.[0]?.runtime;
+  const resources = response.results?.[1]?.resources;
+  if (!runtime || !resources) {
+    throw new Error(`missing runtime/resource read result: ${JSON.stringify(response)}`);
+  }
+  const payload = (resources.runtime_buffer_payloads || []).find((candidate) => {
+    const summary = (resources.summaries || []).find((entry) => {
+      return JSON.stringify(entry.ref) === JSON.stringify(candidate.ref) && entry.owner === outputNodeId;
+    });
+    return summary && candidate.metadata?.output_channels?.sample_format === 'u16';
+  });
+  if (!payload) {
+    throw new Error(`missing output payload: ${JSON.stringify(resources)}`);
+  }
+
+  const bytes = decodeBase64(payload.bytes);
+  return {
+    frame_num: runtime.project.frame_num,
+    red: bytes[0] | (bytes[1] << 8),
+    green: bytes[2] | (bytes[3] << 8),
+    blue: bytes[4] | (bytes[5] << 8),
+  };
+}
+
+function decodeBase64(value) {
+  const binary = atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+  return bytes;
 }
 </script>
 </body>

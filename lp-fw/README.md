@@ -47,8 +47,9 @@ cargo test -p lpa-link --features local-host
 
 `fw-browser` is the browser/Web Worker runtime target for Studio simulation and
 project testing. It builds to wasm, initializes the browser `lpvm-wasm` runtime,
-compiles a tiny shader through the real shader frontend, and renders a test
-pixel.
+owns an in-memory `LpServer`/filesystem/virtual hardware runtime, accepts
+`lpc_wire` client frames over a structured worker envelope, and can load/tick a
+project without exposing direct shader APIs to JavaScript.
 
 Useful checks:
 
@@ -71,7 +72,9 @@ http://127.0.0.1:2819/smoke.html
 ```
 
 Success means the page shows `ok` and
-`document.documentElement.dataset.smoke == "ok"`.
+`document.documentElement.dataset.smoke == "ok"`. The current page writes a
+small project through worker messages, loads it, ticks the runtime, and verifies
+increasing output bytes through project-read `OutputChannels` resources.
 
 `just fw-browser-test` is the intended automated `wasm-bindgen-test` path, but it
 requires a working browser/WebDriver environment. If it fails locally because no

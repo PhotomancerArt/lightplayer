@@ -12,6 +12,8 @@ server internals directly.
 - `lpa-client` consumes the client-side connection created by the runtime.
 - `lpa-link` `local-host` uses `fw-host` to create runtime instances and expose
   them as low-level link sessions.
+- `fw-core` provides the shared transport drain and server tick helpers used by
+  the host runtime loop.
 - `lpc-*` and `lpfs` provide the model, hardware, shared transport, wire, and
   filesystem pieces used by the hosted server.
 

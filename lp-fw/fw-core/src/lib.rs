@@ -9,11 +9,15 @@
 pub mod log;
 
 pub mod message_router;
+pub mod runtime;
 pub mod serial;
 pub mod test_messages;
 pub mod transport;
 
 pub use message_router::MessageRouter;
+pub use runtime::{
+    DrainedClientMessages, ServerTickOutcome, drain_client_messages, tick_server_frame,
+};
 pub use test_messages::{
     TestCommand, TestResponse, deserialize_command, parse_message_line, serialize_command,
     serialize_response,

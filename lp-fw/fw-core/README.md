@@ -4,7 +4,7 @@
 
 It is `no_std` by default and provides reusable pieces for embedded/server
 firmware, including serial transport helpers, message routing, test-message
-serialization, and target-specific logging support.
+serialization, target-specific logging support, and small runtime loop helpers.
 
 ## Relationship To Other Crates
 
@@ -17,6 +17,18 @@ serialization, and target-specific logging support.
 setup, board drivers, flash layout, emulator process behavior, and host/browser
 runtime lifecycle belong in their target crates.
 
+## Runtime Helpers
+
+`fw_core::runtime` owns target-neutral server loop pieces:
+
+- drain available client messages from a `ServerTransport`
+- tick `LpServer` with a computed frame delta
+- record last-frame timing on the server
+
+Targets still decide how to boot, yield, sleep, schedule autorun, expose logs,
+and manage hardware. This keeps `fw-core` useful without turning it into a
+browser, host, or ESP32 abstraction layer.
+
 ## Features
 
 - `std`: enables host-side support for tests and logging dependencies.
@@ -27,6 +39,7 @@ runtime lifecycle belong in their target crates.
 
 ```bash
 cargo check -p fw-core
+cargo test -p fw-core
 ```
 
 When changing code that affects firmware behavior, also run the relevant target

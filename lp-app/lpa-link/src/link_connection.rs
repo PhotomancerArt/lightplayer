@@ -5,6 +5,7 @@ use crate::{LinkEndpointId, LinkSessionId};
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum LinkConnectionKind {
     Fake,
+    LocalBrowserWorker { protocol: String },
     PendingImplementation { kind: String },
 }
 
@@ -42,6 +43,21 @@ impl LinkConnection {
             endpoint_id: endpoint_id.into(),
             session_id: session_id.into(),
             kind: LinkConnectionKind::PendingImplementation { kind: kind.into() },
+            #[cfg(feature = "local-host")]
+            local_host_transport: None,
+        }
+    }
+
+    pub fn local_browser_worker(
+        endpoint_id: impl Into<LinkEndpointId>,
+        session_id: impl Into<LinkSessionId>,
+    ) -> Self {
+        Self {
+            endpoint_id: endpoint_id.into(),
+            session_id: session_id.into(),
+            kind: LinkConnectionKind::LocalBrowserWorker {
+                protocol: "fw-browser-post-message-v1".to_string(),
+            },
             #[cfg(feature = "local-host")]
             local_host_transport: None,
         }

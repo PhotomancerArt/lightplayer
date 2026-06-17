@@ -2823,10 +2823,16 @@ dependencies = [
 name = "fw-browser"
 version = "40.0.0"
 dependencies = [
- "js-sys",
- "lps-frontend",
- "lpvm",
+ "fw-core",
+ "lpa-server",
+ "lpc-hardware",
+ "lpc-model",
+ "lpc-shared",
+ "lpc-wire",
+ "lpfs",
  "lpvm-wasm",
+ "serde",
+ "serde_json",
  "wasm-bindgen",
  "wasm-bindgen-test",
 ]
@@ -2929,6 +2935,7 @@ dependencies = [
 name = "fw-host"
 version = "40.0.0"
 dependencies = [
+ "fw-core",
  "lpa-client",
  "lpa-server",
  "lpc-hardware",

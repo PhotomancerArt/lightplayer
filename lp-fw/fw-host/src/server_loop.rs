@@ -1,8 +1,10 @@
 use std::time::{Duration, Instant};
 
+use fw_core::{drain_client_messages, tick_server_frame};
 use lpa_server::LpServer;
+use lpc_shared::time::TimeProvider;
 use lpc_shared::transport::ServerTransport;
-use lpc_wire::{TransportError, WireMessage};
+use lpc_wire::TransportError;
 
 use crate::HostRuntimeError;
 
@@ -12,39 +14,34 @@ pub async fn run_server_loop_async<T: ServerTransport>(
     mut server: LpServer,
     mut transport: T,
 ) -> Result<(), HostRuntimeError> {
-    let mut last_tick = Instant::now();
+    let time_provider = HostLoopTimeProvider::new();
+    let mut last_tick_ms = time_provider.now_ms();
 
     loop {
         let frame_start = Instant::now();
-        let mut incoming_messages = Vec::new();
-
-        loop {
-            match transport.receive().await {
-                Ok(Some(client_msg)) => incoming_messages.push(WireMessage::Client(client_msg)),
-                Ok(None) => break,
-                Err(TransportError::ConnectionLost) => return Ok(()),
-                Err(error) => {
-                    eprintln!("Host runtime transport error: {error}");
-                    break;
-                }
+        let frame_start_ms = time_provider.now_ms();
+        let drained = drain_client_messages(&mut transport).await;
+        if let Some(error) = drained.error {
+            match error {
+                TransportError::ConnectionLost => return Ok(()),
+                error => eprintln!("Host runtime transport error: {error}"),
             }
         }
 
-        let delta_time = last_tick.elapsed();
-        let delta_ms = delta_time.as_millis().min(u32::MAX as u128) as u32;
-        let tick_start = Instant::now();
-
-        if let Err(error) = server
-            .tick_and_send(delta_ms.max(1), incoming_messages, &mut transport)
-            .await
-        {
+        let tick = tick_server_frame(
+            &mut server,
+            &mut transport,
+            &time_provider,
+            frame_start_ms,
+            last_tick_ms,
+            drained.messages,
+        )
+        .await;
+        if let Some(error) = tick.server_error {
             eprintln!("Host runtime server error: {error}");
-        } else {
-            let frame_time_us = tick_start.elapsed().as_micros() as u64;
-            server.set_last_frame_time(frame_time_us);
         }
 
-        last_tick = frame_start;
+        last_tick_ms = frame_start_ms;
         let frame_duration = frame_start.elapsed();
         if frame_duration < Duration::from_millis(TARGET_FRAME_TIME_MS as u64) {
             tokio::time::sleep(Duration::from_millis(TARGET_FRAME_TIME_MS as u64) - frame_duration)
@@ -52,5 +49,23 @@ pub async fn run_server_loop_async<T: ServerTransport>(
         } else {
             tokio::task::yield_now().await;
         }
+    }
+}
+
+struct HostLoopTimeProvider {
+    start: Instant,
+}
+
+impl HostLoopTimeProvider {
+    fn new() -> Self {
+        Self {
+            start: Instant::now(),
+        }
+    }
+}
+
+impl TimeProvider for HostLoopTimeProvider {
+    fn now_ms(&self) -> u64 {
+        self.start.elapsed().as_millis().min(u64::MAX as u128) as u64
     }
 }

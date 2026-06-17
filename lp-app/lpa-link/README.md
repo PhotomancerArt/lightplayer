@@ -25,7 +25,9 @@ details directly in UI code.
 - `providers::local_host` launches host-local runtime instances through
   `fw-host` and returns a connection usable by `lpa-client`.
 - `providers::local_browser` models browser/Web Worker runtime instances for
-  Studio simulation and project testing.
+  Studio simulation and project testing. Its connection kind records the
+  `fw-browser-post-message-v1` envelope; Studio web code owns the actual
+  JavaScript `Worker` object and postMessage transport binding.
 
 Provider support is feature-gated:
 
@@ -49,3 +51,7 @@ cargo test -p lpa-link --features local-browser
   be natural, even if the first Studio UI exposes only one session.
 - A `LinkConnection` is a server/client connection, not a project session.
   Project sessions belong above this layer.
+- `local-browser` is worker-shaped but not Rust-owned. The link layer can model
+  endpoint/session identity, status, logs, diagnostics, and the worker envelope
+  protocol. The web frontend must still bind that model to an actual module
+  Worker created from `fw-browser/www/fw-browser-worker.js`.

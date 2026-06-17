@@ -9,8 +9,8 @@ without requiring physical ESP32 hardware for every test.
 
 ## Relationship To Other Crates
 
-- `fw-core` provides shared firmware transport/logging plumbing with the `emu`
-  feature.
+- `fw-core` provides shared firmware transport/logging plumbing and runtime loop
+  helpers with the `emu` feature.
 - `lpa-server` runs inside the firmware image.
 - `lp-riscv-emu`, `lp-riscv-emu-guest`, and related crates provide the emulator
   host/guest infrastructure.

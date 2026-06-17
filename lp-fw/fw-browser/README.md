@@ -5,31 +5,43 @@
 It exists for Studio simulation and browser-local project testing. It is not the
 embedded product path and it is not a replacement for ESP32 runtime shader
 compilation. The browser runtime still uses the real shader frontend and
-`lpvm-wasm` browser backend to compile and execute shaders in the browser.
+`lpvm-wasm` browser backend to compile and execute shaders in the browser, but
+shader work happens behind `LpServer` and project loading rather than through
+direct public shader calls.
 
 ## Relationship To Other Crates
 
-- `lps-frontend` parses and lowers GLSL.
-- `lpvm-wasm` compiles the lowered shader to wasm and runs it through browser
-  `WebAssembly` APIs.
+- `lpa-server` owns projects, filesystem protocol handling, and render ticks.
+- `fw-core` provides shared runtime drain/tick helpers.
+- `lpvm-wasm` is used by `lpc-engine`'s wasm32 graphics backend to execute
+  shaders through browser `WebAssembly` APIs.
 - `lpa-link` `local-browser` models browser runtime instances and scoped
   logs/status for Studio.
 - Future Studio UI code should consume this through a browser-local link/session
   boundary rather than reaching directly into shader runtime details.
 
-## Public Proof Surface
+## Worker Boundary
 
-The current wasm-bindgen exports are intentionally small:
+The wasm-bindgen exports are intentionally small and firmware-shaped:
 
 - initialize browser builtin exports
 - create a named runtime instance
-- compile a shader into that runtime
-- render the first pixel
-- read runtime-scoped logs
+- send structured envelope JSON to the runtime
+- tick the runtime deterministically
+- drain structured output envelope JSON
 - read runtime count
 
-That proves the first browser-local thread without committing to the final
-Studio API.
+`fw-browser/www/fw-browser-worker.js` wraps those exports in a module Web Worker
+that accepts the same envelope vocabulary over `postMessage`.
+
+Input envelopes currently include `protocol_in`, `tick`, `start`, `stop`, and
+`drain`. `protocol_in` carries a whole `lpc_wire` client JSON frame. Output
+envelopes currently include `status`, `log`, and `protocol_out`. `protocol_out`
+carries a whole `lpc_wire` server JSON frame.
+
+Automated smoke coverage should load/tick projects through this boundary and
+inspect canonical project-read `OutputChannels` resources rather than reaching
+directly into shader or output-provider internals.
 
 ## Validation
 
@@ -52,7 +64,9 @@ http://127.0.0.1:2819/smoke.html
 ```
 
 Success means the page reports `ok`, sets
-`document.documentElement.dataset.smoke == "ok"`, and renders a red test pixel.
+`document.documentElement.dataset.smoke == "ok"`, writes a small project through
+worker protocol messages, loads it, ticks the worker-owned firmware runtime, and
+observes increasing `OutputChannels` bytes through project-read resources.
 
 `just fw-browser-test` runs the Rust-native `wasm-bindgen-test` path. It requires
 a working browser/WebDriver environment, so local failures caused by missing or

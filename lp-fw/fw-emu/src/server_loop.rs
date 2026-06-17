@@ -5,17 +5,15 @@
 
 use crate::serial::SyscallSerialIo;
 use crate::time::SyscallTimeProvider;
-use alloc::vec::Vec;
 use core::future::Future;
 use core::pin::pin;
 use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
 use fw_core::transport::SerialTransport;
+use fw_core::{drain_client_messages, tick_server_frame};
 use log;
 use lp_riscv_emu_guest::sys_yield;
 use lpa_server::LpServer;
 use lpc_shared::time::TimeProvider;
-use lpc_shared::transport::ServerTransport;
-use lpc_wire::WireMessage;
 
 /// Block on a future until completion. Uses sys_yield when pending.
 fn block_on<F: Future>(future: F) -> F::Output {
@@ -54,54 +52,30 @@ pub fn run_server_loop(
             frame_start
         );
 
-        // Collect incoming messages (non-blocking)
-        let mut incoming_messages = Vec::new();
-        let mut receive_calls = 0;
-        loop {
-            receive_calls += 1;
-            match block_on(transport.receive()) {
-                Ok(Some(msg)) => {
-                    log::debug!(
-                        "run_server_loop: Received message id={} on receive call #{}",
-                        msg.id,
-                        receive_calls
-                    );
-                    incoming_messages.push(WireMessage::Client(msg));
-                }
-                Ok(None) => {
-                    if receive_calls > 1 {
-                        log::trace!(
-                            "run_server_loop: No more messages after {} receive calls",
-                            receive_calls
-                        );
-                    }
-                    // No more messages available
-                    break;
-                }
-                Err(e) => {
-                    log::warn!("run_server_loop: Transport error: {:?}", e);
-                    // Transport error - break and continue
-                    break;
-                }
-            }
+        let drained = block_on(drain_client_messages(&mut transport));
+        if let Some(error) = drained.error {
+            log::warn!("run_server_loop: Transport error: {error:?}");
         }
         log::trace!(
             "run_server_loop: Collected {} messages this loop iteration",
-            incoming_messages.len()
+            drained.messages.len()
         );
 
-        // Calculate delta time since last tick
-        let delta_time = time_provider.elapsed_ms(last_tick);
-        let delta_ms = delta_time.min(u32::MAX as u64) as u32;
-
-        match block_on(server.tick_and_send(delta_ms.max(1), incoming_messages, &mut transport)) {
-            Ok(response_count) => {
-                log::trace!("run_server_loop: Server sent {response_count} response(s)");
-            }
-            Err(e) => {
-                log::warn!("run_server_loop: Server tick error: {:?}", e);
-                // Server error - continue
-            }
+        let tick = block_on(tick_server_frame(
+            &mut server,
+            &mut transport,
+            &time_provider,
+            frame_start,
+            last_tick,
+            drained.messages,
+        ));
+        if let Some(error) = tick.server_error {
+            log::warn!("run_server_loop: Server tick error: {error:?}");
+        } else {
+            log::trace!(
+                "run_server_loop: Server sent {} response(s)",
+                tick.response_count
+            );
         }
 
         last_tick = frame_start;

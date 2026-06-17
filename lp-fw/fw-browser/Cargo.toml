@@ -6,7 +6,7 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 publish = false
-description = "Browser/Web Worker LightPlayer runtime proof"
+description = "Browser/Web Worker LightPlayer firmware runtime"
 
 [lints]
 workspace = true
@@ -15,10 +15,16 @@ workspace = true
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-js-sys = "0.3"
-lps-frontend = { path = "../../lp-shader/lps-frontend" }
-lpvm = { path = "../../lp-shader/lpvm" }
+fw-core = { path = "../fw-core", features = ["std"] }
+lpa-server = { path = "../../lp-app/lpa-server" }
+lpc-hardware = { path = "../../lp-core/lpc-hardware" }
+lpc-model = { path = "../../lp-core/lpc-model" }
+lpc-shared = { path = "../../lp-core/lpc-shared" }
+lpc-wire = { path = "../../lp-core/lpc-wire" }
+lpfs = { path = "../../lp-base/lpfs", features = ["std"] }
 lpvm-wasm = { path = "../../lp-shader/lpvm-wasm" }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
 wasm-bindgen = "0.2"
 
 [dev-dependencies]
