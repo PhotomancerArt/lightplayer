@@ -13,7 +13,7 @@ use lpfs::{LpFs, LpFsStd};
 use tokio::time::sleep;
 
 use crate::client::host_serial_esp32::connect_host_serial_esp32_with_options;
-use crate::commands::dev::{push_project_async, validation};
+use crate::commands::dev::{deploy_project_async, validation};
 
 use super::args::{FwcheckCli, FwcheckCommand, FwcheckDemoArgs, FwcheckRunArgs, FwcheckTargetArg};
 use super::{port, process, report, trace_dir};
@@ -271,23 +271,13 @@ async fn run_demo_capture_async(
 ) -> Result<String> {
     wait_for_boot_ready(capture).await?;
 
-    if let Err(e) = run_client_step(capture, "stop all projects", client.stop_all_projects()).await
-    {
-        eprintln!("Warning: Failed to stop all projects: {e}");
-        eprintln!("Continuing with project push...");
-    }
-
-    run_client_step(
+    let handle = run_client_step(
         capture,
-        "push project",
-        push_project_async(client, local_fs.as_ref(), project_uid),
+        "deploy project",
+        deploy_project_async(client, local_fs.as_ref(), project_uid),
     )
-    .await?;
-
-    let project_path = format!("projects/{project_uid}");
-    let handle = run_client_step(capture, "load project", client.project_load(&project_path))
-        .await
-        .with_context(|| format!("load {project_path}"))?;
+    .await
+    .with_context(|| format!("deploy projects/{project_uid}"))?;
 
     let _ = handle;
 
@@ -307,7 +297,7 @@ async fn run_demo_capture_async(
     let _ = transport.close().await;
 
     Ok(format!(
-        "status: ok\nproject: {project_path}\nloaded_projects: {loaded}\nsettled_for: {settle_secs}s\n",
+        "status: ok\nproject: projects/{project_uid}\nloaded_projects: {loaded}\nsettled_for: {settle_secs}s\n",
     ))
 }
 

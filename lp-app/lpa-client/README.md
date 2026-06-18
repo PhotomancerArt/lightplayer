@@ -64,6 +64,11 @@ That ordering avoids the ESP32 trying to run multiple loaded projects during a
 replace-in-place upload. Direct bootloader/raw filesystem image access is not a
 server-protocol deploy; it belongs below this layer in `lpa-link` management.
 
+Use `deploy_project_files` for initial upload/load flows such as CLI upload,
+CLI dev startup, firmware demo checks, and browser hardware demo loading. Use
+`push_project_files` only when the caller intentionally wants write-only sync,
+such as an already-loaded file-watch update.
+
 ## Relationship To lpa-link
 
 `lpa-link` owns device/runtime discovery, endpoint status, raw logs,

@@ -27,12 +27,13 @@ StudioEffect -> lpa-link browser-worker model -> JavaScript Worker -> fw-browser
 The browser serial ESP32 path is:
 
 ```text
-StudioEffect -> lpa-link browser-serial-esp32 model -> Web Serial shim -> ESP32 lp-server
+StudioEffect -> lpa-link browser-serial-esp32 model -> lpa-client LpClient<ClientIo> -> Web Serial shim -> ESP32 lp-server
 ```
 
 Demo project loading uses the same server protocol on both paths: write files
-under `/projects/studio-demo/...`, then call `LoadProject` with
-`studio-demo`.
+under `/projects/studio-demo/...`, then load the `studio-demo` project. Hardware
+deploy flows stop existing projects before writing/loading so ESP32-class
+firmware does not keep old output resources open while the new project starts.
 
 The demo upload request list currently lives in `demo_project` for the Studio
 POC. Longer-lived project deploy semantics live in `lpa-client`, including the
@@ -43,10 +44,10 @@ client connection in `lpa-link` management.
 
 `browser-serial-esp32` targets an already-flashed ESP32 running LightPlayer. It
 uses a small JavaScript shim because `web-sys` currently gates Web Serial behind
-unstable API cfg flags. The current browser serial protocol client is temporary
-M2 bring-up code; M2c should adapt Web Serial streams into `lpa-client::ClientIo`
-so browser serial uses the same request correlation, protocol events, and
-project deploy helpers as host paths.
+unstable API cfg flags. Browser serial stream ownership stays in that shim, but
+the Rust runtime adapts it into `lpa-client::ClientIo` so request correlation,
+protocol events, server errors, and project write helpers come from the shared
+client model.
 
 For hardware bring-up, valid `M!` protocol frames stay internal to the runtime.
 Non-protocol device lines are echoed directly to the JavaScript console with a
@@ -57,6 +58,19 @@ JSON snippet so protocol/framing bugs can be diagnosed without dumping full
 project payloads. If a malformed frame contains a nested `M!` marker, the
 browser serial client attempts to resynchronize from that marker so a valid
 response frame is not lost behind a truncated heartbeat or log burst.
+
+The current ESP32 Studio deploy policy is single-project by workflow:
+
+```text
+StopAllProjects
+FsWrite demo files
+LoadProject
+ReadProjectInventory
+```
+
+Future firmware/server capabilities can expose richer multi-project support,
+but Studio hardware loading should keep this conservative flow until output
+resource arbitration is designed.
 
 ## Validation
 

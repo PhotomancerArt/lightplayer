@@ -14,7 +14,11 @@ pub use fs_loop::fs_loop;
 pub use handler::handle_dev;
 #[allow(unused_imports, reason = "May be used in future pull functionality")]
 pub use pull_project::pull_project_async;
-pub use push_project::push_project_async;
+#[allow(
+    unused_imports,
+    reason = "Write-only push helper remains part of the dev command surface"
+)]
+pub use push_project::{deploy_project_async, push_project_async};
 // Re-export for public API (used internally via direct path)
 #[allow(unused_imports, reason = "Public API re-export")]
 pub use sync::sync_file_change;

@@ -10,10 +10,11 @@ description = "LightPlayer Studio effect executor and runtime adapters"
 
 [dependencies]
 lp-studio-core = { path = "../lp-studio-core" }
-lpa-client = { path = "../lpa-client", optional = true }
+lpa-client = { path = "../lpa-client", default-features = false }
 lpa-link = { path = "../lpa-link" }
 lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
+async-trait = { version = "0.1", optional = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, features = ["std"] }
 tokio = { version = "1", features = ["sync", "time"], optional = true }
@@ -35,7 +36,7 @@ tokio = { version = "1", features = ["macros", "rt", "time"] }
 
 [features]
 default = []
-host-process = ["dep:lpa-client", "lpa-link/host-process", "dep:tokio"]
+host-process = ["lpa-client/host", "lpa-link/host-process", "dep:tokio"]
 browser-worker = [
     "lpa-link/browser-worker",
     "dep:js-sys",
@@ -46,6 +47,7 @@ browser-worker = [
 ]
 browser-serial-esp32 = [
     "lpa-link/browser-serial-esp32",
+    "dep:async-trait",
     "dep:js-sys",
     "dep:wasm-bindgen",
     "dep:wasm-bindgen-futures",

@@ -1,5 +1,4 @@
 use lp_studio_core::{StudioEvent, StudioHeartbeat, StudioLogEntry, StudioLogLevel};
-#[cfg(feature = "host-process")]
 use lpa_client::ClientEvent;
 use lpc_wire::server::api::LogLevel;
 use lpc_wire::{
@@ -40,7 +39,6 @@ pub fn server_event(response: WireServerMessage) -> Option<StudioEvent> {
     }
 }
 
-#[cfg(feature = "host-process")]
 pub fn client_event(event: ClientEvent) -> StudioEvent {
     match event {
         ClientEvent::Heartbeat {

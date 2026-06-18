@@ -4,9 +4,10 @@
 use anyhow::{Context, Result};
 use lp_riscv_emu::{FrameOutcome, Riscv32Emulator, profile::HaltReason};
 use lpa_client::TokioLpClient;
-use lpc_model::AsLpPath;
-use lpfs::{LpFs, LpFsStd};
+use lpfs::LpFsStd;
 use std::sync::{Arc, Mutex};
+
+use crate::commands::dev::deploy_project_async;
 
 /// Wall-clock budget (in simulated ms) per outer iteration. Matches
 /// the previous m0 cadence.
@@ -40,19 +41,15 @@ pub async fn run_workload(
     project_uid: &str,
     max_cycles: u64,
 ) -> Result<WorkloadOutcome> {
-    eprintln!("Syncing project files...");
+    eprintln!("Deploying project...");
     let local_fs = LpFsStd::new(dir.to_path_buf());
-    push_project_files(client, &local_fs, project_uid).await?;
-
-    eprintln!("Loading project...");
-    let project_path = format!("projects/{project_uid}");
-    match client.project_load(&project_path).await {
+    match deploy_project_async(client, &local_fs, project_uid).await {
         Ok(_) => {}
         Err(e) if is_profile_stop_error(&e) => {
-            eprintln!("Profile gate stopped during project load.");
+            eprintln!("Profile gate stopped during project deploy.");
             return Ok(WorkloadOutcome::ProfileStopped);
         }
-        Err(e) => return Err(e).context("Failed to load project"),
+        Err(e) => return Err(e).context("Failed to deploy project"),
     }
 
     eprintln!("Driving frames (mode-gated; --max-cycles {max_cycles})...");
@@ -102,39 +99,4 @@ fn is_profile_stop_error(e: &anyhow::Error) -> bool {
             .to_string()
             .contains("Emulator stopped by profile gate")
     })
-}
-
-async fn push_project_files(
-    client: &TokioLpClient,
-    local_fs: &dyn LpFs,
-    project_uid: &str,
-) -> Result<()> {
-    let entries = local_fs
-        .list_dir("/".as_path(), true)
-        .map_err(|e| anyhow::anyhow!("Failed to list project files: {e:?}"))?;
-
-    for entry in entries {
-        if entry.as_str().ends_with('/') {
-            continue;
-        }
-        if local_fs.is_dir(entry.as_path()).unwrap_or(false) {
-            continue;
-        }
-        let content = local_fs
-            .read_file(entry.as_path())
-            .map_err(|e| anyhow::anyhow!("Failed to read {}: {e:?}", entry.as_str()))?;
-
-        let relative = if entry.as_str().starts_with('/') {
-            &entry.as_str()[1..]
-        } else {
-            entry.as_str()
-        };
-
-        let full_path = format!("/projects/{project_uid}/{relative}");
-        client
-            .fs_write(full_path.as_path(), content)
-            .await
-            .with_context(|| format!("Failed to write {full_path}"))?;
-    }
-    Ok(())
 }

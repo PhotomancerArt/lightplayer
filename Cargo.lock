@@ -5076,6 +5076,7 @@ dependencies = [
 name = "lp-studio-runtime"
 version = "40.0.0"
 dependencies = [
+ "async-trait",
  "js-sys",
  "lp-studio-core",
  "lpa-client",

@@ -1,5 +1,6 @@
-use lpc_model::AsLpPathBuf;
-use lpc_wire::{ClientRequest, FsRequest, WireServerMsgBody, messages::ClientMessage};
+use lpa_client::ProjectDeployFile;
+use lpa_client::project_deploy::project_write_requests;
+use lpc_wire::{ClientRequest, WireServerMsgBody, messages::ClientMessage};
 
 pub const DEMO_PROJECT_ID: &str = lp_studio_core::STUDIO_DEMO_PROJECT_ID;
 
@@ -48,21 +49,21 @@ pub fn demo_write_messages(first_id: u64, project_id: &str) -> Vec<ClientMessage
         .collect()
 }
 
-pub fn demo_write_requests(project_id: &str) -> Vec<ClientRequest> {
+pub fn demo_project_deploy_files() -> Vec<ProjectDeployFile> {
     demo_project_files()
         .iter()
-        .map(|file| {
-            let path = format!("/projects/{project_id}/{}", file.relative_path).as_path_buf();
-            ClientRequest::Filesystem(FsRequest::Write {
-                path,
-                data: file.bytes.to_vec(),
-            })
-        })
+        .map(|file| ProjectDeployFile::new(file.relative_path, file.bytes.to_vec()))
         .collect()
+}
+
+pub fn demo_write_requests(project_id: &str) -> Vec<ClientRequest> {
+    project_write_requests(project_id, demo_project_deploy_files())
 }
 
 #[cfg(test)]
 mod tests {
+    use lpc_wire::FsRequest;
+
     use super::*;
 
     #[test]

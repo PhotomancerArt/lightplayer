@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio::signal;
 
 use crate::client::{LpClient, client_connect};
-use crate::commands::dev::{fs_loop, push_project_async, validation};
+use crate::commands::dev::{deploy_project_async, fs_loop, validation};
 use crate::debug_ui::DebugUiState;
 use lpa_client::HostSpecifier;
 
@@ -71,26 +71,11 @@ async fn handle_dev_async(
     // Create local filesystem
     let local_fs: Arc<dyn LpFs> = Arc::new(LpFsStd::new(args.dir.clone()));
 
-    // Stop all currently loaded projects before pushing
-    // This ensures a clean state
-    if let Err(e) = client.stop_all_projects().await {
-        // Log warning but continue - server might not have any projects loaded
-        eprintln!("Warning: Failed to stop all projects: {e}");
-        eprintln!("Continuing with project push...");
-    }
-
-    // Push project to server
-    // This ensures the project exists on the server before we try to load it
-    push_project_async(&client, &*local_fs, &project_uid)
+    // Deploy project to server. This stops old projects, writes files, then
+    // loads the project so hardware targets do not keep old outputs open.
+    let project_handle = deploy_project_async(&client, &*local_fs, &project_uid)
         .await
-        .with_context(|| format!("Failed to push project to server (host: {host_spec_str})"))?;
-
-    // Load project on server
-    let project_path = format!("projects/{project_uid}");
-    let project_handle = client
-        .project_load(&project_path)
-        .await
-        .context("Failed to load project on server")?;
+        .with_context(|| format!("Failed to deploy project to server (host: {host_spec_str})"))?;
 
     // Spawn fs_loop task
     let fs_loop_handle = {

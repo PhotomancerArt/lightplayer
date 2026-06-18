@@ -3,7 +3,9 @@
 //! Provides async function to push local project files to the server.
 
 use anyhow::{Context, Result};
+use lpa_client::ProjectDeployFile;
 use lpc_model::AsLpPath;
+use lpc_wire::WireProjectHandle;
 use lpfs::LpFs;
 
 use crate::client::LpClient;
@@ -23,15 +25,43 @@ use crate::client::LpClient;
 ///
 /// * `Ok(())` if all files were pushed successfully
 /// * `Err` if any file operation failed
+#[allow(
+    dead_code,
+    reason = "Write-only project sync is retained for file-watch and future partial deploy callers"
+)]
 pub async fn push_project_async(
     client: &LpClient,
     local_fs: &dyn LpFs,
     project_uid: &str,
 ) -> Result<()> {
+    let files = collect_project_deploy_files(local_fs)?;
+    client
+        .push_project_files(project_uid, files)
+        .await
+        .with_context(|| format!("Failed to push project files for {project_uid}"))?;
+    Ok(())
+}
+
+/// Stop any loaded projects, push project files, and load the project.
+pub async fn deploy_project_async(
+    client: &LpClient,
+    local_fs: &dyn LpFs,
+    project_uid: &str,
+) -> Result<WireProjectHandle> {
+    let files = collect_project_deploy_files(local_fs)?;
+    client
+        .deploy_project_files(project_uid, files)
+        .await
+        .with_context(|| format!("Failed to deploy project {project_uid}"))
+}
+
+fn collect_project_deploy_files(local_fs: &dyn LpFs) -> Result<Vec<ProjectDeployFile>> {
     // List all files recursively in the project directory
     let entries = local_fs
         .list_dir("/".as_path(), true)
         .map_err(|e| anyhow::anyhow!("Failed to list project files: {e}"))?;
+
+    let mut files = Vec::new();
 
     // Push each file to the server (skip directories)
     for entry_path in entries {
@@ -71,14 +101,8 @@ pub async fn push_project_async(
         } else {
             entry_str
         };
-        let server_path = format!("/projects/{project_uid}/{relative_path}");
-
-        // Write file to server
-        client
-            .fs_write(server_path.as_path(), data)
-            .await
-            .with_context(|| format!("Failed to write file to server: {server_path}"))?;
+        files.push(ProjectDeployFile::new(relative_path, data));
     }
 
-    Ok(())
+    Ok(files)
 }
