@@ -31,7 +31,7 @@ issues.
 
 `fw-host` is the host-OS LightPlayer runtime target. It owns reusable local
 server lifecycle that should not live only in `lp-cli`. The Studio link layer can
-use this target through `lpa-link` `local-host` support to create local runtime
+use this target through `lpa-link` `host-process` support to create local runtime
 instances and connect an `lpa-client` to them.
 
 Useful checks:
@@ -39,8 +39,8 @@ Useful checks:
 ```bash
 cargo check -p fw-host
 cargo test -p fw-host
-cargo check -p lpa-link --features local-host
-cargo test -p lpa-link --features local-host
+cargo check -p lpa-link --features host-process
+cargo test -p lpa-link --features host-process
 ```
 
 ### Browser Runtime

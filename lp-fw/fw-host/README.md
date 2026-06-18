@@ -10,7 +10,7 @@ server internals directly.
 
 - `lpa-server` hosts projects and serves the LightPlayer wire API.
 - `lpa-client` consumes the client-side connection created by the runtime.
-- `lpa-link` `local-host` uses `fw-host` to create runtime instances and expose
+- `lpa-link` `host-process` uses `fw-host` to create runtime instances and expose
   them as low-level link sessions.
 - `fw-core` provides the shared transport drain and server tick helpers used by
   the host runtime loop.
@@ -39,6 +39,6 @@ packaged host deployments are future productization work.
 ```bash
 cargo check -p fw-host
 cargo test -p fw-host
-cargo check -p lpa-link --features local-host
-cargo test -p lpa-link --features local-host
+cargo check -p lpa-link --features host-process
+cargo test -p lpa-link --features host-process
 ```

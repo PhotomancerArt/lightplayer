@@ -35,8 +35,8 @@ Studio can show connection health and raw protocol independently.
 ticking an `LpServer` frame. Browser Worker lifecycle, host process lifecycle,
 and ESP32 scheduling remain target-specific.
 
-`lpa-link local-browser` models endpoint/session identity and reports a
-`LocalBrowserWorker` connection with protocol `fw-browser-post-message-v1`.
+`lpa-link browser-worker` models endpoint/session identity and reports a
+`BrowserWorker` connection with protocol `fw-browser-post-message-v1`.
 The web frontend still owns the actual JavaScript `Worker` object and binds that
 worker to Studio/client code.
 

@@ -15,7 +15,7 @@ direct public shader calls.
 - `fw-core` provides shared runtime drain/tick helpers.
 - `lpvm-wasm` is used by `lpc-engine`'s wasm32 graphics backend to execute
   shaders through browser `WebAssembly` APIs.
-- `lpa-link` `local-browser` models browser runtime instances and scoped
+- `lpa-link` `browser-worker` models browser runtime instances and scoped
   logs/status for Studio.
 - Future Studio UI code should consume this through a browser-local link/session
   boundary rather than reaching directly into shader runtime details.
