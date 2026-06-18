@@ -9,11 +9,16 @@ pub fn DevicePanel(
     on_connect_hardware: EventHandler<MouseEvent>,
 ) -> Element {
     let provider = state
-        .link_selection
-        .selected_provider_id
-        .as_str()
-        .to_string();
-    let endpoint_count = state.link_selection.endpoints.len();
+        .device_manager
+        .providers
+        .selected_provider_id()
+        .map(|provider_id| provider_id.as_str().to_string())
+        .unwrap_or_else(|| "none".to_string());
+    let endpoint_count = state
+        .device_manager
+        .providers
+        .selected_provider_endpoints()
+        .len();
     let access = state
         .device_access
         .as_ref()

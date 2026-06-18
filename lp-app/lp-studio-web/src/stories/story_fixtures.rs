@@ -1,8 +1,8 @@
 use lp_studio_core::{
     ActionId, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID, ClientSession,
-    ConnectionSession, DeviceAccess, DeviceAccessStatus, DeviceCapability, DeviceId, DeviceSession,
-    ProjectSession, STUDIO_DEMO_PROJECT_ID, StudioDiagnostic, StudioHeartbeat, StudioLogEntry,
-    StudioLogLevel, StudioState,
+    ConnectionSession, DeviceAccess, DeviceAccessStatus, DeviceCapability, DeviceFlowState,
+    DeviceId, DeviceSession, ProjectSession, STUDIO_DEMO_PROJECT_ID, StudioDiagnostic,
+    StudioHeartbeat, StudioLogEntry, StudioLogLevel, StudioState,
 };
 use lpa_link::{
     LinkConnectionKind, LinkEndpoint, LinkEndpointId, LinkEndpointStatus, LinkProviderId,
@@ -21,15 +21,24 @@ pub fn studio_state_idle() -> StudioState {
 
 pub fn studio_state_connecting() -> StudioState {
     let mut state = StudioState::default();
-    state.link_selection.endpoints =
-        vec![browser_endpoint().with_status(LinkEndpointStatus::Launching)];
+    set_provider_endpoints(
+        &mut state,
+        BROWSER_WORKER_PROVIDER_ID,
+        vec![browser_endpoint().with_status(LinkEndpointStatus::Launching)],
+    );
+    state.device_manager.active_flow = DeviceFlowState::OpeningLink {
+        endpoint_id: LinkEndpointId::new("browser-worker-worker-1"),
+    };
     state
 }
 
 pub fn studio_state_connected() -> StudioState {
     let mut state = StudioState::default();
-    state.link_selection.endpoints =
-        vec![browser_endpoint().with_status(LinkEndpointStatus::Connected)];
+    set_provider_endpoints(
+        &mut state,
+        BROWSER_WORKER_PROVIDER_ID,
+        vec![browser_endpoint().with_status(LinkEndpointStatus::Connected)],
+    );
     attach_device_session(&mut state);
     state.heartbeat = Some(StudioHeartbeat {
         fps_avg: 59.8,
@@ -43,8 +52,10 @@ pub fn studio_state_connected() -> StudioState {
 
 pub fn studio_state_hardware_unsupported() -> StudioState {
     let mut state = StudioState::default();
-    state.link_selection.selected_provider_id =
-        LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID);
+    state
+        .device_manager
+        .providers
+        .select_provider(BROWSER_SERIAL_ESP32_PROVIDER_ID);
     state.device_access = Some(DeviceAccess::new(
         BROWSER_SERIAL_ESP32_PROVIDER_ID,
         DeviceAccessStatus::Unsupported {
@@ -56,8 +67,10 @@ pub fn studio_state_hardware_unsupported() -> StudioState {
 
 pub fn studio_state_hardware_denied() -> StudioState {
     let mut state = StudioState::default();
-    state.link_selection.selected_provider_id =
-        LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID);
+    state
+        .device_manager
+        .providers
+        .select_provider(BROWSER_SERIAL_ESP32_PROVIDER_ID);
     state.device_access = Some(DeviceAccess::new(
         BROWSER_SERIAL_ESP32_PROVIDER_ID,
         DeviceAccessStatus::PermissionDenied {
@@ -69,17 +82,23 @@ pub fn studio_state_hardware_denied() -> StudioState {
 
 pub fn studio_state_hardware_granted() -> StudioState {
     let mut state = StudioState::default();
-    state.link_selection.selected_provider_id =
-        LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID);
+    state
+        .device_manager
+        .providers
+        .select_provider(BROWSER_SERIAL_ESP32_PROVIDER_ID);
     state.device_access = Some(DeviceAccess::new(
         BROWSER_SERIAL_ESP32_PROVIDER_ID,
         DeviceAccessStatus::Granted,
     ));
-    state.link_selection.endpoints = vec![LinkEndpoint::new(
-        "browser-serial-esp32-port-1",
+    set_provider_endpoints(
+        &mut state,
         BROWSER_SERIAL_ESP32_PROVIDER_ID,
-        "ESP32 Serial (303a:1001)",
-    )];
+        vec![LinkEndpoint::new(
+            "browser-serial-esp32-port-1",
+            BROWSER_SERIAL_ESP32_PROVIDER_ID,
+            "ESP32 Serial (303a:1001)",
+        )],
+    );
     state
 }
 
@@ -183,6 +202,22 @@ fn browser_endpoint() -> LinkEndpoint {
         BROWSER_WORKER_PROVIDER_ID,
         "Browser runtime worker",
     )
+}
+
+fn set_provider_endpoints(
+    state: &mut StudioState,
+    provider_id: impl Into<LinkProviderId>,
+    endpoints: Vec<LinkEndpoint>,
+) {
+    let provider_id = provider_id.into();
+    state
+        .device_manager
+        .providers
+        .select_provider(provider_id.clone());
+    state
+        .device_manager
+        .providers
+        .set_provider_endpoints(provider_id, endpoints);
 }
 
 fn project_session(

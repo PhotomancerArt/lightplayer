@@ -6,6 +6,9 @@ use crate::ActionId;
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum StudioEffect {
+    RefreshProviderCatalog {
+        action_id: ActionId,
+    },
     RequestDeviceAccess {
         action_id: ActionId,
         provider_id: LinkProviderId,
@@ -15,6 +18,10 @@ pub enum StudioEffect {
         provider_id: LinkProviderId,
     },
     ConnectEndpoint {
+        action_id: ActionId,
+        endpoint_id: LinkEndpointId,
+    },
+    ProbeTarget {
         action_id: ActionId,
         endpoint_id: LinkEndpointId,
     },

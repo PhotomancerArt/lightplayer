@@ -1,6 +1,7 @@
 use lp_studio_core::{
-    DeviceAccessStatus, DeviceCapability, HOST_PROCESS_PROVIDER_ID, StudioEffect, StudioEvent,
-    StudioLogEntry, StudioLogLevel,
+    DeviceAccessStatus, DeviceCapability, HOST_PROCESS_PROVIDER_ID, ProviderAvailability,
+    ProviderCapability, ProviderCardState, ProviderIntent, StudioEffect, StudioEvent,
+    StudioLogEntry, StudioLogLevel, TargetProbeResult,
 };
 use lpa_link::providers::host_process::{HostProcessProvider, HostProcessSession};
 use lpa_link::{LinkEndpointId, LinkProvider, LinkProviderId, LinkSession};
@@ -58,6 +59,38 @@ impl HostProcessStudioRuntime {
             action_id,
             provider_id,
             endpoints,
+        }])
+    }
+
+    async fn refresh_provider_catalog(
+        &mut self,
+        action_id: lp_studio_core::ActionId,
+    ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
+        let endpoints = self
+            .provider
+            .discover()
+            .await
+            .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
+        Ok(vec![StudioEvent::ProviderCatalogUpdated {
+            action_id: Some(action_id),
+            providers: vec![
+                ProviderCardState::new(
+                    HOST_PROCESS_PROVIDER_ID,
+                    "Host runtime",
+                    ProviderIntent::RunHostRuntime,
+                )
+                .with_availability(ProviderAvailability::Available)
+                .with_capabilities(vec![
+                    ProviderCapability::DiscoverEndpoints,
+                    ProviderCapability::Connect,
+                    ProviderCapability::Simulate,
+                    ProviderCapability::ReadLogs,
+                    ProviderCapability::ReadDiagnostics,
+                    ProviderCapability::DeployProject,
+                    ProviderCapability::ReadProjectInventory,
+                ])
+                .with_endpoints(endpoints),
+            ],
         }])
     }
 
@@ -128,6 +161,9 @@ impl EffectExecutor for HostProcessStudioRuntime {
         effect: StudioEffect,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
         match effect {
+            StudioEffect::RefreshProviderCatalog { action_id } => {
+                self.refresh_provider_catalog(action_id).await
+            }
             StudioEffect::RequestDeviceAccess {
                 action_id,
                 provider_id,
@@ -151,6 +187,13 @@ impl EffectExecutor for HostProcessStudioRuntime {
                 action_id,
                 endpoint_id,
             } => self.connect(action_id, endpoint_id).await,
+            StudioEffect::ProbeTarget {
+                action_id,
+                endpoint_id,
+            } => Ok(vec![StudioEvent::TargetProbeCompleted {
+                action_id,
+                result: TargetProbeResult::server(endpoint_id, Some("host-process".to_string())),
+            }]),
             StudioEffect::DisconnectSession {
                 action_id,
                 session_id,
@@ -244,7 +287,15 @@ mod tests {
             .dispatch(StudioActionKind::DiscoverDevices, ActionOrigin::Harness)
             .await
             .unwrap();
-        let endpoint_id = harness.app().state().link_selection.endpoints[0].id.clone();
+        let endpoint_id = harness
+            .app()
+            .state()
+            .device_manager
+            .providers
+            .first_selected_endpoint()
+            .expect("discovered endpoint")
+            .id
+            .clone();
         harness
             .dispatch(
                 StudioActionKind::ConnectDevice { endpoint_id },

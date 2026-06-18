@@ -3,12 +3,22 @@ use lpc_wire::{LoadedProject, WireProjectHandle, WireProjectInventoryReadRespons
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ActionId, DeviceAccessStatus, DeviceCapability, StudioDiagnostic, StudioHeartbeat,
-    StudioLogEntry,
+    ActionId, DeviceAccessStatus, DeviceCapability, DeviceIssue, ProgressState,
+    ProviderAvailability, ProviderCardState, StudioDiagnostic, StudioHeartbeat, StudioLogEntry,
+    TargetProbeResult,
 };
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum StudioEvent {
+    ProviderCatalogUpdated {
+        action_id: Option<ActionId>,
+        providers: Vec<ProviderCardState>,
+    },
+    ProviderAvailabilityUpdated {
+        action_id: Option<ActionId>,
+        provider_id: LinkProviderId,
+        availability: ProviderAvailability,
+    },
     DeviceAccessUpdated {
         action_id: Option<ActionId>,
         provider_id: LinkProviderId,
@@ -39,6 +49,26 @@ pub enum StudioEvent {
         action_id: ActionId,
         endpoint_id: LinkEndpointId,
         firmware_id: Option<String>,
+    },
+    TargetProbeCompleted {
+        action_id: ActionId,
+        result: TargetProbeResult,
+    },
+    TargetProbeFailed {
+        action_id: ActionId,
+        endpoint_id: LinkEndpointId,
+        issue: DeviceIssue,
+    },
+    ProvisioningIssueRaised {
+        action_id: Option<ActionId>,
+        issue: DeviceIssue,
+    },
+    ProvisioningProgressUpdated {
+        action_id: Option<ActionId>,
+        progress: ProgressState,
+    },
+    ProvisioningFlowCanceled {
+        action_id: ActionId,
     },
     DemoProjectSeeded {
         action_id: ActionId,

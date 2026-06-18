@@ -22,6 +22,34 @@ pub struct ActionDescriptor {
 impl ActionDescriptor {
     pub fn for_type(action_type: StudioActionType) -> Self {
         match action_type {
+            StudioActionType::RefreshProviderCatalog => Self::new(
+                action_type,
+                "Refresh provider catalog",
+                "Ask the runtime which Studio providers are available.",
+                ActionCategory::Device,
+                ActionHistoryPolicy::Never,
+            ),
+            StudioActionType::StartProvisioning => Self::new(
+                action_type,
+                "Start provisioning",
+                "Begin the device provisioning flow with a selected provider.",
+                ActionCategory::Device,
+                ActionHistoryPolicy::Never,
+            ),
+            StudioActionType::CancelProvisioning => Self::new(
+                action_type,
+                "Cancel provisioning",
+                "Cancel the active provisioning flow and return to provider choice.",
+                ActionCategory::Device,
+                ActionHistoryPolicy::Never,
+            ),
+            StudioActionType::RetryProvisioning => Self::new(
+                action_type,
+                "Retry provisioning",
+                "Retry the active provider/device provisioning flow.",
+                ActionCategory::Device,
+                ActionHistoryPolicy::Never,
+            ),
             StudioActionType::SelectLinkProvider => Self::new(
                 action_type,
                 "Select link provider",
@@ -50,6 +78,20 @@ impl ActionDescriptor {
                 ActionCategory::Device,
                 ActionHistoryPolicy::Never,
             ),
+            StudioActionType::ConnectSelectedEndpoint => Self::new(
+                action_type,
+                "Connect selected endpoint",
+                "Open a link session for the selected provider endpoint.",
+                ActionCategory::Device,
+                ActionHistoryPolicy::Never,
+            ),
+            StudioActionType::ProbeTarget => Self::new(
+                action_type,
+                "Probe target",
+                "Classify the selected endpoint before deciding whether provisioning is needed.",
+                ActionCategory::Device,
+                ActionHistoryPolicy::Never,
+            ),
             StudioActionType::DisconnectDevice => Self::new(
                 action_type,
                 "Disconnect device",
@@ -61,6 +103,13 @@ impl ActionDescriptor {
                 action_type,
                 "Reset device",
                 "Ask the current link to reset or reboot the connected device.",
+                ActionCategory::Device,
+                ActionHistoryPolicy::Never,
+            ),
+            StudioActionType::ConfirmFirmwareFlash => Self::new(
+                action_type,
+                "Confirm firmware flash",
+                "Confirm and start a firmware flashing operation for an endpoint.",
                 ActionCategory::Device,
                 ActionHistoryPolicy::Never,
             ),
@@ -84,6 +133,13 @@ impl ActionDescriptor {
                 "Write and load the built-in Studio demo project.",
                 ActionCategory::Project,
                 ActionHistoryPolicy::Never,
+            ),
+            StudioActionType::AcknowledgeProvisioningIssue => Self::new(
+                action_type,
+                "Acknowledge provisioning issue",
+                "Dismiss a provisioning issue from the Studio read model.",
+                ActionCategory::Device,
+                ActionHistoryPolicy::Ephemeral,
             ),
             StudioActionType::RefreshStatus => Self::new(
                 action_type,
@@ -140,11 +196,18 @@ mod tests {
     #[test]
     fn operational_actions_are_not_undoable() {
         for action_type in [
+            StudioActionType::RefreshProviderCatalog,
+            StudioActionType::StartProvisioning,
+            StudioActionType::CancelProvisioning,
+            StudioActionType::RetryProvisioning,
             StudioActionType::DiscoverDevices,
             StudioActionType::ConnectDevice,
+            StudioActionType::ConnectSelectedEndpoint,
+            StudioActionType::ProbeTarget,
             StudioActionType::DisconnectDevice,
             StudioActionType::RequestDeviceAccess,
             StudioActionType::ResetDevice,
+            StudioActionType::ConfirmFirmwareFlash,
             StudioActionType::FlashDeviceFirmware,
             StudioActionType::UploadDemoProject,
             StudioActionType::LoadDemoProject,
@@ -162,6 +225,13 @@ mod tests {
     #[test]
     fn navigation_actions_are_ephemeral() {
         let descriptor = ActionDescriptor::for_type(StudioActionType::SelectProjectNode);
+
+        assert!(descriptor.history_policy.ephemeral());
+    }
+
+    #[test]
+    fn issue_acknowledgement_is_ephemeral() {
+        let descriptor = ActionDescriptor::for_type(StudioActionType::AcknowledgeProvisioningIssue);
 
         assert!(descriptor.history_policy.ephemeral());
     }

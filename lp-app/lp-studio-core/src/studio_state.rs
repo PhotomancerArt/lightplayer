@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ClientSession, ConnectionSession, DeviceAccess, DeviceSession, InFlightAction, LinkSelection,
-    ProjectSession, StudioDiagnostic, StudioHeartbeat, StudioLogEntry,
+    ClientSession, ConnectionSession, DeviceAccess, DeviceManagerState, DeviceSession,
+    InFlightAction, ProjectSession, StudioDiagnostic, StudioHeartbeat, StudioLogEntry,
 };
 
 #[derive(Clone, Debug, Default, PartialEq, Deserialize, Serialize)]
 pub struct StudioState {
-    pub link_selection: LinkSelection,
+    pub device_manager: DeviceManagerState,
     pub device_access: Option<DeviceAccess>,
     pub device_session: Option<DeviceSession>,
     pub connection_session: Option<ConnectionSession>,

@@ -65,9 +65,9 @@ pub async fn run_host_process_demo() -> Result<StudioApp, StudioRuntimeError> {
     let endpoint_id = harness
         .app()
         .state()
-        .link_selection
-        .endpoints
-        .first()
+        .device_manager
+        .providers
+        .first_selected_endpoint()
         .ok_or_else(|| {
             StudioRuntimeError::Link("host-process discovery returned no endpoints".to_string())
         })?

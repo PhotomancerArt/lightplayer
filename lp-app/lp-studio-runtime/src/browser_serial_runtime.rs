@@ -1,6 +1,8 @@
 use lp_studio_core::{
     ActionOrigin, BROWSER_SERIAL_ESP32_PROVIDER_ID, DeviceAccessStatus, DeviceCapability,
+    ProviderAvailability, ProviderCapability, ProviderCardState, ProviderIntent, RecoveryAction,
     StudioActionKind, StudioApp, StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel,
+    TargetProbeResult,
 };
 use lpa_link::providers::browser_serial_esp32::{
     BrowserSerialEsp32Provider, BrowserSerialEsp32Session,
@@ -122,6 +124,51 @@ impl BrowserSerialStudioRuntime {
         }])
     }
 
+    async fn refresh_provider_catalog(
+        &mut self,
+        action_id: lp_studio_core::ActionId,
+    ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
+        let availability = if browser_serial_shim::is_supported() {
+            ProviderAvailability::AvailableWithPermission
+        } else {
+            ProviderAvailability::unavailable(
+                "Web Serial is not supported in this browser.",
+                vec![
+                    RecoveryAction::UseCompatibleBrowser,
+                    RecoveryAction::ChooseSimulator,
+                ],
+            )
+        };
+        let endpoints = self
+            .provider
+            .discover()
+            .await
+            .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
+        Ok(vec![StudioEvent::ProviderCatalogUpdated {
+            action_id: Some(action_id),
+            providers: vec![
+                ProviderCardState::new(
+                    BROWSER_SERIAL_ESP32_PROVIDER_ID,
+                    "USB ESP32",
+                    ProviderIntent::ConnectUsbEsp32,
+                )
+                .with_availability(availability)
+                .with_capabilities(vec![
+                    ProviderCapability::RequestAccess,
+                    ProviderCapability::DiscoverEndpoints,
+                    ProviderCapability::Connect,
+                    ProviderCapability::ResetDevice,
+                    ProviderCapability::ReadLogs,
+                    ProviderCapability::ReadDiagnostics,
+                    ProviderCapability::ReadHeartbeat,
+                    ProviderCapability::DeployProject,
+                    ProviderCapability::ReadProjectInventory,
+                ])
+                .with_endpoints(endpoints),
+            ],
+        }])
+    }
+
     async fn connect(
         &mut self,
         action_id: lp_studio_core::ActionId,
@@ -208,6 +255,9 @@ impl EffectExecutor for BrowserSerialStudioRuntime {
         effect: StudioEffect,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
         match effect {
+            StudioEffect::RefreshProviderCatalog { action_id } => {
+                self.refresh_provider_catalog(action_id).await
+            }
             StudioEffect::RequestDeviceAccess {
                 action_id,
                 provider_id,
@@ -220,6 +270,13 @@ impl EffectExecutor for BrowserSerialStudioRuntime {
                 action_id,
                 endpoint_id,
             } => self.connect(action_id, endpoint_id).await,
+            StudioEffect::ProbeTarget {
+                action_id,
+                endpoint_id,
+            } => Ok(vec![StudioEvent::TargetProbeCompleted {
+                action_id,
+                result: TargetProbeResult::server(endpoint_id, Some("browser-serial".to_string())),
+            }]),
             StudioEffect::DisconnectSession {
                 action_id,
                 session_id,
@@ -271,9 +328,9 @@ pub async fn run_browser_serial_demo() -> Result<StudioApp, StudioRuntimeError> 
     drain_effects(&mut app, &mut runtime, effects).await?;
     let endpoint_id = app
         .state()
-        .link_selection
-        .endpoints
-        .first()
+        .device_manager
+        .providers
+        .first_selected_endpoint()
         .ok_or_else(|| {
             StudioRuntimeError::Link(
                 "browser serial permission did not yield an endpoint".to_string(),

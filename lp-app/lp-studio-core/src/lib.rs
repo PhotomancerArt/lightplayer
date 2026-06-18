@@ -12,8 +12,8 @@ pub mod device_capability;
 pub mod device_id;
 pub mod device_session;
 pub mod in_flight_action;
-pub mod link_selection;
 pub mod project_session;
+pub mod provisioning;
 pub mod studio_action;
 pub mod studio_app;
 pub mod studio_diagnostic;
@@ -35,8 +35,13 @@ pub use device_capability::DeviceCapability;
 pub use device_id::DeviceId;
 pub use device_session::DeviceSession;
 pub use in_flight_action::InFlightAction;
-pub use link_selection::LinkSelection;
 pub use project_session::ProjectSession;
+pub use provisioning::{
+    ConnectedDeviceState, DeviceFlowState, DeviceHealthState, DeviceIssue, DeviceIssueKind,
+    DeviceIssueSeverity, DeviceManagerState, ProgressState, ProviderAvailability,
+    ProviderCapability, ProviderCardState, ProviderCatalog, ProviderIntent, ProvisioningReason,
+    RecoveryAction, TargetKind, TargetProbeResult,
+};
 pub use studio_action::{StudioAction, StudioActionKind, StudioActionType};
 pub use studio_app::StudioApp;
 pub use studio_diagnostic::{StudioDiagnostic, StudioDiagnosticSeverity};
