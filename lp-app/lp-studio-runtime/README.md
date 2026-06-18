@@ -43,6 +43,16 @@ uses a small JavaScript shim because `web-sys` currently gates Web Serial behind
 unstable API cfg flags; Rust still owns Studio state, request/response handling,
 and project upload semantics.
 
+For hardware bring-up, valid `M!` protocol frames stay internal to the runtime.
+Non-protocol device lines are echoed directly to the JavaScript console with a
+`fw-esp32` prefix, using the firmware log level when present. They do not enter
+the global Studio log list; a future hardware console view should live with the
+device panel. Malformed `M!` frames are surfaced as warnings with a sanitized
+JSON snippet so protocol/framing bugs can be diagnosed without dumping full
+project payloads. If a malformed frame contains a nested `M!` marker, the
+browser serial client attempts to resynchronize from that marker so a valid
+response frame is not lost behind a truncated heartbeat or log burst.
+
 ## Validation
 
 ```bash

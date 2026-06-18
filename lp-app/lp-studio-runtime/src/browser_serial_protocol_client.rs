@@ -1,10 +1,10 @@
 use lpc_wire::{
-    ClientRequest, WireProjectCommandResponse, WireServerMessage, WireServerMsgBody, json,
-    messages::ClientMessage,
+    ClientRequest, FsRequest, WireProjectCommandResponse, WireServerMessage, WireServerMsgBody,
+    json, messages::ClientMessage,
 };
-use wasm_bindgen::JsValue;
+use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 
-use lp_studio_core::{StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel};
+use lp_studio_core::{StudioDiagnostic, StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel};
 
 use crate::browser_serial_shim;
 use crate::protocol_event::{inventory_request, server_event};
@@ -137,18 +137,31 @@ impl BrowserSerialProtocolClient {
         request: ClientRequest,
     ) -> Result<BrowserSerialExchange, StudioRuntimeError> {
         let request_id = self.next_request_id();
+        let request_label = request_label(&request);
         let frame = json::to_string(&ClientMessage {
             id: request_id,
             msg: request,
         })
         .map_err(|error| StudioRuntimeError::Protocol(error.to_string()))?;
+        let mut events = vec![StudioEvent::LogReceived {
+            entry: StudioLogEntry::new(
+                StudioLogLevel::Debug,
+                "browser-serial",
+                format!(
+                    "tx request id={request_id} kind={request_label} json_bytes={}",
+                    frame.len()
+                ),
+            ),
+        }];
         browser_serial_shim::write_line(self.port_id, &format!("M!{frame}\n")).await?;
 
-        let mut events = Vec::new();
+        let mut last_protocol_issue = None;
         for _ in 0..600 {
             events.extend(self.take_link_errors());
             for line in browser_serial_shim::take_lines(self.port_id) {
-                if let Some(response) = self.handle_line(line, request_id, &mut events)? {
+                if let Some(response) =
+                    self.handle_line(line, request_id, &mut events, &mut last_protocol_issue)
+                {
                     if let WireServerMsgBody::Error { error } = &response.msg {
                         return Err(StudioRuntimeError::Protocol(error.clone()));
                     }
@@ -157,9 +170,14 @@ impl BrowserSerialProtocolClient {
             }
             sleep_ms(10).await?;
         }
-        Err(StudioRuntimeError::Transport(
-            "timed out waiting for browser serial protocol response".to_string(),
-        ))
+        let mut message = format!(
+            "timed out waiting for browser serial protocol response id={request_id} kind={request_label}"
+        );
+        if let Some(issue) = last_protocol_issue {
+            message.push_str("; last malformed protocol frame: ");
+            message.push_str(&issue);
+        }
+        Err(StudioRuntimeError::Transport(message))
     }
 
     fn handle_line(
@@ -167,18 +185,49 @@ impl BrowserSerialProtocolClient {
         line: String,
         request_id: u64,
         events: &mut Vec<StudioEvent>,
-    ) -> Result<Option<WireServerMessage>, StudioRuntimeError> {
+        last_protocol_issue: &mut Option<String>,
+    ) -> Option<WireServerMessage> {
+        if line.is_empty() {
+            return None;
+        }
+
         let Some(json_frame) = line.strip_prefix("M!") else {
-            events.push(StudioEvent::LogReceived {
-                entry: StudioLogEntry::new(StudioLogLevel::Info, "fw-esp32", line),
-            });
-            return Ok(None);
+            echo_device_line(&line);
+            return None;
         };
 
-        let response = json::from_str::<WireServerMessage>(json_frame)
-            .map_err(|error| StudioRuntimeError::Protocol(error.to_string()))?;
+        let response = match json::from_str::<WireServerMessage>(json_frame) {
+            Ok(response) => response,
+            Err(error) => {
+                let snippet = line_snippet(json_frame, 240);
+                let issue = format!("{error}; json={snippet}");
+                *last_protocol_issue = Some(issue.clone());
+                let message = format!(
+                    "malformed M! frame while waiting for response id={request_id}: {issue}"
+                );
+                console_warn(&format!("[browser-serial] {message}"));
+                events.push(StudioEvent::LogReceived {
+                    entry: StudioLogEntry::new(StudioLogLevel::Warn, "browser-serial", &message),
+                });
+                events.push(StudioEvent::DiagnosticRaised {
+                    diagnostic: StudioDiagnostic::error(None, message),
+                });
+                if let Some(next_frame) = nested_protocol_frame(json_frame) {
+                    console_warn(&format!(
+                        "[browser-serial] attempting resync at nested M! frame while waiting for response id={request_id}"
+                    ));
+                    return self.handle_line(
+                        next_frame.to_string(),
+                        request_id,
+                        events,
+                        last_protocol_issue,
+                    );
+                }
+                return None;
+            }
+        };
         if response.id == request_id {
-            return Ok(Some(response));
+            return Some(response);
         }
         if response.id == 0 {
             if let Some(event) = server_event(response) {
@@ -196,7 +245,7 @@ impl BrowserSerialProtocolClient {
                 ),
             });
         }
-        Ok(None)
+        None
     }
 
     fn take_link_errors(&self) -> Vec<StudioEvent> {
@@ -213,6 +262,69 @@ impl BrowserSerialProtocolClient {
         self.next_request_id += 1;
         id
     }
+}
+
+fn request_label(request: &ClientRequest) -> &'static str {
+    match request {
+        ClientRequest::Filesystem(FsRequest::Read { .. }) => "fs.read",
+        ClientRequest::Filesystem(FsRequest::Write { .. }) => "fs.write",
+        ClientRequest::Filesystem(FsRequest::DeleteFile { .. }) => "fs.delete_file",
+        ClientRequest::Filesystem(FsRequest::DeleteDir { .. }) => "fs.delete_dir",
+        ClientRequest::Filesystem(FsRequest::ListDir { .. }) => "fs.list_dir",
+        ClientRequest::LoadProject { .. } => "project.load",
+        ClientRequest::UnloadProject { .. } => "project.unload",
+        ClientRequest::ProjectRequest { .. } => "project.read",
+        ClientRequest::ProjectCommand { .. } => "project.command",
+        ClientRequest::ListAvailableProjects => "project.list_available",
+        ClientRequest::ListLoadedProjects => "project.list_loaded",
+        ClientRequest::StopAllProjects => "project.stop_all",
+    }
+}
+
+fn echo_device_line(line: &str) {
+    let message = format!("[fw-esp32] {}", line_snippet(line, 1_024));
+    if line.starts_with("[ERROR]") {
+        console_error(&message);
+    } else if line.starts_with("[WARN]") {
+        console_warn(&message);
+    } else if line.starts_with("[DEBUG]") || line.starts_with("[TRACE]") {
+        console_debug(&message);
+    } else {
+        console_log(&message);
+    }
+}
+
+fn nested_protocol_frame(json_frame: &str) -> Option<&str> {
+    json_frame.find("M!").map(|offset| &json_frame[offset..])
+}
+
+fn line_snippet(line: &str, max_len: usize) -> String {
+    let mut output = String::new();
+    for c in line.chars() {
+        if output.len() >= max_len {
+            output.push_str("...");
+            break;
+        }
+        for escaped in c.escape_default() {
+            output.push(escaped);
+        }
+    }
+    output
+}
+
+#[wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen(js_namespace = console, js_name = log)]
+    fn console_log(message: &str);
+
+    #[wasm_bindgen(js_namespace = console, js_name = debug)]
+    fn console_debug(message: &str);
+
+    #[wasm_bindgen(js_namespace = console, js_name = warn)]
+    fn console_warn(message: &str);
+
+    #[wasm_bindgen(js_namespace = console, js_name = error)]
+    fn console_error(message: &str);
 }
 
 pub struct BrowserSerialExchange {
