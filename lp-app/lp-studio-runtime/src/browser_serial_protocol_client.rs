@@ -1,29 +1,30 @@
-use js_sys::Promise;
 use lpc_wire::{
     ClientRequest, WireProjectCommandResponse, WireServerMessage, WireServerMsgBody, json,
     messages::ClientMessage,
 };
-use wasm_bindgen::prelude::*;
-use wasm_bindgen_futures::JsFuture;
+use wasm_bindgen::JsValue;
 
-use lp_studio_core::{StudioEffect, StudioEvent};
+use lp_studio_core::{StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel};
 
-use crate::browser_worker_runtime::BrowserWorkerStudioRuntime;
+use crate::browser_serial_shim;
 use crate::protocol_event::{inventory_request, server_event};
-use crate::worker_envelope::{BrowserInputEnvelope, BrowserOutputEnvelope};
 use crate::{StudioRuntimeError, demo_project};
 
-pub struct BrowserProtocolClient {
-    runtime: BrowserWorkerStudioRuntime,
+pub struct BrowserSerialProtocolClient {
+    port_id: u32,
     next_request_id: u64,
 }
 
-impl BrowserProtocolClient {
-    pub fn new(runtime: BrowserWorkerStudioRuntime) -> Self {
+impl BrowserSerialProtocolClient {
+    pub fn new(port_id: u32) -> Self {
         Self {
-            runtime,
+            port_id,
             next_request_id: 1,
         }
+    }
+
+    pub fn port_id(&self) -> u32 {
+        self.port_id
     }
 
     pub async fn seed_demo_project(
@@ -134,46 +135,77 @@ impl BrowserProtocolClient {
     async fn send_request(
         &mut self,
         request: ClientRequest,
-    ) -> Result<BrowserExchange, StudioRuntimeError> {
+    ) -> Result<BrowserSerialExchange, StudioRuntimeError> {
         let request_id = self.next_request_id();
         let frame = json::to_string(&ClientMessage {
             id: request_id,
             msg: request,
         })
         .map_err(|error| StudioRuntimeError::Protocol(error.to_string()))?;
-        self.runtime
-            .post(&BrowserInputEnvelope::ProtocolIn { frame })?;
+        browser_serial_shim::write_line(self.port_id, &format!("M!{frame}\n")).await?;
 
         let mut events = Vec::new();
-        for _ in 0..240 {
-            self.runtime
-                .post(&BrowserInputEnvelope::Tick { delta_ms: Some(16) })?;
-            sleep_ms(4).await?;
-            for output in self.runtime.take_outputs() {
-                match output {
-                    BrowserOutputEnvelope::ProtocolOut { frame } => {
-                        let response: WireServerMessage = json::from_str(&frame)
-                            .map_err(|error| StudioRuntimeError::Protocol(error.to_string()))?;
-                        if response.id == request_id {
-                            return Ok(BrowserExchange { response, events });
-                        }
-                        if response.id == 0 {
-                            if let Some(event) = server_event(response) {
-                                events.push(event);
-                            }
-                        }
+        for _ in 0..600 {
+            events.extend(self.take_link_errors());
+            for line in browser_serial_shim::take_lines(self.port_id) {
+                if let Some(response) = self.handle_line(line, request_id, &mut events)? {
+                    if let WireServerMsgBody::Error { error } = &response.msg {
+                        return Err(StudioRuntimeError::Protocol(error.clone()));
                     }
-                    output => {
-                        if let Some(event) = worker_output_to_event(output) {
-                            events.push(event);
-                        }
-                    }
+                    return Ok(BrowserSerialExchange { response, events });
                 }
             }
+            sleep_ms(10).await?;
         }
-        Err(StudioRuntimeError::Browser(
-            "timed out waiting for worker protocol response".to_string(),
+        Err(StudioRuntimeError::Transport(
+            "timed out waiting for browser serial protocol response".to_string(),
         ))
+    }
+
+    fn handle_line(
+        &self,
+        line: String,
+        request_id: u64,
+        events: &mut Vec<StudioEvent>,
+    ) -> Result<Option<WireServerMessage>, StudioRuntimeError> {
+        let Some(json_frame) = line.strip_prefix("M!") else {
+            events.push(StudioEvent::LogReceived {
+                entry: StudioLogEntry::new(StudioLogLevel::Info, "fw-esp32", line),
+            });
+            return Ok(None);
+        };
+
+        let response = json::from_str::<WireServerMessage>(json_frame)
+            .map_err(|error| StudioRuntimeError::Protocol(error.to_string()))?;
+        if response.id == request_id {
+            return Ok(Some(response));
+        }
+        if response.id == 0 {
+            if let Some(event) = server_event(response) {
+                events.push(event);
+            }
+        } else {
+            events.push(StudioEvent::LogReceived {
+                entry: StudioLogEntry::new(
+                    StudioLogLevel::Warn,
+                    "lp-studio-runtime",
+                    format!(
+                        "Ignoring uncorrelated serial response id={} while waiting for id={request_id}",
+                        response.id
+                    ),
+                ),
+            });
+        }
+        Ok(None)
+    }
+
+    fn take_link_errors(&self) -> Vec<StudioEvent> {
+        browser_serial_shim::take_errors(self.port_id)
+            .into_iter()
+            .map(|message| StudioEvent::LogReceived {
+                entry: StudioLogEntry::new(StudioLogLevel::Error, "browser-serial", message),
+            })
+            .collect()
     }
 
     fn next_request_id(&mut self) -> u64 {
@@ -183,62 +215,26 @@ impl BrowserProtocolClient {
     }
 }
 
-pub struct BrowserExchange {
+pub struct BrowserSerialExchange {
     pub response: WireServerMessage,
     pub events: Vec<StudioEvent>,
 }
 
 pub async fn sleep_ms(ms: i32) -> Result<(), StudioRuntimeError> {
-    let promise = Promise::new(&mut |resolve: js_sys::Function, reject: js_sys::Function| {
-        let Some(window) = web_sys::window() else {
-            let _ = reject.call1(&JsValue::NULL, &JsValue::from_str("missing window"));
-            return;
-        };
-        if let Err(error) =
-            window.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms)
-        {
-            let _ = reject.call1(&JsValue::NULL, &error);
-        }
-    });
-    JsFuture::from(promise)
+    let promise =
+        js_sys::Promise::new(&mut |resolve: js_sys::Function, reject: js_sys::Function| {
+            let Some(window) = web_sys::window() else {
+                let _ = reject.call1(&JsValue::NULL, &JsValue::from_str("missing window"));
+                return;
+            };
+            if let Err(error) =
+                window.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms)
+            {
+                let _ = reject.call1(&JsValue::NULL, &error);
+            }
+        });
+    wasm_bindgen_futures::JsFuture::from(promise)
         .await
         .map(|_| ())
         .map_err(|error| StudioRuntimeError::Browser(format!("{error:?}")))
-}
-
-fn worker_output_to_event(output: BrowserOutputEnvelope) -> Option<StudioEvent> {
-    match output {
-        BrowserOutputEnvelope::Status {
-            status, message, ..
-        } => Some(StudioEvent::LogReceived {
-            entry: lp_studio_core::StudioLogEntry::new(
-                lp_studio_core::StudioLogLevel::Info,
-                "fw-browser",
-                message.unwrap_or(status),
-            ),
-        }),
-        BrowserOutputEnvelope::Log {
-            level,
-            target,
-            message,
-            ..
-        } => Some(StudioEvent::LogReceived {
-            entry: lp_studio_core::StudioLogEntry::new(
-                parse_worker_log_level(&level),
-                target,
-                message,
-            ),
-        }),
-        BrowserOutputEnvelope::ProtocolOut { .. } => None,
-    }
-}
-
-fn parse_worker_log_level(level: &str) -> lp_studio_core::StudioLogLevel {
-    match level {
-        "trace" => lp_studio_core::StudioLogLevel::Trace,
-        "debug" => lp_studio_core::StudioLogLevel::Debug,
-        "warn" => lp_studio_core::StudioLogLevel::Warn,
-        "error" => lp_studio_core::StudioLogLevel::Error,
-        _ => lp_studio_core::StudioLogLevel::Info,
-    }
 }

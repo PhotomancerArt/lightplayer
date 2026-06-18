@@ -1,4 +1,3 @@
-use lpc_model::AsLpPathBuf;
 use lpc_wire::{ClientRequest, WireProjectCommandResponse, WireServerMsgBody};
 
 use lp_studio_core::{StudioEvent, StudioLogEntry, StudioLogLevel};
@@ -22,15 +21,8 @@ impl<'a> ProjectSessionRuntime<'a> {
         project_id: &str,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
         let mut events = Vec::new();
-        for file in demo_project::demo_project_files() {
-            let path = format!("/projects/{project_id}/{}", file.relative_path);
-            let exchange = self
-                .client
-                .send_request(ClientRequest::Filesystem(lpc_wire::FsRequest::Write {
-                    path: path.as_str().as_path_buf(),
-                    data: file.bytes.to_vec(),
-                }))
-                .await?;
+        for request in demo_project::demo_write_requests(project_id) {
+            let exchange = self.client.send_request(request).await?;
             events.extend(exchange.events);
             demo_project::ensure_write_response(&exchange.response.msg)
                 .map_err(StudioRuntimeError::Protocol)?;

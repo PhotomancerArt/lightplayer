@@ -6,6 +6,10 @@ use crate::ActionId;
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum StudioEffect {
+    RequestDeviceAccess {
+        action_id: ActionId,
+        provider_id: LinkProviderId,
+    },
     DiscoverEndpoints {
         action_id: ActionId,
         provider_id: LinkProviderId,
@@ -17,6 +21,15 @@ pub enum StudioEffect {
     DisconnectSession {
         action_id: ActionId,
         session_id: LinkSessionId,
+    },
+    ResetDevice {
+        action_id: ActionId,
+        endpoint_id: LinkEndpointId,
+    },
+    FlashDeviceFirmware {
+        action_id: ActionId,
+        endpoint_id: LinkEndpointId,
+        firmware_id: Option<String>,
     },
     SeedDemoProject {
         action_id: ActionId,

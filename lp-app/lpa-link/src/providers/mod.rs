@@ -14,6 +14,8 @@
 //! contract. Include it when management details are target-specific, such as
 //! ESP32 flashing, reset, and filesystem behavior.
 
+#[cfg(feature = "browser-serial-esp32")]
+pub mod browser_serial_esp32;
 #[cfg(feature = "browser-worker")]
 pub mod browser_worker;
 pub mod fake;

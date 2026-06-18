@@ -26,9 +26,13 @@ impl InFlightAction {
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum StudioActionTypeName {
     SelectLinkProvider,
+    RequestDeviceAccess,
     DiscoverDevices,
     ConnectDevice,
     DisconnectDevice,
+    ResetDevice,
+    FlashDeviceFirmware,
+    UploadDemoProject,
     LoadDemoProject,
     RefreshStatus,
     ReadProjectInventory,
@@ -39,9 +43,13 @@ impl From<StudioActionType> for StudioActionTypeName {
     fn from(value: StudioActionType) -> Self {
         match value {
             StudioActionType::SelectLinkProvider => Self::SelectLinkProvider,
+            StudioActionType::RequestDeviceAccess => Self::RequestDeviceAccess,
             StudioActionType::DiscoverDevices => Self::DiscoverDevices,
             StudioActionType::ConnectDevice => Self::ConnectDevice,
             StudioActionType::DisconnectDevice => Self::DisconnectDevice,
+            StudioActionType::ResetDevice => Self::ResetDevice,
+            StudioActionType::FlashDeviceFirmware => Self::FlashDeviceFirmware,
+            StudioActionType::UploadDemoProject => Self::UploadDemoProject,
             StudioActionType::LoadDemoProject => Self::LoadDemoProject,
             StudioActionType::RefreshStatus => Self::RefreshStatus,
             StudioActionType::ReadProjectInventory => Self::ReadProjectInventory,

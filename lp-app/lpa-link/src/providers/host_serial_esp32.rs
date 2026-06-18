@@ -95,12 +95,7 @@ impl HostSerialEsp32Provider {
         label: String,
     ) {
         let endpoint = LinkEndpoint::new(endpoint_id.clone(), self.id.clone(), label)
-            .with_management(LinkManagement {
-                can_reset: true,
-                can_read_logs: true,
-                can_read_diagnostics: true,
-                ..LinkManagement::default()
-            });
+            .with_management(LinkManagement::esp32_serial_base());
 
         if let Some(existing) = self
             .endpoints

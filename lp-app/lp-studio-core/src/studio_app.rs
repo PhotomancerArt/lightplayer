@@ -2,8 +2,9 @@ use lpa_link::{LinkEndpointId, LinkProviderId};
 
 use crate::{
     ActionDescriptor, ActionId, ActionMeta, ActionOrigin, ClientSession, ConnectionSession,
-    DeviceId, DeviceSession, InFlightAction, ProjectSession, STUDIO_DEMO_PROJECT_ID, StudioAction,
-    StudioActionKind, StudioDiagnostic, StudioEffect, StudioEvent, StudioState,
+    DeviceAccess, DeviceId, DeviceSession, InFlightAction, ProjectSession, STUDIO_DEMO_PROJECT_ID,
+    StudioAction, StudioActionKind, StudioDiagnostic, StudioEffect, StudioEvent, StudioLogEntry,
+    StudioLogLevel, StudioState,
 };
 
 pub struct StudioApp {
@@ -45,6 +46,14 @@ impl StudioApp {
             StudioActionKind::SelectLinkProvider { provider_id } => {
                 self.state.link_selection.selected_provider_id = provider_id;
                 self.state.link_selection.endpoints.clear();
+                self.state.device_access = None;
+            }
+            StudioActionKind::RequestDeviceAccess => {
+                self.mark_in_flight(action.meta.action_id, descriptor);
+                effects.push(StudioEffect::RequestDeviceAccess {
+                    action_id: action.meta.action_id,
+                    provider_id: self.state.link_selection.selected_provider_id.clone(),
+                });
             }
             StudioActionKind::DiscoverDevices => {
                 self.mark_in_flight(action.meta.action_id, descriptor);
@@ -74,7 +83,38 @@ impl StudioApp {
                         .push(StudioDiagnostic::info("No device session is connected."));
                 }
             }
-            StudioActionKind::LoadDemoProject => {
+            StudioActionKind::ResetDevice => {
+                self.mark_in_flight(action.meta.action_id, descriptor);
+                if let Some(session) = &self.state.device_session {
+                    effects.push(StudioEffect::ResetDevice {
+                        action_id: action.meta.action_id,
+                        endpoint_id: session.endpoint_id.clone(),
+                    });
+                } else {
+                    self.finish_action(action.meta.action_id);
+                    self.state.diagnostics.push(StudioDiagnostic::error(
+                        Some(action.meta.action_id),
+                        "No device session is connected.",
+                    ));
+                }
+            }
+            StudioActionKind::FlashDeviceFirmware { firmware_id } => {
+                self.mark_in_flight(action.meta.action_id, descriptor);
+                if let Some(session) = &self.state.device_session {
+                    effects.push(StudioEffect::FlashDeviceFirmware {
+                        action_id: action.meta.action_id,
+                        endpoint_id: session.endpoint_id.clone(),
+                        firmware_id,
+                    });
+                } else {
+                    self.finish_action(action.meta.action_id);
+                    self.state.diagnostics.push(StudioDiagnostic::error(
+                        Some(action.meta.action_id),
+                        "No device session is connected.",
+                    ));
+                }
+            }
+            StudioActionKind::UploadDemoProject | StudioActionKind::LoadDemoProject => {
                 self.mark_in_flight(action.meta.action_id, descriptor);
                 effects.push(StudioEffect::SeedDemoProject {
                     action_id: action.meta.action_id,
@@ -114,6 +154,16 @@ impl StudioApp {
     pub fn apply_event(&mut self, event: StudioEvent) -> Vec<StudioEffect> {
         let mut effects = Vec::new();
         match event {
+            StudioEvent::DeviceAccessUpdated {
+                action_id,
+                provider_id,
+                status,
+            } => {
+                if let Some(action_id) = action_id {
+                    self.finish_action(action_id);
+                }
+                self.state.device_access = Some(DeviceAccess::new(provider_id, status));
+            }
             StudioEvent::EndpointsDiscovered {
                 action_id,
                 provider_id,
@@ -156,6 +206,33 @@ impl StudioApp {
                 self.state.connection_session = None;
                 self.state.client_session = None;
                 self.state.project_session = None;
+            }
+            StudioEvent::DeviceReset {
+                action_id,
+                endpoint_id,
+            } => {
+                self.finish_action(action_id);
+                self.state.logs.push(StudioLogEntry::new(
+                    StudioLogLevel::Info,
+                    "lp-studio-core",
+                    format!("device reset requested for {}", endpoint_id.as_str()),
+                ));
+            }
+            StudioEvent::FirmwareFlashCompleted {
+                action_id,
+                endpoint_id,
+                firmware_id,
+            } => {
+                self.finish_action(action_id);
+                let firmware_label = firmware_id.unwrap_or_else(|| "selected firmware".to_string());
+                self.state.logs.push(StudioLogEntry::new(
+                    StudioLogLevel::Info,
+                    "lp-studio-core",
+                    format!(
+                        "firmware flash completed for {} using {firmware_label}",
+                        endpoint_id.as_str()
+                    ),
+                ));
             }
             StudioEvent::DemoProjectSeeded {
                 action_id,
@@ -259,6 +336,67 @@ mod tests {
         assert_eq!(effects.len(), 1);
         assert!(matches!(effects[0], StudioEffect::DiscoverEndpoints { .. }));
         assert_eq!(app.state().in_flight.len(), 1);
+    }
+
+    #[test]
+    fn request_device_access_produces_provider_scoped_effect() {
+        let mut app = StudioApp::new();
+        app.dispatch_kind(
+            StudioActionKind::SelectLinkProvider {
+                provider_id: LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID),
+            },
+            ActionOrigin::User,
+        );
+
+        let effects = app.dispatch_kind(StudioActionKind::RequestDeviceAccess, ActionOrigin::User);
+
+        assert!(matches!(
+            &effects[0],
+            StudioEffect::RequestDeviceAccess { provider_id, .. }
+                if provider_id.as_str() == BROWSER_WORKER_PROVIDER_ID
+        ));
+        assert_eq!(app.state().in_flight.len(), 1);
+    }
+
+    #[test]
+    fn device_access_event_updates_state_and_finishes_action() {
+        let mut app = StudioApp::new();
+        let action_id = ActionId::new(11);
+        app.mark_in_flight(
+            action_id,
+            ActionDescriptor::for_type(crate::StudioActionType::RequestDeviceAccess),
+        );
+
+        app.apply_event(StudioEvent::DeviceAccessUpdated {
+            action_id: Some(action_id),
+            provider_id: LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID),
+            status: crate::DeviceAccessStatus::Granted,
+        });
+
+        assert!(app.state().in_flight.is_empty());
+        assert_eq!(
+            app.state()
+                .device_access
+                .as_ref()
+                .map(|access| access.provider_id.as_str()),
+            Some(BROWSER_WORKER_PROVIDER_ID)
+        );
+    }
+
+    #[test]
+    fn hardware_management_requires_connected_device() {
+        let mut app = StudioApp::new();
+
+        let reset_effects = app.dispatch_kind(StudioActionKind::ResetDevice, ActionOrigin::User);
+        let flash_effects = app.dispatch_kind(
+            StudioActionKind::FlashDeviceFirmware { firmware_id: None },
+            ActionOrigin::User,
+        );
+
+        assert!(reset_effects.is_empty());
+        assert!(flash_effects.is_empty());
+        assert_eq!(app.state().diagnostics.len(), 2);
+        assert!(app.state().in_flight.is_empty());
     }
 
     #[test]

@@ -23,7 +23,7 @@ pub use link_endpoint_id::LinkEndpointId;
 pub use link_endpoint_status::LinkEndpointStatus;
 pub use link_error::LinkError;
 pub use link_log_entry::{LinkLogEntry, LinkLogLevel};
-pub use link_management::LinkManagement;
+pub use link_management::{LinkManagement, LinkManagementOperation};
 pub use link_provider::LinkProvider;
 pub use link_provider_id::LinkProviderId;
 pub use link_session::LinkSession;

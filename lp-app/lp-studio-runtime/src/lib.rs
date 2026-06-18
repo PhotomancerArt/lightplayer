@@ -20,6 +20,13 @@ pub mod browser_protocol_client;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub mod browser_worker_runtime;
 
+#[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+pub mod browser_serial_protocol_client;
+#[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+pub mod browser_serial_runtime;
+#[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+pub mod browser_serial_shim;
+
 pub use effect_executor::EffectExecutor;
 pub use error::StudioRuntimeError;
 
@@ -30,3 +37,6 @@ pub use host_process_runtime::HostProcessStudioRuntime;
 
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 pub use browser_worker_runtime::{BrowserWorkerStudioRuntime, run_browser_worker_demo};
+
+#[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+pub use browser_serial_runtime::{BrowserSerialStudioRuntime, run_browser_serial_demo};

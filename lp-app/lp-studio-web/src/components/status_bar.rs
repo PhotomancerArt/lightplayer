@@ -26,7 +26,7 @@ pub fn StatusBar(state: StudioState, running: bool, error: Option<String>) -> El
         header { class: "status-bar",
             div {
                 h1 { "LightPlayer Studio" }
-                p { "Browser firmware runtime" }
+                p { "Firmware runtime and hardware control" }
             }
             div { class: "status-pill", "{status}" }
             div { class: "status-metric", "{heartbeat}" }

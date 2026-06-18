@@ -1,6 +1,6 @@
 use lp_studio_core::{
-    DeviceCapability, HOST_PROCESS_PROVIDER_ID, StudioEffect, StudioEvent, StudioLogEntry,
-    StudioLogLevel,
+    DeviceAccessStatus, DeviceCapability, HOST_PROCESS_PROVIDER_ID, StudioEffect, StudioEvent,
+    StudioLogEntry, StudioLogLevel,
 };
 use lpa_link::providers::host_process::{HostProcessProvider, HostProcessSession};
 use lpa_link::{LinkEndpointId, LinkProvider, LinkProviderId, LinkSession};
@@ -128,6 +128,21 @@ impl EffectExecutor for HostProcessStudioRuntime {
         effect: StudioEffect,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
         match effect {
+            StudioEffect::RequestDeviceAccess {
+                action_id,
+                provider_id,
+            } => {
+                if provider_id.as_str() != HOST_PROCESS_PROVIDER_ID {
+                    return Err(StudioRuntimeError::UnsupportedProvider(
+                        provider_id.as_str().to_string(),
+                    ));
+                }
+                Ok(vec![StudioEvent::DeviceAccessUpdated {
+                    action_id: Some(action_id),
+                    provider_id,
+                    status: DeviceAccessStatus::Granted,
+                }])
+            }
             StudioEffect::DiscoverEndpoints {
                 action_id,
                 provider_id,
@@ -146,6 +161,21 @@ impl EffectExecutor for HostProcessStudioRuntime {
                     session_id,
                 }])
             }
+            StudioEffect::ResetDevice {
+                action_id,
+                endpoint_id: _,
+            } => Ok(vec![StudioEvent::ActionFailed {
+                action_id,
+                message: "host-process reset is not implemented".to_string(),
+            }]),
+            StudioEffect::FlashDeviceFirmware {
+                action_id,
+                endpoint_id: _,
+                firmware_id: _,
+            } => Ok(vec![StudioEvent::ActionFailed {
+                action_id,
+                message: "host-process firmware flashing is not supported".to_string(),
+            }]),
             StudioEffect::SeedDemoProject {
                 action_id,
                 project_id,
@@ -180,6 +210,7 @@ fn host_process_capabilities() -> Vec<DeviceCapability> {
     vec![
         DeviceCapability::Connect,
         DeviceCapability::UseHostProcess,
+        DeviceCapability::WriteProjectFiles,
         DeviceCapability::ReadHeartbeat,
         DeviceCapability::ListProjects,
         DeviceCapability::LoadProject,

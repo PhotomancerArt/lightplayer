@@ -1,7 +1,8 @@
 use lp_studio_core::{
-    ActionId, BROWSER_WORKER_PROVIDER_ID, ClientSession, ConnectionSession, DeviceCapability,
-    DeviceId, DeviceSession, ProjectSession, STUDIO_DEMO_PROJECT_ID, StudioDiagnostic,
-    StudioHeartbeat, StudioLogEntry, StudioLogLevel, StudioState,
+    ActionId, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID, ClientSession,
+    ConnectionSession, DeviceAccess, DeviceAccessStatus, DeviceCapability, DeviceId, DeviceSession,
+    ProjectSession, STUDIO_DEMO_PROJECT_ID, StudioDiagnostic, StudioHeartbeat, StudioLogEntry,
+    StudioLogLevel, StudioState,
 };
 use lpa_link::{
     LinkConnectionKind, LinkEndpoint, LinkEndpointId, LinkEndpointStatus, LinkProviderId,
@@ -37,6 +38,48 @@ pub fn studio_state_connected() -> StudioState {
         uptime_ms: 42_000,
         free_memory_bytes: Some(154_112),
     });
+    state
+}
+
+pub fn studio_state_hardware_unsupported() -> StudioState {
+    let mut state = StudioState::default();
+    state.link_selection.selected_provider_id =
+        LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID);
+    state.device_access = Some(DeviceAccess::new(
+        BROWSER_SERIAL_ESP32_PROVIDER_ID,
+        DeviceAccessStatus::Unsupported {
+            reason: "Web Serial is not supported in this browser.".to_string(),
+        },
+    ));
+    state
+}
+
+pub fn studio_state_hardware_denied() -> StudioState {
+    let mut state = StudioState::default();
+    state.link_selection.selected_provider_id =
+        LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID);
+    state.device_access = Some(DeviceAccess::new(
+        BROWSER_SERIAL_ESP32_PROVIDER_ID,
+        DeviceAccessStatus::PermissionDenied {
+            reason: "No port selected.".to_string(),
+        },
+    ));
+    state
+}
+
+pub fn studio_state_hardware_granted() -> StudioState {
+    let mut state = StudioState::default();
+    state.link_selection.selected_provider_id =
+        LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID);
+    state.device_access = Some(DeviceAccess::new(
+        BROWSER_SERIAL_ESP32_PROVIDER_ID,
+        DeviceAccessStatus::Granted,
+    ));
+    state.link_selection.endpoints = vec![LinkEndpoint::new(
+        "browser-serial-esp32-port-1",
+        BROWSER_SERIAL_ESP32_PROVIDER_ID,
+        "ESP32 Serial (303a:1001)",
+    )];
     state
 }
 
@@ -117,6 +160,7 @@ fn attach_device_session(state: &mut StudioState) {
         capabilities: vec![
             DeviceCapability::Connect,
             DeviceCapability::UseBrowserWorker,
+            DeviceCapability::WriteProjectFiles,
             DeviceCapability::ReadHeartbeat,
             DeviceCapability::LoadProject,
             DeviceCapability::ReadProjectInventory,

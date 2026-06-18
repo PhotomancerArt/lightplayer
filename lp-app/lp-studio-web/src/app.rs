@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use lp_studio_core::StudioApp;
-use lp_studio_runtime::run_browser_worker_demo;
+use lp_studio_runtime::{run_browser_serial_demo, run_browser_worker_demo};
 
 use crate::components::device_panel::DevicePanel;
 use crate::components::inventory_view::InventoryView;
@@ -42,13 +42,32 @@ pub fn App() -> Element {
             running.set(false);
         });
     };
+    let connect_hardware = move |_| {
+        if *running.read() {
+            return;
+        }
+        running.set(true);
+        error.set(None);
+        spawn(async move {
+            match run_browser_serial_demo().await {
+                Ok(app) => studio.set(app),
+                Err(runtime_error) => error.set(Some(runtime_error.to_string())),
+            }
+            running.set(false);
+        });
+    };
 
     rsx! {
         style { "{STYLE}" }
         main { class: "studio-shell",
             StatusBar { state: state.clone(), running: is_running, error: error_text.clone() }
             section { class: "studio-grid",
-                DevicePanel { state: state.clone(), running: is_running, on_start_demo: start_demo }
+                DevicePanel {
+                    state: state.clone(),
+                    running: is_running,
+                    on_start_demo: start_demo,
+                    on_connect_hardware: connect_hardware,
+                }
                 ProjectPanel { state: state.clone() }
                 InventoryView { state: state.clone() }
                 LogPanel { state }

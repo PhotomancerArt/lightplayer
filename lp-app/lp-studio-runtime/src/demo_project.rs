@@ -38,20 +38,55 @@ pub fn demo_project_files() -> &'static [DemoProjectFile] {
 }
 
 pub fn demo_write_messages(first_id: u64, project_id: &str) -> Vec<ClientMessage> {
-    demo_project_files()
+    demo_write_requests(project_id)
         .iter()
         .enumerate()
-        .map(|(index, file)| {
-            let path = format!("/projects/{project_id}/{}", file.relative_path).as_path_buf();
-            ClientMessage {
-                id: first_id + index as u64,
-                msg: ClientRequest::Filesystem(FsRequest::Write {
-                    path,
-                    data: file.bytes.to_vec(),
-                }),
-            }
+        .map(|(index, request)| ClientMessage {
+            id: first_id + index as u64,
+            msg: request.clone(),
         })
         .collect()
+}
+
+pub fn demo_write_requests(project_id: &str) -> Vec<ClientRequest> {
+    demo_project_files()
+        .iter()
+        .map(|file| {
+            let path = format!("/projects/{project_id}/{}", file.relative_path).as_path_buf();
+            ClientRequest::Filesystem(FsRequest::Write {
+                path,
+                data: file.bytes.to_vec(),
+            })
+        })
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn demo_write_messages_allocate_contiguous_ids() {
+        let messages = demo_write_messages(40, DEMO_PROJECT_ID);
+
+        assert_eq!(messages.len(), demo_project_files().len());
+        assert_eq!(messages[0].id, 40);
+        assert_eq!(
+            messages[messages.len() - 1].id,
+            40 + demo_project_files().len() as u64 - 1
+        );
+    }
+
+    #[test]
+    fn demo_write_requests_target_project_directory() {
+        let requests = demo_write_requests("hardware-demo");
+
+        assert!(matches!(
+            &requests[0],
+            ClientRequest::Filesystem(FsRequest::Write { path, .. })
+                if path.as_str() == "/projects/hardware-demo/clock.toml"
+        ));
+    }
 }
 
 pub fn ensure_write_response(body: &WireServerMsgBody) -> Result<(), String> {

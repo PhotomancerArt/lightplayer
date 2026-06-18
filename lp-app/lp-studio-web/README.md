@@ -2,9 +2,10 @@
 
 `lp-studio-web` is the first static browser shell for LightPlayer Studio.
 
-It renders `lp-studio-core` state and drives the browser-local `browser-worker`
-runtime path from `lp-studio-runtime`. It does not own Studio domain behavior and
-does not use Dioxus server functions.
+It renders `lp-studio-core` state and drives browser runtimes from
+`lp-studio-runtime`: the browser-local `browser-worker` proof path and the
+`browser-serial-esp32` path for already-flashed ESP32 hardware. It does not own
+Studio domain behavior and does not use Dioxus server functions.
 
 ## Run
 
@@ -18,6 +19,17 @@ packages them with wasm-bindgen, prepares the worker assets, and serves
 
 Use `just studio-web-build` or `just studio-web` when you want the release/static
 build path.
+
+## Hardware
+
+The hardware button uses Web Serial, so it requires a supported Chromium-class
+browser and a secure/local context. The current hardware path assumes the ESP32
+already has LightPlayer firmware running; browser-side flashing is planned as
+the next hardware phase.
+
+The app loads `public/browser-serial.js` before the Rust wasm module. That shim
+owns the direct Web Serial stream objects, while Rust owns Studio actions,
+status, protocol parsing, and demo project upload.
 
 ## Stories
 
@@ -87,5 +99,6 @@ non-generated files under `lp-app/lp-studio-web/` have changed.
 ## Boundary
 
 - `lp-studio-core` owns actions, state, effects, diagnostics, and sessions.
-- `lp-studio-runtime` owns browser worker protocol flow and demo project loading.
+- `lp-studio-runtime` owns browser worker/serial protocol flow and demo project
+  loading.
 - `lp-studio-web` owns Dioxus components and static presentation.

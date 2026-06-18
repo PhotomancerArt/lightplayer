@@ -7,9 +7,13 @@ use crate::{ActionDescriptor, ActionMeta};
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum StudioActionType {
     SelectLinkProvider,
+    RequestDeviceAccess,
     DiscoverDevices,
     ConnectDevice,
     DisconnectDevice,
+    ResetDevice,
+    FlashDeviceFirmware,
+    UploadDemoProject,
     LoadDemoProject,
     RefreshStatus,
     ReadProjectInventory,
@@ -20,9 +24,13 @@ impl StudioActionType {
     pub fn all() -> Vec<Self> {
         vec![
             Self::SelectLinkProvider,
+            Self::RequestDeviceAccess,
             Self::DiscoverDevices,
             Self::ConnectDevice,
             Self::DisconnectDevice,
+            Self::ResetDevice,
+            Self::FlashDeviceFirmware,
+            Self::UploadDemoProject,
             Self::LoadDemoProject,
             Self::RefreshStatus,
             Self::ReadProjectInventory,
@@ -35,9 +43,13 @@ impl StudioActionType {
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum StudioActionKind {
     SelectLinkProvider { provider_id: LinkProviderId },
+    RequestDeviceAccess,
     DiscoverDevices,
     ConnectDevice { endpoint_id: LinkEndpointId },
     DisconnectDevice,
+    ResetDevice,
+    FlashDeviceFirmware { firmware_id: Option<String> },
+    UploadDemoProject,
     LoadDemoProject,
     RefreshStatus,
     ReadProjectInventory,
@@ -48,9 +60,13 @@ impl StudioActionKind {
     pub fn action_type(&self) -> StudioActionType {
         match self {
             Self::SelectLinkProvider { .. } => StudioActionType::SelectLinkProvider,
+            Self::RequestDeviceAccess => StudioActionType::RequestDeviceAccess,
             Self::DiscoverDevices => StudioActionType::DiscoverDevices,
             Self::ConnectDevice { .. } => StudioActionType::ConnectDevice,
             Self::DisconnectDevice => StudioActionType::DisconnectDevice,
+            Self::ResetDevice => StudioActionType::ResetDevice,
+            Self::FlashDeviceFirmware { .. } => StudioActionType::FlashDeviceFirmware,
+            Self::UploadDemoProject => StudioActionType::UploadDemoProject,
             Self::LoadDemoProject => StudioActionType::LoadDemoProject,
             Self::RefreshStatus => StudioActionType::RefreshStatus,
             Self::ReadProjectInventory => StudioActionType::ReadProjectInventory,

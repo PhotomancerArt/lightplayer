@@ -2,10 +2,18 @@ use lpa_link::{LinkConnectionKind, LinkEndpoint, LinkEndpointId, LinkProviderId,
 use lpc_wire::{LoadedProject, WireProjectHandle, WireProjectInventoryReadResponse};
 use serde::{Deserialize, Serialize};
 
-use crate::{ActionId, DeviceCapability, StudioDiagnostic, StudioHeartbeat, StudioLogEntry};
+use crate::{
+    ActionId, DeviceAccessStatus, DeviceCapability, StudioDiagnostic, StudioHeartbeat,
+    StudioLogEntry,
+};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum StudioEvent {
+    DeviceAccessUpdated {
+        action_id: Option<ActionId>,
+        provider_id: LinkProviderId,
+        status: DeviceAccessStatus,
+    },
     EndpointsDiscovered {
         action_id: ActionId,
         provider_id: LinkProviderId,
@@ -22,6 +30,15 @@ pub enum StudioEvent {
     DeviceDisconnected {
         action_id: ActionId,
         session_id: LinkSessionId,
+    },
+    DeviceReset {
+        action_id: ActionId,
+        endpoint_id: LinkEndpointId,
+    },
+    FirmwareFlashCompleted {
+        action_id: ActionId,
+        endpoint_id: LinkEndpointId,
+        firmware_id: Option<String>,
     },
     DemoProjectSeeded {
         action_id: ActionId,

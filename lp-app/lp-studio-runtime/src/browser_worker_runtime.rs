@@ -190,6 +190,7 @@ fn browser_worker_capabilities() -> Vec<DeviceCapability> {
     vec![
         DeviceCapability::Connect,
         DeviceCapability::UseBrowserWorker,
+        DeviceCapability::WriteProjectFiles,
         DeviceCapability::ReadHeartbeat,
         DeviceCapability::ListProjects,
         DeviceCapability::LoadProject,

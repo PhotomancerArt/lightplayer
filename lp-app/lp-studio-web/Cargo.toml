@@ -17,7 +17,7 @@ lpa-link = { path = "../lpa-link", optional = true }
 lpc-model = { path = "../../lp-core/lpc-model", optional = true }
 lpc-wire = { path = "../../lp-core/lpc-wire", optional = true }
 lp-studio-core = { path = "../lp-studio-core" }
-lp-studio-runtime = { path = "../lp-studio-runtime", features = ["browser-worker"] }
+lp-studio-runtime = { path = "../lp-studio-runtime", features = ["browser-worker", "browser-serial-esp32"] }
 web-sys = { version = "0.3", optional = true, features = ["Location", "Window"] }
 
 [lints]

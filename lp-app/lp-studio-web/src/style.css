@@ -146,6 +146,13 @@ button:disabled {
   margin-bottom: 10px;
 }
 
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .panel h2 {
   font-size: 15px;
   color: var(--text-primary);

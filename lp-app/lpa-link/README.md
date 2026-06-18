@@ -33,7 +33,7 @@ details directly in UI code.
 | `host-process` | `providers::host_process::HostProcessProvider` | host process running `fw-host` | spawnable host runtime | logs, diagnostics, future local filesystem/runtime controls | implemented |
 | `browser-worker` | `providers::browser_worker::BrowserWorkerProvider` | `fw-browser` Web Worker | browser worker runtime | logs, diagnostics, worker lifecycle | model implemented; web code owns the actual Worker binding |
 | `host-serial-esp32` | `providers::host_serial_esp32::HostSerialEsp32Provider` | ESP32 over host serial | physical serial device | connect, reset-after-open, logs, diagnostics; future flash/raw filesystem | implemented for discovery/connect |
-| `browser-serial-esp32` | future `providers::browser_serial_esp32::BrowserSerialEsp32Provider` | ESP32 over Web Serial | physical serial device | connect, reset, flash, raw filesystem, diagnostics | future |
+| `browser-serial-esp32` | `providers::browser_serial_esp32::BrowserSerialEsp32Provider` | ESP32 over Web Serial | physical serial device | connect, reset, logs, diagnostics; future flash/raw filesystem | model implemented; web code owns the actual Web Serial binding |
 | `host-websocket` | future `providers::host_websocket::HostWebsocketProvider` | already-running server over host networking | remote endpoint | host-side discovery/connect/status; limited management | future |
 | `browser-websocket` | future `providers::browser_websocket::BrowserWebsocketProvider` | already-running server over browser networking | remote endpoint | browser permission/discovery/connect/status; limited management | future |
 | `host-webserver` | future `providers::host_webserver::HostWebserverProvider` | host service owning `fw-host` runtimes | service-managed runtime endpoint | create/stop runtimes, logs, diagnostics | future |
@@ -51,6 +51,9 @@ cargo check -p lpa-link --features host-process
 cargo test -p lpa-link --features host-process
 cargo check -p lpa-link --features host-serial-esp32
 cargo test -p lpa-link --features host-serial-esp32
+cargo check -p lpa-link --features browser-serial-esp32
+cargo test -p lpa-link --features browser-serial-esp32
+cargo check -p lpa-link --features browser-serial-esp32 --target wasm32-unknown-unknown
 cargo check -p lpa-link --features browser-worker --target wasm32-unknown-unknown
 cargo test -p lpa-link --features browser-worker
 ```
@@ -66,7 +69,8 @@ cargo test -p lpa-link --features browser-worker
 - **Connection:** client protocol channel to `lp-server`, consumed by
   `lpa-client`.
 - **Management:** low-level operations below Studio capabilities: reset, flash,
-  raw filesystem access, logs, diagnostics, and similar device/runtime controls.
+  raw filesystem image access, logs, diagnostics, and similar device/runtime
+  controls.
 - Public domain types use `Link*` names where they cross crate boundaries:
   `LinkProvider`, `LinkEndpoint`, `LinkSession`, `LinkConnection`, and related
   IDs/status types.
@@ -90,3 +94,11 @@ cargo test -p lpa-link --features browser-worker
   endpoint/session identity, status, logs, diagnostics, and the worker envelope
   protocol. The web frontend must still bind that model to an actual module
   Worker created from `fw-browser/www/fw-browser-worker.js`.
+- `browser-serial-esp32` is Web-Serial-shaped but not Rust-owned by `lpa-link`.
+  The link layer models granted endpoints, sessions, management capability, and
+  the serial JSON-lines protocol identity. The web runtime calls `requestPort()`
+  from a user gesture and binds the browser streams to protocol read/write
+  logic.
+- Direct filesystem access means raw/full filesystem image management below the
+  running `lp-server`. Normal project upload should use `lpa-client` and the
+  server filesystem/project protocol once firmware is running.

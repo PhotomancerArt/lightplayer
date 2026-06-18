@@ -20,6 +20,17 @@ Actions are documented program objects. Their descriptors provide labels,
 summaries, categories, and history policy so generic UI help and future agents
 can inspect the available action surface.
 
+The hardware action surface separates:
+
+- device access and browser permission requests;
+- link/session operations such as connect, disconnect, reset, and flash;
+- project operations such as uploading the built-in demo through `lp-server`;
+- local navigation such as selecting a project node.
+
+Operational hardware actions are not undoable. Future undo should attach to
+successful project edit transactions, not to permission prompts, flashing,
+resets, or connection lifecycle events.
+
 M1 does not implement undo/redo. It only classifies action history behavior so
 future undo can attach to successful project edit transactions instead of every
 operational action.

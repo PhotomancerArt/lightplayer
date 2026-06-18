@@ -19,6 +19,7 @@ tokio = { version = "1", features = ["macros", "rt"] }
 
 [features]
 default = []
+browser-serial-esp32 = []
 browser-worker = []
 host-process = ["dep:fw-host", "dep:lpa-client", "dep:tokio"]
 host-serial-esp32 = [
