@@ -5098,6 +5098,10 @@ dependencies = [
  "dioxus",
  "lp-studio-core",
  "lp-studio-runtime",
+ "lpa-link",
+ "lpc-model",
+ "lpc-wire",
+ "web-sys",
 ]
 
 [[package]]

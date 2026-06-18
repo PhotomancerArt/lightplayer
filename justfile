@@ -162,6 +162,45 @@ fw-browser-smoke: fw-browser-build
 # Studio web app
 # ============================================================================
 
+studio-web-dev-build: install-wasm32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Building fw-browser for wasm32 debug..."
+    cargo build -p fw-browser --target wasm32-unknown-unknown
+    echo "Building lp-studio-web for wasm32 debug with stories..."
+    cargo build -p lp-studio-web --target wasm32-unknown-unknown --features stories
+    if ! command -v wasm-bindgen >/dev/null 2>&1; then
+        echo "wasm-bindgen not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
+        exit 1
+    fi
+    echo "Generating fw-browser debug JS glue..."
+    wasm-bindgen target/wasm32-unknown-unknown/debug/fw_browser.wasm \
+        --out-dir lp-fw/fw-browser/www/pkg --target web
+    echo "Generating Studio web debug JS glue..."
+    mkdir -p lp-app/lp-studio-web/public/pkg
+    wasm-bindgen target/wasm32-unknown-unknown/debug/lp-studio-web.wasm \
+        --out-dir lp-app/lp-studio-web/public/pkg --target web
+    echo "Copying fw-browser worker assets..."
+    cp lp-fw/fw-browser/www/fw-browser-worker.js lp-app/lp-studio-web/public/fw-browser-worker.js
+    cp lp-fw/fw-browser/www/pkg/fw_browser.js lp-app/lp-studio-web/public/pkg/fw_browser.js
+    cp lp-fw/fw-browser/www/pkg/fw_browser_bg.wasm lp-app/lp-studio-web/public/pkg/fw_browser_bg.wasm
+    echo "Artifacts: lp-app/lp-studio-web/public/ (debug build)"
+
+studio-story-pngs: studio-web-dev-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    node lp-app/lp-studio-web/scripts/studio-story-pngs.mjs
+
+studio-dev: studio-web-dev-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port="${STUDIO_WEB_PORT:-2820}"
+    echo "Serving LightPlayer Studio dev build at http://127.0.0.1:${port}/"
+    echo "Storybook: http://127.0.0.1:${port}/#/stories"
+    echo "Re-run just studio-dev after Rust changes; generated artifacts are ignored."
+    cd lp-app/lp-studio-web/public
+    python3 -m http.server "${port}" --bind 127.0.0.1
+
 studio-web-build: install-wasm32-target fw-browser-build
     #!/usr/bin/env bash
     set -euo pipefail

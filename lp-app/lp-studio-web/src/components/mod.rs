@@ -1,5 +1,15 @@
 pub mod device_panel;
+#[cfg(feature = "stories")]
+pub mod device_panel_stories;
 pub mod inventory_view;
+#[cfg(feature = "stories")]
+pub mod inventory_view_stories;
 pub mod log_panel;
+#[cfg(feature = "stories")]
+pub mod log_panel_stories;
 pub mod project_panel;
+#[cfg(feature = "stories")]
+pub mod project_panel_stories;
 pub mod status_bar;
+#[cfg(feature = "stories")]
+pub mod status_bar_stories;

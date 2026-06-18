@@ -13,6 +13,14 @@ const WORKER_URL: &str = "./fw-browser-worker.js";
 
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn App() -> Element {
+    #[cfg(feature = "stories")]
+    if crate::stories::story_book::should_show_story_book() {
+        return rsx! {
+            style { "{STYLE}" }
+            crate::stories::story_book::StoryBook {}
+        };
+    }
+
     let mut studio = use_signal(StudioApp::new);
     let mut running = use_signal(|| false);
     let mut error = use_signal(|| Option::<String>::None);
