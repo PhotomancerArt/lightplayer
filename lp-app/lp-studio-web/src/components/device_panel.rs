@@ -65,6 +65,7 @@ fn access_status_label(status: &DeviceAccessStatus) -> String {
         DeviceAccessStatus::Unknown => "unknown".to_string(),
         DeviceAccessStatus::Unsupported { reason } => format!("unsupported: {reason}"),
         DeviceAccessStatus::PermissionRequired => "permission required".to_string(),
+        DeviceAccessStatus::PermissionCanceled { reason } => format!("canceled: {reason}"),
         DeviceAccessStatus::PermissionDenied { reason } => format!("denied: {reason}"),
         DeviceAccessStatus::Granted => "granted".to_string(),
     }
