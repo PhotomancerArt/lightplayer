@@ -49,8 +49,40 @@ Generate local PNGs for quick review:
 just studio-story-pngs
 ```
 
-PNGs are written to `lp-app/lp-studio-web/story-pngs/`, which is gitignored.
-They are local review artifacts, not committed visual baselines.
+PNGs are written to `lp-app/lp-studio-web/story-images/.scratch/`, which is
+gitignored.
+
+Update committed visual baselines when intentional Studio UI changes affect
+component rendering:
+
+```bash
+just studio-story-baselines
+```
+
+Baselines are written to `lp-app/lp-studio-web/story-images/` and should be
+committed when they change. The baseline set is intentionally small and should
+stay curated. Hidden child directories under `story-images/` are scratch space
+and are ignored. Story captures are clipped to the story canvas content at the
+standard wide story viewport.
+
+Baseline and check commands require `oxipng` so fresh captures compare against
+the committed optimized PNGs.
+
+Compare fresh story PNGs against the committed baselines without updating them:
+
+```bash
+just studio-story-check
+```
+
+Fresh check output is written to `lp-app/lp-studio-web/story-images/.new/`,
+which is gitignored. For agent and pre-commit-style local flows, use:
+
+```bash
+just studio-story-baselines-if-needed
+```
+
+That command runs baseline generation only when tracked or untracked
+non-generated files under `lp-app/lp-studio-web/` have changed.
 
 ## Boundary
 

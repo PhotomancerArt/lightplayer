@@ -244,6 +244,36 @@ the shared planning workspace. Existing `docs/plans`, `docs/plans-old`,
 `docs/roadmaps`, and `docs/roadmaps-old` content is historical and should not
 be migrated unless a separate migration plan asks for it.
 
+## Studio UI visual baselines
+
+When a change touches non-generated files under `lp-app/lp-studio-web/`, run the
+Studio story baseline helper before committing:
+
+```bash
+just studio-story-baselines-if-needed
+```
+
+If it updates files under `lp-app/lp-studio-web/story-images/`, include those
+PNG changes in the same commit and mention the affected story baselines in the
+final summary. The helper intentionally ignores generated web artifacts,
+scratch PNGs, fresh check PNGs, and the baseline PNGs themselves.
+
+Useful related commands:
+
+```bash
+just studio-story-pngs        # ignored scratch PNGs for quick local review
+just studio-story-baselines   # update committed story baselines
+just studio-story-check       # compare fresh PNGs to committed baselines
+```
+
+`studio-story-baselines` and `studio-story-check` require `oxipng`; run
+`scripts/dev-init.sh` or install it with `cargo install oxipng` /
+`brew install oxipng`.
+
+Do not add an auto-mutating Git hook for this workflow unless the user asks for
+one explicitly. Hooks that rewrite the working tree during commit are annoying
+during rebases, merges, and partial commits.
+
 ## Validation Commands
 
 These commands must pass for any change touching the shader pipeline:

@@ -26,8 +26,8 @@ Studio component stories will be native Dioxus code in `lp-studio-web`.
 - `just studio-dev` builds the web app with the `stories` feature so the local
   storybook is available at `/#/stories`.
 - Production/static `studio-web-build` does not enable the storybook feature.
-- `just studio-story-pngs` generates local PNGs into a gitignored
-  `lp-app/lp-studio-web/story-pngs/` directory.
+- `just studio-story-pngs` generates local PNGs into gitignored
+  `lp-app/lp-studio-web/story-images/.scratch/`.
 
 ## Consequences
 
@@ -43,3 +43,9 @@ PNG generation is intentionally local-only for now. Before PNGs become committed
 baselines or CI gates, we need a stable rendering environment, a curated story
 set, and rules for volatile content such as logs, animation, timestamps, and
 browser/font differences.
+
+## Update 2026-06-18
+
+The PNG baseline policy was amended by
+[ADR 2026-06-18: Studio Story PNG Baselines](./2026-06-18-studio-story-png-baselines.md).
+The native Dioxus storybook decision remains accepted.

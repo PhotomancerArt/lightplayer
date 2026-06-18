@@ -191,6 +191,36 @@ studio-story-pngs: studio-web-dev-build
     set -euo pipefail
     node lp-app/lp-studio-web/scripts/studio-story-pngs.mjs
 
+studio-story-baselines: studio-web-dev-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    node lp-app/lp-studio-web/scripts/studio-story-pngs.mjs baselines
+
+studio-story-check: studio-web-dev-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    node lp-app/lp-studio-web/scripts/studio-story-pngs.mjs check
+
+studio-story-baselines-if-needed:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tracked="$(git diff --name-only HEAD -- \
+        lp-app/lp-studio-web \
+        ':!lp-app/lp-studio-web/public/**' \
+        ':!lp-app/lp-studio-web/story-images/**')"
+    untracked="$(git ls-files --others --exclude-standard -- lp-app/lp-studio-web \
+        | grep -v '^lp-app/lp-studio-web/public/' \
+        | grep -v '^lp-app/lp-studio-web/story-images/' \
+        || true)"
+    changed="$(printf '%s\n%s\n' "$tracked" "$untracked" | sed '/^$/d' | sort -u)"
+    if [[ -z "$changed" ]]; then
+        echo "No Studio UI source changes; skipping story baseline generation."
+        exit 0
+    fi
+    echo "Studio UI source changed; updating story baselines:"
+    printf '%s\n' "$changed" | sed 's/^/  /'
+    just studio-story-baselines
+
 studio-dev: studio-web-dev-build
     #!/usr/bin/env bash
     set -euo pipefail

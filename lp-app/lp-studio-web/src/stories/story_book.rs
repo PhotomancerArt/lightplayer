@@ -106,6 +106,7 @@ fn StoryCanvas(
     rsx! {
         div {
             class: "story-canvas-shell",
+            "data-story-capture": "1",
             "data-story-id": "{story_id}",
             "data-story-label": "{label}",
             div { class: "story-canvas-meta",
