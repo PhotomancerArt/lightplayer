@@ -1,26 +1,26 @@
-//! CLI local-host transport.
+//! CLI host-process transport.
 //!
-//! This module adapts `lpa-link`'s `local-host` provider to the CLI's current
+//! This module adapts `lpa-link`'s `host-process` provider to the CLI's current
 //! `ClientTransport` return shape while keeping the link session alive for the
 //! lifetime of the transport.
 
 use anyhow::Result;
 use lpa_client::ClientTransport;
-use lpa_link::providers::local_host::{LocalHostProvider, LocalHostSession};
+use lpa_link::providers::host_process::{HostProcessProvider, HostProcessSession};
 use lpa_link::{LinkError, LinkProvider, LinkSession};
 use lpc_wire::{ClientMessage, TransportError, WireServerMessage};
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
 /// Client transport backed by an in-process `fw-host` runtime session.
-pub struct LocalHostClientTransport {
+pub struct HostProcessClientTransport {
     transport: Option<Arc<Mutex<Box<dyn ClientTransport>>>>,
-    session: LocalHostSession,
+    session: HostProcessSession,
     closed: bool,
 }
 
-impl LocalHostClientTransport {
-    fn new(transport: Arc<Mutex<Box<dyn ClientTransport>>>, session: LocalHostSession) -> Self {
+impl HostProcessClientTransport {
+    fn new(transport: Arc<Mutex<Box<dyn ClientTransport>>>, session: HostProcessSession) -> Self {
         Self {
             transport: Some(transport),
             session,
@@ -29,21 +29,21 @@ impl LocalHostClientTransport {
     }
 }
 
-/// Start a new local-host runtime and return a CLI-compatible transport.
-pub fn connect_local_host() -> Result<LocalHostClientTransport> {
-    let mut provider = LocalHostProvider::new("local-host");
-    let endpoint_id = provider.create_memory_endpoint("Local Host");
+/// Start a new host-process runtime and return a CLI-compatible transport.
+pub fn connect_host_process() -> Result<HostProcessClientTransport> {
+    let mut provider = HostProcessProvider::new("host-process");
+    let endpoint_id = provider.create_memory_endpoint("Host Process");
     let mut session = pollster::block_on(provider.connect(&endpoint_id))?;
     let connection = pollster::block_on(session.connection())?;
     let transport = connection
-        .local_host_transport()
-        .ok_or_else(|| anyhow::anyhow!("local-host connection did not include a transport"))?;
+        .client_transport()
+        .ok_or_else(|| anyhow::anyhow!("host-process connection did not include a transport"))?;
 
-    Ok(LocalHostClientTransport::new(transport, session))
+    Ok(HostProcessClientTransport::new(transport, session))
 }
 
 #[async_trait::async_trait]
-impl ClientTransport for LocalHostClientTransport {
+impl ClientTransport for HostProcessClientTransport {
     async fn send(&mut self, msg: ClientMessage) -> Result<(), TransportError> {
         if self.closed {
             return Err(TransportError::ConnectionLost);
@@ -77,7 +77,7 @@ impl ClientTransport for LocalHostClientTransport {
     }
 }
 
-impl Drop for LocalHostClientTransport {
+impl Drop for HostProcessClientTransport {
     fn drop(&mut self) {
         drop(self.transport.take());
     }
@@ -94,8 +94,8 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn local_host_transport_serves_client_requests() {
-        let transport = connect_local_host().unwrap();
+    async fn host_process_transport_serves_client_requests() {
+        let transport = connect_host_process().unwrap();
         let client = LpClient::new(Box::new(transport));
 
         let projects = client.project_list_available().await.unwrap();
@@ -104,8 +104,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn close_stops_local_host_transport() {
-        let mut transport = connect_local_host().unwrap();
+    async fn close_stops_host_process_transport() {
+        let mut transport = connect_host_process().unwrap();
 
         transport.close().await.unwrap();
 

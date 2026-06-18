@@ -10,8 +10,8 @@ pub trait LinkProvider {
 
     /// Discover endpoints currently offered by this provider.
     ///
-    /// Providers may return physical endpoints, such as a future ESP32 serial
-    /// port, or spawnable endpoints, such as `local-host` memory runtimes.
+    /// Providers may return physical endpoints, such as an ESP32 serial port,
+    /// or spawnable endpoints, such as `host-process` memory runtimes.
     async fn discover(&mut self) -> Result<Vec<LinkEndpoint>, LinkError>;
 
     async fn status(

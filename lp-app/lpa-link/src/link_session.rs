@@ -14,7 +14,7 @@ pub trait LinkSession {
 
     /// Open or return the client connection associated with this session.
     ///
-    /// The session owns lifecycle below the connection. For `local-host`, that
+    /// The session owns lifecycle below the connection. For `host-process`, that
     /// means keeping the in-process `fw-host` runtime alive while the returned
     /// transport is in use.
     async fn connection(&mut self) -> Result<LinkConnection, LinkError>;

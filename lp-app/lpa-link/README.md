@@ -30,12 +30,13 @@ details directly in UI code.
 | Provider ID | Rust module/type | Runtime or device | Endpoint kind | Management intent | Status |
 |---|---|---|---|---|---|
 | `fake` | `providers::fake::FakeProvider` | none | test endpoint | diagnostics only | implemented |
-| `local-host` | `providers::local_host::LocalHostProvider` | in-process `fw-host` | spawnable host runtime | logs, diagnostics, future local filesystem/runtime controls | implemented |
-| `local-browser` | `providers::local_browser::LocalBrowserProvider` | `fw-browser` Web Worker | browser worker runtime | logs, diagnostics, worker lifecycle | model implemented; web code owns the actual Worker binding |
-| `serial-esp32-web` | future `providers::serial_esp32_web::SerialEsp32WebProvider` | ESP32 over Web Serial | physical serial device | connect, reset, flash, raw filesystem, diagnostics | future |
-| `serial-esp32-host` | future `providers::serial_esp32_host::SerialEsp32HostProvider` | ESP32 over host serial | physical serial device | connect, reset, flash, raw filesystem, diagnostics | future |
-| `websocket` | future `providers::websocket::WebSocketProvider` | already-running server | remote endpoint | mostly connect/status; limited management | future |
-| `webserver-host` | future `providers::webserver_host::WebserverHostProvider` | host service owning `fw-host` runtimes | service-managed runtime endpoint | create/stop runtimes, logs, diagnostics | future |
+| `host-process` | `providers::host_process::HostProcessProvider` | host process running `fw-host` | spawnable host runtime | logs, diagnostics, future local filesystem/runtime controls | implemented |
+| `browser-worker` | `providers::browser_worker::BrowserWorkerProvider` | `fw-browser` Web Worker | browser worker runtime | logs, diagnostics, worker lifecycle | model implemented; web code owns the actual Worker binding |
+| `host-serial-esp32` | `providers::host_serial_esp32::HostSerialEsp32Provider` | ESP32 over host serial | physical serial device | connect, reset-after-open, logs, diagnostics; future flash/raw filesystem | implemented for discovery/connect |
+| `browser-serial-esp32` | future `providers::browser_serial_esp32::BrowserSerialEsp32Provider` | ESP32 over Web Serial | physical serial device | connect, reset, flash, raw filesystem, diagnostics | future |
+| `host-websocket` | future `providers::host_websocket::HostWebsocketProvider` | already-running server over host networking | remote endpoint | host-side discovery/connect/status; limited management | future |
+| `browser-websocket` | future `providers::browser_websocket::BrowserWebsocketProvider` | already-running server over browser networking | remote endpoint | browser permission/discovery/connect/status; limited management | future |
+| `host-webserver` | future `providers::host_webserver::HostWebserverProvider` | host service owning `fw-host` runtimes | service-managed runtime endpoint | create/stop runtimes, logs, diagnostics | future |
 
 The ESP32 serial providers are intentionally ESP32-specific. Flashing,
 resetting, boot-mode handling, and raw filesystem access are target-family
@@ -46,16 +47,18 @@ Provider support is feature-gated:
 ```bash
 cargo check -p lpa-link
 cargo test -p lpa-link
-cargo check -p lpa-link --features local-host
-cargo test -p lpa-link --features local-host
-cargo check -p lpa-link --features local-browser --target wasm32-unknown-unknown
-cargo test -p lpa-link --features local-browser
+cargo check -p lpa-link --features host-process
+cargo test -p lpa-link --features host-process
+cargo check -p lpa-link --features host-serial-esp32
+cargo test -p lpa-link --features host-serial-esp32
+cargo check -p lpa-link --features browser-worker --target wasm32-unknown-unknown
+cargo test -p lpa-link --features browser-worker
 ```
 
 ## Design Notes
 
 - **Provider:** source of endpoints and management behavior, such as
-  `local-host`, `local-browser`, or future ESP32 serial providers.
+  `host-process`, `browser-worker`, or ESP32 serial providers.
 - **Endpoint:** something a provider can connect to. An endpoint can be physical
   hardware or a spawnable runtime target.
 - **Session:** live ownership/lifecycle of a connected endpoint or launched
@@ -67,19 +70,23 @@ cargo test -p lpa-link --features local-browser
 - Public domain types use `Link*` names where they cross crate boundaries:
   `LinkProvider`, `LinkEndpoint`, `LinkSession`, `LinkConnection`, and related
   IDs/status types.
-- Provider modules and methods use natural names such as `local_host`,
-  `local_browser`, `discover`, `status`, `connect`, and `logs`.
-- Public provider IDs use kebab-case, such as `local-host` and future
-  `serial-esp32-web`. Rust modules/types use Rust naming, such as
-  `providers::serial_esp32_web::SerialEsp32WebProvider`.
+- Provider modules and methods use natural names such as `host_process`,
+  `browser_worker`, `discover`, `status`, `connect`, and `logs`.
+- Public provider IDs use kebab-case and generally follow
+  `{environment}-{mechanism}-{target?}`, such as `host-process`,
+  `browser-worker`, `host-serial-esp32`, `browser-serial-esp32`,
+  `host-websocket`, and `browser-websocket`. The target segment is optional when
+  the mechanism already carries the whole contract. Include it when management
+  details are target-specific. Rust modules/types use Rust naming, such as
+  `providers::host_serial_esp32::HostSerialEsp32Provider`.
 - The model is plural-first. Multiple host or browser runtime instances should
   be natural, even if the first Studio UI exposes only one session.
-- `local-host` endpoints are spawnable. Calling `connect()` creates a new
+- `host-process` endpoints are spawnable. Calling `connect()` creates a new
   in-process `fw-host` runtime instance and returns a session that owns its
   lifecycle.
 - A `LinkConnection` is a server/client connection, not a project session.
   Project sessions belong above this layer.
-- `local-browser` is worker-shaped but not Rust-owned. The link layer can model
+- `browser-worker` is worker-shaped but not Rust-owned. The link layer can model
   endpoint/session identity, status, logs, diagnostics, and the worker envelope
   protocol. The web frontend must still bind that model to an actual module
   Worker created from `fw-browser/www/fw-browser-worker.js`.

@@ -2,11 +2,16 @@ use serde::{Deserialize, Serialize};
 
 use crate::{LinkEndpointId, LinkSessionId};
 
+#[cfg(any(feature = "host-process", feature = "host-serial-esp32"))]
+pub type LinkClientTransport =
+    std::sync::Arc<tokio::sync::Mutex<Box<dyn lpa_client::ClientTransport>>>;
+
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum LinkConnectionKind {
     Fake,
-    LocalHost,
-    LocalBrowserWorker { protocol: String },
+    HostProcess,
+    BrowserWorker { protocol: String },
+    HostSerialEsp32,
     PendingImplementation { kind: String },
 }
 
@@ -15,10 +20,9 @@ pub struct LinkConnection {
     pub endpoint_id: LinkEndpointId,
     pub session_id: LinkSessionId,
     pub kind: LinkConnectionKind,
-    #[cfg(feature = "local-host")]
+    #[cfg(any(feature = "host-process", feature = "host-serial-esp32"))]
     #[serde(skip)]
-    pub local_host_transport:
-        Option<std::sync::Arc<tokio::sync::Mutex<Box<dyn lpa_client::ClientTransport>>>>,
+    pub client_transport: Option<LinkClientTransport>,
 }
 
 impl LinkConnection {
@@ -30,8 +34,8 @@ impl LinkConnection {
             endpoint_id: endpoint_id.into(),
             session_id: session_id.into(),
             kind: LinkConnectionKind::Fake,
-            #[cfg(feature = "local-host")]
-            local_host_transport: None,
+            #[cfg(any(feature = "host-process", feature = "host-serial-esp32"))]
+            client_transport: None,
         }
     }
 
@@ -44,44 +48,56 @@ impl LinkConnection {
             endpoint_id: endpoint_id.into(),
             session_id: session_id.into(),
             kind: LinkConnectionKind::PendingImplementation { kind: kind.into() },
-            #[cfg(feature = "local-host")]
-            local_host_transport: None,
+            #[cfg(any(feature = "host-process", feature = "host-serial-esp32"))]
+            client_transport: None,
         }
     }
 
-    pub fn local_browser_worker(
+    pub fn browser_worker(
         endpoint_id: impl Into<LinkEndpointId>,
         session_id: impl Into<LinkSessionId>,
     ) -> Self {
         Self {
             endpoint_id: endpoint_id.into(),
             session_id: session_id.into(),
-            kind: LinkConnectionKind::LocalBrowserWorker {
+            kind: LinkConnectionKind::BrowserWorker {
                 protocol: "fw-browser-post-message-v1".to_string(),
             },
-            #[cfg(feature = "local-host")]
-            local_host_transport: None,
+            #[cfg(any(feature = "host-process", feature = "host-serial-esp32"))]
+            client_transport: None,
         }
     }
 
-    #[cfg(feature = "local-host")]
-    pub fn local_host(
+    #[cfg(feature = "host-process")]
+    pub fn host_process(
         endpoint_id: impl Into<LinkEndpointId>,
         session_id: impl Into<LinkSessionId>,
-        transport: std::sync::Arc<tokio::sync::Mutex<Box<dyn lpa_client::ClientTransport>>>,
+        transport: LinkClientTransport,
     ) -> Self {
         Self {
             endpoint_id: endpoint_id.into(),
             session_id: session_id.into(),
-            kind: LinkConnectionKind::LocalHost,
-            local_host_transport: Some(transport),
+            kind: LinkConnectionKind::HostProcess,
+            client_transport: Some(transport),
         }
     }
 
-    #[cfg(feature = "local-host")]
-    pub fn local_host_transport(
-        &self,
-    ) -> Option<std::sync::Arc<tokio::sync::Mutex<Box<dyn lpa_client::ClientTransport>>>> {
-        self.local_host_transport.clone()
+    #[cfg(feature = "host-serial-esp32")]
+    pub fn host_serial_esp32(
+        endpoint_id: impl Into<LinkEndpointId>,
+        session_id: impl Into<LinkSessionId>,
+        transport: LinkClientTransport,
+    ) -> Self {
+        Self {
+            endpoint_id: endpoint_id.into(),
+            session_id: session_id.into(),
+            kind: LinkConnectionKind::HostSerialEsp32,
+            client_transport: Some(transport),
+        }
+    }
+
+    #[cfg(any(feature = "host-process", feature = "host-serial-esp32"))]
+    pub fn client_transport(&self) -> Option<LinkClientTransport> {
+        self.client_transport.clone()
     }
 }

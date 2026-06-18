@@ -4117,7 +4117,9 @@ version = "40.0.0"
 dependencies = [
  "fw-host",
  "lpa-client",
+ "lpc-model",
  "serde",
+ "serialport",
  "tokio",
 ]
 

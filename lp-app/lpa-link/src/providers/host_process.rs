@@ -1,3 +1,5 @@
+use fw_host::HostRuntime;
+
 use crate::{
     LinkConnection, LinkDiagnostic, LinkDiagnosticSeverity, LinkEndpoint, LinkEndpointId,
     LinkEndpointStatus, LinkError, LinkLogEntry, LinkLogLevel, LinkManagement, LinkProvider,
@@ -5,14 +7,14 @@ use crate::{
 };
 
 #[derive(Clone, Debug)]
-pub struct LocalBrowserProvider {
+pub struct HostProcessProvider {
     id: LinkProviderId,
     endpoints: Vec<LinkEndpoint>,
     next_endpoint_index: u64,
     next_session_index: u64,
 }
 
-impl LocalBrowserProvider {
+impl HostProcessProvider {
     pub fn new(id: impl Into<LinkProviderId>) -> Self {
         Self {
             id: id.into(),
@@ -22,9 +24,14 @@ impl LocalBrowserProvider {
         }
     }
 
-    pub fn create_worker_endpoint(&mut self, label: impl Into<String>) -> LinkEndpointId {
+    /// Create a spawnable in-process `fw-host` memory runtime endpoint.
+    ///
+    /// The endpoint is not a physical device. Each successful `connect()` call
+    /// starts a new `fw-host` runtime instance and returns a session that owns
+    /// that runtime lifecycle.
+    pub fn create_memory_endpoint(&mut self, label: impl Into<String>) -> LinkEndpointId {
         let endpoint_id = LinkEndpointId::new(format!(
-            "{}-worker-{}",
+            "{}-memory-{}",
             self.id.as_str(),
             self.next_endpoint_index
         ));
@@ -48,8 +55,8 @@ impl LocalBrowserProvider {
     }
 }
 
-impl LinkProvider for LocalBrowserProvider {
-    type Session = LocalBrowserSession;
+impl LinkProvider for HostProcessProvider {
+    type Session = HostProcessSession;
 
     fn id(&self) -> &LinkProviderId {
         &self.id
@@ -68,50 +75,54 @@ impl LinkProvider for LocalBrowserProvider {
 
     async fn connect(&mut self, endpoint_id: &LinkEndpointId) -> Result<Self::Session, LinkError> {
         let endpoint = self.endpoint(endpoint_id)?.clone();
+        let runtime = HostRuntime::start_memory().map_err(|error| LinkError::ConnectionFailed {
+            message: error.to_string(),
+        })?;
         let session_id = LinkSessionId::new(format!(
             "{}:{}",
             endpoint_id.as_str(),
             self.next_session_index
         ));
         self.next_session_index += 1;
-        Ok(LocalBrowserSession::new(endpoint.id, session_id))
+
+        Ok(HostProcessSession::new(endpoint.id, session_id, runtime))
     }
 }
 
-#[derive(Clone, Debug)]
-pub struct LocalBrowserSession {
+pub struct HostProcessSession {
     endpoint_id: LinkEndpointId,
     id: LinkSessionId,
-    closed: bool,
+    runtime: HostRuntime,
     logs: Vec<LinkLogEntry>,
     diagnostics: Vec<LinkDiagnostic>,
 }
 
-impl LocalBrowserSession {
-    pub fn new(endpoint_id: LinkEndpointId, id: LinkSessionId) -> Self {
+impl HostProcessSession {
+    pub fn new(endpoint_id: LinkEndpointId, id: LinkSessionId, runtime: HostRuntime) -> Self {
         let logs = vec![LinkLogEntry::new(
             endpoint_id.clone(),
             Some(id.clone()),
             LinkLogLevel::Info,
-            "local browser worker session created",
+            "host process runtime started",
         )];
         let diagnostics = vec![LinkDiagnostic::new(
             endpoint_id.clone(),
             Some(id.clone()),
             LinkDiagnosticSeverity::Info,
-            "local browser worker session ready; Studio web owns Worker postMessage binding",
+            "host process runtime ready",
         )];
+
         Self {
             endpoint_id,
             id,
-            closed: false,
+            runtime,
             logs,
             diagnostics,
         }
     }
 }
 
-impl LinkSession for LocalBrowserSession {
+impl LinkSession for HostProcessSession {
     fn id(&self) -> &LinkSessionId {
         &self.id
     }
@@ -129,22 +140,25 @@ impl LinkSession for LocalBrowserSession {
     }
 
     async fn connection(&mut self) -> Result<LinkConnection, LinkError> {
-        if self.closed {
-            return Err(LinkError::Closed);
-        }
-        Ok(LinkConnection::local_browser_worker(
+        Ok(LinkConnection::host_process(
             self.endpoint_id.clone(),
             self.id.clone(),
+            self.runtime.client_transport(),
         ))
     }
 
     async fn close(&mut self) -> Result<(), LinkError> {
-        self.closed = true;
+        self.runtime
+            .close()
+            .await
+            .map_err(|error| LinkError::Other {
+                message: error.to_string(),
+            })?;
         self.logs.push(LinkLogEntry::new(
             self.endpoint_id.clone(),
             Some(self.id.clone()),
             LinkLogLevel::Info,
-            "local browser worker session closed",
+            "host process runtime stopped",
         ));
         Ok(())
     }
@@ -152,39 +166,50 @@ impl LinkSession for LocalBrowserSession {
 
 #[cfg(test)]
 mod tests {
-    use crate::LinkConnectionKind;
+    use lpa_client::LpClient;
 
     use super::*;
 
     #[tokio::test]
-    async fn local_browser_provider_supports_multiple_worker_endpoints() {
-        let mut provider = LocalBrowserProvider::new("local-browser");
-        provider.create_worker_endpoint("Browser A");
-        provider.create_worker_endpoint("Browser B");
-
-        let endpoints = provider.discover().await.unwrap();
-        assert_eq!(endpoints.len(), 2);
-
-        let session_a = provider.connect(&endpoints[0].id).await.unwrap();
-        let session_b = provider.connect(&endpoints[1].id).await.unwrap();
-
-        assert_ne!(session_a.id(), session_b.id());
-        assert_ne!(session_a.endpoint_id(), session_b.endpoint_id());
-    }
-
-    #[tokio::test]
-    async fn local_browser_connection_reports_worker_protocol() {
-        let mut provider = LocalBrowserProvider::new("local-browser");
-        let endpoint_id = provider.create_worker_endpoint("Browser A");
+    async fn host_process_connection_serves_client_requests() {
+        let mut provider = provider_with_two_endpoints();
+        let endpoint_id = LinkEndpointId::new("host-process-memory-1");
         let mut session = provider.connect(&endpoint_id).await.unwrap();
 
         let connection = session.connection().await.unwrap();
-
-        assert_eq!(connection.endpoint_id, endpoint_id);
         assert!(matches!(
             connection.kind,
-            LinkConnectionKind::LocalBrowserWorker { ref protocol }
-                if protocol == "fw-browser-post-message-v1"
+            crate::LinkConnectionKind::HostProcess
         ));
+        let transport = connection.client_transport().unwrap();
+        let client = LpClient::new_shared(transport);
+        let projects = client.project_list_available().await.unwrap();
+
+        assert!(projects.is_empty());
+        session.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn host_process_provider_supports_multiple_endpoints() {
+        let mut provider = provider_with_two_endpoints();
+        let endpoints = provider.discover().await.unwrap();
+
+        assert_eq!(endpoints.len(), 2);
+
+        let mut session_a = provider.connect(&endpoints[0].id).await.unwrap();
+        let mut session_b = provider.connect(&endpoints[1].id).await.unwrap();
+
+        assert_ne!(session_a.id(), session_b.id());
+        assert_ne!(session_a.endpoint_id(), session_b.endpoint_id());
+
+        session_a.close().await.unwrap();
+        session_b.close().await.unwrap();
+    }
+
+    fn provider_with_two_endpoints() -> HostProcessProvider {
+        let mut provider = HostProcessProvider::new("host-process");
+        provider.create_memory_endpoint("Host Process A");
+        provider.create_memory_endpoint("Host Process B");
+        provider
     }
 }

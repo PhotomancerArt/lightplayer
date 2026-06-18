@@ -5,14 +5,14 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use fw_checks::{FW_CHECK_JSON_PREFIX, FwCheckConfig, FwCheckTarget, all_checks, find_check};
-use lpa_client::transport_serial::{
-    HardwareSerialOptions, SerialLineObserver, create_hardware_serial_transport_pair_with_options,
-};
+use lpa_client::transport_serial::SerialLineObserver;
 use lpa_client::{ClientTransport, LpClient};
+use lpa_link::providers::host_serial_esp32::HostSerialEsp32Options;
 use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 use lpfs::{LpFs, LpFsStd};
 use tokio::time::sleep;
 
+use crate::client::host_serial_esp32::connect_host_serial_esp32_with_options;
 use crate::commands::dev::{push_project_async, validation};
 
 use super::args::{FwcheckCli, FwcheckCommand, FwcheckDemoArgs, FwcheckRunArgs, FwcheckTargetArg};
@@ -218,16 +218,13 @@ fn run_demo_capture(
 ) -> Result<DemoResult> {
     let capture = Arc::new(SerialCapture::new(&trace.trace_txt)?);
     let observer: Arc<dyn SerialLineObserver> = capture.clone();
-    let options = HardwareSerialOptions {
+    let options = HostSerialEsp32Options {
+        baud_rate: Some(DEFAULT_SERIAL_BAUD_RATE),
         reset_after_open: true,
         line_observer: Some(observer),
     };
-    let transport = create_hardware_serial_transport_pair_with_options(
-        port_name,
-        DEFAULT_SERIAL_BAUD_RATE,
-        options,
-    )
-    .map_err(|e| anyhow::anyhow!("Failed to create serial transport: {e}"))?;
+    let transport = connect_host_serial_esp32_with_options(port_name, options)
+        .map_err(|e| anyhow::anyhow!("Failed to create serial transport: {e}"))?;
     let transport: Box<dyn ClientTransport> = Box::new(transport);
     let shared_transport = Arc::new(tokio::sync::Mutex::new(transport));
     let client = LpClient::new_shared(Arc::clone(&shared_transport));

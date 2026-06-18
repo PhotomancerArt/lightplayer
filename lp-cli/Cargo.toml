@@ -26,7 +26,7 @@ notify = "6"
 lpc-model = { path = "../lp-core/lpc-model" }
 lpc-wire = { path = "../lp-core/lpc-wire" }
 lpa-server = { path = "../lp-app/lpa-server" }
-lpa-link = { path = "../lp-app/lpa-link", features = ["local-host"] }
+lpa-link = { path = "../lp-app/lpa-link", features = ["host-process", "host-serial-esp32"] }
 lpc-hardware = { path = "../lp-core/lpc-hardware" }
 lpc-shared = { path = "../lp-core/lpc-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }

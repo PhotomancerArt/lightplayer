@@ -14,6 +14,8 @@ pub mod link_session;
 pub mod link_session_id;
 pub mod providers;
 
+#[cfg(any(feature = "host-process", feature = "host-serial-esp32"))]
+pub use link_connection::LinkClientTransport;
 pub use link_connection::{LinkConnection, LinkConnectionKind};
 pub use link_diagnostic::{LinkDiagnostic, LinkDiagnosticSeverity};
 pub use link_endpoint::LinkEndpoint;
