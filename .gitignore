@@ -34,3 +34,6 @@ perf.data*
 .builtins-source-hash
 traces/
 profiles/
+lp-app/lp-studio-web/public/pkg/
+lp-app/lp-studio-web/public/fw-browser-worker.js
+lp-app/lp-studio-web/dist/

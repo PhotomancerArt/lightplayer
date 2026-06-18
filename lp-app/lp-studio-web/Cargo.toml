@@ -1,0 +1,17 @@
+[package]
+name = "lp-studio-web"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Static Dioxus web shell for LightPlayer Studio"
+
+[dependencies]
+dioxus = { version = "0.7", features = ["web"] }
+lp-studio-core = { path = "../lp-studio-core" }
+lp-studio-runtime = { path = "../lp-studio-runtime", features = ["browser-worker"] }
+
+[lints]
+workspace = true

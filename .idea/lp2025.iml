@@ -103,6 +103,9 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-core/lpc-hardware/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-base/lp-collection/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-base/lp-vecmap/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-app/lp-studio-core/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-app/lp-studio-runtime/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-app/lp-studio-web/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-app/lpa-link/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-browser/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-fw/fw-host/src" isTestSource="false" />

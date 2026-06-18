@@ -1,0 +1,9 @@
+[application]
+name = "lp-studio-web"
+default_platform = "web"
+asset_dir = "public"
+out_dir = "dist"
+
+[web.app]
+title = "LightPlayer Studio"
+base_path = "/"
