@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context, Result, bail};
 use fw_checks::{FW_CHECK_JSON_PREFIX, FwCheckConfig, FwCheckTarget, all_checks, find_check};
 use lpa_client::transport_serial::SerialLineObserver;
-use lpa_client::{ClientTransport, LpClient};
+use lpa_client::{ClientTransport, TokioLpClient};
 use lpa_link::providers::host_serial_esp32::HostSerialEsp32Options;
 use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 use lpfs::{LpFs, LpFsStd};
@@ -227,7 +227,7 @@ fn run_demo_capture(
         .map_err(|e| anyhow::anyhow!("Failed to create serial transport: {e}"))?;
     let transport: Box<dyn ClientTransport> = Box::new(transport);
     let shared_transport = Arc::new(tokio::sync::Mutex::new(transport));
-    let client = LpClient::new_shared(Arc::clone(&shared_transport));
+    let client = TokioLpClient::new_shared(Arc::clone(&shared_transport));
     let local_fs: Arc<dyn LpFs + Send + Sync> = Arc::new(LpFsStd::new(project_dir.to_owned()));
     let runtime = tokio::runtime::Runtime::new()?;
 
@@ -262,7 +262,7 @@ fn run_demo_capture(
 }
 
 async fn run_demo_capture_async(
-    client: &LpClient,
+    client: &TokioLpClient,
     capture: &Arc<SerialCapture>,
     local_fs: Arc<dyn LpFs + Send + Sync>,
     project_uid: &str,

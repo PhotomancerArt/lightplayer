@@ -36,7 +36,7 @@ pub fn connect_host_process() -> Result<HostProcessClientTransport> {
     let mut session = pollster::block_on(provider.connect(&endpoint_id))?;
     let connection = pollster::block_on(session.connection())?;
     let transport = connection
-        .client_transport()
+        .server_connection()
         .ok_or_else(|| anyhow::anyhow!("host-process connection did not include a transport"))?;
 
     Ok(HostProcessClientTransport::new(transport, session))
@@ -89,14 +89,14 @@ fn link_error_to_transport(error: LinkError) -> TransportError {
 
 #[cfg(test)]
 mod tests {
-    use lpa_client::LpClient;
+    use lpa_client::TokioLpClient;
 
     use super::*;
 
     #[tokio::test]
     async fn host_process_transport_serves_client_requests() {
         let transport = connect_host_process().unwrap();
-        let client = LpClient::new(Box::new(transport));
+        let client = TokioLpClient::new(Box::new(transport));
 
         let projects = client.project_list_available().await.unwrap();
 

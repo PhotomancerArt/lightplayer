@@ -7,13 +7,15 @@ runtime/link/client facts back into Studio events.
 
 - `lp-studio-core` owns state transitions.
 - `lp-studio-runtime` owns I/O, runtime adapters, demo project seeding, and
-  client protocol flow.
+  mapping lower-level client/link events into Studio events.
+- `lpa-client` owns lp-server request ids, response correlation, protocol
+  errors, heartbeat/log events, and shared project deploy semantics.
 - `lp-studio-web` owns Dioxus components and browser presentation.
 
 The host-process path is:
 
 ```text
-StudioEffect -> lpa-link host-process -> fw-host -> lpc-wire protocol
+StudioEffect -> lpa-link host-process -> lpa-client TokioLpClient -> fw-host
 ```
 
 The browser-worker path is:
@@ -32,16 +34,19 @@ Demo project loading uses the same server protocol on both paths: write files
 under `/projects/studio-demo/...`, then call `LoadProject` with
 `studio-demo`.
 
-The demo upload request list lives in `demo_project`, so future hardware paths
-such as `browser-serial-esp32` can reuse the same `lp-server` filesystem writes
-instead of forking project sync behavior. Direct/raw filesystem image access is
-not part of this server protocol path; it belongs below the client connection in
-`lpa-link` management.
+The demo upload request list currently lives in `demo_project` for the Studio
+POC. Longer-lived project deploy semantics live in `lpa-client`, including the
+shared stop/write/load flow that future hardware paths should use instead of
+forking request correlation or project sync behavior. Direct/raw filesystem
+image access is not part of this server protocol path; it belongs below the
+client connection in `lpa-link` management.
 
 `browser-serial-esp32` targets an already-flashed ESP32 running LightPlayer. It
 uses a small JavaScript shim because `web-sys` currently gates Web Serial behind
-unstable API cfg flags; Rust still owns Studio state, request/response handling,
-and project upload semantics.
+unstable API cfg flags. The current browser serial protocol client is temporary
+M2 bring-up code; M2c should adapt Web Serial streams into `lpa-client::ClientIo`
+so browser serial uses the same request correlation, protocol events, and
+project deploy helpers as host paths.
 
 For hardware bring-up, valid `M!` protocol frames stay internal to the runtime.
 Non-protocol device lines are echoed directly to the JavaScript console with a

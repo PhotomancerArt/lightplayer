@@ -76,7 +76,7 @@ impl HostProcessStudioRuntime {
             .await
             .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
         let transport = connection
-            .client_transport()
+            .server_connection()
             .ok_or(StudioRuntimeError::MissingClient)?;
         let session_id = session.id().clone();
         let logs = session.logs();

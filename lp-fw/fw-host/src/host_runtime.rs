@@ -137,14 +137,14 @@ fn create_memory_server() -> LpServer {
 
 #[cfg(test)]
 mod tests {
-    use lpa_client::LpClient;
+    use lpa_client::TokioLpClient;
 
     use super::*;
 
     #[tokio::test]
     async fn memory_runtime_serves_client_requests_and_shuts_down() {
         let mut runtime = HostRuntime::start_memory().unwrap();
-        let client = LpClient::new_shared(runtime.client_transport());
+        let client = TokioLpClient::new_shared(runtime.client_transport());
 
         let projects = client.project_list_available().await.unwrap();
 
@@ -156,8 +156,8 @@ mod tests {
     async fn multiple_memory_runtimes_can_run_concurrently() {
         let mut runtime_a = HostRuntime::start_memory().unwrap();
         let mut runtime_b = HostRuntime::start_memory().unwrap();
-        let client_a = LpClient::new_shared(runtime_a.client_transport());
-        let client_b = LpClient::new_shared(runtime_b.client_transport());
+        let client_a = TokioLpClient::new_shared(runtime_a.client_transport());
+        let client_b = TokioLpClient::new_shared(runtime_b.client_transport());
 
         assert!(client_a.project_list_available().await.unwrap().is_empty());
         assert!(client_b.project_list_available().await.unwrap().is_empty());

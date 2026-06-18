@@ -6,9 +6,9 @@ use lpa_client::transport_serial::{
 use tokio::sync::Mutex;
 
 use crate::{
-    LinkClientTransport, LinkConnection, LinkDiagnostic, LinkDiagnosticSeverity, LinkEndpoint,
-    LinkEndpointId, LinkEndpointStatus, LinkError, LinkLogEntry, LinkLogLevel, LinkManagement,
-    LinkProvider, LinkProviderId, LinkSession, LinkSessionId,
+    LinkConnection, LinkDiagnostic, LinkDiagnosticSeverity, LinkEndpoint, LinkEndpointId,
+    LinkEndpointStatus, LinkError, LinkLogEntry, LinkLogLevel, LinkManagement, LinkProvider,
+    LinkProviderId, LinkServerConnection, LinkSession, LinkSessionId,
 };
 
 #[derive(Clone, Default)]
@@ -164,14 +164,14 @@ impl LinkProvider for HostSerialEsp32Provider {
             message: error.to_string(),
         })?;
         let transport: Box<dyn lpa_client::ClientTransport> = Box::new(transport);
-        let transport: LinkClientTransport = Arc::new(Mutex::new(transport));
+        let server_connection: LinkServerConnection = Arc::new(Mutex::new(transport));
 
         Ok(HostSerialEsp32Session::new(
             endpoint.endpoint.id,
             session_id,
             endpoint.port_name,
             baud_rate,
-            transport,
+            server_connection,
         ))
     }
 }
@@ -181,7 +181,7 @@ pub struct HostSerialEsp32Session {
     id: LinkSessionId,
     port_name: String,
     baud_rate: u32,
-    transport: Option<LinkClientTransport>,
+    server_connection: Option<LinkServerConnection>,
     logs: Vec<LinkLogEntry>,
     diagnostics: Vec<LinkDiagnostic>,
     closed: bool,
@@ -193,7 +193,7 @@ impl HostSerialEsp32Session {
         id: LinkSessionId,
         port_name: String,
         baud_rate: u32,
-        transport: LinkClientTransport,
+        server_connection: LinkServerConnection,
     ) -> Self {
         let logs = vec![LinkLogEntry::new(
             endpoint_id.clone(),
@@ -212,7 +212,7 @@ impl HostSerialEsp32Session {
             id,
             port_name,
             baud_rate,
-            transport: Some(transport),
+            server_connection: Some(server_connection),
             logs,
             diagnostics,
             closed: false,
@@ -241,13 +241,13 @@ impl LinkSession for HostSerialEsp32Session {
         if self.closed {
             return Err(LinkError::Closed);
         }
-        let Some(transport) = &self.transport else {
+        let Some(server_connection) = &self.server_connection else {
             return Err(LinkError::Closed);
         };
         Ok(LinkConnection::host_serial_esp32(
             self.endpoint_id.clone(),
             self.id.clone(),
-            transport.clone(),
+            server_connection.clone(),
         ))
     }
 
@@ -256,8 +256,8 @@ impl LinkSession for HostSerialEsp32Session {
             return Ok(());
         }
         self.closed = true;
-        if let Some(transport) = self.transport.take() {
-            transport
+        if let Some(server_connection) = self.server_connection.take() {
+            server_connection
                 .lock()
                 .await
                 .close()

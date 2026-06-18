@@ -25,15 +25,33 @@ Studio should build product capabilities above this crate. It should not embed
 Web Serial, browser-worker, host-process, flashing, or endpoint-management
 details directly in UI code.
 
+## Server Connections
+
+`LinkConnection` is the handoff point from link management to the server
+protocol. Host providers currently expose a `LinkServerConnection`, which is a
+shared host `lpa-client` transport and can be wrapped as a `TokioLpClient` with
+`server_client()`.
+
+Browser providers model the endpoint/session/protocol identity, but the actual
+browser stream binding still lives in the web runtime:
+
+- `browser-worker` binds a JavaScript module Worker created from `fw-browser`.
+- `browser-serial-esp32` binds a Web Serial stream granted by a user gesture.
+
+Those browser bindings should adapt their send/receive streams into
+`lpa-client::ClientIo` rather than reimplement request ids, response
+correlation, server error handling, heartbeat/log handling, or project deploy
+ordering.
+
 ## Providers
 
 | Provider ID | Rust module/type | Runtime or device | Endpoint kind | Management intent | Status |
 |---|---|---|---|---|---|
 | `fake` | `providers::fake::FakeProvider` | none | test endpoint | diagnostics only | implemented |
-| `host-process` | `providers::host_process::HostProcessProvider` | host process running `fw-host` | spawnable host runtime | logs, diagnostics, future local filesystem/runtime controls | implemented |
-| `browser-worker` | `providers::browser_worker::BrowserWorkerProvider` | `fw-browser` Web Worker | browser worker runtime | logs, diagnostics, worker lifecycle | model implemented; web code owns the actual Worker binding |
-| `host-serial-esp32` | `providers::host_serial_esp32::HostSerialEsp32Provider` | ESP32 over host serial | physical serial device | connect, reset-after-open, logs, diagnostics; future flash/raw filesystem | implemented for discovery/connect |
-| `browser-serial-esp32` | `providers::browser_serial_esp32::BrowserSerialEsp32Provider` | ESP32 over Web Serial | physical serial device | connect, reset, logs, diagnostics; future flash/raw filesystem | model implemented; web code owns the actual Web Serial binding |
+| `host-process` | `providers::host_process::HostProcessProvider` | host process running `fw-host` | spawnable host runtime | logs, diagnostics, future local filesystem/runtime controls | implemented; returns host `LinkServerConnection` |
+| `browser-worker` | `providers::browser_worker::BrowserWorkerProvider` | `fw-browser` Web Worker | browser worker runtime | logs, diagnostics, worker lifecycle | model implemented; web code owns Worker binding and future `ClientIo` adapter |
+| `host-serial-esp32` | `providers::host_serial_esp32::HostSerialEsp32Provider` | ESP32 over host serial | physical serial device | connect, reset-after-open, logs, diagnostics; future flash/raw filesystem | implemented for discovery/connect; returns host `LinkServerConnection` |
+| `browser-serial-esp32` | `providers::browser_serial_esp32::BrowserSerialEsp32Provider` | ESP32 over Web Serial | physical serial device | connect, reset, logs, diagnostics; future flash/raw filesystem | model implemented; web code owns Web Serial binding and future `ClientIo` adapter |
 | `host-websocket` | future `providers::host_websocket::HostWebsocketProvider` | already-running server over host networking | remote endpoint | host-side discovery/connect/status; limited management | future |
 | `browser-websocket` | future `providers::browser_websocket::BrowserWebsocketProvider` | already-running server over browser networking | remote endpoint | browser permission/discovery/connect/status; limited management | future |
 | `host-webserver` | future `providers::host_webserver::HostWebserverProvider` | host service owning `fw-host` runtimes | service-managed runtime endpoint | create/stop runtimes, logs, diagnostics | future |

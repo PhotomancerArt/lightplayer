@@ -3,7 +3,7 @@
 
 use anyhow::{Context, Result};
 use lp_riscv_emu::{FrameOutcome, Riscv32Emulator, profile::HaltReason};
-use lpa_client::LpClient;
+use lpa_client::TokioLpClient;
 use lpc_model::AsLpPath;
 use lpfs::{LpFs, LpFsStd};
 use std::sync::{Arc, Mutex};
@@ -16,7 +16,7 @@ const FRAME_TICK_MS: u32 = 40;
 /// runaway guest from blocking the cycle-budget check.
 const MAX_STEPS_PER_FRAME: u64 = 5_000_000;
 
-async fn try_stop_projects(client: &LpClient) {
+async fn try_stop_projects(client: &TokioLpClient) {
     if let Err(e) = client.stop_all_projects().await {
         eprintln!("warning: failed to stop projects (continuing): {e:#}");
     }
@@ -34,7 +34,7 @@ pub enum WorkloadOutcome {
 /// Push project files, load the project, then drive frames until
 /// `outcome` is determined. Reports progress on stderr.
 pub async fn run_workload(
-    client: &LpClient,
+    client: &TokioLpClient,
     emulator_arc: &Arc<Mutex<Riscv32Emulator>>,
     dir: &std::path::Path,
     project_uid: &str,
@@ -105,7 +105,7 @@ fn is_profile_stop_error(e: &anyhow::Error) -> bool {
 }
 
 async fn push_project_files(
-    client: &LpClient,
+    client: &TokioLpClient,
     local_fs: &dyn LpFs,
     project_uid: &str,
 ) -> Result<()> {

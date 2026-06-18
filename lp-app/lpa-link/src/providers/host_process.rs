@@ -166,8 +166,6 @@ impl LinkSession for HostProcessSession {
 
 #[cfg(test)]
 mod tests {
-    use lpa_client::LpClient;
-
     use super::*;
 
     #[tokio::test]
@@ -181,8 +179,7 @@ mod tests {
             connection.kind,
             crate::LinkConnectionKind::HostProcess
         ));
-        let transport = connection.client_transport().unwrap();
-        let client = LpClient::new_shared(transport);
+        let client = connection.server_client().unwrap();
         let projects = client.project_list_available().await.unwrap();
 
         assert!(projects.is_empty());

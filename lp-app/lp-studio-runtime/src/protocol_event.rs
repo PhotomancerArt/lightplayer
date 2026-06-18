@@ -1,4 +1,6 @@
 use lp_studio_core::{StudioEvent, StudioHeartbeat, StudioLogEntry, StudioLogLevel};
+#[cfg(feature = "host-process")]
+use lpa_client::ClientEvent;
 use lpc_wire::server::api::LogLevel;
 use lpc_wire::{
     ClientRequest, WireProjectCommand, WireProjectInventoryReadRequest, WireServerMessage,
@@ -35,6 +37,42 @@ pub fn server_event(response: WireServerMessage) -> Option<StudioEvent> {
             entry: StudioLogEntry::new(log_level(level), "lp-server", message),
         }),
         _ => None,
+    }
+}
+
+#[cfg(feature = "host-process")]
+pub fn client_event(event: ClientEvent) -> StudioEvent {
+    match event {
+        ClientEvent::Heartbeat {
+            fps,
+            frame_count,
+            loaded_projects,
+            uptime_ms,
+            memory,
+        } => StudioEvent::HeartbeatReceived {
+            heartbeat: StudioHeartbeat {
+                fps_avg: fps.avg,
+                frame_count,
+                loaded_project_count: loaded_projects.len(),
+                uptime_ms,
+                free_memory_bytes: memory.map(|memory| memory.free_bytes),
+            },
+        },
+        ClientEvent::Log { level, message } => StudioEvent::LogReceived {
+            entry: StudioLogEntry::new(log_level(level), "lp-server", message),
+        },
+        ClientEvent::UncorrelatedResponse {
+            response_id,
+            expected_id,
+        } => StudioEvent::LogReceived {
+            entry: StudioLogEntry::new(
+                StudioLogLevel::Warn,
+                "lp-studio-runtime",
+                format!(
+                    "Ignoring uncorrelated server response id={response_id} while waiting for id={expected_id}"
+                ),
+            ),
+        },
     }
 }
 

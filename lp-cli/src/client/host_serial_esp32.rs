@@ -55,7 +55,7 @@ pub fn connect_host_serial_esp32_with_options(
     let endpoint_id = provider.create_endpoint_for_port(port_name, format!("ESP32 ({port_name})"));
     let mut session = pollster::block_on(provider.connect(&endpoint_id))?;
     let connection = pollster::block_on(session.connection())?;
-    let transport = connection.client_transport().ok_or_else(|| {
+    let transport = connection.server_connection().ok_or_else(|| {
         anyhow::anyhow!("host-serial-esp32 connection did not include a transport")
     })?;
 
