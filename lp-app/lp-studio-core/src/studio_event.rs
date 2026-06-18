@@ -37,6 +37,11 @@ pub enum StudioEvent {
         connection_kind: LinkConnectionKind,
         capabilities: Vec<DeviceCapability>,
     },
+    DeviceConnectionFailed {
+        action_id: ActionId,
+        endpoint_id: LinkEndpointId,
+        issue: DeviceIssue,
+    },
     DeviceDisconnected {
         action_id: ActionId,
         session_id: LinkSessionId,

@@ -425,6 +425,16 @@ impl StudioApp {
                     };
                 }
             }
+            StudioEvent::DeviceConnectionFailed {
+                action_id,
+                endpoint_id,
+                issue,
+            } => {
+                self.finish_action(action_id);
+                self.state.device_manager.push_issue(issue.clone());
+                self.state.device_manager.active_flow =
+                    DeviceFlowState::LinkFailed { endpoint_id, issue };
+            }
             StudioEvent::DeviceDisconnected {
                 action_id,
                 session_id: _,
@@ -471,14 +481,17 @@ impl StudioApp {
             }
             StudioEvent::TargetProbeCompleted { action_id, result } => {
                 self.finish_action(action_id);
-                if let Some(issue) = result.issue.clone() {
-                    self.state.device_manager.push_issue(issue.clone());
-                    self.state.device_manager.active_flow = DeviceFlowState::Degraded { issue };
-                } else if let Some(reason) = result.provisioning_reason.clone() {
+                if let Some(reason) = result.provisioning_reason.clone() {
+                    if let Some(issue) = result.issue.clone() {
+                        self.state.device_manager.push_issue(issue);
+                    }
                     self.state.device_manager.active_flow = DeviceFlowState::ProvisioningRequired {
                         endpoint_id: result.endpoint_id,
                         reason,
                     };
+                } else if let Some(issue) = result.issue.clone() {
+                    self.state.device_manager.push_issue(issue.clone());
+                    self.state.device_manager.active_flow = DeviceFlowState::Degraded { issue };
                 } else {
                     self.state.device_manager.active_flow = match result.kind {
                         TargetKind::LightPlayerServer => DeviceFlowState::OpeningServer {
@@ -679,6 +692,23 @@ impl StudioApp {
                     );
                 self.state.device_manager.active_flow =
                     DeviceFlowState::ProviderSelected { provider_id };
+            }
+            DeviceAccessStatus::PermissionCanceled { reason } => {
+                let issue = DeviceIssue::error(
+                    issue_id_for_provider("permission-canceled", &provider_id),
+                    DeviceIssueKind::PermissionCanceled,
+                    reason,
+                )
+                .with_provider(provider_id.clone())
+                .with_recovery_actions(vec![
+                    RecoveryAction::Retry,
+                    RecoveryAction::ChooseSimulator,
+                ]);
+                self.state.device_manager.active_flow = DeviceFlowState::AccessFailed {
+                    provider_id,
+                    issue: issue.clone(),
+                };
+                self.state.device_manager.push_issue(issue);
             }
             DeviceAccessStatus::Unsupported { reason } => {
                 self.state
@@ -1022,6 +1052,68 @@ mod tests {
         assert!(matches!(
             app.state().device_manager.active_flow,
             DeviceFlowState::ServerReady { .. }
+        ));
+    }
+
+    #[test]
+    fn device_connection_failed_event_sets_link_failed_flow() {
+        let mut app = StudioApp::new();
+        let action_id = ActionId::new(30);
+        let endpoint_id = LinkEndpointId::new("endpoint-a");
+        let issue = DeviceIssue::error(
+            "endpoint-open-failed",
+            DeviceIssueKind::EndpointOpenFailed,
+            "Could not open endpoint.",
+        )
+        .with_endpoint(endpoint_id.clone());
+        app.mark_in_flight(
+            action_id,
+            ActionDescriptor::for_type(crate::StudioActionType::ConnectDevice),
+        );
+
+        app.apply_event(StudioEvent::DeviceConnectionFailed {
+            action_id,
+            endpoint_id: endpoint_id.clone(),
+            issue,
+        });
+
+        assert!(app.state().in_flight.is_empty());
+        assert!(matches!(
+            &app.state().device_manager.active_flow,
+            DeviceFlowState::LinkFailed {
+                endpoint_id: flow_endpoint_id,
+                issue,
+            } if flow_endpoint_id == &endpoint_id
+                && issue.kind == DeviceIssueKind::EndpointOpenFailed
+        ));
+    }
+
+    #[test]
+    fn permission_canceled_access_event_sets_access_failed_flow() {
+        let mut app = StudioApp::new();
+        let action_id = ActionId::new(31);
+        let provider_id = LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID);
+        app.mark_in_flight(
+            action_id,
+            ActionDescriptor::for_type(crate::StudioActionType::RequestDeviceAccess),
+        );
+
+        app.apply_event(StudioEvent::DeviceAccessUpdated {
+            action_id: Some(action_id),
+            provider_id: provider_id.clone(),
+            status: crate::DeviceAccessStatus::PermissionCanceled {
+                reason: "The browser chooser was canceled.".to_string(),
+            },
+        });
+
+        assert!(app.state().in_flight.is_empty());
+        assert!(matches!(
+            &app.state().device_manager.active_flow,
+            DeviceFlowState::AccessFailed {
+                provider_id: flow_provider_id,
+                issue,
+            } if flow_provider_id == &provider_id
+                && issue.kind == DeviceIssueKind::PermissionCanceled
         ));
     }
 

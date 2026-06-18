@@ -1,28 +1,34 @@
-use lp_studio_core::{
-    ActionOrigin, HOST_PROCESS_PROVIDER_ID, StudioActionKind, StudioApp, StudioEffect,
-};
+//! Runtime test harness for driving a `StudioApp` through an effect executor.
+
+#[cfg(feature = "host-process")]
+use lp_studio_core::HOST_PROCESS_PROVIDER_ID;
+use lp_studio_core::{ActionOrigin, StudioActionKind, StudioApp, StudioEffect};
+#[cfg(feature = "host-process")]
 use lpa_link::LinkProviderId;
 
+#[cfg(feature = "host-process")]
+use crate::HostProcessStudioRuntime;
+use crate::StudioRuntimeError;
 use crate::effect_executor::EffectExecutor;
-use crate::{HostProcessStudioRuntime, StudioRuntimeError};
 
-pub struct RuntimeHarness {
+/// Drives a `StudioApp` by dispatching actions and executing returned effects.
+pub struct RuntimeHarness<R> {
     app: StudioApp,
-    runtime: HostProcessStudioRuntime,
+    runtime: R,
 }
 
-impl RuntimeHarness {
-    pub fn host_process() -> Self {
-        let mut app = StudioApp::new();
-        app.dispatch_kind(
-            StudioActionKind::SelectLinkProvider {
-                provider_id: LinkProviderId::new(HOST_PROCESS_PROVIDER_ID),
-            },
-            ActionOrigin::Harness,
-        );
+impl<R> RuntimeHarness<R>
+where
+    R: EffectExecutor,
+{
+    pub fn new(app: StudioApp, runtime: R) -> Self {
+        Self { app, runtime }
+    }
+
+    pub fn with_runtime(runtime: R) -> Self {
         Self {
-            app,
-            runtime: HostProcessStudioRuntime::new(),
+            app: StudioApp::new(),
+            runtime,
         }
     }
 
@@ -30,8 +36,20 @@ impl RuntimeHarness {
         &self.app
     }
 
-    pub fn runtime_mut(&mut self) -> &mut HostProcessStudioRuntime {
+    pub fn app_mut(&mut self) -> &mut StudioApp {
+        &mut self.app
+    }
+
+    pub fn runtime(&self) -> &R {
+        &self.runtime
+    }
+
+    pub fn runtime_mut(&mut self) -> &mut R {
         &mut self.runtime
+    }
+
+    pub fn into_app(self) -> StudioApp {
+        self.app
     }
 
     pub async fn dispatch(
@@ -43,7 +61,7 @@ impl RuntimeHarness {
         self.drain_effects(effects).await
     }
 
-    async fn drain_effects(
+    pub async fn drain_effects(
         &mut self,
         mut effects: Vec<StudioEffect>,
     ) -> Result<(), StudioRuntimeError> {
@@ -57,6 +75,24 @@ impl RuntimeHarness {
     }
 }
 
+#[cfg(feature = "host-process")]
+impl RuntimeHarness<HostProcessStudioRuntime> {
+    pub fn host_process() -> Self {
+        let mut app = StudioApp::new();
+        app.dispatch_kind(
+            StudioActionKind::SelectLinkProvider {
+                provider_id: LinkProviderId::new(HOST_PROCESS_PROVIDER_ID),
+            },
+            ActionOrigin::Harness,
+        );
+        Self {
+            app,
+            runtime: HostProcessStudioRuntime::new(),
+        }
+    }
+}
+
+#[cfg(feature = "host-process")]
 pub async fn run_host_process_demo() -> Result<StudioApp, StudioRuntimeError> {
     let mut harness = RuntimeHarness::host_process();
     harness

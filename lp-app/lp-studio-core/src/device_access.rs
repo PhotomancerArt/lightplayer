@@ -23,6 +23,7 @@ pub enum DeviceAccessStatus {
     Unknown,
     Unsupported { reason: String },
     PermissionRequired,
+    PermissionCanceled { reason: String },
     PermissionDenied { reason: String },
     Granted,
 }

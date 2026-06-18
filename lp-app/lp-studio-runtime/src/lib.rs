@@ -3,13 +3,13 @@
 pub mod demo_project;
 pub mod effect_executor;
 pub mod error;
+pub mod harness;
 pub mod protocol_event;
+pub mod scenario;
 pub mod worker_envelope;
 
 #[cfg(feature = "host-process")]
 pub mod client_session_runtime;
-#[cfg(feature = "host-process")]
-pub mod harness;
 #[cfg(feature = "host-process")]
 pub mod host_process_runtime;
 #[cfg(feature = "host-process")]
@@ -29,9 +29,10 @@ pub mod browser_serial_shim;
 
 pub use effect_executor::EffectExecutor;
 pub use error::StudioRuntimeError;
+pub use harness::RuntimeHarness;
 
 #[cfg(feature = "host-process")]
-pub use harness::{RuntimeHarness, run_host_process_demo};
+pub use harness::run_host_process_demo;
 #[cfg(feature = "host-process")]
 pub use host_process_runtime::HostProcessStudioRuntime;
 

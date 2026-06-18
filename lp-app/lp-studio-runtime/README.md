@@ -30,6 +30,20 @@ The browser serial ESP32 path is:
 StudioEffect -> lpa-link browser-serial-esp32 model -> lpa-client LpClient<ClientIo> -> Web Serial shim -> ESP32 lp-server
 ```
 
+The scenario path is I/O-free:
+
+```text
+StudioEffect -> scenario runtime -> scripted StudioEvent values -> StudioApp reducer
+```
+
+`scenario` is a runtime test and future story-fixture layer. It models
+product-level provisioning outcomes such as permission denial, endpoint open
+failure, blank devices, flash failure, project load failure, heartbeat, and
+connection loss. It does not replace `lpa-link` fake providers, which remain
+useful for lower-level link/session behavior. Scenario tests drive the same
+action/effect/event/reducer loop as real runtimes, so the UI and future agents
+can reuse the same vocabulary without inventing separate fixture states.
+
 Demo project loading uses the same server protocol on both paths: write files
 under `/projects/studio-demo/...`, then load the `studio-demo` project. Hardware
 deploy flows stop existing projects before writing/loading so ESP32-class
