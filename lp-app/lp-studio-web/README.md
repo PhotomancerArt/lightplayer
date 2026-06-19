@@ -72,7 +72,8 @@ just studio-story-pngs
 ```
 
 PNGs are written to `lp-app/lp-studio-web/story-images/.scratch/`, which is
-gitignored.
+gitignored. Capture uses 4 Chrome pages by default; set
+`STUDIO_STORY_PNGS_CONCURRENCY=<n>` to tune this locally.
 
 Update committed visual baselines when intentional Studio UI changes affect
 component rendering:

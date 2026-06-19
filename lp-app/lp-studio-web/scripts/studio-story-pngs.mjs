@@ -22,6 +22,7 @@ const publicDir = path.join(repoRoot, "lp-app/lp-studio-web/public");
 const storyRoot = path.join(repoRoot, "lp-app/lp-studio-web");
 const mode = parseMode(process.argv.slice(2));
 const port = process.env.STUDIO_STORY_PNGS_PORT ?? "2822";
+const requestedCaptureConcurrency = parseCaptureConcurrency();
 const baseUrl = `http://127.0.0.1:${port}/`;
 const chrome = process.env.CHROME_BIN ?? findChrome();
 const baselineDir = path.resolve(repoRoot, baselineDirFromEnv());
@@ -175,6 +176,16 @@ function baselineDirFromEnv() {
   );
 }
 
+function parseCaptureConcurrency() {
+  const value = process.env.STUDIO_STORY_PNGS_CONCURRENCY ?? "4";
+  const parsed = Number.parseInt(value, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed.toString() !== value) {
+    console.error("STUDIO_STORY_PNGS_CONCURRENCY must be a positive integer.");
+    process.exit(2);
+  }
+  return parsed;
+}
+
 async function discoverStoryIds() {
   const html = await runChrome([
     "--headless=new",
@@ -190,22 +201,55 @@ async function discoverStoryIds() {
 }
 
 async function captureStories(storyIds, directory) {
-  const files = [];
-  const browser = await launchCaptureBrowser();
+  const concurrency = Math.min(requestedCaptureConcurrency, storyIds.length);
+  const files = new Array(storyIds.length);
+  const browser = await launchCaptureBrowser(concurrency);
+  let nextStoryIndex = 0;
+
+  console.log(`Capturing ${storyIds.length} stories with ${concurrency} Chrome pages...`);
+
   try {
-    for (const storyId of storyIds) {
-      const file = path.join(directory, storyFileName(storyId));
-      await browser.capture(storyPngUrl(storyId), storyId, file);
-      console.log(`wrote ${path.relative(repoRoot, file)}`);
-      files.push(file);
-    }
+    await Promise.all(
+      Array.from({ length: concurrency }, (_, pageIndex) =>
+        captureStoryWorker({
+          browser,
+          directory,
+          files,
+          nextStoryIndex: () => nextStoryIndex++,
+          pageIndex,
+          storyIds,
+        }),
+      ),
+    );
   } finally {
     await browser.close();
   }
   return files;
 }
 
-async function launchCaptureBrowser() {
+async function captureStoryWorker({
+  browser,
+  directory,
+  files,
+  nextStoryIndex,
+  pageIndex,
+  storyIds,
+}) {
+  while (true) {
+    const storyIndex = nextStoryIndex();
+    if (storyIndex >= storyIds.length) {
+      return;
+    }
+
+    const storyId = storyIds[storyIndex];
+    const file = path.join(directory, storyFileName(storyId));
+    await browser.capture(pageIndex, storyPngUrl(storyId), storyId, file);
+    console.log(`wrote ${path.relative(repoRoot, file)}`);
+    files[storyIndex] = file;
+  }
+}
+
+async function launchCaptureBrowser(pageCount) {
   const userDataDir = await mkdtemp(path.join(tmpdir(), "lp-studio-story-chrome-"));
   const child = spawn(
     chrome,
@@ -225,6 +269,31 @@ async function launchCaptureBrowser() {
   const childExited = once(child, "exit").catch(() => {});
   const wsUrl = await waitForDevTools(child);
   const cdp = await CdpConnection.open(wsUrl);
+  const pages = await Promise.all(
+    Array.from({ length: pageCount }, () => createCapturePage(cdp)),
+  );
+
+  return {
+    async capture(pageIndex, url, storyId, file) {
+      await pages[pageIndex].capture(url, storyId, file);
+    },
+
+    async close() {
+      try {
+        await cdp.send("Browser.close");
+      } catch {
+        cdp.close();
+      }
+      if (child.exitCode === null) {
+        child.kill("SIGTERM");
+      }
+      await Promise.race([childExited, delay(1_000)]);
+      await rm(userDataDir, { recursive: true, force: true });
+    },
+  };
+}
+
+async function createCapturePage(cdp) {
   const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
   const { sessionId } = await cdp.send("Target.attachToTarget", {
     targetId,
@@ -259,19 +328,6 @@ async function launchCaptureBrowser() {
         sessionId,
       );
       await writeFile(file, Buffer.from(data, "base64"));
-    },
-
-    async close() {
-      try {
-        await cdp.send("Browser.close");
-      } catch {
-        cdp.close();
-      }
-      if (child.exitCode === null) {
-        child.kill("SIGTERM");
-      }
-      await Promise.race([childExited, delay(1_000)]);
-      await rm(userDataDir, { recursive: true, force: true });
     },
   };
 }
