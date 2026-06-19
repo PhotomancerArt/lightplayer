@@ -158,6 +158,207 @@ button:disabled {
   color: var(--text-primary);
 }
 
+.device-panel {
+  display: grid;
+  gap: 14px;
+}
+
+.device-section {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.device-section h3,
+.provider-card h4 {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.device-section h3 {
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+}
+
+.provider-card,
+.flow-card,
+.issue-card,
+.recovery-box,
+.project-selection-box,
+.progress-box {
+  min-width: 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  background: var(--surface-panel-raised);
+  padding: 10px;
+}
+
+.provider-card {
+  display: grid;
+  gap: 8px;
+}
+
+.provider-card.is-selected {
+  border-color: rgba(88, 213, 255, 0.5);
+  box-shadow: 0 0 0 1px rgba(88, 213, 255, 0.08);
+}
+
+.provider-card-header,
+.progress-label,
+.project-selection-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.provider-card h4 {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.provider-card p,
+.provider-card-meta,
+.flow-card p,
+.recovery-box p,
+.empty-state {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.provider-card-meta {
+  color: var(--accent-cyan);
+}
+
+.secondary-button {
+  border-color: var(--border-strong);
+  background: var(--surface-control);
+  color: var(--text-secondary);
+  box-shadow: none;
+}
+
+.secondary-button:hover:not(:disabled),
+.secondary-button:focus-visible {
+  border-color: rgba(88, 213, 255, 0.5);
+  background: rgba(88, 213, 255, 0.1);
+  color: #c8f2ff;
+}
+
+.flow-card {
+  display: grid;
+  gap: 10px;
+}
+
+.flow-card-main {
+  display: grid;
+  gap: 4px;
+}
+
+.flow-kicker {
+  color: var(--accent-amber);
+  font-size: 12px;
+  font-weight: 750;
+  text-transform: uppercase;
+}
+
+.flow-card strong,
+.issue-card strong,
+.recovery-box strong,
+.project-selection-box strong {
+  color: var(--text-primary);
+  font-size: 14px;
+}
+
+.progress-box {
+  display: grid;
+  gap: 8px;
+}
+
+.progress-label {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.progress-track {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #2c2a25;
+}
+
+.progress-fill {
+  width: var(--progress);
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent-green);
+}
+
+.project-selection-box {
+  align-items: flex-start;
+}
+
+.choice-list,
+.hardware-log-list {
+  display: grid;
+  gap: 6px;
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+
+.choice-list {
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
+.issue-list {
+  gap: 8px;
+}
+
+.issue-card {
+  display: grid;
+  gap: 8px;
+  border-color: rgba(255, 155, 130, 0.38);
+  background: var(--danger-bg);
+}
+
+.recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.hardware-log-list {
+  max-height: 150px;
+  overflow: auto;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.hardware-log-list li {
+  display: grid;
+  grid-template-columns: 52px 96px minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+}
+
+.log-level {
+  color: var(--accent-amber);
+}
+
+.log-target {
+  color: var(--accent-cyan);
+  overflow-wrap: anywhere;
+}
+
 dl {
   display: grid;
   grid-template-columns: 92px minmax(0, 1fr);

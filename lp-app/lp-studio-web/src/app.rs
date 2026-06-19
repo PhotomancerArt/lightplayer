@@ -1,12 +1,15 @@
 use dioxus::prelude::*;
-use lp_studio_core::StudioApp;
-use lp_studio_runtime::{run_browser_serial_demo, run_browser_worker_demo};
+use lp_studio_core::{ActionOrigin, StudioActionKind, StudioApp};
+use lpa_link::LinkProviderId;
 
 use crate::components::device_panel::DevicePanel;
 use crate::components::inventory_view::InventoryView;
 use crate::components::log_panel::LogPanel;
 use crate::components::project_panel::ProjectPanel;
 use crate::components::status_bar::StatusBar;
+use crate::web_provisioning_controller::{
+    WebProvisioningController, auto_advance_web_flow, dispatch_web_action,
+};
 
 const STYLE: &str = include_str!("style.css");
 const WORKER_URL: &str = "./fw-browser-worker.js";
@@ -21,38 +24,70 @@ pub fn App() -> Element {
         };
     }
 
-    let mut studio = use_signal(StudioApp::new);
+    let studio = use_signal(StudioApp::new);
+    let controller = use_signal(|| WebProvisioningController::new(WORKER_URL));
     let mut running = use_signal(|| false);
-    let mut error = use_signal(|| Option::<String>::None);
+    use_future(move || async move {
+        running.set(true);
+        dispatch_web_action(
+            studio,
+            controller,
+            StudioActionKind::RefreshProviderCatalog,
+            ActionOrigin::System,
+        )
+        .await;
+        running.set(false);
+    });
 
     let state = studio.read().state().clone();
     let is_running = *running.read();
-    let error_text = error.read().clone();
-    let start_demo = move |_| {
+    let error_text = controller.read().error().map(str::to_string);
+    let refresh_catalog = move |_| {
         if *running.read() {
             return;
         }
         running.set(true);
-        error.set(None);
         spawn(async move {
-            match run_browser_worker_demo(WORKER_URL).await {
-                Ok(app) => studio.set(app),
-                Err(runtime_error) => error.set(Some(runtime_error.to_string())),
-            }
+            dispatch_web_action(
+                studio,
+                controller,
+                StudioActionKind::RefreshProviderCatalog,
+                ActionOrigin::System,
+            )
+            .await;
             running.set(false);
         });
     };
-    let connect_hardware = move |_| {
+    let start_provider = move |provider_id: LinkProviderId| {
         if *running.read() {
             return;
         }
         running.set(true);
-        error.set(None);
         spawn(async move {
-            match run_browser_serial_demo().await {
-                Ok(app) => studio.set(app),
-                Err(runtime_error) => error.set(Some(runtime_error.to_string())),
-            }
+            dispatch_web_action(
+                studio,
+                controller,
+                StudioActionKind::StartProvisioning { provider_id },
+                ActionOrigin::User,
+            )
+            .await;
+            auto_advance_web_flow(studio, controller).await;
+            running.set(false);
+        });
+    };
+    let load_starter_project = move |_| {
+        if *running.read() {
+            return;
+        }
+        running.set(true);
+        spawn(async move {
+            dispatch_web_action(
+                studio,
+                controller,
+                StudioActionKind::LoadDemoProject,
+                ActionOrigin::User,
+            )
+            .await;
             running.set(false);
         });
     };
@@ -65,8 +100,9 @@ pub fn App() -> Element {
                 DevicePanel {
                     state: state.clone(),
                     running: is_running,
-                    on_start_demo: start_demo,
-                    on_connect_hardware: connect_hardware,
+                    on_refresh_catalog: refresh_catalog,
+                    on_start_provider: start_provider,
+                    on_load_starter_project: load_starter_project,
                 }
                 ProjectPanel { state: state.clone() }
                 InventoryView { state: state.clone() }

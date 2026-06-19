@@ -27,7 +27,8 @@ link layer:
 - provider catalog and provider availability;
 - selected provider and discovered/granted provider endpoints;
 - active provisioning flow, such as choosing a provider, requesting access,
-  opening a link, probing a target, flashing, deploying a project, or ready;
+  opening a link, probing a target, reading project state, flashing, deploying
+  a project, recovery, or ready;
 - connected-device health;
 - typed device issues and recovery actions;
 - long-running operation progress.
@@ -53,8 +54,16 @@ The hardware action surface separates:
 - link/session operations such as connect, disconnect, reset, and flash;
 - provisioning operations such as provider catalog refresh, target probing,
   progress updates, and typed issue recovery;
-- project operations such as uploading the built-in demo through `lp-server`;
+- project operations such as reading loaded project state, attaching to an
+  existing loaded project, or explicitly uploading/loading the built-in starter
+  project through `lp-server`;
 - local navigation such as selecting a project node.
+
+After a server link is established, Studio reads project state before loading
+anything. A single loaded project becomes the attached `ProjectSession`; zero or
+multiple loaded projects become `ProjectSelectionRequired`; safe/recovery
+conditions become `RecoveryRequired`. This keeps normal connect-to-existing
+hardware separate from explicit overwrite/load intent.
 
 Operational hardware actions are not undoable. Future undo should attach to
 successful project edit transactions, not to permission prompts, flashing,

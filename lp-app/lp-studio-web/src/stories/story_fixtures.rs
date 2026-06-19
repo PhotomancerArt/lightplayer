@@ -1,8 +1,11 @@
 use lp_studio_core::{
     ActionId, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID, ClientSession,
-    ConnectionSession, DeviceAccess, DeviceAccessStatus, DeviceCapability, DeviceFlowState,
-    DeviceId, DeviceSession, ProjectSession, STUDIO_DEMO_PROJECT_ID, StudioDiagnostic,
-    StudioHeartbeat, StudioLogEntry, StudioLogLevel, StudioState,
+    ConnectedDeviceState, ConnectionSession, DeviceAccess, DeviceAccessStatus, DeviceCapability,
+    DeviceFlowState, DeviceId, DeviceIssue, DeviceIssueKind, DeviceSession, ProgressState,
+    ProjectChoice, ProjectSelectionReason, ProjectSession, ProviderAvailability,
+    ProviderCapability, ProviderCardState, ProviderIntent, ProvisioningReason, RecoveryAction,
+    RecoveryReason, STUDIO_DEMO_PROJECT_ID, StudioDiagnostic, StudioHeartbeat, StudioLogEntry,
+    StudioLogLevel, StudioState,
 };
 use lpa_link::{
     LinkConnectionKind, LinkEndpoint, LinkEndpointId, LinkEndpointStatus, LinkProviderId,
@@ -16,11 +19,62 @@ use lpc_model::{
 use lpc_wire::{WireProjectHandle, WireProjectInventoryReadResponse};
 
 pub fn studio_state_idle() -> StudioState {
-    StudioState::default()
+    studio_state_provider_catalog()
+}
+
+pub fn studio_state_provider_catalog() -> StudioState {
+    let mut state = StudioState::default();
+    set_default_provider_cards(&mut state);
+    state
+}
+
+pub fn studio_state_requesting_access() -> StudioState {
+    let mut state = studio_state_provider_catalog();
+    state
+        .device_manager
+        .providers
+        .select_provider(BROWSER_SERIAL_ESP32_PROVIDER_ID);
+    state.device_manager.active_flow = DeviceFlowState::RequestingAccess {
+        provider_id: LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID),
+    };
+    state.device_access = Some(DeviceAccess::new(
+        BROWSER_SERIAL_ESP32_PROVIDER_ID,
+        DeviceAccessStatus::PermissionRequired,
+    ));
+    state
+}
+
+pub fn studio_state_access_canceled() -> StudioState {
+    let mut state = studio_state_provider_catalog();
+    let provider_id = LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID);
+    let issue = DeviceIssue::error(
+        "story-access-canceled",
+        DeviceIssueKind::PermissionCanceled,
+        "The browser device chooser was canceled.",
+    )
+    .with_provider(provider_id.clone())
+    .with_recovery_actions(vec![RecoveryAction::Retry, RecoveryAction::ChooseSimulator]);
+    state.device_access = Some(DeviceAccess::new(
+        provider_id.clone(),
+        DeviceAccessStatus::PermissionCanceled {
+            reason: "The browser device chooser was canceled.".to_string(),
+        },
+    ));
+    state
+        .device_manager
+        .providers
+        .select_provider(provider_id.clone());
+    state.device_manager.active_flow = DeviceFlowState::AccessFailed {
+        provider_id,
+        issue: issue.clone(),
+    };
+    state.device_manager.push_issue(issue);
+    state
 }
 
 pub fn studio_state_connecting() -> StudioState {
     let mut state = StudioState::default();
+    set_default_provider_cards(&mut state);
     set_provider_endpoints(
         &mut state,
         BROWSER_WORKER_PROVIDER_ID,
@@ -34,12 +88,18 @@ pub fn studio_state_connecting() -> StudioState {
 
 pub fn studio_state_connected() -> StudioState {
     let mut state = StudioState::default();
+    set_default_provider_cards(&mut state);
     set_provider_endpoints(
         &mut state,
         BROWSER_WORKER_PROVIDER_ID,
         vec![browser_endpoint().with_status(LinkEndpointStatus::Connected)],
     );
     attach_device_session(&mut state);
+    if let Some(session) = &state.device_session {
+        state.device_manager.active_flow = DeviceFlowState::ServerReady {
+            session_id: session.session_id.clone(),
+        };
+    }
     state.heartbeat = Some(StudioHeartbeat {
         fps_avg: 59.8,
         frame_count: 1_284,
@@ -50,8 +110,127 @@ pub fn studio_state_connected() -> StudioState {
     state
 }
 
+pub fn studio_state_probing_server() -> StudioState {
+    let mut state = studio_state_connected();
+    state.device_manager.active_flow = DeviceFlowState::ProbingTarget {
+        endpoint_id: LinkEndpointId::new("browser-worker-worker-1"),
+    };
+    state
+}
+
+pub fn studio_state_blank_device_flash_offer() -> StudioState {
+    let mut state = studio_state_hardware_granted();
+    state.device_manager.active_flow = DeviceFlowState::ProvisioningRequired {
+        endpoint_id: LinkEndpointId::new("browser-serial-esp32-port-1"),
+        reason: ProvisioningReason::DeviceBlank,
+    };
+    state
+}
+
+pub fn studio_state_flashing() -> StudioState {
+    let mut state = studio_state_blank_device_flash_offer();
+    state.device_manager.active_flow = DeviceFlowState::Flashing {
+        endpoint_id: LinkEndpointId::new("browser-serial-esp32-port-1"),
+        progress: Some(
+            ProgressState::new("Writing LightPlayer firmware")
+                .with_steps(1, 3)
+                .with_percent(42),
+        ),
+    };
+    state
+}
+
+pub fn studio_state_reading_project_state() -> StudioState {
+    let mut state = studio_state_connected();
+    state.device_manager.active_flow = DeviceFlowState::ReadingProjectState {
+        session_id: LinkSessionId::new("browser-worker-worker-1:1"),
+    };
+    state
+}
+
+pub fn studio_state_project_selection_required() -> StudioState {
+    let mut state = studio_state_connected();
+    state.device_manager.active_flow = DeviceFlowState::ProjectSelectionRequired {
+        session_id: LinkSessionId::new("browser-worker-worker-1:1"),
+        reason: ProjectSelectionReason::NoLoadedProject,
+        projects: Vec::new(),
+    };
+    state
+}
+
+pub fn studio_state_multiple_project_selection_required() -> StudioState {
+    let mut state = studio_state_connected();
+    state.device_manager.active_flow = DeviceFlowState::ProjectSelectionRequired {
+        session_id: LinkSessionId::new("browser-worker-worker-1:1"),
+        reason: ProjectSelectionReason::MultipleLoadedProjects,
+        projects: vec![
+            ProjectChoice::new(
+                STUDIO_DEMO_PROJECT_ID,
+                "/projects/studio-demo",
+                WireProjectHandle::new(1),
+            ),
+            ProjectChoice::new("gallery", "/projects/gallery", WireProjectHandle::new(2)),
+        ],
+    };
+    state
+}
+
+pub fn studio_state_recovery_required() -> StudioState {
+    let mut state = studio_state_connected();
+    state.device_manager.active_flow = DeviceFlowState::RecoveryRequired {
+        session_id: LinkSessionId::new("browser-worker-worker-1:1"),
+        reason: RecoveryReason::ProjectCrash {
+            project_id: Some(STUDIO_DEMO_PROJECT_ID.to_string()),
+            message: Some("The previous project crashed during startup.".to_string()),
+        },
+    };
+    state
+}
+
+pub fn studio_state_deploying_project() -> StudioState {
+    let mut state = studio_state_connected();
+    state.device_manager.active_flow = DeviceFlowState::DeployingProject {
+        project_id: STUDIO_DEMO_PROJECT_ID.to_string(),
+        progress: Some(
+            ProgressState::new("Writing starter project")
+                .with_steps(2, 4)
+                .with_percent(50),
+        ),
+    };
+    state
+}
+
+pub fn studio_state_connection_lost() -> StudioState {
+    let mut state = studio_state_connected();
+    let issue = DeviceIssue::error(
+        "story-connection-lost",
+        DeviceIssueKind::ConnectionLost,
+        "The device connection was lost.",
+    )
+    .with_recovery_actions(vec![
+        RecoveryAction::Reconnect,
+        RecoveryAction::ChooseSimulator,
+    ]);
+    state.device_manager.active_flow = DeviceFlowState::Degraded {
+        issue: issue.clone(),
+    };
+    state.device_manager.push_issue(issue);
+    state
+}
+
 pub fn studio_state_hardware_unsupported() -> StudioState {
     let mut state = StudioState::default();
+    set_default_provider_cards(&mut state);
+    state.device_manager.providers.set_provider_availability(
+        LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID),
+        ProviderAvailability::unavailable(
+            "Web Serial is not supported in this browser.",
+            vec![
+                RecoveryAction::UseCompatibleBrowser,
+                RecoveryAction::ChooseSimulator,
+            ],
+        ),
+    );
     state
         .device_manager
         .providers
@@ -67,6 +246,7 @@ pub fn studio_state_hardware_unsupported() -> StudioState {
 
 pub fn studio_state_hardware_denied() -> StudioState {
     let mut state = StudioState::default();
+    set_default_provider_cards(&mut state);
     state
         .device_manager
         .providers
@@ -82,6 +262,7 @@ pub fn studio_state_hardware_denied() -> StudioState {
 
 pub fn studio_state_hardware_granted() -> StudioState {
     let mut state = StudioState::default();
+    set_default_provider_cards(&mut state);
     state
         .device_manager
         .providers
@@ -108,6 +289,9 @@ pub fn studio_state_ready() -> StudioState {
         Some(demo_inventory()),
         Some("nodes[shader]"),
     ));
+    state.device_manager.active_flow = DeviceFlowState::Ready {
+        project_id: STUDIO_DEMO_PROJECT_ID.to_string(),
+    };
     state.logs = vec![
         StudioLogEntry::new(StudioLogLevel::Info, "fw-browser", "runtime ready"),
         StudioLogEntry::new(
@@ -130,9 +314,13 @@ pub fn studio_state_error() -> StudioState {
 
 pub fn studio_state_long_content() -> StudioState {
     let mut state = studio_state_ready();
+    let long_session_id =
+        LinkSessionId::new("browser-worker-worker-1:session-with-a-very-long-debug-identifier");
     if let Some(device) = &mut state.device_session {
-        device.session_id =
-            LinkSessionId::new("browser-worker-worker-1:session-with-a-very-long-debug-identifier");
+        device.session_id = long_session_id.clone();
+    }
+    if let Some(device) = &mut state.device_manager.current_device {
+        device.session_id = long_session_id;
     }
     if let Some(project) = &mut state.project_session {
         project.project_id =
@@ -188,12 +376,30 @@ fn attach_device_session(state: &mut StudioState) {
     });
     state.connection_session = Some(ConnectionSession {
         endpoint_id,
-        session_id,
+        session_id: session_id.clone(),
         kind: LinkConnectionKind::BrowserWorker {
             protocol: "fw-browser-post-message-v1".to_string(),
         },
     });
     state.client_session = Some(ClientSession::connected("lp-server"));
+    state.device_manager.current_device = Some(ConnectedDeviceState::connected(
+        DeviceId::new("browser-worker:browser-worker-worker-1"),
+        provider_id,
+        LinkEndpointId::new("browser-worker-worker-1"),
+        session_id,
+        LinkConnectionKind::BrowserWorker {
+            protocol: "fw-browser-post-message-v1".to_string(),
+        },
+        vec![
+            DeviceCapability::Connect,
+            DeviceCapability::UseBrowserWorker,
+            DeviceCapability::WriteProjectFiles,
+            DeviceCapability::ReadHeartbeat,
+            DeviceCapability::LoadProject,
+            DeviceCapability::ReadProjectInventory,
+            DeviceCapability::ReadLogs,
+        ],
+    ));
 }
 
 fn browser_endpoint() -> LinkEndpoint {
@@ -218,6 +424,39 @@ fn set_provider_endpoints(
         .device_manager
         .providers
         .set_provider_endpoints(provider_id, endpoints);
+}
+
+fn set_default_provider_cards(state: &mut StudioState) {
+    state.device_manager.providers.set_providers(vec![
+        ProviderCardState::new(
+            BROWSER_WORKER_PROVIDER_ID,
+            "Simulator",
+            ProviderIntent::SimulateInBrowser,
+        )
+        .with_availability(ProviderAvailability::Available)
+        .with_capabilities(vec![
+            ProviderCapability::DiscoverEndpoints,
+            ProviderCapability::Connect,
+            ProviderCapability::Simulate,
+            ProviderCapability::DeployProject,
+            ProviderCapability::ReadProjectInventory,
+        ])
+        .with_endpoints(vec![browser_endpoint()]),
+        ProviderCardState::new(
+            BROWSER_SERIAL_ESP32_PROVIDER_ID,
+            "USB ESP32",
+            ProviderIntent::ConnectUsbEsp32,
+        )
+        .with_availability(ProviderAvailability::AvailableWithPermission)
+        .with_capabilities(vec![
+            ProviderCapability::RequestAccess,
+            ProviderCapability::DiscoverEndpoints,
+            ProviderCapability::Connect,
+            ProviderCapability::ResetDevice,
+            ProviderCapability::DeployProject,
+            ProviderCapability::ReadProjectInventory,
+        ]),
+    ]);
 }
 
 fn project_session(

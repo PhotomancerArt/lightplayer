@@ -95,6 +95,11 @@ impl ScenarioHarness {
             .await
     }
 
+    pub async fn read_project_state(&mut self) -> Result<(), StudioRuntimeError> {
+        self.dispatch(StudioActionKind::ReadProjectState, ActionOrigin::Harness)
+            .await
+    }
+
     pub async fn refresh_status(&mut self) -> Result<(), StudioRuntimeError> {
         self.dispatch(StudioActionKind::RefreshStatus, ActionOrigin::Harness)
             .await
@@ -198,6 +203,7 @@ fn event_label(event: &StudioEvent) -> String {
         StudioEvent::ProjectLoaded { .. } => "project loaded",
         StudioEvent::ProjectInventoryRead { .. } => "project inventory read",
         StudioEvent::LoadedProjectsRefreshed { .. } => "loaded projects refreshed",
+        StudioEvent::ProjectStateRead { .. } => "project state read",
         StudioEvent::HeartbeatReceived { .. } => "heartbeat received",
         StudioEvent::LogReceived { .. } => "log received",
         StudioEvent::DiagnosticRaised { .. } => "diagnostic raised",
@@ -209,7 +215,8 @@ fn event_label(event: &StudioEvent) -> String {
 #[cfg(test)]
 mod tests {
     use lp_studio_core::{
-        DeviceFlowState, DeviceIssueKind, ProvisioningReason, STUDIO_DEMO_PROJECT_ID,
+        DeviceFlowState, DeviceIssueKind, ProjectSelectionReason, ProvisioningReason,
+        STUDIO_DEMO_PROJECT_ID,
     };
 
     use super::*;
@@ -271,7 +278,7 @@ mod tests {
         harness.refresh_catalog().await.unwrap();
         harness.start_default_provider().await.unwrap();
         harness.connect_selected_endpoint().await.unwrap();
-        harness.load_demo_project().await.unwrap();
+        harness.read_project_state().await.unwrap();
 
         assert!(matches!(
             harness.app().state().device_manager.active_flow,
@@ -291,8 +298,54 @@ mod tests {
             matches!(flow, DeviceFlowState::ServerReady { .. })
         });
         assert_flow_snapshot(&harness, |flow| {
-            matches!(flow, DeviceFlowState::DeployingProject { .. })
+            matches!(flow, DeviceFlowState::ReadingProjectState { .. })
         });
+    }
+
+    #[tokio::test]
+    async fn no_loaded_project_requires_project_selection() {
+        let mut harness = ScenarioHarness::new(ProvisioningScenario::no_loaded_project());
+
+        connect_ready_server(&mut harness).await;
+        harness.read_project_state().await.unwrap();
+
+        assert!(matches!(
+            harness.app().state().device_manager.active_flow,
+            DeviceFlowState::ProjectSelectionRequired {
+                reason: ProjectSelectionReason::NoLoadedProject,
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn multiple_loaded_projects_require_project_selection() {
+        let mut harness = ScenarioHarness::new(ProvisioningScenario::multiple_loaded_projects());
+
+        connect_ready_server(&mut harness).await;
+        harness.read_project_state().await.unwrap();
+
+        assert!(matches!(
+            &harness.app().state().device_manager.active_flow,
+            DeviceFlowState::ProjectSelectionRequired {
+                reason: ProjectSelectionReason::MultipleLoadedProjects,
+                projects,
+                ..
+            } if projects.len() == 2
+        ));
+    }
+
+    #[tokio::test]
+    async fn recovery_required_enters_recovery_flow() {
+        let mut harness = ScenarioHarness::new(ProvisioningScenario::recovery_required());
+
+        connect_ready_server(&mut harness).await;
+        harness.read_project_state().await.unwrap();
+
+        assert!(matches!(
+            harness.app().state().device_manager.active_flow,
+            DeviceFlowState::RecoveryRequired { .. }
+        ));
     }
 
     #[tokio::test]

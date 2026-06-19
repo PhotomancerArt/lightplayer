@@ -1,7 +1,10 @@
 use lpa_link::{LinkEndpointId, LinkProviderId, LinkSessionId};
 use serde::{Deserialize, Serialize};
 
-use crate::{DeviceIssue, ProgressState, ProvisioningReason};
+use crate::{
+    DeviceIssue, ProgressState, ProjectChoice, ProjectSelectionReason, ProvisioningReason,
+    RecoveryReason,
+};
 
 /// Product-level journey through provider choice, provisioning, and readiness.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
@@ -49,6 +52,18 @@ pub enum DeviceFlowState {
     },
     ServerReady {
         session_id: LinkSessionId,
+    },
+    ReadingProjectState {
+        session_id: LinkSessionId,
+    },
+    ProjectSelectionRequired {
+        session_id: LinkSessionId,
+        reason: ProjectSelectionReason,
+        projects: Vec<ProjectChoice>,
+    },
+    RecoveryRequired {
+        session_id: LinkSessionId,
+        reason: RecoveryReason,
     },
     DeployingProject {
         project_id: String,

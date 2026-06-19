@@ -1,12 +1,12 @@
-use lpa_link::{LinkEndpointId, LinkProviderId};
+use lpa_link::{LinkEndpointId, LinkProviderId, LinkSessionId};
 
 use crate::{
     ActionDescriptor, ActionId, ActionMeta, ActionOrigin, ClientSession, ConnectedDeviceState,
     ConnectionSession, DeviceAccess, DeviceAccessStatus, DeviceFlowState, DeviceId, DeviceIssue,
-    DeviceIssueKind, DeviceSession, InFlightAction, ProgressState, ProjectSession,
-    ProviderAvailability, RecoveryAction, STUDIO_DEMO_PROJECT_ID, StudioAction, StudioActionKind,
-    StudioDiagnostic, StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel, StudioState,
-    TargetKind,
+    DeviceIssueKind, DeviceSession, InFlightAction, ProgressState, ProjectSelectionReason,
+    ProjectSession, ProjectStateResult, ProviderAvailability, RecoveryAction,
+    STUDIO_DEMO_PROJECT_ID, StudioAction, StudioActionKind, StudioDiagnostic, StudioEffect,
+    StudioEvent, StudioLogEntry, StudioLogLevel, StudioState, TargetKind,
 };
 
 pub struct StudioApp {
@@ -286,6 +286,23 @@ impl StudioApp {
                 effects.push(StudioEffect::RefreshStatus {
                     action_id: action.meta.action_id,
                 });
+            }
+            StudioActionKind::ReadProjectState => {
+                self.mark_in_flight(action.meta.action_id, descriptor);
+                if let Some(session_id) = self.current_link_session_id() {
+                    self.state.device_manager.active_flow = DeviceFlowState::ReadingProjectState {
+                        session_id: session_id.clone(),
+                    };
+                    effects.push(StudioEffect::ReadProjectState {
+                        action_id: action.meta.action_id,
+                    });
+                } else {
+                    self.finish_action(action.meta.action_id);
+                    self.state.diagnostics.push(StudioDiagnostic::error(
+                        Some(action.meta.action_id),
+                        "No server session is connected.",
+                    ));
+                }
             }
             StudioActionKind::ReadProjectInventory => {
                 self.mark_in_flight(action.meta.action_id, descriptor);
@@ -587,6 +604,9 @@ impl StudioApp {
             } => {
                 self.finish_action(action_id);
             }
+            StudioEvent::ProjectStateRead { action_id, result } => {
+                effects.extend(self.apply_project_state_result(action_id, result));
+            }
             StudioEvent::HeartbeatReceived { heartbeat } => {
                 self.state.heartbeat = Some(heartbeat);
                 if let Some(device) = &mut self.state.device_manager.current_device {
@@ -643,6 +663,68 @@ impl StudioApp {
             .providers
             .selected_provider_id()
             .cloned()
+    }
+
+    fn current_link_session_id(&self) -> Option<LinkSessionId> {
+        self.state
+            .device_session
+            .as_ref()
+            .map(|session| session.session_id.clone())
+            .or_else(|| {
+                self.state
+                    .connection_session
+                    .as_ref()
+                    .map(|session| session.session_id.clone())
+            })
+    }
+
+    fn apply_project_state_result(
+        &mut self,
+        action_id: ActionId,
+        result: ProjectStateResult,
+    ) -> Vec<StudioEffect> {
+        match result {
+            ProjectStateResult::LoadedProject { project } => {
+                self.state.project_session =
+                    Some(ProjectSession::new(project.project_id, project.handle));
+                vec![StudioEffect::ReadProjectInventory {
+                    action_id,
+                    handle: project.handle,
+                }]
+            }
+            ProjectStateResult::NoLoadedProject => {
+                self.finish_action(action_id);
+                if let Some(session_id) = self.current_link_session_id() {
+                    self.state.device_manager.active_flow =
+                        DeviceFlowState::ProjectSelectionRequired {
+                            session_id,
+                            reason: ProjectSelectionReason::NoLoadedProject,
+                            projects: Vec::new(),
+                        };
+                }
+                Vec::new()
+            }
+            ProjectStateResult::MultipleProjects { projects } => {
+                self.finish_action(action_id);
+                if let Some(session_id) = self.current_link_session_id() {
+                    self.state.device_manager.active_flow =
+                        DeviceFlowState::ProjectSelectionRequired {
+                            session_id,
+                            reason: ProjectSelectionReason::MultipleLoadedProjects,
+                            projects,
+                        };
+                }
+                Vec::new()
+            }
+            ProjectStateResult::RecoveryRequired { reason } => {
+                self.finish_action(action_id);
+                if let Some(session_id) = self.current_link_session_id() {
+                    self.state.device_manager.active_flow =
+                        DeviceFlowState::RecoveryRequired { session_id, reason };
+                }
+                Vec::new()
+            }
+        }
     }
 
     fn raise_no_provider_issue(&mut self, action_id: ActionId) {
@@ -832,8 +914,9 @@ mod tests {
 
     use crate::{
         ActionOrigin, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID,
-        DeviceCapability, DeviceFlowState, DeviceIssueKind, ProviderAvailability,
-        ProviderCardState, ProviderIntent, RecoveryAction,
+        DeviceCapability, DeviceFlowState, DeviceIssueKind, ProjectSelectionReason,
+        ProjectStateResult, ProviderAvailability, ProviderCardState, ProviderIntent,
+        RecoveryAction, RecoveryReason,
     };
 
     use super::*;
@@ -1056,6 +1139,102 @@ mod tests {
     }
 
     #[test]
+    fn read_project_state_marks_flow_and_emits_effect() {
+        let mut app = connected_app();
+
+        let effects = app.dispatch_kind(StudioActionKind::ReadProjectState, ActionOrigin::User);
+
+        assert!(matches!(effects[0], StudioEffect::ReadProjectState { .. }));
+        assert!(matches!(
+            app.state().device_manager.active_flow,
+            DeviceFlowState::ReadingProjectState { .. }
+        ));
+    }
+
+    #[test]
+    fn project_state_read_attaches_existing_project_and_reads_inventory() {
+        let mut app = connected_app();
+        let action_id = ActionId::new(42);
+        app.mark_in_flight(
+            action_id,
+            ActionDescriptor::for_type(crate::StudioActionType::ReadProjectState),
+        );
+        app.state.device_manager.active_flow = DeviceFlowState::ReadingProjectState {
+            session_id: LinkSessionId::new("session-1"),
+        };
+
+        let effects = app.apply_event(StudioEvent::ProjectStateRead {
+            action_id,
+            result: ProjectStateResult::loaded_project(
+                STUDIO_DEMO_PROJECT_ID,
+                "/projects/studio-demo",
+                WireProjectHandle::new(7),
+            ),
+        });
+
+        assert!(matches!(
+            effects[0],
+            StudioEffect::ReadProjectInventory {
+                handle: WireProjectHandle(7),
+                ..
+            }
+        ));
+        assert_eq!(
+            app.state()
+                .project_session
+                .as_ref()
+                .map(|project| project.project_id.as_str()),
+            Some(STUDIO_DEMO_PROJECT_ID)
+        );
+
+        app.apply_event(StudioEvent::ProjectInventoryRead {
+            action_id,
+            inventory: WireProjectInventoryReadResponse::default(),
+        });
+
+        assert!(app.state().in_flight.is_empty());
+        assert!(matches!(
+            app.state().device_manager.active_flow,
+            DeviceFlowState::Ready { .. }
+        ));
+    }
+
+    #[test]
+    fn project_state_read_can_require_project_selection_or_recovery() {
+        let mut no_project = connected_app();
+        let action_id = ActionId::new(43);
+
+        no_project.apply_event(StudioEvent::ProjectStateRead {
+            action_id,
+            result: ProjectStateResult::NoLoadedProject,
+        });
+
+        assert!(matches!(
+            no_project.state().device_manager.active_flow,
+            DeviceFlowState::ProjectSelectionRequired {
+                reason: ProjectSelectionReason::NoLoadedProject,
+                ..
+            }
+        ));
+
+        let mut recovery = connected_app();
+        recovery.apply_event(StudioEvent::ProjectStateRead {
+            action_id,
+            result: ProjectStateResult::RecoveryRequired {
+                reason: RecoveryReason::ProjectCrash {
+                    project_id: Some(STUDIO_DEMO_PROJECT_ID.to_string()),
+                    message: Some("previous boot failed".to_string()),
+                },
+            },
+        });
+
+        assert!(matches!(
+            recovery.state().device_manager.active_flow,
+            DeviceFlowState::RecoveryRequired { .. }
+        ));
+    }
+
+    #[test]
     fn device_connection_failed_event_sets_link_failed_flow() {
         let mut app = StudioApp::new();
         let action_id = ActionId::new(30);
@@ -1194,5 +1373,20 @@ mod tests {
                 .and_then(|project| project.selected_node_id.as_deref()),
             Some("node-a")
         );
+    }
+
+    fn connected_app() -> StudioApp {
+        let mut app = StudioApp::new();
+        app.apply_event(StudioEvent::DeviceConnected {
+            action_id: ActionId::new(1),
+            provider_id: LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID),
+            endpoint_id: LinkEndpointId::new("browser-worker-worker-1"),
+            session_id: LinkSessionId::new("session-1"),
+            connection_kind: LinkConnectionKind::BrowserWorker {
+                protocol: "fw-browser-post-message-v1".to_string(),
+            },
+            capabilities: vec![DeviceCapability::Connect],
+        });
+        app
     }
 }

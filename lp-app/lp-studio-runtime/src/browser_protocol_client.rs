@@ -6,24 +6,28 @@ use lpc_wire::{
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
-use lp_studio_core::{StudioEffect, StudioEvent};
+use lp_studio_core::{ProjectStateResult, StudioEffect, StudioEvent};
 
-use crate::browser_worker_runtime::BrowserWorkerStudioRuntime;
+use crate::browser_worker_runtime::BrowserWorkerHandle;
 use crate::protocol_event::{inventory_request, server_event};
 use crate::worker_envelope::{BrowserInputEnvelope, BrowserOutputEnvelope};
 use crate::{StudioRuntimeError, demo_project};
 
 pub struct BrowserProtocolClient {
-    runtime: BrowserWorkerStudioRuntime,
+    runtime: BrowserWorkerHandle,
     next_request_id: u64,
 }
 
 impl BrowserProtocolClient {
-    pub fn new(runtime: BrowserWorkerStudioRuntime) -> Self {
+    pub(crate) fn new(runtime: BrowserWorkerHandle) -> Self {
         Self {
             runtime,
             next_request_id: 1,
         }
+    }
+
+    pub fn close(&mut self) {
+        self.runtime.terminate();
     }
 
     pub async fn seed_demo_project(
@@ -59,6 +63,9 @@ impl BrowserProtocolClient {
             }
             StudioEffect::RefreshStatus { action_id } => {
                 self.refresh_loaded_projects(action_id).await
+            }
+            StudioEffect::ReadProjectState { action_id } => {
+                self.read_project_state(action_id).await
             }
             _ => Ok(Vec::new()),
         }
@@ -126,6 +133,21 @@ impl BrowserProtocolClient {
             events.push(StudioEvent::LoadedProjectsRefreshed {
                 action_id,
                 projects,
+            });
+        }
+        Ok(events)
+    }
+
+    async fn read_project_state(
+        &mut self,
+        action_id: lp_studio_core::ActionId,
+    ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
+        let exchange = self.send_request(ClientRequest::ListLoadedProjects).await?;
+        let mut events = exchange.events;
+        if let WireServerMsgBody::ListLoadedProjects { projects } = exchange.response.msg {
+            events.push(StudioEvent::ProjectStateRead {
+                action_id,
+                result: ProjectStateResult::from_loaded_projects(projects),
             });
         }
         Ok(events)

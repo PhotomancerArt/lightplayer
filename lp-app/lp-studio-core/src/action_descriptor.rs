@@ -148,6 +148,13 @@ impl ActionDescriptor {
                 ActionCategory::Runtime,
                 ActionHistoryPolicy::Never,
             ),
+            StudioActionType::ReadProjectState => Self::new(
+                action_type,
+                "Read project state",
+                "Inspect the connected server before attaching, loading, or recovering a project.",
+                ActionCategory::Project,
+                ActionHistoryPolicy::Never,
+            ),
             StudioActionType::ReadProjectInventory => Self::new(
                 action_type,
                 "Read project inventory",
@@ -212,6 +219,7 @@ mod tests {
             StudioActionType::UploadDemoProject,
             StudioActionType::LoadDemoProject,
             StudioActionType::RefreshStatus,
+            StudioActionType::ReadProjectState,
             StudioActionType::ReadProjectInventory,
         ] {
             assert!(

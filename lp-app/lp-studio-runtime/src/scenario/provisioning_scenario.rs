@@ -1,7 +1,8 @@
 use lp_studio_core::{
     BROWSER_SERIAL_ESP32_PROVIDER_ID, DeviceCapability, DeviceIssue, DeviceIssueKind,
-    HOST_PROCESS_PROVIDER_ID, ProviderAvailability, ProviderCapability, ProviderCardState,
-    ProviderIntent, RecoveryAction, STUDIO_DEMO_PROJECT_ID,
+    HOST_PROCESS_PROVIDER_ID, ProjectChoice, ProjectStateResult, ProviderAvailability,
+    ProviderCapability, ProviderCardState, ProviderIntent, RecoveryAction, RecoveryReason,
+    STUDIO_DEMO_PROJECT_ID,
 };
 use lpa_link::{LinkConnectionKind, LinkEndpoint, LinkEndpointId, LinkProviderId};
 use serde::{Deserialize, Serialize};
@@ -22,6 +23,7 @@ pub struct ProvisioningScenario {
     pub connect: ConnectOutcome,
     pub probe: ProbeOutcome,
     pub flash: FlashOutcome,
+    pub project_state: ProjectStateResult,
     pub project: ProjectOutcome,
     pub connection: ConnectionOutcome,
 }
@@ -120,6 +122,38 @@ impl ProvisioningScenario {
         )))
     }
 
+    pub fn no_loaded_project() -> Self {
+        Self::host("no-loaded-project").with_project_state(ProjectStateResult::NoLoadedProject)
+    }
+
+    pub fn multiple_loaded_projects() -> Self {
+        Self::host("multiple-loaded-projects").with_project_state(
+            ProjectStateResult::MultipleProjects {
+                projects: vec![
+                    ProjectChoice::new(
+                        STUDIO_DEMO_PROJECT_ID,
+                        project_path(),
+                        lpc_wire::WireProjectHandle::new(1),
+                    ),
+                    ProjectChoice::new(
+                        "gallery",
+                        "/projects/gallery",
+                        lpc_wire::WireProjectHandle::new(2),
+                    ),
+                ],
+            },
+        )
+    }
+
+    pub fn recovery_required() -> Self {
+        Self::host("recovery-required").with_project_state(ProjectStateResult::RecoveryRequired {
+            reason: RecoveryReason::ProjectCrash {
+                project_id: Some(STUDIO_DEMO_PROJECT_ID.to_string()),
+                message: Some("The previously loaded project failed during boot.".to_string()),
+            },
+        })
+    }
+
     pub fn project_load_fails() -> Self {
         Self::host("project-load-fails").with_project(ProjectOutcome::load_fails(issue(
             "project-load-failed",
@@ -215,6 +249,11 @@ impl ProvisioningScenario {
             connect,
             probe: ProbeOutcome::server(Some("scenario-server".to_string())),
             flash: FlashOutcome::Succeeds,
+            project_state: ProjectStateResult::loaded_project(
+                STUDIO_DEMO_PROJECT_ID,
+                project_path(),
+                lpc_wire::WireProjectHandle::new(1),
+            ),
             project: ProjectOutcome::succeeds(),
             connection: ConnectionOutcome::Healthy,
         }
@@ -242,6 +281,11 @@ impl ProvisioningScenario {
 
     fn with_flash(mut self, flash: FlashOutcome) -> Self {
         self.flash = flash;
+        self
+    }
+
+    fn with_project_state(mut self, project_state: ProjectStateResult) -> Self {
+        self.project_state = project_state;
         self
     }
 

@@ -7,6 +7,12 @@ It renders `lp-studio-core` state and drives browser runtimes from
 `browser-serial-esp32` path for already-flashed ESP32 hardware. It does not own
 Studio domain behavior and does not use Dioxus server functions.
 
+The main app uses a browser-side provisioning controller rather than helper
+functions that return a completed `StudioApp`. The controller dispatches real
+`StudioActionKind` values, executes returned effects through the active browser
+runtime, applies events back into `StudioApp`, and auto-advances only obvious
+steps such as endpoint granted -> connect -> read project state.
+
 ## Run
 
 ```bash
@@ -22,10 +28,10 @@ build path.
 
 ## Hardware
 
-The hardware button uses Web Serial, so it requires a supported Chromium-class
-browser and a secure/local context. The current hardware path assumes the ESP32
-already has LightPlayer firmware running; browser-side flashing is planned as
-the next hardware phase.
+The USB ESP32 provider uses Web Serial, so it requires a supported
+Chromium-class browser and a secure/local context. The current hardware path
+assumes the ESP32 already has LightPlayer firmware running; browser-side
+flashing is planned as the next hardware phase.
 
 The app loads `public/browser-serial.js` before the Rust wasm module. That shim
 owns the direct Web Serial stream objects, while Rust owns Studio actions,
@@ -54,6 +60,10 @@ Add new stories by:
 
 Use `stories/story_fixtures.rs` for fake but domain-shaped `StudioState`
 fixtures. Stories should render real components, not duplicate mock markup.
+Provisioning journey stories use `flow/*` ids and cover provider selection,
+access, link opening, target probing, blank-device provisioning, flashing,
+server ready, project-state reading, project selection, recovery, deploying,
+ready, and connection-lost branches.
 
 Generate local PNGs for quick review:
 
@@ -101,4 +111,5 @@ non-generated files under `lp-app/lp-studio-web/` have changed.
 - `lp-studio-core` owns actions, state, effects, diagnostics, and sessions.
 - `lp-studio-runtime` owns browser worker/serial protocol flow and demo project
   loading.
-- `lp-studio-web` owns Dioxus components and static presentation.
+- `lp-studio-web` owns Dioxus components, static presentation, and the thin
+  browser controller that routes core effects to browser runtimes.

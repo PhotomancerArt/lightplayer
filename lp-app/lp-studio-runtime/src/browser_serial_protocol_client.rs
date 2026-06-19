@@ -6,7 +6,9 @@ use lpa_client::{ClientError, ClientEvent, ClientIo, ClientOutcome, LpClient};
 use lpc_wire::{ClientMessage, TransportError, WireServerMessage, json};
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 
-use lp_studio_core::{StudioDiagnostic, StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel};
+use lp_studio_core::{
+    ProjectStateResult, StudioDiagnostic, StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel,
+};
 
 use crate::browser_serial_shim;
 use crate::protocol_event::client_event;
@@ -75,6 +77,9 @@ impl BrowserSerialProtocolClient {
             StudioEffect::RefreshStatus { action_id } => {
                 self.refresh_loaded_projects(action_id).await
             }
+            StudioEffect::ReadProjectState { action_id } => {
+                self.read_project_state(action_id).await
+            }
             _ => Ok(Vec::new()),
         }
     }
@@ -129,6 +134,23 @@ impl BrowserSerialProtocolClient {
         events.push(StudioEvent::LoadedProjectsRefreshed {
             action_id,
             projects,
+        });
+        Ok(events)
+    }
+
+    async fn read_project_state(
+        &mut self,
+        action_id: lp_studio_core::ActionId,
+    ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
+        let outcome = self
+            .client
+            .project_list_loaded()
+            .await
+            .map_err(map_client_error)?;
+        let (projects, mut events) = self.split_outcome(outcome);
+        events.push(StudioEvent::ProjectStateRead {
+            action_id,
+            result: ProjectStateResult::from_loaded_projects(projects),
         });
         Ok(events)
     }

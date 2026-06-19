@@ -38,9 +38,10 @@ pub use in_flight_action::InFlightAction;
 pub use project_session::ProjectSession;
 pub use provisioning::{
     ConnectedDeviceState, DeviceFlowState, DeviceHealthState, DeviceIssue, DeviceIssueKind,
-    DeviceIssueSeverity, DeviceManagerState, ProgressState, ProviderAvailability,
-    ProviderCapability, ProviderCardState, ProviderCatalog, ProviderIntent, ProvisioningReason,
-    RecoveryAction, TargetKind, TargetProbeResult,
+    DeviceIssueSeverity, DeviceManagerState, ProgressState, ProjectChoice, ProjectSelectionReason,
+    ProjectStateResult, ProviderAvailability, ProviderCapability, ProviderCardState,
+    ProviderCatalog, ProviderIntent, ProvisioningReason, RecoveryAction, RecoveryReason,
+    TargetKind, TargetProbeResult,
 };
 pub use studio_action::{StudioAction, StudioActionKind, StudioActionType};
 pub use studio_app::StudioApp;

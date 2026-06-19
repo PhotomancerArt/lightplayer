@@ -24,6 +24,7 @@ pub enum StudioActionType {
     LoadDemoProject,
     AcknowledgeProvisioningIssue,
     RefreshStatus,
+    ReadProjectState,
     ReadProjectInventory,
     SelectProjectNode,
 }
@@ -49,6 +50,7 @@ impl StudioActionType {
             Self::LoadDemoProject,
             Self::AcknowledgeProvisioningIssue,
             Self::RefreshStatus,
+            Self::ReadProjectState,
             Self::ReadProjectInventory,
             Self::SelectProjectNode,
         ]
@@ -91,6 +93,7 @@ pub enum StudioActionKind {
         issue_id: String,
     },
     RefreshStatus,
+    ReadProjectState,
     ReadProjectInventory,
     SelectProjectNode {
         node_id: Option<String>,
@@ -120,6 +123,7 @@ impl StudioActionKind {
                 StudioActionType::AcknowledgeProvisioningIssue
             }
             Self::RefreshStatus => StudioActionType::RefreshStatus,
+            Self::ReadProjectState => StudioActionType::ReadProjectState,
             Self::ReadProjectInventory => StudioActionType::ReadProjectInventory,
             Self::SelectProjectNode { .. } => StudioActionType::SelectProjectNode,
         }

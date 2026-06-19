@@ -2,26 +2,260 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use lp_studio_core::{
-    ActionOrigin, BROWSER_WORKER_PROVIDER_ID, DeviceCapability, StudioActionKind, StudioApp,
-    StudioEvent, StudioLogEntry, StudioLogLevel,
+    ActionOrigin, BROWSER_WORKER_PROVIDER_ID, DeviceAccessStatus, DeviceCapability,
+    ProviderAvailability, ProviderCapability, ProviderCardState, ProviderIntent, StudioActionKind,
+    StudioApp, StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel, TargetProbeResult,
 };
-use lpa_link::providers::browser_worker::BrowserWorkerProvider;
+use lpa_link::providers::browser_worker::{BrowserWorkerProvider, BrowserWorkerSession};
 use lpa_link::{LinkConnectionKind, LinkEndpointId, LinkProvider, LinkProviderId, LinkSession};
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use web_sys::{MessageEvent, Worker, WorkerOptions, WorkerType};
 
+use crate::StudioRuntimeError;
 use crate::browser_protocol_client::BrowserProtocolClient;
+use crate::effect_executor::EffectExecutor;
+use crate::harness::RuntimeHarness;
 use crate::worker_envelope::{BrowserInputEnvelope, BrowserOutputEnvelope};
-use crate::{StudioRuntimeError, demo_project};
 
+/// Browser Worker-backed Studio runtime used by the simulator provider.
 pub struct BrowserWorkerStudioRuntime {
+    worker_url: String,
+    provider: BrowserWorkerProvider,
+    session: Option<BrowserWorkerSession>,
+    client: Option<BrowserProtocolClient>,
+}
+
+impl BrowserWorkerStudioRuntime {
+    pub fn new(worker_url: &str) -> Self {
+        let mut provider = BrowserWorkerProvider::new(BROWSER_WORKER_PROVIDER_ID);
+        provider.create_worker_endpoint("Browser firmware runtime");
+        Self {
+            worker_url: worker_url.to_string(),
+            provider,
+            session: None,
+            client: None,
+        }
+    }
+
+    pub async fn close(&mut self) -> Result<(), StudioRuntimeError> {
+        if let Some(client) = &mut self.client {
+            client.close();
+        }
+        if let Some(session) = &mut self.session {
+            session
+                .close()
+                .await
+                .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
+        }
+        self.client = None;
+        self.session = None;
+        Ok(())
+    }
+
+    async fn refresh_provider_catalog(
+        &mut self,
+        action_id: lp_studio_core::ActionId,
+    ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
+        let endpoints = self
+            .provider
+            .discover()
+            .await
+            .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
+        Ok(vec![StudioEvent::ProviderCatalogUpdated {
+            action_id: Some(action_id),
+            providers: vec![
+                ProviderCardState::new(
+                    BROWSER_WORKER_PROVIDER_ID,
+                    "Simulator",
+                    ProviderIntent::SimulateInBrowser,
+                )
+                .with_availability(ProviderAvailability::Available)
+                .with_capabilities(vec![
+                    ProviderCapability::DiscoverEndpoints,
+                    ProviderCapability::Connect,
+                    ProviderCapability::Simulate,
+                    ProviderCapability::ReadLogs,
+                    ProviderCapability::ReadDiagnostics,
+                    ProviderCapability::ReadHeartbeat,
+                    ProviderCapability::DeployProject,
+                    ProviderCapability::ReadProjectInventory,
+                ])
+                .with_endpoints(endpoints),
+            ],
+        }])
+    }
+
+    async fn request_device_access(
+        &mut self,
+        action_id: lp_studio_core::ActionId,
+        provider_id: LinkProviderId,
+    ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
+        if provider_id.as_str() != BROWSER_WORKER_PROVIDER_ID {
+            return Err(StudioRuntimeError::UnsupportedProvider(
+                provider_id.as_str().to_string(),
+            ));
+        }
+        Ok(vec![StudioEvent::DeviceAccessUpdated {
+            action_id: Some(action_id),
+            provider_id,
+            status: DeviceAccessStatus::Granted,
+        }])
+    }
+
+    async fn discover(
+        &mut self,
+        action_id: lp_studio_core::ActionId,
+        provider_id: LinkProviderId,
+    ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
+        if provider_id.as_str() != BROWSER_WORKER_PROVIDER_ID {
+            return Err(StudioRuntimeError::UnsupportedProvider(
+                provider_id.as_str().to_string(),
+            ));
+        }
+        let endpoints = self
+            .provider
+            .discover()
+            .await
+            .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
+        Ok(vec![StudioEvent::EndpointsDiscovered {
+            action_id,
+            provider_id,
+            endpoints,
+        }])
+    }
+
+    async fn connect(
+        &mut self,
+        action_id: lp_studio_core::ActionId,
+        endpoint_id: LinkEndpointId,
+    ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
+        let mut session = self
+            .provider
+            .connect(&endpoint_id)
+            .await
+            .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
+        let connection = session
+            .connection()
+            .await
+            .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
+        let session_id = session.id().clone();
+        let logs = session.logs();
+        let diagnostics = session.diagnostics();
+        let connection_kind = match connection.kind {
+            LinkConnectionKind::BrowserWorker { protocol } => {
+                LinkConnectionKind::BrowserWorker { protocol }
+            }
+            other => other,
+        };
+        let mut worker = BrowserWorkerHandle::new(&self.worker_url)?;
+
+        let mut events = Vec::new();
+        for log in logs {
+            events.push(StudioEvent::LogReceived {
+                entry: StudioLogEntry::new(map_log_level(log.level), "lpa-link", log.message),
+            });
+        }
+        for diagnostic in diagnostics {
+            events.push(StudioEvent::DiagnosticRaised {
+                diagnostic: lp_studio_core::StudioDiagnostic::info(diagnostic.message),
+            });
+        }
+        events.extend(worker.boot("Studio browser runtime").await?);
+
+        self.client = Some(BrowserProtocolClient::new(worker));
+        self.session = Some(session);
+        events.push(StudioEvent::DeviceConnected {
+            action_id,
+            provider_id: LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID),
+            endpoint_id,
+            session_id,
+            connection_kind,
+            capabilities: browser_worker_capabilities(),
+        });
+        Ok(events)
+    }
+
+    fn project_client(&mut self) -> Result<&mut BrowserProtocolClient, StudioRuntimeError> {
+        self.client
+            .as_mut()
+            .ok_or(StudioRuntimeError::MissingClient)
+    }
+}
+
+impl EffectExecutor for BrowserWorkerStudioRuntime {
+    async fn execute_effect(
+        &mut self,
+        effect: StudioEffect,
+    ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
+        match effect {
+            StudioEffect::RefreshProviderCatalog { action_id } => {
+                self.refresh_provider_catalog(action_id).await
+            }
+            StudioEffect::RequestDeviceAccess {
+                action_id,
+                provider_id,
+            } => self.request_device_access(action_id, provider_id).await,
+            StudioEffect::DiscoverEndpoints {
+                action_id,
+                provider_id,
+            } => self.discover(action_id, provider_id).await,
+            StudioEffect::ConnectEndpoint {
+                action_id,
+                endpoint_id,
+            } => self.connect(action_id, endpoint_id).await,
+            StudioEffect::ProbeTarget {
+                action_id,
+                endpoint_id,
+            } => Ok(vec![StudioEvent::TargetProbeCompleted {
+                action_id,
+                result: TargetProbeResult::server(endpoint_id, Some("browser-worker".to_string())),
+            }]),
+            StudioEffect::DisconnectSession {
+                action_id,
+                session_id,
+            } => {
+                self.close().await?;
+                Ok(vec![StudioEvent::DeviceDisconnected {
+                    action_id,
+                    session_id,
+                }])
+            }
+            StudioEffect::ResetDevice {
+                action_id,
+                endpoint_id: _,
+            } => Ok(vec![StudioEvent::ActionFailed {
+                action_id,
+                message: "browser worker reset is not implemented".to_string(),
+            }]),
+            StudioEffect::FlashDeviceFirmware {
+                action_id,
+                endpoint_id: _,
+                firmware_id: _,
+            } => Ok(vec![StudioEvent::ActionFailed {
+                action_id,
+                message: "browser worker firmware flashing is not supported".to_string(),
+            }]),
+            StudioEffect::SeedDemoProject {
+                action_id,
+                project_id,
+            } => {
+                self.project_client()?
+                    .seed_demo_project(action_id, &project_id)
+                    .await
+            }
+            effect => self.project_client()?.execute_project_effect(effect).await,
+        }
+    }
+}
+
+pub(crate) struct BrowserWorkerHandle {
     worker: Worker,
     outputs: Rc<RefCell<Vec<BrowserOutputEnvelope>>>,
 }
 
-impl BrowserWorkerStudioRuntime {
-    pub fn new(worker_url: &str) -> Result<Self, StudioRuntimeError> {
+impl BrowserWorkerHandle {
+    fn new(worker_url: &str) -> Result<Self, StudioRuntimeError> {
         let options = WorkerOptions::new();
         options.set_type(WorkerType::Module);
         let worker = Worker::new_with_options(worker_url, &options)
@@ -81,109 +315,48 @@ impl BrowserWorkerStudioRuntime {
         core::mem::take(&mut *self.outputs.borrow_mut())
     }
 
-    pub fn take_studio_events(&mut self) -> Vec<StudioEvent> {
-        self.take_outputs()
-            .into_iter()
-            .filter_map(output_to_event)
-            .collect()
+    pub fn terminate(&self) {
+        self.worker.terminate();
     }
 }
 
 pub async fn run_browser_worker_demo(worker_url: &str) -> Result<StudioApp, StudioRuntimeError> {
-    let mut app = StudioApp::new();
-    app.dispatch_kind(
-        StudioActionKind::SelectLinkProvider {
-            provider_id: LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID),
-        },
-        ActionOrigin::System,
-    );
-
-    let mut provider = BrowserWorkerProvider::new(BROWSER_WORKER_PROVIDER_ID);
-    let endpoint_id = provider.create_worker_endpoint("Browser firmware runtime");
-    let endpoints = provider
-        .discover()
-        .await
-        .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
-    let discover_effects =
-        app.dispatch_kind(StudioActionKind::DiscoverDevices, ActionOrigin::Harness);
-    let action_id = discover_effects
-        .first()
-        .and_then(|effect| match effect {
-            lp_studio_core::StudioEffect::DiscoverEndpoints { action_id, .. } => Some(*action_id),
-            _ => None,
-        })
-        .unwrap_or_default();
-    app.apply_event(StudioEvent::EndpointsDiscovered {
-        action_id,
-        provider_id: LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID),
-        endpoints,
-    });
-
-    let mut session = provider
-        .connect(&endpoint_id)
-        .await
-        .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
-    let connection = session
-        .connection()
-        .await
-        .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
-    let mut runtime = BrowserWorkerStudioRuntime::new(worker_url)?;
-    for event in runtime.boot("Studio browser runtime").await? {
-        app.apply_event(event);
-    }
-    let connect_effects = app.dispatch_kind(
-        StudioActionKind::ConnectDevice {
-            endpoint_id: LinkEndpointId::new(endpoint_id.as_str()),
-        },
-        ActionOrigin::Harness,
-    );
-    let connect_action_id = connect_effects
-        .first()
-        .and_then(|effect| match effect {
-            lp_studio_core::StudioEffect::ConnectEndpoint { action_id, .. } => Some(*action_id),
-            _ => None,
-        })
-        .unwrap_or_default();
-    app.apply_event(StudioEvent::DeviceConnected {
-        action_id: connect_action_id,
-        provider_id: LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID),
-        endpoint_id,
-        session_id: session.id().clone(),
-        connection_kind: match connection.kind {
-            LinkConnectionKind::BrowserWorker { protocol } => {
-                LinkConnectionKind::BrowserWorker { protocol }
-            }
-            other => other,
-        },
-        capabilities: browser_worker_capabilities(),
-    });
-
-    let mut client = BrowserProtocolClient::new(runtime);
-    let load_effects = app.dispatch_kind(StudioActionKind::LoadDemoProject, ActionOrigin::Harness);
-    let load_action_id = load_effects
-        .first()
-        .and_then(|effect| match effect {
-            lp_studio_core::StudioEffect::SeedDemoProject { action_id, .. } => Some(*action_id),
-            _ => None,
-        })
-        .unwrap_or_default();
-    for event in client
-        .seed_demo_project(load_action_id, demo_project::DEMO_PROJECT_ID)
-        .await?
-    {
-        let effects = app.apply_event(event);
-        for effect in effects {
-            for event in client.execute_project_effect(effect).await? {
-                let follow_up = app.apply_event(event);
-                for effect in follow_up {
-                    for event in client.execute_project_effect(effect).await? {
-                        app.apply_event(event);
-                    }
-                }
-            }
-        }
-    }
-    Ok(app)
+    let mut harness = RuntimeHarness::with_runtime(BrowserWorkerStudioRuntime::new(worker_url));
+    harness
+        .dispatch(
+            StudioActionKind::RefreshProviderCatalog,
+            ActionOrigin::Harness,
+        )
+        .await?;
+    harness
+        .dispatch(
+            StudioActionKind::StartProvisioning {
+                provider_id: LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID),
+            },
+            ActionOrigin::Harness,
+        )
+        .await?;
+    let endpoint_id = harness
+        .app()
+        .state()
+        .device_manager
+        .providers
+        .first_selected_endpoint()
+        .ok_or_else(|| {
+            StudioRuntimeError::Link("browser worker discovery returned no endpoints".to_string())
+        })?
+        .id
+        .clone();
+    harness
+        .dispatch(
+            StudioActionKind::ConnectDevice { endpoint_id },
+            ActionOrigin::Harness,
+        )
+        .await?;
+    harness
+        .dispatch(StudioActionKind::LoadDemoProject, ActionOrigin::Harness)
+        .await?;
+    Ok(harness.into_app())
 }
 
 fn browser_worker_capabilities() -> Vec<DeviceCapability> {
@@ -230,5 +403,15 @@ fn parse_worker_log_level(level: &str) -> StudioLogLevel {
         "warn" => StudioLogLevel::Warn,
         "error" => StudioLogLevel::Error,
         _ => StudioLogLevel::Info,
+    }
+}
+
+fn map_log_level(level: lpa_link::LinkLogLevel) -> StudioLogLevel {
+    match level {
+        lpa_link::LinkLogLevel::Trace => StudioLogLevel::Trace,
+        lpa_link::LinkLogLevel::Debug => StudioLogLevel::Debug,
+        lpa_link::LinkLogLevel::Info => StudioLogLevel::Info,
+        lpa_link::LinkLogLevel::Warn => StudioLogLevel::Warn,
+        lpa_link::LinkLogLevel::Error => StudioLogLevel::Error,
     }
 }

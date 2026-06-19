@@ -1,6 +1,6 @@
 use lpc_wire::{ClientRequest, WireProjectCommandResponse, WireServerMsgBody};
 
-use lp_studio_core::{StudioEvent, StudioLogEntry, StudioLogLevel};
+use lp_studio_core::{ProjectStateResult, StudioEvent, StudioLogEntry, StudioLogLevel};
 
 use crate::client_session_runtime::ClientSessionRuntime;
 use crate::protocol_event::inventory_request;
@@ -110,6 +110,36 @@ impl<'a> ProjectSessionRuntime<'a> {
                         StudioLogLevel::Warn,
                         "lp-studio-runtime",
                         format!("unexpected status response: {other:?}"),
+                    ),
+                });
+                Ok(events)
+            }
+        }
+    }
+
+    pub async fn read_project_state(
+        &mut self,
+        action_id: lp_studio_core::ActionId,
+    ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
+        let exchange = self
+            .client
+            .send_request(ClientRequest::ListLoadedProjects)
+            .await?;
+        let mut events = exchange.events;
+        match exchange.response.msg {
+            WireServerMsgBody::ListLoadedProjects { projects } => {
+                events.push(StudioEvent::ProjectStateRead {
+                    action_id,
+                    result: ProjectStateResult::from_loaded_projects(projects),
+                });
+                Ok(events)
+            }
+            other => {
+                events.push(StudioEvent::LogReceived {
+                    entry: StudioLogEntry::new(
+                        StudioLogLevel::Warn,
+                        "lp-studio-runtime",
+                        format!("unexpected project state response: {other:?}"),
                     ),
                 });
                 Ok(events)

@@ -43,6 +43,7 @@ pub enum StudioActionTypeName {
     LoadDemoProject,
     AcknowledgeProvisioningIssue,
     RefreshStatus,
+    ReadProjectState,
     ReadProjectInventory,
     SelectProjectNode,
 }
@@ -68,6 +69,7 @@ impl From<StudioActionType> for StudioActionTypeName {
             StudioActionType::LoadDemoProject => Self::LoadDemoProject,
             StudioActionType::AcknowledgeProvisioningIssue => Self::AcknowledgeProvisioningIssue,
             StudioActionType::RefreshStatus => Self::RefreshStatus,
+            StudioActionType::ReadProjectState => Self::ReadProjectState,
             StudioActionType::ReadProjectInventory => Self::ReadProjectInventory,
             StudioActionType::SelectProjectNode => Self::SelectProjectNode,
         }

@@ -21,7 +21,7 @@ StudioEffect -> lpa-link host-process -> lpa-client TokioLpClient -> fw-host
 The browser-worker path is:
 
 ```text
-StudioEffect -> lpa-link browser-worker model -> JavaScript Worker -> fw-browser
+StudioEffect -> lpa-link browser-worker model -> JavaScript Worker -> fw-browser -> lp-server protocol
 ```
 
 The browser serial ESP32 path is:
@@ -39,10 +39,17 @@ StudioEffect -> scenario runtime -> scripted StudioEvent values -> StudioApp red
 `scenario` is a runtime test and future story-fixture layer. It models
 product-level provisioning outcomes such as permission denial, endpoint open
 failure, blank devices, flash failure, project load failure, heartbeat, and
-connection loss. It does not replace `lpa-link` fake providers, which remain
-useful for lower-level link/session behavior. Scenario tests drive the same
-action/effect/event/reducer loop as real runtimes, so the UI and future agents
-can reuse the same vocabulary without inventing separate fixture states.
+connection loss. It also models post-server project state: existing project,
+no loaded project, multiple loaded projects, and recovery-required branches. It
+does not replace `lpa-link` fake providers, which remain useful for lower-level
+link/session behavior. Scenario tests drive the same action/effect/event/reducer
+loop as real runtimes, so the UI and future agents can reuse the same vocabulary
+without inventing separate fixture states.
+
+Connected runtimes handle `ReadProjectState` by listing loaded projects through
+the server protocol. Studio treats one loaded project as attachable, zero or
+many loaded projects as user selection states, and future safe-mode data as a
+recovery state. Explicit starter/demo upload remains a separate user action.
 
 Demo project loading uses the same server protocol on both paths: write files
 under `/projects/studio-demo/...`, then load the `studio-demo` project. Hardware

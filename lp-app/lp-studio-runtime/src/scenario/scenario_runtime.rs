@@ -124,6 +124,12 @@ impl EffectExecutor for ScenarioRuntime {
                 &self.scenario.connection,
                 &self.scenario.project,
             )),
+            StudioEffect::ReadProjectState { action_id } => {
+                Ok(vec![StudioEvent::ProjectStateRead {
+                    action_id,
+                    result: self.scenario.project_state.clone(),
+                }])
+            }
             StudioEffect::ReadProjectInventory {
                 action_id,
                 handle: _,

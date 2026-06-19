@@ -240,6 +240,9 @@ impl EffectExecutor for HostProcessStudioRuntime {
                     .refresh_loaded_projects(action_id)
                     .await
             }
+            StudioEffect::ReadProjectState { action_id } => {
+                self.project_runtime()?.read_project_state(action_id).await
+            }
             StudioEffect::ReadProjectInventory { action_id, handle } => {
                 self.project_runtime()?
                     .read_inventory(action_id, handle)

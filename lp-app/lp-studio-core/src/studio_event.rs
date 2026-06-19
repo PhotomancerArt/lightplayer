@@ -3,7 +3,7 @@ use lpc_wire::{LoadedProject, WireProjectHandle, WireProjectInventoryReadRespons
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ActionId, DeviceAccessStatus, DeviceCapability, DeviceIssue, ProgressState,
+    ActionId, DeviceAccessStatus, DeviceCapability, DeviceIssue, ProgressState, ProjectStateResult,
     ProviderAvailability, ProviderCardState, StudioDiagnostic, StudioHeartbeat, StudioLogEntry,
     TargetProbeResult,
 };
@@ -91,6 +91,10 @@ pub enum StudioEvent {
     LoadedProjectsRefreshed {
         action_id: ActionId,
         projects: Vec<LoadedProject>,
+    },
+    ProjectStateRead {
+        action_id: ActionId,
+        result: ProjectStateResult,
     },
     HeartbeatReceived {
         heartbeat: StudioHeartbeat,

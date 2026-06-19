@@ -49,6 +49,9 @@ pub enum StudioEffect {
     RefreshStatus {
         action_id: ActionId,
     },
+    ReadProjectState {
+        action_id: ActionId,
+    },
     ReadProjectInventory {
         action_id: ActionId,
         handle: WireProjectHandle,
