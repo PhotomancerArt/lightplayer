@@ -10,14 +10,14 @@ use lpa_link::{LinkEndpointId, LinkProviderId};
 
 /// Browser-side controller for dispatching Studio actions into web runtimes.
 pub struct WebProvisioningController {
-    runtime: WebStudioRuntime,
+    runtime: Option<WebStudioRuntime>,
     error: Option<String>,
 }
 
 impl WebProvisioningController {
     pub fn new(worker_url: &str) -> Self {
         Self {
-            runtime: WebStudioRuntime::new(worker_url),
+            runtime: Some(WebStudioRuntime::new(worker_url)),
             error: None,
         }
     }
@@ -32,6 +32,16 @@ impl WebProvisioningController {
 
     fn set_error(&mut self, error: StudioRuntimeError) {
         self.error = Some(error.to_string());
+    }
+
+    fn take_runtime(&mut self) -> Result<WebStudioRuntime, StudioRuntimeError> {
+        self.runtime
+            .take()
+            .ok_or_else(|| StudioRuntimeError::Browser("web runtime is already busy".to_string()))
+    }
+
+    fn replace_runtime(&mut self, runtime: WebStudioRuntime) {
+        self.runtime = Some(runtime);
     }
 }
 
@@ -84,7 +94,10 @@ async fn drain_effects(
     mut effects: Vec<StudioEffect>,
 ) -> Result<(), StudioRuntimeError> {
     while let Some(effect) = effects.pop() {
-        let events = controller.write().runtime.execute_effect(effect).await?;
+        let mut runtime = controller.write().take_runtime()?;
+        let result = runtime.execute_effect(effect).await;
+        controller.write().replace_runtime(runtime);
+        let events = result?;
         for event in events {
             effects.extend(studio.write().apply_event(event));
         }
