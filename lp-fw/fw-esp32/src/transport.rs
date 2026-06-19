@@ -161,7 +161,7 @@ impl ServerTransport for StreamingMessageRouterTransport {
                             return Ok(Some(msg));
                         }
                         Err(e) => {
-                            log::warn!("StreamingMessageRouterTransport: Failed to parse: {e}");
+                            log::debug!("StreamingMessageRouterTransport: Failed to parse: {e}");
                             continue;
                         }
                     }
@@ -198,7 +198,7 @@ where
 {
     let mut writer = ChunkedJsonWriter::new(channel);
     writer
-        .write_all(b"M!")
+        .write_all(b"\nM!")
         .map_err(|_| TransportError::ConnectionLost)?;
 
     let mut json = JsonWriter::new(writer);

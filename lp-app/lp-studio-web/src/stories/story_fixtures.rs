@@ -312,6 +312,28 @@ pub fn studio_state_error() -> StudioState {
     state
 }
 
+pub fn studio_state_protocol_diagnostic() -> StudioState {
+    let mut state = studio_state_connected();
+    let message = concat!(
+        "malformed M! frame while waiting for response id=1 kind=project.list_loaded: ",
+        "missing field `min` at line 1 column 92; json={\\\"id\\\":0,\\\"msg\\\":{",
+        "\\\"heartbeat\\\":{\\\"fps\\\":{\\\"avg\\\":29.06281,\\\"sdev\\\":0,",
+        "\\\"miin\\\":29.102337,\\\"max\\\":29.102337},\\\"frame_count\\\":3065,",
+        "\\\"loaded_projects\\\":[{\\\"handle\\\":1,\\\"path\\\":\\\"/projects/basic\\\"}],",
+        "\\\"uptime_ms\\\":105318,\\\"memory\\\":{\\\"freeBytes\\\":154112,",
+        "\\\"totalBytes\\\":299008}}}}"
+    );
+    state
+        .diagnostics
+        .push(StudioDiagnostic::error(Some(ActionId::new(43)), message));
+    state.logs.push(StudioLogEntry::new(
+        StudioLogLevel::Warn,
+        "browser-serial",
+        message,
+    ));
+    state
+}
+
 pub fn studio_state_long_content() -> StudioState {
     let mut state = studio_state_ready();
     let long_session_id =

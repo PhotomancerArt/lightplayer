@@ -8,9 +8,9 @@ use crate::stories::story_fixtures::{
     studio_state_flashing, studio_state_hardware_denied, studio_state_hardware_granted,
     studio_state_hardware_unsupported, studio_state_idle, studio_state_long_content,
     studio_state_multiple_project_selection_required, studio_state_probing_server,
-    studio_state_project_selection_required, studio_state_provider_catalog,
-    studio_state_reading_project_state, studio_state_ready, studio_state_recovery_required,
-    studio_state_requesting_access,
+    studio_state_project_selection_required, studio_state_protocol_diagnostic,
+    studio_state_provider_catalog, studio_state_reading_project_state, studio_state_ready,
+    studio_state_recovery_required, studio_state_requesting_access,
 };
 
 pub const STORIES: &[StoryDescriptor] = &[
@@ -55,6 +55,12 @@ pub const STORIES: &[StoryDescriptor] = &[
         "DevicePanel",
         "Long Session",
         "Long session identifiers should wrap cleanly.",
+    ),
+    StoryDescriptor::new(
+        "device/protocol-diagnostic",
+        "DevicePanel",
+        "Protocol Diagnostic",
+        "Malformed protocol diagnostics remain readable.",
     ),
     StoryDescriptor::new(
         "flow/provider-catalog",
@@ -159,6 +165,9 @@ pub fn render_story(id: &str) -> Option<Element> {
         "device/hardware-denied" => Some(device_story(studio_state_hardware_denied(), false)),
         "device/hardware-granted" => Some(device_story(studio_state_hardware_granted(), false)),
         "device/long-session" => Some(device_story(studio_state_long_content(), false)),
+        "device/protocol-diagnostic" => {
+            Some(device_story(studio_state_protocol_diagnostic(), false))
+        }
         "flow/provider-catalog" => Some(device_story(studio_state_provider_catalog(), false)),
         "flow/requesting-access" => Some(device_story(studio_state_requesting_access(), true)),
         "flow/access-canceled" => Some(device_story(studio_state_access_canceled(), false)),

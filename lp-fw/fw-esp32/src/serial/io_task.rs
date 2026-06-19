@@ -91,15 +91,6 @@ const WRITE_TIMEOUT: Duration = Duration::from_millis(1000);
 /// large enough to avoid excessive syscalls. Resource snapshots can be 10KB+.
 const WRITE_CHUNK_SIZE: usize = 256;
 
-/// Async write with timeout. Returns false if the write timed out or errored.
-async fn timed_write<W: Write>(tx: &mut W, data: &[u8]) -> bool {
-    use embassy_futures::select::{Either, select};
-    match select(Timer::after(WRITE_TIMEOUT), Write::write(tx, data)).await {
-        Either::First(_) => false,
-        Either::Second(result) => result.is_ok(),
-    }
-}
-
 /// Write all data in chunks with per-chunk timeout. Prevents large messages
 /// (e.g. resource snapshots) from timing out mid-write and corrupting the stream
 /// by concatenating with the next message. Uses write_all per chunk to
@@ -216,7 +207,7 @@ async fn drain_outgoing_server_json_chunks<W: Write>(tx: &mut W, connected: bool
         match receiver.try_receive() {
             Ok(chunk) if connected => {
                 if !timed_write_all(tx, chunk.bytes()).await {
-                    let _ = timed_write(tx, b"\n").await;
+                    let _ = timed_write_all(tx, b"\n").await;
                     break;
                 }
             }
@@ -232,7 +223,10 @@ async fn drain_outgoing_messages<W: Write>(router: &MessageRouter, tx: &mut W, c
     loop {
         match receiver.try_receive() {
             Ok(msg) if connected => {
-                if !timed_write(tx, msg.as_bytes()).await {
+                if !timed_write_all(tx, b"\n").await {
+                    break;
+                }
+                if !timed_write_all(tx, msg.as_bytes()).await {
                     break;
                 }
             }
@@ -278,7 +272,7 @@ async fn drain_outgoing_server_msg<W: Write>(tx: &mut W, connected: bool) {
 
     // If a timeout interrupts a JSON frame before the trailing newline, separate the
     // next frame so host parsers can recover instead of concatenating two `M!` messages.
-    let _ = timed_write(tx, b"\n").await;
+    let _ = timed_write_all(tx, b"\n").await;
 }
 
 #[cfg(feature = "server")]
@@ -299,7 +293,7 @@ async fn timed_write_full_server_msg<W: Write>(
 ) -> bool {
     let mut buf = [0u8; 4 * 1024];
     let mut writer = StackJsonWriter::new(&mut buf);
-    if writer.write(b"M!").is_err() {
+    if writer.write(b"\nM!").is_err() {
         return false;
     }
     if ser_write_json::ser::to_writer(&mut writer, &msg).is_err() {

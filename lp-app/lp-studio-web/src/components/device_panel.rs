@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use lp_studio_core::{
     DeviceAccessStatus, DeviceFlowState, DeviceIssue, ProgressState, ProjectSelectionReason,
     ProviderAvailability, ProviderCardState, ProviderIntent, ProvisioningReason, RecoveryAction,
-    RecoveryReason, StudioLogEntry, StudioState,
+    RecoveryReason, StudioDiagnostic, StudioDiagnosticSeverity, StudioLogEntry, StudioState,
 };
 use lpa_link::LinkProviderId;
 
@@ -21,6 +21,13 @@ pub fn DevicePanel(
         .selected_provider_id()
         .cloned();
     let issues = state.device_manager.issues.clone();
+    let diagnostics = state
+        .diagnostics
+        .iter()
+        .rev()
+        .take(3)
+        .cloned()
+        .collect::<Vec<_>>();
     let logs = state.logs.iter().rev().take(5).cloned().collect::<Vec<_>>();
     let access = state
         .device_access
@@ -114,6 +121,15 @@ pub fn DevicePanel(
                     h3 { "Issues" }
                     for issue in issues {
                         IssueView { issue }
+                    }
+                }
+            }
+
+            if !diagnostics.is_empty() {
+                div { class: "device-section diagnostic-list",
+                    h3 { "Diagnostics" }
+                    for diagnostic in diagnostics {
+                        DiagnosticView { diagnostic }
                     }
                 }
             }
@@ -286,6 +302,16 @@ fn IssueView(issue: DeviceIssue) -> Element {
 }
 
 #[component]
+fn DiagnosticView(diagnostic: StudioDiagnostic) -> Element {
+    rsx! {
+        article { class: "diagnostic-card",
+            strong { "{diagnostic_severity_label(&diagnostic.severity)}" }
+            p { "{diagnostic.message}" }
+        }
+    }
+}
+
+#[component]
 fn LogLine(entry: StudioLogEntry) -> Element {
     rsx! {
         li {
@@ -293,6 +319,14 @@ fn LogLine(entry: StudioLogEntry) -> Element {
             span { class: "log-target", "{entry.target}" }
             span { "{entry.message}" }
         }
+    }
+}
+
+fn diagnostic_severity_label(severity: &StudioDiagnosticSeverity) -> &'static str {
+    match severity {
+        StudioDiagnosticSeverity::Info => "Info",
+        StudioDiagnosticSeverity::Warning => "Warning",
+        StudioDiagnosticSeverity::Error => "Error",
     }
 }
 

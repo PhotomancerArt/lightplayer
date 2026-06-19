@@ -153,7 +153,9 @@ pub async fn run_server_loop<T: ServerTransport>(
         // Send heartbeat message periodically
         // See prior art: fw-esp32/src/tests/test_usb.rs heartbeat_task()
         // This implementation uses proper ServerMessage types with M! prefix
-        if current_time.saturating_sub(heartbeat_last_sent) >= HEARTBEAT_INTERVAL_MS {
+        if response_count > 0 {
+            heartbeat_last_sent = current_time;
+        } else if current_time.saturating_sub(heartbeat_last_sent) >= HEARTBEAT_INTERVAL_MS {
             // Get loaded projects from server
             let loaded_projects = server.project_manager().list_loaded_projects();
 

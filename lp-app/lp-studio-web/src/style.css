@@ -91,7 +91,6 @@ button:disabled {
 
 .status-pill,
 .status-metric,
-.status-error,
 .mini-count {
   border-radius: 999px;
   padding: 5px 10px;
@@ -116,9 +115,16 @@ button:disabled {
 
 .status-error {
   grid-column: 1 / -1;
+  border: 1px solid rgba(255, 155, 130, 0.4);
+  border-radius: 6px;
   border-color: rgba(255, 155, 130, 0.4);
   background: var(--danger-bg);
   color: var(--danger-text);
+  padding: 8px 10px;
+  font-size: 13px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .studio-grid {
@@ -323,6 +329,34 @@ button:disabled {
   gap: 8px;
 }
 
+.diagnostic-list {
+  gap: 8px;
+}
+
+.diagnostic-card {
+  display: grid;
+  gap: 6px;
+  border: 1px solid rgba(255, 155, 130, 0.38);
+  border-radius: 6px;
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  padding: 9px;
+}
+
+.diagnostic-card strong {
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.diagnostic-card p {
+  margin: 0;
+  color: var(--danger-text);
+  font-size: 12px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .issue-card {
   display: grid;
   gap: 8px;
@@ -348,6 +382,15 @@ button:disabled {
   grid-template-columns: 52px 96px minmax(0, 1fr);
   gap: 8px;
   min-width: 0;
+}
+
+.hardware-log-list li > span {
+  min-width: 0;
+}
+
+.hardware-log-list li > span:last-child {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .log-level {
@@ -419,6 +462,11 @@ dd {
 
 .diagnostic-line {
   color: var(--danger-text);
+}
+
+.log-list li {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 
 .story-book {

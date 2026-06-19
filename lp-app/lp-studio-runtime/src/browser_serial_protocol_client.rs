@@ -14,6 +14,9 @@ use crate::browser_serial_shim;
 use crate::protocol_event::client_event;
 use crate::{StudioRuntimeError, demo_project};
 
+const MALFORMED_PROTOCOL_SNIPPET_LIMIT: usize = 4_096;
+const DEVICE_LOG_SNIPPET_LIMIT: usize = 1_024;
+
 pub struct BrowserSerialProtocolClient {
     port_id: u32,
     client: LpClient<BrowserSerialClientIo>,
@@ -192,7 +195,7 @@ impl BrowserSerialClientIo {
         match json::from_str::<WireServerMessage>(json_frame) {
             Ok(response) => Ok(Some(response)),
             Err(error) => {
-                let snippet = line_snippet(json_frame, 240);
+                let snippet = line_snippet(json_frame, MALFORMED_PROTOCOL_SNIPPET_LIMIT);
                 let issue = format!("{error}; json={snippet}");
                 self.record_malformed_frame(issue.clone());
                 if let Some(next_frame) = nested_protocol_frame(json_frame) {
@@ -361,7 +364,10 @@ fn studio_error_to_transport(error: StudioRuntimeError) -> TransportError {
 }
 
 fn echo_device_line(line: &str) {
-    let message = format!("[fw-esp32] {}", line_snippet(line, 1_024));
+    let message = format!(
+        "[fw-esp32] {}",
+        line_snippet(line, DEVICE_LOG_SNIPPET_LIMIT)
+    );
     if line.starts_with("[ERROR]") {
         console_error(&message);
     } else if line.starts_with("[WARN]") {
