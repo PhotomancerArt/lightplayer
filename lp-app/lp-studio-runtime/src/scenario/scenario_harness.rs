@@ -386,12 +386,70 @@ mod tests {
         connect_and_probe(&mut unavailable).await;
         unavailable.confirm_firmware_flash(None).await.unwrap();
 
+        let mut missing = ScenarioHarness::new(ProvisioningScenario::flash_artifact_missing());
+        connect_and_probe(&mut missing).await;
+        missing.confirm_firmware_flash(None).await.unwrap();
+
         let mut failed = ScenarioHarness::new(ProvisioningScenario::flash_fails());
         connect_and_probe(&mut failed).await;
         failed.confirm_firmware_flash(None).await.unwrap();
 
         assert_active_issue_kind(&unavailable, DeviceIssueKind::FlashFailed);
+        assert_active_issue_kind(&missing, DeviceIssueKind::FirmwareArtifactMissing);
         assert_active_issue_kind(&failed, DeviceIssueKind::FlashFailed);
+    }
+
+    #[tokio::test]
+    async fn post_flash_reconnect_failure_degrades_after_opening_server() {
+        let mut harness = ScenarioHarness::new(ProvisioningScenario::flash_reconnect_fails());
+
+        connect_and_probe(&mut harness).await;
+        harness.confirm_firmware_flash(None).await.unwrap();
+
+        assert_flow_snapshot(&harness, |flow| {
+            matches!(flow, DeviceFlowState::OpeningServer { .. })
+        });
+        assert_active_issue_kind(&harness, DeviceIssueKind::ConnectionLost);
+        assert!(matches!(
+            harness.app().state().device_manager.active_flow,
+            DeviceFlowState::Degraded { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn post_flash_success_can_read_project_state() {
+        let mut harness = ScenarioHarness::new(ProvisioningScenario::flash_succeeds());
+
+        connect_and_probe(&mut harness).await;
+        harness.confirm_firmware_flash(None).await.unwrap();
+        harness.read_project_state().await.unwrap();
+
+        assert!(matches!(
+            harness.app().state().device_manager.active_flow,
+            DeviceFlowState::Ready { .. }
+        ));
+        assert_flow_snapshot(&harness, |flow| {
+            matches!(flow, DeviceFlowState::OpeningServer { .. })
+        });
+        assert_flow_snapshot(&harness, |flow| {
+            matches!(flow, DeviceFlowState::ReadingProjectState { .. })
+        });
+    }
+
+    #[tokio::test]
+    async fn post_flash_project_state_failure_degrades() {
+        let mut harness =
+            ScenarioHarness::new(ProvisioningScenario::post_flash_project_state_fails());
+
+        connect_and_probe(&mut harness).await;
+        harness.confirm_firmware_flash(None).await.unwrap();
+        harness.read_project_state().await.unwrap();
+
+        assert_active_issue_kind(&harness, DeviceIssueKind::ServerTimeout);
+        assert!(matches!(
+            harness.app().state().device_manager.active_flow,
+            DeviceFlowState::Degraded { .. }
+        ));
     }
 
     #[tokio::test]

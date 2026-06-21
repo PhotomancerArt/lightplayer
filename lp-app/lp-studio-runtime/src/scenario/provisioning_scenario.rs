@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::scenario::{
     AccessOutcome, ConnectOutcome, ConnectionOutcome, FlashOutcome, ProbeOutcome, ProjectOutcome,
+    ProjectStateOutcome,
 };
 
 const HOST_ENDPOINT_ID: &str = "scenario-host-runtime";
@@ -23,7 +24,7 @@ pub struct ProvisioningScenario {
     pub connect: ConnectOutcome,
     pub probe: ProbeOutcome,
     pub flash: FlashOutcome,
-    pub project_state: ProjectStateResult,
+    pub project_state: ProjectStateOutcome,
     pub project: ProjectOutcome,
     pub connection: ConnectionOutcome,
 }
@@ -102,6 +103,22 @@ impl ProvisioningScenario {
             )))
     }
 
+    pub fn flash_artifact_missing() -> Self {
+        Self::blank_device_flash_available()
+            .with_name("flash-artifact-missing")
+            .with_flash(FlashOutcome::artifact_missing(issue(
+                "flash-artifact-missing",
+                DeviceIssueKind::FirmwareArtifactMissing,
+                "The LightPlayer firmware artifact is missing from this Studio build.",
+                vec![
+                    RecoveryAction::Retry,
+                    RecoveryAction::OpenHelp {
+                        topic: "firmware packaging".to_string(),
+                    },
+                ],
+            )))
+    }
+
     pub fn flash_fails() -> Self {
         Self::blank_device_flash_available()
             .with_name("flash-fails")
@@ -110,6 +127,17 @@ impl ProvisioningScenario {
                 DeviceIssueKind::FlashFailed,
                 "Firmware flashing failed.",
                 vec![RecoveryAction::Retry, RecoveryAction::ResetDevice],
+            )))
+    }
+
+    pub fn flash_reconnect_fails() -> Self {
+        Self::blank_device_flash_available()
+            .with_name("flash-reconnect-fails")
+            .with_flash(FlashOutcome::reconnect_fails(issue(
+                "post-flash-reconnect-failed",
+                DeviceIssueKind::ConnectionLost,
+                "Firmware was flashed, but Studio could not reconnect to the device.",
+                vec![RecoveryAction::Reconnect, RecoveryAction::ResetDevice],
             )))
     }
 
@@ -152,6 +180,17 @@ impl ProvisioningScenario {
                 message: Some("The previously loaded project failed during boot.".to_string()),
             },
         })
+    }
+
+    pub fn post_flash_project_state_fails() -> Self {
+        Self::flash_succeeds()
+            .with_name("post-flash-project-state-fails")
+            .with_project_state_failure(issue(
+                "post-flash-project-state-failed",
+                DeviceIssueKind::ServerTimeout,
+                "Firmware was flashed, but Studio could not read project state from the server.",
+                vec![RecoveryAction::Retry, RecoveryAction::Reconnect],
+            ))
     }
 
     pub fn project_load_fails() -> Self {
@@ -249,11 +288,11 @@ impl ProvisioningScenario {
             connect,
             probe: ProbeOutcome::server(Some("scenario-server".to_string())),
             flash: FlashOutcome::Succeeds,
-            project_state: ProjectStateResult::loaded_project(
+            project_state: ProjectStateOutcome::succeeds(ProjectStateResult::loaded_project(
                 STUDIO_DEMO_PROJECT_ID,
                 project_path(),
                 lpc_wire::WireProjectHandle::new(1),
-            ),
+            )),
             project: ProjectOutcome::succeeds(),
             connection: ConnectionOutcome::Healthy,
         }
@@ -285,7 +324,12 @@ impl ProvisioningScenario {
     }
 
     fn with_project_state(mut self, project_state: ProjectStateResult) -> Self {
-        self.project_state = project_state;
+        self.project_state = ProjectStateOutcome::succeeds(project_state);
+        self
+    }
+
+    fn with_project_state_failure(mut self, issue: DeviceIssue) -> Self {
+        self.project_state = ProjectStateOutcome::fails(issue);
         self
     }
 

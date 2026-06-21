@@ -127,6 +127,15 @@ pub fn studio_state_blank_device_flash_offer() -> StudioState {
     state
 }
 
+pub fn studio_state_flash_confirm() -> StudioState {
+    let mut state = studio_state_blank_device_flash_offer();
+    state.device_manager.active_flow = DeviceFlowState::FlashConfirm {
+        endpoint_id: LinkEndpointId::new("browser-serial-esp32-port-1"),
+        firmware_id: Some("lightplayer-esp32c6-server".to_string()),
+    };
+    state
+}
+
 pub fn studio_state_flashing() -> StudioState {
     let mut state = studio_state_blank_device_flash_offer();
     state.device_manager.active_flow = DeviceFlowState::Flashing {
@@ -137,6 +146,82 @@ pub fn studio_state_flashing() -> StudioState {
                 .with_percent(42),
         ),
     };
+    state
+}
+
+pub fn studio_state_firmware_artifact_missing() -> StudioState {
+    let mut state = studio_state_blank_device_flash_offer();
+    let issue = DeviceIssue::error(
+        "story-firmware-artifact-missing",
+        DeviceIssueKind::FirmwareArtifactMissing,
+        "The LightPlayer firmware artifact is missing from this Studio build.",
+    )
+    .with_endpoint("browser-serial-esp32-port-1")
+    .with_recovery_actions(vec![
+        RecoveryAction::Retry,
+        RecoveryAction::OpenHelp {
+            topic: "firmware packaging".to_string(),
+        },
+    ]);
+    state.device_manager.active_flow = DeviceFlowState::Degraded {
+        issue: issue.clone(),
+    };
+    state.device_manager.push_issue(issue);
+    state
+}
+
+pub fn studio_state_flash_failed() -> StudioState {
+    let mut state = studio_state_blank_device_flash_offer();
+    let issue = DeviceIssue::error(
+        "story-flash-failed",
+        DeviceIssueKind::FlashFailed,
+        "Firmware flashing failed before the device could be restarted.",
+    )
+    .with_endpoint("browser-serial-esp32-port-1")
+    .with_recovery_actions(vec![RecoveryAction::Retry, RecoveryAction::ResetDevice]);
+    state.device_manager.active_flow = DeviceFlowState::Degraded {
+        issue: issue.clone(),
+    };
+    state.device_manager.push_issue(issue);
+    state
+}
+
+pub fn studio_state_post_flash_reconnecting() -> StudioState {
+    let mut state = studio_state_hardware_granted();
+    state.device_manager.active_flow = DeviceFlowState::OpeningServer {
+        endpoint_id: LinkEndpointId::new("browser-serial-esp32-port-1"),
+    };
+    state.logs.push(StudioLogEntry::new(
+        StudioLogLevel::Info,
+        "lp-studio-core",
+        "firmware flash completed for browser-serial-esp32-port-1 using lightplayer-esp32c6-server",
+    ));
+    state
+}
+
+pub fn studio_state_post_flash_reconnect_failed() -> StudioState {
+    let mut state = studio_state_post_flash_reconnecting();
+    let issue = DeviceIssue::error(
+        "story-post-flash-reconnect-failed",
+        DeviceIssueKind::ConnectionLost,
+        "Firmware was flashed, but Studio could not reconnect to the device.",
+    )
+    .with_endpoint("browser-serial-esp32-port-1")
+    .with_recovery_actions(vec![RecoveryAction::Reconnect, RecoveryAction::ResetDevice]);
+    state.device_manager.active_flow = DeviceFlowState::Degraded {
+        issue: issue.clone(),
+    };
+    state.device_manager.push_issue(issue);
+    state
+}
+
+pub fn studio_state_post_flash_ready() -> StudioState {
+    let mut state = studio_state_ready();
+    state.logs.push(StudioLogEntry::new(
+        StudioLogLevel::Info,
+        "lp-studio-core",
+        "firmware flash completed for browser-serial-esp32-port-1 using lightplayer-esp32c6-server",
+    ));
     state
 }
 
@@ -475,6 +560,7 @@ fn set_default_provider_cards(state: &mut StudioState) {
             ProviderCapability::DiscoverEndpoints,
             ProviderCapability::Connect,
             ProviderCapability::ResetDevice,
+            ProviderCapability::FlashFirmware,
             ProviderCapability::DeployProject,
             ProviderCapability::ReadProjectInventory,
         ]),

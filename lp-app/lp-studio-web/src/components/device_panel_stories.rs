@@ -5,12 +5,15 @@ use crate::stories::story::StoryDescriptor;
 use crate::stories::story_fixtures::{
     studio_state_access_canceled, studio_state_blank_device_flash_offer, studio_state_connected,
     studio_state_connecting, studio_state_connection_lost, studio_state_deploying_project,
+    studio_state_firmware_artifact_missing, studio_state_flash_confirm, studio_state_flash_failed,
     studio_state_flashing, studio_state_hardware_denied, studio_state_hardware_granted,
     studio_state_hardware_unsupported, studio_state_idle, studio_state_long_content,
-    studio_state_multiple_project_selection_required, studio_state_probing_server,
-    studio_state_project_selection_required, studio_state_protocol_diagnostic,
-    studio_state_provider_catalog, studio_state_reading_project_state, studio_state_ready,
-    studio_state_recovery_required, studio_state_requesting_access,
+    studio_state_multiple_project_selection_required, studio_state_post_flash_ready,
+    studio_state_post_flash_reconnect_failed, studio_state_post_flash_reconnecting,
+    studio_state_probing_server, studio_state_project_selection_required,
+    studio_state_protocol_diagnostic, studio_state_provider_catalog,
+    studio_state_reading_project_state, studio_state_ready, studio_state_recovery_required,
+    studio_state_requesting_access,
 };
 
 pub const STORIES: &[StoryDescriptor] = &[
@@ -99,10 +102,46 @@ pub const STORIES: &[StoryDescriptor] = &[
         "A connected target needs LightPlayer firmware.",
     ),
     StoryDescriptor::new(
+        "flow/flash-confirm",
+        "ProvisioningFlow",
+        "Flash Confirm",
+        "A destructive firmware flash is waiting for confirmation.",
+    ),
+    StoryDescriptor::new(
         "flow/flashing",
         "ProvisioningFlow",
         "Flashing",
         "Firmware flashing progress is visible.",
+    ),
+    StoryDescriptor::new(
+        "flow/firmware-artifact-missing",
+        "ProvisioningFlow",
+        "Firmware Missing",
+        "The selected Studio build does not include a firmware artifact.",
+    ),
+    StoryDescriptor::new(
+        "flow/flash-failed",
+        "ProvisioningFlow",
+        "Flash Failed",
+        "Firmware flashing failed and recovery actions are visible.",
+    ),
+    StoryDescriptor::new(
+        "flow/post-flash-reconnecting",
+        "ProvisioningFlow",
+        "Post-Flash Reconnect",
+        "Firmware was flashed and Studio is reopening the server.",
+    ),
+    StoryDescriptor::new(
+        "flow/post-flash-reconnect-failed",
+        "ProvisioningFlow",
+        "Reconnect Failed",
+        "Firmware was flashed but the device did not reconnect.",
+    ),
+    StoryDescriptor::new(
+        "flow/post-flash-ready",
+        "ProvisioningFlow",
+        "Post-Flash Ready",
+        "Firmware was flashed and the server project state was attached.",
     ),
     StoryDescriptor::new(
         "flow/server-ready",
@@ -176,7 +215,21 @@ pub fn render_story(id: &str) -> Option<Element> {
         "flow/blank-device-flash-offer" => {
             Some(device_story(studio_state_blank_device_flash_offer(), false))
         }
+        "flow/flash-confirm" => Some(device_story(studio_state_flash_confirm(), false)),
         "flow/flashing" => Some(device_story(studio_state_flashing(), true)),
+        "flow/firmware-artifact-missing" => Some(device_story(
+            studio_state_firmware_artifact_missing(),
+            false,
+        )),
+        "flow/flash-failed" => Some(device_story(studio_state_flash_failed(), false)),
+        "flow/post-flash-reconnecting" => {
+            Some(device_story(studio_state_post_flash_reconnecting(), true))
+        }
+        "flow/post-flash-reconnect-failed" => Some(device_story(
+            studio_state_post_flash_reconnect_failed(),
+            false,
+        )),
+        "flow/post-flash-ready" => Some(device_story(studio_state_post_flash_ready(), false)),
         "flow/server-ready" => Some(device_story(studio_state_connected(), false)),
         "flow/reading-project-state" => {
             Some(device_story(studio_state_reading_project_state(), true))
@@ -204,6 +257,7 @@ fn device_story(state: lp_studio_core::StudioState, running: bool) -> Element {
             running,
             on_refresh_catalog: move |_| {},
             on_start_provider: move |_| {},
+            on_confirm_firmware_flash: move |_| {},
             on_load_starter_project: move |_| {},
         }
     }

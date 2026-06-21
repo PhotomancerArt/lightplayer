@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use lp_studio_core::{ActionOrigin, StudioActionKind, StudioApp};
-use lpa_link::LinkProviderId;
+use lpa_link::{LinkEndpointId, LinkProviderId};
 
 use crate::components::device_panel::DevicePanel;
 use crate::components::inventory_view::InventoryView;
@@ -91,6 +91,27 @@ pub fn App() -> Element {
             running.set(false);
         });
     };
+    let confirm_firmware_flash =
+        move |(endpoint_id, firmware_id): (LinkEndpointId, Option<String>)| {
+            if *running.read() {
+                return;
+            }
+            running.set(true);
+            spawn(async move {
+                dispatch_web_action(
+                    studio,
+                    controller,
+                    StudioActionKind::ConfirmFirmwareFlash {
+                        endpoint_id,
+                        firmware_id,
+                    },
+                    ActionOrigin::User,
+                )
+                .await;
+                auto_advance_web_flow(studio, controller).await;
+                running.set(false);
+            });
+        };
 
     rsx! {
         style { "{STYLE}" }
@@ -102,6 +123,7 @@ pub fn App() -> Element {
                     running: is_running,
                     on_refresh_catalog: refresh_catalog,
                     on_start_provider: start_provider,
+                    on_confirm_firmware_flash: confirm_firmware_flash,
                     on_load_starter_project: load_starter_project,
                 }
                 ProjectPanel { state: state.clone() }

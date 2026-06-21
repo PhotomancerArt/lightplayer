@@ -4,7 +4,7 @@ use lp_studio_core::{
     ProviderAvailability, ProviderCardState, ProviderIntent, ProvisioningReason, RecoveryAction,
     RecoveryReason, StudioDiagnostic, StudioDiagnosticSeverity, StudioLogEntry, StudioState,
 };
-use lpa_link::LinkProviderId;
+use lpa_link::{LinkEndpointId, LinkProviderId};
 
 #[component]
 pub fn DevicePanel(
@@ -12,6 +12,7 @@ pub fn DevicePanel(
     running: bool,
     on_refresh_catalog: EventHandler<MouseEvent>,
     on_start_provider: EventHandler<LinkProviderId>,
+    on_confirm_firmware_flash: EventHandler<(LinkEndpointId, Option<String>)>,
     on_load_starter_project: EventHandler<MouseEvent>,
 ) -> Element {
     let providers = state.device_manager.providers.providers.clone();
@@ -80,6 +81,7 @@ pub fn DevicePanel(
                 FlowStateView {
                     flow: state.device_manager.active_flow.clone(),
                     running,
+                    on_confirm_firmware_flash,
                     on_load_starter_project,
                 }
             }
@@ -194,6 +196,7 @@ fn ProviderCard(
 fn FlowStateView(
     flow: DeviceFlowState,
     running: bool,
+    on_confirm_firmware_flash: EventHandler<(LinkEndpointId, Option<String>)>,
     on_load_starter_project: EventHandler<MouseEvent>,
 ) -> Element {
     let summary = flow_summary(&flow);
@@ -222,10 +225,28 @@ fn FlowStateView(
                         p { "{recovery_reason_label(&reason)}" }
                     }
                 },
-                DeviceFlowState::ProvisioningRequired { reason, .. } => rsx! {
+                DeviceFlowState::ProvisioningRequired { endpoint_id, reason } => rsx! {
                     div { class: "recovery-box",
                         strong { "Provisioning" }
                         p { "{provisioning_reason_label(&reason)}" }
+                        button {
+                            disabled: running,
+                            onclick: move |_| on_confirm_firmware_flash.call((endpoint_id.clone(), None)),
+                            "Flash firmware"
+                        }
+                    }
+                },
+                DeviceFlowState::FlashConfirm { endpoint_id, firmware_id } => rsx! {
+                    div { class: "recovery-box",
+                        strong { "Flash firmware" }
+                        p { "{flash_confirmation_label(firmware_id.as_deref())}" }
+                        button {
+                            disabled: running,
+                            onclick: move |_| {
+                                on_confirm_firmware_flash.call((endpoint_id.clone(), firmware_id.clone()))
+                            },
+                            "Confirm flash"
+                        }
                     }
                 },
                 _ => rsx! {},
@@ -493,6 +514,16 @@ fn provisioning_reason_label(reason: &ProvisioningReason) -> String {
         ProvisioningReason::UserRequested => "Provisioning requested.".to_string(),
         ProvisioningReason::Other { message } => message.clone(),
     }
+}
+
+fn flash_confirmation_label(firmware_id: Option<&str>) -> String {
+    firmware_id
+        .map(|firmware_id| {
+            format!("Ready to write {firmware_id}. Existing device data may be lost.")
+        })
+        .unwrap_or_else(|| {
+            "Ready to write LightPlayer firmware. Existing device data may be lost.".to_string()
+        })
 }
 
 fn recovery_reason_label(reason: &RecoveryReason) -> String {

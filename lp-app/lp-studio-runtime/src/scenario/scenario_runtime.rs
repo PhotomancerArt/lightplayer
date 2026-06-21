@@ -11,7 +11,7 @@ use crate::StudioRuntimeError;
 use crate::effect_executor::EffectExecutor;
 use crate::scenario::{
     AccessOutcome, ConnectOutcome, ConnectionOutcome, FlashOutcome, ProbeOutcome, ProjectOutcome,
-    ProvisioningScenario,
+    ProjectStateOutcome, ProvisioningScenario,
 };
 
 /// Effect executor that maps a `ProvisioningScenario` into real Studio events.
@@ -124,12 +124,10 @@ impl EffectExecutor for ScenarioRuntime {
                 &self.scenario.connection,
                 &self.scenario.project,
             )),
-            StudioEffect::ReadProjectState { action_id } => {
-                Ok(vec![StudioEvent::ProjectStateRead {
-                    action_id,
-                    result: self.scenario.project_state.clone(),
-                }])
-            }
+            StudioEffect::ReadProjectState { action_id } => Ok(project_state_events(
+                action_id,
+                &self.scenario.project_state,
+            )),
             StudioEffect::ReadProjectInventory {
                 action_id,
                 handle: _,
@@ -297,12 +295,44 @@ fn flash_events(
                 firmware_id,
             },
         ],
-        FlashOutcome::Unavailable { issue } | FlashOutcome::Fails { issue } => {
+        FlashOutcome::Unavailable { issue }
+        | FlashOutcome::ArtifactMissing { issue }
+        | FlashOutcome::Fails { issue } => {
             vec![StudioEvent::ProvisioningIssueRaised {
                 action_id: Some(action_id),
                 issue: issue_for_endpoint(issue, endpoint_id),
             }]
         }
+        FlashOutcome::ReconnectFails { issue } => vec![
+            StudioEvent::ProvisioningProgressUpdated {
+                action_id: Some(action_id),
+                progress: ProgressState::new("Flashing firmware")
+                    .with_steps(2, 2)
+                    .with_percent(100),
+            },
+            StudioEvent::FirmwareFlashCompleted {
+                action_id,
+                endpoint_id: endpoint_id.clone(),
+                firmware_id,
+            },
+            StudioEvent::ProvisioningIssueRaised {
+                action_id: Some(action_id),
+                issue: issue_for_endpoint(issue, endpoint_id),
+            },
+        ],
+    }
+}
+
+fn project_state_events(action_id: ActionId, outcome: &ProjectStateOutcome) -> Vec<StudioEvent> {
+    match outcome {
+        ProjectStateOutcome::Succeeds(result) => vec![StudioEvent::ProjectStateRead {
+            action_id,
+            result: result.clone(),
+        }],
+        ProjectStateOutcome::Fails { issue } => vec![StudioEvent::ProvisioningIssueRaised {
+            action_id: Some(action_id),
+            issue: issue.clone(),
+        }],
     }
 }
 

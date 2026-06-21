@@ -24,6 +24,7 @@ pub enum DeviceIssueKind {
     UnsupportedTarget,
     ServerTimeout,
     IncompatibleFirmware,
+    FirmwareArtifactMissing,
     ProjectDeployFailed,
     ProjectLoadFailed,
     FlashFailed,
