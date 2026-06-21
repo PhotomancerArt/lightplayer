@@ -36,7 +36,7 @@ impl BrowserSerialEsp32Provider {
         self.next_endpoint_index += 1;
 
         let endpoint = LinkEndpoint::new(endpoint_id.clone(), self.id.clone(), label)
-            .with_management(LinkManagement::esp32_serial_base());
+            .with_management(LinkManagement::esp32_serial_base().with_flash());
         self.endpoints.push(endpoint);
         endpoint_id
     }
@@ -177,7 +177,7 @@ mod tests {
                 .supports(LinkManagementOperation::ReadLogs)
         );
         assert!(
-            !endpoints[0]
+            endpoints[0]
                 .management
                 .supports(LinkManagementOperation::FlashFirmware)
         );

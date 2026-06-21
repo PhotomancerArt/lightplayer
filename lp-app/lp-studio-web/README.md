@@ -30,13 +30,15 @@ browser flashing path.
 ## Hardware
 
 The USB ESP32 provider uses Web Serial, so it requires a supported
-Chromium-class browser and a secure/local context. The current hardware path can
-connect to an ESP32 that already has LightPlayer firmware running. Browser-side
-flashing is being added in the hardware provisioning milestone.
+Chromium-class browser and a secure/local context. The hardware path can connect
+to an ESP32 that already has LightPlayer firmware running and can flash packaged
+ESP32-C6 firmware when the firmware manifest is present.
 
-The app loads `public/browser-serial.js` before the Rust wasm module. That shim
-owns the direct Web Serial stream objects, while Rust owns Studio actions,
-status, protocol parsing, and demo project upload.
+The app loads `public/browser-serial.js` and `public/browser-esp32-flash.js`
+before the Rust wasm module. The serial shim owns the direct Web Serial stream
+objects for normal server protocol traffic. During firmware flashing, Studio
+releases the normal serial reader/writer and the flashing shim takes exclusive
+ownership of the same browser `SerialPort`.
 
 Release builds package firmware assets under:
 
@@ -53,8 +55,9 @@ just studio-firmware-package-esp32c6
 The package contains `manifest.json` and a merged ESP32-C6 binary image produced
 by `espflash save-image --merge --skip-padding`. The manifest records firmware
 identity, build profile/features, source commit, flash address, size, checksum,
-and reset/destructive-behavior notes. P3 wires the browser flashing adapter to
-this manifest.
+and reset/destructive-behavior notes. The browser flashing shim consumes this
+manifest directly; it does not process ELF files or build firmware in the
+browser.
 
 ## Stories
 

@@ -70,6 +70,14 @@ the Rust runtime adapts it into `lpa-client::ClientIo` so request correlation,
 protocol events, server errors, and project write helpers come from the shared
 client model.
 
+The browser ESP32 flashing path is a second browser shim boundary. The runtime
+loads `./firmware/esp32c6/manifest.json`, advertises flash capability only when
+the browser supports Web Serial and that manifest is available, releases the
+normal serial protocol reader/writer, and calls the JavaScript flashing adapter
+with the same user-granted `SerialPort`. Flash progress, logs, success, and
+failures are translated back into Studio events; reconnect/classification after
+flash remains a separate provisioning step.
+
 For hardware bring-up, valid `M!` protocol frames stay internal to the runtime.
 Non-protocol device lines are echoed directly to the JavaScript console with a
 `fw-esp32` prefix, using the firmware log level when present. They do not enter

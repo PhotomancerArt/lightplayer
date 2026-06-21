@@ -30,6 +30,9 @@ extern "C" {
     #[wasm_bindgen(js_namespace = globalThis, js_name = lpBrowserSerialTakeErrors)]
     fn js_take_errors(id: u32) -> Array;
 
+    #[wasm_bindgen(js_namespace = globalThis, js_name = lpBrowserSerialRelease)]
+    fn js_release(id: u32) -> Promise;
+
     #[wasm_bindgen(js_namespace = globalThis, js_name = lpBrowserSerialClose)]
     fn js_close(id: u32) -> Promise;
 }
@@ -65,6 +68,13 @@ pub fn take_lines(id: u32) -> Vec<String> {
 
 pub fn take_errors(id: u32) -> Vec<String> {
     js_array_to_strings(js_take_errors(id))
+}
+
+pub async fn release(id: u32) -> Result<(), StudioRuntimeError> {
+    JsFuture::from(js_release(id))
+        .await
+        .map(|_| ())
+        .map_err(js_error)
 }
 
 pub async fn close(id: u32) -> Result<(), StudioRuntimeError> {

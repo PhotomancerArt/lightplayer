@@ -21,6 +21,8 @@ pub mod browser_protocol_client;
 pub mod browser_worker_runtime;
 
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+pub mod browser_esp32_flash;
+#[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub mod browser_serial_protocol_client;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub mod browser_serial_runtime;

@@ -108,7 +108,6 @@ pub fn App() -> Element {
                     ActionOrigin::User,
                 )
                 .await;
-                auto_advance_web_flow(studio, controller).await;
                 running.set(false);
             });
         };

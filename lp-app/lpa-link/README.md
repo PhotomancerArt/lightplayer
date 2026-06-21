@@ -51,7 +51,7 @@ ordering.
 | `host-process` | `providers::host_process::HostProcessProvider` | host process running `fw-host` | spawnable host runtime | logs, diagnostics, future local filesystem/runtime controls | implemented; returns host `LinkServerConnection` |
 | `browser-worker` | `providers::browser_worker::BrowserWorkerProvider` | `fw-browser` Web Worker | browser worker runtime | logs, diagnostics, worker lifecycle | model implemented; web code owns Worker binding and future `ClientIo` adapter |
 | `host-serial-esp32` | `providers::host_serial_esp32::HostSerialEsp32Provider` | ESP32 over host serial | physical serial device | connect, reset-after-open, logs, diagnostics; future flash/raw filesystem | implemented for discovery/connect; returns host `LinkServerConnection` |
-| `browser-serial-esp32` | `providers::browser_serial_esp32::BrowserSerialEsp32Provider` | ESP32 over Web Serial | physical serial device | connect, reset, logs, diagnostics; future flash/raw filesystem | model implemented; web code owns Web Serial binding and future `ClientIo` adapter |
+| `browser-serial-esp32` | `providers::browser_serial_esp32::BrowserSerialEsp32Provider` | ESP32 over Web Serial | physical serial device | connect, flash, reset, logs, diagnostics; future raw filesystem | model implemented; web code owns Web Serial binding, flashing adapter, and `ClientIo` adapter |
 | `host-websocket` | future `providers::host_websocket::HostWebsocketProvider` | already-running server over host networking | remote endpoint | host-side discovery/connect/status; limited management | future |
 | `browser-websocket` | future `providers::browser_websocket::BrowserWebsocketProvider` | already-running server over browser networking | remote endpoint | browser permission/discovery/connect/status; limited management | future |
 | `host-webserver` | future `providers::host_webserver::HostWebserverProvider` | host service owning `fw-host` runtimes | service-managed runtime endpoint | create/stop runtimes, logs, diagnostics | future |
@@ -116,7 +116,9 @@ cargo test -p lpa-link --features browser-worker
   The link layer models granted endpoints, sessions, management capability, and
   the serial JSON-lines protocol identity. The web runtime calls `requestPort()`
   from a user gesture and binds the browser streams to protocol read/write
-  logic.
+  logic. Firmware flashing is also browser-owned: Studio releases the normal
+  protocol reader/writer, then the browser flashing adapter takes exclusive
+  ownership of the same granted `SerialPort` for bootloader flashing.
 - Direct filesystem access means raw/full filesystem image management below the
   running `lp-server`. Normal project upload should use `lpa-client` and the
   server filesystem/project protocol once firmware is running.

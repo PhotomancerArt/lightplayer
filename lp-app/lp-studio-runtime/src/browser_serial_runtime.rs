@@ -1,8 +1,8 @@
 use lp_studio_core::{
-    ActionOrigin, BROWSER_SERIAL_ESP32_PROVIDER_ID, DeviceAccessStatus, DeviceCapability,
-    ProviderAvailability, ProviderCapability, ProviderCardState, ProviderIntent, RecoveryAction,
-    StudioActionKind, StudioApp, StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel,
-    TargetProbeResult,
+    ActionId, ActionOrigin, BROWSER_SERIAL_ESP32_PROVIDER_ID, DeviceAccessStatus, DeviceCapability,
+    DeviceIssue, DeviceIssueKind, ProgressState, ProviderAvailability, ProviderCapability,
+    ProviderCardState, ProviderIntent, RecoveryAction, StudioActionKind, StudioApp,
+    StudioDiagnostic, StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel, TargetProbeResult,
 };
 use lpa_link::providers::browser_serial_esp32::{
     BrowserSerialEsp32Provider, BrowserSerialEsp32Session,
@@ -11,6 +11,7 @@ use lpa_link::{LinkConnectionKind, LinkEndpointId, LinkProvider, LinkProviderId,
 use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 
 use crate::StudioRuntimeError;
+use crate::browser_esp32_flash::{self, DEFAULT_ESP32C6_FIRMWARE_MANIFEST_URL};
 use crate::browser_serial_protocol_client::BrowserSerialProtocolClient;
 use crate::browser_serial_shim;
 use crate::effect_executor::EffectExecutor;
@@ -20,6 +21,8 @@ pub struct BrowserSerialStudioRuntime {
     endpoint_ports: Vec<(LinkEndpointId, u32)>,
     session: Option<BrowserSerialEsp32Session>,
     client: Option<BrowserSerialProtocolClient>,
+    flash_manifest: Option<browser_esp32_flash::BrowserEsp32FirmwareManifest>,
+    flash_available: bool,
 }
 
 impl BrowserSerialStudioRuntime {
@@ -29,12 +32,21 @@ impl BrowserSerialStudioRuntime {
             endpoint_ports: Vec::new(),
             session: None,
             client: None,
+            flash_manifest: None,
+            flash_available: false,
         }
     }
 
     pub async fn close(&mut self) -> Result<(), StudioRuntimeError> {
+        let mut closed_port_ids = Vec::new();
         if let Some(client) = &self.client {
             browser_serial_shim::close(client.port_id()).await?;
+            closed_port_ids.push(client.port_id());
+        }
+        for (_, port_id) in &self.endpoint_ports {
+            if !closed_port_ids.contains(port_id) {
+                browser_serial_shim::close(*port_id).await?;
+            }
         }
         if let Some(session) = &mut self.session {
             session
@@ -128,7 +140,18 @@ impl BrowserSerialStudioRuntime {
         &mut self,
         action_id: lp_studio_core::ActionId,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
-        let availability = if browser_serial_shim::is_supported() {
+        let serial_supported = browser_serial_shim::is_supported();
+        let flash_manifest = if serial_supported && browser_esp32_flash::is_supported() {
+            browser_esp32_flash::load_manifest(DEFAULT_ESP32C6_FIRMWARE_MANIFEST_URL)
+                .await
+                .ok()
+        } else {
+            None
+        };
+        self.flash_available = flash_manifest.is_some();
+        self.flash_manifest = flash_manifest;
+
+        let availability = if serial_supported {
             ProviderAvailability::AvailableWithPermission
         } else {
             ProviderAvailability::unavailable(
@@ -153,17 +176,7 @@ impl BrowserSerialStudioRuntime {
                     ProviderIntent::ConnectUsbEsp32,
                 )
                 .with_availability(availability)
-                .with_capabilities(vec![
-                    ProviderCapability::RequestAccess,
-                    ProviderCapability::DiscoverEndpoints,
-                    ProviderCapability::Connect,
-                    ProviderCapability::ResetDevice,
-                    ProviderCapability::ReadLogs,
-                    ProviderCapability::ReadDiagnostics,
-                    ProviderCapability::ReadHeartbeat,
-                    ProviderCapability::DeployProject,
-                    ProviderCapability::ReadProjectInventory,
-                ])
+                .with_capabilities(browser_serial_provider_capabilities(self.flash_available))
                 .with_endpoints(endpoints),
             ],
         }])
@@ -215,9 +228,179 @@ impl BrowserSerialStudioRuntime {
             endpoint_id,
             session_id,
             connection_kind,
-            capabilities: browser_serial_capabilities(),
+            capabilities: browser_serial_capabilities(self.flash_available),
         });
         Ok(events)
+    }
+
+    async fn flash_firmware(
+        &mut self,
+        action_id: ActionId,
+        endpoint_id: LinkEndpointId,
+        requested_firmware_id: Option<String>,
+    ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
+        if !browser_esp32_flash::is_supported() {
+            return Ok(Self::flash_issue_events(
+                action_id,
+                endpoint_id,
+                DeviceIssueKind::RuntimeUnsupported,
+                "Browser ESP32 firmware flashing is not supported in this browser.",
+                vec![
+                    RecoveryAction::UseCompatibleBrowser,
+                    RecoveryAction::ChooseSimulator,
+                ],
+            ));
+        }
+
+        let manifest = match self.flash_manifest.clone() {
+            Some(manifest) => manifest,
+            None => match browser_esp32_flash::load_manifest(DEFAULT_ESP32C6_FIRMWARE_MANIFEST_URL)
+                .await
+            {
+                Ok(manifest) => {
+                    self.flash_available = true;
+                    self.flash_manifest = Some(manifest.clone());
+                    manifest
+                }
+                Err(error) => {
+                    return Ok(Self::flash_issue_events(
+                        action_id,
+                        endpoint_id,
+                        DeviceIssueKind::FirmwareArtifactMissing,
+                        format!("ESP32-C6 firmware artifact is unavailable: {error}"),
+                        vec![
+                            RecoveryAction::Retry,
+                            RecoveryAction::OpenHelp {
+                                topic: "studio firmware packaging".to_string(),
+                            },
+                        ],
+                    ));
+                }
+            },
+        };
+
+        if requested_firmware_id
+            .as_ref()
+            .is_some_and(|firmware_id| firmware_id != &manifest.firmware_id)
+        {
+            return Ok(Self::flash_issue_events(
+                action_id,
+                endpoint_id,
+                DeviceIssueKind::FirmwareArtifactMissing,
+                format!(
+                    "Requested firmware is not packaged for browser flashing: {}",
+                    requested_firmware_id.unwrap_or_default()
+                ),
+                vec![
+                    RecoveryAction::Retry,
+                    RecoveryAction::OpenHelp {
+                        topic: "studio firmware packaging".to_string(),
+                    },
+                ],
+            ));
+        }
+
+        let port_id = self.port_id_for_endpoint(&endpoint_id)?;
+        if let Some(client) = &self.client {
+            browser_serial_shim::release(client.port_id()).await?;
+        }
+        if let Some(session) = &mut self.session {
+            session
+                .close()
+                .await
+                .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
+        }
+        self.client = None;
+        self.session = None;
+
+        let mut events = vec![StudioEvent::ProvisioningProgressUpdated {
+            action_id: None,
+            progress: ProgressState::new(format!("Flashing {}", manifest.display_name))
+                .with_steps(0, 3)
+                .with_percent(0),
+        }];
+
+        match browser_esp32_flash::flash_firmware(port_id, DEFAULT_ESP32C6_FIRMWARE_MANIFEST_URL)
+            .await
+        {
+            Ok(result) => {
+                for line in result.logs {
+                    events.push(StudioEvent::LogReceived {
+                        entry: StudioLogEntry::new(
+                            StudioLogLevel::Info,
+                            "browser-esp32-flash",
+                            line,
+                        ),
+                    });
+                }
+                for progress in result.progress {
+                    events.push(StudioEvent::ProvisioningProgressUpdated {
+                        action_id: None,
+                        progress,
+                    });
+                }
+                if let Some(chip_name) = result.chip_name {
+                    events.push(StudioEvent::DiagnosticRaised {
+                        diagnostic: StudioDiagnostic::info(format!(
+                            "Flashed firmware to {chip_name}."
+                        )),
+                    });
+                }
+                events.push(StudioEvent::ProvisioningProgressUpdated {
+                    action_id: None,
+                    progress: ProgressState::new("Firmware flash complete")
+                        .with_steps(3, 3)
+                        .with_percent(100),
+                });
+                events.push(StudioEvent::FirmwareFlashCompleted {
+                    action_id,
+                    endpoint_id,
+                    firmware_id: Some(result.manifest.firmware_id),
+                });
+                Ok(events)
+            }
+            Err(error) => Ok(Self::flash_issue_events(
+                action_id,
+                endpoint_id,
+                DeviceIssueKind::FlashFailed,
+                format!("ESP32 firmware flash failed: {error}"),
+                vec![
+                    RecoveryAction::Retry,
+                    RecoveryAction::Reconnect,
+                    RecoveryAction::ChooseSimulator,
+                ],
+            )),
+        }
+    }
+
+    fn flash_issue_events(
+        action_id: ActionId,
+        endpoint_id: LinkEndpointId,
+        kind: DeviceIssueKind,
+        message: impl Into<String>,
+        recovery_actions: Vec<RecoveryAction>,
+    ) -> Vec<StudioEvent> {
+        let message = message.into();
+        let issue = DeviceIssue::error(
+            format!("browser-esp32-flash-{}", action_id.get()),
+            kind,
+            message.clone(),
+        )
+        .with_provider(BROWSER_SERIAL_ESP32_PROVIDER_ID)
+        .with_endpoint(endpoint_id);
+        let issue = issue.with_recovery_actions(recovery_actions);
+        vec![
+            StudioEvent::DiagnosticRaised {
+                diagnostic: StudioDiagnostic::error(Some(action_id), message.clone()),
+            },
+            StudioEvent::LogReceived {
+                entry: StudioLogEntry::new(StudioLogLevel::Error, "browser-esp32-flash", message),
+            },
+            StudioEvent::ProvisioningIssueRaised {
+                action_id: Some(action_id),
+                issue,
+            },
+        ]
     }
 
     fn project_client(&mut self) -> Result<&mut BrowserSerialProtocolClient, StudioRuntimeError> {
@@ -296,12 +479,12 @@ impl EffectExecutor for BrowserSerialStudioRuntime {
             }]),
             StudioEffect::FlashDeviceFirmware {
                 action_id,
-                endpoint_id: _,
-                firmware_id: _,
-            } => Ok(vec![StudioEvent::ActionFailed {
-                action_id,
-                message: "browser firmware flashing is planned for the next phase".to_string(),
-            }]),
+                endpoint_id,
+                firmware_id,
+            } => {
+                self.flash_firmware(action_id, endpoint_id, firmware_id)
+                    .await
+            }
             StudioEffect::SeedDemoProject {
                 action_id,
                 project_id,
@@ -362,8 +545,26 @@ async fn drain_effects(
     Ok(())
 }
 
-fn browser_serial_capabilities() -> Vec<DeviceCapability> {
-    vec![
+fn browser_serial_provider_capabilities(flash_available: bool) -> Vec<ProviderCapability> {
+    let mut capabilities = vec![
+        ProviderCapability::RequestAccess,
+        ProviderCapability::DiscoverEndpoints,
+        ProviderCapability::Connect,
+        ProviderCapability::ResetDevice,
+        ProviderCapability::ReadLogs,
+        ProviderCapability::ReadDiagnostics,
+        ProviderCapability::ReadHeartbeat,
+        ProviderCapability::DeployProject,
+        ProviderCapability::ReadProjectInventory,
+    ];
+    if flash_available {
+        capabilities.push(ProviderCapability::FlashFirmware);
+    }
+    capabilities
+}
+
+fn browser_serial_capabilities(flash_available: bool) -> Vec<DeviceCapability> {
+    let mut capabilities = vec![
         DeviceCapability::RequestDeviceAccess,
         DeviceCapability::Connect,
         DeviceCapability::UseBrowserSerialEsp32,
@@ -374,7 +575,11 @@ fn browser_serial_capabilities() -> Vec<DeviceCapability> {
         DeviceCapability::ReadProjectInventory,
         DeviceCapability::ReadLogs,
         DeviceCapability::ReadDiagnostics,
-    ]
+    ];
+    if flash_available {
+        capabilities.push(DeviceCapability::FlashFirmware);
+    }
+    capabilities
 }
 
 fn map_log_level(level: lpa_link::LinkLogLevel) -> StudioLogLevel {

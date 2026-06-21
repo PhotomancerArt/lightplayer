@@ -8,6 +8,8 @@ export function installLightPlayerBrowserSerial() {
   globalThis.lpBrowserSerialWriteLine = writeLine;
   globalThis.lpBrowserSerialTakeLines = takeLines;
   globalThis.lpBrowserSerialTakeErrors = takeErrors;
+  globalThis.lpBrowserSerialRelease = releasePort;
+  globalThis.lpBrowserSerialGetPort = getPort;
   globalThis.lpBrowserSerialClose = closePort;
 }
 
@@ -31,6 +33,7 @@ async function requestPort() {
     lines: [],
     errors: [],
     closed: false,
+    releasing: false,
   });
   return { id, label: labelForPort(port) };
 }
@@ -41,6 +44,7 @@ async function openPort(id, baudRate) {
   session.reader = session.port.readable.getReader();
   session.writer = session.port.writable.getWriter();
   session.closed = false;
+  session.releasing = false;
   readPump(id, session);
 }
 
@@ -67,6 +71,16 @@ async function closePort(id) {
   if (!session) {
     return;
   }
+  await releasePort(id);
+  sessions.delete(id);
+}
+
+async function releasePort(id) {
+  const session = sessions.get(id);
+  if (!session) {
+    return;
+  }
+  session.releasing = true;
   session.closed = true;
   try {
     await session.reader?.cancel();
@@ -91,9 +105,18 @@ async function closePort(id) {
   try {
     await session.port.close();
   } catch (error) {
-    session.errors.push(errorMessage(error));
+    const message = errorMessage(error);
+    if (!message.includes("already closed")) {
+      session.errors.push(message);
+    }
   }
-  sessions.delete(id);
+  session.reader = null;
+  session.writer = null;
+  session.releasing = false;
+}
+
+function getPort(id) {
+  return requireSession(id).port;
 }
 
 async function readPump(id, session) {
@@ -116,7 +139,7 @@ async function readPump(id, session) {
   } finally {
     const wasClosed = session.closed;
     session.closed = true;
-    if (!wasClosed && sessions.get(id) === session) {
+    if (!wasClosed && !session.releasing && sessions.get(id) === session) {
       session.errors.push("Serial port disconnected.");
     }
   }

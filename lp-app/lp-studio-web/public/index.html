@@ -8,8 +8,10 @@
   <body>
     <div id="main"></div>
     <script type="module">
+      import { installLightPlayerBrowserEsp32Flash } from "./browser-esp32-flash.js";
       import { installLightPlayerBrowserSerial } from "./browser-serial.js";
       import init from "./pkg/lp-studio-web.js";
+      installLightPlayerBrowserEsp32Flash();
       installLightPlayerBrowserSerial();
       await init();
     </script>
