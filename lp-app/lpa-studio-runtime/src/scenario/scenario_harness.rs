@@ -1,4 +1,4 @@
-use lpa_link::link_endpoint::LinkEndpointId;
+use lpa_link::provider::endpoint::LinkEndpointId;
 use lpa_studio_core::{
     ActionOrigin, LinkActionRequest, LinkState, ProjectActionRequest, ServerActionRequest,
     StudioActionKind, StudioApp, StudioEffect, StudioEvent,

@@ -4,7 +4,7 @@ use std::rc::Rc;
 use lpa_client::project_deploy::{project_load_path, request_label};
 use lpa_client::{ClientError, ClientEvent, ClientIo, ClientOutcome, LpClient};
 use lpa_link::LinkProvider;
-use lpa_link::link_session::LinkSessionId;
+use lpa_link::provider::session::LinkSessionId;
 use lpa_link::providers::browser_serial_esp32::BrowserSerialEsp32Provider;
 use lpc_wire::{ClientMessage, TransportError, WireServerMessage, json};
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};

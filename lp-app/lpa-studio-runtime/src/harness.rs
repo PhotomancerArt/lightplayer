@@ -1,8 +1,6 @@
 //! Runtime test harness for driving a `StudioApp` through an effect executor.
 
 #[cfg(feature = "host-process")]
-use lpa_link::link_provider::LinkProviderId;
-#[cfg(feature = "host-process")]
 use lpa_studio_core::HOST_PROCESS_PROVIDER_ID;
 use lpa_studio_core::{ActionOrigin, StudioActionKind, StudioApp, StudioEffect};
 #[cfg(feature = "host-process")]
@@ -83,7 +81,7 @@ impl RuntimeHarness<HostProcessStudioRuntime> {
         let mut app = StudioApp::new();
         app.dispatch_kind(
             StudioActionKind::from(LinkActionRequest::SelectProvider {
-                provider_id: LinkProviderId::new(HOST_PROCESS_PROVIDER_ID),
+                provider_id: HOST_PROCESS_PROVIDER_ID,
             }),
             ActionOrigin::Harness,
         );

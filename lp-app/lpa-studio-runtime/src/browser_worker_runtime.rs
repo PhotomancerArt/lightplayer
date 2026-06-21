@@ -5,9 +5,9 @@ use crate::StudioRuntimeError;
 use crate::browser_protocol_client::BrowserProtocolClient;
 use crate::effect_executor::EffectExecutor;
 use crate::harness::RuntimeHarness;
-use lpa_link::link_endpoint::LinkEndpointId;
-use lpa_link::link_provider::LinkProviderId;
-use lpa_link::link_session::LinkSessionId;
+use lpa_link::LinkProviderKind;
+use lpa_link::provider::endpoint::LinkEndpointId;
+use lpa_link::provider::session::LinkSessionId;
 use lpa_link::providers::browser_worker::{
     BrowserOutputEnvelope, BrowserWorkerOptions, BrowserWorkerProvider,
 };
@@ -32,7 +32,7 @@ impl BrowserWorkerStudioRuntime {
     }
 
     pub fn with_options(options: BrowserWorkerOptions) -> Self {
-        let mut provider = BrowserWorkerProvider::with_options(BROWSER_WORKER_PROVIDER_ID, options);
+        let mut provider = BrowserWorkerProvider::with_options(options);
         provider.create_worker_endpoint("Browser firmware runtime");
         Self {
             provider: Rc::new(RefCell::new(provider)),
@@ -93,9 +93,9 @@ impl BrowserWorkerStudioRuntime {
     async fn request_device_access(
         &mut self,
         action_id: lpa_studio_core::ActionId,
-        provider_id: LinkProviderId,
+        provider_id: LinkProviderKind,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
-        if provider_id.as_str() != BROWSER_WORKER_PROVIDER_ID {
+        if provider_id != BROWSER_WORKER_PROVIDER_ID {
             return Err(StudioRuntimeError::UnsupportedProvider(
                 provider_id.as_str().to_string(),
             ));
@@ -110,9 +110,9 @@ impl BrowserWorkerStudioRuntime {
     async fn discover(
         &mut self,
         action_id: lpa_studio_core::ActionId,
-        provider_id: LinkProviderId,
+        provider_id: LinkProviderKind,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
-        if provider_id.as_str() != BROWSER_WORKER_PROVIDER_ID {
+        if provider_id != BROWSER_WORKER_PROVIDER_ID {
             return Err(StudioRuntimeError::UnsupportedProvider(
                 provider_id.as_str().to_string(),
             ));
@@ -191,7 +191,7 @@ impl BrowserWorkerStudioRuntime {
         self.session_id = Some(session_id.clone());
         events.push(StudioEvent::DeviceConnected {
             action_id,
-            provider_id: LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID),
+            provider_id: BROWSER_WORKER_PROVIDER_ID,
             endpoint_id,
             session_id,
             connection_kind,
@@ -284,7 +284,7 @@ pub async fn run_browser_worker_demo() -> Result<StudioApp, StudioRuntimeError> 
     harness
         .dispatch(
             StudioActionKind::from(LinkActionRequest::StartProvisioning {
-                provider_id: LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID),
+                provider_id: BROWSER_WORKER_PROVIDER_ID,
             }),
             ActionOrigin::Harness,
         )

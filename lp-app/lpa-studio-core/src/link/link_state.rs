@@ -2,9 +2,9 @@ use crate::{
     DeviceIssue, ProgressState, ProjectChoice, ProjectSelectionReason, ProvisioningReason,
     RecoveryReason,
 };
-use lpa_link::link_endpoint::LinkEndpointId;
-use lpa_link::link_provider::LinkProviderId;
-use lpa_link::link_session::LinkSessionId;
+use lpa_link::LinkProviderKind;
+use lpa_link::provider::endpoint::LinkEndpointId;
+use lpa_link::provider::session::LinkSessionId;
 use serde::{Deserialize, Serialize};
 
 /// Product-level journey through provider choice, link, and readiness.
@@ -13,10 +13,10 @@ pub enum LinkState {
     Empty,
     ChoosingProvider,
     RequestingAccess {
-        provider_id: LinkProviderId,
+        provider_id: LinkProviderKind,
     },
     AccessFailed {
-        provider_id: LinkProviderId,
+        provider_id: LinkProviderKind,
         issue: DeviceIssue,
     },
     Opening {

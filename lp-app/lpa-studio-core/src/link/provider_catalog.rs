@@ -1,13 +1,13 @@
 use crate::{ProviderAvailability, ProviderCardState, ProviderIntent};
 use lpa_link::LinkEndpoint;
-use lpa_link::link_endpoint::LinkEndpointId;
-use lpa_link::link_provider::LinkProviderId;
+use lpa_link::LinkProviderKind;
+use lpa_link::provider::endpoint::LinkEndpointId;
 use serde::{Deserialize, Serialize};
 
 /// Collection of provider profiles and the user's current provider selection.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 pub struct ProviderCatalog {
-    pub selected_provider_id: Option<LinkProviderId>,
+    pub selected_provider_id: Option<LinkProviderKind>,
     pub providers: Vec<ProviderCardState>,
 }
 
@@ -23,11 +23,11 @@ impl ProviderCatalog {
         }
     }
 
-    pub fn selected_provider_id(&self) -> Option<&LinkProviderId> {
+    pub fn selected_provider_id(&self) -> Option<&LinkProviderKind> {
         self.selected_provider_id.as_ref()
     }
 
-    pub fn select_provider(&mut self, provider_id: impl Into<LinkProviderId>) {
+    pub fn select_provider(&mut self, provider_id: impl Into<LinkProviderKind>) {
         let provider_id = provider_id.into();
         self.ensure_provider(provider_id.clone());
         self.selected_provider_id = Some(provider_id);
@@ -58,13 +58,16 @@ impl ProviderCatalog {
         }
     }
 
-    pub fn provider(&self, provider_id: &LinkProviderId) -> Option<&ProviderCardState> {
+    pub fn provider(&self, provider_id: &LinkProviderKind) -> Option<&ProviderCardState> {
         self.providers
             .iter()
             .find(|entry| entry.provider_id == *provider_id)
     }
 
-    pub fn provider_mut(&mut self, provider_id: &LinkProviderId) -> Option<&mut ProviderCardState> {
+    pub fn provider_mut(
+        &mut self,
+        provider_id: &LinkProviderKind,
+    ) -> Option<&mut ProviderCardState> {
         self.providers
             .iter_mut()
             .find(|entry| entry.provider_id == *provider_id)
@@ -88,7 +91,7 @@ impl ProviderCatalog {
 
     pub fn set_provider_endpoints(
         &mut self,
-        provider_id: LinkProviderId,
+        provider_id: LinkProviderKind,
         endpoints: Vec<LinkEndpoint>,
     ) {
         self.ensure_provider(provider_id.clone());
@@ -99,7 +102,7 @@ impl ProviderCatalog {
 
     pub fn set_provider_availability(
         &mut self,
-        provider_id: LinkProviderId,
+        provider_id: LinkProviderKind,
         availability: ProviderAvailability,
     ) {
         self.ensure_provider(provider_id.clone());
@@ -115,7 +118,7 @@ impl ProviderCatalog {
             .find(|endpoint| endpoint.id == *endpoint_id)
     }
 
-    fn ensure_provider(&mut self, provider_id: LinkProviderId) {
+    fn ensure_provider(&mut self, provider_id: LinkProviderKind) {
         if self.provider(&provider_id).is_none() {
             self.providers.push(ProviderCardState::new(
                 provider_id.clone(),

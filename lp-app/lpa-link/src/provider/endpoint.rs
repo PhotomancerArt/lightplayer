@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::LinkCapabilities;
-use crate::link_provider::LinkProviderId;
+use crate::providers::LinkProviderKind;
 
 /// A provider-visible target that can be connected to.
 ///
@@ -15,22 +15,27 @@ use crate::link_provider::LinkProviderId;
 /// in-process `fw-host` runtime session.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct LinkEndpoint {
+    /// Provider-local endpoint id used for status/connect operations.
     pub id: LinkEndpointId,
-    pub provider_id: LinkProviderId,
+    /// Built-in provider kind that discovered and owns this endpoint.
+    pub provider_kind: LinkProviderKind,
+    /// Human-facing endpoint label, such as a serial port name.
     pub label: String,
+    /// Last known endpoint availability state.
     pub status: LinkEndpointStatus,
+    /// Link operations supported when this endpoint is connected.
     pub capabilities: LinkCapabilities,
 }
 
 impl LinkEndpoint {
     pub fn new(
         id: impl Into<LinkEndpointId>,
-        provider_id: impl Into<LinkProviderId>,
+        provider_kind: impl Into<LinkProviderKind>,
         label: impl Into<String>,
     ) -> Self {
         Self {
             id: id.into(),
-            provider_id: provider_id.into(),
+            provider_kind: provider_kind.into(),
             label: label.into(),
             status: LinkEndpointStatus::Available,
             capabilities: LinkCapabilities::default(),
@@ -48,6 +53,11 @@ impl LinkEndpoint {
     }
 }
 
+/// Opaque provider-scoped endpoint identity.
+///
+/// Endpoint ids only need to be stable enough for the provider that returned
+/// them to recognize later `status` and `connect` calls. They are not provider
+/// identities; use `LinkEndpoint::provider_kind` for the provider class.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
 pub struct LinkEndpointId(String);
 
@@ -73,6 +83,7 @@ impl From<String> for LinkEndpointId {
     }
 }
 
+/// Provider-reported endpoint lifecycle state.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum LinkEndpointStatus {
     Available,

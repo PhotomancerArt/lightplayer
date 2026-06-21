@@ -7,9 +7,9 @@ use crate::{
     ServerActionRequest, ServerState, StudioAction, StudioActionKind, StudioDiagnostic,
     StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel, StudioState, TargetKind,
 };
-use lpa_link::link_endpoint::LinkEndpointId;
-use lpa_link::link_provider::LinkProviderId;
-use lpa_link::link_session::LinkSessionId;
+use lpa_link::LinkProviderKind;
+use lpa_link::provider::endpoint::LinkEndpointId;
+use lpa_link::provider::session::LinkSessionId;
 
 pub struct StudioApp {
     state: StudioState,
@@ -676,7 +676,7 @@ impl StudioApp {
             .retain(|in_flight| in_flight.action_id != action_id);
     }
 
-    fn selected_provider_id(&self) -> Option<LinkProviderId> {
+    fn selected_provider_id(&self) -> Option<LinkProviderKind> {
         self.state
             .device_manager
             .providers
@@ -780,7 +780,7 @@ impl StudioApp {
 
     fn apply_device_access_status(
         &mut self,
-        provider_id: LinkProviderId,
+        provider_id: LinkProviderKind,
         status: DeviceAccessStatus,
     ) {
         self.state
@@ -892,13 +892,13 @@ impl Default for StudioApp {
     }
 }
 
-fn device_id_for(provider_id: &LinkProviderId, endpoint_id: &LinkEndpointId) -> DeviceId {
+fn device_id_for(provider_id: &LinkProviderKind, endpoint_id: &LinkEndpointId) -> DeviceId {
     DeviceId::new(format!("{}:{}", provider_id.as_str(), endpoint_id.as_str()))
 }
 
 fn provider_unavailable_issue(
     action_id: ActionId,
-    provider_id: LinkProviderId,
+    provider_id: LinkProviderKind,
     availability: ProviderAvailability,
 ) -> DeviceIssue {
     let (message, recovery_actions) = match availability {
@@ -928,15 +928,14 @@ fn issue_id(prefix: &str, action_id: ActionId) -> String {
     format!("{prefix}-{}", action_id.get())
 }
 
-fn issue_id_for_provider(prefix: &str, provider_id: &LinkProviderId) -> String {
+fn issue_id_for_provider(prefix: &str, provider_id: &LinkProviderKind) -> String {
     format!("{prefix}-{}", provider_id.as_str())
 }
 
 #[cfg(test)]
 mod tests {
-    use lpa_link::link_endpoint::LinkEndpointId;
-    use lpa_link::link_provider::LinkProviderId;
-    use lpa_link::link_session::LinkSessionId;
+    use lpa_link::provider::endpoint::LinkEndpointId;
+    use lpa_link::provider::session::LinkSessionId;
     use lpa_link::{LinkConnectionKind, LinkEndpoint};
     use lpc_wire::{WireProjectHandle, WireProjectInventoryReadResponse};
 
@@ -970,7 +969,7 @@ mod tests {
         let mut app = StudioApp::new();
         app.dispatch_kind(
             StudioActionKind::from(LinkActionRequest::SelectProvider {
-                provider_id: LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID),
+                provider_id: BROWSER_WORKER_PROVIDER_ID,
             }),
             ActionOrigin::User,
         );
@@ -990,7 +989,7 @@ mod tests {
         let mut app = StudioApp::new();
         app.dispatch_kind(
             StudioActionKind::from(LinkActionRequest::SelectProvider {
-                provider_id: LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID),
+                provider_id: BROWSER_WORKER_PROVIDER_ID,
             }),
             ActionOrigin::User,
         );
@@ -1003,7 +1002,7 @@ mod tests {
         assert!(matches!(
             &effects[0],
             StudioEffect::RequestDeviceAccess { provider_id, .. }
-                if provider_id.as_str() == BROWSER_WORKER_PROVIDER_ID
+                if provider_id == &BROWSER_WORKER_PROVIDER_ID
         ));
         assert_eq!(app.state().in_flight.len(), 1);
     }
@@ -1019,7 +1018,7 @@ mod tests {
 
         app.apply_event(StudioEvent::DeviceAccessUpdated {
             action_id: Some(action_id),
-            provider_id: LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID),
+            provider_id: BROWSER_WORKER_PROVIDER_ID,
             status: crate::DeviceAccessStatus::Granted,
         });
 
@@ -1028,7 +1027,7 @@ mod tests {
             app.state()
                 .device_access
                 .as_ref()
-                .map(|access| access.provider_id.as_str()),
+                .map(|access| access.provider_id),
             Some(BROWSER_WORKER_PROVIDER_ID)
         );
         assert!(matches!(
@@ -1072,7 +1071,7 @@ mod tests {
             app.state()
                 .device_manager
                 .providers
-                .provider(&LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID))
+                .provider(&BROWSER_SERIAL_ESP32_PROVIDER_ID)
                 .map(|provider| &provider.availability),
             Some(ProviderAvailability::Unavailable { .. })
         ));
@@ -1084,7 +1083,7 @@ mod tests {
 
         app.apply_event(StudioEvent::DeviceAccessUpdated {
             action_id: None,
-            provider_id: LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID),
+            provider_id: BROWSER_SERIAL_ESP32_PROVIDER_ID,
             status: crate::DeviceAccessStatus::Unsupported {
                 reason: "Web Serial is not supported in this browser.".to_string(),
             },
@@ -1132,7 +1131,7 @@ mod tests {
 
         app.apply_event(StudioEvent::EndpointsDiscovered {
             action_id,
-            provider_id: LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID),
+            provider_id: BROWSER_WORKER_PROVIDER_ID,
             endpoints: vec![endpoint.clone()],
         });
 
@@ -1155,7 +1154,7 @@ mod tests {
 
         app.apply_event(StudioEvent::DeviceConnected {
             action_id: ActionId::new(1),
-            provider_id: LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID),
+            provider_id: BROWSER_WORKER_PROVIDER_ID,
             endpoint_id: LinkEndpointId::new("browser-worker-worker-1"),
             session_id: LinkSessionId::new("session-1"),
             connection_kind: LinkConnectionKind::BrowserWorker {
@@ -1310,7 +1309,7 @@ mod tests {
     fn permission_canceled_access_event_sets_access_failed_flow() {
         let mut app = StudioApp::new();
         let action_id = ActionId::new(31);
-        let provider_id = LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID);
+        let provider_id = BROWSER_SERIAL_ESP32_PROVIDER_ID;
         app.mark_in_flight(
             action_id,
             ActionDescriptor::for_type(crate::StudioActionType::RequestDeviceAccess),
@@ -1418,7 +1417,7 @@ mod tests {
         let mut app = StudioApp::new();
         app.apply_event(StudioEvent::DeviceConnected {
             action_id: ActionId::new(1),
-            provider_id: LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID),
+            provider_id: BROWSER_WORKER_PROVIDER_ID,
             endpoint_id: LinkEndpointId::new("browser-worker-worker-1"),
             session_id: LinkSessionId::new("session-1"),
             connection_kind: LinkConnectionKind::BrowserWorker {

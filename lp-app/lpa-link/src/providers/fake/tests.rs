@@ -1,5 +1,5 @@
-use crate::link_endpoint::LinkEndpointId;
-use crate::link_provider::LinkProviderId;
+use crate::provider::endpoint::LinkEndpointId;
+use crate::providers::LinkProviderKind;
 use crate::providers::fake::FakeProvider;
 use crate::{LinkCapabilities, LinkEndpoint, LinkProvider};
 
@@ -53,11 +53,14 @@ async fn logs_and_diagnostics_are_scoped_to_session() {
 }
 
 fn fake_provider() -> FakeProvider {
-    let provider_id = LinkProviderId::new("fake");
-    FakeProvider::new(provider_id.clone())
+    FakeProvider::new()
         .with_endpoint(
-            LinkEndpoint::new("fake-a", provider_id.clone(), "Fake A")
+            LinkEndpoint::new("fake-a", LinkProviderKind::Fake, "Fake A")
                 .with_capabilities(LinkCapabilities::diagnostics_only()),
         )
-        .with_endpoint(LinkEndpoint::new("fake-b", provider_id, "Fake B"))
+        .with_endpoint(LinkEndpoint::new(
+            "fake-b",
+            LinkProviderKind::Fake,
+            "Fake B",
+        ))
 }

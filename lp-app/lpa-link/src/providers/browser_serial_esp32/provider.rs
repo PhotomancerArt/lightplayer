@@ -1,22 +1,24 @@
 use std::collections::BTreeMap;
 
-use crate::link_endpoint::{LinkEndpointId, LinkEndpointStatus};
-use crate::link_provider::LinkProviderId;
-use crate::link_session::LinkSessionId;
+use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
+use crate::provider::session::LinkSessionId;
 use crate::providers::browser_serial_esp32::BrowserSerialEsp32Options;
-#[cfg(target_arch = "wasm32")]
 use crate::providers::browser_serial_esp32::{
     BrowserEsp32FirmwareManifest, BrowserEsp32FlashResult, BrowserEsp32ProbeResult,
     browser_esp32_flash, browser_serial,
 };
+use crate::providers::{LinkProviderDescriptor, LinkProviderKind};
 use crate::{
     LinkCapabilities, LinkConnection, LinkConnectionKind, LinkDiagnostic, LinkDiagnosticSeverity,
     LinkEndpoint, LinkError, LinkLogEntry, LinkLogLevel, LinkProvider, LinkSession,
     LinkSessionStatus,
 };
 
+pub fn descriptor() -> LinkProviderDescriptor {
+    LinkProviderKind::BrowserSerialEsp32.descriptor()
+}
+
 pub struct BrowserSerialEsp32Provider {
-    id: LinkProviderId,
     endpoints: BTreeMap<LinkEndpointId, BrowserSerialEndpointState>,
     sessions: BTreeMap<LinkSessionId, BrowserSerialSessionState>,
     options: BrowserSerialEsp32Options,
@@ -25,13 +27,12 @@ pub struct BrowserSerialEsp32Provider {
 }
 
 impl BrowserSerialEsp32Provider {
-    pub fn new(id: impl Into<LinkProviderId>) -> Self {
-        Self::with_options(id, BrowserSerialEsp32Options::default())
+    pub fn new() -> Self {
+        Self::with_options(BrowserSerialEsp32Options::default())
     }
 
-    pub fn with_options(id: impl Into<LinkProviderId>, options: BrowserSerialEsp32Options) -> Self {
+    pub fn with_options(options: BrowserSerialEsp32Options) -> Self {
         Self {
-            id: id.into(),
             endpoints: BTreeMap::new(),
             sessions: BTreeMap::new(),
             options,
@@ -51,12 +52,12 @@ impl BrowserSerialEsp32Provider {
     ) -> LinkEndpointId {
         let endpoint_id = LinkEndpointId::new(format!(
             "{}-port-{}",
-            self.id.as_str(),
+            self.kind().key(),
             self.next_endpoint_index
         ));
         self.next_endpoint_index += 1;
 
-        let endpoint = LinkEndpoint::new(endpoint_id.clone(), self.id.clone(), label)
+        let endpoint = LinkEndpoint::new(endpoint_id.clone(), self.kind(), label)
             .with_capabilities(LinkCapabilities::esp32_serial_base().with_flash());
         self.endpoints.insert(
             endpoint_id.clone(),
@@ -65,34 +66,20 @@ impl BrowserSerialEsp32Provider {
         endpoint_id
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn is_serial_supported(&self) -> bool {
         browser_serial::is_supported()
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn is_serial_supported(&self) -> bool {
-        false
-    }
-
-    #[cfg(target_arch = "wasm32")]
     pub fn is_flash_supported(&self) -> bool {
         browser_esp32_flash::is_supported()
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn is_flash_supported(&self) -> bool {
-        false
-    }
-
-    #[cfg(target_arch = "wasm32")]
     pub async fn request_access(&mut self) -> Result<LinkEndpoint, LinkError> {
         let port = browser_serial::request_port().await?;
         let endpoint_id = self.create_granted_endpoint(port.label, port.id);
         Ok(self.endpoint(&endpoint_id)?.clone())
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub async fn open_protocol(
         &mut self,
         session_id: &LinkSessionId,
@@ -104,7 +91,6 @@ impl BrowserSerialEsp32Provider {
         Ok(())
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub async fn write_line(
         &self,
         session_id: &LinkSessionId,
@@ -114,19 +100,16 @@ impl BrowserSerialEsp32Provider {
         browser_serial::write_line(state.port_id, line).await
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn take_lines(&self, session_id: &LinkSessionId) -> Result<Vec<String>, LinkError> {
         let state = self.session(session_id)?;
         Ok(browser_serial::take_lines(state.port_id))
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn take_errors(&self, session_id: &LinkSessionId) -> Result<Vec<String>, LinkError> {
         let state = self.session(session_id)?;
         Ok(browser_serial::take_errors(state.port_id))
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub async fn release_protocol(&mut self, session_id: &LinkSessionId) -> Result<(), LinkError> {
         let state = self.session_mut(session_id)?;
         browser_serial::release(state.port_id).await?;
@@ -134,7 +117,6 @@ impl BrowserSerialEsp32Provider {
         Ok(())
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub async fn release_session_for_management(
         &mut self,
         session_id: &LinkSessionId,
@@ -144,12 +126,10 @@ impl BrowserSerialEsp32Provider {
         Ok(())
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub async fn load_firmware_manifest(&self) -> Result<BrowserEsp32FirmwareManifest, LinkError> {
         browser_esp32_flash::load_manifest(&self.options.firmware_manifest_path).await
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub async fn probe_target(
         &mut self,
         endpoint_id: &LinkEndpointId,
@@ -158,7 +138,6 @@ impl BrowserSerialEsp32Provider {
         browser_esp32_flash::probe_target(port_id, self.options.esptool_module_path()).await
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub async fn flash_firmware(
         &mut self,
         endpoint_id: &LinkEndpointId,
@@ -202,8 +181,8 @@ impl BrowserSerialEsp32Provider {
 }
 
 impl LinkProvider for BrowserSerialEsp32Provider {
-    fn id(&self) -> &LinkProviderId {
-        &self.id
+    fn kind(&self) -> LinkProviderKind {
+        LinkProviderKind::BrowserSerialEsp32
     }
 
     async fn discover(&mut self) -> Result<Vec<LinkEndpoint>, LinkError> {
@@ -231,7 +210,7 @@ impl LinkProvider for BrowserSerialEsp32Provider {
         self.next_session_index += 1;
         let session = LinkSession::new(
             session_id.clone(),
-            self.id.clone(),
+            self.kind(),
             endpoint_state.endpoint.id.clone(),
             LinkConnectionKind::BrowserSerialEsp32 {
                 protocol: "lp-serial-json-lines-v1".to_string(),
@@ -273,7 +252,6 @@ impl LinkProvider for BrowserSerialEsp32Provider {
             return Ok(());
         }
         state.session.status = LinkSessionStatus::Closed;
-        #[cfg(target_arch = "wasm32")]
         browser_serial::close(state.port_id).await?;
         state.protocol_open = false;
         state.logs.push(LinkLogEntry::new(

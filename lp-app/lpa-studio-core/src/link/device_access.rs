@@ -1,15 +1,15 @@
-use lpa_link::link_provider::LinkProviderId;
+use lpa_link::LinkProviderKind;
 use serde::{Deserialize, Serialize};
 
 /// Browser or host access state for a low-level device provider.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct DeviceAccess {
-    pub provider_id: LinkProviderId,
+    pub provider_id: LinkProviderKind,
     pub status: DeviceAccessStatus,
 }
 
 impl DeviceAccess {
-    pub fn new(provider_id: impl Into<LinkProviderId>, status: DeviceAccessStatus) -> Self {
+    pub fn new(provider_id: impl Into<LinkProviderKind>, status: DeviceAccessStatus) -> Self {
         Self {
             provider_id: provider_id.into(),
             status,

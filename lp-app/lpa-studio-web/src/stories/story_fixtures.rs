@@ -1,6 +1,6 @@
-use lpa_link::link_endpoint::{LinkEndpointId, LinkEndpointStatus};
-use lpa_link::link_provider::LinkProviderId;
-use lpa_link::link_session::LinkSessionId;
+use lpa_link::LinkProviderKind;
+use lpa_link::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
+use lpa_link::provider::session::LinkSessionId;
 use lpa_link::{LinkConnectionKind, LinkEndpoint};
 use lpa_studio_core::{
     ActionId, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID, ClientSession,
@@ -35,7 +35,7 @@ pub fn studio_state_requesting_access() -> StudioState {
         .providers
         .select_provider(BROWSER_SERIAL_ESP32_PROVIDER_ID);
     state.device_manager.active_flow = LinkState::RequestingAccess {
-        provider_id: LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID),
+        provider_id: BROWSER_SERIAL_ESP32_PROVIDER_ID,
     };
     state.device_access = Some(DeviceAccess::new(
         BROWSER_SERIAL_ESP32_PROVIDER_ID,
@@ -46,7 +46,7 @@ pub fn studio_state_requesting_access() -> StudioState {
 
 pub fn studio_state_access_canceled() -> StudioState {
     let mut state = studio_state_provider_catalog();
-    let provider_id = LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID);
+    let provider_id = BROWSER_SERIAL_ESP32_PROVIDER_ID;
     let issue = DeviceIssue::error(
         "story-access-canceled",
         DeviceIssueKind::PermissionCanceled,
@@ -351,7 +351,7 @@ pub fn studio_state_hardware_unsupported() -> StudioState {
     let mut state = StudioState::default();
     set_default_provider_cards(&mut state);
     state.device_manager.providers.set_provider_availability(
-        LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID),
+        BROWSER_SERIAL_ESP32_PROVIDER_ID,
         ProviderAvailability::unavailable(
             "Web Serial is not supported in this browser.",
             vec![
@@ -507,7 +507,7 @@ pub fn studio_state_log_heavy() -> StudioState {
 }
 
 fn attach_device_session(state: &mut StudioState) {
-    let provider_id = LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID);
+    let provider_id = BROWSER_WORKER_PROVIDER_ID;
     let endpoint_id = LinkEndpointId::new("browser-worker-worker-1");
     let session_id = LinkSessionId::new("browser-worker-worker-1:1");
     state.device_session = Some(DeviceSession {
@@ -563,7 +563,7 @@ fn browser_endpoint() -> LinkEndpoint {
 
 fn set_provider_endpoints(
     state: &mut StudioState,
-    provider_id: impl Into<LinkProviderId>,
+    provider_id: impl Into<LinkProviderKind>,
     endpoints: Vec<LinkEndpoint>,
 ) {
     let provider_id = provider_id.into();

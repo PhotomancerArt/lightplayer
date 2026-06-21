@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
-use lpa_link::link_endpoint::LinkEndpointId;
-use lpa_link::link_provider::LinkProviderId;
+use lpa_link::LinkProviderKind;
+use lpa_link::provider::endpoint::LinkEndpointId;
 use lpa_studio_core::{
     DeviceAccessStatus, DeviceIssue, LinkState, ProgressState, ProjectSelectionReason,
     ProviderAvailability, ProviderCardState, ProviderIntent, ProvisioningReason, RecoveryAction,
@@ -12,7 +12,7 @@ pub fn DevicePanel(
     state: StudioState,
     running: bool,
     on_refresh_catalog: EventHandler<MouseEvent>,
-    on_start_provider: EventHandler<LinkProviderId>,
+    on_start_provider: EventHandler<LinkProviderKind>,
     on_confirm_firmware_flash: EventHandler<(LinkEndpointId, Option<String>)>,
     on_load_starter_project: EventHandler<MouseEvent>,
 ) -> Element {
@@ -158,7 +158,7 @@ fn ProviderCard(
     provider: ProviderCardState,
     selected: bool,
     running: bool,
-    on_start_provider: EventHandler<LinkProviderId>,
+    on_start_provider: EventHandler<LinkProviderKind>,
 ) -> Element {
     let can_start = provider.availability.can_start();
     let class = if selected {

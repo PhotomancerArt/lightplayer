@@ -1,7 +1,7 @@
 use lpa_link::LinkProvider;
-use lpa_link::link_endpoint::LinkEndpointId;
-use lpa_link::link_provider::LinkProviderId;
-use lpa_link::link_session::LinkSessionId;
+use lpa_link::LinkProviderKind;
+use lpa_link::provider::endpoint::LinkEndpointId;
+use lpa_link::provider::session::LinkSessionId;
 use lpa_link::providers::host_process::HostProcessProvider;
 use lpa_studio_core::{
     DeviceAccessStatus, DeviceCapability, HOST_PROCESS_PROVIDER_ID, ProviderAvailability,
@@ -22,7 +22,7 @@ pub struct HostProcessStudioRuntime {
 
 impl HostProcessStudioRuntime {
     pub fn new() -> Self {
-        let mut provider = HostProcessProvider::new(HOST_PROCESS_PROVIDER_ID);
+        let mut provider = HostProcessProvider::new();
         provider.create_memory_endpoint("Studio host runtime");
         Self {
             provider,
@@ -46,9 +46,9 @@ impl HostProcessStudioRuntime {
     async fn discover(
         &mut self,
         action_id: lpa_studio_core::ActionId,
-        provider_id: LinkProviderId,
+        provider_id: LinkProviderKind,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
-        if provider_id.as_str() != HOST_PROCESS_PROVIDER_ID {
+        if provider_id != HOST_PROCESS_PROVIDER_ID {
             return Err(StudioRuntimeError::UnsupportedProvider(
                 provider_id.as_str().to_string(),
             ));
@@ -141,7 +141,7 @@ impl HostProcessStudioRuntime {
         }
         events.push(StudioEvent::DeviceConnected {
             action_id,
-            provider_id: LinkProviderId::new(HOST_PROCESS_PROVIDER_ID),
+            provider_id: HOST_PROCESS_PROVIDER_ID,
             endpoint_id,
             session_id,
             connection_kind,
@@ -178,7 +178,7 @@ impl EffectExecutor for HostProcessStudioRuntime {
                 action_id,
                 provider_id,
             } => {
-                if provider_id.as_str() != HOST_PROCESS_PROVIDER_ID {
+                if provider_id != HOST_PROCESS_PROVIDER_ID {
                     return Err(StudioRuntimeError::UnsupportedProvider(
                         provider_id.as_str().to_string(),
                     ));

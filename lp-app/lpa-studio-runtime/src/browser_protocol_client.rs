@@ -6,7 +6,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use lpa_link::LinkProvider;
-use lpa_link::link_session::LinkSessionId;
+use lpa_link::provider::session::LinkSessionId;
 use lpa_link::providers::browser_worker::{
     BrowserInputEnvelope, BrowserOutputEnvelope, BrowserWorkerProvider,
 };

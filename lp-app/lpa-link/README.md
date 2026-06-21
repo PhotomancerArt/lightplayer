@@ -67,7 +67,22 @@ handling, or project deploy ordering.
 
 ## Providers
 
-| Provider ID | Rust module/type | Runtime or device | Endpoint kind | Management intent | Status |
+Applications can inspect the providers compiled into `lpa-link` without
+duplicating the feature/target matrix:
+
+```rust
+let registry =
+    lpa_link::providers::LinkProviderRegistry::from_env(lpa_link::providers::LinkEnv::default());
+let providers = registry.descriptors();
+```
+
+The returned `LinkProviderDescriptor` values contain provider kinds, build
+availability, labels, and low-level `LinkCapabilities`. `LinkProviderKind`
+owns the stable kebab-case key used at app boundaries. Product surfaces such as
+Studio should map these descriptors into their own UX-facing provider cards,
+intents, ordering, and recovery actions.
+
+| Provider key | Rust module/type | Runtime or device | Endpoint kind | Management intent | Status |
 |---|---|---|---|---|---|
 | `fake` | `providers::fake::FakeProvider` | none | test endpoint | diagnostics only | implemented |
 | `host-process` | `providers::host_process::HostProcessProvider` | host process running `fw-host` | spawnable host runtime | logs, diagnostics, future local filesystem/runtime controls | implemented; returns host `LinkServerConnection` |
@@ -91,11 +106,8 @@ cargo check -p lpa-link --features host-process
 cargo test -p lpa-link --features host-process
 cargo check -p lpa-link --features host-serial-esp32
 cargo test -p lpa-link --features host-serial-esp32
-cargo check -p lpa-link --features browser-serial-esp32
-cargo test -p lpa-link --features browser-serial-esp32
 cargo check -p lpa-link --features browser-serial-esp32 --target wasm32-unknown-unknown
 cargo check -p lpa-link --features browser-worker --target wasm32-unknown-unknown
-cargo test -p lpa-link --features browser-worker
 ```
 
 ## Design Notes

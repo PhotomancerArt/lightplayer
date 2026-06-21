@@ -15,7 +15,6 @@ impl BrowserWorkerOptions {
         }
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn worker_script_path(&self) -> String {
         wasm_bindgen::link_to!(module = "/src/providers/browser_worker/fw_browser_worker.js")
     }

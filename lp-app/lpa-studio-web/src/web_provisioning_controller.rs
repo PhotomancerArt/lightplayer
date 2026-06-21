@@ -1,7 +1,7 @@
 use dioxus::prelude::{ReadableExt, Signal, WritableExt};
 use lpa_link::LinkConnectionKind;
-use lpa_link::link_endpoint::LinkEndpointId;
-use lpa_link::link_provider::LinkProviderId;
+use lpa_link::LinkProviderKind;
+use lpa_link::provider::endpoint::LinkEndpointId;
 use lpa_link::providers::browser_serial_esp32::BrowserSerialEsp32Options;
 use lpa_link::providers::browser_worker::BrowserWorkerOptions;
 use lpa_studio_core::{
@@ -129,7 +129,7 @@ async fn drain_effects(
 struct WebStudioRuntime {
     browser_worker: BrowserWorkerStudioRuntime,
     browser_serial: BrowserSerialStudioRuntime,
-    active_provider_id: Option<LinkProviderId>,
+    active_provider_id: Option<LinkProviderKind>,
 }
 
 impl WebStudioRuntime {
@@ -243,22 +243,24 @@ impl WebStudioRuntime {
 
     async fn execute_for_provider(
         &mut self,
-        provider_id: &LinkProviderId,
+        provider_id: &LinkProviderKind,
         effect: StudioEffect,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
-        match provider_id.as_str() {
+        match *provider_id {
             BROWSER_WORKER_PROVIDER_ID => self.browser_worker.execute_effect(effect).await,
             BROWSER_SERIAL_ESP32_PROVIDER_ID => self.browser_serial.execute_effect(effect).await,
-            other => Err(StudioRuntimeError::UnsupportedProvider(other.to_string())),
+            other => Err(StudioRuntimeError::UnsupportedProvider(
+                other.as_str().to_string(),
+            )),
         }
     }
 
     fn activate_provider_for_endpoint(&mut self, endpoint_id: &LinkEndpointId) {
         let endpoint = endpoint_id.as_str();
-        if endpoint.starts_with(BROWSER_WORKER_PROVIDER_ID) {
-            self.active_provider_id = Some(LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID));
-        } else if endpoint.starts_with(BROWSER_SERIAL_ESP32_PROVIDER_ID) {
-            self.active_provider_id = Some(LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID));
+        if endpoint.starts_with(BROWSER_WORKER_PROVIDER_ID.key()) {
+            self.active_provider_id = Some(BROWSER_WORKER_PROVIDER_ID);
+        } else if endpoint.starts_with(BROWSER_SERIAL_ESP32_PROVIDER_ID.key()) {
+            self.active_provider_id = Some(BROWSER_SERIAL_ESP32_PROVIDER_ID);
         }
     }
 }

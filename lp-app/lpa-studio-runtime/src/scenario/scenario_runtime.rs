@@ -1,5 +1,5 @@
-use lpa_link::link_endpoint::LinkEndpointId;
-use lpa_link::link_provider::LinkProviderId;
+use lpa_link::LinkProviderKind;
+use lpa_link::provider::endpoint::LinkEndpointId;
 use lpa_studio_core::{
     ActionId, DeviceAccessStatus, DeviceIssue, ProgressState, ProvisioningReason,
     STUDIO_DEMO_PROJECT_ID, StudioDiagnostic, StudioEffect, StudioEvent, StudioHeartbeat,
@@ -30,11 +30,11 @@ impl ScenarioRuntime {
         &self.scenario
     }
 
-    fn provider_id_for_endpoint(&self, endpoint_id: &LinkEndpointId) -> LinkProviderId {
+    fn provider_id_for_endpoint(&self, endpoint_id: &LinkEndpointId) -> LinkProviderKind {
         self.scenario
             .provider_id_for_endpoint(endpoint_id)
             .or_else(|| self.scenario.primary_provider_id().cloned())
-            .unwrap_or_else(|| LinkProviderId::new("scenario"))
+            .unwrap_or(lpa_studio_core::HOST_PROCESS_PROVIDER_ID)
     }
 }
 
@@ -142,7 +142,7 @@ impl EffectExecutor for ScenarioRuntime {
 
 fn access_events(
     action_id: ActionId,
-    provider_id: LinkProviderId,
+    provider_id: LinkProviderKind,
     access: &AccessOutcome,
     scenario: &ProvisioningScenario,
 ) -> Vec<StudioEvent> {
@@ -430,7 +430,6 @@ fn issue_for_endpoint(issue: &DeviceIssue, endpoint_id: LinkEndpointId) -> Devic
 
 #[cfg(test)]
 mod tests {
-    use lpa_link::link_provider::LinkProviderId;
     use lpa_studio_core::{
         ActionId, BROWSER_SERIAL_ESP32_PROVIDER_ID, DeviceAccessStatus, DeviceIssueKind,
         StudioEffect, StudioEvent,
@@ -463,7 +462,7 @@ mod tests {
         let events = runtime
             .execute_effect(StudioEffect::RequestDeviceAccess {
                 action_id: ActionId::new(1),
-                provider_id: LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID),
+                provider_id: BROWSER_SERIAL_ESP32_PROVIDER_ID,
             })
             .await
             .unwrap();

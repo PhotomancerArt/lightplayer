@@ -2,8 +2,8 @@ use crate::scenario::{
     AccessOutcome, ConnectOutcome, ConnectionOutcome, FlashOutcome, ProbeOutcome, ProjectOutcome,
     ProjectStateOutcome,
 };
-use lpa_link::link_endpoint::LinkEndpointId;
-use lpa_link::link_provider::LinkProviderId;
+use lpa_link::LinkProviderKind;
+use lpa_link::provider::endpoint::LinkEndpointId;
 use lpa_link::{LinkConnectionKind, LinkEndpoint};
 use lpa_studio_core::{
     BROWSER_SERIAL_ESP32_PROVIDER_ID, DeviceCapability, DeviceIssue, DeviceIssueKind,
@@ -212,7 +212,7 @@ impl ProvisioningScenario {
         )))
     }
 
-    pub fn primary_provider_id(&self) -> Option<&LinkProviderId> {
+    pub fn primary_provider_id(&self) -> Option<&LinkProviderKind> {
         self.providers.first().map(|provider| &provider.provider_id)
     }
 
@@ -224,7 +224,7 @@ impl ProvisioningScenario {
             .next()
     }
 
-    pub fn endpoints_for(&self, provider_id: &LinkProviderId) -> Vec<LinkEndpoint> {
+    pub fn endpoints_for(&self, provider_id: &LinkProviderKind) -> Vec<LinkEndpoint> {
         self.providers
             .iter()
             .find(|provider| provider.provider_id == *provider_id)
@@ -232,7 +232,10 @@ impl ProvisioningScenario {
             .unwrap_or_default()
     }
 
-    pub fn provider_id_for_endpoint(&self, endpoint_id: &LinkEndpointId) -> Option<LinkProviderId> {
+    pub fn provider_id_for_endpoint(
+        &self,
+        endpoint_id: &LinkEndpointId,
+    ) -> Option<LinkProviderKind> {
         self.providers
             .iter()
             .find(|provider| {

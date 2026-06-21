@@ -1,6 +1,6 @@
 use crate::StudioActionType;
-use lpa_link::link_endpoint::LinkEndpointId;
-use lpa_link::link_provider::LinkProviderId;
+use lpa_link::LinkProviderKind;
+use lpa_link::provider::endpoint::LinkEndpointId;
 use serde::{Deserialize, Serialize};
 
 /// User or agent intent owned by the Studio link manager.
@@ -8,12 +8,12 @@ use serde::{Deserialize, Serialize};
 pub enum LinkActionRequest {
     RefreshProviderCatalog,
     StartProvisioning {
-        provider_id: LinkProviderId,
+        provider_id: LinkProviderKind,
     },
     CancelProvisioning,
     RetryProvisioning,
     SelectProvider {
-        provider_id: LinkProviderId,
+        provider_id: LinkProviderKind,
     },
     RequestDeviceAccess,
     DiscoverDevices,

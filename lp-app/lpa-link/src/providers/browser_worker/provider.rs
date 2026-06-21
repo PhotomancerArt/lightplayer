@@ -1,21 +1,23 @@
 use std::collections::BTreeMap;
 
-use crate::link_endpoint::{LinkEndpointId, LinkEndpointStatus};
-use crate::link_provider::LinkProviderId;
-use crate::link_session::LinkSessionId;
+use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
+use crate::provider::session::LinkSessionId;
 use crate::providers::browser_worker::BrowserWorkerOptions;
-#[cfg(target_arch = "wasm32")]
 use crate::providers::browser_worker::{
     BrowserInputEnvelope, BrowserOutputEnvelope, BrowserWorkerHandle,
 };
+use crate::providers::{LinkProviderDescriptor, LinkProviderKind};
 use crate::{
     LinkCapabilities, LinkConnection, LinkConnectionKind, LinkDiagnostic, LinkDiagnosticSeverity,
     LinkEndpoint, LinkError, LinkLogEntry, LinkLogLevel, LinkOperation, LinkProvider, LinkSession,
     LinkSessionStatus,
 };
 
+pub fn descriptor() -> LinkProviderDescriptor {
+    LinkProviderKind::BrowserWorker.descriptor()
+}
+
 pub struct BrowserWorkerProvider {
-    id: LinkProviderId,
     endpoints: Vec<LinkEndpoint>,
     sessions: BTreeMap<LinkSessionId, BrowserWorkerSessionState>,
     options: BrowserWorkerOptions,
@@ -24,13 +26,12 @@ pub struct BrowserWorkerProvider {
 }
 
 impl BrowserWorkerProvider {
-    pub fn new(id: impl Into<LinkProviderId>) -> Self {
-        Self::with_options(id, BrowserWorkerOptions::default())
+    pub fn new() -> Self {
+        Self::with_options(BrowserWorkerOptions::default())
     }
 
-    pub fn with_options(id: impl Into<LinkProviderId>, options: BrowserWorkerOptions) -> Self {
+    pub fn with_options(options: BrowserWorkerOptions) -> Self {
         Self {
-            id: id.into(),
             endpoints: Vec::new(),
             sessions: BTreeMap::new(),
             options,
@@ -46,12 +47,12 @@ impl BrowserWorkerProvider {
     pub fn create_worker_endpoint(&mut self, label: impl Into<String>) -> LinkEndpointId {
         let endpoint_id = LinkEndpointId::new(format!(
             "{}-worker-{}",
-            self.id.as_str(),
+            self.kind().key(),
             self.next_endpoint_index
         ));
         self.next_endpoint_index += 1;
 
-        let endpoint = LinkEndpoint::new(endpoint_id.clone(), self.id.clone(), label)
+        let endpoint = LinkEndpoint::new(endpoint_id.clone(), self.kind(), label)
             .with_capabilities(
                 LinkCapabilities::default()
                     .with(LinkOperation::ReadLogs)
@@ -68,7 +69,6 @@ impl BrowserWorkerProvider {
             .ok_or_else(|| LinkError::endpoint_not_found(endpoint_id.as_str()))
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn post(
         &self,
         session_id: &LinkSessionId,
@@ -77,7 +77,6 @@ impl BrowserWorkerProvider {
         self.session(session_id)?.handle()?.post(envelope)
     }
 
-    #[cfg(target_arch = "wasm32")]
     pub fn take_outputs(
         &mut self,
         session_id: &LinkSessionId,
@@ -105,8 +104,8 @@ impl BrowserWorkerProvider {
 }
 
 impl LinkProvider for BrowserWorkerProvider {
-    fn id(&self) -> &LinkProviderId {
-        &self.id
+    fn kind(&self) -> LinkProviderKind {
+        LinkProviderKind::BrowserWorker
     }
 
     async fn discover(&mut self) -> Result<Vec<LinkEndpoint>, LinkError> {
@@ -131,25 +130,19 @@ impl LinkProvider for BrowserWorkerProvider {
 
         let session = LinkSession::new(
             session_id.clone(),
-            self.id.clone(),
+            self.kind(),
             endpoint.id.clone(),
             LinkConnectionKind::BrowserWorker {
                 protocol: "fw-browser-post-message-v1".to_string(),
             },
             endpoint.capabilities.clone(),
         );
-        #[cfg(target_arch = "wasm32")]
-        let state = {
-            let mut state = BrowserWorkerSessionState::new(endpoint.id.clone(), session.clone());
-            let mut handle = BrowserWorkerHandle::new(&self.options.worker_script_path())?;
-            state
-                .pending_outputs
-                .extend(handle.boot("Studio browser runtime", &self.options).await?);
-            state.handle = Some(handle);
-            state
-        };
-        #[cfg(not(target_arch = "wasm32"))]
-        let state = BrowserWorkerSessionState::new(endpoint.id, session.clone());
+        let mut state = BrowserWorkerSessionState::new(endpoint.id, session.clone());
+        let mut handle = BrowserWorkerHandle::new(&self.options.worker_script_path())?;
+        state
+            .pending_outputs
+            .extend(handle.boot("Studio browser runtime", &self.options).await?);
+        state.handle = Some(handle);
         self.sessions.insert(session_id, state);
         Ok(session)
     }
@@ -182,7 +175,6 @@ impl LinkProvider for BrowserWorkerProvider {
             return Ok(());
         }
         state.session.status = LinkSessionStatus::Closed;
-        #[cfg(target_arch = "wasm32")]
         if let Some(handle) = &state.handle {
             handle.terminate();
         }
@@ -201,9 +193,7 @@ struct BrowserWorkerSessionState {
     session: LinkSession,
     logs: Vec<LinkLogEntry>,
     diagnostics: Vec<LinkDiagnostic>,
-    #[cfg(target_arch = "wasm32")]
     pending_outputs: Vec<BrowserOutputEnvelope>,
-    #[cfg(target_arch = "wasm32")]
     handle: Option<BrowserWorkerHandle>,
 }
 
@@ -226,21 +216,17 @@ impl BrowserWorkerSessionState {
             session,
             logs,
             diagnostics,
-            #[cfg(target_arch = "wasm32")]
             pending_outputs: Vec::new(),
-            #[cfg(target_arch = "wasm32")]
             handle: None,
         }
     }
 
-    #[cfg(target_arch = "wasm32")]
     fn handle(&self) -> Result<&BrowserWorkerHandle, LinkError> {
         self.handle
             .as_ref()
             .ok_or_else(|| LinkError::other("browser worker session has no worker handle"))
     }
 
-    #[cfg(target_arch = "wasm32")]
     fn handle_mut(&mut self) -> Result<&mut BrowserWorkerHandle, LinkError> {
         self.handle
             .as_mut()

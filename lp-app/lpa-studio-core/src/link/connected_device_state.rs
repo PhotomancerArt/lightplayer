@@ -1,8 +1,8 @@
 use crate::{DeviceCapability, DeviceId};
 use lpa_link::LinkConnectionKind;
-use lpa_link::link_endpoint::LinkEndpointId;
-use lpa_link::link_provider::LinkProviderId;
-use lpa_link::link_session::LinkSessionId;
+use lpa_link::LinkProviderKind;
+use lpa_link::provider::endpoint::LinkEndpointId;
+use lpa_link::provider::session::LinkSessionId;
 use serde::{Deserialize, Serialize};
 
 /// Coarse health for a connected device/server session.
@@ -18,7 +18,7 @@ pub enum DeviceHealthState {
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct ConnectedDeviceState {
     pub device_id: DeviceId,
-    pub provider_id: LinkProviderId,
+    pub provider_id: LinkProviderKind,
     pub endpoint_id: LinkEndpointId,
     pub session_id: LinkSessionId,
     pub connection_kind: LinkConnectionKind,
@@ -29,7 +29,7 @@ pub struct ConnectedDeviceState {
 impl ConnectedDeviceState {
     pub fn connected(
         device_id: DeviceId,
-        provider_id: LinkProviderId,
+        provider_id: LinkProviderKind,
         endpoint_id: LinkEndpointId,
         session_id: LinkSessionId,
         connection_kind: LinkConnectionKind,

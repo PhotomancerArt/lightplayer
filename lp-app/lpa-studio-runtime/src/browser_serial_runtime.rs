@@ -1,9 +1,9 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use lpa_link::link_endpoint::LinkEndpointId;
-use lpa_link::link_provider::LinkProviderId;
-use lpa_link::link_session::LinkSessionId;
+use lpa_link::LinkProviderKind;
+use lpa_link::provider::endpoint::LinkEndpointId;
+use lpa_link::provider::session::LinkSessionId;
 use lpa_link::providers::browser_serial_esp32::{
     BrowserEsp32FirmwareManifest, BrowserEsp32FlashProgress, BrowserSerialEsp32Options,
     BrowserSerialEsp32Provider,
@@ -39,7 +39,6 @@ impl BrowserSerialStudioRuntime {
     pub fn with_options(options: BrowserSerialEsp32Options) -> Self {
         Self {
             provider: Rc::new(RefCell::new(BrowserSerialEsp32Provider::with_options(
-                BROWSER_SERIAL_ESP32_PROVIDER_ID,
                 options,
             ))),
             session_id: None,
@@ -65,9 +64,9 @@ impl BrowserSerialStudioRuntime {
     async fn request_device_access(
         &mut self,
         action_id: lpa_studio_core::ActionId,
-        provider_id: LinkProviderId,
+        provider_id: LinkProviderKind,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
-        if provider_id.as_str() != BROWSER_SERIAL_ESP32_PROVIDER_ID {
+        if provider_id != BROWSER_SERIAL_ESP32_PROVIDER_ID {
             return Err(StudioRuntimeError::UnsupportedProvider(
                 provider_id.as_str().to_string(),
             ));
@@ -119,9 +118,9 @@ impl BrowserSerialStudioRuntime {
     async fn discover(
         &mut self,
         action_id: lpa_studio_core::ActionId,
-        provider_id: LinkProviderId,
+        provider_id: LinkProviderKind,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
-        if provider_id.as_str() != BROWSER_SERIAL_ESP32_PROVIDER_ID {
+        if provider_id != BROWSER_SERIAL_ESP32_PROVIDER_ID {
             return Err(StudioRuntimeError::UnsupportedProvider(
                 provider_id.as_str().to_string(),
             ));
@@ -258,7 +257,7 @@ impl BrowserSerialStudioRuntime {
         }
         events.push(StudioEvent::DeviceConnected {
             action_id,
-            provider_id: LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID),
+            provider_id: BROWSER_SERIAL_ESP32_PROVIDER_ID,
             endpoint_id,
             session_id,
             connection_kind,
@@ -723,7 +722,7 @@ pub async fn run_browser_serial_demo() -> Result<StudioApp, StudioRuntimeError> 
     let mut app = StudioApp::new();
     app.dispatch_kind(
         StudioActionKind::from(LinkActionRequest::SelectProvider {
-            provider_id: LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID),
+            provider_id: BROWSER_SERIAL_ESP32_PROVIDER_ID,
         }),
         ActionOrigin::System,
     );

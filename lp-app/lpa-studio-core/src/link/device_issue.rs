@@ -1,6 +1,6 @@
 use crate::RecoveryAction;
-use lpa_link::link_endpoint::LinkEndpointId;
-use lpa_link::link_provider::LinkProviderId;
+use lpa_link::LinkProviderKind;
+use lpa_link::provider::endpoint::LinkEndpointId;
 use serde::{Deserialize, Serialize};
 
 /// Severity for a link issue.
@@ -39,7 +39,7 @@ pub struct DeviceIssue {
     pub kind: DeviceIssueKind,
     pub severity: DeviceIssueSeverity,
     pub message: String,
-    pub provider_id: Option<LinkProviderId>,
+    pub provider_id: Option<LinkProviderKind>,
     pub endpoint_id: Option<LinkEndpointId>,
     pub recovery_actions: Vec<RecoveryAction>,
 }
@@ -66,7 +66,7 @@ impl DeviceIssue {
         Self::new(id, kind, DeviceIssueSeverity::Error, message)
     }
 
-    pub fn with_provider(mut self, provider_id: impl Into<LinkProviderId>) -> Self {
+    pub fn with_provider(mut self, provider_id: impl Into<LinkProviderKind>) -> Self {
         self.provider_id = Some(provider_id.into());
         self
     }

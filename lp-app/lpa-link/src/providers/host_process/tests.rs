@@ -1,5 +1,5 @@
 use crate::LinkProvider;
-use crate::link_endpoint::LinkEndpointId;
+use crate::provider::endpoint::LinkEndpointId;
 use crate::providers::host_process::HostProcessProvider;
 
 #[tokio::test]
@@ -38,7 +38,7 @@ async fn host_process_provider_supports_multiple_endpoints() {
 }
 
 fn provider_with_two_endpoints() -> HostProcessProvider {
-    let mut provider = HostProcessProvider::new("host-process");
+    let mut provider = HostProcessProvider::new();
     provider.create_memory_endpoint("Host Process A");
     provider.create_memory_endpoint("Host Process B");
     provider

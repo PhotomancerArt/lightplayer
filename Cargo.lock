@@ -5098,6 +5098,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serialport",
+ "strum",
  "tokio",
  "wasm-bindgen",
  "wasm-bindgen-futures",

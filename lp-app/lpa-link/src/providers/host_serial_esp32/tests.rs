@@ -3,7 +3,7 @@ use crate::providers::host_serial_esp32::{HostSerialEsp32Provider, label_for_por
 use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 #[test]
 fn explicit_port_endpoint_records_metadata() {
-    let mut provider = HostSerialEsp32Provider::new("host-serial-esp32");
+    let mut provider = HostSerialEsp32Provider::new();
 
     let endpoint_id = provider.create_endpoint_for_port("/dev/cu.usbmodem2101", "Board");
 
@@ -40,7 +40,7 @@ fn labels_likely_esp32_ports() {
 
 #[test]
 fn default_options_do_not_reset_after_open() {
-    let provider = HostSerialEsp32Provider::new("host-serial-esp32");
+    let provider = HostSerialEsp32Provider::new();
 
     assert_eq!(provider.options().baud_rate, None);
     assert!(!provider.options().reset_after_open);

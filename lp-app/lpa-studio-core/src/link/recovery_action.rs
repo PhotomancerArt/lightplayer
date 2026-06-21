@@ -1,4 +1,4 @@
-use lpa_link::link_provider::LinkProviderId;
+use lpa_link::LinkProviderKind;
 use serde::{Deserialize, Serialize};
 
 /// A structured next step the UI or a future agent can offer after an issue.
@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 pub enum RecoveryAction {
     Retry,
     ChooseSimulator,
-    ChooseProvider { provider_id: LinkProviderId },
+    ChooseProvider { provider_id: LinkProviderKind },
     UseCompatibleBrowser,
     Reconnect,
     FlashFirmware { firmware_id: Option<String> },

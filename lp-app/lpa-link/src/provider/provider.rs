@@ -1,12 +1,24 @@
-use crate::link_endpoint::{LinkEndpointId, LinkEndpointStatus};
-use crate::link_session::LinkSessionId;
+use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
+use crate::provider::session::LinkSessionId;
+use crate::providers::LinkProviderKind;
 use crate::{LinkConnection, LinkDiagnostic, LinkEndpoint, LinkError, LinkLogEntry, LinkSession};
-use serde::{Deserialize, Serialize};
 
+/// Controller interface for one built-in link provider.
+///
+/// A provider owns the resources for a single `LinkProviderKind`: discovered
+/// endpoints, live sessions, serial ports, workers, spawned runtimes, and any
+/// provider-specific management state. Callers hold lightweight endpoint and
+/// session records and pass their ids back into the provider for follow-up
+/// operations.
+///
+/// The trait is intentionally not used as a trait object today because async
+/// trait methods are not object-safe. `LinkProviderRegistry` stores concrete
+/// providers through `LinkProviderInstance`, an enum-dispatched wrapper that
+/// still exposes this same controller interface.
 #[allow(async_fn_in_trait, reason = "Link providers are not object-safe yet")]
 pub trait LinkProvider {
-    /// Stable provider id, such as `host-process` or `browser-serial-esp32`.
-    fn id(&self) -> &LinkProviderId;
+    /// Stable built-in provider kind, such as `host-process` or `browser-serial-esp32`.
+    fn kind(&self) -> LinkProviderKind;
 
     /// Discover endpoints currently offered by this provider.
     ///
@@ -14,6 +26,7 @@ pub trait LinkProvider {
     /// or spawnable endpoints, such as `host-process` memory runtimes.
     async fn discover(&mut self) -> Result<Vec<LinkEndpoint>, LinkError>;
 
+    /// Return the current status for a previously discovered endpoint.
     async fn status(
         &mut self,
         endpoint_id: &LinkEndpointId,
@@ -38,29 +51,4 @@ pub trait LinkProvider {
 
     /// Close provider-owned resources for a live session.
     async fn close(&mut self, session_id: &LinkSessionId) -> Result<(), LinkError>;
-}
-
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
-pub struct LinkProviderId(String);
-
-impl LinkProviderId {
-    pub fn new(value: impl Into<String>) -> Self {
-        Self(value.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl From<&str> for LinkProviderId {
-    fn from(value: &str) -> Self {
-        Self::new(value)
-    }
-}
-
-impl From<String> for LinkProviderId {
-    fn from(value: String) -> Self {
-        Self::new(value)
-    }
 }

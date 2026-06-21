@@ -1,7 +1,7 @@
 use crate::LinkCapabilities;
-use crate::link_connection::LinkConnectionKind;
-use crate::link_endpoint::LinkEndpointId;
-use crate::link_provider::LinkProviderId;
+use crate::provider::connection::LinkConnectionKind;
+use crate::provider::endpoint::LinkEndpointId;
+use crate::providers::LinkProviderKind;
 use serde::{Deserialize, Serialize};
 
 /// Provider-neutral snapshot of a live link session.
@@ -16,25 +16,31 @@ use serde::{Deserialize, Serialize};
 /// when the caller needs the protocol handoff.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct LinkSession {
+    /// Provider-scoped session id used for connection/log/close operations.
     pub id: LinkSessionId,
-    pub provider_id: LinkProviderId,
+    /// Built-in provider kind that owns the concrete resources for this session.
+    pub provider_kind: LinkProviderKind,
+    /// Endpoint that was connected to create this session.
     pub endpoint_id: LinkEndpointId,
+    /// Protocol/transport shape exposed by the session.
     pub connection_kind: LinkConnectionKind,
+    /// Operations available through this live session.
     pub capabilities: LinkCapabilities,
+    /// Provider-neutral session lifecycle state.
     pub status: LinkSessionStatus,
 }
 
 impl LinkSession {
     pub fn new(
         id: impl Into<LinkSessionId>,
-        provider_id: impl Into<LinkProviderId>,
+        provider_kind: impl Into<LinkProviderKind>,
         endpoint_id: impl Into<LinkEndpointId>,
         connection_kind: LinkConnectionKind,
         capabilities: LinkCapabilities,
     ) -> Self {
         Self {
             id: id.into(),
-            provider_id: provider_id.into(),
+            provider_kind: provider_kind.into(),
             endpoint_id: endpoint_id.into(),
             connection_kind,
             capabilities,
@@ -56,6 +62,11 @@ impl LinkSession {
     }
 }
 
+/// Opaque provider-scoped live session identity.
+///
+/// The provider that created a session owns the underlying resources. Pass this
+/// id back to that provider to request a protocol connection, logs,
+/// diagnostics, or resource cleanup.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
 pub struct LinkSessionId(String);
 
@@ -81,6 +92,7 @@ impl From<String> for LinkSessionId {
     }
 }
 
+/// Provider-neutral live session lifecycle state.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum LinkSessionStatus {
     Open,

@@ -3,9 +3,9 @@ use crate::{
     ProviderAvailability, ProviderCardState, StudioDiagnostic, StudioHeartbeat, StudioLogEntry,
     TargetProbeResult,
 };
-use lpa_link::link_endpoint::LinkEndpointId;
-use lpa_link::link_provider::LinkProviderId;
-use lpa_link::link_session::LinkSessionId;
+use lpa_link::LinkProviderKind;
+use lpa_link::provider::endpoint::LinkEndpointId;
+use lpa_link::provider::session::LinkSessionId;
 use lpa_link::{LinkConnectionKind, LinkEndpoint};
 use lpc_wire::{LoadedProject, WireProjectHandle, WireProjectInventoryReadResponse};
 use serde::{Deserialize, Serialize};
@@ -18,22 +18,22 @@ pub enum StudioEvent {
     },
     ProviderAvailabilityUpdated {
         action_id: Option<ActionId>,
-        provider_id: LinkProviderId,
+        provider_id: LinkProviderKind,
         availability: ProviderAvailability,
     },
     DeviceAccessUpdated {
         action_id: Option<ActionId>,
-        provider_id: LinkProviderId,
+        provider_id: LinkProviderKind,
         status: DeviceAccessStatus,
     },
     EndpointsDiscovered {
         action_id: ActionId,
-        provider_id: LinkProviderId,
+        provider_id: LinkProviderKind,
         endpoints: Vec<LinkEndpoint>,
     },
     DeviceConnected {
         action_id: ActionId,
-        provider_id: LinkProviderId,
+        provider_id: LinkProviderKind,
         endpoint_id: LinkEndpointId,
         session_id: LinkSessionId,
         connection_kind: LinkConnectionKind,

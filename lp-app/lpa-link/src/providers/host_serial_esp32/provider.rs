@@ -1,9 +1,9 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use crate::link_endpoint::{LinkEndpointId, LinkEndpointStatus};
-use crate::link_provider::LinkProviderId;
-use crate::link_session::LinkSessionId;
+use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
+use crate::provider::session::LinkSessionId;
+use crate::providers::{LinkProviderDescriptor, LinkProviderKind};
 use crate::{
     LinkCapabilities, LinkConnection, LinkConnectionKind, LinkDiagnostic, LinkDiagnosticSeverity,
     LinkEndpoint, LinkError, LinkLogEntry, LinkLogLevel, LinkProvider, LinkServerConnection,
@@ -14,8 +14,11 @@ use lpa_client::transport_serial::{
 };
 use tokio::sync::Mutex;
 
+pub fn descriptor() -> LinkProviderDescriptor {
+    LinkProviderKind::HostSerialEsp32.descriptor()
+}
+
 pub struct HostSerialEsp32Provider {
-    id: LinkProviderId,
     endpoints: Vec<HostSerialEsp32Endpoint>,
     sessions: BTreeMap<LinkSessionId, HostSerialEsp32SessionState>,
     options: HostSerialEsp32Options,
@@ -30,13 +33,12 @@ pub struct HostSerialEsp32Options {
 }
 
 impl HostSerialEsp32Provider {
-    pub fn new(id: impl Into<LinkProviderId>) -> Self {
-        Self::with_options(id, HostSerialEsp32Options::default())
+    pub fn new() -> Self {
+        Self::with_options(HostSerialEsp32Options::default())
     }
 
-    pub fn with_options(id: impl Into<LinkProviderId>, options: HostSerialEsp32Options) -> Self {
+    pub fn with_options(options: HostSerialEsp32Options) -> Self {
         Self {
-            id: id.into(),
             endpoints: Vec::new(),
             sessions: BTreeMap::new(),
             options,
@@ -58,7 +60,7 @@ impl HostSerialEsp32Provider {
         label: impl Into<String>,
     ) -> LinkEndpointId {
         let port_name = port_name.into();
-        let endpoint_id = endpoint_id_for_port(&self.id, &port_name);
+        let endpoint_id = endpoint_id_for_port(&port_name);
         self.upsert_port_endpoint(endpoint_id.clone(), port_name, label.into());
         endpoint_id
     }
@@ -124,7 +126,7 @@ impl HostSerialEsp32Provider {
         port_name: String,
         label: String,
     ) {
-        let endpoint = LinkEndpoint::new(endpoint_id.clone(), self.id.clone(), label)
+        let endpoint = LinkEndpoint::new(endpoint_id.clone(), self.kind(), label)
             .with_capabilities(LinkCapabilities::esp32_serial_base());
 
         if let Some(existing) = self
@@ -146,8 +148,8 @@ impl HostSerialEsp32Provider {
 }
 
 impl LinkProvider for HostSerialEsp32Provider {
-    fn id(&self) -> &LinkProviderId {
-        &self.id
+    fn kind(&self) -> LinkProviderKind {
+        LinkProviderKind::HostSerialEsp32
     }
 
     async fn discover(&mut self) -> Result<Vec<LinkEndpoint>, LinkError> {
@@ -196,7 +198,7 @@ impl LinkProvider for HostSerialEsp32Provider {
 
         let session = LinkSession::new(
             session_id.clone(),
-            self.id.clone(),
+            self.kind(),
             endpoint.endpoint.id.clone(),
             LinkConnectionKind::HostSerialEsp32,
             endpoint.endpoint.capabilities.clone(),
@@ -317,10 +319,10 @@ pub fn label_for_port(port_name: &str) -> String {
     }
 }
 
-fn endpoint_id_for_port(provider_id: &LinkProviderId, port_name: &str) -> LinkEndpointId {
+fn endpoint_id_for_port(port_name: &str) -> LinkEndpointId {
     LinkEndpointId::new(format!(
         "{}:{}",
-        provider_id.as_str(),
+        LinkProviderKind::HostSerialEsp32.key(),
         sanitize_endpoint_part(port_name)
     ))
 }

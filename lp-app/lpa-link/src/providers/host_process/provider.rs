@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
-use crate::link_endpoint::{LinkEndpointId, LinkEndpointStatus};
-use crate::link_provider::LinkProviderId;
-use crate::link_session::LinkSessionId;
+use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
+use crate::provider::session::LinkSessionId;
+use crate::providers::{LinkProviderDescriptor, LinkProviderKind};
 use crate::{
     LinkCapabilities, LinkConnection, LinkConnectionKind, LinkDiagnostic, LinkDiagnosticSeverity,
     LinkEndpoint, LinkError, LinkLogEntry, LinkLogLevel, LinkOperation, LinkProvider, LinkSession,
@@ -10,8 +10,11 @@ use crate::{
 };
 use fw_host::HostRuntime;
 
+pub fn descriptor() -> LinkProviderDescriptor {
+    LinkProviderKind::HostProcess.descriptor()
+}
+
 pub struct HostProcessProvider {
-    id: LinkProviderId,
     endpoints: Vec<LinkEndpoint>,
     sessions: BTreeMap<LinkSessionId, HostProcessSessionState>,
     next_endpoint_index: u64,
@@ -19,9 +22,8 @@ pub struct HostProcessProvider {
 }
 
 impl HostProcessProvider {
-    pub fn new(id: impl Into<LinkProviderId>) -> Self {
+    pub fn new() -> Self {
         Self {
-            id: id.into(),
             endpoints: Vec::new(),
             sessions: BTreeMap::new(),
             next_endpoint_index: 1,
@@ -37,12 +39,12 @@ impl HostProcessProvider {
     pub fn create_memory_endpoint(&mut self, label: impl Into<String>) -> LinkEndpointId {
         let endpoint_id = LinkEndpointId::new(format!(
             "{}-memory-{}",
-            self.id.as_str(),
+            self.kind().key(),
             self.next_endpoint_index
         ));
         self.next_endpoint_index += 1;
 
-        let endpoint = LinkEndpoint::new(endpoint_id.clone(), self.id.clone(), label)
+        let endpoint = LinkEndpoint::new(endpoint_id.clone(), self.kind(), label)
             .with_capabilities(
                 LinkCapabilities::default()
                     .with(LinkOperation::ReadLogs)
@@ -76,8 +78,8 @@ impl HostProcessProvider {
 }
 
 impl LinkProvider for HostProcessProvider {
-    fn id(&self) -> &LinkProviderId {
-        &self.id
+    fn kind(&self) -> LinkProviderKind {
+        LinkProviderKind::HostProcess
     }
 
     async fn discover(&mut self) -> Result<Vec<LinkEndpoint>, LinkError> {
@@ -105,7 +107,7 @@ impl LinkProvider for HostProcessProvider {
 
         let session = LinkSession::new(
             session_id.clone(),
-            self.id.clone(),
+            self.kind(),
             endpoint.id.clone(),
             LinkConnectionKind::HostProcess,
             endpoint.capabilities.clone(),

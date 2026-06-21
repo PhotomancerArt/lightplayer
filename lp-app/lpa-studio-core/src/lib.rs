@@ -1,5 +1,7 @@
 //! UI-independent LightPlayer Studio domain model.
 
+use lpa_link::LinkProviderKind;
+
 pub mod client_session;
 pub mod connection_session;
 pub mod in_flight_action;
@@ -52,8 +54,8 @@ pub use ux::action_priority::ActionPriority;
 pub use ux::available_action::AvailableAction;
 pub use ux::ux_manager::UxManager;
 
-pub const BROWSER_WORKER_PROVIDER_ID: &str = "browser-worker";
-pub const BROWSER_SERIAL_ESP32_PROVIDER_ID: &str = "browser-serial-esp32";
-pub const HOST_PROCESS_PROVIDER_ID: &str = "host-process";
-pub const HOST_SERIAL_ESP32_PROVIDER_ID: &str = "host-serial-esp32";
+pub const BROWSER_WORKER_PROVIDER_ID: LinkProviderKind = LinkProviderKind::BrowserWorker;
+pub const BROWSER_SERIAL_ESP32_PROVIDER_ID: LinkProviderKind = LinkProviderKind::BrowserSerialEsp32;
+pub const HOST_PROCESS_PROVIDER_ID: LinkProviderKind = LinkProviderKind::HostProcess;
+pub const HOST_SERIAL_ESP32_PROVIDER_ID: LinkProviderKind = LinkProviderKind::HostSerialEsp32;
 pub const STUDIO_DEMO_PROJECT_ID: &str = "studio-demo";

@@ -1,25 +1,27 @@
 use std::collections::BTreeMap;
 
-use crate::link_endpoint::{LinkEndpointId, LinkEndpointStatus};
-use crate::link_provider::LinkProviderId;
-use crate::link_session::LinkSessionId;
+use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
+use crate::provider::session::LinkSessionId;
+use crate::providers::{LinkProviderDescriptor, LinkProviderKind};
 use crate::{
     LinkConnection, LinkConnectionKind, LinkDiagnostic, LinkDiagnosticSeverity, LinkEndpoint,
     LinkError, LinkLogEntry, LinkLogLevel, LinkProvider, LinkSession, LinkSessionStatus,
 };
 
+pub fn descriptor() -> LinkProviderDescriptor {
+    LinkProviderKind::Fake.descriptor()
+}
+
 #[derive(Clone, Debug)]
 pub struct FakeProvider {
-    id: LinkProviderId,
     endpoints: Vec<LinkEndpoint>,
     sessions: BTreeMap<LinkSessionId, FakeSessionState>,
     next_session_index: u64,
 }
 
 impl FakeProvider {
-    pub fn new(id: impl Into<LinkProviderId>) -> Self {
+    pub fn new() -> Self {
         Self {
-            id: id.into(),
             endpoints: Vec::new(),
             sessions: BTreeMap::new(),
             next_session_index: 1,
@@ -55,8 +57,8 @@ impl FakeProvider {
 }
 
 impl LinkProvider for FakeProvider {
-    fn id(&self) -> &LinkProviderId {
-        &self.id
+    fn kind(&self) -> LinkProviderKind {
+        LinkProviderKind::Fake
     }
 
     async fn discover(&mut self) -> Result<Vec<LinkEndpoint>, LinkError> {
@@ -81,7 +83,7 @@ impl LinkProvider for FakeProvider {
 
         let session = LinkSession::new(
             session_id.clone(),
-            self.id.clone(),
+            self.kind(),
             endpoint.id.clone(),
             LinkConnectionKind::Fake,
             endpoint.capabilities.clone(),

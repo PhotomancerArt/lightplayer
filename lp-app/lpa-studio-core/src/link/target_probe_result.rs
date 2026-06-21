@@ -1,4 +1,4 @@
-use lpa_link::link_endpoint::LinkEndpointId;
+use lpa_link::provider::endpoint::LinkEndpointId;
 use serde::{Deserialize, Serialize};
 
 use crate::{DeviceCapability, DeviceIssue, ProvisioningReason};

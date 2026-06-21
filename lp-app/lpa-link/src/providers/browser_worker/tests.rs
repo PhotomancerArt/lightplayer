@@ -3,7 +3,7 @@ use crate::{LinkConnectionKind, LinkProvider};
 
 #[tokio::test]
 async fn browser_worker_provider_supports_multiple_worker_endpoints() {
-    let mut provider = BrowserWorkerProvider::new("browser-worker");
+    let mut provider = BrowserWorkerProvider::new();
     provider.create_worker_endpoint("Browser A");
     provider.create_worker_endpoint("Browser B");
 
@@ -19,7 +19,7 @@ async fn browser_worker_provider_supports_multiple_worker_endpoints() {
 
 #[tokio::test]
 async fn browser_worker_connection_reports_worker_protocol() {
-    let mut provider = BrowserWorkerProvider::new("browser-worker");
+    let mut provider = BrowserWorkerProvider::new();
     let endpoint_id = provider.create_worker_endpoint("Browser A");
     let session = provider.connect(&endpoint_id).await.unwrap();
 

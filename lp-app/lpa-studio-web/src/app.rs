@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
-use lpa_link::link_endpoint::LinkEndpointId;
-use lpa_link::link_provider::LinkProviderId;
+use lpa_link::LinkProviderKind;
+use lpa_link::provider::endpoint::LinkEndpointId;
 use lpa_studio_core::{
     ActionOrigin, LinkActionRequest, ProjectActionRequest, StudioActionKind, StudioApp,
 };
@@ -59,7 +59,7 @@ pub fn App() -> Element {
             running.set(false);
         });
     };
-    let start_provider = move |provider_id: LinkProviderId| {
+    let start_provider = move |provider_id: LinkProviderKind| {
         if *running.read() {
             return;
         }
