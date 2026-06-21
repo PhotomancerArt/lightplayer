@@ -1,8 +1,9 @@
 use lp_studio_core::{
     ActionId, ActionOrigin, BROWSER_SERIAL_ESP32_PROVIDER_ID, DeviceAccessStatus, DeviceCapability,
     DeviceIssue, DeviceIssueKind, ProgressState, ProviderAvailability, ProviderCapability,
-    ProviderCardState, ProviderIntent, RecoveryAction, StudioActionKind, StudioApp,
-    StudioDiagnostic, StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel, TargetProbeResult,
+    ProviderCardState, ProviderIntent, ProvisioningReason, RecoveryAction, StudioActionKind,
+    StudioApp, StudioDiagnostic, StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel,
+    TargetKind, TargetProbeResult,
 };
 use lpa_link::providers::browser_serial_esp32::{
     BrowserSerialEsp32Provider, BrowserSerialEsp32Session,
@@ -184,21 +185,38 @@ impl BrowserSerialStudioRuntime {
 
     async fn connect(
         &mut self,
-        action_id: lp_studio_core::ActionId,
+        action_id: ActionId,
         endpoint_id: LinkEndpointId,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
         let port_id = self.port_id_for_endpoint(&endpoint_id)?;
-        browser_serial_shim::open(port_id, DEFAULT_SERIAL_BAUD_RATE).await?;
+        if let Err(error) = browser_serial_shim::open(port_id, DEFAULT_SERIAL_BAUD_RATE).await {
+            return Ok(Self::connection_failed_events(
+                action_id,
+                endpoint_id,
+                format!("Could not open browser serial port: {error}"),
+            ));
+        }
 
-        let mut session = self
-            .provider
-            .connect(&endpoint_id)
-            .await
-            .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
-        let connection = session
-            .connection()
-            .await
-            .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
+        let mut session = match self.provider.connect(&endpoint_id).await {
+            Ok(session) => session,
+            Err(error) => {
+                return Ok(Self::connection_failed_events(
+                    action_id,
+                    endpoint_id,
+                    format!("Could not create browser serial link session: {error}"),
+                ));
+            }
+        };
+        let connection = match session.connection().await {
+            Ok(connection) => connection,
+            Err(error) => {
+                return Ok(Self::connection_failed_events(
+                    action_id,
+                    endpoint_id,
+                    format!("Could not open browser serial link connection: {error}"),
+                ));
+            }
+        };
         let session_id = session.id().clone();
         let logs = session.logs();
         let diagnostics = session.diagnostics();
@@ -231,6 +249,221 @@ impl BrowserSerialStudioRuntime {
             capabilities: browser_serial_capabilities(self.flash_available),
         });
         Ok(events)
+    }
+
+    fn connection_failed_events(
+        action_id: ActionId,
+        endpoint_id: LinkEndpointId,
+        message: impl Into<String>,
+    ) -> Vec<StudioEvent> {
+        let issue = DeviceIssue::error(
+            format!("browser-serial-connect-{}", action_id.get()),
+            DeviceIssueKind::EndpointOpenFailed,
+            message,
+        )
+        .with_provider(BROWSER_SERIAL_ESP32_PROVIDER_ID)
+        .with_endpoint(endpoint_id.clone())
+        .with_recovery_actions(vec![
+            RecoveryAction::Retry,
+            RecoveryAction::Reconnect,
+            RecoveryAction::ResetDevice,
+            RecoveryAction::ChooseSimulator,
+        ]);
+        vec![StudioEvent::DeviceConnectionFailed {
+            action_id,
+            endpoint_id,
+            issue,
+        }]
+    }
+
+    async fn probe_target(
+        &mut self,
+        action_id: ActionId,
+        endpoint_id: LinkEndpointId,
+    ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
+        let port_id = self.port_id_for_endpoint(&endpoint_id)?;
+        if let Some(client) = &mut self.client {
+            match client.probe_server().await {
+                Ok(mut events) => {
+                    events.push(StudioEvent::TargetProbeCompleted {
+                        action_id,
+                        result: TargetProbeResult::server(
+                            endpoint_id,
+                            Some("lp-server".to_string()),
+                        ),
+                    });
+                    return Ok(events);
+                }
+                Err(error) => {
+                    let message = format!("LightPlayer server probe did not respond: {error}");
+                    let mut events = vec![StudioEvent::LogReceived {
+                        entry: StudioLogEntry::new(
+                            StudioLogLevel::Warn,
+                            "browser-serial-probe",
+                            message.clone(),
+                        ),
+                    }];
+                    events.push(StudioEvent::DiagnosticRaised {
+                        diagnostic: StudioDiagnostic::info(message),
+                    });
+                    events.extend(self.release_protocol_session(action_id).await?);
+                    return self
+                        .probe_bootloader_target(action_id, endpoint_id, port_id, events)
+                        .await;
+                }
+            }
+        }
+
+        self.probe_bootloader_target(action_id, endpoint_id, port_id, Vec::new())
+            .await
+    }
+
+    async fn probe_bootloader_target(
+        &mut self,
+        action_id: ActionId,
+        endpoint_id: LinkEndpointId,
+        port_id: u32,
+        mut events: Vec<StudioEvent>,
+    ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
+        if !browser_esp32_flash::is_supported() {
+            events.push(StudioEvent::TargetProbeFailed {
+                action_id,
+                endpoint_id: endpoint_id.clone(),
+                issue: Self::probe_issue(
+                    action_id,
+                    &endpoint_id,
+                    DeviceIssueKind::RuntimeUnsupported,
+                    "Browser ESP32 target probing is not supported in this browser.",
+                    vec![
+                        RecoveryAction::UseCompatibleBrowser,
+                        RecoveryAction::ChooseSimulator,
+                    ],
+                ),
+            });
+            return Ok(events);
+        }
+
+        match browser_esp32_flash::probe_target(port_id).await {
+            Ok(result) => {
+                for line in result.logs {
+                    events.push(StudioEvent::LogReceived {
+                        entry: StudioLogEntry::new(
+                            StudioLogLevel::Info,
+                            "browser-esp32-probe",
+                            line,
+                        ),
+                    });
+                }
+                let chip_name = result
+                    .chip_name
+                    .unwrap_or_else(|| "unknown ESP32".to_string());
+                if is_supported_esp32c6_chip(&chip_name) {
+                    events.push(StudioEvent::DiagnosticRaised {
+                        diagnostic: StudioDiagnostic::info(format!(
+                            "Detected provisionable {chip_name} bootloader."
+                        )),
+                    });
+                    events.push(StudioEvent::TargetProbeCompleted {
+                        action_id,
+                        result: TargetProbeResult {
+                            endpoint_id,
+                            kind: TargetKind::Bootloader,
+                            server_version: None,
+                            capabilities: browser_serial_capabilities(self.flash_available),
+                            provisioning_reason: Some(ProvisioningReason::BootloaderMode),
+                            issue: None,
+                        },
+                    });
+                } else {
+                    let issue = Self::probe_issue(
+                        action_id,
+                        &endpoint_id,
+                        DeviceIssueKind::UnsupportedTarget,
+                        format!("Detected unsupported ESP32 target: {chip_name}."),
+                        vec![
+                            RecoveryAction::Reconnect,
+                            RecoveryAction::ChooseSimulator,
+                            RecoveryAction::OpenHelp {
+                                topic: "supported hardware".to_string(),
+                            },
+                        ],
+                    );
+                    events.push(StudioEvent::TargetProbeCompleted {
+                        action_id,
+                        result: TargetProbeResult {
+                            endpoint_id,
+                            kind: TargetKind::UnsupportedDevice,
+                            server_version: None,
+                            capabilities: Vec::new(),
+                            provisioning_reason: None,
+                            issue: Some(issue),
+                        },
+                    });
+                }
+                Ok(events)
+            }
+            Err(error) => {
+                events.push(StudioEvent::TargetProbeFailed {
+                    action_id,
+                    endpoint_id: endpoint_id.clone(),
+                    issue: Self::probe_issue(
+                        action_id,
+                        &endpoint_id,
+                        DeviceIssueKind::ServerTimeout,
+                        format!("No LightPlayer server or ESP32-C6 bootloader responded: {error}"),
+                        vec![
+                            RecoveryAction::Retry,
+                            RecoveryAction::Reconnect,
+                            RecoveryAction::ResetDevice,
+                            RecoveryAction::ChooseSimulator,
+                        ],
+                    ),
+                });
+                Ok(events)
+            }
+        }
+    }
+
+    async fn release_protocol_session(
+        &mut self,
+        action_id: ActionId,
+    ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
+        let session_id = self.session.as_ref().map(|session| session.id().clone());
+        if let Some(client) = &self.client {
+            browser_serial_shim::release(client.port_id()).await?;
+        }
+        if let Some(session) = &mut self.session {
+            session
+                .close()
+                .await
+                .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
+        }
+        self.client = None;
+        self.session = None;
+        Ok(session_id
+            .map(|session_id| StudioEvent::DeviceDisconnected {
+                action_id,
+                session_id,
+            })
+            .into_iter()
+            .collect())
+    }
+
+    fn probe_issue(
+        action_id: ActionId,
+        endpoint_id: &LinkEndpointId,
+        kind: DeviceIssueKind,
+        message: impl Into<String>,
+        recovery_actions: Vec<RecoveryAction>,
+    ) -> DeviceIssue {
+        DeviceIssue::error(
+            format!("browser-serial-probe-{}", action_id.get()),
+            kind,
+            message,
+        )
+        .with_provider(BROWSER_SERIAL_ESP32_PROVIDER_ID)
+        .with_endpoint(endpoint_id.clone())
+        .with_recovery_actions(recovery_actions)
     }
 
     async fn flash_firmware(
@@ -301,17 +534,7 @@ impl BrowserSerialStudioRuntime {
         }
 
         let port_id = self.port_id_for_endpoint(&endpoint_id)?;
-        if let Some(client) = &self.client {
-            browser_serial_shim::release(client.port_id()).await?;
-        }
-        if let Some(session) = &mut self.session {
-            session
-                .close()
-                .await
-                .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
-        }
-        self.client = None;
-        self.session = None;
+        let disconnected_events = self.release_protocol_session(action_id).await?;
 
         let mut events = vec![StudioEvent::ProvisioningProgressUpdated {
             action_id: None,
@@ -352,6 +575,7 @@ impl BrowserSerialStudioRuntime {
                         .with_steps(3, 3)
                         .with_percent(100),
                 });
+                events.extend(disconnected_events);
                 events.push(StudioEvent::FirmwareFlashCompleted {
                     action_id,
                     endpoint_id,
@@ -359,17 +583,21 @@ impl BrowserSerialStudioRuntime {
                 });
                 Ok(events)
             }
-            Err(error) => Ok(Self::flash_issue_events(
-                action_id,
-                endpoint_id,
-                DeviceIssueKind::FlashFailed,
-                format!("ESP32 firmware flash failed: {error}"),
-                vec![
-                    RecoveryAction::Retry,
-                    RecoveryAction::Reconnect,
-                    RecoveryAction::ChooseSimulator,
-                ],
-            )),
+            Err(error) => {
+                events.extend(disconnected_events);
+                events.extend(Self::flash_issue_events(
+                    action_id,
+                    endpoint_id,
+                    DeviceIssueKind::FlashFailed,
+                    format!("ESP32 firmware flash failed: {error}"),
+                    vec![
+                        RecoveryAction::Retry,
+                        RecoveryAction::Reconnect,
+                        RecoveryAction::ChooseSimulator,
+                    ],
+                ));
+                Ok(events)
+            }
         }
     }
 
@@ -456,10 +684,7 @@ impl EffectExecutor for BrowserSerialStudioRuntime {
             StudioEffect::ProbeTarget {
                 action_id,
                 endpoint_id,
-            } => Ok(vec![StudioEvent::TargetProbeCompleted {
-                action_id,
-                result: TargetProbeResult::server(endpoint_id, Some("browser-serial".to_string())),
-            }]),
+            } => self.probe_target(action_id, endpoint_id).await,
             StudioEffect::DisconnectSession {
                 action_id,
                 session_id,
@@ -580,6 +805,11 @@ fn browser_serial_capabilities(flash_available: bool) -> Vec<DeviceCapability> {
         capabilities.push(DeviceCapability::FlashFirmware);
     }
     capabilities
+}
+
+fn is_supported_esp32c6_chip(chip_name: &str) -> bool {
+    let normalized = chip_name.to_ascii_lowercase().replace(['-', '_', ' '], "");
+    normalized.contains("esp32c6")
 }
 
 fn map_log_level(level: lpa_link::LinkLogLevel) -> StudioLogLevel {

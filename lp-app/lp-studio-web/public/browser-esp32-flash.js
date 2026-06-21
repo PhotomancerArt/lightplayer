@@ -4,6 +4,7 @@ const DEFAULT_ESPTOOL_JS_MODULE_URL = "https://unpkg.com/esptool-js@0.6.0/lib/in
 export function installLightPlayerBrowserEsp32Flash() {
   globalThis.lpBrowserEsp32FlashIsSupported = isSupported;
   globalThis.lpBrowserEsp32FlashLoadManifest = loadManifest;
+  globalThis.lpBrowserEsp32FlashProbeTarget = probeTarget;
   globalThis.lpBrowserEsp32FlashFirmware = flashFirmware;
 }
 
@@ -16,20 +17,47 @@ async function loadManifest(manifestUrl = DEFAULT_MANIFEST_URL) {
   return summarizeManifest(manifest, manifestUrl);
 }
 
+async function probeTarget(portId) {
+  if (!isSupported()) {
+    throw new Error("Web Serial ESP32 probing is not supported in this browser.");
+  }
+
+  const port = serialPortFor(portId);
+  await globalThis.lpBrowserSerialRelease?.(portId);
+
+  const { ESPLoader, Transport } = await loadEsptoolModule();
+  const logs = [];
+  const terminal = terminalFor(logs, "esp32-probe");
+  const transport = new Transport(port, true);
+  const loader = new ESPLoader({
+    transport,
+    baudrate: 115200,
+    terminal,
+    debugLogging: false,
+  });
+
+  try {
+    const chipName = await loader.main();
+    await loader.after("hard_reset");
+    return {
+      chipName: chipName ? String(chipName) : null,
+      logs,
+    };
+  } finally {
+    try {
+      await transport.disconnect();
+    } catch (error) {
+      console.warn("[esp32-probe] transport disconnect failed", error);
+    }
+  }
+}
+
 async function flashFirmware(portId, manifestUrl = DEFAULT_MANIFEST_URL) {
   if (!isSupported()) {
     throw new Error("Web Serial firmware flashing is not supported in this browser.");
   }
 
-  const getPort = globalThis.lpBrowserSerialGetPort;
-  if (typeof getPort !== "function") {
-    throw new Error("Browser serial port access is not installed.");
-  }
-  const port = getPort(portId);
-  if (!port) {
-    throw new Error(`No browser serial port exists for session ${portId}.`);
-  }
-
+  const port = serialPortFor(portId);
   await globalThis.lpBrowserSerialRelease?.(portId);
 
   const manifest = await loadFullManifest(manifestUrl);
@@ -37,21 +65,7 @@ async function flashFirmware(portId, manifestUrl = DEFAULT_MANIFEST_URL) {
   const { ESPLoader, Transport } = await loadEsptoolModule();
   const logs = [];
   const progress = [];
-  const terminal = {
-    clean() {},
-    writeLine(line) {
-      const message = String(line ?? "");
-      logs.push(message);
-      console.info(`[esp32-flash] ${message}`);
-    },
-    write(text) {
-      const message = String(text ?? "").trimEnd();
-      if (message.length > 0) {
-        logs.push(message);
-        console.info(`[esp32-flash] ${message}`);
-      }
-    },
-  };
+  const terminal = terminalFor(logs, "esp32-flash");
   const transport = new Transport(port, true);
   const loader = new ESPLoader({
     transport,
@@ -108,6 +122,36 @@ async function flashFirmware(portId, manifestUrl = DEFAULT_MANIFEST_URL) {
       console.warn("[esp32-flash] transport disconnect failed", error);
     }
   }
+}
+
+function serialPortFor(portId) {
+  const getPort = globalThis.lpBrowserSerialGetPort;
+  if (typeof getPort !== "function") {
+    throw new Error("Browser serial port access is not installed.");
+  }
+  const port = getPort(portId);
+  if (!port) {
+    throw new Error(`No browser serial port exists for session ${portId}.`);
+  }
+  return port;
+}
+
+function terminalFor(logs, target) {
+  return {
+    clean() {},
+    writeLine(line) {
+      const message = String(line ?? "");
+      logs.push(message);
+      console.info(`[${target}] ${message}`);
+    },
+    write(text) {
+      const message = String(text ?? "").trimEnd();
+      if (message.length > 0) {
+        logs.push(message);
+        console.info(`[${target}] ${message}`);
+      }
+    },
+  };
 }
 
 async function loadFullManifest(manifestUrl) {

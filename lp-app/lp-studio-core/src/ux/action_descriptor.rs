@@ -9,7 +9,7 @@ pub enum ActionCategory {
     Navigation,
 }
 
-/// Human and machine-readable description of an action type.
+/// Human and machine-readable description of an ux type.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ActionDescriptor {
     pub action_type: StudioActionType,
@@ -31,22 +31,22 @@ impl ActionDescriptor {
             ),
             StudioActionType::StartProvisioning => Self::new(
                 action_type,
-                "Start provisioning",
-                "Begin the device provisioning flow with a selected provider.",
+                "Start link",
+                "Begin the device link flow with a selected provider.",
                 ActionCategory::Device,
                 ActionHistoryPolicy::Never,
             ),
             StudioActionType::CancelProvisioning => Self::new(
                 action_type,
-                "Cancel provisioning",
-                "Cancel the active provisioning flow and return to provider choice.",
+                "Cancel link",
+                "Cancel the active link flow and return to provider choice.",
                 ActionCategory::Device,
                 ActionHistoryPolicy::Never,
             ),
             StudioActionType::RetryProvisioning => Self::new(
                 action_type,
-                "Retry provisioning",
-                "Retry the active provider/device provisioning flow.",
+                "Retry link",
+                "Retry the active provider/device link flow.",
                 ActionCategory::Device,
                 ActionHistoryPolicy::Never,
             ),
@@ -88,7 +88,7 @@ impl ActionDescriptor {
             StudioActionType::ProbeTarget => Self::new(
                 action_type,
                 "Probe target",
-                "Classify the selected endpoint before deciding whether provisioning is needed.",
+                "Classify the selected endpoint before deciding whether link is needed.",
                 ActionCategory::Device,
                 ActionHistoryPolicy::Never,
             ),
@@ -136,8 +136,8 @@ impl ActionDescriptor {
             ),
             StudioActionType::AcknowledgeProvisioningIssue => Self::new(
                 action_type,
-                "Acknowledge provisioning issue",
-                "Dismiss a provisioning issue from the Studio read model.",
+                "Acknowledge link issue",
+                "Dismiss a link issue from the Studio read model.",
                 ActionCategory::Device,
                 ActionHistoryPolicy::Ephemeral,
             ),

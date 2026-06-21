@@ -2,11 +2,11 @@ use lpa_link::{LinkEndpointId, LinkProviderId, LinkSessionId};
 
 use crate::{
     ActionDescriptor, ActionId, ActionMeta, ActionOrigin, ClientSession, ConnectedDeviceState,
-    ConnectionSession, DeviceAccess, DeviceAccessStatus, DeviceFlowState, DeviceId, DeviceIssue,
-    DeviceIssueKind, DeviceSession, InFlightAction, ProgressState, ProjectSelectionReason,
+    ConnectionSession, DeviceAccess, DeviceAccessStatus, DeviceId, DeviceIssue, DeviceIssueKind,
+    DeviceSession, InFlightAction, LinkState, ProgressState, ProjectSelectionReason,
     ProjectSession, ProjectStateResult, ProviderAvailability, RecoveryAction,
-    STUDIO_DEMO_PROJECT_ID, StudioAction, StudioActionKind, StudioDiagnostic, StudioEffect,
-    StudioEvent, StudioLogEntry, StudioLogLevel, StudioState, TargetKind,
+    StudioAction, StudioActionKind, StudioDiagnostic, StudioEffect, StudioEvent,
+    StudioLogEntry, StudioLogLevel, StudioState, TargetKind, STUDIO_DEMO_PROJECT_ID,
 };
 
 pub struct StudioApp {
@@ -65,7 +65,7 @@ impl StudioApp {
                     .map(|provider| provider.availability.clone())
                     .unwrap_or(ProviderAvailability::Available);
                 if availability.can_start() {
-                    self.state.device_manager.active_flow = DeviceFlowState::RequestingAccess {
+                    self.state.device_manager.active_flow = LinkState::GrantPermission {
                         provider_id: provider_id.clone(),
                     };
                     match availability {
@@ -89,7 +89,7 @@ impl StudioApp {
                         provider_id.clone(),
                         availability,
                     );
-                    self.state.device_manager.active_flow = DeviceFlowState::AccessFailed {
+                    self.state.device_manager.active_flow = LinkState::AccessFailed {
                         provider_id,
                         issue: issue.clone(),
                     };
@@ -97,13 +97,13 @@ impl StudioApp {
                 }
             }
             StudioActionKind::CancelProvisioning => {
-                self.state.device_manager.active_flow = DeviceFlowState::ChoosingProvider;
+                self.state.device_manager.active_flow = LinkState::ChooseProvider;
                 self.state.device_manager.providers.clear_selection();
             }
             StudioActionKind::RetryProvisioning => {
                 if let Some(provider_id) = self.selected_provider_id() {
                     self.mark_in_flight(action.meta.action_id, descriptor);
-                    self.state.device_manager.active_flow = DeviceFlowState::RequestingAccess {
+                    self.state.device_manager.active_flow = LinkState::GrantPermission {
                         provider_id: provider_id.clone(),
                     };
                     effects.push(StudioEffect::RequestDeviceAccess {
@@ -119,7 +119,7 @@ impl StudioApp {
                     .device_manager
                     .providers
                     .select_provider(provider_id.clone());
-                self.state.device_manager.active_flow = DeviceFlowState::ProviderSelected {
+                self.state.device_manager.active_flow = LinkState::ProviderSelected {
                     provider_id: provider_id.clone(),
                 };
                 self.state.device_access = None;
@@ -127,7 +127,7 @@ impl StudioApp {
             StudioActionKind::RequestDeviceAccess => {
                 if let Some(provider_id) = self.selected_provider_id() {
                     self.mark_in_flight(action.meta.action_id, descriptor);
-                    self.state.device_manager.active_flow = DeviceFlowState::RequestingAccess {
+                    self.state.device_manager.active_flow = LinkState::GrantPermission {
                         provider_id: provider_id.clone(),
                     };
                     effects.push(StudioEffect::RequestDeviceAccess {
@@ -151,7 +151,7 @@ impl StudioApp {
             }
             StudioActionKind::ConnectDevice { endpoint_id } => {
                 self.mark_in_flight(action.meta.action_id, descriptor);
-                self.state.device_manager.active_flow = DeviceFlowState::OpeningLink {
+                self.state.device_manager.active_flow = LinkState::OpeningLink {
                     endpoint_id: endpoint_id.clone(),
                 };
                 effects.push(StudioEffect::ConnectEndpoint {
@@ -168,7 +168,7 @@ impl StudioApp {
                     .map(|endpoint| endpoint.id.clone())
                 {
                     self.mark_in_flight(action.meta.action_id, descriptor);
-                    self.state.device_manager.active_flow = DeviceFlowState::OpeningLink {
+                    self.state.device_manager.active_flow = LinkState::OpeningLink {
                         endpoint_id: endpoint_id.clone(),
                     };
                     effects.push(StudioEffect::ConnectEndpoint {
@@ -196,7 +196,7 @@ impl StudioApp {
                     });
                 if let Some(endpoint_id) = endpoint_id {
                     self.mark_in_flight(action.meta.action_id, descriptor);
-                    self.state.device_manager.active_flow = DeviceFlowState::ProbingTarget {
+                    self.state.device_manager.active_flow = LinkState::ProbingTarget {
                         endpoint_id: endpoint_id.clone(),
                     };
                     effects.push(StudioEffect::ProbeTarget {
@@ -241,7 +241,7 @@ impl StudioApp {
                 firmware_id,
             } => {
                 self.mark_in_flight(action.meta.action_id, descriptor);
-                self.state.device_manager.active_flow = DeviceFlowState::Flashing {
+                self.state.device_manager.active_flow = LinkState::Flashing {
                     endpoint_id: endpoint_id.clone(),
                     progress: Some(ProgressState::new("Preparing firmware flash")),
                 };
@@ -269,7 +269,7 @@ impl StudioApp {
             }
             StudioActionKind::UploadDemoProject | StudioActionKind::LoadDemoProject => {
                 self.mark_in_flight(action.meta.action_id, descriptor);
-                self.state.device_manager.active_flow = DeviceFlowState::DeployingProject {
+                self.state.device_manager.active_flow = LinkState::DeployingProject {
                     project_id: STUDIO_DEMO_PROJECT_ID.to_string(),
                     progress: Some(ProgressState::new("Writing demo project")),
                 };
@@ -290,7 +290,7 @@ impl StudioApp {
             StudioActionKind::ReadProjectState => {
                 self.mark_in_flight(action.meta.action_id, descriptor);
                 if let Some(session_id) = self.current_link_session_id() {
-                    self.state.device_manager.active_flow = DeviceFlowState::ReadingProjectState {
+                    self.state.device_manager.active_flow = LinkState::ReadingProjectState {
                         session_id: session_id.clone(),
                     };
                     effects.push(StudioEffect::ReadProjectState {
@@ -346,7 +346,7 @@ impl StudioApp {
                     .selected_provider_id()
                     .is_none()
                 {
-                    self.state.device_manager.active_flow = DeviceFlowState::ChoosingProvider;
+                    self.state.device_manager.active_flow = LinkState::ChooseProvider;
                 }
             }
             StudioEvent::ProviderAvailabilityUpdated {
@@ -393,13 +393,13 @@ impl StudioApp {
                     .first_selected_endpoint()
                     .map(|endpoint| endpoint.id.clone())
                 {
-                    self.state.device_manager.active_flow = DeviceFlowState::EndpointGranted {
+                    self.state.device_manager.active_flow = LinkState::EndpointGranted {
                         provider_id,
                         endpoint_id,
                     };
                 } else {
                     self.state.device_manager.active_flow =
-                        DeviceFlowState::ProviderSelected { provider_id };
+                        LinkState::ProviderSelected { provider_id };
                 }
             }
             StudioEvent::DeviceConnected {
@@ -437,7 +437,7 @@ impl StudioApp {
                             connection.kind.clone(),
                             device.capabilities.clone(),
                         ));
-                    self.state.device_manager.active_flow = DeviceFlowState::ServerReady {
+                    self.state.device_manager.active_flow = LinkState::ServerReady {
                         session_id: device.session_id.clone(),
                     };
                 }
@@ -450,7 +450,7 @@ impl StudioApp {
                 self.finish_action(action_id);
                 self.state.device_manager.push_issue(issue.clone());
                 self.state.device_manager.active_flow =
-                    DeviceFlowState::LinkFailed { endpoint_id, issue };
+                    LinkState::LinkFailed { endpoint_id, issue };
             }
             StudioEvent::DeviceDisconnected {
                 action_id,
@@ -462,7 +462,7 @@ impl StudioApp {
                 self.state.client_session = None;
                 self.state.project_session = None;
                 self.state.device_manager.current_device = None;
-                self.state.device_manager.active_flow = DeviceFlowState::Disconnected {
+                self.state.device_manager.active_flow = LinkState::Disconnected {
                     reason: Some("Device disconnected".to_string()),
                 };
             }
@@ -483,7 +483,7 @@ impl StudioApp {
                 firmware_id,
             } => {
                 self.finish_action(action_id);
-                self.state.device_manager.active_flow = DeviceFlowState::OpeningServer {
+                self.state.device_manager.active_flow = LinkState::OpeningServer {
                     endpoint_id: endpoint_id.clone(),
                 };
                 let firmware_label = firmware_id.unwrap_or_else(|| "selected firmware".to_string());
@@ -502,23 +502,23 @@ impl StudioApp {
                     if let Some(issue) = result.issue.clone() {
                         self.state.device_manager.push_issue(issue);
                     }
-                    self.state.device_manager.active_flow = DeviceFlowState::ProvisioningRequired {
+                    self.state.device_manager.active_flow = LinkState::ProvisioningRequired {
                         endpoint_id: result.endpoint_id,
                         reason,
                     };
                 } else if let Some(issue) = result.issue.clone() {
                     self.state.device_manager.push_issue(issue.clone());
-                    self.state.device_manager.active_flow = DeviceFlowState::Degraded { issue };
+                    self.state.device_manager.active_flow = LinkState::Degraded { issue };
                 } else {
                     self.state.device_manager.active_flow = match result.kind {
-                        TargetKind::LightPlayerServer => DeviceFlowState::OpeningServer {
+                        TargetKind::LightPlayerServer => LinkState::OpeningServer {
                             endpoint_id: result.endpoint_id,
                         },
-                        TargetKind::Bootloader => DeviceFlowState::ProvisioningRequired {
+                        TargetKind::Bootloader => LinkState::ProvisioningRequired {
                             endpoint_id: result.endpoint_id,
                             reason: crate::ProvisioningReason::BootloaderMode,
                         },
-                        TargetKind::BlankDevice => DeviceFlowState::ProvisioningRequired {
+                        TargetKind::BlankDevice => LinkState::ProvisioningRequired {
                             endpoint_id: result.endpoint_id,
                             reason: crate::ProvisioningReason::DeviceBlank,
                         },
@@ -530,7 +530,7 @@ impl StudioApp {
                             )
                             .with_endpoint(result.endpoint_id);
                             self.state.device_manager.push_issue(issue.clone());
-                            DeviceFlowState::Degraded { issue }
+                            LinkState::Degraded { issue }
                         }
                     };
                 }
@@ -543,14 +543,14 @@ impl StudioApp {
                 self.finish_action(action_id);
                 self.state.device_manager.push_issue(issue.clone());
                 self.state.device_manager.active_flow =
-                    DeviceFlowState::LinkFailed { endpoint_id, issue };
+                    LinkState::LinkFailed { endpoint_id, issue };
             }
             StudioEvent::ProvisioningIssueRaised { action_id, issue } => {
                 if let Some(action_id) = action_id {
                     self.finish_action(action_id);
                 }
                 self.state.device_manager.push_issue(issue.clone());
-                self.state.device_manager.active_flow = DeviceFlowState::Degraded { issue };
+                self.state.device_manager.active_flow = LinkState::Degraded { issue };
             }
             StudioEvent::ProvisioningProgressUpdated {
                 action_id,
@@ -563,13 +563,13 @@ impl StudioApp {
             }
             StudioEvent::ProvisioningFlowCanceled { action_id } => {
                 self.finish_action(action_id);
-                self.state.device_manager.active_flow = DeviceFlowState::ChoosingProvider;
+                self.state.device_manager.active_flow = LinkState::ChooseProvider;
             }
             StudioEvent::DemoProjectSeeded {
                 action_id,
                 project_id,
             } => {
-                self.state.device_manager.active_flow = DeviceFlowState::DeployingProject {
+                self.state.device_manager.active_flow = LinkState::DeployingProject {
                     project_id: project_id.clone(),
                     progress: Some(ProgressState::new("Loading project")),
                 };
@@ -593,7 +593,7 @@ impl StudioApp {
                 self.finish_action(action_id);
                 if let Some(project) = &mut self.state.project_session {
                     project.inventory = Some(inventory);
-                    self.state.device_manager.active_flow = DeviceFlowState::Ready {
+                    self.state.device_manager.active_flow = LinkState::Ready {
                         project_id: project.project_id.clone(),
                     };
                 }
@@ -625,13 +625,13 @@ impl StudioApp {
                     .diagnostics
                     .push(StudioDiagnostic::error(Some(action_id), message.clone()));
                 let issue = DeviceIssue::error(
-                    issue_id("action-failed", action_id),
+                    issue_id("ux-failed", action_id),
                     DeviceIssueKind::ActionFailed,
                     message,
                 )
                 .with_recovery_actions(vec![RecoveryAction::Retry]);
                 self.state.device_manager.push_issue(issue.clone());
-                self.state.device_manager.active_flow = DeviceFlowState::Degraded { issue };
+                self.state.device_manager.active_flow = LinkState::Degraded { issue };
             }
         }
         effects
@@ -695,24 +695,22 @@ impl StudioApp {
             ProjectStateResult::NoLoadedProject => {
                 self.finish_action(action_id);
                 if let Some(session_id) = self.current_link_session_id() {
-                    self.state.device_manager.active_flow =
-                        DeviceFlowState::ProjectSelectionRequired {
-                            session_id,
-                            reason: ProjectSelectionReason::NoLoadedProject,
-                            projects: Vec::new(),
-                        };
+                    self.state.device_manager.active_flow = LinkState::ProjectSelectionRequired {
+                        session_id,
+                        reason: ProjectSelectionReason::NoLoadedProject,
+                        projects: Vec::new(),
+                    };
                 }
                 Vec::new()
             }
             ProjectStateResult::MultipleProjects { projects } => {
                 self.finish_action(action_id);
                 if let Some(session_id) = self.current_link_session_id() {
-                    self.state.device_manager.active_flow =
-                        DeviceFlowState::ProjectSelectionRequired {
-                            session_id,
-                            reason: ProjectSelectionReason::MultipleLoadedProjects,
-                            projects,
-                        };
+                    self.state.device_manager.active_flow = LinkState::ProjectSelectionRequired {
+                        session_id,
+                        reason: ProjectSelectionReason::MultipleLoadedProjects,
+                        projects,
+                    };
                 }
                 Vec::new()
             }
@@ -720,7 +718,7 @@ impl StudioApp {
                 self.finish_action(action_id);
                 if let Some(session_id) = self.current_link_session_id() {
                     self.state.device_manager.active_flow =
-                        DeviceFlowState::RecoveryRequired { session_id, reason };
+                        LinkState::RecoveryRequired { session_id, reason };
                 }
                 Vec::new()
             }
@@ -735,7 +733,7 @@ impl StudioApp {
         )
         .with_recovery_actions(vec![RecoveryAction::ChooseSimulator]);
         self.state.device_manager.push_issue(issue.clone());
-        self.state.device_manager.active_flow = DeviceFlowState::Degraded { issue };
+        self.state.device_manager.active_flow = LinkState::Degraded { issue };
     }
 
     fn raise_no_endpoint_issue(&mut self, action_id: ActionId) {
@@ -746,7 +744,7 @@ impl StudioApp {
         )
         .with_recovery_actions(vec![RecoveryAction::Retry]);
         self.state.device_manager.push_issue(issue.clone());
-        self.state.device_manager.active_flow = DeviceFlowState::Degraded { issue };
+        self.state.device_manager.active_flow = LinkState::Degraded { issue };
     }
 
     fn apply_device_access_status(
@@ -761,8 +759,7 @@ impl StudioApp {
         self.state.device_access = Some(DeviceAccess::new(provider_id.clone(), status.clone()));
         match status {
             DeviceAccessStatus::Unknown | DeviceAccessStatus::PermissionRequired => {
-                self.state.device_manager.active_flow =
-                    DeviceFlowState::RequestingAccess { provider_id };
+                self.state.device_manager.active_flow = LinkState::GrantPermission { provider_id };
             }
             DeviceAccessStatus::Granted => {
                 self.state
@@ -772,8 +769,7 @@ impl StudioApp {
                         provider_id.clone(),
                         ProviderAvailability::Available,
                     );
-                self.state.device_manager.active_flow =
-                    DeviceFlowState::ProviderSelected { provider_id };
+                self.state.device_manager.active_flow = LinkState::ProviderSelected { provider_id };
             }
             DeviceAccessStatus::PermissionCanceled { reason } => {
                 let issue = DeviceIssue::error(
@@ -786,7 +782,7 @@ impl StudioApp {
                     RecoveryAction::Retry,
                     RecoveryAction::ChooseSimulator,
                 ]);
-                self.state.device_manager.active_flow = DeviceFlowState::AccessFailed {
+                self.state.device_manager.active_flow = LinkState::AccessFailed {
                     provider_id,
                     issue: issue.clone(),
                 };
@@ -816,7 +812,7 @@ impl StudioApp {
                     RecoveryAction::UseCompatibleBrowser,
                     RecoveryAction::ChooseSimulator,
                 ]);
-                self.state.device_manager.active_flow = DeviceFlowState::AccessFailed {
+                self.state.device_manager.active_flow = LinkState::AccessFailed {
                     provider_id,
                     issue: issue.clone(),
                 };
@@ -833,7 +829,7 @@ impl StudioApp {
                     RecoveryAction::Retry,
                     RecoveryAction::ChooseSimulator,
                 ]);
-                self.state.device_manager.active_flow = DeviceFlowState::AccessFailed {
+                self.state.device_manager.active_flow = LinkState::AccessFailed {
                     provider_id,
                     issue: issue.clone(),
                 };
@@ -844,11 +840,11 @@ impl StudioApp {
 
     fn apply_progress(&mut self, progress: ProgressState) {
         match &mut self.state.device_manager.active_flow {
-            DeviceFlowState::Flashing {
+            LinkState::Flashing {
                 progress: active_progress,
                 ..
             }
-            | DeviceFlowState::DeployingProject {
+            | LinkState::DeployingProject {
                 progress: active_progress,
                 ..
             } => {
@@ -913,10 +909,9 @@ mod tests {
     use lpc_wire::{WireProjectHandle, WireProjectInventoryReadResponse};
 
     use crate::{
-        ActionOrigin, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID,
-        DeviceCapability, DeviceFlowState, DeviceIssueKind, ProjectSelectionReason,
-        ProjectStateResult, ProviderAvailability, ProviderCardState, ProviderIntent,
-        RecoveryAction, RecoveryReason,
+        ActionOrigin, DeviceCapability, DeviceIssueKind,
+        LinkState, ProjectSelectionReason, ProjectStateResult, ProviderAvailability, ProviderCardState,
+        ProviderIntent, RecoveryAction, RecoveryReason, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID,
     };
 
     use super::*;
@@ -934,7 +929,7 @@ mod tests {
         );
         assert!(matches!(
             app.state().device_manager.active_flow,
-            DeviceFlowState::ChoosingProvider
+            LinkState::ChooseProvider
         ));
     }
 
@@ -1000,7 +995,7 @@ mod tests {
         );
         assert!(matches!(
             app.state().device_manager.active_flow,
-            DeviceFlowState::ProviderSelected { .. }
+            LinkState::ProviderSelected { .. }
         ));
     }
 
@@ -1064,7 +1059,7 @@ mod tests {
         );
         assert!(matches!(
             app.state().device_manager.active_flow,
-            DeviceFlowState::AccessFailed { .. }
+            LinkState::AccessFailed { .. }
         ));
     }
 
@@ -1109,7 +1104,7 @@ mod tests {
         );
         assert!(matches!(
             app.state().device_manager.active_flow,
-            DeviceFlowState::EndpointGranted { .. }
+            LinkState::EndpointGranted { .. }
         ));
     }
 
@@ -1134,7 +1129,7 @@ mod tests {
         assert!(app.state().device_manager.current_device.is_some());
         assert!(matches!(
             app.state().device_manager.active_flow,
-            DeviceFlowState::ServerReady { .. }
+            LinkState::ServerReady { .. }
         ));
     }
 
@@ -1147,7 +1142,7 @@ mod tests {
         assert!(matches!(effects[0], StudioEffect::ReadProjectState { .. }));
         assert!(matches!(
             app.state().device_manager.active_flow,
-            DeviceFlowState::ReadingProjectState { .. }
+            LinkState::ReadingProjectState { .. }
         ));
     }
 
@@ -1159,7 +1154,7 @@ mod tests {
             action_id,
             ActionDescriptor::for_type(crate::StudioActionType::ReadProjectState),
         );
-        app.state.device_manager.active_flow = DeviceFlowState::ReadingProjectState {
+        app.state.device_manager.active_flow = LinkState::ReadingProjectState {
             session_id: LinkSessionId::new("session-1"),
         };
 
@@ -1195,7 +1190,7 @@ mod tests {
         assert!(app.state().in_flight.is_empty());
         assert!(matches!(
             app.state().device_manager.active_flow,
-            DeviceFlowState::Ready { .. }
+            LinkState::Ready { .. }
         ));
     }
 
@@ -1211,7 +1206,7 @@ mod tests {
 
         assert!(matches!(
             no_project.state().device_manager.active_flow,
-            DeviceFlowState::ProjectSelectionRequired {
+            LinkState::ProjectSelectionRequired {
                 reason: ProjectSelectionReason::NoLoadedProject,
                 ..
             }
@@ -1230,7 +1225,7 @@ mod tests {
 
         assert!(matches!(
             recovery.state().device_manager.active_flow,
-            DeviceFlowState::RecoveryRequired { .. }
+            LinkState::RecoveryRequired { .. }
         ));
     }
 
@@ -1259,7 +1254,7 @@ mod tests {
         assert!(app.state().in_flight.is_empty());
         assert!(matches!(
             &app.state().device_manager.active_flow,
-            DeviceFlowState::LinkFailed {
+            LinkState::LinkFailed {
                 endpoint_id: flow_endpoint_id,
                 issue,
             } if flow_endpoint_id == &endpoint_id
@@ -1288,7 +1283,7 @@ mod tests {
         assert!(app.state().in_flight.is_empty());
         assert!(matches!(
             &app.state().device_manager.active_flow,
-            DeviceFlowState::AccessFailed {
+            LinkState::AccessFailed {
                 provider_id: flow_provider_id,
                 issue,
             } if flow_provider_id == &provider_id
@@ -1345,7 +1340,7 @@ mod tests {
         );
         assert!(matches!(
             app.state().device_manager.active_flow,
-            DeviceFlowState::Ready { .. }
+            LinkState::Ready { .. }
         ));
     }
 

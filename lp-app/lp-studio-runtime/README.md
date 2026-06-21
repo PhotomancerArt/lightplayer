@@ -78,6 +78,15 @@ with the same user-granted `SerialPort`. Flash progress, logs, success, and
 failures are translated back into Studio events; reconnect/classification after
 flash remains a separate provisioning step.
 
+Browser serial target classification is layered. Studio first opens the normal
+serial link and sends a lightweight `lp-server` request through `lpa-client`. If
+that responds, the target is treated as a running LightPlayer server and Studio
+continues to project-state discovery. If the server request times out or the
+stream is not protocol-shaped, Studio releases the normal serial client and
+uses the browser ESP32 adapter to detect a provisionable ESP32-C6 bootloader.
+Unsupported or unresponsive targets become typed provisioning issues rather
+than raw controller errors.
+
 For hardware bring-up, valid `M!` protocol frames stay internal to the runtime.
 Non-protocol device lines are echoed directly to the JavaScript console with a
 `fw-esp32` prefix, using the firmware log level when present. They do not enter

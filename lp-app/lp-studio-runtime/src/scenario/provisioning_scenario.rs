@@ -1,7 +1,7 @@
 use lp_studio_core::{
-    BROWSER_SERIAL_ESP32_PROVIDER_ID, DeviceCapability, DeviceIssue, DeviceIssueKind,
-    HOST_PROCESS_PROVIDER_ID, ProjectChoice, ProjectStateResult, ProviderAvailability,
-    ProviderCapability, ProviderCardState, ProviderIntent, RecoveryAction, RecoveryReason,
+    DeviceCapability, DeviceIssue, DeviceIssueKind, ProjectChoice,
+    ProjectStateResult, ProviderAvailability, ProviderCapability, ProviderCardState,
+    ProviderIntent, RecoveryAction, RecoveryReason, BROWSER_SERIAL_ESP32_PROVIDER_ID, HOST_PROCESS_PROVIDER_ID,
     STUDIO_DEMO_PROJECT_ID,
 };
 use lpa_link::{LinkConnectionKind, LinkEndpoint, LinkEndpointId, LinkProviderId};
@@ -15,7 +15,7 @@ use crate::scenario::{
 const HOST_ENDPOINT_ID: &str = "scenario-host-runtime";
 const BROWSER_SERIAL_ENDPOINT_ID: &str = "scenario-browser-serial-esp32";
 
-/// A deterministic product-level provisioning journey for Studio runtime tests.
+/// A deterministic product-level link journey for Studio runtime tests.
 #[derive(Clone, Debug, PartialEq, Deserialize, Serialize)]
 pub struct ProvisioningScenario {
     pub name: String,

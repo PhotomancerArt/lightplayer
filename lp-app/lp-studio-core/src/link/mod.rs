@@ -1,9 +1,13 @@
-//! Studio provisioning and device-manager read model.
+//! Studio link and device-manager read model.
 
 pub mod connected_device_state;
-pub mod device_flow_state;
+pub mod device_access;
+pub mod device_capability;
+pub mod device_id;
 pub mod device_issue;
 pub mod device_manager_state;
+pub mod device_session;
+pub mod link_state;
 pub mod progress_state;
 pub mod project_choice;
 pub mod project_selection_reason;
@@ -19,9 +23,9 @@ pub mod recovery_reason;
 pub mod target_probe_result;
 
 pub use connected_device_state::{ConnectedDeviceState, DeviceHealthState};
-pub use device_flow_state::DeviceFlowState;
 pub use device_issue::{DeviceIssue, DeviceIssueKind, DeviceIssueSeverity};
 pub use device_manager_state::DeviceManagerState;
+pub use link_state::LinkState;
 pub use progress_state::ProgressState;
 pub use project_choice::ProjectChoice;
 pub use project_selection_reason::ProjectSelectionReason;

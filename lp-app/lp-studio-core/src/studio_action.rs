@@ -57,7 +57,7 @@ impl StudioActionType {
     }
 }
 
-/// Payload-bearing Studio action.
+/// Payload-bearing Studio ux.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum StudioActionKind {
     RefreshProviderCatalog,
@@ -134,7 +134,7 @@ impl StudioActionKind {
     }
 }
 
-/// One dispatchable Studio action plus metadata.
+/// One dispatchable Studio ux plus metadata.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct StudioAction {
     pub meta: ActionMeta,

@@ -25,6 +25,12 @@ pub struct BrowserEsp32FlashResult {
     pub progress: Vec<ProgressState>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BrowserEsp32ProbeResult {
+    pub chip_name: Option<String>,
+    pub logs: Vec<String>,
+}
+
 #[wasm_bindgen]
 extern "C" {
     #[wasm_bindgen(js_namespace = globalThis, js_name = lpBrowserEsp32FlashIsSupported)]
@@ -32,6 +38,9 @@ extern "C" {
 
     #[wasm_bindgen(js_namespace = globalThis, js_name = lpBrowserEsp32FlashLoadManifest)]
     fn js_load_manifest(manifest_url: &str) -> Promise;
+
+    #[wasm_bindgen(js_namespace = globalThis, js_name = lpBrowserEsp32FlashProbeTarget)]
+    fn js_probe_target(port_id: u32) -> Promise;
 
     #[wasm_bindgen(js_namespace = globalThis, js_name = lpBrowserEsp32FlashFirmware)]
     fn js_flash_firmware(port_id: u32, manifest_url: &str) -> Promise;
@@ -63,6 +72,16 @@ pub async fn flash_firmware(
         chip_name: reflect_optional_string(&value, "chipName")?,
         logs: reflect_string_array(&value, "logs")?,
         progress: reflect_progress_array(&value, "progress")?,
+    })
+}
+
+pub async fn probe_target(port_id: u32) -> Result<BrowserEsp32ProbeResult, StudioRuntimeError> {
+    let value = JsFuture::from(js_probe_target(port_id))
+        .await
+        .map_err(js_error)?;
+    Ok(BrowserEsp32ProbeResult {
+        chip_name: reflect_optional_string(&value, "chipName")?,
+        logs: reflect_string_array(&value, "logs")?,
     })
 }
 

@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use lp_studio_core::{
-    DeviceAccessStatus, DeviceFlowState, DeviceIssue, ProgressState, ProjectSelectionReason,
+    DeviceAccessStatus, DeviceIssue, LinkState, ProgressState, ProjectSelectionReason,
     ProviderAvailability, ProviderCardState, ProviderIntent, ProvisioningReason, RecoveryAction,
     RecoveryReason, StudioDiagnostic, StudioDiagnosticSeverity, StudioLogEntry, StudioState,
 };
@@ -194,7 +194,7 @@ fn ProviderCard(
 
 #[component]
 fn FlowStateView(
-    flow: DeviceFlowState,
+    flow: LinkState,
     running: bool,
     on_confirm_firmware_flash: EventHandler<(LinkEndpointId, Option<String>)>,
     on_load_starter_project: EventHandler<MouseEvent>,
@@ -211,7 +211,7 @@ fn FlowStateView(
                 ProgressView { progress }
             }
             match flow {
-                DeviceFlowState::ProjectSelectionRequired { reason, projects, .. } => rsx! {
+                LinkState::ProjectSelectionRequired { reason, projects, .. } => rsx! {
                     ProjectSelectionView {
                         reason,
                         projects,
@@ -219,13 +219,13 @@ fn FlowStateView(
                         on_load_starter_project,
                     }
                 },
-                DeviceFlowState::RecoveryRequired { reason, .. } => rsx! {
+                LinkState::RecoveryRequired { reason, .. } => rsx! {
                     div { class: "recovery-box",
                         strong { "Recovery" }
                         p { "{recovery_reason_label(&reason)}" }
                     }
                 },
-                DeviceFlowState::ProvisioningRequired { endpoint_id, reason } => rsx! {
+                LinkState::ProvisioningRequired { endpoint_id, reason } => rsx! {
                     div { class: "recovery-box",
                         strong { "Provisioning" }
                         p { "{provisioning_reason_label(&reason)}" }
@@ -236,7 +236,7 @@ fn FlowStateView(
                         }
                     }
                 },
-                DeviceFlowState::FlashConfirm { endpoint_id, firmware_id } => rsx! {
+                LinkState::FlashConfirm { endpoint_id, firmware_id } => rsx! {
                     div { class: "recovery-box",
                         strong { "Flash firmware" }
                         p { "{flash_confirmation_label(firmware_id.as_deref())}" }
@@ -314,7 +314,7 @@ fn IssueView(issue: DeviceIssue) -> Element {
             if !issue.recovery_actions.is_empty() {
                 div { class: "recovery-actions",
                     for action in issue.recovery_actions {
-                        span { class: "mini-count", "{recovery_action_label(&action)}" }
+                        span { class: "mini-count", "{recovery_action_label(&ux)}" }
                     }
                 }
             }
@@ -358,45 +358,43 @@ struct FlowSummary {
     progress: Option<ProgressState>,
 }
 
-fn flow_summary(flow: &DeviceFlowState) -> FlowSummary {
+fn flow_summary(flow: &LinkState) -> FlowSummary {
     match flow {
-        DeviceFlowState::Empty | DeviceFlowState::ChoosingProvider => summary(
+        LinkState::Empty | LinkState::ChooseProvider => summary(
             "Choose",
             "Pick a runtime",
             "Simulator and hardware providers appear here when available.",
         ),
-        DeviceFlowState::ProviderSelected { provider_id } => {
+        LinkState::ProviderSelected { provider_id } => {
             summary("Selected", provider_id.as_str(), "Provider selected.")
         }
-        DeviceFlowState::RequestingAccess { provider_id } => summary(
+        LinkState::GrantPermission { provider_id } => summary(
             "Access",
             provider_id.as_str(),
             "Waiting for provider access.",
         ),
-        DeviceFlowState::AccessFailed { issue, .. } => {
-            summary("Access", "Access failed", &issue.message)
-        }
-        DeviceFlowState::EndpointGranted { endpoint_id, .. } => {
+        LinkState::AccessFailed { issue, .. } => summary("Access", "Access failed", &issue.message),
+        LinkState::EndpointGranted { endpoint_id, .. } => {
             summary("Endpoint", endpoint_id.as_str(), "Endpoint granted.")
         }
-        DeviceFlowState::OpeningLink { endpoint_id } => {
+        LinkState::OpeningLink { endpoint_id } => {
             summary("Link", endpoint_id.as_str(), "Opening link session.")
         }
-        DeviceFlowState::LinkFailed { issue, .. } => summary("Link", "Link failed", &issue.message),
-        DeviceFlowState::ProbingTarget { endpoint_id } => {
+        LinkState::LinkFailed { issue, .. } => summary("Link", "Link failed", &issue.message),
+        LinkState::ProbingTarget { endpoint_id } => {
             summary("Probe", endpoint_id.as_str(), "Identifying target.")
         }
-        DeviceFlowState::ProvisioningRequired { reason, .. } => summary(
+        LinkState::ProvisioningRequired { reason, .. } => summary(
             "Provision",
             "Provisioning required",
             &provisioning_reason_label(reason),
         ),
-        DeviceFlowState::FlashConfirm { endpoint_id, .. } => summary(
+        LinkState::FlashConfirm { endpoint_id, .. } => summary(
             "Flash",
             endpoint_id.as_str(),
             "Waiting for flash confirmation.",
         ),
-        DeviceFlowState::Flashing {
+        LinkState::Flashing {
             endpoint_id,
             progress,
         } => summary_with_progress(
@@ -405,34 +403,34 @@ fn flow_summary(flow: &DeviceFlowState) -> FlowSummary {
             "Flashing firmware.",
             progress,
         ),
-        DeviceFlowState::OpeningServer { endpoint_id } => {
+        LinkState::OpeningServer { endpoint_id } => {
             summary("Server", endpoint_id.as_str(), "Opening server protocol.")
         }
-        DeviceFlowState::ServerReady { session_id } => {
+        LinkState::ServerReady { session_id } => {
             summary("Server", session_id.as_str(), "Server link ready.")
         }
-        DeviceFlowState::ReadingProjectState { session_id } => {
+        LinkState::ReadingProjectState { session_id } => {
             summary("Project", session_id.as_str(), "Reading project state.")
         }
-        DeviceFlowState::ProjectSelectionRequired {
+        LinkState::ProjectSelectionRequired {
             reason, projects, ..
         } => summary(
             "Project",
             project_selection_reason_label(reason),
             &format!("{} candidate project(s).", projects.len()),
         ),
-        DeviceFlowState::RecoveryRequired { reason, .. } => summary(
+        LinkState::RecoveryRequired { reason, .. } => summary(
             "Recovery",
             "Recovery required",
             &recovery_reason_label(reason),
         ),
-        DeviceFlowState::DeployingProject {
+        LinkState::DeployingProject {
             project_id,
             progress,
         } => summary_with_progress("Project", project_id, "Deploying project.", progress),
-        DeviceFlowState::Ready { project_id } => summary("Ready", project_id, "Project attached."),
-        DeviceFlowState::Degraded { issue } => summary("Issue", "Degraded", &issue.message),
-        DeviceFlowState::Disconnected { reason } => summary(
+        LinkState::Ready { project_id } => summary("Ready", project_id, "Project attached."),
+        LinkState::Degraded { issue } => summary("Issue", "Degraded", &issue.message),
+        LinkState::Disconnected { reason } => summary(
             "Offline",
             "Disconnected",
             reason.as_deref().unwrap_or("No active device session."),

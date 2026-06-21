@@ -37,6 +37,15 @@ impl BrowserSerialProtocolClient {
         self.port_id
     }
 
+    pub async fn probe_server(&mut self) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
+        let outcome = self
+            .client
+            .project_list_loaded()
+            .await
+            .map_err(map_client_error)?;
+        Ok(self.studio_events(outcome.events))
+    }
+
     pub async fn seed_demo_project(
         &mut self,
         action_id: lp_studio_core::ActionId,

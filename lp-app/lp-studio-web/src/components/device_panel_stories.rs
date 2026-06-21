@@ -13,7 +13,8 @@ use crate::stories::story_fixtures::{
     studio_state_probing_server, studio_state_project_selection_required,
     studio_state_protocol_diagnostic, studio_state_provider_catalog,
     studio_state_reading_project_state, studio_state_ready, studio_state_recovery_required,
-    studio_state_requesting_access,
+    studio_state_requesting_access, studio_state_unresponsive_target,
+    studio_state_unsupported_target,
 };
 
 pub const STORIES: &[StoryDescriptor] = &[
@@ -126,6 +127,18 @@ pub const STORIES: &[StoryDescriptor] = &[
         "Firmware flashing failed and recovery actions are visible.",
     ),
     StoryDescriptor::new(
+        "flow/unsupported-target",
+        "ProvisioningFlow",
+        "Unsupported Target",
+        "The target probe found hardware outside the MVP support matrix.",
+    ),
+    StoryDescriptor::new(
+        "flow/unresponsive-target",
+        "ProvisioningFlow",
+        "Unresponsive Target",
+        "Neither the server protocol nor bootloader probing responded.",
+    ),
+    StoryDescriptor::new(
         "flow/post-flash-reconnecting",
         "ProvisioningFlow",
         "Post-Flash Reconnect",
@@ -222,6 +235,8 @@ pub fn render_story(id: &str) -> Option<Element> {
             false,
         )),
         "flow/flash-failed" => Some(device_story(studio_state_flash_failed(), false)),
+        "flow/unsupported-target" => Some(device_story(studio_state_unsupported_target(), false)),
+        "flow/unresponsive-target" => Some(device_story(studio_state_unresponsive_target(), false)),
         "flow/post-flash-reconnecting" => {
             Some(device_story(studio_state_post_flash_reconnecting(), true))
         }

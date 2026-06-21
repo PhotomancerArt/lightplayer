@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::RecoveryAction;
 
-/// Severity for a provisioning issue.
+/// Severity for a link issue.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum DeviceIssueSeverity {
     Info,
@@ -11,7 +11,7 @@ pub enum DeviceIssueSeverity {
     Error,
 }
 
-/// Machine-readable provisioning failure category.
+/// Machine-readable link failure category.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum DeviceIssueKind {
     RuntimeUnsupported,
@@ -32,7 +32,7 @@ pub enum DeviceIssueKind {
     ActionFailed,
 }
 
-/// User- and agent-readable issue raised during provisioning.
+/// User- and agent-readable issue raised during link.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct DeviceIssue {
     pub id: String,

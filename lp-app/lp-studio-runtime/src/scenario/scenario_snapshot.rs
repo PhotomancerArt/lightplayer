@@ -1,11 +1,11 @@
-use lp_studio_core::{DeviceFlowState, StudioApp};
+use lp_studio_core::{LinkState, StudioApp};
 use serde::{Deserialize, Serialize};
 
 /// Lightweight journey snapshot captured after scenario actions and events.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct ScenarioSnapshot {
     pub label: String,
-    pub flow: DeviceFlowState,
+    pub flow: LinkState,
     pub issue_count: usize,
     pub log_count: usize,
     pub diagnostic_count: usize,

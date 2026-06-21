@@ -1,11 +1,11 @@
 use lp_studio_core::{
-    ActionId, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID, ClientSession,
-    ConnectedDeviceState, ConnectionSession, DeviceAccess, DeviceAccessStatus, DeviceCapability,
-    DeviceFlowState, DeviceId, DeviceIssue, DeviceIssueKind, DeviceSession, ProgressState,
-    ProjectChoice, ProjectSelectionReason, ProjectSession, ProviderAvailability,
-    ProviderCapability, ProviderCardState, ProviderIntent, ProvisioningReason, RecoveryAction,
-    RecoveryReason, STUDIO_DEMO_PROJECT_ID, StudioDiagnostic, StudioHeartbeat, StudioLogEntry,
-    StudioLogLevel, StudioState,
+    ActionId, ClientSession, ConnectedDeviceState, ConnectionSession,
+    DeviceAccess, DeviceAccessStatus, DeviceCapability, DeviceId, DeviceIssue,
+    DeviceIssueKind, DeviceSession, LinkState, ProgressState, ProjectChoice, ProjectSelectionReason, ProjectSession,
+    ProviderAvailability, ProviderCapability, ProviderCardState, ProviderIntent,
+    ProvisioningReason, RecoveryAction, RecoveryReason, StudioDiagnostic, StudioHeartbeat,
+    StudioLogEntry, StudioLogLevel, StudioState, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID,
+    STUDIO_DEMO_PROJECT_ID,
 };
 use lpa_link::{
     LinkConnectionKind, LinkEndpoint, LinkEndpointId, LinkEndpointStatus, LinkProviderId,
@@ -34,7 +34,7 @@ pub fn studio_state_requesting_access() -> StudioState {
         .device_manager
         .providers
         .select_provider(BROWSER_SERIAL_ESP32_PROVIDER_ID);
-    state.device_manager.active_flow = DeviceFlowState::RequestingAccess {
+    state.device_manager.active_flow = LinkState::GrantPermission {
         provider_id: LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID),
     };
     state.device_access = Some(DeviceAccess::new(
@@ -64,7 +64,7 @@ pub fn studio_state_access_canceled() -> StudioState {
         .device_manager
         .providers
         .select_provider(provider_id.clone());
-    state.device_manager.active_flow = DeviceFlowState::AccessFailed {
+    state.device_manager.active_flow = LinkState::AccessFailed {
         provider_id,
         issue: issue.clone(),
     };
@@ -80,7 +80,7 @@ pub fn studio_state_connecting() -> StudioState {
         BROWSER_WORKER_PROVIDER_ID,
         vec![browser_endpoint().with_status(LinkEndpointStatus::Launching)],
     );
-    state.device_manager.active_flow = DeviceFlowState::OpeningLink {
+    state.device_manager.active_flow = LinkState::OpeningLink {
         endpoint_id: LinkEndpointId::new("browser-worker-worker-1"),
     };
     state
@@ -96,7 +96,7 @@ pub fn studio_state_connected() -> StudioState {
     );
     attach_device_session(&mut state);
     if let Some(session) = &state.device_session {
-        state.device_manager.active_flow = DeviceFlowState::ServerReady {
+        state.device_manager.active_flow = LinkState::ServerReady {
             session_id: session.session_id.clone(),
         };
     }
@@ -112,7 +112,7 @@ pub fn studio_state_connected() -> StudioState {
 
 pub fn studio_state_probing_server() -> StudioState {
     let mut state = studio_state_connected();
-    state.device_manager.active_flow = DeviceFlowState::ProbingTarget {
+    state.device_manager.active_flow = LinkState::ProbingTarget {
         endpoint_id: LinkEndpointId::new("browser-worker-worker-1"),
     };
     state
@@ -120,7 +120,7 @@ pub fn studio_state_probing_server() -> StudioState {
 
 pub fn studio_state_blank_device_flash_offer() -> StudioState {
     let mut state = studio_state_hardware_granted();
-    state.device_manager.active_flow = DeviceFlowState::ProvisioningRequired {
+    state.device_manager.active_flow = LinkState::ProvisioningRequired {
         endpoint_id: LinkEndpointId::new("browser-serial-esp32-port-1"),
         reason: ProvisioningReason::DeviceBlank,
     };
@@ -129,7 +129,7 @@ pub fn studio_state_blank_device_flash_offer() -> StudioState {
 
 pub fn studio_state_flash_confirm() -> StudioState {
     let mut state = studio_state_blank_device_flash_offer();
-    state.device_manager.active_flow = DeviceFlowState::FlashConfirm {
+    state.device_manager.active_flow = LinkState::FlashConfirm {
         endpoint_id: LinkEndpointId::new("browser-serial-esp32-port-1"),
         firmware_id: Some("lightplayer-esp32c6-server".to_string()),
     };
@@ -138,7 +138,7 @@ pub fn studio_state_flash_confirm() -> StudioState {
 
 pub fn studio_state_flashing() -> StudioState {
     let mut state = studio_state_blank_device_flash_offer();
-    state.device_manager.active_flow = DeviceFlowState::Flashing {
+    state.device_manager.active_flow = LinkState::Flashing {
         endpoint_id: LinkEndpointId::new("browser-serial-esp32-port-1"),
         progress: Some(
             ProgressState::new("Writing LightPlayer firmware")
@@ -163,7 +163,7 @@ pub fn studio_state_firmware_artifact_missing() -> StudioState {
             topic: "firmware packaging".to_string(),
         },
     ]);
-    state.device_manager.active_flow = DeviceFlowState::Degraded {
+    state.device_manager.active_flow = LinkState::Degraded {
         issue: issue.clone(),
     };
     state.device_manager.push_issue(issue);
@@ -179,7 +179,51 @@ pub fn studio_state_flash_failed() -> StudioState {
     )
     .with_endpoint("browser-serial-esp32-port-1")
     .with_recovery_actions(vec![RecoveryAction::Retry, RecoveryAction::ResetDevice]);
-    state.device_manager.active_flow = DeviceFlowState::Degraded {
+    state.device_manager.active_flow = LinkState::Degraded {
+        issue: issue.clone(),
+    };
+    state.device_manager.push_issue(issue);
+    state
+}
+
+pub fn studio_state_unsupported_target() -> StudioState {
+    let mut state = studio_state_hardware_granted();
+    let issue = DeviceIssue::error(
+        "story-unsupported-target",
+        DeviceIssueKind::UnsupportedTarget,
+        "Detected unsupported ESP32 target: ESP32-S3.",
+    )
+    .with_endpoint("browser-serial-esp32-port-1")
+    .with_recovery_actions(vec![
+        RecoveryAction::Reconnect,
+        RecoveryAction::ChooseSimulator,
+        RecoveryAction::OpenHelp {
+            topic: "supported hardware".to_string(),
+        },
+    ]);
+    state.device_manager.active_flow = LinkState::Degraded {
+        issue: issue.clone(),
+    };
+    state.device_manager.push_issue(issue);
+    state
+}
+
+pub fn studio_state_unresponsive_target() -> StudioState {
+    let mut state = studio_state_hardware_granted();
+    let issue = DeviceIssue::error(
+        "story-unresponsive-target",
+        DeviceIssueKind::ServerTimeout,
+        "No LightPlayer server or ESP32-C6 bootloader responded.",
+    )
+    .with_endpoint("browser-serial-esp32-port-1")
+    .with_recovery_actions(vec![
+        RecoveryAction::Retry,
+        RecoveryAction::Reconnect,
+        RecoveryAction::ResetDevice,
+        RecoveryAction::ChooseSimulator,
+    ]);
+    state.device_manager.active_flow = LinkState::LinkFailed {
+        endpoint_id: LinkEndpointId::new("browser-serial-esp32-port-1"),
         issue: issue.clone(),
     };
     state.device_manager.push_issue(issue);
@@ -188,7 +232,7 @@ pub fn studio_state_flash_failed() -> StudioState {
 
 pub fn studio_state_post_flash_reconnecting() -> StudioState {
     let mut state = studio_state_hardware_granted();
-    state.device_manager.active_flow = DeviceFlowState::OpeningServer {
+    state.device_manager.active_flow = LinkState::OpeningServer {
         endpoint_id: LinkEndpointId::new("browser-serial-esp32-port-1"),
     };
     state.logs.push(StudioLogEntry::new(
@@ -208,7 +252,7 @@ pub fn studio_state_post_flash_reconnect_failed() -> StudioState {
     )
     .with_endpoint("browser-serial-esp32-port-1")
     .with_recovery_actions(vec![RecoveryAction::Reconnect, RecoveryAction::ResetDevice]);
-    state.device_manager.active_flow = DeviceFlowState::Degraded {
+    state.device_manager.active_flow = LinkState::Degraded {
         issue: issue.clone(),
     };
     state.device_manager.push_issue(issue);
@@ -227,7 +271,7 @@ pub fn studio_state_post_flash_ready() -> StudioState {
 
 pub fn studio_state_reading_project_state() -> StudioState {
     let mut state = studio_state_connected();
-    state.device_manager.active_flow = DeviceFlowState::ReadingProjectState {
+    state.device_manager.active_flow = LinkState::ReadingProjectState {
         session_id: LinkSessionId::new("browser-worker-worker-1:1"),
     };
     state
@@ -235,7 +279,7 @@ pub fn studio_state_reading_project_state() -> StudioState {
 
 pub fn studio_state_project_selection_required() -> StudioState {
     let mut state = studio_state_connected();
-    state.device_manager.active_flow = DeviceFlowState::ProjectSelectionRequired {
+    state.device_manager.active_flow = LinkState::ProjectSelectionRequired {
         session_id: LinkSessionId::new("browser-worker-worker-1:1"),
         reason: ProjectSelectionReason::NoLoadedProject,
         projects: Vec::new(),
@@ -245,7 +289,7 @@ pub fn studio_state_project_selection_required() -> StudioState {
 
 pub fn studio_state_multiple_project_selection_required() -> StudioState {
     let mut state = studio_state_connected();
-    state.device_manager.active_flow = DeviceFlowState::ProjectSelectionRequired {
+    state.device_manager.active_flow = LinkState::ProjectSelectionRequired {
         session_id: LinkSessionId::new("browser-worker-worker-1:1"),
         reason: ProjectSelectionReason::MultipleLoadedProjects,
         projects: vec![
@@ -262,7 +306,7 @@ pub fn studio_state_multiple_project_selection_required() -> StudioState {
 
 pub fn studio_state_recovery_required() -> StudioState {
     let mut state = studio_state_connected();
-    state.device_manager.active_flow = DeviceFlowState::RecoveryRequired {
+    state.device_manager.active_flow = LinkState::RecoveryRequired {
         session_id: LinkSessionId::new("browser-worker-worker-1:1"),
         reason: RecoveryReason::ProjectCrash {
             project_id: Some(STUDIO_DEMO_PROJECT_ID.to_string()),
@@ -274,7 +318,7 @@ pub fn studio_state_recovery_required() -> StudioState {
 
 pub fn studio_state_deploying_project() -> StudioState {
     let mut state = studio_state_connected();
-    state.device_manager.active_flow = DeviceFlowState::DeployingProject {
+    state.device_manager.active_flow = LinkState::DeployingProject {
         project_id: STUDIO_DEMO_PROJECT_ID.to_string(),
         progress: Some(
             ProgressState::new("Writing starter project")
@@ -296,7 +340,7 @@ pub fn studio_state_connection_lost() -> StudioState {
         RecoveryAction::Reconnect,
         RecoveryAction::ChooseSimulator,
     ]);
-    state.device_manager.active_flow = DeviceFlowState::Degraded {
+    state.device_manager.active_flow = LinkState::Degraded {
         issue: issue.clone(),
     };
     state.device_manager.push_issue(issue);
@@ -374,7 +418,7 @@ pub fn studio_state_ready() -> StudioState {
         Some(demo_inventory()),
         Some("nodes[shader]"),
     ));
-    state.device_manager.active_flow = DeviceFlowState::Ready {
+    state.device_manager.active_flow = LinkState::Ready {
         project_id: STUDIO_DEMO_PROJECT_ID.to_string(),
     };
     state.logs = vec![

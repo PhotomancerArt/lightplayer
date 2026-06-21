@@ -1,11 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-/// Future undo/history treatment for an action.
+/// Future undo/history treatment for an ux.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum ActionHistoryPolicy {
-    /// The action is operational or read-only and should never enter undo history.
+    /// The ux is operational or read-only and should never enter undo history.
     Never,
-    /// The action is local and temporary, such as selection or panel state.
+    /// The ux is local and temporary, such as selection or panel state.
     Ephemeral,
     /// Future shape for confirmed domain edits that can be inverted.
     UndoableEdit {

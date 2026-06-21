@@ -13,7 +13,7 @@ pub enum TargetKind {
     Unknown,
 }
 
-/// Result of probing an endpoint before deciding whether provisioning is needed.
+/// Result of probing an endpoint before deciding whether link is needed.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct TargetProbeResult {
     pub endpoint_id: LinkEndpointId,

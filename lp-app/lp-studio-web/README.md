@@ -40,6 +40,13 @@ objects for normal server protocol traffic. During firmware flashing, Studio
 releases the normal serial reader/writer and the flashing shim takes exclusive
 ownership of the same browser `SerialPort`.
 
+The web controller auto-advances hardware provisioning in small explicit steps:
+grant endpoint access, open the serial link, probe for a running LightPlayer
+server, offer firmware flashing for provisionable ESP32-C6 bootloader targets,
+reconnect after a successful flash, probe again, and finally read server
+project state. Probe and reconnect failures are surfaced in the device manager
+with recovery actions.
+
 Release builds package firmware assets under:
 
 ```text

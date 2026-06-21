@@ -1,4 +1,4 @@
-//! Deterministic Studio provisioning scenarios for tests and future stories.
+//! Deterministic Studio link scenarios for tests and future stories.
 
 mod access_outcome;
 mod connect_outcome;

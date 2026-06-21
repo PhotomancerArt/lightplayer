@@ -6,15 +6,15 @@ use crate::{
     RecoveryReason,
 };
 
-/// Product-level journey through provider choice, provisioning, and readiness.
+/// Product-level journey through provider choice, link, and readiness.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
-pub enum DeviceFlowState {
+pub enum LinkState {
     Empty,
-    ChoosingProvider,
+    ChooseProvider,
     ProviderSelected {
         provider_id: LinkProviderId,
     },
-    RequestingAccess {
+    GrantPermission {
         provider_id: LinkProviderId,
     },
     AccessFailed {
@@ -80,8 +80,8 @@ pub enum DeviceFlowState {
     },
 }
 
-impl Default for DeviceFlowState {
+impl Default for LinkState {
     fn default() -> Self {
-        Self::ChoosingProvider
+        Self::ChooseProvider
     }
 }

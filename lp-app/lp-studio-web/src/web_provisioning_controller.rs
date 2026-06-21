@@ -1,12 +1,12 @@
 use dioxus::prelude::{ReadableExt, Signal, WritableExt};
 use lp_studio_core::{
-    ActionOrigin, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID, DeviceFlowState,
-    StudioActionKind, StudioApp, StudioEffect, StudioEvent,
+    ActionOrigin, LinkState, StudioActionKind, StudioApp,
+    StudioEffect, StudioEvent, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID,
 };
 use lp_studio_runtime::{
     BrowserSerialStudioRuntime, BrowserWorkerStudioRuntime, EffectExecutor, StudioRuntimeError,
 };
-use lpa_link::{LinkEndpointId, LinkProviderId};
+use lpa_link::{LinkConnectionKind, LinkEndpointId, LinkProviderId};
 
 /// Browser-side controller for dispatching Studio actions into web runtimes.
 pub struct WebProvisioningController {
@@ -63,16 +63,23 @@ pub async fn auto_advance_web_flow(
     controller: Signal<WebProvisioningController>,
 ) {
     for _ in 0..8 {
-        let next_action = match &studio.read().state().device_manager.active_flow {
-            DeviceFlowState::EndpointGranted { endpoint_id, .. } => {
+        let state = studio.read().state().clone();
+        let next_action = match &state.device_manager.active_flow {
+            LinkState::EndpointGranted { endpoint_id, .. } => {
                 Some(StudioActionKind::ConnectDevice {
                     endpoint_id: endpoint_id.clone(),
                 })
             }
-            DeviceFlowState::ServerReady { .. } => Some(StudioActionKind::ReadProjectState),
-            DeviceFlowState::OpeningServer { .. }
-                if studio.read().state().connection_session.is_some() =>
-            {
+            LinkState::ServerReady { .. } if is_browser_serial_connection(&state) => {
+                Some(StudioActionKind::ProbeTarget { endpoint_id: None })
+            }
+            LinkState::ServerReady { .. } => Some(StudioActionKind::ReadProjectState),
+            LinkState::OpeningServer { endpoint_id } if state.connection_session.is_none() => {
+                Some(StudioActionKind::ConnectDevice {
+                    endpoint_id: endpoint_id.clone(),
+                })
+            }
+            LinkState::OpeningServer { .. } if state.connection_session.is_some() => {
                 Some(StudioActionKind::ReadProjectState)
             }
             _ => None,
@@ -86,6 +93,12 @@ pub async fn auto_advance_web_flow(
             break;
         }
     }
+}
+
+fn is_browser_serial_connection(state: &lp_studio_core::StudioState) -> bool {
+    state.connection_session.as_ref().is_some_and(|session| {
+        matches!(session.kind, LinkConnectionKind::BrowserSerialEsp32 { .. })
+    })
 }
 
 async fn drain_effects(

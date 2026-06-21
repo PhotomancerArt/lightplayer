@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-/// User-visible progress for long-running provisioning operations.
+/// User-visible progress for long-running link operations.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct ProgressState {
     pub label: String,

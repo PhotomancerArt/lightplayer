@@ -1,19 +1,12 @@
 //! UI-independent LightPlayer Studio domain model.
 
-pub mod action_descriptor;
-pub mod action_history_policy;
-pub mod action_id;
-pub mod action_meta;
-pub mod action_origin;
 pub mod client_session;
 pub mod connection_session;
-pub mod device_access;
-pub mod device_capability;
-pub mod device_id;
-pub mod device_session;
 pub mod in_flight_action;
+pub mod link;
+pub mod project;
 pub mod project_session;
-pub mod provisioning;
+pub mod server;
 pub mod studio_action;
 pub mod studio_app;
 pub mod studio_diagnostic;
@@ -22,27 +15,23 @@ pub mod studio_event;
 pub mod studio_heartbeat;
 pub mod studio_log_entry;
 pub mod studio_state;
+pub mod ux;
 
-pub use action_descriptor::{ActionCategory, ActionDescriptor};
-pub use action_history_policy::{ActionHistoryPolicy, UndoScope};
-pub use action_id::ActionId;
-pub use action_meta::ActionMeta;
-pub use action_origin::ActionOrigin;
 pub use client_session::ClientSession;
 pub use connection_session::ConnectionSession;
-pub use device_access::{DeviceAccess, DeviceAccessStatus};
-pub use device_capability::DeviceCapability;
-pub use device_id::DeviceId;
-pub use device_session::DeviceSession;
 pub use in_flight_action::InFlightAction;
-pub use project_session::ProjectSession;
-pub use provisioning::{
-    ConnectedDeviceState, DeviceFlowState, DeviceHealthState, DeviceIssue, DeviceIssueKind,
-    DeviceIssueSeverity, DeviceManagerState, ProgressState, ProjectChoice, ProjectSelectionReason,
+pub use link::device_access::{DeviceAccess, DeviceAccessStatus};
+pub use link::device_capability::DeviceCapability;
+pub use link::device_id::DeviceId;
+pub use link::device_session::DeviceSession;
+pub use link::{
+    ConnectedDeviceState, DeviceHealthState, DeviceIssue, DeviceIssueKind, DeviceIssueSeverity,
+    DeviceManagerState, LinkState, ProgressState, ProjectChoice, ProjectSelectionReason,
     ProjectStateResult, ProviderAvailability, ProviderCapability, ProviderCardState,
     ProviderCatalog, ProviderIntent, ProvisioningReason, RecoveryAction, RecoveryReason,
     TargetKind, TargetProbeResult,
 };
+pub use project_session::ProjectSession;
 pub use studio_action::{StudioAction, StudioActionKind, StudioActionType};
 pub use studio_app::StudioApp;
 pub use studio_diagnostic::{StudioDiagnostic, StudioDiagnosticSeverity};
@@ -51,6 +40,11 @@ pub use studio_event::StudioEvent;
 pub use studio_heartbeat::StudioHeartbeat;
 pub use studio_log_entry::{StudioLogEntry, StudioLogLevel};
 pub use studio_state::StudioState;
+pub use ux::action_descriptor::{ActionCategory, ActionDescriptor};
+pub use ux::action_history_policy::{ActionHistoryPolicy, UndoScope};
+pub use ux::action_id::ActionId;
+pub use ux::action_meta::ActionMeta;
+pub use ux::action_origin::ActionOrigin;
 
 pub const BROWSER_WORKER_PROVIDER_ID: &str = "browser-worker";
 pub const BROWSER_SERIAL_ESP32_PROVIDER_ID: &str = "browser-serial-esp32";

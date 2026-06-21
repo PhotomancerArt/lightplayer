@@ -1,12 +1,12 @@
 use lp_studio_core::{
-    ActionOrigin, DeviceFlowState, StudioActionKind, StudioApp, StudioEffect, StudioEvent,
+    ActionOrigin, LinkState, StudioActionKind, StudioApp, StudioEffect, StudioEvent,
 };
 use lpa_link::LinkEndpointId;
 
-use crate::StudioRuntimeError;
 use crate::effect_executor::EffectExecutor;
 use crate::harness::RuntimeHarness;
 use crate::scenario::{ProvisioningScenario, ScenarioRuntime, ScenarioSnapshot};
+use crate::StudioRuntimeError;
 
 /// Convenience harness for executing a `ProvisioningScenario` as a user journey.
 pub struct ScenarioHarness {
@@ -150,13 +150,13 @@ impl ScenarioHarness {
 
     fn active_endpoint_id(&self) -> Result<LinkEndpointId, StudioRuntimeError> {
         match &self.app().state().device_manager.active_flow {
-            DeviceFlowState::ProvisioningRequired { endpoint_id, .. }
-            | DeviceFlowState::FlashConfirm { endpoint_id, .. }
-            | DeviceFlowState::Flashing { endpoint_id, .. }
-            | DeviceFlowState::OpeningServer { endpoint_id }
-            | DeviceFlowState::OpeningLink { endpoint_id }
-            | DeviceFlowState::ProbingTarget { endpoint_id }
-            | DeviceFlowState::EndpointGranted { endpoint_id, .. } => Ok(endpoint_id.clone()),
+            LinkState::ProvisioningRequired { endpoint_id, .. }
+            | LinkState::FlashConfirm { endpoint_id, .. }
+            | LinkState::Flashing { endpoint_id, .. }
+            | LinkState::OpeningServer { endpoint_id }
+            | LinkState::OpeningLink { endpoint_id }
+            | LinkState::ProbingTarget { endpoint_id }
+            | LinkState::EndpointGranted { endpoint_id, .. } => Ok(endpoint_id.clone()),
             _ => self
                 .app()
                 .state()
@@ -196,9 +196,9 @@ fn event_label(event: &StudioEvent) -> String {
         StudioEvent::FirmwareFlashCompleted { .. } => "firmware flash completed",
         StudioEvent::TargetProbeCompleted { .. } => "target probe completed",
         StudioEvent::TargetProbeFailed { .. } => "target probe failed",
-        StudioEvent::ProvisioningIssueRaised { .. } => "provisioning issue raised",
-        StudioEvent::ProvisioningProgressUpdated { .. } => "provisioning progress updated",
-        StudioEvent::ProvisioningFlowCanceled { .. } => "provisioning flow canceled",
+        StudioEvent::ProvisioningIssueRaised { .. } => "link issue raised",
+        StudioEvent::ProvisioningProgressUpdated { .. } => "link progress updated",
+        StudioEvent::ProvisioningFlowCanceled { .. } => "link flow canceled",
         StudioEvent::DemoProjectSeeded { .. } => "demo project seeded",
         StudioEvent::ProjectLoaded { .. } => "project loaded",
         StudioEvent::ProjectInventoryRead { .. } => "project inventory read",
@@ -207,7 +207,7 @@ fn event_label(event: &StudioEvent) -> String {
         StudioEvent::HeartbeatReceived { .. } => "heartbeat received",
         StudioEvent::LogReceived { .. } => "log received",
         StudioEvent::DiagnosticRaised { .. } => "diagnostic raised",
-        StudioEvent::ActionFailed { .. } => "action failed",
+        StudioEvent::ActionFailed { .. } => "ux failed",
     }
     .to_string()
 }
@@ -215,7 +215,7 @@ fn event_label(event: &StudioEvent) -> String {
 #[cfg(test)]
 mod tests {
     use lp_studio_core::{
-        DeviceFlowState, DeviceIssueKind, ProjectSelectionReason, ProvisioningReason,
+        DeviceIssueKind, LinkState, ProjectSelectionReason, ProvisioningReason,
         STUDIO_DEMO_PROJECT_ID,
     };
 
@@ -239,7 +239,7 @@ mod tests {
         );
         assert!(matches!(
             harness.app().state().device_manager.active_flow,
-            DeviceFlowState::ChoosingProvider
+            LinkState::ChooseProvider
         ));
     }
 
@@ -253,7 +253,7 @@ mod tests {
         assert_active_issue_kind(&harness, DeviceIssueKind::RuntimeUnsupported);
         assert!(matches!(
             harness.app().state().device_manager.active_flow,
-            DeviceFlowState::AccessFailed { .. }
+            LinkState::AccessFailed { .. }
         ));
     }
 
@@ -282,23 +282,23 @@ mod tests {
 
         assert!(matches!(
             harness.app().state().device_manager.active_flow,
-            DeviceFlowState::Ready { ref project_id }
+            LinkState::Ready { ref project_id }
                 if project_id == STUDIO_DEMO_PROJECT_ID
         ));
         assert_flow_snapshot(&harness, |flow| {
-            matches!(flow, DeviceFlowState::RequestingAccess { .. })
+            matches!(flow, LinkState::GrantPermission { .. })
         });
         assert_flow_snapshot(&harness, |flow| {
-            matches!(flow, DeviceFlowState::EndpointGranted { .. })
+            matches!(flow, LinkState::EndpointGranted { .. })
         });
         assert_flow_snapshot(&harness, |flow| {
-            matches!(flow, DeviceFlowState::OpeningLink { .. })
+            matches!(flow, LinkState::OpeningLink { .. })
         });
         assert_flow_snapshot(&harness, |flow| {
-            matches!(flow, DeviceFlowState::ServerReady { .. })
+            matches!(flow, LinkState::ServerReady { .. })
         });
         assert_flow_snapshot(&harness, |flow| {
-            matches!(flow, DeviceFlowState::ReadingProjectState { .. })
+            matches!(flow, LinkState::ReadingProjectState { .. })
         });
     }
 
@@ -311,7 +311,7 @@ mod tests {
 
         assert!(matches!(
             harness.app().state().device_manager.active_flow,
-            DeviceFlowState::ProjectSelectionRequired {
+            LinkState::ProjectSelectionRequired {
                 reason: ProjectSelectionReason::NoLoadedProject,
                 ..
             }
@@ -327,7 +327,7 @@ mod tests {
 
         assert!(matches!(
             &harness.app().state().device_manager.active_flow,
-            DeviceFlowState::ProjectSelectionRequired {
+            LinkState::ProjectSelectionRequired {
                 reason: ProjectSelectionReason::MultipleLoadedProjects,
                 projects,
                 ..
@@ -344,7 +344,7 @@ mod tests {
 
         assert!(matches!(
             harness.app().state().device_manager.active_flow,
-            DeviceFlowState::RecoveryRequired { .. }
+            LinkState::RecoveryRequired { .. }
         ));
     }
 
@@ -357,7 +357,7 @@ mod tests {
 
         assert!(matches!(
             harness.app().state().device_manager.active_flow,
-            DeviceFlowState::ProvisioningRequired {
+            LinkState::ProvisioningRequired {
                 reason: ProvisioningReason::DeviceBlank,
                 ..
             }
@@ -371,12 +371,10 @@ mod tests {
         connect_and_probe(&mut harness).await;
         harness.confirm_firmware_flash(None).await.unwrap();
 
-        assert_flow_snapshot(&harness, |flow| {
-            matches!(flow, DeviceFlowState::Flashing { .. })
-        });
+        assert_flow_snapshot(&harness, |flow| matches!(flow, LinkState::Flashing { .. }));
         assert!(matches!(
             harness.app().state().device_manager.active_flow,
-            DeviceFlowState::OpeningServer { .. }
+            LinkState::OpeningServer { .. }
         ));
     }
 
@@ -407,12 +405,12 @@ mod tests {
         harness.confirm_firmware_flash(None).await.unwrap();
 
         assert_flow_snapshot(&harness, |flow| {
-            matches!(flow, DeviceFlowState::OpeningServer { .. })
+            matches!(flow, LinkState::OpeningServer { .. })
         });
         assert_active_issue_kind(&harness, DeviceIssueKind::ConnectionLost);
         assert!(matches!(
             harness.app().state().device_manager.active_flow,
-            DeviceFlowState::Degraded { .. }
+            LinkState::Degraded { .. }
         ));
     }
 
@@ -426,13 +424,13 @@ mod tests {
 
         assert!(matches!(
             harness.app().state().device_manager.active_flow,
-            DeviceFlowState::Ready { .. }
+            LinkState::Ready { .. }
         ));
         assert_flow_snapshot(&harness, |flow| {
-            matches!(flow, DeviceFlowState::OpeningServer { .. })
+            matches!(flow, LinkState::OpeningServer { .. })
         });
         assert_flow_snapshot(&harness, |flow| {
-            matches!(flow, DeviceFlowState::ReadingProjectState { .. })
+            matches!(flow, LinkState::ReadingProjectState { .. })
         });
     }
 
@@ -448,7 +446,7 @@ mod tests {
         assert_active_issue_kind(&harness, DeviceIssueKind::ServerTimeout);
         assert!(matches!(
             harness.app().state().device_manager.active_flow,
-            DeviceFlowState::Degraded { .. }
+            LinkState::Degraded { .. }
         ));
     }
 
@@ -463,7 +461,7 @@ mod tests {
         assert_active_issue_kind(&harness, DeviceIssueKind::EndpointOpenFailed);
         assert!(matches!(
             harness.app().state().device_manager.active_flow,
-            DeviceFlowState::LinkFailed { .. }
+            LinkState::LinkFailed { .. }
         ));
     }
 
@@ -476,7 +474,7 @@ mod tests {
         assert_active_issue_kind(&harness, DeviceIssueKind::ServerTimeout);
         assert!(matches!(
             harness.app().state().device_manager.active_flow,
-            DeviceFlowState::LinkFailed { .. }
+            LinkState::LinkFailed { .. }
         ));
     }
 
@@ -489,7 +487,7 @@ mod tests {
         assert_active_issue_kind(&harness, DeviceIssueKind::IncompatibleFirmware);
         assert!(matches!(
             harness.app().state().device_manager.active_flow,
-            DeviceFlowState::ProvisioningRequired {
+            LinkState::ProvisioningRequired {
                 reason: ProvisioningReason::FirmwareIncompatible { .. },
                 ..
             }
@@ -520,7 +518,7 @@ mod tests {
         assert_active_issue_kind(&harness, DeviceIssueKind::ConnectionLost);
         assert!(matches!(
             harness.app().state().device_manager.active_flow,
-            DeviceFlowState::Degraded { .. }
+            LinkState::Degraded { .. }
         ));
     }
 
@@ -546,10 +544,7 @@ mod tests {
         assert_eq!(issue.kind, kind);
     }
 
-    fn assert_flow_snapshot(
-        harness: &ScenarioHarness,
-        predicate: impl Fn(&DeviceFlowState) -> bool,
-    ) {
+    fn assert_flow_snapshot(harness: &ScenarioHarness, predicate: impl Fn(&LinkState) -> bool) {
         assert!(
             harness
                 .snapshots()

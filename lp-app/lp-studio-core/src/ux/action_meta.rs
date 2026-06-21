@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{ActionHistoryPolicy, ActionId, ActionOrigin};
 
-/// Per-dispatch metadata attached to a Studio action.
+/// Per-dispatch metadata attached to a Studio ux.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct ActionMeta {
     pub action_id: ActionId,

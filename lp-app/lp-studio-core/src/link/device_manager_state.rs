@@ -1,12 +1,12 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{ConnectedDeviceState, DeviceFlowState, DeviceIssue, ProviderCatalog};
+use crate::{ConnectedDeviceState, DeviceIssue, LinkState, ProviderCatalog};
 
-/// UI-independent read model for the Studio device/provisioning surface.
+/// UI-independent read model for the Studio device/link surface.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct DeviceManagerState {
     pub providers: ProviderCatalog,
-    pub active_flow: DeviceFlowState,
+    pub active_flow: LinkState,
     pub current_device: Option<ConnectedDeviceState>,
     pub issues: Vec<DeviceIssue>,
 }
@@ -15,7 +15,7 @@ impl DeviceManagerState {
     pub fn new() -> Self {
         Self {
             providers: ProviderCatalog::new(),
-            active_flow: DeviceFlowState::default(),
+            active_flow: LinkState::default(),
             current_device: None,
             issues: Vec::new(),
         }
