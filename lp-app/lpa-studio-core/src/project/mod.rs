@@ -5,7 +5,10 @@
 //! operations or raw server transport.
 
 pub mod project_action;
+pub mod project_choice;
+pub mod project_selection_reason;
 pub mod project_state;
+pub mod project_state_result;
 
 pub use project_action::ProjectActionRequest;
 pub use project_state::{ProjectState, ProjectSyncState};

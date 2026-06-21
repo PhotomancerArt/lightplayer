@@ -26,7 +26,7 @@ pub use link::device_id::DeviceId;
 pub use link::device_session::DeviceSession;
 pub use link::{
     ConnectedDeviceState, DeviceHealthState, DeviceIssue, DeviceIssueKind, DeviceIssueSeverity,
-    DeviceManagerState, LinkActionRequest, LinkState, ProgressState, ProjectChoice,
+    LinkActionRequest, LinkManagerState, LinkState, ProgressState, ProjectChoice,
     ProjectSelectionReason, ProjectStateResult, ProviderAvailability, ProviderCapability,
     ProviderCardState, ProviderCatalog, ProviderIntent, ProvisioningReason, RecoveryAction,
     RecoveryReason, TargetKind, TargetProbeResult,

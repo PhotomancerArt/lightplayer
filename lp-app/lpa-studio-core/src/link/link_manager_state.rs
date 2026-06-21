@@ -7,14 +7,14 @@ use crate::{
 
 /// UI-independent read model for the Studio device/link surface.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
-pub struct DeviceManagerState {
+pub struct LinkManagerState {
     pub providers: ProviderCatalog,
     pub active_flow: LinkState,
     pub current_device: Option<ConnectedDeviceState>,
     pub issues: Vec<DeviceIssue>,
 }
 
-impl DeviceManagerState {
+impl LinkManagerState {
     pub fn new() -> Self {
         Self {
             providers: ProviderCatalog::new(),
@@ -120,7 +120,7 @@ impl DeviceManagerState {
     }
 }
 
-impl Default for DeviceManagerState {
+impl Default for LinkManagerState {
     fn default() -> Self {
         Self::new()
     }

@@ -2,6 +2,28 @@ use serde::{Deserialize, Serialize};
 
 use crate::{LinkEndpointId, LinkSessionId};
 
+/// Handoff from a live link session to the `lp-server` protocol layer.
+///
+/// `LinkConnection` is created by `LinkSession::connection()`. It identifies
+/// which endpoint/session produced the server protocol connection and describes
+/// the provider/runtime flavor used to reach that server.
+///
+/// It is not an endpoint and it does not own the whole session lifecycle. Keep
+/// the `LinkSession` alive while using the connection.
+#[derive(Clone, Deserialize, Serialize)]
+pub struct LinkConnection {
+    /// Endpoint that the owning session was opened from.
+    pub endpoint_id: LinkEndpointId,
+    /// Live session that produced this connection.
+    pub session_id: LinkSessionId,
+    /// Provider/runtime flavor for this protocol connection.
+    pub kind: LinkConnectionKind,
+    #[cfg(any(feature = "host-process", feature = "host-serial-esp32"))]
+    /// Host-side protocol channel for links that can expose one directly.
+    #[serde(skip)]
+    pub server_connection: Option<LinkServerConnection>,
+}
+
 /// Host-side server protocol connection opened by a link session.
 ///
 /// Browser links currently expose protocol identity in `LinkConnectionKind`;
@@ -13,7 +35,10 @@ pub type LinkServerConnection = lpa_client::SharedClientTransport;
 #[cfg(any(feature = "host-process", feature = "host-serial-esp32"))]
 pub type LinkClientTransport = LinkServerConnection;
 
-/// Transport/runtime flavor for a connected link session.
+/// Transport/runtime flavor for a server protocol connection.
+///
+/// Browser variants include protocol identity, but browser-owned streams still
+/// live in the web runtime. Host variants may carry a `LinkServerConnection`.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum LinkConnectionKind {
     Fake,
@@ -22,18 +47,6 @@ pub enum LinkConnectionKind {
     HostSerialEsp32,
     BrowserSerialEsp32 { protocol: String },
     PendingImplementation { kind: String },
-}
-
-/// Connected link metadata plus an optional server protocol connection.
-#[derive(Clone, Deserialize, Serialize)]
-pub struct LinkConnection {
-    pub endpoint_id: LinkEndpointId,
-    pub session_id: LinkSessionId,
-    pub kind: LinkConnectionKind,
-    #[cfg(any(feature = "host-process", feature = "host-serial-esp32"))]
-    /// Host-side protocol channel for links that can expose one directly.
-    #[serde(skip)]
-    pub server_connection: Option<LinkServerConnection>,
 }
 
 impl LinkConnection {

@@ -3,18 +3,18 @@ use serde::{Deserialize, Serialize};
 use crate::{LinkEndpointId, LinkSessionId};
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
-pub enum LinkDiagnosticSeverity {
-    Info,
-    Warning,
-    Error,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct LinkDiagnostic {
     pub endpoint_id: LinkEndpointId,
     pub session_id: Option<LinkSessionId>,
     pub severity: LinkDiagnosticSeverity,
     pub message: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub enum LinkDiagnosticSeverity {
+    Info,
+    Warning,
+    Error,
 }
 
 impl LinkDiagnostic {

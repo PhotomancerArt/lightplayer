@@ -1,8 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{LinkEndpointId, LinkEndpointStatus, LinkManagement, LinkProviderId};
+use crate::{LinkCapabilities, LinkEndpointId, LinkEndpointStatus, LinkProviderId};
 
 /// A provider-visible target that can be connected to.
+///
+/// An endpoint is a candidate target, not a live connection. It is returned by
+/// `LinkProvider::discover()` and describes what can be opened: a serial port,
+/// a browser worker runtime, a host process runtime template, or a future
+/// websocket target.
 ///
 /// Endpoints are not always physical devices. `host-process`, for example,
 /// exposes spawnable host runtime endpoints: connecting to one creates a new
@@ -13,7 +18,7 @@ pub struct LinkEndpoint {
     pub provider_id: LinkProviderId,
     pub label: String,
     pub status: LinkEndpointStatus,
-    pub management: LinkManagement,
+    pub capabilities: LinkCapabilities,
 }
 
 impl LinkEndpoint {
@@ -27,7 +32,7 @@ impl LinkEndpoint {
             provider_id: provider_id.into(),
             label: label.into(),
             status: LinkEndpointStatus::Available,
-            management: LinkManagement::default(),
+            capabilities: LinkCapabilities::default(),
         }
     }
 
@@ -36,8 +41,8 @@ impl LinkEndpoint {
         self
     }
 
-    pub fn with_management(mut self, management: LinkManagement) -> Self {
-        self.management = management;
+    pub fn with_capabilities(mut self, capabilities: LinkCapabilities) -> Self {
+        self.capabilities = capabilities;
         self
     }
 }

@@ -25,9 +25,31 @@ Studio should build product capabilities above this crate. It should not embed
 Web Serial, browser-worker, host-process, flashing, or endpoint-management
 details directly in UI code.
 
+## Endpoint, Session, Connection
+
+The central lifecycle is:
+
+```text
+LinkProvider::discover() -> LinkEndpoint
+LinkProvider::connect(endpoint_id) -> LinkSession
+LinkSession::connection() -> LinkConnection
+LinkConnection::server_client() -> lpa-client
+```
+
+- **Endpoint:** a provider-visible target that can be opened. It is a
+  discoverable candidate, not a live resource. Examples include an ESP32 serial
+  port, a browser worker runtime target, a spawnable `fw-host` runtime, or a
+  future websocket target.
+- **Session:** live ownership of an opened endpoint. It owns provider-specific
+  lifecycle, such as an open serial port, a spawned `fw-host` runtime, or a
+  browser worker identity.
+- **Connection:** the handoff from a live session to the `lp-server` protocol
+  layer. A connection is not a project session and does not replace the owning
+  link session.
+
 ## Server Connections
 
-`LinkConnection` is the handoff point from link management to the server
+`LinkConnection` is the handoff point from an open link session to the server
 protocol. Host providers currently expose a `LinkServerConnection`, which is a
 shared host `lpa-client` transport and can be wrapped as a `TokioLpClient` with
 `server_client()`.
@@ -80,15 +102,15 @@ cargo test -p lpa-link --features browser-worker
 
 - **Provider:** source of endpoints and management behavior, such as
   `host-process`, `browser-worker`, or ESP32 serial providers.
-- **Endpoint:** something a provider can connect to. An endpoint can be physical
-  hardware or a spawnable runtime target.
+- **Endpoint:** discoverable candidate target. It has identity, status, and
+  `LinkCapabilities`, but no live resource ownership.
 - **Session:** live ownership/lifecycle of a connected endpoint or launched
   runtime.
-- **Connection:** client protocol channel to `lp-server`, consumed by
+- **Connection:** server protocol handoff to `lp-server`, consumed by
   `lpa-client`.
-- **Management:** low-level operations below Studio capabilities: reset, flash,
-  raw filesystem image access, logs, diagnostics, and similar device/runtime
-  controls.
+- **Capabilities:** low-level operations below Studio product actions: reset,
+  flash, raw filesystem image access, logs, diagnostics, and similar
+  device/runtime controls.
 - Public domain types use `Link*` names where they cross crate boundaries:
   `LinkProvider`, `LinkEndpoint`, `LinkSession`, `LinkConnection`, and related
   IDs/status types.

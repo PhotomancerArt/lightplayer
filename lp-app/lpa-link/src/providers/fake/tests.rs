@@ -1,0 +1,63 @@
+use crate::providers::fake::FakeProvider;
+use crate::{
+    LinkCapabilities, LinkEndpoint, LinkEndpointId, LinkProvider, LinkProviderId, LinkSession,
+};
+
+#[tokio::test]
+async fn discover_returns_all_fake_endpoints() {
+    let mut provider = fake_provider();
+
+    let endpoints = provider.discover().await.unwrap();
+
+    assert_eq!(endpoints.len(), 2);
+    assert_eq!(endpoints[0].id.as_str(), "fake-a");
+    assert_eq!(endpoints[1].id.as_str(), "fake-b");
+}
+
+#[tokio::test]
+async fn sessions_are_scoped_to_endpoint_and_have_stable_ids() {
+    let mut provider = fake_provider();
+    let endpoint_a = LinkEndpointId::new("fake-a");
+    let endpoint_b = LinkEndpointId::new("fake-b");
+
+    let mut session_a = provider.connect(&endpoint_a).await.unwrap();
+    let session_b = provider.connect(&endpoint_b).await.unwrap();
+
+    assert_eq!(session_a.endpoint_id().as_str(), "fake-a");
+    assert_eq!(session_b.endpoint_id().as_str(), "fake-b");
+    assert_ne!(session_a.id(), session_b.id());
+
+    let connection = session_a.connection().await.unwrap();
+    assert_eq!(connection.endpoint_id.as_str(), "fake-a");
+    assert_eq!(connection.session_id, session_a.id().clone());
+}
+
+#[tokio::test]
+async fn logs_and_diagnostics_are_scoped_to_session() {
+    let mut provider = fake_provider();
+    let mut session = provider
+        .connect(&LinkEndpointId::new("fake-a"))
+        .await
+        .unwrap();
+
+    let logs = session.logs();
+    let diagnostics = session.diagnostics();
+
+    assert_eq!(logs[0].endpoint_id.as_str(), "fake-a");
+    assert_eq!(logs[0].session_id, Some(session.id().clone()));
+    assert_eq!(diagnostics[0].endpoint_id.as_str(), "fake-a");
+    assert_eq!(diagnostics[0].session_id, Some(session.id().clone()));
+
+    session.close().await.unwrap();
+    assert!(session.connection().await.is_err());
+}
+
+fn fake_provider() -> FakeProvider {
+    let provider_id = LinkProviderId::new("fake");
+    FakeProvider::new(provider_id.clone())
+        .with_endpoint(
+            LinkEndpoint::new("fake-a", provider_id.clone(), "Fake A")
+                .with_capabilities(LinkCapabilities::diagnostics_only()),
+        )
+        .with_endpoint(LinkEndpoint::new("fake-b", provider_id, "Fake B"))
+}
