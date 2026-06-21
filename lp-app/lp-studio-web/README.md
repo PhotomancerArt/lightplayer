@@ -24,18 +24,37 @@ packages them with wasm-bindgen, prepares the worker assets, and serves
 `http://127.0.0.1:2820/`.
 
 Use `just studio-web-build` or `just studio-web` when you want the release/static
-build path.
+build path. The release build packages ESP32-C6 firmware assets for the future
+browser flashing path.
 
 ## Hardware
 
 The USB ESP32 provider uses Web Serial, so it requires a supported
-Chromium-class browser and a secure/local context. The current hardware path
-assumes the ESP32 already has LightPlayer firmware running; browser-side
-flashing is planned as the next hardware phase.
+Chromium-class browser and a secure/local context. The current hardware path can
+connect to an ESP32 that already has LightPlayer firmware running. Browser-side
+flashing is being added in the hardware provisioning milestone.
 
 The app loads `public/browser-serial.js` before the Rust wasm module. That shim
 owns the direct Web Serial stream objects, while Rust owns Studio actions,
 status, protocol parsing, and demo project upload.
+
+Release builds package firmware assets under:
+
+```text
+lp-app/lp-studio-web/public/firmware/esp32c6/
+```
+
+The generated directory is gitignored. Regenerate it explicitly with:
+
+```bash
+just studio-firmware-package-esp32c6
+```
+
+The package contains `manifest.json` and a merged ESP32-C6 binary image produced
+by `espflash save-image --merge --skip-padding`. The manifest records firmware
+identity, build profile/features, source commit, flash address, size, checksum,
+and reset/destructive-behavior notes. P3 wires the browser flashing adapter to
+this manifest.
 
 ## Stories
 

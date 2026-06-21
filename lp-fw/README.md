@@ -114,6 +114,28 @@ For linked ESP32 builds, size measurements, and bloat analysis, run from
 `lp-fw/fw-esp32/` or through a just recipe that changes into that directory so
 the crate-local linker configuration is active.
 
+### Studio Firmware Package
+
+Studio browser flashing consumes prebuilt ESP32-C6 firmware assets rather than
+building from an ELF in the browser. Generate the current browser-flashable
+package with:
+
+```bash
+just studio-firmware-package-esp32c6
+```
+
+The recipe builds `fw-esp32` with `esp32c6,server` under the `release-esp32`
+profile, then runs `espflash save-image --merge --skip-padding` to emit a merged
+binary image and manifest under:
+
+```text
+lp-app/lp-studio-web/public/firmware/esp32c6/
+```
+
+The package is generated output and is gitignored. `just studio-web-build`
+depends on this package so release/static Studio builds have the firmware assets
+available for the browser provisioning flow.
+
 ## Workspace Notes
 
 This workspace mixes host crates, browser wasm crates, and RV32 bare-metal

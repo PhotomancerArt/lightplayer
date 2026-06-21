@@ -9,6 +9,7 @@ rv32_firmware_packages := "fw-esp32"
 # fw-esp32 uses release-esp32 (panic=unwind, nightly) for panic recovery
 
 fw_esp32_profile := "release-esp32"
+fw_esp32_elf := "target/" + rv32_target + "/" + fw_esp32_profile + "/fw-esp32"
 lps_dir := "lp-shader"
 
 # Default recipe - show available commands
@@ -231,7 +232,61 @@ studio-dev: studio-web-dev-build
     cd lp-app/lp-studio-web/public
     python3 -m http.server "${port}" --bind 127.0.0.1
 
-studio-web-build: install-wasm32-target fw-browser-build
+studio-firmware-package-esp32c6: install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v espflash >/dev/null 2>&1; then
+        echo "espflash not found. Install it before packaging Studio firmware assets."
+        exit 1
+    fi
+
+    firmware_id="lightplayer-esp32c6-server"
+    display_name="LightPlayer ESP32-C6 server firmware"
+    features="esp32c6,server"
+    out_dir="lp-app/lp-studio-web/public/firmware/esp32c6"
+    image_name="fw-esp32c6-server-merged.bin"
+    image_file="${out_dir}/${image_name}"
+    manifest_file="${out_dir}/manifest.json"
+
+    echo "Building ${display_name}..."
+    (cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32_profile }} --features "${features}")
+
+    mkdir -p "${out_dir}"
+    rm -f "${out_dir}"/*.bin "${manifest_file}"
+
+    echo "Generating browser-flashable merged ESP32-C6 image..."
+    espflash save-image \
+        --chip esp32c6 \
+        --partition-table lp-fw/fw-esp32/partitions.csv \
+        --merge \
+        --skip-padding \
+        {{ fw_esp32_elf }} \
+        "${image_file}"
+
+    size_bytes="$(wc -c < "${image_file}" | tr -d ' ')"
+    sha256="$(shasum -a 256 "${image_file}" | awk '{print $1}')"
+    generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    source_commit="$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+    source_dirty=false
+    if ! git diff --quiet --ignore-submodules -- || ! git diff --cached --quiet --ignore-submodules --; then
+        source_dirty=true
+    fi
+
+    MANIFEST_FIRMWARE_ID="${firmware_id}" \
+    MANIFEST_DISPLAY_NAME="${display_name}" \
+    MANIFEST_TARGET="{{ rv32_target }}" \
+    MANIFEST_PROFILE="{{ fw_esp32_profile }}" \
+    MANIFEST_SOURCE_COMMIT="${source_commit}" \
+    MANIFEST_SOURCE_DIRTY="${source_dirty}" \
+    MANIFEST_GENERATED_AT="${generated_at}" \
+    MANIFEST_IMAGE_PATH="${image_name}" \
+    MANIFEST_IMAGE_SIZE="${size_bytes}" \
+    MANIFEST_IMAGE_SHA256="${sha256}" \
+    node lp-app/lp-studio-web/scripts/studio-firmware-manifest.mjs "${manifest_file}"
+    echo "Firmware manifest: ${manifest_file}"
+    echo "Firmware image: ${image_file} (${size_bytes} bytes, sha256=${sha256})"
+
+studio-web-build: install-wasm32-target fw-browser-build studio-firmware-package-esp32c6
     #!/usr/bin/env bash
     set -euo pipefail
     echo "Building lp-studio-web for wasm32..."
@@ -541,11 +596,6 @@ merge: check
 # Example: just demo basic
 demo example="basic":
     cd lp-cli && cargo run -- dev ../examples/{{ example }}
-
-# Run firmware on ESP32-C6 device
-# Path to fw-esp32 ELF (release-esp32 profile)
-
-fw_esp32_elf := "target/" + rv32_target + "/" + fw_esp32_profile + "/fw-esp32"
 
 # Requires: ESP32-C6 device connected via USB. Builds the default lps-glsl frontend path.
 # Usage: just demo-esp32c6-host [example-name]
