@@ -1,13 +1,13 @@
-use lpa_link::LinkEndpointId;
+use lpa_link::link_endpoint::LinkEndpointId;
 use lpa_studio_core::{
     ActionOrigin, LinkActionRequest, LinkState, ProjectActionRequest, ServerActionRequest,
     StudioActionKind, StudioApp, StudioEffect, StudioEvent,
 };
 
-use crate::StudioRuntimeError;
 use crate::effect_executor::EffectExecutor;
 use crate::harness::RuntimeHarness;
 use crate::scenario::{ProvisioningScenario, ScenarioRuntime, ScenarioSnapshot};
+use crate::StudioRuntimeError;
 
 /// Convenience harness for executing a `ProvisioningScenario` as a user journey.
 pub struct ScenarioHarness {

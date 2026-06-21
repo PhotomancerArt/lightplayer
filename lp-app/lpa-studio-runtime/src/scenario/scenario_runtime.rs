@@ -1,18 +1,19 @@
-use lpa_link::{LinkEndpointId, LinkProviderId};
+use lpa_link::link_endpoint::LinkEndpointId;
+use lpa_link::link_provider::LinkProviderId;
 use lpa_studio_core::{
     ActionId, DeviceAccessStatus, DeviceIssue, ProgressState, ProvisioningReason,
-    STUDIO_DEMO_PROJECT_ID, StudioDiagnostic, StudioEffect, StudioEvent, StudioHeartbeat,
-    StudioLogEntry, StudioLogLevel, TargetKind, TargetProbeResult,
+    StudioDiagnostic, StudioEffect, StudioEvent, StudioHeartbeat, StudioLogEntry,
+    StudioLogLevel, TargetKind, TargetProbeResult, STUDIO_DEMO_PROJECT_ID,
 };
 use lpc_model::AsLpPathBuf;
 use lpc_wire::LoadedProject;
 
-use crate::StudioRuntimeError;
 use crate::effect_executor::EffectExecutor;
 use crate::scenario::{
     AccessOutcome, ConnectOutcome, ConnectionOutcome, FlashOutcome, ProbeOutcome, ProjectOutcome,
     ProjectStateOutcome, ProvisioningScenario,
 };
+use crate::StudioRuntimeError;
 
 /// Effect executor that maps a `ProvisioningScenario` into real Studio events.
 #[derive(Clone, Debug)]
@@ -429,10 +430,10 @@ fn issue_for_endpoint(issue: &DeviceIssue, endpoint_id: LinkEndpointId) -> Devic
 
 #[cfg(test)]
 mod tests {
-    use lpa_link::LinkProviderId;
+    use lpa_link::link_provider::LinkProviderId;
     use lpa_studio_core::{
-        ActionId, BROWSER_SERIAL_ESP32_PROVIDER_ID, DeviceAccessStatus, DeviceIssueKind,
-        StudioEffect, StudioEvent,
+        ActionId, DeviceAccessStatus, DeviceIssueKind, StudioEffect,
+        StudioEvent, BROWSER_SERIAL_ESP32_PROVIDER_ID,
     };
 
     use super::*;

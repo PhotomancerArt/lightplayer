@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
-use lpa_link::{LinkEndpointId, LinkProviderId};
+use lpa_link::link_endpoint::LinkEndpointId;
+use lpa_link::link_provider::LinkProviderId;
 use lpa_studio_core::{
     ActionOrigin, LinkActionRequest, ProjectActionRequest, StudioActionKind, StudioApp,
 };
@@ -10,7 +11,7 @@ use crate::components::log_panel::LogPanel;
 use crate::components::project_panel::ProjectPanel;
 use crate::components::status_bar::StatusBar;
 use crate::web_provisioning_controller::{
-    WebProvisioningController, auto_advance_web_flow, dispatch_web_action,
+    auto_advance_web_flow, dispatch_web_action, WebProvisioningController,
 };
 
 const STYLE: &str = include_str!("style.css");

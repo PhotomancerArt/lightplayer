@@ -1,16 +1,17 @@
-use lpa_link::{LinkConnectionKind, LinkEndpoint, LinkEndpointId, LinkProviderId};
-use lpa_studio_core::{
-    BROWSER_SERIAL_ESP32_PROVIDER_ID, DeviceCapability, DeviceIssue, DeviceIssueKind,
-    HOST_PROCESS_PROVIDER_ID, ProjectChoice, ProjectStateResult, ProviderAvailability,
-    ProviderCapability, ProviderCardState, ProviderIntent, RecoveryAction, RecoveryReason,
-    STUDIO_DEMO_PROJECT_ID,
-};
-use serde::{Deserialize, Serialize};
-
 use crate::scenario::{
     AccessOutcome, ConnectOutcome, ConnectionOutcome, FlashOutcome, ProbeOutcome, ProjectOutcome,
     ProjectStateOutcome,
 };
+use lpa_link::link_endpoint::LinkEndpointId;
+use lpa_link::link_provider::LinkProviderId;
+use lpa_link::{LinkConnectionKind, LinkEndpoint};
+use lpa_studio_core::{
+    DeviceCapability, DeviceIssue, DeviceIssueKind, ProjectChoice,
+    ProjectStateResult, ProviderAvailability, ProviderCapability, ProviderCardState,
+    ProviderIntent, RecoveryAction, RecoveryReason, BROWSER_SERIAL_ESP32_PROVIDER_ID, HOST_PROCESS_PROVIDER_ID,
+    STUDIO_DEMO_PROJECT_ID,
+};
+use serde::{Deserialize, Serialize};
 
 const HOST_ENDPOINT_ID: &str = "scenario-host-runtime";
 const BROWSER_SERIAL_ENDPOINT_ID: &str = "scenario-browser-serial-esp32";

@@ -1,14 +1,15 @@
-use lpa_link::{LinkEndpointId, LinkProviderId, LinkSessionId};
-
 use crate::{
     ActionDescriptor, ActionId, ActionMeta, ActionOrigin, ClientSession, ConnectedDeviceState,
     ConnectionSession, DeviceAccess, DeviceAccessStatus, DeviceId, DeviceIssue, DeviceIssueKind,
     DeviceSession, InFlightAction, LinkActionRequest, LinkState, ProgressState,
     ProjectActionRequest, ProjectSelectionReason, ProjectSession, ProjectState, ProjectStateResult,
-    ProjectSyncState, ProviderAvailability, RecoveryAction, STUDIO_DEMO_PROJECT_ID,
-    ServerActionRequest, ServerState, StudioAction, StudioActionKind, StudioDiagnostic,
-    StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel, StudioState, TargetKind,
+    ProjectSyncState, ProviderAvailability, RecoveryAction, ServerActionRequest,
+    ServerState, StudioAction, StudioActionKind, StudioDiagnostic, StudioEffect,
+    StudioEvent, StudioLogEntry, StudioLogLevel, StudioState, TargetKind, STUDIO_DEMO_PROJECT_ID,
 };
+use lpa_link::link_endpoint::LinkEndpointId;
+use lpa_link::link_provider::LinkProviderId;
+use lpa_link::link_session::LinkSessionId;
 
 pub struct StudioApp {
     state: StudioState,
@@ -933,15 +934,16 @@ fn issue_id_for_provider(prefix: &str, provider_id: &LinkProviderId) -> String {
 
 #[cfg(test)]
 mod tests {
-    use lpa_link::{
-        LinkConnectionKind, LinkEndpoint, LinkEndpointId, LinkProviderId, LinkSessionId,
-    };
+    use lpa_link::link_endpoint::LinkEndpointId;
+    use lpa_link::link_provider::LinkProviderId;
+    use lpa_link::link_session::LinkSessionId;
+    use lpa_link::{LinkConnectionKind, LinkEndpoint};
     use lpc_wire::{WireProjectHandle, WireProjectInventoryReadResponse};
 
     use crate::{
-        ActionOrigin, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID,
-        DeviceCapability, DeviceIssueKind, LinkState, ProjectSelectionReason, ProjectStateResult,
-        ProviderAvailability, ProviderCardState, ProviderIntent, RecoveryAction, RecoveryReason,
+        ActionOrigin, DeviceCapability, DeviceIssueKind,
+        LinkState, ProjectSelectionReason, ProjectStateResult, ProviderAvailability, ProviderCardState,
+        ProviderIntent, RecoveryAction, RecoveryReason, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID,
     };
 
     use super::*;

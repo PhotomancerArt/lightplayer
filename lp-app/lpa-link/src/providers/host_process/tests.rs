@@ -1,5 +1,6 @@
+use crate::link_endpoint::LinkEndpointId;
 use crate::providers::host_process::HostProcessProvider;
-use crate::{LinkEndpointId, LinkProvider, LinkSession};
+use crate::{LinkProvider, LinkSession};
 
 #[tokio::test]
 async fn host_process_connection_serves_client_requests() {

@@ -1,8 +1,8 @@
+use crate::link_endpoint::{LinkEndpointId, LinkEndpointStatus};
+use crate::link_provider::LinkProviderId;
+use crate::link_session::LinkSessionId;
 use crate::providers::fake::session::FakeSession;
-use crate::{
-    LinkEndpoint, LinkEndpointId, LinkEndpointStatus, LinkError, LinkProvider, LinkProviderId,
-    LinkSessionId,
-};
+use crate::{LinkEndpoint, LinkError, LinkProvider};
 
 #[derive(Clone, Debug)]
 pub struct FakeProvider {

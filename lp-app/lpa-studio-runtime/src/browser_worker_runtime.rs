@@ -1,21 +1,23 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::StudioRuntimeError;
 use crate::browser_protocol_client::BrowserProtocolClient;
 use crate::effect_executor::EffectExecutor;
 use crate::harness::RuntimeHarness;
 use crate::worker_envelope::{BrowserInputEnvelope, BrowserOutputEnvelope};
+use crate::StudioRuntimeError;
+use lpa_link::link_endpoint::LinkEndpointId;
+use lpa_link::link_provider::LinkProviderId;
 use lpa_link::providers::browser_worker::{BrowserWorkerProvider, BrowserWorkerSession};
-use lpa_link::{LinkConnectionKind, LinkEndpointId, LinkProvider, LinkProviderId, LinkSession};
+use lpa_link::{LinkConnectionKind, LinkProvider, LinkSession};
 use lpa_studio_core::{
-    ActionOrigin, BROWSER_WORKER_PROVIDER_ID, DeviceAccessStatus, DeviceCapability,
-    LinkActionRequest, ProjectActionRequest, ProviderAvailability, ProviderCapability,
-    ProviderCardState, ProviderIntent, StudioActionKind, StudioApp, StudioEffect, StudioEvent,
-    StudioLogEntry, StudioLogLevel, TargetProbeResult,
+    ActionOrigin, DeviceAccessStatus, DeviceCapability, LinkActionRequest,
+    ProjectActionRequest, ProviderAvailability, ProviderCapability, ProviderCardState,
+    ProviderIntent, StudioActionKind, StudioApp, StudioEffect, StudioEvent, StudioLogEntry,
+    StudioLogLevel, TargetProbeResult, BROWSER_WORKER_PROVIDER_ID,
 };
-use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen::JsCast;
 use web_sys::{MessageEvent, Worker, WorkerOptions, WorkerType};
 
 /// Browser Worker-backed Studio runtime used by the simulator provider.

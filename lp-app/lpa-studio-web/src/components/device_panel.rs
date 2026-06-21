@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
-use lpa_link::{LinkEndpointId, LinkProviderId};
+use lpa_link::link_endpoint::LinkEndpointId;
+use lpa_link::link_provider::LinkProviderId;
 use lpa_studio_core::{
     DeviceAccessStatus, DeviceIssue, LinkState, ProgressState, ProjectSelectionReason,
     ProviderAvailability, ProviderCardState, ProviderIntent, ProvisioningReason, RecoveryAction,

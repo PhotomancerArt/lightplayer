@@ -1,7 +1,7 @@
-use lpa_link::{LinkEndpointId, LinkProviderId};
-use serde::{Deserialize, Serialize};
-
 use crate::StudioActionType;
+use lpa_link::link_endpoint::LinkEndpointId;
+use lpa_link::link_provider::LinkProviderId;
+use serde::{Deserialize, Serialize};
 
 /// User or agent intent owned by the Studio link manager.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]

@@ -1,7 +1,9 @@
-use lpa_link::{LinkConnectionKind, LinkEndpointId, LinkProviderId, LinkSessionId};
-use serde::{Deserialize, Serialize};
-
 use crate::{DeviceCapability, DeviceId};
+use lpa_link::link_endpoint::LinkEndpointId;
+use lpa_link::link_provider::LinkProviderId;
+use lpa_link::link_session::LinkSessionId;
+use lpa_link::LinkConnectionKind;
+use serde::{Deserialize, Serialize};
 
 /// Coarse health for a connected device/server session.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]

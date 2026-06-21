@@ -1,4 +1,4 @@
-use lpa_link::LinkProviderId;
+use lpa_link::link_provider::LinkProviderId;
 use serde::{Deserialize, Serialize};
 
 /// A structured next step the UI or a future agent can offer after an issue.

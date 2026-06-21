@@ -1,6 +1,6 @@
-use crate::{
-    LinkConnection, LinkDiagnostic, LinkEndpointId, LinkError, LinkLogEntry, LinkSessionId,
-};
+use crate::link_endpoint::LinkEndpointId;
+use crate::{LinkConnection, LinkDiagnostic, LinkError, LinkLogEntry};
+use serde::{Deserialize, Serialize};
 
 /// Live ownership of a connected endpoint.
 ///
@@ -34,4 +34,29 @@ pub trait LinkSession {
 
     /// Close provider-owned live resources for this session.
     async fn close(&mut self) -> Result<(), LinkError>;
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
+pub struct LinkSessionId(String);
+
+impl LinkSessionId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for LinkSessionId {
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<String> for LinkSessionId {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
 }

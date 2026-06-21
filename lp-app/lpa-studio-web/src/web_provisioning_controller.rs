@@ -1,8 +1,10 @@
 use dioxus::prelude::{ReadableExt, Signal, WritableExt};
-use lpa_link::{LinkConnectionKind, LinkEndpointId, LinkProviderId};
+use lpa_link::link_endpoint::LinkEndpointId;
+use lpa_link::link_provider::LinkProviderId;
+use lpa_link::LinkConnectionKind;
 use lpa_studio_core::{
-    ActionOrigin, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID, LinkActionRequest,
-    LinkState, ServerActionRequest, StudioActionKind, StudioApp, StudioEffect, StudioEvent,
+    ActionOrigin, LinkActionRequest, LinkState, ServerActionRequest,
+    StudioActionKind, StudioApp, StudioEffect, StudioEvent, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID,
 };
 use lpa_studio_runtime::{
     BrowserSerialStudioRuntime, BrowserWorkerStudioRuntime, EffectExecutor, StudioRuntimeError,

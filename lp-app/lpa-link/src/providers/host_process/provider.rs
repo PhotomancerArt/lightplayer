@@ -1,8 +1,8 @@
+use crate::link_endpoint::{LinkEndpointId, LinkEndpointStatus};
+use crate::link_provider::LinkProviderId;
+use crate::link_session::LinkSessionId;
 use crate::providers::host_process::session::HostProcessSession;
-use crate::{
-    LinkCapabilities, LinkEndpoint, LinkEndpointId, LinkEndpointStatus, LinkError, LinkOperation,
-    LinkProvider, LinkProviderId, LinkSessionId,
-};
+use crate::{LinkCapabilities, LinkEndpoint, LinkError, LinkOperation, LinkProvider};
 use fw_host::HostRuntime;
 
 #[derive(Clone, Debug)]

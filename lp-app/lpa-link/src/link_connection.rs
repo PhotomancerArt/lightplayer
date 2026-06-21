@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{LinkEndpointId, LinkSessionId};
+use crate::link_endpoint::LinkEndpointId;
+use crate::link_session::LinkSessionId;
 
 /// Handoff from a live link session to the `lp-server` protocol layer.
 ///

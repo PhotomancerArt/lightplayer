@@ -1,7 +1,7 @@
+use crate::link_endpoint::LinkEndpointId;
+use crate::link_provider::LinkProviderId;
 use crate::providers::fake::FakeProvider;
-use crate::{
-    LinkCapabilities, LinkEndpoint, LinkEndpointId, LinkProvider, LinkProviderId, LinkSession,
-};
+use crate::{LinkCapabilities, LinkEndpoint, LinkProvider, LinkSession};
 
 #[tokio::test]
 async fn discover_returns_all_fake_endpoints() {

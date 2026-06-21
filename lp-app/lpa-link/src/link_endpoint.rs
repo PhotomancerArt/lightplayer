@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{LinkCapabilities, LinkEndpointId, LinkEndpointStatus, LinkProviderId};
+use crate::link_provider::LinkProviderId;
+use crate::LinkCapabilities;
 
 /// A provider-visible target that can be connected to.
 ///
@@ -45,4 +46,39 @@ impl LinkEndpoint {
         self.capabilities = capabilities;
         self
     }
+}
+
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
+pub struct LinkEndpointId(String);
+
+impl LinkEndpointId {
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl From<&str> for LinkEndpointId {
+    fn from(value: &str) -> Self {
+        Self::new(value)
+    }
+}
+
+impl From<String> for LinkEndpointId {
+    fn from(value: String) -> Self {
+        Self::new(value)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub enum LinkEndpointStatus {
+    Available,
+    Launching,
+    Connected,
+    InUse,
+    Unavailable { reason: String },
+    Error { message: String },
 }

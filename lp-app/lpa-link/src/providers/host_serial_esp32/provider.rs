@@ -1,10 +1,10 @@
+use crate::link_endpoint::{LinkEndpointId, LinkEndpointStatus};
+use crate::link_provider::LinkProviderId;
+use crate::link_session::LinkSessionId;
 use crate::providers::host_serial_esp32::session::HostSerialEsp32Session;
-use crate::{
-    LinkCapabilities, LinkEndpoint, LinkEndpointId, LinkEndpointStatus, LinkError, LinkProvider,
-    LinkProviderId, LinkServerConnection, LinkSessionId,
-};
+use crate::{LinkCapabilities, LinkEndpoint, LinkError, LinkProvider, LinkServerConnection};
 use lpa_client::transport_serial::{
-    HardwareSerialOptions, SerialLineObserver, create_hardware_serial_transport_pair_with_options,
+    create_hardware_serial_transport_pair_with_options, HardwareSerialOptions, SerialLineObserver,
 };
 use std::sync::Arc;
 use tokio::sync::Mutex;

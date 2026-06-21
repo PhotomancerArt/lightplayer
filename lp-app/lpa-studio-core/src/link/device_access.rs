@@ -1,4 +1,4 @@
-use lpa_link::LinkProviderId;
+use lpa_link::link_provider::LinkProviderId;
 use serde::{Deserialize, Serialize};
 
 /// Browser or host access state for a low-level device provider.

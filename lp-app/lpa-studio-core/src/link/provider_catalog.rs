@@ -1,7 +1,8 @@
-use lpa_link::{LinkEndpoint, LinkEndpointId, LinkProviderId};
-use serde::{Deserialize, Serialize};
-
 use crate::{ProviderAvailability, ProviderCardState, ProviderIntent};
+use lpa_link::link_endpoint::LinkEndpointId;
+use lpa_link::link_provider::LinkProviderId;
+use lpa_link::LinkEndpoint;
+use serde::{Deserialize, Serialize};
 
 /// Collection of provider profiles and the user's current provider selection.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]

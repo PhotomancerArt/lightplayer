@@ -1,10 +1,11 @@
-use lpa_link::{LinkEndpointId, LinkProviderId, LinkSessionId};
-use serde::{Deserialize, Serialize};
-
 use crate::{
     DeviceIssue, ProgressState, ProjectChoice, ProjectSelectionReason, ProvisioningReason,
     RecoveryReason,
 };
+use lpa_link::link_endpoint::LinkEndpointId;
+use lpa_link::link_provider::LinkProviderId;
+use lpa_link::link_session::LinkSessionId;
+use serde::{Deserialize, Serialize};
 
 /// Product-level journey through provider choice, link, and readiness.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]

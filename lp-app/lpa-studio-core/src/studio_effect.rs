@@ -1,8 +1,9 @@
-use lpa_link::{LinkEndpointId, LinkProviderId, LinkSessionId};
+use crate::ActionId;
+use lpa_link::link_endpoint::LinkEndpointId;
+use lpa_link::link_provider::LinkProviderId;
+use lpa_link::link_session::LinkSessionId;
 use lpc_wire::WireProjectHandle;
 use serde::{Deserialize, Serialize};
-
-use crate::ActionId;
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum StudioEffect {

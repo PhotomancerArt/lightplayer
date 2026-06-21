@@ -1,12 +1,14 @@
-use lpa_link::{LinkConnectionKind, LinkEndpoint, LinkEndpointId, LinkProviderId, LinkSessionId};
-use lpc_wire::{LoadedProject, WireProjectHandle, WireProjectInventoryReadResponse};
-use serde::{Deserialize, Serialize};
-
 use crate::{
     ActionId, DeviceAccessStatus, DeviceCapability, DeviceIssue, ProgressState, ProjectStateResult,
     ProviderAvailability, ProviderCardState, StudioDiagnostic, StudioHeartbeat, StudioLogEntry,
     TargetProbeResult,
 };
+use lpa_link::link_endpoint::LinkEndpointId;
+use lpa_link::link_provider::LinkProviderId;
+use lpa_link::link_session::LinkSessionId;
+use lpa_link::{LinkConnectionKind, LinkEndpoint};
+use lpc_wire::{LoadedProject, WireProjectHandle, WireProjectInventoryReadResponse};
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub enum StudioEvent {

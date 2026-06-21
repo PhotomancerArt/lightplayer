@@ -1,7 +1,7 @@
-use lpa_link::{LinkEndpoint, LinkProviderId};
-use serde::{Deserialize, Serialize};
-
 use crate::{ProviderAvailability, ProviderCapability, ProviderIntent};
+use lpa_link::link_provider::LinkProviderId;
+use lpa_link::LinkEndpoint;
+use serde::{Deserialize, Serialize};
 
 /// Studio-facing card/profile for a link provider.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]

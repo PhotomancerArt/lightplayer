@@ -1,17 +1,17 @@
 //! Runtime test harness for driving a `StudioApp` through an effect executor.
 
 #[cfg(feature = "host-process")]
-use lpa_link::LinkProviderId;
+use lpa_link::link_provider::LinkProviderId;
 #[cfg(feature = "host-process")]
 use lpa_studio_core::HOST_PROCESS_PROVIDER_ID;
 use lpa_studio_core::{ActionOrigin, StudioActionKind, StudioApp, StudioEffect};
 #[cfg(feature = "host-process")]
 use lpa_studio_core::{LinkActionRequest, ProjectActionRequest};
 
+use crate::effect_executor::EffectExecutor;
 #[cfg(feature = "host-process")]
 use crate::HostProcessStudioRuntime;
 use crate::StudioRuntimeError;
-use crate::effect_executor::EffectExecutor;
 
 /// Drives a `StudioApp` by dispatching actions and executing returned effects.
 pub struct RuntimeHarness<R> {

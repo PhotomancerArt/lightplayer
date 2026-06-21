@@ -1,21 +1,23 @@
+use lpa_link::link_endpoint::LinkEndpointId;
+use lpa_link::link_provider::LinkProviderId;
 use lpa_link::providers::browser_serial_esp32::{
     BrowserSerialEsp32Provider, BrowserSerialEsp32Session,
 };
-use lpa_link::{LinkConnectionKind, LinkEndpointId, LinkProvider, LinkProviderId, LinkSession};
+use lpa_link::{LinkConnectionKind, LinkProvider, LinkSession};
 use lpa_studio_core::{
-    ActionId, ActionOrigin, BROWSER_SERIAL_ESP32_PROVIDER_ID, DeviceAccessStatus, DeviceCapability,
-    DeviceIssue, DeviceIssueKind, LinkActionRequest, ProgressState, ProjectActionRequest,
-    ProviderAvailability, ProviderCapability, ProviderCardState, ProviderIntent,
-    ProvisioningReason, RecoveryAction, StudioActionKind, StudioApp, StudioDiagnostic,
-    StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel, TargetKind, TargetProbeResult,
+    ActionId, ActionOrigin, DeviceAccessStatus, DeviceCapability, DeviceIssue,
+    DeviceIssueKind, LinkActionRequest, ProgressState, ProjectActionRequest, ProviderAvailability,
+    ProviderCapability, ProviderCardState, ProviderIntent, ProvisioningReason,
+    RecoveryAction, StudioActionKind, StudioApp, StudioDiagnostic, StudioEffect,
+    StudioEvent, StudioLogEntry, StudioLogLevel, TargetKind, TargetProbeResult, BROWSER_SERIAL_ESP32_PROVIDER_ID,
 };
 use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 
-use crate::StudioRuntimeError;
 use crate::browser_esp32_flash::{self, DEFAULT_ESP32C6_FIRMWARE_MANIFEST_URL};
 use crate::browser_serial_protocol_client::BrowserSerialProtocolClient;
 use crate::browser_serial_shim;
 use crate::effect_executor::EffectExecutor;
+use crate::StudioRuntimeError;
 
 pub struct BrowserSerialStudioRuntime {
     provider: BrowserSerialEsp32Provider,

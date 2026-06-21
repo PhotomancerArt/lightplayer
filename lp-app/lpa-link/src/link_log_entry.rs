@@ -1,6 +1,15 @@
 use serde::{Deserialize, Serialize};
 
-use crate::{LinkEndpointId, LinkSessionId};
+use crate::link_endpoint::LinkEndpointId;
+use crate::link_session::LinkSessionId;
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct LinkLogEntry {
+    pub endpoint_id: LinkEndpointId,
+    pub session_id: Option<LinkSessionId>,
+    pub level: LinkLogLevel,
+    pub message: String,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum LinkLogLevel {
@@ -9,14 +18,6 @@ pub enum LinkLogLevel {
     Info,
     Warn,
     Error,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
-pub struct LinkLogEntry {
-    pub endpoint_id: LinkEndpointId,
-    pub session_id: Option<LinkSessionId>,
-    pub level: LinkLogLevel,
-    pub message: String,
 }
 
 impl LinkLogEntry {

@@ -1,7 +1,8 @@
-use lpa_link::{LinkEndpointId, LinkProviderId, LinkSessionId};
-use serde::{Deserialize, Serialize};
-
 use crate::{DeviceCapability, DeviceId};
+use lpa_link::link_endpoint::LinkEndpointId;
+use lpa_link::link_provider::LinkProviderId;
+use lpa_link::link_session::LinkSessionId;
+use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub struct DeviceSession {

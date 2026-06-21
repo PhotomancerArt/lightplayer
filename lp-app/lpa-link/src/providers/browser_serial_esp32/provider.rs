@@ -1,8 +1,8 @@
+use crate::link_endpoint::{LinkEndpointId, LinkEndpointStatus};
+use crate::link_provider::LinkProviderId;
+use crate::link_session::LinkSessionId;
 use crate::providers::browser_serial_esp32::session::BrowserSerialEsp32Session;
-use crate::{
-    LinkCapabilities, LinkEndpoint, LinkEndpointId, LinkEndpointStatus, LinkError, LinkProvider,
-    LinkProviderId, LinkSessionId,
-};
+use crate::{LinkCapabilities, LinkEndpoint, LinkError, LinkProvider};
 
 #[derive(Clone, Debug)]
 pub struct BrowserSerialEsp32Provider {
