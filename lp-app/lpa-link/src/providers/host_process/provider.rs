@@ -1,14 +1,19 @@
+use std::collections::BTreeMap;
+
 use crate::link_endpoint::{LinkEndpointId, LinkEndpointStatus};
 use crate::link_provider::LinkProviderId;
 use crate::link_session::LinkSessionId;
-use crate::providers::host_process::session::HostProcessSession;
-use crate::{LinkCapabilities, LinkEndpoint, LinkError, LinkOperation, LinkProvider};
+use crate::{
+    LinkCapabilities, LinkConnection, LinkConnectionKind, LinkDiagnostic, LinkDiagnosticSeverity,
+    LinkEndpoint, LinkError, LinkLogEntry, LinkLogLevel, LinkOperation, LinkProvider, LinkSession,
+    LinkSessionStatus,
+};
 use fw_host::HostRuntime;
 
-#[derive(Clone, Debug)]
 pub struct HostProcessProvider {
     id: LinkProviderId,
     endpoints: Vec<LinkEndpoint>,
+    sessions: BTreeMap<LinkSessionId, HostProcessSessionState>,
     next_endpoint_index: u64,
     next_session_index: u64,
 }
@@ -18,6 +23,7 @@ impl HostProcessProvider {
         Self {
             id: id.into(),
             endpoints: Vec::new(),
+            sessions: BTreeMap::new(),
             next_endpoint_index: 1,
             next_session_index: 1,
         }
@@ -52,11 +58,24 @@ impl HostProcessProvider {
             .find(|endpoint| endpoint.id == *endpoint_id)
             .ok_or_else(|| LinkError::endpoint_not_found(endpoint_id.as_str()))
     }
+
+    fn session(&self, session_id: &LinkSessionId) -> Result<&HostProcessSessionState, LinkError> {
+        self.sessions
+            .get(session_id)
+            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))
+    }
+
+    fn session_mut(
+        &mut self,
+        session_id: &LinkSessionId,
+    ) -> Result<&mut HostProcessSessionState, LinkError> {
+        self.sessions
+            .get_mut(session_id)
+            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))
+    }
 }
 
 impl LinkProvider for HostProcessProvider {
-    type Session = HostProcessSession;
-
     fn id(&self) -> &LinkProviderId {
         &self.id
     }
@@ -72,7 +91,7 @@ impl LinkProvider for HostProcessProvider {
         Ok(self.endpoint(endpoint_id)?.status.clone())
     }
 
-    async fn connect(&mut self, endpoint_id: &LinkEndpointId) -> Result<Self::Session, LinkError> {
+    async fn connect(&mut self, endpoint_id: &LinkEndpointId) -> Result<LinkSession, LinkError> {
         let endpoint = self.endpoint(endpoint_id)?.clone();
         let runtime = HostRuntime::start_memory().map_err(|error| LinkError::ConnectionFailed {
             message: error.to_string(),
@@ -84,6 +103,93 @@ impl LinkProvider for HostProcessProvider {
         ));
         self.next_session_index += 1;
 
-        Ok(HostProcessSession::new(endpoint.id, session_id, runtime))
+        let session = LinkSession::new(
+            session_id.clone(),
+            self.id.clone(),
+            endpoint.id.clone(),
+            LinkConnectionKind::HostProcess,
+            endpoint.capabilities.clone(),
+        );
+        self.sessions.insert(
+            session_id,
+            HostProcessSessionState::new(endpoint.id, session.clone(), runtime),
+        );
+        Ok(session)
+    }
+
+    async fn connection(
+        &mut self,
+        session_id: &LinkSessionId,
+    ) -> Result<LinkConnection, LinkError> {
+        let state = self.session(session_id)?;
+        if state.session.status == LinkSessionStatus::Closed {
+            return Err(LinkError::Closed);
+        }
+        Ok(LinkConnection::host_process(
+            state.session.endpoint_id.clone(),
+            state.session.id.clone(),
+            state.runtime.client_transport(),
+        ))
+    }
+
+    fn logs(&self, session_id: &LinkSessionId) -> Result<Vec<LinkLogEntry>, LinkError> {
+        Ok(self.session(session_id)?.logs.clone())
+    }
+
+    fn diagnostics(&self, session_id: &LinkSessionId) -> Result<Vec<LinkDiagnostic>, LinkError> {
+        Ok(self.session(session_id)?.diagnostics.clone())
+    }
+
+    async fn close(&mut self, session_id: &LinkSessionId) -> Result<(), LinkError> {
+        let state = self.session_mut(session_id)?;
+        if state.session.status == LinkSessionStatus::Closed {
+            return Ok(());
+        }
+        state.session.status = LinkSessionStatus::Closed;
+        state
+            .runtime
+            .close()
+            .await
+            .map_err(|error| LinkError::other(error.to_string()))?;
+        state.logs.push(LinkLogEntry::new(
+            state.endpoint_id.clone(),
+            Some(state.session.id.clone()),
+            LinkLogLevel::Info,
+            "host process runtime stopped",
+        ));
+        Ok(())
+    }
+}
+
+struct HostProcessSessionState {
+    endpoint_id: LinkEndpointId,
+    session: LinkSession,
+    runtime: HostRuntime,
+    logs: Vec<LinkLogEntry>,
+    diagnostics: Vec<LinkDiagnostic>,
+}
+
+impl HostProcessSessionState {
+    fn new(endpoint_id: LinkEndpointId, session: LinkSession, runtime: HostRuntime) -> Self {
+        let logs = vec![LinkLogEntry::new(
+            endpoint_id.clone(),
+            Some(session.id.clone()),
+            LinkLogLevel::Info,
+            "host process runtime started",
+        )];
+        let diagnostics = vec![LinkDiagnostic::new(
+            endpoint_id.clone(),
+            Some(session.id.clone()),
+            LinkDiagnosticSeverity::Info,
+            "host process runtime ready",
+        )];
+
+        Self {
+            endpoint_id,
+            session,
+            runtime,
+            logs,
+            diagnostics,
+        }
     }
 }

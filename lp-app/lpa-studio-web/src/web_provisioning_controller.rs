@@ -1,14 +1,21 @@
 use dioxus::prelude::{ReadableExt, Signal, WritableExt};
+use lpa_link::LinkConnectionKind;
 use lpa_link::link_endpoint::LinkEndpointId;
 use lpa_link::link_provider::LinkProviderId;
-use lpa_link::LinkConnectionKind;
+use lpa_link::providers::browser_serial_esp32::BrowserSerialEsp32Options;
+use lpa_link::providers::browser_worker::BrowserWorkerOptions;
 use lpa_studio_core::{
-    ActionOrigin, LinkActionRequest, LinkState, ServerActionRequest,
-    StudioActionKind, StudioApp, StudioEffect, StudioEvent, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID,
+    ActionOrigin, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID, LinkActionRequest,
+    LinkState, ServerActionRequest, StudioActionKind, StudioApp, StudioEffect, StudioEvent,
 };
 use lpa_studio_runtime::{
     BrowserSerialStudioRuntime, BrowserWorkerStudioRuntime, EffectExecutor, StudioRuntimeError,
 };
+
+const FW_BROWSER_MODULE_PATH: &str = "./pkg/fw_browser.js";
+const FW_BROWSER_WASM_PATH: &str = "./pkg/fw_browser_bg.wasm";
+const FIRMWARE_MANIFEST_PATH: &str = "./firmware/esp32c6/manifest.json";
+const ESPTOOL_MODULE_PATH: &str = "./vendor/esptool-js/index.js";
 
 /// Browser-side controller for dispatching Studio actions into web runtimes.
 pub struct WebProvisioningController {
@@ -17,9 +24,9 @@ pub struct WebProvisioningController {
 }
 
 impl WebProvisioningController {
-    pub fn new(worker_url: &str) -> Self {
+    pub fn new() -> Self {
         Self {
-            runtime: Some(WebStudioRuntime::new(worker_url)),
+            runtime: Some(WebStudioRuntime::new()),
             error: None,
         }
     }
@@ -126,10 +133,16 @@ struct WebStudioRuntime {
 }
 
 impl WebStudioRuntime {
-    fn new(worker_url: &str) -> Self {
+    fn new() -> Self {
         Self {
-            browser_worker: BrowserWorkerStudioRuntime::new(worker_url),
-            browser_serial: BrowserSerialStudioRuntime::new(),
+            browser_worker: BrowserWorkerStudioRuntime::with_options(BrowserWorkerOptions::new(
+                FW_BROWSER_MODULE_PATH,
+                FW_BROWSER_WASM_PATH,
+            )),
+            browser_serial: BrowserSerialStudioRuntime::with_options(
+                BrowserSerialEsp32Options::new(FIRMWARE_MANIFEST_PATH)
+                    .with_esptool_module_path(ESPTOOL_MODULE_PATH),
+            ),
             active_provider_id: None,
         }
     }

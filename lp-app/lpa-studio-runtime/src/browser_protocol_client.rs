@@ -1,33 +1,46 @@
-use js_sys::Promise;
 use lpc_wire::{
     ClientRequest, WireProjectCommandResponse, WireServerMessage, WireServerMsgBody, json,
     messages::ClientMessage,
 };
+use std::cell::RefCell;
+use std::rc::Rc;
+
+use lpa_link::LinkProvider;
+use lpa_link::link_session::LinkSessionId;
+use lpa_link::providers::browser_worker::{
+    BrowserInputEnvelope, BrowserOutputEnvelope, BrowserWorkerProvider,
+};
+use lpa_studio_core::{ProjectStateResult, StudioEffect, StudioEvent};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
-use lpa_studio_core::{ProjectStateResult, StudioEffect, StudioEvent};
-
-use crate::browser_worker_runtime::BrowserWorkerHandle;
 use crate::protocol_event::{inventory_request, server_event};
-use crate::worker_envelope::{BrowserInputEnvelope, BrowserOutputEnvelope};
 use crate::{StudioRuntimeError, demo_project};
 
 pub struct BrowserProtocolClient {
-    runtime: BrowserWorkerHandle,
+    provider: Rc<RefCell<BrowserWorkerProvider>>,
+    session_id: LinkSessionId,
     next_request_id: u64,
 }
 
 impl BrowserProtocolClient {
-    pub(crate) fn new(runtime: BrowserWorkerHandle) -> Self {
+    pub(crate) fn new(
+        provider: Rc<RefCell<BrowserWorkerProvider>>,
+        session_id: LinkSessionId,
+    ) -> Self {
         Self {
-            runtime,
+            provider,
+            session_id,
             next_request_id: 1,
         }
     }
 
-    pub fn close(&mut self) {
-        self.runtime.terminate();
+    pub async fn close(&mut self) -> Result<(), StudioRuntimeError> {
+        self.provider
+            .borrow_mut()
+            .close(&self.session_id)
+            .await
+            .map_err(|error| StudioRuntimeError::Link(error.to_string()))
     }
 
     pub async fn seed_demo_project(
@@ -163,15 +176,13 @@ impl BrowserProtocolClient {
             msg: request,
         })
         .map_err(|error| StudioRuntimeError::Protocol(error.to_string()))?;
-        self.runtime
-            .post(&BrowserInputEnvelope::ProtocolIn { frame })?;
+        self.post(&BrowserInputEnvelope::ProtocolIn { frame })?;
 
         let mut events = Vec::new();
         for _ in 0..240 {
-            self.runtime
-                .post(&BrowserInputEnvelope::Tick { delta_ms: Some(16) })?;
+            self.post(&BrowserInputEnvelope::Tick { delta_ms: Some(16) })?;
             sleep_ms(4).await?;
-            for output in self.runtime.take_outputs() {
+            for output in self.take_outputs()? {
                 match output {
                     BrowserOutputEnvelope::ProtocolOut { frame } => {
                         let response: WireServerMessage = json::from_str(&frame)
@@ -203,6 +214,20 @@ impl BrowserProtocolClient {
         self.next_request_id += 1;
         id
     }
+
+    fn post(&self, envelope: &BrowserInputEnvelope) -> Result<(), StudioRuntimeError> {
+        self.provider
+            .borrow()
+            .post(&self.session_id, envelope)
+            .map_err(|error| StudioRuntimeError::Link(error.to_string()))
+    }
+
+    fn take_outputs(&self) -> Result<Vec<BrowserOutputEnvelope>, StudioRuntimeError> {
+        self.provider
+            .borrow_mut()
+            .take_outputs(&self.session_id)
+            .map_err(|error| StudioRuntimeError::Link(error.to_string()))
+    }
 }
 
 pub struct BrowserExchange {
@@ -211,17 +236,18 @@ pub struct BrowserExchange {
 }
 
 pub async fn sleep_ms(ms: i32) -> Result<(), StudioRuntimeError> {
-    let promise = Promise::new(&mut |resolve: js_sys::Function, reject: js_sys::Function| {
-        let Some(window) = web_sys::window() else {
-            let _ = reject.call1(&JsValue::NULL, &JsValue::from_str("missing window"));
-            return;
-        };
-        if let Err(error) =
-            window.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms)
-        {
-            let _ = reject.call1(&JsValue::NULL, &error);
-        }
-    });
+    let promise =
+        js_sys::Promise::new(&mut |resolve: js_sys::Function, reject: js_sys::Function| {
+            let Some(window) = web_sys::window() else {
+                let _ = reject.call1(&JsValue::NULL, &JsValue::from_str("missing window"));
+                return;
+            };
+            if let Err(error) =
+                window.set_timeout_with_callback_and_timeout_and_arguments_0(&resolve, ms)
+            {
+                let _ = reject.call1(&JsValue::NULL, &error);
+            }
+        });
     JsFuture::from(promise)
         .await
         .map(|_| ())

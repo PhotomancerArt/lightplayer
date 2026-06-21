@@ -1,7 +1,7 @@
 use crate::link_endpoint::LinkEndpointId;
 use crate::link_provider::LinkProviderId;
 use crate::providers::fake::FakeProvider;
-use crate::{LinkCapabilities, LinkEndpoint, LinkProvider, LinkSession};
+use crate::{LinkCapabilities, LinkEndpoint, LinkProvider};
 
 #[tokio::test]
 async fn discover_returns_all_fake_endpoints() {
@@ -20,14 +20,14 @@ async fn sessions_are_scoped_to_endpoint_and_have_stable_ids() {
     let endpoint_a = LinkEndpointId::new("fake-a");
     let endpoint_b = LinkEndpointId::new("fake-b");
 
-    let mut session_a = provider.connect(&endpoint_a).await.unwrap();
+    let session_a = provider.connect(&endpoint_a).await.unwrap();
     let session_b = provider.connect(&endpoint_b).await.unwrap();
 
     assert_eq!(session_a.endpoint_id().as_str(), "fake-a");
     assert_eq!(session_b.endpoint_id().as_str(), "fake-b");
     assert_ne!(session_a.id(), session_b.id());
 
-    let connection = session_a.connection().await.unwrap();
+    let connection = provider.connection(session_a.id()).await.unwrap();
     assert_eq!(connection.endpoint_id.as_str(), "fake-a");
     assert_eq!(connection.session_id, session_a.id().clone());
 }
@@ -35,21 +35,21 @@ async fn sessions_are_scoped_to_endpoint_and_have_stable_ids() {
 #[tokio::test]
 async fn logs_and_diagnostics_are_scoped_to_session() {
     let mut provider = fake_provider();
-    let mut session = provider
+    let session = provider
         .connect(&LinkEndpointId::new("fake-a"))
         .await
         .unwrap();
 
-    let logs = session.logs();
-    let diagnostics = session.diagnostics();
+    let logs = provider.logs(session.id()).unwrap();
+    let diagnostics = provider.diagnostics(session.id()).unwrap();
 
     assert_eq!(logs[0].endpoint_id.as_str(), "fake-a");
     assert_eq!(logs[0].session_id, Some(session.id().clone()));
     assert_eq!(diagnostics[0].endpoint_id.as_str(), "fake-a");
     assert_eq!(diagnostics[0].session_id, Some(session.id().clone()));
 
-    session.close().await.unwrap();
-    assert!(session.connection().await.is_err());
+    provider.close(session.id()).await.unwrap();
+    assert!(provider.connection(session.id()).await.is_err());
 }
 
 fn fake_provider() -> FakeProvider {

@@ -5092,11 +5092,16 @@ name = "lpa-link"
 version = "40.0.0"
 dependencies = [
  "fw-host",
+ "js-sys",
  "lpa-client",
  "lpc-model",
  "serde",
+ "serde-wasm-bindgen",
  "serialport",
  "tokio",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

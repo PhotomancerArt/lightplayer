@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
-use crate::link_provider::LinkProviderId;
 use crate::LinkCapabilities;
+use crate::link_provider::LinkProviderId;
 
 /// A provider-visible target that can be connected to.
 ///

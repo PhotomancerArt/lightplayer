@@ -1,12 +1,10 @@
 use crate::link_endpoint::{LinkEndpointId, LinkEndpointStatus};
-use crate::{LinkEndpoint, LinkError, LinkSession};
+use crate::link_session::LinkSessionId;
+use crate::{LinkConnection, LinkDiagnostic, LinkEndpoint, LinkError, LinkLogEntry, LinkSession};
 use serde::{Deserialize, Serialize};
 
 #[allow(async_fn_in_trait, reason = "Link providers are not object-safe yet")]
 pub trait LinkProvider {
-    /// Provider-specific live session type.
-    type Session: LinkSession;
-
     /// Stable provider id, such as `host-process` or `browser-serial-esp32`.
     fn id(&self) -> &LinkProviderId;
 
@@ -23,9 +21,23 @@ pub trait LinkProvider {
 
     /// Open a live session from a discovered endpoint.
     ///
-    /// The returned session owns the live resource. Use `LinkSession::connection()`
-    /// when the caller needs the `lp-server` protocol handoff.
-    async fn connect(&mut self, endpoint_id: &LinkEndpointId) -> Result<Self::Session, LinkError>;
+    /// The provider owns the concrete resources behind the returned session
+    /// record. Use the session id with `connection`, `logs`, `diagnostics`, and
+    /// `close` for provider-owned follow-up operations.
+    async fn connect(&mut self, endpoint_id: &LinkEndpointId) -> Result<LinkSession, LinkError>;
+
+    /// Open or return the client connection associated with a live session.
+    async fn connection(&mut self, session_id: &LinkSessionId)
+    -> Result<LinkConnection, LinkError>;
+
+    /// Link-level logs available through the provider-owned session.
+    fn logs(&self, session_id: &LinkSessionId) -> Result<Vec<LinkLogEntry>, LinkError>;
+
+    /// Link-level diagnostics available through the provider-owned session.
+    fn diagnostics(&self, session_id: &LinkSessionId) -> Result<Vec<LinkDiagnostic>, LinkError>;
+
+    /// Close provider-owned resources for a live session.
+    async fn close(&mut self, session_id: &LinkSessionId) -> Result<(), LinkError>;
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]

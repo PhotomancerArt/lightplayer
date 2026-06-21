@@ -6,8 +6,10 @@ runtime/link/client facts back into Studio events.
 ## Boundaries
 
 - `lpa-studio-core` owns state transitions.
-- `lpa-studio-runtime` owns I/O, runtime adapters, demo project seeding, and
-  mapping lower-level client/link events into Studio events.
+- `lpa-studio-runtime` owns effect execution, runtime adapters, demo project
+  seeding, and mapping lower-level client/link events into Studio events.
+- `lpa-link` owns provider resource lifecycles: endpoint/session state, browser
+  worker creation, Web Serial open/release/close, and ESP32 probe/flash.
 - `lpa-client` owns lp-server request ids, response correlation, protocol
   errors, heartbeat/log events, and shared project deploy semantics.
 - `lpa-studio-web` owns Dioxus components and browser presentation.
@@ -21,13 +23,13 @@ StudioEffect -> lpa-link host-process -> lpa-client TokioLpClient -> fw-host
 The browser-worker path is:
 
 ```text
-StudioEffect -> lpa-link browser-worker model -> JavaScript Worker -> fw-browser -> lp-server protocol
+StudioEffect -> lpa-link browser-worker provider -> JavaScript Worker -> fw-browser -> lp-server protocol
 ```
 
 The browser serial ESP32 path is:
 
 ```text
-StudioEffect -> lpa-link browser-serial-esp32 model -> lpa-client LpClient<ClientIo> -> Web Serial shim -> ESP32 lp-server
+StudioEffect -> lpa-link browser-serial-esp32 provider -> lpa-client LpClient<ClientIo> -> Web Serial -> ESP32 lp-server
 ```
 
 The scenario path is I/O-free:
@@ -63,20 +65,17 @@ forking request correlation or project sync behavior. Direct/raw filesystem
 image access is not part of this server protocol path; it belongs below the
 client connection in `lpa-link` management.
 
-`browser-serial-esp32` targets an already-flashed ESP32 running LightPlayer. It
-uses a small JavaScript shim because `web-sys` currently gates Web Serial behind
-unstable API cfg flags. Browser serial stream ownership stays in that shim, but
-the Rust runtime adapts it into `lpa-client::ClientIo` so request correlation,
+`browser-serial-esp32` targets an already-flashed ESP32 running LightPlayer.
+Web Serial ownership lives in `lpa-link`; the Rust runtime adapts provider
+read/write operations into `lpa-client::ClientIo` so request correlation,
 protocol events, server errors, and project write helpers come from the shared
 client model.
 
-The browser ESP32 flashing path is a second browser shim boundary. The runtime
-loads `./firmware/esp32c6/manifest.json`, advertises flash capability only when
-the browser supports Web Serial and that manifest is available, releases the
-normal serial protocol reader/writer, and calls the JavaScript flashing adapter
-with the same user-granted `SerialPort`. Flash progress, logs, success, and
-failures are translated back into Studio events; reconnect/classification after
-flash remains a separate provisioning step.
+The browser ESP32 flashing path is a provider operation in `lpa-link`. The
+runtime advertises flash capability when provider checks succeed, requests probe
+or flash by endpoint id, and translates low-level logs/progress/success/failure
+into Studio events. Reconnect/classification after flash remains a separate
+Studio provisioning step.
 
 Browser serial target classification is layered. Studio first opens the normal
 serial link and sends a lightweight `lp-server` request through `lpa-client`. If

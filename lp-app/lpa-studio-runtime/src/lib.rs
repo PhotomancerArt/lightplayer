@@ -6,7 +6,6 @@ pub mod error;
 pub mod harness;
 pub mod protocol_event;
 pub mod scenario;
-pub mod worker_envelope;
 
 #[cfg(feature = "host-process")]
 pub mod client_session_runtime;
@@ -21,13 +20,9 @@ pub mod browser_protocol_client;
 pub mod browser_worker_runtime;
 
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
-pub mod browser_esp32_flash;
-#[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub mod browser_serial_protocol_client;
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 pub mod browser_serial_runtime;
-#[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
-pub mod browser_serial_shim;
 
 pub use effect_executor::EffectExecutor;
 pub use error::StudioRuntimeError;

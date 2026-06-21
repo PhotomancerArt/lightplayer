@@ -8,10 +8,10 @@ use lpa_studio_core::{ActionOrigin, StudioActionKind, StudioApp, StudioEffect};
 #[cfg(feature = "host-process")]
 use lpa_studio_core::{LinkActionRequest, ProjectActionRequest};
 
-use crate::effect_executor::EffectExecutor;
 #[cfg(feature = "host-process")]
 use crate::HostProcessStudioRuntime;
 use crate::StudioRuntimeError;
+use crate::effect_executor::EffectExecutor;
 
 /// Drives a `StudioApp` by dispatching actions and executing returned effects.
 pub struct RuntimeHarness<R> {

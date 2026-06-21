@@ -1,31 +1,23 @@
-const DEFAULT_MANIFEST_URL = "./firmware/esp32c6/manifest.json";
-const DEFAULT_ESPTOOL_JS_MODULE_URL = "https://unpkg.com/esptool-js@0.6.0/lib/index.js";
+import { getPort, releasePort } from "./browser_serial.js";
 
-export function installLightPlayerBrowserEsp32Flash() {
-  globalThis.lpBrowserEsp32FlashIsSupported = isSupported;
-  globalThis.lpBrowserEsp32FlashLoadManifest = loadManifest;
-  globalThis.lpBrowserEsp32FlashProbeTarget = probeTarget;
-  globalThis.lpBrowserEsp32FlashFirmware = flashFirmware;
-}
-
-function isSupported() {
+export function isSupported() {
   return Boolean(globalThis.navigator?.serial && globalThis.fetch);
 }
 
-async function loadManifest(manifestUrl = DEFAULT_MANIFEST_URL) {
-  const manifest = await loadFullManifest(manifestUrl);
-  return summarizeManifest(manifest, manifestUrl);
+export async function loadManifest(manifestPath) {
+  const manifest = await loadFullManifest(manifestPath);
+  return summarizeManifest(manifest, manifestPath);
 }
 
-async function probeTarget(portId) {
+export async function probeTarget(portId, esptoolModulePath) {
   if (!isSupported()) {
     throw new Error("Web Serial ESP32 probing is not supported in this browser.");
   }
 
-  const port = serialPortFor(portId);
-  await globalThis.lpBrowserSerialRelease?.(portId);
+  const port = getPort(portId);
+  await releasePort(portId);
 
-  const { ESPLoader, Transport } = await loadEsptoolModule();
+  const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
   const logs = [];
   const terminal = terminalFor(logs, "esp32-probe");
   const transport = new Transport(port, true);
@@ -52,17 +44,17 @@ async function probeTarget(portId) {
   }
 }
 
-async function flashFirmware(portId, manifestUrl = DEFAULT_MANIFEST_URL) {
+export async function flashFirmware(portId, manifestPath, esptoolModulePath) {
   if (!isSupported()) {
     throw new Error("Web Serial firmware flashing is not supported in this browser.");
   }
 
-  const port = serialPortFor(portId);
-  await globalThis.lpBrowserSerialRelease?.(portId);
+  const port = getPort(portId);
+  await releasePort(portId);
 
-  const manifest = await loadFullManifest(manifestUrl);
-  const imageFiles = await loadImageFiles(manifest, manifestUrl);
-  const { ESPLoader, Transport } = await loadEsptoolModule();
+  const manifest = await loadFullManifest(manifestPath);
+  const imageFiles = await loadImageFiles(manifest, manifestPath);
+  const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
   const logs = [];
   const progress = [];
   const terminal = terminalFor(logs, "esp32-flash");
@@ -110,7 +102,7 @@ async function flashFirmware(portId, manifestUrl = DEFAULT_MANIFEST_URL) {
     });
     await loader.after("hard_reset");
     return {
-      manifest: summarizeManifest(manifest, manifestUrl),
+      manifest: summarizeManifest(manifest, manifestPath),
       chipName: chipName ? String(chipName) : null,
       logs,
       progress: compactProgress(progress),
@@ -122,18 +114,6 @@ async function flashFirmware(portId, manifestUrl = DEFAULT_MANIFEST_URL) {
       console.warn("[esp32-flash] transport disconnect failed", error);
     }
   }
-}
-
-function serialPortFor(portId) {
-  const getPort = globalThis.lpBrowserSerialGetPort;
-  if (typeof getPort !== "function") {
-    throw new Error("Browser serial port access is not installed.");
-  }
-  const port = getPort(portId);
-  if (!port) {
-    throw new Error(`No browser serial port exists for session ${portId}.`);
-  }
-  return port;
 }
 
 function terminalFor(logs, target) {
@@ -154,8 +134,8 @@ function terminalFor(logs, target) {
   };
 }
 
-async function loadFullManifest(manifestUrl) {
-  const response = await fetch(manifestUrl, { cache: "no-store" });
+async function loadFullManifest(manifestPath) {
+  const response = await fetch(manifestPath, { cache: "no-store" });
   if (!response.ok) {
     throw new Error(`Firmware manifest is unavailable (${response.status} ${response.statusText}).`);
   }
@@ -164,11 +144,11 @@ async function loadFullManifest(manifestUrl) {
   return manifest;
 }
 
-async function loadImageFiles(manifest, manifestUrl) {
-  const baseUrl = new URL(manifestUrl, globalThis.location?.href ?? "http://localhost/");
+async function loadImageFiles(manifest, manifestPath) {
+  const basePath = new URL(manifestPath, globalThis.location?.href ?? "http://localhost/");
   return Promise.all(
     manifest.images.map(async (image) => {
-      const response = await fetch(new URL(image.path, baseUrl), { cache: "no-store" });
+      const response = await fetch(new URL(image.path, basePath), { cache: "no-store" });
       if (!response.ok) {
         throw new Error(`Firmware image ${image.path} is unavailable (${response.status} ${response.statusText}).`);
       }
@@ -180,19 +160,21 @@ async function loadImageFiles(manifest, manifestUrl) {
   );
 }
 
-async function loadEsptoolModule() {
-  const moduleUrl = globalThis.lpEspToolJsModuleUrl ?? DEFAULT_ESPTOOL_JS_MODULE_URL;
-  return import(moduleUrl);
+async function loadEsptoolModule(esptoolModulePath) {
+  if (!esptoolModulePath) {
+    throw new Error("Missing same-origin esptool_module_path.");
+  }
+  return import(esptoolModulePath);
 }
 
-function summarizeManifest(manifest, manifestUrl) {
+function summarizeManifest(manifest, manifestPath) {
   return {
     firmwareId: String(manifest.firmwareId),
     displayName: String(manifest.displayName ?? manifest.firmwareId),
     targetChip: String(manifest.target?.chip ?? "esp32c6"),
     imageCount: manifest.images.length,
     totalBytes: manifest.images.reduce((total, image) => total + Number(image.sizeBytes ?? 0), 0),
-    manifestUrl,
+    manifestPath,
   };
 }
 

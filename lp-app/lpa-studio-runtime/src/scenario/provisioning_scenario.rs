@@ -6,9 +6,9 @@ use lpa_link::link_endpoint::LinkEndpointId;
 use lpa_link::link_provider::LinkProviderId;
 use lpa_link::{LinkConnectionKind, LinkEndpoint};
 use lpa_studio_core::{
-    DeviceCapability, DeviceIssue, DeviceIssueKind, ProjectChoice,
-    ProjectStateResult, ProviderAvailability, ProviderCapability, ProviderCardState,
-    ProviderIntent, RecoveryAction, RecoveryReason, BROWSER_SERIAL_ESP32_PROVIDER_ID, HOST_PROCESS_PROVIDER_ID,
+    BROWSER_SERIAL_ESP32_PROVIDER_ID, DeviceCapability, DeviceIssue, DeviceIssueKind,
+    HOST_PROCESS_PROVIDER_ID, ProjectChoice, ProjectStateResult, ProviderAvailability,
+    ProviderCapability, ProviderCardState, ProviderIntent, RecoveryAction, RecoveryReason,
     STUDIO_DEMO_PROJECT_ID,
 };
 use serde::{Deserialize, Serialize};

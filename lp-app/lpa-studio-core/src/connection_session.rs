@@ -1,6 +1,6 @@
+use lpa_link::LinkConnectionKind;
 use lpa_link::link_endpoint::LinkEndpointId;
 use lpa_link::link_session::LinkSessionId;
-use lpa_link::LinkConnectionKind;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]

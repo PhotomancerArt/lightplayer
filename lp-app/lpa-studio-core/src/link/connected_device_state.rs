@@ -1,8 +1,8 @@
 use crate::{DeviceCapability, DeviceId};
+use lpa_link::LinkConnectionKind;
 use lpa_link::link_endpoint::LinkEndpointId;
 use lpa_link::link_provider::LinkProviderId;
 use lpa_link::link_session::LinkSessionId;
-use lpa_link::LinkConnectionKind;
 use serde::{Deserialize, Serialize};
 
 /// Coarse health for a connected device/server session.

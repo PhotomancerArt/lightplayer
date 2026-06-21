@@ -3,6 +3,7 @@ use std::fmt::{self, Display};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LinkError {
     EndpointNotFound { endpoint: String },
+    SessionNotFound { session: String },
     OperationUnsupported { operation: String },
     ConnectionFailed { message: String },
     Closed,
@@ -13,6 +14,12 @@ impl LinkError {
     pub fn endpoint_not_found(endpoint: impl Into<String>) -> Self {
         Self::EndpointNotFound {
             endpoint: endpoint.into(),
+        }
+    }
+
+    pub fn session_not_found(session: impl Into<String>) -> Self {
+        Self::SessionNotFound {
+            session: session.into(),
         }
     }
 
@@ -34,6 +41,9 @@ impl Display for LinkError {
         match self {
             Self::EndpointNotFound { endpoint } => {
                 write!(f, "link endpoint not found: {endpoint}")
+            }
+            Self::SessionNotFound { session } => {
+                write!(f, "link session not found: {session}")
             }
             Self::OperationUnsupported { operation } => {
                 write!(f, "link operation unsupported: {operation}")

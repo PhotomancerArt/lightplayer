@@ -1,5 +1,5 @@
-use lpa_link::link_session::LinkSessionId;
 use lpa_link::LinkConnectionKind;
+use lpa_link::link_session::LinkSessionId;
 use lpa_studio_core::{DeviceCapability, DeviceIssue};
 use serde::{Deserialize, Serialize};
 

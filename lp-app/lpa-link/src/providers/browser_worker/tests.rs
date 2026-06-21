@@ -1,5 +1,5 @@
 use crate::providers::browser_worker::BrowserWorkerProvider;
-use crate::{LinkConnectionKind, LinkProvider, LinkSession};
+use crate::{LinkConnectionKind, LinkProvider};
 
 #[tokio::test]
 async fn browser_worker_provider_supports_multiple_worker_endpoints() {
@@ -21,9 +21,9 @@ async fn browser_worker_provider_supports_multiple_worker_endpoints() {
 async fn browser_worker_connection_reports_worker_protocol() {
     let mut provider = BrowserWorkerProvider::new("browser-worker");
     let endpoint_id = provider.create_worker_endpoint("Browser A");
-    let mut session = provider.connect(&endpoint_id).await.unwrap();
+    let session = provider.connect(&endpoint_id).await.unwrap();
 
-    let connection = session.connection().await.unwrap();
+    let connection = provider.connection(session.id()).await.unwrap();
 
     assert_eq!(connection.endpoint_id, endpoint_id);
     assert!(matches!(

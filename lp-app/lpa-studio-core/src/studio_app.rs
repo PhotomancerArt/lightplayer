@@ -3,9 +3,9 @@ use crate::{
     ConnectionSession, DeviceAccess, DeviceAccessStatus, DeviceId, DeviceIssue, DeviceIssueKind,
     DeviceSession, InFlightAction, LinkActionRequest, LinkState, ProgressState,
     ProjectActionRequest, ProjectSelectionReason, ProjectSession, ProjectState, ProjectStateResult,
-    ProjectSyncState, ProviderAvailability, RecoveryAction, ServerActionRequest,
-    ServerState, StudioAction, StudioActionKind, StudioDiagnostic, StudioEffect,
-    StudioEvent, StudioLogEntry, StudioLogLevel, StudioState, TargetKind, STUDIO_DEMO_PROJECT_ID,
+    ProjectSyncState, ProviderAvailability, RecoveryAction, STUDIO_DEMO_PROJECT_ID,
+    ServerActionRequest, ServerState, StudioAction, StudioActionKind, StudioDiagnostic,
+    StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel, StudioState, TargetKind,
 };
 use lpa_link::link_endpoint::LinkEndpointId;
 use lpa_link::link_provider::LinkProviderId;
@@ -941,9 +941,9 @@ mod tests {
     use lpc_wire::{WireProjectHandle, WireProjectInventoryReadResponse};
 
     use crate::{
-        ActionOrigin, DeviceCapability, DeviceIssueKind,
-        LinkState, ProjectSelectionReason, ProjectStateResult, ProviderAvailability, ProviderCardState,
-        ProviderIntent, RecoveryAction, RecoveryReason, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID,
+        ActionOrigin, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID,
+        DeviceCapability, DeviceIssueKind, LinkState, ProjectSelectionReason, ProjectStateResult,
+        ProviderAvailability, ProviderCardState, ProviderIntent, RecoveryAction, RecoveryReason,
     };
 
     use super::*;

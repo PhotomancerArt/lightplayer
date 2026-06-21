@@ -1,18 +1,23 @@
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 use crate::link_endpoint::{LinkEndpointId, LinkEndpointStatus};
 use crate::link_provider::LinkProviderId;
 use crate::link_session::LinkSessionId;
-use crate::providers::host_serial_esp32::session::HostSerialEsp32Session;
-use crate::{LinkCapabilities, LinkEndpoint, LinkError, LinkProvider, LinkServerConnection};
-use lpa_client::transport_serial::{
-    create_hardware_serial_transport_pair_with_options, HardwareSerialOptions, SerialLineObserver,
+use crate::{
+    LinkCapabilities, LinkConnection, LinkConnectionKind, LinkDiagnostic, LinkDiagnosticSeverity,
+    LinkEndpoint, LinkError, LinkLogEntry, LinkLogLevel, LinkProvider, LinkServerConnection,
+    LinkSession, LinkSessionStatus,
 };
-use std::sync::Arc;
+use lpa_client::transport_serial::{
+    HardwareSerialOptions, SerialLineObserver, create_hardware_serial_transport_pair_with_options,
+};
 use tokio::sync::Mutex;
 
-#[derive(Clone)]
 pub struct HostSerialEsp32Provider {
     id: LinkProviderId,
     endpoints: Vec<HostSerialEsp32Endpoint>,
+    sessions: BTreeMap<LinkSessionId, HostSerialEsp32SessionState>,
     options: HostSerialEsp32Options,
     next_session_index: u64,
 }
@@ -33,6 +38,7 @@ impl HostSerialEsp32Provider {
         Self {
             id: id.into(),
             endpoints: Vec::new(),
+            sessions: BTreeMap::new(),
             options,
             next_session_index: 1,
         }
@@ -94,6 +100,24 @@ impl HostSerialEsp32Provider {
             .ok_or_else(|| LinkError::endpoint_not_found(endpoint_id.as_str()))
     }
 
+    fn session(
+        &self,
+        session_id: &LinkSessionId,
+    ) -> Result<&HostSerialEsp32SessionState, LinkError> {
+        self.sessions
+            .get(session_id)
+            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))
+    }
+
+    fn session_mut(
+        &mut self,
+        session_id: &LinkSessionId,
+    ) -> Result<&mut HostSerialEsp32SessionState, LinkError> {
+        self.sessions
+            .get_mut(session_id)
+            .ok_or_else(|| LinkError::session_not_found(session_id.as_str()))
+    }
+
     fn upsert_port_endpoint(
         &mut self,
         endpoint_id: LinkEndpointId,
@@ -122,8 +146,6 @@ impl HostSerialEsp32Provider {
 }
 
 impl LinkProvider for HostSerialEsp32Provider {
-    type Session = HostSerialEsp32Session;
-
     fn id(&self) -> &LinkProviderId {
         &self.id
     }
@@ -144,7 +166,7 @@ impl LinkProvider for HostSerialEsp32Provider {
         Ok(self.endpoint(endpoint_id)?.status.clone())
     }
 
-    async fn connect(&mut self, endpoint_id: &LinkEndpointId) -> Result<Self::Session, LinkError> {
+    async fn connect(&mut self, endpoint_id: &LinkEndpointId) -> Result<LinkSession, LinkError> {
         let endpoint = self.endpoint_entry(endpoint_id)?.clone();
         let session_id = LinkSessionId::new(format!(
             "{}:{}",
@@ -172,13 +194,73 @@ impl LinkProvider for HostSerialEsp32Provider {
         let transport: Box<dyn lpa_client::ClientTransport> = Box::new(transport);
         let server_connection: LinkServerConnection = Arc::new(Mutex::new(transport));
 
-        Ok(HostSerialEsp32Session::new(
-            endpoint.endpoint.id,
+        let session = LinkSession::new(
+            session_id.clone(),
+            self.id.clone(),
+            endpoint.endpoint.id.clone(),
+            LinkConnectionKind::HostSerialEsp32,
+            endpoint.endpoint.capabilities.clone(),
+        );
+        self.sessions.insert(
             session_id,
-            endpoint.port_name,
-            baud_rate,
-            server_connection,
+            HostSerialEsp32SessionState::new(
+                session.clone(),
+                endpoint.port_name,
+                baud_rate,
+                server_connection,
+            ),
+        );
+        Ok(session)
+    }
+
+    async fn connection(
+        &mut self,
+        session_id: &LinkSessionId,
+    ) -> Result<LinkConnection, LinkError> {
+        let state = self.session(session_id)?;
+        if state.session.status == LinkSessionStatus::Closed {
+            return Err(LinkError::Closed);
+        }
+        let Some(server_connection) = &state.server_connection else {
+            return Err(LinkError::Closed);
+        };
+        Ok(LinkConnection::host_serial_esp32(
+            state.session.endpoint_id.clone(),
+            state.session.id.clone(),
+            server_connection.clone(),
         ))
+    }
+
+    fn logs(&self, session_id: &LinkSessionId) -> Result<Vec<LinkLogEntry>, LinkError> {
+        Ok(self.session(session_id)?.logs.clone())
+    }
+
+    fn diagnostics(&self, session_id: &LinkSessionId) -> Result<Vec<LinkDiagnostic>, LinkError> {
+        Ok(self.session(session_id)?.diagnostics.clone())
+    }
+
+    async fn close(&mut self, session_id: &LinkSessionId) -> Result<(), LinkError> {
+        let state = self.session_mut(session_id)?;
+        if state.session.status == LinkSessionStatus::Closed {
+            return Ok(());
+        }
+        state.session.status = LinkSessionStatus::Closed;
+        if let Some(server_connection) = state.server_connection.take() {
+            let mut transport = server_connection.lock().await;
+            lpa_client::ClientTransport::close(&mut **transport)
+                .await
+                .map_err(|error| LinkError::other(error.to_string()))?;
+        }
+        state.logs.push(LinkLogEntry::new(
+            state.session.endpoint_id.clone(),
+            Some(state.session.id.clone()),
+            LinkLogLevel::Info,
+            format!(
+                "host serial ESP32 session closed on {} at {} baud",
+                state.port_name, state.baud_rate
+            ),
+        ));
+        Ok(())
     }
 }
 
@@ -186,6 +268,45 @@ impl LinkProvider for HostSerialEsp32Provider {
 struct HostSerialEsp32Endpoint {
     endpoint: LinkEndpoint,
     port_name: String,
+}
+
+struct HostSerialEsp32SessionState {
+    session: LinkSession,
+    port_name: String,
+    baud_rate: u32,
+    server_connection: Option<LinkServerConnection>,
+    logs: Vec<LinkLogEntry>,
+    diagnostics: Vec<LinkDiagnostic>,
+}
+
+impl HostSerialEsp32SessionState {
+    fn new(
+        session: LinkSession,
+        port_name: String,
+        baud_rate: u32,
+        server_connection: LinkServerConnection,
+    ) -> Self {
+        let logs = vec![LinkLogEntry::new(
+            session.endpoint_id.clone(),
+            Some(session.id.clone()),
+            LinkLogLevel::Info,
+            format!("host serial ESP32 session opened on {port_name}"),
+        )];
+        let diagnostics = vec![LinkDiagnostic::new(
+            session.endpoint_id.clone(),
+            Some(session.id.clone()),
+            LinkDiagnosticSeverity::Info,
+            format!("host serial ESP32 transport ready at {baud_rate} baud"),
+        )];
+        Self {
+            session,
+            port_name,
+            baud_rate,
+            server_connection: Some(server_connection),
+            logs,
+            diagnostics,
+        }
+    }
 }
 
 pub fn label_for_port(port_name: &str) -> String {

@@ -2,7 +2,7 @@ use js_sys::{Array, Promise, Reflect};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
-use crate::StudioRuntimeError;
+use crate::LinkError;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BrowserSerialPortHandle {
@@ -10,30 +10,30 @@ pub struct BrowserSerialPortHandle {
     pub label: String,
 }
 
-#[wasm_bindgen]
+#[wasm_bindgen(module = "/src/providers/browser_serial_esp32/browser_serial.js")]
 extern "C" {
-    #[wasm_bindgen(js_namespace = globalThis, js_name = lpBrowserSerialIsSupported)]
+    #[wasm_bindgen(js_name = isSupported)]
     fn js_is_supported() -> bool;
 
-    #[wasm_bindgen(js_namespace = globalThis, js_name = lpBrowserSerialRequestPort)]
+    #[wasm_bindgen(js_name = requestPort)]
     fn js_request_port() -> Promise;
 
-    #[wasm_bindgen(js_namespace = globalThis, js_name = lpBrowserSerialOpen)]
+    #[wasm_bindgen(js_name = openPort)]
     fn js_open(id: u32, baud_rate: u32) -> Promise;
 
-    #[wasm_bindgen(js_namespace = globalThis, js_name = lpBrowserSerialWriteLine)]
+    #[wasm_bindgen(js_name = writeLine)]
     fn js_write_line(id: u32, line: &str) -> Promise;
 
-    #[wasm_bindgen(js_namespace = globalThis, js_name = lpBrowserSerialTakeLines)]
+    #[wasm_bindgen(js_name = takeLines)]
     fn js_take_lines(id: u32) -> Array;
 
-    #[wasm_bindgen(js_namespace = globalThis, js_name = lpBrowserSerialTakeErrors)]
+    #[wasm_bindgen(js_name = takeErrors)]
     fn js_take_errors(id: u32) -> Array;
 
-    #[wasm_bindgen(js_namespace = globalThis, js_name = lpBrowserSerialRelease)]
+    #[wasm_bindgen(js_name = releasePort)]
     fn js_release(id: u32) -> Promise;
 
-    #[wasm_bindgen(js_namespace = globalThis, js_name = lpBrowserSerialClose)]
+    #[wasm_bindgen(js_name = closePort)]
     fn js_close(id: u32) -> Promise;
 }
 
@@ -41,21 +41,21 @@ pub fn is_supported() -> bool {
     js_is_supported()
 }
 
-pub async fn request_port() -> Result<BrowserSerialPortHandle, StudioRuntimeError> {
+pub async fn request_port() -> Result<BrowserSerialPortHandle, LinkError> {
     let value = JsFuture::from(js_request_port()).await.map_err(js_error)?;
     let id = reflect_u32(&value, "id")?;
     let label = reflect_string(&value, "label")?;
     Ok(BrowserSerialPortHandle { id, label })
 }
 
-pub async fn open(id: u32, baud_rate: u32) -> Result<(), StudioRuntimeError> {
+pub async fn open(id: u32, baud_rate: u32) -> Result<(), LinkError> {
     JsFuture::from(js_open(id, baud_rate))
         .await
         .map(|_| ())
         .map_err(js_error)
 }
 
-pub async fn write_line(id: u32, line: &str) -> Result<(), StudioRuntimeError> {
+pub async fn write_line(id: u32, line: &str) -> Result<(), LinkError> {
     JsFuture::from(js_write_line(id, line))
         .await
         .map(|_| ())
@@ -70,14 +70,14 @@ pub fn take_errors(id: u32) -> Vec<String> {
     js_array_to_strings(js_take_errors(id))
 }
 
-pub async fn release(id: u32) -> Result<(), StudioRuntimeError> {
+pub async fn release(id: u32) -> Result<(), LinkError> {
     JsFuture::from(js_release(id))
         .await
         .map(|_| ())
         .map_err(js_error)
 }
 
-pub async fn close(id: u32) -> Result<(), StudioRuntimeError> {
+pub async fn close(id: u32) -> Result<(), LinkError> {
     JsFuture::from(js_close(id))
         .await
         .map(|_| ())
@@ -88,29 +88,29 @@ fn js_array_to_strings(array: Array) -> Vec<String> {
     array.iter().filter_map(|value| value.as_string()).collect()
 }
 
-fn reflect_u32(value: &JsValue, key: &str) -> Result<u32, StudioRuntimeError> {
+fn reflect_u32(value: &JsValue, key: &str) -> Result<u32, LinkError> {
     let value = Reflect::get(value, &JsValue::from_str(key)).map_err(js_error)?;
     let Some(value) = value.as_f64() else {
-        return Err(StudioRuntimeError::Browser(format!(
+        return Err(LinkError::other(format!(
             "browser serial response missing numeric `{key}`"
         )));
     };
     Ok(value as u32)
 }
 
-fn reflect_string(value: &JsValue, key: &str) -> Result<String, StudioRuntimeError> {
+fn reflect_string(value: &JsValue, key: &str) -> Result<String, LinkError> {
     let value = Reflect::get(value, &JsValue::from_str(key)).map_err(js_error)?;
-    value.as_string().ok_or_else(|| {
-        StudioRuntimeError::Browser(format!("browser serial response missing string `{key}`"))
-    })
+    value
+        .as_string()
+        .ok_or_else(|| LinkError::other(format!("browser serial response missing string `{key}`")))
 }
 
-fn js_error(value: JsValue) -> StudioRuntimeError {
+fn js_error(value: JsValue) -> LinkError {
     if let Some(error) = value.dyn_ref::<js_sys::Error>() {
-        StudioRuntimeError::Browser(error.message().into())
+        LinkError::other(error.message())
     } else if let Some(message) = value.as_string() {
-        StudioRuntimeError::Browser(message)
+        LinkError::other(message)
     } else {
-        StudioRuntimeError::Browser(format!("{value:?}"))
+        LinkError::other(format!("{value:?}"))
     }
 }

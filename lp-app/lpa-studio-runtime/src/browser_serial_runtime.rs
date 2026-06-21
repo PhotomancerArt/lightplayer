@@ -1,39 +1,48 @@
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use lpa_link::link_endpoint::LinkEndpointId;
 use lpa_link::link_provider::LinkProviderId;
+use lpa_link::link_session::LinkSessionId;
 use lpa_link::providers::browser_serial_esp32::{
-    BrowserSerialEsp32Provider, BrowserSerialEsp32Session,
+    BrowserEsp32FirmwareManifest, BrowserEsp32FlashProgress, BrowserSerialEsp32Options,
+    BrowserSerialEsp32Provider,
 };
-use lpa_link::{LinkConnectionKind, LinkProvider, LinkSession};
+use lpa_link::{LinkConnectionKind, LinkProvider};
 use lpa_studio_core::{
-    ActionId, ActionOrigin, DeviceAccessStatus, DeviceCapability, DeviceIssue,
-    DeviceIssueKind, LinkActionRequest, ProgressState, ProjectActionRequest, ProviderAvailability,
-    ProviderCapability, ProviderCardState, ProviderIntent, ProvisioningReason,
-    RecoveryAction, StudioActionKind, StudioApp, StudioDiagnostic, StudioEffect,
-    StudioEvent, StudioLogEntry, StudioLogLevel, TargetKind, TargetProbeResult, BROWSER_SERIAL_ESP32_PROVIDER_ID,
+    ActionId, ActionOrigin, BROWSER_SERIAL_ESP32_PROVIDER_ID, DeviceAccessStatus, DeviceCapability,
+    DeviceIssue, DeviceIssueKind, LinkActionRequest, ProgressState, ProjectActionRequest,
+    ProviderAvailability, ProviderCapability, ProviderCardState, ProviderIntent,
+    ProvisioningReason, RecoveryAction, StudioActionKind, StudioApp, StudioDiagnostic,
+    StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel, TargetKind, TargetProbeResult,
 };
 use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 
-use crate::browser_esp32_flash::{self, DEFAULT_ESP32C6_FIRMWARE_MANIFEST_URL};
-use crate::browser_serial_protocol_client::BrowserSerialProtocolClient;
-use crate::browser_serial_shim;
-use crate::effect_executor::EffectExecutor;
 use crate::StudioRuntimeError;
+use crate::browser_serial_protocol_client::BrowserSerialProtocolClient;
+use crate::effect_executor::EffectExecutor;
 
 pub struct BrowserSerialStudioRuntime {
-    provider: BrowserSerialEsp32Provider,
-    endpoint_ports: Vec<(LinkEndpointId, u32)>,
-    session: Option<BrowserSerialEsp32Session>,
+    provider: Rc<RefCell<BrowserSerialEsp32Provider>>,
+    session_id: Option<LinkSessionId>,
     client: Option<BrowserSerialProtocolClient>,
-    flash_manifest: Option<browser_esp32_flash::BrowserEsp32FirmwareManifest>,
+    flash_manifest: Option<BrowserEsp32FirmwareManifest>,
     flash_available: bool,
 }
 
 impl BrowserSerialStudioRuntime {
     pub fn new() -> Self {
+        let options = BrowserSerialEsp32Options::default();
+        Self::with_options(options)
+    }
+
+    pub fn with_options(options: BrowserSerialEsp32Options) -> Self {
         Self {
-            provider: BrowserSerialEsp32Provider::new(BROWSER_SERIAL_ESP32_PROVIDER_ID),
-            endpoint_ports: Vec::new(),
-            session: None,
+            provider: Rc::new(RefCell::new(BrowserSerialEsp32Provider::with_options(
+                BROWSER_SERIAL_ESP32_PROVIDER_ID,
+                options,
+            ))),
+            session_id: None,
             client: None,
             flash_manifest: None,
             flash_available: false,
@@ -41,24 +50,15 @@ impl BrowserSerialStudioRuntime {
     }
 
     pub async fn close(&mut self) -> Result<(), StudioRuntimeError> {
-        let mut closed_port_ids = Vec::new();
-        if let Some(client) = &self.client {
-            browser_serial_shim::close(client.port_id()).await?;
-            closed_port_ids.push(client.port_id());
-        }
-        for (_, port_id) in &self.endpoint_ports {
-            if !closed_port_ids.contains(port_id) {
-                browser_serial_shim::close(*port_id).await?;
-            }
-        }
-        if let Some(session) = &mut self.session {
-            session
-                .close()
+        if let Some(session_id) = &self.session_id {
+            self.provider
+                .borrow_mut()
+                .close(session_id)
                 .await
                 .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
         }
         self.client = None;
-        self.session = None;
+        self.session_id = None;
         Ok(())
     }
 
@@ -72,7 +72,7 @@ impl BrowserSerialStudioRuntime {
                 provider_id.as_str().to_string(),
             ));
         }
-        if !browser_serial_shim::is_supported() {
+        if !self.provider.borrow().is_serial_supported() {
             return Ok(vec![StudioEvent::DeviceAccessUpdated {
                 action_id: Some(action_id),
                 provider_id,
@@ -82,8 +82,8 @@ impl BrowserSerialStudioRuntime {
             }]);
         }
 
-        let port = match browser_serial_shim::request_port().await {
-            Ok(port) => port,
+        match self.provider.borrow_mut().request_access().await {
+            Ok(_) => {}
             Err(error) => {
                 return Ok(vec![StudioEvent::DeviceAccessUpdated {
                     action_id: Some(action_id),
@@ -95,10 +95,9 @@ impl BrowserSerialStudioRuntime {
             }
         };
 
-        let endpoint_id = self.provider.create_granted_endpoint(port.label);
-        self.endpoint_ports.push((endpoint_id.clone(), port.id));
         let endpoints = self
             .provider
+            .borrow_mut()
             .discover()
             .await
             .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
@@ -129,6 +128,7 @@ impl BrowserSerialStudioRuntime {
         }
         let endpoints = self
             .provider
+            .borrow_mut()
             .discover()
             .await
             .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
@@ -143,11 +143,9 @@ impl BrowserSerialStudioRuntime {
         &mut self,
         action_id: lpa_studio_core::ActionId,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
-        let serial_supported = browser_serial_shim::is_supported();
-        let flash_manifest = if serial_supported && browser_esp32_flash::is_supported() {
-            browser_esp32_flash::load_manifest(DEFAULT_ESP32C6_FIRMWARE_MANIFEST_URL)
-                .await
-                .ok()
+        let serial_supported = self.provider.borrow().is_serial_supported();
+        let flash_manifest = if serial_supported && self.provider.borrow().is_flash_supported() {
+            self.provider.borrow().load_firmware_manifest().await.ok()
         } else {
             None
         };
@@ -167,6 +165,7 @@ impl BrowserSerialStudioRuntime {
         };
         let endpoints = self
             .provider
+            .borrow_mut()
             .discover()
             .await
             .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
@@ -190,16 +189,7 @@ impl BrowserSerialStudioRuntime {
         action_id: ActionId,
         endpoint_id: LinkEndpointId,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
-        let port_id = self.port_id_for_endpoint(&endpoint_id)?;
-        if let Err(error) = browser_serial_shim::open(port_id, DEFAULT_SERIAL_BAUD_RATE).await {
-            return Ok(Self::connection_failed_events(
-                action_id,
-                endpoint_id,
-                format!("Could not open browser serial port: {error}"),
-            ));
-        }
-
-        let mut session = match self.provider.connect(&endpoint_id).await {
+        let session = match self.provider.borrow_mut().connect(&endpoint_id).await {
             Ok(session) => session,
             Err(error) => {
                 return Ok(Self::connection_failed_events(
@@ -209,7 +199,20 @@ impl BrowserSerialStudioRuntime {
                 ));
             }
         };
-        let connection = match session.connection().await {
+        if let Err(error) = self
+            .provider
+            .borrow_mut()
+            .open_protocol(session.id(), DEFAULT_SERIAL_BAUD_RATE)
+            .await
+        {
+            return Ok(Self::connection_failed_events(
+                action_id,
+                endpoint_id,
+                format!("Could not open browser serial port: {error}"),
+            ));
+        }
+
+        let connection = match self.provider.borrow_mut().connection(session.id()).await {
             Ok(connection) => connection,
             Err(error) => {
                 return Ok(Self::connection_failed_events(
@@ -220,16 +223,27 @@ impl BrowserSerialStudioRuntime {
             }
         };
         let session_id = session.id().clone();
-        let logs = session.logs();
-        let diagnostics = session.diagnostics();
+        let logs = self
+            .provider
+            .borrow()
+            .logs(&session_id)
+            .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
+        let diagnostics = self
+            .provider
+            .borrow()
+            .diagnostics(&session_id)
+            .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
         let connection_kind = match connection.kind {
             LinkConnectionKind::BrowserSerialEsp32 { protocol } => {
                 LinkConnectionKind::BrowserSerialEsp32 { protocol }
             }
             other => other,
         };
-        self.client = Some(BrowserSerialProtocolClient::new(port_id));
-        self.session = Some(session);
+        self.client = Some(BrowserSerialProtocolClient::new(
+            Rc::clone(&self.provider),
+            session_id.clone(),
+        ));
+        self.session_id = Some(session_id.clone());
 
         let mut events = Vec::new();
         for log in logs {
@@ -283,7 +297,6 @@ impl BrowserSerialStudioRuntime {
         action_id: ActionId,
         endpoint_id: LinkEndpointId,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
-        let port_id = self.port_id_for_endpoint(&endpoint_id)?;
         if let Some(client) = &mut self.client {
             match client.probe_server().await {
                 Ok(mut events) => {
@@ -310,13 +323,13 @@ impl BrowserSerialStudioRuntime {
                     });
                     events.extend(self.release_protocol_session(action_id).await?);
                     return self
-                        .probe_bootloader_target(action_id, endpoint_id, port_id, events)
+                        .probe_bootloader_target(action_id, endpoint_id, events)
                         .await;
                 }
             }
         }
 
-        self.probe_bootloader_target(action_id, endpoint_id, port_id, Vec::new())
+        self.probe_bootloader_target(action_id, endpoint_id, Vec::new())
             .await
     }
 
@@ -324,10 +337,9 @@ impl BrowserSerialStudioRuntime {
         &mut self,
         action_id: ActionId,
         endpoint_id: LinkEndpointId,
-        port_id: u32,
         mut events: Vec<StudioEvent>,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
-        if !browser_esp32_flash::is_supported() {
+        if !self.provider.borrow().is_flash_supported() {
             events.push(StudioEvent::TargetProbeFailed {
                 action_id,
                 endpoint_id: endpoint_id.clone(),
@@ -345,7 +357,7 @@ impl BrowserSerialStudioRuntime {
             return Ok(events);
         }
 
-        match browser_esp32_flash::probe_target(port_id).await {
+        match self.provider.borrow_mut().probe_target(&endpoint_id).await {
             Ok(result) => {
                 for line in result.logs {
                     events.push(StudioEvent::LogReceived {
@@ -430,18 +442,16 @@ impl BrowserSerialStudioRuntime {
         &mut self,
         action_id: ActionId,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
-        let session_id = self.session.as_ref().map(|session| session.id().clone());
-        if let Some(client) = &self.client {
-            browser_serial_shim::release(client.port_id()).await?;
-        }
-        if let Some(session) = &mut self.session {
-            session
-                .close()
+        let session_id = self.session_id.clone();
+        if let Some(session_id) = &session_id {
+            self.provider
+                .borrow_mut()
+                .release_session_for_management(session_id)
                 .await
                 .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
         }
         self.client = None;
-        self.session = None;
+        self.session_id = None;
         Ok(session_id
             .map(|session_id| StudioEvent::DeviceDisconnected {
                 action_id,
@@ -474,7 +484,7 @@ impl BrowserSerialStudioRuntime {
         endpoint_id: LinkEndpointId,
         requested_firmware_id: Option<String>,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
-        if !browser_esp32_flash::is_supported() {
+        if !self.provider.borrow().is_flash_supported() {
             return Ok(Self::flash_issue_events(
                 action_id,
                 endpoint_id,
@@ -489,9 +499,7 @@ impl BrowserSerialStudioRuntime {
 
         let manifest = match self.flash_manifest.clone() {
             Some(manifest) => manifest,
-            None => match browser_esp32_flash::load_manifest(DEFAULT_ESP32C6_FIRMWARE_MANIFEST_URL)
-                .await
-            {
+            None => match self.provider.borrow().load_firmware_manifest().await {
                 Ok(manifest) => {
                     self.flash_available = true;
                     self.flash_manifest = Some(manifest.clone());
@@ -535,7 +543,6 @@ impl BrowserSerialStudioRuntime {
             ));
         }
 
-        let port_id = self.port_id_for_endpoint(&endpoint_id)?;
         let disconnected_events = self.release_protocol_session(action_id).await?;
 
         let mut events = vec![StudioEvent::ProvisioningProgressUpdated {
@@ -545,7 +552,10 @@ impl BrowserSerialStudioRuntime {
                 .with_percent(0),
         }];
 
-        match browser_esp32_flash::flash_firmware(port_id, DEFAULT_ESP32C6_FIRMWARE_MANIFEST_URL)
+        match self
+            .provider
+            .borrow_mut()
+            .flash_firmware(&endpoint_id)
             .await
         {
             Ok(result) => {
@@ -561,7 +571,7 @@ impl BrowserSerialStudioRuntime {
                 for progress in result.progress {
                     events.push(StudioEvent::ProvisioningProgressUpdated {
                         action_id: None,
-                        progress,
+                        progress: map_flash_progress(progress),
                     });
                 }
                 if let Some(chip_name) = result.chip_name {
@@ -637,22 +647,6 @@ impl BrowserSerialStudioRuntime {
         self.client
             .as_mut()
             .ok_or(StudioRuntimeError::MissingClient)
-    }
-
-    fn port_id_for_endpoint(
-        &self,
-        endpoint_id: &LinkEndpointId,
-    ) -> Result<u32, StudioRuntimeError> {
-        self.endpoint_ports
-            .iter()
-            .find(|(entry_endpoint_id, _)| entry_endpoint_id == endpoint_id)
-            .map(|(_, port_id)| *port_id)
-            .ok_or_else(|| {
-                StudioRuntimeError::Link(format!(
-                    "no browser serial port handle for endpoint {}",
-                    endpoint_id.as_str()
-                ))
-            })
     }
 }
 
@@ -813,6 +807,19 @@ fn browser_serial_capabilities(flash_available: bool) -> Vec<DeviceCapability> {
         capabilities.push(DeviceCapability::FlashFirmware);
     }
     capabilities
+}
+
+fn map_flash_progress(progress: BrowserEsp32FlashProgress) -> ProgressState {
+    let mut state = ProgressState::new(progress.label);
+    if let Some(total_steps) = progress.total_steps {
+        state = state.with_steps(progress.completed_steps, total_steps);
+    } else {
+        state.completed_steps = progress.completed_steps;
+    }
+    if let Some(percent) = progress.percent {
+        state = state.with_percent(percent as u8);
+    }
+    state
 }
 
 fn is_supported_esp32c6_chip(chip_name: &str) -> bool {

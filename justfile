@@ -181,8 +181,7 @@ studio-web-dev-build: install-wasm32-target
     mkdir -p lp-app/lpa-studio-web/public/pkg
     wasm-bindgen target/wasm32-unknown-unknown/debug/lpa-studio-web.wasm \
         --out-dir lp-app/lpa-studio-web/public/pkg --target web
-    echo "Copying fw-browser worker assets..."
-    cp lp-fw/fw-browser/www/fw-browser-worker.js lp-app/lpa-studio-web/public/fw-browser-worker.js
+    echo "Copying fw-browser wasm artifacts..."
     cp lp-fw/fw-browser/www/pkg/fw_browser.js lp-app/lpa-studio-web/public/pkg/fw_browser.js
     cp lp-fw/fw-browser/www/pkg/fw_browser_bg.wasm lp-app/lpa-studio-web/public/pkg/fw_browser_bg.wasm
     echo "Artifacts: lp-app/lpa-studio-web/public/ (debug build)"
@@ -299,11 +298,10 @@ studio-web-build: install-wasm32-target fw-browser-build studio-firmware-package
     mkdir -p lp-app/lpa-studio-web/public/pkg
     wasm-bindgen target/wasm32-unknown-unknown/release/lpa-studio-web.wasm \
         --out-dir lp-app/lpa-studio-web/public/pkg --target web
-    echo "Copying fw-browser worker assets..."
-    cp lp-fw/fw-browser/www/fw-browser-worker.js lp-app/lpa-studio-web/public/fw-browser-worker.js
+    echo "Copying fw-browser wasm artifacts..."
     cp lp-fw/fw-browser/www/pkg/fw_browser.js lp-app/lpa-studio-web/public/pkg/fw_browser.js
     cp lp-fw/fw-browser/www/pkg/fw_browser_bg.wasm lp-app/lpa-studio-web/public/pkg/fw_browser_bg.wasm
-    echo "Artifacts: lp-app/lpa-studio-web/public/ (index.html, fw-browser-worker.js, pkg/)"
+    echo "Artifacts: lp-app/lpa-studio-web/public/ (index.html, pkg/)"
 
 studio-web: studio-web-build
     #!/usr/bin/env bash

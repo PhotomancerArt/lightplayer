@@ -1,39 +1,59 @@
+use crate::LinkCapabilities;
+use crate::link_connection::LinkConnectionKind;
 use crate::link_endpoint::LinkEndpointId;
-use crate::{LinkConnection, LinkDiagnostic, LinkError, LinkLogEntry};
+use crate::link_provider::LinkProviderId;
 use serde::{Deserialize, Serialize};
 
-/// Live ownership of a connected endpoint.
+/// Provider-neutral snapshot of a live link session.
 ///
 /// A session begins when a provider successfully connects to a `LinkEndpoint`.
-/// It owns the lifecycle below the server protocol connection: an open serial
-/// port, a spawned `fw-host` runtime, a browser worker identity, or another
-/// provider-specific live resource.
+/// The concrete resources below the session, such as browser serial ports,
+/// workers, spawned host runtimes, and protocol streams, remain owned by the
+/// provider that created the session.
 ///
-/// A session is not itself the `lp-server` client protocol. Call
-/// `connection()` to get the protocol handoff for runtimes that expose one.
-#[allow(async_fn_in_trait, reason = "Link sessions are not object-safe yet")]
-pub trait LinkSession {
-    /// Stable id for this live session.
-    fn id(&self) -> &LinkSessionId;
+/// A `LinkSession` is not itself the `lp-server` client protocol and does not
+/// own resources directly. Call `LinkProvider::connection()` with the session id
+/// when the caller needs the protocol handoff.
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub struct LinkSession {
+    pub id: LinkSessionId,
+    pub provider_id: LinkProviderId,
+    pub endpoint_id: LinkEndpointId,
+    pub connection_kind: LinkConnectionKind,
+    pub capabilities: LinkCapabilities,
+    pub status: LinkSessionStatus,
+}
 
-    /// Endpoint this session was opened from.
-    fn endpoint_id(&self) -> &LinkEndpointId;
+impl LinkSession {
+    pub fn new(
+        id: impl Into<LinkSessionId>,
+        provider_id: impl Into<LinkProviderId>,
+        endpoint_id: impl Into<LinkEndpointId>,
+        connection_kind: LinkConnectionKind,
+        capabilities: LinkCapabilities,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            provider_id: provider_id.into(),
+            endpoint_id: endpoint_id.into(),
+            connection_kind,
+            capabilities,
+            status: LinkSessionStatus::Open,
+        }
+    }
 
-    /// Link-level logs available through the session.
-    fn logs(&self) -> Vec<LinkLogEntry>;
+    pub fn id(&self) -> &LinkSessionId {
+        &self.id
+    }
 
-    /// Link-level diagnostics available through the session.
-    fn diagnostics(&self) -> Vec<LinkDiagnostic>;
+    pub fn endpoint_id(&self) -> &LinkEndpointId {
+        &self.endpoint_id
+    }
 
-    /// Open or return the client connection associated with this session.
-    ///
-    /// The session owns lifecycle below the connection. For `host-process`, that
-    /// means keeping the in-process `fw-host` runtime alive while the returned
-    /// transport is in use.
-    async fn connection(&mut self) -> Result<LinkConnection, LinkError>;
-
-    /// Close provider-owned live resources for this session.
-    async fn close(&mut self) -> Result<(), LinkError>;
+    pub fn with_status(mut self, status: LinkSessionStatus) -> Self {
+        self.status = status;
+        self
+    }
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Deserialize, Serialize)]
@@ -59,4 +79,12 @@ impl From<String> for LinkSessionId {
     fn from(value: String) -> Self {
         Self::new(value)
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
+pub enum LinkSessionStatus {
+    Open,
+    Closing,
+    Closed,
+    Error { message: String },
 }

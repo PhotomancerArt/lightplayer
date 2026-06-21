@@ -3,13 +3,13 @@ use lpa_link::link_provider::LinkProviderId;
 use lpa_link::link_session::LinkSessionId;
 use lpa_link::{LinkConnectionKind, LinkEndpoint};
 use lpa_studio_core::{
-    ActionId, ClientSession, ConnectedDeviceState, ConnectionSession,
-    DeviceAccess, DeviceAccessStatus, DeviceCapability, DeviceId, DeviceIssue,
-    DeviceIssueKind, DeviceSession, LinkState, ProgressState, ProjectChoice, ProjectSelectionReason, ProjectSession,
-    ProviderAvailability, ProviderCapability, ProviderCardState, ProviderIntent,
-    ProvisioningReason, RecoveryAction, RecoveryReason, StudioDiagnostic, StudioHeartbeat,
-    StudioLogEntry, StudioLogLevel, StudioState, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID,
-    STUDIO_DEMO_PROJECT_ID,
+    ActionId, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID, ClientSession,
+    ConnectedDeviceState, ConnectionSession, DeviceAccess, DeviceAccessStatus, DeviceCapability,
+    DeviceId, DeviceIssue, DeviceIssueKind, DeviceSession, LinkState, ProgressState, ProjectChoice,
+    ProjectSelectionReason, ProjectSession, ProviderAvailability, ProviderCapability,
+    ProviderCardState, ProviderIntent, ProvisioningReason, RecoveryAction, RecoveryReason,
+    STUDIO_DEMO_PROJECT_ID, StudioDiagnostic, StudioHeartbeat, StudioLogEntry, StudioLogLevel,
+    StudioState,
 };
 use lpc_model::{
     ArtifactLocation, ArtifactSpec, AssetBodyOrigin, AssetContentType, AssetEntry, AssetLocation,

@@ -11,12 +11,10 @@ use crate::components::log_panel::LogPanel;
 use crate::components::project_panel::ProjectPanel;
 use crate::components::status_bar::StatusBar;
 use crate::web_provisioning_controller::{
-    auto_advance_web_flow, dispatch_web_action, WebProvisioningController,
+    WebProvisioningController, auto_advance_web_flow, dispatch_web_action,
 };
 
 const STYLE: &str = include_str!("style.css");
-const WORKER_URL: &str = "./fw-browser-worker.js";
-
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn App() -> Element {
     #[cfg(feature = "stories")]
@@ -28,7 +26,7 @@ pub fn App() -> Element {
     }
 
     let studio = use_signal(StudioApp::new);
-    let controller = use_signal(|| WebProvisioningController::new(WORKER_URL));
+    let controller = use_signal(WebProvisioningController::new);
     let mut running = use_signal(|| false);
     use_future(move || async move {
         running.set(true);

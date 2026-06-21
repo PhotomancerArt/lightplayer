@@ -1,23 +1,11 @@
 const sessions = new Map();
 let nextSessionId = 1;
 
-export function installLightPlayerBrowserSerial() {
-  globalThis.lpBrowserSerialIsSupported = isSupported;
-  globalThis.lpBrowserSerialRequestPort = requestPort;
-  globalThis.lpBrowserSerialOpen = openPort;
-  globalThis.lpBrowserSerialWriteLine = writeLine;
-  globalThis.lpBrowserSerialTakeLines = takeLines;
-  globalThis.lpBrowserSerialTakeErrors = takeErrors;
-  globalThis.lpBrowserSerialRelease = releasePort;
-  globalThis.lpBrowserSerialGetPort = getPort;
-  globalThis.lpBrowserSerialClose = closePort;
-}
-
-function isSupported() {
+export function isSupported() {
   return Boolean(globalThis.navigator?.serial);
 }
 
-async function requestPort() {
+export async function requestPort() {
   if (!isSupported()) {
     throw new Error("Web Serial is not supported in this browser.");
   }
@@ -38,7 +26,7 @@ async function requestPort() {
   return { id, label: labelForPort(port) };
 }
 
-async function openPort(id, baudRate) {
+export async function openPort(id, baudRate) {
   const session = requireSession(id);
   await session.port.open({ baudRate });
   session.reader = session.port.readable.getReader();
@@ -48,7 +36,7 @@ async function openPort(id, baudRate) {
   readPump(id, session);
 }
 
-async function writeLine(id, line) {
+export async function writeLine(id, line) {
   const session = requireSession(id);
   if (!session.writer) {
     throw new Error("Serial port is not open.");
@@ -56,17 +44,17 @@ async function writeLine(id, line) {
   await session.writer.write(session.encoder.encode(line));
 }
 
-function takeLines(id) {
+export function takeLines(id) {
   const session = requireSession(id);
   return session.lines.splice(0, session.lines.length);
 }
 
-function takeErrors(id) {
+export function takeErrors(id) {
   const session = requireSession(id);
   return session.errors.splice(0, session.errors.length);
 }
 
-async function closePort(id) {
+export async function closePort(id) {
   const session = sessions.get(id);
   if (!session) {
     return;
@@ -75,7 +63,7 @@ async function closePort(id) {
   sessions.delete(id);
 }
 
-async function releasePort(id) {
+export async function releasePort(id) {
   const session = sessions.get(id);
   if (!session) {
     return;
@@ -115,7 +103,7 @@ async function releasePort(id) {
   session.releasing = false;
 }
 
-function getPort(id) {
+export function getPort(id) {
   return requireSession(id).port;
 }
 

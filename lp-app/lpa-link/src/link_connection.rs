@@ -5,12 +5,12 @@ use crate::link_session::LinkSessionId;
 
 /// Handoff from a live link session to the `lp-server` protocol layer.
 ///
-/// `LinkConnection` is created by `LinkSession::connection()`. It identifies
+/// `LinkConnection` is created by `LinkProvider::connection()`. It identifies
 /// which endpoint/session produced the server protocol connection and describes
 /// the provider/runtime flavor used to reach that server.
 ///
 /// It is not an endpoint and it does not own the whole session lifecycle. Keep
-/// the `LinkSession` alive while using the connection.
+/// the provider-owned session open while using the connection.
 #[derive(Clone, Deserialize, Serialize)]
 pub struct LinkConnection {
     /// Endpoint that the owning session was opened from.

@@ -1,21 +1,22 @@
+use lpa_link::LinkProvider;
 use lpa_link::link_endpoint::LinkEndpointId;
 use lpa_link::link_provider::LinkProviderId;
-use lpa_link::providers::host_process::{HostProcessProvider, HostProcessSession};
-use lpa_link::{LinkProvider, LinkSession};
+use lpa_link::link_session::LinkSessionId;
+use lpa_link::providers::host_process::HostProcessProvider;
 use lpa_studio_core::{
-    DeviceAccessStatus, DeviceCapability, ProviderAvailability, ProviderCapability,
-    ProviderCardState, ProviderIntent, StudioEffect, StudioEvent, StudioLogEntry,
-    StudioLogLevel, TargetProbeResult, HOST_PROCESS_PROVIDER_ID,
+    DeviceAccessStatus, DeviceCapability, HOST_PROCESS_PROVIDER_ID, ProviderAvailability,
+    ProviderCapability, ProviderCardState, ProviderIntent, StudioEffect, StudioEvent,
+    StudioLogEntry, StudioLogLevel, TargetProbeResult,
 };
 
+use crate::StudioRuntimeError;
 use crate::client_session_runtime::ClientSessionRuntime;
 use crate::effect_executor::EffectExecutor;
 use crate::project_session_runtime::ProjectSessionRuntime;
-use crate::StudioRuntimeError;
 
 pub struct HostProcessStudioRuntime {
     provider: HostProcessProvider,
-    session: Option<HostProcessSession>,
+    session_id: Option<LinkSessionId>,
     client: Option<ClientSessionRuntime>,
 }
 
@@ -25,19 +26,19 @@ impl HostProcessStudioRuntime {
         provider.create_memory_endpoint("Studio host runtime");
         Self {
             provider,
-            session: None,
+            session_id: None,
             client: None,
         }
     }
 
     pub async fn close(&mut self) -> Result<(), StudioRuntimeError> {
-        if let Some(session) = &mut self.session {
-            session
-                .close()
+        if let Some(session_id) = &self.session_id {
+            self.provider
+                .close(session_id)
                 .await
                 .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
         }
-        self.session = None;
+        self.session_id = None;
         self.client = None;
         Ok(())
     }
@@ -101,24 +102,31 @@ impl HostProcessStudioRuntime {
         action_id: lpa_studio_core::ActionId,
         endpoint_id: LinkEndpointId,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
-        let mut session = self
+        let session = self
             .provider
             .connect(&endpoint_id)
             .await
             .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
-        let connection = session
-            .connection()
+        let connection = self
+            .provider
+            .connection(session.id())
             .await
             .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
         let transport = connection
             .server_connection()
             .ok_or(StudioRuntimeError::MissingClient)?;
         let session_id = session.id().clone();
-        let logs = session.logs();
-        let diagnostics = session.diagnostics();
+        let logs = self
+            .provider
+            .logs(&session_id)
+            .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
+        let diagnostics = self
+            .provider
+            .diagnostics(&session_id)
+            .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
         let connection_kind = connection.kind.clone();
         self.client = Some(ClientSessionRuntime::new(transport));
-        self.session = Some(session);
+        self.session_id = Some(session_id.clone());
 
         let mut events = Vec::new();
         for log in logs {

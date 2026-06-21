@@ -31,8 +31,9 @@ The wasm-bindgen exports are intentionally small and firmware-shaped:
 - drain structured output envelope JSON
 - read runtime count
 
-`fw-browser/www/fw-browser-worker.js` wraps those exports in a module Web Worker
-that accepts the same envelope vocabulary over `postMessage`.
+`lpa-link` owns the Studio browser-worker wrapper under its
+`browser_worker` provider. The `fw-browser/www/fw-browser-worker.js` file is a
+standalone smoke-page wrapper for this crate's local browser smoke test.
 
 Input envelopes currently include `protocol_in`, `tick`, `start`, `stop`, and
 `drain`. `protocol_in` carries a whole `lpc_wire` client JSON frame. Output

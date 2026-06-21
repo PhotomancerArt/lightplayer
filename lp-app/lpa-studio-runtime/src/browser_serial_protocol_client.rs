@@ -3,6 +3,9 @@ use std::rc::Rc;
 
 use lpa_client::project_deploy::{project_load_path, request_label};
 use lpa_client::{ClientError, ClientEvent, ClientIo, ClientOutcome, LpClient};
+use lpa_link::LinkProvider;
+use lpa_link::link_session::LinkSessionId;
+use lpa_link::providers::browser_serial_esp32::BrowserSerialEsp32Provider;
 use lpc_wire::{ClientMessage, TransportError, WireServerMessage, json};
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 
@@ -10,7 +13,6 @@ use lpa_studio_core::{
     ProjectStateResult, StudioDiagnostic, StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel,
 };
 
-use crate::browser_serial_shim;
 use crate::protocol_event::client_event;
 use crate::{StudioRuntimeError, demo_project};
 
@@ -18,23 +20,22 @@ const MALFORMED_PROTOCOL_SNIPPET_LIMIT: usize = 4_096;
 const DEVICE_LOG_SNIPPET_LIMIT: usize = 1_024;
 
 pub struct BrowserSerialProtocolClient {
-    port_id: u32,
     client: LpClient<BrowserSerialClientIo>,
     io_state: Rc<RefCell<BrowserSerialClientState>>,
 }
 
 impl BrowserSerialProtocolClient {
-    pub fn new(port_id: u32) -> Self {
-        let io_state = Rc::new(RefCell::new(BrowserSerialClientState::new(port_id)));
+    pub fn new(
+        provider: Rc<RefCell<BrowserSerialEsp32Provider>>,
+        session_id: LinkSessionId,
+    ) -> Self {
+        let io_state = Rc::new(RefCell::new(BrowserSerialClientState::new(
+            provider, session_id,
+        )));
         Self {
-            port_id,
             client: LpClient::new(BrowserSerialClientIo::new(Rc::clone(&io_state))),
             io_state,
         }
-    }
-
-    pub fn port_id(&self) -> u32 {
-        self.port_id
     }
 
     pub async fn probe_server(&mut self) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
@@ -187,10 +188,6 @@ impl BrowserSerialClientIo {
         Self { state }
     }
 
-    fn port_id(&self) -> u32 {
-        self.state.borrow().port_id
-    }
-
     fn handle_line(&self, line: String) -> Result<Option<WireServerMessage>, TransportError> {
         if line.is_empty() {
             return Ok(None);
@@ -260,14 +257,29 @@ impl ClientIo for BrowserSerialClientIo {
             "[browser-serial] tx request id={request_id} kind={label} json_bytes={}",
             frame.len()
         ));
-        browser_serial_shim::write_line(self.port_id(), &format!("M!{frame}\n"))
+        let (provider, session_id) = {
+            let state = self.state.borrow();
+            (Rc::clone(&state.provider), state.session_id.clone())
+        };
+        provider
+            .borrow()
+            .write_line(&session_id, &format!("M!{frame}\n"))
             .await
-            .map_err(studio_error_to_transport)
+            .map_err(link_error_to_transport)
     }
 
     async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
         for _ in 0..600 {
-            for error in browser_serial_shim::take_errors(self.port_id()) {
+            let (provider, session_id) = {
+                let state = self.state.borrow();
+                (Rc::clone(&state.provider), state.session_id.clone())
+            };
+
+            for error in provider
+                .borrow()
+                .take_errors(&session_id)
+                .map_err(link_error_to_transport)?
+            {
                 let message = format!(
                     "browser serial error while {}: {error}",
                     self.wait_context()
@@ -285,7 +297,11 @@ impl ClientIo for BrowserSerialClientIo {
                 return Err(TransportError::Other(message));
             }
 
-            for line in browser_serial_shim::take_lines(self.port_id()) {
+            for line in provider
+                .borrow()
+                .take_lines(&session_id)
+                .map_err(link_error_to_transport)?
+            {
                 if let Some(response) = self.handle_line(line)? {
                     return Ok(response);
                 }
@@ -306,23 +322,31 @@ impl ClientIo for BrowserSerialClientIo {
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {
-        browser_serial_shim::close(self.port_id())
+        let (provider, session_id) = {
+            let state = self.state.borrow();
+            (Rc::clone(&state.provider), state.session_id.clone())
+        };
+        provider
+            .borrow_mut()
+            .close(&session_id)
             .await
-            .map_err(studio_error_to_transport)
+            .map_err(link_error_to_transport)
     }
 }
 
 struct BrowserSerialClientState {
-    port_id: u32,
+    provider: Rc<RefCell<BrowserSerialEsp32Provider>>,
+    session_id: LinkSessionId,
     last_request: Option<BrowserSerialRequest>,
     last_protocol_issue: Option<String>,
     pending_events: Vec<StudioEvent>,
 }
 
 impl BrowserSerialClientState {
-    fn new(port_id: u32) -> Self {
+    fn new(provider: Rc<RefCell<BrowserSerialEsp32Provider>>, session_id: LinkSessionId) -> Self {
         Self {
-            port_id,
+            provider,
+            session_id,
             last_request: None,
             last_protocol_issue: None,
             pending_events: Vec::new(),
@@ -369,6 +393,10 @@ fn map_client_error(error: ClientError) -> StudioRuntimeError {
 }
 
 fn studio_error_to_transport(error: StudioRuntimeError) -> TransportError {
+    TransportError::Other(error.to_string())
+}
+
+fn link_error_to_transport(error: lpa_link::LinkError) -> TransportError {
     TransportError::Other(error.to_string())
 }
 

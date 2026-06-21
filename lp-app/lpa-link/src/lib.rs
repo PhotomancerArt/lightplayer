@@ -24,3 +24,4 @@ pub use link_provider::LinkProvider;
 pub use link_provider::LinkProviderId;
 pub use link_session::LinkSession;
 pub use link_session::LinkSessionId;
+pub use link_session::LinkSessionStatus;

@@ -1,57 +1,58 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use crate::StudioRuntimeError;
 use crate::browser_protocol_client::BrowserProtocolClient;
 use crate::effect_executor::EffectExecutor;
 use crate::harness::RuntimeHarness;
-use crate::worker_envelope::{BrowserInputEnvelope, BrowserOutputEnvelope};
-use crate::StudioRuntimeError;
 use lpa_link::link_endpoint::LinkEndpointId;
 use lpa_link::link_provider::LinkProviderId;
-use lpa_link::providers::browser_worker::{BrowserWorkerProvider, BrowserWorkerSession};
-use lpa_link::{LinkConnectionKind, LinkProvider, LinkSession};
-use lpa_studio_core::{
-    ActionOrigin, DeviceAccessStatus, DeviceCapability, LinkActionRequest,
-    ProjectActionRequest, ProviderAvailability, ProviderCapability, ProviderCardState,
-    ProviderIntent, StudioActionKind, StudioApp, StudioEffect, StudioEvent, StudioLogEntry,
-    StudioLogLevel, TargetProbeResult, BROWSER_WORKER_PROVIDER_ID,
+use lpa_link::link_session::LinkSessionId;
+use lpa_link::providers::browser_worker::{
+    BrowserOutputEnvelope, BrowserWorkerOptions, BrowserWorkerProvider,
 };
-use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
-use web_sys::{MessageEvent, Worker, WorkerOptions, WorkerType};
+use lpa_link::{LinkConnectionKind, LinkProvider};
+use lpa_studio_core::{
+    ActionOrigin, BROWSER_WORKER_PROVIDER_ID, DeviceAccessStatus, DeviceCapability,
+    LinkActionRequest, ProjectActionRequest, ProviderAvailability, ProviderCapability,
+    ProviderCardState, ProviderIntent, StudioActionKind, StudioApp, StudioEffect, StudioEvent,
+    StudioLogEntry, StudioLogLevel, TargetProbeResult,
+};
 
 /// Browser Worker-backed Studio runtime used by the simulator provider.
 pub struct BrowserWorkerStudioRuntime {
-    worker_url: String,
-    provider: BrowserWorkerProvider,
-    session: Option<BrowserWorkerSession>,
+    provider: Rc<RefCell<BrowserWorkerProvider>>,
+    session_id: Option<LinkSessionId>,
     client: Option<BrowserProtocolClient>,
 }
 
 impl BrowserWorkerStudioRuntime {
-    pub fn new(worker_url: &str) -> Self {
-        let mut provider = BrowserWorkerProvider::new(BROWSER_WORKER_PROVIDER_ID);
+    pub fn new() -> Self {
+        Self::with_options(BrowserWorkerOptions::default())
+    }
+
+    pub fn with_options(options: BrowserWorkerOptions) -> Self {
+        let mut provider = BrowserWorkerProvider::with_options(BROWSER_WORKER_PROVIDER_ID, options);
         provider.create_worker_endpoint("Browser firmware runtime");
         Self {
-            worker_url: worker_url.to_string(),
-            provider,
-            session: None,
+            provider: Rc::new(RefCell::new(provider)),
+            session_id: None,
             client: None,
         }
     }
 
     pub async fn close(&mut self) -> Result<(), StudioRuntimeError> {
         if let Some(client) = &mut self.client {
-            client.close();
-        }
-        if let Some(session) = &mut self.session {
-            session
-                .close()
+            client.close().await?;
+        } else if let Some(session_id) = &self.session_id {
+            self.provider
+                .borrow_mut()
+                .close(session_id)
                 .await
                 .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
         }
         self.client = None;
-        self.session = None;
+        self.session_id = None;
         Ok(())
     }
 
@@ -61,6 +62,7 @@ impl BrowserWorkerStudioRuntime {
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
         let endpoints = self
             .provider
+            .borrow_mut()
             .discover()
             .await
             .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
@@ -117,6 +119,7 @@ impl BrowserWorkerStudioRuntime {
         }
         let endpoints = self
             .provider
+            .borrow_mut()
             .discover()
             .await
             .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
@@ -132,26 +135,35 @@ impl BrowserWorkerStudioRuntime {
         action_id: lpa_studio_core::ActionId,
         endpoint_id: LinkEndpointId,
     ) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
-        let mut session = self
+        let session = self
             .provider
+            .borrow_mut()
             .connect(&endpoint_id)
             .await
             .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
-        let connection = session
-            .connection()
+        let connection = self
+            .provider
+            .borrow_mut()
+            .connection(session.id())
             .await
             .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
         let session_id = session.id().clone();
-        let logs = session.logs();
-        let diagnostics = session.diagnostics();
+        let logs = self
+            .provider
+            .borrow()
+            .logs(&session_id)
+            .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
+        let diagnostics = self
+            .provider
+            .borrow()
+            .diagnostics(&session_id)
+            .map_err(|error| StudioRuntimeError::Link(error.to_string()))?;
         let connection_kind = match connection.kind {
             LinkConnectionKind::BrowserWorker { protocol } => {
                 LinkConnectionKind::BrowserWorker { protocol }
             }
             other => other,
         };
-        let mut worker = BrowserWorkerHandle::new(&self.worker_url)?;
-
         let mut events = Vec::new();
         for log in logs {
             events.push(StudioEvent::LogReceived {
@@ -163,10 +175,20 @@ impl BrowserWorkerStudioRuntime {
                 diagnostic: lpa_studio_core::StudioDiagnostic::info(diagnostic.message),
             });
         }
-        events.extend(worker.boot("Studio browser runtime").await?);
+        events.extend(
+            self.provider
+                .borrow_mut()
+                .take_outputs(&session_id)
+                .map_err(|error| StudioRuntimeError::Link(error.to_string()))?
+                .into_iter()
+                .filter_map(output_to_event),
+        );
 
-        self.client = Some(BrowserProtocolClient::new(worker));
-        self.session = Some(session);
+        self.client = Some(BrowserProtocolClient::new(
+            Rc::clone(&self.provider),
+            session_id.clone(),
+        ));
+        self.session_id = Some(session_id.clone());
         events.push(StudioEvent::DeviceConnected {
             action_id,
             provider_id: LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID),
@@ -251,79 +273,8 @@ impl EffectExecutor for BrowserWorkerStudioRuntime {
     }
 }
 
-pub(crate) struct BrowserWorkerHandle {
-    worker: Worker,
-    outputs: Rc<RefCell<Vec<BrowserOutputEnvelope>>>,
-}
-
-impl BrowserWorkerHandle {
-    fn new(worker_url: &str) -> Result<Self, StudioRuntimeError> {
-        let options = WorkerOptions::new();
-        options.set_type(WorkerType::Module);
-        let worker = Worker::new_with_options(worker_url, &options)
-            .map_err(|error| StudioRuntimeError::Browser(format!("{error:?}")))?;
-        let outputs = Rc::new(RefCell::new(Vec::new()));
-        let output_ref = Rc::clone(&outputs);
-        let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |event: MessageEvent| {
-            match serde_wasm_bindgen::from_value::<BrowserOutputEnvelope>(event.data()) {
-                Ok(envelope) => output_ref.borrow_mut().push(envelope),
-                Err(error) => output_ref.borrow_mut().push(BrowserOutputEnvelope::Log {
-                    runtime_id: 0,
-                    level: "error".to_string(),
-                    target: "lpa-studio-runtime".to_string(),
-                    message: format!("failed to parse worker message: {error}"),
-                }),
-            }
-        });
-        worker.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
-        on_message.forget();
-        Ok(Self { worker, outputs })
-    }
-
-    pub async fn boot(&mut self, label: &str) -> Result<Vec<StudioEvent>, StudioRuntimeError> {
-        self.post(&BrowserInputEnvelope::Boot {
-            label: label.to_string(),
-        })?;
-        let mut events = Vec::new();
-        for _ in 0..200 {
-            crate::browser_protocol_client::sleep_ms(25).await?;
-            for output in self.take_outputs() {
-                let ready = matches!(
-                    &output,
-                    BrowserOutputEnvelope::Status { status, .. } if status == "ready"
-                );
-                if let Some(event) = output_to_event(output) {
-                    events.push(event);
-                }
-                if ready {
-                    return Ok(events);
-                }
-            }
-        }
-        Err(StudioRuntimeError::Browser(
-            "timed out waiting for browser worker boot".to_string(),
-        ))
-    }
-
-    pub fn post(&self, envelope: &BrowserInputEnvelope) -> Result<(), StudioRuntimeError> {
-        let value = serde_wasm_bindgen::to_value(envelope)
-            .map_err(|error| StudioRuntimeError::Browser(error.to_string()))?;
-        self.worker
-            .post_message(&value)
-            .map_err(|error| StudioRuntimeError::Browser(format!("{error:?}")))
-    }
-
-    pub fn take_outputs(&mut self) -> Vec<BrowserOutputEnvelope> {
-        core::mem::take(&mut *self.outputs.borrow_mut())
-    }
-
-    pub fn terminate(&self) {
-        self.worker.terminate();
-    }
-}
-
-pub async fn run_browser_worker_demo(worker_url: &str) -> Result<StudioApp, StudioRuntimeError> {
-    let mut harness = RuntimeHarness::with_runtime(BrowserWorkerStudioRuntime::new(worker_url));
+pub async fn run_browser_worker_demo() -> Result<StudioApp, StudioRuntimeError> {
+    let mut harness = RuntimeHarness::with_runtime(BrowserWorkerStudioRuntime::new());
     harness
         .dispatch(
             StudioActionKind::from(LinkActionRequest::RefreshProviderCatalog),
