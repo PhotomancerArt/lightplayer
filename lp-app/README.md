@@ -19,11 +19,11 @@ logic.
   server or firmware target.
 - `lpa-link` — low-level endpoint/link layer for discovery, status,
   management, diagnostics, logs, and opening server/client connections.
-- `lp-studio-core` — UI-independent Studio state, documented actions, effects,
+- `lpa-studio-core` — UI-independent Studio state, documented actions, effects,
   events, diagnostics, capabilities, and sessions.
-- `lp-studio-runtime` — Studio effect executor and runtime adapters for
+- `lpa-studio-runtime` — Studio effect executor and runtime adapters for
   host-process and browser-worker flows.
-- `lp-studio-web` — static Dioxus browser shell for the first Studio UI slice.
+- `lpa-studio-web` — static Dioxus browser shell for the first Studio UI slice.
 - `web-demo` — browser demo and tooling for the shader pipeline.
 
 ## Boundary

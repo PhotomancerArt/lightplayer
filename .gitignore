@@ -34,9 +34,9 @@ perf.data*
 .builtins-source-hash
 traces/
 profiles/
-lp-app/lp-studio-web/public/pkg/
-lp-app/lp-studio-web/public/fw-browser-worker.js
-lp-app/lp-studio-web/public/firmware/
-lp-app/lp-studio-web/dist/
-lp-app/lp-studio-web/story-images/.new/
-lp-app/lp-studio-web/story-images/.scratch/
+lp-app/lpa-studio-web/public/pkg/
+lp-app/lpa-studio-web/public/fw-browser-worker.js
+lp-app/lpa-studio-web/public/firmware/
+lp-app/lpa-studio-web/dist/
+lp-app/lpa-studio-web/story-images/.new/
+lp-app/lpa-studio-web/story-images/.scratch/

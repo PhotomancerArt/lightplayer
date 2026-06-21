@@ -168,8 +168,8 @@ studio-web-dev-build: install-wasm32-target
     set -euo pipefail
     echo "Building fw-browser for wasm32 debug..."
     cargo build -p fw-browser --target wasm32-unknown-unknown
-    echo "Building lp-studio-web for wasm32 debug with stories..."
-    cargo build -p lp-studio-web --target wasm32-unknown-unknown --features stories
+    echo "Building lpa-studio-web for wasm32 debug with stories..."
+    cargo build -p lpa-studio-web --target wasm32-unknown-unknown --features stories
     if ! command -v wasm-bindgen >/dev/null 2>&1; then
         echo "wasm-bindgen not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
         exit 1
@@ -178,40 +178,40 @@ studio-web-dev-build: install-wasm32-target
     wasm-bindgen target/wasm32-unknown-unknown/debug/fw_browser.wasm \
         --out-dir lp-fw/fw-browser/www/pkg --target web
     echo "Generating Studio web debug JS glue..."
-    mkdir -p lp-app/lp-studio-web/public/pkg
-    wasm-bindgen target/wasm32-unknown-unknown/debug/lp-studio-web.wasm \
-        --out-dir lp-app/lp-studio-web/public/pkg --target web
+    mkdir -p lp-app/lpa-studio-web/public/pkg
+    wasm-bindgen target/wasm32-unknown-unknown/debug/lpa-studio-web.wasm \
+        --out-dir lp-app/lpa-studio-web/public/pkg --target web
     echo "Copying fw-browser worker assets..."
-    cp lp-fw/fw-browser/www/fw-browser-worker.js lp-app/lp-studio-web/public/fw-browser-worker.js
-    cp lp-fw/fw-browser/www/pkg/fw_browser.js lp-app/lp-studio-web/public/pkg/fw_browser.js
-    cp lp-fw/fw-browser/www/pkg/fw_browser_bg.wasm lp-app/lp-studio-web/public/pkg/fw_browser_bg.wasm
-    echo "Artifacts: lp-app/lp-studio-web/public/ (debug build)"
+    cp lp-fw/fw-browser/www/fw-browser-worker.js lp-app/lpa-studio-web/public/fw-browser-worker.js
+    cp lp-fw/fw-browser/www/pkg/fw_browser.js lp-app/lpa-studio-web/public/pkg/fw_browser.js
+    cp lp-fw/fw-browser/www/pkg/fw_browser_bg.wasm lp-app/lpa-studio-web/public/pkg/fw_browser_bg.wasm
+    echo "Artifacts: lp-app/lpa-studio-web/public/ (debug build)"
 
 studio-story-pngs: studio-web-dev-build
     #!/usr/bin/env bash
     set -euo pipefail
-    node lp-app/lp-studio-web/scripts/studio-story-pngs.mjs
+    node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs
 
 studio-story-baselines: studio-web-dev-build
     #!/usr/bin/env bash
     set -euo pipefail
-    node lp-app/lp-studio-web/scripts/studio-story-pngs.mjs baselines
+    node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs baselines
 
 studio-story-check: studio-web-dev-build
     #!/usr/bin/env bash
     set -euo pipefail
-    node lp-app/lp-studio-web/scripts/studio-story-pngs.mjs check
+    node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs check
 
 studio-story-baselines-if-needed:
     #!/usr/bin/env bash
     set -euo pipefail
     tracked="$(git diff --name-only HEAD -- \
-        lp-app/lp-studio-web \
-        ':!lp-app/lp-studio-web/public/**' \
-        ':!lp-app/lp-studio-web/story-images/**')"
-    untracked="$(git ls-files --others --exclude-standard -- lp-app/lp-studio-web \
-        | grep -v '^lp-app/lp-studio-web/public/' \
-        | grep -v '^lp-app/lp-studio-web/story-images/' \
+        lp-app/lpa-studio-web \
+        ':!lp-app/lpa-studio-web/public/**' \
+        ':!lp-app/lpa-studio-web/story-images/**')"
+    untracked="$(git ls-files --others --exclude-standard -- lp-app/lpa-studio-web \
+        | grep -v '^lp-app/lpa-studio-web/public/' \
+        | grep -v '^lp-app/lpa-studio-web/story-images/' \
         || true)"
     changed="$(printf '%s\n%s\n' "$tracked" "$untracked" | sed '/^$/d' | sort -u)"
     if [[ -z "$changed" ]]; then
@@ -229,7 +229,7 @@ studio-dev: studio-web-dev-build
     echo "Serving LightPlayer Studio dev build at http://127.0.0.1:${port}/"
     echo "Storybook: http://127.0.0.1:${port}/#/stories"
     echo "Re-run just studio-dev after Rust changes; generated artifacts are ignored."
-    cd lp-app/lp-studio-web/public
+    cd lp-app/lpa-studio-web/public
     python3 -m http.server "${port}" --bind 127.0.0.1
 
 studio-firmware-package-esp32c6: install-rv32-target
@@ -243,7 +243,7 @@ studio-firmware-package-esp32c6: install-rv32-target
     firmware_id="lightplayer-esp32c6-server"
     display_name="LightPlayer ESP32-C6 server firmware"
     features="esp32c6,server"
-    out_dir="lp-app/lp-studio-web/public/firmware/esp32c6"
+    out_dir="lp-app/lpa-studio-web/public/firmware/esp32c6"
     image_name="fw-esp32c6-server-merged.bin"
     image_file="${out_dir}/${image_name}"
     manifest_file="${out_dir}/manifest.json"
@@ -282,35 +282,35 @@ studio-firmware-package-esp32c6: install-rv32-target
     MANIFEST_IMAGE_PATH="${image_name}" \
     MANIFEST_IMAGE_SIZE="${size_bytes}" \
     MANIFEST_IMAGE_SHA256="${sha256}" \
-    node lp-app/lp-studio-web/scripts/studio-firmware-manifest.mjs "${manifest_file}"
+    node lp-app/lpa-studio-web/scripts/studio-firmware-manifest.mjs "${manifest_file}"
     echo "Firmware manifest: ${manifest_file}"
     echo "Firmware image: ${image_file} (${size_bytes} bytes, sha256=${sha256})"
 
 studio-web-build: install-wasm32-target fw-browser-build studio-firmware-package-esp32c6
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "Building lp-studio-web for wasm32..."
-    cargo build -p lp-studio-web --target wasm32-unknown-unknown --release
+    echo "Building lpa-studio-web for wasm32..."
+    cargo build -p lpa-studio-web --target wasm32-unknown-unknown --release
     if ! command -v wasm-bindgen >/dev/null 2>&1; then
         echo "wasm-bindgen not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
         exit 1
     fi
     echo "Generating Studio web JS glue..."
-    mkdir -p lp-app/lp-studio-web/public/pkg
-    wasm-bindgen target/wasm32-unknown-unknown/release/lp-studio-web.wasm \
-        --out-dir lp-app/lp-studio-web/public/pkg --target web
+    mkdir -p lp-app/lpa-studio-web/public/pkg
+    wasm-bindgen target/wasm32-unknown-unknown/release/lpa-studio-web.wasm \
+        --out-dir lp-app/lpa-studio-web/public/pkg --target web
     echo "Copying fw-browser worker assets..."
-    cp lp-fw/fw-browser/www/fw-browser-worker.js lp-app/lp-studio-web/public/fw-browser-worker.js
-    cp lp-fw/fw-browser/www/pkg/fw_browser.js lp-app/lp-studio-web/public/pkg/fw_browser.js
-    cp lp-fw/fw-browser/www/pkg/fw_browser_bg.wasm lp-app/lp-studio-web/public/pkg/fw_browser_bg.wasm
-    echo "Artifacts: lp-app/lp-studio-web/public/ (index.html, fw-browser-worker.js, pkg/)"
+    cp lp-fw/fw-browser/www/fw-browser-worker.js lp-app/lpa-studio-web/public/fw-browser-worker.js
+    cp lp-fw/fw-browser/www/pkg/fw_browser.js lp-app/lpa-studio-web/public/pkg/fw_browser.js
+    cp lp-fw/fw-browser/www/pkg/fw_browser_bg.wasm lp-app/lpa-studio-web/public/pkg/fw_browser_bg.wasm
+    echo "Artifacts: lp-app/lpa-studio-web/public/ (index.html, fw-browser-worker.js, pkg/)"
 
 studio-web: studio-web-build
     #!/usr/bin/env bash
     set -euo pipefail
     port="${STUDIO_WEB_PORT:-2820}"
     echo "Serving LightPlayer Studio at http://127.0.0.1:${port}/"
-    cd lp-app/lp-studio-web/public
+    cd lp-app/lpa-studio-web/public
     python3 -m http.server "${port}" --bind 127.0.0.1
 
 # ============================================================================
