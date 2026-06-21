@@ -1,4 +1,9 @@
-//! Studio link and device-manager read model.
+//! Link manager model for provider choice, endpoint access, target probing,
+//! flashing/reset operations, link health, and low-level diagnostics.
+//!
+//! The link manager stops at establishing a usable target link. `server` owns
+//! the `lp-server` protocol state above that link, and `project` owns
+//! attachment to a loaded project.
 
 pub mod connected_device_state;
 pub mod device_access;
@@ -7,6 +12,7 @@ pub mod device_id;
 pub mod device_issue;
 pub mod device_manager_state;
 pub mod device_session;
+pub mod link_action;
 pub mod link_state;
 pub mod progress_state;
 pub mod project_choice;
@@ -25,6 +31,7 @@ pub mod target_probe_result;
 pub use connected_device_state::{ConnectedDeviceState, DeviceHealthState};
 pub use device_issue::{DeviceIssue, DeviceIssueKind, DeviceIssueSeverity};
 pub use device_manager_state::DeviceManagerState;
+pub use link_action::LinkActionRequest;
 pub use link_state::LinkState;
 pub use progress_state::ProgressState;
 pub use project_choice::ProjectChoice;

@@ -1,8 +1,8 @@
 use dioxus::prelude::{ReadableExt, Signal, WritableExt};
 use lpa_link::{LinkConnectionKind, LinkEndpointId, LinkProviderId};
 use lpa_studio_core::{
-    ActionOrigin, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID, LinkState,
-    StudioActionKind, StudioApp, StudioEffect, StudioEvent,
+    ActionOrigin, BROWSER_SERIAL_ESP32_PROVIDER_ID, BROWSER_WORKER_PROVIDER_ID, LinkActionRequest,
+    LinkState, ServerActionRequest, StudioActionKind, StudioApp, StudioEffect, StudioEvent,
 };
 use lpa_studio_runtime::{
     BrowserSerialStudioRuntime, BrowserWorkerStudioRuntime, EffectExecutor, StudioRuntimeError,
@@ -65,23 +65,22 @@ pub async fn auto_advance_web_flow(
     for _ in 0..8 {
         let state = studio.read().state().clone();
         let next_action = match &state.device_manager.active_flow {
-            LinkState::EndpointGranted { endpoint_id, .. } => {
-                Some(StudioActionKind::ConnectDevice {
-                    endpoint_id: endpoint_id.clone(),
-                })
-            }
             LinkState::ServerReady { .. } if is_browser_serial_connection(&state) => {
-                Some(StudioActionKind::ProbeTarget { endpoint_id: None })
+                Some(StudioActionKind::from(LinkActionRequest::ProbeTarget {
+                    endpoint_id: None,
+                }))
             }
-            LinkState::ServerReady { .. } => Some(StudioActionKind::ReadProjectState),
+            LinkState::ServerReady { .. } => Some(StudioActionKind::from(
+                ServerActionRequest::ReadProjectState,
+            )),
             LinkState::OpeningServer { endpoint_id } if state.connection_session.is_none() => {
-                Some(StudioActionKind::ConnectDevice {
+                Some(StudioActionKind::from(LinkActionRequest::ConnectEndpoint {
                     endpoint_id: endpoint_id.clone(),
-                })
+                }))
             }
-            LinkState::OpeningServer { .. } if state.connection_session.is_some() => {
-                Some(StudioActionKind::ReadProjectState)
-            }
+            LinkState::OpeningServer { .. } if state.connection_session.is_some() => Some(
+                StudioActionKind::from(ServerActionRequest::ReadProjectState),
+            ),
             _ => None,
         };
 

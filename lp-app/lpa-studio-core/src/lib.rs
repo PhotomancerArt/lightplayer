@@ -26,14 +26,14 @@ pub use link::device_id::DeviceId;
 pub use link::device_session::DeviceSession;
 pub use link::{
     ConnectedDeviceState, DeviceHealthState, DeviceIssue, DeviceIssueKind, DeviceIssueSeverity,
-    DeviceManagerState, LinkState, ProgressState, ProjectChoice, ProjectSelectionReason,
-    ProjectStateResult, ProviderAvailability, ProviderCapability, ProviderCardState,
-    ProviderCatalog, ProviderIntent, ProvisioningReason, RecoveryAction, RecoveryReason,
-    TargetKind, TargetProbeResult,
+    DeviceManagerState, LinkActionRequest, LinkState, ProgressState, ProjectChoice,
+    ProjectSelectionReason, ProjectStateResult, ProviderAvailability, ProviderCapability,
+    ProviderCardState, ProviderCatalog, ProviderIntent, ProvisioningReason, RecoveryAction,
+    RecoveryReason, TargetKind, TargetProbeResult,
 };
-pub use project::ProjectState;
+pub use project::{ProjectActionRequest, ProjectState, ProjectSyncState};
 pub use project_session::ProjectSession;
-pub use server::ServerState;
+pub use server::{ServerActionRequest, ServerState};
 pub use studio_action::{StudioAction, StudioActionKind, StudioActionType};
 pub use studio_app::StudioApp;
 pub use studio_diagnostic::{StudioDiagnostic, StudioDiagnosticSeverity};
@@ -42,11 +42,14 @@ pub use studio_event::StudioEvent;
 pub use studio_heartbeat::StudioHeartbeat;
 pub use studio_log_entry::{StudioLogEntry, StudioLogLevel};
 pub use studio_state::StudioState;
+pub use ux::action_confirmation::ActionConfirmation;
 pub use ux::action_descriptor::{ActionCategory, ActionDescriptor};
 pub use ux::action_history_policy::{ActionHistoryPolicy, UndoScope};
 pub use ux::action_id::ActionId;
 pub use ux::action_meta::ActionMeta;
 pub use ux::action_origin::ActionOrigin;
+pub use ux::action_priority::ActionPriority;
+pub use ux::available_action::AvailableAction;
 pub use ux::ux_manager::UxManager;
 
 pub const BROWSER_WORKER_PROVIDER_ID: &str = "browser-worker";

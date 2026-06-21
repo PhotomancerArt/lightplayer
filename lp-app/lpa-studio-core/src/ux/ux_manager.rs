@@ -4,5 +4,5 @@ pub trait UxManager {
     type Action;
 
     fn state(&self) -> &Self::State;
-    fn available_actions(&self) -> Vec<Self::Action>;
+    fn available_actions(&self) -> Vec<crate::AvailableAction<Self::Action>>;
 }

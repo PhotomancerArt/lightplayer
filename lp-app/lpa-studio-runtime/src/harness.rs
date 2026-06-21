@@ -5,6 +5,8 @@ use lpa_link::LinkProviderId;
 #[cfg(feature = "host-process")]
 use lpa_studio_core::HOST_PROCESS_PROVIDER_ID;
 use lpa_studio_core::{ActionOrigin, StudioActionKind, StudioApp, StudioEffect};
+#[cfg(feature = "host-process")]
+use lpa_studio_core::{LinkActionRequest, ProjectActionRequest};
 
 #[cfg(feature = "host-process")]
 use crate::HostProcessStudioRuntime;
@@ -80,9 +82,9 @@ impl RuntimeHarness<HostProcessStudioRuntime> {
     pub fn host_process() -> Self {
         let mut app = StudioApp::new();
         app.dispatch_kind(
-            StudioActionKind::SelectLinkProvider {
+            StudioActionKind::from(LinkActionRequest::SelectProvider {
                 provider_id: LinkProviderId::new(HOST_PROCESS_PROVIDER_ID),
-            },
+            }),
             ActionOrigin::Harness,
         );
         Self {
@@ -96,7 +98,10 @@ impl RuntimeHarness<HostProcessStudioRuntime> {
 pub async fn run_host_process_demo() -> Result<StudioApp, StudioRuntimeError> {
     let mut harness = RuntimeHarness::host_process();
     harness
-        .dispatch(StudioActionKind::DiscoverDevices, ActionOrigin::Harness)
+        .dispatch(
+            StudioActionKind::from(LinkActionRequest::DiscoverDevices),
+            ActionOrigin::Harness,
+        )
         .await?;
     let endpoint_id = harness
         .app()
@@ -111,12 +116,15 @@ pub async fn run_host_process_demo() -> Result<StudioApp, StudioRuntimeError> {
         .clone();
     harness
         .dispatch(
-            StudioActionKind::ConnectDevice { endpoint_id },
+            StudioActionKind::from(LinkActionRequest::ConnectEndpoint { endpoint_id }),
             ActionOrigin::Harness,
         )
         .await?;
     harness
-        .dispatch(StudioActionKind::LoadDemoProject, ActionOrigin::Harness)
+        .dispatch(
+            StudioActionKind::from(ProjectActionRequest::LoadDemoProject),
+            ActionOrigin::Harness,
+        )
         .await?;
     harness.runtime.close().await?;
     Ok(harness.app)

@@ -5,8 +5,9 @@ use lpa_link::providers::browser_worker::{BrowserWorkerProvider, BrowserWorkerSe
 use lpa_link::{LinkConnectionKind, LinkEndpointId, LinkProvider, LinkProviderId, LinkSession};
 use lpa_studio_core::{
     ActionOrigin, BROWSER_WORKER_PROVIDER_ID, DeviceAccessStatus, DeviceCapability,
-    ProviderAvailability, ProviderCapability, ProviderCardState, ProviderIntent, StudioActionKind,
-    StudioApp, StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel, TargetProbeResult,
+    LinkActionRequest, ProjectActionRequest, ProviderAvailability, ProviderCapability,
+    ProviderCardState, ProviderIntent, StudioActionKind, StudioApp, StudioEffect, StudioEvent,
+    StudioLogEntry, StudioLogLevel, TargetProbeResult,
 };
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
@@ -324,15 +325,15 @@ pub async fn run_browser_worker_demo(worker_url: &str) -> Result<StudioApp, Stud
     let mut harness = RuntimeHarness::with_runtime(BrowserWorkerStudioRuntime::new(worker_url));
     harness
         .dispatch(
-            StudioActionKind::RefreshProviderCatalog,
+            StudioActionKind::from(LinkActionRequest::RefreshProviderCatalog),
             ActionOrigin::Harness,
         )
         .await?;
     harness
         .dispatch(
-            StudioActionKind::StartProvisioning {
+            StudioActionKind::from(LinkActionRequest::StartProvisioning {
                 provider_id: LinkProviderId::new(BROWSER_WORKER_PROVIDER_ID),
-            },
+            }),
             ActionOrigin::Harness,
         )
         .await?;
@@ -349,12 +350,15 @@ pub async fn run_browser_worker_demo(worker_url: &str) -> Result<StudioApp, Stud
         .clone();
     harness
         .dispatch(
-            StudioActionKind::ConnectDevice { endpoint_id },
+            StudioActionKind::from(LinkActionRequest::ConnectEndpoint { endpoint_id }),
             ActionOrigin::Harness,
         )
         .await?;
     harness
-        .dispatch(StudioActionKind::LoadDemoProject, ActionOrigin::Harness)
+        .dispatch(
+            StudioActionKind::from(ProjectActionRequest::LoadDemoProject),
+            ActionOrigin::Harness,
+        )
         .await?;
     Ok(harness.into_app())
 }

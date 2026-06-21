@@ -34,7 +34,7 @@ pub fn studio_state_requesting_access() -> StudioState {
         .device_manager
         .providers
         .select_provider(BROWSER_SERIAL_ESP32_PROVIDER_ID);
-    state.device_manager.active_flow = LinkState::GrantPermission {
+    state.device_manager.active_flow = LinkState::RequestingAccess {
         provider_id: LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID),
     };
     state.device_access = Some(DeviceAccess::new(
@@ -80,7 +80,7 @@ pub fn studio_state_connecting() -> StudioState {
         BROWSER_WORKER_PROVIDER_ID,
         vec![browser_endpoint().with_status(LinkEndpointStatus::Launching)],
     );
-    state.device_manager.active_flow = LinkState::OpeningLink {
+    state.device_manager.active_flow = LinkState::Opening {
         endpoint_id: LinkEndpointId::new("browser-worker-worker-1"),
     };
     state
@@ -129,7 +129,7 @@ pub fn studio_state_blank_device_flash_offer() -> StudioState {
 
 pub fn studio_state_flash_confirm() -> StudioState {
     let mut state = studio_state_blank_device_flash_offer();
-    state.device_manager.active_flow = LinkState::FlashConfirm {
+    state.device_manager.active_flow = LinkState::ConfirmingFirmwareFlash {
         endpoint_id: LinkEndpointId::new("browser-serial-esp32-port-1"),
         firmware_id: Some("lightplayer-esp32c6-server".to_string()),
     };
@@ -222,7 +222,7 @@ pub fn studio_state_unresponsive_target() -> StudioState {
         RecoveryAction::ResetDevice,
         RecoveryAction::ChooseSimulator,
     ]);
-    state.device_manager.active_flow = LinkState::LinkFailed {
+    state.device_manager.active_flow = LinkState::OpenFailed {
         endpoint_id: LinkEndpointId::new("browser-serial-esp32-port-1"),
         issue: issue.clone(),
     };

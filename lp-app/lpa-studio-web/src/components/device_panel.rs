@@ -236,7 +236,7 @@ fn FlowStateView(
                         }
                     }
                 },
-                LinkState::FlashConfirm { endpoint_id, firmware_id } => rsx! {
+                LinkState::ConfirmingFirmwareFlash { endpoint_id, firmware_id } => rsx! {
                     div { class: "recovery-box",
                         strong { "Flash firmware" }
                         p { "{flash_confirmation_label(firmware_id.as_deref())}" }
@@ -360,27 +360,21 @@ struct FlowSummary {
 
 fn flow_summary(flow: &LinkState) -> FlowSummary {
     match flow {
-        LinkState::Empty | LinkState::ChooseProvider => summary(
+        LinkState::Empty | LinkState::ChoosingProvider => summary(
             "Choose",
             "Pick a runtime",
             "Simulator and hardware providers appear here when available.",
         ),
-        LinkState::ProviderSelected { provider_id } => {
-            summary("Selected", provider_id.as_str(), "Provider selected.")
-        }
-        LinkState::GrantPermission { provider_id } => summary(
+        LinkState::RequestingAccess { provider_id } => summary(
             "Access",
             provider_id.as_str(),
             "Waiting for provider access.",
         ),
         LinkState::AccessFailed { issue, .. } => summary("Access", "Access failed", &issue.message),
-        LinkState::EndpointGranted { endpoint_id, .. } => {
-            summary("Endpoint", endpoint_id.as_str(), "Endpoint granted.")
-        }
-        LinkState::OpeningLink { endpoint_id } => {
+        LinkState::Opening { endpoint_id } => {
             summary("Link", endpoint_id.as_str(), "Opening link session.")
         }
-        LinkState::LinkFailed { issue, .. } => summary("Link", "Link failed", &issue.message),
+        LinkState::OpenFailed { issue, .. } => summary("Link", "Link failed", &issue.message),
         LinkState::ProbingTarget { endpoint_id } => {
             summary("Probe", endpoint_id.as_str(), "Identifying target.")
         }
@@ -389,7 +383,7 @@ fn flow_summary(flow: &LinkState) -> FlowSummary {
             "Provisioning required",
             &provisioning_reason_label(reason),
         ),
-        LinkState::FlashConfirm { endpoint_id, .. } => summary(
+        LinkState::ConfirmingFirmwareFlash { endpoint_id, .. } => summary(
             "Flash",
             endpoint_id.as_str(),
             "Waiting for flash confirmation.",

@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 use lpa_link::{LinkEndpointId, LinkProviderId};
-use lpa_studio_core::{ActionOrigin, StudioActionKind, StudioApp};
+use lpa_studio_core::{
+    ActionOrigin, LinkActionRequest, ProjectActionRequest, StudioActionKind, StudioApp,
+};
 
 use crate::components::device_panel::DevicePanel;
 use crate::components::inventory_view::InventoryView;
@@ -32,7 +34,7 @@ pub fn App() -> Element {
         dispatch_web_action(
             studio,
             controller,
-            StudioActionKind::RefreshProviderCatalog,
+            StudioActionKind::from(LinkActionRequest::RefreshProviderCatalog),
             ActionOrigin::System,
         )
         .await;
@@ -51,7 +53,7 @@ pub fn App() -> Element {
             dispatch_web_action(
                 studio,
                 controller,
-                StudioActionKind::RefreshProviderCatalog,
+                StudioActionKind::from(LinkActionRequest::RefreshProviderCatalog),
                 ActionOrigin::System,
             )
             .await;
@@ -67,7 +69,7 @@ pub fn App() -> Element {
             dispatch_web_action(
                 studio,
                 controller,
-                StudioActionKind::StartProvisioning { provider_id },
+                StudioActionKind::from(LinkActionRequest::StartProvisioning { provider_id }),
                 ActionOrigin::User,
             )
             .await;
@@ -84,7 +86,7 @@ pub fn App() -> Element {
             dispatch_web_action(
                 studio,
                 controller,
-                StudioActionKind::LoadDemoProject,
+                StudioActionKind::from(ProjectActionRequest::LoadDemoProject),
                 ActionOrigin::User,
             )
             .await;
@@ -101,10 +103,10 @@ pub fn App() -> Element {
                 dispatch_web_action(
                     studio,
                     controller,
-                    StudioActionKind::ConfirmFirmwareFlash {
+                    StudioActionKind::from(LinkActionRequest::ConfirmFirmwareFlash {
                         endpoint_id,
                         firmware_id,
-                    },
+                    }),
                     ActionOrigin::User,
                 )
                 .await;

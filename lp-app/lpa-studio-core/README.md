@@ -22,31 +22,38 @@ this vocabulary.
 Studio provisioning is modeled above `lpa-link`. The link layer knows how to
 discover endpoints, open sessions, report low-level management capability, and
 hand off a server connection. Studio core owns the product journey around that
-link layer:
+link layer and exposes it as three manager read models.
 
-- provider catalog and provider availability;
-- selected provider and discovered/granted provider endpoints;
-- active provisioning flow, such as choosing a provider, requesting access,
-  opening a link, probing a target, reading project state, flashing, deploying
-  a project, recovery, or ready;
-- connected-device health;
-- typed device issues and recovery actions;
-- long-running operation progress.
+| Manager | Owns | Ready means | Does not own |
+|---|---|---|---|
+| `link` | Provider catalog, provider availability, endpoint access, physical/logical link state, target probing, flashing/reset actions, low-level diagnostics | A target link is established and can support server work | `lp-server` protocol state or project meaning |
+| `server` | `lp-server` protocol connection, status/heartbeat facts, logs, loaded-project discovery, recovery/safe-mode facts | The protocol is usable and current server status is known | Project editing/session state |
+| `project` | Active project attachment, project inventory snapshot, project load/deploy/resync state, future sync/edit facts | Studio has a coherent project session, or knows user project selection is required | Link/device operations or raw server transport |
 
-`DeviceManagerState` is the UI-independent read model for that journey. It
-contains a `ProviderCatalog`, an active `DeviceFlowState`, the current connected
-device summary, and structured issues. Existing session records such as
-`DeviceSession`, `ConnectionSession`, `ClientSession`, and `ProjectSession`
-remain the canonical live records for the connected runtime and loaded project.
+The managers are setup-sequential but not lifetime-sequential. The link manager
+continues to own disconnect, reset, reinstall, and diagnostics actions after a
+server or project is attached.
+
+`DeviceManagerState`, `ServerState`, and `ProjectState` each expose
+`available_actions()`. The combined `StudioState::available_actions()` returns
+dispatchable `StudioActionKind` values for generic UI surfaces and future agent
+harnesses.
 
 Provider availability is intentionally separate from endpoint/device
 capability. For example, "Web Serial is unsupported in this browser" is a
 provider availability issue. "This ESP32 endpoint can flash firmware" is an
 endpoint or management capability.
 
-Actions are documented program objects. Their descriptors provide labels,
-summaries, categories, and history policy so generic UI help and future agents
-can inspect the available action surface.
+Actions are documented program objects:
+
+- `LinkActionRequest`, `ServerActionRequest`, and `ProjectActionRequest` are
+  manager-local dispatch payloads.
+- `StudioActionKind` wraps those manager-local requests for app-wide dispatch.
+- `ActionDescriptor` provides labels, summaries, categories, and history policy.
+- `AvailableAction` combines a dispatchable payload with descriptor,
+  enablement, priority, and optional confirmation metadata.
+- `StudioEffect` describes work that a runtime must execute.
+- `StudioEvent` is the runtime's result input back into the core state machine.
 
 The hardware action surface separates:
 
@@ -69,7 +76,7 @@ Operational hardware actions are not undoable. Future undo should attach to
 successful project edit transactions, not to permission prompts, flashing,
 resets, or connection lifecycle events.
 
-M1 does not implement undo/redo. It only classifies action history behavior so
+This crate does not implement undo/redo yet. It only classifies action history behavior so
 future undo can attach to successful project edit transactions instead of every
 operational action.
 

@@ -4,10 +4,10 @@ use lpa_link::providers::browser_serial_esp32::{
 use lpa_link::{LinkConnectionKind, LinkEndpointId, LinkProvider, LinkProviderId, LinkSession};
 use lpa_studio_core::{
     ActionId, ActionOrigin, BROWSER_SERIAL_ESP32_PROVIDER_ID, DeviceAccessStatus, DeviceCapability,
-    DeviceIssue, DeviceIssueKind, ProgressState, ProviderAvailability, ProviderCapability,
-    ProviderCardState, ProviderIntent, ProvisioningReason, RecoveryAction, StudioActionKind,
-    StudioApp, StudioDiagnostic, StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel,
-    TargetKind, TargetProbeResult,
+    DeviceIssue, DeviceIssueKind, LinkActionRequest, ProgressState, ProjectActionRequest,
+    ProviderAvailability, ProviderCapability, ProviderCardState, ProviderIntent,
+    ProvisioningReason, RecoveryAction, StudioActionKind, StudioApp, StudioDiagnostic,
+    StudioEffect, StudioEvent, StudioLogEntry, StudioLogLevel, TargetKind, TargetProbeResult,
 };
 use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 
@@ -726,13 +726,16 @@ impl EffectExecutor for BrowserSerialStudioRuntime {
 pub async fn run_browser_serial_demo() -> Result<StudioApp, StudioRuntimeError> {
     let mut app = StudioApp::new();
     app.dispatch_kind(
-        StudioActionKind::SelectLinkProvider {
+        StudioActionKind::from(LinkActionRequest::SelectProvider {
             provider_id: LinkProviderId::new(BROWSER_SERIAL_ESP32_PROVIDER_ID),
-        },
+        }),
         ActionOrigin::System,
     );
     let mut runtime = BrowserSerialStudioRuntime::new();
-    let effects = app.dispatch_kind(StudioActionKind::RequestDeviceAccess, ActionOrigin::User);
+    let effects = app.dispatch_kind(
+        StudioActionKind::from(LinkActionRequest::RequestDeviceAccess),
+        ActionOrigin::User,
+    );
     drain_effects(&mut app, &mut runtime, effects).await?;
     let endpoint_id = app
         .state()
@@ -747,11 +750,14 @@ pub async fn run_browser_serial_demo() -> Result<StudioApp, StudioRuntimeError> 
         .id
         .clone();
     let effects = app.dispatch_kind(
-        StudioActionKind::ConnectDevice { endpoint_id },
+        StudioActionKind::from(LinkActionRequest::ConnectEndpoint { endpoint_id }),
         ActionOrigin::User,
     );
     drain_effects(&mut app, &mut runtime, effects).await?;
-    let effects = app.dispatch_kind(StudioActionKind::UploadDemoProject, ActionOrigin::User);
+    let effects = app.dispatch_kind(
+        StudioActionKind::from(ProjectActionRequest::UploadDemoProject),
+        ActionOrigin::User,
+    );
     drain_effects(&mut app, &mut runtime, effects).await?;
     Ok(app)
 }

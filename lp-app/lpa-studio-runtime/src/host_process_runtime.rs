@@ -278,7 +278,9 @@ fn map_log_level(level: lpa_link::LinkLogLevel) -> StudioLogLevel {
 
 #[cfg(test)]
 mod tests {
-    use lpa_studio_core::{ActionOrigin, StudioActionKind};
+    use lpa_studio_core::{
+        ActionOrigin, LinkActionRequest, ProjectActionRequest, StudioActionKind,
+    };
 
     use crate::demo_project;
     use crate::harness::RuntimeHarness;
@@ -287,7 +289,10 @@ mod tests {
     async fn host_process_harness_loads_demo_project() {
         let mut harness = RuntimeHarness::host_process();
         harness
-            .dispatch(StudioActionKind::DiscoverDevices, ActionOrigin::Harness)
+            .dispatch(
+                StudioActionKind::from(LinkActionRequest::DiscoverDevices),
+                ActionOrigin::Harness,
+            )
             .await
             .unwrap();
         let endpoint_id = harness
@@ -301,13 +306,16 @@ mod tests {
             .clone();
         harness
             .dispatch(
-                StudioActionKind::ConnectDevice { endpoint_id },
+                StudioActionKind::from(LinkActionRequest::ConnectEndpoint { endpoint_id }),
                 ActionOrigin::Harness,
             )
             .await
             .unwrap();
         harness
-            .dispatch(StudioActionKind::LoadDemoProject, ActionOrigin::Harness)
+            .dispatch(
+                StudioActionKind::from(ProjectActionRequest::LoadDemoProject),
+                ActionOrigin::Harness,
+            )
             .await
             .unwrap();
 

@@ -1,7 +1,8 @@
-use lpa_link::{LinkEndpointId, LinkProviderId};
 use serde::{Deserialize, Serialize};
 
-use crate::{ActionDescriptor, ActionMeta};
+use crate::{
+    ActionDescriptor, ActionMeta, LinkActionRequest, ProjectActionRequest, ServerActionRequest,
+};
 
 /// Payload-free kind used for descriptors, help, and future agent tools.
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -57,80 +58,49 @@ impl StudioActionType {
     }
 }
 
+impl From<StudioActionType> for ActionDescriptor {
+    fn from(action_type: StudioActionType) -> Self {
+        Self::for_type(action_type)
+    }
+}
+
 /// Payload-bearing Studio action.
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum StudioActionKind {
-    RefreshProviderCatalog,
-    StartProvisioning {
-        provider_id: LinkProviderId,
-    },
-    CancelProvisioning,
-    RetryProvisioning,
-    SelectLinkProvider {
-        provider_id: LinkProviderId,
-    },
-    RequestDeviceAccess,
-    DiscoverDevices,
-    ConnectDevice {
-        endpoint_id: LinkEndpointId,
-    },
-    ConnectSelectedEndpoint,
-    ProbeTarget {
-        endpoint_id: Option<LinkEndpointId>,
-    },
-    DisconnectDevice,
-    ResetDevice,
-    ConfirmFirmwareFlash {
-        endpoint_id: LinkEndpointId,
-        firmware_id: Option<String>,
-    },
-    FlashDeviceFirmware {
-        firmware_id: Option<String>,
-    },
-    UploadDemoProject,
-    LoadDemoProject,
-    AcknowledgeProvisioningIssue {
-        issue_id: String,
-    },
-    RefreshStatus,
-    ReadProjectState,
-    ReadProjectInventory,
-    SelectProjectNode {
-        node_id: Option<String>,
-    },
+    Link(LinkActionRequest),
+    Server(ServerActionRequest),
+    Project(ProjectActionRequest),
 }
 
 impl StudioActionKind {
     pub fn action_type(&self) -> StudioActionType {
         match self {
-            Self::RefreshProviderCatalog => StudioActionType::RefreshProviderCatalog,
-            Self::StartProvisioning { .. } => StudioActionType::StartProvisioning,
-            Self::CancelProvisioning => StudioActionType::CancelProvisioning,
-            Self::RetryProvisioning => StudioActionType::RetryProvisioning,
-            Self::SelectLinkProvider { .. } => StudioActionType::SelectLinkProvider,
-            Self::RequestDeviceAccess => StudioActionType::RequestDeviceAccess,
-            Self::DiscoverDevices => StudioActionType::DiscoverDevices,
-            Self::ConnectDevice { .. } => StudioActionType::ConnectDevice,
-            Self::ConnectSelectedEndpoint => StudioActionType::ConnectSelectedEndpoint,
-            Self::ProbeTarget { .. } => StudioActionType::ProbeTarget,
-            Self::DisconnectDevice => StudioActionType::DisconnectDevice,
-            Self::ResetDevice => StudioActionType::ResetDevice,
-            Self::ConfirmFirmwareFlash { .. } => StudioActionType::ConfirmFirmwareFlash,
-            Self::FlashDeviceFirmware { .. } => StudioActionType::FlashDeviceFirmware,
-            Self::UploadDemoProject => StudioActionType::UploadDemoProject,
-            Self::LoadDemoProject => StudioActionType::LoadDemoProject,
-            Self::AcknowledgeProvisioningIssue { .. } => {
-                StudioActionType::AcknowledgeProvisioningIssue
-            }
-            Self::RefreshStatus => StudioActionType::RefreshStatus,
-            Self::ReadProjectState => StudioActionType::ReadProjectState,
-            Self::ReadProjectInventory => StudioActionType::ReadProjectInventory,
-            Self::SelectProjectNode { .. } => StudioActionType::SelectProjectNode,
+            Self::Link(request) => request.action_type(),
+            Self::Server(request) => request.action_type(),
+            Self::Project(request) => request.action_type(),
         }
     }
 
     pub fn descriptor(&self) -> ActionDescriptor {
         ActionDescriptor::for_type(self.action_type())
+    }
+}
+
+impl From<LinkActionRequest> for StudioActionKind {
+    fn from(request: LinkActionRequest) -> Self {
+        Self::Link(request)
+    }
+}
+
+impl From<ServerActionRequest> for StudioActionKind {
+    fn from(request: ServerActionRequest) -> Self {
+        Self::Server(request)
+    }
+}
+
+impl From<ProjectActionRequest> for StudioActionKind {
+    fn from(request: ProjectActionRequest) -> Self {
+        Self::Project(request)
     }
 }
 

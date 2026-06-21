@@ -1,6 +1,7 @@
 use lpa_link::LinkEndpointId;
 use lpa_studio_core::{
-    ActionOrigin, LinkState, StudioActionKind, StudioApp, StudioEffect, StudioEvent,
+    ActionOrigin, LinkActionRequest, LinkState, ProjectActionRequest, ServerActionRequest,
+    StudioActionKind, StudioApp, StudioEffect, StudioEvent,
 };
 
 use crate::StudioRuntimeError;
@@ -38,7 +39,7 @@ impl ScenarioHarness {
 
     pub async fn refresh_catalog(&mut self) -> Result<(), StudioRuntimeError> {
         self.dispatch(
-            StudioActionKind::RefreshProviderCatalog,
+            StudioActionKind::from(LinkActionRequest::RefreshProviderCatalog),
             ActionOrigin::Harness,
         )
         .await
@@ -52,7 +53,7 @@ impl ScenarioHarness {
             .cloned()
             .ok_or_else(|| StudioRuntimeError::Link("scenario has no provider".to_string()))?;
         self.dispatch(
-            StudioActionKind::StartProvisioning { provider_id },
+            StudioActionKind::from(LinkActionRequest::StartProvisioning { provider_id }),
             ActionOrigin::Harness,
         )
         .await
@@ -61,7 +62,7 @@ impl ScenarioHarness {
     pub async fn connect_selected_endpoint(&mut self) -> Result<(), StudioRuntimeError> {
         let endpoint_id = self.selected_endpoint_id()?;
         self.dispatch(
-            StudioActionKind::ConnectDevice { endpoint_id },
+            StudioActionKind::from(LinkActionRequest::ConnectEndpoint { endpoint_id }),
             ActionOrigin::Harness,
         )
         .await
@@ -69,7 +70,7 @@ impl ScenarioHarness {
 
     pub async fn probe_current_target(&mut self) -> Result<(), StudioRuntimeError> {
         self.dispatch(
-            StudioActionKind::ProbeTarget { endpoint_id: None },
+            StudioActionKind::from(LinkActionRequest::ProbeTarget { endpoint_id: None }),
             ActionOrigin::Harness,
         )
         .await
@@ -81,33 +82,45 @@ impl ScenarioHarness {
     ) -> Result<(), StudioRuntimeError> {
         let endpoint_id = self.active_endpoint_id()?;
         self.dispatch(
-            StudioActionKind::ConfirmFirmwareFlash {
+            StudioActionKind::from(LinkActionRequest::ConfirmFirmwareFlash {
                 endpoint_id,
                 firmware_id,
-            },
+            }),
             ActionOrigin::Harness,
         )
         .await
     }
 
     pub async fn load_demo_project(&mut self) -> Result<(), StudioRuntimeError> {
-        self.dispatch(StudioActionKind::LoadDemoProject, ActionOrigin::Harness)
-            .await
+        self.dispatch(
+            StudioActionKind::from(ProjectActionRequest::LoadDemoProject),
+            ActionOrigin::Harness,
+        )
+        .await
     }
 
     pub async fn read_project_state(&mut self) -> Result<(), StudioRuntimeError> {
-        self.dispatch(StudioActionKind::ReadProjectState, ActionOrigin::Harness)
-            .await
+        self.dispatch(
+            StudioActionKind::from(ServerActionRequest::ReadProjectState),
+            ActionOrigin::Harness,
+        )
+        .await
     }
 
     pub async fn refresh_status(&mut self) -> Result<(), StudioRuntimeError> {
-        self.dispatch(StudioActionKind::RefreshStatus, ActionOrigin::Harness)
-            .await
+        self.dispatch(
+            StudioActionKind::from(ServerActionRequest::RefreshStatus),
+            ActionOrigin::Harness,
+        )
+        .await
     }
 
     pub async fn disconnect_device(&mut self) -> Result<(), StudioRuntimeError> {
-        self.dispatch(StudioActionKind::DisconnectDevice, ActionOrigin::Harness)
-            .await
+        self.dispatch(
+            StudioActionKind::from(LinkActionRequest::Disconnect),
+            ActionOrigin::Harness,
+        )
+        .await
     }
 
     pub async fn dispatch(
@@ -151,12 +164,11 @@ impl ScenarioHarness {
     fn active_endpoint_id(&self) -> Result<LinkEndpointId, StudioRuntimeError> {
         match &self.app().state().device_manager.active_flow {
             LinkState::ProvisioningRequired { endpoint_id, .. }
-            | LinkState::FlashConfirm { endpoint_id, .. }
+            | LinkState::ConfirmingFirmwareFlash { endpoint_id, .. }
             | LinkState::Flashing { endpoint_id, .. }
             | LinkState::OpeningServer { endpoint_id }
-            | LinkState::OpeningLink { endpoint_id }
-            | LinkState::ProbingTarget { endpoint_id }
-            | LinkState::EndpointGranted { endpoint_id, .. } => Ok(endpoint_id.clone()),
+            | LinkState::Opening { endpoint_id }
+            | LinkState::ProbingTarget { endpoint_id } => Ok(endpoint_id.clone()),
             _ => self
                 .app()
                 .state()
@@ -239,7 +251,7 @@ mod tests {
         );
         assert!(matches!(
             harness.app().state().device_manager.active_flow,
-            LinkState::ChooseProvider
+            LinkState::ChoosingProvider
         ));
     }
 
@@ -286,14 +298,9 @@ mod tests {
                 if project_id == STUDIO_DEMO_PROJECT_ID
         ));
         assert_flow_snapshot(&harness, |flow| {
-            matches!(flow, LinkState::GrantPermission { .. })
+            matches!(flow, LinkState::RequestingAccess { .. })
         });
-        assert_flow_snapshot(&harness, |flow| {
-            matches!(flow, LinkState::EndpointGranted { .. })
-        });
-        assert_flow_snapshot(&harness, |flow| {
-            matches!(flow, LinkState::OpeningLink { .. })
-        });
+        assert_flow_snapshot(&harness, |flow| matches!(flow, LinkState::Opening { .. }));
         assert_flow_snapshot(&harness, |flow| {
             matches!(flow, LinkState::ServerReady { .. })
         });
@@ -461,7 +468,7 @@ mod tests {
         assert_active_issue_kind(&harness, DeviceIssueKind::EndpointOpenFailed);
         assert!(matches!(
             harness.app().state().device_manager.active_flow,
-            LinkState::LinkFailed { .. }
+            LinkState::OpenFailed { .. }
         ));
     }
 
@@ -474,7 +481,7 @@ mod tests {
         assert_active_issue_kind(&harness, DeviceIssueKind::ServerTimeout);
         assert!(matches!(
             harness.app().state().device_manager.active_flow,
-            LinkState::LinkFailed { .. }
+            LinkState::OpenFailed { .. }
         ));
     }
 

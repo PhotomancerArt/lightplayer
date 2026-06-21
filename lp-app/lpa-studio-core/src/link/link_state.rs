@@ -10,25 +10,18 @@ use crate::{
 #[derive(Clone, Debug, Eq, PartialEq, Deserialize, Serialize)]
 pub enum LinkState {
     Empty,
-    ChooseProvider,
-    ProviderSelected {
-        provider_id: LinkProviderId,
-    },
-    GrantPermission {
+    ChoosingProvider,
+    RequestingAccess {
         provider_id: LinkProviderId,
     },
     AccessFailed {
         provider_id: LinkProviderId,
         issue: DeviceIssue,
     },
-    EndpointGranted {
-        provider_id: LinkProviderId,
+    Opening {
         endpoint_id: LinkEndpointId,
     },
-    OpeningLink {
-        endpoint_id: LinkEndpointId,
-    },
-    LinkFailed {
+    OpenFailed {
         endpoint_id: LinkEndpointId,
         issue: DeviceIssue,
     },
@@ -39,7 +32,7 @@ pub enum LinkState {
         endpoint_id: LinkEndpointId,
         reason: ProvisioningReason,
     },
-    FlashConfirm {
+    ConfirmingFirmwareFlash {
         endpoint_id: LinkEndpointId,
         firmware_id: Option<String>,
     },
@@ -82,6 +75,6 @@ pub enum LinkState {
 
 impl Default for LinkState {
     fn default() -> Self {
-        Self::ChooseProvider
+        Self::ChoosingProvider
     }
 }
