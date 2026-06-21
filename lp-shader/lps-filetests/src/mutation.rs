@@ -50,7 +50,7 @@ fn annotation_color(kind: Option<&str>) -> &'static str {
     }
 }
 
-/// A single mutation action to be applied to a file.
+/// A single mutation ux to be applied to a file.
 #[derive(Debug, Clone)]
 pub enum MutationAction {
     /// Add an annotation before a run directive.
@@ -74,7 +74,7 @@ pub enum MutationAction {
 }
 
 impl MutationAction {
-    /// Get the path for this action.
+    /// Get the path for this ux.
     fn path(&self) -> &PathBuf {
         match self {
             MutationAction::AddAnnotation { path, .. } => path,
@@ -82,7 +82,7 @@ impl MutationAction {
         }
     }
 
-    /// Get the line number for this action.
+    /// Get the line number for this ux.
     fn line(&self) -> usize {
         match self {
             MutationAction::AddAnnotation { line, .. } => *line,
@@ -116,7 +116,7 @@ impl MutationPlan {
         self.actions.len()
     }
 
-    /// Add an action to the plan.
+    /// Add an ux to the plan.
     pub fn push(&mut self, action: MutationAction) {
         self.actions.push(action);
     }
@@ -137,7 +137,7 @@ impl MutationPlan {
         let mut sorted: Vec<_> = self.actions.iter().collect();
         sorted.sort_by_key(|a| (a.path(), a.line()));
 
-        // Group by action type
+        // Group by ux type
         let mut add_actions: Vec<&MutationAction> = Vec::new();
         let mut remove_actions: Vec<&MutationAction> = Vec::new();
 
@@ -268,7 +268,7 @@ impl MutationPlan {
         }
     }
 
-    /// Determine the annotation kind from the first action (for header coloring).
+    /// Determine the annotation kind from the first ux (for header coloring).
     fn annotation_kind(&self) -> Option<&str> {
         self.actions.first().and_then(|a| match a {
             MutationAction::AddAnnotation { annotation, .. } => {
@@ -346,7 +346,7 @@ impl MutationPlan {
                 let action = actions[i];
                 let line = action.line();
 
-                // Check if this is a remove action
+                // Check if this is a remove ux
                 if let MutationAction::RemoveAnnotation { target_name, .. } = action {
                     // Collect all RemoveAnnotation actions at this line
                     let mut targets: Vec<&Target> = Vec::new();

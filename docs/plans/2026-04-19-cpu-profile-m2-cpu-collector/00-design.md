@@ -140,12 +140,12 @@ proposal — local placement chosen).
 
 #### `src/emu/executor/compressed.rs` — compressed jump classification
 
-| Mnemonic     | Encoding   | New class                                      |
-| ------------ | ---------- | ---------------------------------------------- |
-| `c.j`        | rd = x0    | `JalTail`                                      |
-| `c.jal`      | rd = x1    | `JalCall`                                      |
-| `c.jr rs1`   | rd = x0    | `JalrReturn` if `rs1 == 1` else `JalrIndirect` |
-| `c.jalr rs1` | rd = x1    | `JalrCall`                                     |
+| Mnemonic     | Encoding | New class                                      |
+|--------------|----------|------------------------------------------------|
+| `c.j`        | rd = x0  | `JalTail`                                      |
+| `c.jal`      | rd = x1  | `JalCall`                                      |
+| `c.jr rs1`   | rd = x0  | `JalrReturn` if `rs1 == 1` else `JalrIndirect` |
+| `c.jalr rs1` | rd = x1  | `JalrCall`                                     |
 
 #### `src/emu/executor/mod.rs` — `ExecutionResult`
 
@@ -204,12 +204,15 @@ impl Riscv32Emulator {
 #### `src/profile/mod.rs` — trait + session updates
 
 `InstClass` re-export from `cycle_model`:
+
 ```rust
 pub use crate::emu::cycle_model::InstClass;
 ```
+
 (Replaces the m1-era stub `pub struct InstClass {}`.)
 
 `Collector` trait:
+
 ```rust
 pub trait Collector: Send {
     fn on_syscall(&mut self, _ctx: &mut EmuCtx, _id: u32, _args: &[u32; 8]) -> SyscallAction { SyscallAction::Forward }
@@ -223,6 +226,7 @@ pub trait Collector: Send {
 ```
 
 `ProfileSession`:
+
 ```rust
 impl ProfileSession {
     pub fn dispatch_instruction(&mut self, pc: u32, target_pc: u32,
@@ -233,7 +237,7 @@ impl ProfileSession {
     }
 
     /// Extended on_perf_event: fans out to collectors, runs gate,
-    /// fans out gate action, propagates Stop.
+    /// fans out gate ux, propagates Stop.
     pub fn on_perf_event(&mut self, event: PerfEvent) {
         for c in &mut self.collectors { c.on_perf_event(&event); }
         let action = self.gate.as_mut()
@@ -478,6 +482,7 @@ impl CycleModelArg {
 #### `src/commands/profile/handler.rs` — wiring
 
 Two new chunks:
+
 1. **Cycle model plumbing**:
    `emu = emu.with_cycle_model(args.cycle_model.to_emu());`
 2. **`cpu` collector validation + auto-include events**:
@@ -568,14 +573,15 @@ impl<'a> Symbolizer<'a> {
 ```
 
 Algorithm:
+
 1. Symbolize every PC in `func_stats` and assemble a deduplicated
    `frames: Vec<{ name }>` with a `pc -> frame_idx` map.
 2. DFS over `call_edges` keyed by caller, maintaining a running
    `cursor: u64`. For each (caller, callee) in DFS order:
-   - Emit `O` event for callee at `cursor`.
-   - Recurse into callee's outgoing edges.
-   - `cursor += call_edges[(caller, callee)].inclusive_cycles - <recursed inclusive>`
-   - Emit `C` event for callee at `cursor`.
+    - Emit `O` event for callee at `cursor`.
+    - Recurse into callee's outgoing edges.
+    - `cursor += call_edges[(caller, callee)].inclusive_cycles - <recursed inclusive>`
+    - Emit `C` event for callee at `cursor`.
 3. Wrap in the Speedscope envelope:
    ```json
    {
@@ -680,13 +686,13 @@ lp-cli profile [--dir PROFILES_DIR] EXAMPLE_DIR
 
 `profiles/2026-04-19T15-22-01--basic--steady-render/`
 
-| File                            | Source            | Notes                              |
-| ------------------------------- | ----------------- | ---------------------------------- |
-| `meta.json`                     | handler           | gains `cycle_model` field          |
-| `events.jsonl`                  | EventsCollector   | auto-included with cpu             |
-| `cpu-profile.json`              | output_cpu_json   | canonical, m3's diff target        |
-| `cpu-profile.speedscope.json`   | output_speedscope | browser flame chart                |
-| `report.txt`                    | output            | gains `=== CPU summary ===` section|
+| File                          | Source            | Notes                               |
+|-------------------------------|-------------------|-------------------------------------|
+| `meta.json`                   | handler           | gains `cycle_model` field           |
+| `events.jsonl`                | EventsCollector   | auto-included with cpu              |
+| `cpu-profile.json`            | output_cpu_json   | canonical, m3's diff target         |
+| `cpu-profile.speedscope.json` | output_speedscope | browser flame chart                 |
+| `report.txt`                  | output            | gains `=== CPU summary ===` section |
 
 `heap-trace.jsonl` shows up only when `alloc` is in `--collect`.
 
@@ -704,60 +710,60 @@ lp-cli profile [--dir PROFILES_DIR] EXAMPLE_DIR
   values where it matters).
 
 - `lp-riscv-emu/src/profile/cpu.rs#tests` — eight scenarios:
-  1. `gate_disabled_no_attribution`: events ignored when active=false.
-  2. `simple_call_return`: push, attribute, pop. Inclusive cycles
-     match wall-clock between push and pop.
-  3. `nested_three_deep`: A→B→C→C-return→B-return→A-return.
-     Inclusive cycles bubble correctly.
-  4. `tail_call_swaps_top`: A→B(tail)→C(tail)→return-from-A. Stack
-     never deeper than 1 frame.
-  5. `orphaned_return_at_root`: extra return when stack is empty.
-     No-op, no panic.
-  6. `root_self_cycles`: instructions before any call land under
-     `<root>` (PC=0).
-  7. `enable_disable_toggle`: gate flips on/off mid-run; cycles only
-     attributed during `active=true` windows.
-  8. `call_edge_aggregation`: same (caller, callee) called 3 times;
-     `call_edges[(caller, callee)].count == 3`.
+    1. `gate_disabled_no_attribution`: events ignored when active=false.
+    2. `simple_call_return`: push, attribute, pop. Inclusive cycles
+       match wall-clock between push and pop.
+    3. `nested_three_deep`: A→B→C→C-return→B-return→A-return.
+       Inclusive cycles bubble correctly.
+    4. `tail_call_swaps_top`: A→B(tail)→C(tail)→return-from-A. Stack
+       never deeper than 1 frame.
+    5. `orphaned_return_at_root`: extra return when stack is empty.
+       No-op, no panic.
+    6. `root_self_cycles`: instructions before any call land under
+       `<root>` (PC=0).
+    7. `enable_disable_toggle`: gate flips on/off mid-run; cycles only
+       attributed during `active=true` windows.
+    8. `call_edge_aggregation`: same (caller, callee) called 3 times;
+       `call_edges[(caller, callee)].count == 3`.
 
 - `lp-cli/src/commands/profile/symbolize.rs#tests`:
-  - hit (PC inside known symbol)
-  - miss in RAM → `<jit:0xADDR>`
-  - miss elsewhere → `<unknown:0xADDR>`
-  - PC == 0 → `<root>`
-  - boundary: `pc == addr` (hit), `pc == addr + size - 1` (hit),
-    `pc == addr + size` (miss).
+    - hit (PC inside known symbol)
+    - miss in RAM → `<jit:0xADDR>`
+    - miss elsewhere → `<unknown:0xADDR>`
+    - PC == 0 → `<root>`
+    - boundary: `pc == addr` (hit), `pc == addr + size - 1` (hit),
+      `pc == addr + size` (miss).
 
 - `lp-cli/src/commands/profile/output_speedscope.rs#tests`:
-  - 3-frame call graph fixture → output parses as JSON, has correct
-    Speedscope shape (`$schema`, `profiles[0].type == "evented"`,
-    `events.len() == call_edges.len() * 2`).
-  - Sum of all event delta cycles equals `total_cycles_attributed`.
+    - 3-frame call graph fixture → output parses as JSON, has correct
+      Speedscope shape (`$schema`, `profiles[0].type == "evented"`,
+      `events.len() == call_edges.len() * 2`).
+    - Sum of all event delta cycles equals `total_cycles_attributed`.
 
 - `lp-cli/src/commands/profile/output_cpu_json.rs#tests`:
-  - Round-trip through `serde_json::from_str` / `to_string`.
-  - `schema_version == 1` present.
-  - Hex format matches `^0x[0-9a-f]{8}$` for all PC keys.
+    - Round-trip through `serde_json::from_str` / `to_string`.
+    - `schema_version == 1` present.
+    - Hex format matches `^0x[0-9a-f]{8}$` for all PC keys.
 
 - `lp-cli/src/commands/profile/mode/{compile,startup,all}.rs#tests`:
-  - New case: each gate returns `Enable` on `profile:start`.
-  - (Existing m1 cases unchanged.)
+    - New case: each gate returns `Enable` on `profile:start`.
+    - (Existing m1 cases unchanged.)
 
 ### Integration tests
 
 - `lp-cli/tests/profile_cpu.rs` (new):
-  - `cpu_default_smoke`: `lp-cli profile examples/basic` produces
-    `meta.json`, `events.jsonl`, `cpu-profile.json`,
-    `cpu-profile.speedscope.json`, `report.txt`. `cpu-profile.json`
-    parses; `total_cycles_attributed > 0`; `report.txt` contains
-    "CPU summary".
-  - `cpu_with_alloc`: `--collect cpu,alloc` produces both
-    `cpu-profile.json` and `heap-trace.jsonl`.
-  - `cpu_uniform_model`: `--cycle-model uniform` →
-    `meta.json.cycle_model == "uniform"` and all instruction costs
-    are 1 (sanity check on a tiny example).
-  - `cpu_compile_mode`: `--mode compile` produces a non-empty
-    flame chart (smoke test that gate Enable-on-profile-start works).
+    - `cpu_default_smoke`: `lp-cli profile examples/basic` produces
+      `meta.json`, `events.jsonl`, `cpu-profile.json`,
+      `cpu-profile.speedscope.json`, `report.txt`. `cpu-profile.json`
+      parses; `total_cycles_attributed > 0`; `report.txt` contains
+      "CPU summary".
+    - `cpu_with_alloc`: `--collect cpu,alloc` produces both
+      `cpu-profile.json` and `heap-trace.jsonl`.
+    - `cpu_uniform_model`: `--cycle-model uniform` →
+      `meta.json.cycle_model == "uniform"` and all instruction costs
+      are 1 (sanity check on a tiny example).
+    - `cpu_compile_mode`: `--mode compile` produces a non-empty
+      flame chart (smoke test that gate Enable-on-profile-start works).
 
 ## Out of scope
 
