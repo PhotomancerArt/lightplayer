@@ -172,6 +172,59 @@ export async function eraseDeviceFlash(portId, esptoolModulePath) {
   }
 }
 
+export async function resetTarget(portId, esptoolModulePath) {
+  if (!isSupported()) {
+    throw new Error("Web Serial ESP32 reset is not supported in this browser.");
+  }
+
+  const port = getPort(portId);
+  await releasePort(portId);
+
+  const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
+  const logs = [];
+  const progress = [];
+  const terminal = terminalFor(logs, "esp32-reset");
+  const transport = new Transport(port, true);
+  const loader = new ESPLoader({
+    transport,
+    baudrate: 115200,
+    terminal,
+    debugLogging: false,
+  });
+  let resetComplete = false;
+
+  try {
+    await transport.connect(115200);
+    progress.push({
+      label: "Resetting device",
+      completedSteps: 1,
+      totalSteps: 2,
+      percent: 50,
+    });
+    await loader.after("hard_reset");
+    resetComplete = true;
+    progress.push({
+      label: "Waiting for device boot",
+      completedSteps: 2,
+      totalSteps: 2,
+      percent: 100,
+    });
+    return {
+      logs,
+      progress: compactProgress(progress),
+    };
+  } finally {
+    try {
+      await transport.disconnect();
+    } catch (error) {
+      console.warn("[esp32-reset] transport disconnect failed", error);
+    }
+    if (resetComplete) {
+      await sleep(1500);
+    }
+  }
+}
+
 function terminalFor(logs, target) {
   return {
     clean() {},
@@ -188,6 +241,10 @@ function terminalFor(logs, target) {
       }
     },
   };
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function loadFullManifest(manifestPath) {

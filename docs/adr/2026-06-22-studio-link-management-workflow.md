@@ -47,11 +47,22 @@ loading, `esptool-js` integration, and protocol release/reopen behavior. Before
 probe, firmware flash, or full erase, it releases normal server/protocol serial
 ownership so bootloader tooling can take the port exclusively.
 
+Browser serial server protocol open/reopen also performs a hard reset before
+opening the JSON-lines protocol stream. The browser serial client then waits for
+the first valid protocol frame before sending the first request, so the initial
+project probe is not lost while firmware is still booting. If the readiness wait
+or probe still fails, Studio marks the server failed instead of leaving the
+server pane in a misleading connected state.
+
 Use the packaged Studio firmware manifest at
 `./firmware/esp32c6/manifest.json`. Use a pinned browser esptool module,
-`https://unpkg.com/esptool-js@0.6.0/lib/index.js`, as the default development
-path. Applications can override the module path through
-`BrowserSerialEsp32Options` when they want to serve the dependency themselves.
+`https://cdn.jsdelivr.net/npm/esptool-js@0.6.0/+esm`, as the default development
+path. A browser ESM CDN endpoint is required because the raw package ESM imports
+dependencies such as `pako` by bare specifier, which browsers cannot resolve
+directly. The selected endpoint has been checked against the ESP32-C6 stub
+decode path used by reset/provisioning. Applications can override the module
+path through `BrowserSerialEsp32Options` when they want to serve the dependency
+themselves.
 
 Expose the workflow through `lpa-studio-ux` actions:
 

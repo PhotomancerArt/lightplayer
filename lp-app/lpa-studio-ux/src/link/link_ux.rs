@@ -354,16 +354,17 @@ impl LinkUx {
 
         let result = {
             let mut registry = self.registry.borrow_mut();
-            let provider = registry
-                .provider_mut(provider_id)
-                .ok_or_else(|| missing_provider(provider_id))?;
-            provider
-                .manage(&session_id, request)
-                .await
-                .map_err(map_link_error)?
+            match registry.provider_mut(provider_id) {
+                Some(provider) => provider
+                    .manage(&session_id, request)
+                    .await
+                    .map_err(map_link_error),
+                None => Err(missing_provider(provider_id)),
+            }
         };
-        let logs = management_result_logs(&result);
         self.state = LinkState::Connected { device };
+        let result = result?;
+        let logs = management_result_logs(&result);
         Ok(LinkManagementOutcome { result, logs })
     }
 
@@ -712,10 +713,15 @@ fn map_diagnostic_level(level: LinkDiagnosticSeverity) -> UxLogLevel {
 
 #[cfg(test)]
 mod tests {
+    use std::future::Future;
+    use std::sync::Arc;
+    use std::task::{Context, Poll, Wake, Waker};
+
     use lpa_link::providers::LinkProviderRegistry;
     use lpa_link::providers::fake::FakeProvider;
     use lpa_link::{
-        LinkCapabilities, LinkConnectionKind, LinkEndpoint, LinkProviderKind, LinkSession,
+        LinkCapabilities, LinkConnectionKind, LinkEndpoint, LinkManagementRequest,
+        LinkProviderKind, LinkSession,
     };
 
     use super::*;
@@ -820,6 +826,30 @@ mod tests {
     }
 
     #[test]
+    fn failed_management_returns_to_recoverable_connected_state() {
+        let mut link = LinkUx::with_registry(registry_with_fake_endpoint());
+        link.active_provider = Some(LinkProviderKind::Fake);
+        link.active_session = Some(management_capable_session());
+        link.set_state(LinkState::Connected {
+            device: ConnectedDeviceSummary::new(
+                LinkProviderKind::Fake,
+                "fake-runtime",
+                "fake-session",
+                "Fake runtime",
+            ),
+        });
+
+        let result = block_on_ready(link.manage(
+            LinkManagementRequest::EraseDeviceFlash,
+            "Resetting device to blank",
+        ));
+
+        assert!(matches!(result, Err(UxError::Link(_))));
+        assert!(matches!(link.state(), LinkState::Connected { .. }));
+        assert!(!link.actions(false).is_empty());
+    }
+
+    #[test]
     fn snapshot_projects_provider_catalog_from_registry() {
         let link = LinkUx::with_registry(registry_with_fake_endpoint());
 
@@ -850,5 +880,24 @@ mod tests {
                 .with_flash()
                 .with_device_erase(),
         )
+    }
+
+    fn block_on_ready<F>(future: F) -> F::Output
+    where
+        F: Future,
+    {
+        let waker = Waker::from(Arc::new(NoopWake));
+        let mut context = Context::from_waker(&waker);
+        let mut future = Box::pin(future);
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(output) => output,
+            Poll::Pending => panic!("test future unexpectedly yielded"),
+        }
+    }
+
+    struct NoopWake;
+
+    impl Wake for NoopWake {
+        fn wake(self: Arc<Self>) {}
     }
 }

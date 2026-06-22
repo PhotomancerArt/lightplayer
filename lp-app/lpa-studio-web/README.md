@@ -61,11 +61,13 @@ errors instead of silent boot timeouts.
 
 ESP32-C6 firmware assets are served from
 `public/firmware/esp32c6/manifest.json`. Browser serial provisioning imports a
-pinned `esptool-js` module from
-`https://unpkg.com/esptool-js@0.6.0/lib/index.js` by default; deployments can
+pinned browser ESM `esptool-js` module from
+`https://cdn.jsdelivr.net/npm/esptool-js@0.6.0/+esm` by default; deployments can
 override the `BrowserSerialEsp32Options` path if they want to serve that module
-themselves. Firmware provisioning and reset-to-blank both require a browser with
-Web Serial support and a user-granted serial port.
+themselves. The CDN ESM endpoint avoids raw package bare imports such as `pako`,
+which browsers cannot resolve directly, and it decodes the ESP32-C6 flasher
+stub used by reset/provisioning. Firmware provisioning and reset-to-blank both
+require a browser with Web Serial support and a user-granted serial port.
 
 ## Hardware Flow
 

@@ -1,4 +1,6 @@
-use crate::providers::browser_serial_esp32::BrowserSerialEsp32Provider;
+use crate::providers::browser_serial_esp32::{
+    BrowserSerialEsp32Provider, DEFAULT_ESPTOOL_MODULE_PATH,
+};
 use crate::{LinkConnectionKind, LinkOperation, LinkProvider};
 
 #[tokio::test]
@@ -37,4 +39,17 @@ async fn browser_serial_connection_reports_protocol() {
         LinkConnectionKind::BrowserSerialEsp32 { ref protocol }
             if protocol == "lp-serial-json-lines-v1"
     ));
+}
+
+#[test]
+fn default_esptool_module_path_uses_bundled_browser_esm() {
+    assert_eq!(
+        BrowserSerialEsp32Provider::new()
+            .options()
+            .esptool_module_path
+            .as_deref(),
+        Some(DEFAULT_ESPTOOL_MODULE_PATH)
+    );
+    assert!(DEFAULT_ESPTOOL_MODULE_PATH.contains("cdn.jsdelivr.net/"));
+    assert!(DEFAULT_ESPTOOL_MODULE_PATH.ends_with("/+esm"));
 }

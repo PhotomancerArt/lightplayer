@@ -5,7 +5,7 @@ mod provider;
 
 pub use browser_esp32_flash::{
     BrowserEsp32EraseResult, BrowserEsp32FirmwareManifest, BrowserEsp32FlashProgress,
-    BrowserEsp32FlashResult, BrowserEsp32ProbeResult,
+    BrowserEsp32FlashResult, BrowserEsp32ProbeResult, BrowserEsp32ResetResult,
 };
 pub use browser_serial::BrowserSerialPortHandle;
 pub use browser_serial_esp32_options::{

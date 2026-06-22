@@ -126,6 +126,12 @@ impl StudioUx {
             .link
             .active_connection()
             .ok_or_else(|| UxError::MissingSession("link connection is not open".to_string()))?;
+        if should_reopen_before_server_connect(&connection) {
+            self.project.reset();
+            self.server.disconnect();
+            let connected = self.link.reopen_active_connection().await?;
+            return self.attach_connected_link(connected).await;
+        }
         self.connect_server_connection(&connection).await
     }
 
@@ -137,7 +143,20 @@ impl StudioUx {
             Ok(()) => {
                 let mut outcome =
                     UxOutcome::new().with_notice(UxNotice::info("Server protocol connected"));
-                match self.connect_running_project_if_available().await? {
+                let auto_connect = match self.connect_running_project_if_available().await {
+                    Ok(auto_connect) => auto_connect,
+                    Err(error) => {
+                        self.logs.push(UxLogEntry::new(
+                            UxLogLevel::Error,
+                            "lpa-studio-ux",
+                            format!("server readiness probe failed: {error}"),
+                        ));
+                        self.project.reset();
+                        self.server.fail(error.to_string());
+                        return Err(error);
+                    }
+                };
+                match auto_connect {
                     AutoProjectConnect::Connected => {
                         outcome = outcome.with_notice(UxNotice::info("Connected running project"));
                     }
@@ -359,6 +378,13 @@ enum AutoProjectConnect {
 
 fn should_auto_load_demo_project(connection: &LinkConnection) -> bool {
     matches!(connection.kind, LinkConnectionKind::BrowserWorker { .. })
+}
+
+fn should_reopen_before_server_connect(connection: &LinkConnection) -> bool {
+    matches!(
+        connection.kind,
+        LinkConnectionKind::BrowserSerialEsp32 { .. }
+    )
 }
 
 fn provision_notice(result: &LinkManagementResult) -> UxNotice {

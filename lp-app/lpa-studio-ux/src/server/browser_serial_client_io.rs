@@ -14,7 +14,8 @@ use wasm_bindgen_futures::JsFuture;
 
 use crate::{SharedLinkRegistry, UxLogEntry, UxLogLevel};
 
-const RESPONSE_POLL_LIMIT: usize = 600;
+const RESPONSE_POLL_LIMIT: usize = 500;
+const READINESS_POLL_LIMIT: usize = 500;
 const RESPONSE_POLL_DELAY_MS: i32 = 10;
 const MALFORMED_PROTOCOL_SNIPPET_LIMIT: usize = 4_096;
 const DEVICE_LOG_SNIPPET_LIMIT: usize = 1_024;
@@ -36,8 +37,63 @@ impl BrowserSerialClientIo {
                 logs,
                 last_request: None,
                 last_protocol_issue: None,
+                protocol_ready: false,
             })),
         }
+    }
+
+    async fn ensure_protocol_ready(&self) -> Result<(), TransportError> {
+        if self.state.borrow().protocol_ready {
+            return Ok(());
+        }
+
+        for _ in 0..READINESS_POLL_LIMIT {
+            let (registry, session_id) = {
+                let state = self.state.borrow();
+                (Rc::clone(&state.registry), state.session_id.clone())
+            };
+
+            let (errors, lines) = {
+                let mut registry = registry.borrow_mut();
+                let provider = browser_serial_provider_mut(&mut registry)?;
+                let errors = provider
+                    .take_errors(&session_id)
+                    .map_err(link_error_to_transport)?;
+                let lines = provider
+                    .take_lines(&session_id)
+                    .map_err(link_error_to_transport)?;
+                (errors, lines)
+            };
+
+            for error in errors {
+                let message =
+                    format!("browser serial error while waiting for server readiness: {error}");
+                console_error(&format!("[browser-serial] {message}"));
+                self.state
+                    .borrow()
+                    .push_log(UxLogLevel::Error, "browser-serial", message.clone());
+                return Err(TransportError::Other(message));
+            }
+
+            for line in lines {
+                if self.handle_line(line)?.is_some() {
+                    let mut state = self.state.borrow_mut();
+                    state.protocol_ready = true;
+                    state.push_log(
+                        UxLogLevel::Info,
+                        "browser-serial",
+                        "server protocol stream is ready",
+                    );
+                    return Ok(());
+                }
+            }
+
+            sleep_ms(RESPONSE_POLL_DELAY_MS).await?;
+        }
+
+        Err(TransportError::Other(
+            "timed out waiting for browser serial server readiness".to_string(),
+        ))
     }
 
     fn handle_line(&self, line: String) -> Result<Option<WireServerMessage>, TransportError> {
@@ -92,6 +148,8 @@ impl BrowserSerialClientIo {
 #[async_trait(?Send)]
 impl ClientIo for BrowserSerialClientIo {
     async fn send(&mut self, msg: ClientMessage) -> Result<(), TransportError> {
+        self.ensure_protocol_ready().await?;
+
         let request_id = msg.id;
         let label = request_label(&msg.msg);
         let frame = json::to_string(&msg)
@@ -193,6 +251,7 @@ struct BrowserSerialClientState {
     logs: Rc<RefCell<Vec<UxLogEntry>>>,
     last_request: Option<BrowserSerialRequest>,
     last_protocol_issue: Option<String>,
+    protocol_ready: bool,
 }
 
 impl BrowserSerialClientState {

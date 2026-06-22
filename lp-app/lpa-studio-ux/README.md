@@ -86,6 +86,12 @@ normal server/project workflow. If the browser or device needs more time after
 reset, Studio keeps the link context and reports that the user should reconnect
 after boot.
 
+For Browser Web Serial ESP32 links, opening or reopening the server protocol
+goes through the provider reset path before Studio probes for loaded projects.
+The browser-serial client waits for the first valid protocol frame before
+sending the first request, so a just-reset device does not lose the initial
+project probe while firmware is still booting.
+
 After reset-to-blank, Studio leaves project and server detached and returns to a
 link state that can offer provisioning again. Reset-to-blank is not a server
 filesystem clear; it is a destructive whole-device erase through the link

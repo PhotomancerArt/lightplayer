@@ -179,10 +179,16 @@ cargo check -p lpa-link --features browser-worker --target wasm32-unknown-unknow
 - `browser-serial-esp32` owns Web Serial access and ESP32 probe/flash/erase bindings
   under `src/providers/browser_serial_esp32`. Apps pass same-origin
   `firmware_manifest_path` and optional `esptool_module_path` options for
-  app-owned assets. The default esptool module is pinned to
-  `https://unpkg.com/esptool-js@0.6.0/lib/index.js` for development. A deployed
-  app can override it with a hosted module path. The provider releases normal
+  app-owned assets. The default esptool module is pinned to the browser ESM
+  endpoint `https://cdn.jsdelivr.net/npm/esptool-js@0.6.0/+esm` for
+  development. The ESM CDN rewrite is important because the raw package imports
+  dependencies such as `pako` by bare specifier, which browsers cannot resolve
+  without a bundler or import map. This endpoint has also been checked against
+  the ESP32-C6 stub decoding path used by reset/provisioning. A deployed app can
+  override the default with a hosted module path. The provider releases normal
   protocol ownership before probe/flash/erase takes exclusive bootloader access.
+  Opening the normal serial server protocol performs a hard reset first, then
+  waits briefly for firmware boot before the protocol port is reopened.
 - Direct filesystem access means raw/full filesystem image management below the
   running `lp-server`. Normal project upload should use `lpa-client` and the
   server filesystem/project protocol once firmware is running.

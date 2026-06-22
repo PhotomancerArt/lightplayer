@@ -29,6 +29,12 @@ pub struct BrowserEsp32EraseResult {
     pub progress: Vec<BrowserEsp32FlashProgress>,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct BrowserEsp32ResetResult {
+    pub logs: Vec<String>,
+    pub progress: Vec<BrowserEsp32FlashProgress>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BrowserEsp32FlashProgress {
     pub label: String,
@@ -59,6 +65,9 @@ extern "C" {
 
     #[wasm_bindgen(js_name = eraseDeviceFlash)]
     fn js_erase_device_flash(port_id: u32, esptool_module_path: &str) -> Promise;
+
+    #[wasm_bindgen(js_name = resetTarget)]
+    fn js_reset_target(port_id: u32, esptool_module_path: &str) -> Promise;
 }
 
 pub fn is_supported() -> bool {
@@ -102,6 +111,19 @@ pub async fn erase_device_flash(
         .map_err(js_error)?;
     Ok(BrowserEsp32EraseResult {
         chip_name: reflect_optional_string(&value, "chipName")?,
+        logs: reflect_string_array(&value, "logs")?,
+        progress: reflect_progress_array(&value, "progress")?,
+    })
+}
+
+pub async fn reset_target(
+    port_id: u32,
+    esptool_module_path: &str,
+) -> Result<BrowserEsp32ResetResult, LinkError> {
+    let value = JsFuture::from(js_reset_target(port_id, esptool_module_path))
+        .await
+        .map_err(js_error)?;
+    Ok(BrowserEsp32ResetResult {
         logs: reflect_string_array(&value, "logs")?,
         progress: reflect_progress_array(&value, "progress")?,
     })

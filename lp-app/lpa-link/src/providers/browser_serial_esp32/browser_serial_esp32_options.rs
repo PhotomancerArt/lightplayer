@@ -1,5 +1,5 @@
 pub const DEFAULT_ESP32C6_FIRMWARE_MANIFEST_PATH: &str = "./firmware/esp32c6/manifest.json";
-pub const DEFAULT_ESPTOOL_MODULE_PATH: &str = "https://unpkg.com/esptool-js@0.6.0/lib/index.js";
+pub const DEFAULT_ESPTOOL_MODULE_PATH: &str = "https://cdn.jsdelivr.net/npm/esptool-js@0.6.0/+esm";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BrowserSerialEsp32Options {
