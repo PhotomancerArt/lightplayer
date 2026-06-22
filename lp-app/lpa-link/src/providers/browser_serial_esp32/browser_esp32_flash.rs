@@ -1,8 +1,8 @@
-use js_sys::{Array, Promise, Reflect};
-use wasm_bindgen::prelude::*;
+use js_sys::{Array, Function, Promise, Reflect};
+use wasm_bindgen::{JsCast, closure::Closure, prelude::*};
 use wasm_bindgen_futures::JsFuture;
 
-use crate::LinkError;
+use crate::{LinkError, LinkManagementEvent, LinkManagementEventSink, LinkManagementProgress};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BrowserEsp32FirmwareManifest {
@@ -61,13 +61,22 @@ extern "C" {
     fn js_probe_target(port_id: u32, esptool_module_path: &str) -> Promise;
 
     #[wasm_bindgen(js_name = flashFirmware)]
-    fn js_flash_firmware(port_id: u32, manifest_path: &str, esptool_module_path: &str) -> Promise;
+    fn js_flash_firmware(
+        port_id: u32,
+        manifest_path: &str,
+        esptool_module_path: &str,
+        on_event: &Function,
+    ) -> Promise;
 
     #[wasm_bindgen(js_name = eraseDeviceFlash)]
-    fn js_erase_device_flash(port_id: u32, esptool_module_path: &str) -> Promise;
+    fn js_erase_device_flash(
+        port_id: u32,
+        esptool_module_path: &str,
+        on_event: &Function,
+    ) -> Promise;
 
     #[wasm_bindgen(js_name = resetTarget)]
-    fn js_reset_target(port_id: u32, esptool_module_path: &str) -> Promise;
+    fn js_reset_target(port_id: u32, esptool_module_path: &str, on_event: &Function) -> Promise;
 }
 
 pub fn is_supported() -> bool {
@@ -81,15 +90,18 @@ pub async fn load_manifest(manifest_path: &str) -> Result<BrowserEsp32FirmwareMa
     parse_manifest(&value)
 }
 
-pub async fn flash_firmware(
+pub async fn flash_firmware_with_events(
     port_id: u32,
     manifest_path: &str,
     esptool_module_path: &str,
+    events: LinkManagementEventSink,
 ) -> Result<BrowserEsp32FlashResult, LinkError> {
+    let on_event = management_event_callback(events);
     let value = JsFuture::from(js_flash_firmware(
         port_id,
         manifest_path,
         esptool_module_path,
+        on_event.as_ref().unchecked_ref(),
     ))
     .await
     .map_err(js_error)?;
@@ -102,13 +114,19 @@ pub async fn flash_firmware(
     })
 }
 
-pub async fn erase_device_flash(
+pub async fn erase_device_flash_with_events(
     port_id: u32,
     esptool_module_path: &str,
+    events: LinkManagementEventSink,
 ) -> Result<BrowserEsp32EraseResult, LinkError> {
-    let value = JsFuture::from(js_erase_device_flash(port_id, esptool_module_path))
-        .await
-        .map_err(js_error)?;
+    let on_event = management_event_callback(events);
+    let value = JsFuture::from(js_erase_device_flash(
+        port_id,
+        esptool_module_path,
+        on_event.as_ref().unchecked_ref(),
+    ))
+    .await
+    .map_err(js_error)?;
     Ok(BrowserEsp32EraseResult {
         chip_name: reflect_optional_string(&value, "chipName")?,
         logs: reflect_string_array(&value, "logs")?,
@@ -120,9 +138,27 @@ pub async fn reset_target(
     port_id: u32,
     esptool_module_path: &str,
 ) -> Result<BrowserEsp32ResetResult, LinkError> {
-    let value = JsFuture::from(js_reset_target(port_id, esptool_module_path))
-        .await
-        .map_err(js_error)?;
+    reset_target_with_events(
+        port_id,
+        esptool_module_path,
+        LinkManagementEventSink::noop(),
+    )
+    .await
+}
+
+pub async fn reset_target_with_events(
+    port_id: u32,
+    esptool_module_path: &str,
+    events: LinkManagementEventSink,
+) -> Result<BrowserEsp32ResetResult, LinkError> {
+    let on_event = management_event_callback(events);
+    let value = JsFuture::from(js_reset_target(
+        port_id,
+        esptool_module_path,
+        on_event.as_ref().unchecked_ref(),
+    ))
+    .await
+    .map_err(js_error)?;
     Ok(BrowserEsp32ResetResult {
         logs: reflect_string_array(&value, "logs")?,
         progress: reflect_progress_array(&value, "progress")?,
@@ -140,6 +176,30 @@ pub async fn probe_target(
         chip_name: reflect_optional_string(&value, "chipName")?,
         logs: reflect_string_array(&value, "logs")?,
     })
+}
+
+fn management_event_callback(events: LinkManagementEventSink) -> Closure<dyn FnMut(JsValue)> {
+    Closure::wrap(Box::new(move |value: JsValue| match parse_event(&value) {
+        Ok(event) => events.emit(event),
+        Err(error) => events.emit(LinkManagementEvent::log(format!(
+            "failed to parse browser ESP32 progress event: {error}"
+        ))),
+    }) as Box<dyn FnMut(JsValue)>)
+}
+
+fn parse_event(value: &JsValue) -> Result<LinkManagementEvent, LinkError> {
+    match reflect_string(value, "kind")?.as_str() {
+        "log" => Ok(LinkManagementEvent::log(reflect_string(value, "message")?)),
+        "progress" => Ok(LinkManagementEvent::progress(LinkManagementProgress {
+            label: reflect_string(value, "label")?,
+            completed_steps: reflect_optional_u32(value, "completedSteps")?.unwrap_or(0),
+            total_steps: reflect_optional_u32(value, "totalSteps")?,
+            percent: reflect_optional_u32(value, "percent")?,
+        })),
+        kind => Err(LinkError::other(format!(
+            "unknown browser ESP32 progress event kind `{kind}`"
+        ))),
+    }
 }
 
 fn parse_manifest(value: &JsValue) -> Result<BrowserEsp32FirmwareManifest, LinkError> {

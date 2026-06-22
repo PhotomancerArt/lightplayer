@@ -1,4 +1,5 @@
 use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
+use crate::provider::management_event::{LinkManagementEventSink, emit_management_result_events};
 use crate::provider::management_request::LinkManagementRequest;
 use crate::provider::management_result::LinkManagementResult;
 use crate::provider::session::LinkSessionId;
@@ -64,6 +65,19 @@ pub trait LinkProvider {
     ) -> Result<LinkManagementResult, LinkError> {
         let _ = session_id;
         Err(LinkError::unsupported(format!("{:?}", request.operation())))
+    }
+
+    /// Execute a low-level management operation and publish live progress where
+    /// the provider can observe it.
+    async fn manage_with_events(
+        &mut self,
+        session_id: &LinkSessionId,
+        request: LinkManagementRequest,
+        events: LinkManagementEventSink,
+    ) -> Result<LinkManagementResult, LinkError> {
+        let result = self.manage(session_id, request).await?;
+        emit_management_result_events(&result, &events);
+        Ok(result)
     }
 
     /// Close provider-owned resources for a live session.

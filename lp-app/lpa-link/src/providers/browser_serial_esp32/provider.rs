@@ -15,8 +15,8 @@ use crate::providers::browser_serial_esp32::{
 use crate::providers::{LinkProviderDescriptor, LinkProviderKind};
 use crate::{
     LinkCapabilities, LinkConnection, LinkConnectionKind, LinkDiagnostic, LinkDiagnosticSeverity,
-    LinkEndpoint, LinkError, LinkLogEntry, LinkLogLevel, LinkManagementProgress, LinkProvider,
-    LinkSession, LinkSessionStatus,
+    LinkEndpoint, LinkError, LinkLogEntry, LinkLogLevel, LinkManagementEventSink,
+    LinkManagementProgress, LinkProvider, LinkSession, LinkSessionStatus,
 };
 
 pub fn descriptor() -> LinkProviderDescriptor {
@@ -152,11 +152,21 @@ impl BrowserSerialEsp32Provider {
         &mut self,
         endpoint_id: &LinkEndpointId,
     ) -> Result<BrowserEsp32FlashResult, LinkError> {
+        self.flash_firmware_with_events(endpoint_id, LinkManagementEventSink::noop())
+            .await
+    }
+
+    pub async fn flash_firmware_with_events(
+        &mut self,
+        endpoint_id: &LinkEndpointId,
+        events: LinkManagementEventSink,
+    ) -> Result<BrowserEsp32FlashResult, LinkError> {
         let port_id = self.endpoint_state(endpoint_id)?.port_id;
-        browser_esp32_flash::flash_firmware(
+        browser_esp32_flash::flash_firmware_with_events(
             port_id,
             &self.options.firmware_manifest_path,
             self.options.esptool_module_path(),
+            events,
         )
         .await
     }
@@ -165,8 +175,80 @@ impl BrowserSerialEsp32Provider {
         &mut self,
         endpoint_id: &LinkEndpointId,
     ) -> Result<BrowserEsp32EraseResult, LinkError> {
+        self.erase_device_flash_with_events(endpoint_id, LinkManagementEventSink::noop())
+            .await
+    }
+
+    pub async fn erase_device_flash_with_events(
+        &mut self,
+        endpoint_id: &LinkEndpointId,
+        events: LinkManagementEventSink,
+    ) -> Result<BrowserEsp32EraseResult, LinkError> {
         let port_id = self.endpoint_state(endpoint_id)?.port_id;
-        browser_esp32_flash::erase_device_flash(port_id, self.options.esptool_module_path()).await
+        browser_esp32_flash::erase_device_flash_with_events(
+            port_id,
+            self.options.esptool_module_path(),
+            events,
+        )
+        .await
+    }
+
+    async fn manage_inner(
+        &mut self,
+        session_id: &LinkSessionId,
+        request: LinkManagementRequest,
+        events: LinkManagementEventSink,
+    ) -> Result<LinkManagementResult, LinkError> {
+        self.session_capabilities_support(session_id, &request)?;
+        let endpoint_id = self.session(session_id)?.session.endpoint_id.clone();
+        self.release_protocol_if_open(session_id).await?;
+        match request {
+            LinkManagementRequest::FlashFirmware => {
+                let result = self
+                    .flash_firmware_with_events(&endpoint_id, events.clone())
+                    .await?;
+                let logs = result
+                    .logs
+                    .iter()
+                    .map(|message| {
+                        LinkLogEntry::new(
+                            endpoint_id.clone(),
+                            Some(session_id.clone()),
+                            LinkLogLevel::Info,
+                            message.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                self.session_mut(session_id)?.logs.extend(logs);
+                Ok(LinkManagementResult::FlashFirmware(
+                    map_firmware_flash_result(result),
+                ))
+            }
+            LinkManagementRequest::EraseDeviceFlash => {
+                let result = self
+                    .erase_device_flash_with_events(&endpoint_id, events.clone())
+                    .await?;
+                let logs = result
+                    .logs
+                    .iter()
+                    .map(|message| {
+                        LinkLogEntry::new(
+                            endpoint_id.clone(),
+                            Some(session_id.clone()),
+                            LinkLogLevel::Info,
+                            message.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                self.session_mut(session_id)?.logs.extend(logs);
+                Ok(LinkManagementResult::EraseDeviceFlash(
+                    map_erase_device_result(result),
+                ))
+            }
+            LinkManagementRequest::ResetRuntime | LinkManagementRequest::EraseRawFilesystem => {
+                Err(LinkError::unsupported(format!("{:?}", request.operation())))
+            }
+        }
     }
 
     async fn reset_target_for_protocol(
@@ -308,52 +390,17 @@ impl LinkProvider for BrowserSerialEsp32Provider {
         session_id: &LinkSessionId,
         request: LinkManagementRequest,
     ) -> Result<LinkManagementResult, LinkError> {
-        self.session_capabilities_support(session_id, &request)?;
-        let endpoint_id = self.session(session_id)?.session.endpoint_id.clone();
-        self.release_protocol_if_open(session_id).await?;
-        match request {
-            LinkManagementRequest::FlashFirmware => {
-                let result = self.flash_firmware(&endpoint_id).await?;
-                let logs = result
-                    .logs
-                    .iter()
-                    .map(|message| {
-                        LinkLogEntry::new(
-                            endpoint_id.clone(),
-                            Some(session_id.clone()),
-                            LinkLogLevel::Info,
-                            message.clone(),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                self.session_mut(session_id)?.logs.extend(logs);
-                Ok(LinkManagementResult::FlashFirmware(
-                    map_firmware_flash_result(result),
-                ))
-            }
-            LinkManagementRequest::EraseDeviceFlash => {
-                let result = self.erase_device_flash(&endpoint_id).await?;
-                let logs = result
-                    .logs
-                    .iter()
-                    .map(|message| {
-                        LinkLogEntry::new(
-                            endpoint_id.clone(),
-                            Some(session_id.clone()),
-                            LinkLogLevel::Info,
-                            message.clone(),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                self.session_mut(session_id)?.logs.extend(logs);
-                Ok(LinkManagementResult::EraseDeviceFlash(
-                    map_erase_device_result(result),
-                ))
-            }
-            LinkManagementRequest::ResetRuntime | LinkManagementRequest::EraseRawFilesystem => {
-                Err(LinkError::unsupported(format!("{:?}", request.operation())))
-            }
-        }
+        self.manage_inner(session_id, request, LinkManagementEventSink::noop())
+            .await
+    }
+
+    async fn manage_with_events(
+        &mut self,
+        session_id: &LinkSessionId,
+        request: LinkManagementRequest,
+        events: LinkManagementEventSink,
+    ) -> Result<LinkManagementResult, LinkError> {
+        self.manage_inner(session_id, request, events).await
     }
 
     async fn close(&mut self, session_id: &LinkSessionId) -> Result<(), LinkError> {

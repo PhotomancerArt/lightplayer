@@ -1,10 +1,11 @@
-use crate::{ProgressState, UxIssue, UxMetric};
+use crate::{ProgressState, UxActivity, UxIssue, UxMetric};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UxBody {
     Empty,
     Text(String),
     Progress(ProgressState),
+    Activity(UxActivity),
     Issue(UxIssue),
     Metrics(Vec<UxMetric>),
 }
@@ -22,6 +23,27 @@ impl UxBody {
                 Some(detail) => vec![progress.label.clone(), detail.clone()],
                 None => vec![progress.label.clone()],
             },
+            Self::Activity(activity) => {
+                let mut lines = vec![activity.title.clone()];
+                if let Some(detail) = &activity.detail {
+                    lines.push(detail.clone());
+                }
+                if let Some(progress) = &activity.progress {
+                    lines.push(progress.label.clone());
+                    if let Some(detail) = &progress.detail {
+                        lines.push(detail.clone());
+                    }
+                }
+                lines.extend(
+                    activity
+                        .terminal
+                        .iter()
+                        .rev()
+                        .take(8)
+                        .map(|line| line.text.clone()),
+                );
+                lines
+            }
             Self::Issue(issue) => match &issue.detail {
                 Some(detail) => vec![issue.message.clone(), detail.clone()],
                 None => vec![issue.message.clone()],

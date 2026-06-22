@@ -13,6 +13,9 @@ pub use provider::endpoint::LinkEndpointId;
 pub use provider::endpoint::LinkEndpointStatus;
 pub use provider::error::LinkError;
 pub use provider::log::{LinkLogEntry, LinkLogLevel};
+pub use provider::management_event::{
+    LinkManagementEvent, LinkManagementEventSink, emit_management_result_events,
+};
 pub use provider::management_progress::LinkManagementProgress;
 pub use provider::management_request::LinkManagementRequest;
 pub use provider::management_result::{

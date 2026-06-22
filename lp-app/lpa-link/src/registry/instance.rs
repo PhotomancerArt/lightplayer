@@ -1,4 +1,5 @@
 use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
+use crate::provider::management_event::LinkManagementEventSink;
 use crate::provider::management_request::LinkManagementRequest;
 use crate::provider::management_result::LinkManagementResult;
 use crate::provider::session::LinkSessionId;
@@ -153,6 +154,45 @@ impl LinkProvider for LinkProviderInstance {
             Self::BrowserWorker(provider) => provider.manage(session_id, request).await,
             #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
             Self::BrowserSerialEsp32(provider) => provider.manage(session_id, request).await,
+        }
+    }
+
+    async fn manage_with_events(
+        &mut self,
+        session_id: &LinkSessionId,
+        request: LinkManagementRequest,
+        events: LinkManagementEventSink,
+    ) -> Result<LinkManagementResult, LinkError> {
+        match self {
+            Self::Fake(provider) => {
+                provider
+                    .manage_with_events(session_id, request, events)
+                    .await
+            }
+            #[cfg(feature = "host-process")]
+            Self::HostProcess(provider) => {
+                provider
+                    .manage_with_events(session_id, request, events)
+                    .await
+            }
+            #[cfg(feature = "host-serial-esp32")]
+            Self::HostSerialEsp32(provider) => {
+                provider
+                    .manage_with_events(session_id, request, events)
+                    .await
+            }
+            #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
+            Self::BrowserWorker(provider) => {
+                provider
+                    .manage_with_events(session_id, request, events)
+                    .await
+            }
+            #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+            Self::BrowserSerialEsp32(provider) => {
+                provider
+                    .manage_with_events(session_id, request, events)
+                    .await
+            }
         }
     }
 

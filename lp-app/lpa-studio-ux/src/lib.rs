@@ -29,8 +29,11 @@ pub use server::{
 };
 pub use studio::{
     StudioSnapshot, StudioUx, UxError, UxLogEntry, UxLogLevel, UxNotice, UxNoticeLevel, UxOutcome,
-    UxResult,
+    UxResult, UxUpdate, UxUpdateSink,
 };
-pub use view::{StudioView, UxBody, UxMetric, UxPaneView, UxStatus, UxStatusKind};
+pub use view::{
+    StudioView, UxActivity, UxBody, UxMetric, UxPaneView, UxProgress, UxStatus, UxStatusKind,
+    UxTerminalLine,
+};
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "studio-demo";

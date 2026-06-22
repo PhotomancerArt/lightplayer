@@ -1,5 +1,8 @@
+use std::cell::Cell;
+use std::rc::Rc;
+
 use dioxus::prelude::*;
-use lpa_studio_ux::{StudioUx, StudioView, UxAction};
+use lpa_studio_ux::{StudioUx, StudioView, UxAction, UxBody, UxUpdate, UxUpdateSink};
 
 use crate::components::StudioShell;
 
@@ -64,6 +67,32 @@ impl StudioWebModel {
             self.view = ux.view();
         }
     }
+
+    fn apply_update(&mut self, update: UxUpdate) {
+        match update {
+            UxUpdate::View(view) => {
+                self.view = view;
+            }
+            UxUpdate::Activity {
+                node_id,
+                status,
+                activity,
+            } => {
+                if let Some(pane) = self
+                    .view
+                    .panes
+                    .iter_mut()
+                    .find(|pane| pane.node_id == node_id)
+                {
+                    pane.status = status;
+                    pane.body = UxBody::Activity(activity);
+                }
+            }
+            UxUpdate::Log(log) => {
+                self.view.logs.push(log);
+            }
+        }
+    }
 }
 
 async fn execute_action(mut model: Signal<StudioWebModel>, action: UxAction) {
@@ -80,7 +109,16 @@ async fn execute_action(mut model: Signal<StudioWebModel>, action: UxAction) {
         return;
     };
 
-    let result = ux.dispatch(action).await;
+    let accepting_updates = Rc::new(Cell::new(true));
+    let mut update_model = model;
+    let update_gate = Rc::clone(&accepting_updates);
+    let updates = UxUpdateSink::new(move |update| {
+        if update_gate.get() {
+            update_model.write().apply_update(update);
+        }
+    });
+    let result = ux.dispatch_with_updates(action, updates).await;
+    accepting_updates.set(false);
     let mut state = model.write();
     match result {
         Ok(outcome) => {

@@ -14,6 +14,7 @@ pub mod diagnostic;
 pub mod endpoint;
 pub mod error;
 pub mod log;
+pub mod management_event;
 pub mod management_progress;
 pub mod management_request;
 pub mod management_result;

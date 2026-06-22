@@ -17,6 +17,9 @@ pub struct FakeProvider {
     endpoints: Vec<LinkEndpoint>,
     sessions: BTreeMap<LinkSessionId, FakeSessionState>,
     next_session_index: u64,
+    discover_error: Option<String>,
+    connect_error: Option<String>,
+    connection_error: Option<String>,
 }
 
 impl FakeProvider {
@@ -25,11 +28,29 @@ impl FakeProvider {
             endpoints: Vec::new(),
             sessions: BTreeMap::new(),
             next_session_index: 1,
+            discover_error: None,
+            connect_error: None,
+            connection_error: None,
         }
     }
 
     pub fn with_endpoint(mut self, endpoint: LinkEndpoint) -> Self {
         self.endpoints.push(endpoint);
+        self
+    }
+
+    pub fn with_discover_error(mut self, message: impl Into<String>) -> Self {
+        self.discover_error = Some(message.into());
+        self
+    }
+
+    pub fn with_connect_error(mut self, message: impl Into<String>) -> Self {
+        self.connect_error = Some(message.into());
+        self
+    }
+
+    pub fn with_connection_error(mut self, message: impl Into<String>) -> Self {
+        self.connection_error = Some(message.into());
         self
     }
 
@@ -62,6 +83,11 @@ impl LinkProvider for FakeProvider {
     }
 
     async fn discover(&mut self) -> Result<Vec<LinkEndpoint>, LinkError> {
+        if let Some(message) = &self.discover_error {
+            return Err(LinkError::ConnectionFailed {
+                message: message.clone(),
+            });
+        }
         Ok(self.endpoints.clone())
     }
 
@@ -73,6 +99,11 @@ impl LinkProvider for FakeProvider {
     }
 
     async fn connect(&mut self, endpoint_id: &LinkEndpointId) -> Result<LinkSession, LinkError> {
+        if let Some(message) = &self.connect_error {
+            return Err(LinkError::ConnectionFailed {
+                message: message.clone(),
+            });
+        }
         let endpoint = self.endpoint(endpoint_id)?.clone();
         let session_id = LinkSessionId::new(format!(
             "{}:{}",
@@ -99,6 +130,11 @@ impl LinkProvider for FakeProvider {
         &mut self,
         session_id: &LinkSessionId,
     ) -> Result<LinkConnection, LinkError> {
+        if let Some(message) = &self.connection_error {
+            return Err(LinkError::ConnectionFailed {
+                message: message.clone(),
+            });
+        }
         let state = self.session(session_id)?;
         if state.session.status == LinkSessionStatus::Closed {
             return Err(LinkError::Closed);

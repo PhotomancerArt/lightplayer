@@ -44,8 +44,13 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
   is the enum type and variant, not a parallel string action kind.
 - `StudioView` is the semantic render surface. It contains `UxPaneView` values
   for Link, Server, and Project plus recent logs.
-- `UxBody` is intentionally small: text, progress, issue, metrics, or empty.
-  It is not a generic component schema.
+- `UxBody` is intentionally small: text, progress/activity, issue, metrics, or
+  empty. It is not a generic component schema.
+- `UxActivity` describes live work inside a pane: title, optional progress, and
+  optional terminal lines.
+- `UxUpdate` / `UxUpdateSink` let `StudioUx::dispatch_with_updates` publish
+  live pane activity or fresh `StudioView` snapshots while an async action is
+  still running.
 - `StudioSnapshot` and the node snapshots remain cloneable domain read models,
   but web rendering should prefer `StudioView`.
 
@@ -77,9 +82,11 @@ because they happen below the running server protocol:
   `EraseDeviceFlash`. It remains a tertiary destructive action even when the
   server is connected.
 
-Both actions flow through `lpa-link::LinkProvider::manage`. `StudioUx` clears
-project and server state before executing them because firmware flashing and
-full-device erase invalidate any previous server/client connection.
+Both actions flow through `lpa-link::LinkProvider::manage_with_events`.
+`StudioUx` clears project and server state before executing them because
+firmware flashing and full-device erase invalidate any previous server/client
+connection. Browser Web Serial ESP32 management streams esptool terminal output
+and progress into the Link pane as `UxActivity` while the action is running.
 
 After provisioning, Studio attempts to reopen the server protocol and resume the
 normal server/project workflow. If the browser or device needs more time after
@@ -117,6 +124,8 @@ let text = view.render_text();
 
 Actions remain in-process values. Text rendering can describe available actions,
 but it is not a stable wire protocol and does not serialize operations.
+Interactive shells can use `dispatch_with_updates` to show progress/terminal
+updates during long actions without owning provider resources themselves.
 
 ## Removed Old Split
 

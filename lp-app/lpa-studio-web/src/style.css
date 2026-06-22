@@ -134,6 +134,100 @@ select {
   color: #ffc7c7;
 }
 
+.ux-activity {
+  display: grid;
+  gap: 10px;
+}
+
+.ux-activity-title {
+  color: #fffaf0;
+  font-weight: 700;
+}
+
+.ux-progress {
+  display: grid;
+  gap: 6px;
+}
+
+.ux-progress-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  color: #c7cbd0;
+  font-size: 0.9rem;
+}
+
+.ux-progress-meta span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ux-progress-meta strong {
+  color: #f2e6a2;
+  font-size: 0.86rem;
+}
+
+.ux-progress-track {
+  position: relative;
+  height: 9px;
+  overflow: hidden;
+  border: 1px solid #303942;
+  border-radius: 999px;
+  background: #10151a;
+}
+
+.ux-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: #7be0b2;
+}
+
+.ux-progress-fill-determinate {
+  transition: width 140ms ease-out;
+}
+
+.ux-progress-fill-indeterminate {
+  width: 42%;
+  animation: ux-progress-sweep 1.2s ease-in-out infinite;
+}
+
+.ux-progress-fill-timeout {
+  transform-origin: left center;
+  animation-name: ux-progress-timeout;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+.ux-progress-detail {
+  margin: 0;
+  color: #99a2ad;
+  font-size: 0.88rem;
+}
+
+.ux-terminal {
+  display: grid;
+  gap: 3px;
+  max-height: 170px;
+  margin: 0;
+  padding: 10px;
+  overflow: auto;
+  border: 1px solid #293039;
+  border-radius: 6px;
+  color: #d8dfdb;
+  background: #0c1114;
+  font-family:
+    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.78rem;
+  line-height: 1.35;
+  list-style: none;
+}
+
+.ux-terminal li {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
 .ux-actions {
   display: flex;
   flex-wrap: wrap;
@@ -427,6 +521,26 @@ select {
 
 .story-frame {
   width: 100%;
+}
+
+@keyframes ux-progress-sweep {
+  0% {
+    transform: translateX(-110%);
+  }
+
+  100% {
+    transform: translateX(250%);
+  }
+}
+
+@keyframes ux-progress-timeout {
+  from {
+    transform: scaleX(1);
+  }
+
+  to {
+    transform: scaleX(0);
+  }
 }
 
 @media (max-width: 880px) {

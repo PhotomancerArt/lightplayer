@@ -27,6 +27,8 @@ Add a provider-neutral link management API to `lpa-link`:
 - callers execute session-scoped requests with `LinkProvider::manage`;
 - requests use `LinkManagementRequest`;
 - results use `LinkManagementResult` plus compact management progress/log data;
+- long-running providers can additionally publish `LinkManagementEvent` values
+  through `manage_with_events`;
 - unsupported providers return `LinkError::OperationUnsupported`.
 
 The initial implemented requests are:
@@ -78,6 +80,8 @@ Expose the workflow through `lpa-studio-ux` actions:
   the normal server/project workflow;
 - after reset-to-blank, Studio leaves server/project detached and keeps the
   link context provisionable when the browser still holds the serial permission.
+- live management progress is surfaced as pane-scoped `UxActivity`, including
+  progress bars and raw esptool terminal output for browser serial flash/erase.
 
 Zip upload/download is out of this slice. If raw filesystem backup/restore is
 added later, it should read or write direct device/LittleFS image bytes through
@@ -93,12 +97,12 @@ link-level management, not route through the running server filesystem API.
   link management actions without learning browser serial or esptool details.
 - `lpa-link` becomes the durable home for low-level device management, while
   `lpa-client` remains the durable home for server protocol/project operations.
+- Flash/erase no longer need to leave the UI opaque while awaiting a single
+  final result; the UX layer can publish live activity updates without moving
+  provider ownership into the web UI.
 - The default esptool path depends on a pinned remote module. This is acceptable
   for the current development slice and is explicitly overridable for packaged
   deployments.
-- Live streaming progress is still deferred. Management results return a compact
-  progress/log history; the UI can display working state while awaiting the
-  operation and show logs afterward.
 
 ## Alternatives Considered
 
@@ -127,5 +131,5 @@ link-level management, not route through the running server filesystem API.
   builds.
 - Add host-serial ESP32 management support using the same request/result model.
 - Add direct raw LittleFS image read/write if backup/restore becomes a priority.
-- Add streaming management progress if flash/erase duration makes result-only
-  progress feel too opaque.
+- Add cancellation/retry affordances for long-running management activity if
+  flash/erase failures need more recovery control.

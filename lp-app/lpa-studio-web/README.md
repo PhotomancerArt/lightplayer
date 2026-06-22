@@ -4,7 +4,8 @@
 
 The web app owns Dioxus presentation. It renders `StudioView` panes and
 contextual `UxAction` controls, then dispatches those actions back into
-`StudioUx`. Browser-worker lifecycle, provider routing, protocol request
+`StudioUx`. It also applies live `UxUpdate` values while long async actions are
+running. Browser-worker lifecycle, provider routing, protocol request
 correlation, running-project attach, demo project deployment, and project
 inventory reads belong below the UI in `lpa-studio-ux`, `lpa-link`, and
 `lpa-client`.
@@ -77,13 +78,14 @@ prompt, not by a Studio endpoint picker.
 
 For a blank or non-LightPlayer ESP32-C6, Studio keeps the link session and
 offers `Provision firmware`. Confirming the action writes the packaged firmware
-and then attempts to reconnect to the LightPlayer server after reset.
+and then attempts to reconnect to the LightPlayer server after reset. Flashing
+renders live progress and raw esptool output in the Link pane.
 
 For an already provisioned ESP32-C6, Studio can connect to the server/project
 workflow. The link pane also offers `Reset to blank` as a destructive tertiary
 action when the provider advertises whole-device erase. Confirming it erases the
 device flash, clears server/project state, and returns the link to a
-provisionable state.
+provisionable state. Reset-to-blank uses the same live activity renderer.
 
 ## Stories
 
@@ -107,8 +109,8 @@ than the old provisioning journey fixtures.
 ## Boundary
 
 - `lpa-studio-ux` owns Studio product state, `StudioView` panes, snapshots,
-  actions, async dispatch, UX node ids, the link provider registry, and the
-  connected server client.
+  actions, live `UxUpdate` activity, async dispatch, UX node ids, the link
+  provider registry, and the connected server client.
 - `lpa-link` owns provider implementations, provider resources, sessions, and
   lifecycle.
 - `lpa-client` owns server protocol correlation and typed project operations.

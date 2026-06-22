@@ -61,6 +61,12 @@ provider
     .await?;
 ```
 
+Callers that need live UI feedback can use `manage_with_events` with a
+`LinkManagementEventSink`. Providers that can observe progress stream terminal
+log lines and compact progress entries while the operation runs; providers that
+only have final results fall back to replaying the result logs/progress through
+the same event vocabulary.
+
 `LinkManagementRequest` is provider-neutral, while each provider owns the
 target-specific work needed to satisfy it. For browser Web Serial ESP32, this
 means releasing normal server/protocol ownership of the serial port before
@@ -177,7 +183,8 @@ cargo check -p lpa-link --features browser-worker --target wasm32-unknown-unknow
   `fw_browser_module_path` and `fw_browser_wasm_path` options for the generated
   `fw-browser` sidecar artifacts.
 - `browser-serial-esp32` owns Web Serial access and ESP32 probe/flash/erase bindings
-  under `src/providers/browser_serial_esp32`. Apps pass same-origin
+  under `src/providers/browser_serial_esp32`. Flash and erase stream esptool
+  terminal/progress events through `LinkManagementEventSink`. Apps pass same-origin
   `firmware_manifest_path` and optional `esptool_module_path` options for
   app-owned assets. The default esptool module is pinned to the browser ESM
   endpoint `https://cdn.jsdelivr.net/npm/esptool-js@0.6.0/+esm` for

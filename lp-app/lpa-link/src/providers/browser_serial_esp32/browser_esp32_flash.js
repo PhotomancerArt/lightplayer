@@ -44,7 +44,7 @@ export async function probeTarget(portId, esptoolModulePath) {
   }
 }
 
-export async function flashFirmware(portId, manifestPath, esptoolModulePath) {
+export async function flashFirmware(portId, manifestPath, esptoolModulePath, onEvent) {
   if (!isSupported()) {
     throw new Error("Web Serial firmware flashing is not supported in this browser.");
   }
@@ -57,7 +57,7 @@ export async function flashFirmware(portId, manifestPath, esptoolModulePath) {
   const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
   const logs = [];
   const progress = [];
-  const terminal = terminalFor(logs, "esp32-flash");
+  const terminal = terminalFor(logs, "esp32-flash", onEvent);
   const transport = new Transport(port, true);
   const loader = new ESPLoader({
     transport,
@@ -68,7 +68,7 @@ export async function flashFirmware(portId, manifestPath, esptoolModulePath) {
 
   try {
     const chipName = await loader.main();
-    progress.push({
+    pushProgress(progress, onEvent, {
       label: "Connected to ESP32 bootloader",
       completedSteps: 1,
       totalSteps: 3,
@@ -86,7 +86,7 @@ export async function flashFirmware(portId, manifestPath, esptoolModulePath) {
       compress: true,
       reportProgress: (fileIndex, written, total) => {
         const percent = total > 0 ? Math.round((written / total) * 100) : 0;
-        progress.push({
+        pushProgress(progress, onEvent, {
           label: `Writing firmware image ${fileIndex + 1}/${imageFiles.length}`,
           completedSteps: 2,
           totalSteps: 3,
@@ -94,7 +94,7 @@ export async function flashFirmware(portId, manifestPath, esptoolModulePath) {
         });
       },
     });
-    progress.push({
+    pushProgress(progress, onEvent, {
       label: "Resetting flashed device",
       completedSteps: 3,
       totalSteps: 3,
@@ -116,7 +116,7 @@ export async function flashFirmware(portId, manifestPath, esptoolModulePath) {
   }
 }
 
-export async function eraseDeviceFlash(portId, esptoolModulePath) {
+export async function eraseDeviceFlash(portId, esptoolModulePath, onEvent) {
   if (!isSupported()) {
     throw new Error("Web Serial device erase is not supported in this browser.");
   }
@@ -127,7 +127,7 @@ export async function eraseDeviceFlash(portId, esptoolModulePath) {
   const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
   const logs = [];
   const progress = [];
-  const terminal = terminalFor(logs, "esp32-erase");
+  const terminal = terminalFor(logs, "esp32-erase", onEvent);
   const transport = new Transport(port, true);
   const loader = new ESPLoader({
     transport,
@@ -138,20 +138,20 @@ export async function eraseDeviceFlash(portId, esptoolModulePath) {
 
   try {
     const chipName = await loader.main();
-    progress.push({
+    pushProgress(progress, onEvent, {
       label: "Connected to ESP32 bootloader",
       completedSteps: 1,
       totalSteps: 3,
       percent: 10,
     });
-    progress.push({
+    pushProgress(progress, onEvent, {
       label: "Erasing device flash",
       completedSteps: 2,
       totalSteps: 3,
       percent: 50,
     });
     await loader.eraseFlash();
-    progress.push({
+    pushProgress(progress, onEvent, {
       label: "Resetting blank device",
       completedSteps: 3,
       totalSteps: 3,
@@ -172,7 +172,7 @@ export async function eraseDeviceFlash(portId, esptoolModulePath) {
   }
 }
 
-export async function resetTarget(portId, esptoolModulePath) {
+export async function resetTarget(portId, esptoolModulePath, onEvent) {
   if (!isSupported()) {
     throw new Error("Web Serial ESP32 reset is not supported in this browser.");
   }
@@ -183,7 +183,7 @@ export async function resetTarget(portId, esptoolModulePath) {
   const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
   const logs = [];
   const progress = [];
-  const terminal = terminalFor(logs, "esp32-reset");
+  const terminal = terminalFor(logs, "esp32-reset", onEvent);
   const transport = new Transport(port, true);
   const loader = new ESPLoader({
     transport,
@@ -195,7 +195,7 @@ export async function resetTarget(portId, esptoolModulePath) {
 
   try {
     await transport.connect(115200);
-    progress.push({
+    pushProgress(progress, onEvent, {
       label: "Resetting device",
       completedSteps: 1,
       totalSteps: 2,
@@ -203,7 +203,7 @@ export async function resetTarget(portId, esptoolModulePath) {
     });
     await loader.after("hard_reset");
     resetComplete = true;
-    progress.push({
+    pushProgress(progress, onEvent, {
       label: "Waiting for device boot",
       completedSteps: 2,
       totalSteps: 2,
@@ -225,22 +225,51 @@ export async function resetTarget(portId, esptoolModulePath) {
   }
 }
 
-function terminalFor(logs, target) {
+function terminalFor(logs, target, onEvent) {
   return {
     clean() {},
     writeLine(line) {
       const message = String(line ?? "");
       logs.push(message);
+      emitEvent(onEvent, { kind: "log", message });
       console.info(`[${target}] ${message}`);
     },
     write(text) {
       const message = String(text ?? "").trimEnd();
       if (message.length > 0) {
         logs.push(message);
+        emitEvent(onEvent, { kind: "log", message });
         console.info(`[${target}] ${message}`);
       }
     },
   };
+}
+
+function pushProgress(progress, onEvent, entry) {
+  const normalized = {
+    label: String(entry.label ?? ""),
+    completedSteps: Number(entry.completedSteps ?? 0),
+    totalSteps: entry.totalSteps == null ? null : Number(entry.totalSteps),
+    percent: entry.percent == null ? null : Number(entry.percent),
+  };
+  const previous = progress.at(-1);
+  if (
+    previous &&
+    previous.label === normalized.label &&
+    previous.completedSteps === normalized.completedSteps &&
+    previous.totalSteps === normalized.totalSteps &&
+    previous.percent === normalized.percent
+  ) {
+    return;
+  }
+  progress.push(normalized);
+  emitEvent(onEvent, { kind: "progress", ...normalized });
+}
+
+function emitEvent(onEvent, event) {
+  if (typeof onEvent === "function") {
+    onEvent(event);
+  }
 }
 
 function sleep(ms) {

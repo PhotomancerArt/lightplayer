@@ -12,9 +12,11 @@ use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 
 use crate::{
     ActionPriority, ConnectedDeviceSummary, EndpointChoice, LinkOp, LinkSnapshot, LinkState,
-    ProgressState, ProviderChoice, UxAction, UxBody, UxError, UxIssue, UxLogEntry, UxLogLevel,
-    UxMetric, UxNode, UxNodeId, UxPaneView, UxStatus,
+    ProgressState, ProviderChoice, UxAction, UxActivity, UxBody, UxError, UxIssue, UxLogEntry,
+    UxLogLevel, UxMetric, UxNode, UxNodeId, UxPaneView, UxProgress, UxStatus, UxUpdate,
+    UxUpdateSink,
 };
+use lpa_link::{LinkManagementEvent, LinkManagementEventSink};
 
 pub type SharedLinkRegistry = Rc<RefCell<LinkProviderRegistry>>;
 
@@ -211,12 +213,19 @@ impl LinkUx {
             progress: ProgressState::new("Discovering endpoints"),
         };
 
-        let endpoints = {
+        let result = {
             let mut registry = self.registry.borrow_mut();
-            let provider = registry
-                .provider_mut(provider_id)
-                .ok_or_else(|| missing_provider(provider_id))?;
-            provider.discover().await.map_err(map_link_error)?
+            match registry.provider_mut(provider_id) {
+                Some(provider) => provider.discover().await.map_err(map_link_error),
+                None => Err(missing_provider(provider_id)),
+            }
+        };
+        let endpoints = match result {
+            Ok(endpoints) => endpoints,
+            Err(error) => {
+                self.fail(error.message());
+                return Err(error);
+            }
         };
         if endpoints.is_empty() {
             let error = UxError::Link(format!(
@@ -248,17 +257,24 @@ impl LinkUx {
             progress: ProgressState::new("Requesting browser serial access"),
         };
 
-        let endpoint = {
+        let result = {
             let mut registry = self.registry.borrow_mut();
-            let provider = registry
-                .provider_mut(LinkProviderKind::BrowserSerialEsp32)
-                .ok_or_else(|| missing_provider(LinkProviderKind::BrowserSerialEsp32))?;
-            let LinkProviderInstance::BrowserSerialEsp32(provider) = provider else {
-                return Err(UxError::Link(
+            match registry.provider_mut(LinkProviderKind::BrowserSerialEsp32) {
+                Some(LinkProviderInstance::BrowserSerialEsp32(provider)) => {
+                    provider.request_access().await.map_err(map_link_error)
+                }
+                Some(_) => Err(UxError::Link(
                     "browser serial registry entry has the wrong provider type".to_string(),
-                ));
-            };
-            provider.request_access().await.map_err(map_link_error)?
+                )),
+                None => Err(missing_provider(LinkProviderKind::BrowserSerialEsp32)),
+            }
+        };
+        let endpoint = match result {
+            Ok(endpoint) => endpoint,
+            Err(error) => {
+                self.fail(error.message());
+                return Err(error);
+            }
         };
         let endpoint_choice = EndpointChoice::from_endpoint(endpoint);
         let endpoint_id = endpoint_choice.id.clone();
@@ -298,22 +314,23 @@ impl LinkUx {
             progress: ProgressState::new("Opening link session"),
         };
 
-        let (session, connection, logs) = {
+        let result = {
             let mut registry = self.registry.borrow_mut();
-            let provider = registry
-                .provider_mut(provider_id)
-                .ok_or_else(|| missing_provider(provider_id))?;
-            let session = provider
-                .connect(&endpoint_id)
-                .await
-                .map_err(map_link_error)?;
-            open_provider_protocol_if_needed(provider_id, provider, session.id()).await?;
-            let connection = provider
-                .connection(session.id())
-                .await
-                .map_err(map_link_error)?;
-            let logs = link_session_logs(provider, session.id())?;
-            (session, connection, logs)
+            match registry.provider_mut(provider_id) {
+                Some(provider) => {
+                    open_connected_provider(provider_id, provider, &endpoint_id).await
+                }
+                None => Err(missing_provider(provider_id)),
+            }
+        };
+        let (session, connection, logs) = match result {
+            Ok(result) => result,
+            Err(error) => {
+                self.active_session = None;
+                self.active_connection = None;
+                self.fail(error.message());
+                return Err(error);
+            }
         };
 
         self.active_provider = Some(provider_id);
@@ -337,6 +354,16 @@ impl LinkUx {
         request: LinkManagementRequest,
         progress_label: impl Into<String>,
     ) -> Result<LinkManagementOutcome, UxError> {
+        self.manage_with_updates(request, progress_label, UxUpdateSink::noop())
+            .await
+    }
+
+    pub async fn manage_with_updates(
+        &mut self,
+        request: LinkManagementRequest,
+        progress_label: impl Into<String>,
+        updates: UxUpdateSink,
+    ) -> Result<LinkManagementOutcome, UxError> {
         let provider_id = self
             .active_provider
             .ok_or_else(|| UxError::MissingSession("link provider is not selected".to_string()))?;
@@ -346,17 +373,29 @@ impl LinkUx {
             .map(|session| session.id.clone())
             .ok_or_else(|| UxError::MissingSession("link session is not open".to_string()))?;
         let device = self.connected_device_summary()?;
+        let progress_label = progress_label.into();
         self.active_connection = None;
         self.state = LinkState::Managing {
             device: device.clone(),
-            progress: ProgressState::new(progress_label),
+            progress: ProgressState::new(progress_label.clone()),
         };
+        let node_id = self.node_id();
+        let activity = Rc::new(RefCell::new(
+            UxActivity::new(progress_label.clone())
+                .with_progress(UxProgress::indeterminate(progress_label.clone())),
+        ));
+        updates.emit(UxUpdate::Activity {
+            node_id: node_id.clone(),
+            status: UxStatus::working("Managing"),
+            activity: activity.borrow().clone(),
+        });
+        let event_sink = management_activity_sink(node_id, activity, updates);
 
         let result = {
             let mut registry = self.registry.borrow_mut();
             match registry.provider_mut(provider_id) {
                 Some(provider) => provider
-                    .manage(&session_id, request)
+                    .manage_with_events(&session_id, request, event_sink)
                     .await
                     .map_err(map_link_error),
                 None => Err(missing_provider(provider_id)),
@@ -572,6 +611,47 @@ fn management_result_logs(result: &LinkManagementResult) -> Vec<UxLogEntry> {
     }
 }
 
+fn management_activity_sink(
+    node_id: UxNodeId,
+    activity: Rc<RefCell<UxActivity>>,
+    updates: UxUpdateSink,
+) -> LinkManagementEventSink {
+    LinkManagementEventSink::new(move |event| {
+        let mut activity = activity.borrow_mut();
+        apply_management_event(&mut activity, event);
+        updates.emit(UxUpdate::Activity {
+            node_id: node_id.clone(),
+            status: UxStatus::working("Managing"),
+            activity: (*activity).clone(),
+        });
+    })
+}
+
+fn apply_management_event(activity: &mut UxActivity, event: LinkManagementEvent) {
+    match event {
+        LinkManagementEvent::Log { message } => {
+            if !message.trim().is_empty() {
+                activity.push_terminal_line(message);
+                activity.retain_recent_terminal_lines(80);
+            }
+        }
+        LinkManagementEvent::Progress(progress) => {
+            let mut ux_progress = match progress.percent {
+                Some(percent) => UxProgress::determinate(progress.label, percent),
+                None => UxProgress::indeterminate(progress.label),
+            };
+            if let Some(total_steps) = progress.total_steps {
+                ux_progress = ux_progress.with_detail(format!(
+                    "Step {} of {}",
+                    progress.completed_steps.min(total_steps),
+                    total_steps
+                ));
+            }
+            activity.progress = Some(ux_progress);
+        }
+    }
+}
+
 fn provider_can_open_server(kind: LinkProviderKind) -> bool {
     matches!(
         kind,
@@ -618,6 +698,41 @@ fn provider_auto_connects(kind: LinkProviderKind) -> bool {
         kind,
         LinkProviderKind::BrowserWorker | LinkProviderKind::HostProcess
     )
+}
+
+async fn open_connected_provider(
+    provider_id: LinkProviderKind,
+    provider: &mut LinkProviderInstance,
+    endpoint_id: &LinkEndpointId,
+) -> Result<(LinkSession, LinkConnection, Vec<UxLogEntry>), UxError> {
+    let session = provider
+        .connect(endpoint_id)
+        .await
+        .map_err(map_link_error)?;
+    if let Err(error) = open_provider_protocol_if_needed(provider_id, provider, session.id()).await
+    {
+        close_failed_session(provider, session.id()).await;
+        return Err(error);
+    }
+    let connection = match provider.connection(session.id()).await {
+        Ok(connection) => connection,
+        Err(error) => {
+            close_failed_session(provider, session.id()).await;
+            return Err(map_link_error(error));
+        }
+    };
+    let logs = match link_session_logs(provider, session.id()) {
+        Ok(logs) => logs,
+        Err(error) => {
+            close_failed_session(provider, session.id()).await;
+            return Err(error);
+        }
+    };
+    Ok((session, connection, logs))
+}
+
+async fn close_failed_session(provider: &mut LinkProviderInstance, session_id: &LinkSessionId) {
+    let _ = provider.close(session_id).await;
 }
 
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
@@ -850,6 +965,68 @@ mod tests {
     }
 
     #[test]
+    fn failed_endpoint_discovery_enters_recoverable_failed_state() {
+        let mut link =
+            LinkUx::with_registry(registry_with_fake_discover_error("serial discovery failed"));
+
+        let result = block_on_ready(link.open_provider(LinkProviderKind::Fake));
+
+        assert!(matches!(result, Err(UxError::Link(_))));
+        assert!(matches!(
+            link.state(),
+            LinkState::Failed { issue } if issue.message.contains("serial discovery failed")
+        ));
+        assert_eq!(link.actions(false).len(), 1);
+        assert_eq!(
+            link.actions(false)[0].op_as::<LinkOp>(),
+            Some(&LinkOp::RefreshProviders)
+        );
+    }
+
+    #[test]
+    fn failed_endpoint_connect_enters_recoverable_failed_state() {
+        let mut link = LinkUx::with_registry(registry_with_fake_connect_error(
+            "Failed to open serial port.",
+        ));
+
+        let result = block_on_ready(
+            link.connect_endpoint(LinkProviderKind::Fake, LinkEndpointId::new("fake-runtime")),
+        );
+
+        assert!(matches!(result, Err(UxError::Link(_))));
+        assert!(matches!(
+            link.state(),
+            LinkState::Failed { issue } if issue.message.contains("Failed to open serial port")
+        ));
+        assert_eq!(link.actions(false).len(), 1);
+        assert_eq!(
+            link.actions(false)[0].op_as::<LinkOp>(),
+            Some(&LinkOp::RefreshProviders)
+        );
+    }
+
+    #[test]
+    fn failed_connection_handoff_enters_recoverable_failed_state() {
+        let mut link =
+            LinkUx::with_registry(registry_with_fake_connection_error("server handoff failed"));
+
+        let result = block_on_ready(
+            link.connect_endpoint(LinkProviderKind::Fake, LinkEndpointId::new("fake-runtime")),
+        );
+
+        assert!(matches!(result, Err(UxError::Link(_))));
+        assert!(matches!(
+            link.state(),
+            LinkState::Failed { issue } if issue.message.contains("server handoff failed")
+        ));
+        assert_eq!(link.actions(false).len(), 1);
+        assert_eq!(
+            link.actions(false)[0].op_as::<LinkOp>(),
+            Some(&LinkOp::RefreshProviders)
+        );
+    }
+
+    #[test]
     fn snapshot_projects_provider_catalog_from_registry() {
         let link = LinkUx::with_registry(registry_with_fake_endpoint());
 
@@ -867,6 +1044,48 @@ mod tests {
             LinkProviderKind::Fake,
             "Fake runtime",
         )));
+        registry
+    }
+
+    fn registry_with_fake_discover_error(message: impl Into<String>) -> LinkProviderRegistry {
+        let mut registry = LinkProviderRegistry::new();
+        registry.insert(
+            FakeProvider::new()
+                .with_endpoint(LinkEndpoint::new(
+                    "fake-runtime",
+                    LinkProviderKind::Fake,
+                    "Fake runtime",
+                ))
+                .with_discover_error(message),
+        );
+        registry
+    }
+
+    fn registry_with_fake_connect_error(message: impl Into<String>) -> LinkProviderRegistry {
+        let mut registry = LinkProviderRegistry::new();
+        registry.insert(
+            FakeProvider::new()
+                .with_endpoint(LinkEndpoint::new(
+                    "fake-runtime",
+                    LinkProviderKind::Fake,
+                    "Fake runtime",
+                ))
+                .with_connect_error(message),
+        );
+        registry
+    }
+
+    fn registry_with_fake_connection_error(message: impl Into<String>) -> LinkProviderRegistry {
+        let mut registry = LinkProviderRegistry::new();
+        registry.insert(
+            FakeProvider::new()
+                .with_endpoint(LinkEndpoint::new(
+                    "fake-runtime",
+                    LinkProviderKind::Fake,
+                    "Fake runtime",
+                ))
+                .with_connection_error(message),
+        );
         registry
     }
 
