@@ -69,6 +69,9 @@ impl BrowserSerialClientIo {
         if self.state.borrow().protocol_ready {
             return Ok(());
         }
+        self.state
+            .borrow()
+            .emit_readiness_activity(UxStatus::working("Connecting"));
 
         for _ in 0..READINESS_POLL_LIMIT {
             let (registry, session_id) = {
@@ -110,6 +113,10 @@ impl BrowserSerialClientIo {
                     );
                     return Ok(());
                 }
+                if let Some(message) = self.detect_readiness_failure() {
+                    self.state.borrow_mut().mark_protocol_failed(&message, true);
+                    return Err(TransportError::Other(message));
+                }
             }
 
             sleep_ms(RESPONSE_POLL_DELAY_MS).await?;
@@ -125,6 +132,15 @@ impl BrowserSerialClientIo {
             .borrow_mut()
             .mark_protocol_failed(&message, no_firmware);
         Err(TransportError::Other(message))
+    }
+
+    fn detect_readiness_failure(&self) -> Option<String> {
+        let state = self.state.borrow();
+        if state.readiness_classifier.no_firmware_detected() {
+            Some(state.readiness_classifier.classify_timeout().message())
+        } else {
+            None
+        }
     }
 
     fn handle_line(&self, line: String) -> Result<Option<WireServerMessage>, TransportError> {

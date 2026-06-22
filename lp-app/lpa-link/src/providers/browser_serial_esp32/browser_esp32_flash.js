@@ -220,7 +220,7 @@ export async function resetTarget(portId, esptoolModulePath, onEvent) {
       console.warn("[esp32-reset] transport disconnect failed", error);
     }
     if (resetComplete) {
-      await sleep(1500);
+      await sleep(50);
     }
   }
 }
