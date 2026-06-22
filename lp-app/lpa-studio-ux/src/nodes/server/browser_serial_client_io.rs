@@ -91,32 +91,31 @@ impl BrowserSerialClientIo {
                 (errors, lines)
             };
 
-            for error in errors {
-                let message =
-                    format!("browser serial error while waiting for server readiness: {error}");
-                console_error(&format!("[browser-serial] {message}"));
-                self.state
-                    .borrow()
-                    .push_log(UxLogLevel::Error, "browser-serial", message.clone());
-                return Err(TransportError::Other(message));
-            }
-
+            let mut protocol_ready = false;
             for line in lines {
                 if self.handle_line(line)?.is_some() {
-                    let mut state = self.state.borrow_mut();
-                    state.protocol_ready = true;
-                    state.mark_protocol_ready();
-                    state.push_log(
-                        UxLogLevel::Info,
-                        "browser-serial",
-                        "server protocol stream is ready",
-                    );
-                    return Ok(());
+                    protocol_ready = true;
                 }
                 if let Some(message) = self.detect_readiness_failure() {
                     self.state.borrow_mut().mark_protocol_failed(&message, true);
                     return Err(TransportError::Other(message));
                 }
+            }
+
+            if let Some(error) = errors.into_iter().next() {
+                return Err(self.readiness_error(error));
+            }
+
+            if protocol_ready {
+                let mut state = self.state.borrow_mut();
+                state.protocol_ready = true;
+                state.mark_protocol_ready();
+                state.push_log(
+                    UxLogLevel::Info,
+                    "browser-serial",
+                    "server protocol stream is ready",
+                );
+                return Ok(());
             }
 
             sleep_ms(RESPONSE_POLL_DELAY_MS).await?;
@@ -141,6 +140,31 @@ impl BrowserSerialClientIo {
         } else {
             None
         }
+    }
+
+    fn readiness_error(&self, error: String) -> TransportError {
+        let message = format!("browser serial error while waiting for server readiness: {error}");
+        if let Some(no_firmware_message) = self.detect_readiness_failure() {
+            console_warn(&format!(
+                "[browser-serial] {message}; treating as no firmware"
+            ));
+            self.state
+                .borrow()
+                .push_log(UxLogLevel::Warn, "browser-serial", message);
+            self.state
+                .borrow_mut()
+                .mark_protocol_failed(&no_firmware_message, true);
+            return TransportError::Other(no_firmware_message);
+        }
+
+        console_error(&format!("[browser-serial] {message}"));
+        self.state
+            .borrow()
+            .push_log(UxLogLevel::Error, "browser-serial", message.clone());
+        self.state
+            .borrow_mut()
+            .mark_protocol_failed(&message, false);
+        TransportError::Other(message)
     }
 
     fn handle_line(&self, line: String) -> Result<Option<WireServerMessage>, TransportError> {

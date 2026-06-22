@@ -1,11 +1,9 @@
 use crate::{
     ConnectedDeviceSummary, DeviceOp, DeviceSnapshot, EndpointChoice, LinkOp, LinkState, LinkUx,
-    ProjectOp, ProjectState, ProviderChoice, ServerState, ServerUx, UiAction, UiBody, UiMetric,
-    UiPaneView, UiStackSection, UiStackView, UiStatus, UiStepState, UiTerminalLine, UxIssue,
-    UxLogEntry, UxNode, UxNodeId,
+    ProjectOp, ProjectState, ProviderChoice, ServerFailureKind, ServerState, ServerUx, UiAction,
+    UiBody, UiMetric, UiPaneView, UiStackSection, UiStackView, UiStatus, UiStepState,
+    UiTerminalLine, UxLogEntry, UxNode, UxNodeId,
 };
-
-const NO_FIRMWARE_DETECTED_PREFIX: &str = "no LightPlayer firmware detected";
 
 pub struct DeviceUx {
     pub(crate) link: LinkUx,
@@ -36,6 +34,16 @@ impl DeviceUx {
         matches!(self.server.snapshot().state, ServerState::Connected { .. })
     }
 
+    pub fn needs_firmware(&self) -> bool {
+        matches!(
+            self.server.snapshot().state,
+            ServerState::Failed {
+                kind: ServerFailureKind::NoFirmware,
+                ..
+            }
+        )
+    }
+
     pub fn has_meaningful_terminal(&self) -> bool {
         !matches!(self.link.state(), LinkState::SelectingProvider { .. })
     }
@@ -53,17 +61,13 @@ impl DeviceUx {
     }
 
     pub fn view(&self, project_state: &ProjectState, project_actions: Vec<UiAction>) -> UiPaneView {
-        let stack = UiStackView::new(vec![
-            self.select_connection_section(),
-            self.connect_device_section(),
-            self.connect_lightplayer_section(),
-            self.open_project_section(project_state, project_actions),
-        ])
-        .with_terminal(if self.has_meaningful_terminal() {
-            self.terminal.clone()
-        } else {
-            Vec::new()
-        });
+        let stack = UiStackView::new(self.sections(project_state, project_actions)).with_terminal(
+            if self.has_meaningful_terminal() {
+                self.terminal.clone()
+            } else {
+                Vec::new()
+            },
+        );
 
         UiPaneView::new(
             Self::NODE_ID,
@@ -74,9 +78,49 @@ impl DeviceUx {
         )
     }
 
+    fn sections(
+        &self,
+        project_state: &ProjectState,
+        project_actions: Vec<UiAction>,
+    ) -> Vec<UiStackSection> {
+        let mut sections = vec![self.select_connection_section()];
+        if self.should_show_connect_device() {
+            sections.push(self.connect_device_section());
+        }
+        if self.should_show_connect_lightplayer() {
+            sections.push(self.connect_lightplayer_section());
+        }
+        if self.should_show_open_project(project_state) {
+            sections.push(self.open_project_section(project_state, project_actions));
+        }
+        sections
+    }
+
+    fn should_show_connect_device(&self) -> bool {
+        !matches!(self.link.state(), LinkState::SelectingProvider { .. })
+    }
+
+    fn should_show_connect_lightplayer(&self) -> bool {
+        matches!(
+            self.link.state(),
+            LinkState::Connected { .. } | LinkState::Managing { .. }
+        )
+    }
+
+    fn should_show_open_project(&self, _project_state: &ProjectState) -> bool {
+        self.has_lightplayer_state()
+    }
+
     fn status(&self) -> UiStatus {
         match (self.link.state(), &self.server.snapshot().state) {
             (LinkState::SelectingProvider { .. }, _) => UiStatus::neutral("Choose connection"),
+            (
+                LinkState::Connected { .. },
+                ServerState::Failed {
+                    kind: ServerFailureKind::NoFirmware,
+                    ..
+                },
+            ) => UiStatus::warning("Ready to flash"),
             (LinkState::Failed { .. }, _) | (_, ServerState::Failed { .. }) => {
                 UiStatus::error("Needs attention")
             }
@@ -141,15 +185,7 @@ impl DeviceUx {
                 UiStackSection::new("connect-device", "Connect device", UiStepState::Active)
                     .with_body(UiBody::Progress(progress.clone()))
             }
-            LinkState::Managing { device, progress } => {
-                UiStackSection::new("connect-device", "Connect device", UiStepState::Active)
-                    .with_body(UiBody::Metrics(vec![
-                        UiMetric::new("Device", &device.label),
-                        UiMetric::new("Session", &device.session_id),
-                        UiMetric::new("Operation", &progress.label),
-                    ]))
-            }
-            LinkState::Connected { device } => {
+            LinkState::Connected { device } | LinkState::Managing { device, .. } => {
                 UiStackSection::new("connect-device", "Connect device", UiStepState::Complete)
                     .with_body(device_summary_body(device))
             }
@@ -191,8 +227,8 @@ impl DeviceUx {
                 .with_body(UiBody::Metrics(vec![UiMetric::new("Protocol", protocol)]))
                 .with_actions(self.lightplayer_actions(true))
             }
-            (LinkState::Connected { .. }, ServerState::Failed { issue }) => {
-                let no_firmware = is_no_firmware_issue(issue);
+            (LinkState::Connected { .. }, ServerState::Failed { issue, kind }) => {
+                let no_firmware = *kind == ServerFailureKind::NoFirmware;
                 UiStackSection::new(
                     "connect-lightplayer",
                     if no_firmware {
@@ -200,9 +236,17 @@ impl DeviceUx {
                     } else {
                         "Connect LightPlayer"
                     },
-                    UiStepState::NeedsAttention,
+                    if no_firmware {
+                        UiStepState::Active
+                    } else {
+                        UiStepState::NeedsAttention
+                    },
                 )
-                .with_body(UiBody::Issue(issue.clone()))
+                .with_body(if no_firmware {
+                    UiBody::text("No LightPlayer firmware is running on this ESP32.")
+                } else {
+                    UiBody::Issue(issue.clone())
+                })
                 .with_actions(if no_firmware {
                     self.no_firmware_actions()
                 } else {
@@ -211,7 +255,7 @@ impl DeviceUx {
             }
             (LinkState::Managing { progress, .. }, _) => UiStackSection::new(
                 "connect-lightplayer",
-                "Connect LightPlayer",
+                progress.label.clone(),
                 UiStepState::Active,
             )
             .with_body(UiBody::Progress(progress.clone())),
@@ -230,6 +274,10 @@ impl DeviceUx {
         actions: Vec<UiAction>,
     ) -> UiStackSection {
         if !self.has_lightplayer_state() {
+            if self.needs_firmware() {
+                return UiStackSection::new("open-project", "Open project", UiStepState::Pending)
+                    .with_body(UiBody::text("Flash firmware before opening a project."));
+            }
             return UiStackSection::new("open-project", "Open project", UiStepState::Pending)
                 .with_body(UiBody::text("Connect LightPlayer first."));
         }
@@ -461,12 +509,4 @@ fn is_device_log_source(source: &str) -> bool {
         source,
         "lpa-link" | "browser-serial" | "fw-esp32" | "fw-browser" | "lp-server"
     )
-}
-
-fn is_no_firmware_issue(issue: &UxIssue) -> bool {
-    issue.message.contains(NO_FIRMWARE_DETECTED_PREFIX)
-        || issue
-            .detail
-            .as_deref()
-            .is_some_and(|detail| detail.contains(NO_FIRMWARE_DETECTED_PREFIX))
 }

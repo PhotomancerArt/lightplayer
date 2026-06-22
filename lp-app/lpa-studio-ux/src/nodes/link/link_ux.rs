@@ -60,6 +60,11 @@ impl LinkUx {
         self.state = state;
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_active_session_for_test(&mut self, session: LinkSession) {
+        self.active_session = Some(session);
+    }
+
     pub fn snapshot(&self) -> LinkSnapshot {
         LinkSnapshot::new(self.state.clone())
     }

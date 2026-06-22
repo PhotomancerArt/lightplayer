@@ -321,7 +321,6 @@ fn lightplayer_disconnected_view() -> StudioView {
                         disconnect_device_action(),
                     ],
                 ),
-                open_project_pending(),
             ],
             vec!["[lpa-studio-ux] LightPlayer protocol detached; device session remains open"],
         )],
@@ -336,7 +335,7 @@ fn lightplayer_disconnected_view() -> StudioView {
 fn provision_ready_view() -> StudioView {
     StudioView::new(
         vec![blank_device_view(
-            UiStatus::warning("Flash ready"),
+            UiStatus::warning("Ready to flash"),
             UiBody::text("No LightPlayer firmware is running on this ESP32."),
             false,
         )],
@@ -351,7 +350,7 @@ fn provision_ready_view() -> StudioView {
 fn browser_serial_blank_firmware_view() -> StudioView {
     StudioView::new(
         vec![blank_device_view(
-            UiStatus::warning("Flash ready"),
+            UiStatus::warning("Ready to flash"),
             UiBody::Activity(blank_firmware_activity()),
             false,
         )],
@@ -376,12 +375,11 @@ fn provisioning_view() -> StudioView {
                 connect_device_complete(esp32_metrics()),
                 stack_section(
                     "connect-lightplayer",
-                    "Connect LightPlayer",
+                    "Flashing firmware",
                     UiStepState::Active,
                     UiBody::Activity(provisioning_activity()),
                     Vec::new(),
                 ),
-                open_project_pending(),
             ],
             vec![
                 "[lpa-link] Connected to ESP32 bootloader",
@@ -406,7 +404,7 @@ fn provision_failed_view() -> StudioView {
                 connect_device_complete(esp32_metrics()),
                 stack_section(
                     "connect-lightplayer",
-                    "Connect LightPlayer",
+                    "Flashing firmware",
                     UiStepState::NeedsAttention,
                     UiBody::Issue(
                         UxIssue::new("firmware flashing failed").with_detail(
@@ -418,7 +416,6 @@ fn provision_failed_view() -> StudioView {
                         disconnect_device_action(),
                     ],
                 ),
-                open_project_pending(),
             ],
             vec![
                 "[lpa-link] Connected to ESP32 bootloader",
@@ -439,15 +436,14 @@ fn resetting_to_blank_view() -> StudioView {
             UiStatus::working("Resetting"),
             vec![
                 select_connection_complete("ESP32 over USB"),
+                connect_device_complete(esp32_metrics()),
                 stack_section(
-                    "connect-device",
-                    "Connect device",
+                    "connect-lightplayer",
+                    "Wiping device",
                     UiStepState::Active,
                     UiBody::Activity(reset_activity()),
                     Vec::new(),
                 ),
-                connect_lightplayer_pending(),
-                open_project_pending(),
             ],
             vec![
                 "[lpa-link] Connected to ESP32 bootloader",
@@ -490,8 +486,6 @@ fn error_view() -> StudioView {
                     UiBody::Issue(UxIssue::new("browser worker boot timed out")),
                     vec![device_action(DeviceOp::RefreshConnections)],
                 ),
-                connect_lightplayer_pending(),
-                open_project_pending(),
             ],
             vec!["[lpa-link] browser worker boot timed out"],
         )],
@@ -506,24 +500,13 @@ fn error_view() -> StudioView {
 fn idle_device_view() -> UiPaneView {
     device_view(
         UiStatus::neutral("Choose connection"),
-        vec![
-            stack_section(
-                "select-connection",
-                "Select connection",
-                UiStepState::Active,
-                UiBody::text("Choose how Studio should connect."),
-                start_actions(),
-            ),
-            stack_section(
-                "connect-device",
-                "Connect device",
-                UiStepState::Pending,
-                UiBody::text("Choose a connection first."),
-                Vec::new(),
-            ),
-            connect_lightplayer_pending(),
-            open_project_pending(),
-        ],
+        vec![stack_section(
+            "select-connection",
+            "Select connection",
+            UiStepState::Active,
+            UiBody::text("Choose how Studio should connect."),
+            start_actions(),
+        )],
         Vec::new(),
     )
 }
@@ -547,8 +530,6 @@ fn endpoint_device_view() -> UiPaneView {
                     .with_summary("Open the browser-local firmware runtime."),
                 ],
             ),
-            connect_lightplayer_pending(),
-            open_project_pending(),
         ],
         vec!["[lpa-link] Browser worker provider selected"],
     )
@@ -559,16 +540,7 @@ fn starting_device_view() -> UiPaneView {
         UiStatus::working("Connecting"),
         vec![
             select_connection_complete("Simulator"),
-            stack_section(
-                "connect-device",
-                "Connect device",
-                UiStepState::Active,
-                UiBody::Progress(
-                    ProgressState::new("Opening link session")
-                        .with_detail("Starting browser-local firmware runtime."),
-                ),
-                Vec::new(),
-            ),
+            connect_device_complete(browser_worker_metrics()),
             stack_section(
                 "connect-lightplayer",
                 "Connect LightPlayer",
@@ -576,7 +548,6 @@ fn starting_device_view() -> UiPaneView {
                 UiBody::Progress(ProgressState::new("Opening server protocol")),
                 Vec::new(),
             ),
-            open_project_pending(),
         ],
         vec![
             "[lpa-link] browser worker session created",
@@ -704,14 +675,13 @@ fn blank_device_view(status: UiStatus, body: UiBody, after_reset: bool) -> UiPan
             stack_section(
                 "connect-lightplayer",
                 "Flash firmware",
-                UiStepState::NeedsAttention,
+                UiStepState::Active,
                 body,
                 vec![
                     device_action(DeviceOp::ProvisionFirmware),
                     disconnect_device_action(),
                 ],
             ),
-            open_project_pending(),
         ],
         detail,
     )
@@ -826,26 +796,6 @@ fn connect_device_complete(metrics: Vec<UiMetric>) -> UiStackSection {
         "Connect device",
         UiStepState::Complete,
         UiBody::Metrics(metrics),
-        Vec::new(),
-    )
-}
-
-fn connect_lightplayer_pending() -> UiStackSection {
-    stack_section(
-        "connect-lightplayer",
-        "Connect LightPlayer",
-        UiStepState::Pending,
-        UiBody::text("Connect a device first."),
-        Vec::new(),
-    )
-}
-
-fn open_project_pending() -> UiStackSection {
-    stack_section(
-        "open-project",
-        "Open project",
-        UiStepState::Pending,
-        UiBody::text("Connect LightPlayer first."),
         Vec::new(),
     )
 }

@@ -147,12 +147,12 @@ select {
 
 .ux-stack {
   display: grid;
-  gap: 12px;
+  gap: 14px;
 }
 
 .ux-stack-sections {
   display: grid;
-  gap: 8px;
+  gap: 0;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -160,21 +160,25 @@ select {
 
 .ux-stack-section {
   display: grid;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid #293039;
-  border-radius: 6px;
-  background: #11161b;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 11px;
+  padding: 8px 0;
+  background: transparent;
 }
 
-.ux-stack-section-heading {
+.ux-stack-section + .ux-stack-section {
+  margin-top: 3px;
+  padding-top: 12px;
+  border-top: 1px solid #252d34;
+}
+
+.ux-stack-section-content {
   display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  gap: 8px;
-  align-items: baseline;
+  gap: 7px;
+  min-width: 0;
 }
 
-.ux-stack-section-heading h3 {
+.ux-stack-section-content h3 {
   margin: 0;
   color: #fffaf0;
   font-size: 0.98rem;
@@ -183,38 +187,45 @@ select {
 }
 
 .ux-stack-section-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  margin-top: 1px;
+  border: 1px solid #3e4852;
+  border-radius: 50%;
   color: #99a2ad;
-  font-family:
-    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
-  font-size: 0.78rem;
+  background: #151a1f;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .ux-stack-section-body {
   min-width: 0;
 }
 
-.ux-stack-section-active {
-  border-color: #717d44;
-}
-
 .ux-stack-section-active .ux-stack-section-marker {
+  border-color: #717d44;
   color: #f2e6a2;
-}
-
-.ux-stack-section-complete {
-  border-color: #365545;
+  background: #2a2916;
 }
 
 .ux-stack-section-complete .ux-stack-section-marker {
+  border-color: #365545;
   color: #7be0b2;
-}
-
-.ux-stack-section-attention {
-  border-color: #874b4b;
+  background: #13241d;
 }
 
 .ux-stack-section-attention .ux-stack-section-marker {
+  border-color: #874b4b;
   color: #ffc7c7;
+  background: #301b1d;
+}
+
+.ux-stack-section .ux-actions {
+  margin-top: 8px;
 }
 
 .ux-activity {

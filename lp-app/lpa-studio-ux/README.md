@@ -36,8 +36,13 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
 - `StudioUx` is the top-level controller. It owns `DeviceUx` and `ProjectUx`.
 - `DeviceUx` is the user-facing device workflow. It owns the lower-level link
   and server controllers and presents one stack of steps: select connection,
-  connect device, connect LightPlayer, and open project. The open-project step
-  offers running-project attach and demo-load actions until a project is loaded.
+  connect device, connect LightPlayer, and open project. The stack is
+  progressive: completed steps remain as compact history, the current relevant
+  step owns the available actions, and future steps are hidden until they are
+  useful.
+- Device exposes the open-project step only after LightPlayer is connected. That
+  step offers running-project attach and demo-load actions until a project is
+  loaded.
 - `LinkUx` owns link-provider selection, the `LinkProviderRegistry`, and the
   active link session. It remains an implementation detail below `DeviceUx`.
 - `ServerUx` owns the connected `lpa-client` protocol client once a link exposes
@@ -72,8 +77,8 @@ inventory.
 
 Project attach behavior is UX-owned:
 
-- zero loaded projects: offer to load the demo project in the Device
-  open-project step;
+- zero loaded projects: once LightPlayer is connected, offer to load the demo
+  project in the Device open-project step;
 - one loaded project: auto-attach after server connection and then show the
   Project pane;
 - multiple loaded projects: show the selection in the Device open-project step

@@ -1,9 +1,9 @@
 use lpa_link::LinkConnection;
 
 use crate::{
-    ProgressState, ServerOp, ServerSnapshot, ServerState, SharedLinkRegistry, StudioServerClient,
-    UiAction, UiBody, UiMetric, UiPaneView, UiStatus, UxError, UxIssue, UxNode, UxNodeId,
-    UxUpdateSink,
+    ProgressState, ServerFailureKind, ServerOp, ServerSnapshot, ServerState, SharedLinkRegistry,
+    StudioServerClient, UiAction, UiBody, UiMetric, UiPaneView, UiStatus, UxError, UxIssue, UxNode,
+    UxNodeId, UxUpdateSink,
 };
 
 pub struct ServerUx {
@@ -86,9 +86,21 @@ impl ServerUx {
     }
 
     pub fn fail(&mut self, message: impl Into<String>) {
+        self.fail_with_kind(message, ServerFailureKind::Unknown);
+    }
+
+    pub fn fail_no_firmware(&mut self) {
+        self.fail_with_kind(
+            "No LightPlayer firmware detected.",
+            ServerFailureKind::NoFirmware,
+        );
+    }
+
+    pub fn fail_with_kind(&mut self, message: impl Into<String>, kind: ServerFailureKind) {
         self.client = None;
         self.state = ServerState::Failed {
             issue: UxIssue::new(message),
+            kind,
         };
     }
 
@@ -130,6 +142,6 @@ fn server_body(state: &ServerState) -> UiBody {
         ServerState::Connected { protocol } => {
             UiBody::Metrics(vec![UiMetric::new("Protocol", protocol)])
         }
-        ServerState::Failed { issue } => UiBody::Issue(issue.clone()),
+        ServerState::Failed { issue, .. } => UiBody::Issue(issue.clone()),
     }
 }

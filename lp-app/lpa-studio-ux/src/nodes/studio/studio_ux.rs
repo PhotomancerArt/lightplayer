@@ -203,21 +203,26 @@ impl StudioUx {
                 {
                     Ok(auto_connect) => auto_connect,
                     Err(error) => {
-                        self.logs.push(UxLogEntry::new(
-                            UxLogLevel::Error,
-                            "lpa-studio-ux",
-                            format!("server readiness probe failed: {error}"),
-                        ));
                         let pending_logs = self.device.server.take_pending_logs();
                         self.device.record_logs(&pending_logs);
                         self.logs.extend(pending_logs);
                         self.project.reset();
                         if matches!(error, UxError::NoFirmwareDetected(_)) {
-                            self.device.server.fail("No LightPlayer firmware detected.");
+                            self.logs.push(UxLogEntry::new(
+                                UxLogLevel::Info,
+                                "lpa-studio-ux",
+                                "No LightPlayer firmware detected during server readiness",
+                            ));
+                            self.device.server.fail_no_firmware();
                             return Ok(UxOutcome::new().with_notice(UxNotice::info(
                                 "No LightPlayer firmware detected; flash firmware onto the selected ESP32",
                             )));
                         }
+                        self.logs.push(UxLogEntry::new(
+                            UxLogLevel::Error,
+                            "lpa-studio-ux",
+                            format!("server readiness probe failed: {error}"),
+                        ));
                         self.device.server.fail(error.to_string());
                         return Err(error);
                     }
@@ -611,11 +616,14 @@ mod tests {
 
     use lpa_link::providers::LinkProviderRegistry;
     use lpa_link::providers::fake::FakeProvider;
-    use lpa_link::{LinkConnection, LinkEndpoint, LinkEndpointId, LinkProviderKind};
+    use lpa_link::{
+        LinkCapabilities, LinkConnection, LinkConnectionKind, LinkEndpoint, LinkEndpointId,
+        LinkProviderKind, LinkSession,
+    };
 
     use crate::{
         ConnectedDeviceSummary, LinkState, LinkUx, ProjectInventorySummary, ProjectState,
-        ProjectUx, ServerState, UiStatusKind, UxNodeId,
+        ProjectUx, ServerFailureKind, ServerState, UiStatusKind, UiStepState, UxIssue, UxNodeId,
     };
 
     use super::*;
@@ -651,6 +659,7 @@ mod tests {
 
         assert_eq!(view.panes.len(), 1);
         assert_eq!(view.panes[0].node_id.as_str(), DeviceUx::NODE_ID);
+        assert_eq!(device_section_ids(&view), vec!["select-connection"]);
     }
 
     #[test]
@@ -663,6 +672,15 @@ mod tests {
 
         assert_eq!(view.panes.len(), 1);
         assert_eq!(view.panes[0].node_id.as_str(), DeviceUx::NODE_ID);
+        assert_eq!(
+            device_section_ids(&view),
+            vec![
+                "select-connection",
+                "connect-device",
+                "connect-lightplayer",
+                "open-project"
+            ]
+        );
         assert!(actions.iter().any(|action| {
             matches!(
                 action.op_as::<ProjectOp>(),
@@ -676,14 +694,97 @@ mod tests {
     }
 
     #[test]
+    fn connected_link_without_server_hides_open_project_step() {
+        let studio = link_connected_studio();
+
+        let view = studio.view();
+        let actions = view_actions(&view);
+
+        assert_eq!(
+            device_section_ids(&view),
+            vec!["select-connection", "connect-device", "connect-lightplayer"]
+        );
+        assert!(actions.iter().any(|action| matches!(
+            action.op_as::<DeviceOp>(),
+            Some(DeviceOp::ConnectLightPlayer)
+        )));
+        assert!(!actions.iter().any(|action| matches!(
+            action.op_as::<ProjectOp>(),
+            Some(ProjectOp::ConnectRunningProject | ProjectOp::LoadDemoProject)
+        )));
+    }
+
+    #[test]
+    fn no_firmware_failure_hides_connect_lightplayer_action() {
+        let mut studio = connected_studio();
+        studio.project.reset();
+        studio
+            .device
+            .link
+            .set_active_session_for_test(management_capable_session());
+        studio.device.server.set_state(ServerState::Failed {
+            issue: UxIssue::new("No LightPlayer firmware detected."),
+            kind: ServerFailureKind::NoFirmware,
+        });
+
+        let view = studio.view();
+        let actions = view_actions(&view);
+
+        assert_eq!(view.panes[0].status.kind, UiStatusKind::Warning);
+        assert_eq!(view.panes[0].status.label, "Ready to flash");
+        assert_eq!(
+            device_section_ids(&view),
+            vec!["select-connection", "connect-device", "connect-lightplayer"]
+        );
+        let UiBody::Stack(stack) = &view.panes[0].body else {
+            panic!("device pane should render a stack view");
+        };
+        let lightplayer_section = stack
+            .sections
+            .iter()
+            .find(|section| section.id == "connect-lightplayer")
+            .expect("connect lightplayer section should exist");
+        assert_eq!(lightplayer_section.title, "Flash firmware");
+        assert_eq!(lightplayer_section.state, UiStepState::Active);
+        assert!(matches!(lightplayer_section.body, UiBody::Text(_)));
+        assert!(actions.iter().any(|action| matches!(
+            action.op_as::<DeviceOp>(),
+            Some(DeviceOp::ProvisionFirmware)
+        )));
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
+        );
+        assert!(!actions.iter().any(|action| matches!(
+            action.op_as::<DeviceOp>(),
+            Some(DeviceOp::ConnectLightPlayer)
+        )));
+    }
+
+    #[test]
     fn loaded_project_gets_project_pane() {
         let studio = connected_studio();
 
         let view = studio.view();
+        let actions = view_actions(&view);
 
         assert_eq!(view.panes.len(), 2);
         assert_eq!(view.panes[0].node_id.as_str(), DeviceUx::NODE_ID);
         assert_eq!(view.panes[1].node_id.as_str(), ProjectUx::NODE_ID);
+        assert_eq!(
+            device_section_ids(&view),
+            vec![
+                "select-connection",
+                "connect-device",
+                "connect-lightplayer",
+                "open-project"
+            ]
+        );
+        assert!(!actions.iter().any(|action| matches!(
+            action.op_as::<ProjectOp>(),
+            Some(ProjectOp::ConnectRunningProject | ProjectOp::LoadDemoProject)
+        )));
     }
 
     #[test]
@@ -780,6 +881,17 @@ mod tests {
     }
 
     fn connected_studio() -> StudioUx {
+        let mut studio = link_connected_studio();
+        studio.device.server.set_state(ServerState::Connected {
+            protocol: "fake-protocol".to_string(),
+        });
+        studio
+            .project
+            .mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        studio
+    }
+
+    fn link_connected_studio() -> StudioUx {
         let mut studio = StudioUx::new();
         studio.device.link.set_state(LinkState::Connected {
             device: ConnectedDeviceSummary::new(
@@ -789,13 +901,18 @@ mod tests {
                 "Fake runtime",
             ),
         });
-        studio.device.server.set_state(ServerState::Connected {
-            protocol: "fake-protocol".to_string(),
-        });
         studio
-            .project
-            .mark_ready("loaded-project", 7, ProjectInventorySummary::default());
-        studio
+    }
+
+    fn device_section_ids(view: &StudioView) -> Vec<&str> {
+        let UiBody::Stack(stack) = &view.panes[0].body else {
+            panic!("device pane should render stack");
+        };
+        stack
+            .sections
+            .iter()
+            .map(|section| section.id.as_str())
+            .collect()
     }
 
     fn registry_with_fake_connect_error(message: impl Into<String>) -> LinkProviderRegistry {
@@ -810,6 +927,18 @@ mod tests {
                 .with_connect_error(message),
         );
         registry
+    }
+
+    fn management_capable_session() -> LinkSession {
+        LinkSession::new(
+            "fake-session",
+            LinkProviderKind::Fake,
+            "fake-runtime",
+            LinkConnectionKind::Fake,
+            LinkCapabilities::esp32_serial_base()
+                .with_flash()
+                .with_device_erase(),
+        )
     }
 
     fn block_on_ready<F>(future: F) -> F::Output

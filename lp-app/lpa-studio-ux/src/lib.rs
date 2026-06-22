@@ -22,8 +22,8 @@ pub use nodes::project::{
     ProjectState, ProjectUx,
 };
 pub use nodes::server::{
-    LoadedDemoProject, LoadedProjectCatalog, ServerOp, ServerSnapshot, ServerState, ServerUx,
-    StudioServerClient,
+    LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerOp, ServerSnapshot,
+    ServerState, ServerUx, StudioServerClient,
 };
 pub use nodes::studio::{
     StudioSnapshot, StudioUx, UxError, UxLogEntry, UxLogLevel, UxNotice, UxNoticeLevel, UxOutcome,
