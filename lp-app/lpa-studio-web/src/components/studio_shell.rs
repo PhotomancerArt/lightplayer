@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use lpa_studio_ux::{StudioView, UxAction};
+use lpa_studio_ux::{StudioView, UiAction};
 
 use crate::components::{RuntimeLog, UxPane};
 
@@ -10,7 +10,7 @@ pub fn StudioShell(
     running: bool,
     error: Option<String>,
     notices: Vec<String>,
-    on_action: EventHandler<UxAction>,
+    on_action: EventHandler<UiAction>,
 ) -> Element {
     let has_error = error.is_some();
     let StudioView { panes, logs } = view;

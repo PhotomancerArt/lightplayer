@@ -1,17 +1,17 @@
 use dioxus::prelude::*;
-use lpa_studio_ux::{UxAction, UxActivity, UxActivityStepState, UxBody, UxPaneView, UxProgress};
+use lpa_studio_ux::{UiAction, UiActivity, UiActivityStepState, UiBody, UiPaneView, UiProgress};
 
 use crate::components::ActionStrip;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn UxPane(
-    view: UxPaneView,
+    view: UiPaneView,
     primary: bool,
     running: bool,
-    on_action: EventHandler<UxAction>,
+    on_action: EventHandler<UiAction>,
 ) -> Element {
-    let UxPaneView {
+    let UiPaneView {
         title,
         status,
         body,
@@ -45,13 +45,13 @@ pub fn UxPane(
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn UxPaneBody(body: UxBody) -> Element {
+fn UxPaneBody(body: UiBody) -> Element {
     match body {
-        UxBody::Empty => rsx! {},
-        UxBody::Text(text) => rsx! {
+        UiBody::Empty => rsx! {},
+        UiBody::Text(text) => rsx! {
             p { class: "ux-panel-copy", "{text}" }
         },
-        UxBody::Progress(progress) => {
+        UiBody::Progress(progress) => {
             let label = progress.label;
             let detail = progress.detail;
             rsx! {
@@ -61,10 +61,10 @@ fn UxPaneBody(body: UxBody) -> Element {
                 }
             }
         }
-        UxBody::Activity(activity) => rsx! {
+        UiBody::Activity(activity) => rsx! {
             UxActivityBody { activity }
         },
-        UxBody::Issue(issue) => {
+        UiBody::Issue(issue) => {
             let message = issue.message;
             let detail = issue.detail;
             rsx! {
@@ -74,7 +74,7 @@ fn UxPaneBody(body: UxBody) -> Element {
                 }
             }
         }
-        UxBody::Metrics(metrics) => rsx! {
+        UiBody::Metrics(metrics) => rsx! {
             dl { class: "ux-metrics",
                 for metric in metrics {
                     div {
@@ -89,7 +89,7 @@ fn UxPaneBody(body: UxBody) -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn UxActivityBody(activity: UxActivity) -> Element {
+fn UxActivityBody(activity: UiActivity) -> Element {
     let title = activity.title;
     let detail = activity.detail;
     let progress = activity.progress;
@@ -131,22 +131,22 @@ fn UxActivityBody(activity: UxActivity) -> Element {
     }
 }
 
-fn activity_step_class(state: UxActivityStepState) -> &'static str {
+fn activity_step_class(state: UiActivityStepState) -> &'static str {
     match state {
-        UxActivityStepState::Pending => "ux-activity-step ux-activity-step-pending",
-        UxActivityStepState::Active => "ux-activity-step ux-activity-step-active",
-        UxActivityStepState::Complete => "ux-activity-step ux-activity-step-complete",
-        UxActivityStepState::Failed => "ux-activity-step ux-activity-step-failed",
+        UiActivityStepState::Pending => "ux-activity-step ux-activity-step-pending",
+        UiActivityStepState::Active => "ux-activity-step ux-activity-step-active",
+        UiActivityStepState::Complete => "ux-activity-step ux-activity-step-complete",
+        UiActivityStepState::Failed => "ux-activity-step ux-activity-step-failed",
     }
 }
 
-fn activity_step_marker(state: UxActivityStepState) -> &'static str {
+fn activity_step_marker(state: UiActivityStepState) -> &'static str {
     state.text_marker()
 }
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn UxProgressBar(progress: UxProgress) -> Element {
+fn UxProgressBar(progress: UiProgress) -> Element {
     let label = progress.label;
     let detail = progress.detail;
     let percent = progress.percent;

@@ -2,38 +2,35 @@
 
 pub use lpa_link::{LinkEndpointId, LinkEndpointStatus, LinkProviderKind};
 
-pub mod action;
+pub mod node;
 
-pub mod link;
-pub mod project;
-pub mod server;
-pub mod studio;
-pub mod view;
+pub mod nodes;
+pub mod ui;
 
-pub use action::{
-    ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, UxAction, UxActions,
+pub use node::{
+    ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, UiAction, UiActions,
     UxContext, UxNode, UxNodeId, UxOp,
 };
-pub use link::{
+pub use nodes::link::{
     ConnectedDeviceSummary, ConnectedLink, EndpointChoice, LinkManagementOutcome, LinkOp,
     LinkOpenOutcome, LinkSnapshot, LinkState, LinkUx, ProgressState, ProviderChoice,
     SharedLinkRegistry, UxIssue,
 };
-pub use project::{
+pub use nodes::project::{
     LoadedProjectChoice, ProjectConnectResult, ProjectInventorySummary, ProjectOp, ProjectSnapshot,
     ProjectState, ProjectUx,
 };
-pub use server::{
+pub use nodes::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerOp, ServerSnapshot, ServerState, ServerUx,
     StudioServerClient,
 };
-pub use studio::{
+pub use nodes::studio::{
     StudioSnapshot, StudioUx, UxError, UxLogEntry, UxLogLevel, UxNotice, UxNoticeLevel, UxOutcome,
     UxResult, UxUpdate, UxUpdateSink,
 };
-pub use view::{
-    StudioView, UxActivity, UxActivityStep, UxActivityStepState, UxBody, UxMetric, UxPaneView,
-    UxProgress, UxStatus, UxStatusKind, UxTerminalLine,
+pub use ui::{
+    StudioView, UiActivity, UiActivityStep, UiActivityStepState, UiBody, UiMetric, UiPaneView,
+    UiProgress, UiStatus, UiStatusKind, UiTerminalLine,
 };
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "studio-demo";

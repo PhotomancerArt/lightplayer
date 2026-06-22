@@ -2,9 +2,9 @@ use dioxus::prelude::*;
 use lpa_studio_ux::{
     ConnectedDeviceSummary, EndpointChoice, LinkOp, LinkProviderKind, LinkState, LinkUx,
     LoadedProjectChoice, ProgressState, ProjectInventorySummary, ProjectState, ProjectUx,
-    ProviderChoice, ServerState, ServerUx, StudioView, UxAction, UxActivity, UxActivityStep,
-    UxActivityStepState, UxBody, UxIssue, UxLogEntry, UxLogLevel, UxNodeId, UxPaneView, UxProgress,
-    UxStatus,
+    ProviderChoice, ServerState, ServerUx, StudioView, UiAction, UiActivity, UiActivityStep,
+    UiActivityStepState, UiBody, UiPaneView, UiProgress, UiStatus, UxIssue, UxLogEntry, UxLogLevel,
+    UxNodeId,
 };
 
 use crate::components::{ActionStrip, StudioShell, UxPane};
@@ -365,11 +365,11 @@ fn browser_serial_blank_firmware_view() -> StudioView {
     StudioView::new(
         vec![
             provision_ready_link_view(),
-            UxPaneView::new(
+            UiPaneView::new(
                 ServerUx::NODE_ID,
                 "Server",
-                UxStatus::warning("Provision ready"),
-                UxBody::Activity(blank_firmware_activity()),
+                UiStatus::warning("Provision ready"),
+                UiBody::Activity(blank_firmware_activity()),
                 Vec::new(),
             ),
             project_view(ProjectState::NotLoaded, false),
@@ -386,24 +386,24 @@ fn browser_serial_blank_firmware_view() -> StudioView {
     )
 }
 
-fn blank_firmware_activity() -> UxActivity {
-    let mut activity = UxActivity::new("Connecting ESP32 server")
+fn blank_firmware_activity() -> UiActivity {
+    let mut activity = UiActivity::new("Connecting ESP32 server")
         .with_detail("ESP32 boot output looks like blank or erased flash.")
-        .with_progress(UxProgress::determinate(
+        .with_progress(UiProgress::determinate(
             "LightPlayer protocol unavailable",
             100,
         ))
         .with_steps(vec![
-            UxActivityStep::new("serial-access", "Serial access")
-                .with_state(UxActivityStepState::Complete)
+            UiActivityStep::new("serial-access", "Serial access")
+                .with_state(UiActivityStepState::Complete)
                 .with_detail("Browser serial port is open."),
-            UxActivityStep::new("reset-device", "Reset device")
-                .with_state(UxActivityStepState::Complete)
+            UiActivityStep::new("reset-device", "Reset device")
+                .with_state(UiActivityStepState::Complete)
                 .with_detail("Device reset was requested before protocol attach."),
-            UxActivityStep::new("boot-output", "Boot output")
-                .with_state(UxActivityStepState::Complete),
-            UxActivityStep::new("server-protocol", "LightPlayer protocol")
-                .with_state(UxActivityStepState::Failed),
+            UiActivityStep::new("boot-output", "Boot output")
+                .with_state(UiActivityStepState::Complete),
+            UiActivityStep::new("server-protocol", "LightPlayer protocol")
+                .with_state(UiActivityStepState::Failed),
         ]);
     activity.push_terminal_line("ESP-ROM:esp32c6-20220919");
     activity.push_terminal_line("Build:Sep 19 2022");
@@ -434,11 +434,11 @@ fn provisioning_view() -> StudioView {
 fn provision_failed_view() -> StudioView {
     StudioView::new(
         vec![
-            UxPaneView::new(
+            UiPaneView::new(
                 LinkUx::NODE_ID,
                 "Link",
-                UxStatus::error("Provision failed"),
-                UxBody::Issue(
+                UiStatus::error("Provision failed"),
+                UiBody::Issue(
                     UxIssue::new("firmware flashing failed")
                         .with_detail("Check the cable, boot mode, and browser serial permission."),
                 ),
@@ -479,11 +479,11 @@ fn resetting_to_blank_view() -> StudioView {
 fn reset_complete_view() -> StudioView {
     StudioView::new(
         vec![
-            UxPaneView::new(
+            UiPaneView::new(
                 LinkUx::NODE_ID,
                 "Link",
-                UxStatus::warning("Blank ESP32"),
-                UxBody::text("The device has been erased and can be provisioned again."),
+                UiStatus::warning("Blank ESP32"),
+                UiBody::text("The device has been erased and can be provisioned again."),
                 vec![
                     link_action(LinkOp::ProvisionFirmware),
                     link_action(LinkOp::DisconnectLink),
@@ -535,18 +535,18 @@ fn studio_view(
     )
 }
 
-fn link_view(state: LinkState, server_connected: bool) -> UxPaneView {
+fn link_view(state: LinkState, server_connected: bool) -> UiPaneView {
     let mut link = LinkUx::new();
     link.set_state(state);
     link.view(server_connected)
 }
 
-fn provision_ready_link_view() -> UxPaneView {
-    UxPaneView::new(
+fn provision_ready_link_view() -> UiPaneView {
+    UiPaneView::new(
         LinkUx::NODE_ID,
         "Link",
-        UxStatus::warning("Blank ESP32"),
-        UxBody::text("The selected device is ready for LightPlayer firmware."),
+        UiStatus::warning("Blank ESP32"),
+        UiBody::text("The selected device is ready for LightPlayer firmware."),
         vec![
             link_action(LinkOp::ProvisionFirmware),
             link_action(LinkOp::ConnectServer),
@@ -555,17 +555,17 @@ fn provision_ready_link_view() -> UxPaneView {
     )
 }
 
-fn link_action(op: LinkOp) -> UxAction {
-    UxAction::from_op(UxNodeId::new(LinkUx::NODE_ID), op)
+fn link_action(op: LinkOp) -> UiAction {
+    UiAction::from_op(UxNodeId::new(LinkUx::NODE_ID), op)
 }
 
-fn server_view(state: ServerState) -> UxPaneView {
+fn server_view(state: ServerState) -> UiPaneView {
     let mut server = ServerUx::new();
     server.set_state(state);
     server.view()
 }
 
-fn project_view(state: ProjectState, server_connected: bool) -> UxPaneView {
+fn project_view(state: ProjectState, server_connected: bool) -> UiPaneView {
     let mut project = ProjectUx::new();
     let no_running_project = matches!(state, ProjectState::NotLoaded) && server_connected;
     project.set_state(state);
@@ -630,6 +630,6 @@ fn project_ready_state() -> ProjectState {
     }
 }
 
-fn start_actions() -> Vec<UxAction> {
+fn start_actions() -> Vec<UiAction> {
     link_view(idle_link_state(), false).actions
 }

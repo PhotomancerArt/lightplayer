@@ -1,14 +1,14 @@
 use dioxus::prelude::*;
-use lpa_studio_ux::UxAction;
+use lpa_studio_ux::UiAction;
 
 use crate::components::ActionButton;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ActionStrip(
-    actions: Vec<UxAction>,
+    actions: Vec<UiAction>,
     running: bool,
-    on_action: EventHandler<UxAction>,
+    on_action: EventHandler<UiAction>,
 ) -> Element {
     rsx! {
         div { class: "ux-actions",

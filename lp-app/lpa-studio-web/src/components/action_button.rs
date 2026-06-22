@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
-use lpa_studio_ux::{ActionEnablement, ActionPriority, UxAction};
+use lpa_studio_ux::{ActionEnablement, ActionPriority, UiAction};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn ActionButton(action: UxAction, running: bool, on_action: EventHandler<UxAction>) -> Element {
+pub fn ActionButton(action: UiAction, running: bool, on_action: EventHandler<UiAction>) -> Element {
     let action_to_run = action.clone();
     let meta = action.meta().clone();
     let disabled = running || !meta.enablement.is_enabled();

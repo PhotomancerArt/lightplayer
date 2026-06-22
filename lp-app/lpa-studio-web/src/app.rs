@@ -2,7 +2,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use lpa_studio_ux::{StudioUx, StudioView, UxAction, UxBody, UxUpdate, UxUpdateSink};
+use lpa_studio_ux::{StudioUx, StudioView, UiAction, UiBody, UxUpdate, UxUpdateSink};
 
 use crate::components::StudioShell;
 
@@ -23,7 +23,7 @@ pub fn App() -> Element {
     let running = model.read().running;
     let error = model.read().error.clone();
     let notices = model.read().notices.clone();
-    let on_action = move |action: UxAction| {
+    let on_action = move |action: UiAction| {
         spawn(async move {
             execute_action(model, action).await;
         });
@@ -85,7 +85,7 @@ impl StudioWebModel {
                     .find(|pane| pane.node_id == node_id)
                 {
                     pane.status = status;
-                    pane.body = UxBody::Activity(activity);
+                    pane.body = UiBody::Activity(activity);
                 }
             }
             UxUpdate::Log(log) => {
@@ -95,7 +95,7 @@ impl StudioWebModel {
     }
 }
 
-async fn execute_action(mut model: Signal<StudioWebModel>, action: UxAction) {
+async fn execute_action(mut model: Signal<StudioWebModel>, action: UiAction) {
     let Some(mut ux) = ({
         let mut state = model.write();
         if state.running {
