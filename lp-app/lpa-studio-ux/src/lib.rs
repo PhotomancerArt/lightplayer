@@ -18,7 +18,9 @@ pub use link::{
     LinkState, LinkUx, ProgressState, ProviderChoice, SharedLinkRegistry, UxIssue,
 };
 pub use project::{ProjectInventorySummary, ProjectOp, ProjectSnapshot, ProjectState, ProjectUx};
-pub use server::{LoadedDemoProject, ServerSnapshot, ServerState, ServerUx, StudioServerClient};
+pub use server::{
+    LoadedDemoProject, ServerOp, ServerSnapshot, ServerState, ServerUx, StudioServerClient,
+};
 pub use studio::{
     StudioSnapshot, StudioUx, UxError, UxLogEntry, UxLogLevel, UxNotice, UxNoticeLevel, UxOutcome,
     UxResult,

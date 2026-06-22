@@ -2,8 +2,8 @@ use dioxus::prelude::*;
 use lpa_studio_ux::{
     ConnectedDeviceSummary, EndpointChoice, LinkOp, LinkProviderKind, LinkSnapshot, LinkState,
     LinkUx, ProgressState, ProjectInventorySummary, ProjectOp, ProjectSnapshot, ProjectState,
-    ProjectUx, ProviderChoice, ServerSnapshot, ServerState, StudioSnapshot, UxAction, UxIssue,
-    UxLogEntry, UxLogLevel, UxNodeId,
+    ProjectUx, ProviderChoice, ServerOp, ServerSnapshot, ServerState, ServerUx, StudioSnapshot,
+    UxAction, UxIssue, UxLogEntry, UxLogLevel, UxNodeId,
 };
 
 use crate::components::{ActionStrip, LinkPane, ProjectPane, ServerPane, StudioShell};
@@ -105,6 +105,9 @@ pub fn render_story(id: &str) -> Option<Element> {
                     state: ServerState::Connected {
                         protocol: "fw-browser-post-message-v1".to_string(),
                     },
+                    actions: server_disconnect_actions(),
+                    running: false,
+                    on_action: move |_| {},
                 }
             });
         }
@@ -133,14 +136,14 @@ pub fn render_story(id: &str) -> Option<Element> {
         "studio/simulator-starting" => (starting_snapshot(), Vec::new(), true, None, Vec::new()),
         "studio/simulator-ready" => (
             simulator_ready_snapshot(),
-            project_actions(),
+            connected_not_loaded_actions(),
             false,
             None,
             vec!["Simulator is running".to_string()],
         ),
         "studio/project-ready" => (
             project_ready_snapshot(),
-            Vec::new(),
+            connected_ready_actions(),
             false,
             None,
             vec!["Demo project loaded".to_string()],
@@ -347,4 +350,43 @@ fn project_actions() -> Vec<UxAction> {
             ProjectOp::LoadDemoProject,
         ),
     ]
+}
+
+fn connected_not_loaded_actions() -> Vec<UxAction> {
+    let mut actions = connected_infra_actions();
+    actions.extend(project_actions());
+    actions
+}
+
+fn connected_ready_actions() -> Vec<UxAction> {
+    let mut actions = connected_infra_actions();
+    actions.extend(project_disconnect_actions());
+    actions
+}
+
+fn connected_infra_actions() -> Vec<UxAction> {
+    let mut actions = link_disconnect_actions();
+    actions.extend(server_disconnect_actions());
+    actions
+}
+
+fn link_disconnect_actions() -> Vec<UxAction> {
+    vec![UxAction::from_op(
+        UxNodeId::new(LinkUx::NODE_ID),
+        LinkOp::DisconnectLink,
+    )]
+}
+
+fn server_disconnect_actions() -> Vec<UxAction> {
+    vec![UxAction::from_op(
+        UxNodeId::new(ServerUx::NODE_ID),
+        ServerOp::DisconnectServer,
+    )]
+}
+
+fn project_disconnect_actions() -> Vec<UxAction> {
+    vec![UxAction::from_op(
+        UxNodeId::new(ProjectUx::NODE_ID),
+        ProjectOp::DisconnectProject,
+    )]
 }

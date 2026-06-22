@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use lpa_studio_ux::{LinkUx, ProjectUx, StudioSnapshot, UxAction};
+use lpa_studio_ux::{LinkUx, ProjectUx, ServerUx, StudioSnapshot, UxAction};
 
 use crate::components::{LinkPane, ProjectPane, RuntimeLog, ServerPane};
 
@@ -15,6 +15,7 @@ pub fn StudioShell(
 ) -> Element {
     let has_error = error.is_some();
     let link_actions = actions_for_node(&actions, LinkUx::NODE_ID);
+    let server_actions = actions_for_node(&actions, ServerUx::NODE_ID);
     let project_actions = actions_for_node(&actions, ProjectUx::NODE_ID);
 
     rsx! {
@@ -56,7 +57,12 @@ pub fn StudioShell(
                     running,
                     on_action,
                 }
-                ServerPane { state: snapshot.server.state }
+                ServerPane {
+                    state: snapshot.server.state,
+                    actions: server_actions,
+                    running,
+                    on_action,
+                }
                 ProjectPane {
                     state: snapshot.project.state,
                     actions: project_actions,

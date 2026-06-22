@@ -1,8 +1,9 @@
 use core::future::Future;
 
 use crate::{
-    ConnectedLink, LinkOp, LinkOpenOutcome, LinkUx, ProjectOp, ProjectUx, ServerUx, StudioSnapshot,
-    UxAction, UxContext, UxLogEntry, UxLogLevel, UxNode, UxNotice, UxOutcome, UxResult,
+    ConnectedLink, LinkOp, LinkOpenOutcome, LinkUx, ProjectOp, ProjectUx, ServerOp, ServerUx,
+    StudioSnapshot, UxAction, UxContext, UxLogEntry, UxLogLevel, UxNode, UxNotice, UxOutcome,
+    UxResult,
 };
 
 pub struct StudioUx {
@@ -33,6 +34,7 @@ impl StudioUx {
 
     pub fn actions(&self) -> Vec<UxAction> {
         let mut actions = self.link.actions();
+        actions.extend(self.server.actions());
         actions.extend(self.project.actions(self.server.is_connected()));
         actions
     }
@@ -46,6 +48,10 @@ impl StudioUx {
             let op = action.into_op::<ProjectOp>()?;
             return self.execute_project_op(op).await;
         }
+        if action.node_id() == &self.server.node_id() {
+            let op = action.into_op::<ServerOp>()?;
+            return self.execute_server_op(op).await;
+        }
         Err(crate::UxError::UnsupportedAction(format!(
             "unknown UX node {}",
             action.node_id()
@@ -54,6 +60,7 @@ impl StudioUx {
 
     async fn execute_link_op(&mut self, op: LinkOp) -> UxResult {
         match op {
+            LinkOp::DisconnectLink => self.disconnect_link().await,
             LinkOp::RefreshProviders => {
                 self.link.refresh_provider_catalog();
                 Ok(UxOutcome::new().with_notice(UxNotice::info("Provider catalog refreshed")))
@@ -80,6 +87,13 @@ impl StudioUx {
         match op {
             ProjectOp::ConnectRunningProject => self.connect_running_project().await,
             ProjectOp::LoadDemoProject => self.load_demo_project().await,
+            ProjectOp::DisconnectProject => self.disconnect_project().await,
+        }
+    }
+
+    async fn execute_server_op(&mut self, op: ServerOp) -> UxResult {
+        match op {
+            ServerOp::DisconnectServer => self.disconnect_server().await,
         }
     }
 
@@ -159,6 +173,24 @@ impl StudioUx {
                 Err(error)
             }
         }
+    }
+
+    async fn disconnect_project(&mut self) -> UxResult {
+        self.project.disconnect();
+        Ok(UxOutcome::new().with_notice(UxNotice::info("Project disconnected")))
+    }
+
+    async fn disconnect_server(&mut self) -> UxResult {
+        self.project.disconnect();
+        self.server.disconnect();
+        Ok(UxOutcome::new().with_notice(UxNotice::info("Server disconnected")))
+    }
+
+    async fn disconnect_link(&mut self) -> UxResult {
+        self.project.disconnect();
+        self.server.disconnect();
+        self.link.disconnect().await?;
+        Ok(UxOutcome::new().with_notice(UxNotice::info("Link disconnected")))
     }
 }
 

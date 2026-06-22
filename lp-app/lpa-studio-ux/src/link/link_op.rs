@@ -7,6 +7,7 @@ use crate::{ActionMeta, ActionPriority, UxOp};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LinkOp {
     RefreshProviders,
+    DisconnectLink,
     OpenProvider {
         provider_id: LinkProviderKind,
     },
@@ -19,6 +20,11 @@ pub enum LinkOp {
 impl UxOp for LinkOp {
     fn default_action_meta(&self) -> ActionMeta {
         match self {
+            Self::DisconnectLink => ActionMeta::new(
+                "Disconnect link",
+                "Close the current link session and return to provider selection.",
+                ActionPriority::Tertiary,
+            ),
             Self::RefreshProviders => ActionMeta::new(
                 "Refresh providers",
                 "Rebuild the provider catalog from lpa-link.",

@@ -6,6 +6,7 @@ use crate::{ActionMeta, ActionPriority, UxOp};
 pub enum ProjectOp {
     ConnectRunningProject,
     LoadDemoProject,
+    DisconnectProject,
 }
 
 impl UxOp for ProjectOp {
@@ -20,6 +21,11 @@ impl UxOp for ProjectOp {
                 "Load demo project",
                 "Upload and run the built-in demo project.",
                 ActionPriority::Secondary,
+            ),
+            Self::DisconnectProject => ActionMeta::new(
+                "Disconnect project",
+                "Detach Studio from the current project without stopping it on the device.",
+                ActionPriority::Tertiary,
             ),
         }
     }

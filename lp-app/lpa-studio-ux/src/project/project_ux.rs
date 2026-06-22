@@ -36,8 +36,8 @@ impl ProjectUx {
                 ]
             }
             ProjectState::ConnectingRunningProject { .. }
-            | ProjectState::LoadingDemoProject { .. }
-            | ProjectState::Ready { .. } => Vec::new(),
+            | ProjectState::LoadingDemoProject { .. } => Vec::new(),
+            ProjectState::Ready { .. } => vec![self.action(ProjectOp::DisconnectProject)],
         }
     }
 
@@ -70,6 +70,10 @@ impl ProjectUx {
         self.state = ProjectState::Failed {
             issue: UxIssue::new(message),
         };
+    }
+
+    pub fn disconnect(&mut self) {
+        self.state = ProjectState::NotLoaded;
     }
 
     pub async fn load_demo_project(
@@ -160,5 +164,20 @@ mod tests {
             Some(&ProjectOp::LoadDemoProject)
         );
         assert_eq!(actions[1].meta().priority, ActionPriority::Secondary);
+    }
+
+    #[test]
+    fn ready_project_offers_disconnect_action() {
+        let mut project = ProjectUx::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+
+        let actions = project.actions(true);
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(
+            actions[0].op_as::<ProjectOp>(),
+            Some(&ProjectOp::DisconnectProject)
+        );
+        assert_eq!(actions[0].meta().priority, ActionPriority::Tertiary);
     }
 }

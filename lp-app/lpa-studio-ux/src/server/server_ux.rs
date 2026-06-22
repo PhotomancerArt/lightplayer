@@ -1,8 +1,8 @@
 use lpa_link::LinkConnection;
 
 use crate::{
-    ProgressState, ServerSnapshot, ServerState, SharedLinkRegistry, StudioServerClient, UxError,
-    UxIssue,
+    ProgressState, ServerOp, ServerSnapshot, ServerState, SharedLinkRegistry, StudioServerClient,
+    UxAction, UxError, UxIssue, UxNode, UxNodeId,
 };
 
 pub struct ServerUx {
@@ -11,6 +11,8 @@ pub struct ServerUx {
 }
 
 impl ServerUx {
+    pub const NODE_ID: &'static str = "studio.server";
+
     pub fn new() -> Self {
         Self {
             state: ServerState::Disconnected,
@@ -28,6 +30,15 @@ impl ServerUx {
 
     pub fn is_connected(&self) -> bool {
         matches!(self.state, ServerState::Connected { .. }) && self.client.is_some()
+    }
+
+    pub fn actions(&self) -> Vec<UxAction> {
+        match self.state {
+            ServerState::Connected { .. } => vec![self.action(ServerOp::DisconnectServer)],
+            ServerState::Disconnected
+            | ServerState::Connecting { .. }
+            | ServerState::Failed { .. } => Vec::new(),
+        }
     }
 
     pub fn mark_connecting(&mut self, label: impl Into<String>) {
@@ -60,6 +71,19 @@ impl ServerUx {
         self.state = ServerState::Failed {
             issue: UxIssue::new(message),
         };
+    }
+
+    pub fn disconnect(&mut self) {
+        self.client = None;
+        self.state = ServerState::Disconnected;
+    }
+}
+
+impl UxNode for ServerUx {
+    type Op = ServerOp;
+
+    fn node_id(&self) -> UxNodeId {
+        UxNodeId::new(Self::NODE_ID)
     }
 }
 

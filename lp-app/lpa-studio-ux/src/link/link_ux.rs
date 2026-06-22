@@ -96,9 +96,8 @@ impl LinkUx {
                 })
                 .collect(),
             LinkState::Failed { .. } => vec![self.action(LinkOp::RefreshProviders)],
-            LinkState::DiscoveringEndpoints { .. }
-            | LinkState::Connecting { .. }
-            | LinkState::Connected { .. } => Vec::new(),
+            LinkState::DiscoveringEndpoints { .. } | LinkState::Connecting { .. } => Vec::new(),
+            LinkState::Connected { .. } => vec![self.action(LinkOp::DisconnectLink)],
         }
     }
 
@@ -110,6 +109,34 @@ impl LinkUx {
         self.state = LinkState::SelectingProvider {
             providers: provider_choices(&self.registry.borrow()),
         };
+    }
+
+    pub async fn disconnect(&mut self) -> Result<(), UxError> {
+        let provider_id = self.active_provider;
+        let session_id = self
+            .active_session
+            .as_ref()
+            .map(|session| session.id.clone());
+        let result = match (provider_id, session_id) {
+            (Some(provider_id), Some(session_id)) => {
+                let mut registry = self.registry.borrow_mut();
+                let provider = registry
+                    .provider_mut(provider_id)
+                    .ok_or_else(|| missing_provider(provider_id))?;
+                provider.close(&session_id).await.map_err(map_link_error)
+            }
+            _ => Ok(()),
+        };
+        match result {
+            Ok(()) => {
+                self.refresh_provider_catalog();
+                Ok(())
+            }
+            Err(error) => {
+                self.fail(error.message());
+                Err(error)
+            }
+        }
     }
 
     pub async fn open_provider(

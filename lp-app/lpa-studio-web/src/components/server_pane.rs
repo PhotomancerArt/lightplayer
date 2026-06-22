@@ -1,9 +1,16 @@
 use dioxus::prelude::*;
-use lpa_studio_ux::ServerState;
+use lpa_studio_ux::{ServerState, UxAction};
+
+use crate::components::ActionStrip;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn ServerPane(state: ServerState) -> Element {
+pub fn ServerPane(
+    state: ServerState,
+    actions: Vec<UxAction>,
+    running: bool,
+    on_action: EventHandler<UxAction>,
+) -> Element {
     rsx! {
         section { class: "ux-panel",
             div { class: "ux-panel-heading",
@@ -11,6 +18,13 @@ pub fn ServerPane(state: ServerState) -> Element {
                 h2 { "{server_title(&state)}" }
             }
             p { class: "ux-panel-copy", "{server_detail(&state)}" }
+            if !actions.is_empty() {
+                ActionStrip {
+                    actions,
+                    running,
+                    on_action,
+                }
+            }
         }
     }
 }
