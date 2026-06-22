@@ -82,3 +82,9 @@ CI browser tooling is provisioned.
   `fw-browser-post-message-v1`.
 - Add richer diagnostics and optional output snapshots for Studio device panels
   after the canonical protocol path remains stable.
+
+## Later Note
+
+As of the provider-owned resources refactor and the `lpa-studio-ux` experiment,
+`lpa-link browser-worker` owns the JavaScript Worker lifecycle. Browser UI code
+should consume the Studio UX surface rather than owning the Worker directly.

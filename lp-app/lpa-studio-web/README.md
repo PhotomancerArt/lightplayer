@@ -1,17 +1,30 @@
 # lpa-studio-web
 
-`lpa-studio-web` is the first static browser shell for LightPlayer Studio.
+`lpa-studio-web` is the static browser shell for the experimental
+`lpa-studio-ux` slice.
 
-It renders `lpa-studio-core` state and drives browser runtimes from
-`lpa-studio-runtime`: the browser-local `browser-worker` proof path and the
-`browser-serial-esp32` path for already-flashed ESP32 hardware. It does not own
-Studio domain behavior and does not use Dioxus server functions.
+The web app owns Dioxus presentation. It renders `StudioSnapshot` values,
+renders contextual `AvailableAction<StudioAction>` controls, and dispatches
+actions back into `StudioUx`. Browser-worker lifecycle, provider routing,
+protocol request correlation, demo project deployment, and project inventory
+reads belong below the UI in `lpa-studio-ux`, `lpa-link`, and `lpa-client`.
 
-The main app uses a browser-side provisioning controller rather than helper
-functions that return a completed `StudioApp`. The controller dispatches real
-`StudioActionKind` values, executes returned effects through the active browser
-runtime, applies events back into `StudioApp`, and auto-advances only obvious
-steps such as endpoint granted -> connect -> read project state.
+## Current Slice
+
+The active first screen is the browser simulator:
+
+```text
+lpa-studio-web -> lpa-studio-ux -> lpa-link browser-worker -> fw-browser -> lp-server
+```
+
+The slice can launch the browser-local firmware runtime, open the server
+protocol, load the built-in demo project, and display a small project inventory
+summary. It intentionally does not include the previous Web Serial ESP32
+provisioning UI or the full old component set.
+
+The older `lpa-studio-core` and `lpa-studio-runtime` crates remain in the
+workspace as references during the experiment, but the default web app does not
+depend on them.
 
 ## Run
 
@@ -23,125 +36,32 @@ just studio-dev
 packages them with wasm-bindgen, prepares the wasm sidecar assets, and serves
 `http://127.0.0.1:2820/`.
 
-Use `just studio-web-build` or `just studio-web` when you want the release/static
-build path. The release build packages ESP32-C6 firmware assets for the future
-browser flashing path.
-
-## Hardware
-
-The USB ESP32 provider uses Web Serial, so it requires a supported
-Chromium-class browser and a secure/local context. The hardware path can connect
-to an ESP32 that already has LightPlayer firmware running and can flash packaged
-ESP32-C6 firmware when the firmware manifest is present.
-
-`lpa-link` owns the browser-worker wrapper, Web Serial bindings, and ESP32
-probe/flash JavaScript snippets. The web app passes same-origin asset paths into
-the providers for generated `fw-browser` artifacts, the ESP32 firmware manifest,
-and the esptool module. During firmware flashing, Studio asks the provider to
-release normal serial protocol ownership before the provider takes exclusive
-bootloader access to the same browser `SerialPort`.
-
-The web controller auto-advances hardware provisioning in small explicit steps:
-grant endpoint access, open the serial link, probe for a running LightPlayer
-server, offer firmware flashing for provisionable ESP32-C6 bootloader targets,
-reconnect after a successful flash, probe again, and finally read server
-project state. Probe and reconnect failures are surfaced in the device manager
-with recovery actions.
-
-Release builds package firmware assets under:
-
-```text
-lp-app/lpa-studio-web/public/firmware/esp32c6/
-```
-
-The generated directory is gitignored. Regenerate it explicitly with:
-
-```bash
-just studio-firmware-package-esp32c6
-```
-
-The package contains `manifest.json` and a merged ESP32-C6 binary image produced
-by `espflash save-image --merge --skip-padding`. The manifest records firmware
-identity, build profile/features, source commit, flash address, size, checksum,
-and reset/destructive-behavior notes. The browser flashing shim consumes this
-manifest directly; it does not process ELF files or build firmware in the
-browser.
+Use `just studio-web-build` or `just studio-web` for the release/static build
+path. The release build still packages ESP32-C6 firmware assets for future
+browser flashing work, even though the current UX slice is simulator-only.
 
 ## Stories
 
-`lpa-studio-web` has a native Dioxus storybook for isolated component states.
-Stories live next to the components they exercise, using sibling files such as
-`device_panel_stories.rs`.
+The storybook has been reduced to the new UX shell states for this experiment.
+Run the dev server and open:
 
-Run the dev server and open the storybook:
-
-```bash
-just studio-dev
+```text
+http://127.0.0.1:2820/#/stories
 ```
 
-Then visit `http://127.0.0.1:2820/#/stories`.
-
-Add new stories by:
-
-1. adding a `*_stories.rs` sibling module for the component
-2. adding one or more `StoryDescriptor` values
-3. adding a `render_story` match arm for each stable story id
-4. registering the module in `stories/story_registry.rs`
-
-Use `stories/story_fixtures.rs` for fake but domain-shaped `StudioState`
-fixtures. Stories should render real components, not duplicate mock markup.
-Provisioning journey stories use `flow/*` ids and cover provider selection,
-access, link opening, target probing, blank-device provisioning, flashing,
-server ready, project-state reading, project selection, recovery, deploying,
-ready, and connection-lost branches.
-
-Generate local PNGs for quick review:
-
-```bash
-just studio-story-pngs
-```
-
-PNGs are written to `lp-app/lpa-studio-web/story-images/.scratch/`, which is
-gitignored. Capture uses 4 Chrome pages by default; set
-`STUDIO_STORY_PNGS_CONCURRENCY=<n>` to tune this locally.
-
-Update committed visual baselines when intentional Studio UI changes affect
-component rendering:
-
-```bash
-just studio-story-baselines
-```
-
-Baselines are written to `lp-app/lpa-studio-web/story-images/` and should be
-committed when they change. The baseline set is intentionally small and should
-stay curated. Hidden child directories under `story-images/` are scratch space
-and are ignored. Story captures are clipped to the story canvas content at the
-standard wide story viewport.
-
-Baseline and check commands require `oxipng` so fresh captures compare against
-the committed optimized PNGs.
-
-Compare fresh story PNGs against the committed baselines without updating them:
-
-```bash
-just studio-story-check
-```
-
-Fresh check output is written to `lp-app/lpa-studio-web/story-images/.new/`,
-which is gitignored. For agent and pre-commit-style local flows, use:
+Generate or update visual baselines with:
 
 ```bash
 just studio-story-baselines-if-needed
 ```
 
-That command runs baseline generation only when tracked or untracked
-non-generated files under `lp-app/lpa-studio-web/` have changed.
+The baseline set intentionally reflects the active UX simulator surface rather
+than the old provisioning journey fixtures.
 
 ## Boundary
 
-- `lpa-studio-core` owns actions, state, effects, diagnostics, and sessions.
-- `lpa-studio-runtime` owns effect execution, Studio event mapping, browser
-  protocol adapters, and demo project loading.
-- `lpa-link` owns browser worker/serial provider resources and lifecycle.
-- `lpa-studio-web` owns Dioxus components, static presentation, and the thin
-  browser controller that routes core effects to browser runtimes.
+- `lpa-studio-ux` owns Studio product state, snapshots, actions, and async
+  execution.
+- `lpa-link` owns browser-worker provider resources and lifecycle.
+- `lpa-client` owns server protocol correlation and typed project operations.
+- `lpa-studio-web` owns Dioxus rendering and browser event handling.

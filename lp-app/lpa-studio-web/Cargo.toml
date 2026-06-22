@@ -9,15 +9,11 @@ publish = false
 description = "Static Dioxus web shell for LightPlayer Studio"
 
 [features]
-stories = ["dep:lpc-model", "dep:lpc-wire", "dep:web-sys"]
+stories = ["dep:web-sys"]
 
 [dependencies]
 dioxus = { version = "0.7", features = ["web"] }
-lpa-link = { path = "../lpa-link" }
-lpc-model = { path = "../../lp-core/lpc-model", optional = true }
-lpc-wire = { path = "../../lp-core/lpc-wire", optional = true }
-lpa-studio-core = { path = "../lpa-studio-core" }
-lpa-studio-runtime = { path = "../lpa-studio-runtime", features = ["browser-worker", "browser-serial-esp32"] }
+lpa-studio-ux = { path = "../lpa-studio-ux", features = ["browser-worker"] }
 web-sys = { version = "0.3", optional = true, features = ["Location", "Window"] }
 
 [lints]

@@ -4,7 +4,7 @@ Date: 2026-06-18
 
 ## Status
 
-Accepted
+Superseded by [2026-06-21 Studio UX Layer](./2026-06-21-studio-ux-layer.md)
 
 ## Context
 

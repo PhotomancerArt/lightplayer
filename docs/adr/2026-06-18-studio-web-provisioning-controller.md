@@ -1,10 +1,10 @@
 # ADR: Studio Web Provisioning Controller
 
-- **Status:** Accepted
+- **Status:** Superseded by [2026-06-21 Studio UX Layer](./2026-06-21-studio-ux-layer.md)
 - **Date:** 2026-06-18
 - **Deciders:** Photomancer
 - **Supersedes:** None
-- **Superseded by:** None
+- **Superseded by:** [2026-06-21 Studio UX Layer](./2026-06-21-studio-ux-layer.md)
 
 ## Context
 

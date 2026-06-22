@@ -109,6 +109,7 @@
       <sourceFolder url="file://$MODULE_DIR$/lp-app/lpa-studio-core/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-app/lpa-studio-runtime/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lp-app/lpa-studio-web/src" isTestSource="false" />
+      <sourceFolder url="file://$MODULE_DIR$/lp-app/lpa-studio-ux/src" isTestSource="false" />
       <sourceFolder url="file://$MODULE_DIR$/lpfx/lpfx/src" isTestSource="false" />
       <excludeFolder url="file://$MODULE_DIR$/target" />
     </content>
