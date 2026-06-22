@@ -1,13 +1,13 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-#[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
-use lpa_link::providers::LinkProviderInstance;
-use lpa_link::providers::{LinkEnv, LinkProviderRegistry};
+use lpa_link::providers::{LinkEnv, LinkProviderInstance, LinkProviderRegistry};
 use lpa_link::{
     LinkConnection, LinkDiagnosticSeverity, LinkEndpointId, LinkLogLevel, LinkProvider,
-    LinkProviderKind, LinkSession,
+    LinkProviderKind, LinkSession, LinkSessionId,
 };
+#[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 
 use crate::{
     ActionPriority, ConnectedDeviceSummary, EndpointChoice, LinkOp, LinkSnapshot, LinkState,
@@ -244,6 +244,7 @@ impl LinkUx {
                 .connect(&endpoint_id)
                 .await
                 .map_err(map_link_error)?;
+            open_provider_protocol_if_needed(provider_id, provider, session.id()).await?;
             let connection = provider
                 .connection(session.id())
                 .await
@@ -385,6 +386,36 @@ fn provider_auto_connects(kind: LinkProviderKind) -> bool {
         kind,
         LinkProviderKind::BrowserWorker | LinkProviderKind::HostProcess
     )
+}
+
+#[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+async fn open_provider_protocol_if_needed(
+    provider_id: LinkProviderKind,
+    provider: &mut LinkProviderInstance,
+    session_id: &LinkSessionId,
+) -> Result<(), UxError> {
+    if provider_id != LinkProviderKind::BrowserSerialEsp32 {
+        return Ok(());
+    }
+    let LinkProviderInstance::BrowserSerialEsp32(provider) = provider else {
+        return Err(UxError::Link(
+            "browser serial registry entry has the wrong provider type".to_string(),
+        ));
+    };
+    provider
+        .open_protocol(session_id, DEFAULT_SERIAL_BAUD_RATE)
+        .await
+        .map_err(map_link_error)
+}
+
+#[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
+async fn open_provider_protocol_if_needed(
+    provider_id: LinkProviderKind,
+    _provider: &mut LinkProviderInstance,
+    _session_id: &LinkSessionId,
+) -> Result<(), UxError> {
+    let _ = provider_id;
+    Ok(())
 }
 
 fn provider_action_priority(kind: LinkProviderKind) -> ActionPriority {

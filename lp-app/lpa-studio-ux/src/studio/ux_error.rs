@@ -8,6 +8,7 @@ pub enum UxError {
     UnsupportedAction(String),
     MissingSession(String),
     Link(String),
+    Project(String),
     Transport(String),
     Protocol(String),
     Browser(String),
@@ -20,6 +21,7 @@ impl UxError {
             | Self::UnsupportedAction(message)
             | Self::MissingSession(message)
             | Self::Link(message)
+            | Self::Project(message)
             | Self::Transport(message)
             | Self::Protocol(message)
             | Self::Browser(message) => message,
@@ -34,6 +36,7 @@ impl fmt::Display for UxError {
             Self::UnsupportedAction(message) => write!(f, "unsupported action: {message}"),
             Self::MissingSession(message) => write!(f, "missing session: {message}"),
             Self::Link(message) => write!(f, "link error: {message}"),
+            Self::Project(message) => write!(f, "project error: {message}"),
             Self::Transport(message) => write!(f, "transport error: {message}"),
             Self::Protocol(message) => write!(f, "protocol error: {message}"),
             Self::Browser(message) => write!(f, "browser error: {message}"),

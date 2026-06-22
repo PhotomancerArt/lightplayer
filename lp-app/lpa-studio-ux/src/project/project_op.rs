@@ -4,16 +4,22 @@ use crate::{ActionMeta, ActionPriority, UxOp};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProjectOp {
+    ConnectRunningProject,
     LoadDemoProject,
 }
 
 impl UxOp for ProjectOp {
     fn default_action_meta(&self) -> ActionMeta {
         match self {
+            Self::ConnectRunningProject => ActionMeta::new(
+                "Connect running project",
+                "Attach to a project that is already loaded on the connected server.",
+                ActionPriority::Primary,
+            ),
             Self::LoadDemoProject => ActionMeta::new(
                 "Load demo project",
-                "Upload and run the built-in simulator project.",
-                ActionPriority::Primary,
+                "Upload and run the built-in demo project.",
+                ActionPriority::Secondary,
             ),
         }
     }

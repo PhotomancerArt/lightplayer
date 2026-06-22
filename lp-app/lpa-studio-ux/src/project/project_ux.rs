@@ -30,10 +30,21 @@ impl ProjectUx {
         }
         match self.state {
             ProjectState::NotLoaded | ProjectState::Failed { .. } => {
-                vec![self.action(ProjectOp::LoadDemoProject)]
+                vec![
+                    self.action(ProjectOp::ConnectRunningProject),
+                    self.action(ProjectOp::LoadDemoProject),
+                ]
             }
-            ProjectState::LoadingDemoProject { .. } | ProjectState::Ready { .. } => Vec::new(),
+            ProjectState::ConnectingRunningProject { .. }
+            | ProjectState::LoadingDemoProject { .. }
+            | ProjectState::Ready { .. } => Vec::new(),
         }
+    }
+
+    pub fn mark_connecting_running(&mut self) {
+        self.state = ProjectState::ConnectingRunningProject {
+            progress: ProgressState::new("Connecting running project"),
+        };
     }
 
     pub fn mark_loading_demo(&mut self) {
@@ -70,6 +81,39 @@ impl ProjectUx {
         self.mark_ready(loaded.project_id, loaded.handle_id, loaded.inventory);
         Ok(loaded.logs)
     }
+
+    pub async fn connect_running_project(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Result<Vec<UxLogEntry>, UxError> {
+        self.mark_connecting_running();
+        let connection = server.connect_running_project().await?;
+        match connection.project {
+            Some(project) => {
+                self.mark_ready(project.project_id, project.handle_id, project.inventory);
+                Ok(connection.logs)
+            }
+            None => {
+                let error = UxError::Project(
+                    "no running project is loaded on the connected server".to_string(),
+                );
+                self.fail(error.message());
+                Err(error)
+            }
+        }
+    }
+
+    pub async fn connect_running_project_if_available(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Result<Option<Vec<UxLogEntry>>, UxError> {
+        let connection = server.connect_running_project().await?;
+        let Some(project) = connection.project else {
+            return Ok(None);
+        };
+        self.mark_ready(project.project_id, project.handle_id, project.inventory);
+        Ok(Some(connection.logs))
+    }
 }
 
 impl UxNode for ProjectUx {
@@ -83,5 +127,38 @@ impl UxNode for ProjectUx {
 impl Default for ProjectUx {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{ActionPriority, ProjectOp};
+
+    use super::*;
+
+    #[test]
+    fn disconnected_project_has_no_actions() {
+        let project = ProjectUx::new();
+
+        assert!(project.actions(false).is_empty());
+    }
+
+    #[test]
+    fn connected_not_loaded_project_offers_attach_and_demo_actions() {
+        let project = ProjectUx::new();
+
+        let actions = project.actions(true);
+
+        assert_eq!(actions.len(), 2);
+        assert_eq!(
+            actions[0].op_as::<ProjectOp>(),
+            Some(&ProjectOp::ConnectRunningProject)
+        );
+        assert_eq!(actions[0].meta().priority, ActionPriority::Primary);
+        assert_eq!(
+            actions[1].op_as::<ProjectOp>(),
+            Some(&ProjectOp::LoadDemoProject)
+        );
+        assert_eq!(actions[1].meta().priority, ActionPriority::Secondary);
     }
 }

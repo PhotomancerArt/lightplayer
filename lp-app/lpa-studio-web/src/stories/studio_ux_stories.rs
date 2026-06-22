@@ -56,7 +56,7 @@ pub const STORIES: &[StoryDescriptor] = &[
         "studio/simulator-ready",
         "Studio UX",
         "Simulator ready",
-        "Connected simulator with the demo project action available.",
+        "Connected simulator with project attach actions available.",
     ),
     StoryDescriptor::new(
         "studio/project-ready",
@@ -111,8 +111,8 @@ pub fn render_story(id: &str) -> Option<Element> {
         "studio/panes/project" => {
             return Some(rsx! {
                 ProjectPane {
-                    state: project_ready_state(),
-                    actions: load_project_actions(),
+                    state: ProjectState::NotLoaded,
+                    actions: project_actions(),
                     running: false,
                     on_action: move |_| {},
                 }
@@ -133,7 +133,7 @@ pub fn render_story(id: &str) -> Option<Element> {
         "studio/simulator-starting" => (starting_snapshot(), Vec::new(), true, None, Vec::new()),
         "studio/simulator-ready" => (
             simulator_ready_snapshot(),
-            load_project_actions(),
+            project_actions(),
             false,
             None,
             vec!["Simulator is running".to_string()],
@@ -336,9 +336,15 @@ fn connect_actions() -> Vec<UxAction> {
     ]
 }
 
-fn load_project_actions() -> Vec<UxAction> {
-    vec![UxAction::from_op(
-        UxNodeId::new(ProjectUx::NODE_ID),
-        ProjectOp::LoadDemoProject,
-    )]
+fn project_actions() -> Vec<UxAction> {
+    vec![
+        UxAction::from_op(
+            UxNodeId::new(ProjectUx::NODE_ID),
+            ProjectOp::ConnectRunningProject,
+        ),
+        UxAction::from_op(
+            UxNodeId::new(ProjectUx::NODE_ID),
+            ProjectOp::LoadDemoProject,
+        ),
+    ]
 }

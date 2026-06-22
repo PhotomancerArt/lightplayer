@@ -5159,6 +5159,7 @@ dependencies = [
  "js-sys",
  "lpa-client",
  "lpa-link",
+ "lpc-model",
  "lpc-wire",
  "wasm-bindgen",
  "wasm-bindgen-futures",

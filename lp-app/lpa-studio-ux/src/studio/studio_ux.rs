@@ -1,3 +1,5 @@
+use core::future::Future;
+
 use crate::{
     ConnectedLink, LinkOp, LinkOpenOutcome, LinkUx, ProjectOp, ProjectUx, ServerUx, StudioSnapshot,
     UxAction, UxContext, UxLogEntry, UxLogLevel, UxNode, UxNotice, UxOutcome, UxResult,
@@ -59,7 +61,9 @@ impl StudioUx {
             LinkOp::OpenProvider { provider_id } => {
                 match self.link.open_provider(provider_id).await? {
                     LinkOpenOutcome::Opened => Ok(UxOutcome::new()),
-                    LinkOpenOutcome::Connected(connected) => self.attach_connected_link(connected),
+                    LinkOpenOutcome::Connected(connected) => {
+                        self.attach_connected_link(connected).await
+                    }
                 }
             }
             LinkOp::ConnectEndpoint {
@@ -67,29 +71,72 @@ impl StudioUx {
                 endpoint_id,
             } => {
                 let connected = self.link.connect_endpoint(provider_id, endpoint_id).await?;
-                self.attach_connected_link(connected)
+                self.attach_connected_link(connected).await
             }
         }
     }
 
     async fn execute_project_op(&mut self, op: ProjectOp) -> UxResult {
         match op {
+            ProjectOp::ConnectRunningProject => self.connect_running_project().await,
             ProjectOp::LoadDemoProject => self.load_demo_project().await,
         }
     }
 
-    fn attach_connected_link(&mut self, connected: ConnectedLink) -> UxResult {
+    async fn attach_connected_link(&mut self, connected: ConnectedLink) -> UxResult {
         self.logs.extend(connected.logs);
         match self
             .server
             .attach_link_connection(self.link.registry_handle(), &connected.connection)
         {
-            Ok(()) => Ok(UxOutcome::new().with_notice(UxNotice::info("Server protocol connected"))),
+            Ok(()) => {
+                let mut outcome =
+                    UxOutcome::new().with_notice(UxNotice::info("Server protocol connected"));
+                if self.connect_running_project_if_available().await? {
+                    outcome = outcome.with_notice(UxNotice::info("Connected running project"));
+                }
+                Ok(outcome)
+            }
             Err(error) => {
                 self.server.fail(error.to_string());
                 Err(error)
             }
         }
+    }
+
+    async fn connect_running_project(&mut self) -> UxResult {
+        let result = {
+            let server = self.server.client_mut()?;
+            self.project.connect_running_project(server).await
+        };
+        match result {
+            Ok(logs) => {
+                self.logs.extend(logs);
+                Ok(UxOutcome::new().with_notice(UxNotice::info("Connected running project")))
+            }
+            Err(error) => {
+                self.logs.push(UxLogEntry::new(
+                    UxLogLevel::Error,
+                    "lpa-studio-ux",
+                    error.to_string(),
+                ));
+                Err(error)
+            }
+        }
+    }
+
+    async fn connect_running_project_if_available(&mut self) -> Result<bool, crate::UxError> {
+        let result = {
+            let server = self.server.client_mut()?;
+            self.project
+                .connect_running_project_if_available(server)
+                .await
+        };
+        if let Some(logs) = result? {
+            self.logs.extend(logs);
+            return Ok(true);
+        }
+        Ok(false)
     }
 
     async fn load_demo_project(&mut self) -> UxResult {
@@ -125,7 +172,7 @@ impl UxContext for StudioUx {
     fn dispatch(
         &mut self,
         action: UxAction,
-    ) -> core::pin::Pin<Box<dyn core::future::Future<Output = UxResult> + '_>> {
+    ) -> core::pin::Pin<Box<dyn Future<Output = UxResult> + '_>> {
         Box::pin(StudioUx::dispatch(self, action))
     }
 }

@@ -3,6 +3,9 @@ use crate::{ProgressState, ProjectInventorySummary, UxIssue};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProjectState {
     NotLoaded,
+    ConnectingRunningProject {
+        progress: ProgressState,
+    },
     LoadingDemoProject {
         progress: ProgressState,
     },

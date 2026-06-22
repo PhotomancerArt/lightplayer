@@ -70,6 +70,7 @@ fn ProjectDetails(state: ProjectState) -> Element {
 fn project_title(state: &ProjectState) -> &'static str {
     match state {
         ProjectState::NotLoaded => "Not loaded",
+        ProjectState::ConnectingRunningProject { .. } => "Connecting",
         ProjectState::LoadingDemoProject { .. } => "Loading",
         ProjectState::Ready { .. } => "Ready",
         ProjectState::Failed { .. } => "Failed",
@@ -79,8 +80,9 @@ fn project_title(state: &ProjectState) -> &'static str {
 fn project_detail(state: &ProjectState) -> String {
     match state {
         ProjectState::NotLoaded => {
-            "Load the demo project after the simulator is connected.".to_string()
+            "Connect to a running project or load the demo project.".to_string()
         }
+        ProjectState::ConnectingRunningProject { progress } => progress.label.clone(),
         ProjectState::LoadingDemoProject { progress } => progress.label.clone(),
         ProjectState::Ready { .. } => "Project inventory is ready.".to_string(),
         ProjectState::Failed { issue } => issue.message.clone(),

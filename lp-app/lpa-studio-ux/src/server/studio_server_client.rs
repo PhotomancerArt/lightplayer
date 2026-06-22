@@ -68,6 +68,51 @@ pub struct LoadedDemoProject {
     pub logs: Vec<UxLogEntry>,
 }
 
+pub struct RunningProjectConnection {
+    pub project: Option<LoadedRunningProject>,
+    pub logs: Vec<UxLogEntry>,
+}
+
+pub struct LoadedRunningProject {
+    pub project_id: String,
+    pub handle_id: u32,
+    pub inventory: ProjectInventorySummary,
+}
+
+impl StudioServerClient {
+    pub async fn connect_running_project(&mut self) -> Result<RunningProjectConnection, UxError> {
+        let loaded = self
+            .client
+            .project_list_loaded()
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(loaded.events);
+        let Some(project) = loaded.value.into_iter().next() else {
+            logs.extend(self.take_pending_logs());
+            return Ok(RunningProjectConnection {
+                project: None,
+                logs,
+            });
+        };
+
+        let inventory = self
+            .client
+            .project_inventory_read(project.handle)
+            .await
+            .map_err(map_client_error)?;
+        logs.extend(map_client_events(inventory.events));
+        logs.extend(self.take_pending_logs());
+        Ok(RunningProjectConnection {
+            project: Some(LoadedRunningProject {
+                project_id: project.path.as_str().to_string(),
+                handle_id: project.handle.id(),
+                inventory: ProjectInventorySummary::from(&inventory.value),
+            }),
+            logs,
+        })
+    }
+}
+
 fn server_io_from_link_connection(
     _registry: SharedLinkRegistry,
     connection: &LinkConnection,
@@ -86,12 +131,24 @@ fn server_io_from_link_connection(
         LinkConnectionKind::BrowserWorker { .. } => Err(UxError::UnsupportedFeature(
             "browser worker server I/O requires the browser-worker feature on wasm".to_string(),
         )),
+        #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+        LinkConnectionKind::BrowserSerialEsp32 { .. } => Ok(Box::new(
+            super::browser_serial_client_io::BrowserSerialClientIo::new(
+                _registry,
+                connection.session_id.clone(),
+                _pending_logs,
+            ),
+        )),
+        #[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
+        LinkConnectionKind::BrowserSerialEsp32 { .. } => Err(UxError::UnsupportedFeature(
+            "browser serial ESP32 server I/O requires the browser-serial-esp32 feature on wasm"
+                .to_string(),
+        )),
         LinkConnectionKind::Fake => Err(UxError::UnsupportedFeature(
             "fake links do not expose a server protocol".to_string(),
         )),
         LinkConnectionKind::HostProcess
         | LinkConnectionKind::HostSerialEsp32
-        | LinkConnectionKind::BrowserSerialEsp32 { .. }
         | LinkConnectionKind::PendingImplementation { .. } => Err(UxError::UnsupportedFeature(
             format!("server I/O is not implemented for {:?}", connection.kind),
         )),

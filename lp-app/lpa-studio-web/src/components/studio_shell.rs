@@ -22,7 +22,6 @@ pub fn StudioShell(
             header { class: "ux-header",
                 div {
                     p { class: "ux-eyebrow", "LightPlayer Studio" }
-                    h1 { "Simulator" }
                 }
                 div { class: status_class(running, has_error),
                     if running {
