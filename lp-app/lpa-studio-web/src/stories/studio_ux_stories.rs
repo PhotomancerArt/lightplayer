@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
 use lpa_studio_ux::{
-    ActionMeta, ActionPriority, AvailableAction, ConnectedDeviceSummary, LinkAction, LinkSnapshot,
-    LinkState, ProgressState, ProjectAction, ProjectInventorySummary, ProjectSnapshot,
-    ProjectState, ProviderChoice, ServerSnapshot, ServerState, StudioAction, StudioSnapshot,
-    UxIssue, UxLogEntry, UxLogLevel,
+    ActionMeta, ActionPriority, AvailableAction, ConnectedDeviceSummary, EndpointChoice,
+    LinkAction, LinkProviderKind, LinkSnapshot, LinkState, ProgressState, ProjectAction,
+    ProjectInventorySummary, ProjectSnapshot, ProjectState, ProviderChoice, ServerSnapshot,
+    ServerState, StudioAction, StudioSnapshot, UxIssue, UxLogEntry, UxLogLevel,
 };
 
 use crate::app::StudioShell;
@@ -17,10 +17,16 @@ pub const STORIES: &[StoryDescriptor] = &[
         "Initial Studio UX state before launching the browser simulator.",
     ),
     StoryDescriptor::new(
+        "studio/simulator-endpoint",
+        "Studio UX",
+        "Simulator endpoint",
+        "Endpoint choices returned by the selected lpa-link provider.",
+    ),
+    StoryDescriptor::new(
         "studio/simulator-starting",
         "Studio UX",
         "Simulator starting",
-        "Progress state while the browser worker and server protocol are starting.",
+        "Progress state while the selected endpoint is opening.",
     ),
     StoryDescriptor::new(
         "studio/simulator-ready",
@@ -45,6 +51,13 @@ pub const STORIES: &[StoryDescriptor] = &[
 pub fn render_story(id: &str) -> Option<Element> {
     let (snapshot, actions, running, error, notices) = match id {
         "studio/simulator-idle" => (idle_snapshot(), start_actions(), false, None, Vec::new()),
+        "studio/simulator-endpoint" => (
+            endpoint_snapshot(),
+            connect_actions(),
+            false,
+            None,
+            Vec::new(),
+        ),
         "studio/simulator-starting" => (starting_snapshot(), Vec::new(), true, None, Vec::new()),
         "studio/simulator-ready" => (
             simulator_ready_snapshot(),
@@ -94,8 +107,9 @@ fn idle_snapshot() -> StudioSnapshot {
 
 fn starting_snapshot() -> StudioSnapshot {
     StudioSnapshot::new(
-        LinkSnapshot::new(LinkState::StartingSimulator {
-            progress: ProgressState::new("Starting simulator"),
+        LinkSnapshot::new(LinkState::Connecting {
+            endpoint: EndpointChoice::browser_worker(),
+            progress: ProgressState::new("Opening link session"),
         }),
         ServerSnapshot::new(ServerState::Connecting {
             progress: ProgressState::new("Opening server protocol"),
@@ -106,6 +120,18 @@ fn starting_snapshot() -> StudioSnapshot {
             "lpa-link",
             "browser worker session created",
         )],
+    )
+}
+
+fn endpoint_snapshot() -> StudioSnapshot {
+    StudioSnapshot::new(
+        LinkSnapshot::new(LinkState::SelectingEndpoint {
+            provider_id: LinkProviderKind::BrowserWorker,
+            endpoints: vec![EndpointChoice::browser_worker()],
+        }),
+        ServerSnapshot::new(ServerState::Disconnected),
+        ProjectSnapshot::new(ProjectState::NotLoaded),
+        Vec::new(),
     )
 }
 
@@ -183,12 +209,29 @@ fn connected_link_snapshot() -> LinkSnapshot {
 }
 
 fn start_actions() -> Vec<AvailableAction<StudioAction>> {
+    let provider_id = ProviderChoice::browser_worker().id;
     vec![AvailableAction::from_command(
-        StudioAction::from(LinkAction::StartSimulator),
+        StudioAction::from(LinkAction::SelectProvider { provider_id }),
         ActionMeta::new(
-            LinkAction::START_SIMULATOR,
+            LinkAction::SELECT_PROVIDER,
             "Start simulator",
-            "Launch a browser-local LightPlayer runtime.",
+            "Run LightPlayer locally in a browser worker.",
+            ActionPriority::Primary,
+        ),
+    )]
+}
+
+fn connect_actions() -> Vec<AvailableAction<StudioAction>> {
+    let endpoint = EndpointChoice::browser_worker();
+    vec![AvailableAction::from_command(
+        StudioAction::from(LinkAction::ConnectEndpoint {
+            provider_id: endpoint.provider_id,
+            endpoint_id: endpoint.id,
+        }),
+        ActionMeta::new(
+            LinkAction::CONNECT_ENDPOINT,
+            "Open Browser firmware runtime",
+            "Spawn a browser-local firmware runtime.",
             ActionPriority::Primary,
         ),
     )]

@@ -1,3 +1,4 @@
+pub mod demo_project;
 pub mod project_action;
 pub mod project_inventory_summary;
 pub mod project_snapshot;

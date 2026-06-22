@@ -3,16 +3,17 @@ use std::rc::Rc;
 
 use async_trait::async_trait;
 use lpa_client::ClientIo;
-use lpa_link::LinkProvider;
 use lpa_link::provider::session::LinkSessionId;
 use lpa_link::providers::browser_worker::{
     BrowserInputEnvelope, BrowserOutputEnvelope, BrowserWorkerProvider,
 };
+use lpa_link::providers::{LinkProviderInstance, LinkProviderRegistry};
+use lpa_link::{LinkProvider, LinkProviderKind};
 use lpc_wire::{ClientMessage, TransportError, WireServerMessage, json};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 
-use crate::{UxLogEntry, UxLogLevel};
+use crate::{SharedLinkRegistry, UxLogEntry, UxLogLevel};
 
 const RESPONSE_POLL_LIMIT: usize = 240;
 
@@ -22,13 +23,13 @@ pub struct BrowserWorkerClientIo {
 
 impl BrowserWorkerClientIo {
     pub fn new(
-        provider: Rc<RefCell<BrowserWorkerProvider>>,
+        registry: SharedLinkRegistry,
         session_id: LinkSessionId,
         logs: Rc<RefCell<Vec<UxLogEntry>>>,
     ) -> Self {
         Self {
             state: Rc::new(RefCell::new(BrowserWorkerClientState {
-                provider,
+                registry,
                 session_id,
                 logs,
             })),
@@ -71,33 +72,36 @@ impl ClientIo for BrowserWorkerClientIo {
     }
 
     async fn close(&mut self) -> Result<(), TransportError> {
-        self.state
-            .borrow()
-            .provider
-            .borrow_mut()
-            .close(&self.state.borrow().session_id)
+        let (registry, session_id) = {
+            let state = self.state.borrow();
+            (Rc::clone(&state.registry), state.session_id.clone())
+        };
+        let mut registry = registry.borrow_mut();
+        let provider = browser_worker_provider_mut(&mut registry)?;
+        provider
+            .close(&session_id)
             .await
             .map_err(|error| TransportError::Other(error.to_string()))
     }
 }
 
 struct BrowserWorkerClientState {
-    provider: Rc<RefCell<BrowserWorkerProvider>>,
+    registry: SharedLinkRegistry,
     session_id: LinkSessionId,
     logs: Rc<RefCell<Vec<UxLogEntry>>>,
 }
 
 impl BrowserWorkerClientState {
     fn post(&self, envelope: &BrowserInputEnvelope) -> Result<(), TransportError> {
-        self.provider
-            .borrow()
+        let mut registry = self.registry.borrow_mut();
+        browser_worker_provider_mut(&mut registry)?
             .post(&self.session_id, envelope)
             .map_err(|error| TransportError::Other(error.to_string()))
     }
 
     fn take_outputs(&self) -> Result<Vec<BrowserOutputEnvelope>, TransportError> {
-        self.provider
-            .borrow_mut()
+        let mut registry = self.registry.borrow_mut();
+        browser_worker_provider_mut(&mut registry)?
             .take_outputs(&self.session_id)
             .map_err(|error| TransportError::Other(error.to_string()))
     }
@@ -109,7 +113,21 @@ impl BrowserWorkerClientState {
     }
 }
 
-pub fn worker_output_to_log(output: BrowserOutputEnvelope) -> Option<UxLogEntry> {
+fn browser_worker_provider_mut(
+    registry: &mut LinkProviderRegistry,
+) -> Result<&mut BrowserWorkerProvider, TransportError> {
+    match registry.provider_mut(LinkProviderKind::BrowserWorker) {
+        Some(LinkProviderInstance::BrowserWorker(provider)) => Ok(provider),
+        Some(_) => Err(TransportError::Other(
+            "browser-worker registry entry has the wrong provider type".to_string(),
+        )),
+        None => Err(TransportError::Other(
+            "browser-worker provider is not available".to_string(),
+        )),
+    }
+}
+
+fn worker_output_to_log(output: BrowserOutputEnvelope) -> Option<UxLogEntry> {
     match output {
         BrowserOutputEnvelope::Status {
             status, message, ..

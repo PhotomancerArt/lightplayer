@@ -1,9 +1,8 @@
 //! UI-independent LightPlayer Studio UX surface.
 
-pub mod action;
+pub use lpa_link::{LinkEndpointId, LinkEndpointStatus, LinkProviderKind};
 
-#[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
-mod browser_worker;
+pub mod action;
 
 pub mod link;
 pub mod project;
@@ -15,13 +14,13 @@ pub use action::{
     UxCommand,
 };
 pub use link::{
-    ConnectedDeviceSummary, LinkAction, LinkSnapshot, LinkState, LinkUx, ProgressState,
-    ProviderChoice, UxIssue,
+    ConnectedDeviceSummary, EndpointChoice, LinkAction, LinkSnapshot, LinkState, LinkUx,
+    ProgressState, ProviderChoice, SharedLinkRegistry, UxIssue,
 };
 pub use project::{
     ProjectAction, ProjectInventorySummary, ProjectSnapshot, ProjectState, ProjectUx,
 };
-pub use server::{ServerSnapshot, ServerState, ServerUx};
+pub use server::{LoadedDemoProject, ServerSnapshot, ServerState, ServerUx, StudioServerClient};
 pub use studio::{
     StudioAction, StudioSnapshot, StudioUx, UxError, UxLogEntry, UxLogLevel, UxNotice,
     UxNoticeLevel, UxOutcome, UxResult,

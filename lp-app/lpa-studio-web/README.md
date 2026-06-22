@@ -11,16 +11,20 @@ reads belong below the UI in `lpa-studio-ux`, `lpa-link`, and `lpa-client`.
 
 ## Current Slice
 
-The active first screen is the browser simulator:
+The active first screen is the browser simulator, reached through the
+provider/endpoint model owned by `lpa-link`:
 
 ```text
-lpa-studio-web -> lpa-studio-ux -> lpa-link browser-worker -> fw-browser -> lp-server
+lpa-studio-web -> lpa-studio-ux -> LinkProviderRegistry -> browser-worker -> fw-browser -> lp-server
 ```
 
-The slice can launch the browser-local firmware runtime, open the server
-protocol, load the built-in demo project, and display a small project inventory
-summary. It intentionally does not include the previous Web Serial ESP32
-provisioning UI or the full old component set.
+`LinkUx` owns `LinkProviderRegistry`, renders provider and endpoint choices,
+and opens link sessions through the selected provider. `ServerUx` owns the
+`lpa-client` protocol client once a connected link exposes server I/O. The slice
+can launch the browser-local firmware runtime, open the server protocol, load
+the built-in demo project, and display a small project inventory summary. It
+intentionally does not include the previous Web Serial ESP32 provisioning UI or
+the full old component set.
 
 The older `lpa-studio-core` and `lpa-studio-runtime` crates remain in the
 workspace as references during the experiment, but the default web app does not
@@ -60,8 +64,9 @@ than the old provisioning journey fixtures.
 
 ## Boundary
 
-- `lpa-studio-ux` owns Studio product state, snapshots, actions, and async
-  execution.
-- `lpa-link` owns browser-worker provider resources and lifecycle.
+- `lpa-studio-ux` owns Studio product state, snapshots, actions, async
+  execution, the link provider registry, and the connected server client.
+- `lpa-link` owns provider implementations, provider resources, sessions, and
+  lifecycle.
 - `lpa-client` owns server protocol correlation and typed project operations.
 - `lpa-studio-web` owns Dioxus rendering and browser event handling.

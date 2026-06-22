@@ -45,6 +45,10 @@ The first implementation slice uses:
 
 - `StudioUx` as the top-level surface;
 - `LinkUx`, `ServerUx`, and `ProjectUx` as domain sub-surfaces;
+- `LinkUx` owns `lpa-link::LinkProviderRegistry` and opens provider sessions
+  through the registry;
+- `ServerUx` owns the connected `lpa-client` protocol client after a link
+  connection exposes server I/O;
 - `StudioSnapshot` and related snapshots as cloneable read models;
 - typed commands such as `LinkAction` and `ProjectAction`;
 - `AvailableAction<A>` to attach contextual labels, summaries, priorities, and
@@ -52,10 +56,13 @@ The first implementation slice uses:
 - async `execute()` methods that perform the real operation and update the UX
   state directly.
 
-The first proof path is browser-worker simulation only. `lpa-studio-ux` owns the
-browser-worker provider/session and adapts it into `lpa-client::LpClient<Io>`.
-The web app renders snapshots and dispatches actions; it does not route runtime
-providers, drain service effects, or correlate protocol responses.
+The first proof path is browser-worker simulation through the same provider
+registry entry point that future hardware and host providers use. `lpa-link`
+owns the browser-worker provider/session. `lpa-studio-ux` owns the registry and
+adapts the connected link session into `lpa-client::LpClient<Io>` as an internal
+server transport detail. The web app renders snapshots and dispatches actions;
+it does not route runtime providers, drain service effects, or correlate
+protocol responses.
 
 The older `lpa-studio-core` and `lpa-studio-runtime` crates remain in the
 workspace as compiling references during the experiment. A later cleanup can

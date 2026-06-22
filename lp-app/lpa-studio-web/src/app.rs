@@ -284,7 +284,9 @@ async fn execute_action(mut model: Signal<StudioWebModel>, action: StudioAction)
 fn link_title(state: &LinkState) -> String {
     match state {
         LinkState::SelectingProvider { .. } => "Choose runtime".to_string(),
-        LinkState::StartingSimulator { .. } => "Starting".to_string(),
+        LinkState::DiscoveringEndpoints { .. } => "Discovering".to_string(),
+        LinkState::SelectingEndpoint { .. } => "Choose endpoint".to_string(),
+        LinkState::Connecting { .. } => "Connecting".to_string(),
         LinkState::Connected { device } => device.label.clone(),
         LinkState::Failed { .. } => "Link failed".to_string(),
     }
@@ -295,8 +297,19 @@ fn link_detail(state: &LinkState) -> String {
         LinkState::SelectingProvider { providers } => providers
             .first()
             .map(|provider| provider.summary.clone())
-            .unwrap_or_else(|| "No simulator providers are available.".to_string()),
-        LinkState::StartingSimulator { progress } => progress
+            .unwrap_or_else(|| "No link providers are available.".to_string()),
+        LinkState::DiscoveringEndpoints {
+            provider_id,
+            progress,
+        } => progress
+            .detail
+            .clone()
+            .unwrap_or_else(|| format!("Discovering endpoints from {}.", provider_id.label())),
+        LinkState::SelectingEndpoint { endpoints, .. } => endpoints
+            .first()
+            .map(|endpoint| endpoint.summary.clone())
+            .unwrap_or_else(|| "No endpoints are available for this provider.".to_string()),
+        LinkState::Connecting { progress, .. } => progress
             .detail
             .clone()
             .unwrap_or_else(|| progress.label.clone()),
@@ -321,7 +334,9 @@ fn server_title(state: &ServerState) -> &'static str {
 
 fn server_detail(state: &ServerState) -> String {
     match state {
-        ServerState::Disconnected => "Start the simulator to open the server protocol.".to_string(),
+        ServerState::Disconnected => {
+            "Open a link endpoint to attach the server protocol.".to_string()
+        }
         ServerState::Connecting { progress } => progress.label.clone(),
         ServerState::Connected { protocol } => format!("Protocol: {protocol}"),
         ServerState::Failed { issue } => issue.message.clone(),

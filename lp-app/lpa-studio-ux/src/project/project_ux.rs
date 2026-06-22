@@ -1,6 +1,7 @@
 use crate::{
     ActionMeta, ActionPriority, AvailableAction, ProgressState, ProjectAction,
-    ProjectInventorySummary, ProjectSnapshot, ProjectState, UxIssue,
+    ProjectInventorySummary, ProjectSnapshot, ProjectState, StudioServerClient, UxError, UxIssue,
+    UxLogEntry,
 };
 
 pub struct ProjectUx {
@@ -65,6 +66,16 @@ impl ProjectUx {
         self.state = ProjectState::Failed {
             issue: UxIssue::new(message),
         };
+    }
+
+    pub async fn load_demo_project(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Result<Vec<UxLogEntry>, UxError> {
+        self.mark_loading_demo();
+        let loaded = server.load_demo_project().await?;
+        self.mark_ready(loaded.project_id, loaded.handle_id, loaded.inventory);
+        Ok(loaded.logs)
     }
 }
 
