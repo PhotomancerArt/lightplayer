@@ -8,8 +8,8 @@ Accepted
 
 `lpa-link` had a split ownership model. It exposed shared endpoint records, but
 each provider returned a provider-specific session type, while browser serial
-and browser worker resource ownership mostly lived in `lpa-studio-runtime` and
-`lpa-studio-web` glue.
+and browser worker resource ownership mostly lived in the old Studio runtime
+crate and `lpa-studio-web` glue.
 
 That made the boundary hard to reason about: the link provider looked like the
 owner of endpoint/session identity, but Web Serial ports, worker lifecycles,
@@ -33,9 +33,9 @@ Browser provider JavaScript that implements provider mechanics is owned by
 Application-owned browser artifacts are passed to provider constructors as
 same-origin paths, not as remote URLs or a general locator model.
 
-`lpa-studio-runtime` remains the effect executor and event mapper. It may adapt
-provider streams into `lpa-client`, but it does not own provider resource
-identity or lifecycle. Studio UX vocabulary remains above `lpa-link`.
+`lpa-studio-ux` owns the active Studio controller layer above `lpa-link`. It may
+adapt connected link sessions into `lpa-client`, but it does not own provider
+resource identity or lifecycle.
 
 ## Consequences
 

@@ -50,6 +50,8 @@ The first implementation slice uses:
 - `ServerUx` owns the connected `lpa-client` protocol client after a link
   connection exposes server I/O;
 - `StudioSnapshot` and related snapshots as cloneable read models;
+- `StudioView`, `UxPaneView`, and `UxBody` as small UI-independent view
+  primitives for panes, status, body content, metrics, issues, and actions;
 - typed operations such as `LinkOp` and `ProjectOp`;
 - `UxNodeId` to address resource-owning UX nodes such as `studio.link` and
   `studio.project`;
@@ -87,24 +89,28 @@ A fully dynamic `UxRegistry` is intentionally deferred. `StudioUx` manually owns
 and dispatches to its current nodes for now, while the `UxNodeId`/`UxContext`
 shape leaves room for a future UX tree such as `studio.project.node_tree`.
 
-The older `lpa-studio-core` and `lpa-studio-runtime` crates remain in the
-workspace as compiling references during the experiment. A later cleanup can
-delete, archive, or fold them once the new model proves itself.
+These UX models are in-process client-side objects. They are meant for web UI,
+future CLI/desktop shells, tests, and agent-facing textual descriptions; they
+are not a new client/server serialization boundary.
+
+The older `lpa-studio-core` and `lpa-studio-runtime` crates were deleted after
+the vertical slice proved the new model could own link, server, and project
+resources directly.
 
 ## Consequences
 
 - Studio behavior becomes easier to inspect through states, node ids, and
   available actions.
 - Web UI, future CLI, tests, and agents can share the same action/snapshot
-  language.
+  language plus a small pane-view vocabulary.
 - Initial provider choices are renderable by generic action components instead
   of special-cased web UI.
 - Service operations move out of the UI and out of an abstract effect/event
   loop.
 - The first slice is smaller than the old provisioning UI; ESP32 flashing,
   provisioning, and rich recovery states must be ported intentionally later.
-- The old ADRs and crate READMEs may describe reference code rather than the
-  active direction until cleanup is complete.
+- Historical plan files and old ADRs may mention the deleted core/runtime split,
+  but the active workspace uses `lpa-studio-ux` directly.
 
 ## Alternatives Considered
 
@@ -113,8 +119,9 @@ delete, archive, or fold them once the new model proves itself.
     ownership look like external effects and still leaked runtime composition
     into the web app.
 - Rename the old crates to backup directories immediately.
-  - Rejected for the experiment because keeping them compiling as references
-    makes the slice easier to compare, inspect, and discard.
+  - Deferred during the experiment because keeping them compiling as references
+    made the slice easier to compare. They were later deleted instead of
+    renamed once the new slice was viable.
 - Start with a generic UX component tree.
   - Deferred. Domain-specific `LinkUx`, `ServerUx`, and `ProjectUx` states are
     clearer for this stage. Generic view concepts can emerge from repeated
@@ -127,10 +134,8 @@ delete, archive, or fold them once the new model proves itself.
 ## Follow-Ups
 
 - Port browser serial ESP32 and firmware flashing into the UX model.
-- Decide whether `lpa-studio-core` / `lpa-studio-runtime` should be deleted,
-  archived, or folded after the experiment.
 - Add a CLI or test harness that drives `StudioUx` directly.
-- Rebuild richer Studio visual stories on the new snapshot/action model.
+- Rebuild richer Studio visual stories on the new view/action model.
 - Add a concrete `UxRegistry` when dynamic UX nodes such as
   `studio.project.node_tree` need registration and dispatch.
 - Add derive macros for operation metadata after the manual `UxOp` model has

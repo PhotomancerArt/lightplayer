@@ -1,6 +1,7 @@
 use crate::{
-    ProgressState, ProjectInventorySummary, ProjectOp, ProjectSnapshot, ProjectState,
-    StudioServerClient, UxAction, UxError, UxIssue, UxLogEntry, UxNode, UxNodeId,
+    LoadedProjectChoice, ProgressState, ProjectConnectResult, ProjectInventorySummary, ProjectOp,
+    ProjectSnapshot, ProjectState, StudioServerClient, UxAction, UxBody, UxError, UxIssue,
+    UxLogEntry, UxMetric, UxNode, UxNodeId, UxPaneView, UxStatus,
 };
 
 pub struct ProjectUx {
@@ -35,16 +36,43 @@ impl ProjectUx {
                     self.action(ProjectOp::LoadDemoProject),
                 ]
             }
+            ProjectState::SelectingLoadedProject { ref projects } => projects
+                .iter()
+                .map(|project| {
+                    self.action(ProjectOp::ConnectLoadedProject {
+                        handle_id: project.handle_id,
+                    })
+                    .with_label(format!("Connect {}", project.project_id))
+                    .with_summary(format!(
+                        "Attach to running project handle {}.",
+                        project.handle_id
+                    ))
+                })
+                .collect(),
             ProjectState::ConnectingRunningProject { .. }
             | ProjectState::LoadingDemoProject { .. } => Vec::new(),
             ProjectState::Ready { .. } => vec![self.action(ProjectOp::DisconnectProject)],
         }
     }
 
+    pub fn view(&self, server_connected: bool) -> UxPaneView {
+        UxPaneView::new(
+            Self::NODE_ID,
+            "Project",
+            project_status(&self.state),
+            project_body(&self.state),
+            self.actions(server_connected),
+        )
+    }
+
     pub fn mark_connecting_running(&mut self) {
         self.state = ProjectState::ConnectingRunningProject {
             progress: ProgressState::new("Connecting running project"),
         };
+    }
+
+    pub fn mark_selecting_loaded_project(&mut self, projects: Vec<LoadedProjectChoice>) {
+        self.state = ProjectState::SelectingLoadedProject { projects };
     }
 
     pub fn mark_loading_demo(&mut self) {
@@ -89,34 +117,79 @@ impl ProjectUx {
     pub async fn connect_running_project(
         &mut self,
         server: &mut StudioServerClient,
-    ) -> Result<Vec<UxLogEntry>, UxError> {
+    ) -> Result<ProjectConnectResult, UxError> {
         self.mark_connecting_running();
-        let connection = server.connect_running_project().await?;
-        match connection.project {
-            Some(project) => {
-                self.mark_ready(project.project_id, project.handle_id, project.inventory);
-                Ok(connection.logs)
-            }
-            None => {
+        let catalog = server.list_loaded_projects().await?;
+        self.connect_from_catalog(server, catalog.projects, catalog.logs, true)
+            .await
+    }
+
+    pub async fn connect_running_project_if_available(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Result<ProjectConnectResult, UxError> {
+        let catalog = server.list_loaded_projects().await?;
+        self.connect_from_catalog(server, catalog.projects, catalog.logs, false)
+            .await
+    }
+
+    pub async fn connect_loaded_project(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+    ) -> Result<Vec<UxLogEntry>, UxError> {
+        let choice = self.loaded_project_choice(handle_id)?;
+        self.mark_connecting_running();
+        let project = server.connect_loaded_project(choice).await?;
+        let logs = server.take_pending_logs();
+        self.mark_ready(project.project_id, project.handle_id, project.inventory);
+        Ok(logs)
+    }
+
+    async fn connect_from_catalog(
+        &mut self,
+        server: &mut StudioServerClient,
+        projects: Vec<LoadedProjectChoice>,
+        mut logs: Vec<UxLogEntry>,
+        fail_when_empty: bool,
+    ) -> Result<ProjectConnectResult, UxError> {
+        match projects.as_slice() {
+            [] if fail_when_empty => {
                 let error = UxError::Project(
                     "no running project is loaded on the connected server".to_string(),
                 );
                 self.fail(error.message());
                 Err(error)
             }
+            [] => Ok(ProjectConnectResult::NotFound { logs }),
+            [project] => {
+                let loaded = server.connect_loaded_project(project.clone()).await?;
+                logs.extend(server.take_pending_logs());
+                self.mark_ready(loaded.project_id, loaded.handle_id, loaded.inventory);
+                Ok(ProjectConnectResult::Connected { logs })
+            }
+            _ => {
+                self.mark_selecting_loaded_project(projects);
+                Ok(ProjectConnectResult::SelectionRequired { logs })
+            }
         }
     }
 
-    pub async fn connect_running_project_if_available(
-        &mut self,
-        server: &mut StudioServerClient,
-    ) -> Result<Option<Vec<UxLogEntry>>, UxError> {
-        let connection = server.connect_running_project().await?;
-        let Some(project) = connection.project else {
-            return Ok(None);
-        };
-        self.mark_ready(project.project_id, project.handle_id, project.inventory);
-        Ok(Some(connection.logs))
+    fn loaded_project_choice(&self, handle_id: u32) -> Result<LoadedProjectChoice, UxError> {
+        match &self.state {
+            ProjectState::SelectingLoadedProject { projects } => projects
+                .iter()
+                .find(|project| project.handle_id == handle_id)
+                .cloned()
+                .ok_or_else(|| {
+                    UxError::Project(format!(
+                        "loaded project handle {handle_id} is not available"
+                    ))
+                }),
+            _ => Err(UxError::Project(
+                "loaded project selection is not active".to_string(),
+            )),
+        }
     }
 }
 
@@ -131,6 +204,43 @@ impl UxNode for ProjectUx {
 impl Default for ProjectUx {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn project_status(state: &ProjectState) -> UxStatus {
+    match state {
+        ProjectState::NotLoaded => UxStatus::neutral("Not loaded"),
+        ProjectState::SelectingLoadedProject { .. } => UxStatus::neutral("Choose project"),
+        ProjectState::ConnectingRunningProject { .. } => UxStatus::working("Connecting"),
+        ProjectState::LoadingDemoProject { .. } => UxStatus::working("Loading"),
+        ProjectState::Ready { .. } => UxStatus::good("Ready"),
+        ProjectState::Failed { .. } => UxStatus::error("Failed"),
+    }
+}
+
+fn project_body(state: &ProjectState) -> UxBody {
+    match state {
+        ProjectState::NotLoaded => {
+            UxBody::text("Connect to a running project or load the demo project.")
+        }
+        ProjectState::SelectingLoadedProject { projects } => UxBody::text(format!(
+            "{} projects are running. Choose one to attach.",
+            projects.len()
+        )),
+        ProjectState::ConnectingRunningProject { progress }
+        | ProjectState::LoadingDemoProject { progress } => UxBody::Progress(progress.clone()),
+        ProjectState::Ready {
+            project_id,
+            handle_id,
+            inventory,
+        } => UxBody::Metrics(vec![
+            UxMetric::new("Project", project_id),
+            UxMetric::new("Handle", *handle_id),
+            UxMetric::new("Nodes", inventory.node_count),
+            UxMetric::new("Definitions", inventory.definition_count),
+            UxMetric::new("Assets", inventory.asset_count),
+        ]),
+        ProjectState::Failed { issue } => UxBody::Issue(issue.clone()),
     }
 }
 
@@ -164,6 +274,28 @@ mod tests {
             Some(&ProjectOp::LoadDemoProject)
         );
         assert_eq!(actions[1].meta().priority, ActionPriority::Secondary);
+    }
+
+    #[test]
+    fn multiple_loaded_projects_offer_project_specific_actions() {
+        let mut project = ProjectUx::new();
+        project.mark_selecting_loaded_project(vec![
+            LoadedProjectChoice::new("/projects/a", 1),
+            LoadedProjectChoice::new("/projects/b", 2),
+        ]);
+
+        let actions = project.actions(true);
+
+        assert_eq!(actions.len(), 2);
+        assert_eq!(
+            actions[0].op_as::<ProjectOp>(),
+            Some(&ProjectOp::ConnectLoadedProject { handle_id: 1 })
+        );
+        assert_eq!(actions[0].meta().label, "Connect /projects/a");
+        assert_eq!(
+            actions[1].op_as::<ProjectOp>(),
+            Some(&ProjectOp::ConnectLoadedProject { handle_id: 2 })
+        );
     }
 
     #[test]

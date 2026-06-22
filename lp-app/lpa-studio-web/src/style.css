@@ -125,6 +125,15 @@ select {
   line-height: 1.5;
 }
 
+.ux-panel-detail {
+  margin-top: 6px;
+  color: #99a2ad;
+}
+
+.ux-panel-issue {
+  color: #ffc7c7;
+}
+
 .ux-actions {
   display: flex;
   flex-wrap: wrap;

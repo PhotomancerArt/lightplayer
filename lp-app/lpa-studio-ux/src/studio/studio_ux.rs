@@ -1,9 +1,9 @@
 use core::future::Future;
 
 use crate::{
-    ConnectedLink, LinkOp, LinkOpenOutcome, LinkUx, ProjectOp, ProjectUx, ServerOp, ServerUx,
-    StudioSnapshot, UxAction, UxContext, UxLogEntry, UxLogLevel, UxNode, UxNotice, UxOutcome,
-    UxResult,
+    ConnectedLink, LinkOp, LinkOpenOutcome, LinkUx, ProjectConnectResult, ProjectOp, ProjectUx,
+    ServerOp, ServerUx, StudioSnapshot, StudioView, UxAction, UxActions, UxContext, UxError,
+    UxLogEntry, UxLogLevel, UxNode, UxNotice, UxOutcome, UxResult,
 };
 
 pub struct StudioUx {
@@ -32,11 +32,22 @@ impl StudioUx {
         )
     }
 
-    pub fn actions(&self) -> Vec<UxAction> {
-        let mut actions = self.link.actions();
+    pub fn actions(&self) -> UxActions {
+        let mut actions = UxActions::new(self.link.actions());
         actions.extend(self.server.actions());
         actions.extend(self.project.actions(self.server.is_connected()));
         actions
+    }
+
+    pub fn view(&self) -> StudioView {
+        StudioView::new(
+            vec![
+                self.link.view(),
+                self.server.view(),
+                self.project.view(self.server.is_connected()),
+            ],
+            self.logs.clone(),
+        )
     }
 
     pub async fn dispatch(&mut self, action: UxAction) -> UxResult {
@@ -86,6 +97,9 @@ impl StudioUx {
     async fn execute_project_op(&mut self, op: ProjectOp) -> UxResult {
         match op {
             ProjectOp::ConnectRunningProject => self.connect_running_project().await,
+            ProjectOp::ConnectLoadedProject { handle_id } => {
+                self.connect_loaded_project(handle_id).await
+            }
             ProjectOp::LoadDemoProject => self.load_demo_project().await,
             ProjectOp::DisconnectProject => self.disconnect_project().await,
         }
@@ -106,8 +120,8 @@ impl StudioUx {
             Ok(()) => {
                 let mut outcome =
                     UxOutcome::new().with_notice(UxNotice::info("Server protocol connected"));
-                if self.connect_running_project_if_available().await? {
-                    outcome = outcome.with_notice(UxNotice::info("Connected running project"));
+                if let Some(notice) = self.connect_running_project_if_available().await? {
+                    outcome = outcome.with_notice(UxNotice::info(notice));
                 }
                 Ok(outcome)
             }
@@ -124,6 +138,61 @@ impl StudioUx {
             self.project.connect_running_project(server).await
         };
         match result {
+            Ok(ProjectConnectResult::Connected { logs }) => {
+                self.logs.extend(logs);
+                Ok(UxOutcome::new().with_notice(UxNotice::info("Connected running project")))
+            }
+            Ok(ProjectConnectResult::SelectionRequired { logs }) => {
+                self.logs.extend(logs);
+                Ok(UxOutcome::new().with_notice(UxNotice::info("Choose running project")))
+            }
+            Ok(ProjectConnectResult::NotFound { logs }) => {
+                self.logs.extend(logs);
+                Ok(UxOutcome::new().with_notice(UxNotice::info("No running project found")))
+            }
+            Err(error) => {
+                self.logs.push(UxLogEntry::new(
+                    UxLogLevel::Error,
+                    "lpa-studio-ux",
+                    error.to_string(),
+                ));
+                self.project.fail(error.to_string());
+                Err(error)
+            }
+        }
+    }
+
+    async fn connect_running_project_if_available(
+        &mut self,
+    ) -> Result<Option<&'static str>, UxError> {
+        let result = {
+            let server = self.server.client_mut()?;
+            self.project
+                .connect_running_project_if_available(server)
+                .await
+        };
+        match result? {
+            ProjectConnectResult::Connected { logs } => {
+                self.logs.extend(logs);
+                Ok(Some("Connected running project"))
+            }
+            ProjectConnectResult::SelectionRequired { logs } => {
+                self.logs.extend(logs);
+                Ok(Some("Choose running project"))
+            }
+            ProjectConnectResult::NotFound { logs } => {
+                self.logs.extend(logs);
+                Ok(None)
+            }
+        }
+    }
+
+    async fn connect_loaded_project(&mut self, handle_id: u32) -> UxResult {
+        let result = {
+            let server = self.server.client_mut()?;
+            self.project.connect_loaded_project(server, handle_id).await
+        };
+        match result {
             Ok(logs) => {
                 self.logs.extend(logs);
                 Ok(UxOutcome::new().with_notice(UxNotice::info("Connected running project")))
@@ -134,23 +203,10 @@ impl StudioUx {
                     "lpa-studio-ux",
                     error.to_string(),
                 ));
+                self.project.fail(error.to_string());
                 Err(error)
             }
         }
-    }
-
-    async fn connect_running_project_if_available(&mut self) -> Result<bool, crate::UxError> {
-        let result = {
-            let server = self.server.client_mut()?;
-            self.project
-                .connect_running_project_if_available(server)
-                .await
-        };
-        if let Some(logs) = result? {
-            self.logs.extend(logs);
-            return Ok(true);
-        }
-        Ok(false)
     }
 
     async fn load_demo_project(&mut self) -> UxResult {
@@ -211,7 +267,16 @@ impl UxContext for StudioUx {
 
 #[cfg(test)]
 mod tests {
-    use crate::{LinkState, LinkUx};
+    use std::future::Future;
+    use std::sync::Arc;
+    use std::task::{Context, Poll, Wake, Waker};
+
+    use lpa_link::LinkProviderKind;
+
+    use crate::{
+        ConnectedDeviceSummary, LinkState, LinkUx, ProjectInventorySummary, ProjectState,
+        ServerState,
+    };
 
     use super::*;
 
@@ -236,5 +301,113 @@ mod tests {
                 .iter()
                 .all(|action| action.node_id().as_str() == LinkUx::NODE_ID)
         );
+    }
+
+    #[test]
+    fn initial_view_exposes_three_panes() {
+        let studio = StudioUx::new();
+
+        let view = studio.view();
+
+        assert_eq!(view.panes.len(), 3);
+        assert_eq!(view.panes[0].node_id.as_str(), LinkUx::NODE_ID);
+    }
+
+    #[test]
+    fn project_disconnect_leaves_server_and_link_connected() {
+        let mut studio = connected_studio();
+
+        block_on_ready(studio.disconnect_project()).unwrap();
+
+        assert!(matches!(
+            studio.project.snapshot().state,
+            ProjectState::NotLoaded
+        ));
+        assert!(matches!(
+            studio.server.snapshot().state,
+            ServerState::Connected { .. }
+        ));
+        assert!(matches!(
+            studio.link.snapshot().state,
+            LinkState::Connected { .. }
+        ));
+    }
+
+    #[test]
+    fn server_disconnect_clears_project_and_keeps_link_connected() {
+        let mut studio = connected_studio();
+
+        block_on_ready(studio.disconnect_server()).unwrap();
+
+        assert!(matches!(
+            studio.project.snapshot().state,
+            ProjectState::NotLoaded
+        ));
+        assert!(matches!(
+            studio.server.snapshot().state,
+            ServerState::Disconnected
+        ));
+        assert!(matches!(
+            studio.link.snapshot().state,
+            LinkState::Connected { .. }
+        ));
+    }
+
+    #[test]
+    fn link_disconnect_clears_project_server_and_link() {
+        let mut studio = connected_studio();
+
+        block_on_ready(studio.disconnect_link()).unwrap();
+
+        assert!(matches!(
+            studio.project.snapshot().state,
+            ProjectState::NotLoaded
+        ));
+        assert!(matches!(
+            studio.server.snapshot().state,
+            ServerState::Disconnected
+        ));
+        assert!(matches!(
+            studio.link.snapshot().state,
+            LinkState::SelectingProvider { .. }
+        ));
+    }
+
+    fn connected_studio() -> StudioUx {
+        let mut studio = StudioUx::new();
+        studio.link.set_state(LinkState::Connected {
+            device: ConnectedDeviceSummary::new(
+                LinkProviderKind::Fake,
+                "fake-runtime",
+                "fake-session",
+                "Fake runtime",
+            ),
+        });
+        studio.server.set_state(ServerState::Connected {
+            protocol: "fake-protocol".to_string(),
+        });
+        studio
+            .project
+            .mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        studio
+    }
+
+    fn block_on_ready<F>(future: F) -> F::Output
+    where
+        F: Future,
+    {
+        let waker = Waker::from(Arc::new(NoopWake));
+        let mut context = Context::from_waker(&waker);
+        let mut future = Box::pin(future);
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(output) => output,
+            Poll::Pending => panic!("test future unexpectedly yielded"),
+        }
+    }
+
+    struct NoopWake;
+
+    impl Wake for NoopWake {
+        fn wake(self: Arc<Self>) {}
     }
 }

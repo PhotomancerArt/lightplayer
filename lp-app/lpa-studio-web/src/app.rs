@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use lpa_studio_ux::{StudioSnapshot, StudioUx, UxAction};
+use lpa_studio_ux::{StudioUx, StudioView, UxAction};
 
 use crate::components::StudioShell;
 
@@ -16,8 +16,7 @@ pub fn App() -> Element {
     }
 
     let model = use_signal(StudioWebModel::new);
-    let snapshot = model.read().snapshot.clone();
-    let actions = model.read().actions.clone();
+    let view = model.read().view.clone();
     let running = model.read().running;
     let error = model.read().error.clone();
     let notices = model.read().notices.clone();
@@ -30,8 +29,7 @@ pub fn App() -> Element {
     rsx! {
         style { "{STYLE}" }
         StudioShell {
-            snapshot,
-            actions,
+            view,
             running,
             error,
             notices,
@@ -42,8 +40,7 @@ pub fn App() -> Element {
 
 struct StudioWebModel {
     ux: Option<StudioUx>,
-    snapshot: StudioSnapshot,
-    actions: Vec<UxAction>,
+    view: StudioView,
     running: bool,
     error: Option<String>,
     notices: Vec<String>,
@@ -52,12 +49,10 @@ struct StudioWebModel {
 impl StudioWebModel {
     fn new() -> Self {
         let ux = StudioUx::new();
-        let snapshot = ux.snapshot();
-        let actions = ux.actions();
+        let view = ux.view();
         Self {
             ux: Some(ux),
-            snapshot,
-            actions,
+            view,
             running: false,
             error: None,
             notices: Vec::new(),
@@ -66,8 +61,7 @@ impl StudioWebModel {
 
     fn refresh_from_ux(&mut self) {
         if let Some(ux) = &self.ux {
-            self.snapshot = ux.snapshot();
-            self.actions = ux.actions();
+            self.view = ux.view();
         }
     }
 }
@@ -80,7 +74,6 @@ async fn execute_action(mut model: Signal<StudioWebModel>, action: UxAction) {
         }
         state.running = true;
         state.error = None;
-        state.actions.clear();
         state.ux.take()
     }) else {
         model.write().error = Some("Studio UX is already busy.".to_string());

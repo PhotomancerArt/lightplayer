@@ -1,13 +1,13 @@
 # lpa-studio-web
 
-`lpa-studio-web` is the static browser shell for the experimental
-`lpa-studio-ux` slice.
+`lpa-studio-web` is the static browser shell for the `lpa-studio-ux` slice.
 
-The web app owns Dioxus presentation. It renders `StudioSnapshot` values,
-renders contextual `UxAction` controls, and dispatches those actions back into
+The web app owns Dioxus presentation. It renders `StudioView` panes, renders
+contextual `UxAction` controls, and dispatches those actions back into
 `StudioUx`. Browser-worker lifecycle, provider routing, protocol request
-correlation, demo project deployment, and project inventory reads belong below
-the UI in `lpa-studio-ux`, `lpa-link`, and `lpa-client`.
+correlation, running-project attach, demo project deployment, and project
+inventory reads belong below the UI in `lpa-studio-ux`, `lpa-link`, and
+`lpa-client`.
 
 ## Current Slice
 
@@ -31,14 +31,11 @@ support is compiled in. The browser still owns the serial port picker and
 permission prompt; the UI does not model that picker as an endpoint-selection
 screen.
 
-The slice can launch the browser-local firmware runtime, open the server
-protocol, load the built-in demo project, and display a small project inventory
-summary. It intentionally does not include the previous full ESP32 provisioning,
+The slice can launch the browser-local firmware runtime, connect browser serial
+hardware, open the server protocol, attach to an already-loaded running project,
+load the built-in demo project, and display a small project inventory summary.
+It intentionally does not include the previous full ESP32 provisioning,
 flashing, and recovery UI.
-
-The older `lpa-studio-core` and `lpa-studio-runtime` crates remain in the
-workspace as references during the experiment, but the default web app does not
-depend on them.
 
 ## Run
 
@@ -80,9 +77,9 @@ than the old provisioning journey fixtures.
 
 ## Boundary
 
-- `lpa-studio-ux` owns Studio product state, snapshots, actions, async
-  dispatch, UX node ids, the link provider registry, and the connected server
-  client.
+- `lpa-studio-ux` owns Studio product state, `StudioView` panes, snapshots,
+  actions, async dispatch, UX node ids, the link provider registry, and the
+  connected server client.
 - `lpa-link` owns provider implementations, provider resources, sessions, and
   lifecycle.
 - `lpa-client` owns server protocol correlation and typed project operations.

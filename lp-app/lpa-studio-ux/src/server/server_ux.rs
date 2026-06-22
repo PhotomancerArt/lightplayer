@@ -2,7 +2,7 @@ use lpa_link::LinkConnection;
 
 use crate::{
     ProgressState, ServerOp, ServerSnapshot, ServerState, SharedLinkRegistry, StudioServerClient,
-    UxAction, UxError, UxIssue, UxNode, UxNodeId,
+    UxAction, UxBody, UxError, UxIssue, UxMetric, UxNode, UxNodeId, UxPaneView, UxStatus,
 };
 
 pub struct ServerUx {
@@ -39,6 +39,16 @@ impl ServerUx {
             | ServerState::Connecting { .. }
             | ServerState::Failed { .. } => Vec::new(),
         }
+    }
+
+    pub fn view(&self) -> UxPaneView {
+        UxPaneView::new(
+            Self::NODE_ID,
+            "Server",
+            server_status(&self.state),
+            server_body(&self.state),
+            self.actions(),
+        )
     }
 
     pub fn mark_connecting(&mut self, label: impl Into<String>) {
@@ -90,5 +100,27 @@ impl UxNode for ServerUx {
 impl Default for ServerUx {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+fn server_status(state: &ServerState) -> UxStatus {
+    match state {
+        ServerState::Disconnected => UxStatus::neutral("Offline"),
+        ServerState::Connecting { .. } => UxStatus::working("Connecting"),
+        ServerState::Connected { .. } => UxStatus::good("Connected"),
+        ServerState::Failed { .. } => UxStatus::error("Failed"),
+    }
+}
+
+fn server_body(state: &ServerState) -> UxBody {
+    match state {
+        ServerState::Disconnected => {
+            UxBody::text("Open a link endpoint to attach the server protocol.")
+        }
+        ServerState::Connecting { progress } => UxBody::Progress(progress.clone()),
+        ServerState::Connected { protocol } => {
+            UxBody::Metrics(vec![UxMetric::new("Protocol", protocol)])
+        }
+        ServerState::Failed { issue } => UxBody::Issue(issue.clone()),
     }
 }

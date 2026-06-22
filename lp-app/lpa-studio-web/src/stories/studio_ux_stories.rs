@@ -1,12 +1,12 @@
 use dioxus::prelude::*;
 use lpa_studio_ux::{
-    ConnectedDeviceSummary, EndpointChoice, LinkOp, LinkProviderKind, LinkSnapshot, LinkState,
-    LinkUx, ProgressState, ProjectInventorySummary, ProjectOp, ProjectSnapshot, ProjectState,
-    ProjectUx, ProviderChoice, ServerOp, ServerSnapshot, ServerState, ServerUx, StudioSnapshot,
-    UxAction, UxIssue, UxLogEntry, UxLogLevel, UxNodeId,
+    ConnectedDeviceSummary, EndpointChoice, LinkProviderKind, LinkState, LinkUx,
+    LoadedProjectChoice, ProgressState, ProjectInventorySummary, ProjectState, ProjectUx,
+    ProviderChoice, ServerState, ServerUx, StudioView, UxAction, UxIssue, UxLogEntry, UxLogLevel,
+    UxPaneView,
 };
 
-use crate::components::{ActionStrip, LinkPane, ProjectPane, ServerPane, StudioShell};
+use crate::components::{ActionStrip, StudioShell, UxPane};
 use crate::stories::story::StoryDescriptor;
 
 pub const STORIES: &[StoryDescriptor] = &[
@@ -20,19 +20,25 @@ pub const STORIES: &[StoryDescriptor] = &[
         "studio/panes/link",
         "Studio UX",
         "Link pane",
-        "Link pane rendered directly from state and available link actions.",
+        "Link pane rendered directly from the Link UX view.",
     ),
     StoryDescriptor::new(
         "studio/panes/server",
         "Studio UX",
         "Server pane",
-        "Server pane rendered directly from server state.",
+        "Server pane rendered directly from the Server UX view.",
     ),
     StoryDescriptor::new(
         "studio/panes/project",
         "Studio UX",
         "Project pane",
-        "Project pane rendered directly from project state and available actions.",
+        "Project pane rendered directly from the Project UX view.",
+    ),
+    StoryDescriptor::new(
+        "studio/panes/project-selection",
+        "Studio UX",
+        "Project selection",
+        "Loaded project choices exposed as Project UX actions.",
     ),
     StoryDescriptor::new(
         "studio/simulator-idle",
@@ -62,7 +68,7 @@ pub const STORIES: &[StoryDescriptor] = &[
         "studio/project-ready",
         "Studio UX",
         "Project ready",
-        "Demo project loaded and summarized through the UX snapshot.",
+        "Demo project loaded and summarized through the UX view.",
     ),
     StoryDescriptor::new(
         "studio/error",
@@ -90,32 +96,46 @@ pub fn render_story(id: &str) -> Option<Element> {
             });
         }
         "studio/panes/link" => {
+            let view = link_view(idle_link_state());
             return Some(rsx! {
-                LinkPane {
-                    state: idle_link_state(),
-                    actions: start_actions(),
+                UxPane {
+                    view,
+                    primary: true,
                     running: false,
                     on_action: move |_| {},
                 }
             });
         }
         "studio/panes/server" => {
+            let view = server_view(ServerState::Connected {
+                protocol: "fw-browser-post-message-v1".to_string(),
+            });
             return Some(rsx! {
-                ServerPane {
-                    state: ServerState::Connected {
-                        protocol: "fw-browser-post-message-v1".to_string(),
-                    },
-                    actions: server_disconnect_actions(),
+                UxPane {
+                    view,
+                    primary: false,
                     running: false,
                     on_action: move |_| {},
                 }
             });
         }
         "studio/panes/project" => {
+            let view = project_view(ProjectState::NotLoaded, true);
             return Some(rsx! {
-                ProjectPane {
-                    state: ProjectState::NotLoaded,
-                    actions: project_actions(),
+                UxPane {
+                    view,
+                    primary: false,
+                    running: false,
+                    on_action: move |_| {},
+                }
+            });
+        }
+        "studio/panes/project-selection" => {
+            let view = project_view(project_selection_state(), true);
+            return Some(rsx! {
+                UxPane {
+                    view,
+                    primary: false,
                     running: false,
                     on_action: move |_| {},
                 }
@@ -124,33 +144,24 @@ pub fn render_story(id: &str) -> Option<Element> {
         _ => {}
     }
 
-    let (snapshot, actions, running, error, notices) = match id {
-        "studio/simulator-idle" => (idle_snapshot(), start_actions(), false, None, Vec::new()),
-        "studio/simulator-endpoint" => (
-            endpoint_snapshot(),
-            connect_actions(),
-            false,
-            None,
-            Vec::new(),
-        ),
-        "studio/simulator-starting" => (starting_snapshot(), Vec::new(), true, None, Vec::new()),
+    let (view, running, error, notices) = match id {
+        "studio/simulator-idle" => (idle_view(), false, None, Vec::new()),
+        "studio/simulator-endpoint" => (endpoint_view(), false, None, Vec::new()),
+        "studio/simulator-starting" => (starting_view(), true, None, Vec::new()),
         "studio/simulator-ready" => (
-            simulator_ready_snapshot(),
-            connected_not_loaded_actions(),
+            simulator_ready_view(),
             false,
             None,
             vec!["Simulator is running".to_string()],
         ),
         "studio/project-ready" => (
-            project_ready_snapshot(),
-            connected_ready_actions(),
+            project_ready_view(),
             false,
             None,
             vec!["Demo project loaded".to_string()],
         ),
         "studio/error" => (
-            error_snapshot(),
-            start_actions(),
+            error_view(),
             false,
             Some("browser worker boot timed out".to_string()),
             Vec::new(),
@@ -159,8 +170,7 @@ pub fn render_story(id: &str) -> Option<Element> {
     };
     Some(rsx! {
         StudioShell {
-            snapshot,
-            actions,
+            view,
             running,
             error,
             notices,
@@ -169,25 +179,27 @@ pub fn render_story(id: &str) -> Option<Element> {
     })
 }
 
-fn idle_snapshot() -> StudioSnapshot {
-    StudioSnapshot::new(
-        LinkSnapshot::new(idle_link_state()),
-        ServerSnapshot::new(ServerState::Disconnected),
-        ProjectSnapshot::new(ProjectState::NotLoaded),
+fn idle_view() -> StudioView {
+    studio_view(
+        idle_link_state(),
+        ServerState::Disconnected,
+        ProjectState::NotLoaded,
+        false,
         Vec::new(),
     )
 }
 
-fn starting_snapshot() -> StudioSnapshot {
-    StudioSnapshot::new(
-        LinkSnapshot::new(LinkState::Connecting {
+fn starting_view() -> StudioView {
+    studio_view(
+        LinkState::Connecting {
             endpoint: EndpointChoice::browser_worker(),
             progress: ProgressState::new("Opening link session"),
-        }),
-        ServerSnapshot::new(ServerState::Connecting {
+        },
+        ServerState::Connecting {
             progress: ProgressState::new("Opening server protocol"),
-        }),
-        ProjectSnapshot::new(ProjectState::NotLoaded),
+        },
+        ProjectState::NotLoaded,
+        false,
         vec![UxLogEntry::new(
             UxLogLevel::Info,
             "lpa-link",
@@ -196,25 +208,27 @@ fn starting_snapshot() -> StudioSnapshot {
     )
 }
 
-fn endpoint_snapshot() -> StudioSnapshot {
-    StudioSnapshot::new(
-        LinkSnapshot::new(LinkState::SelectingEndpoint {
+fn endpoint_view() -> StudioView {
+    studio_view(
+        LinkState::SelectingEndpoint {
             provider_id: LinkProviderKind::BrowserWorker,
             endpoints: vec![EndpointChoice::browser_worker()],
-        }),
-        ServerSnapshot::new(ServerState::Disconnected),
-        ProjectSnapshot::new(ProjectState::NotLoaded),
+        },
+        ServerState::Disconnected,
+        ProjectState::NotLoaded,
+        false,
         Vec::new(),
     )
 }
 
-fn simulator_ready_snapshot() -> StudioSnapshot {
-    StudioSnapshot::new(
-        connected_link_snapshot(),
-        ServerSnapshot::new(ServerState::Connected {
+fn simulator_ready_view() -> StudioView {
+    studio_view(
+        connected_link_state(),
+        ServerState::Connected {
             protocol: "fw-browser-post-message-v1".to_string(),
-        }),
-        ProjectSnapshot::new(ProjectState::NotLoaded),
+        },
+        ProjectState::NotLoaded,
+        true,
         vec![
             UxLogEntry::new(UxLogLevel::Info, "fw-browser", "ready"),
             UxLogEntry::new(
@@ -226,13 +240,14 @@ fn simulator_ready_snapshot() -> StudioSnapshot {
     )
 }
 
-fn project_ready_snapshot() -> StudioSnapshot {
-    StudioSnapshot::new(
-        connected_link_snapshot(),
-        ServerSnapshot::new(ServerState::Connected {
+fn project_ready_view() -> StudioView {
+    studio_view(
+        connected_link_state(),
+        ServerState::Connected {
             protocol: "fw-browser-post-message-v1".to_string(),
-        }),
-        ProjectSnapshot::new(project_ready_state()),
+        },
+        project_ready_state(),
+        true,
         vec![
             UxLogEntry::new(UxLogLevel::Info, "fw-browser", "project loaded"),
             UxLogEntry::new(
@@ -244,6 +259,59 @@ fn project_ready_snapshot() -> StudioSnapshot {
     )
 }
 
+fn error_view() -> StudioView {
+    studio_view(
+        LinkState::Failed {
+            issue: UxIssue::new("browser worker boot timed out"),
+        },
+        ServerState::Failed {
+            issue: UxIssue::new("server protocol was not opened"),
+        },
+        ProjectState::NotLoaded,
+        false,
+        vec![UxLogEntry::new(
+            UxLogLevel::Error,
+            "lpa-studio-ux",
+            "browser worker boot timed out",
+        )],
+    )
+}
+
+fn studio_view(
+    link_state: LinkState,
+    server_state: ServerState,
+    project_state: ProjectState,
+    server_connected: bool,
+    logs: Vec<UxLogEntry>,
+) -> StudioView {
+    StudioView::new(
+        vec![
+            link_view(link_state),
+            server_view(server_state),
+            project_view(project_state, server_connected),
+        ],
+        logs,
+    )
+}
+
+fn link_view(state: LinkState) -> UxPaneView {
+    let mut link = LinkUx::new();
+    link.set_state(state);
+    link.view()
+}
+
+fn server_view(state: ServerState) -> UxPaneView {
+    let mut server = ServerUx::new();
+    server.set_state(state);
+    server.view()
+}
+
+fn project_view(state: ProjectState, server_connected: bool) -> UxPaneView {
+    let mut project = ProjectUx::new();
+    project.set_state(state);
+    project.view(server_connected)
+}
+
 fn idle_link_state() -> LinkState {
     LinkState::SelectingProvider {
         providers: vec![
@@ -253,6 +321,27 @@ fn idle_link_state() -> LinkState {
                 label: "ESP32".to_string(),
                 summary: "Connect to ESP32 hardware through browser Web Serial.".to_string(),
             },
+        ],
+    }
+}
+
+fn connected_link_state() -> LinkState {
+    let provider_id = ProviderChoice::browser_worker().id;
+    LinkState::Connected {
+        device: ConnectedDeviceSummary::new(
+            provider_id,
+            "browser-worker-worker-1",
+            "browser-worker-worker-1:1",
+            "Browser firmware runtime",
+        ),
+    }
+}
+
+fn project_selection_state() -> ProjectState {
+    ProjectState::SelectingLoadedProject {
+        projects: vec![
+            LoadedProjectChoice::new("/projects/ambient", 1),
+            LoadedProjectChoice::new("/projects/palette-test", 2),
         ],
     }
 }
@@ -269,124 +358,6 @@ fn project_ready_state() -> ProjectState {
     }
 }
 
-fn error_snapshot() -> StudioSnapshot {
-    StudioSnapshot::new(
-        LinkSnapshot::new(LinkState::Failed {
-            issue: UxIssue::new("browser worker boot timed out"),
-        }),
-        ServerSnapshot::new(ServerState::Failed {
-            issue: UxIssue::new("server protocol was not opened"),
-        }),
-        ProjectSnapshot::new(ProjectState::NotLoaded),
-        vec![UxLogEntry::new(
-            UxLogLevel::Error,
-            "lpa-studio-ux",
-            "browser worker boot timed out",
-        )],
-    )
-}
-
-fn connected_link_snapshot() -> LinkSnapshot {
-    let provider_id = ProviderChoice::browser_worker().id;
-    LinkSnapshot::new(LinkState::Connected {
-        device: ConnectedDeviceSummary::new(
-            provider_id,
-            "browser-worker-worker-1",
-            "browser-worker-worker-1:1",
-            "Browser firmware runtime",
-        ),
-    })
-}
-
 fn start_actions() -> Vec<UxAction> {
-    vec![
-        UxAction::from_op(
-            UxNodeId::new(LinkUx::NODE_ID),
-            LinkOp::OpenProvider {
-                provider_id: LinkProviderKind::BrowserWorker,
-            },
-        )
-        .with_label("Start simulator")
-        .with_summary("Run LightPlayer locally in a browser worker.")
-        .with_short_label("Simulator")
-        .with_icon("play"),
-        UxAction::from_op(
-            UxNodeId::new(LinkUx::NODE_ID),
-            LinkOp::OpenProvider {
-                provider_id: LinkProviderKind::BrowserSerialEsp32,
-            },
-        )
-        .with_label("Connect ESP32")
-        .with_summary("Connect to ESP32 hardware through browser Web Serial.")
-        .with_short_label("ESP32")
-        .with_icon("usb")
-        .with_priority(lpa_studio_ux::ActionPriority::Secondary),
-    ]
-}
-
-fn connect_actions() -> Vec<UxAction> {
-    let endpoint = EndpointChoice::browser_worker();
-    vec![
-        UxAction::from_op(
-            UxNodeId::new(LinkUx::NODE_ID),
-            LinkOp::ConnectEndpoint {
-                provider_id: endpoint.provider_id,
-                endpoint_id: endpoint.id,
-            },
-        )
-        .with_label("Open Browser firmware runtime")
-        .with_summary("Spawn a browser-local firmware runtime."),
-    ]
-}
-
-fn project_actions() -> Vec<UxAction> {
-    vec![
-        UxAction::from_op(
-            UxNodeId::new(ProjectUx::NODE_ID),
-            ProjectOp::ConnectRunningProject,
-        ),
-        UxAction::from_op(
-            UxNodeId::new(ProjectUx::NODE_ID),
-            ProjectOp::LoadDemoProject,
-        ),
-    ]
-}
-
-fn connected_not_loaded_actions() -> Vec<UxAction> {
-    let mut actions = connected_infra_actions();
-    actions.extend(project_actions());
-    actions
-}
-
-fn connected_ready_actions() -> Vec<UxAction> {
-    let mut actions = connected_infra_actions();
-    actions.extend(project_disconnect_actions());
-    actions
-}
-
-fn connected_infra_actions() -> Vec<UxAction> {
-    let mut actions = link_disconnect_actions();
-    actions.extend(server_disconnect_actions());
-    actions
-}
-
-fn link_disconnect_actions() -> Vec<UxAction> {
-    vec![UxAction::from_op(
-        UxNodeId::new(LinkUx::NODE_ID),
-        LinkOp::DisconnectLink,
-    )]
-}
-
-fn server_disconnect_actions() -> Vec<UxAction> {
-    vec![UxAction::from_op(
-        UxNodeId::new(ServerUx::NODE_ID),
-        ServerOp::DisconnectServer,
-    )]
-}
-
-fn project_disconnect_actions() -> Vec<UxAction> {
-    vec![UxAction::from_op(
-        UxNodeId::new(ProjectUx::NODE_ID),
-        ProjectOp::DisconnectProject,
-    )]
+    link_view(idle_link_state()).actions
 }

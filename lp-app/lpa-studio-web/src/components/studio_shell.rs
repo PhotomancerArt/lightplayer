@@ -1,22 +1,19 @@
 use dioxus::prelude::*;
-use lpa_studio_ux::{LinkUx, ProjectUx, ServerUx, StudioSnapshot, UxAction};
+use lpa_studio_ux::{StudioView, UxAction};
 
-use crate::components::{LinkPane, ProjectPane, RuntimeLog, ServerPane};
+use crate::components::{RuntimeLog, UxPane};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn StudioShell(
-    snapshot: StudioSnapshot,
-    actions: Vec<UxAction>,
+    view: StudioView,
     running: bool,
     error: Option<String>,
     notices: Vec<String>,
     on_action: EventHandler<UxAction>,
 ) -> Element {
     let has_error = error.is_some();
-    let link_actions = actions_for_node(&actions, LinkUx::NODE_ID);
-    let server_actions = actions_for_node(&actions, ServerUx::NODE_ID);
-    let project_actions = actions_for_node(&actions, ProjectUx::NODE_ID);
+    let StudioView { panes, logs } = view;
 
     rsx! {
         main { class: "ux-shell",
@@ -51,37 +48,20 @@ pub fn StudioShell(
             }
 
             section { class: "ux-layout",
-                LinkPane {
-                    state: snapshot.link.state,
-                    actions: link_actions,
-                    running,
-                    on_action,
-                }
-                ServerPane {
-                    state: snapshot.server.state,
-                    actions: server_actions,
-                    running,
-                    on_action,
-                }
-                ProjectPane {
-                    state: snapshot.project.state,
-                    actions: project_actions,
-                    running,
-                    on_action,
+                for (index, pane) in panes.into_iter().enumerate() {
+                    UxPane {
+                        key: "{pane.node_id}",
+                        view: pane,
+                        primary: index == 0,
+                        running,
+                        on_action,
+                    }
                 }
             }
 
-            RuntimeLog { logs: snapshot.logs }
+            RuntimeLog { logs }
         }
     }
-}
-
-fn actions_for_node(actions: &[UxAction], node_id: &str) -> Vec<UxAction> {
-    actions
-        .iter()
-        .filter(|action| action.is_for_node(node_id))
-        .cloned()
-        .collect()
 }
 
 fn status_class(running: bool, has_error: bool) -> &'static str {

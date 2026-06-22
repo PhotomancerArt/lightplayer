@@ -3,9 +3,13 @@ use std::rc::Rc;
 
 use lpa_client::{ClientError, ClientEvent, ClientIo, LpClient};
 use lpa_link::{LinkConnection, LinkConnectionKind};
+use lpc_wire::WireProjectHandle;
 
 use crate::project::demo_project::{DEMO_PROJECT_ID, demo_project_deploy_files};
-use crate::{ProjectInventorySummary, SharedLinkRegistry, UxError, UxLogEntry, UxLogLevel};
+use crate::{
+    LoadedProjectChoice, ProjectInventorySummary, SharedLinkRegistry, UxError, UxLogEntry,
+    UxLogLevel,
+};
 
 pub struct StudioServerClient {
     client: LpClient<Box<dyn ClientIo>>,
@@ -68,8 +72,8 @@ pub struct LoadedDemoProject {
     pub logs: Vec<UxLogEntry>,
 }
 
-pub struct RunningProjectConnection {
-    pub project: Option<LoadedRunningProject>,
+pub struct LoadedProjectCatalog {
+    pub projects: Vec<LoadedProjectChoice>,
     pub logs: Vec<UxLogEntry>,
 }
 
@@ -80,35 +84,40 @@ pub struct LoadedRunningProject {
 }
 
 impl StudioServerClient {
-    pub async fn connect_running_project(&mut self) -> Result<RunningProjectConnection, UxError> {
+    pub async fn list_loaded_projects(&mut self) -> Result<LoadedProjectCatalog, UxError> {
         let loaded = self
             .client
             .project_list_loaded()
             .await
             .map_err(map_client_error)?;
         let mut logs = map_client_events(loaded.events);
-        let Some(project) = loaded.value.into_iter().next() else {
-            logs.extend(self.take_pending_logs());
-            return Ok(RunningProjectConnection {
-                project: None,
-                logs,
-            });
-        };
+        logs.extend(self.take_pending_logs());
+        Ok(LoadedProjectCatalog {
+            projects: loaded
+                .value
+                .into_iter()
+                .map(|project| LoadedProjectChoice::new(project.path.as_str(), project.handle.id()))
+                .collect(),
+            logs,
+        })
+    }
 
+    pub async fn connect_loaded_project(
+        &mut self,
+        choice: LoadedProjectChoice,
+    ) -> Result<LoadedRunningProject, UxError> {
         let inventory = self
             .client
-            .project_inventory_read(project.handle)
+            .project_inventory_read(WireProjectHandle::new(choice.handle_id))
             .await
             .map_err(map_client_error)?;
-        logs.extend(map_client_events(inventory.events));
-        logs.extend(self.take_pending_logs());
-        Ok(RunningProjectConnection {
-            project: Some(LoadedRunningProject {
-                project_id: project.path.as_str().to_string(),
-                handle_id: project.handle.id(),
-                inventory: ProjectInventorySummary::from(&inventory.value),
-            }),
-            logs,
+        self.pending_logs
+            .borrow_mut()
+            .extend(map_client_events(inventory.events));
+        Ok(LoadedRunningProject {
+            project_id: choice.project_id,
+            handle_id: choice.handle_id,
+            inventory: ProjectInventorySummary::from(&inventory.value),
         })
     }
 }

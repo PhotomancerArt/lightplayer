@@ -11,8 +11,8 @@ use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 
 use crate::{
     ActionPriority, ConnectedDeviceSummary, EndpointChoice, LinkOp, LinkSnapshot, LinkState,
-    ProgressState, ProviderChoice, UxAction, UxError, UxIssue, UxLogEntry, UxLogLevel, UxNode,
-    UxNodeId,
+    ProgressState, ProviderChoice, UxAction, UxBody, UxError, UxIssue, UxLogEntry, UxLogLevel,
+    UxMetric, UxNode, UxNodeId, UxPaneView, UxStatus,
 };
 
 pub type SharedLinkRegistry = Rc<RefCell<LinkProviderRegistry>>;
@@ -99,6 +99,16 @@ impl LinkUx {
             LinkState::DiscoveringEndpoints { .. } | LinkState::Connecting { .. } => Vec::new(),
             LinkState::Connected { .. } => vec![self.action(LinkOp::DisconnectLink)],
         }
+    }
+
+    pub fn view(&self) -> UxPaneView {
+        UxPaneView::new(
+            Self::NODE_ID,
+            "Link",
+            link_status(&self.state),
+            link_body(&self.state),
+            self.actions(),
+        )
     }
 
     pub fn refresh_provider_catalog(&mut self) {
@@ -365,6 +375,44 @@ fn provider_choices(registry: &LinkProviderRegistry) -> Vec<ProviderChoice> {
         .into_iter()
         .map(ProviderChoice::from_descriptor)
         .collect()
+}
+
+fn link_status(state: &LinkState) -> UxStatus {
+    match state {
+        LinkState::SelectingProvider { .. } => UxStatus::neutral("Choose runtime"),
+        LinkState::DiscoveringEndpoints { .. } => UxStatus::working("Discovering"),
+        LinkState::SelectingEndpoint { .. } => UxStatus::neutral("Choose endpoint"),
+        LinkState::Connecting { .. } => UxStatus::working("Connecting"),
+        LinkState::Connected { device } => UxStatus::good(device.label.clone()),
+        LinkState::Failed { .. } => UxStatus::error("Link failed"),
+    }
+}
+
+fn link_body(state: &LinkState) -> UxBody {
+    match state {
+        LinkState::SelectingProvider { providers } => providers
+            .first()
+            .map(|provider| UxBody::text(provider.summary.clone()))
+            .unwrap_or_else(|| UxBody::text("No link providers are available.")),
+        LinkState::DiscoveringEndpoints {
+            provider_id,
+            progress,
+        } => UxBody::Progress(progress.clone().with_detail(format!(
+            "Discovering endpoints from {}.",
+            provider_id.label()
+        ))),
+        LinkState::SelectingEndpoint { endpoints, .. } => endpoints
+            .first()
+            .map(|endpoint| UxBody::text(endpoint.summary.clone()))
+            .unwrap_or_else(|| UxBody::text("No endpoints are available for this provider.")),
+        LinkState::Connecting { progress, .. } => UxBody::Progress(progress.clone()),
+        LinkState::Connected { device } => UxBody::Metrics(vec![
+            UxMetric::new("Provider", device.provider_id.label()),
+            UxMetric::new("Endpoint", &device.endpoint_id),
+            UxMetric::new("Session", &device.session_id),
+        ]),
+        LinkState::Failed { issue } => UxBody::Issue(issue.clone()),
+    }
 }
 
 fn provider_can_open_server(kind: LinkProviderKind) -> bool {

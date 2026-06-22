@@ -13,5 +13,5 @@ pub use server_snapshot::ServerSnapshot;
 pub use server_state::ServerState;
 pub use server_ux::ServerUx;
 pub use studio_server_client::{
-    LoadedDemoProject, LoadedRunningProject, RunningProjectConnection, StudioServerClient,
+    LoadedDemoProject, LoadedProjectCatalog, LoadedRunningProject, StudioServerClient,
 };

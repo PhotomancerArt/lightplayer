@@ -1,8 +1,11 @@
-use crate::{ProgressState, ProjectInventorySummary, UxIssue};
+use crate::{LoadedProjectChoice, ProgressState, ProjectInventorySummary, UxIssue};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProjectState {
     NotLoaded,
+    SelectingLoadedProject {
+        projects: Vec<LoadedProjectChoice>,
+    },
     ConnectingRunningProject {
         progress: ProgressState,
     },
