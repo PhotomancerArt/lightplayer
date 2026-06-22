@@ -45,6 +45,8 @@ impl BrowserSerialReadinessClassifier {
                 recent_lines: self.recent_lines.clone(),
                 reason: self.no_firmware_reason(),
             }
+        } else if self.recent_lines.is_empty() {
+            BrowserSerialReadinessFailure::NoSerialOutput
         } else {
             BrowserSerialReadinessFailure::ProtocolTimeout {
                 recent_lines: self.recent_lines.clone(),
@@ -71,6 +73,7 @@ impl BrowserSerialReadinessClassifier {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BrowserSerialReadinessFailure {
+    NoSerialOutput,
     NoFirmwareDetected {
         recent_lines: Vec<String>,
         reason: NoFirmwareReason,
@@ -89,6 +92,7 @@ pub enum NoFirmwareReason {
 impl BrowserSerialReadinessFailure {
     pub fn message(&self) -> String {
         match self {
+            Self::NoSerialOutput => "timed out waiting for browser serial server readiness; no serial output was received from the device".to_string(),
             Self::NoFirmwareDetected {
                 recent_lines,
                 reason,
@@ -195,6 +199,22 @@ mod tests {
             classifier.classify_timeout(),
             BrowserSerialReadinessFailure::ProtocolTimeout { .. }
         ));
+    }
+
+    #[test]
+    fn no_output_classifies_as_no_serial_output() {
+        let classifier = BrowserSerialReadinessClassifier::new();
+
+        assert_eq!(
+            classifier.classify_timeout(),
+            BrowserSerialReadinessFailure::NoSerialOutput
+        );
+        assert!(
+            classifier
+                .classify_timeout()
+                .message()
+                .contains("no serial output")
+        );
     }
 
     #[test]

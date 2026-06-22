@@ -172,82 +172,6 @@ export async function eraseDeviceFlash(portId, esptoolModulePath, onEvent) {
   }
 }
 
-export async function resetTarget(portId, esptoolModulePath, onEvent) {
-  if (!isSupported()) {
-    throw new Error("Web Serial ESP32 reset is not supported in this browser.");
-  }
-
-  const port = getPort(portId);
-  await releasePort(portId);
-
-  const logs = [];
-  const progress = [];
-  const terminal = terminalFor(logs, "esp32-reset", onEvent);
-  void esptoolModulePath;
-  let resetComplete = false;
-
-  try {
-    await port.open({ baudRate: 115200 });
-    pushProgress(progress, onEvent, {
-      label: "Resetting device",
-      completedSteps: 1,
-      totalSteps: 2,
-      percent: 50,
-    });
-    try {
-      await hardResetOpenedPort(port, terminal);
-    } catch (error) {
-      terminal.writeLine(`Reset signal control failed: ${errorMessage(error)}`);
-      terminal.writeLine("Continuing without a hardware reset.");
-    }
-    resetComplete = true;
-    pushProgress(progress, onEvent, {
-      label: "Waiting for device boot",
-      completedSteps: 2,
-      totalSteps: 2,
-      percent: 100,
-    });
-    return {
-      logs,
-      progress: compactProgress(progress),
-    };
-  } finally {
-    try {
-      await port.close();
-    } catch (error) {
-      console.warn("[esp32-reset] port close failed", error);
-    }
-    if (resetComplete) {
-      await sleep(250);
-    }
-  }
-}
-
-async function hardResetOpenedPort(port, terminal) {
-  if (typeof port.setSignals !== "function") {
-    throw new Error("Web Serial port does not support DTR/RTS reset signals.");
-  }
-  await classicHardResetOpenedPort(port, terminal);
-}
-
-async function classicHardResetOpenedPort(port, terminal) {
-  terminal.writeLine("Hard resetting via RTS pin...");
-  await setDTR(port, false);
-  await sleep(100);
-  await setRTS(port, true, false);
-  await sleep(100);
-  await setRTS(port, false, false);
-}
-
-async function setRTS(port, requestToSend, dataTerminalReady) {
-  await port.setSignals({ requestToSend });
-  await port.setSignals({ dataTerminalReady });
-}
-
-async function setDTR(port, dataTerminalReady) {
-  await port.setSignals({ dataTerminalReady });
-}
-
 function assertNoFlashCommunicationWarning(logs, context) {
   const warning = logs.find((line) =>
     line.includes("Failed to communicate with the flash chip") ||
@@ -303,17 +227,6 @@ function emitEvent(onEvent, event) {
   if (typeof onEvent === "function") {
     onEvent(event);
   }
-}
-
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function errorMessage(error) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
 }
 
 async function loadFullManifest(manifestPath) {

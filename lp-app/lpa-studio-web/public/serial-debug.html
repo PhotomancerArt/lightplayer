@@ -297,18 +297,6 @@
               Read window after reset (ms)
               <input id="readWindowMs" type="number" min="0" step="100" value="5000" />
             </label>
-            <label class="inline-check">
-              <input id="readDuringReset" type="checkbox" checked />
-              Start reader before reset
-            </label>
-            <label class="inline-check">
-              <input id="reopenAfterReset" type="checkbox" />
-              Close and reopen before reading
-            </label>
-            <label class="inline-check">
-              <input id="continueAfterSignalFailure" type="checkbox" checked />
-              Continue reading if signal control fails
-            </label>
             <div class="row">
               <button class="primary" id="resetClassic">Normal reset + read</button>
               <button id="resetUsbJtag">USB-JTAG download reset + read</button>
@@ -351,14 +339,16 @@
     </main>
 
     <script type="module">
+      import {
+        BrowserEsp32DeviceController,
+        errorMessage,
+      } from "/lpa-link/browser_esp32_device_controller.js";
+
       const els = {
         support: document.querySelector("#support"),
         portLabel: document.querySelector("#portLabel"),
         baudRate: document.querySelector("#baudRate"),
         readWindowMs: document.querySelector("#readWindowMs"),
-        readDuringReset: document.querySelector("#readDuringReset"),
-        reopenAfterReset: document.querySelector("#reopenAfterReset"),
-        continueAfterSignalFailure: document.querySelector("#continueAfterSignalFailure"),
         sequence: document.querySelector("#sequence"),
         terminal: document.querySelector("#terminal"),
         portState: document.querySelector("#portState"),
@@ -367,15 +357,10 @@
         rtsState: document.querySelector("#rtsState"),
       };
 
-      let port = null;
-      let reader = null;
-      let readLoopPromise = null;
-      let readStopRequested = false;
+      let controller = null;
+      let unsubscribeController = null;
       let dtr = null;
       let rts = null;
-      let readBuffer = "";
-
-      const decoder = new TextDecoder();
 
       bind("#requestPort", requestPort);
       bind("#openPort", openPort);
@@ -386,18 +371,18 @@
       bind("#clearLog", () => {
         els.terminal.textContent = "";
       });
-      bind("#resetUsbJtag", () => resetAndRead(usbJtagReset));
-      bind("#resetClassic", () => resetAndRead(classicReset));
-      bind("#resetRtsOnly", () => resetAndRead(rtsOnlyReset));
-      bind("#readOnly", readOnly);
+      bind("#resetUsbJtag", () => controllerResetAndRead("usb-jtag-download"));
+      bind("#resetClassic", () => controllerResetAndRead("normal"));
+      bind("#resetRtsOnly", () => controllerResetAndRead("rts-only"));
+      bind("#readOnly", controllerReadOnly);
       bind("#setDtr0", () => setDTR(false));
       bind("#setDtr1", () => setDTR(true));
       bind("#setRts0", () => setRTS(false));
       bind("#setRts1", () => setRTS(true));
       bind("#runSequence", () => runSequence(els.sequence.value));
-      bind("#runSequenceAndRead", () => resetAndRead(() => runSequence(els.sequence.value)));
+      bind("#runSequenceAndRead", controllerRunSequenceAndRead);
 
-      if ("serial" in navigator) {
+      if (BrowserEsp32DeviceController.isSupported()) {
         els.support.textContent = "Web Serial available";
       } else {
         els.support.textContent = "Web Serial unavailable in this context";
@@ -422,210 +407,96 @@
       }
 
       async function requestPort() {
-        port = await navigator.serial.requestPort();
+        const selected = await BrowserEsp32DeviceController.requestPort();
+        controller = new BrowserEsp32DeviceController(selected);
+        subscribeController();
         dtr = null;
         rts = null;
-        logSystem(`selected ${portLabel(port)}`);
+        logSystem(`selected ${controller.label}`);
       }
 
       async function openPort() {
-        requirePort();
-        if (port.readable || port.writable) {
+        requireController();
+        if (controller.isOpen()) {
           logSystem("port already open", "warn");
           return;
         }
-        await port.open({ baudRate: baudRate() });
-        readBuffer = "";
+        await controller.openForRead({ baudRate: baudRate(), log: controllerLog });
         logSystem(`opened at ${baudRate()} baud`);
         await snapshotSignals();
       }
 
       async function closePort() {
-        await stopRead();
-        if (!port) {
+        if (!controller) {
           return;
         }
-        if (port.readable || port.writable) {
-          await port.close();
-          logSystem("closed port");
-        }
+        await controller.close();
+        logSystem("closed port");
       }
 
       async function startRead() {
-        requireOpenPort();
-        if (reader) {
+        requireOpenController();
+        if (controller.reader) {
           logSystem("reader already running", "warn");
           return;
         }
-        readStopRequested = false;
-        reader = port.readable.getReader();
+        controller.startReadPump();
         els.readerState.textContent = "running";
         logSystem("started raw read");
-        readLoopPromise = readLoop(reader);
       }
 
       async function stopRead() {
-        readStopRequested = true;
-        const currentReader = reader;
-        if (!currentReader) {
+        if (!controller?.reader) {
           return;
         }
-        try {
-          await currentReader.cancel();
-        } catch (error) {
-          logSystem(`reader cancel failed: ${errorMessage(error)}`, "warn");
-        }
-        try {
-          await readLoopPromise;
-        } finally {
-          readLoopPromise = null;
-        }
+        await controller.stopReadPump();
       }
 
-      async function readLoop(activeReader) {
-        try {
-          for (;;) {
-            const { value, done } = await activeReader.read();
-            if (done) {
-              break;
-            }
-            if (value) {
-              appendSerial(value);
-            }
-          }
-        } catch (error) {
-          if (!readStopRequested) {
-            logSystem(`read failed: ${errorMessage(error)}`, "error");
-          }
-        } finally {
-          try {
-            activeReader.releaseLock();
-          } catch {}
-          if (reader === activeReader) {
-            reader = null;
-          }
-          renderState();
-          logSystem("reader stopped");
-        }
+      async function controllerResetAndRead(resetKind) {
+        requireController();
+        await controller.resetAndRead({
+          baudRate: baudRate(),
+          readWindowMs: readWindowMs(),
+          resetKind,
+        });
       }
 
-      async function resetAndRead(resetFn) {
-        requirePort();
-        await stopRead();
-        if (!(port.readable || port.writable)) {
-          await openPort();
-        }
-        readBuffer = "";
-        if (els.readDuringReset.checked && !els.reopenAfterReset.checked) {
-          await startRead();
-        }
-        logSystem("reset sequence starting");
-        try {
-          await resetFn();
-          logSystem("reset sequence complete");
-        } catch (error) {
-          logSystem(`reset sequence failed: ${errorMessage(error)}`, "error");
-          if (!els.continueAfterSignalFailure.checked) {
-            throw error;
-          }
-          logSystem("continuing read after reset failure", "warn");
-        }
-        if (els.reopenAfterReset.checked) {
-          await closePort();
-          await sleep(250);
-          await openPort();
-        }
-        if (!reader) {
-          await startRead();
-        }
+      async function controllerReadOnly() {
+        requireController();
+        await controller.readFor({
+          baudRate: baudRate(),
+          readWindowMs: readWindowMs(),
+        });
+      }
+
+      async function controllerRunSequenceAndRead() {
+        requireController();
+        await controller.releaseProtocol({ collectErrors: false });
+        await controller.openForRead({ baudRate: baudRate(), clear: false, log: controllerLog });
+        await controller.runSignalSequence(els.sequence.value, { log: controllerLog });
         const ms = readWindowMs();
         if (ms > 0) {
           await sleep(ms);
-          await stopRead();
+          await controller.stopReadPump();
           logSystem(`read window complete (${ms}ms)`);
         }
-      }
-
-      async function readOnly() {
-        requirePort();
-        await stopRead();
-        if (!(port.readable || port.writable)) {
-          await openPort();
-        }
-        readBuffer = "";
-        await startRead();
-        const ms = readWindowMs();
-        if (ms > 0) {
-          await sleep(ms);
-          await stopRead();
-          logSystem(`read window complete (${ms}ms)`);
-        }
-      }
-
-      async function classicReset() {
-        logSystem("classic RTS reset: D0 W100 R1 W100 R0");
-        await setDTR(false);
-        await sleep(100);
-        await setRTS(true);
-        await sleep(100);
-        await setRTS(false);
-      }
-
-      async function usbJtagReset() {
-        logSystem("USB-JTAG download reset: R0 D0 W100 D1 R0 W100 R1 D0 R1 W100 R0 D0");
-        await setRTS(false);
-        await setDTR(false);
-        await sleep(100);
-        await setDTR(true);
-        await setRTS(false);
-        await sleep(100);
-        await setRTS(true);
-        await setDTR(false);
-        await setRTS(true);
-        await sleep(100);
-        await setRTS(false);
-        await setDTR(false);
-      }
-
-      async function rtsOnlyReset() {
-        logSystem("RTS-only reset: R1 W100 R0");
-        await setRTS(true);
-        await sleep(100);
-        await setRTS(false);
       }
 
       async function runSequence(text) {
-        requireOpenPort();
+        requireOpenController();
         const commands = text
           .split(/[\s|,]+/)
           .map((command) => command.trim())
           .filter(Boolean);
         logSystem(`running custom sequence: ${commands.join(" ")}`);
-        for (const command of commands) {
-          const op = command[0]?.toUpperCase();
-          const arg = command.slice(1);
-          if (op === "D") {
-            await setDTR(parseBinaryArg(command, arg));
-          } else if (op === "R") {
-            await setRTS(parseBinaryArg(command, arg));
-          } else if (op === "W") {
-            const ms = Number(arg);
-            if (!Number.isFinite(ms) || ms < 0) {
-              throw new Error(`invalid wait command: ${command}`);
-            }
-            logSystem(`wait ${ms}ms`);
-            await sleep(ms);
-          } else {
-            throw new Error(`unknown sequence command: ${command}`);
-          }
-        }
+        await controller.runSignalSequence(text, { log: controllerLog });
       }
 
       async function setDTR(value) {
-        requireOpenPort();
+        requireOpenController();
         const next = Boolean(value);
         try {
-          await port.setSignals({ dataTerminalReady: next });
+          await controller.setDTR(next);
         } catch (error) {
           throw new Error(`DTR=${Number(next)} failed: ${errorMessage(error)}`);
         }
@@ -635,10 +506,10 @@
       }
 
       async function setRTS(value) {
-        requireOpenPort();
+        requireOpenController();
         const next = Boolean(value);
         try {
-          await port.setSignals({ requestToSend: next });
+          await controller.setRTS(next);
         } catch (error) {
           throw new Error(`RTS=${Number(next)} failed: ${errorMessage(error)}`);
         }
@@ -648,19 +519,9 @@
       }
 
       async function snapshotSignals() {
-        requireOpenPort();
-        if (typeof port.getSignals !== "function") {
-          logSystem("getSignals() is not available for this port", "warn");
-          return;
-        }
-        const signals = await port.getSignals();
+        requireOpenController();
+        const signals = await controller.snapshotSignals();
         logSystem(`signals: ${JSON.stringify(signals)}`);
-      }
-
-      function appendSerial(bytes) {
-        const text = decoder.decode(bytes, { stream: true });
-        readBuffer += text;
-        appendText(text);
       }
 
       function appendText(text) {
@@ -677,26 +538,44 @@
       }
 
       function renderState() {
-        els.portState.textContent = port
-          ? port.readable || port.writable
+        els.portState.textContent = controller
+          ? controller.isOpen()
             ? "open"
             : "selected"
           : "none";
-        els.readerState.textContent = reader ? "running" : "stopped";
+        els.readerState.textContent = controller?.reader ? "running" : "stopped";
         els.dtrState.textContent = dtr == null ? "unknown" : String(Number(dtr));
         els.rtsState.textContent = rts == null ? "unknown" : String(Number(rts));
-        els.portLabel.textContent = port ? portLabel(port) : "No port selected";
+        els.portLabel.textContent = controller ? controller.label : "No port selected";
       }
 
-      function requirePort() {
-        if (!port) {
+      function subscribeController() {
+        unsubscribeController?.();
+        unsubscribeController = controller.subscribe((event) => {
+          if (event.type === "raw") {
+            appendText(event.text);
+          } else if (event.type === "log") {
+            logSystem(`[${event.source}] ${event.text}`);
+          } else if (event.type === "error") {
+            logSystem(event.error, "error");
+          }
+          renderState();
+        });
+      }
+
+      function controllerLog(source, text) {
+        controller?.emit({ type: "log", source, text });
+      }
+
+      function requireController() {
+        if (!controller) {
           throw new Error("No serial port selected.");
         }
       }
 
-      function requireOpenPort() {
-        requirePort();
-        if (!(port.readable || port.writable)) {
+      function requireOpenController() {
+        requireController();
+        if (!controller.isOpen()) {
           throw new Error("Serial port is not open.");
         }
       }
@@ -715,31 +594,6 @@
           throw new Error("Invalid read window.");
         }
         return value;
-      }
-
-      function parseBinaryArg(command, arg) {
-        if (arg !== "0" && arg !== "1") {
-          throw new Error(`invalid binary command: ${command}`);
-        }
-        return arg === "1";
-      }
-
-      function portLabel(value) {
-        const info = value.getInfo?.() ?? {};
-        const vendor = hex(info.usbVendorId);
-        const product = hex(info.usbProductId);
-        if (vendor && product) {
-          return `USB ${vendor}:${product}`;
-        }
-        return "Serial port";
-      }
-
-      function hex(value) {
-        return typeof value === "number" ? value.toString(16).padStart(4, "0") : null;
-      }
-
-      function errorMessage(error) {
-        return error instanceof Error ? error.message : String(error);
       }
 
       function sleep(ms) {

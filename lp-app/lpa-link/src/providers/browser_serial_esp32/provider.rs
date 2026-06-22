@@ -9,8 +9,7 @@ use crate::provider::session::LinkSessionId;
 use crate::providers::browser_serial_esp32::BrowserSerialEsp32Options;
 use crate::providers::browser_serial_esp32::{
     BrowserEsp32EraseResult, BrowserEsp32FirmwareManifest, BrowserEsp32FlashProgress,
-    BrowserEsp32FlashResult, BrowserEsp32ProbeResult, BrowserEsp32ResetResult, browser_esp32_flash,
-    browser_serial,
+    BrowserEsp32FlashResult, BrowserEsp32ProbeResult, browser_esp32_flash, browser_serial,
 };
 use crate::providers::{LinkProviderDescriptor, LinkProviderKind};
 use crate::{
@@ -94,9 +93,14 @@ impl BrowserSerialEsp32Provider {
         session_id: &LinkSessionId,
         baud_rate: u32,
     ) -> Result<(), LinkError> {
-        self.reset_target_for_protocol(session_id).await?;
+        let (endpoint_id, port_id) = {
+            let state = self.session(session_id)?;
+            (state.session.endpoint_id.clone(), state.port_id)
+        };
+        let result = browser_serial::open(port_id, baud_rate).await?;
+        let logs = protocol_open_result_logs(endpoint_id, session_id.clone(), result);
         let state = self.session_mut(session_id)?;
-        browser_serial::open(state.port_id, baud_rate).await?;
+        state.logs.extend(logs);
         state.protocol_open = true;
         Ok(())
     }
@@ -249,21 +253,6 @@ impl BrowserSerialEsp32Provider {
                 Err(LinkError::unsupported(format!("{:?}", request.operation())))
             }
         }
-    }
-
-    async fn reset_target_for_protocol(
-        &mut self,
-        session_id: &LinkSessionId,
-    ) -> Result<(), LinkError> {
-        let (endpoint_id, port_id) = {
-            let state = self.session(session_id)?;
-            (state.session.endpoint_id.clone(), state.port_id)
-        };
-        let result =
-            browser_esp32_flash::reset_target(port_id, self.options.esptool_module_path()).await?;
-        let logs = reset_result_logs(endpoint_id, session_id.clone(), result);
-        self.session_mut(session_id)?.logs.extend(logs);
-        Ok(())
     }
 
     async fn release_protocol_if_open(
@@ -445,10 +434,10 @@ fn map_erase_device_result(result: BrowserEsp32EraseResult) -> LinkEraseDeviceRe
     }
 }
 
-fn reset_result_logs(
+fn protocol_open_result_logs(
     endpoint_id: LinkEndpointId,
     session_id: LinkSessionId,
-    result: BrowserEsp32ResetResult,
+    result: browser_serial::BrowserSerialProtocolOpenResult,
 ) -> Vec<LinkLogEntry> {
     let mut logs = result
         .logs

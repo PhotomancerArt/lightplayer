@@ -399,7 +399,7 @@ fn initial_readiness_activity() -> UiActivity {
                 .with_detail("Browser serial port is open."),
             UiActivityStep::new(STEP_RESET_DEVICE, "Reset device")
                 .with_state(UiActivityStepState::Complete)
-                .with_detail("Device reset was requested before protocol attach."),
+                .with_detail("Device reset was requested while serial output was being read."),
             UiActivityStep::new(STEP_BOOT_OUTPUT, "Boot output")
                 .with_state(UiActivityStepState::Active),
             UiActivityStep::new(STEP_PROTOCOL, "LightPlayer protocol")

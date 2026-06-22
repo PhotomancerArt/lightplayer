@@ -60,6 +60,12 @@ those paths to page-absolute URLs before sending them into the embedded blob
 worker, which lets worker import/init failures surface as actionable link
 errors instead of silent boot timeouts.
 
+Browser ESP32 Web Serial uses the shared app-served controller at
+`public/lpa-link/browser_esp32_device_controller.js`. Both Studio's wasm-bound
+`lpa-link` provider and the standalone `serial-debug.html` page import that
+module, so normal connect/reset/read debugging exercises the same Web Serial
+lifecycle code that Studio uses.
+
 ESP32-C6 firmware assets are served from
 `public/firmware/esp32c6/manifest.json`. Browser serial provisioning imports a
 pinned browser ESM `esptool-js` module from
@@ -67,7 +73,7 @@ pinned browser ESM `esptool-js` module from
 override the `BrowserSerialEsp32Options` path if they want to serve that module
 themselves. The CDN ESM endpoint avoids raw package bare imports such as `pako`,
 which browsers cannot resolve directly, and it decodes the ESP32-C6 flasher
-stub used by reset/provisioning. Firmware provisioning and reset-to-blank both
+stub used by reset/provisioning. Firmware flashing and device wipe both
 require a browser with Web Serial support and a user-granted serial port.
 
 ## Hardware Flow
@@ -77,7 +83,7 @@ Serial action. Browser port selection is handled by the browser permission
 prompt, not by a Studio endpoint picker.
 
 For a blank or non-LightPlayer ESP32-C6, Studio keeps the device session and
-offers `Provision firmware` in the LightPlayer step. Confirming the action
+offers `Flash firmware` in the LightPlayer step. Confirming the action
 writes the packaged firmware and then attempts to reconnect to the LightPlayer
 server after reset. Flashing renders live progress and raw esptool output in
 the Device pane.
@@ -88,16 +94,26 @@ are recognized from ESP32 ROM output such as `invalid header: 0xffffffff`, so
 the app lands in a provision-ready state instead of a generic action failure.
 
 For an already provisioned ESP32-C6, Studio can connect to the server/project
-workflow. The Device pane also offers `Reset to blank` as a destructive
+workflow. The Device pane also offers `Wipe device` as a destructive
 tertiary action when the provider advertises whole-device erase. Confirming it
 erases the device flash, clears server/project state, and returns the device to a
-provisionable state. Reset-to-blank uses the same live activity renderer.
+provisionable state. Wipe uses the same live activity renderer.
+
+For low-level browser serial debugging, open:
+
+```text
+http://127.0.0.1:2820/serial-debug.html
+```
+
+The page can select a Web Serial port, run the same normal reset/read path as
+Studio, exercise explicit USB-JTAG downloader reset experiments, and show raw
+serial output without involving the full Studio UX.
 
 ## Stories
 
 The storybook covers the active UX shell, connection action strip, Device stack
 states, loaded Project pane state, browser-serial blank-firmware readiness,
-provision-ready/provisioning/provision-failed, and reset-to-blank states.
+provision-ready/provisioning/provision-failed, and wipe states.
 Run the dev server and open:
 
 ```text

@@ -182,20 +182,28 @@ cargo check -p lpa-link --features browser-worker --target wasm32-unknown-unknow
   `src/providers/browser_worker`. Apps pass same-origin
   `fw_browser_module_path` and `fw_browser_wasm_path` options for the generated
   `fw-browser` sidecar artifacts.
-- `browser-serial-esp32` owns Web Serial access and ESP32 probe/flash/erase bindings
-  under `src/providers/browser_serial_esp32`. Flash and erase stream esptool
-  terminal/progress events through `LinkManagementEventSink`. Apps pass same-origin
-  `firmware_manifest_path` and optional `esptool_module_path` options for
-  app-owned assets. The default esptool module is pinned to the browser ESM
-  endpoint `https://cdn.jsdelivr.net/npm/esptool-js@0.6.0/+esm` for
+- `browser-serial-esp32` owns Web Serial access and ESP32 probe/flash/erase
+  bindings under `src/providers/browser_serial_esp32`. In the browser, its
+  wasm-bound session adapter delegates Web Serial lifecycle to the app-served
+  `BrowserEsp32DeviceController` at
+  `/lpa-link/browser_esp32_device_controller.js`. The controller owns the
+  selected `SerialPort`, reader/writer locks, raw serial log pump, best-effort
+  reset signaling, and the handoff between normal protocol reading and
+  `esptool-js` bootloader operations. Flash and erase stream esptool
+  terminal/progress events through `LinkManagementEventSink`. Apps pass
+  same-origin `firmware_manifest_path` and optional `esptool_module_path`
+  options for app-owned assets. The default esptool module is pinned to the
+  browser ESM endpoint `https://cdn.jsdelivr.net/npm/esptool-js@0.6.0/+esm` for
   development. The ESM CDN rewrite is important because the raw package imports
   dependencies such as `pako` by bare specifier, which browsers cannot resolve
   without a bundler or import map. This endpoint has also been checked against
   the ESP32-C6 stub decoding path used by reset/provisioning. A deployed app can
   override the default with a hosted module path. The provider releases normal
   protocol ownership before probe/flash/erase takes exclusive bootloader access.
-  Opening the normal serial server protocol performs a hard reset first, then
-  waits briefly for firmware boot before the protocol port is reopened.
+  Opening the normal serial server protocol opens the port once, starts reading
+  immediately, then attempts a best-effort hard reset while boot output is being
+  captured. Reset signal failures are diagnostic; readiness is classified from
+  serial output and protocol frames.
 - Direct filesystem access means raw/full filesystem image management below the
   running `lp-server`. Normal project upload should use `lpa-client` and the
   server filesystem/project protocol once firmware is running.

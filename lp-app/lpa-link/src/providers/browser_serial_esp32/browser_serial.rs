@@ -10,6 +10,20 @@ pub struct BrowserSerialPortHandle {
     pub label: String,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BrowserSerialProtocolOpenResult {
+    pub logs: Vec<String>,
+    pub progress: Vec<BrowserSerialProtocolProgress>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BrowserSerialProtocolProgress {
+    pub label: String,
+    pub completed_steps: u32,
+    pub total_steps: Option<u32>,
+    pub percent: Option<u32>,
+}
+
 #[wasm_bindgen(module = "/src/providers/browser_serial_esp32/browser_serial.js")]
 extern "C" {
     #[wasm_bindgen(js_name = isSupported)]
@@ -48,11 +62,14 @@ pub async fn request_port() -> Result<BrowserSerialPortHandle, LinkError> {
     Ok(BrowserSerialPortHandle { id, label })
 }
 
-pub async fn open(id: u32, baud_rate: u32) -> Result<(), LinkError> {
-    JsFuture::from(js_open(id, baud_rate))
+pub async fn open(id: u32, baud_rate: u32) -> Result<BrowserSerialProtocolOpenResult, LinkError> {
+    let value = JsFuture::from(js_open(id, baud_rate))
         .await
-        .map(|_| ())
-        .map_err(js_error)
+        .map_err(js_error)?;
+    Ok(BrowserSerialProtocolOpenResult {
+        logs: reflect_string_array(&value, "logs")?,
+        progress: reflect_progress_array(&value, "progress")?,
+    })
 }
 
 pub async fn write_line(id: u32, line: &str) -> Result<(), LinkError> {
@@ -88,6 +105,42 @@ fn js_array_to_strings(array: Array) -> Vec<String> {
     array.iter().filter_map(|value| value.as_string()).collect()
 }
 
+fn reflect_progress_array(
+    value: &JsValue,
+    key: &str,
+) -> Result<Vec<BrowserSerialProtocolProgress>, LinkError> {
+    let value = reflect_value(value, key)?;
+    if value.is_null() || value.is_undefined() {
+        return Ok(Vec::new());
+    }
+    let array = Array::from(&value);
+    let mut progress = Vec::with_capacity(array.length() as usize);
+    for entry in array.iter() {
+        progress.push(BrowserSerialProtocolProgress {
+            label: reflect_string(&entry, "label")?,
+            completed_steps: reflect_optional_u32(&entry, "completedSteps")?.unwrap_or(0),
+            total_steps: reflect_optional_u32(&entry, "totalSteps")?,
+            percent: reflect_optional_u32(&entry, "percent")?,
+        });
+    }
+    Ok(progress)
+}
+
+fn reflect_string_array(value: &JsValue, key: &str) -> Result<Vec<String>, LinkError> {
+    let value = reflect_value(value, key)?;
+    if value.is_null() || value.is_undefined() {
+        return Ok(Vec::new());
+    }
+    Ok(Array::from(&value)
+        .iter()
+        .filter_map(|value| value.as_string())
+        .collect())
+}
+
+fn reflect_value(value: &JsValue, key: &str) -> Result<JsValue, LinkError> {
+    Reflect::get(value, &JsValue::from_str(key)).map_err(js_error)
+}
+
 fn reflect_u32(value: &JsValue, key: &str) -> Result<u32, LinkError> {
     let value = Reflect::get(value, &JsValue::from_str(key)).map_err(js_error)?;
     let Some(value) = value.as_f64() else {
@@ -99,10 +152,32 @@ fn reflect_u32(value: &JsValue, key: &str) -> Result<u32, LinkError> {
 }
 
 fn reflect_string(value: &JsValue, key: &str) -> Result<String, LinkError> {
-    let value = Reflect::get(value, &JsValue::from_str(key)).map_err(js_error)?;
+    reflect_optional_string(value, key)?
+        .ok_or_else(|| LinkError::other(format!("browser serial response missing string `{key}`")))
+}
+
+fn reflect_optional_u32(value: &JsValue, key: &str) -> Result<Option<u32>, LinkError> {
+    let value = reflect_value(value, key)?;
+    if value.is_null() || value.is_undefined() {
+        return Ok(None);
+    }
+    let Some(value) = value.as_f64() else {
+        return Err(LinkError::other(format!(
+            "browser serial response `{key}` is not numeric"
+        )));
+    };
+    Ok(Some(value as u32))
+}
+
+fn reflect_optional_string(value: &JsValue, key: &str) -> Result<Option<String>, LinkError> {
+    let value = reflect_value(value, key)?;
+    if value.is_null() || value.is_undefined() {
+        return Ok(None);
+    }
     value
         .as_string()
-        .ok_or_else(|| LinkError::other(format!("browser serial response missing string `{key}`")))
+        .map(Some)
+        .ok_or_else(|| LinkError::other(format!("browser serial response `{key}` is not a string")))
 }
 
 fn js_error(value: JsValue) -> LinkError {

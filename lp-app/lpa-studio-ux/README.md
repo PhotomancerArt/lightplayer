@@ -88,10 +88,10 @@ loading when nothing is running.
 Blank-device provisioning and recovery are modeled as Device actions backed by
 link-level management because they happen below the running server protocol:
 
-- `Provision firmware` is offered in the Connect LightPlayer step when the
+- `Flash firmware` is offered in the Connect LightPlayer step when the
   connected device session supports `FlashFirmware` and Studio is not currently
   attached to a server.
-- `Reset to blank` is offered as a tertiary destructive Device action when the
+- `Wipe device` is offered as a tertiary destructive Device action when the
   connected device session supports `EraseDeviceFlash`.
 
 Both actions flow through `lpa-link::LinkProvider::manage_with_events`.
@@ -106,10 +106,14 @@ reset, Studio keeps the link context and reports that the user should reconnect
 after boot.
 
 For Browser Web Serial ESP32 links, opening or reopening the server protocol
-goes through the provider reset path before Studio probes for loaded projects.
-The browser-serial client waits for the first valid protocol frame before
-sending the first request, so a just-reset device does not lose the initial
-project probe while firmware is still booting.
+goes through the provider-owned browser ESP32 device controller. The controller
+opens the Web Serial port once, starts reading immediately, then attempts a
+best-effort reset while raw boot output is being captured. The browser-serial
+client waits for the first valid protocol frame before sending the first
+request, so a just-reset device does not lose the initial project probe while
+firmware is still booting. Reset signal failures are reported as diagnostics;
+the user-facing readiness result comes from raw serial output and protocol
+frames.
 
 While waiting for browser serial readiness, Studio publishes a stepped
 `UiActivity` in the Device pane. The reusable activity data includes serial
@@ -121,13 +125,12 @@ view as text.
 If ESP32 boot output includes patterns such as `invalid header: 0xffffffff`,
 Studio classifies the device as blank/erased instead of surfacing a generic
 protocol timeout. The link session remains open, project/server state is
-detached, and `Provision firmware` remains available when the selected provider
+detached, and `Flash firmware` remains available when the selected provider
 advertises flashing support.
 
-After reset-to-blank, Studio leaves project and server detached and returns to a
-link state that can offer provisioning again. Reset-to-blank is not a server
-filesystem clear; it is a destructive whole-device erase through the link
-provider.
+After wipe, Studio leaves project and server detached and returns to a link
+state that can offer firmware flashing again. Wipe is not a server filesystem
+clear; it is a destructive whole-device erase through the link provider.
 
 Disconnect semantics are intentionally distinct:
 

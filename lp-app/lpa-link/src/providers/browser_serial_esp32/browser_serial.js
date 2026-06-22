@@ -1,58 +1,33 @@
+import { BrowserEsp32DeviceController } from "/lpa-link/browser_esp32_device_controller.js";
+
 const sessions = new Map();
 let nextSessionId = 1;
 
 export function isSupported() {
-  return Boolean(globalThis.navigator?.serial);
+  return BrowserEsp32DeviceController.isSupported();
 }
 
 export async function requestPort() {
-  if (!isSupported()) {
-    throw new Error("Web Serial is not supported in this browser.");
-  }
-  const port = await navigator.serial.requestPort();
+  const { port, label } = await BrowserEsp32DeviceController.requestPort();
   const id = nextSessionId++;
-  sessions.set(id, {
-    port,
-    reader: null,
-    writer: null,
-    decoder: new TextDecoder(),
-    encoder: new TextEncoder(),
-    buffer: "",
-    lines: [],
-    errors: [],
-    closed: false,
-    releasing: false,
-  });
-  return { id, label: labelForPort(port) };
+  sessions.set(id, new BrowserEsp32DeviceController({ port, label }));
+  return { id, label };
 }
 
 export async function openPort(id, baudRate) {
-  const session = requireSession(id);
-  clearBufferedInput(session);
-  await session.port.open({ baudRate });
-  session.reader = session.port.readable.getReader();
-  session.writer = session.port.writable.getWriter();
-  session.closed = false;
-  session.releasing = false;
-  readPump(id, session);
+  return requireSession(id).openProtocol({ baudRate });
 }
 
 export async function writeLine(id, line) {
-  const session = requireSession(id);
-  if (!session.writer) {
-    throw new Error("Serial port is not open.");
-  }
-  await session.writer.write(session.encoder.encode(line));
+  await requireSession(id).writeLine(line);
 }
 
 export function takeLines(id) {
-  const session = requireSession(id);
-  return session.lines.splice(0, session.lines.length);
+  return requireSession(id).takeLines();
 }
 
 export function takeErrors(id) {
-  const session = requireSession(id);
-  return session.errors.splice(0, session.errors.length);
+  return requireSession(id).takeErrors();
 }
 
 export async function closePort(id) {
@@ -60,7 +35,7 @@ export async function closePort(id) {
   if (!session) {
     return;
   }
-  await releasePort(id);
+  await session.close();
   sessions.delete(id);
 }
 
@@ -69,104 +44,11 @@ export async function releasePort(id) {
   if (!session) {
     return;
   }
-  session.releasing = true;
-  session.closed = true;
-  try {
-    await session.reader?.cancel();
-  } catch (error) {
-    session.errors.push(errorMessage(error));
-  }
-  try {
-    session.reader?.releaseLock();
-  } catch (error) {
-    session.errors.push(errorMessage(error));
-  }
-  try {
-    await session.writer?.close();
-  } catch (error) {
-    session.errors.push(errorMessage(error));
-  }
-  try {
-    session.writer?.releaseLock();
-  } catch (error) {
-    session.errors.push(errorMessage(error));
-  }
-  try {
-    await session.port.close();
-  } catch (error) {
-    const message = errorMessage(error);
-    if (!message.includes("already closed")) {
-      session.errors.push(message);
-    }
-  }
-  session.reader = null;
-  session.writer = null;
-  session.releasing = false;
+  await session.releaseProtocol();
 }
 
 export function getPort(id) {
   return requireSession(id).port;
-}
-
-async function readPump(id, session) {
-  try {
-    while (!session.closed) {
-      const { value, done } = await session.reader.read();
-      if (done) {
-        break;
-      }
-      if (!value) {
-        continue;
-      }
-      session.buffer += session.decoder.decode(value, { stream: true });
-      drainCompleteLines(session);
-    }
-  } catch (error) {
-    if (!session.closed) {
-      session.errors.push(errorMessage(error));
-    }
-  } finally {
-    const wasClosed = session.closed;
-    session.closed = true;
-    if (!wasClosed && !session.releasing && sessions.get(id) === session) {
-      session.errors.push("Serial port disconnected.");
-    }
-  }
-}
-
-function drainCompleteLines(session) {
-  for (;;) {
-    const newline = session.buffer.indexOf("\n");
-    if (newline < 0) {
-      return;
-    }
-    const line = session.buffer.slice(0, newline).replace(/\r$/, "");
-    session.buffer = session.buffer.slice(newline + 1);
-    session.lines.push(line);
-  }
-}
-
-function clearBufferedInput(session) {
-  session.buffer = "";
-  session.lines = [];
-  session.errors = [];
-}
-
-function labelForPort(port) {
-  const info = port.getInfo?.() ?? {};
-  const vendor = numberToHex(info.usbVendorId);
-  const product = numberToHex(info.usbProductId);
-  if (vendor && product) {
-    return `ESP32 Serial (${vendor}:${product})`;
-  }
-  return "Browser serial device";
-}
-
-function numberToHex(value) {
-  if (typeof value !== "number") {
-    return null;
-  }
-  return value.toString(16).padStart(4, "0");
 }
 
 function requireSession(id) {
@@ -175,11 +57,4 @@ function requireSession(id) {
     throw new Error(`Unknown browser serial session: ${id}`);
   }
   return session;
-}
-
-function errorMessage(error) {
-  if (error instanceof Error) {
-    return error.message;
-  }
-  return String(error);
 }
