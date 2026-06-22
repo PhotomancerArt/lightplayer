@@ -3,8 +3,8 @@ use std::rc::Rc;
 
 use dioxus::prelude::*;
 use lpa_studio_ux::{
-    DeviceUx, LinkUx, ServerUx, StudioUx, StudioView, UiAction, UiBody, UiStepState, UxUpdate,
-    UxUpdateSink,
+    DeviceUx, LinkUx, ProjectUx, ServerUx, StudioUx, StudioView, UiAction, UiBody, UiStepState,
+    UxUpdate, UxUpdateSink,
 };
 
 use crate::components::StudioShell;
@@ -84,7 +84,10 @@ impl StudioWebModel {
                 if let Some(pane) = self.view.panes.iter_mut().find(|pane| {
                     pane.node_id == node_id
                         || (pane.node_id.as_str() == DeviceUx::NODE_ID
-                            && matches!(node_id.as_str(), LinkUx::NODE_ID | ServerUx::NODE_ID))
+                            && matches!(
+                                node_id.as_str(),
+                                LinkUx::NODE_ID | ServerUx::NODE_ID | ProjectUx::NODE_ID
+                            ))
                 }) {
                     let section_id = device_activity_section_id(node_id.as_str(), &activity.title);
                     pane.status = status;
@@ -118,6 +121,9 @@ fn device_activity_section_id(node_id: &str, title: &str) -> Option<&'static str
     if node_id == ServerUx::NODE_ID {
         return Some("connect-lightplayer");
     }
+    if node_id == ProjectUx::NODE_ID {
+        return Some("open-project");
+    }
     if node_id == LinkUx::NODE_ID {
         if title.contains("Provision") {
             return Some("connect-lightplayer");
@@ -133,6 +139,8 @@ fn device_activity_section_id(node_id: &str, title: &str) -> Option<&'static str
         || title.contains("Firmware")
     {
         Some("connect-lightplayer")
+    } else if title.contains("project") || title.contains("Project") {
+        Some("open-project")
     } else {
         Some("connect-device")
     }

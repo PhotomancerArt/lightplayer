@@ -38,8 +38,8 @@ project, connect browser serial hardware, open the LightPlayer server protocol,
 attach to an already-loaded running project, explicitly load the built-in demo
 project on hardware, provision a blank ESP32-C6 with packaged LightPlayer
 firmware, reset a provisioned ESP32-C6 back to blank, and display a small
-project inventory summary. The Project pane appears once LightPlayer is
-connected or a project state is otherwise meaningful.
+project inventory summary. Project attach/load choices appear in the Device
+pane. The Project pane appears once a project is loaded.
 
 ## Run
 
@@ -96,7 +96,7 @@ provisionable state. Reset-to-blank uses the same live activity renderer.
 ## Stories
 
 The storybook covers the active UX shell, connection action strip, Device stack
-states, Project pane states, browser-serial blank-firmware readiness,
+states, loaded Project pane state, browser-serial blank-firmware readiness,
 provision-ready/provisioning/provision-failed, and reset-to-blank states.
 Run the dev server and open:
 

@@ -39,10 +39,12 @@ have a separate global action list; actions are part of the presented view.
 `StudioUx::actions()` derives the currently available actions from the current
 `StudioView`.
 
-Project remains separate from Device. It is hidden until LightPlayer is
-connected or the project state is otherwise meaningful. Project is expected to
-grow into the node tree, file tree, and project editing surface, so folding it
-into Device would mix two product concepts that will evolve differently.
+Project remains separate from Device, but only after a project is loaded.
+Project attach, demo loading, and loaded-project selection are part of getting
+the device into a usable state, so those actions live in the Device
+open-project step. Project is expected to grow into the node tree, file tree,
+and project editing surface, so folding the loaded project surface into Device
+would mix two product concepts that will evolve differently.
 
 `UiStackView`, `UiStackSection`, and `UiStepState` are reusable UI-independent
 view primitives. They are intentionally small and client-side only. They are
@@ -52,11 +54,12 @@ surfaces, not as a serialized client/server protocol.
 ## Consequences
 
 - The active Studio shell now presents a Device pane first, with Project shown
-  only once it is useful.
+  only once a project is loaded.
 - Link and Server remain real implementation controllers, but they are no
   longer top-level user-facing panes.
 - Blank-device detection, provisioning, reset-to-blank, reconnect, boot logs,
-  and LightPlayer server attach appear in one continuous Device workflow.
+  LightPlayer server attach, and project opening appear in one continuous Device
+  workflow.
 - Web UI rendering becomes more generic: it renders stack sections, section
   bodies, section-local actions, and terminal output without knowing link/server
   policy.
@@ -85,7 +88,7 @@ surfaces, not as a serialized client/server protocol.
 
 - Migrate lower-level progress emission so Device actions publish section-aware
   activity directly instead of relying on Link/Server node-id fallback mapping.
-- Continue shaping the Project pane around the future project node tree and file
-  tree.
+- Continue shaping the loaded Project pane around the future project node tree
+  and file tree.
 - Add more focused tests for Device stack state/action placement as hardware
   workflows settle.

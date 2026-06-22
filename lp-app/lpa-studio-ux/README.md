@@ -36,20 +36,21 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
 - `StudioUx` is the top-level controller. It owns `DeviceUx` and `ProjectUx`.
 - `DeviceUx` is the user-facing device workflow. It owns the lower-level link
   and server controllers and presents one stack of steps: select connection,
-  connect device, connect LightPlayer, and open project.
+  connect device, connect LightPlayer, and open project. The open-project step
+  offers running-project attach and demo-load actions until a project is loaded.
 - `LinkUx` owns link-provider selection, the `LinkProviderRegistry`, and the
   active link session. It remains an implementation detail below `DeviceUx`.
 - `ServerUx` owns the connected `lpa-client` protocol client once a link exposes
   server I/O. It remains an implementation detail below `DeviceUx`.
-- `ProjectUx` owns Studio's view of the attached or loadable project and is
-  shown once LightPlayer is connected or a project state is meaningful.
+- `ProjectUx` owns Studio's view of the loaded project and is shown only after a
+  project is loaded.
 - `UiAction` is an in-process action offering: target `UxNodeId`, boxed typed
   operation, and metadata such as label, summary, priority, icon, enablement,
   and confirmation.
 - `DeviceOp` and `ProjectOp` are the typed user-facing operations. Operation
   identity is the enum type and variant, not a parallel string action kind.
-- `StudioView` is the semantic render surface. It contains `UiPaneView` values
-  for Device and, when visible, Project plus recent logs.
+- `StudioView` is the semantic render surface. It contains a Device
+  `UiPaneView`, an optional loaded Project `UiPaneView`, and recent logs.
 - `UiBody` is intentionally small: text, progress/activity, issue, metrics,
   stack, or empty. It is not a generic component schema.
 - `UiStackView` / `UiStackSection` model reusable multi-step product workflows.
@@ -71,10 +72,12 @@ inventory.
 
 Project attach behavior is UX-owned:
 
-- zero loaded projects: offer to load the demo project;
-- one loaded project: auto-attach after server connection;
-- multiple loaded projects: enter a selection state and expose one action per
-  loaded project.
+- zero loaded projects: offer to load the demo project in the Device
+  open-project step;
+- one loaded project: auto-attach after server connection and then show the
+  Project pane;
+- multiple loaded projects: show the selection in the Device open-project step
+  and expose one action per loaded project.
 
 For the browser-worker simulator, the zero-loaded-project case auto-loads the
 demo project. Real hardware remains conservative and requires explicit project

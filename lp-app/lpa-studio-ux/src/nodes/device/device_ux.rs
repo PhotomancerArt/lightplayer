@@ -1,7 +1,8 @@
 use crate::{
     ConnectedDeviceSummary, DeviceOp, DeviceSnapshot, EndpointChoice, LinkOp, LinkState, LinkUx,
-    ProviderChoice, ServerState, ServerUx, UiAction, UiBody, UiMetric, UiPaneView, UiStackSection,
-    UiStackView, UiStatus, UiStepState, UiTerminalLine, UxLogEntry, UxNode, UxNodeId,
+    ProjectOp, ProjectState, ProviderChoice, ServerState, ServerUx, UiAction, UiBody, UiMetric,
+    UiPaneView, UiStackSection, UiStackView, UiStatus, UiStepState, UiTerminalLine, UxLogEntry,
+    UxNode, UxNodeId,
 };
 
 pub struct DeviceUx {
@@ -29,6 +30,10 @@ impl DeviceUx {
         self.server.is_connected()
     }
 
+    pub fn has_lightplayer_state(&self) -> bool {
+        matches!(self.server.snapshot().state, ServerState::Connected { .. })
+    }
+
     pub fn has_meaningful_terminal(&self) -> bool {
         !matches!(self.link.state(), LinkState::SelectingProvider { .. })
     }
@@ -45,12 +50,12 @@ impl DeviceUx {
         }
     }
 
-    pub fn view(&self) -> UiPaneView {
+    pub fn view(&self, project_state: &ProjectState, project_actions: Vec<UiAction>) -> UiPaneView {
         let stack = UiStackView::new(vec![
             self.select_connection_section(),
             self.connect_device_section(),
             self.connect_lightplayer_section(),
-            self.open_project_section(),
+            self.open_project_section(project_state, project_actions),
         ])
         .with_terminal(if self.has_meaningful_terminal() {
             self.terminal.clone()
@@ -206,14 +211,44 @@ impl DeviceUx {
         }
     }
 
-    fn open_project_section(&self) -> UiStackSection {
-        if self.server.is_connected() {
-            UiStackSection::new("open-project", "Open project", UiStepState::Active).with_body(
-                UiBody::text("Use the Project pane to attach a running project or load the demo."),
-            )
-        } else {
-            UiStackSection::new("open-project", "Open project", UiStepState::Pending)
-                .with_body(UiBody::text("Connect LightPlayer first."))
+    fn open_project_section(
+        &self,
+        project_state: &ProjectState,
+        actions: Vec<UiAction>,
+    ) -> UiStackSection {
+        if !self.has_lightplayer_state() {
+            return UiStackSection::new("open-project", "Open project", UiStepState::Pending)
+                .with_body(UiBody::text("Connect LightPlayer first."));
+        }
+
+        match project_state {
+            ProjectState::NotLoaded => {
+                UiStackSection::new("open-project", "Open project", UiStepState::Active)
+                    .with_body(UiBody::text(not_loaded_project_prompt(&actions)))
+                    .with_actions(actions)
+            }
+            ProjectState::SelectingLoadedProject { projects } => {
+                UiStackSection::new("open-project", "Open project", UiStepState::Active)
+                    .with_body(UiBody::text(format!(
+                        "{} projects are running. Choose one to open.",
+                        projects.len()
+                    )))
+                    .with_actions(actions)
+            }
+            ProjectState::ConnectingRunningProject { progress }
+            | ProjectState::LoadingDemoProject { progress } => {
+                UiStackSection::new("open-project", "Open project", UiStepState::Active)
+                    .with_body(UiBody::Progress(progress.clone()))
+            }
+            ProjectState::Ready { project_id, .. } => {
+                UiStackSection::new("open-project", "Open project", UiStepState::Complete)
+                    .with_body(UiBody::text(format!("{project_id} is loaded.")))
+            }
+            ProjectState::Failed { issue } => {
+                UiStackSection::new("open-project", "Open project", UiStepState::NeedsAttention)
+                    .with_body(UiBody::Issue(issue.clone()))
+                    .with_actions(actions)
+            }
         }
     }
 
@@ -223,6 +258,19 @@ impl DeviceUx {
             .into_iter()
             .filter_map(|action| map_link_action(action, self.node_id()))
             .collect()
+    }
+}
+
+fn not_loaded_project_prompt(actions: &[UiAction]) -> &'static str {
+    if actions.iter().any(|action| {
+        matches!(
+            action.op_as::<ProjectOp>(),
+            Some(ProjectOp::ConnectRunningProject)
+        )
+    }) {
+        "Connect to a running project or load the demo project."
+    } else {
+        "No running project is loaded. Load the demo project when you're ready."
     }
 }
 

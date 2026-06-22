@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
 use lpa_studio_ux::{
-    DeviceOp, DeviceUx, LinkEndpointId, LinkProviderKind, LoadedProjectChoice, ProgressState,
-    ProjectInventorySummary, ProjectOp, ProjectState, ProjectUx, StudioView, UiAction, UiActivity,
-    UiActivityStep, UiActivityStepState, UiBody, UiMetric, UiPaneView, UiProgress, UiStackSection,
-    UiStackView, UiStatus, UiStepState, UiTerminalLine, UxIssue, UxLogEntry, UxLogLevel, UxNodeId,
+    DeviceOp, DeviceUx, LinkEndpointId, LinkProviderKind, ProgressState, ProjectInventorySummary,
+    ProjectOp, ProjectState, ProjectUx, StudioView, UiAction, UiActivity, UiActivityStep,
+    UiActivityStepState, UiBody, UiMetric, UiPaneView, UiProgress, UiStackSection, UiStackView,
+    UiStatus, UiStepState, UiTerminalLine, UxIssue, UxLogEntry, UxLogLevel, UxNodeId,
 };
 
 use crate::components::{ActionStrip, StudioShell, UxPane};
@@ -26,13 +26,19 @@ pub const STORIES: &[StoryDescriptor] = &[
         "studio/panes/project",
         "Studio UX",
         "Project pane",
-        "Project pane rendered directly from the Project UX view.",
+        "Loaded project pane rendered directly from the Project UX view.",
     ),
     StoryDescriptor::new(
-        "studio/panes/project-selection",
+        "studio/device-project-empty",
+        "Studio UX",
+        "Project launcher",
+        "Device pane offering running-project attach and demo loading.",
+    ),
+    StoryDescriptor::new(
+        "studio/device-project-selection",
         "Studio UX",
         "Project selection",
-        "Loaded project choices exposed as Project UX actions.",
+        "Loaded project choices exposed in the Device open-project step.",
     ),
     StoryDescriptor::new(
         "studio/simulator-idle",
@@ -143,7 +149,7 @@ pub fn render_story(id: &str) -> Option<Element> {
             });
         }
         "studio/panes/project" => {
-            let view = project_view(ProjectState::NotLoaded, true);
+            let view = project_view(project_ready_state(), true);
             return Some(rsx! {
                 UxPane {
                     view,
@@ -153,12 +159,23 @@ pub fn render_story(id: &str) -> Option<Element> {
                 }
             });
         }
-        "studio/panes/project-selection" => {
-            let view = project_view(project_selection_state(), true);
+        "studio/device-project-empty" => {
+            let view = device_project_empty_view();
             return Some(rsx! {
                 UxPane {
                     view,
-                    primary: false,
+                    primary: true,
+                    running: false,
+                    on_action: move |_| {},
+                }
+            });
+        }
+        "studio/device-project-selection" => {
+            let view = device_project_selection_view();
+            return Some(rsx! {
+                UxPane {
+                    view,
+                    primary: true,
                     running: false,
                     on_action: move |_| {},
                 }
@@ -600,6 +617,72 @@ fn simulator_ready_device_view() -> UiPaneView {
     )
 }
 
+fn device_project_empty_view() -> UiPaneView {
+    device_view(
+        UiStatus::good("LightPlayer ready"),
+        vec![
+            select_connection_complete("ESP32 over USB"),
+            connect_device_complete(esp32_metrics()),
+            stack_section(
+                "connect-lightplayer",
+                "Connect LightPlayer",
+                UiStepState::Complete,
+                UiBody::Metrics(vec![UiMetric::new("Protocol", "lp-serial-json-lines-v1")]),
+                vec![disconnect_device_action()],
+            ),
+            stack_section(
+                "open-project",
+                "Open project",
+                UiStepState::Active,
+                UiBody::text("Connect to a running project or load the demo project."),
+                vec![
+                    project_action(ProjectOp::ConnectRunningProject),
+                    project_action(ProjectOp::LoadDemoProject),
+                ],
+            ),
+        ],
+        vec![
+            "[fw-esp32] LightPlayer protocol ready",
+            "[lp-server] loaded projects: 0",
+        ],
+    )
+}
+
+fn device_project_selection_view() -> UiPaneView {
+    device_view(
+        UiStatus::good("LightPlayer ready"),
+        vec![
+            select_connection_complete("ESP32 over USB"),
+            connect_device_complete(esp32_metrics()),
+            stack_section(
+                "connect-lightplayer",
+                "Connect LightPlayer",
+                UiStepState::Complete,
+                UiBody::Metrics(vec![UiMetric::new("Protocol", "lp-serial-json-lines-v1")]),
+                vec![disconnect_device_action()],
+            ),
+            stack_section(
+                "open-project",
+                "Open project",
+                UiStepState::Active,
+                UiBody::text("2 projects are running. Choose one to open."),
+                vec![
+                    project_action(ProjectOp::ConnectLoadedProject { handle_id: 1 })
+                        .with_label("Connect /projects/ambient")
+                        .with_summary("Attach to running project handle 1."),
+                    project_action(ProjectOp::ConnectLoadedProject { handle_id: 2 })
+                        .with_label("Connect /projects/palette-test")
+                        .with_summary("Attach to running project handle 2."),
+                ],
+            ),
+        ],
+        vec![
+            "[fw-esp32] LightPlayer protocol ready",
+            "[lp-server] loaded projects: 2",
+        ],
+    )
+}
+
 fn blank_device_view(status: UiStatus, body: UiBody, after_reset: bool) -> UiPaneView {
     let detail = if after_reset {
         vec![
@@ -794,15 +877,6 @@ fn project_view(state: ProjectState, server_connected: bool) -> UiPaneView {
     project.view(server_connected)
 }
 
-fn project_selection_state() -> ProjectState {
-    ProjectState::SelectingLoadedProject {
-        projects: vec![
-            LoadedProjectChoice::new("/projects/ambient", 1),
-            LoadedProjectChoice::new("/projects/palette-test", 2),
-        ],
-    }
-}
-
 fn project_ready_state() -> ProjectState {
     ProjectState::Ready {
         project_id: "studio-demo".to_string(),
@@ -842,10 +916,6 @@ fn device_action(op: DeviceOp) -> UiAction {
     UiAction::from_op(UxNodeId::new(DeviceUx::NODE_ID), op)
 }
 
-#[allow(
-    dead_code,
-    reason = "Project stories may grow direct project action fixtures."
-)]
 fn project_action(op: ProjectOp) -> UiAction {
     UiAction::from_op(UxNodeId::new(ProjectUx::NODE_ID), op)
 }

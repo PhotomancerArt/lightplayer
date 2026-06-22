@@ -38,9 +38,11 @@ impl StudioUx {
     }
 
     pub fn view(&self) -> StudioView {
-        let mut panes = vec![self.device.view()];
-        if self.project_is_visible() {
-            panes.push(self.project.view(self.device.is_lightplayer_connected()));
+        let project_snapshot = self.project.snapshot();
+        let project_actions = self.project.actions(self.device.has_lightplayer_state());
+        let mut panes = vec![self.device.view(&project_snapshot.state, project_actions)];
+        if self.project_is_loaded() {
+            panes.push(self.project.view(self.device.has_lightplayer_state()));
         }
         StudioView::new(panes, self.logs.clone())
     }
@@ -461,9 +463,8 @@ impl StudioUx {
         Ok(UxOutcome::new().with_notice(reset_notice(&management.result)))
     }
 
-    fn project_is_visible(&self) -> bool {
-        self.device.is_lightplayer_connected()
-            || !matches!(self.project.snapshot().state, ProjectState::NotLoaded)
+    fn project_is_loaded(&self) -> bool {
+        matches!(self.project.snapshot().state, ProjectState::Ready { .. })
     }
 }
 
@@ -577,7 +578,7 @@ mod tests {
 
     use crate::{
         ConnectedDeviceSummary, LinkState, LinkUx, ProjectInventorySummary, ProjectState,
-        ServerState, UiStatusKind, UxNodeId,
+        ProjectUx, ServerState, UiStatusKind, UxNodeId,
     };
 
     use super::*;
@@ -613,6 +614,39 @@ mod tests {
 
         assert_eq!(view.panes.len(), 1);
         assert_eq!(view.panes[0].node_id.as_str(), DeviceUx::NODE_ID);
+    }
+
+    #[test]
+    fn connected_without_project_keeps_project_actions_in_device_pane() {
+        let mut studio = connected_studio();
+        studio.project.reset();
+
+        let view = studio.view();
+        let actions = view_actions(&view);
+
+        assert_eq!(view.panes.len(), 1);
+        assert_eq!(view.panes[0].node_id.as_str(), DeviceUx::NODE_ID);
+        assert!(actions.iter().any(|action| {
+            matches!(
+                action.op_as::<ProjectOp>(),
+                Some(ProjectOp::ConnectRunningProject)
+            )
+        }));
+        assert!(actions.iter().any(|action| matches!(
+            action.op_as::<ProjectOp>(),
+            Some(ProjectOp::LoadDemoProject)
+        )));
+    }
+
+    #[test]
+    fn loaded_project_gets_project_pane() {
+        let studio = connected_studio();
+
+        let view = studio.view();
+
+        assert_eq!(view.panes.len(), 2);
+        assert_eq!(view.panes[0].node_id.as_str(), DeviceUx::NODE_ID);
+        assert_eq!(view.panes[1].node_id.as_str(), ProjectUx::NODE_ID);
     }
 
     #[test]
