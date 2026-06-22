@@ -15,8 +15,9 @@ pub use action::{
     UxContext, UxNode, UxNodeId, UxOp,
 };
 pub use link::{
-    ConnectedDeviceSummary, ConnectedLink, EndpointChoice, LinkOp, LinkOpenOutcome, LinkSnapshot,
-    LinkState, LinkUx, ProgressState, ProviderChoice, SharedLinkRegistry, UxIssue,
+    ConnectedDeviceSummary, ConnectedLink, EndpointChoice, LinkManagementOutcome, LinkOp,
+    LinkOpenOutcome, LinkSnapshot, LinkState, LinkUx, ProgressState, ProviderChoice,
+    SharedLinkRegistry, UxIssue,
 };
 pub use project::{
     LoadedProjectChoice, ProjectConnectResult, ProjectInventorySummary, ProjectOp, ProjectSnapshot,

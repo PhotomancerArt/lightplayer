@@ -1,4 +1,6 @@
 use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
+use crate::provider::management_request::LinkManagementRequest;
+use crate::provider::management_result::LinkManagementResult;
 use crate::provider::session::LinkSessionId;
 use crate::providers::LinkProviderKind;
 use crate::{LinkConnection, LinkDiagnostic, LinkEndpoint, LinkError, LinkLogEntry, LinkSession};
@@ -48,6 +50,21 @@ pub trait LinkProvider {
 
     /// Link-level diagnostics available through the provider-owned session.
     fn diagnostics(&self, session_id: &LinkSessionId) -> Result<Vec<LinkDiagnostic>, LinkError>;
+
+    /// Execute a low-level management operation through a live session.
+    ///
+    /// Providers that do not support the requested operation should return
+    /// `LinkError::OperationUnsupported`. Management operations are below the
+    /// `lp-server` protocol and may invalidate any server connection opened from
+    /// the same session.
+    async fn manage(
+        &mut self,
+        session_id: &LinkSessionId,
+        request: LinkManagementRequest,
+    ) -> Result<LinkManagementResult, LinkError> {
+        let _ = session_id;
+        Err(LinkError::unsupported(format!("{:?}", request.operation())))
+    }
 
     /// Close provider-owned resources for a live session.
     async fn close(&mut self, session_id: &LinkSessionId) -> Result<(), LinkError>;

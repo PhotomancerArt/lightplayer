@@ -18,6 +18,10 @@ pub enum LinkState {
         endpoint: EndpointChoice,
         progress: ProgressState,
     },
+    Managing {
+        device: ConnectedDeviceSummary,
+        progress: ProgressState,
+    },
     Connected {
         device: ConnectedDeviceSummary,
     },

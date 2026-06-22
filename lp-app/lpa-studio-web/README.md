@@ -36,8 +36,9 @@ screen.
 The current surface can launch the browser-local firmware runtime with the demo
 project, connect browser serial hardware, open the server protocol, attach to an
 already-loaded running project, explicitly load the built-in demo project on
-hardware, and display a small project inventory summary. It intentionally does
-not include the previous full ESP32 provisioning, flashing, and recovery UI.
+hardware, provision a blank ESP32-C6 with packaged LightPlayer firmware, reset a
+provisioned ESP32-C6 back to blank, and display a small project inventory
+summary.
 
 ## Run
 
@@ -58,9 +59,34 @@ those paths to page-absolute URLs before sending them into the embedded blob
 worker, which lets worker import/init failures surface as actionable link
 errors instead of silent boot timeouts.
 
+ESP32-C6 firmware assets are served from
+`public/firmware/esp32c6/manifest.json`. Browser serial provisioning imports a
+pinned `esptool-js` module from
+`https://unpkg.com/esptool-js@0.6.0/lib/index.js` by default; deployments can
+override the `BrowserSerialEsp32Options` path if they want to serve that module
+themselves. Firmware provisioning and reset-to-blank both require a browser with
+Web Serial support and a user-granted serial port.
+
+## Hardware Flow
+
+Start the dev server, open `http://127.0.0.1:2820/`, and choose the ESP32 Web
+Serial action. Browser port selection is handled by the browser permission
+prompt, not by a Studio endpoint picker.
+
+For a blank or non-LightPlayer ESP32-C6, Studio keeps the link session and
+offers `Provision firmware`. Confirming the action writes the packaged firmware
+and then attempts to reconnect to the LightPlayer server after reset.
+
+For an already provisioned ESP32-C6, Studio can connect to the server/project
+workflow. The link pane also offers `Reset to blank` as a destructive tertiary
+action when the provider advertises whole-device erase. Confirming it erases the
+device flash, clears server/project state, and returns the link to a
+provisionable state.
+
 ## Stories
 
-The storybook covers the active UX shell, action strip, and pane states.
+The storybook covers the active UX shell, action strip, pane states,
+provision-ready/provisioning/provision-failed, and reset-to-blank states.
 Run the dev server and open:
 
 ```text

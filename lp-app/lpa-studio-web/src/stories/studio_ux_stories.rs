@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
 use lpa_studio_ux::{
-    ConnectedDeviceSummary, EndpointChoice, LinkProviderKind, LinkState, LinkUx,
+    ConnectedDeviceSummary, EndpointChoice, LinkOp, LinkProviderKind, LinkState, LinkUx,
     LoadedProjectChoice, ProgressState, ProjectInventorySummary, ProjectState, ProjectUx,
-    ProviderChoice, ServerState, ServerUx, StudioView, UxAction, UxIssue, UxLogEntry, UxLogLevel,
-    UxPaneView,
+    ProviderChoice, ServerState, ServerUx, StudioView, UxAction, UxBody, UxIssue, UxLogEntry,
+    UxLogLevel, UxNodeId, UxPaneView, UxStatus,
 };
 
 use crate::components::{ActionStrip, StudioShell, UxPane};
@@ -69,6 +69,36 @@ pub const STORIES: &[StoryDescriptor] = &[
         "Studio UX",
         "Server disconnected",
         "Open link session with the server protocol detached and reconnect action available.",
+    ),
+    StoryDescriptor::new(
+        "studio/provision-ready",
+        "Studio UX",
+        "Provision ready",
+        "Blank ESP32 link session offering firmware provisioning.",
+    ),
+    StoryDescriptor::new(
+        "studio/provisioning",
+        "Studio UX",
+        "Provisioning",
+        "Progress while Studio flashes packaged LightPlayer firmware.",
+    ),
+    StoryDescriptor::new(
+        "studio/provision-failed",
+        "Studio UX",
+        "Provision failed",
+        "Provisioning issue with retry and disconnect actions.",
+    ),
+    StoryDescriptor::new(
+        "studio/resetting-to-blank",
+        "Studio UX",
+        "Resetting to blank",
+        "Progress while Studio erases an existing ESP32.",
+    ),
+    StoryDescriptor::new(
+        "studio/reset-complete",
+        "Studio UX",
+        "Reset complete",
+        "Blank ESP32 after erase with provisioning available again.",
     ),
     StoryDescriptor::new(
         "studio/project-ready",
@@ -168,6 +198,21 @@ pub fn render_story(id: &str) -> Option<Element> {
             false,
             None,
             vec!["Server disconnected".to_string()],
+        ),
+        "studio/provision-ready" => (provision_ready_view(), false, None, Vec::new()),
+        "studio/provisioning" => (provisioning_view(), true, None, Vec::new()),
+        "studio/provision-failed" => (
+            provision_failed_view(),
+            false,
+            Some("browser serial firmware flashing failed".to_string()),
+            Vec::new(),
+        ),
+        "studio/resetting-to-blank" => (resetting_to_blank_view(), true, None, Vec::new()),
+        "studio/reset-complete" => (
+            reset_complete_view(),
+            false,
+            None,
+            vec!["ESP32-C6 reset to blank".to_string()],
         ),
         "studio/project-ready" => (
             project_ready_view(),
@@ -289,6 +334,108 @@ fn server_disconnected_link_ready_view() -> StudioView {
     )
 }
 
+fn provision_ready_view() -> StudioView {
+    StudioView::new(
+        vec![
+            provision_ready_link_view(),
+            server_view(ServerState::Disconnected),
+            project_view(ProjectState::NotLoaded, false),
+        ],
+        vec![UxLogEntry::new(
+            UxLogLevel::Warn,
+            "lpa-studio-ux",
+            "server protocol is unavailable; firmware provisioning is available",
+        )],
+    )
+}
+
+fn provisioning_view() -> StudioView {
+    studio_view(
+        LinkState::Managing {
+            device: esp32_device_summary(),
+            progress: ProgressState::new("Provisioning firmware")
+                .with_detail("Writing LightPlayer ESP32-C6 server firmware."),
+        },
+        ServerState::Disconnected,
+        ProjectState::NotLoaded,
+        false,
+        vec![UxLogEntry::new(
+            UxLogLevel::Info,
+            "lpa-link",
+            "Connected to ESP32 bootloader",
+        )],
+    )
+}
+
+fn provision_failed_view() -> StudioView {
+    StudioView::new(
+        vec![
+            UxPaneView::new(
+                LinkUx::NODE_ID,
+                "Link",
+                UxStatus::error("Provision failed"),
+                UxBody::Issue(
+                    UxIssue::new("firmware flashing failed")
+                        .with_detail("Check the cable, boot mode, and browser serial permission."),
+                ),
+                vec![
+                    link_action(LinkOp::ProvisionFirmware),
+                    link_action(LinkOp::DisconnectLink),
+                ],
+            ),
+            server_view(ServerState::Disconnected),
+            project_view(ProjectState::NotLoaded, false),
+        ],
+        vec![UxLogEntry::new(
+            UxLogLevel::Error,
+            "lpa-link",
+            "failed to write firmware image",
+        )],
+    )
+}
+
+fn resetting_to_blank_view() -> StudioView {
+    studio_view(
+        LinkState::Managing {
+            device: esp32_device_summary(),
+            progress: ProgressState::new("Resetting device to blank")
+                .with_detail("Erasing ESP32 flash through the bootloader."),
+        },
+        ServerState::Disconnected,
+        ProjectState::NotLoaded,
+        false,
+        vec![UxLogEntry::new(
+            UxLogLevel::Info,
+            "lpa-link",
+            "Erasing device flash",
+        )],
+    )
+}
+
+fn reset_complete_view() -> StudioView {
+    StudioView::new(
+        vec![
+            UxPaneView::new(
+                LinkUx::NODE_ID,
+                "Link",
+                UxStatus::warning("Blank ESP32"),
+                UxBody::text("The device has been erased and can be provisioned again."),
+                vec![
+                    link_action(LinkOp::ProvisionFirmware),
+                    link_action(LinkOp::DisconnectLink),
+                ],
+            ),
+            server_view(ServerState::Disconnected),
+            project_view(ProjectState::NotLoaded, false),
+        ],
+        vec![UxLogEntry::new(
+            UxLogLevel::Info,
+            "lpa-link",
+            "Chip erase completed successfully",
+        )],
+    )
+}
+
 fn error_view() -> StudioView {
     studio_view(
         LinkState::Failed {
@@ -330,6 +477,24 @@ fn link_view(state: LinkState, server_connected: bool) -> UxPaneView {
     link.view(server_connected)
 }
 
+fn provision_ready_link_view() -> UxPaneView {
+    UxPaneView::new(
+        LinkUx::NODE_ID,
+        "Link",
+        UxStatus::warning("Blank ESP32"),
+        UxBody::text("The selected device is ready for LightPlayer firmware."),
+        vec![
+            link_action(LinkOp::ProvisionFirmware),
+            link_action(LinkOp::ConnectServer),
+            link_action(LinkOp::DisconnectLink),
+        ],
+    )
+}
+
+fn link_action(op: LinkOp) -> UxAction {
+    UxAction::from_op(UxNodeId::new(LinkUx::NODE_ID), op)
+}
+
 fn server_view(state: ServerState) -> UxPaneView {
     let mut server = ServerUx::new();
     server.set_state(state);
@@ -369,6 +534,15 @@ fn connected_link_state() -> LinkState {
             "Browser firmware runtime",
         ),
     }
+}
+
+fn esp32_device_summary() -> ConnectedDeviceSummary {
+    ConnectedDeviceSummary::new(
+        LinkProviderKind::BrowserSerialEsp32,
+        "browser-serial-esp32-port-1",
+        "browser-serial-esp32-port-1:1",
+        "ESP32-C6",
+    )
 }
 
 fn project_selection_state() -> ProjectState {

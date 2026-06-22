@@ -1,7 +1,7 @@
 use crate::provider::endpoint::LinkEndpointId;
 use crate::providers::LinkProviderKind;
 use crate::providers::fake::FakeProvider;
-use crate::{LinkCapabilities, LinkEndpoint, LinkProvider};
+use crate::{LinkCapabilities, LinkEndpoint, LinkError, LinkManagementRequest, LinkProvider};
 
 #[tokio::test]
 async fn discover_returns_all_fake_endpoints() {
@@ -50,6 +50,22 @@ async fn logs_and_diagnostics_are_scoped_to_session() {
 
     provider.close(session.id()).await.unwrap();
     assert!(provider.connection(session.id()).await.is_err());
+}
+
+#[tokio::test]
+async fn unsupported_management_request_returns_link_error() {
+    let mut provider = fake_provider();
+    let session = provider
+        .connect(&LinkEndpointId::new("fake-a"))
+        .await
+        .unwrap();
+
+    let error = provider
+        .manage(session.id(), LinkManagementRequest::FlashFirmware)
+        .await
+        .unwrap_err();
+
+    assert!(matches!(error, LinkError::OperationUnsupported { .. }));
 }
 
 fn fake_provider() -> FakeProvider {

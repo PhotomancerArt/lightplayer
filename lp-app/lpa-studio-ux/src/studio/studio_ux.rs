@@ -1,6 +1,6 @@
 use core::future::Future;
 
-use lpa_link::{LinkConnection, LinkConnectionKind};
+use lpa_link::{LinkConnection, LinkConnectionKind, LinkManagementRequest, LinkManagementResult};
 
 use crate::{
     ConnectedLink, LinkOp, LinkOpenOutcome, LinkUx, ProjectConnectResult, ProjectOp, ProjectUx,
@@ -75,6 +75,8 @@ impl StudioUx {
         match op {
             LinkOp::DisconnectLink => self.disconnect_link().await,
             LinkOp::ConnectServer => self.connect_server_from_link().await,
+            LinkOp::ProvisionFirmware => self.provision_firmware().await,
+            LinkOp::ResetToBlank => self.reset_to_blank().await,
             LinkOp::RefreshProviders => {
                 self.link.refresh_provider_catalog();
                 Ok(UxOutcome::new().with_notice(UxNotice::info("Provider catalog refreshed")))
@@ -273,6 +275,64 @@ impl StudioUx {
         self.link.disconnect().await?;
         Ok(UxOutcome::new().with_notice(UxNotice::info("Link disconnected")))
     }
+
+    async fn provision_firmware(&mut self) -> UxResult {
+        self.project.reset();
+        self.server.disconnect();
+        let management = self
+            .link
+            .manage(
+                LinkManagementRequest::FlashFirmware,
+                "Provisioning firmware",
+            )
+            .await?;
+        self.logs.extend(management.logs);
+        let mut outcome = UxOutcome::new().with_notice(provision_notice(&management.result));
+        match self.link.reopen_active_connection().await {
+            Ok(connected) => match self.attach_connected_link(connected).await {
+                Ok(mut attach_outcome) => {
+                    outcome.notices.append(&mut attach_outcome.notices);
+                    Ok(outcome)
+                }
+                Err(error) => {
+                    self.logs.push(UxLogEntry::new(
+                        UxLogLevel::Warn,
+                        "lpa-studio-ux",
+                        format!("firmware provisioned but server reconnect failed: {error}"),
+                    ));
+                    self.server.fail(error.to_string());
+                    Ok(outcome.with_notice(UxNotice::info(
+                        "Firmware provisioned; reconnect the server after the device finishes booting",
+                    )))
+                }
+            },
+            Err(error) => {
+                self.logs.push(UxLogEntry::new(
+                    UxLogLevel::Warn,
+                    "lpa-studio-ux",
+                    format!("firmware provisioned but serial reopen failed: {error}"),
+                ));
+                self.server.fail(error.to_string());
+                Ok(outcome.with_notice(UxNotice::info(
+                    "Firmware provisioned; reconnect the device after it finishes booting",
+                )))
+            }
+        }
+    }
+
+    async fn reset_to_blank(&mut self) -> UxResult {
+        self.project.reset();
+        self.server.disconnect();
+        let management = self
+            .link
+            .manage(
+                LinkManagementRequest::EraseDeviceFlash,
+                "Resetting device to blank",
+            )
+            .await?;
+        self.logs.extend(management.logs);
+        Ok(UxOutcome::new().with_notice(reset_notice(&management.result)))
+    }
 }
 
 impl Default for StudioUx {
@@ -299,6 +359,25 @@ enum AutoProjectConnect {
 
 fn should_auto_load_demo_project(connection: &LinkConnection) -> bool {
     matches!(connection.kind, LinkConnectionKind::BrowserWorker { .. })
+}
+
+fn provision_notice(result: &LinkManagementResult) -> UxNotice {
+    match result {
+        LinkManagementResult::FlashFirmware(result) => {
+            UxNotice::info(format!("Provisioned {}", result.manifest.display_name))
+        }
+        _ => UxNotice::info("Firmware provisioned"),
+    }
+}
+
+fn reset_notice(result: &LinkManagementResult) -> UxNotice {
+    match result {
+        LinkManagementResult::EraseDeviceFlash(result) => {
+            let label = result.chip_name.as_deref().unwrap_or("selected ESP32");
+            UxNotice::info(format!("{label} reset to blank"))
+        }
+        _ => UxNotice::info("Device reset to blank"),
+    }
 }
 
 #[cfg(test)]

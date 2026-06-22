@@ -13,6 +13,8 @@ pub enum LinkOperation {
     Reset,
     /// Flash firmware onto the endpoint.
     FlashFirmware,
+    /// Erase the endpoint flash so the device returns to a blank state.
+    EraseDeviceFlash,
     /// Read the raw filesystem image below the running server.
     ReadRawFilesystem,
     /// Write the raw filesystem image below the running server.
@@ -66,6 +68,11 @@ impl LinkCapabilities {
 
     pub fn with_flash(mut self) -> Self {
         self.operations.insert(LinkOperation::FlashFirmware);
+        self
+    }
+
+    pub fn with_device_erase(mut self) -> Self {
+        self.operations.insert(LinkOperation::EraseDeviceFlash);
         self
     }
 

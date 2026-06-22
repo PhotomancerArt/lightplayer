@@ -1,4 +1,6 @@
 use crate::provider::endpoint::{LinkEndpointId, LinkEndpointStatus};
+use crate::provider::management_request::LinkManagementRequest;
+use crate::provider::management_result::LinkManagementResult;
 use crate::provider::session::LinkSessionId;
 use crate::providers::{LinkProviderDescriptor, LinkProviderKind};
 use crate::{
@@ -133,6 +135,24 @@ impl LinkProvider for LinkProviderInstance {
             Self::BrowserWorker(provider) => provider.diagnostics(session_id),
             #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
             Self::BrowserSerialEsp32(provider) => provider.diagnostics(session_id),
+        }
+    }
+
+    async fn manage(
+        &mut self,
+        session_id: &LinkSessionId,
+        request: LinkManagementRequest,
+    ) -> Result<LinkManagementResult, LinkError> {
+        match self {
+            Self::Fake(provider) => provider.manage(session_id, request).await,
+            #[cfg(feature = "host-process")]
+            Self::HostProcess(provider) => provider.manage(session_id, request).await,
+            #[cfg(feature = "host-serial-esp32")]
+            Self::HostSerialEsp32(provider) => provider.manage(session_id, request).await,
+            #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
+            Self::BrowserWorker(provider) => provider.manage(session_id, request).await,
+            #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+            Self::BrowserSerialEsp32(provider) => provider.manage(session_id, request).await,
         }
     }
 

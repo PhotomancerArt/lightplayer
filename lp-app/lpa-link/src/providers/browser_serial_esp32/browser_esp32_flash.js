@@ -116,6 +116,62 @@ export async function flashFirmware(portId, manifestPath, esptoolModulePath) {
   }
 }
 
+export async function eraseDeviceFlash(portId, esptoolModulePath) {
+  if (!isSupported()) {
+    throw new Error("Web Serial device erase is not supported in this browser.");
+  }
+
+  const port = getPort(portId);
+  await releasePort(portId);
+
+  const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
+  const logs = [];
+  const progress = [];
+  const terminal = terminalFor(logs, "esp32-erase");
+  const transport = new Transport(port, true);
+  const loader = new ESPLoader({
+    transport,
+    baudrate: 115200,
+    terminal,
+    debugLogging: false,
+  });
+
+  try {
+    const chipName = await loader.main();
+    progress.push({
+      label: "Connected to ESP32 bootloader",
+      completedSteps: 1,
+      totalSteps: 3,
+      percent: 10,
+    });
+    progress.push({
+      label: "Erasing device flash",
+      completedSteps: 2,
+      totalSteps: 3,
+      percent: 50,
+    });
+    await loader.eraseFlash();
+    progress.push({
+      label: "Resetting blank device",
+      completedSteps: 3,
+      totalSteps: 3,
+      percent: 100,
+    });
+    await loader.after("hard_reset");
+    return {
+      chipName: chipName ? String(chipName) : null,
+      logs,
+      progress: compactProgress(progress),
+    };
+  } finally {
+    try {
+      await transport.disconnect();
+    } catch (error) {
+      console.warn("[esp32-erase] transport disconnect failed", error);
+    }
+  }
+}
+
 function terminalFor(logs, target) {
   return {
     clean() {},
@@ -162,7 +218,7 @@ async function loadImageFiles(manifest, manifestPath) {
 
 async function loadEsptoolModule(esptoolModulePath) {
   if (!esptoolModulePath) {
-    throw new Error("Missing same-origin esptool_module_path.");
+    throw new Error("Missing esptool_module_path.");
   }
   return import(esptoolModulePath);
 }

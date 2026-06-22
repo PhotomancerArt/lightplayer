@@ -10,6 +10,7 @@ pub fn ActionButton(action: UxAction, running: bool, on_action: EventHandler<UxA
     let class = action_class(meta.priority);
     let disabled_reason = disabled_reason(&meta.enablement).map(ToString::to_string);
     let icon_class = action_icon_class(meta.icon.as_deref());
+    let confirmation = meta.confirmation.clone();
     let label = meta.label;
     let summary = meta.summary;
 
@@ -20,7 +21,11 @@ pub fn ActionButton(action: UxAction, running: bool, on_action: EventHandler<UxA
                 r#type: "button",
                 disabled,
                 title: "{summary}",
-                onclick: move |_| on_action.call(action_to_run.clone()),
+                onclick: move |_| {
+                    if confirmation_confirmed(confirmation.as_ref()) {
+                        on_action.call(action_to_run.clone());
+                    }
+                },
                 if let Some(icon_class) = icon_class {
                     span { class: "{icon_class}", aria_hidden: "true" }
                 }
@@ -31,6 +36,16 @@ pub fn ActionButton(action: UxAction, running: bool, on_action: EventHandler<UxA
             }
         }
     }
+}
+
+fn confirmation_confirmed(confirmation: Option<&lpa_studio_ux::ActionConfirmation>) -> bool {
+    let Some(confirmation) = confirmation else {
+        return true;
+    };
+    let message = format!("{}\n\n{}", confirmation.title, confirmation.message);
+    web_sys::window()
+        .and_then(|window| window.confirm_with_message(&message).ok())
+        .unwrap_or(false)
 }
 
 fn action_class(priority: ActionPriority) -> &'static str {

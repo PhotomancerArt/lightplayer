@@ -17,6 +17,11 @@ async fn browser_serial_provider_models_granted_ports() {
             .capabilities
             .supports(LinkOperation::FlashFirmware)
     );
+    assert!(
+        endpoints[0]
+            .capabilities
+            .supports(LinkOperation::EraseDeviceFlash)
+    );
 }
 
 #[tokio::test]

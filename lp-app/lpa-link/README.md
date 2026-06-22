@@ -47,6 +47,36 @@ LinkConnection::server_client() -> lpa-client
   layer. A connection is not a project session and does not replace the owning
   link session.
 
+## Management API
+
+Some link operations happen below the running `lp-server`: firmware
+provisioning, full-device erase, raw filesystem image access, bootloader
+probing, and low-level reset/recovery. Providers advertise the operations they
+can perform through `LinkCapabilities`, then execute supported operations
+through the session-scoped management API:
+
+```rust
+provider
+    .manage(session.id(), LinkManagementRequest::FlashFirmware)
+    .await?;
+```
+
+`LinkManagementRequest` is provider-neutral, while each provider owns the
+target-specific work needed to satisfy it. For browser Web Serial ESP32, this
+means releasing normal server/protocol ownership of the serial port before
+taking exclusive bootloader ownership for flash or erase.
+
+The current implemented management operations are:
+
+- `FlashFirmware`: write the provider-configured LightPlayer ESP32-C6 firmware
+  manifest/images to the device.
+- `EraseDeviceFlash`: erase the whole device flash so the ESP32 returns to a
+  blank, unprovisioned state.
+
+Raw filesystem image erase/read/write are modeled as link-level operations but
+are future work. They should operate on direct device/LittleFS image bytes below
+the server, not on the server filesystem API used for normal project upload.
+
 ## Server Connections
 
 `LinkConnection` is the handoff point from an open link session to the server
@@ -88,7 +118,7 @@ intents, ordering, and recovery actions.
 | `host-process` | `providers::host_process::HostProcessProvider` | host process running `fw-host` | spawnable host runtime | logs, diagnostics, future local filesystem/runtime controls | implemented; returns host `LinkServerConnection` |
 | `browser-worker` | `providers::browser_worker::BrowserWorkerProvider` | `fw-browser` Web Worker | browser worker runtime | logs, diagnostics, worker lifecycle | implemented; owns Worker wrapper/lifecycle |
 | `host-serial-esp32` | `providers::host_serial_esp32::HostSerialEsp32Provider` | ESP32 over host serial | physical serial device | connect, reset-after-open, logs, diagnostics; future flash/raw filesystem | implemented for discovery/connect; returns host `LinkServerConnection` |
-| `browser-serial-esp32` | `providers::browser_serial_esp32::BrowserSerialEsp32Provider` | ESP32 over Web Serial | physical serial device | connect, flash, reset, logs, diagnostics; future raw filesystem | implemented for browser Web Serial/probe/flash ownership |
+| `browser-serial-esp32` | `providers::browser_serial_esp32::BrowserSerialEsp32Provider` | ESP32 over Web Serial | physical serial device | connect, provision firmware, erase to blank, reset, logs, diagnostics; future raw filesystem | implemented for browser Web Serial/probe/flash/erase ownership |
 | `host-websocket` | future `providers::host_websocket::HostWebsocketProvider` | already-running server over host networking | remote endpoint | host-side discovery/connect/status; limited management | future |
 | `browser-websocket` | future `providers::browser_websocket::BrowserWebsocketProvider` | already-running server over browser networking | remote endpoint | browser permission/discovery/connect/status; limited management | future |
 | `host-webserver` | future `providers::host_webserver::HostWebserverProvider` | host service owning `fw-host` runtimes | service-managed runtime endpoint | create/stop runtimes, logs, diagnostics | future |
@@ -146,11 +176,13 @@ cargo check -p lpa-link --features browser-worker --target wasm32-unknown-unknow
   `src/providers/browser_worker`. Apps pass same-origin
   `fw_browser_module_path` and `fw_browser_wasm_path` options for the generated
   `fw-browser` sidecar artifacts.
-- `browser-serial-esp32` owns Web Serial access and ESP32 probe/flash bindings
+- `browser-serial-esp32` owns Web Serial access and ESP32 probe/flash/erase bindings
   under `src/providers/browser_serial_esp32`. Apps pass same-origin
   `firmware_manifest_path` and optional `esptool_module_path` options for
-  app-owned assets. The provider releases normal protocol ownership before
-  probe/flash takes exclusive bootloader access.
+  app-owned assets. The default esptool module is pinned to
+  `https://unpkg.com/esptool-js@0.6.0/lib/index.js` for development. A deployed
+  app can override it with a hosted module path. The provider releases normal
+  protocol ownership before probe/flash/erase takes exclusive bootloader access.
 - Direct filesystem access means raw/full filesystem image management below the
   running `lp-server`. Normal project upload should use `lpa-client` and the
   server filesystem/project protocol once firmware is running.

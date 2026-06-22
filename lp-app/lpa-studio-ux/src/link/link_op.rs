@@ -2,12 +2,14 @@ use core::any::Any;
 
 use lpa_link::{LinkEndpointId, LinkProviderKind};
 
-use crate::{ActionMeta, ActionPriority, UxOp};
+use crate::{ActionConfirmation, ActionMeta, ActionPriority, UxOp};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LinkOp {
     RefreshProviders,
     ConnectServer,
+    ProvisionFirmware,
+    ResetToBlank,
     DisconnectLink,
     OpenProvider {
         provider_id: LinkProviderKind,
@@ -21,6 +23,26 @@ pub enum LinkOp {
 impl UxOp for LinkOp {
     fn default_action_meta(&self) -> ActionMeta {
         match self {
+            Self::ProvisionFirmware => ActionMeta::new(
+                "Provision firmware",
+                "Flash the packaged LightPlayer firmware onto this ESP32.",
+                ActionPriority::Primary,
+            )
+            .with_confirmation(ActionConfirmation::new(
+                "Provision firmware",
+                "This will write LightPlayer firmware to the selected ESP32. Continue?",
+                "Provision firmware",
+            )),
+            Self::ResetToBlank => ActionMeta::new(
+                "Reset to blank",
+                "Erase this ESP32 so it is no longer provisioned.",
+                ActionPriority::Tertiary,
+            )
+            .with_confirmation(ActionConfirmation::new(
+                "Reset device to blank",
+                "This erases firmware and device data from the selected ESP32.",
+                "Erase device",
+            )),
             Self::ConnectServer => ActionMeta::new(
                 "Connect server",
                 "Attach Studio to the server protocol over the open link session.",

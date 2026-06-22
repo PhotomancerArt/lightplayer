@@ -13,7 +13,9 @@ pub use endpoint_choice::EndpointChoice;
 pub use link_op::LinkOp;
 pub use link_snapshot::LinkSnapshot;
 pub use link_state::LinkState;
-pub use link_ux::{ConnectedLink, LinkOpenOutcome, LinkUx, SharedLinkRegistry};
+pub use link_ux::{
+    ConnectedLink, LinkManagementOutcome, LinkOpenOutcome, LinkUx, SharedLinkRegistry,
+};
 pub use progress_state::ProgressState;
 pub use provider_choice::ProviderChoice;
 pub use ux_issue::UxIssue;

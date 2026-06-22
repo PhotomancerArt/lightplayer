@@ -3,8 +3,9 @@ use std::rc::Rc;
 
 use lpa_link::providers::{LinkEnv, LinkProviderInstance, LinkProviderRegistry};
 use lpa_link::{
-    LinkConnection, LinkDiagnosticSeverity, LinkEndpointId, LinkLogLevel, LinkProvider,
-    LinkProviderKind, LinkSession, LinkSessionId,
+    LinkConnection, LinkDiagnosticSeverity, LinkEndpointId, LinkLogLevel, LinkManagementRequest,
+    LinkManagementResult, LinkOperation, LinkProvider, LinkProviderKind, LinkSession,
+    LinkSessionId,
 };
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
@@ -100,14 +101,29 @@ impl LinkUx {
                 })
                 .collect(),
             LinkState::Failed { .. } => vec![self.action(LinkOp::RefreshProviders)],
-            LinkState::DiscoveringEndpoints { .. } | LinkState::Connecting { .. } => Vec::new(),
+            LinkState::DiscoveringEndpoints { .. }
+            | LinkState::Connecting { .. }
+            | LinkState::Managing { .. } => Vec::new(),
             LinkState::Connected { .. } if server_connected => {
-                vec![self.action(LinkOp::DisconnectLink)]
+                let mut actions = Vec::new();
+                if self.active_supports(LinkOperation::EraseDeviceFlash) {
+                    actions.push(self.action(LinkOp::ResetToBlank));
+                }
+                actions.push(self.action(LinkOp::DisconnectLink));
+                actions
             }
-            LinkState::Connected { .. } => vec![
-                self.action(LinkOp::ConnectServer),
-                self.action(LinkOp::DisconnectLink),
-            ],
+            LinkState::Connected { .. } => {
+                let mut actions = Vec::new();
+                if self.active_supports(LinkOperation::FlashFirmware) {
+                    actions.push(self.action(LinkOp::ProvisionFirmware));
+                }
+                actions.push(self.action(LinkOp::ConnectServer));
+                if self.active_supports(LinkOperation::EraseDeviceFlash) {
+                    actions.push(self.action(LinkOp::ResetToBlank));
+                }
+                actions.push(self.action(LinkOp::DisconnectLink));
+                actions
+            }
         }
     }
 
@@ -316,6 +332,67 @@ impl LinkUx {
         Ok(ConnectedLink { connection, logs })
     }
 
+    pub async fn manage(
+        &mut self,
+        request: LinkManagementRequest,
+        progress_label: impl Into<String>,
+    ) -> Result<LinkManagementOutcome, UxError> {
+        let provider_id = self
+            .active_provider
+            .ok_or_else(|| UxError::MissingSession("link provider is not selected".to_string()))?;
+        let session_id = self
+            .active_session
+            .as_ref()
+            .map(|session| session.id.clone())
+            .ok_or_else(|| UxError::MissingSession("link session is not open".to_string()))?;
+        let device = self.connected_device_summary()?;
+        self.active_connection = None;
+        self.state = LinkState::Managing {
+            device: device.clone(),
+            progress: ProgressState::new(progress_label),
+        };
+
+        let result = {
+            let mut registry = self.registry.borrow_mut();
+            let provider = registry
+                .provider_mut(provider_id)
+                .ok_or_else(|| missing_provider(provider_id))?;
+            provider
+                .manage(&session_id, request)
+                .await
+                .map_err(map_link_error)?
+        };
+        let logs = management_result_logs(&result);
+        self.state = LinkState::Connected { device };
+        Ok(LinkManagementOutcome { result, logs })
+    }
+
+    pub async fn reopen_active_connection(&mut self) -> Result<ConnectedLink, UxError> {
+        let provider_id = self
+            .active_provider
+            .ok_or_else(|| UxError::MissingSession("link provider is not selected".to_string()))?;
+        let session_id = self
+            .active_session
+            .as_ref()
+            .map(|session| session.id.clone())
+            .ok_or_else(|| UxError::MissingSession("link session is not open".to_string()))?;
+        let (connection, logs) = {
+            let mut registry = self.registry.borrow_mut();
+            let provider = registry
+                .provider_mut(provider_id)
+                .ok_or_else(|| missing_provider(provider_id))?;
+            open_provider_protocol_if_needed(provider_id, provider, &session_id).await?;
+            let connection = provider
+                .connection(&session_id)
+                .await
+                .map_err(map_link_error)?;
+            let logs = link_session_logs(provider, &session_id)?;
+            (connection, logs)
+        };
+        self.active_connection = Some(connection.clone());
+        Ok(ConnectedLink { connection, logs })
+    }
+
     pub fn fail(&mut self, message: impl Into<String>) {
         self.state = LinkState::Failed {
             issue: UxIssue::new(message),
@@ -343,6 +420,23 @@ impl LinkUx {
             _ => None,
         }
     }
+
+    fn active_supports(&self, operation: LinkOperation) -> bool {
+        self.active_session
+            .as_ref()
+            .is_some_and(|session| session.capabilities.supports(operation))
+    }
+
+    fn connected_device_summary(&self) -> Result<ConnectedDeviceSummary, UxError> {
+        match &self.state {
+            LinkState::Connected { device } | LinkState::Managing { device, .. } => {
+                Ok(device.clone())
+            }
+            _ => Err(UxError::MissingSession(
+                "link is not connected to a device".to_string(),
+            )),
+        }
+    }
 }
 
 impl UxNode for LinkUx {
@@ -361,6 +455,11 @@ pub struct ConnectedLink {
 pub enum LinkOpenOutcome {
     Opened,
     Connected(ConnectedLink),
+}
+
+pub struct LinkManagementOutcome {
+    pub result: LinkManagementResult,
+    pub logs: Vec<UxLogEntry>,
 }
 
 impl Default for LinkUx {
@@ -393,6 +492,7 @@ fn link_status(state: &LinkState) -> UxStatus {
         LinkState::DiscoveringEndpoints { .. } => UxStatus::working("Discovering"),
         LinkState::SelectingEndpoint { .. } => UxStatus::neutral("Choose endpoint"),
         LinkState::Connecting { .. } => UxStatus::working("Connecting"),
+        LinkState::Managing { .. } => UxStatus::working("Managing"),
         LinkState::Connected { device } => UxStatus::good(device.label.clone()),
         LinkState::Failed { .. } => UxStatus::error("Link failed"),
     }
@@ -416,12 +516,58 @@ fn link_body(state: &LinkState) -> UxBody {
             .map(|endpoint| UxBody::text(endpoint.summary.clone()))
             .unwrap_or_else(|| UxBody::text("No endpoints are available for this provider.")),
         LinkState::Connecting { progress, .. } => UxBody::Progress(progress.clone()),
+        LinkState::Managing { progress, .. } => UxBody::Progress(progress.clone()),
         LinkState::Connected { device } => UxBody::Metrics(vec![
             UxMetric::new("Provider", device.provider_id.label()),
             UxMetric::new("Endpoint", &device.endpoint_id),
             UxMetric::new("Session", &device.session_id),
         ]),
         LinkState::Failed { issue } => UxBody::Issue(issue.clone()),
+    }
+}
+
+fn management_result_logs(result: &LinkManagementResult) -> Vec<UxLogEntry> {
+    match result {
+        LinkManagementResult::FlashFirmware(result) => {
+            let mut logs = result
+                .logs
+                .iter()
+                .map(|message| UxLogEntry::new(UxLogLevel::Info, "lpa-link", message.clone()))
+                .collect::<Vec<_>>();
+            logs.extend(result.progress.iter().map(|progress| {
+                UxLogEntry::new(UxLogLevel::Info, "lpa-link", progress.label.clone())
+            }));
+            logs
+        }
+        LinkManagementResult::EraseDeviceFlash(result) => {
+            let mut logs = result
+                .logs
+                .iter()
+                .map(|message| UxLogEntry::new(UxLogLevel::Info, "lpa-link", message.clone()))
+                .collect::<Vec<_>>();
+            logs.extend(result.progress.iter().map(|progress| {
+                UxLogEntry::new(UxLogLevel::Info, "lpa-link", progress.label.clone())
+            }));
+            logs
+        }
+        LinkManagementResult::EraseRawFilesystem(result) => {
+            let mut logs = result
+                .logs
+                .iter()
+                .map(|message| UxLogEntry::new(UxLogLevel::Info, "lpa-link", message.clone()))
+                .collect::<Vec<_>>();
+            logs.extend(result.progress.iter().map(|progress| {
+                UxLogEntry::new(UxLogLevel::Info, "lpa-link", progress.label.clone())
+            }));
+            logs
+        }
+        LinkManagementResult::ResetRuntime => {
+            vec![UxLogEntry::new(
+                UxLogLevel::Info,
+                "lpa-link",
+                "runtime reset completed",
+            )]
+        }
     }
 }
 
@@ -568,7 +714,9 @@ fn map_diagnostic_level(level: LinkDiagnosticSeverity) -> UxLogLevel {
 mod tests {
     use lpa_link::providers::LinkProviderRegistry;
     use lpa_link::providers::fake::FakeProvider;
-    use lpa_link::{LinkEndpoint, LinkProviderKind};
+    use lpa_link::{
+        LinkCapabilities, LinkConnectionKind, LinkEndpoint, LinkProviderKind, LinkSession,
+    };
 
     use super::*;
 
@@ -627,6 +775,51 @@ mod tests {
     }
 
     #[test]
+    fn connected_management_capable_link_offers_provision_and_reset_without_server() {
+        let mut link = LinkUx::with_registry(registry_with_fake_endpoint());
+        link.active_session = Some(management_capable_session());
+        link.set_state(LinkState::Connected {
+            device: ConnectedDeviceSummary::new(
+                LinkProviderKind::Fake,
+                "fake-runtime",
+                "fake-session",
+                "Fake runtime",
+            ),
+        });
+
+        let actions = link.actions(false);
+
+        assert_eq!(actions.len(), 4);
+        assert_eq!(
+            actions[0].op_as::<LinkOp>(),
+            Some(&LinkOp::ProvisionFirmware)
+        );
+        assert_eq!(actions[1].op_as::<LinkOp>(), Some(&LinkOp::ConnectServer));
+        assert_eq!(actions[2].op_as::<LinkOp>(), Some(&LinkOp::ResetToBlank));
+        assert_eq!(actions[3].op_as::<LinkOp>(), Some(&LinkOp::DisconnectLink));
+    }
+
+    #[test]
+    fn connected_management_capable_link_keeps_reset_available_with_server() {
+        let mut link = LinkUx::with_registry(registry_with_fake_endpoint());
+        link.active_session = Some(management_capable_session());
+        link.set_state(LinkState::Connected {
+            device: ConnectedDeviceSummary::new(
+                LinkProviderKind::Fake,
+                "fake-runtime",
+                "fake-session",
+                "Fake runtime",
+            ),
+        });
+
+        let actions = link.actions(true);
+
+        assert_eq!(actions.len(), 2);
+        assert_eq!(actions[0].op_as::<LinkOp>(), Some(&LinkOp::ResetToBlank));
+        assert_eq!(actions[1].op_as::<LinkOp>(), Some(&LinkOp::DisconnectLink));
+    }
+
+    #[test]
     fn snapshot_projects_provider_catalog_from_registry() {
         let link = LinkUx::with_registry(registry_with_fake_endpoint());
 
@@ -645,5 +838,17 @@ mod tests {
             "Fake runtime",
         )));
         registry
+    }
+
+    fn management_capable_session() -> LinkSession {
+        LinkSession::new(
+            "fake-session",
+            LinkProviderKind::Fake,
+            "fake-runtime",
+            LinkConnectionKind::Fake,
+            LinkCapabilities::esp32_serial_base()
+                .with_flash()
+                .with_device_erase(),
+        )
     }
 }

@@ -66,6 +66,31 @@ For the browser-worker simulator, the zero-loaded-project case auto-loads the
 demo project. Real hardware remains conservative and requires explicit project
 loading when nothing is running.
 
+## Link Management UX
+
+Blank-device provisioning and recovery are modeled as link-level UX actions
+because they happen below the running server protocol:
+
+- `Provision firmware` is offered when the connected link session supports
+  `FlashFirmware` and Studio is not currently attached to a server.
+- `Reset to blank` is offered when the connected link session supports
+  `EraseDeviceFlash`. It remains a tertiary destructive action even when the
+  server is connected.
+
+Both actions flow through `lpa-link::LinkProvider::manage`. `StudioUx` clears
+project and server state before executing them because firmware flashing and
+full-device erase invalidate any previous server/client connection.
+
+After provisioning, Studio attempts to reopen the server protocol and resume the
+normal server/project workflow. If the browser or device needs more time after
+reset, Studio keeps the link context and reports that the user should reconnect
+after boot.
+
+After reset-to-blank, Studio leaves project and server detached and returns to a
+link state that can offer provisioning again. Reset-to-blank is not a server
+filesystem clear; it is a destructive whole-device erase through the link
+provider.
+
 Disconnect semantics are intentionally distinct:
 
 - disconnecting a project detaches Studio from the project and leaves the server
