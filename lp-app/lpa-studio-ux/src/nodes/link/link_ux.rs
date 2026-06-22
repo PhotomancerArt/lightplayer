@@ -3,9 +3,9 @@ use std::rc::Rc;
 
 use lpa_link::providers::{LinkEnv, LinkProviderInstance, LinkProviderRegistry};
 use lpa_link::{
-    LinkConnection, LinkDiagnosticSeverity, LinkEndpointId, LinkLogLevel, LinkManagementRequest,
-    LinkManagementResult, LinkOperation, LinkProvider, LinkProviderKind, LinkSession,
-    LinkSessionId,
+    LinkConnection, LinkDiagnosticSeverity, LinkEndpointId, LinkError, LinkLogLevel,
+    LinkManagementRequest, LinkManagementResult, LinkOperation, LinkProvider, LinkProviderKind,
+    LinkSession, LinkSessionId,
 };
 #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
 use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
@@ -43,7 +43,10 @@ impl LinkUx {
         let registry = Rc::new(RefCell::new(registry));
         let providers = provider_choices(&registry.borrow());
         Self {
-            state: LinkState::SelectingProvider { providers },
+            state: LinkState::SelectingProvider {
+                providers,
+                issue: None,
+            },
             registry,
             active_provider: None,
             active_endpoint: None,
@@ -79,7 +82,7 @@ impl LinkUx {
 
     pub fn actions(&self, server_connected: bool) -> Vec<UiAction> {
         match &self.state {
-            LinkState::SelectingProvider { providers } => providers
+            LinkState::SelectingProvider { providers, .. } => providers
                 .iter()
                 .map(|provider| {
                     self.action(LinkOp::OpenProvider {
@@ -144,13 +147,20 @@ impl LinkUx {
     }
 
     pub fn refresh_provider_catalog(&mut self) {
+        self.reset_to_provider_selection(None);
+    }
+
+    fn reset_to_provider_selection(&mut self, issue: Option<UxIssue>) {
         self.active_provider = None;
         self.active_endpoint = None;
         self.active_session = None;
         self.active_connection = None;
-        self.state = LinkState::SelectingProvider {
-            providers: provider_choices(&self.registry.borrow()),
-        };
+        let providers = provider_choices(&self.registry.borrow());
+        self.state = LinkState::SelectingProvider { providers, issue };
+    }
+
+    fn recover_to_provider_selection(&mut self, message: impl Into<String>) {
+        self.reset_to_provider_selection(Some(UxIssue::new(message)));
     }
 
     pub async fn disconnect(&mut self) -> Result<(), UxError> {
@@ -227,17 +237,14 @@ impl LinkUx {
         let endpoints = match result {
             Ok(endpoints) => endpoints,
             Err(error) => {
-                self.fail(error.message());
+                self.recover_to_provider_selection(error.message());
                 return Err(error);
             }
         };
         if endpoints.is_empty() {
-            let error = UxError::Link(format!(
-                "{} did not report any endpoints",
-                provider_id.label()
-            ));
-            self.fail(error.message());
-            return Err(error);
+            let message = format!("{} did not report any endpoints", provider_id.label());
+            self.recover_to_provider_selection(message.clone());
+            return Err(UxError::Link(message));
         }
 
         self.state = LinkState::SelectingEndpoint {
@@ -275,8 +282,12 @@ impl LinkUx {
         };
         let endpoint = match result {
             Ok(endpoint) => endpoint,
+            Err(UxError::Cancelled(message)) => {
+                self.reset_to_provider_selection(None);
+                return Ok(LinkOpenOutcome::Cancelled { message });
+            }
             Err(error) => {
-                self.fail(error.message());
+                self.recover_to_provider_selection(error.message());
                 return Err(error);
             }
         };
@@ -332,7 +343,7 @@ impl LinkUx {
             Err(error) => {
                 self.active_session = None;
                 self.active_connection = None;
-                self.fail(error.message());
+                self.recover_to_provider_selection(error.message());
                 return Err(error);
             }
         };
@@ -499,6 +510,7 @@ pub struct ConnectedLink {
 pub enum LinkOpenOutcome {
     Opened,
     Connected(ConnectedLink),
+    Cancelled { message: String },
 }
 
 pub struct LinkManagementOutcome {
@@ -544,7 +556,10 @@ fn link_status(state: &LinkState) -> UiStatus {
 
 fn link_body(state: &LinkState) -> UiBody {
     match state {
-        LinkState::SelectingProvider { providers } => providers
+        LinkState::SelectingProvider {
+            issue: Some(issue), ..
+        } => UiBody::Issue(issue.clone()),
+        LinkState::SelectingProvider { providers, .. } => providers
             .first()
             .map(|provider| UiBody::text(provider.summary.clone()))
             .unwrap_or_else(|| UiBody::text("No link providers are available.")),
@@ -809,8 +824,11 @@ fn missing_provider(provider_id: LinkProviderKind) -> UxError {
     UxError::Link(format!("provider {} is not available", provider_id.key()))
 }
 
-fn map_link_error(error: impl core::fmt::Display) -> UxError {
-    UxError::Link(error.to_string())
+fn map_link_error(error: LinkError) -> UxError {
+    match error {
+        LinkError::Cancelled { message } => UxError::Cancelled(message),
+        _ => UxError::Link(error.to_string()),
+    }
 }
 
 fn map_link_log_level(level: LinkLogLevel) -> UxLogLevel {
@@ -967,7 +985,17 @@ mod tests {
     }
 
     #[test]
-    fn failed_endpoint_discovery_enters_recoverable_failed_state() {
+    fn cancelled_link_error_maps_to_cancelled_ux_error() {
+        let error = map_link_error(LinkError::cancelled("Port selection canceled"));
+
+        assert_eq!(
+            error,
+            UxError::Cancelled("Port selection canceled".to_string())
+        );
+    }
+
+    #[test]
+    fn failed_endpoint_discovery_returns_to_provider_selection_with_issue() {
         let mut link =
             LinkUx::with_registry(registry_with_fake_discover_error("serial discovery failed"));
 
@@ -976,17 +1004,22 @@ mod tests {
         assert!(matches!(result, Err(UxError::Link(_))));
         assert!(matches!(
             link.state(),
-            LinkState::Failed { issue } if issue.message.contains("serial discovery failed")
+            LinkState::SelectingProvider {
+                issue: Some(issue),
+                ..
+            } if issue.message.contains("serial discovery failed")
         ));
         assert_eq!(link.actions(false).len(), 1);
         assert_eq!(
             link.actions(false)[0].op_as::<LinkOp>(),
-            Some(&LinkOp::RefreshProviders)
+            Some(&LinkOp::OpenProvider {
+                provider_id: LinkProviderKind::Fake
+            })
         );
     }
 
     #[test]
-    fn failed_endpoint_connect_enters_recoverable_failed_state() {
+    fn failed_endpoint_connect_returns_to_provider_selection_with_issue() {
         let mut link = LinkUx::with_registry(registry_with_fake_connect_error(
             "Failed to open serial port.",
         ));
@@ -998,17 +1031,22 @@ mod tests {
         assert!(matches!(result, Err(UxError::Link(_))));
         assert!(matches!(
             link.state(),
-            LinkState::Failed { issue } if issue.message.contains("Failed to open serial port")
+            LinkState::SelectingProvider {
+                issue: Some(issue),
+                ..
+            } if issue.message.contains("Failed to open serial port")
         ));
         assert_eq!(link.actions(false).len(), 1);
         assert_eq!(
             link.actions(false)[0].op_as::<LinkOp>(),
-            Some(&LinkOp::RefreshProviders)
+            Some(&LinkOp::OpenProvider {
+                provider_id: LinkProviderKind::Fake
+            })
         );
     }
 
     #[test]
-    fn failed_connection_handoff_enters_recoverable_failed_state() {
+    fn failed_connection_handoff_returns_to_provider_selection_with_issue() {
         let mut link =
             LinkUx::with_registry(registry_with_fake_connection_error("server handoff failed"));
 
@@ -1019,12 +1057,17 @@ mod tests {
         assert!(matches!(result, Err(UxError::Link(_))));
         assert!(matches!(
             link.state(),
-            LinkState::Failed { issue } if issue.message.contains("server handoff failed")
+            LinkState::SelectingProvider {
+                issue: Some(issue),
+                ..
+            } if issue.message.contains("server handoff failed")
         ));
         assert_eq!(link.actions(false).len(), 1);
         assert_eq!(
             link.actions(false)[0].op_as::<LinkOp>(),
-            Some(&LinkOp::RefreshProviders)
+            Some(&LinkOp::OpenProvider {
+                provider_id: LinkProviderKind::Fake
+            })
         );
     }
 
@@ -1034,7 +1077,7 @@ mod tests {
 
         assert!(matches!(
             link.snapshot().state,
-            LinkState::SelectingProvider { ref providers }
+            LinkState::SelectingProvider { ref providers, .. }
                 if providers.len() == 1 && providers[0].id == LinkProviderKind::Fake
         ));
     }

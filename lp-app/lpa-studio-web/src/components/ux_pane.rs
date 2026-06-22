@@ -20,12 +20,10 @@ pub fn UxPane(
 ) -> Element {
     let UiPaneView {
         title,
-        status,
         body,
         actions,
         ..
     } = view;
-    let status_label = status.label;
     let panel_class = if primary {
         "ux-panel ux-panel-primary"
     } else {
@@ -36,7 +34,6 @@ pub fn UxPane(
         section { class: "{panel_class}",
             div { class: "ux-panel-heading",
                 p { "{title}" }
-                h2 { "{status_label}" }
             }
             UxPaneBody {
                 body,

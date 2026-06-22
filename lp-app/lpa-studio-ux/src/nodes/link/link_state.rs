@@ -5,6 +5,7 @@ use lpa_link::LinkProviderKind;
 pub enum LinkState {
     SelectingProvider {
         providers: Vec<ProviderChoice>,
+        issue: Option<UxIssue>,
     },
     DiscoveringEndpoints {
         provider_id: LinkProviderKind,

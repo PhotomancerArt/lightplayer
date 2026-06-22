@@ -6,6 +6,7 @@ pub enum LinkError {
     SessionNotFound { session: String },
     OperationUnsupported { operation: String },
     ConnectionFailed { message: String },
+    Cancelled { message: String },
     Closed,
     Other { message: String },
 }
@@ -29,6 +30,12 @@ impl LinkError {
         }
     }
 
+    pub fn cancelled(message: impl Into<String>) -> Self {
+        Self::Cancelled {
+            message: message.into(),
+        }
+    }
+
     pub fn other(message: impl Into<String>) -> Self {
         Self::Other {
             message: message.into(),
@@ -49,6 +56,7 @@ impl Display for LinkError {
                 write!(f, "link operation unsupported: {operation}")
             }
             Self::ConnectionFailed { message } => write!(f, "link connection failed: {message}"),
+            Self::Cancelled { message } => f.write_str(message),
             Self::Closed => write!(f, "link session is closed"),
             Self::Other { message } => f.write_str(message),
         }

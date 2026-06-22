@@ -6,15 +6,20 @@ use lpa_studio_ux::{UxLogEntry, UxLogLevel};
 pub fn RuntimeLog(logs: Vec<UxLogEntry>) -> Element {
     rsx! {
         section { class: "ux-log-panel",
-            div { class: "ux-panel-heading",
-                p { "Runtime" }
-                h2 { "Recent activity" }
+            div { class: "ux-log-heading",
+                p { "Console" }
             }
             if logs.is_empty() {
-                p { class: "ux-panel-copy", "No runtime messages yet." }
+                ol { class: "ux-log-list",
+                    li { class: "ux-log ux-log-empty",
+                        span { "idle" }
+                        strong { "studio" }
+                        p { "No messages yet." }
+                    }
+                }
             } else {
                 ol { class: "ux-log-list",
-                    for entry in logs.iter().rev().take(8) {
+                    for entry in logs.iter().rev().take(4) {
                         li { class: log_class(entry.level),
                             span { "{log_level_label(entry.level)}" }
                             strong { "{entry.source}" }

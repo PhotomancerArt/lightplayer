@@ -1,6 +1,9 @@
 use core::future::Future;
 
-use lpa_link::{LinkConnection, LinkConnectionKind, LinkManagementRequest, LinkManagementResult};
+use lpa_link::{
+    LinkConnection, LinkConnectionKind, LinkManagementRequest, LinkManagementResult,
+    LinkProviderKind,
+};
 
 use crate::{
     ConnectedLink, DeviceOp, DeviceUx, LinkOpenOutcome, ProjectConnectResult, ProjectOp,
@@ -91,15 +94,20 @@ impl StudioUx {
                 Ok(UxOutcome::new().with_notice(UxNotice::info("Connection catalog refreshed")))
             }
             DeviceOp::OpenProvider { provider_id } => {
-                emit_activity(
-                    &updates,
-                    self.device.node_id(),
-                    "Opening device",
-                    "Opening",
-                    UiProgress::indeterminate(format!("Opening {}", provider_id.label())),
-                );
+                if provider_id != LinkProviderKind::BrowserSerialEsp32 {
+                    emit_activity(
+                        &updates,
+                        self.device.node_id(),
+                        "Opening device",
+                        "Opening",
+                        UiProgress::indeterminate(format!("Opening {}", provider_id.label())),
+                    );
+                }
                 match self.device.link.open_provider(provider_id).await? {
                     LinkOpenOutcome::Opened => Ok(UxOutcome::new()),
+                    LinkOpenOutcome::Cancelled { message } => {
+                        Ok(UxOutcome::new().with_notice(UxNotice::info(message)))
+                    }
                     LinkOpenOutcome::Connected(connected) => {
                         self.attach_connected_link(connected, updates).await
                     }

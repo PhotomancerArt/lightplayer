@@ -47,6 +47,18 @@ pub const STORIES: &[StoryDescriptor] = &[
         "Initial Studio UX state before launching the browser simulator.",
     ),
     StoryDescriptor::new(
+        "studio/browser-serial-canceled",
+        "Studio UX",
+        "Serial chooser canceled",
+        "Browser serial picker after the native dialog was canceled.",
+    ),
+    StoryDescriptor::new(
+        "studio/browser-serial-open-failed",
+        "Studio UX",
+        "Serial open failed",
+        "Recoverable serial-open failure with picker actions still available.",
+    ),
+    StoryDescriptor::new(
         "studio/simulator-endpoint",
         "Studio UX",
         "Simulator endpoint",
@@ -127,7 +139,6 @@ pub fn render_story(id: &str) -> Option<Element> {
                 section { class: "ux-panel ux-panel-primary",
                     div { class: "ux-panel-heading",
                         p { "Actions" }
-                        h2 { "Connection choices" }
                     }
                     ActionStrip {
                         actions: start_actions(),
@@ -184,74 +195,92 @@ pub fn render_story(id: &str) -> Option<Element> {
         _ => {}
     }
 
-    let (view, running, error, notices) = match id {
-        "studio/simulator-idle" => (idle_view(), false, None, Vec::new()),
-        "studio/simulator-endpoint" => (endpoint_view(), false, None, Vec::new()),
-        "studio/simulator-starting" => (starting_view(), true, None, Vec::new()),
+    let (mut view, running, story_logs) = match id {
+        "studio/simulator-idle" => (idle_view(), false, Vec::new()),
+        "studio/browser-serial-canceled" => (browser_serial_canceled_view(), false, Vec::new()),
+        "studio/browser-serial-open-failed" => {
+            (browser_serial_open_failed_view(), false, Vec::new())
+        }
+        "studio/simulator-endpoint" => (endpoint_view(), false, Vec::new()),
+        "studio/simulator-starting" => (starting_view(), true, Vec::new()),
         "studio/simulator-ready" => (
             simulator_ready_view(),
             false,
-            None,
             vec![
-                "Simulator is running".to_string(),
-                "Demo project loaded".to_string(),
+                studio_log(UxLogLevel::Info, "Simulator is running"),
+                studio_log(UxLogLevel::Info, "Demo project loaded"),
             ],
         ),
         "studio/server-disconnected-link-ready" => (
             lightplayer_disconnected_view(),
             false,
-            None,
-            vec!["LightPlayer disconnected".to_string()],
+            vec![studio_log(UxLogLevel::Info, "LightPlayer disconnected")],
         ),
-        "studio/provision-ready" => (provision_ready_view(), false, None, Vec::new()),
-        "studio/browser-serial-blank-firmware" => (
-            browser_serial_blank_firmware_view(),
-            false,
-            None,
-            Vec::new(),
-        ),
-        "studio/provisioning" => (provisioning_view(), true, None, Vec::new()),
+        "studio/provision-ready" => (provision_ready_view(), false, Vec::new()),
+        "studio/browser-serial-blank-firmware" => {
+            (browser_serial_blank_firmware_view(), false, Vec::new())
+        }
+        "studio/provisioning" => (provisioning_view(), true, Vec::new()),
         "studio/provision-failed" => (
             provision_failed_view(),
             false,
-            Some("browser serial firmware flashing failed".to_string()),
-            Vec::new(),
+            vec![studio_log(
+                UxLogLevel::Error,
+                "browser serial firmware flashing failed",
+            )],
         ),
-        "studio/resetting-to-blank" => (resetting_to_blank_view(), true, None, Vec::new()),
+        "studio/resetting-to-blank" => (resetting_to_blank_view(), true, Vec::new()),
         "studio/reset-complete" => (
             reset_complete_view(),
             false,
-            None,
-            vec!["ESP32-C6 wiped".to_string()],
+            vec![studio_log(UxLogLevel::Info, "ESP32-C6 wiped")],
         ),
         "studio/project-ready" => (
             project_ready_view(),
             false,
-            None,
-            vec!["Demo project loaded".to_string()],
+            vec![studio_log(UxLogLevel::Info, "Demo project loaded")],
         ),
         "studio/error" => (
             error_view(),
             false,
-            Some("browser worker boot timed out".to_string()),
-            Vec::new(),
+            vec![studio_log(
+                UxLogLevel::Error,
+                "browser worker boot timed out",
+            )],
         ),
         _ => return None,
     };
+    view.logs.extend(story_logs);
 
     Some(rsx! {
         StudioShell {
             view,
             running,
-            error,
-            notices,
             on_action: move |_| {},
         }
     })
 }
 
+fn studio_log(level: UxLogLevel, message: impl Into<String>) -> UxLogEntry {
+    UxLogEntry::new(level, "studio", message)
+}
+
 fn idle_view() -> StudioView {
     StudioView::new(vec![idle_device_view()], Vec::new())
+}
+
+fn browser_serial_canceled_view() -> StudioView {
+    StudioView::new(
+        vec![idle_device_view()],
+        vec![studio_log(UxLogLevel::Info, "Port selection canceled")],
+    )
+}
+
+fn browser_serial_open_failed_view() -> StudioView {
+    picker_issue_view(
+        "Failed to open serial port.",
+        "Failed to execute 'open' on 'SerialPort': Failed to open serial port.",
+    )
 }
 
 fn endpoint_view() -> StudioView {
@@ -474,26 +503,26 @@ fn reset_complete_view() -> StudioView {
 }
 
 fn error_view() -> StudioView {
+    picker_issue_view(
+        "browser worker boot timed out",
+        "browser worker boot timed out",
+    )
+}
+
+fn picker_issue_view(message: &'static str, log_message: &'static str) -> StudioView {
     StudioView::new(
         vec![device_view(
             UiStatus::error("Needs attention"),
-            vec![
-                select_connection_complete("Simulator"),
-                stack_section(
-                    "connect-device",
-                    "Connect device",
-                    UiStepState::NeedsAttention,
-                    UiBody::Issue(UxIssue::new("browser worker boot timed out")),
-                    vec![device_action(DeviceOp::RefreshConnections)],
-                ),
-            ],
-            vec!["[lpa-link] browser worker boot timed out"],
+            vec![stack_section(
+                "select-connection",
+                "Select connection",
+                UiStepState::NeedsAttention,
+                UiBody::Issue(UxIssue::new(message)),
+                start_actions(),
+            )],
+            Vec::new(),
         )],
-        vec![UxLogEntry::new(
-            UxLogLevel::Error,
-            "lpa-studio-ux",
-            "browser worker boot timed out",
-        )],
+        vec![studio_log(UxLogLevel::Error, log_message)],
     )
 }
 
@@ -679,6 +708,7 @@ fn blank_device_view(status: UiStatus, body: UiBody, after_reset: bool) -> UiPan
                 body,
                 vec![
                     device_action(DeviceOp::ProvisionFirmware),
+                    device_action(DeviceOp::ResetToBlank),
                     disconnect_device_action(),
                 ],
             ),

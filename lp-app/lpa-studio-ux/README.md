@@ -88,6 +88,23 @@ For the browser-worker simulator, the zero-loaded-project case auto-loads the
 demo project. Real hardware remains conservative and requires explicit project
 loading when nothing is running.
 
+## Feedback And Recovery
+
+Recoverable connection problems are modeled in the same view/action language as
+the rest of Studio. If opening a device fails, `LinkUx` returns to provider
+selection with an inline `UxIssue` and the normal provider actions still
+available. Retrying is therefore the same operation as choosing a connection
+again; `Refresh connections` is reserved for rebuilding the provider catalog.
+
+Canceling the browser Web Serial chooser is a normal UX outcome, not a failed
+link. `lpa-link` preserves chooser cancellation as a typed cancellation error,
+`LinkUx` returns to provider selection without an issue, and `StudioUx` reports
+only a low-key notice suitable for a console or activity log.
+
+Generic notices and action failures are expected to flow into recent activity
+logs. Actionable issues that affect the next user choice should live inline in
+the relevant `UiStackSection` body.
+
 ## Device Management UX
 
 Blank-device provisioning and recovery are modeled as Device actions backed by

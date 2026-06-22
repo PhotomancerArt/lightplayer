@@ -56,7 +56,9 @@ pub fn is_supported() -> bool {
 }
 
 pub async fn request_port() -> Result<BrowserSerialPortHandle, LinkError> {
-    let value = JsFuture::from(js_request_port()).await.map_err(js_error)?;
+    let value = JsFuture::from(js_request_port())
+        .await
+        .map_err(js_request_port_error)?;
     let id = reflect_u32(&value, "id")?;
     let label = reflect_string(&value, "label")?;
     Ok(BrowserSerialPortHandle { id, label })
@@ -180,12 +182,35 @@ fn reflect_optional_string(value: &JsValue, key: &str) -> Result<Option<String>,
         .ok_or_else(|| LinkError::other(format!("browser serial response `{key}` is not a string")))
 }
 
-fn js_error(value: JsValue) -> LinkError {
-    if let Some(error) = value.dyn_ref::<js_sys::Error>() {
-        LinkError::other(error.message())
-    } else if let Some(message) = value.as_string() {
-        LinkError::other(message)
+fn js_request_port_error(value: JsValue) -> LinkError {
+    let message = js_error_message(&value);
+    if is_request_port_cancel(js_error_name(&value).as_deref(), &message) {
+        LinkError::cancelled("Port selection canceled")
     } else {
-        LinkError::other(format!("{value:?}"))
+        LinkError::other(message)
     }
+}
+
+fn js_error(value: JsValue) -> LinkError {
+    LinkError::other(js_error_message(&value))
+}
+
+fn js_error_message(value: &JsValue) -> String {
+    if let Some(error) = value.dyn_ref::<js_sys::Error>() {
+        error.message().into()
+    } else if let Some(message) = value.as_string() {
+        message
+    } else {
+        format!("{value:?}")
+    }
+}
+
+fn js_error_name(value: &JsValue) -> Option<String> {
+    Reflect::get(value, &JsValue::from_str("name"))
+        .ok()
+        .and_then(|name| name.as_string())
+}
+
+fn is_request_port_cancel(name: Option<&str>, message: &str) -> bool {
+    matches!(name, Some("NotFoundError")) || message.contains("No port selected by the user")
 }

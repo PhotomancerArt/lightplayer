@@ -97,7 +97,10 @@ impl DeviceUx {
     }
 
     fn should_show_connect_device(&self) -> bool {
-        !matches!(self.link.state(), LinkState::SelectingProvider { .. })
+        !matches!(
+            self.link.state(),
+            LinkState::SelectingProvider { .. } | LinkState::Failed { .. }
+        )
     }
 
     fn should_show_connect_lightplayer(&self) -> bool {
@@ -113,6 +116,9 @@ impl DeviceUx {
 
     fn status(&self) -> UiStatus {
         match (self.link.state(), &self.server.snapshot().state) {
+            (LinkState::SelectingProvider { issue: Some(_), .. }, _) => {
+                UiStatus::error("Needs attention")
+            }
             (LinkState::SelectingProvider { .. }, _) => UiStatus::neutral("Choose connection"),
             (
                 LinkState::Connected { .. },
@@ -138,13 +144,22 @@ impl DeviceUx {
 
     fn select_connection_section(&self) -> UiStackSection {
         match self.link.state() {
-            LinkState::SelectingProvider { providers } => UiStackSection::new(
-                "select-connection",
-                "Select connection",
-                UiStepState::Active,
-            )
-            .with_body(UiBody::text("Choose how Studio should connect."))
-            .with_actions(provider_actions(providers, self.node_id())),
+            LinkState::SelectingProvider { providers, issue } => {
+                let section = UiStackSection::new(
+                    "select-connection",
+                    "Select connection",
+                    if issue.is_some() {
+                        UiStepState::NeedsAttention
+                    } else {
+                        UiStepState::Active
+                    },
+                )
+                .with_actions(provider_actions(providers, self.node_id()));
+                match issue {
+                    Some(issue) => section.with_body(UiBody::Issue(issue.clone())),
+                    None => section.with_body(UiBody::text("Choose how Studio should connect.")),
+                }
+            }
             LinkState::Failed { .. } => UiStackSection::new(
                 "select-connection",
                 "Select connection",
@@ -458,6 +473,9 @@ fn selected_connection_label(state: &LinkState) -> String {
             device.label.clone()
         }
         LinkState::Failed { .. } => "Connection needs attention.".to_string(),
+        LinkState::SelectingProvider {
+            issue: Some(issue), ..
+        } => issue.message.clone(),
         LinkState::SelectingProvider { .. } => "Choose how to connect.".to_string(),
     }
 }
