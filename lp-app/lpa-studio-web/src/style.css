@@ -383,8 +383,6 @@ select {
 
 .ux-stack-terminal {
   max-height: 220px;
-  display: flex;
-  flex-direction: column-reverse;
 }
 
 .ux-actions {

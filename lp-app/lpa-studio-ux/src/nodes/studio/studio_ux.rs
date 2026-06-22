@@ -215,7 +215,7 @@ impl StudioUx {
                         if matches!(error, UxError::NoFirmwareDetected(_)) {
                             self.device.server.fail("No LightPlayer firmware detected.");
                             return Ok(UxOutcome::new().with_notice(UxNotice::info(
-                                "No LightPlayer firmware detected; provision the selected ESP32",
+                                "No LightPlayer firmware detected; flash firmware onto the selected ESP32",
                             )));
                         }
                         self.device.server.fail(error.to_string());
@@ -400,7 +400,7 @@ impl StudioUx {
             .link
             .manage_with_updates(
                 LinkManagementRequest::FlashFirmware,
-                "Provisioning firmware",
+                "Flashing firmware",
                 updates.clone(),
             )
             .await?;
@@ -424,11 +424,11 @@ impl StudioUx {
                     self.logs.push(UxLogEntry::new(
                         UxLogLevel::Warn,
                         "lpa-studio-ux",
-                        format!("firmware provisioned but server reconnect failed: {error}"),
+                        format!("firmware flashed but server reconnect failed: {error}"),
                     ));
                     self.device.server.fail(error.to_string());
                     Ok(outcome.with_notice(UxNotice::info(
-                        "Firmware provisioned; reconnect the server after the device finishes booting",
+                        "Firmware flashed; reconnect the server after the device finishes booting",
                     )))
                 }
             },
@@ -436,11 +436,11 @@ impl StudioUx {
                 self.logs.push(UxLogEntry::new(
                     UxLogLevel::Warn,
                     "lpa-studio-ux",
-                    format!("firmware provisioned but serial reopen failed: {error}"),
+                    format!("firmware flashed but serial reopen failed: {error}"),
                 ));
                 self.device.server.fail(error.to_string());
                 Ok(outcome.with_notice(UxNotice::info(
-                    "Firmware provisioned; reconnect the device after it finishes booting",
+                    "Firmware flashed; reconnect the device after it finishes booting",
                 )))
             }
         }
@@ -454,13 +454,50 @@ impl StudioUx {
             .link
             .manage_with_updates(
                 LinkManagementRequest::EraseDeviceFlash,
-                "Resetting device to blank",
-                updates,
+                "Wiping device",
+                updates.clone(),
             )
             .await?;
         self.device.record_logs(&management.logs);
         self.logs.extend(management.logs);
-        Ok(UxOutcome::new().with_notice(reset_notice(&management.result)))
+        let mut outcome = UxOutcome::new().with_notice(reset_notice(&management.result));
+        emit_activity(
+            &updates,
+            self.device.node_id(),
+            "Reconnecting device",
+            "Connecting",
+            UiProgress::timeout("Checking for LightPlayer firmware", 5_000),
+        );
+        match self.device.link.reopen_active_connection().await {
+            Ok(connected) => match self.attach_connected_link(connected, updates).await {
+                Ok(mut attach_outcome) => {
+                    outcome.notices.append(&mut attach_outcome.notices);
+                    Ok(outcome)
+                }
+                Err(error) => {
+                    self.logs.push(UxLogEntry::new(
+                        UxLogLevel::Warn,
+                        "lpa-studio-ux",
+                        format!("device wiped but server reconnect failed: {error}"),
+                    ));
+                    self.device.server.fail(error.to_string());
+                    Ok(outcome.with_notice(UxNotice::info(
+                        "Device wiped; reconnect after the device finishes booting",
+                    )))
+                }
+            },
+            Err(error) => {
+                self.logs.push(UxLogEntry::new(
+                    UxLogLevel::Warn,
+                    "lpa-studio-ux",
+                    format!("device wiped but serial reopen failed: {error}"),
+                ));
+                self.device.server.fail(error.to_string());
+                Ok(outcome.with_notice(UxNotice::info(
+                    "Device wiped; reconnect the device after it finishes booting",
+                )))
+            }
+        }
     }
 
     fn project_is_loaded(&self) -> bool {
@@ -547,9 +584,9 @@ fn should_reopen_before_server_connect(connection: &LinkConnection) -> bool {
 fn provision_notice(result: &LinkManagementResult) -> UxNotice {
     match result {
         LinkManagementResult::FlashFirmware(result) => {
-            UxNotice::info(format!("Provisioned {}", result.manifest.display_name))
+            UxNotice::info(format!("Flashed {}", result.manifest.display_name))
         }
-        _ => UxNotice::info("Firmware provisioned"),
+        _ => UxNotice::info("Firmware flashed"),
     }
 }
 
@@ -557,9 +594,9 @@ fn reset_notice(result: &LinkManagementResult) -> UxNotice {
     match result {
         LinkManagementResult::EraseDeviceFlash(result) => {
             let label = result.chip_name.as_deref().unwrap_or("selected ESP32");
-            UxNotice::info(format!("{label} reset to blank"))
+            UxNotice::info(format!("{label} wiped"))
         }
-        _ => UxNotice::info("Device reset to blank"),
+        _ => UxNotice::info("Device wiped"),
     }
 }
 

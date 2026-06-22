@@ -151,13 +151,13 @@ export async function eraseDeviceFlash(portId, esptoolModulePath, onEvent) {
       percent: 50,
     });
     await loader.eraseFlash();
+    assertNoFlashCommunicationWarning(logs, "Device erase");
     pushProgress(progress, onEvent, {
-      label: "Resetting blank device",
+      label: "Device flash erased",
       completedSteps: 3,
       totalSteps: 3,
       percent: 100,
     });
-    await loader.after("hard_reset");
     return {
       chipName: chipName ? String(chipName) : null,
       logs,
@@ -180,28 +180,26 @@ export async function resetTarget(portId, esptoolModulePath, onEvent) {
   const port = getPort(portId);
   await releasePort(portId);
 
-  const { ESPLoader, Transport } = await loadEsptoolModule(esptoolModulePath);
   const logs = [];
   const progress = [];
   const terminal = terminalFor(logs, "esp32-reset", onEvent);
-  const transport = new Transport(port, true);
-  const loader = new ESPLoader({
-    transport,
-    baudrate: 115200,
-    terminal,
-    debugLogging: false,
-  });
+  void esptoolModulePath;
   let resetComplete = false;
 
   try {
-    await transport.connect(115200);
+    await port.open({ baudRate: 115200 });
     pushProgress(progress, onEvent, {
       label: "Resetting device",
       completedSteps: 1,
       totalSteps: 2,
       percent: 50,
     });
-    await loader.after("hard_reset");
+    try {
+      await hardResetOpenedPort(port, terminal);
+    } catch (error) {
+      terminal.writeLine(`Reset signal control failed: ${errorMessage(error)}`);
+      terminal.writeLine("Continuing without a hardware reset.");
+    }
     resetComplete = true;
     pushProgress(progress, onEvent, {
       label: "Waiting for device boot",
@@ -215,13 +213,48 @@ export async function resetTarget(portId, esptoolModulePath, onEvent) {
     };
   } finally {
     try {
-      await transport.disconnect();
+      await port.close();
     } catch (error) {
-      console.warn("[esp32-reset] transport disconnect failed", error);
+      console.warn("[esp32-reset] port close failed", error);
     }
     if (resetComplete) {
-      await sleep(50);
+      await sleep(250);
     }
+  }
+}
+
+async function hardResetOpenedPort(port, terminal) {
+  if (typeof port.setSignals !== "function") {
+    throw new Error("Web Serial port does not support DTR/RTS reset signals.");
+  }
+  await classicHardResetOpenedPort(port, terminal);
+}
+
+async function classicHardResetOpenedPort(port, terminal) {
+  terminal.writeLine("Hard resetting via RTS pin...");
+  await setDTR(port, false);
+  await sleep(100);
+  await setRTS(port, true, false);
+  await sleep(100);
+  await setRTS(port, false, false);
+}
+
+async function setRTS(port, requestToSend, dataTerminalReady) {
+  await port.setSignals({ requestToSend });
+  await port.setSignals({ dataTerminalReady });
+}
+
+async function setDTR(port, dataTerminalReady) {
+  await port.setSignals({ dataTerminalReady });
+}
+
+function assertNoFlashCommunicationWarning(logs, context) {
+  const warning = logs.find((line) =>
+    line.includes("Failed to communicate with the flash chip") ||
+    line.includes("Flash ID: 0")
+  );
+  if (warning) {
+    throw new Error(`${context} failed: ${warning}`);
   }
 }
 
@@ -274,6 +307,13 @@ function emitEvent(onEvent, event) {
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function errorMessage(error) {
+  if (error instanceof Error) {
+    return error.message;
+  }
+  return String(error);
 }
 
 async function loadFullManifest(manifestPath) {

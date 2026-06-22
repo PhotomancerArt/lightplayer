@@ -28,6 +28,7 @@ export async function requestPort() {
 
 export async function openPort(id, baudRate) {
   const session = requireSession(id);
+  clearBufferedInput(session);
   await session.port.open({ baudRate });
   session.reader = session.port.readable.getReader();
   session.writer = session.port.writable.getWriter();
@@ -143,6 +144,12 @@ function drainCompleteLines(session) {
     session.buffer = session.buffer.slice(newline + 1);
     session.lines.push(line);
   }
+}
+
+function clearBufferedInput(session) {
+  session.buffer = "";
+  session.lines = [];
+  session.errors = [];
 }
 
 function labelForPort(port) {

@@ -358,7 +358,7 @@ impl BrowserSerialClientState {
             100,
         ));
         let status = if no_firmware {
-            UiStatus::warning("Provision ready")
+            UiStatus::warning("Flash ready")
         } else {
             UiStatus::error("Timeout")
         };

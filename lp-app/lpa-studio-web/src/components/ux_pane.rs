@@ -134,7 +134,7 @@ fn UxStackBody(stack: UiStackView, running: bool, on_action: EventHandler<UiActi
             }
             if !terminal.is_empty() {
                 ol { class: "ux-terminal ux-stack-terminal",
-                    for line in terminal.iter().rev() {
+                    for line in terminal.iter() {
                         li { "{line.text}" }
                     }
                 }

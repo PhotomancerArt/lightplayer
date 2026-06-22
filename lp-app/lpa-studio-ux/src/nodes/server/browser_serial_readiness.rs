@@ -15,6 +15,7 @@ const FAILURE_SNIPPET_LINE_LIMIT: usize = 6;
 pub struct BrowserSerialReadinessClassifier {
     recent_lines: Vec<String>,
     invalid_blank_header_count: usize,
+    rom_download_mode_count: usize,
 }
 
 impl BrowserSerialReadinessClassifier {
@@ -28,6 +29,9 @@ impl BrowserSerialReadinessClassifier {
         if normalized.contains("invalid header: 0xffffffff") {
             self.invalid_blank_header_count += 1;
         }
+        if normalized.contains("waiting for download") || normalized.contains("(download(") {
+            self.rom_download_mode_count += 1;
+        }
         self.recent_lines.push(line);
         if self.recent_lines.len() > RECENT_LINE_LIMIT {
             let remove_count = self.recent_lines.len() - RECENT_LINE_LIMIT;
@@ -39,6 +43,7 @@ impl BrowserSerialReadinessClassifier {
         if self.no_firmware_detected() {
             BrowserSerialReadinessFailure::NoFirmwareDetected {
                 recent_lines: self.recent_lines.clone(),
+                reason: self.no_firmware_reason(),
             }
         } else {
             BrowserSerialReadinessFailure::ProtocolTimeout {
@@ -48,27 +53,54 @@ impl BrowserSerialReadinessClassifier {
     }
 
     pub fn no_firmware_detected(&self) -> bool {
-        self.invalid_blank_header_count > 0
+        self.invalid_blank_header_count > 0 || self.rom_download_mode_count > 0
     }
 
     pub fn recent_lines(&self) -> &[String] {
         &self.recent_lines
     }
+
+    fn no_firmware_reason(&self) -> NoFirmwareReason {
+        if self.rom_download_mode_count > 0 {
+            NoFirmwareReason::RomDownloadMode
+        } else {
+            NoFirmwareReason::BlankOrErasedFlash
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BrowserSerialReadinessFailure {
-    NoFirmwareDetected { recent_lines: Vec<String> },
-    ProtocolTimeout { recent_lines: Vec<String> },
+    NoFirmwareDetected {
+        recent_lines: Vec<String>,
+        reason: NoFirmwareReason,
+    },
+    ProtocolTimeout {
+        recent_lines: Vec<String>,
+    },
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum NoFirmwareReason {
+    BlankOrErasedFlash,
+    RomDownloadMode,
 }
 
 impl BrowserSerialReadinessFailure {
     pub fn message(&self) -> String {
         match self {
-            Self::NoFirmwareDetected { recent_lines } => {
-                let mut message = format!(
-                    "{NO_FIRMWARE_DETECTED_PREFIX}; ESP32 boot output looks like blank or erased flash"
-                );
+            Self::NoFirmwareDetected {
+                recent_lines,
+                reason,
+            } => {
+                let mut message = match reason {
+                    NoFirmwareReason::BlankOrErasedFlash => format!(
+                        "{NO_FIRMWARE_DETECTED_PREFIX}; ESP32 boot output looks like blank or erased flash"
+                    ),
+                    NoFirmwareReason::RomDownloadMode => format!(
+                        "{NO_FIRMWARE_DETECTED_PREFIX}; ESP32 is waiting in ROM download mode"
+                    ),
+                };
                 append_recent_lines(&mut message, recent_lines);
                 message
             }
@@ -122,7 +154,33 @@ mod tests {
                     "ESP-ROM:esp32c6-20220919".to_string(),
                     "invalid header: 0xffffffff".to_string(),
                 ],
+                reason: NoFirmwareReason::BlankOrErasedFlash,
             }
+        );
+    }
+
+    #[test]
+    fn rom_download_mode_classifies_as_no_firmware() {
+        let mut classifier = BrowserSerialReadinessClassifier::new();
+
+        classifier.observe_line("boot:0x16 (DOWNLOAD(USB/UART0/SDIO_REI_FEO))");
+        classifier.observe_line("waiting for download");
+
+        assert_eq!(
+            classifier.classify_timeout(),
+            BrowserSerialReadinessFailure::NoFirmwareDetected {
+                recent_lines: vec![
+                    "boot:0x16 (DOWNLOAD(USB/UART0/SDIO_REI_FEO))".to_string(),
+                    "waiting for download".to_string(),
+                ],
+                reason: NoFirmwareReason::RomDownloadMode,
+            }
+        );
+        assert!(
+            classifier
+                .classify_timeout()
+                .message()
+                .contains("ESP32 is waiting in ROM download mode")
         );
     }
 

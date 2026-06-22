@@ -73,38 +73,38 @@ pub const STORIES: &[StoryDescriptor] = &[
     StoryDescriptor::new(
         "studio/provision-ready",
         "Studio UX",
-        "Provision ready",
-        "Blank ESP32 device session offering firmware provisioning.",
+        "Flash ready",
+        "Blank ESP32 device session offering firmware flashing.",
     ),
     StoryDescriptor::new(
         "studio/browser-serial-blank-firmware",
         "Studio UX",
         "Blank firmware readiness",
-        "Browser serial readiness with boot logs and firmware provisioning available.",
+        "Browser serial readiness with boot logs and firmware flashing available.",
     ),
     StoryDescriptor::new(
         "studio/provisioning",
         "Studio UX",
-        "Provisioning",
+        "Flashing",
         "Progress while Studio flashes packaged LightPlayer firmware.",
     ),
     StoryDescriptor::new(
         "studio/provision-failed",
         "Studio UX",
-        "Provision failed",
-        "Provisioning issue with retry and disconnect actions.",
+        "Flash failed",
+        "Firmware flashing issue with retry and disconnect actions.",
     ),
     StoryDescriptor::new(
         "studio/resetting-to-blank",
         "Studio UX",
-        "Resetting to blank",
+        "Wiping",
         "Progress while Studio erases an existing ESP32.",
     ),
     StoryDescriptor::new(
         "studio/reset-complete",
         "Studio UX",
         "Reset complete",
-        "Blank ESP32 after erase with provisioning available again.",
+        "Blank ESP32 after erase with firmware flashing available again.",
     ),
     StoryDescriptor::new(
         "studio/project-ready",
@@ -222,7 +222,7 @@ pub fn render_story(id: &str) -> Option<Element> {
             reset_complete_view(),
             false,
             None,
-            vec!["ESP32-C6 reset to blank".to_string()],
+            vec!["ESP32-C6 wiped".to_string()],
         ),
         "studio/project-ready" => (
             project_ready_view(),
@@ -336,14 +336,14 @@ fn lightplayer_disconnected_view() -> StudioView {
 fn provision_ready_view() -> StudioView {
     StudioView::new(
         vec![blank_device_view(
-            UiStatus::warning("Provision ready"),
+            UiStatus::warning("Flash ready"),
             UiBody::text("No LightPlayer firmware is running on this ESP32."),
             false,
         )],
         vec![UxLogEntry::new(
             UxLogLevel::Warn,
             "lpa-studio-ux",
-            "server protocol is unavailable; firmware provisioning is available",
+            "server protocol is unavailable; firmware flashing is available",
         )],
     )
 }
@@ -351,7 +351,7 @@ fn provision_ready_view() -> StudioView {
 fn browser_serial_blank_firmware_view() -> StudioView {
     StudioView::new(
         vec![blank_device_view(
-            UiStatus::warning("Provision ready"),
+            UiStatus::warning("Flash ready"),
             UiBody::Activity(blank_firmware_activity()),
             false,
         )],
@@ -361,7 +361,7 @@ fn browser_serial_blank_firmware_view() -> StudioView {
             UxLogEntry::new(
                 UxLogLevel::Warn,
                 "lpa-studio-ux",
-                "no LightPlayer firmware detected; provisioning is available",
+                "no LightPlayer firmware detected; firmware flashing is available",
             ),
         ],
     )
@@ -370,7 +370,7 @@ fn browser_serial_blank_firmware_view() -> StudioView {
 fn provisioning_view() -> StudioView {
     StudioView::new(
         vec![device_view(
-            UiStatus::working("Provisioning"),
+            UiStatus::working("Flashing"),
             vec![
                 select_connection_complete("ESP32 over USB"),
                 connect_device_complete(esp32_metrics()),
@@ -466,7 +466,7 @@ fn reset_complete_view() -> StudioView {
     StudioView::new(
         vec![blank_device_view(
             UiStatus::warning("Blank ESP32"),
-            UiBody::text("The device has been erased and can be provisioned again."),
+            UiBody::text("The device has been erased and can be flashed again."),
             true,
         )],
         vec![UxLogEntry::new(
@@ -703,12 +703,11 @@ fn blank_device_view(status: UiStatus, body: UiBody, after_reset: bool) -> UiPan
             connect_device_complete(esp32_metrics()),
             stack_section(
                 "connect-lightplayer",
-                "Connect LightPlayer",
+                "Flash firmware",
                 UiStepState::NeedsAttention,
                 body,
                 vec![
                     device_action(DeviceOp::ProvisionFirmware),
-                    device_action(DeviceOp::ConnectLightPlayer),
                     disconnect_device_action(),
                 ],
             ),
@@ -746,7 +745,7 @@ fn blank_firmware_activity() -> UiActivity {
 }
 
 fn provisioning_activity() -> UiActivity {
-    let mut activity = UiActivity::new("Provisioning firmware")
+    let mut activity = UiActivity::new("Flashing firmware")
         .with_detail("Writing packaged LightPlayer ESP32-C6 firmware.")
         .with_progress(UiProgress::determinate("Writing flash", 42))
         .with_steps(vec![
@@ -763,7 +762,7 @@ fn provisioning_activity() -> UiActivity {
 }
 
 fn reset_activity() -> UiActivity {
-    let mut activity = UiActivity::new("Resetting device to blank")
+    let mut activity = UiActivity::new("Wiping device")
         .with_detail("Erasing ESP32 flash through the bootloader.")
         .with_progress(UiProgress::determinate("Erasing flash", 58))
         .with_steps(vec![

@@ -1,9 +1,11 @@
 use crate::{
     ConnectedDeviceSummary, DeviceOp, DeviceSnapshot, EndpointChoice, LinkOp, LinkState, LinkUx,
     ProjectOp, ProjectState, ProviderChoice, ServerState, ServerUx, UiAction, UiBody, UiMetric,
-    UiPaneView, UiStackSection, UiStackView, UiStatus, UiStepState, UiTerminalLine, UxLogEntry,
-    UxNode, UxNodeId,
+    UiPaneView, UiStackSection, UiStackView, UiStatus, UiStepState, UiTerminalLine, UxIssue,
+    UxLogEntry, UxNode, UxNodeId,
 };
+
+const NO_FIRMWARE_DETECTED_PREFIX: &str = "no LightPlayer firmware detected";
 
 pub struct DeviceUx {
     pub(crate) link: LinkUx,
@@ -189,13 +191,24 @@ impl DeviceUx {
                 .with_body(UiBody::Metrics(vec![UiMetric::new("Protocol", protocol)]))
                 .with_actions(self.lightplayer_actions(true))
             }
-            (LinkState::Connected { .. }, ServerState::Failed { issue }) => UiStackSection::new(
-                "connect-lightplayer",
-                "Connect LightPlayer",
-                UiStepState::NeedsAttention,
-            )
-            .with_body(UiBody::Issue(issue.clone()))
-            .with_actions(self.lightplayer_actions(false)),
+            (LinkState::Connected { .. }, ServerState::Failed { issue }) => {
+                let no_firmware = is_no_firmware_issue(issue);
+                UiStackSection::new(
+                    "connect-lightplayer",
+                    if no_firmware {
+                        "Flash firmware"
+                    } else {
+                        "Connect LightPlayer"
+                    },
+                    UiStepState::NeedsAttention,
+                )
+                .with_body(UiBody::Issue(issue.clone()))
+                .with_actions(if no_firmware {
+                    self.no_firmware_actions()
+                } else {
+                    self.lightplayer_actions(false)
+                })
+            }
             (LinkState::Managing { progress, .. }, _) => UiStackSection::new(
                 "connect-lightplayer",
                 "Connect LightPlayer",
@@ -257,6 +270,18 @@ impl DeviceUx {
             .actions(server_connected)
             .into_iter()
             .filter_map(|action| map_link_action(action, self.node_id()))
+            .collect()
+    }
+
+    fn no_firmware_actions(&self) -> Vec<UiAction> {
+        self.lightplayer_actions(false)
+            .into_iter()
+            .filter(|action| {
+                !matches!(
+                    action.op_as::<DeviceOp>(),
+                    Some(DeviceOp::ConnectLightPlayer)
+                )
+            })
             .collect()
     }
 }
@@ -360,7 +385,7 @@ fn map_link_action(action: UiAction, node_id: UxNodeId) -> Option<UiAction> {
     } else if matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::DisconnectDevice)) {
         Some(
             action
-                .with_label("Disconnect device")
+                .with_label("Disconnect")
                 .with_summary("Close the current device session."),
         )
     } else {
@@ -436,4 +461,12 @@ fn is_device_log_source(source: &str) -> bool {
         source,
         "lpa-link" | "browser-serial" | "fw-esp32" | "fw-browser" | "lp-server"
     )
+}
+
+fn is_no_firmware_issue(issue: &UxIssue) -> bool {
+    issue.message.contains(NO_FIRMWARE_DETECTED_PREFIX)
+        || issue
+            .detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains(NO_FIRMWARE_DETECTED_PREFIX))
 }

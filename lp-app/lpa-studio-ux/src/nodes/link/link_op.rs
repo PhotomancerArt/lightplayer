@@ -24,24 +24,24 @@ impl UxOp for LinkOp {
     fn default_action_meta(&self) -> ActionMeta {
         match self {
             Self::ProvisionFirmware => ActionMeta::new(
-                "Provision firmware",
+                "Flash firmware",
                 "Flash the packaged LightPlayer firmware onto this ESP32.",
                 ActionPriority::Primary,
             )
             .with_confirmation(ActionConfirmation::new(
-                "Provision firmware",
+                "Flash firmware",
                 "This will write LightPlayer firmware to the selected ESP32. Continue?",
-                "Provision firmware",
+                "Flash firmware",
             )),
             Self::ResetToBlank => ActionMeta::new(
-                "Reset to blank",
-                "Erase this ESP32 so it is no longer provisioned.",
+                "Wipe device",
+                "Erase firmware and device data from this ESP32.",
                 ActionPriority::Tertiary,
             )
             .with_confirmation(ActionConfirmation::new(
-                "Reset device to blank",
+                "Wipe device",
                 "This erases firmware and device data from the selected ESP32.",
-                "Erase device",
+                "Wipe device",
             )),
             Self::ConnectServer => ActionMeta::new(
                 "Connect server",
@@ -49,8 +49,8 @@ impl UxOp for LinkOp {
                 ActionPriority::Primary,
             ),
             Self::DisconnectLink => ActionMeta::new(
-                "Disconnect link",
-                "Close the current link session and return to provider selection.",
+                "Disconnect",
+                "Close the current device session and return to connection choices.",
                 ActionPriority::Tertiary,
             ),
             Self::RefreshProviders => ActionMeta::new(

@@ -953,10 +953,8 @@ mod tests {
             ),
         });
 
-        let result = block_on_ready(link.manage(
-            LinkManagementRequest::EraseDeviceFlash,
-            "Resetting device to blank",
-        ));
+        let result =
+            block_on_ready(link.manage(LinkManagementRequest::EraseDeviceFlash, "Wiping device"));
 
         assert!(matches!(result, Err(UxError::Link(_))));
         assert!(matches!(link.state(), LinkState::Connected { .. }));
