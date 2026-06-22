@@ -1,0 +1,89 @@
+use core::any::Any;
+
+use lpa_link::{LinkEndpointId, LinkProviderKind};
+
+use crate::{ActionConfirmation, ActionMeta, ActionPriority, UxOp};
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum DeviceOp {
+    OpenProvider {
+        provider_id: LinkProviderKind,
+    },
+    ConnectEndpoint {
+        provider_id: LinkProviderKind,
+        endpoint_id: LinkEndpointId,
+    },
+    ConnectLightPlayer,
+    ProvisionFirmware,
+    ResetToBlank,
+    DisconnectDevice,
+    RefreshConnections,
+}
+
+impl UxOp for DeviceOp {
+    fn default_action_meta(&self) -> ActionMeta {
+        match self {
+            Self::OpenProvider { .. } => ActionMeta::new(
+                "Choose connection",
+                "Select this way to connect a LightPlayer device.",
+                ActionPriority::Primary,
+            ),
+            Self::ConnectEndpoint { .. } => ActionMeta::new(
+                "Connect device",
+                "Open this device endpoint.",
+                ActionPriority::Primary,
+            ),
+            Self::ConnectLightPlayer => ActionMeta::new(
+                "Connect LightPlayer",
+                "Attach Studio to LightPlayer on the connected device.",
+                ActionPriority::Primary,
+            ),
+            Self::ProvisionFirmware => ActionMeta::new(
+                "Provision firmware",
+                "Flash the packaged LightPlayer firmware onto this ESP32.",
+                ActionPriority::Primary,
+            )
+            .with_confirmation(ActionConfirmation::new(
+                "Provision firmware",
+                "This will write LightPlayer firmware to the selected ESP32. Continue?",
+                "Provision firmware",
+            )),
+            Self::ResetToBlank => ActionMeta::new(
+                "Reset to blank",
+                "Erase this ESP32 so it is no longer provisioned.",
+                ActionPriority::Tertiary,
+            )
+            .with_confirmation(ActionConfirmation::new(
+                "Reset device to blank",
+                "This erases firmware and device data from the selected ESP32.",
+                "Erase device",
+            )),
+            Self::DisconnectDevice => ActionMeta::new(
+                "Disconnect device",
+                "Close the current device session and return to connection choices.",
+                ActionPriority::Tertiary,
+            ),
+            Self::RefreshConnections => ActionMeta::new(
+                "Refresh connections",
+                "Rebuild the connection catalog from available providers.",
+                ActionPriority::Secondary,
+            ),
+        }
+    }
+
+    fn clone_box(&self) -> Box<dyn UxOp> {
+        Box::new(self.clone())
+    }
+
+    fn eq_op(&self, other: &dyn UxOp) -> bool {
+        other.as_any().downcast_ref::<Self>() == Some(self)
+    }
+
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
+
+    fn into_any(self: Box<Self>) -> Box<dyn Any> {
+        self
+    }
+}

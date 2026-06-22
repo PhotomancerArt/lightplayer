@@ -2,7 +2,10 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use dioxus::prelude::*;
-use lpa_studio_ux::{StudioUx, StudioView, UiAction, UiBody, UxUpdate, UxUpdateSink};
+use lpa_studio_ux::{
+    DeviceUx, LinkUx, ServerUx, StudioUx, StudioView, UiAction, UiBody, UiStepState, UxUpdate,
+    UxUpdateSink,
+};
 
 use crate::components::StudioShell;
 
@@ -78,13 +81,29 @@ impl StudioWebModel {
                 status,
                 activity,
             } => {
-                if let Some(pane) = self
-                    .view
-                    .panes
-                    .iter_mut()
-                    .find(|pane| pane.node_id == node_id)
-                {
+                if let Some(pane) = self.view.panes.iter_mut().find(|pane| {
+                    pane.node_id == node_id
+                        || (pane.node_id.as_str() == DeviceUx::NODE_ID
+                            && matches!(node_id.as_str(), LinkUx::NODE_ID | ServerUx::NODE_ID))
+                }) {
+                    let section_id = device_activity_section_id(node_id.as_str(), &activity.title);
                     pane.status = status;
+                    if pane.node_id.as_str() == DeviceUx::NODE_ID {
+                        if let (Some(section_id), UiBody::Stack(stack)) =
+                            (section_id, &mut pane.body)
+                        {
+                            if let Some(section) = stack
+                                .sections
+                                .iter_mut()
+                                .find(|section| section.id == section_id)
+                            {
+                                section.state = UiStepState::Active;
+                                section.body = UiBody::Activity(activity);
+                                section.actions.clear();
+                                return;
+                            }
+                        }
+                    }
                     pane.body = UiBody::Activity(activity);
                 }
             }
@@ -92,6 +111,30 @@ impl StudioWebModel {
                 self.view.logs.push(log);
             }
         }
+    }
+}
+
+fn device_activity_section_id(node_id: &str, title: &str) -> Option<&'static str> {
+    if node_id == ServerUx::NODE_ID {
+        return Some("connect-lightplayer");
+    }
+    if node_id == LinkUx::NODE_ID {
+        if title.contains("Provision") {
+            return Some("connect-lightplayer");
+        }
+        return Some("connect-device");
+    }
+    if node_id != DeviceUx::NODE_ID {
+        return None;
+    }
+    if title.contains("LightPlayer")
+        || title.contains("server")
+        || title.contains("firmware")
+        || title.contains("Firmware")
+    {
+        Some("connect-lightplayer")
+    } else {
+        Some("connect-device")
     }
 }
 

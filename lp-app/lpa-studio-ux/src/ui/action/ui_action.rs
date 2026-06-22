@@ -99,6 +99,11 @@ impl UiAction {
         self.meta = self.meta.with_confirmation(confirmation);
         self
     }
+
+    pub fn with_meta(mut self, meta: ActionMeta) -> Self {
+        self.meta = meta;
+        self
+    }
 }
 
 #[cfg(test)]

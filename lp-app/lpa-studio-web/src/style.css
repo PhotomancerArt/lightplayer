@@ -87,8 +87,19 @@ select {
 
 .ux-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr) minmax(260px, 0.9fr);
   gap: 14px;
+}
+
+.ux-layout-single {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ux-layout-split {
+  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+}
+
+.ux-layout-triple {
+  grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr) minmax(260px, 0.9fr);
 }
 
 .ux-panel,
@@ -131,6 +142,78 @@ select {
 }
 
 .ux-panel-issue {
+  color: #ffc7c7;
+}
+
+.ux-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.ux-stack-sections {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ux-stack-section {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid #293039;
+  border-radius: 6px;
+  background: #11161b;
+}
+
+.ux-stack-section-heading {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+
+.ux-stack-section-heading h3 {
+  margin: 0;
+  color: #fffaf0;
+  font-size: 0.98rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.ux-stack-section-marker {
+  color: #99a2ad;
+  font-family:
+    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.78rem;
+}
+
+.ux-stack-section-body {
+  min-width: 0;
+}
+
+.ux-stack-section-active {
+  border-color: #717d44;
+}
+
+.ux-stack-section-active .ux-stack-section-marker {
+  color: #f2e6a2;
+}
+
+.ux-stack-section-complete {
+  border-color: #365545;
+}
+
+.ux-stack-section-complete .ux-stack-section-marker {
+  color: #7be0b2;
+}
+
+.ux-stack-section-attention {
+  border-color: #874b4b;
+}
+
+.ux-stack-section-attention .ux-stack-section-marker {
   color: #ffc7c7;
 }
 
@@ -296,6 +379,12 @@ select {
 .ux-terminal li {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
+}
+
+.ux-stack-terminal {
+  max-height: 220px;
+  display: flex;
+  flex-direction: column-reverse;
 }
 
 .ux-actions {

@@ -1,4 +1,4 @@
-use crate::{ProgressState, UiActivity, UiMetric, UxIssue};
+use crate::{ProgressState, UiActivity, UiMetric, UiStackView, UxIssue};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiBody {
@@ -8,6 +8,7 @@ pub enum UiBody {
     Activity(UiActivity),
     Issue(UxIssue),
     Metrics(Vec<UiMetric>),
+    Stack(Box<UiStackView>),
 }
 
 impl UiBody {
@@ -59,6 +60,41 @@ impl UiBody {
                 .iter()
                 .map(|metric| format!("{}: {}", metric.label, metric.value))
                 .collect(),
+            Self::Stack(stack) => {
+                let mut lines = Vec::new();
+                for section in &stack.sections {
+                    lines.push(format!("{} {}", section.state.text_marker(), section.title));
+                    lines.extend(
+                        section
+                            .body
+                            .render_text_lines()
+                            .into_iter()
+                            .map(|line| format!("  {line}")),
+                    );
+                    if !section.actions.is_empty() {
+                        lines.push("  actions:".to_string());
+                        lines.extend(
+                            section
+                                .actions
+                                .iter()
+                                .map(|action| format!("    - {}", action.meta().label)),
+                        );
+                    }
+                }
+                if !stack.terminal.is_empty() {
+                    lines.push("terminal:".to_string());
+                    lines.extend(
+                        stack
+                            .terminal
+                            .iter()
+                            .rev()
+                            .take(12)
+                            .rev()
+                            .map(|line| format!("  {}", line.text)),
+                    );
+                }
+                lines
+            }
         }
     }
 }

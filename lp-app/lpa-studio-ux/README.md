@@ -26,28 +26,37 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
 - `lpa-client` owns server protocol request ids, response correlation, typed
   project operations, and side-channel protocol events.
 - `lpa-studio-ux` owns Studio product state, the `LinkProviderRegistry`, the
-  connected server client, and async action execution above those services.
-- `lpa-studio-web` renders `StudioView` panes and available actions.
+  connected server client, project attach/load policy, and async action
+  execution above those services.
+- `lpa-studio-web` renders `StudioView` panes, stack sections, terminal output,
+  and available actions.
 
 ## Public Model
 
-- `StudioUx` is the top-level controller. It owns `LinkUx`, `ServerUx`, and
-  `ProjectUx`.
-- `LinkUx` owns link-provider selection and the active link session.
+- `StudioUx` is the top-level controller. It owns `DeviceUx` and `ProjectUx`.
+- `DeviceUx` is the user-facing device workflow. It owns the lower-level link
+  and server controllers and presents one stack of steps: select connection,
+  connect device, connect LightPlayer, and open project.
+- `LinkUx` owns link-provider selection, the `LinkProviderRegistry`, and the
+  active link session. It remains an implementation detail below `DeviceUx`.
 - `ServerUx` owns the connected `lpa-client` protocol client once a link exposes
-  server I/O.
-- `ProjectUx` owns Studio's view of the attached or loadable project.
-- `UxAction` is an in-process action offering: target `UxNodeId`, boxed typed
+  server I/O. It remains an implementation detail below `DeviceUx`.
+- `ProjectUx` owns Studio's view of the attached or loadable project and is
+  shown once LightPlayer is connected or a project state is meaningful.
+- `UiAction` is an in-process action offering: target `UxNodeId`, boxed typed
   operation, and metadata such as label, summary, priority, icon, enablement,
   and confirmation.
-- `LinkOp`, `ServerOp`, and `ProjectOp` are typed operations. Operation identity
-  is the enum type and variant, not a parallel string action kind.
-- `StudioView` is the semantic render surface. It contains `UxPaneView` values
-  for Link, Server, and Project plus recent logs.
-- `UxBody` is intentionally small: text, progress/activity, issue, metrics, or
-  empty. It is not a generic component schema.
-- `UxActivity` describes live work inside a pane: title, optional progress,
-  optional milestone steps, and optional terminal lines.
+- `DeviceOp` and `ProjectOp` are the typed user-facing operations. Operation
+  identity is the enum type and variant, not a parallel string action kind.
+- `StudioView` is the semantic render surface. It contains `UiPaneView` values
+  for Device and, when visible, Project plus recent logs.
+- `UiBody` is intentionally small: text, progress/activity, issue, metrics,
+  stack, or empty. It is not a generic component schema.
+- `UiStackView` / `UiStackSection` model reusable multi-step product workflows.
+  Device uses them for connection, LightPlayer attach, provisioning, and project
+  opening. Section-local actions are the action surface.
+- `UiActivity` describes live work inside a pane or stack section: title,
+  optional progress, optional milestone steps, and optional terminal lines.
 - `UxUpdate` / `UxUpdateSink` let `StudioUx::dispatch_with_updates` publish
   live pane activity or fresh `StudioView` snapshots while an async action is
   still running.
@@ -71,22 +80,22 @@ For the browser-worker simulator, the zero-loaded-project case auto-loads the
 demo project. Real hardware remains conservative and requires explicit project
 loading when nothing is running.
 
-## Link Management UX
+## Device Management UX
 
-Blank-device provisioning and recovery are modeled as link-level UX actions
-because they happen below the running server protocol:
+Blank-device provisioning and recovery are modeled as Device actions backed by
+link-level management because they happen below the running server protocol:
 
-- `Provision firmware` is offered when the connected link session supports
-  `FlashFirmware` and Studio is not currently attached to a server.
-- `Reset to blank` is offered when the connected link session supports
-  `EraseDeviceFlash`. It remains a tertiary destructive action even when the
-  server is connected.
+- `Provision firmware` is offered in the Connect LightPlayer step when the
+  connected device session supports `FlashFirmware` and Studio is not currently
+  attached to a server.
+- `Reset to blank` is offered as a tertiary destructive Device action when the
+  connected device session supports `EraseDeviceFlash`.
 
 Both actions flow through `lpa-link::LinkProvider::manage_with_events`.
 `StudioUx` clears project and server state before executing them because
 firmware flashing and full-device erase invalidate any previous server/client
 connection. Browser Web Serial ESP32 management streams esptool terminal output
-and progress into the Link pane as `UxActivity` while the action is running.
+and progress into the Device pane while the action is running.
 
 After provisioning, Studio attempts to reopen the server protocol and resume the
 normal server/project workflow. If the browser or device needs more time after
@@ -100,7 +109,7 @@ sending the first request, so a just-reset device does not lose the initial
 project probe while firmware is still booting.
 
 While waiting for browser serial readiness, Studio publishes a stepped
-`UxActivity` in the Server pane. The reusable activity data includes serial
+`UiActivity` in the Device pane. The reusable activity data includes serial
 access, device reset, boot output, LightPlayer protocol readiness, and recent
 raw boot lines. This is presentation-neutral: the web UI renders it as a small
 stepper plus terminal, while agents or future CLI shells can render the same
@@ -121,10 +130,8 @@ Disconnect semantics are intentionally distinct:
 
 - disconnecting a project detaches Studio from the project and leaves the server
   and link connected;
-- disconnecting the server clears the project and server but leaves the link
-  connected;
-- disconnecting the link clears project/server/link and returns to provider
-  selection.
+- disconnecting the Device clears project/server/link and returns to connection
+  choices.
 
 ## Agent And CLI Use
 

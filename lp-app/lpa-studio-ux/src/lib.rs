@@ -11,6 +11,7 @@ pub use node::{
     ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, UiAction, UiActions,
     UxContext, UxNode, UxNodeId, UxOp,
 };
+pub use nodes::device::{DeviceOp, DeviceSnapshot, DeviceUx};
 pub use nodes::link::{
     ConnectedDeviceSummary, ConnectedLink, EndpointChoice, LinkManagementOutcome, LinkOp,
     LinkOpenOutcome, LinkSnapshot, LinkState, LinkUx, ProgressState, ProviderChoice,
@@ -30,7 +31,7 @@ pub use nodes::studio::{
 };
 pub use ui::{
     StudioView, UiActivity, UiActivityStep, UiActivityStepState, UiBody, UiMetric, UiPaneView,
-    UiProgress, UiStatus, UiStatusKind, UiTerminalLine,
+    UiProgress, UiStackSection, UiStackView, UiStatus, UiStatusKind, UiStepState, UiTerminalLine,
 };
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "studio-demo";

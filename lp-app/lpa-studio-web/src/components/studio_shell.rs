@@ -14,6 +14,11 @@ pub fn StudioShell(
 ) -> Element {
     let has_error = error.is_some();
     let StudioView { panes, logs } = view;
+    let layout_class = match panes.len() {
+        0 | 1 => "ux-layout ux-layout-single",
+        2 => "ux-layout ux-layout-split",
+        _ => "ux-layout ux-layout-triple",
+    };
 
     rsx! {
         main { class: "ux-shell",
@@ -47,7 +52,7 @@ pub fn StudioShell(
                 }
             }
 
-            section { class: "ux-layout",
+            section { class: "{layout_class}",
                 for (index, pane) in panes.into_iter().enumerate() {
                     UxPane {
                         key: "{pane.node_id}",

@@ -1,5 +1,8 @@
 use dioxus::prelude::*;
-use lpa_studio_ux::{UiAction, UiActivity, UiActivityStepState, UiBody, UiPaneView, UiProgress};
+use lpa_studio_ux::{
+    UiAction, UiActivity, UiActivityStepState, UiBody, UiPaneView, UiProgress, UiStackView,
+    UiStepState,
+};
 
 use crate::components::ActionStrip;
 
@@ -31,7 +34,11 @@ pub fn UxPane(
                 p { "{title}" }
                 h2 { "{status_label}" }
             }
-            UxPaneBody { body }
+            UxPaneBody {
+                body,
+                running,
+                on_action,
+            }
             if !actions.is_empty() {
                 ActionStrip {
                     actions,
@@ -45,7 +52,7 @@ pub fn UxPane(
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn UxPaneBody(body: UiBody) -> Element {
+fn UxPaneBody(body: UiBody, running: bool, on_action: EventHandler<UiAction>) -> Element {
     match body {
         UiBody::Empty => rsx! {},
         UiBody::Text(text) => rsx! {
@@ -84,6 +91,64 @@ fn UxPaneBody(body: UiBody) -> Element {
                 }
             }
         },
+        UiBody::Stack(stack) => rsx! {
+            UxStackBody {
+                stack: *stack,
+                running,
+                on_action,
+            }
+        },
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn UxStackBody(stack: UiStackView, running: bool, on_action: EventHandler<UiAction>) -> Element {
+    let terminal = stack.terminal;
+
+    rsx! {
+        div { class: "ux-stack",
+            ol { class: "ux-stack-sections",
+                for section in stack.sections {
+                    li { class: "{stack_section_class(section.state)}",
+                        div { class: "ux-stack-section-heading",
+                            span { class: "ux-stack-section-marker", "{section.state.text_marker()}" }
+                            h3 { "{section.title}" }
+                        }
+                        div { class: "ux-stack-section-body",
+                            UxPaneBody {
+                                body: section.body,
+                                running,
+                                on_action,
+                            }
+                        }
+                        if !section.actions.is_empty() {
+                            ActionStrip {
+                                actions: section.actions,
+                                running,
+                                on_action,
+                            }
+                        }
+                    }
+                }
+            }
+            if !terminal.is_empty() {
+                ol { class: "ux-terminal ux-stack-terminal",
+                    for line in terminal.iter().rev() {
+                        li { "{line.text}" }
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn stack_section_class(state: UiStepState) -> &'static str {
+    match state {
+        UiStepState::Pending => "ux-stack-section ux-stack-section-pending",
+        UiStepState::Active => "ux-stack-section ux-stack-section-active",
+        UiStepState::Complete => "ux-stack-section ux-stack-section-complete",
+        UiStepState::NeedsAttention => "ux-stack-section ux-stack-section-attention",
     }
 }
 
