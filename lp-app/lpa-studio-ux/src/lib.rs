@@ -14,8 +14,8 @@ pub use action::{
     UxCommand,
 };
 pub use link::{
-    ConnectedDeviceSummary, EndpointChoice, LinkAction, LinkSnapshot, LinkState, LinkUx,
-    ProgressState, ProviderChoice, SharedLinkRegistry, UxIssue,
+    ConnectedDeviceSummary, ConnectedLink, EndpointChoice, LinkAction, LinkOpenOutcome,
+    LinkSnapshot, LinkState, LinkUx, ProgressState, ProviderChoice, SharedLinkRegistry, UxIssue,
 };
 pub use project::{
     ProjectAction, ProjectInventorySummary, ProjectSnapshot, ProjectState, ProjectUx,

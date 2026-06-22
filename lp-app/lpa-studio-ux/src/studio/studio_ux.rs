@@ -1,6 +1,6 @@
 use crate::{
-    AvailableAction, LinkAction, LinkUx, ProjectAction, ProjectUx, ServerUx, StudioAction,
-    StudioSnapshot, UxLogEntry, UxLogLevel, UxNotice, UxOutcome, UxResult,
+    AvailableAction, ConnectedLink, LinkAction, LinkOpenOutcome, LinkUx, ProjectAction, ProjectUx,
+    ServerUx, StudioAction, StudioSnapshot, UxLogEntry, UxLogLevel, UxNotice, UxOutcome, UxResult,
 };
 
 pub struct StudioUx {
@@ -58,29 +58,32 @@ impl StudioUx {
                 self.link.refresh_provider_catalog();
                 Ok(UxOutcome::new().with_notice(UxNotice::info("Provider catalog refreshed")))
             }
-            LinkAction::SelectProvider { provider_id } => {
-                self.link.select_provider(provider_id).await?;
-                Ok(UxOutcome::new())
+            LinkAction::OpenProvider { provider_id } => {
+                match self.link.open_provider(provider_id).await? {
+                    LinkOpenOutcome::Opened => Ok(UxOutcome::new()),
+                    LinkOpenOutcome::Connected(connected) => self.attach_connected_link(connected),
+                }
             }
             LinkAction::ConnectEndpoint {
                 provider_id,
                 endpoint_id,
             } => {
                 let connected = self.link.connect_endpoint(provider_id, endpoint_id).await?;
-                self.logs.extend(connected.logs);
-                match self
-                    .server
-                    .attach_link_connection(self.link.registry_handle(), &connected.connection)
-                {
-                    Ok(()) => {
-                        Ok(UxOutcome::new()
-                            .with_notice(UxNotice::info("Server protocol connected")))
-                    }
-                    Err(error) => {
-                        self.server.fail(error.to_string());
-                        Err(error)
-                    }
-                }
+                self.attach_connected_link(connected)
+            }
+        }
+    }
+
+    fn attach_connected_link(&mut self, connected: ConnectedLink) -> UxResult {
+        self.logs.extend(connected.logs);
+        match self
+            .server
+            .attach_link_connection(self.link.registry_handle(), &connected.connection)
+        {
+            Ok(()) => Ok(UxOutcome::new().with_notice(UxNotice::info("Server protocol connected"))),
+            Err(error) => {
+                self.server.fail(error.to_string());
+                Err(error)
             }
         }
     }

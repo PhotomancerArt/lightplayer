@@ -52,17 +52,24 @@ The first implementation slice uses:
 - `StudioSnapshot` and related snapshots as cloneable read models;
 - typed commands such as `LinkAction` and `ProjectAction`;
 - `AvailableAction<A>` to attach contextual labels, summaries, priorities, and
-  enablement to typed commands;
+  enablement to typed commands, including provider choices exposed as actions;
 - async `execute()` methods that perform the real operation and update the UX
   state directly.
 
 The first proof path is browser-worker simulation through the same provider
-registry entry point that future hardware and host providers use. `lpa-link`
-owns the browser-worker provider/session. `lpa-studio-ux` owns the registry and
-adapts the connected link session into `lpa-client::LpClient<Io>` as an internal
-server transport detail. The web app renders snapshots and dispatches actions;
-it does not route runtime providers, drain service effects, or correlate
-protocol responses.
+registry entry point that future hardware and host providers use. The simulator
+provider is represented as an initial action; executing it auto-discovers and
+connects the single browser-worker endpoint, then attaches the server protocol.
+`lpa-link` owns the browser-worker provider/session. `lpa-studio-ux` owns the
+registry and adapts the connected link session into `lpa-client::LpClient<Io>`
+as an internal server transport detail.
+
+Browser Web Serial is also represented as an initial provider action when the
+web build enables that provider. Browser port selection and permission remain
+browser-owned behavior; Studio UX starts the access request and then models the
+resulting provider endpoint/session state. The web app renders snapshots and
+dispatches actions; it does not route runtime providers, drain service effects,
+correlate protocol responses, or implement browser port selection itself.
 
 The older `lpa-studio-core` and `lpa-studio-runtime` crates remain in the
 workspace as compiling references during the experiment. A later cleanup can
@@ -74,10 +81,12 @@ delete, archive, or fold them once the new model proves itself.
   actions.
 - Web UI, future CLI, tests, and agents can share the same action/snapshot
   language.
+- Initial provider choices are renderable by generic action components instead
+  of special-cased web UI.
 - Service operations move out of the UI and out of an abstract effect/event
   loop.
-- The first slice is smaller than the old provisioning UI; Web Serial ESP32,
-  flashing, and rich recovery states must be ported intentionally later.
+- The first slice is smaller than the old provisioning UI; ESP32 flashing,
+  provisioning, and rich recovery states must be ported intentionally later.
 - The old ADRs and crate READMEs may describe reference code rather than the
   active direction until cleanup is complete.
 

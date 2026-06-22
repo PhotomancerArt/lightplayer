@@ -28,6 +28,14 @@ browser-worker = [
     "dep:wasm-bindgen-futures",
     "dep:web-sys",
 ]
+browser-serial-esp32 = [
+    "lpa-link/browser-serial-esp32",
+    "dep:async-trait",
+    "dep:js-sys",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:web-sys",
+]
 
 [lints]
 workspace = true

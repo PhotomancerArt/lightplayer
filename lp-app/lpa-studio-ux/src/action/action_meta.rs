@@ -4,7 +4,9 @@ use crate::{ActionConfirmation, ActionEnablement, ActionKind, ActionPriority};
 pub struct ActionMeta {
     pub kind: ActionKind,
     pub label: String,
+    pub short_label: Option<String>,
     pub summary: String,
+    pub icon: Option<String>,
     pub priority: ActionPriority,
     pub enablement: ActionEnablement,
     pub confirmation: Option<ActionConfirmation>,
@@ -20,11 +22,23 @@ impl ActionMeta {
         Self {
             kind,
             label: label.into(),
+            short_label: None,
             summary: summary.into(),
+            icon: None,
             priority,
             enablement: ActionEnablement::Enabled,
             confirmation: None,
         }
+    }
+
+    pub fn with_short_label(mut self, short_label: impl Into<String>) -> Self {
+        self.short_label = Some(short_label.into());
+        self
+    }
+
+    pub fn with_icon(mut self, icon: impl Into<String>) -> Self {
+        self.icon = Some(icon.into());
+        self
     }
 
     pub fn disabled(mut self, reason: impl Into<String>) -> Self {

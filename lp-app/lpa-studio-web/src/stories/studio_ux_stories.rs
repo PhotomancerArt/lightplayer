@@ -6,10 +6,34 @@ use lpa_studio_ux::{
     ServerState, StudioAction, StudioSnapshot, UxIssue, UxLogEntry, UxLogLevel,
 };
 
-use crate::app::StudioShell;
+use crate::components::{ActionStrip, LinkPane, ProjectPane, ServerPane, StudioShell};
 use crate::stories::story::StoryDescriptor;
 
 pub const STORIES: &[StoryDescriptor] = &[
+    StoryDescriptor::new(
+        "studio/actions/provider-actions",
+        "Studio UX",
+        "Provider actions",
+        "Generic action strip for provider choices exposed by Link UX.",
+    ),
+    StoryDescriptor::new(
+        "studio/panes/link",
+        "Studio UX",
+        "Link pane",
+        "Link pane rendered directly from state and available link actions.",
+    ),
+    StoryDescriptor::new(
+        "studio/panes/server",
+        "Studio UX",
+        "Server pane",
+        "Server pane rendered directly from server state.",
+    ),
+    StoryDescriptor::new(
+        "studio/panes/project",
+        "Studio UX",
+        "Project pane",
+        "Project pane rendered directly from project state and available actions.",
+    ),
     StoryDescriptor::new(
         "studio/simulator-idle",
         "Studio UX",
@@ -49,6 +73,54 @@ pub const STORIES: &[StoryDescriptor] = &[
 ];
 
 pub fn render_story(id: &str) -> Option<Element> {
+    match id {
+        "studio/actions/provider-actions" => {
+            return Some(rsx! {
+                section { class: "ux-panel ux-panel-primary",
+                    div { class: "ux-panel-heading",
+                        p { "Actions" }
+                        h2 { "Provider choices" }
+                    }
+                    ActionStrip {
+                        actions: start_actions(),
+                        running: false,
+                        on_action: move |_| {},
+                    }
+                }
+            });
+        }
+        "studio/panes/link" => {
+            return Some(rsx! {
+                LinkPane {
+                    state: idle_link_state(),
+                    actions: start_actions(),
+                    running: false,
+                    on_action: move |_| {},
+                }
+            });
+        }
+        "studio/panes/server" => {
+            return Some(rsx! {
+                ServerPane {
+                    state: ServerState::Connected {
+                        protocol: "fw-browser-post-message-v1".to_string(),
+                    },
+                }
+            });
+        }
+        "studio/panes/project" => {
+            return Some(rsx! {
+                ProjectPane {
+                    state: project_ready_state(),
+                    actions: load_project_actions(),
+                    running: false,
+                    on_action: move |_| {},
+                }
+            });
+        }
+        _ => {}
+    }
+
     let (snapshot, actions, running, error, notices) = match id {
         "studio/simulator-idle" => (idle_snapshot(), start_actions(), false, None, Vec::new()),
         "studio/simulator-endpoint" => (
@@ -96,9 +168,7 @@ pub fn render_story(id: &str) -> Option<Element> {
 
 fn idle_snapshot() -> StudioSnapshot {
     StudioSnapshot::new(
-        LinkSnapshot::new(LinkState::SelectingProvider {
-            providers: vec![ProviderChoice::browser_worker()],
-        }),
+        LinkSnapshot::new(idle_link_state()),
         ServerSnapshot::new(ServerState::Disconnected),
         ProjectSnapshot::new(ProjectState::NotLoaded),
         Vec::new(),
@@ -159,15 +229,7 @@ fn project_ready_snapshot() -> StudioSnapshot {
         ServerSnapshot::new(ServerState::Connected {
             protocol: "fw-browser-post-message-v1".to_string(),
         }),
-        ProjectSnapshot::new(ProjectState::Ready {
-            project_id: "studio-demo".to_string(),
-            handle_id: 1,
-            inventory: ProjectInventorySummary {
-                node_count: 4,
-                definition_count: 3,
-                asset_count: 1,
-            },
-        }),
+        ProjectSnapshot::new(project_ready_state()),
         vec![
             UxLogEntry::new(UxLogLevel::Info, "fw-browser", "project loaded"),
             UxLogEntry::new(
@@ -177,6 +239,31 @@ fn project_ready_snapshot() -> StudioSnapshot {
             ),
         ],
     )
+}
+
+fn idle_link_state() -> LinkState {
+    LinkState::SelectingProvider {
+        providers: vec![
+            ProviderChoice::browser_worker(),
+            ProviderChoice {
+                id: LinkProviderKind::BrowserSerialEsp32,
+                label: "ESP32".to_string(),
+                summary: "Connect to ESP32 hardware through browser Web Serial.".to_string(),
+            },
+        ],
+    }
+}
+
+fn project_ready_state() -> ProjectState {
+    ProjectState::Ready {
+        project_id: "studio-demo".to_string(),
+        handle_id: 1,
+        inventory: ProjectInventorySummary {
+            node_count: 4,
+            definition_count: 3,
+            asset_count: 1,
+        },
+    }
 }
 
 fn error_snapshot() -> StudioSnapshot {
@@ -209,16 +296,34 @@ fn connected_link_snapshot() -> LinkSnapshot {
 }
 
 fn start_actions() -> Vec<AvailableAction<StudioAction>> {
-    let provider_id = ProviderChoice::browser_worker().id;
-    vec![AvailableAction::from_command(
-        StudioAction::from(LinkAction::SelectProvider { provider_id }),
-        ActionMeta::new(
-            LinkAction::SELECT_PROVIDER,
-            "Start simulator",
-            "Run LightPlayer locally in a browser worker.",
-            ActionPriority::Primary,
+    vec![
+        AvailableAction::from_command(
+            StudioAction::from(LinkAction::OpenProvider {
+                provider_id: LinkProviderKind::BrowserWorker,
+            }),
+            ActionMeta::new(
+                LinkAction::OPEN_PROVIDER,
+                "Start simulator",
+                "Run LightPlayer locally in a browser worker.",
+                ActionPriority::Primary,
+            )
+            .with_short_label("Simulator")
+            .with_icon("play"),
         ),
-    )]
+        AvailableAction::from_command(
+            StudioAction::from(LinkAction::OpenProvider {
+                provider_id: LinkProviderKind::BrowserSerialEsp32,
+            }),
+            ActionMeta::new(
+                LinkAction::OPEN_PROVIDER,
+                "Connect ESP32",
+                "Connect to ESP32 hardware through browser Web Serial.",
+                ActionPriority::Secondary,
+            )
+            .with_short_label("ESP32")
+            .with_icon("usb"),
+        ),
+    ]
 }
 
 fn connect_actions() -> Vec<AvailableAction<StudioAction>> {

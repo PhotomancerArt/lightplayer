@@ -1,6 +1,8 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+#[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+use lpa_link::providers::LinkProviderInstance;
 use lpa_link::providers::{LinkEnv, LinkProviderRegistry};
 use lpa_link::{
     LinkConnection, LinkDiagnosticSeverity, LinkEndpointId, LinkLogLevel, LinkProvider,
@@ -68,15 +70,17 @@ impl LinkUx {
                 .iter()
                 .map(|provider| {
                     AvailableAction::from_command(
-                        LinkAction::SelectProvider {
+                        LinkAction::OpenProvider {
                             provider_id: provider.id,
                         },
                         ActionMeta::new(
-                            LinkAction::SELECT_PROVIDER,
+                            LinkAction::OPEN_PROVIDER,
                             provider_action_label(provider.id),
                             provider.summary.clone(),
                             provider_action_priority(provider.id),
-                        ),
+                        )
+                        .with_short_label(provider_action_short_label(provider.id))
+                        .with_icon(provider_action_icon(provider.id)),
                     )
                 })
                 .collect(),
@@ -125,7 +129,33 @@ impl LinkUx {
         };
     }
 
-    pub async fn select_provider(&mut self, provider_id: LinkProviderKind) -> Result<(), UxError> {
+    pub async fn open_provider(
+        &mut self,
+        provider_id: LinkProviderKind,
+    ) -> Result<LinkOpenOutcome, UxError> {
+        if provider_id == LinkProviderKind::BrowserSerialEsp32 {
+            return self.open_browser_serial_provider().await;
+        }
+
+        self.discover_provider_endpoints(provider_id).await?;
+        let endpoints = match &self.state {
+            LinkState::SelectingEndpoint { endpoints, .. } => endpoints.clone(),
+            _ => Vec::new(),
+        };
+        if endpoints.len() == 1 && provider_auto_connects(provider_id) {
+            let endpoint_id = endpoints[0].id.clone();
+            return self
+                .connect_endpoint(provider_id, endpoint_id)
+                .await
+                .map(LinkOpenOutcome::Connected);
+        }
+        Ok(LinkOpenOutcome::Opened)
+    }
+
+    pub async fn discover_provider_endpoints(
+        &mut self,
+        provider_id: LinkProviderKind,
+    ) -> Result<(), UxError> {
         self.active_provider = Some(provider_id);
         self.active_endpoint = None;
         self.active_session = None;
@@ -159,6 +189,45 @@ impl LinkUx {
                 .collect(),
         };
         Ok(())
+    }
+
+    #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
+    async fn open_browser_serial_provider(&mut self) -> Result<LinkOpenOutcome, UxError> {
+        self.active_provider = Some(LinkProviderKind::BrowserSerialEsp32);
+        self.active_endpoint = None;
+        self.active_session = None;
+        self.active_connection = None;
+        self.state = LinkState::DiscoveringEndpoints {
+            provider_id: LinkProviderKind::BrowserSerialEsp32,
+            progress: ProgressState::new("Requesting browser serial access"),
+        };
+
+        let endpoint = {
+            let mut registry = self.registry.borrow_mut();
+            let provider = registry
+                .provider_mut(LinkProviderKind::BrowserSerialEsp32)
+                .ok_or_else(|| missing_provider(LinkProviderKind::BrowserSerialEsp32))?;
+            let LinkProviderInstance::BrowserSerialEsp32(provider) = provider else {
+                return Err(UxError::Link(
+                    "browser serial registry entry has the wrong provider type".to_string(),
+                ));
+            };
+            provider.request_access().await.map_err(map_link_error)?
+        };
+        let endpoint_choice = EndpointChoice::from_endpoint(endpoint);
+        self.state = LinkState::SelectingEndpoint {
+            provider_id: LinkProviderKind::BrowserSerialEsp32,
+            endpoints: vec![endpoint_choice],
+        };
+        Ok(LinkOpenOutcome::Opened)
+    }
+
+    #[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
+    async fn open_browser_serial_provider(&mut self) -> Result<LinkOpenOutcome, UxError> {
+        Err(UxError::UnsupportedFeature(
+            "browser serial ESP32 access requires the browser-serial-esp32 feature on wasm"
+                .to_string(),
+        ))
     }
 
     pub async fn connect_endpoint(
@@ -247,6 +316,11 @@ pub struct ConnectedLink {
     pub logs: Vec<UxLogEntry>,
 }
 
+pub enum LinkOpenOutcome {
+    Opened,
+    Connected(ConnectedLink),
+}
+
 impl Default for LinkUx {
     fn default() -> Self {
         Self::new()
@@ -285,11 +359,38 @@ fn provider_action_label(kind: LinkProviderKind) -> String {
     match kind {
         LinkProviderKind::BrowserWorker => "Start simulator".to_string(),
         LinkProviderKind::HostProcess => "Start host runtime".to_string(),
-        LinkProviderKind::BrowserSerialEsp32 | LinkProviderKind::HostSerialEsp32 => {
-            "Select hardware".to_string()
-        }
+        LinkProviderKind::BrowserSerialEsp32 => "Connect ESP32".to_string(),
+        LinkProviderKind::HostSerialEsp32 => "Select hardware".to_string(),
         LinkProviderKind::Fake => "Select fake provider".to_string(),
     }
+}
+
+fn provider_action_short_label(kind: LinkProviderKind) -> String {
+    match kind {
+        LinkProviderKind::BrowserWorker => "Simulator".to_string(),
+        LinkProviderKind::HostProcess => "Host".to_string(),
+        LinkProviderKind::BrowserSerialEsp32 | LinkProviderKind::HostSerialEsp32 => {
+            "ESP32".to_string()
+        }
+        LinkProviderKind::Fake => "Fake".to_string(),
+    }
+}
+
+fn provider_action_icon(kind: LinkProviderKind) -> String {
+    match kind {
+        LinkProviderKind::BrowserWorker | LinkProviderKind::HostProcess => "play".to_string(),
+        LinkProviderKind::BrowserSerialEsp32 | LinkProviderKind::HostSerialEsp32 => {
+            "usb".to_string()
+        }
+        LinkProviderKind::Fake => "test-tube".to_string(),
+    }
+}
+
+fn provider_auto_connects(kind: LinkProviderKind) -> bool {
+    matches!(
+        kind,
+        LinkProviderKind::BrowserWorker | LinkProviderKind::HostProcess
+    )
 }
 
 fn provider_action_priority(kind: LinkProviderKind) -> ActionPriority {
@@ -370,7 +471,7 @@ mod tests {
         assert_eq!(actions.len(), 1);
         assert_eq!(
             actions[0].command,
-            LinkAction::SelectProvider {
+            LinkAction::OpenProvider {
                 provider_id: LinkProviderKind::Fake
             }
         );

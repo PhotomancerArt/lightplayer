@@ -4,7 +4,7 @@ use lpa_link::{LinkEndpointId, LinkProviderKind};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LinkAction {
     RefreshProviders,
-    SelectProvider {
+    OpenProvider {
         provider_id: LinkProviderKind,
     },
     ConnectEndpoint {
@@ -15,7 +15,7 @@ pub enum LinkAction {
 
 impl LinkAction {
     pub const REFRESH_PROVIDERS: ActionKind = ActionKind::new("link", "refresh-providers");
-    pub const SELECT_PROVIDER: ActionKind = ActionKind::new("link", "select-provider");
+    pub const OPEN_PROVIDER: ActionKind = ActionKind::new("link", "open-provider");
     pub const CONNECT_ENDPOINT: ActionKind = ActionKind::new("link", "connect-endpoint");
 }
 
@@ -23,7 +23,7 @@ impl UxCommand for LinkAction {
     fn action_kind(&self) -> ActionKind {
         match self {
             Self::RefreshProviders => Self::REFRESH_PROVIDERS,
-            Self::SelectProvider { .. } => Self::SELECT_PROVIDER,
+            Self::OpenProvider { .. } => Self::OPEN_PROVIDER,
             Self::ConnectEndpoint { .. } => Self::CONNECT_ENDPOINT,
         }
     }

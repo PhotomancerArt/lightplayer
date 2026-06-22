@@ -22,6 +22,6 @@ impl BrowserWorkerOptions {
 
 impl Default for BrowserWorkerOptions {
     fn default() -> Self {
-        Self::new("./pkg/fw_browser.js", "./pkg/fw_browser_bg.wasm")
+        Self::new("/pkg/fw_browser.js", "/pkg/fw_browser_bg.wasm")
     }
 }

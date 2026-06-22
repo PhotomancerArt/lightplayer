@@ -1,4 +1,5 @@
 mod app;
+mod components;
 #[cfg(feature = "stories")]
 mod stories;
 

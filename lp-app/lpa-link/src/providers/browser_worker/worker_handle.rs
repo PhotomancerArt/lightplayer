@@ -5,7 +5,7 @@ use js_sys::Promise;
 use wasm_bindgen::JsCast;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{MessageEvent, Worker, WorkerOptions, WorkerType};
+use web_sys::{ErrorEvent, MessageEvent, Url, Worker, WorkerOptions, WorkerType};
 
 use crate::LinkError;
 use crate::providers::browser_worker::{
@@ -38,6 +38,35 @@ impl BrowserWorkerHandle {
         });
         worker.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
         on_message.forget();
+
+        let output_ref = Rc::clone(&outputs);
+        let on_error = Closure::<dyn FnMut(ErrorEvent)>::new(move |event: ErrorEvent| {
+            output_ref.borrow_mut().push(BrowserOutputEnvelope::Status {
+                runtime_id: None,
+                status: "error".to_string(),
+                message: Some(format!(
+                    "worker error: {} at {}:{}:{}",
+                    event.message(),
+                    event.filename(),
+                    event.lineno(),
+                    event.colno()
+                )),
+            });
+        });
+        worker.set_onerror(Some(on_error.as_ref().unchecked_ref()));
+        on_error.forget();
+
+        let output_ref = Rc::clone(&outputs);
+        let on_message_error =
+            Closure::<dyn FnMut(MessageEvent)>::new(move |_event: MessageEvent| {
+                output_ref.borrow_mut().push(BrowserOutputEnvelope::Status {
+                    runtime_id: None,
+                    status: "error".to_string(),
+                    message: Some("worker message could not be deserialized".to_string()),
+                });
+            });
+        worker.set_onmessageerror(Some(on_message_error.as_ref().unchecked_ref()));
+        on_message_error.forget();
         Ok(Self { worker, outputs })
     }
 
@@ -46,10 +75,12 @@ impl BrowserWorkerHandle {
         label: &str,
         options: &BrowserWorkerOptions,
     ) -> Result<Vec<BrowserOutputEnvelope>, LinkError> {
+        let fw_browser_module_path = resolve_page_url(&options.fw_browser_module_path)?;
+        let fw_browser_wasm_path = resolve_page_url(&options.fw_browser_wasm_path)?;
         self.post(&BrowserInputEnvelope::Boot {
             label: label.to_string(),
-            fw_browser_module_path: options.fw_browser_module_path.clone(),
-            fw_browser_wasm_path: options.fw_browser_wasm_path.clone(),
+            fw_browser_module_path,
+            fw_browser_wasm_path,
         })?;
         let mut outputs = Vec::new();
         for _ in 0..200 {
@@ -59,15 +90,22 @@ impl BrowserWorkerHandle {
                     &output,
                     BrowserOutputEnvelope::Status { status, .. } if status == "ready"
                 );
+                let error = boot_error_message(&output);
                 outputs.push(output);
+                if let Some(message) = error {
+                    return Err(LinkError::other(format!(
+                        "browser worker boot failed: {message}"
+                    )));
+                }
                 if ready {
                     return Ok(outputs);
                 }
             }
         }
-        Err(LinkError::other(
-            "timed out waiting for browser worker boot",
-        ))
+        Err(LinkError::other(format!(
+            "timed out waiting for browser worker boot{}",
+            boot_output_summary(&outputs)
+        )))
     }
 
     pub fn post(&self, envelope: &BrowserInputEnvelope) -> Result<(), LinkError> {
@@ -84,6 +122,77 @@ impl BrowserWorkerHandle {
 
     pub fn terminate(&self) {
         self.worker.terminate();
+    }
+}
+
+fn resolve_page_url(path: &str) -> Result<String, LinkError> {
+    if path.is_empty() {
+        return Ok(String::new());
+    }
+    if Url::new(path).is_ok() {
+        return Ok(path.to_string());
+    }
+
+    let Some(window) = web_sys::window() else {
+        return Err(LinkError::other(format!(
+            "cannot resolve browser worker asset path {path:?}: missing window"
+        )));
+    };
+    let base = if let Some(document) = window.document() {
+        document
+            .url()
+            .map_err(|error| LinkError::other(format!("{error:?}")))?
+    } else {
+        window
+            .location()
+            .href()
+            .map_err(|error| LinkError::other(format!("{error:?}")))?
+    };
+    Url::new_with_base(path, &base)
+        .map(|url| url.href())
+        .map_err(|error| {
+            LinkError::other(format!(
+                "cannot resolve browser worker asset path {path:?} from {base:?}: {error:?}"
+            ))
+        })
+}
+
+fn boot_error_message(output: &BrowserOutputEnvelope) -> Option<String> {
+    match output {
+        BrowserOutputEnvelope::Status {
+            status, message, ..
+        } if status == "error" => Some(
+            message
+                .clone()
+                .unwrap_or_else(|| "worker reported error status".to_string()),
+        ),
+        BrowserOutputEnvelope::Log { level, message, .. } if level == "error" => {
+            Some(message.clone())
+        }
+        _ => None,
+    }
+}
+
+fn boot_output_summary(outputs: &[BrowserOutputEnvelope]) -> String {
+    let Some(last) = outputs.last() else {
+        return "; no worker output was received".to_string();
+    };
+    match last {
+        BrowserOutputEnvelope::Status {
+            status, message, ..
+        } => match message {
+            Some(message) => format!("; last worker status was {status}: {message}"),
+            None => format!("; last worker status was {status}"),
+        },
+        BrowserOutputEnvelope::Log {
+            level,
+            target,
+            message,
+            ..
+        } => format!("; last worker log was {level} from {target}: {message}"),
+        BrowserOutputEnvelope::ProtocolOut { .. } => {
+            "; last worker output was a protocol frame".to_string()
+        }
     }
 }
 

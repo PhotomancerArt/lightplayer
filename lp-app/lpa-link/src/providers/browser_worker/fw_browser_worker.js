@@ -34,6 +34,7 @@ self.onmessage = async (event) => {
         throw new Error(`unknown worker message kind: ${message.kind}`);
     }
   } catch (error) {
+    console.error("[fw-browser-worker]", error);
     self.postMessage({
       kind: "status",
       status: "error",

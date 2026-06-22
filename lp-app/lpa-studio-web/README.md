@@ -11,20 +11,29 @@ reads belong below the UI in `lpa-studio-ux`, `lpa-link`, and `lpa-client`.
 
 ## Current Slice
 
-The active first screen is the browser simulator, reached through the
-provider/endpoint model owned by `lpa-link`:
+The active first screen is the Link pane, rendered from provider actions owned
+by the UX layer. In the browser build it starts with simulator and ESP32
+actions:
 
 ```text
 lpa-studio-web -> lpa-studio-ux -> LinkProviderRegistry -> browser-worker -> fw-browser -> lp-server
 ```
 
-`LinkUx` owns `LinkProviderRegistry`, renders provider and endpoint choices,
-and opens link sessions through the selected provider. `ServerUx` owns the
-`lpa-client` protocol client once a connected link exposes server I/O. The slice
-can launch the browser-local firmware runtime, open the server protocol, load
-the built-in demo project, and display a small project inventory summary. It
-intentionally does not include the previous Web Serial ESP32 provisioning UI or
-the full old component set.
+`LinkUx` owns `LinkProviderRegistry`, turns provider choices into contextual
+`AvailableAction<LinkAction>` values, and opens link sessions through the
+selected provider. The simulator provider auto-discovers and connects its single
+browser-worker endpoint, so starting the simulator is one click. `ServerUx` owns
+the `lpa-client` protocol client once a connected link exposes server I/O.
+
+The WebSerial ESP32 provider is visible as a provider action when browser serial
+support is compiled in. The browser still owns the serial port picker and
+permission prompt; the UI does not model that picker as an endpoint-selection
+screen.
+
+The slice can launch the browser-local firmware runtime, open the server
+protocol, load the built-in demo project, and display a small project inventory
+summary. It intentionally does not include the previous full ESP32 provisioning,
+flashing, and recovery UI.
 
 The older `lpa-studio-core` and `lpa-studio-runtime` crates remain in the
 workspace as references during the experiment, but the default web app does not
@@ -42,11 +51,17 @@ packages them with wasm-bindgen, prepares the wasm sidecar assets, and serves
 
 Use `just studio-web-build` or `just studio-web` for the release/static build
 path. The release build still packages ESP32-C6 firmware assets for future
-browser flashing work, even though the current UX slice is simulator-only.
+browser flashing work.
+
+Browser-worker assets are served from `public/pkg/`. The UX boot path resolves
+those paths to page-absolute URLs before sending them into the embedded blob
+worker, which lets worker import/init failures surface as actionable link
+errors instead of silent boot timeouts.
 
 ## Stories
 
-The storybook has been reduced to the new UX shell states for this experiment.
+The storybook has been reduced to the new UX shell, action, and pane states for
+this experiment.
 Run the dev server and open:
 
 ```text
@@ -69,4 +84,5 @@ than the old provisioning journey fixtures.
 - `lpa-link` owns provider implementations, provider resources, sessions, and
   lifecycle.
 - `lpa-client` owns server protocol correlation and typed project operations.
-- `lpa-studio-web` owns Dioxus rendering and browser event handling.
+- `lpa-studio-web` owns Dioxus rendering, pane composition, and browser event
+  handling.

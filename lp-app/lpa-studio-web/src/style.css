@@ -128,11 +128,22 @@ select {
 .ux-actions {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   gap: 10px;
   margin-top: 18px;
 }
 
+.ux-action-item {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
 .ux-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   min-height: 40px;
   padding: 0 14px;
   border: 1px solid #3e4852;
@@ -141,6 +152,31 @@ select {
   background: #20272e;
   cursor: pointer;
   font-weight: 700;
+}
+
+.ux-action-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  font-size: 0.72rem;
+  line-height: 1;
+}
+
+.ux-action-icon-play::before {
+  content: ">";
+}
+
+.ux-action-icon-usb::before {
+  content: "USB";
+}
+
+.ux-action-icon-test::before {
+  content: "T";
 }
 
 .ux-action:hover:not(:disabled) {
