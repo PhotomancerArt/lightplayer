@@ -144,6 +144,76 @@ select {
   font-weight: 700;
 }
 
+.ux-activity-steps {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ux-activity-step {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 8px;
+  align-items: flex-start;
+  padding: 8px;
+  border: 1px solid #293039;
+  border-radius: 6px;
+  background: #11161b;
+}
+
+.ux-activity-step-marker {
+  color: #99a2ad;
+  font-family:
+    "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.78rem;
+}
+
+.ux-activity-step-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ux-activity-step-copy span {
+  color: #dce4df;
+  font-size: 0.9rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.ux-activity-step-copy small {
+  color: #99a2ad;
+  font-size: 0.78rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.ux-activity-step-active {
+  border-color: #717d44;
+}
+
+.ux-activity-step-active .ux-activity-step-marker {
+  color: #f2e6a2;
+}
+
+.ux-activity-step-complete {
+  border-color: #365545;
+}
+
+.ux-activity-step-complete .ux-activity-step-marker {
+  color: #7be0b2;
+}
+
+.ux-activity-step-failed {
+  border-color: #874b4b;
+}
+
+.ux-activity-step-failed .ux-activity-step-marker {
+  color: #ffc7c7;
+}
+
 .ux-progress {
   display: grid;
   gap: 6px;

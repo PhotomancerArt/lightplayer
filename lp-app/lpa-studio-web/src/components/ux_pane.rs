@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use lpa_studio_ux::{UxAction, UxActivity, UxBody, UxPaneView, UxProgress};
+use lpa_studio_ux::{UxAction, UxActivity, UxActivityStepState, UxBody, UxPaneView, UxProgress};
 
 use crate::components::ActionStrip;
 
@@ -93,6 +93,7 @@ fn UxActivityBody(activity: UxActivity) -> Element {
     let title = activity.title;
     let detail = activity.detail;
     let progress = activity.progress;
+    let steps = activity.steps;
     let terminal = activity.terminal;
 
     rsx! {
@@ -104,6 +105,21 @@ fn UxActivityBody(activity: UxActivity) -> Element {
             if let Some(progress) = progress {
                 UxProgressBar { progress }
             }
+            if !steps.is_empty() {
+                ol { class: "ux-activity-steps",
+                    for step in steps {
+                        li { class: "{activity_step_class(step.state)}",
+                            span { class: "ux-activity-step-marker", "{activity_step_marker(step.state)}" }
+                            div { class: "ux-activity-step-copy",
+                                span { "{step.label}" }
+                                if let Some(detail) = step.detail.as_ref() {
+                                    small { "{detail}" }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             if !terminal.is_empty() {
                 ol { class: "ux-terminal",
                     for line in terminal.iter().rev().take(12).rev() {
@@ -113,6 +129,19 @@ fn UxActivityBody(activity: UxActivity) -> Element {
             }
         }
     }
+}
+
+fn activity_step_class(state: UxActivityStepState) -> &'static str {
+    match state {
+        UxActivityStepState::Pending => "ux-activity-step ux-activity-step-pending",
+        UxActivityStepState::Active => "ux-activity-step ux-activity-step-active",
+        UxActivityStepState::Complete => "ux-activity-step ux-activity-step-complete",
+        UxActivityStepState::Failed => "ux-activity-step ux-activity-step-failed",
+    }
+}
+
+fn activity_step_marker(state: UxActivityStepState) -> &'static str {
+    state.text_marker()
 }
 
 #[component]

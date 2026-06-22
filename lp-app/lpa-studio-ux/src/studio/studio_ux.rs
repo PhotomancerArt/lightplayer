@@ -190,10 +190,11 @@ impl StudioUx {
             "Connecting",
             UxProgress::indeterminate("Opening server protocol"),
         );
-        match self
-            .server
-            .attach_link_connection(self.link.registry_handle(), connection)
-        {
+        match self.server.attach_link_connection(
+            self.link.registry_handle(),
+            connection,
+            updates.clone(),
+        ) {
             Ok(()) => {
                 let mut outcome =
                     UxOutcome::new().with_notice(UxNotice::info("Server protocol connected"));
@@ -216,7 +217,14 @@ impl StudioUx {
                             "lpa-studio-ux",
                             format!("server readiness probe failed: {error}"),
                         ));
+                        self.logs.extend(self.server.take_pending_logs());
                         self.project.reset();
+                        if matches!(error, UxError::NoFirmwareDetected(_)) {
+                            self.server.fail("No LightPlayer firmware detected.");
+                            return Ok(UxOutcome::new().with_notice(UxNotice::info(
+                                "No LightPlayer firmware detected; provision the selected ESP32",
+                            )));
+                        }
                         self.server.fail(error.to_string());
                         return Err(error);
                     }

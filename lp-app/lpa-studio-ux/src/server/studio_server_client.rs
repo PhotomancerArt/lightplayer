@@ -8,7 +8,7 @@ use lpc_wire::WireProjectHandle;
 use crate::project::demo_project::{DEMO_PROJECT_ID, demo_project_deploy_files};
 use crate::{
     LoadedProjectChoice, ProjectInventorySummary, SharedLinkRegistry, UxError, UxLogEntry,
-    UxLogLevel,
+    UxLogLevel, UxUpdateSink,
 };
 
 pub struct StudioServerClient {
@@ -21,10 +21,16 @@ impl StudioServerClient {
     pub fn from_link_connection(
         registry: SharedLinkRegistry,
         connection: &LinkConnection,
+        updates: UxUpdateSink,
     ) -> Result<Self, UxError> {
         let pending_logs = Rc::new(RefCell::new(Vec::new()));
         let protocol = connection_protocol(&connection.kind);
-        let io = server_io_from_link_connection(registry, connection, Rc::clone(&pending_logs))?;
+        let io = server_io_from_link_connection(
+            registry,
+            connection,
+            Rc::clone(&pending_logs),
+            updates,
+        )?;
         Ok(Self {
             client: LpClient::new(io),
             protocol,
@@ -126,6 +132,7 @@ fn server_io_from_link_connection(
     _registry: SharedLinkRegistry,
     connection: &LinkConnection,
     _pending_logs: Rc<RefCell<Vec<UxLogEntry>>>,
+    _updates: UxUpdateSink,
 ) -> Result<Box<dyn ClientIo>, UxError> {
     match &connection.kind {
         #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
@@ -146,6 +153,7 @@ fn server_io_from_link_connection(
                 _registry,
                 connection.session_id.clone(),
                 _pending_logs,
+                _updates,
             ),
         )),
         #[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
@@ -205,6 +213,11 @@ fn map_client_events(events: Vec<ClientEvent>) -> Vec<UxLogEntry> {
 
 fn map_client_error(error: ClientError) -> UxError {
     match error {
+        ClientError::Transport(message)
+            if super::browser_serial_readiness::is_no_firmware_detected_message(&message) =>
+        {
+            UxError::NoFirmwareDetected(message)
+        }
         ClientError::Transport(message) => UxError::Transport(message),
         ClientError::Server(message) | ClientError::Protocol(message) => UxError::Protocol(message),
         ClientError::UnexpectedResponse {
@@ -220,5 +233,20 @@ fn map_server_log_level(level: lpc_wire::server::api::LogLevel) -> UxLogLevel {
         lpc_wire::server::api::LogLevel::Info => UxLogLevel::Info,
         lpc_wire::server::api::LogLevel::Warn => UxLogLevel::Warn,
         lpc_wire::server::api::LogLevel::Error => UxLogLevel::Error,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::browser_serial_readiness::NO_FIRMWARE_DETECTED_PREFIX;
+    use super::*;
+
+    #[test]
+    fn no_firmware_transport_error_maps_to_no_firmware_ux_error() {
+        let error = map_client_error(ClientError::Transport(format!(
+            "Transport error: {NO_FIRMWARE_DETECTED_PREFIX}; recent serial output: invalid header"
+        )));
+
+        assert!(matches!(error, UxError::NoFirmwareDetected(_)));
     }
 }

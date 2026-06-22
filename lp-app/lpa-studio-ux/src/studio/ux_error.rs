@@ -12,6 +12,7 @@ pub enum UxError {
     Transport(String),
     Protocol(String),
     Browser(String),
+    NoFirmwareDetected(String),
 }
 
 impl UxError {
@@ -24,7 +25,8 @@ impl UxError {
             | Self::Project(message)
             | Self::Transport(message)
             | Self::Protocol(message)
-            | Self::Browser(message) => message,
+            | Self::Browser(message)
+            | Self::NoFirmwareDetected(message) => message,
         }
     }
 }
@@ -40,6 +42,7 @@ impl fmt::Display for UxError {
             Self::Transport(message) => write!(f, "transport error: {message}"),
             Self::Protocol(message) => write!(f, "protocol error: {message}"),
             Self::Browser(message) => write!(f, "browser error: {message}"),
+            Self::NoFirmwareDetected(message) => write!(f, "{message}"),
         }
     }
 }

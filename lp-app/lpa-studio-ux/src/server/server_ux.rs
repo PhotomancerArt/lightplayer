@@ -3,6 +3,7 @@ use lpa_link::LinkConnection;
 use crate::{
     ProgressState, ServerOp, ServerSnapshot, ServerState, SharedLinkRegistry, StudioServerClient,
     UxAction, UxBody, UxError, UxIssue, UxMetric, UxNode, UxNodeId, UxPaneView, UxStatus,
+    UxUpdateSink,
 };
 
 pub struct ServerUx {
@@ -61,9 +62,10 @@ impl ServerUx {
         &mut self,
         registry: SharedLinkRegistry,
         connection: &LinkConnection,
+        updates: UxUpdateSink,
     ) -> Result<(), UxError> {
         self.mark_connecting("Opening server protocol");
-        let client = StudioServerClient::from_link_connection(registry, connection)?;
+        let client = StudioServerClient::from_link_connection(registry, connection, updates)?;
         let protocol = client.protocol().to_string();
         self.client = Some(client);
         self.state = ServerState::Connected { protocol };
@@ -74,6 +76,13 @@ impl ServerUx {
         self.client
             .as_mut()
             .ok_or_else(|| UxError::MissingSession("server client is not connected".to_string()))
+    }
+
+    pub fn take_pending_logs(&mut self) -> Vec<crate::UxLogEntry> {
+        self.client
+            .as_mut()
+            .map(StudioServerClient::take_pending_logs)
+            .unwrap_or_default()
     }
 
     pub fn fail(&mut self, message: impl Into<String>) {

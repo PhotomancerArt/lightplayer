@@ -46,8 +46,8 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
   for Link, Server, and Project plus recent logs.
 - `UxBody` is intentionally small: text, progress/activity, issue, metrics, or
   empty. It is not a generic component schema.
-- `UxActivity` describes live work inside a pane: title, optional progress, and
-  optional terminal lines.
+- `UxActivity` describes live work inside a pane: title, optional progress,
+  optional milestone steps, and optional terminal lines.
 - `UxUpdate` / `UxUpdateSink` let `StudioUx::dispatch_with_updates` publish
   live pane activity or fresh `StudioView` snapshots while an async action is
   still running.
@@ -98,6 +98,19 @@ goes through the provider reset path before Studio probes for loaded projects.
 The browser-serial client waits for the first valid protocol frame before
 sending the first request, so a just-reset device does not lose the initial
 project probe while firmware is still booting.
+
+While waiting for browser serial readiness, Studio publishes a stepped
+`UxActivity` in the Server pane. The reusable activity data includes serial
+access, device reset, boot output, LightPlayer protocol readiness, and recent
+raw boot lines. This is presentation-neutral: the web UI renders it as a small
+stepper plus terminal, while agents or future CLI shells can render the same
+view as text.
+
+If ESP32 boot output includes patterns such as `invalid header: 0xffffffff`,
+Studio classifies the device as blank/erased instead of surfacing a generic
+protocol timeout. The link session remains open, project/server state is
+detached, and `Provision firmware` remains available when the selected provider
+advertises flashing support.
 
 After reset-to-blank, Studio leaves project and server detached and returns to a
 link state that can offer provisioning again. Reset-to-blank is not a server

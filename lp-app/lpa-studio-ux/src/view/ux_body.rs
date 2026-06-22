@@ -34,6 +34,13 @@ impl UxBody {
                         lines.push(detail.clone());
                     }
                 }
+                lines.extend(activity.steps.iter().map(|step| {
+                    let line = format!("{} {}", step.state.text_marker(), step.label);
+                    match &step.detail {
+                        Some(detail) => format!("{line}: {detail}"),
+                        None => line,
+                    }
+                }));
                 lines.extend(
                     activity
                         .terminal

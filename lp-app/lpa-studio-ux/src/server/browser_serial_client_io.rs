@@ -12,13 +12,25 @@ use lpc_wire::{ClientMessage, TransportError, WireServerMessage, json};
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use wasm_bindgen_futures::JsFuture;
 
-use crate::{SharedLinkRegistry, UxLogEntry, UxLogLevel};
+use super::browser_serial_readiness::{
+    BrowserSerialReadinessClassifier, BrowserSerialReadinessFailure,
+};
+use crate::{
+    ServerUx, SharedLinkRegistry, UxActivity, UxActivityStep, UxActivityStepState, UxLogEntry,
+    UxLogLevel, UxNodeId, UxProgress, UxStatus, UxUpdate, UxUpdateSink,
+};
 
 const RESPONSE_POLL_LIMIT: usize = 500;
 const READINESS_POLL_LIMIT: usize = 500;
 const RESPONSE_POLL_DELAY_MS: i32 = 10;
+const READINESS_TIMEOUT_MS: u32 = 5_000;
 const MALFORMED_PROTOCOL_SNIPPET_LIMIT: usize = 4_096;
 const DEVICE_LOG_SNIPPET_LIMIT: usize = 1_024;
+const READINESS_TERMINAL_LINE_LIMIT: usize = 80;
+const STEP_SERIAL_ACCESS: &str = "serial-access";
+const STEP_RESET_DEVICE: &str = "reset-device";
+const STEP_BOOT_OUTPUT: &str = "boot-output";
+const STEP_PROTOCOL: &str = "server-protocol";
 
 pub struct BrowserSerialClientIo {
     state: Rc<RefCell<BrowserSerialClientState>>,
@@ -29,12 +41,23 @@ impl BrowserSerialClientIo {
         registry: SharedLinkRegistry,
         session_id: LinkSessionId,
         logs: Rc<RefCell<Vec<UxLogEntry>>>,
+        updates: UxUpdateSink,
     ) -> Self {
+        let readiness_activity = initial_readiness_activity();
+        updates.emit(UxUpdate::Activity {
+            node_id: server_node_id(),
+            status: UxStatus::working("Connecting"),
+            activity: readiness_activity.clone(),
+        });
         Self {
             state: Rc::new(RefCell::new(BrowserSerialClientState {
                 registry,
                 session_id,
                 logs,
+                updates,
+                readiness_activity,
+                readiness_classifier: BrowserSerialReadinessClassifier::new(),
+                boot_output_seen: false,
                 last_request: None,
                 last_protocol_issue: None,
                 protocol_ready: false,
@@ -79,6 +102,7 @@ impl BrowserSerialClientIo {
                 if self.handle_line(line)?.is_some() {
                     let mut state = self.state.borrow_mut();
                     state.protocol_ready = true;
+                    state.mark_protocol_ready();
                     state.push_log(
                         UxLogLevel::Info,
                         "browser-serial",
@@ -91,9 +115,16 @@ impl BrowserSerialClientIo {
             sleep_ms(RESPONSE_POLL_DELAY_MS).await?;
         }
 
-        Err(TransportError::Other(
-            "timed out waiting for browser serial server readiness".to_string(),
-        ))
+        let failure = self.state.borrow().readiness_classifier.classify_timeout();
+        let no_firmware = matches!(
+            failure,
+            BrowserSerialReadinessFailure::NoFirmwareDetected { .. }
+        );
+        let message = failure.message();
+        self.state
+            .borrow_mut()
+            .mark_protocol_failed(&message, no_firmware);
+        Err(TransportError::Other(message))
     }
 
     fn handle_line(&self, line: String) -> Result<Option<WireServerMessage>, TransportError> {
@@ -129,7 +160,9 @@ impl BrowserSerialClientIo {
         let level = device_line_level(line);
         let message = line_snippet(line, DEVICE_LOG_SNIPPET_LIMIT);
         log_device_line(level, &message);
-        self.state.borrow().push_log(level, "fw-esp32", message);
+        self.state
+            .borrow_mut()
+            .record_readiness_device_line(level, message);
     }
 
     fn record_malformed_frame(&self, issue: String) {
@@ -249,6 +282,10 @@ struct BrowserSerialClientState {
     registry: SharedLinkRegistry,
     session_id: LinkSessionId,
     logs: Rc<RefCell<Vec<UxLogEntry>>>,
+    updates: UxUpdateSink,
+    readiness_activity: UxActivity,
+    readiness_classifier: BrowserSerialReadinessClassifier,
+    boot_output_seen: bool,
     last_request: Option<BrowserSerialRequest>,
     last_protocol_issue: Option<String>,
     protocol_ready: bool,
@@ -259,6 +296,65 @@ impl BrowserSerialClientState {
         self.logs
             .borrow_mut()
             .push(UxLogEntry::new(level, source, message));
+    }
+
+    fn record_readiness_device_line(&mut self, level: UxLogLevel, message: String) {
+        self.readiness_classifier.observe_line(message.clone());
+        let entry = UxLogEntry::new(level, "fw-esp32", message.clone());
+        self.logs.borrow_mut().push(entry.clone());
+        self.updates.emit(UxUpdate::Log(entry));
+        if !self.boot_output_seen {
+            self.boot_output_seen = true;
+            self.readiness_activity
+                .set_step_state(STEP_BOOT_OUTPUT, UxActivityStepState::Complete);
+        }
+        self.readiness_activity
+            .set_step_state(STEP_PROTOCOL, UxActivityStepState::Active);
+        self.readiness_activity.push_terminal_line(message);
+        self.readiness_activity
+            .retain_recent_terminal_lines(READINESS_TERMINAL_LINE_LIMIT);
+        self.emit_readiness_activity(UxStatus::working("Connecting"));
+    }
+
+    fn mark_protocol_ready(&mut self) {
+        self.readiness_activity
+            .set_step_state(STEP_BOOT_OUTPUT, UxActivityStepState::Complete);
+        self.readiness_activity
+            .set_step_state(STEP_PROTOCOL, UxActivityStepState::Complete);
+        self.readiness_activity.progress =
+            Some(UxProgress::determinate("LightPlayer protocol ready", 100));
+        self.emit_readiness_activity(UxStatus::good("Connected"));
+    }
+
+    fn mark_protocol_failed(&mut self, message: &str, no_firmware: bool) {
+        if self.readiness_classifier.recent_lines().is_empty() {
+            self.readiness_activity
+                .set_step_state(STEP_BOOT_OUTPUT, UxActivityStepState::Failed);
+        } else {
+            self.readiness_activity
+                .set_step_state(STEP_BOOT_OUTPUT, UxActivityStepState::Complete);
+        }
+        self.readiness_activity
+            .set_step_state(STEP_PROTOCOL, UxActivityStepState::Failed);
+        self.readiness_activity.detail = Some(message.to_string());
+        self.readiness_activity.progress = Some(UxProgress::determinate(
+            "LightPlayer protocol unavailable",
+            100,
+        ));
+        let status = if no_firmware {
+            UxStatus::warning("Provision ready")
+        } else {
+            UxStatus::error("Timeout")
+        };
+        self.emit_readiness_activity(status);
+    }
+
+    fn emit_readiness_activity(&self, status: UxStatus) {
+        self.updates.emit(UxUpdate::Activity {
+            node_id: server_node_id(),
+            status,
+            activity: self.readiness_activity.clone(),
+        });
     }
 
     fn wait_context(&self) -> String {
@@ -272,6 +368,31 @@ impl BrowserSerialClientState {
             None => "waiting for a protocol response".to_string(),
         }
     }
+}
+
+fn initial_readiness_activity() -> UxActivity {
+    UxActivity::new("Connecting ESP32 server")
+        .with_detail("Waiting for LightPlayer boot output and protocol frames.")
+        .with_progress(UxProgress::timeout(
+            "Waiting for LightPlayer protocol",
+            READINESS_TIMEOUT_MS,
+        ))
+        .with_steps(vec![
+            UxActivityStep::new(STEP_SERIAL_ACCESS, "Serial access")
+                .with_state(UxActivityStepState::Complete)
+                .with_detail("Browser serial port is open."),
+            UxActivityStep::new(STEP_RESET_DEVICE, "Reset device")
+                .with_state(UxActivityStepState::Complete)
+                .with_detail("Device reset was requested before protocol attach."),
+            UxActivityStep::new(STEP_BOOT_OUTPUT, "Boot output")
+                .with_state(UxActivityStepState::Active),
+            UxActivityStep::new(STEP_PROTOCOL, "LightPlayer protocol")
+                .with_state(UxActivityStepState::Active),
+        ])
+}
+
+fn server_node_id() -> UxNodeId {
+    UxNodeId::new(ServerUx::NODE_ID)
 }
 
 #[derive(Clone, Copy)]

@@ -2,8 +2,9 @@ use dioxus::prelude::*;
 use lpa_studio_ux::{
     ConnectedDeviceSummary, EndpointChoice, LinkOp, LinkProviderKind, LinkState, LinkUx,
     LoadedProjectChoice, ProgressState, ProjectInventorySummary, ProjectState, ProjectUx,
-    ProviderChoice, ServerState, ServerUx, StudioView, UxAction, UxBody, UxIssue, UxLogEntry,
-    UxLogLevel, UxNodeId, UxPaneView, UxStatus,
+    ProviderChoice, ServerState, ServerUx, StudioView, UxAction, UxActivity, UxActivityStep,
+    UxActivityStepState, UxBody, UxIssue, UxLogEntry, UxLogLevel, UxNodeId, UxPaneView, UxProgress,
+    UxStatus,
 };
 
 use crate::components::{ActionStrip, StudioShell, UxPane};
@@ -75,6 +76,12 @@ pub const STORIES: &[StoryDescriptor] = &[
         "Studio UX",
         "Provision ready",
         "Blank ESP32 link session offering firmware provisioning.",
+    ),
+    StoryDescriptor::new(
+        "studio/browser-serial-blank-firmware",
+        "Studio UX",
+        "Blank firmware readiness",
+        "Browser serial server readiness with boot logs and firmware provisioning available.",
     ),
     StoryDescriptor::new(
         "studio/provisioning",
@@ -200,6 +207,9 @@ pub fn render_story(id: &str) -> Option<Element> {
             vec!["Server disconnected".to_string()],
         ),
         "studio/provision-ready" => (provision_ready_view(), false, None, Vec::new()),
+        "studio/browser-serial-blank-firmware" => {
+            (browser_serial_blank_firmware_view(), true, None, Vec::new())
+        }
         "studio/provisioning" => (provisioning_view(), true, None, Vec::new()),
         "studio/provision-failed" => (
             provision_failed_view(),
@@ -338,7 +348,9 @@ fn provision_ready_view() -> StudioView {
     StudioView::new(
         vec![
             provision_ready_link_view(),
-            server_view(ServerState::Disconnected),
+            server_view(ServerState::Failed {
+                issue: UxIssue::new("No LightPlayer firmware detected."),
+            }),
             project_view(ProjectState::NotLoaded, false),
         ],
         vec![UxLogEntry::new(
@@ -347,6 +359,58 @@ fn provision_ready_view() -> StudioView {
             "server protocol is unavailable; firmware provisioning is available",
         )],
     )
+}
+
+fn browser_serial_blank_firmware_view() -> StudioView {
+    StudioView::new(
+        vec![
+            provision_ready_link_view(),
+            UxPaneView::new(
+                ServerUx::NODE_ID,
+                "Server",
+                UxStatus::warning("Provision ready"),
+                UxBody::Activity(blank_firmware_activity()),
+                Vec::new(),
+            ),
+            project_view(ProjectState::NotLoaded, false),
+        ],
+        vec![
+            UxLogEntry::new(UxLogLevel::Info, "fw-esp32", "ESP-ROM:esp32c6-20220919"),
+            UxLogEntry::new(UxLogLevel::Info, "fw-esp32", "invalid header: 0xffffffff"),
+            UxLogEntry::new(
+                UxLogLevel::Warn,
+                "lpa-studio-ux",
+                "no LightPlayer firmware detected; provisioning is available",
+            ),
+        ],
+    )
+}
+
+fn blank_firmware_activity() -> UxActivity {
+    let mut activity = UxActivity::new("Connecting ESP32 server")
+        .with_detail("ESP32 boot output looks like blank or erased flash.")
+        .with_progress(UxProgress::determinate(
+            "LightPlayer protocol unavailable",
+            100,
+        ))
+        .with_steps(vec![
+            UxActivityStep::new("serial-access", "Serial access")
+                .with_state(UxActivityStepState::Complete)
+                .with_detail("Browser serial port is open."),
+            UxActivityStep::new("reset-device", "Reset device")
+                .with_state(UxActivityStepState::Complete)
+                .with_detail("Device reset was requested before protocol attach."),
+            UxActivityStep::new("boot-output", "Boot output")
+                .with_state(UxActivityStepState::Complete),
+            UxActivityStep::new("server-protocol", "LightPlayer protocol")
+                .with_state(UxActivityStepState::Failed),
+        ]);
+    activity.push_terminal_line("ESP-ROM:esp32c6-20220919");
+    activity.push_terminal_line("Build:Sep 19 2022");
+    activity.push_terminal_line("rst:0x7 (TG0_WDT_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)");
+    activity.push_terminal_line("invalid header: 0xffffffff");
+    activity.push_terminal_line("invalid header: 0xffffffff");
+    activity
 }
 
 fn provisioning_view() -> StudioView {
