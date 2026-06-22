@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use lpa_studio_ux::{AvailableAction, ProjectState, StudioAction};
+use lpa_studio_ux::{ProjectState, UxAction};
 
 use crate::components::ActionStrip;
 
@@ -7,9 +7,9 @@ use crate::components::ActionStrip;
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ProjectPane(
     state: ProjectState,
-    actions: Vec<AvailableAction<StudioAction>>,
+    actions: Vec<UxAction>,
     running: bool,
-    on_action: EventHandler<StudioAction>,
+    on_action: EventHandler<UxAction>,
 ) -> Element {
     rsx! {
         section { class: "ux-panel",

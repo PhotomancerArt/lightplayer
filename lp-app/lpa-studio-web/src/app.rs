@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use lpa_studio_ux::{AvailableAction, StudioAction, StudioSnapshot, StudioUx};
+use lpa_studio_ux::{StudioSnapshot, StudioUx, UxAction};
 
 use crate::components::StudioShell;
 
@@ -21,7 +21,7 @@ pub fn App() -> Element {
     let running = model.read().running;
     let error = model.read().error.clone();
     let notices = model.read().notices.clone();
-    let on_action = move |action: StudioAction| {
+    let on_action = move |action: UxAction| {
         spawn(async move {
             execute_action(model, action).await;
         });
@@ -43,7 +43,7 @@ pub fn App() -> Element {
 struct StudioWebModel {
     ux: Option<StudioUx>,
     snapshot: StudioSnapshot,
-    actions: Vec<AvailableAction<StudioAction>>,
+    actions: Vec<UxAction>,
     running: bool,
     error: Option<String>,
     notices: Vec<String>,
@@ -72,7 +72,7 @@ impl StudioWebModel {
     }
 }
 
-async fn execute_action(mut model: Signal<StudioWebModel>, action: StudioAction) {
+async fn execute_action(mut model: Signal<StudioWebModel>, action: UxAction) {
     let Some(mut ux) = ({
         let mut state = model.write();
         if state.running {
@@ -87,7 +87,7 @@ async fn execute_action(mut model: Signal<StudioWebModel>, action: StudioAction)
         return;
     };
 
-    let result = ux.execute(action).await;
+    let result = ux.dispatch(action).await;
     let mut state = model.write();
     match result {
         Ok(outcome) => {

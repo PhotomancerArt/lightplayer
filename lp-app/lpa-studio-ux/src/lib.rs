@@ -10,20 +10,18 @@ pub mod server;
 pub mod studio;
 
 pub use action::{
-    ActionConfirmation, ActionEnablement, ActionKind, ActionMeta, ActionPriority, AvailableAction,
-    UxCommand,
+    ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, UxAction, UxContext, UxNode,
+    UxNodeId, UxOp,
 };
 pub use link::{
-    ConnectedDeviceSummary, ConnectedLink, EndpointChoice, LinkAction, LinkOpenOutcome,
-    LinkSnapshot, LinkState, LinkUx, ProgressState, ProviderChoice, SharedLinkRegistry, UxIssue,
+    ConnectedDeviceSummary, ConnectedLink, EndpointChoice, LinkOp, LinkOpenOutcome, LinkSnapshot,
+    LinkState, LinkUx, ProgressState, ProviderChoice, SharedLinkRegistry, UxIssue,
 };
-pub use project::{
-    ProjectAction, ProjectInventorySummary, ProjectSnapshot, ProjectState, ProjectUx,
-};
+pub use project::{ProjectInventorySummary, ProjectOp, ProjectSnapshot, ProjectState, ProjectUx};
 pub use server::{LoadedDemoProject, ServerSnapshot, ServerState, ServerUx, StudioServerClient};
 pub use studio::{
-    StudioAction, StudioSnapshot, StudioUx, UxError, UxLogEntry, UxLogLevel, UxNotice,
-    UxNoticeLevel, UxOutcome, UxResult,
+    StudioSnapshot, StudioUx, UxError, UxLogEntry, UxLogLevel, UxNotice, UxNoticeLevel, UxOutcome,
+    UxResult,
 };
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "studio-demo";

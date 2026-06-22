@@ -1,6 +1,6 @@
 use crate::{
-    AvailableAction, ConnectedLink, LinkAction, LinkOpenOutcome, LinkUx, ProjectAction, ProjectUx,
-    ServerUx, StudioAction, StudioSnapshot, UxLogEntry, UxLogLevel, UxNotice, UxOutcome, UxResult,
+    ConnectedLink, LinkOp, LinkOpenOutcome, LinkUx, ProjectOp, ProjectUx, ServerUx, StudioSnapshot,
+    UxAction, UxContext, UxLogEntry, UxLogLevel, UxNode, UxNotice, UxOutcome, UxResult,
 };
 
 pub struct StudioUx {
@@ -29,48 +29,52 @@ impl StudioUx {
         )
     }
 
-    pub fn actions(&self) -> Vec<AvailableAction<StudioAction>> {
-        let mut actions = self
-            .link
-            .actions()
-            .into_iter()
-            .map(|action| action.map(StudioAction::from))
-            .collect::<Vec<_>>();
-        actions.extend(
-            self.project
-                .actions(self.server.is_connected())
-                .into_iter()
-                .map(|action| action.map(StudioAction::from)),
-        );
+    pub fn actions(&self) -> Vec<UxAction> {
+        let mut actions = self.link.actions();
+        actions.extend(self.project.actions(self.server.is_connected()));
         actions
     }
 
-    pub async fn execute(&mut self, action: StudioAction) -> UxResult {
-        match action {
-            StudioAction::Link(action) => self.execute_link_action(action).await,
-            StudioAction::Project(ProjectAction::LoadDemoProject) => self.load_demo_project().await,
+    pub async fn dispatch(&mut self, action: UxAction) -> UxResult {
+        if action.node_id() == &self.link.node_id() {
+            let op = action.into_op::<LinkOp>()?;
+            return self.execute_link_op(op).await;
         }
+        if action.node_id() == &self.project.node_id() {
+            let op = action.into_op::<ProjectOp>()?;
+            return self.execute_project_op(op).await;
+        }
+        Err(crate::UxError::UnsupportedAction(format!(
+            "unknown UX node {}",
+            action.node_id()
+        )))
     }
 
-    async fn execute_link_action(&mut self, action: LinkAction) -> UxResult {
-        match action {
-            LinkAction::RefreshProviders => {
+    async fn execute_link_op(&mut self, op: LinkOp) -> UxResult {
+        match op {
+            LinkOp::RefreshProviders => {
                 self.link.refresh_provider_catalog();
                 Ok(UxOutcome::new().with_notice(UxNotice::info("Provider catalog refreshed")))
             }
-            LinkAction::OpenProvider { provider_id } => {
+            LinkOp::OpenProvider { provider_id } => {
                 match self.link.open_provider(provider_id).await? {
                     LinkOpenOutcome::Opened => Ok(UxOutcome::new()),
                     LinkOpenOutcome::Connected(connected) => self.attach_connected_link(connected),
                 }
             }
-            LinkAction::ConnectEndpoint {
+            LinkOp::ConnectEndpoint {
                 provider_id,
                 endpoint_id,
             } => {
                 let connected = self.link.connect_endpoint(provider_id, endpoint_id).await?;
                 self.attach_connected_link(connected)
             }
+        }
+    }
+
+    async fn execute_project_op(&mut self, op: ProjectOp) -> UxResult {
+        match op {
+            ProjectOp::LoadDemoProject => self.load_demo_project().await,
         }
     }
 
@@ -117,9 +121,18 @@ impl Default for StudioUx {
     }
 }
 
+impl UxContext for StudioUx {
+    fn dispatch(
+        &mut self,
+        action: UxAction,
+    ) -> core::pin::Pin<Box<dyn core::future::Future<Output = UxResult> + '_>> {
+        Box::pin(StudioUx::dispatch(self, action))
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::{LinkState, StudioAction};
+    use crate::{LinkState, LinkUx};
 
     use super::*;
 
@@ -134,7 +147,7 @@ mod tests {
     }
 
     #[test]
-    fn initial_actions_are_link_actions() {
+    fn initial_actions_target_link_node() {
         let studio = StudioUx::new();
 
         let actions = studio.actions();
@@ -142,7 +155,7 @@ mod tests {
         assert!(
             actions
                 .iter()
-                .all(|action| matches!(action.command, StudioAction::Link(_)))
+                .all(|action| action.node_id().as_str() == LinkUx::NODE_ID)
         );
     }
 }

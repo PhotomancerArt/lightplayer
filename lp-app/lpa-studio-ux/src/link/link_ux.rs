@@ -10,9 +10,9 @@ use lpa_link::{
 };
 
 use crate::{
-    ActionMeta, ActionPriority, AvailableAction, ConnectedDeviceSummary, EndpointChoice,
-    LinkAction, LinkSnapshot, LinkState, ProgressState, ProviderChoice, UxError, UxIssue,
-    UxLogEntry, UxLogLevel,
+    ActionPriority, ConnectedDeviceSummary, EndpointChoice, LinkOp, LinkSnapshot, LinkState,
+    ProgressState, ProviderChoice, UxAction, UxError, UxIssue, UxLogEntry, UxLogLevel, UxNode,
+    UxNodeId,
 };
 
 pub type SharedLinkRegistry = Rc<RefCell<LinkProviderRegistry>>;
@@ -27,6 +27,8 @@ pub struct LinkUx {
 }
 
 impl LinkUx {
+    pub const NODE_ID: &'static str = "studio.link";
+
     pub fn new() -> Self {
         Self::with_env(LinkEnv::default())
     }
@@ -64,24 +66,19 @@ impl LinkUx {
         Rc::clone(&self.registry)
     }
 
-    pub fn actions(&self) -> Vec<AvailableAction<LinkAction>> {
+    pub fn actions(&self) -> Vec<UxAction> {
         match &self.state {
             LinkState::SelectingProvider { providers } => providers
                 .iter()
                 .map(|provider| {
-                    AvailableAction::from_command(
-                        LinkAction::OpenProvider {
-                            provider_id: provider.id,
-                        },
-                        ActionMeta::new(
-                            LinkAction::OPEN_PROVIDER,
-                            provider_action_label(provider.id),
-                            provider.summary.clone(),
-                            provider_action_priority(provider.id),
-                        )
-                        .with_short_label(provider_action_short_label(provider.id))
-                        .with_icon(provider_action_icon(provider.id)),
-                    )
+                    self.action(LinkOp::OpenProvider {
+                        provider_id: provider.id,
+                    })
+                    .with_label(provider_action_label(provider.id))
+                    .with_summary(provider.summary.clone())
+                    .with_short_label(provider_action_short_label(provider.id))
+                    .with_icon(provider_action_icon(provider.id))
+                    .with_priority(provider_action_priority(provider.id))
                 })
                 .collect(),
             LinkState::SelectingEndpoint {
@@ -90,29 +87,15 @@ impl LinkUx {
             } => endpoints
                 .iter()
                 .map(|endpoint| {
-                    AvailableAction::from_command(
-                        LinkAction::ConnectEndpoint {
-                            provider_id: *provider_id,
-                            endpoint_id: endpoint.id.clone(),
-                        },
-                        ActionMeta::new(
-                            LinkAction::CONNECT_ENDPOINT,
-                            format!("Open {}", endpoint.label),
-                            endpoint.summary.clone(),
-                            ActionPriority::Primary,
-                        ),
-                    )
+                    self.action(LinkOp::ConnectEndpoint {
+                        provider_id: *provider_id,
+                        endpoint_id: endpoint.id.clone(),
+                    })
+                    .with_label(format!("Open {}", endpoint.label))
+                    .with_summary(endpoint.summary.clone())
                 })
                 .collect(),
-            LinkState::Failed { .. } => vec![AvailableAction::from_command(
-                LinkAction::RefreshProviders,
-                ActionMeta::new(
-                    LinkAction::REFRESH_PROVIDERS,
-                    "Refresh providers",
-                    "Rebuild the provider catalog from lpa-link.",
-                    ActionPriority::Secondary,
-                ),
-            )],
+            LinkState::Failed { .. } => vec![self.action(LinkOp::RefreshProviders)],
             LinkState::DiscoveringEndpoints { .. }
             | LinkState::Connecting { .. }
             | LinkState::Connected { .. } => Vec::new(),
@@ -215,11 +198,14 @@ impl LinkUx {
             provider.request_access().await.map_err(map_link_error)?
         };
         let endpoint_choice = EndpointChoice::from_endpoint(endpoint);
+        let endpoint_id = endpoint_choice.id.clone();
         self.state = LinkState::SelectingEndpoint {
             provider_id: LinkProviderKind::BrowserSerialEsp32,
             endpoints: vec![endpoint_choice],
         };
-        Ok(LinkOpenOutcome::Opened)
+        self.connect_endpoint(LinkProviderKind::BrowserSerialEsp32, endpoint_id)
+            .await
+            .map(LinkOpenOutcome::Connected)
     }
 
     #[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
@@ -308,6 +294,14 @@ impl LinkUx {
             }
             _ => None,
         }
+    }
+}
+
+impl UxNode for LinkUx {
+    type Op = LinkOp;
+
+    fn node_id(&self) -> UxNodeId {
+        UxNodeId::new(Self::NODE_ID)
     }
 }
 
@@ -470,12 +464,13 @@ mod tests {
 
         assert_eq!(actions.len(), 1);
         assert_eq!(
-            actions[0].command,
-            LinkAction::OpenProvider {
+            actions[0].op_as::<LinkOp>(),
+            Some(&LinkOp::OpenProvider {
                 provider_id: LinkProviderKind::Fake
-            }
+            })
         );
-        assert_eq!(actions[0].meta.label, "Select fake provider");
+        assert_eq!(actions[0].node_id().as_str(), LinkUx::NODE_ID);
+        assert_eq!(actions[0].meta().label, "Select fake provider");
     }
 
     #[test]

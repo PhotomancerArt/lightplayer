@@ -1,9 +1,9 @@
 use dioxus::prelude::*;
 use lpa_studio_ux::{
-    ActionMeta, ActionPriority, AvailableAction, ConnectedDeviceSummary, EndpointChoice,
-    LinkAction, LinkProviderKind, LinkSnapshot, LinkState, ProgressState, ProjectAction,
-    ProjectInventorySummary, ProjectSnapshot, ProjectState, ProviderChoice, ServerSnapshot,
-    ServerState, StudioAction, StudioSnapshot, UxIssue, UxLogEntry, UxLogLevel,
+    ConnectedDeviceSummary, EndpointChoice, LinkOp, LinkProviderKind, LinkSnapshot, LinkState,
+    LinkUx, ProgressState, ProjectInventorySummary, ProjectOp, ProjectSnapshot, ProjectState,
+    ProjectUx, ProviderChoice, ServerSnapshot, ServerState, StudioSnapshot, UxAction, UxIssue,
+    UxLogEntry, UxLogLevel, UxNodeId,
 };
 
 use crate::components::{ActionStrip, LinkPane, ProjectPane, ServerPane, StudioShell};
@@ -295,61 +295,50 @@ fn connected_link_snapshot() -> LinkSnapshot {
     })
 }
 
-fn start_actions() -> Vec<AvailableAction<StudioAction>> {
+fn start_actions() -> Vec<UxAction> {
     vec![
-        AvailableAction::from_command(
-            StudioAction::from(LinkAction::OpenProvider {
+        UxAction::from_op(
+            UxNodeId::new(LinkUx::NODE_ID),
+            LinkOp::OpenProvider {
                 provider_id: LinkProviderKind::BrowserWorker,
-            }),
-            ActionMeta::new(
-                LinkAction::OPEN_PROVIDER,
-                "Start simulator",
-                "Run LightPlayer locally in a browser worker.",
-                ActionPriority::Primary,
-            )
-            .with_short_label("Simulator")
-            .with_icon("play"),
-        ),
-        AvailableAction::from_command(
-            StudioAction::from(LinkAction::OpenProvider {
+            },
+        )
+        .with_label("Start simulator")
+        .with_summary("Run LightPlayer locally in a browser worker.")
+        .with_short_label("Simulator")
+        .with_icon("play"),
+        UxAction::from_op(
+            UxNodeId::new(LinkUx::NODE_ID),
+            LinkOp::OpenProvider {
                 provider_id: LinkProviderKind::BrowserSerialEsp32,
-            }),
-            ActionMeta::new(
-                LinkAction::OPEN_PROVIDER,
-                "Connect ESP32",
-                "Connect to ESP32 hardware through browser Web Serial.",
-                ActionPriority::Secondary,
-            )
-            .with_short_label("ESP32")
-            .with_icon("usb"),
-        ),
+            },
+        )
+        .with_label("Connect ESP32")
+        .with_summary("Connect to ESP32 hardware through browser Web Serial.")
+        .with_short_label("ESP32")
+        .with_icon("usb")
+        .with_priority(lpa_studio_ux::ActionPriority::Secondary),
     ]
 }
 
-fn connect_actions() -> Vec<AvailableAction<StudioAction>> {
+fn connect_actions() -> Vec<UxAction> {
     let endpoint = EndpointChoice::browser_worker();
-    vec![AvailableAction::from_command(
-        StudioAction::from(LinkAction::ConnectEndpoint {
-            provider_id: endpoint.provider_id,
-            endpoint_id: endpoint.id,
-        }),
-        ActionMeta::new(
-            LinkAction::CONNECT_ENDPOINT,
-            "Open Browser firmware runtime",
-            "Spawn a browser-local firmware runtime.",
-            ActionPriority::Primary,
-        ),
-    )]
+    vec![
+        UxAction::from_op(
+            UxNodeId::new(LinkUx::NODE_ID),
+            LinkOp::ConnectEndpoint {
+                provider_id: endpoint.provider_id,
+                endpoint_id: endpoint.id,
+            },
+        )
+        .with_label("Open Browser firmware runtime")
+        .with_summary("Spawn a browser-local firmware runtime."),
+    ]
 }
 
-fn load_project_actions() -> Vec<AvailableAction<StudioAction>> {
-    vec![AvailableAction::from_command(
-        StudioAction::from(ProjectAction::LoadDemoProject),
-        ActionMeta::new(
-            ProjectAction::LOAD_DEMO_PROJECT,
-            "Load demo project",
-            "Upload and run the built-in simulator project.",
-            ActionPriority::Primary,
-        ),
+fn load_project_actions() -> Vec<UxAction> {
+    vec![UxAction::from_op(
+        UxNodeId::new(ProjectUx::NODE_ID),
+        ProjectOp::LoadDemoProject,
     )]
 }

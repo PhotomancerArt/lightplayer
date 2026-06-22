@@ -1,20 +1,17 @@
 use dioxus::prelude::*;
-use lpa_studio_ux::{ActionEnablement, ActionPriority, AvailableAction, StudioAction};
+use lpa_studio_ux::{ActionEnablement, ActionPriority, UxAction};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn ActionButton(
-    action: AvailableAction<StudioAction>,
-    running: bool,
-    on_action: EventHandler<StudioAction>,
-) -> Element {
-    let command = action.command.clone();
-    let disabled = running || !action.meta.enablement.is_enabled();
-    let class = action_class(action.meta.priority);
-    let disabled_reason = disabled_reason(&action.meta.enablement).map(ToString::to_string);
-    let icon_class = action_icon_class(action.meta.icon.as_deref());
-    let label = action.meta.label.clone();
-    let summary = action.meta.summary.clone();
+pub fn ActionButton(action: UxAction, running: bool, on_action: EventHandler<UxAction>) -> Element {
+    let action_to_run = action.clone();
+    let meta = action.meta().clone();
+    let disabled = running || !meta.enablement.is_enabled();
+    let class = action_class(meta.priority);
+    let disabled_reason = disabled_reason(&meta.enablement).map(ToString::to_string);
+    let icon_class = action_icon_class(meta.icon.as_deref());
+    let label = meta.label;
+    let summary = meta.summary;
 
     rsx! {
         div { class: "ux-action-item",
@@ -23,7 +20,7 @@ pub fn ActionButton(
                 r#type: "button",
                 disabled,
                 title: "{summary}",
-                onclick: move |_| on_action.call(command.clone()),
+                onclick: move |_| on_action.call(action_to_run.clone()),
                 if let Some(icon_class) = icon_class {
                     span { class: "{icon_class}", aria_hidden: "true" }
                 }

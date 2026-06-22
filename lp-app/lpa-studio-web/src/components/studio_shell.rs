@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use lpa_studio_ux::{AvailableAction, StudioAction, StudioSnapshot};
+use lpa_studio_ux::{LinkUx, ProjectUx, StudioSnapshot, UxAction};
 
 use crate::components::{LinkPane, ProjectPane, RuntimeLog, ServerPane};
 
@@ -7,15 +7,15 @@ use crate::components::{LinkPane, ProjectPane, RuntimeLog, ServerPane};
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn StudioShell(
     snapshot: StudioSnapshot,
-    actions: Vec<AvailableAction<StudioAction>>,
+    actions: Vec<UxAction>,
     running: bool,
     error: Option<String>,
     notices: Vec<String>,
-    on_action: EventHandler<StudioAction>,
+    on_action: EventHandler<UxAction>,
 ) -> Element {
     let has_error = error.is_some();
-    let link_actions = actions_for_link(&actions);
-    let project_actions = actions_for_project(&actions);
+    let link_actions = actions_for_node(&actions, LinkUx::NODE_ID);
+    let project_actions = actions_for_node(&actions, ProjectUx::NODE_ID);
 
     rsx! {
         main { class: "ux-shell",
@@ -71,22 +71,10 @@ pub fn StudioShell(
     }
 }
 
-fn actions_for_link(
-    actions: &[AvailableAction<StudioAction>],
-) -> Vec<AvailableAction<StudioAction>> {
+fn actions_for_node(actions: &[UxAction], node_id: &str) -> Vec<UxAction> {
     actions
         .iter()
-        .filter(|action| matches!(&action.command, StudioAction::Link(_)))
-        .cloned()
-        .collect()
-}
-
-fn actions_for_project(
-    actions: &[AvailableAction<StudioAction>],
-) -> Vec<AvailableAction<StudioAction>> {
-    actions
-        .iter()
-        .filter(|action| matches!(&action.command, StudioAction::Project(_)))
+        .filter(|action| action.is_for_node(node_id))
         .cloned()
         .collect()
 }

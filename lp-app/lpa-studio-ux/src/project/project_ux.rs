@@ -1,7 +1,6 @@
 use crate::{
-    ActionMeta, ActionPriority, AvailableAction, ProgressState, ProjectAction,
-    ProjectInventorySummary, ProjectSnapshot, ProjectState, StudioServerClient, UxError, UxIssue,
-    UxLogEntry,
+    ProgressState, ProjectInventorySummary, ProjectOp, ProjectSnapshot, ProjectState,
+    StudioServerClient, UxAction, UxError, UxIssue, UxLogEntry, UxNode, UxNodeId,
 };
 
 pub struct ProjectUx {
@@ -9,6 +8,8 @@ pub struct ProjectUx {
 }
 
 impl ProjectUx {
+    pub const NODE_ID: &'static str = "studio.project";
+
     pub fn new() -> Self {
         Self {
             state: ProjectState::NotLoaded,
@@ -23,21 +24,13 @@ impl ProjectUx {
         ProjectSnapshot::new(self.state.clone())
     }
 
-    pub fn actions(&self, server_connected: bool) -> Vec<AvailableAction<ProjectAction>> {
+    pub fn actions(&self, server_connected: bool) -> Vec<UxAction> {
         if !server_connected {
             return Vec::new();
         }
         match self.state {
             ProjectState::NotLoaded | ProjectState::Failed { .. } => {
-                vec![AvailableAction::from_command(
-                    ProjectAction::LoadDemoProject,
-                    ActionMeta::new(
-                        ProjectAction::LOAD_DEMO_PROJECT,
-                        "Load demo project",
-                        "Upload and run the built-in simulator project.",
-                        ActionPriority::Primary,
-                    ),
-                )]
+                vec![self.action(ProjectOp::LoadDemoProject)]
             }
             ProjectState::LoadingDemoProject { .. } | ProjectState::Ready { .. } => Vec::new(),
         }
@@ -76,6 +69,14 @@ impl ProjectUx {
         let loaded = server.load_demo_project().await?;
         self.mark_ready(loaded.project_id, loaded.handle_id, loaded.inventory);
         Ok(loaded.logs)
+    }
+}
+
+impl UxNode for ProjectUx {
+    type Op = ProjectOp;
+
+    fn node_id(&self) -> UxNodeId {
+        UxNodeId::new(Self::NODE_ID)
     }
 }
 

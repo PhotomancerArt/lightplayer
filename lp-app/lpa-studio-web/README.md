@@ -4,10 +4,10 @@
 `lpa-studio-ux` slice.
 
 The web app owns Dioxus presentation. It renders `StudioSnapshot` values,
-renders contextual `AvailableAction<StudioAction>` controls, and dispatches
-actions back into `StudioUx`. Browser-worker lifecycle, provider routing,
-protocol request correlation, demo project deployment, and project inventory
-reads belong below the UI in `lpa-studio-ux`, `lpa-link`, and `lpa-client`.
+renders contextual `UxAction` controls, and dispatches those actions back into
+`StudioUx`. Browser-worker lifecycle, provider routing, protocol request
+correlation, demo project deployment, and project inventory reads belong below
+the UI in `lpa-studio-ux`, `lpa-link`, and `lpa-client`.
 
 ## Current Slice
 
@@ -20,10 +20,11 @@ lpa-studio-web -> lpa-studio-ux -> LinkProviderRegistry -> browser-worker -> fw-
 ```
 
 `LinkUx` owns `LinkProviderRegistry`, turns provider choices into contextual
-`AvailableAction<LinkAction>` values, and opens link sessions through the
-selected provider. The simulator provider auto-discovers and connects its single
-browser-worker endpoint, so starting the simulator is one click. `ServerUx` owns
-the `lpa-client` protocol client once a connected link exposes server I/O.
+`UxAction` values backed by `LinkOp` operations, and opens link sessions through
+the selected provider. The simulator provider auto-discovers and connects its
+single browser-worker endpoint, so starting the simulator is one click.
+`ServerUx` owns the `lpa-client` protocol client once a connected link exposes
+server I/O.
 
 The WebSerial ESP32 provider is visible as a provider action when browser serial
 support is compiled in. The browser still owns the serial port picker and
@@ -80,7 +81,8 @@ than the old provisioning journey fixtures.
 ## Boundary
 
 - `lpa-studio-ux` owns Studio product state, snapshots, actions, async
-  execution, the link provider registry, and the connected server client.
+  dispatch, UX node ids, the link provider registry, and the connected server
+  client.
 - `lpa-link` owns provider implementations, provider resources, sessions, and
   lifecycle.
 - `lpa-client` owns server protocol correlation and typed project operations.
