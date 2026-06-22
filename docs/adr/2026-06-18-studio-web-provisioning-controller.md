@@ -79,3 +79,9 @@ visual story set becomes a lightweight review surface for this foundational UX.
 - Add real recovery/safe-mode protocol once firmware/server support exists.
 - Consider extracting shared controller test helpers if desktop Studio needs
   the same auto-advance policy outside Dioxus.
+
+## Update 2026-06-22
+
+The active Studio web app no longer owns a separate provisioning controller.
+`lpa-studio-ux` owns Link, Server, and Project controller logic directly and
+`lpa-studio-web` renders `StudioView` panes plus `UxAction` controls.

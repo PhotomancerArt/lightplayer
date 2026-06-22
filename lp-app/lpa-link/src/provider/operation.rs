@@ -26,8 +26,8 @@ pub enum LinkOperation {
 /// Set of low-level link operations advertised by an endpoint.
 ///
 /// This is intentionally a set of `LinkOperation` values rather than one bool
-/// per operation so UI, Studio core, and future agents can inspect and present
-/// the operation surface generically.
+/// per operation so Studio UX, UI shells, and future agents can inspect and
+/// present the operation surface generically.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Deserialize, Serialize)]
 pub struct LinkCapabilities {
     operations: BTreeSet<LinkOperation>,

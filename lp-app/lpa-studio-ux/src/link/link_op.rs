@@ -7,6 +7,7 @@ use crate::{ActionMeta, ActionPriority, UxOp};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LinkOp {
     RefreshProviders,
+    ConnectServer,
     DisconnectLink,
     OpenProvider {
         provider_id: LinkProviderKind,
@@ -20,6 +21,11 @@ pub enum LinkOp {
 impl UxOp for LinkOp {
     fn default_action_meta(&self) -> ActionMeta {
         match self {
+            Self::ConnectServer => ActionMeta::new(
+                "Connect server",
+                "Attach Studio to the server protocol over the open link session.",
+                ActionPriority::Primary,
+            ),
             Self::DisconnectLink => ActionMeta::new(
                 "Disconnect link",
                 "Close the current link session and return to provider selection.",

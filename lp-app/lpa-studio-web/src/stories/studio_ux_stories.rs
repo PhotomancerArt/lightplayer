@@ -62,7 +62,13 @@ pub const STORIES: &[StoryDescriptor] = &[
         "studio/simulator-ready",
         "Studio UX",
         "Simulator ready",
-        "Connected simulator with project attach actions available.",
+        "Connected simulator after the UX layer auto-loads the demo project.",
+    ),
+    StoryDescriptor::new(
+        "studio/server-disconnected-link-ready",
+        "Studio UX",
+        "Server disconnected",
+        "Open link session with the server protocol detached and reconnect action available.",
     ),
     StoryDescriptor::new(
         "studio/project-ready",
@@ -96,7 +102,7 @@ pub fn render_story(id: &str) -> Option<Element> {
             });
         }
         "studio/panes/link" => {
-            let view = link_view(idle_link_state());
+            let view = link_view(idle_link_state(), false);
             return Some(rsx! {
                 UxPane {
                     view,
@@ -152,7 +158,16 @@ pub fn render_story(id: &str) -> Option<Element> {
             simulator_ready_view(),
             false,
             None,
-            vec!["Simulator is running".to_string()],
+            vec![
+                "Simulator is running".to_string(),
+                "Demo project loaded".to_string(),
+            ],
+        ),
+        "studio/server-disconnected-link-ready" => (
+            server_disconnected_link_ready_view(),
+            false,
+            None,
+            vec!["Server disconnected".to_string()],
         ),
         "studio/project-ready" => (
             project_ready_view(),
@@ -227,7 +242,7 @@ fn simulator_ready_view() -> StudioView {
         ServerState::Connected {
             protocol: "fw-browser-post-message-v1".to_string(),
         },
-        ProjectState::NotLoaded,
+        project_ready_state(),
         true,
         vec![
             UxLogEntry::new(UxLogLevel::Info, "fw-browser", "ready"),
@@ -236,6 +251,7 @@ fn simulator_ready_view() -> StudioView {
                 "lpa-link",
                 "browser worker session owns Worker lifecycle in lpa-link",
             ),
+            UxLogEntry::new(UxLogLevel::Info, "fw-browser", "project loaded"),
         ],
     )
 }
@@ -256,6 +272,20 @@ fn project_ready_view() -> StudioView {
                 "heartbeat frame=42 uptime_ms=700",
             ),
         ],
+    )
+}
+
+fn server_disconnected_link_ready_view() -> StudioView {
+    studio_view(
+        connected_link_state(),
+        ServerState::Disconnected,
+        ProjectState::NotLoaded,
+        false,
+        vec![UxLogEntry::new(
+            UxLogLevel::Info,
+            "lpa-studio-ux",
+            "server protocol detached; link session remains open",
+        )],
     )
 }
 
@@ -286,7 +316,7 @@ fn studio_view(
 ) -> StudioView {
     StudioView::new(
         vec![
-            link_view(link_state),
+            link_view(link_state, server_connected),
             server_view(server_state),
             project_view(project_state, server_connected),
         ],
@@ -294,10 +324,10 @@ fn studio_view(
     )
 }
 
-fn link_view(state: LinkState) -> UxPaneView {
+fn link_view(state: LinkState, server_connected: bool) -> UxPaneView {
     let mut link = LinkUx::new();
     link.set_state(state);
-    link.view()
+    link.view(server_connected)
 }
 
 fn server_view(state: ServerState) -> UxPaneView {
@@ -308,7 +338,11 @@ fn server_view(state: ServerState) -> UxPaneView {
 
 fn project_view(state: ProjectState, server_connected: bool) -> UxPaneView {
     let mut project = ProjectUx::new();
+    let no_running_project = matches!(state, ProjectState::NotLoaded) && server_connected;
     project.set_state(state);
+    if no_running_project {
+        project.mark_no_running_project();
+    }
     project.view(server_connected)
 }
 
@@ -359,5 +393,5 @@ fn project_ready_state() -> ProjectState {
 }
 
 fn start_actions() -> Vec<UxAction> {
-    link_view(idle_link_state()).actions
+    link_view(idle_link_state(), false).actions
 }

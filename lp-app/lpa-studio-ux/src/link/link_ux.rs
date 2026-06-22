@@ -66,7 +66,11 @@ impl LinkUx {
         Rc::clone(&self.registry)
     }
 
-    pub fn actions(&self) -> Vec<UxAction> {
+    pub fn active_connection(&self) -> Option<LinkConnection> {
+        self.active_connection.clone()
+    }
+
+    pub fn actions(&self, server_connected: bool) -> Vec<UxAction> {
         match &self.state {
             LinkState::SelectingProvider { providers } => providers
                 .iter()
@@ -97,17 +101,23 @@ impl LinkUx {
                 .collect(),
             LinkState::Failed { .. } => vec![self.action(LinkOp::RefreshProviders)],
             LinkState::DiscoveringEndpoints { .. } | LinkState::Connecting { .. } => Vec::new(),
-            LinkState::Connected { .. } => vec![self.action(LinkOp::DisconnectLink)],
+            LinkState::Connected { .. } if server_connected => {
+                vec![self.action(LinkOp::DisconnectLink)]
+            }
+            LinkState::Connected { .. } => vec![
+                self.action(LinkOp::ConnectServer),
+                self.action(LinkOp::DisconnectLink),
+            ],
         }
     }
 
-    pub fn view(&self) -> UxPaneView {
+    pub fn view(&self, server_connected: bool) -> UxPaneView {
         UxPaneView::new(
             Self::NODE_ID,
             "Link",
             link_status(&self.state),
             link_body(&self.state),
-            self.actions(),
+            self.actions(server_connected),
         )
     }
 
@@ -566,7 +576,7 @@ mod tests {
     fn selecting_provider_offers_registry_provider_actions() {
         let link = LinkUx::with_registry(registry_with_fake_endpoint());
 
-        let actions = link.actions();
+        let actions = link.actions(false);
 
         assert_eq!(actions.len(), 1);
         assert_eq!(
@@ -577,6 +587,43 @@ mod tests {
         );
         assert_eq!(actions[0].node_id().as_str(), LinkUx::NODE_ID);
         assert_eq!(actions[0].meta().label, "Select fake provider");
+    }
+
+    #[test]
+    fn connected_link_without_server_offers_server_attach() {
+        let mut link = LinkUx::with_registry(registry_with_fake_endpoint());
+        link.set_state(LinkState::Connected {
+            device: ConnectedDeviceSummary::new(
+                LinkProviderKind::Fake,
+                "fake-runtime",
+                "fake-session",
+                "Fake runtime",
+            ),
+        });
+
+        let actions = link.actions(false);
+
+        assert_eq!(actions.len(), 2);
+        assert_eq!(actions[0].op_as::<LinkOp>(), Some(&LinkOp::ConnectServer));
+        assert_eq!(actions[1].op_as::<LinkOp>(), Some(&LinkOp::DisconnectLink));
+    }
+
+    #[test]
+    fn connected_link_with_server_only_offers_link_disconnect() {
+        let mut link = LinkUx::with_registry(registry_with_fake_endpoint());
+        link.set_state(LinkState::Connected {
+            device: ConnectedDeviceSummary::new(
+                LinkProviderKind::Fake,
+                "fake-runtime",
+                "fake-session",
+                "Fake runtime",
+            ),
+        });
+
+        let actions = link.actions(true);
+
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].op_as::<LinkOp>(), Some(&LinkOp::DisconnectLink));
     }
 
     #[test]

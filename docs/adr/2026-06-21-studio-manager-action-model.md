@@ -4,7 +4,7 @@ Date: 2026-06-21
 
 ## Status
 
-Accepted
+Superseded by [2026-06-21 Studio UX Layer](./2026-06-21-studio-ux-layer.md)
 
 ## Context
 
@@ -82,3 +82,10 @@ for moments where the user or system has meaningful work.
   once the UI consumes the new manager states directly.
 - Use `AvailableAction` for visible controls instead of component-local button
   decisions.
+
+## Update 2026-06-22
+
+The manager action idea became the active `lpa-studio-ux` model: `LinkUx`,
+`ServerUx`, and `ProjectUx` own typed operations and expose contextual
+`UxAction` values. `AvailableAction` and the effect/event runtime boundary were
+removed with the old core/runtime crates.

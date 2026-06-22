@@ -37,9 +37,9 @@ lpa-studio-web, future CLI, desktop, and agents
 ```
 
 `Ux` means a resource-owning product surface. It owns lower-level services such
-as `lpa-link` and `lpa-client`, then exposes user-shaped state, snapshots,
-typed operations, contextual actions, progress, issues, logs, and project
-summaries.
+as `lpa-link` and `lpa-client`, then exposes user-shaped state, semantic views,
+snapshots, typed operations, contextual actions, progress, issues, logs, and
+project summaries.
 
 The first implementation slice uses:
 
@@ -80,10 +80,10 @@ as an internal server transport detail.
 Browser Web Serial is also represented as an initial provider action when the
 web build enables that provider. Browser port selection and permission remain
 browser-owned behavior; Studio UX starts the access request and then models the
-resulting provider endpoint/session state. The web app renders snapshots and
-generic `UxAction` values; it does not route runtime providers, drain service
-effects, correlate protocol responses, or implement browser port selection
-itself.
+resulting provider endpoint/session state. The web app renders `StudioView`
+panes and generic `UxAction` values; it does not route runtime providers, drain
+service effects, correlate protocol responses, or implement browser port
+selection itself.
 
 A fully dynamic `UxRegistry` is intentionally deferred. `StudioUx` manually owns
 and dispatches to its current nodes for now, while the `UxNodeId`/`UxContext`
@@ -101,8 +101,8 @@ resources directly.
 
 - Studio behavior becomes easier to inspect through states, node ids, and
   available actions.
-- Web UI, future CLI, tests, and agents can share the same action/snapshot
-  language plus a small pane-view vocabulary.
+- Web UI, future CLI, tests, and agents can share the same view/action/snapshot
+  language.
 - Initial provider choices are renderable by generic action components instead
   of special-cased web UI.
 - Service operations move out of the UI and out of an abstract effect/event

@@ -2,7 +2,8 @@
 
 ## Status
 
-Accepted.
+Superseded by [2026-06-21 LPA Link Provider-Owned Resources](./2026-06-21-lpa-link-provider-owned-resources.md)
+and [2026-06-21 Studio UX Layer](./2026-06-21-studio-ux-layer.md).
 
 ## Context
 
@@ -47,3 +48,10 @@ vocabulary.
 The cost is one small JavaScript file in the static web shell. Browser stream
 edge cases such as reader cancellation, disconnects, and permission errors must
 be handled and tested at that boundary.
+
+## Update 2026-06-22
+
+Browser serial ownership moved below Studio into `lpa-link`'s
+`browser-serial-esp32` provider. `lpa-studio-ux` now adapts the connected link
+session into `lpa-client`; `lpa-studio-web` does not own Web Serial streams or a
+runtime shim.

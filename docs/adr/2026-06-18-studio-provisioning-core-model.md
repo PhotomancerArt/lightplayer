@@ -1,10 +1,10 @@
 # ADR: Studio Provisioning Core Model
 
-- **Status:** Accepted
+- **Status:** Superseded by [2026-06-21 Studio UX Layer](./2026-06-21-studio-ux-layer.md)
 - **Date:** 2026-06-18
 - **Deciders:** Photomancer
 - **Supersedes:** None
-- **Superseded by:** None
+- **Superseded by:** [2026-06-21 Studio UX Layer](./2026-06-21-studio-ux-layer.md)
 
 ## Context
 
@@ -90,3 +90,11 @@ architecture.
   journey stories.
 - Real browser/host ESP32 flashing and recovery should plug into the same flow
   model instead of creating a separate provisioning path.
+
+## Update 2026-06-22
+
+The `lp-studio-core` provisioning model was removed with the old
+core/runtime split. Active Studio state now lives in `lpa-studio-ux` as
+resource-owning Link, Server, and Project UX nodes. Flashing, recovery, and
+provisioning concepts should be reintroduced there deliberately when the
+hardware UX is ported.

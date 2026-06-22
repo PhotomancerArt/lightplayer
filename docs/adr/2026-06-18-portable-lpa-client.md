@@ -62,9 +62,9 @@ model.
 flashing, reset, raw filesystem, and diagnostics without confusing those
 management operations with typed project/client protocol operations.
 
-There are temporarily two browser-local protocol clients in
-`lp-studio-runtime` for M2 hardware bring-up. They are now explicitly follow-up
-work: M2c should adapt browser worker and Web Serial streams into `ClientIo`.
+Browser worker and Web Serial Studio paths now adapt connected `lpa-link`
+sessions into `lpa-client::ClientIo` from `lpa-studio-ux`, so Studio does not
+need duplicated browser-local protocol clients.
 
 The feature model is slightly more explicit. Host adapters and host transports
 sit behind `host`; the portable core can be checked for wasm with
@@ -88,10 +88,8 @@ sit behind `host`; the portable core can be checked for wasm with
 
 ## Follow-ups
 
-- M2c: adapt browser Web Serial to `lpa-client::ClientIo` and remove duplicated
-  response-correlation logic from the browser serial runtime path.
-- Adapt browser worker protocol handling to `ClientIo` when the Studio worker
-  path needs richer project operations.
+- Continue hardening the browser `ClientIo` adapters for disconnects,
+  resynchronization, logs, and heartbeat edge cases.
 - Consider moving host serial framing/resynchronization helpers below
   `ClientTransport` if host and browser serial hardening converge.
 - Keep ESP32 multi-project behavior conservative by using stop/write/load

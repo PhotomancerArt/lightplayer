@@ -1,5 +1,7 @@
 use core::future::Future;
 
+use lpa_link::{LinkConnection, LinkConnectionKind};
+
 use crate::{
     ConnectedLink, LinkOp, LinkOpenOutcome, LinkUx, ProjectConnectResult, ProjectOp, ProjectUx,
     ServerOp, ServerUx, StudioSnapshot, StudioView, UxAction, UxActions, UxContext, UxError,
@@ -33,7 +35,7 @@ impl StudioUx {
     }
 
     pub fn actions(&self) -> UxActions {
-        let mut actions = UxActions::new(self.link.actions());
+        let mut actions = UxActions::new(self.link.actions(self.server.is_connected()));
         actions.extend(self.server.actions());
         actions.extend(self.project.actions(self.server.is_connected()));
         actions
@@ -42,7 +44,7 @@ impl StudioUx {
     pub fn view(&self) -> StudioView {
         StudioView::new(
             vec![
-                self.link.view(),
+                self.link.view(self.server.is_connected()),
                 self.server.view(),
                 self.project.view(self.server.is_connected()),
             ],
@@ -72,6 +74,7 @@ impl StudioUx {
     async fn execute_link_op(&mut self, op: LinkOp) -> UxResult {
         match op {
             LinkOp::DisconnectLink => self.disconnect_link().await,
+            LinkOp::ConnectServer => self.connect_server_from_link().await,
             LinkOp::RefreshProviders => {
                 self.link.refresh_provider_catalog();
                 Ok(UxOutcome::new().with_notice(UxNotice::info("Provider catalog refreshed")))
@@ -113,15 +116,37 @@ impl StudioUx {
 
     async fn attach_connected_link(&mut self, connected: ConnectedLink) -> UxResult {
         self.logs.extend(connected.logs);
+        self.connect_server_connection(&connected.connection).await
+    }
+
+    async fn connect_server_from_link(&mut self) -> UxResult {
+        let connection = self
+            .link
+            .active_connection()
+            .ok_or_else(|| UxError::MissingSession("link connection is not open".to_string()))?;
+        self.connect_server_connection(&connection).await
+    }
+
+    async fn connect_server_connection(&mut self, connection: &LinkConnection) -> UxResult {
         match self
             .server
-            .attach_link_connection(self.link.registry_handle(), &connected.connection)
+            .attach_link_connection(self.link.registry_handle(), connection)
         {
             Ok(()) => {
                 let mut outcome =
                     UxOutcome::new().with_notice(UxNotice::info("Server protocol connected"));
-                if let Some(notice) = self.connect_running_project_if_available().await? {
-                    outcome = outcome.with_notice(UxNotice::info(notice));
+                match self.connect_running_project_if_available().await? {
+                    AutoProjectConnect::Connected => {
+                        outcome = outcome.with_notice(UxNotice::info("Connected running project"));
+                    }
+                    AutoProjectConnect::SelectionRequired => {
+                        outcome = outcome.with_notice(UxNotice::info("Choose running project"));
+                    }
+                    AutoProjectConnect::NotFound if should_auto_load_demo_project(connection) => {
+                        let demo_outcome = self.load_demo_project().await?;
+                        outcome.notices.extend(demo_outcome.notices);
+                    }
+                    AutoProjectConnect::NotFound => {}
                 }
                 Ok(outcome)
             }
@@ -164,7 +189,7 @@ impl StudioUx {
 
     async fn connect_running_project_if_available(
         &mut self,
-    ) -> Result<Option<&'static str>, UxError> {
+    ) -> Result<AutoProjectConnect, UxError> {
         let result = {
             let server = self.server.client_mut()?;
             self.project
@@ -174,15 +199,15 @@ impl StudioUx {
         match result? {
             ProjectConnectResult::Connected { logs } => {
                 self.logs.extend(logs);
-                Ok(Some("Connected running project"))
+                Ok(AutoProjectConnect::Connected)
             }
             ProjectConnectResult::SelectionRequired { logs } => {
                 self.logs.extend(logs);
-                Ok(Some("Choose running project"))
+                Ok(AutoProjectConnect::SelectionRequired)
             }
             ProjectConnectResult::NotFound { logs } => {
                 self.logs.extend(logs);
-                Ok(None)
+                Ok(AutoProjectConnect::NotFound)
             }
         }
     }
@@ -237,13 +262,13 @@ impl StudioUx {
     }
 
     async fn disconnect_server(&mut self) -> UxResult {
-        self.project.disconnect();
+        self.project.reset();
         self.server.disconnect();
         Ok(UxOutcome::new().with_notice(UxNotice::info("Server disconnected")))
     }
 
     async fn disconnect_link(&mut self) -> UxResult {
-        self.project.disconnect();
+        self.project.reset();
         self.server.disconnect();
         self.link.disconnect().await?;
         Ok(UxOutcome::new().with_notice(UxNotice::info("Link disconnected")))
@@ -265,13 +290,24 @@ impl UxContext for StudioUx {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AutoProjectConnect {
+    Connected,
+    SelectionRequired,
+    NotFound,
+}
+
+fn should_auto_load_demo_project(connection: &LinkConnection) -> bool {
+    matches!(connection.kind, LinkConnectionKind::BrowserWorker { .. })
+}
+
 #[cfg(test)]
 mod tests {
     use std::future::Future;
     use std::sync::Arc;
     use std::task::{Context, Poll, Wake, Waker};
 
-    use lpa_link::LinkProviderKind;
+    use lpa_link::{LinkConnection, LinkProviderKind};
 
     use crate::{
         ConnectedDeviceSummary, LinkState, LinkUx, ProjectInventorySummary, ProjectState,
@@ -354,6 +390,19 @@ mod tests {
     }
 
     #[test]
+    fn server_disconnect_exposes_server_reconnect_action_on_link() {
+        let mut studio = connected_studio();
+
+        block_on_ready(studio.disconnect_server()).unwrap();
+        let actions = studio.actions();
+
+        assert!(actions.iter().any(|action| {
+            action.node_id().as_str() == LinkUx::NODE_ID
+                && action.op_as::<LinkOp>() == Some(&LinkOp::ConnectServer)
+        }));
+    }
+
+    #[test]
     fn link_disconnect_clears_project_server_and_link() {
         let mut studio = connected_studio();
 
@@ -371,6 +420,15 @@ mod tests {
             studio.link.snapshot().state,
             LinkState::SelectingProvider { .. }
         ));
+    }
+
+    #[test]
+    fn only_browser_worker_connections_auto_load_demo_project() {
+        let browser_worker = LinkConnection::browser_worker("browser-worker-worker-1", "session-1");
+        let fake = LinkConnection::fake("fake-runtime", "fake-session");
+
+        assert!(should_auto_load_demo_project(&browser_worker));
+        assert!(!should_auto_load_demo_project(&fake));
     }
 
     fn connected_studio() -> StudioUx {

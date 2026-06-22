@@ -1,10 +1,10 @@
 # ADR: Studio Runtime Scenarios
 
-- **Status:** Accepted
+- **Status:** Superseded by [2026-06-21 Studio UX Layer](./2026-06-21-studio-ux-layer.md)
 - **Date:** 2026-06-18
 - **Deciders:** Photomancer
 - **Supersedes:** None
-- **Superseded by:** None
+- **Superseded by:** [2026-06-21 Studio UX Layer](./2026-06-21-studio-ux-layer.md)
 
 ## Context
 
@@ -81,3 +81,10 @@ should stay small, serializable where useful, and I/O-free.
   `ScenarioSnapshot` rather than duplicating fixture vocabulary in the web app.
 - Real browser/host flashing work should emit the same typed events and issues
   exercised by scenario tests.
+
+## Update 2026-06-22
+
+The `lpa-studio-runtime` crate was deleted when Studio moved to the
+resource-owning `lpa-studio-ux` model. Future deterministic Studio stories and
+tests should be built from `StudioView`, typed `UxAction` values, and focused
+UX-node fixtures rather than the deleted runtime scenario module.
