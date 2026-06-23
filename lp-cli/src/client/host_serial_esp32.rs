@@ -6,9 +6,7 @@
 
 use anyhow::Result;
 use lpa_client::ClientTransport;
-use lpa_link::providers::host_serial_esp32::{
-    HostSerialEsp32Options, HostSerialEsp32Provider, HostSerialEsp32Session,
-};
+use lpa_link::providers::host_serial_esp32::{HostSerialEsp32Options, HostSerialEsp32Provider};
 use lpa_link::{LinkError, LinkProvider, LinkSession};
 use lpc_wire::{ClientMessage, TransportError, WireServerMessage};
 use std::sync::Arc;
@@ -17,17 +15,20 @@ use tokio::sync::Mutex;
 /// Client transport backed by an ESP32 over host serial.
 pub struct HostSerialEsp32ClientTransport {
     transport: Option<Arc<Mutex<Box<dyn ClientTransport>>>>,
-    session: HostSerialEsp32Session,
+    provider: HostSerialEsp32Provider,
+    session: LinkSession,
     closed: bool,
 }
 
 impl HostSerialEsp32ClientTransport {
     fn new(
         transport: Arc<Mutex<Box<dyn ClientTransport>>>,
-        session: HostSerialEsp32Session,
+        provider: HostSerialEsp32Provider,
+        session: LinkSession,
     ) -> Self {
         Self {
             transport: Some(transport),
+            provider,
             session,
             closed: false,
         }
@@ -51,15 +52,17 @@ pub fn connect_host_serial_esp32_with_options(
     port_name: &str,
     options: HostSerialEsp32Options,
 ) -> Result<HostSerialEsp32ClientTransport> {
-    let mut provider = HostSerialEsp32Provider::with_options("host-serial-esp32", options);
+    let mut provider = HostSerialEsp32Provider::with_options(options);
     let endpoint_id = provider.create_endpoint_for_port(port_name, format!("ESP32 ({port_name})"));
-    let mut session = pollster::block_on(provider.connect(&endpoint_id))?;
-    let connection = pollster::block_on(session.connection())?;
+    let session = pollster::block_on(provider.connect(&endpoint_id))?;
+    let connection = pollster::block_on(provider.connection(session.id()))?;
     let transport = connection.server_connection().ok_or_else(|| {
         anyhow::anyhow!("host-serial-esp32 connection did not include a transport")
     })?;
 
-    Ok(HostSerialEsp32ClientTransport::new(transport, session))
+    Ok(HostSerialEsp32ClientTransport::new(
+        transport, provider, session,
+    ))
 }
 
 #[async_trait::async_trait]
@@ -93,7 +96,11 @@ impl ClientTransport for HostSerialEsp32ClientTransport {
 
         self.closed = true;
         drop(self.transport.take());
-        self.session.close().await.map_err(link_error_to_transport)
+        let session_id = self.session.id().clone();
+        self.provider
+            .close(&session_id)
+            .await
+            .map_err(link_error_to_transport)
     }
 }
 

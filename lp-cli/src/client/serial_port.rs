@@ -108,7 +108,7 @@ fn auto_detect_port(baud_rate: u32) -> Result<SerialPortConfig> {
 
 /// List host serial ESP32 provider ports without prompting.
 fn list_host_serial_esp32_ports() -> Result<Vec<String>> {
-    let mut provider = HostSerialEsp32Provider::new("host-serial-esp32");
+    let mut provider = HostSerialEsp32Provider::new();
     let endpoints =
         pollster::block_on(provider.discover()).context("Failed to list serial ports")?;
     let mut ports: Vec<String> = endpoints
