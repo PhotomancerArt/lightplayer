@@ -113,14 +113,7 @@ impl LinkUx {
             LinkState::DiscoveringEndpoints { .. }
             | LinkState::Connecting { .. }
             | LinkState::Managing { .. } => Vec::new(),
-            LinkState::Connected { .. } if server_connected => {
-                let mut actions = Vec::new();
-                if self.active_supports(LinkOperation::EraseDeviceFlash) {
-                    actions.push(self.action(LinkOp::ResetToBlank));
-                }
-                actions.push(self.action(LinkOp::DisconnectLink));
-                actions
-            }
+            LinkState::Connected { .. } if server_connected => Vec::new(),
             LinkState::Connected { .. } => {
                 let mut actions = Vec::new();
                 if self.active_supports(LinkOperation::FlashFirmware) {
@@ -636,6 +629,7 @@ fn management_activity_sink(
     updates: UxUpdateSink,
 ) -> LinkManagementEventSink {
     LinkManagementEventSink::new(move |event| {
+        let log_update = management_event_log(&event);
         let mut activity = activity.borrow_mut();
         apply_management_event(&mut activity, event);
         updates.emit(UxUpdate::Activity {
@@ -643,17 +637,15 @@ fn management_activity_sink(
             status: UiStatus::working("Managing"),
             activity: (*activity).clone(),
         });
+        if let Some(log) = log_update {
+            updates.emit(UxUpdate::Log(log));
+        }
     })
 }
 
 fn apply_management_event(activity: &mut UiActivity, event: LinkManagementEvent) {
     match event {
-        LinkManagementEvent::Log { message } => {
-            if !message.trim().is_empty() {
-                activity.push_terminal_line(message);
-                activity.retain_recent_terminal_lines(80);
-            }
-        }
+        LinkManagementEvent::Log { .. } => {}
         LinkManagementEvent::Progress(progress) => {
             let mut ux_progress = match progress.percent {
                 Some(percent) => UiProgress::determinate(progress.label, percent),
@@ -668,6 +660,15 @@ fn apply_management_event(activity: &mut UiActivity, event: LinkManagementEvent)
             }
             activity.progress = Some(ux_progress);
         }
+    }
+}
+
+fn management_event_log(event: &LinkManagementEvent) -> Option<UxLogEntry> {
+    match event {
+        LinkManagementEvent::Log { message } if !message.trim().is_empty() => Some(
+            UxLogEntry::new(UxLogLevel::Info, "lpa-link", message.clone()),
+        ),
+        _ => None,
     }
 }
 
@@ -857,8 +858,8 @@ mod tests {
     use lpa_link::providers::LinkProviderRegistry;
     use lpa_link::providers::fake::FakeProvider;
     use lpa_link::{
-        LinkCapabilities, LinkConnectionKind, LinkEndpoint, LinkManagementRequest,
-        LinkProviderKind, LinkSession,
+        LinkCapabilities, LinkConnectionKind, LinkEndpoint, LinkManagementEvent,
+        LinkManagementRequest, LinkProviderKind, LinkSession,
     };
 
     use super::*;
@@ -900,7 +901,7 @@ mod tests {
     }
 
     #[test]
-    fn connected_link_with_server_only_offers_link_disconnect() {
+    fn connected_link_with_server_hides_link_level_actions() {
         let mut link = LinkUx::with_registry(registry_with_fake_endpoint());
         link.set_state(LinkState::Connected {
             device: ConnectedDeviceSummary::new(
@@ -913,8 +914,7 @@ mod tests {
 
         let actions = link.actions(true);
 
-        assert_eq!(actions.len(), 1);
-        assert_eq!(actions[0].op_as::<LinkOp>(), Some(&LinkOp::DisconnectLink));
+        assert!(actions.is_empty());
     }
 
     #[test]
@@ -943,7 +943,7 @@ mod tests {
     }
 
     #[test]
-    fn connected_management_capable_link_keeps_reset_available_with_server() {
+    fn connected_management_capable_link_hides_management_actions_with_server() {
         let mut link = LinkUx::with_registry(registry_with_fake_endpoint());
         link.active_session = Some(management_capable_session());
         link.set_state(LinkState::Connected {
@@ -957,9 +957,7 @@ mod tests {
 
         let actions = link.actions(true);
 
-        assert_eq!(actions.len(), 2);
-        assert_eq!(actions[0].op_as::<LinkOp>(), Some(&LinkOp::ResetToBlank));
-        assert_eq!(actions[1].op_as::<LinkOp>(), Some(&LinkOp::DisconnectLink));
+        assert!(actions.is_empty());
     }
 
     #[test]
@@ -982,6 +980,19 @@ mod tests {
         assert!(matches!(result, Err(UxError::Link(_))));
         assert!(matches!(link.state(), LinkState::Connected { .. }));
         assert!(!link.actions(false).is_empty());
+    }
+
+    #[test]
+    fn management_log_events_are_ux_logs_not_activity_terminal_lines() {
+        let mut activity = UiActivity::new("Flashing firmware");
+        let event = LinkManagementEvent::log("Writing at 0x10000... (42%)");
+
+        let log = management_event_log(&event).expect("log event should produce a UX log");
+        apply_management_event(&mut activity, event);
+
+        assert_eq!(log.source, "lpa-link");
+        assert_eq!(log.message, "Writing at 0x10000... (42%)");
+        assert!(activity.terminal.is_empty());
     }
 
     #[test]

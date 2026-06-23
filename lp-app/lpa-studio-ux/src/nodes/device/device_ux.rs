@@ -114,6 +114,13 @@ impl DeviceUx {
         self.has_lightplayer_state()
     }
 
+    fn should_show_device_controls(&self) -> bool {
+        matches!(
+            self.server.snapshot().state,
+            ServerState::Disconnected | ServerState::Failed { .. }
+        )
+    }
+
     fn status(&self) -> UiStatus {
         match (self.link.state(), &self.server.snapshot().state) {
             (LinkState::SelectingProvider { issue: Some(_), .. }, _) => {
@@ -201,8 +208,14 @@ impl DeviceUx {
                     .with_body(UiBody::Progress(progress.clone()))
             }
             LinkState::Connected { device } | LinkState::Managing { device, .. } => {
-                UiStackSection::new("connect-device", "Connect device", UiStepState::Complete)
-                    .with_body(device_summary_body(device))
+                let section =
+                    UiStackSection::new("connect-device", "Connect device", UiStepState::Complete)
+                        .with_body(device_summary_body(device));
+                if self.should_show_device_controls() {
+                    section.with_actions(self.device_control_actions())
+                } else {
+                    section
+                }
             }
             LinkState::Failed { issue } => UiStackSection::new(
                 "connect-device",
@@ -224,7 +237,7 @@ impl DeviceUx {
             .with_body(UiBody::text(
                 "Attach Studio to LightPlayer on the connected device.",
             ))
-            .with_actions(self.lightplayer_actions(false)),
+            .with_actions(self.connect_lightplayer_actions()),
             (LinkState::Connected { .. }, ServerState::Connecting { progress }) => {
                 UiStackSection::new(
                     "connect-lightplayer",
@@ -240,14 +253,14 @@ impl DeviceUx {
                     UiStepState::Complete,
                 )
                 .with_body(UiBody::Metrics(vec![UiMetric::new("Protocol", protocol)]))
-                .with_actions(self.lightplayer_actions(true))
+                .with_actions(vec![self.action(DeviceOp::DisconnectLightPlayer)])
             }
             (LinkState::Connected { .. }, ServerState::Failed { issue, kind }) => {
                 let no_firmware = *kind == ServerFailureKind::NoFirmware;
                 UiStackSection::new(
                     "connect-lightplayer",
                     if no_firmware {
-                        "Flash firmware"
+                        "LightPlayer unavailable"
                     } else {
                         "Connect LightPlayer"
                     },
@@ -263,9 +276,9 @@ impl DeviceUx {
                     UiBody::Issue(issue.clone())
                 })
                 .with_actions(if no_firmware {
-                    self.no_firmware_actions()
+                    Vec::new()
                 } else {
-                    self.lightplayer_actions(false)
+                    self.connect_lightplayer_actions()
                 })
             }
             (LinkState::Managing { progress, .. }, _) => UiStackSection::new(
@@ -336,7 +349,19 @@ impl DeviceUx {
             .collect()
     }
 
-    fn no_firmware_actions(&self) -> Vec<UiAction> {
+    fn connect_lightplayer_actions(&self) -> Vec<UiAction> {
+        self.lightplayer_actions(false)
+            .into_iter()
+            .filter(|action| {
+                matches!(
+                    action.op_as::<DeviceOp>(),
+                    Some(DeviceOp::ConnectLightPlayer)
+                )
+            })
+            .collect()
+    }
+
+    fn device_control_actions(&self) -> Vec<UiAction> {
         self.lightplayer_actions(false)
             .into_iter()
             .filter(|action| {

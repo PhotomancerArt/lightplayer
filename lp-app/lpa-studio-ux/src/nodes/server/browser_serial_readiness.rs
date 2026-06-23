@@ -16,6 +16,7 @@ pub struct BrowserSerialReadinessClassifier {
     recent_lines: Vec<String>,
     invalid_blank_header_count: usize,
     rom_download_mode_count: usize,
+    server_started: bool,
 }
 
 impl BrowserSerialReadinessClassifier {
@@ -31,6 +32,9 @@ impl BrowserSerialReadinessClassifier {
         }
         if normalized.contains("waiting for download") || normalized.contains("(download(") {
             self.rom_download_mode_count += 1;
+        }
+        if normalized.contains("fw-esp32 initialized, starting server loop") {
+            self.server_started = true;
         }
         self.recent_lines.push(line);
         if self.recent_lines.len() > RECENT_LINE_LIMIT {
@@ -56,6 +60,10 @@ impl BrowserSerialReadinessClassifier {
 
     pub fn no_firmware_detected(&self) -> bool {
         self.invalid_blank_header_count > 0 || self.rom_download_mode_count > 0
+    }
+
+    pub fn server_started(&self) -> bool {
+        self.server_started
     }
 
     pub fn recent_lines(&self) -> &[String] {
@@ -199,6 +207,16 @@ mod tests {
             classifier.classify_timeout(),
             BrowserSerialReadinessFailure::ProtocolTimeout { .. }
         ));
+    }
+
+    #[test]
+    fn server_loop_start_marks_server_started() {
+        let mut classifier = BrowserSerialReadinessClassifier::new();
+
+        classifier.observe_line("[INIT] fw-esp32 initialized, starting server loop...");
+
+        assert!(classifier.server_started());
+        assert!(!classifier.no_firmware_detected());
     }
 
     #[test]

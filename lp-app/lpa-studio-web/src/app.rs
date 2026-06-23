@@ -4,8 +4,7 @@ use std::rc::Rc;
 use dioxus::prelude::*;
 use lpa_studio_ux::{
     DeviceUx, LinkUx, ProjectUx, ServerUx, StudioUx, StudioView, UiAction, UiBody, UiStepState,
-    UiTerminalLine, UxError, UxLogEntry, UxLogLevel, UxNotice, UxNoticeLevel, UxUpdate,
-    UxUpdateSink,
+    UxError, UxLogEntry, UxLogLevel, UxNotice, UxNoticeLevel, UxUpdate, UxUpdateSink,
 };
 
 use crate::components::StudioShell;
@@ -108,7 +107,6 @@ impl StudioWebModel {
                 }
             }
             UxUpdate::Log(log) => {
-                append_device_terminal_log(&mut self.view, &log);
                 self.view.logs.push(log);
             }
         }
@@ -126,37 +124,6 @@ impl StudioWebModel {
     fn append_console_logs_to_view(&mut self) {
         self.view.logs.extend(self.console_logs.clone());
     }
-}
-
-fn append_device_terminal_log(view: &mut StudioView, log: &UxLogEntry) {
-    if !is_device_log_source(&log.source) {
-        return;
-    }
-    let Some(device_pane) = view
-        .panes
-        .iter_mut()
-        .find(|pane| pane.node_id.as_str() == DeviceUx::NODE_ID)
-    else {
-        return;
-    };
-    let UiBody::Stack(stack) = &mut device_pane.body else {
-        return;
-    };
-    stack.terminal.push(UiTerminalLine::new(format!(
-        "[{}] {}",
-        log.source, log.message
-    )));
-    if stack.terminal.len() > 240 {
-        let remove_count = stack.terminal.len() - 240;
-        stack.terminal.drain(0..remove_count);
-    }
-}
-
-fn is_device_log_source(source: &str) -> bool {
-    matches!(
-        source,
-        "lpa-link" | "browser-serial" | "fw-esp32" | "fw-browser" | "lp-server"
-    )
 }
 
 fn device_activity_section_id(node_id: &str, title: &str) -> Option<&'static str> {

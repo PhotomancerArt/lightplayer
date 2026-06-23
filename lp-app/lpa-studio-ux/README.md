@@ -119,8 +119,9 @@ link-level management because they happen below the running server protocol:
 Both actions flow through `lpa-link::LinkProvider::manage_with_events`.
 `StudioUx` clears project and server state before executing them because
 firmware flashing and full-device erase invalidate any previous server/client
-connection. Browser Web Serial ESP32 management streams esptool terminal output
-and progress into the Device pane while the action is running.
+connection. Browser Web Serial ESP32 management streams progress into the
+active Device step and raw esptool output into the Studio log while the action
+is running.
 
 After provisioning, Studio attempts to reopen the server protocol and resume the
 normal server/project workflow. If the browser or device needs more time after
@@ -131,18 +132,17 @@ For Browser Web Serial ESP32 links, opening or reopening the server protocol
 goes through the provider-owned browser ESP32 device controller. The controller
 opens the Web Serial port once, starts reading immediately, then attempts a
 best-effort reset while raw boot output is being captured. The browser-serial
-client waits for the first valid protocol frame before sending the first
-request, so a just-reset device does not lose the initial project probe while
-firmware is still booting. Reset signal failures are reported as diagnostics;
-the user-facing readiness result comes from raw serial output and protocol
-frames.
+client waits for either a valid protocol frame or the firmware's server-loop
+startup line before sending the first request, so a just-reset device does not
+lose the initial project probe while firmware is still booting. Reset signal
+failures are reported as diagnostics; the user-facing readiness result comes
+from raw serial output and protocol frames.
 
 While waiting for browser serial readiness, Studio publishes a stepped
 `UiActivity` in the Device pane. The reusable activity data includes serial
-access, device reset, boot output, LightPlayer protocol readiness, and recent
-raw boot lines. This is presentation-neutral: the web UI renders it as a small
-stepper plus terminal, while agents or future CLI shells can render the same
-view as text.
+access, device reset, boot output, and LightPlayer protocol readiness; raw boot
+lines are emitted as logs so the web UI, agents, and future CLI shells can
+render progress and logs in separate places.
 
 If ESP32 boot output includes patterns such as `invalid header: 0xffffffff`,
 Studio classifies the device as blank/erased instead of surfacing a generic

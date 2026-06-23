@@ -1,14 +1,10 @@
 use dioxus::prelude::*;
-use dioxus::{html::geometry::PixelsVector2D, prelude::dioxus_core::use_after_render};
 use lpa_studio_ux::{
     UiAction, UiActivity, UiActivityStepState, UiBody, UiPaneView, UiProgress, UiStackView,
-    UiStepState, UiTerminalLine,
+    UiStepState,
 };
-use std::rc::Rc;
 
 use crate::components::ActionStrip;
-
-const TERMINAL_STICKY_THRESHOLD_PX: f64 = 48.0;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -105,7 +101,6 @@ fn UxPaneBody(body: UiBody, running: bool, on_action: EventHandler<UiAction>) ->
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn UxStackBody(stack: UiStackView, running: bool, on_action: EventHandler<UiAction>) -> Element {
-    let terminal = stack.terminal;
     let sections = stack
         .sections
         .into_iter()
@@ -139,12 +134,6 @@ fn UxStackBody(stack: UiStackView, running: bool, on_action: EventHandler<UiActi
                     }
                 }
             }
-            if !terminal.is_empty() {
-                UxTerminal {
-                    lines: terminal,
-                    class: "ux-terminal ux-stack-terminal",
-                }
-            }
         }
     }
 }
@@ -165,7 +154,6 @@ fn UxActivityBody(activity: UiActivity) -> Element {
     let detail = activity.detail;
     let progress = activity.progress;
     let steps = activity.steps;
-    let terminal = terminal_tail(activity.terminal, 12);
 
     rsx! {
         div { class: "ux-activity",
@@ -191,67 +179,8 @@ fn UxActivityBody(activity: UiActivity) -> Element {
                     }
                 }
             }
-            if !terminal.is_empty() {
-                UxTerminal {
-                    lines: terminal,
-                    class: "ux-terminal",
-                }
-            }
         }
     }
-}
-
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn UxTerminal(lines: Vec<UiTerminalLine>, class: &'static str) -> Element {
-    let mut terminal_element = use_signal(|| None::<Rc<MountedData>>);
-    let mut stick_to_bottom = use_signal(|| true);
-
-    use_after_render(move || {
-        if !stick_to_bottom() {
-            return;
-        }
-
-        let Some(element) = terminal_element.read().as_ref().cloned() else {
-            return;
-        };
-
-        spawn(async move {
-            let Ok(scroll_size) = element.get_scroll_size().await else {
-                return;
-            };
-            let coordinates = PixelsVector2D::new(0.0, scroll_size.height);
-            let _ = element.scroll(coordinates, ScrollBehavior::Instant).await;
-        });
-    });
-
-    rsx! {
-        ol {
-            class,
-            onmounted: move |event| {
-                terminal_element.set(Some(event.data()));
-            },
-            onscroll: move |event| {
-                stick_to_bottom.set(is_terminal_near_bottom(
-                    event.scroll_top(),
-                    event.scroll_height(),
-                    event.client_height(),
-                ));
-            },
-            for line in lines.iter() {
-                li { "{line.text}" }
-            }
-        }
-    }
-}
-
-fn terminal_tail(lines: Vec<UiTerminalLine>, max_lines: usize) -> Vec<UiTerminalLine> {
-    let skip_count = lines.len().saturating_sub(max_lines);
-    lines.into_iter().skip(skip_count).collect()
-}
-
-fn is_terminal_near_bottom(scroll_top: f64, scroll_height: i32, client_height: i32) -> bool {
-    f64::from(scroll_height) - scroll_top - f64::from(client_height) <= TERMINAL_STICKY_THRESHOLD_PX
 }
 
 fn activity_step_class(state: UiActivityStepState) -> &'static str {

@@ -42,14 +42,6 @@ impl UiBody {
                         None => line,
                     }
                 }));
-                lines.extend(
-                    activity
-                        .terminal
-                        .iter()
-                        .rev()
-                        .take(8)
-                        .map(|line| line.text.clone()),
-                );
                 lines
             }
             Self::Issue(issue) => match &issue.detail {

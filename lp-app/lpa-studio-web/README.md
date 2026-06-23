@@ -55,6 +55,25 @@ Use `just studio-web-build` or `just studio-web` for the release/static build
 path. The release build still packages ESP32-C6 firmware assets for future
 browser flashing work.
 
+## Deploy
+
+Production Studio deploys to `https://lightplayer.app/` through GitHub Pages
+from Actions. Build a clean release artifact locally with:
+
+```bash
+just studio-web-deploy-dir production target/pages/studio lightplayer.app
+just studio-web-smoke target/pages/studio
+```
+
+The deploy artifact is staged under `target/pages/studio` and includes
+`version.json`, `.nojekyll`, and `CNAME`. It is built from release wasm outputs
+so stale debug artifacts left by `studio-dev` are not uploaded.
+
+Manual beta deployment uses the same artifact recipe with
+`beta.lightplayer.app` and is published by the `Deploy Pages Channel` workflow.
+Operational setup, DNS records, and GitHub Pages HTTPS steps are documented in
+[`docs/deploy/studio-pages.md`](../../docs/deploy/studio-pages.md).
+
 Browser-worker assets are served from `public/pkg/`. The UX boot path resolves
 those paths to page-absolute URLs before sending them into the embedded blob
 worker, which lets worker import/init failures surface as actionable link
@@ -85,13 +104,14 @@ prompt, not by a Studio endpoint picker.
 For a blank or non-LightPlayer ESP32-C6, Studio keeps the device session and
 offers `Flash firmware` in the LightPlayer step. Confirming the action
 writes the packaged firmware and then attempts to reconnect to the LightPlayer
-server after reset. Flashing renders live progress and raw esptool output in
-the Device pane.
+server after reset. Flashing renders live progress in the active Device step
+and raw esptool output in the Console below the Device panel.
 
 During the initial browser-serial server attach, the Device pane shows a
-stepped readiness activity with recent raw boot lines. Blank or erased devices
-are recognized from ESP32 ROM output such as `invalid header: 0xffffffff`, so
-the app lands in a provision-ready state instead of a generic action failure.
+stepped readiness activity while raw boot lines stream into the Console below
+the Device panel. Blank or erased devices are recognized from ESP32 ROM output
+such as `invalid header: 0xffffffff`, so the app lands in a provision-ready
+state instead of a generic action failure.
 
 For an already provisioned ESP32-C6, Studio can connect to the server/project
 workflow. The Device pane also offers `Wipe device` as a destructive

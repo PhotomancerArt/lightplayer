@@ -16,17 +16,15 @@ use super::browser_serial_readiness::{
     BrowserSerialReadinessClassifier, BrowserSerialReadinessFailure,
 };
 use crate::{
-    ServerUx, SharedLinkRegistry, UiActivity, UiActivityStep, UiActivityStepState, UiProgress,
-    UiStatus, UxLogEntry, UxLogLevel, UxNodeId, UxUpdate, UxUpdateSink,
+    ServerUx, SharedLinkRegistry, UiActivity, UiActivityStep, UiActivityStepState, UiStatus,
+    UxLogEntry, UxLogLevel, UxNodeId, UxUpdate, UxUpdateSink,
 };
 
 const RESPONSE_POLL_LIMIT: usize = 500;
 const READINESS_POLL_LIMIT: usize = 500;
 const RESPONSE_POLL_DELAY_MS: i32 = 10;
-const READINESS_TIMEOUT_MS: u32 = 5_000;
 const MALFORMED_PROTOCOL_SNIPPET_LIMIT: usize = 4_096;
 const DEVICE_LOG_SNIPPET_LIMIT: usize = 1_024;
-const READINESS_TERMINAL_LINE_LIMIT: usize = 80;
 const STEP_SERIAL_ACCESS: &str = "serial-access";
 const STEP_RESET_DEVICE: &str = "reset-device";
 const STEP_BOOT_OUTPUT: &str = "boot-output";
@@ -96,6 +94,9 @@ impl BrowserSerialClientIo {
                 if self.handle_line(line)?.is_some() {
                     protocol_ready = true;
                 }
+                if self.server_started() {
+                    protocol_ready = true;
+                }
                 if let Some(message) = self.detect_readiness_failure() {
                     self.state.borrow_mut().mark_protocol_failed(&message, true);
                     return Err(TransportError::Other(message));
@@ -140,6 +141,10 @@ impl BrowserSerialClientIo {
         } else {
             None
         }
+    }
+
+    fn server_started(&self) -> bool {
+        self.state.borrow().readiness_classifier.server_started()
     }
 
     fn readiness_error(&self, error: String) -> TransportError {
@@ -350,9 +355,6 @@ impl BrowserSerialClientState {
         }
         self.readiness_activity
             .set_step_state(STEP_PROTOCOL, UiActivityStepState::Active);
-        self.readiness_activity.push_terminal_line(message);
-        self.readiness_activity
-            .retain_recent_terminal_lines(READINESS_TERMINAL_LINE_LIMIT);
         self.emit_readiness_activity(UiStatus::working("Connecting"));
     }
 
@@ -361,8 +363,7 @@ impl BrowserSerialClientState {
             .set_step_state(STEP_BOOT_OUTPUT, UiActivityStepState::Complete);
         self.readiness_activity
             .set_step_state(STEP_PROTOCOL, UiActivityStepState::Complete);
-        self.readiness_activity.progress =
-            Some(UiProgress::determinate("LightPlayer protocol ready", 100));
+        self.readiness_activity.progress = None;
         self.emit_readiness_activity(UiStatus::good("Connected"));
     }
 
@@ -377,10 +378,7 @@ impl BrowserSerialClientState {
         self.readiness_activity
             .set_step_state(STEP_PROTOCOL, UiActivityStepState::Failed);
         self.readiness_activity.detail = Some(message.to_string());
-        self.readiness_activity.progress = Some(UiProgress::determinate(
-            "LightPlayer protocol unavailable",
-            100,
-        ));
+        self.readiness_activity.progress = None;
         let status = if no_firmware {
             UiStatus::warning("Flash ready")
         } else {
@@ -413,10 +411,6 @@ impl BrowserSerialClientState {
 fn initial_readiness_activity() -> UiActivity {
     UiActivity::new("Connecting ESP32 server")
         .with_detail("Waiting for LightPlayer boot output and protocol frames.")
-        .with_progress(UiProgress::timeout(
-            "Waiting for LightPlayer protocol",
-            READINESS_TIMEOUT_MS,
-        ))
         .with_steps(vec![
             UiActivityStep::new(STEP_SERIAL_ACCESS, "Serial access")
                 .with_state(UiActivityStepState::Complete)

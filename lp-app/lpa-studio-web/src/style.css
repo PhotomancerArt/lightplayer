@@ -30,7 +30,7 @@ select {
   width: min(1180px, 100%);
   min-height: 100vh;
   margin: 0 auto;
-  padding: 28px 28px 142px;
+  padding: 28px 28px 64px;
 }
 
 .ux-header {
@@ -57,16 +57,24 @@ select {
   gap: 14px;
 }
 
-.ux-layout-single {
+.ux-layout-device-only {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.ux-layout-split {
-  grid-template-columns: minmax(0, 1.2fr) minmax(300px, 0.8fr);
+.ux-layout-main-device {
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 380px);
 }
 
 .ux-layout-triple {
   grid-template-columns: minmax(0, 1.2fr) minmax(260px, 0.8fr) minmax(260px, 0.9fr);
+}
+
+.ux-main-column,
+.ux-device-column {
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  min-width: 0;
 }
 
 .ux-panel,
@@ -468,16 +476,10 @@ select {
 }
 
 .ux-log-panel {
-  position: fixed;
-  left: 50%;
-  bottom: 14px;
-  z-index: 20;
-  width: min(1124px, calc(100% - 56px));
-  padding: 9px 10px 10px;
-  transform: translateX(-50%);
+  min-width: 0;
+  padding: 10px;
   border-color: #303942;
-  background: rgba(15, 20, 24, 0.96);
-  box-shadow: 0 14px 42px rgba(0, 0, 0, 0.36);
+  background: #11161b;
 }
 
 .ux-log-heading {
@@ -489,12 +491,14 @@ select {
   gap: 4px;
   margin: 0;
   padding: 0;
+  max-height: min(34vh, 360px);
+  overflow: auto;
   list-style: none;
 }
 
 .ux-log {
   display: grid;
-  grid-template-columns: 48px 108px minmax(0, 1fr);
+  grid-template-columns: 44px 88px minmax(0, 1fr);
   gap: 8px;
   align-items: baseline;
   padding: 5px 7px;
@@ -666,7 +670,7 @@ select {
 
 @media (max-width: 880px) {
   .ux-shell {
-    padding: 18px 18px 154px;
+    padding: 18px 18px 72px;
   }
 
   .ux-header {
@@ -683,9 +687,8 @@ select {
     border-bottom: 1px solid #2a3138;
   }
 
-  .ux-log-panel {
-    bottom: 10px;
-    width: calc(100% - 24px);
+  .ux-log-list {
+    max-height: 260px;
   }
 
   .ux-log {

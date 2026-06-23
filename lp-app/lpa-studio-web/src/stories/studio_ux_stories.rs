@@ -301,8 +301,8 @@ fn starting_view() -> StudioView {
 fn simulator_ready_view() -> StudioView {
     StudioView::new(
         vec![
-            simulator_ready_device_view(),
             project_view(project_ready_state(), true),
+            simulator_ready_device_view(),
         ],
         vec![
             UxLogEntry::new(UxLogLevel::Info, "fw-browser", "ready"),
@@ -319,8 +319,8 @@ fn simulator_ready_view() -> StudioView {
 fn project_ready_view() -> StudioView {
     StudioView::new(
         vec![
-            simulator_ready_device_view(),
             project_view(project_ready_state(), true),
+            simulator_ready_device_view(),
         ],
         vec![
             UxLogEntry::new(UxLogLevel::Info, "fw-browser", "project loaded"),
@@ -339,16 +339,16 @@ fn lightplayer_disconnected_view() -> StudioView {
             UiStatus::good("Simulator connected"),
             vec![
                 select_connection_complete("Simulator"),
-                connect_device_complete(browser_worker_metrics()),
+                connect_device_complete_with_actions(
+                    browser_worker_metrics(),
+                    vec![disconnect_device_action()],
+                ),
                 stack_section(
                     "connect-lightplayer",
                     "Connect LightPlayer",
                     UiStepState::Active,
                     UiBody::text("Attach Studio to LightPlayer on the connected simulator."),
-                    vec![
-                        device_action(DeviceOp::ConnectLightPlayer),
-                        disconnect_device_action(),
-                    ],
+                    vec![connect_lightplayer_action()],
                 ),
             ],
             vec!["[lpa-studio-ux] LightPlayer protocol detached; device session remains open"],
@@ -430,7 +430,7 @@ fn provision_failed_view() -> StudioView {
             UiStatus::error("Needs attention"),
             vec![
                 select_connection_complete("ESP32 over USB"),
-                connect_device_complete(esp32_metrics()),
+                connect_device_complete_with_actions(esp32_metrics(), device_management_actions()),
                 stack_section(
                     "connect-lightplayer",
                     "Flashing firmware",
@@ -440,10 +440,7 @@ fn provision_failed_view() -> StudioView {
                             "Check the cable, boot mode, and browser serial permission.",
                         ),
                     ),
-                    vec![
-                        device_action(DeviceOp::ProvisionFirmware),
-                        disconnect_device_action(),
-                    ],
+                    Vec::new(),
                 ),
             ],
             vec![
@@ -599,7 +596,7 @@ fn simulator_ready_device_view() -> UiPaneView {
                     "Protocol",
                     "fw-browser-post-message-v1",
                 )]),
-                vec![disconnect_device_action()],
+                vec![disconnect_lightplayer_action()],
             ),
             stack_section(
                 "open-project",
@@ -628,7 +625,7 @@ fn device_project_empty_view() -> UiPaneView {
                 "Connect LightPlayer",
                 UiStepState::Complete,
                 UiBody::Metrics(vec![UiMetric::new("Protocol", "lp-serial-json-lines-v1")]),
-                vec![disconnect_device_action()],
+                vec![disconnect_lightplayer_action()],
             ),
             stack_section(
                 "open-project",
@@ -659,7 +656,7 @@ fn device_project_selection_view() -> UiPaneView {
                 "Connect LightPlayer",
                 UiStepState::Complete,
                 UiBody::Metrics(vec![UiMetric::new("Protocol", "lp-serial-json-lines-v1")]),
-                vec![disconnect_device_action()],
+                vec![disconnect_lightplayer_action()],
             ),
             stack_section(
                 "open-project",
@@ -700,17 +697,13 @@ fn blank_device_view(status: UiStatus, body: UiBody, after_reset: bool) -> UiPan
         status,
         vec![
             select_connection_complete("ESP32 over USB"),
-            connect_device_complete(esp32_metrics()),
+            connect_device_complete_with_actions(esp32_metrics(), device_management_actions()),
             stack_section(
                 "connect-lightplayer",
-                "Flash firmware",
+                "LightPlayer unavailable",
                 UiStepState::Active,
                 body,
-                vec![
-                    device_action(DeviceOp::ProvisionFirmware),
-                    device_action(DeviceOp::ResetToBlank),
-                    disconnect_device_action(),
-                ],
+                Vec::new(),
             ),
         ],
         detail,
@@ -718,12 +711,8 @@ fn blank_device_view(status: UiStatus, body: UiBody, after_reset: bool) -> UiPan
 }
 
 fn blank_firmware_activity() -> UiActivity {
-    let mut activity = UiActivity::new("Connecting ESP32 server")
+    UiActivity::new("Connecting ESP32 server")
         .with_detail("ESP32 boot output looks like blank or erased flash.")
-        .with_progress(UiProgress::determinate(
-            "LightPlayer protocol unavailable",
-            100,
-        ))
         .with_steps(vec![
             UiActivityStep::new("serial-access", "Serial access")
                 .with_state(UiActivityStepState::Complete)
@@ -735,17 +724,11 @@ fn blank_firmware_activity() -> UiActivity {
                 .with_state(UiActivityStepState::Complete),
             UiActivityStep::new("server-protocol", "LightPlayer protocol")
                 .with_state(UiActivityStepState::Failed),
-        ]);
-    activity.push_terminal_line("ESP-ROM:esp32c6-20220919");
-    activity.push_terminal_line("Build:Sep 19 2022");
-    activity.push_terminal_line("rst:0x7 (TG0_WDT_HPSYS),boot:0x1e (SPI_FAST_FLASH_BOOT)");
-    activity.push_terminal_line("invalid header: 0xffffffff");
-    activity.push_terminal_line("invalid header: 0xffffffff");
-    activity
+        ])
 }
 
 fn provisioning_activity() -> UiActivity {
-    let mut activity = UiActivity::new("Flashing firmware")
+    UiActivity::new("Flashing firmware")
         .with_detail("Writing packaged LightPlayer ESP32-C6 firmware.")
         .with_progress(UiProgress::determinate("Writing flash", 42))
         .with_steps(vec![
@@ -754,15 +737,11 @@ fn provisioning_activity() -> UiActivity {
             UiActivityStep::new("erase", "Erase").with_state(UiActivityStepState::Complete),
             UiActivityStep::new("write", "Write firmware").with_state(UiActivityStepState::Active),
             UiActivityStep::new("reboot", "Reboot").with_state(UiActivityStepState::Pending),
-        ]);
-    activity.push_terminal_line("Stub running...");
-    activity.push_terminal_line("Changing baud rate to 921600");
-    activity.push_terminal_line("Writing at 0x00010000... (42%)");
-    activity
+        ])
 }
 
 fn reset_activity() -> UiActivity {
-    let mut activity = UiActivity::new("Wiping device")
+    UiActivity::new("Wiping device")
         .with_detail("Erasing ESP32 flash through the bootloader.")
         .with_progress(UiProgress::determinate("Erasing flash", 58))
         .with_steps(vec![
@@ -770,11 +749,7 @@ fn reset_activity() -> UiActivity {
                 .with_state(UiActivityStepState::Complete),
             UiActivityStep::new("erase", "Erase flash").with_state(UiActivityStepState::Active),
             UiActivityStep::new("blank", "Blank device").with_state(UiActivityStepState::Pending),
-        ]);
-    activity.push_terminal_line("Stub running...");
-    activity.push_terminal_line("Erasing flash (this may take a while)...");
-    activity.push_terminal_line("Chip erase in progress");
-    activity
+        ])
 }
 
 fn device_view(
@@ -821,12 +796,19 @@ fn select_connection_complete(label: &'static str) -> UiStackSection {
 }
 
 fn connect_device_complete(metrics: Vec<UiMetric>) -> UiStackSection {
+    connect_device_complete_with_actions(metrics, Vec::new())
+}
+
+fn connect_device_complete_with_actions(
+    metrics: Vec<UiMetric>,
+    actions: Vec<UiAction>,
+) -> UiStackSection {
     stack_section(
         "connect-device",
         "Connect device",
         UiStepState::Complete,
         UiBody::Metrics(metrics),
-        Vec::new(),
+        actions,
     )
 }
 
@@ -889,6 +871,22 @@ fn start_actions() -> Vec<UiAction> {
 
 fn disconnect_device_action() -> UiAction {
     device_action(DeviceOp::DisconnectDevice)
+}
+
+fn disconnect_lightplayer_action() -> UiAction {
+    device_action(DeviceOp::DisconnectLightPlayer)
+}
+
+fn connect_lightplayer_action() -> UiAction {
+    device_action(DeviceOp::ConnectLightPlayer)
+}
+
+fn device_management_actions() -> Vec<UiAction> {
+    vec![
+        device_action(DeviceOp::ProvisionFirmware),
+        device_action(DeviceOp::ResetToBlank),
+        disconnect_device_action(),
+    ]
 }
 
 fn device_action(op: DeviceOp) -> UiAction {

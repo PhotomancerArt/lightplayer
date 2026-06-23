@@ -14,6 +14,7 @@ pub enum DeviceOp {
         endpoint_id: LinkEndpointId,
     },
     ConnectLightPlayer,
+    DisconnectLightPlayer,
     ProvisionFirmware,
     ResetToBlank,
     DisconnectDevice,
@@ -37,6 +38,11 @@ impl UxOp for DeviceOp {
                 "Connect LightPlayer",
                 "Attach Studio to LightPlayer on the connected device.",
                 ActionPriority::Primary,
+            ),
+            Self::DisconnectLightPlayer => ActionMeta::new(
+                "Disconnect",
+                "Detach Studio from LightPlayer while keeping the device connected.",
+                ActionPriority::Tertiary,
             ),
             Self::ProvisionFirmware => ActionMeta::new(
                 "Flash firmware",
