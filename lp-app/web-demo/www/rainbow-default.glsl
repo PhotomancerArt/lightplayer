@@ -86,12 +86,17 @@ vec4 render(vec2 pos) {
     const vec2 REF_SIZE = vec2(32.0, 32.0);
     vec2 virtCoord = pos * REF_SIZE / outputSize;
 
-    // Palette cycle: 5s per palette, 1s smooth transition to next
-    // Clamp palette to 4 to avoid Q32 edge case where floor(mod(...)) yields 5.0
-    float cyclePhase = mod(time, 5.0);
-    float palette = min(floor(mod(time * 0.2, 5.0)), 4.0);
-    float nextPalette = mod(palette + 1.0, 5.0);
-    float blend = smoothstep(4.0, 5.0, cyclePhase);
+    // Palette cycle: 5s per palette, 1s smooth transition to next.
+    // Keep palette index and blend phase derived from one timer so fixed-point
+    // boundary rounding cannot make them disagree at 25s loop points.
+    float palettePhase = mod(time, 25.0) * 0.2;
+    float palette = min(floor(palettePhase), 4.0);
+    float cyclePhase = palettePhase - palette;
+    float nextPalette = palette + 1.0;
+    if (nextPalette > 4.5) {
+        nextPalette = 0.0;
+    }
+    float blend = smoothstep(0.8, 1.0, cyclePhase);
 
     float panSpeed = .3;
     float pan = mix(1.0, 8.0, 0.5 * (sin(time * panSpeed) + 1.0));

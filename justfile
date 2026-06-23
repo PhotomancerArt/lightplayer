@@ -67,7 +67,7 @@ web-demo-build: install-wasm32-target
     wasm-bindgen target/wasm32-unknown-unknown/release/web_demo.wasm \
         --out-dir lp-app/web-demo/www/pkg --target web
     mkdir -p lp-app/web-demo/www
-    cp examples/basic/src/rainbow.shader/main.glsl lp-app/web-demo/www/rainbow-default.glsl
+    cp examples/basic/shader.glsl lp-app/web-demo/www/rainbow-default.glsl
     echo "Artifacts: lp-app/web-demo/www/ (index.html, pkg/)"
 
 # Build and serve the web demo (installs miniserve via cargo if missing)
@@ -80,6 +80,27 @@ web-demo: web-demo-build
     fi
     echo "Serving http://127.0.0.1:2812 (Ctrl+C to stop)"
     miniserve --index index.html -p 2812 lp-app/web-demo/www/
+
+# Build a clean GitHub Pages artifact for the web demo.
+web-demo-deploy-dir channel="local" out_dir="target/pages/web-demo" domain="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just web-demo-build
+    args=(--kind web-demo --channel "{{ channel }}" --out "{{ out_dir }}")
+    if [[ -n "{{ domain }}" ]]; then
+        args+=(--domain "{{ domain }}")
+    fi
+    node scripts/pages/prepare-pages-artifact.mjs "${args[@]}"
+
+# Smoke-check the staged web demo Pages artifact.
+web-demo-smoke out_dir="target/pages/web-demo":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    node scripts/pages/static-site-smoke.mjs \
+        --kind web-demo \
+        --dir "{{ out_dir }}" \
+        --port "${WEB_DEMO_SMOKE_PORT:-2831}" \
+        --server "${PAGES_SMOKE_SERVER:-required}"
 
 # Deploy web demo to gh-pages branch
 web-demo-deploy: web-demo-build
@@ -302,6 +323,27 @@ studio-web-build: install-wasm32-target fw-browser-build studio-firmware-package
     cp lp-fw/fw-browser/www/pkg/fw_browser.js lp-app/lpa-studio-web/public/pkg/fw_browser.js
     cp lp-fw/fw-browser/www/pkg/fw_browser_bg.wasm lp-app/lpa-studio-web/public/pkg/fw_browser_bg.wasm
     echo "Artifacts: lp-app/lpa-studio-web/public/ (index.html, pkg/)"
+
+# Build a clean GitHub Pages artifact for Studio.
+studio-web-deploy-dir channel="local" out_dir="target/pages/studio" domain="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just studio-web-build
+    args=(--kind studio --channel "{{ channel }}" --out "{{ out_dir }}")
+    if [[ -n "{{ domain }}" ]]; then
+        args+=(--domain "{{ domain }}")
+    fi
+    node scripts/pages/prepare-pages-artifact.mjs "${args[@]}"
+
+# Smoke-check the staged Studio Pages artifact.
+studio-web-smoke out_dir="target/pages/studio":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    node scripts/pages/static-site-smoke.mjs \
+        --kind studio \
+        --dir "{{ out_dir }}" \
+        --port "${STUDIO_WEB_SMOKE_PORT:-2830}" \
+        --server "${PAGES_SMOKE_SERVER:-required}"
 
 studio-web: studio-web-build
     #!/usr/bin/env bash

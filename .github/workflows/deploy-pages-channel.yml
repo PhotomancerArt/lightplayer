@@ -1,0 +1,130 @@
+name: Deploy Pages Channel
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Static site channel to deploy
+        required: true
+        type: choice
+        options:
+          - beta
+          - demo
+      ref:
+        description: Git ref to build
+        required: true
+        default: main
+      dry_run:
+        description: Build and smoke-check without pushing to the Pages repo
+        required: true
+        type: boolean
+        default: false
+
+concurrency:
+  group: pages-channel-${{ inputs.channel }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  RUST_BACKTRACE: 1
+  RISC_V_TARGET: riscv32imac-unknown-none-elf
+  RUSTUP_PERMIT_COPY_RENAME: 1
+
+jobs:
+  deploy:
+    name: Build and deploy ${{ inputs.channel }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      - name: Install Rust targets
+        run: |
+          rustup target add wasm32-unknown-unknown
+          rustup target add ${{ env.RISC_V_TARGET }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-${{ runner.arch }}-pages-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-pages-cargo-
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.114 --locked
+
+      - name: Install espflash
+        if: inputs.channel == 'beta'
+        run: cargo install espflash --version 3.3.0 --locked
+
+      - name: Build beta artifact
+        if: inputs.channel == 'beta'
+        run: just studio-web-deploy-dir beta target/pages/channel beta.lightplayer.app
+
+      - name: Smoke-check beta artifact
+        if: inputs.channel == 'beta'
+        run: just studio-web-smoke target/pages/channel
+
+      - name: Build demo artifact
+        if: inputs.channel == 'demo'
+        run: just web-demo-deploy-dir demo target/pages/channel demo.lightplayer.app
+
+      - name: Smoke-check demo artifact
+        if: inputs.channel == 'demo'
+        run: just web-demo-smoke target/pages/channel
+
+      - name: Create Pages App token
+        if: ${{ inputs.dry_run == false }}
+        id: pages-app-token
+        uses: actions/create-github-app-token@v3
+        with:
+          app-id: ${{ secrets.LIGHTPLAYER_PAGES_APP_ID }}
+          private-key: ${{ secrets.LIGHTPLAYER_PAGES_PRIVATE_KEY }}
+          owner: light-player
+          repositories: |
+            lightplayer-beta-pages
+            lightplayer-demo-pages
+          permission-contents: write
+
+      - name: Publish channel artifact
+        env:
+          LIGHTPLAYER_PAGES_TOKEN: ${{ steps.pages-app-token.outputs.token }}
+          CHANNEL: ${{ inputs.channel }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          target_repo=""
+          case "$CHANNEL" in
+            beta) target_repo="light-player/lightplayer-beta-pages" ;;
+            demo) target_repo="light-player/lightplayer-demo-pages" ;;
+            *) echo "unknown channel: $CHANNEL" >&2; exit 2 ;;
+          esac
+
+          args=(--repo "$target_repo" --dir target/pages/channel --message "deploy: ${CHANNEL} ${GITHUB_SHA::12}")
+          if [[ "$DRY_RUN" == "true" ]]; then
+            args+=(--dry-run)
+          fi
+          scripts/pages/publish-static-repo.sh "${args[@]}"

@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LightPlayer Style Lab - Lab Instrument</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #090b0a;
+        --panel: #101511;
+        --panel-2: #151b16;
+        --line: #2e4237;
+        --line-hot: #8ee8a8;
+        --text: #eef6ea;
+        --muted: #8ca096;
+        --accent: #8ee8a8;
+        --accent-2: #f1d36b;
+        --accent-3: #66d5df;
+        --danger: #ff786e;
+        --radius: 4px;
+        --gap: 8px;
+        --pad: 9px;
+        --control-h: 28px;
+        font-family: "IBM Plex Sans", Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        background:
+          linear-gradient(rgba(142, 232, 168, 0.045) 1px, transparent 1px) 0 0 / 24px 24px,
+          linear-gradient(90deg, rgba(142, 232, 168, 0.04) 1px, transparent 1px) 0 0 / 24px 24px,
+          radial-gradient(circle at 85% 14%, rgba(241, 211, 107, 0.10), transparent 24%),
+          #090b0a;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .shell {
+        container-type: inline-size;
+        min-height: 100vh;
+        padding: 8px;
+      }
+
+      .topbar,
+      .pane {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--panel);
+      }
+
+      .topbar {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 7px;
+        margin-bottom: var(--gap);
+        padding: 7px;
+      }
+
+      .brand {
+        display: grid;
+        grid-template-columns: 30px minmax(0, 1fr);
+        gap: 8px;
+        align-items: center;
+      }
+
+      .mark {
+        width: 30px;
+        height: 30px;
+        border: 1px solid var(--accent);
+        border-radius: 3px;
+        background:
+          linear-gradient(90deg, transparent 46%, var(--accent) 47% 53%, transparent 54%),
+          linear-gradient(transparent 46%, var(--accent) 47% 53%, transparent 54%),
+          #0b100d;
+        box-shadow: inset 0 0 0 6px #0b100d;
+      }
+
+      .brand strong,
+      .brand span,
+      .pane-title strong,
+      .pane-title span,
+      .metric strong,
+      .metric span {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .brand strong {
+        font-size: 0.94rem;
+      }
+
+      .brand span,
+      .pane-title span,
+      .metric span,
+      label,
+      .tab,
+      .log span {
+        color: var(--muted);
+        font-size: 0.71rem;
+        font-weight: 800;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      .transport,
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+      }
+
+      .icon,
+      .chip,
+      .tab,
+      .scene,
+      .text-button {
+        min-height: var(--control-h);
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        color: var(--text);
+        background: #0b100d;
+      }
+
+      .icon {
+        width: 32px;
+      }
+
+      .text-button {
+        padding: 0 9px;
+        font-weight: 800;
+      }
+
+      .primary {
+        border-color: var(--accent);
+        color: #071009;
+        background: var(--accent);
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        min-height: 23px;
+        padding: 0 7px;
+        color: var(--text);
+        font-size: 0.77rem;
+      }
+
+      .workbench {
+        display: grid;
+        grid-template-areas: "nav" "main" "inspect" "status";
+        gap: var(--gap);
+      }
+
+      .nav {
+        grid-area: nav;
+      }
+
+      .main {
+        grid-area: main;
+        display: grid;
+        gap: var(--gap);
+      }
+
+      .inspect {
+        grid-area: inspect;
+      }
+
+      .status {
+        grid-area: status;
+      }
+
+      .pane {
+        min-width: 0;
+        overflow: hidden;
+        box-shadow: inset 0 1px rgba(255, 255, 255, 0.03);
+      }
+
+      .pane-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-height: 34px;
+        padding: 6px var(--pad);
+        border-bottom: 1px solid var(--line);
+        background: #0c110e;
+      }
+
+      .pane-title strong {
+        font-size: 0.88rem;
+      }
+
+      .pane-body {
+        padding: var(--pad);
+      }
+
+      .scene-list,
+      .controls,
+      .log-grid,
+      .visual {
+        display: grid;
+        gap: 6px;
+      }
+
+      .scene {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 48px;
+        gap: 8px;
+        align-items: center;
+        width: 100%;
+        padding: 6px 7px;
+        text-align: left;
+      }
+
+      .scene.is-active {
+        border-color: var(--accent);
+        background: #132118;
+      }
+
+      .meter {
+        height: 6px;
+        border: 1px solid #52685c;
+        background: linear-gradient(90deg, var(--accent), var(--accent-2));
+      }
+
+      .mini-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        margin-top: 7px;
+      }
+
+      .metric,
+      .swatch,
+      .knob-card {
+        min-width: 0;
+        padding: 7px;
+        border: 1px solid #26382f;
+        border-radius: 3px;
+        background: #0c110e;
+      }
+
+      .metric strong {
+        margin-top: 2px;
+        font-size: 0.88rem;
+      }
+
+      .swatches {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 4px;
+        margin-top: 7px;
+      }
+
+      .swatches i {
+        display: block;
+        height: 16px;
+        border-radius: 2px;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 5px;
+      }
+
+      .tab {
+        padding: 5px 7px;
+      }
+
+      .tab.is-active {
+        color: var(--accent);
+        border-color: var(--accent);
+      }
+
+      pre {
+        margin: 0;
+        min-height: 260px;
+        overflow: auto;
+        padding: 11px;
+        background:
+          linear-gradient(rgba(142, 232, 168, 0.05) 1px, transparent 1px) 0 0 / 100% 22px,
+          #070a08;
+        color: #dffbe6;
+        font: 0.77rem/1.46 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      .led-view {
+        position: relative;
+        min-height: 232px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        background:
+          radial-gradient(circle at 24% 30%, rgba(142, 232, 168, 0.88), transparent 18%),
+          radial-gradient(circle at 62% 44%, rgba(102, 213, 223, 0.76), transparent 22%),
+          radial-gradient(circle at 50% 82%, rgba(241, 211, 107, 0.72), transparent 18%),
+          #020403;
+      }
+
+      .led-view::before {
+        content: "";
+        position: absolute;
+        inset: 7px;
+        background: radial-gradient(circle, rgba(239, 246, 234, 0.78) 0 1.5px, transparent 2.5px) 0 0 / 14px 14px;
+        mix-blend-mode: screen;
+      }
+
+      .led-view::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(90deg, transparent 50%, rgba(0, 0, 0, 0.28) 51%) 0 0 / 14px 100%;
+      }
+
+      .timeline {
+        display: grid;
+        grid-template-columns: repeat(8, 1fr);
+        gap: 3px;
+      }
+
+      .timeline i {
+        height: 22px;
+        border: 1px solid #26382f;
+        border-radius: 2px;
+        background: var(--accent);
+      }
+
+      .control-row {
+        display: grid;
+        grid-template-columns: 72px minmax(0, 1fr) 56px;
+        gap: 7px;
+        align-items: center;
+      }
+
+      input[type="range"] {
+        width: 100%;
+        accent-color: var(--accent);
+      }
+
+      input[type="number"] {
+        width: 100%;
+        height: var(--control-h);
+        border: 1px solid var(--line);
+        border-radius: 3px;
+        color: var(--text);
+        background: #080c09;
+        text-align: right;
+      }
+
+      .knobs {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+      }
+
+      .knob-card {
+        display: grid;
+        justify-items: center;
+        gap: 5px;
+      }
+
+      .knob {
+        position: relative;
+        width: 52px;
+        aspect-ratio: 1;
+        border: 1px solid #4b6256;
+        border-radius: 50%;
+        background: conic-gradient(from -135deg, var(--accent) 0 60%, #1d2a22 60% 100%);
+      }
+
+      .knob::after {
+        content: "";
+        position: absolute;
+        left: calc(50% - 1px);
+        top: 5px;
+        width: 2px;
+        height: 18px;
+        background: var(--text);
+        transform: rotate(35deg);
+        transform-origin: 50% 21px;
+      }
+
+      .log {
+        display: grid;
+        grid-template-columns: 66px minmax(0, 1fr);
+        gap: 7px;
+        padding: 6px 7px;
+        border: 1px solid #26382f;
+        border-radius: 3px;
+        background: #0c110e;
+      }
+
+      .log strong {
+        overflow-wrap: anywhere;
+      }
+
+      @media (min-width: 720px) {
+        .shell {
+          padding: 12px;
+        }
+
+        .topbar {
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: center;
+        }
+
+        .transport {
+          justify-content: end;
+        }
+
+        .chips {
+          grid-column: 1 / -1;
+        }
+
+        .workbench {
+          grid-template-columns: 204px minmax(0, 1fr);
+          grid-template-areas:
+            "nav main"
+            "inspect main"
+            "status status";
+        }
+      }
+
+      @media (min-width: 1024px) {
+        .shell {
+          padding: 16px;
+        }
+
+        .topbar {
+          grid-template-columns: minmax(250px, 1fr) auto minmax(270px, auto);
+        }
+
+        .chips {
+          grid-column: auto;
+          justify-content: end;
+        }
+
+        .workbench {
+          grid-template-columns: 216px minmax(0, 1fr) 282px;
+          grid-template-areas:
+            "nav main inspect"
+            "status status status";
+        }
+
+        .main {
+          grid-template-columns: minmax(0, 1.08fr) minmax(280px, 0.82fr);
+        }
+      }
+
+      @media (max-width: 430px) {
+        .control-row {
+          grid-template-columns: 1fr;
+        }
+
+        .icon {
+          flex: 1 0 31px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar" aria-label="Studio status and transport">
+        <div class="brand">
+          <span class="mark" aria-hidden="true"></span>
+          <div>
+            <strong>LightPlayer Studio</strong>
+            <span>Aurora Rack / ESP32-C6 live JIT</span>
+          </div>
+        </div>
+        <div class="transport" aria-label="Transport">
+          <button class="icon" title="Previous">|&lt;</button>
+          <button class="icon primary" title="Play">&gt;</button>
+          <button class="icon" title="Stop">[]</button>
+          <button class="text-button">Compile</button>
+        </div>
+        <div class="chips" aria-label="Runtime status">
+          <span class="chip">USB ready</span>
+          <span class="chip">JIT 2.7 ms</span>
+          <span class="chip">Heap 58 K</span>
+        </div>
+      </section>
+
+      <section class="workbench">
+        <aside class="pane nav">
+          <div class="pane-head"><div class="pane-title"><span>Project</span><strong>Scenes</strong></div></div>
+          <div class="pane-body">
+            <div class="scene-list">
+              <button class="scene is-active"><strong>Aurora boreal</strong><span class="meter"></span></button>
+              <button class="scene"><strong>Pixel rain</strong><span class="meter"></span></button>
+              <button class="scene"><strong>Warm scanner</strong><span class="meter"></span></button>
+              <button class="scene"><strong>Audio bloom</strong><span class="meter"></span></button>
+            </div>
+            <div class="mini-grid">
+              <div class="metric"><span>FPS</span><strong>60.0</strong></div>
+              <div class="metric"><span>Nodes</span><strong>18</strong></div>
+              <div class="metric"><span>LPIR</span><strong>824 B</strong></div>
+              <div class="metric"><span>RV32</span><strong>436 B</strong></div>
+            </div>
+            <div class="swatch">
+              <span>Palette</span>
+              <div class="swatches">
+                <i style="background:#8ee8a8"></i>
+                <i style="background:#66d5df"></i>
+                <i style="background:#f1d36b"></i>
+                <i style="background:#ff786e"></i>
+                <i style="background:#eef6ea"></i>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <section class="main">
+          <section class="pane editor">
+            <div class="pane-head">
+              <div class="pane-title"><span>Shader</span><strong>fragment.glsl</strong></div>
+              <div class="tabs"><span class="tab is-active">GLSL</span><span class="tab">LPIR</span><span class="tab">RV32</span></div>
+            </div>
+            <pre><code>vec3 palette(float t) {
+  return 0.5 + 0.5 * cos(6.28318 *
+    (vec3(0.00, 0.32, 0.67) + t));
+}
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+  vec2 p = fragCoord / iResolution.xy;
+  float wave = sin((p.x + time * 0.18) * 18.0);
+  float bloom = smoothstep(0.30, 0.96, wave * p.y);
+  vec3 rgb = palette(p.x + time * 0.07);
+  fragColor = vec4(mix(rgb * 0.18, rgb, bloom), 1.0);
+}</code></pre>
+          </section>
+
+          <section class="pane visual">
+            <div class="pane-head"><div class="pane-title"><span>Texture</span><strong>LED preview</strong></div><span class="chip">64 x 32</span></div>
+            <div class="pane-body visual">
+              <div class="led-view" role="img" aria-label="Lab instrument LED preview"></div>
+              <div class="timeline" aria-hidden="true">
+                <i style="background:#8ee8a8"></i><i style="background:#66d5df"></i><i style="background:#f1d36b"></i><i style="background:#8ee8a8"></i>
+                <i style="background:#66d5df"></i><i style="background:#f1d36b"></i><i style="background:#8ee8a8"></i><i style="background:#66d5df"></i>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <aside class="pane inspect">
+          <div class="pane-head"><div class="pane-title"><span>Controls</span><strong>Aurora rack</strong></div><span class="chip">Live</span></div>
+          <div class="pane-body controls">
+            <div class="knobs">
+              <div class="knob-card"><div class="knob"></div><label>Hue</label></div>
+              <div class="knob-card"><div class="knob"></div><label>Bloom</label></div>
+              <div class="knob-card"><div class="knob"></div><label>Drift</label></div>
+              <div class="knob-card"><div class="knob"></div><label>Gamma</label></div>
+            </div>
+            <div class="control-row"><label>Speed</label><input type="range" value="68"><input type="number" value="0.68" step="0.01"></div>
+            <div class="control-row"><label>Density</label><input type="range" value="43"><input type="number" value="43"></div>
+            <div class="control-row"><label>Gain</label><input type="range" value="81"><input type="number" value="1.24" step="0.01"></div>
+            <button class="text-button primary">Push to device</button>
+          </div>
+        </aside>
+
+        <section class="pane status">
+          <div class="pane-head"><div class="pane-title"><span>Runtime</span><strong>Recent activity</strong></div></div>
+          <div class="pane-body log-grid">
+            <div class="log"><span>info</span><strong>compiled fragment.glsl to RV32 native</strong></div>
+            <div class="log"><span>debug</span><strong>pool allocator reused 9 registers</strong></div>
+            <div class="log"><span>warn</span><strong>texture slot rainbow LUT is simulated</strong></div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>
