@@ -94,7 +94,54 @@ select {
 }
 
 .ux-panel-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   margin-bottom: 12px;
+}
+
+.ux-status {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 1;
+  min-width: 0;
+  min-height: 24px;
+  max-width: 100%;
+  padding: 0 8px;
+  border: 1px solid #3a444c;
+  border-radius: 999px;
+  color: #d9e2df;
+  background: #12171c;
+  font-size: 0.76rem;
+  font-weight: 700;
+  line-height: 1;
+  overflow-wrap: anywhere;
+}
+
+.ux-status-working {
+  border-color: #706730;
+  color: #f2e6a2;
+  background: #24230f;
+}
+
+.ux-status-good {
+  border-color: #365545;
+  color: #7be0b2;
+  background: #13241d;
+}
+
+.ux-status-warning {
+  border-color: #796c33;
+  color: #f0dc7a;
+  background: #292614;
+}
+
+.ux-status-error {
+  border-color: #874b4b;
+  color: #ffc7c7;
+  background: #301b1d;
 }
 
 .ux-panel-copy {

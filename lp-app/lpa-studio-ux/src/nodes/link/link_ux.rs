@@ -393,7 +393,7 @@ impl LinkUx {
                 .with_progress(UiProgress::indeterminate(progress_label.clone())),
         ));
         updates.emit(UxUpdate::Activity {
-            node_id: node_id.clone(),
+            target: crate::UxActivityTarget::pane(node_id.clone()),
             status: UiStatus::working("Managing"),
             activity: activity.borrow().clone(),
         });
@@ -633,7 +633,7 @@ fn management_activity_sink(
         let mut activity = activity.borrow_mut();
         apply_management_event(&mut activity, event);
         updates.emit(UxUpdate::Activity {
-            node_id: node_id.clone(),
+            target: crate::UxActivityTarget::pane(node_id.clone()),
             status: UiStatus::working("Managing"),
             activity: (*activity).clone(),
         });

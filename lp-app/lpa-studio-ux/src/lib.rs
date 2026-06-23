@@ -26,8 +26,8 @@ pub use nodes::server::{
     ServerState, ServerUx, StudioServerClient,
 };
 pub use nodes::studio::{
-    StudioSnapshot, StudioUx, UxError, UxLogEntry, UxLogLevel, UxNotice, UxNoticeLevel, UxOutcome,
-    UxResult, UxUpdate, UxUpdateSink,
+    StudioSnapshot, StudioUx, UxActivityTarget, UxError, UxLogEntry, UxLogLevel, UxNotice,
+    UxNoticeLevel, UxOutcome, UxResult, UxUpdate, UxUpdateSink,
 };
 pub use ui::{
     StudioView, UiActivity, UiActivityStep, UiActivityStepState, UiBody, UiMetric, UiPaneView,

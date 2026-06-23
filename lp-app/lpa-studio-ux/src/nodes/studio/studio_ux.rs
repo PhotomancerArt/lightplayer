@@ -10,8 +10,8 @@ use lpa_link::{
 use crate::{
     ConnectedLink, DeviceOp, DeviceUx, LinkOpenOutcome, ProjectConnectResult, ProjectOp,
     ProjectState, ProjectUx, StudioSnapshot, StudioView, UiAction, UiActions, UiActivity, UiBody,
-    UiStatus, UxContext, UxError, UxLogEntry, UxLogLevel, UxNode, UxNotice, UxOutcome, UxResult,
-    UxUpdate, UxUpdateSink,
+    UiStatus, UxActivityTarget, UxContext, UxError, UxLogEntry, UxLogLevel, UxNode, UxNotice,
+    UxOutcome, UxResult, UxUpdate, UxUpdateSink,
 };
 
 pub struct StudioUx {
@@ -105,7 +105,7 @@ impl StudioUx {
                 if provider_id != LinkProviderKind::BrowserSerialEsp32 {
                     emit_activity(
                         &updates,
-                        self.device.node_id(),
+                        device_section_target(DeviceUx::SECTION_CONNECT_DEVICE),
                         "Opening device",
                         "Opening",
                         format!("Opening {}", provider_id.label()),
@@ -127,7 +127,7 @@ impl StudioUx {
             } => {
                 emit_activity(
                     &updates,
-                    self.device.node_id(),
+                    device_section_target(DeviceUx::SECTION_CONNECT_DEVICE),
                     "Opening device session",
                     "Connecting",
                     "Opening device endpoint",
@@ -174,7 +174,7 @@ impl StudioUx {
             self.device.server.disconnect();
             emit_activity(
                 &updates,
-                self.device.node_id(),
+                device_section_target(DeviceUx::SECTION_CONNECT_LIGHTPLAYER),
                 "Reopening device",
                 "Connecting",
                 "Resetting device before server connect",
@@ -192,15 +192,19 @@ impl StudioUx {
     ) -> UxResult {
         emit_activity(
             &updates,
-            self.device.node_id(),
+            device_section_target(DeviceUx::SECTION_CONNECT_LIGHTPLAYER),
             "Connecting LightPlayer",
             "Connecting",
             "Opening server protocol",
         );
+        let server_updates = retarget_activity_updates(
+            updates.clone(),
+            device_section_target(DeviceUx::SECTION_CONNECT_LIGHTPLAYER),
+        );
         match self.device.server.attach_link_connection(
             self.device.link.registry_handle(),
             connection,
-            updates.clone(),
+            server_updates,
         ) {
             Ok(()) => {
                 let mut outcome =
@@ -208,7 +212,7 @@ impl StudioUx {
                 updates.emit(UxUpdate::View(self.view()));
                 emit_activity(
                     &updates,
-                    self.project.node_id(),
+                    device_section_target(DeviceUx::SECTION_OPEN_PROJECT),
                     "Checking running projects",
                     "Checking",
                     "Checking server response",
@@ -268,7 +272,7 @@ impl StudioUx {
     async fn connect_running_project(&mut self, updates: UxUpdateSink) -> UxResult {
         emit_activity(
             &updates,
-            self.project.node_id(),
+            device_section_target(DeviceUx::SECTION_OPEN_PROJECT),
             "Connecting project",
             "Connecting",
             "Checking loaded projects",
@@ -311,7 +315,7 @@ impl StudioUx {
     ) -> Result<AutoProjectConnect, UxError> {
         emit_activity(
             &updates,
-            self.project.node_id(),
+            device_section_target(DeviceUx::SECTION_OPEN_PROJECT),
             "Checking running projects",
             "Checking",
             "Checking loaded projects",
@@ -344,7 +348,7 @@ impl StudioUx {
     async fn connect_loaded_project(&mut self, handle_id: u32, updates: UxUpdateSink) -> UxResult {
         emit_activity(
             &updates,
-            self.project.node_id(),
+            device_section_target(DeviceUx::SECTION_OPEN_PROJECT),
             "Connecting project",
             "Connecting",
             "Loading project shape",
@@ -374,7 +378,7 @@ impl StudioUx {
     async fn load_demo_project(&mut self, updates: UxUpdateSink) -> UxResult {
         emit_activity(
             &updates,
-            self.project.node_id(),
+            device_section_target(DeviceUx::SECTION_OPEN_PROJECT),
             "Loading demo project",
             "Loading",
             "Uploading demo project",
@@ -423,7 +427,13 @@ impl StudioUx {
         self.project.reset();
         self.device.server.disconnect();
         let captured_logs = Rc::new(RefCell::new(Vec::new()));
-        let management_updates = capture_log_updates(updates.clone(), Rc::clone(&captured_logs));
+        let management_updates = capture_log_updates(
+            retarget_activity_updates(
+                updates.clone(),
+                device_section_target(DeviceUx::SECTION_CONNECT_LIGHTPLAYER),
+            ),
+            Rc::clone(&captured_logs),
+        );
         let management = match self
             .device
             .link
@@ -445,7 +455,7 @@ impl StudioUx {
         let mut outcome = UxOutcome::new().with_notice(provision_notice(&management.result));
         emit_activity(
             &updates,
-            self.device.node_id(),
+            device_section_target(DeviceUx::SECTION_CONNECT_LIGHTPLAYER),
             "Reconnecting device",
             "Connecting",
             "Waiting for firmware boot",
@@ -486,7 +496,13 @@ impl StudioUx {
         self.project.reset();
         self.device.server.disconnect();
         let captured_logs = Rc::new(RefCell::new(Vec::new()));
-        let management_updates = capture_log_updates(updates.clone(), Rc::clone(&captured_logs));
+        let management_updates = capture_log_updates(
+            retarget_activity_updates(
+                updates.clone(),
+                device_section_target(DeviceUx::SECTION_CONNECT_LIGHTPLAYER),
+            ),
+            Rc::clone(&captured_logs),
+        );
         let management = match self
             .device
             .link
@@ -508,7 +524,7 @@ impl StudioUx {
         let mut outcome = UxOutcome::new().with_notice(reset_notice(&management.result));
         emit_activity(
             &updates,
-            self.device.node_id(),
+            device_section_target(DeviceUx::SECTION_CONNECT_LIGHTPLAYER),
             "Reconnecting device",
             "Connecting",
             "Checking for LightPlayer firmware",
@@ -586,16 +602,33 @@ fn should_auto_load_demo_project(connection: &LinkConnection) -> bool {
 
 fn emit_activity(
     updates: &UxUpdateSink,
-    node_id: crate::UxNodeId,
+    target: UxActivityTarget,
     title: impl Into<String>,
     status: impl Into<String>,
     detail: impl Into<String>,
 ) {
     updates.emit(UxUpdate::Activity {
-        node_id,
+        target,
         status: UiStatus::working(status),
         activity: UiActivity::new(title).with_detail(detail),
     });
+}
+
+fn device_section_target(section_id: &'static str) -> UxActivityTarget {
+    UxActivityTarget::stack_section(DeviceUx::NODE_ID, section_id)
+}
+
+fn retarget_activity_updates(updates: UxUpdateSink, target: UxActivityTarget) -> UxUpdateSink {
+    UxUpdateSink::new(move |update| match update {
+        UxUpdate::Activity {
+            status, activity, ..
+        } => updates.emit(UxUpdate::Activity {
+            target: target.clone(),
+            status,
+            activity,
+        }),
+        update => updates.emit(update),
+    })
 }
 
 fn capture_log_updates(
@@ -683,7 +716,8 @@ mod tests {
 
     use crate::{
         ConnectedDeviceSummary, LinkState, LinkUx, ProjectInventorySummary, ProjectState,
-        ProjectUx, ServerFailureKind, ServerState, UiStatusKind, UiStepState, UxIssue, UxNodeId,
+        ProjectUx, ServerFailureKind, ServerState, ServerUx, UiStatusKind, UiStepState, UxIssue,
+        UxNodeId,
     };
 
     use super::*;
@@ -976,8 +1010,16 @@ mod tests {
         assert!(updates.borrow().iter().any(|update| {
             matches!(
                 update,
-                UxUpdate::Activity { activity, .. }
-                    if activity.title == "Opening device session"
+                UxUpdate::Activity {
+                    target: UxActivityTarget::StackSection {
+                        pane_node_id,
+                        section_id,
+                    },
+                    activity,
+                    ..
+                } if pane_node_id.as_str() == DeviceUx::NODE_ID
+                    && section_id == DeviceUx::SECTION_CONNECT_DEVICE
+                    && activity.title == "Opening device session"
             )
         }));
         let last_view = updates
@@ -1000,6 +1042,36 @@ mod tests {
 
         assert!(should_auto_load_demo_project(&browser_worker));
         assert!(!should_auto_load_demo_project(&fake));
+    }
+
+    #[test]
+    fn retarget_activity_updates_rewrites_activity_target() {
+        let updates = Rc::new(RefCell::new(Vec::new()));
+        let sink = UxUpdateSink::new({
+            let updates = Rc::clone(&updates);
+            move |update| {
+                updates.borrow_mut().push(update);
+            }
+        });
+        let target = UxActivityTarget::stack_section(
+            DeviceUx::NODE_ID,
+            DeviceUx::SECTION_CONNECT_LIGHTPLAYER,
+        );
+        let retargeted = retarget_activity_updates(sink, target.clone());
+
+        retargeted.emit(UxUpdate::Activity {
+            target: UxActivityTarget::pane(ServerUx::NODE_ID),
+            status: UiStatus::working("Connecting"),
+            activity: UiActivity::new("Connecting ESP32 server"),
+        });
+
+        assert!(matches!(
+            updates.borrow().as_slice(),
+            [UxUpdate::Activity {
+                target: actual_target,
+                ..
+            }] if *actual_target == target
+        ));
     }
 
     fn connected_studio() -> StudioUx {

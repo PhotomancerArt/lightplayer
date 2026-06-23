@@ -17,7 +17,7 @@ use super::browser_serial_readiness::{
 };
 use crate::{
     ServerUx, SharedLinkRegistry, UiActivity, UiActivityStep, UiActivityStepState, UiStatus,
-    UxLogEntry, UxLogLevel, UxNodeId, UxUpdate, UxUpdateSink,
+    UxActivityTarget, UxLogEntry, UxLogLevel, UxNodeId, UxUpdate, UxUpdateSink,
 };
 
 const RESPONSE_POLL_LIMIT: usize = 500;
@@ -43,7 +43,7 @@ impl BrowserSerialClientIo {
     ) -> Self {
         let readiness_activity = initial_readiness_activity();
         updates.emit(UxUpdate::Activity {
-            node_id: server_node_id(),
+            target: UxActivityTarget::pane(server_node_id()),
             status: UiStatus::working("Connecting"),
             activity: readiness_activity.clone(),
         });
@@ -389,7 +389,7 @@ impl BrowserSerialClientState {
 
     fn emit_readiness_activity(&self, status: UiStatus) {
         self.updates.emit(UxUpdate::Activity {
-            node_id: server_node_id(),
+            target: UxActivityTarget::pane(server_node_id()),
             status,
             activity: self.readiness_activity.clone(),
         });

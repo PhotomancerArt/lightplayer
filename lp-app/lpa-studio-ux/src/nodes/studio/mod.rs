@@ -13,5 +13,5 @@ pub use ux_error::{UxError, UxResult};
 pub use ux_log_entry::{UxLogEntry, UxLogLevel};
 pub use ux_notice::{UxNotice, UxNoticeLevel};
 pub use ux_outcome::UxOutcome;
-pub use ux_update::UxUpdate;
+pub use ux_update::{UxActivityTarget, UxUpdate};
 pub use ux_update_sink::UxUpdateSink;

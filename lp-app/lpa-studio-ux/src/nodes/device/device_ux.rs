@@ -13,6 +13,10 @@ pub struct DeviceUx {
 
 impl DeviceUx {
     pub const NODE_ID: &'static str = "studio.device";
+    pub const SECTION_SELECT_CONNECTION: &'static str = "select-connection";
+    pub const SECTION_CONNECT_DEVICE: &'static str = "connect-device";
+    pub const SECTION_CONNECT_LIGHTPLAYER: &'static str = "connect-lightplayer";
+    pub const SECTION_OPEN_PROJECT: &'static str = "open-project";
 
     pub fn new() -> Self {
         Self {
@@ -153,7 +157,7 @@ impl DeviceUx {
         match self.link.state() {
             LinkState::SelectingProvider { providers, issue } => {
                 let section = UiStackSection::new(
-                    "select-connection",
+                    Self::SECTION_SELECT_CONNECTION,
                     "Select connection",
                     if issue.is_some() {
                         UiStepState::NeedsAttention
@@ -168,14 +172,14 @@ impl DeviceUx {
                 }
             }
             LinkState::Failed { .. } => UiStackSection::new(
-                "select-connection",
+                Self::SECTION_SELECT_CONNECTION,
                 "Select connection",
                 UiStepState::NeedsAttention,
             )
             .with_body(UiBody::text("Refresh connections to try again."))
             .with_actions(vec![self.action(DeviceOp::RefreshConnections)]),
             _ => UiStackSection::new(
-                "select-connection",
+                Self::SECTION_SELECT_CONNECTION,
                 "Select connection",
                 UiStepState::Complete,
             )
@@ -185,32 +189,47 @@ impl DeviceUx {
 
     fn connect_device_section(&self) -> UiStackSection {
         match self.link.state() {
-            LinkState::SelectingProvider { .. } => {
-                UiStackSection::new("connect-device", "Connect device", UiStepState::Pending)
-                    .with_body(UiBody::text("Choose a connection first."))
-            }
+            LinkState::SelectingProvider { .. } => UiStackSection::new(
+                Self::SECTION_CONNECT_DEVICE,
+                "Connect device",
+                UiStepState::Pending,
+            )
+            .with_body(UiBody::text("Choose a connection first.")),
             LinkState::DiscoveringEndpoints {
                 provider_id,
                 progress,
-            } => UiStackSection::new("connect-device", "Connect device", UiStepState::Active)
-                .with_body(UiBody::Progress(progress.clone().with_detail(format!(
-                    "Discovering endpoints from {}.",
-                    provider_id.label()
-                )))),
+            } => UiStackSection::new(
+                Self::SECTION_CONNECT_DEVICE,
+                "Connect device",
+                UiStepState::Active,
+            )
+            .with_body(UiBody::Progress(progress.clone().with_detail(format!(
+                "Discovering endpoints from {}.",
+                provider_id.label()
+            )))),
             LinkState::SelectingEndpoint {
                 provider_id,
                 endpoints,
-            } => UiStackSection::new("connect-device", "Connect device", UiStepState::Active)
-                .with_body(UiBody::text("Choose the device endpoint to open."))
-                .with_actions(endpoint_actions(*provider_id, endpoints, self.node_id())),
-            LinkState::Connecting { progress, .. } => {
-                UiStackSection::new("connect-device", "Connect device", UiStepState::Active)
-                    .with_body(UiBody::Progress(progress.clone()))
-            }
+            } => UiStackSection::new(
+                Self::SECTION_CONNECT_DEVICE,
+                "Connect device",
+                UiStepState::Active,
+            )
+            .with_body(UiBody::text("Choose the device endpoint to open."))
+            .with_actions(endpoint_actions(*provider_id, endpoints, self.node_id())),
+            LinkState::Connecting { progress, .. } => UiStackSection::new(
+                Self::SECTION_CONNECT_DEVICE,
+                "Connect device",
+                UiStepState::Active,
+            )
+            .with_body(UiBody::Progress(progress.clone())),
             LinkState::Connected { device } | LinkState::Managing { device, .. } => {
-                let section =
-                    UiStackSection::new("connect-device", "Connect device", UiStepState::Complete)
-                        .with_body(device_summary_body(device));
+                let section = UiStackSection::new(
+                    Self::SECTION_CONNECT_DEVICE,
+                    "Connect device",
+                    UiStepState::Complete,
+                )
+                .with_body(device_summary_body(device));
                 if self.should_show_device_controls() {
                     section.with_actions(self.device_control_actions())
                 } else {
@@ -218,7 +237,7 @@ impl DeviceUx {
                 }
             }
             LinkState::Failed { issue } => UiStackSection::new(
-                "connect-device",
+                Self::SECTION_CONNECT_DEVICE,
                 "Connect device",
                 UiStepState::NeedsAttention,
             )
@@ -230,7 +249,7 @@ impl DeviceUx {
     fn connect_lightplayer_section(&self) -> UiStackSection {
         match (self.link.state(), &self.server.snapshot().state) {
             (LinkState::Connected { .. }, ServerState::Disconnected) => UiStackSection::new(
-                "connect-lightplayer",
+                Self::SECTION_CONNECT_LIGHTPLAYER,
                 "Connect LightPlayer",
                 UiStepState::Active,
             )
@@ -240,7 +259,7 @@ impl DeviceUx {
             .with_actions(self.connect_lightplayer_actions()),
             (LinkState::Connected { .. }, ServerState::Connecting { progress }) => {
                 UiStackSection::new(
-                    "connect-lightplayer",
+                    Self::SECTION_CONNECT_LIGHTPLAYER,
                     "Connect LightPlayer",
                     UiStepState::Active,
                 )
@@ -248,7 +267,7 @@ impl DeviceUx {
             }
             (LinkState::Connected { .. }, ServerState::Connected { protocol }) => {
                 UiStackSection::new(
-                    "connect-lightplayer",
+                    Self::SECTION_CONNECT_LIGHTPLAYER,
                     "Connect LightPlayer",
                     UiStepState::Complete,
                 )
@@ -258,7 +277,7 @@ impl DeviceUx {
             (LinkState::Connected { .. }, ServerState::Failed { issue, kind }) => {
                 let no_firmware = *kind == ServerFailureKind::NoFirmware;
                 UiStackSection::new(
-                    "connect-lightplayer",
+                    Self::SECTION_CONNECT_LIGHTPLAYER,
                     if no_firmware {
                         "LightPlayer unavailable"
                     } else {
@@ -282,13 +301,13 @@ impl DeviceUx {
                 })
             }
             (LinkState::Managing { progress, .. }, _) => UiStackSection::new(
-                "connect-lightplayer",
+                Self::SECTION_CONNECT_LIGHTPLAYER,
                 progress.label.clone(),
                 UiStepState::Active,
             )
             .with_body(UiBody::Progress(progress.clone())),
             _ => UiStackSection::new(
-                "connect-lightplayer",
+                Self::SECTION_CONNECT_LIGHTPLAYER,
                 "Connect LightPlayer",
                 UiStepState::Pending,
             )
@@ -303,41 +322,59 @@ impl DeviceUx {
     ) -> UiStackSection {
         if !self.has_lightplayer_state() {
             if self.needs_firmware() {
-                return UiStackSection::new("open-project", "Open project", UiStepState::Pending)
-                    .with_body(UiBody::text("Flash firmware before opening a project."));
+                return UiStackSection::new(
+                    Self::SECTION_OPEN_PROJECT,
+                    "Open project",
+                    UiStepState::Pending,
+                )
+                .with_body(UiBody::text("Flash firmware before opening a project."));
             }
-            return UiStackSection::new("open-project", "Open project", UiStepState::Pending)
-                .with_body(UiBody::text("Connect LightPlayer first."));
+            return UiStackSection::new(
+                Self::SECTION_OPEN_PROJECT,
+                "Open project",
+                UiStepState::Pending,
+            )
+            .with_body(UiBody::text("Connect LightPlayer first."));
         }
 
         match project_state {
-            ProjectState::NotLoaded => {
-                UiStackSection::new("open-project", "Open project", UiStepState::Active)
-                    .with_body(UiBody::text(not_loaded_project_prompt(&actions)))
-                    .with_actions(actions)
-            }
-            ProjectState::SelectingLoadedProject { projects } => {
-                UiStackSection::new("open-project", "Open project", UiStepState::Active)
-                    .with_body(UiBody::text(format!(
-                        "{} projects are running. Choose one to open.",
-                        projects.len()
-                    )))
-                    .with_actions(actions)
-            }
+            ProjectState::NotLoaded => UiStackSection::new(
+                Self::SECTION_OPEN_PROJECT,
+                "Open project",
+                UiStepState::Active,
+            )
+            .with_body(UiBody::text(not_loaded_project_prompt(&actions)))
+            .with_actions(actions),
+            ProjectState::SelectingLoadedProject { projects } => UiStackSection::new(
+                Self::SECTION_OPEN_PROJECT,
+                "Open project",
+                UiStepState::Active,
+            )
+            .with_body(UiBody::text(format!(
+                "{} projects are running. Choose one to open.",
+                projects.len()
+            )))
+            .with_actions(actions),
             ProjectState::ConnectingRunningProject { progress }
-            | ProjectState::LoadingDemoProject { progress } => {
-                UiStackSection::new("open-project", "Open project", UiStepState::Active)
-                    .with_body(UiBody::Progress(progress.clone()))
-            }
-            ProjectState::Ready { project_id, .. } => {
-                UiStackSection::new("open-project", "Open project", UiStepState::Complete)
-                    .with_body(UiBody::text(format!("{project_id} is loaded.")))
-            }
-            ProjectState::Failed { issue } => {
-                UiStackSection::new("open-project", "Open project", UiStepState::NeedsAttention)
-                    .with_body(UiBody::Issue(issue.clone()))
-                    .with_actions(actions)
-            }
+            | ProjectState::LoadingDemoProject { progress } => UiStackSection::new(
+                Self::SECTION_OPEN_PROJECT,
+                "Open project",
+                UiStepState::Active,
+            )
+            .with_body(UiBody::Progress(progress.clone())),
+            ProjectState::Ready { project_id, .. } => UiStackSection::new(
+                Self::SECTION_OPEN_PROJECT,
+                "Open project",
+                UiStepState::Complete,
+            )
+            .with_body(UiBody::text(format!("{project_id} is loaded."))),
+            ProjectState::Failed { issue } => UiStackSection::new(
+                Self::SECTION_OPEN_PROJECT,
+                "Open project",
+                UiStepState::NeedsAttention,
+            )
+            .with_body(UiBody::Issue(issue.clone()))
+            .with_actions(actions),
         }
     }
 
