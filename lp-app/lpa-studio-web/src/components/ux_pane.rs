@@ -1,10 +1,10 @@
 use dioxus::prelude::*;
 use lpa_studio_ux::{
     UiAction, UiActivity, UiActivityStepState, UiBody, UiPaneView, UiProgress, UiStackView,
-    UiStatus, UiStatusKind, UiStepState,
+    UiStepState,
 };
 
-use crate::components::ActionStrip;
+use crate::components::{ActionStrip, MetricGrid, PaneFrame};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -21,18 +21,11 @@ pub fn UxPane(
         actions,
         ..
     } = view;
-    let panel_class = if primary {
-        "ux-panel ux-panel-primary"
-    } else {
-        "ux-panel"
-    };
-
     rsx! {
-        section { class: "{panel_class}",
-            div { class: "ux-panel-heading",
-                p { "{title}" }
-                UxStatusChip { status }
-            }
+        PaneFrame {
+            title,
+            primary,
+            status: Some(status),
             UxPaneBody {
                 body,
                 running,
@@ -46,24 +39,6 @@ pub fn UxPane(
                 }
             }
         }
-    }
-}
-
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn UxStatusChip(status: UiStatus) -> Element {
-    rsx! {
-        span { class: "{status_class(status.kind)}", "{status.label}" }
-    }
-}
-
-fn status_class(kind: UiStatusKind) -> &'static str {
-    match kind {
-        UiStatusKind::Neutral => "ux-status ux-status-neutral",
-        UiStatusKind::Working => "ux-status ux-status-working",
-        UiStatusKind::Good => "ux-status ux-status-good",
-        UiStatusKind::Warning => "ux-status ux-status-warning",
-        UiStatusKind::Error => "ux-status ux-status-error",
     }
 }
 
@@ -99,14 +74,7 @@ fn UxPaneBody(body: UiBody, running: bool, on_action: EventHandler<UiAction>) ->
             }
         }
         UiBody::Metrics(metrics) => rsx! {
-            dl { class: "ux-metrics",
-                for metric in metrics {
-                    div {
-                        dt { "{metric.label}" }
-                        dd { "{metric.value}" }
-                    }
-                }
-            }
+            MetricGrid { metrics }
         },
         UiBody::Stack(stack) => rsx! {
             UxStackBody {

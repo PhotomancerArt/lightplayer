@@ -129,11 +129,38 @@ The page can select a Web Serial port, run the same normal reset/read path as
 Studio, exercise explicit USB-JTAG downloader reset experiments, and show raw
 serial output without involving the full Studio UX.
 
+## Theme And Layout
+
+Studio web styling is centralized in `src/style.css`. The top-level `:root`
+section defines semantic tokens for Studio color, surfaces, borders, text,
+status states, action accents, spacing, radii, typography, and shadows. Prefer
+new component styles to consume those tokens instead of adding one-off literals.
+
+Reusable Dioxus primitives live under `src/components/`:
+
+- `ActionButton` and `ActionStrip` render `UiAction` controls.
+- `PaneFrame`, `StatusChip`, and `MetricGrid` provide shared pane structure.
+- `FieldRow` and `Tabs` are editor-foundation primitives used by stories until
+  the project UX model grows real node/slot data.
+- `StudioShell`, `UxPane`, and `RuntimeLog` render the active `StudioView`.
+
+The project editor layout target is:
+
+```text
+lg: [ node tree ] [ nodes/editor ] [ device/secondary ]
+md: [ nodes/editor ] [ tabs: node tree / device / bus / console ]
+sm: [ tabs: nodes / node tree / device / bus / console ]
+```
+
+M1 stories use placeholder editor data only. Project sync, slot editing,
+bindings, bus modeling, and asset editing belong to later milestones.
+
 ## Stories
 
 The storybook covers the active UX shell, connection action strip, Device stack
 states, loaded Project pane state, browser-serial blank-firmware readiness,
-provision-ready/provisioning/provision-failed, and wipe states.
+provision-ready/provisioning/provision-failed, wipe states, and placeholder
+project-editor layout primitives.
 Run the dev server and open:
 
 ```text
@@ -146,8 +173,31 @@ Generate or update visual baselines with:
 just studio-story-baselines-if-needed
 ```
 
-The baseline set intentionally reflects the active view-driven UX surface rather
-than the old provisioning journey fixtures.
+Baselines are captured for `sm`, `md`, and `lg` viewports. Files are named as a
+story id plus viewport suffix, for example:
+
+```text
+studio__editor-shell__sm.png
+studio__editor-shell__md.png
+studio__editor-shell__lg.png
+```
+
+Useful commands:
+
+```bash
+just studio-story-pngs        # scratch captures under story-images/.scratch
+just studio-story-baselines   # update committed sm/md/lg baselines
+just studio-story-check       # compare fresh captures with committed baselines
+```
+
+Baseline and check modes require `oxipng` so committed and fresh PNGs are
+losslessly normalized. Install it with `brew install oxipng` or
+`cargo install oxipng`. The capture script defaults to one Chrome page for
+stable baseline/check output; set `STUDIO_STORY_PNGS_CONCURRENCY` for faster
+scratch runs when needed.
+
+The baseline set intentionally reflects the active view-driven UX surface and
+the editor layout foundation rather than the old provisioning journey fixtures.
 
 ## Boundary
 

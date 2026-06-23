@@ -6,7 +6,9 @@ use lpa_studio_ux::{
     UiStatus, UiStepState, UiTerminalLine, UxIssue, UxLogEntry, UxLogLevel, UxNodeId,
 };
 
-use crate::components::{ActionStrip, StudioShell, UxPane};
+use crate::components::{
+    ActionStrip, FieldRow, MetricGrid, PaneFrame, StudioShell, TabItem, Tabs, UxPane,
+};
 use crate::stories::story::StoryDescriptor;
 
 pub const STORIES: &[StoryDescriptor] = &[
@@ -15,6 +17,18 @@ pub const STORIES: &[StoryDescriptor] = &[
         "Studio UX",
         "Connection actions",
         "Generic action strip for connection choices exposed by Device UX.",
+    ),
+    StoryDescriptor::new(
+        "studio/primitives/editor-fields",
+        "Studio UX",
+        "Editor fields",
+        "Field, metric, and tab primitives for the project editor foundation.",
+    ),
+    StoryDescriptor::new(
+        "studio/editor-shell",
+        "Studio UX",
+        "Editor shell",
+        "Responsive project editor shell with node tree, node workspace, and device rail.",
     ),
     StoryDescriptor::new(
         "studio/panes/device",
@@ -136,10 +150,10 @@ pub fn render_story(id: &str) -> Option<Element> {
     match id {
         "studio/actions/provider-actions" => {
             return Some(rsx! {
-                section { class: "ux-panel ux-panel-primary",
-                    div { class: "ux-panel-heading",
-                        p { "Actions" }
-                    }
+                PaneFrame {
+                    title: "Actions",
+                    primary: true,
+                    status: None::<UiStatus>,
                     ActionStrip {
                         actions: start_actions(),
                         running: false,
@@ -148,6 +162,8 @@ pub fn render_story(id: &str) -> Option<Element> {
                 }
             });
         }
+        "studio/primitives/editor-fields" => return Some(editor_primitives_story()),
+        "studio/editor-shell" => return Some(editor_shell_story()),
         "studio/panes/device" => {
             let view = idle_device_view();
             return Some(rsx! {
@@ -259,6 +275,223 @@ pub fn render_story(id: &str) -> Option<Element> {
             on_action: move |_| {},
         }
     })
+}
+
+fn editor_primitives_story() -> Element {
+    rsx! {
+        PaneFrame {
+            title: "Node inspector",
+            primary: true,
+            status: Some(UiStatus::good("Overlay active")),
+            div { class: "ux-editor-inspector",
+                FieldRow {
+                    label: "Name",
+                    value: "Orbit wash",
+                    changed: false,
+                    detail: None::<String>,
+                }
+                FieldRow {
+                    label: "Brightness",
+                    value: "0.72",
+                    changed: true,
+                    detail: Some("overlay value, not committed".to_string()),
+                }
+                FieldRow {
+                    label: "Shader",
+                    value: "assets/shaders/orbit.glsl",
+                    changed: false,
+                    detail: Some("resource reference".to_string()),
+                }
+                MetricGrid {
+                    metrics: vec![
+                        UiMetric::new("Inputs", 5),
+                        UiMetric::new("Outputs", 2),
+                        UiMetric::new("Bindings", 1),
+                        UiMetric::new("Preview", "live"),
+                    ],
+                }
+                Tabs {
+                    tabs: vec![
+                        TabItem::new("Values", "Slot values", "Direct values shown from the current overlay."),
+                        TabItem::new("Changes", "Pending changes", "Brightness will be committed with the project overlay."),
+                        TabItem::new("Assets", "Node assets", "Shader and SVG assets will open in editor-specific panes."),
+                    ],
+                    initial: 0,
+                }
+            }
+        }
+    }
+}
+
+fn editor_shell_story() -> Element {
+    rsx! {
+        div { class: "ux-editor-shell",
+            div { class: "ux-editor-desktop-tree",
+                NodeTreePane {}
+            }
+            div { class: "ux-editor-workspace",
+                NodeWorkspacePane {}
+            }
+            div { class: "ux-editor-side",
+                DeviceSidePane {}
+                ConsoleSidePane {}
+            }
+            div { class: "ux-editor-compact-side",
+                SecondaryTabsPane {}
+            }
+            div { class: "ux-editor-mobile",
+                MobileEditorTabsPane {}
+            }
+        }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NodeTreePane() -> Element {
+    rsx! {
+        PaneFrame {
+            title: "Node tree",
+            primary: false,
+            status: Some(UiStatus::neutral("Project")),
+            ol { class: "ux-node-tree",
+                li { class: "ux-node-tree-item ux-node-tree-item-active", "Scene root" }
+                li { class: "ux-node-tree-item ux-node-tree-depth-1", "Group: wash" }
+                li { class: "ux-node-tree-item ux-node-tree-depth-2", "Shader: orbit" }
+                li { class: "ux-node-tree-item ux-node-tree-depth-2", "Palette: sunrise" }
+                li { class: "ux-node-tree-item ux-node-tree-depth-1", "Output: strip A" }
+            }
+        }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NodeWorkspacePane() -> Element {
+    rsx! {
+        PaneFrame {
+            title: "Shader: orbit",
+            primary: true,
+            status: Some(UiStatus::warning("2 changes")),
+            div { class: "ux-node-workspace",
+                div { class: "ux-node-preview",
+                    div { class: "ux-node-preview-bars",
+                        span {}
+                        span {}
+                        span {}
+                        span {}
+                        span {}
+                    }
+                }
+                div { class: "ux-node-fields",
+                    FieldRow {
+                        label: "Enabled",
+                        value: "true",
+                        changed: false,
+                        detail: None::<String>,
+                    }
+                    FieldRow {
+                        label: "Brightness",
+                        value: "0.72",
+                        changed: true,
+                        detail: Some("overlay".to_string()),
+                    }
+                    FieldRow {
+                        label: "Speed",
+                        value: "bind /bus/audio/energy",
+                        changed: true,
+                        detail: Some("binding".to_string()),
+                    }
+                    FieldRow {
+                        label: "Shader source",
+                        value: "assets/shaders/orbit.glsl",
+                        changed: false,
+                        detail: Some("asset".to_string()),
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn DeviceSidePane() -> Element {
+    rsx! {
+        PaneFrame {
+            title: "Device",
+            primary: false,
+            status: Some(UiStatus::good("Connected")),
+            MetricGrid {
+                metrics: vec![
+                    UiMetric::new("Runtime", "ESP32-C6"),
+                    UiMetric::new("Project", "studio-demo"),
+                    UiMetric::new("FPS", "936"),
+                    UiMetric::new("Memory", "207k free"),
+                ],
+            }
+        }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ConsoleSidePane() -> Element {
+    rsx! {
+        PaneFrame {
+            title: "Console",
+            primary: false,
+            status: None::<UiStatus>,
+            ol { class: "ux-terminal ux-editor-terminal",
+                li { "[lp-server] heartbeat frame=936" }
+                li { "[studio] overlay has 2 pending changes" }
+                li { "[fw-esp32] shader backend: native JIT" }
+            }
+        }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn SecondaryTabsPane() -> Element {
+    rsx! {
+        PaneFrame {
+            title: "Project side panel",
+            primary: false,
+            status: Some(UiStatus::good("Connected")),
+            Tabs {
+                tabs: vec![
+                    TabItem::new("Tree", "Node tree", "Scene root / Group wash / Shader orbit / Output strip A"),
+                    TabItem::new("Device", "Device", "ESP32-C6 connected, studio-demo loaded, 936 fps."),
+                    TabItem::new("Bus", "Bus", "audio.energy, tempo.bpm, radio.peer_count"),
+                    TabItem::new("Console", "Console", "[lp-server] heartbeat frame=936"),
+                ],
+                initial: 0,
+            }
+        }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn MobileEditorTabsPane() -> Element {
+    rsx! {
+        PaneFrame {
+            title: "Project",
+            primary: true,
+            status: Some(UiStatus::warning("2 changes")),
+            Tabs {
+                tabs: vec![
+                    TabItem::new("Node", "Shader: orbit", "Brightness 0.72, speed bound to /bus/audio/energy."),
+                    TabItem::new("Tree", "Node tree", "Scene root / Group wash / Shader orbit."),
+                    TabItem::new("Device", "Device", "ESP32-C6 connected, studio-demo loaded."),
+                    TabItem::new("Bus", "Bus", "audio.energy, tempo.bpm, radio.peer_count."),
+                    TabItem::new("Console", "Console", "[fw-esp32] shader backend: native JIT."),
+                ],
+                initial: 0,
+            }
+        }
+    }
 }
 
 fn studio_log(level: UxLogLevel, message: impl Into<String>) -> UxLogEntry {

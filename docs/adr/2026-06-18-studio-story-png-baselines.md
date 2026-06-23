@@ -18,18 +18,18 @@ before investing in CI visual-regression infrastructure.
 
 ## Decision
 
-Commit a curated baseline PNG set for `lp-studio-web` stories.
+Commit a curated baseline PNG set for `lpa-studio-web` stories.
 
-- Committed baselines live under `lp-app/lp-studio-web/story-images/`.
+- Committed baselines live under `lp-app/lpa-studio-web/story-images/`.
 - Scratch review PNGs stay gitignored under
-  `lp-app/lp-studio-web/story-images/.scratch/`.
+  `lp-app/lpa-studio-web/story-images/.scratch/`.
 - Fresh check output lives under gitignored
-  `lp-app/lp-studio-web/story-images/.new/`.
+  `lp-app/lpa-studio-web/story-images/.new/`.
 - `just studio-story-baselines` regenerates the committed baseline set.
 - `just studio-story-check` compares fresh story PNGs to committed baselines
   without updating them.
 - `just studio-story-baselines-if-needed` runs baseline generation only when
-  non-generated files under `lp-app/lp-studio-web/` changed since `HEAD`.
+  non-generated files under `lp-app/lpa-studio-web/` changed since `HEAD`.
 - Story captures are clipped to the marked story canvas content rather than the
   full browser viewport.
 - Baseline and check commands require `oxipng` so fresh captures are normalized
@@ -51,3 +51,16 @@ and baseline updates should remain intentional.
 CI can later run `just studio-story-check`, but CI should not commit updated
 PNGs. If the image set grows substantially or churn becomes painful, revisit
 this decision before adding Git LFS or hard visual gates.
+
+## 2026-06-23 Addendum: Responsive Baseline Matrix
+
+The project editor foundation makes responsive layout a first-order part of the
+Studio UI. The accepted baseline set now captures each story at `sm`, `md`, and
+`lg` viewports. Baseline filenames include the viewport id, such as
+`studio__editor-shell__sm.png`, so check mode can compare the full story by
+viewport matrix and report changed, new, or removed images precisely.
+
+This increases baseline count and disk usage, but keeps responsive regressions
+visible while the editor shell, node tree, and device rail are still taking
+shape. The same `oxipng` normalization remains required for baseline and check
+modes.

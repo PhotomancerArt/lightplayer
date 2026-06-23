@@ -28,6 +28,11 @@ const chrome = process.env.CHROME_BIN ?? findChrome();
 const baselineDir = path.resolve(repoRoot, baselineDirFromEnv());
 const outputDir = path.resolve(repoRoot, outputDirForMode(mode));
 const captureDir = mode === "baselines" ? path.join(baselineDir, ".new") : outputDir;
+const STORY_VIEWPORTS = [
+  { id: "sm", width: 390, height: 760 },
+  { id: "md", width: 720, height: 760 },
+  { id: "lg", width: 1080, height: 760 },
+];
 
 class CdpConnection {
   static async open(url) {
@@ -177,7 +182,7 @@ function baselineDirFromEnv() {
 }
 
 function parseCaptureConcurrency() {
-  const value = process.env.STUDIO_STORY_PNGS_CONCURRENCY ?? "4";
+  const value = process.env.STUDIO_STORY_PNGS_CONCURRENCY ?? "1";
   const parsed = Number.parseInt(value, 10);
   if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed.toString() !== value) {
     console.error("STUDIO_STORY_PNGS_CONCURRENCY must be a positive integer.");
@@ -201,12 +206,15 @@ async function discoverStoryIds() {
 }
 
 async function captureStories(storyIds, directory) {
-  const concurrency = Math.min(requestedCaptureConcurrency, storyIds.length);
-  const files = new Array(storyIds.length);
+  const targets = storyTargets(storyIds);
+  const concurrency = Math.min(requestedCaptureConcurrency, targets.length);
+  const files = new Array(targets.length);
   const browser = await launchCaptureBrowser(concurrency);
-  let nextStoryIndex = 0;
+  let nextTargetIndex = 0;
 
-  console.log(`Capturing ${storyIds.length} stories with ${concurrency} Chrome pages...`);
+  console.log(
+    `Capturing ${targets.length} story viewports (${storyIds.length} stories x ${STORY_VIEWPORTS.length} sizes) with ${concurrency} Chrome pages...`,
+  );
 
   try {
     await Promise.all(
@@ -215,9 +223,9 @@ async function captureStories(storyIds, directory) {
           browser,
           directory,
           files,
-          nextStoryIndex: () => nextStoryIndex++,
+          nextTargetIndex: () => nextTargetIndex++,
           pageIndex,
-          storyIds,
+          targets,
         }),
       ),
     );
@@ -231,21 +239,27 @@ async function captureStoryWorker({
   browser,
   directory,
   files,
-  nextStoryIndex,
+  nextTargetIndex,
   pageIndex,
-  storyIds,
+  targets,
 }) {
   while (true) {
-    const storyIndex = nextStoryIndex();
-    if (storyIndex >= storyIds.length) {
+    const targetIndex = nextTargetIndex();
+    if (targetIndex >= targets.length) {
       return;
     }
 
-    const storyId = storyIds[storyIndex];
-    const file = path.join(directory, storyFileName(storyId));
-    await browser.capture(pageIndex, storyPngUrl(storyId), storyId, file);
+    const target = targets[targetIndex];
+    const file = path.join(directory, storyFileName(target.storyId, target.viewport));
+    await browser.capture(
+      pageIndex,
+      storyPngUrl(target.storyId, target.viewport),
+      target.storyId,
+      target.viewport,
+      file,
+    );
     console.log(`wrote ${path.relative(repoRoot, file)}`);
-    files[storyIndex] = file;
+    files[targetIndex] = file;
   }
 }
 
@@ -274,8 +288,8 @@ async function launchCaptureBrowser(pageCount) {
   );
 
   return {
-    async capture(pageIndex, url, storyId, file) {
-      await pages[pageIndex].capture(url, storyId, file);
+    async capture(pageIndex, url, storyId, viewport, file) {
+      await pages[pageIndex].capture(url, storyId, viewport, file);
     },
 
     async close() {
@@ -301,19 +315,19 @@ async function createCapturePage(cdp) {
   });
   await cdp.send("Page.enable", {}, sessionId);
   await cdp.send("Runtime.enable", {}, sessionId);
-  await cdp.send(
-    "Emulation.setDeviceMetricsOverride",
-    {
-      width: 1080,
-      height: 760,
-      deviceScaleFactor: 1,
-      mobile: false,
-    },
-    sessionId,
-  );
 
   return {
-    async capture(url, storyId, file) {
+    async capture(url, storyId, viewport, file) {
+      await cdp.send(
+        "Emulation.setDeviceMetricsOverride",
+        {
+          width: viewport.width,
+          height: viewport.height,
+          deviceScaleFactor: 1,
+          mobile: viewport.width <= 640,
+        },
+        sessionId,
+      );
       await cdp.send("Page.navigate", { url }, sessionId);
       const box = await waitForCaptureBox(cdp, sessionId, storyId);
       const clip = captureClip(box);
@@ -442,14 +456,17 @@ async function optimizePngs(files, { required }) {
 }
 
 async function compareBaselines(storyIds, expectedDir, actualDir) {
-  const expectedFiles = new Set(storyIds.map(storyFileName));
+  const targets = storyTargets(storyIds);
+  const expectedFiles = new Set(
+    targets.map((target) => storyFileName(target.storyId, target.viewport)),
+  );
   const baselineFiles = await listPngFiles(expectedDir);
   const unexpected = baselineFiles.filter((file) => !expectedFiles.has(file));
   const missing = [];
   const changed = [];
 
-  for (const storyId of storyIds) {
-    const fileName = storyFileName(storyId);
+  for (const target of targets) {
+    const fileName = storyFileName(target.storyId, target.viewport);
     const expectedFile = path.join(expectedDir, fileName);
     const actualFile = path.join(actualDir, fileName);
     const expected = await readOptionalFile(expectedFile);
@@ -560,12 +577,18 @@ function printComparison(label, files) {
   }
 }
 
-function storyFileName(storyId) {
-  return `${storyId.replaceAll("/", "__")}.png`;
+function storyTargets(storyIds) {
+  return storyIds.flatMap((storyId) =>
+    STORY_VIEWPORTS.map((viewport) => ({ storyId, viewport })),
+  );
 }
 
-function storyPngUrl(storyId) {
-  return `${baseUrl}?story-png=1&story=${encodeURIComponent(storyId)}#/stories/${storyId}`;
+function storyFileName(storyId, viewport) {
+  return `${storyId.replaceAll("/", "__")}__${viewport.id}.png`;
+}
+
+function storyPngUrl(storyId, viewport) {
+  return `${baseUrl}?story-png=1&story=${encodeURIComponent(storyId)}&viewport=${viewport.id}#/stories/${storyId}`;
 }
 
 function findCommand(command) {
