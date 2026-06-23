@@ -16,7 +16,7 @@ use lp_riscv_emu::{
     test_util::{BinaryBuildConfig, ensure_binary_built},
 };
 use lp_riscv_inst::Gpr;
-use lpa_client::LpClient;
+use lpa_client::TokioLpClient;
 use lpc_model::{AsLpPath, NodeId};
 use lpc_shared::ProjectBuilder;
 use lpc_wire::{
@@ -54,7 +54,7 @@ async fn test_scene_render_fw_emu() {
     let emulator = Arc::new(Mutex::new(emulator));
     let transport = SerialEmuClientTransport::new(emulator.clone())
         .with_backtrace(load_info.symbol_map.clone(), load_info.code_end);
-    let client = LpClient::new(Box::new(transport));
+    let client = TokioLpClient::new(Box::new(transport));
 
     let fs = Rc::new(RefCell::new(LpFsMemory::new()));
     let mut builder = ProjectBuilder::new(fs.clone());
@@ -119,7 +119,7 @@ async fn test_scene_render_fw_emu() {
 }
 
 async fn read_node_id_for_suffix(
-    client: &LpClient,
+    client: &TokioLpClient,
     handle: lpc_wire::WireProjectHandle,
     suffix: &str,
 ) -> NodeId {
@@ -170,7 +170,7 @@ async fn read_node_id_for_suffix(
 }
 
 async fn read_output_sample(
-    client: &LpClient,
+    client: &TokioLpClient,
     handle: lpc_wire::WireProjectHandle,
     output_id: NodeId,
 ) -> OutputSample {
