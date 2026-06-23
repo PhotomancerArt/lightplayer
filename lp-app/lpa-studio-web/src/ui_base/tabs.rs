@@ -1,26 +1,5 @@
 use dioxus::prelude::*;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct TabItem {
-    pub label: String,
-    pub title: String,
-    pub body: String,
-}
-
-impl TabItem {
-    pub fn new(
-        label: impl Into<String>,
-        title: impl Into<String>,
-        body: impl Into<String>,
-    ) -> Self {
-        Self {
-            label: label.into(),
-            title: title.into(),
-            body: body.into(),
-        }
-    }
-}
-
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn Tabs(tabs: Vec<TabItem>, initial: usize) -> Element {
@@ -49,6 +28,27 @@ pub fn Tabs(tabs: Vec<TabItem>, initial: usize) -> Element {
                     p { "{tab.body}" }
                 }
             }
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TabItem {
+    pub label: String,
+    pub title: String,
+    pub body: String,
+}
+
+impl TabItem {
+    pub fn new(
+        label: impl Into<String>,
+        title: impl Into<String>,
+        body: impl Into<String>,
+    ) -> Self {
+        Self {
+            label: label.into(),
+            title: title.into(),
+            body: body.into(),
         }
     }
 }

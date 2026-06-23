@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use lpa_studio_ux::{ActionEnablement, ActionPriority, UiAction};
 
-use crate::components::{StudioIcon, action_icon_name};
+use crate::ui_base::{StudioIcon, action_icon_name};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]

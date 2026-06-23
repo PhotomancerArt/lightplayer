@@ -1,0 +1,13 @@
+//! Studio-specific UI surfaces.
+//!
+//! These components know about LightPlayer Studio concepts such as devices,
+//! projects, nodes, and the overall Studio shell. They compose `ui_core`
+//! controls and `ui_base` primitives into app-specific workflows.
+
+pub mod device;
+pub mod layout;
+pub mod project;
+
+pub use device::RuntimeLog;
+pub use layout::{PaneFrame, StudioShell};
+pub use project::{ProjectNodeWorkspace, ProjectSidebar, ProjectWorkspace};

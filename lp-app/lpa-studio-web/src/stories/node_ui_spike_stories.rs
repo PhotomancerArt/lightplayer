@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
-use crate::components::{StudioIcon, StudioIconName};
 use crate::stories::story::StoryDescriptor;
+use crate::ui_base::{StudioIcon, StudioIconName};
 
 const CLOCK_SHAPE_JSON: &str = include_str!("data/node_ui/clock.shape.json");
 const CLOCK_SLOTS_JSON: &str = include_str!("data/node_ui/clock.slots.json");

@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use lpa_studio_ux::UiAction;
 
-use crate::components::ActionButton;
+use crate::ui_core::ActionButton;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]

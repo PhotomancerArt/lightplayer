@@ -4,7 +4,7 @@ use lpa_studio_ux::{
     ProjectSlotGroupView, ProjectSlotIssueView, ProjectSlotRowView, ProjectSlotValueView, UiAction,
 };
 
-use crate::components::MetricGrid;
+use crate::ui_core::MetricGrid;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]

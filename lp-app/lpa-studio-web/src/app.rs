@@ -7,7 +7,7 @@ use lpa_studio_ux::{
     UxError, UxLogEntry, UxLogLevel, UxNotice, UxNoticeLevel, UxUpdate, UxUpdateSink,
 };
 
-use crate::components::StudioShell;
+use crate::ui_studio::StudioShell;
 
 const STYLE: &str = include_str!("style.css");
 

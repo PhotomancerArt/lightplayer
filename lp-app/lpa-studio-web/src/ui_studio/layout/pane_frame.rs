@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use lpa_studio_ux::UiStatus;
 
-use crate::components::StatusChip;
+use crate::ui_core::StatusChip;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]

@@ -1,16 +1,6 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{CircleAlert, CircleMinus, FlaskConical, Play, Usb};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum StudioIconName {
-    Play,
-    Usb,
-    Test,
-    StatusRunning,
-    StatusIdle,
-    StatusError,
-}
-
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
@@ -31,4 +21,14 @@ pub fn action_icon_name(icon: Option<&str>) -> Option<StudioIconName> {
         Some("test-tube") => Some(StudioIconName::Test),
         _ => None,
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StudioIconName {
+    Play,
+    Usb,
+    Test,
+    StatusRunning,
+    StatusIdle,
+    StatusError,
 }

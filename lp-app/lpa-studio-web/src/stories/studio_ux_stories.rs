@@ -9,10 +9,10 @@ use lpa_studio_ux::{
     UiTerminalLine, UxIssue, UxLogEntry, UxLogLevel, UxNodeId,
 };
 
-use crate::components::{
-    ActionStrip, FieldRow, MetricGrid, PaneFrame, StudioShell, TabItem, Tabs, UxPane,
-};
 use crate::stories::story::StoryDescriptor;
+use crate::ui_base::{FieldRow, TabItem, Tabs};
+use crate::ui_core::{ActionStrip, AppPane, MetricGrid};
+use crate::ui_studio::{PaneFrame, StudioShell};
 
 pub const STORIES: &[StoryDescriptor] = &[
     StoryDescriptor::new(
@@ -182,7 +182,7 @@ pub fn render_story(id: &str) -> Option<Element> {
         "studio/panes/device" => {
             let view = idle_device_view();
             return Some(rsx! {
-                UxPane {
+                AppPane {
                     view,
                     primary: true,
                     running: false,
@@ -193,7 +193,7 @@ pub fn render_story(id: &str) -> Option<Element> {
         "studio/panes/project" => {
             let view = project_view(project_ready_state(), true);
             return Some(rsx! {
-                UxPane {
+                AppPane {
                     view,
                     primary: false,
                     running: false,
@@ -204,7 +204,7 @@ pub fn render_story(id: &str) -> Option<Element> {
         "studio/device-project-empty" => {
             let view = device_project_empty_view();
             return Some(rsx! {
-                UxPane {
+                AppPane {
                     view,
                     primary: true,
                     running: false,
@@ -215,7 +215,7 @@ pub fn render_story(id: &str) -> Option<Element> {
         "studio/device-project-selection" => {
             let view = device_project_selection_view();
             return Some(rsx! {
-                UxPane {
+                AppPane {
                     view,
                     primary: true,
                     running: false,
