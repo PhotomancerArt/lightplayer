@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
 
+use crate::components::{StudioIcon, StudioIconName};
 use crate::stories::story::StoryDescriptor;
 
 const CLOCK_SHAPE_JSON: &str = include_str!("data/node_ui/clock.shape.json");
@@ -41,6 +42,12 @@ pub const STORIES: &[StoryDescriptor] = &[
         "Node UI Spike",
         "Playlist",
         "Fyeah-inspired Playlist node with active entry and owned child visuals.",
+    ),
+    StoryDescriptor::new(
+        "studio/node-ui/status-indicators",
+        "Node UI Spike",
+        "Status indicators",
+        "Minimal nodes showing Running, Idle, and Error status chrome.",
     ),
     StoryDescriptor::new(
         "studio/node-ui/project-context",
@@ -108,6 +115,9 @@ pub fn render_story(id: &str) -> Option<Element> {
                 }
             }
         }),
+        "studio/node-ui/status-indicators" => Some(rsx! {
+            NodeUiStatusStory {}
+        }),
         "studio/node-ui/project-context" => Some(rsx! {
             NodeUiProjectContext {}
         }),
@@ -155,6 +165,57 @@ fn NodeUiGallery() -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NodeUiStatusStory() -> Element {
+    let nodes = vec![
+        status_demo_node(
+            "Running node",
+            "Clock",
+            Some("clock.toml"),
+            NodeUiStatus::running(),
+            Some("0.34 ms frame"),
+            true,
+        ),
+        status_demo_node(
+            "Idle node",
+            "Fixture",
+            Some("fixture.toml"),
+            NodeUiStatus::idle(Some("Last ran at frame 96")),
+            None,
+            true,
+        ),
+        status_demo_node(
+            "Error node",
+            "Shader",
+            Some("rainbow.glsl"),
+            NodeUiStatus::error(
+                Some("Shader compile failed"),
+                Some(
+                    "error[E_SHADER]: failed to compile rainbow.glsl\n  --> rainbow.glsl:18:14\n   |\n18 | color = sample(uv2);\n   |              ^^^ unknown identifier `uv2`",
+                ),
+            ),
+            Some("64 ms compile"),
+            true,
+        ),
+    ];
+    rsx! {
+        NodeUiStoryCanvas {
+            title: "Status indicators",
+            note: "Minimal node windows for checking status color, icon, tint, and the details popup.",
+            div { class: "ux-node-ui-status-gallery",
+                for node in nodes {
+                    NodeWindow {
+                        key: "{node.title}",
+                        node,
+                        variant: NodeUiVariant::Compact,
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn NodeUiProjectContext() -> Element {
     rsx! {
         NodeUiStoryCanvas {
@@ -192,10 +253,11 @@ fn NodeUiProjectContext() -> Element {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn NodeWindow(node: NodeUiNode, variant: NodeUiVariant) -> Element {
     let mut active_tab = use_signal(|| 0_usize);
-    let class = match variant {
+    let base_class = match variant {
         NodeUiVariant::Instrument => "ux-node-ui-window ux-node-ui-window-instrument",
         NodeUiVariant::Compact => "ux-node-ui-window ux-node-ui-window-compact",
     };
+    let class = format!("{base_class} {}", node.status.window_class_name());
     let tabs = node.tabs.clone();
     let active_index = active_tab().min(tabs.len().saturating_sub(1));
     let active_content = tabs
@@ -211,7 +273,9 @@ fn NodeWindow(node: NodeUiNode, variant: NodeUiVariant) -> Element {
                 NodeHeader {
                     title: node.title,
                     kind: node.kind,
+                    source: node.source,
                     status: node.status,
+                    initially_open: node.status_details_open,
                     perf: node.perf,
                     tabs: tabs.clone(),
                     active_index,
@@ -247,7 +311,9 @@ fn NodeWindow(node: NodeUiNode, variant: NodeUiVariant) -> Element {
 fn NodeHeader(
     title: &'static str,
     kind: &'static str,
+    source: Option<&'static str>,
     status: NodeUiStatus,
+    initially_open: bool,
     perf: Option<&'static str>,
     tabs: Vec<NodeUiTab>,
     active_index: usize,
@@ -255,22 +321,87 @@ fn NodeHeader(
 ) -> Element {
     rsx! {
         header { class: "ux-node-ui-header",
+            NodeStatusIndicator {
+                kind,
+                source,
+                status,
+                initially_open,
+                perf,
+            }
             div { class: "ux-node-ui-title",
                 h3 {
-                    "{title}"
-                    span { class: "ux-node-ui-title-kind", "{kind}" }
+                    span { "{title}" }
+                    if let Some(summary) = status.header_summary() {
+                        small { class: "ux-node-ui-status-summary", " - {summary}" }
+                    }
                 }
             }
-            div { class: "ux-node-ui-header-meta",
-                if let Some(perf) = perf {
-                    span { class: "ux-node-ui-perf", "{perf}" }
+            if !tabs.is_empty() {
+                NodeTabList {
+                    tabs,
+                    active_index,
+                    on_select,
                 }
-                span { class: "{status.class_name()}", "{status.label}" }
-                if !tabs.is_empty() {
-                    NodeTabList {
-                        tabs,
-                        active_index,
-                        on_select,
+            }
+        }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NodeStatusIndicator(
+    kind: &'static str,
+    source: Option<&'static str>,
+    status: NodeUiStatus,
+    initially_open: bool,
+    perf: Option<&'static str>,
+) -> Element {
+    let mut open = use_signal(|| initially_open);
+    let trigger_class = if open() {
+        format!(
+            "{} ux-node-ui-status-button-open",
+            status.indicator_class_name()
+        )
+    } else {
+        status.indicator_class_name().to_string()
+    };
+    rsx! {
+        div { class: "ux-node-ui-status-control",
+            button {
+                class: "{trigger_class}",
+                r#type: "button",
+                aria_label: "{status.label} status details",
+                title: "{status.label} status details",
+                aria_expanded: "{open()}",
+                onclick: move |_| open.set(!open()),
+                span { aria_hidden: "true",
+                    StudioIcon {
+                        name: status.icon_name(),
+                        size: 14,
+                    }
+                }
+            }
+            if open() {
+                div { class: "{status.popup_class_name()}",
+                    div { class: "ux-node-ui-status-popup-summary",
+                        div { class: "ux-node-ui-status-popup-line",
+                            strong { class: "ux-node-ui-status-popup-kind", "{kind}" }
+                            span { class: "ux-node-ui-status-popup-perf",
+                                if let Some(perf) = perf {
+                                    "{perf}"
+                                } else {
+                                    "{status.label}"
+                                }
+                            }
+                        }
+                        if let Some(source) = source {
+                            div { class: "ux-node-ui-status-popup-source", "{source}" }
+                        }
+                    }
+                    if let Some(detail) = status.error_detail() {
+                        pre { class: "ux-node-ui-status-popup-error-detail",
+                            code { "{detail}" }
+                        }
                     }
                 }
             }
@@ -508,8 +639,10 @@ fn clock_node() -> NodeUiNode {
     NodeUiNode {
         title: "Clock",
         kind: "Clock",
+        source: Some("clock.toml"),
         path: "/fyeah_sign.show/clock.clock",
-        status: NodeUiStatus::good("Running"),
+        status: NodeUiStatus::running(),
+        status_details_open: false,
         perf: Some("936 fps"),
         presentation: vec![
             NodeUiPresentationItem::Metric(NodeUiMetric {
@@ -539,8 +672,10 @@ fn shader_node() -> NodeUiNode {
     NodeUiNode {
         title: "blast",
         kind: "Shader",
+        source: Some("blast.glsl"),
         path: "/fyeah_sign.show/playlist.playlist/blast.shader",
-        status: NodeUiStatus::good("Running"),
+        status: NodeUiStatus::running(),
+        status_details_open: false,
         perf: Some("64 ms compile"),
         presentation: vec![NodeUiPresentationItem::Product(NodeUiProduct {
             kind: NodeUiProductKind::Visual,
@@ -575,8 +710,10 @@ fn fixture_node() -> NodeUiNode {
     NodeUiNode {
         title: "Fixture",
         kind: "Fixture",
+        source: Some("fixture.toml"),
         path: "/fyeah_sign.show/fixture.fixture",
-        status: NodeUiStatus::good("Running"),
+        status: NodeUiStatus::running(),
+        status_details_open: false,
         perf: Some("657 samples"),
         presentation: vec![NodeUiPresentationItem::Product(NodeUiProduct {
             kind: NodeUiProductKind::Control,
@@ -628,8 +765,10 @@ fn playlist_node() -> NodeUiNode {
     NodeUiNode {
         title: "Playlist",
         kind: "Playlist",
+        source: Some("playlist.toml"),
         path: "/fyeah_sign.show/playlist.playlist",
-        status: NodeUiStatus::good("Running"),
+        status: NodeUiStatus::running(),
+        status_details_open: false,
         perf: Some("entry 1"),
         presentation: vec![
             NodeUiPresentationItem::Product(NodeUiProduct {
@@ -684,6 +823,35 @@ fn playlist_node() -> NodeUiNode {
     }
 }
 
+fn status_demo_node(
+    title: &'static str,
+    kind: &'static str,
+    source: Option<&'static str>,
+    status: NodeUiStatus,
+    perf: Option<&'static str>,
+    status_details_open: bool,
+) -> NodeUiNode {
+    NodeUiNode {
+        title,
+        kind,
+        source,
+        path: "/status.demo",
+        status,
+        status_details_open,
+        perf,
+        presentation: Vec::new(),
+        values: vec![NodeUiValueGroup {
+            rows: vec![
+                value_row(NodeUiValueSource::Direct, "Frame", "128"),
+                value_row(NodeUiValueSource::Direct, "Last duration", "0.34 ms"),
+                value_row(NodeUiValueSource::Direct, "Output", "ready"),
+            ],
+        }],
+        tabs: Vec::new(),
+        children: Vec::new(),
+    }
+}
+
 fn node_json_tabs(shape_json: &'static str, slots_json: &'static str) -> Vec<NodeUiTab> {
     vec![
         NodeUiTab {
@@ -730,8 +898,10 @@ enum NodeUiVariant {
 struct NodeUiNode {
     title: &'static str,
     kind: &'static str,
+    source: Option<&'static str>,
     path: &'static str,
     status: NodeUiStatus,
+    status_details_open: bool,
     perf: Option<&'static str>,
     presentation: Vec<NodeUiPresentationItem>,
     values: Vec<NodeUiValueGroup>,
@@ -743,26 +913,92 @@ struct NodeUiNode {
 struct NodeUiStatus {
     label: &'static str,
     tone: NodeUiStatusTone,
+    summary: Option<&'static str>,
+    detail: Option<&'static str>,
 }
 
 impl NodeUiStatus {
-    const fn good(label: &'static str) -> Self {
+    const fn running() -> Self {
         Self {
-            label,
-            tone: NodeUiStatusTone::Good,
+            label: "Running",
+            tone: NodeUiStatusTone::Running,
+            summary: None,
+            detail: Some("Node has run recently with no reported errors."),
         }
     }
 
-    fn class_name(self) -> &'static str {
+    const fn idle(summary: Option<&'static str>) -> Self {
+        Self {
+            label: "Idle",
+            tone: NodeUiStatusTone::Idle,
+            summary,
+            detail: Some("Node has no current error, but has not run recently."),
+        }
+    }
+
+    const fn error(summary: Option<&'static str>, detail: Option<&'static str>) -> Self {
+        Self {
+            label: "Error",
+            tone: NodeUiStatusTone::Error,
+            summary,
+            detail,
+        }
+    }
+
+    fn window_class_name(self) -> &'static str {
         match self.tone {
-            NodeUiStatusTone::Good => "ux-node-ui-status ux-node-ui-status-good",
+            NodeUiStatusTone::Running => "ux-node-ui-window-status-running",
+            NodeUiStatusTone::Idle => "ux-node-ui-window-status-idle",
+            NodeUiStatusTone::Error => "ux-node-ui-window-status-error",
+        }
+    }
+
+    fn indicator_class_name(self) -> &'static str {
+        match self.tone {
+            NodeUiStatusTone::Running => {
+                "ux-node-ui-status-button ux-node-ui-status-button-running"
+            }
+            NodeUiStatusTone::Idle => "ux-node-ui-status-button ux-node-ui-status-button-idle",
+            NodeUiStatusTone::Error => "ux-node-ui-status-button ux-node-ui-status-button-error",
+        }
+    }
+
+    fn icon_name(self) -> StudioIconName {
+        match self.tone {
+            NodeUiStatusTone::Running => StudioIconName::StatusRunning,
+            NodeUiStatusTone::Idle => StudioIconName::StatusIdle,
+            NodeUiStatusTone::Error => StudioIconName::StatusError,
+        }
+    }
+
+    fn popup_class_name(self) -> &'static str {
+        match self.tone {
+            NodeUiStatusTone::Running => "ux-node-ui-status-popup ux-node-ui-status-popup-running",
+            NodeUiStatusTone::Idle => "ux-node-ui-status-popup ux-node-ui-status-popup-idle",
+            NodeUiStatusTone::Error => "ux-node-ui-status-popup ux-node-ui-status-popup-error",
+        }
+    }
+
+    fn error_detail(self) -> Option<&'static str> {
+        match self.tone {
+            NodeUiStatusTone::Error => self.detail,
+            NodeUiStatusTone::Running | NodeUiStatusTone::Idle => None,
+        }
+    }
+
+    fn header_summary(self) -> Option<&'static str> {
+        match self.tone {
+            NodeUiStatusTone::Error => self.summary,
+            NodeUiStatusTone::Running | NodeUiStatusTone::Idle => None,
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum NodeUiStatusTone {
-    Good,
+    Running,
+    Idle,
+    Error,
 }
 
 #[derive(Clone, Debug, PartialEq)]

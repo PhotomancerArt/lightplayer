@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 use lpa_studio_ux::{ActionEnablement, ActionPriority, UiAction};
 
+use crate::components::{StudioIcon, action_icon_name};
+
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ActionButton(action: UiAction, running: bool, on_action: EventHandler<UiAction>) -> Element {
@@ -9,7 +11,7 @@ pub fn ActionButton(action: UiAction, running: bool, on_action: EventHandler<UiA
     let disabled = running || !meta.enablement.is_enabled();
     let class = action_class(meta.priority);
     let disabled_reason = disabled_reason(&meta.enablement).map(ToString::to_string);
-    let icon_class = action_icon_class(meta.icon.as_deref());
+    let icon = action_icon_name(meta.icon.as_deref());
     let confirmation = meta.confirmation.clone();
     let label = meta.label;
     let summary = meta.summary;
@@ -26,8 +28,13 @@ pub fn ActionButton(action: UiAction, running: bool, on_action: EventHandler<UiA
                         on_action.call(action_to_run.clone());
                     }
                 },
-                if let Some(icon_class) = icon_class {
-                    span { class: "{icon_class}", aria_hidden: "true" }
+                if let Some(icon) = icon {
+                    span { class: "ux-action-icon", aria_hidden: "true",
+                        StudioIcon {
+                            name: icon,
+                            size: 15,
+                        }
+                    }
                 }
                 span { "{label}" }
             }
@@ -60,14 +67,5 @@ fn disabled_reason(enablement: &ActionEnablement) -> Option<&str> {
     match enablement {
         ActionEnablement::Enabled => None,
         ActionEnablement::Disabled { reason } => Some(reason.as_str()),
-    }
-}
-
-fn action_icon_class(icon: Option<&str>) -> Option<&'static str> {
-    match icon {
-        Some("play") => Some("ux-action-icon ux-action-icon-play"),
-        Some("usb") => Some("ux-action-icon ux-action-icon-usb"),
-        Some("test-tube") => Some("ux-action-icon ux-action-icon-test"),
-        _ => None,
     }
 }

@@ -90,3 +90,33 @@ Good candidates for details-on-demand:
 
 Main UI can show the edited or observed value. Details UI can show why it has
 that value, where it came from, and how the runtime represents it.
+
+## Icons
+
+Use icons as semantic affordances, not decoration.
+
+Prefer shared Studio icon components over ad hoc glyphs, emoji, text badges, or
+CSS-drawn symbols. Keep common icon sizes stable so live values do not change
+button, header, or row dimensions.
+
+Status must never rely on color alone. Pair tone with a distinct icon or shape,
+and make the details available from the same trigger when the status matters.
+
+Use text labels for primary meaning. Icons should speed recognition, mark a
+compact control, or clarify repeated action types; they should not make the user
+guess.
+
+## Stable Layout
+
+Dynamic values should not cause page reflow in normal operation.
+
+Status, errors, metrics, revisions, probe results, frame counts, and other live
+runtime data should fit inside reserved space, truncate, scroll, or move into a
+details surface instead of changing component height or pushing nearby UI around.
+This is especially important in node windows, device panels, tables, toolbars,
+and other surfaces users scan repeatedly.
+
+Acceptable layout changes are mostly tied to explicit local user action, such as
+switching a tab, expanding a details panel, or opening a popup. Remote changes,
+like another user editing a project or a device changing state, should preserve
+the current reading surface as much as possible.

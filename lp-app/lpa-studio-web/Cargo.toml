@@ -13,6 +13,7 @@ stories = []
 
 [dependencies]
 dioxus = { version = "0.7", features = ["web"] }
+dioxus-icons = "0.1"
 lpa-studio-ux = { path = "../lpa-studio-ux", features = ["browser-worker", "browser-serial-esp32"] }
 web-sys = { version = "0.3", features = ["Location", "Window"] }
 
