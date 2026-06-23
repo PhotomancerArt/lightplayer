@@ -9,7 +9,7 @@ pub mod ui;
 
 pub use node::{
     ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, UiAction, UiActions,
-    UxContext, UxNode, UxNodeId, UxOp,
+    UxContext, UxNode, UxNodeId, UxNodePath, UxOp,
 };
 pub use nodes::device::{DeviceOp, DeviceSnapshot, DeviceUx};
 pub use nodes::link::{
@@ -18,8 +18,8 @@ pub use nodes::link::{
     SharedLinkRegistry, UxIssue,
 };
 pub use nodes::project::{
-    LoadedProjectChoice, ProjectConnectResult, ProjectInventorySummary, ProjectOp, ProjectSnapshot,
-    ProjectState, ProjectUx,
+    LoadedProjectChoice, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget,
+    ProjectInventorySummary, ProjectOp, ProjectSnapshot, ProjectState, ProjectUx,
 };
 pub use nodes::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerOp, ServerSnapshot,

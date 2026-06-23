@@ -49,11 +49,26 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
   server I/O. It remains an implementation detail below `DeviceUx`.
 - `ProjectUx` owns Studio's view of the loaded project and is shown only after a
   project is loaded.
+- `UxNodeId` is a path-shaped UX address with dotted display compatibility.
+  Static ids such as `studio.device` still compare and render as strings, while
+  dynamic editor ids can be built structurally with child segments.
+- The UX ownership tree and address tree are related but not identical. A
+  dynamic address such as `studio.project.node_tree` or
+  `studio.project.node.4.slot.brightness` does not imply that Studio owns a
+  separate boxed node object for that target.
+- Dispatch is hierarchical. `StudioUx` routes top-level device actions to
+  `DeviceUx` and routes `studio.project` plus `studio.project.*` actions to
+  project ownership. `ProjectUx` owns interpretation of project-local targets
+  such as `node_tree`, `node`, `slot`, `asset`, `changes`, and `bus`.
 - `UiAction` is an in-process action offering: target `UxNodeId`, boxed typed
   operation, and metadata such as label, summary, priority, icon, enablement,
   and confirmation.
 - `DeviceOp` and `ProjectOp` are the typed user-facing operations. Operation
   identity is the enum type and variant, not a parallel string action kind.
+- `ProjectEditorTarget` and `ProjectEditorOp` are the first project-editor
+  dynamic target/op pair. They prove dynamic routing while staying deliberately
+  small; real node, slot, binding, bus, and asset behavior belongs to later
+  editor milestones.
 - `StudioView` is the semantic render surface. It contains a Device
   `UiPaneView`, an optional loaded Project `UiPaneView`, and recent logs.
 - `UiBody` is intentionally small: text, progress/activity, issue, metrics,
@@ -174,6 +189,12 @@ Actions remain in-process values. Text rendering can describe available actions,
 but it is not a stable wire protocol and does not serialize operations.
 Interactive shells can use `dispatch_with_updates` to show progress/terminal
 updates during long actions without owning provider resources themselves.
+
+There is intentionally no central `UxRegistry` object yet. The current Studio
+tree is naturally hierarchical, so each owner consumes its own target subtree.
+If Studio later needs non-tree mounting, plugin-style routes, or cross-cutting
+introspection, a registry can be introduced on top of the path-shaped
+`UxNodeId` model without changing action identity.
 
 ## Removed Old Split
 

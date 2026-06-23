@@ -74,17 +74,23 @@ impl StudioUx {
     }
 
     async fn dispatch_inner(&mut self, action: UiAction, updates: UxUpdateSink) -> UxResult {
-        if action.node_id() == &self.device.node_id() {
+        let node_id = action.node_id().clone();
+        let device_node_id = self.device.node_id();
+        let project_node_id = self.project.node_id();
+
+        if node_id == device_node_id {
             let op = action.into_op::<DeviceOp>()?;
             return self.execute_device_op(op, updates).await;
         }
-        if action.node_id() == &self.project.node_id() {
+        if node_id == project_node_id {
             let op = action.into_op::<ProjectOp>()?;
             return self.execute_project_op(op, updates).await;
         }
+        if node_id.is_descendant_of(&project_node_id) {
+            return self.project.dispatch_editor_action(action, updates).await;
+        }
         Err(crate::UxError::UnsupportedAction(format!(
-            "unknown UX node {}",
-            action.node_id()
+            "unknown UX node {node_id}",
         )))
     }
 
@@ -715,9 +721,9 @@ mod tests {
     };
 
     use crate::{
-        ConnectedDeviceSummary, LinkState, LinkUx, ProjectInventorySummary, ProjectState,
-        ProjectUx, ServerFailureKind, ServerState, ServerUx, UiStatusKind, UiStepState, UxIssue,
-        UxNodeId,
+        ConnectedDeviceSummary, LinkState, LinkUx, ProjectEditorOp, ProjectEditorTarget,
+        ProjectInventorySummary, ProjectState, ProjectUx, ServerFailureKind, ServerState, ServerUx,
+        UiStatusKind, UiStepState, UxIssue, UxNodeId,
     };
 
     use super::*;
@@ -980,6 +986,111 @@ mod tests {
         assert!(matches!(
             studio.device.link.snapshot().state,
             LinkState::SelectingProvider { .. }
+        ));
+    }
+
+    #[test]
+    fn device_action_dispatch_routes_exact_device_target() {
+        let mut studio = connected_studio();
+        let action =
+            UiAction::from_op(UxNodeId::new(DeviceUx::NODE_ID), DeviceOp::DisconnectDevice);
+
+        block_on_ready(studio.dispatch(action)).unwrap();
+
+        assert!(matches!(
+            studio.project.snapshot().state,
+            ProjectState::NotLoaded
+        ));
+        assert!(matches!(
+            studio.device.server.snapshot().state,
+            ServerState::Disconnected
+        ));
+        assert!(matches!(
+            studio.device.link.snapshot().state,
+            LinkState::SelectingProvider { .. }
+        ));
+    }
+
+    #[test]
+    fn project_action_dispatch_routes_exact_project_target() {
+        let mut studio = connected_studio();
+        let action = UiAction::from_op(
+            UxNodeId::new(ProjectUx::NODE_ID),
+            ProjectOp::DisconnectProject,
+        );
+
+        block_on_ready(studio.dispatch(action)).unwrap();
+
+        assert!(matches!(
+            studio.project.snapshot().state,
+            ProjectState::NotLoaded
+        ));
+        assert!(matches!(
+            studio.device.server.snapshot().state,
+            ServerState::Connected { .. }
+        ));
+        assert!(matches!(
+            studio.device.link.snapshot().state,
+            LinkState::Connected { .. }
+        ));
+    }
+
+    #[test]
+    fn project_descendant_action_dispatch_routes_to_project_ux() {
+        let mut studio = StudioUx::new();
+        let target = ProjectEditorTarget::node_tree();
+        let action = UiAction::from_op(target.node_id(), ProjectEditorOp::Focus);
+
+        block_on_ready(studio.dispatch(action)).unwrap();
+
+        assert_eq!(studio.project.active_editor_target(), Some(&target));
+    }
+
+    #[test]
+    fn unknown_top_level_dispatch_fails_clearly() {
+        let mut studio = StudioUx::new();
+        let action = UiAction::from_op(UxNodeId::new("studio.unknown"), ProjectEditorOp::Focus);
+
+        let result = block_on_ready(studio.dispatch(action));
+
+        assert!(matches!(
+            result,
+            Err(UxError::UnsupportedAction(message))
+                if message.contains("unknown UX node studio.unknown")
+        ));
+    }
+
+    #[test]
+    fn unknown_project_descendant_dispatch_fails_as_project_target() {
+        let mut studio = StudioUx::new();
+        let action = UiAction::from_op(
+            UxNodeId::new("studio.project.unknown"),
+            ProjectEditorOp::Focus,
+        );
+
+        let result = block_on_ready(studio.dispatch(action));
+
+        assert!(matches!(
+            result,
+            Err(UxError::UnsupportedAction(message))
+                if message.contains("unknown project editor target studio.project.unknown")
+        ));
+    }
+
+    #[test]
+    fn project_descendant_dispatch_rejects_wrong_op_type() {
+        let mut studio = StudioUx::new();
+        let action = UiAction::from_op(
+            ProjectEditorTarget::node_tree().node_id(),
+            ProjectOp::LoadDemoProject,
+        );
+
+        let result = block_on_ready(studio.dispatch(action));
+
+        assert!(matches!(
+            result,
+            Err(UxError::UnsupportedAction(message))
+                if message.contains("ProjectEditorOp")
         ));
     }
 

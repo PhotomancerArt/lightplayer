@@ -11,5 +11,5 @@ pub use crate::ui::action::ui_action::UiAction;
 pub use crate::ui::action::ui_actions::UiActions;
 pub use ux_context::UxContext;
 pub use ux_node::UxNode;
-pub use ux_node_id::UxNodeId;
+pub use ux_node_id::{UxNodeId, UxNodePath};
 pub use ux_op::UxOp;

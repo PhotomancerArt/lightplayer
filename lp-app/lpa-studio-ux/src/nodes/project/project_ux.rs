@@ -1,12 +1,14 @@
 use crate::{
-    LoadedProjectChoice, ProgressState, ProjectConnectResult, ProjectInventorySummary, ProjectOp,
-    ProjectSnapshot, ProjectState, StudioServerClient, UiAction, UiBody, UiMetric, UiPaneView,
-    UiStatus, UxError, UxIssue, UxLogEntry, UxNode, UxNodeId,
+    LoadedProjectChoice, ProgressState, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget,
+    ProjectInventorySummary, ProjectOp, ProjectSnapshot, ProjectState, StudioServerClient,
+    UiAction, UiBody, UiMetric, UiPaneView, UiStatus, UxError, UxIssue, UxLogEntry, UxNode,
+    UxNodeId, UxOutcome, UxResult, UxUpdateSink,
 };
 
 pub struct ProjectUx {
     state: ProjectState,
     running_project_status: RunningProjectStatus,
+    active_editor_target: Option<ProjectEditorTarget>,
 }
 
 impl ProjectUx {
@@ -16,6 +18,7 @@ impl ProjectUx {
         Self {
             state: ProjectState::NotLoaded,
             running_project_status: RunningProjectStatus::Unknown,
+            active_editor_target: None,
         }
     }
 
@@ -25,6 +28,10 @@ impl ProjectUx {
 
     pub fn snapshot(&self) -> ProjectSnapshot {
         ProjectSnapshot::new(self.state.clone())
+    }
+
+    pub fn active_editor_target(&self) -> Option<&ProjectEditorTarget> {
+        self.active_editor_target.as_ref()
     }
 
     pub fn actions(&self, server_connected: bool) -> Vec<UiAction> {
@@ -118,11 +125,13 @@ impl ProjectUx {
             RunningProjectStatus::Unknown
         };
         self.state = ProjectState::NotLoaded;
+        self.active_editor_target = None;
     }
 
     pub fn reset(&mut self) {
         self.running_project_status = RunningProjectStatus::Unknown;
         self.state = ProjectState::NotLoaded;
+        self.active_editor_target = None;
     }
 
     pub fn mark_no_running_project(&mut self) {
@@ -172,6 +181,16 @@ impl ProjectUx {
         Ok(logs)
     }
 
+    pub async fn dispatch_editor_action(
+        &mut self,
+        action: UiAction,
+        _updates: UxUpdateSink,
+    ) -> UxResult {
+        let target = ProjectEditorTarget::parse(action.node_id())?;
+        let op = action.into_op::<ProjectEditorOp>()?;
+        self.execute_editor_op(target, op).await
+    }
+
     async fn connect_from_catalog(
         &mut self,
         server: &mut StudioServerClient,
@@ -192,6 +211,19 @@ impl ProjectUx {
             _ => {
                 self.mark_selecting_loaded_project(projects);
                 Ok(ProjectConnectResult::SelectionRequired { logs })
+            }
+        }
+    }
+
+    async fn execute_editor_op(
+        &mut self,
+        target: ProjectEditorTarget,
+        op: ProjectEditorOp,
+    ) -> UxResult {
+        match op {
+            ProjectEditorOp::Focus => {
+                self.active_editor_target = Some(target);
+                Ok(UxOutcome::new())
             }
         }
     }
