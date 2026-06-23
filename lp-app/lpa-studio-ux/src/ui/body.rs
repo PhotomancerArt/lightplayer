@@ -1,4 +1,4 @@
-use crate::{ProgressState, UiActivity, UiMetric, UiStackView, UxIssue};
+use crate::{ProgressState, ProjectEditorView, UiActivity, UiMetric, UiStackView, UxIssue};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiBody {
@@ -9,6 +9,7 @@ pub enum UiBody {
     Issue(UxIssue),
     Metrics(Vec<UiMetric>),
     Stack(Box<UiStackView>),
+    ProjectEditor(Box<ProjectEditorView>),
 }
 
 impl UiBody {
@@ -84,6 +85,19 @@ impl UiBody {
                             .rev()
                             .map(|line| format!("  {}", line.text)),
                     );
+                }
+                lines
+            }
+            Self::ProjectEditor(editor) => {
+                let mut lines = vec![
+                    format!("Project: {}", editor.project_id),
+                    format!("Nodes: {}", editor.nodes.len()),
+                ];
+                for node in &editor.nodes {
+                    lines.push(format!("{} {} {}", node.node_id, node.kind, node.path));
+                    for row in &node.prominent_slots {
+                        lines.push(format!("  {}", row.label()));
+                    }
                 }
                 lines
             }

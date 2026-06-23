@@ -1,9 +1,12 @@
 use dioxus::prelude::*;
 use lpa_studio_ux::{
-    DeviceOp, DeviceUx, LinkEndpointId, LinkProviderKind, ProgressState, ProjectInventorySummary,
-    ProjectOp, ProjectState, ProjectUx, StudioView, UiAction, UiActivity, UiActivityStep,
-    UiActivityStepState, UiBody, UiMetric, UiPaneView, UiProgress, UiStackSection, UiStackView,
-    UiStatus, UiStepState, UiTerminalLine, UxIssue, UxLogEntry, UxLogLevel, UxNodeId,
+    DeviceOp, DeviceUx, LinkEndpointId, LinkProviderKind, ProgressState, ProjectEditorOp,
+    ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary, ProjectNodeStatusTone,
+    ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectNodeView, ProjectOp,
+    ProjectRuntimeSummary, ProjectSlotRowView, ProjectState, ProjectSyncPhase, ProjectSyncSummary,
+    ProjectUx, StudioView, UiAction, UiActivity, UiActivityStep, UiActivityStepState, UiBody,
+    UiMetric, UiPaneView, UiProgress, UiStackSection, UiStackView, UiStatus, UiStepState,
+    UiTerminalLine, UxIssue, UxLogEntry, UxLogLevel, UxNodeId,
 };
 
 use crate::components::{
@@ -1110,7 +1113,7 @@ fn project_synced_pane_view() -> UiPaneView {
         ProjectUx::NODE_ID,
         "Project",
         UiStatus::good("Ready"),
-        UiBody::Metrics(project_synced_metrics()),
+        UiBody::ProjectEditor(Box::new(project_editor_fixture(ProjectSyncPhase::Ready))),
         project_ready_actions(),
     )
 }
@@ -1120,12 +1123,9 @@ fn project_syncing_pane_view() -> UiPaneView {
         ProjectUx::NODE_ID,
         "Project",
         UiStatus::working("Syncing"),
-        UiBody::Metrics(vec![
-            UiMetric::new("Project", "studio-demo"),
-            UiMetric::new("Handle", 1),
-            UiMetric::new("Sync", "Syncing"),
-            UiMetric::new("Shapes", "reading page 2"),
-        ]),
+        UiBody::ProjectEditor(Box::new(project_editor_empty_fixture(
+            ProjectSyncPhase::SyncingShapes,
+        ))),
         Vec::new(),
     )
 }
@@ -1135,17 +1135,284 @@ fn project_sync_failed_pane_view() -> UiPaneView {
         ProjectUx::NODE_ID,
         "Project",
         UiStatus::error("Sync issue"),
-        UiBody::Metrics(vec![
-            UiMetric::new("Project", "studio-demo"),
-            UiMetric::new("Handle", 1),
-            UiMetric::new("Inventory nodes", 4),
-            UiMetric::new("Definitions", 3),
-            UiMetric::new("Assets", 1),
-            UiMetric::new("Sync", "project sync failed: protocol timeout"),
-            UiMetric::new("Revision", 0),
-        ]),
+        UiBody::ProjectEditor(Box::new(project_editor_empty_fixture(
+            ProjectSyncPhase::Failed,
+        ))),
         project_ready_actions(),
     )
+}
+
+fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorView {
+    let running = story_node_status("Running", ProjectNodeStatusTone::Good);
+    let warning = ProjectNodeStatusView::new(
+        "Warning",
+        Some("using fallback palette".to_string()),
+        ProjectNodeStatusTone::Warning,
+    );
+    let project = tree_item(
+        "1",
+        "Demo",
+        "Project",
+        running.clone(),
+        false,
+        vec![
+            tree_item("2", "Clock", "Clock", running.clone(), false, Vec::new()),
+            tree_item(
+                "3",
+                "Orbit shader",
+                "Shader",
+                running.clone(),
+                true,
+                Vec::new(),
+            ),
+            tree_item(
+                "4",
+                "Sunrise palette",
+                "Visual",
+                warning.clone(),
+                false,
+                Vec::new(),
+            ),
+            tree_item("5", "Output", "Output", running.clone(), false, Vec::new()),
+        ],
+    );
+    let summary = project_editor_summary(phase);
+    ProjectEditorView::new(
+        "studio-demo",
+        1,
+        summary,
+        project_synced_metrics(),
+        ProjectNodeTreeView::new(vec![project], 5),
+        vec![
+            node_view(
+                "1",
+                "Demo",
+                "Project",
+                "/demo.project",
+                running.clone(),
+                false,
+                vec![],
+                vec![
+                    ProjectSlotRowView::value_with_detail("Name", "studio-demo", "rev 42"),
+                    ProjectSlotRowView::value_with_detail("Enabled", "true", "rev 42"),
+                ],
+                vec![],
+            ),
+            node_view(
+                "2",
+                "Clock",
+                "Clock",
+                "/demo.project/clock.clock",
+                running.clone(),
+                false,
+                vec![ProjectSlotRowView::value_with_detail(
+                    "Output",
+                    "control product node 2 output 0 (1x1)",
+                    "rev 42",
+                )],
+                vec![ProjectSlotRowView::value_with_detail(
+                    "Tempo", "120.0", "rev 42",
+                )],
+                vec![ProjectSlotRowView::value_with_detail(
+                    "Frame", "512", "rev 42",
+                )],
+            ),
+            node_view(
+                "3",
+                "Orbit shader",
+                "Shader",
+                "/demo.project/orbit.shader",
+                running.clone(),
+                true,
+                vec![
+                    ProjectSlotRowView::value_with_detail(
+                        "Input",
+                        "visual product node 4 output 0",
+                        "rev 42",
+                    ),
+                    ProjectSlotRowView::value_with_detail(
+                        "Output",
+                        "visual product node 3 output 0",
+                        "rev 43",
+                    ),
+                ],
+                vec![
+                    ProjectSlotRowView::value_with_detail(
+                        "Shader",
+                        "assets/shaders/orbit.glsl",
+                        "rev 42",
+                    ),
+                    ProjectSlotRowView::group(
+                        "Parameters",
+                        Some("3 fields".to_string()),
+                        vec![
+                            ProjectSlotRowView::value_with_detail("Brightness", "0.72", "rev 44"),
+                            ProjectSlotRowView::value_with_detail("Speed", "1.5", "rev 42"),
+                            ProjectSlotRowView::value_with_detail("Center", "(0.5, 0.5)", "rev 42"),
+                        ],
+                    ),
+                ],
+                vec![ProjectSlotRowView::value_with_detail(
+                    "Compile status",
+                    "ok",
+                    "rev 43",
+                )],
+            ),
+            node_view(
+                "4",
+                "Sunrise palette",
+                "Visual",
+                "/demo.project/palette.vis",
+                warning,
+                false,
+                vec![ProjectSlotRowView::value_with_detail(
+                    "Output",
+                    "visual product node 4 output 0",
+                    "rev 42",
+                )],
+                vec![ProjectSlotRowView::group(
+                    "Colors",
+                    Some("3 entries".to_string()),
+                    vec![
+                        ProjectSlotRowView::value("Primary", "(1.0, 0.45, 0.18)"),
+                        ProjectSlotRowView::value("Secondary", "(0.08, 0.18, 0.42)"),
+                        ProjectSlotRowView::value("Accent", "(0.95, 0.86, 0.34)"),
+                    ],
+                )],
+                vec![],
+            ),
+            node_view(
+                "5",
+                "Output",
+                "Output",
+                "/demo.project/output.output",
+                running,
+                false,
+                vec![ProjectSlotRowView::value_with_detail(
+                    "Input",
+                    "visual product node 3 output 0",
+                    "rev 43",
+                )],
+                vec![ProjectSlotRowView::value_with_detail(
+                    "Endpoint",
+                    "ws281x:rmt:D10",
+                    "rev 42",
+                )],
+                vec![ProjectSlotRowView::value_with_detail(
+                    "Samples", "241", "rev 42",
+                )],
+            ),
+        ],
+    )
+}
+
+fn project_editor_empty_fixture(phase: ProjectSyncPhase) -> ProjectEditorView {
+    ProjectEditorView::new(
+        "studio-demo",
+        1,
+        project_editor_summary(phase),
+        vec![
+            UiMetric::new("Project", "studio-demo"),
+            UiMetric::new("Handle", 1),
+            UiMetric::new("Revision", 0),
+            UiMetric::new("Sync", sync_story_label(phase)),
+        ],
+        ProjectNodeTreeView::new(Vec::new(), 0),
+        Vec::new(),
+    )
+}
+
+fn project_editor_summary(phase: ProjectSyncPhase) -> ProjectSyncSummary {
+    ProjectSyncSummary {
+        phase,
+        revision: 42,
+        node_count: 5,
+        root_node_count: 1,
+        slot_root_count: 10,
+        resource_count: 2,
+        shape_count: 18,
+        shapes_complete: true,
+        runtime: Some(ProjectRuntimeSummary {
+            frame_num: 512,
+            frame_delta_ms: 16,
+            runtime_buffer_count: 2,
+            free_bytes: Some(232 * 1024),
+            used_bytes: Some(60 * 1024),
+            total_bytes: Some(292 * 1024),
+        }),
+        issue: (phase == ProjectSyncPhase::Failed).then(|| UxIssue::new("protocol timeout")),
+    }
+}
+
+fn tree_item(
+    node_id: &str,
+    label: &str,
+    kind: &str,
+    status: ProjectNodeStatusView,
+    focused: bool,
+    children: Vec<ProjectNodeTreeItem>,
+) -> ProjectNodeTreeItem {
+    ProjectNodeTreeItem::new(
+        node_id,
+        label,
+        kind,
+        status,
+        focused,
+        project_focus_action(node_id, label),
+        children,
+    )
+}
+
+#[allow(
+    clippy::too_many_arguments,
+    reason = "story fixtures read more clearly with direct node view data"
+)]
+fn node_view(
+    node_id: &str,
+    label: &str,
+    kind: &str,
+    path: &str,
+    status: ProjectNodeStatusView,
+    focused: bool,
+    prominent_slots: Vec<ProjectSlotRowView>,
+    config_slots: Vec<ProjectSlotRowView>,
+    state_slots: Vec<ProjectSlotRowView>,
+) -> ProjectNodeView {
+    ProjectNodeView::new(
+        node_id,
+        label,
+        kind,
+        path,
+        status,
+        focused,
+        project_focus_action(node_id, label),
+        prominent_slots,
+        config_slots,
+        state_slots,
+        Vec::new(),
+        Vec::new(),
+    )
+}
+
+fn project_focus_action(node_id: &str, label: &str) -> UiAction {
+    UiAction::from_op(
+        ProjectEditorTarget::node(node_id).node_id(),
+        ProjectEditorOp::Focus,
+    )
+    .with_label(format!("Focus {label}"))
+}
+
+fn story_node_status(label: &str, tone: ProjectNodeStatusTone) -> ProjectNodeStatusView {
+    ProjectNodeStatusView::new(label, None, tone)
+}
+
+fn sync_story_label(phase: ProjectSyncPhase) -> &'static str {
+    match phase {
+        ProjectSyncPhase::Empty => "Not synced",
+        ProjectSyncPhase::SyncingShapes | ProjectSyncPhase::SyncingProject => "Syncing",
+        ProjectSyncPhase::Ready => "Synced",
+        ProjectSyncPhase::Failed => "Needs attention",
+    }
 }
 
 fn project_synced_metrics() -> Vec<UiMetric> {

@@ -1,9 +1,8 @@
 use crate::{
     LoadedProjectChoice, ProgressState, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget,
-    ProjectInventorySummary, ProjectOp, ProjectSnapshot, ProjectState, ProjectSync,
-    ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, StudioServerClient, UiAction, UiBody,
-    UiMetric, UiPaneView, UiStatus, UxError, UxIssue, UxLogEntry, UxLogLevel, UxNode, UxNodeId,
-    UxOutcome, UxResult, UxUpdateSink,
+    ProjectInventorySummary, ProjectOp, ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncRun,
+    ProjectSyncSummary, StudioServerClient, UiAction, UiBody, UiMetric, UiPaneView, UiStatus,
+    UxError, UxIssue, UxLogEntry, UxLogLevel, UxNode, UxNodeId, UxOutcome, UxResult, UxUpdateSink,
 };
 
 pub struct ProjectUx {
@@ -91,7 +90,8 @@ impl ProjectUx {
             project_body(
                 &self.state,
                 self.running_project_status,
-                self.sync.as_ref().map(ProjectSync::summary),
+                self.sync.as_ref(),
+                self.active_editor_target.as_ref(),
             ),
             self.actions(server_connected),
         )
@@ -408,7 +408,8 @@ fn project_status(state: &ProjectState, sync: Option<&ProjectSync>) -> UiStatus 
 fn project_body(
     state: &ProjectState,
     running_project_status: RunningProjectStatus,
-    sync: Option<ProjectSyncSummary>,
+    sync: Option<&ProjectSync>,
+    active_target: Option<&ProjectEditorTarget>,
 ) -> UiBody {
     match state {
         ProjectState::NotLoaded if running_project_status == RunningProjectStatus::NoneKnown => {
@@ -427,7 +428,7 @@ fn project_body(
             project_id,
             handle_id,
             inventory,
-        } => ready_project_body(project_id, *handle_id, inventory, sync),
+        } => ready_project_body(project_id, *handle_id, inventory, sync, active_target),
         ProjectState::Failed { issue } => UiBody::Issue(issue.clone()),
     }
 }
@@ -436,8 +437,18 @@ fn ready_project_body(
     project_id: &str,
     handle_id: u32,
     inventory: &ProjectInventorySummary,
-    sync: Option<ProjectSyncSummary>,
+    sync: Option<&ProjectSync>,
+    active_target: Option<&ProjectEditorTarget>,
 ) -> UiBody {
+    if let Some(sync) = sync {
+        return UiBody::ProjectEditor(Box::new(sync.editor_view(
+            project_id,
+            handle_id,
+            inventory,
+            active_target,
+        )));
+    }
+
     let mut metrics = vec![
         UiMetric::new("Project", project_id),
         UiMetric::new("Handle", handle_id),
@@ -446,55 +457,14 @@ fn ready_project_body(
         UiMetric::new("Assets", inventory.asset_count),
     ];
 
-    if let Some(sync) = sync {
-        if let Some(issue) = sync.issue {
-            metrics.push(UiMetric::new("Sync", issue.message));
-        } else {
-            metrics.push(UiMetric::new("Sync", sync_phase_label(sync.phase)));
-        }
-        metrics.push(UiMetric::new("Revision", sync.revision));
-        metrics.push(UiMetric::new("Synced nodes", sync.node_count));
-        metrics.push(UiMetric::new("Root nodes", sync.root_node_count));
-        metrics.push(UiMetric::new("Slot roots", sync.slot_root_count));
-        metrics.push(UiMetric::new("Resources", sync.resource_count));
-        metrics.push(UiMetric::new("Shapes", sync.shape_count));
-        if let Some(runtime) = sync.runtime {
-            metrics.push(UiMetric::new("Frame", runtime.frame_num));
-            metrics.push(UiMetric::new(
-                "Runtime buffers",
-                runtime.runtime_buffer_count,
-            ));
-            if let Some(free_bytes) = runtime.free_bytes {
-                metrics.push(UiMetric::new("Memory free", format_bytes(free_bytes)));
-            }
-        }
-    } else {
-        metrics.push(UiMetric::new("Sync", "Not synced"));
-    }
+    metrics.push(UiMetric::new("Sync", "Not synced"));
 
     UiBody::Metrics(metrics)
 }
 
-fn sync_phase_label(phase: ProjectSyncPhase) -> &'static str {
-    match phase {
-        ProjectSyncPhase::Empty => "Not synced",
-        ProjectSyncPhase::SyncingShapes | ProjectSyncPhase::SyncingProject => "Syncing",
-        ProjectSyncPhase::Ready => "Synced",
-        ProjectSyncPhase::Failed => "Needs attention",
-    }
-}
-
-fn format_bytes(bytes: u64) -> String {
-    if bytes >= 1024 {
-        format!("{} KB", bytes / 1024)
-    } else {
-        format!("{bytes} B")
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use crate::{ActionPriority, ProjectOp};
+    use crate::{ActionPriority, ProjectOp, ProjectSyncPhase};
 
     use super::*;
 

@@ -37,9 +37,9 @@ The current surface can launch the browser-local firmware runtime with the demo
 project, connect browser serial hardware, open the LightPlayer server protocol,
 attach to an already-loaded running project, explicitly load the built-in demo
 project on hardware, provision a blank ESP32-C6 with packaged LightPlayer
-firmware, reset a provisioned ESP32-C6 back to blank, and display a small
-project inventory summary. Project attach/load choices appear in the Device
-pane. The Project pane appears once a project is loaded.
+firmware, reset a provisioned ESP32-C6 back to blank, and render a readonly
+project workspace once a project is loaded. Project attach/load choices appear
+in the Device pane. The Project pane appears once a project is loaded.
 
 ## Run
 
@@ -140,8 +140,12 @@ Reusable Dioxus primitives live under `src/components/`:
 
 - `ActionButton` and `ActionStrip` render `UiAction` controls.
 - `PaneFrame`, `StatusChip`, and `MetricGrid` provide shared pane structure.
-- `FieldRow` and `Tabs` are editor-foundation primitives used by stories until
-  the project UX model grows real node/slot data.
+- `ProjectSidebar` renders the Project rail with compact node tree, project
+  stats, and project actions.
+- `ProjectNodeWorkspace` renders all synced node bodies in tree order as the
+  transparent center workspace.
+- `FieldRow` and `Tabs` remain editor-foundation primitives used by stories and
+  future editing surfaces.
 - `StudioShell`, `UxPane`, and `RuntimeLog` render the active `StudioView`.
 
 The project editor layout target is:
@@ -152,15 +156,16 @@ md: [ nodes/editor ] [ tabs: node tree / device / bus / console ]
 sm: [ tabs: nodes / node tree / device / bus / console ]
 ```
 
-M1 stories use placeholder editor data only. Project sync, slot editing,
-bindings, bus modeling, and asset editing belong to later milestones.
+The active Project pane currently renders readonly synced node data. Slot
+editing, overlay dirty-state, binding authoring, bus modeling, probes, and
+asset editing belong to later milestones.
 
 ## Stories
 
 The storybook covers the active UX shell, connection action strip, Device stack
-states, loaded Project pane state, browser-serial blank-firmware readiness,
-provision-ready/provisioning/provision-failed, wipe states, and placeholder
-project-editor layout primitives.
+states, loaded Project pane state with readonly node workspace,
+browser-serial blank-firmware readiness, provision-ready/provisioning/
+provision-failed, wipe states, and editor-foundation primitives.
 Run the dev server and open:
 
 ```text
@@ -196,8 +201,9 @@ losslessly normalized. Install it with `brew install oxipng` or
 stable baseline/check output; set `STUDIO_STORY_PNGS_CONCURRENCY` for faster
 scratch runs when needed.
 
-The baseline set intentionally reflects the active view-driven UX surface and
-the editor layout foundation rather than the old provisioning journey fixtures.
+The baseline set intentionally reflects the active view-driven UX surface,
+including the semantic project workspace, rather than the old provisioning
+journey fixtures alone.
 
 ## Boundary
 

@@ -754,7 +754,22 @@ fn body_actions(body: &UiBody) -> Vec<UiAction> {
         | UiBody::Activity(_)
         | UiBody::Issue(_)
         | UiBody::Metrics(_) => Vec::new(),
+        UiBody::ProjectEditor(editor) => editor
+            .tree
+            .roots
+            .iter()
+            .flat_map(project_tree_item_actions)
+            .collect(),
     }
+}
+
+fn project_tree_item_actions(
+    item: &crate::ProjectNodeTreeItem,
+) -> Box<dyn Iterator<Item = UiAction> + '_> {
+    Box::new(
+        core::iter::once(item.action.clone())
+            .chain(item.children.iter().flat_map(project_tree_item_actions)),
+    )
 }
 
 fn should_reopen_before_server_connect(connection: &LinkConnection) -> bool {

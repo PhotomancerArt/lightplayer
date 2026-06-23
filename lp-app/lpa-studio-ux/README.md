@@ -49,7 +49,8 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
   server I/O. It remains an implementation detail below `DeviceUx`.
 - `ProjectUx` owns Studio's view of the loaded project and is shown only after a
   project is loaded. It keeps the internal `lpc-view::ProjectView` mirror in
-  sync with server project reads and exposes lightweight summaries to UI code.
+  sync with server project reads and exposes semantic readonly project-editor
+  views to UI code. The web UI does not own or inspect the raw `ProjectView`.
 - `UxNodeId` is a path-shaped UX address with dotted display compatibility.
   Static ids such as `studio.device` still compare and render as strings, while
   dynamic editor ids can be built structurally with child segments.
@@ -73,7 +74,7 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
 - `StudioView` is the semantic render surface. It contains a Device
   `UiPaneView`, an optional loaded Project `UiPaneView`, and recent logs.
 - `UiBody` is intentionally small: text, progress/activity, issue, metrics,
-  stack, or empty. It is not a generic component schema.
+  stack, project editor, or empty. It is not a generic component schema.
 - `UiStackView` / `UiStackSection` model reusable multi-step product workflows.
   Device uses them for connection, LightPlayer attach, provisioning, and project
   opening. Section-local actions are the action surface.
@@ -95,10 +96,19 @@ Project data sync is also UX-owned. After Studio attaches to a running project
 or loads the demo project, `ProjectUx` performs a shape-registry sync followed
 by a normal project read for node detail, initial slot roots, resource
 summaries, and runtime status. The loaded Project pane shows a compact summary
-of the synced mirror and exposes `Refresh project` for explicit action-driven
-refreshes. Sync failures are treated as project-pane issues rather than generic
-action failures so the attached project can stay visible while Studio explains
-what needs attention.
+of the synced mirror alongside a readonly node workspace and exposes
+`Refresh project` for explicit action-driven refreshes. `ProjectSync` keeps the
+raw `lpc_view::ProjectView` private and translates it into `ProjectEditorView`,
+`ProjectNodeTreeView`, `ProjectNodeView`, and `ProjectSlotRowView` data before
+anything reaches a UI. Sync failures are treated as project-pane issues rather
+than generic action failures so the attached project can stay visible while
+Studio explains what needs attention.
+
+The first editor view renders every synced node in stable tree order rather
+than requiring a selected-node detail view. Node bodies show headers, status,
+prominent `input`/`output` slots, config/state slot rows, compact bindings when
+available, and secondary project/runtime stats. Editing, overlay dirty-state,
+binding authoring, bus views, probes, and asset editing are later milestones.
 
 Project attach behavior is UX-owned:
 

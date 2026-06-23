@@ -1,14 +1,17 @@
 use dioxus::prelude::*;
-use lpa_studio_ux::{DeviceUx, StudioView, UiAction, UiPaneView};
+use lpa_studio_ux::{DeviceUx, StudioView, UiAction, UiBody, UiPaneView};
 
-use crate::components::{RuntimeLog, UxPane};
+use crate::components::{ProjectNodeWorkspace, RuntimeLog, UxPane};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn StudioShell(view: StudioView, running: bool, on_action: EventHandler<UiAction>) -> Element {
     let StudioView { panes, logs } = view;
     let PaneGroups { main, device } = group_panes(panes);
-    let layout_class = if main.is_empty() {
+    let project_editor = project_editor_view(&main);
+    let layout_class = if project_editor.is_some() {
+        "ux-layout ux-layout-project-editor"
+    } else if main.is_empty() {
         "ux-layout ux-layout-device-only"
     } else {
         "ux-layout ux-layout-main-device"
@@ -24,7 +27,22 @@ pub fn StudioShell(view: StudioView, running: bool, on_action: EventHandler<UiAc
             }
 
             section { class: "{layout_class}",
-                if !main.is_empty() {
+                if let Some(project_editor) = project_editor {
+                    div { class: "ux-project-sidebar-column",
+                        for (index, pane) in main.into_iter().enumerate() {
+                            UxPane {
+                                key: "{pane.node_id}",
+                                view: pane,
+                                primary: index == 0,
+                                running,
+                                on_action,
+                            }
+                        }
+                    }
+                    div { class: "ux-editor-center-column",
+                        ProjectNodeWorkspace { view: project_editor }
+                    }
+                } else if !main.is_empty() {
                     div { class: "ux-main-column",
                         for (index, pane) in main.into_iter().enumerate() {
                             UxPane {
@@ -71,4 +89,11 @@ fn group_panes(panes: Vec<UiPaneView>) -> PaneGroups {
         }
     }
     PaneGroups { main, device }
+}
+
+fn project_editor_view(panes: &[UiPaneView]) -> Option<lpa_studio_ux::ProjectEditorView> {
+    panes.iter().find_map(|pane| match &pane.body {
+        UiBody::ProjectEditor(editor) => Some((**editor).clone()),
+        _ => None,
+    })
 }

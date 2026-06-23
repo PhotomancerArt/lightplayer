@@ -19,8 +19,11 @@ pub use nodes::link::{
 };
 pub use nodes::project::{
     LoadedProjectChoice, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget,
-    ProjectInventorySummary, ProjectOp, ProjectRuntimeSummary, ProjectSnapshot, ProjectState,
-    ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, ProjectUx,
+    ProjectEditorView, ProjectInventorySummary, ProjectNodeStatusTone, ProjectNodeStatusView,
+    ProjectNodeTreeItem, ProjectNodeTreeView, ProjectNodeView, ProjectOp, ProjectRuntimeSummary,
+    ProjectSlotGroupView, ProjectSlotIssueView, ProjectSlotRowView, ProjectSlotValueView,
+    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
+    ProjectSyncSummary, ProjectUx,
 };
 pub use nodes::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerOp, ServerSnapshot,

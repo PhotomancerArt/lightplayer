@@ -4,7 +4,7 @@ use lpa_studio_ux::{
     UiStepState,
 };
 
-use crate::components::{ActionStrip, MetricGrid, PaneFrame};
+use crate::components::{ActionStrip, MetricGrid, PaneFrame, ProjectSidebar};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -79,6 +79,13 @@ fn UxPaneBody(body: UiBody, running: bool, on_action: EventHandler<UiAction>) ->
         UiBody::Stack(stack) => rsx! {
             UxStackBody {
                 stack: *stack,
+                running,
+                on_action,
+            }
+        },
+        UiBody::ProjectEditor(editor) => rsx! {
+            ProjectSidebar {
+                view: *editor,
                 running,
                 on_action,
             }
