@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use lpa_client::{ClientError, ClientEvent, ClientIo, LpClient};
 use lpa_link::{LinkConnection, LinkConnectionKind};
-use lpc_wire::WireProjectHandle;
+use lpc_wire::{ProjectReadRequest, ProjectReadResponse, WireProjectHandle};
 
 use crate::nodes::project::demo_project::{DEMO_PROJECT_ID, demo_project_deploy_files};
 use crate::{
@@ -18,6 +18,15 @@ pub struct StudioServerClient {
 }
 
 impl StudioServerClient {
+    #[cfg(test)]
+    pub(crate) fn from_io_for_test(protocol: impl Into<String>, io: Box<dyn ClientIo>) -> Self {
+        Self {
+            client: LpClient::new(io),
+            protocol: protocol.into(),
+            pending_logs: Rc::new(RefCell::new(Vec::new())),
+        }
+    }
+
     pub fn from_link_connection(
         registry: SharedLinkRegistry,
         connection: &LinkConnection,
@@ -89,6 +98,11 @@ pub struct LoadedRunningProject {
     pub inventory: ProjectInventorySummary,
 }
 
+pub struct StudioProjectRead {
+    pub response: ProjectReadResponse,
+    pub logs: Vec<UxLogEntry>,
+}
+
 impl StudioServerClient {
     pub async fn list_loaded_projects(&mut self) -> Result<LoadedProjectCatalog, UxError> {
         let loaded = self
@@ -124,6 +138,24 @@ impl StudioServerClient {
             project_id: choice.project_id,
             handle_id: choice.handle_id,
             inventory: ProjectInventorySummary::from(&inventory.value),
+        })
+    }
+
+    pub async fn project_read(
+        &mut self,
+        handle_id: u32,
+        request: ProjectReadRequest,
+    ) -> Result<StudioProjectRead, UxError> {
+        let read = self
+            .client
+            .project_read(WireProjectHandle::new(handle_id), request)
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(read.events);
+        logs.extend(self.take_pending_logs());
+        Ok(StudioProjectRead {
+            response: read.value,
+            logs,
         })
     }
 }

@@ -7,6 +7,7 @@ pub enum ProjectOp {
     ConnectRunningProject,
     ConnectLoadedProject { handle_id: u32 },
     LoadDemoProject,
+    RefreshProject,
     DisconnectProject,
 }
 
@@ -26,6 +27,11 @@ impl UxOp for ProjectOp {
             Self::LoadDemoProject => ActionMeta::new(
                 "Load demo project",
                 "Upload and run the built-in demo project.",
+                ActionPriority::Secondary,
+            ),
+            Self::RefreshProject => ActionMeta::new(
+                "Refresh project",
+                "Refresh Studio's synced project view.",
                 ActionPriority::Secondary,
             ),
             Self::DisconnectProject => ActionMeta::new(

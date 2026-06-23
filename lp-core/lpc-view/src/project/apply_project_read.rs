@@ -64,7 +64,9 @@ pub fn apply_project_read_response(
                 view.resource_cache
                     .apply_runtime_buffer_payloads(&resources.runtime_buffer_payloads);
             }
-            ProjectReadResult::Runtime(_) => {}
+            ProjectReadResult::Runtime(runtime) => {
+                view.runtime = Some(runtime);
+            }
         }
     }
     view.revision = revision;
@@ -127,5 +129,50 @@ mod tests {
         apply_project_read_response(&mut view, response).unwrap();
 
         assert_eq!(view.revision, Revision::new(1));
+    }
+
+    #[test]
+    fn apply_project_read_retains_runtime_status() {
+        let mut view = ProjectView::new();
+        let response = ProjectReadResponse {
+            revision: Revision::new(9),
+            results: vec![ProjectReadResult::Runtime(lpc_wire::RuntimeReadResult {
+                project: lpc_wire::ProjectRuntimeStatus {
+                    revision: Revision::new(9),
+                    frame_num: 42,
+                    frame_delta_ms: 16,
+                    frame_total_ms: 17,
+                    demand_root_count: 2,
+                    runtime_buffer_count: 3,
+                },
+                server: Some(lpc_wire::ServerRuntimeStatus {
+                    theoretical_fps: Some(60.0),
+                    last_frame_time_us: Some(16_000),
+                    memory: Some(lpc_wire::server::MemoryStats {
+                        free_bytes: 1024,
+                        used_bytes: 2048,
+                        total_bytes: 3072,
+                    }),
+                }),
+            })],
+            probes: vec![],
+        };
+
+        apply_project_read_response(&mut view, response).unwrap();
+
+        let runtime = view.runtime.as_ref().expect("runtime retained");
+        assert_eq!(runtime.project.frame_num, 42);
+        assert_eq!(runtime.project.runtime_buffer_count, 3);
+        assert_eq!(
+            runtime
+                .server
+                .as_ref()
+                .and_then(|server| server.memory.as_ref()),
+            Some(&lpc_wire::server::MemoryStats {
+                free_bytes: 1024,
+                used_bytes: 2048,
+                total_bytes: 3072,
+            })
+        );
     }
 }

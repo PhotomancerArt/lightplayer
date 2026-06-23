@@ -13,6 +13,10 @@ It should depend on `lpc-model` and `lpc-wire`, not on `lps-shared`. Client
 property views use portable `LpValue` from wire updates, not runtime shader
 values (`LpsValueF32`).
 
+Project reads retain the latest runtime status alongside the structural project
+mirror. UI/controller layers can therefore summarize frame counters, runtime
+buffers, and server memory without owning protocol response details themselves.
+
 **Naming:** Structures that mirror engine state locally use natural `*View`
 suffixes (`ProjectView`, `NodeTreeView`, `PropAccessView`, `PropsMapView`, …).
 Reserve `Client*` for genuine client API types (for example `ClientApi`), not

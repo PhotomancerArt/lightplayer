@@ -18,4 +18,11 @@ impl UxNotice {
             message: message.into(),
         }
     }
+
+    pub fn warning(message: impl Into<String>) -> Self {
+        Self {
+            level: UxNoticeLevel::Warning,
+            message: message.into(),
+        }
+    }
 }

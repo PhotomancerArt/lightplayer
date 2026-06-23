@@ -1,6 +1,6 @@
 use lpc_model::NodeKind;
 use lpc_model::{LpPathBuf, Revision};
-use lpc_wire::NodeRuntimeStatus;
+use lpc_wire::{NodeRuntimeStatus, RuntimeReadResult};
 
 use super::resource_cache::ClientResourceCache;
 use crate::slot::SlotMirrorView;
@@ -27,6 +27,8 @@ pub struct ProjectView {
     pub slots: SlotMirrorView,
     /// Cached resource summaries and payloads.
     pub resource_cache: ClientResourceCache,
+    /// Latest project/server runtime counters from project reads.
+    pub runtime: Option<RuntimeReadResult>,
 }
 
 /// Minimal node entry retained until canonical project sync is rebuilt.
@@ -45,6 +47,7 @@ impl ProjectView {
             tree: NodeTreeView::new(),
             slots: SlotMirrorView::new(),
             resource_cache: ClientResourceCache::new(),
+            runtime: None,
         }
     }
 }

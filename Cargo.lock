@@ -5131,6 +5131,7 @@ dependencies = [
  "lpa-client",
  "lpa-link",
  "lpc-model",
+ "lpc-view",
  "lpc-wire",
  "wasm-bindgen",
  "wasm-bindgen-futures",

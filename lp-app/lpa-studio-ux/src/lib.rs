@@ -19,11 +19,12 @@ pub use nodes::link::{
 };
 pub use nodes::project::{
     LoadedProjectChoice, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget,
-    ProjectInventorySummary, ProjectOp, ProjectSnapshot, ProjectState, ProjectUx,
+    ProjectInventorySummary, ProjectOp, ProjectRuntimeSummary, ProjectSnapshot, ProjectState,
+    ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, ProjectUx,
 };
 pub use nodes::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerFailureKind, ServerOp, ServerSnapshot,
-    ServerState, ServerUx, StudioServerClient,
+    ServerState, ServerUx, StudioProjectRead, StudioServerClient,
 };
 pub use nodes::studio::{
     StudioSnapshot, StudioUx, UxActivityTarget, UxError, UxLogEntry, UxLogLevel, UxNotice,

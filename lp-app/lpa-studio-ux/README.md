@@ -48,7 +48,8 @@ lpa-studio-web, future CLI, future desktop, tests, and agents
 - `ServerUx` owns the connected `lpa-client` protocol client once a link exposes
   server I/O. It remains an implementation detail below `DeviceUx`.
 - `ProjectUx` owns Studio's view of the loaded project and is shown only after a
-  project is loaded.
+  project is loaded. It keeps the internal `lpc-view::ProjectView` mirror in
+  sync with server project reads and exposes lightweight summaries to UI code.
 - `UxNodeId` is a path-shaped UX address with dotted display compatibility.
   Static ids such as `studio.device` still compare and render as strings, while
   dynamic editor ids can be built structurally with child segments.
@@ -89,6 +90,15 @@ ESP32 entrypoints. It launches `fw-browser` through `lpa-link`, talks to the
 real `lp-server` protocol through `lpa-client`, attaches to a running project
 when one is already loaded, can load the demo project, and reads project
 inventory.
+
+Project data sync is also UX-owned. After Studio attaches to a running project
+or loads the demo project, `ProjectUx` performs a shape-registry sync followed
+by a normal project read for node detail, initial slot roots, resource
+summaries, and runtime status. The loaded Project pane shows a compact summary
+of the synced mirror and exposes `Refresh project` for explicit action-driven
+refreshes. Sync failures are treated as project-pane issues rather than generic
+action failures so the attached project can stay visible while Studio explains
+what needs attention.
 
 Project attach behavior is UX-owned:
 

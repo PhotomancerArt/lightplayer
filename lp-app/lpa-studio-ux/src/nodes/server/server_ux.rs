@@ -25,6 +25,13 @@ impl ServerUx {
         self.state = state;
     }
 
+    #[cfg(test)]
+    pub(crate) fn set_client_for_test(&mut self, client: StudioServerClient) {
+        let protocol = client.protocol().to_string();
+        self.client = Some(client);
+        self.state = ServerState::Connected { protocol };
+    }
+
     pub fn snapshot(&self) -> ServerSnapshot {
         ServerSnapshot::new(self.state.clone())
     }

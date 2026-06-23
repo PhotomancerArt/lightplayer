@@ -136,7 +136,19 @@ pub const STORIES: &[StoryDescriptor] = &[
         "studio/project-ready",
         "Studio UX",
         "Project ready",
-        "Demo project loaded and summarized through the UX view.",
+        "Demo project loaded and synced through the UX view.",
+    ),
+    StoryDescriptor::new(
+        "studio/project-syncing",
+        "Studio UX",
+        "Project syncing",
+        "Loaded project while Studio is reading the project mirror.",
+    ),
+    StoryDescriptor::new(
+        "studio/project-sync-failed",
+        "Studio UX",
+        "Project sync failed",
+        "Loaded project with recoverable sync failure and refresh available.",
     ),
     StoryDescriptor::new(
         "studio/error",
@@ -255,6 +267,19 @@ pub fn render_story(id: &str) -> Option<Element> {
             project_ready_view(),
             false,
             vec![studio_log(UxLogLevel::Info, "Demo project loaded")],
+        ),
+        "studio/project-syncing" => (
+            project_syncing_view(),
+            true,
+            vec![studio_log(UxLogLevel::Info, "Reading project shapes")],
+        ),
+        "studio/project-sync-failed" => (
+            project_sync_failed_view(),
+            false,
+            vec![studio_log(
+                UxLogLevel::Error,
+                "project sync failed: protocol timeout",
+            )],
         ),
         "studio/error" => (
             error_view(),
@@ -533,10 +558,7 @@ fn starting_view() -> StudioView {
 
 fn simulator_ready_view() -> StudioView {
     StudioView::new(
-        vec![
-            project_view(project_ready_state(), true),
-            simulator_ready_device_view(),
-        ],
+        vec![project_synced_pane_view(), simulator_ready_device_view()],
         vec![
             UxLogEntry::new(UxLogLevel::Info, "fw-browser", "ready"),
             UxLogEntry::new(
@@ -551,10 +573,7 @@ fn simulator_ready_view() -> StudioView {
 
 fn project_ready_view() -> StudioView {
     StudioView::new(
-        vec![
-            project_view(project_ready_state(), true),
-            simulator_ready_device_view(),
-        ],
+        vec![project_synced_pane_view(), simulator_ready_device_view()],
         vec![
             UxLogEntry::new(UxLogLevel::Info, "fw-browser", "project loaded"),
             UxLogEntry::new(
@@ -563,6 +582,31 @@ fn project_ready_view() -> StudioView {
                 "heartbeat frame=42 uptime_ms=700",
             ),
         ],
+    )
+}
+
+fn project_syncing_view() -> StudioView {
+    StudioView::new(
+        vec![project_syncing_pane_view(), simulator_ready_device_view()],
+        vec![UxLogEntry::new(
+            UxLogLevel::Info,
+            "lpa-studio-ux",
+            "syncing project",
+        )],
+    )
+}
+
+fn project_sync_failed_view() -> StudioView {
+    StudioView::new(
+        vec![
+            project_sync_failed_pane_view(),
+            simulator_ready_device_view(),
+        ],
+        vec![UxLogEntry::new(
+            UxLogLevel::Error,
+            "lpa-studio-ux",
+            "project sync failed: protocol timeout",
+        )],
     )
 }
 
@@ -1058,6 +1102,76 @@ fn esp32_metrics() -> Vec<UiMetric> {
         UiMetric::new("Provider", "Browser serial ESP32"),
         UiMetric::new("Endpoint", "browser-serial-esp32-port-1"),
         UiMetric::new("Session", "browser-serial-esp32-port-1:1"),
+    ]
+}
+
+fn project_synced_pane_view() -> UiPaneView {
+    UiPaneView::new(
+        ProjectUx::NODE_ID,
+        "Project",
+        UiStatus::good("Ready"),
+        UiBody::Metrics(project_synced_metrics()),
+        project_ready_actions(),
+    )
+}
+
+fn project_syncing_pane_view() -> UiPaneView {
+    UiPaneView::new(
+        ProjectUx::NODE_ID,
+        "Project",
+        UiStatus::working("Syncing"),
+        UiBody::Metrics(vec![
+            UiMetric::new("Project", "studio-demo"),
+            UiMetric::new("Handle", 1),
+            UiMetric::new("Sync", "Syncing"),
+            UiMetric::new("Shapes", "reading page 2"),
+        ]),
+        Vec::new(),
+    )
+}
+
+fn project_sync_failed_pane_view() -> UiPaneView {
+    UiPaneView::new(
+        ProjectUx::NODE_ID,
+        "Project",
+        UiStatus::error("Sync issue"),
+        UiBody::Metrics(vec![
+            UiMetric::new("Project", "studio-demo"),
+            UiMetric::new("Handle", 1),
+            UiMetric::new("Inventory nodes", 4),
+            UiMetric::new("Definitions", 3),
+            UiMetric::new("Assets", 1),
+            UiMetric::new("Sync", "project sync failed: protocol timeout"),
+            UiMetric::new("Revision", 0),
+        ]),
+        project_ready_actions(),
+    )
+}
+
+fn project_synced_metrics() -> Vec<UiMetric> {
+    vec![
+        UiMetric::new("Project", "studio-demo"),
+        UiMetric::new("Handle", 1),
+        UiMetric::new("Inventory nodes", 4),
+        UiMetric::new("Definitions", 3),
+        UiMetric::new("Assets", 1),
+        UiMetric::new("Sync", "Synced"),
+        UiMetric::new("Revision", 42),
+        UiMetric::new("Synced nodes", 7),
+        UiMetric::new("Root nodes", 1),
+        UiMetric::new("Slot roots", 12),
+        UiMetric::new("Resources", 3),
+        UiMetric::new("Shapes", 18),
+        UiMetric::new("Frame", 512),
+        UiMetric::new("Runtime buffers", 2),
+        UiMetric::new("Memory free", "232 KB"),
+    ]
+}
+
+fn project_ready_actions() -> Vec<UiAction> {
+    vec![
+        project_action(ProjectOp::RefreshProject),
+        project_action(ProjectOp::DisconnectProject),
     ]
 }
 

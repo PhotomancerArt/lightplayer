@@ -9,9 +9,9 @@ use lpa_link::{
 
 use crate::{
     ConnectedLink, DeviceOp, DeviceUx, LinkOpenOutcome, ProjectConnectResult, ProjectOp,
-    ProjectState, ProjectUx, StudioSnapshot, StudioView, UiAction, UiActions, UiActivity, UiBody,
-    UiStatus, UxActivityTarget, UxContext, UxError, UxLogEntry, UxLogLevel, UxNode, UxNotice,
-    UxOutcome, UxResult, UxUpdate, UxUpdateSink,
+    ProjectState, ProjectSyncRun, ProjectUx, StudioSnapshot, StudioView, UiAction, UiActions,
+    UiActivity, UiBody, UiStatus, UxActivityTarget, UxContext, UxError, UxLogEntry, UxLogLevel,
+    UxNode, UxNotice, UxOutcome, UxResult, UxUpdate, UxUpdateSink,
 };
 
 pub struct StudioUx {
@@ -155,6 +155,7 @@ impl StudioUx {
                 self.connect_loaded_project(handle_id, updates).await
             }
             ProjectOp::LoadDemoProject => self.load_demo_project(updates).await,
+            ProjectOp::RefreshProject => self.refresh_project(updates).await,
             ProjectOp::DisconnectProject => self.disconnect_project().await,
         }
     }
@@ -254,8 +255,12 @@ impl StudioUx {
                     }
                 };
                 match auto_connect {
-                    AutoProjectConnect::Connected => {
-                        outcome = outcome.with_notice(UxNotice::info("Connected running project"));
+                    AutoProjectConnect::Connected { synced } => {
+                        outcome = outcome.with_notice(project_sync_notice(
+                            synced,
+                            "Connected running project",
+                            "Connected running project; project sync needs attention",
+                        ));
                     }
                     AutoProjectConnect::SelectionRequired => {
                         outcome = outcome.with_notice(UxNotice::info("Choose running project"));
@@ -291,7 +296,12 @@ impl StudioUx {
             Ok(ProjectConnectResult::Connected { logs }) => {
                 self.device.record_logs(&logs);
                 self.logs.extend(logs);
-                Ok(UxOutcome::new().with_notice(UxNotice::info("Connected running project")))
+                let sync = self.sync_project_after_attach(updates).await?;
+                Ok(UxOutcome::new().with_notice(project_sync_notice(
+                    sync.synced,
+                    "Connected running project",
+                    "Connected running project; project sync needs attention",
+                )))
             }
             Ok(ProjectConnectResult::SelectionRequired { logs }) => {
                 self.device.record_logs(&logs);
@@ -336,7 +346,10 @@ impl StudioUx {
             ProjectConnectResult::Connected { logs } => {
                 self.device.record_logs(&logs);
                 self.logs.extend(logs);
-                Ok(AutoProjectConnect::Connected)
+                let sync = self.sync_project_after_attach(updates).await?;
+                Ok(AutoProjectConnect::Connected {
+                    synced: sync.synced,
+                })
             }
             ProjectConnectResult::SelectionRequired { logs } => {
                 self.device.record_logs(&logs);
@@ -367,7 +380,12 @@ impl StudioUx {
             Ok(logs) => {
                 self.device.record_logs(&logs);
                 self.logs.extend(logs);
-                Ok(UxOutcome::new().with_notice(UxNotice::info("Connected running project")))
+                let sync = self.sync_project_after_attach(updates).await?;
+                Ok(UxOutcome::new().with_notice(project_sync_notice(
+                    sync.synced,
+                    "Connected running project",
+                    "Connected running project; project sync needs attention",
+                )))
             }
             Err(error) => {
                 self.logs.push(UxLogEntry::new(
@@ -397,7 +415,12 @@ impl StudioUx {
             Ok(logs) => {
                 self.device.record_logs(&logs);
                 self.logs.extend(logs);
-                Ok(UxOutcome::new().with_notice(UxNotice::info("Demo project loaded")))
+                let sync = self.sync_project_after_attach(updates).await?;
+                Ok(UxOutcome::new().with_notice(project_sync_notice(
+                    sync.synced,
+                    "Demo project loaded",
+                    "Demo project loaded; project sync needs attention",
+                )))
             }
             Err(error) => {
                 self.logs.push(UxLogEntry::new(
@@ -414,6 +437,54 @@ impl StudioUx {
     async fn disconnect_project(&mut self) -> UxResult {
         self.project.disconnect();
         Ok(UxOutcome::new().with_notice(UxNotice::info("Project disconnected")))
+    }
+
+    async fn refresh_project(&mut self, updates: UxUpdateSink) -> UxResult {
+        emit_activity(
+            &updates,
+            UxActivityTarget::pane(ProjectUx::NODE_ID),
+            "Refreshing project",
+            "Refreshing",
+            "Reading project state",
+        );
+        updates.emit(UxUpdate::View(self.view()));
+        let sync = {
+            let server = self.device.server.client_mut()?;
+            self.project.refresh_project(server).await?
+        };
+        self.record_project_sync_run(&sync);
+        updates.emit(UxUpdate::View(self.view()));
+        Ok(UxOutcome::new().with_notice(project_sync_notice(
+            sync.synced,
+            "Project refreshed",
+            "Project refresh needs attention",
+        )))
+    }
+
+    async fn sync_project_after_attach(
+        &mut self,
+        updates: UxUpdateSink,
+    ) -> Result<ProjectSyncRun, UxError> {
+        emit_activity(
+            &updates,
+            UxActivityTarget::pane(ProjectUx::NODE_ID),
+            "Syncing project",
+            "Syncing",
+            "Reading project state",
+        );
+        updates.emit(UxUpdate::View(self.view()));
+        let sync = {
+            let server = self.device.server.client_mut()?;
+            self.project.sync_loaded_project(server).await?
+        };
+        self.record_project_sync_run(&sync);
+        updates.emit(UxUpdate::View(self.view()));
+        Ok(sync)
+    }
+
+    fn record_project_sync_run(&mut self, sync: &ProjectSyncRun) {
+        self.device.record_logs(&sync.logs);
+        self.logs.extend(sync.logs.clone());
     }
 
     async fn disconnect_device(&mut self) -> UxResult {
@@ -597,9 +668,17 @@ impl UxContext for StudioUx {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AutoProjectConnect {
-    Connected,
+    Connected { synced: bool },
     SelectionRequired,
     NotFound,
+}
+
+fn project_sync_notice(synced: bool, success: &str, needs_attention: &str) -> UxNotice {
+    if synced {
+        UxNotice::info(success)
+    } else {
+        UxNotice::warning(needs_attention)
+    }
 }
 
 fn should_auto_load_demo_project(connection: &LinkConnection) -> bool {
@@ -706,24 +785,33 @@ fn reset_notice(result: &LinkManagementResult) -> UxNotice {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::VecDeque;
     use std::future::Future;
+    use std::pin::Pin;
     use std::sync::Arc;
     use std::task::{Context, Poll, Wake, Waker};
 
     use std::cell::RefCell;
     use std::rc::Rc;
 
+    use lpa_client::ClientIo;
     use lpa_link::providers::LinkProviderRegistry;
     use lpa_link::providers::fake::FakeProvider;
     use lpa_link::{
         LinkCapabilities, LinkConnection, LinkConnectionKind, LinkEndpoint, LinkEndpointId,
         LinkProviderKind, LinkSession,
     };
+    use lpc_model::Revision;
+    use lpc_wire::{
+        ClientMessage, ClientRequest, MemoryStats, ProjectReadResponse, ProjectReadResult,
+        ProjectRuntimeStatus, RuntimeReadResult, ServerRuntimeStatus, TransportError,
+        WireServerMessage, WireServerMsgBody,
+    };
 
     use crate::{
         ConnectedDeviceSummary, LinkState, LinkUx, ProjectEditorOp, ProjectEditorTarget,
-        ProjectInventorySummary, ProjectState, ProjectUx, ServerFailureKind, ServerState, ServerUx,
-        UiStatusKind, UiStepState, UxIssue, UxNodeId,
+        ProjectInventorySummary, ProjectState, ProjectSyncPhase, ProjectUx, ServerFailureKind,
+        ServerState, ServerUx, StudioServerClient, UiStatusKind, UiStepState, UxIssue, UxNodeId,
     };
 
     use super::*;
@@ -1036,6 +1124,52 @@ mod tests {
     }
 
     #[test]
+    fn refresh_project_dispatch_reads_project_and_updates_sync_summary() {
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        let io = ScriptedClientIo::new(
+            Rc::clone(&sent),
+            vec![project_read_response_with_runtime(1, Revision::new(13))],
+        );
+        let mut studio = connected_studio_with_client(io);
+        let action =
+            UiAction::from_op(UxNodeId::new(ProjectUx::NODE_ID), ProjectOp::RefreshProject);
+
+        let outcome = block_on_ready(studio.dispatch(action)).unwrap();
+
+        assert!(
+            outcome
+                .notices
+                .iter()
+                .any(|notice| notice.message == "Project refreshed")
+        );
+        let sent = sent.borrow();
+        assert_eq!(sent.len(), 1);
+        let ClientRequest::ProjectRequest { handle, request } = &sent[0].msg else {
+            panic!("refresh should send a project read request");
+        };
+        assert_eq!(sent[0].id, 1);
+        assert_eq!(handle.id(), 7);
+        assert_eq!(request.since, None);
+        assert_eq!(request.queries.len(), 3);
+
+        let sync = studio
+            .project
+            .snapshot()
+            .sync
+            .expect("refresh should leave a sync summary");
+        assert_eq!(sync.phase, ProjectSyncPhase::Ready);
+        assert_eq!(sync.revision, 13);
+        assert_eq!(
+            sync.runtime.as_ref().map(|runtime| runtime.frame_num),
+            Some(77)
+        );
+        assert_eq!(
+            sync.runtime.as_ref().and_then(|runtime| runtime.free_bytes),
+            Some(4096)
+        );
+    }
+
+    #[test]
     fn project_descendant_action_dispatch_routes_to_project_ux() {
         let mut studio = StudioUx::new();
         let target = ProjectEditorTarget::node_tree();
@@ -1196,6 +1330,21 @@ mod tests {
         studio
     }
 
+    fn connected_studio_with_client(io: ScriptedClientIo) -> StudioUx {
+        let mut studio = link_connected_studio();
+        studio
+            .device
+            .server
+            .set_client_for_test(StudioServerClient::from_io_for_test(
+                "fake-protocol",
+                Box::new(io),
+            ));
+        studio
+            .project
+            .mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        studio
+    }
+
     fn link_connected_studio() -> StudioUx {
         let mut studio = StudioUx::new();
         studio.device.link.set_state(LinkState::Connected {
@@ -1249,6 +1398,89 @@ mod tests {
                 .with_flash()
                 .with_device_erase(),
         )
+    }
+
+    fn project_read_response_with_runtime(id: u64, revision: Revision) -> WireServerMessage {
+        WireServerMessage {
+            id,
+            msg: WireServerMsgBody::ProjectRequest {
+                response: ProjectReadResponse {
+                    revision,
+                    results: vec![ProjectReadResult::Runtime(RuntimeReadResult {
+                        project: ProjectRuntimeStatus {
+                            revision,
+                            frame_num: 77,
+                            frame_delta_ms: 16,
+                            frame_total_ms: 17,
+                            demand_root_count: 2,
+                            runtime_buffer_count: 3,
+                        },
+                        server: Some(ServerRuntimeStatus {
+                            theoretical_fps: Some(60.0),
+                            last_frame_time_us: Some(16_000),
+                            memory: Some(MemoryStats {
+                                free_bytes: 4096,
+                                used_bytes: 2048,
+                                total_bytes: 6144,
+                            }),
+                        }),
+                    })],
+                    probes: Vec::new(),
+                },
+            },
+        }
+    }
+
+    struct ScriptedClientIo {
+        sent: Rc<RefCell<Vec<ClientMessage>>>,
+        responses: Rc<RefCell<VecDeque<WireServerMessage>>>,
+    }
+
+    impl ScriptedClientIo {
+        fn new(sent: Rc<RefCell<Vec<ClientMessage>>>, responses: Vec<WireServerMessage>) -> Self {
+            Self {
+                sent,
+                responses: Rc::new(RefCell::new(responses.into())),
+            }
+        }
+    }
+
+    impl ClientIo for ScriptedClientIo {
+        fn send<'life0, 'async_trait>(
+            &'life0 mut self,
+            msg: ClientMessage,
+        ) -> Pin<Box<dyn Future<Output = Result<(), TransportError>> + 'async_trait>>
+        where
+            'life0: 'async_trait,
+            Self: 'async_trait,
+        {
+            self.sent.borrow_mut().push(msg);
+            Box::pin(async { Ok(()) })
+        }
+
+        fn receive<'life0, 'async_trait>(
+            &'life0 mut self,
+        ) -> Pin<Box<dyn Future<Output = Result<WireServerMessage, TransportError>> + 'async_trait>>
+        where
+            'life0: 'async_trait,
+            Self: 'async_trait,
+        {
+            let response =
+                self.responses.borrow_mut().pop_front().ok_or_else(|| {
+                    TransportError::Other("scripted client io exhausted".to_string())
+                });
+            Box::pin(async move { response })
+        }
+
+        fn close<'life0, 'async_trait>(
+            &'life0 mut self,
+        ) -> Pin<Box<dyn Future<Output = Result<(), TransportError>> + 'async_trait>>
+        where
+            'life0: 'async_trait,
+            Self: 'async_trait,
+        {
+            Box::pin(async { Ok(()) })
+        }
     }
 
     fn block_on_ready<F>(future: F) -> F::Output
