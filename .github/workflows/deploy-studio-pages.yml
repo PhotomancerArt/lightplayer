@@ -1,0 +1,88 @@
+name: Deploy Studio Pages
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: pages-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+env:
+  RUST_BACKTRACE: 1
+  RISC_V_TARGET: riscv32imac-unknown-none-elf
+  RUSTUP_PERMIT_COPY_RENAME: 1
+
+jobs:
+  deploy:
+    name: Build and deploy Studio
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: nightly-2026-04-27
+          components: rust-src
+
+      - name: Install Rust targets
+        run: |
+          rustup target add wasm32-unknown-unknown
+          rustup target add ${{ env.RISC_V_TARGET }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-${{ runner.arch }}-pages-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-${{ runner.arch }}-pages-cargo-
+
+      - name: Install just
+        uses: extractions/setup-just@v3
+
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.114 --locked
+
+      - name: Install espflash
+        run: cargo install espflash --version 3.3.0 --locked
+
+      - name: Build Pages artifact
+        run: just studio-web-deploy-dir production target/pages/studio lightplayer.app
+
+      - name: Smoke-check Pages artifact
+        run: just studio-web-smoke target/pages/studio
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/pages/studio
+
+      - name: Deploy Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

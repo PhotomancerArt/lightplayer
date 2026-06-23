@@ -9,24 +9,32 @@ rust-version.workspace = true
 [dependencies]
 lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
-lpc-shared = { path = "../../lp-core/lpc-shared" }
-tokio = { version = "1", features = ["full"] }
-anyhow = "1"
+lpc-shared = { path = "../../lp-core/lpc-shared", optional = true }
+tokio = { version = "1", features = ["full"], optional = true }
+anyhow = { version = "1", optional = true }
 tokio-tungstenite = { version = "0.21", optional = true }
-futures-util = "0.3"
+futures-util = { version = "0.3", optional = true }
 async-trait = "0.1"
 serde = { version = "1", features = ["derive"] }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", optional = true, features = ["std"] }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", optional = true, default-features = false }
-log = { workspace = true, features = ["std"] }
+log = { workspace = true, features = ["std"], optional = true }
 serialport = { version = "4.8", optional = true }
 hashbrown = { workspace = true, optional = true }
 
 [features]
-default = []
-serial = ["lp-riscv-elf", "lp-riscv-emu", "lp-riscv-emu/std", "hashbrown", "serialport"]
-emu = ["lp-riscv-elf", "lp-riscv-emu", "lp-riscv-emu/std", "hashbrown"]
-ws = ["tokio-tungstenite"]
+default = ["host"]
+host = ["dep:anyhow", "dep:futures-util", "dep:log", "dep:lpc-shared", "dep:tokio"]
+serial = [
+    "host",
+    "lp-riscv-elf",
+    "lp-riscv-emu",
+    "lp-riscv-emu/std",
+    "hashbrown",
+    "serialport",
+]
+emu = ["host", "lp-riscv-elf", "lp-riscv-emu", "lp-riscv-emu/std", "hashbrown"]
+ws = ["host", "tokio-tungstenite"]
 
 [dev-dependencies]
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }

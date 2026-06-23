@@ -17,6 +17,12 @@ logic.
   projects, and serving the `lpc-wire` API over app-provided transports.
 - `lpa-client` — client-side transport/API layer for talking to a LightPlayer
   server or firmware target.
+- `lpa-link` — low-level endpoint/link layer for discovery, status,
+  management, diagnostics, logs, and opening server/client connections.
+- `lpa-studio-ux` — UI-independent Studio UX/controller layer. It owns
+  lower-level services and exposes Studio views, node states, typed actions,
+  logs, and project summaries to UI shells.
+- `lpa-studio-web` — static Dioxus browser shell for the first Studio UI slice.
 - `web-demo` — browser demo and tooling for the shader pipeline.
 
 ## Boundary

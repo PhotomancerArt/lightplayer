@@ -1,0 +1,60 @@
+[package]
+name = "lpa-link"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+fw-host = { path = "../../lp-fw/fw-host", optional = true }
+lpa-client = { path = "../lpa-client", optional = true }
+lpc-model = { path = "../../lp-core/lpc-model", optional = true }
+js-sys = { version = "0.3", optional = true }
+serde = { workspace = true, features = ["derive"] }
+serde-wasm-bindgen = { version = "0.6", optional = true }
+serialport = { version = "4.8", optional = true }
+strum = { version = "0.27", features = ["derive"] }
+tokio = { version = "1", features = ["sync"], optional = true }
+wasm-bindgen = { version = "0.2", optional = true }
+wasm-bindgen-futures = { version = "0.4", optional = true }
+web-sys = { version = "0.3", optional = true, features = [
+    "Document",
+    "ErrorEvent",
+    "Location",
+    "MessageEvent",
+    "Url",
+    "Window",
+    "Worker",
+    "WorkerOptions",
+    "WorkerType",
+] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+
+[features]
+default = []
+browser-serial-esp32 = [
+    "dep:js-sys",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+]
+browser-worker = [
+    "dep:js-sys",
+    "dep:serde-wasm-bindgen",
+    "dep:wasm-bindgen",
+    "dep:wasm-bindgen-futures",
+    "dep:web-sys",
+]
+host-process = ["dep:fw-host", "dep:lpa-client", "dep:tokio"]
+host-serial-esp32 = [
+    "dep:lpa-client",
+    "lpa-client/serial",
+    "dep:lpc-model",
+    "dep:serialport",
+    "dep:tokio",
+]
+
+[lints]
+workspace = true

@@ -26,7 +26,7 @@ just web-demo-build
 ```
 
 This builds `web-demo` for wasm32 (release), runs `wasm-bindgen` into `www/pkg/`, and refreshes
-`www/rainbow-default.glsl` from `examples/basic/src/rainbow.shader/main.glsl`.
+`www/rainbow-default.glsl` from `examples/basic/shader.glsl`.
 
 ## Run
 
@@ -36,6 +36,21 @@ just web-demo
 
 Open the URL printed by miniserve (default `http://127.0.0.1:2812`). The editor compiles on idle;
 `render_frame` drives the texture (shader entry point is **`vec4 render(vec2 fragCoord, vec2 outputSize, float time)`**).
+
+## Deploy
+
+The existing `just web-demo-deploy` recipe still deploys the demo to the
+`gh-pages` branch. The `demo.lightplayer.app` channel uses a clean staged
+artifact instead:
+
+```bash
+just web-demo-deploy-dir demo target/pages/web-demo demo.lightplayer.app
+just web-demo-smoke target/pages/web-demo
+```
+
+The staged artifact includes `version.json`, `.nojekyll`, and `CNAME`. Manual
+deployment to the demo Pages repository runs through the `Deploy Pages Channel`
+workflow. See `docs/deploy/studio-pages.md` for DNS and GitHub Pages setup.
 
 ## Linear memory
 

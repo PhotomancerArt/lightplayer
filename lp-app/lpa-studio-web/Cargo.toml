@@ -1,0 +1,20 @@
+[package]
+name = "lpa-studio-web"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Static Dioxus web shell for LightPlayer Studio"
+
+[features]
+stories = []
+
+[dependencies]
+dioxus = { version = "0.7", features = ["web"] }
+lpa-studio-ux = { path = "../lpa-studio-ux", features = ["browser-worker", "browser-serial-esp32"] }
+web-sys = { version = "0.3", features = ["Location", "Window"] }
+
+[lints]
+workspace = true

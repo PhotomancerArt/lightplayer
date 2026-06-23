@@ -14,21 +14,22 @@ use lp_riscv_emu::{
 #[cfg(feature = "serial")]
 use lp_riscv_inst::Gpr;
 #[cfg(feature = "serial")]
-use lpa_client::transport_serial::{
-    BacktraceInfo, create_emulator_serial_transport_pair, create_hardware_serial_transport_pair,
-};
+use lpa_client::transport_serial::{BacktraceInfo, create_emulator_serial_transport_pair};
 use lpa_client::{ClientTransport, HostSpecifier, WebSocketClientTransport};
 #[cfg(feature = "serial")]
 use std::sync::{Arc, Mutex};
 
-use crate::client::local_server::LocalServerTransport;
+use crate::client::host_process::connect_host_process;
+#[cfg(feature = "serial")]
+use crate::client::host_serial_esp32::connect_host_serial_esp32;
 #[cfg(feature = "serial")]
 use crate::client::serial_port::detect_serial_port;
 
 /// Connect to a server using the specified host specifier
 ///
 /// Creates and returns an appropriate `ClientTransport` based on the `HostSpecifier`.
-/// For `Local`, creates an in-memory server on a separate thread.
+/// For `Local`, creates a `host-process` link session backed by an in-process
+/// `fw-host` runtime.
 ///
 /// # Arguments
 ///
@@ -46,7 +47,7 @@ use crate::client::serial_port::detect_serial_port;
 /// use lpa_client::HostSpecifier;
 ///
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
-/// // Connect to local in-memory server
+/// // Connect to a local in-process fw-host runtime
 /// let mut transport = client_connect(HostSpecifier::Local)?;
 /// // Note: In real usage, you would use the transport and then close it.
 /// // For doctest purposes, we just demonstrate creation.
@@ -60,9 +61,8 @@ use crate::client::serial_port::detect_serial_port;
 pub fn client_connect(spec: HostSpecifier) -> Result<Box<dyn ClientTransport>> {
     match spec {
         HostSpecifier::Local => {
-            // Create local server transport (now implements ClientTransport directly)
-            let local_server = LocalServerTransport::new()?;
-            Ok(Box::new(local_server))
+            let host_process = connect_host_process()?;
+            Ok(Box::new(host_process))
         }
         HostSpecifier::WebSocket { url } => {
             // WebSocketClientTransport::new is async, but client_connect is sync
@@ -80,10 +80,8 @@ pub fn client_connect(spec: HostSpecifier) -> Result<Box<dyn ClientTransport>> {
             let port_config = detect_serial_port(port.as_deref(), baud_rate.as_ref().copied())
                 .context("Failed to detect serial port")?;
 
-            // Create hardware serial transport
-            let transport =
-                create_hardware_serial_transport_pair(&port_config.port, port_config.baud_rate)
-                    .map_err(|e| anyhow::anyhow!("Failed to create serial transport: {e}"))?;
+            let transport = connect_host_serial_esp32(&port_config.port, port_config.baud_rate)
+                .map_err(|e| anyhow::anyhow!("Failed to create serial transport: {e}"))?;
 
             Ok(Box::new(transport))
         }

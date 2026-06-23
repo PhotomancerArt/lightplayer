@@ -53,7 +53,7 @@ To get started with development:
    ```
 
    This will:
-   - Check for required tools (Rust, Cargo, rustup, just)
+   - Check for required tools (Rust, Cargo, rustup, just, oxipng)
    - Verify Rust version meets minimum requirements (1.90.0+)
    - Install the RISC-V target (`riscv32imac-unknown-none-elf`) if needed
    - Set up git hooks (pre-commit hook runs `just check`)
@@ -61,6 +61,8 @@ To get started with development:
 2. **Required tools:**
    - Rust toolchain (1.90.0 or later) - [Install Rust](https://rustup.rs/)
    - `just` - Task runner: `cargo install just` or via package manager
+   - `oxipng` - Lossless PNG optimizer for Studio story image baselines:
+     `cargo install oxipng` or `brew install oxipng`
 
 3. **Common development commands:**
    - `just fci` - Fix, check, build, and test the whole project. Do this before you submit a PR.

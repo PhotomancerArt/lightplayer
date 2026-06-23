@@ -1,6 +1,23 @@
 # Firmware Tests
 
-Integration tests for firmware functionality, including USB serial communication tests.
+Integration tests for firmware functionality, including firmware emulator
+rendering and USB serial communication tests.
+
+## Firmware Emulator Render Tests
+
+`scene_render_emu` builds and runs `fw-emu`, writes a project through the wire
+protocol, loads it, advances simulated time, and verifies output channel bytes
+through canonical project-read `OutputChannels` resources.
+
+```bash
+cargo test -p fw-tests --test scene_render_emu
+```
+
+Browser firmware smoke coverage currently lives with `fw-browser`: the
+`fw-browser` wasm test covers project load/tick/output through the runtime API,
+and `lp-fw/fw-browser/www/smoke.html` creates a real Web Worker and verifies the
+same project-read output path through `postMessage`. A future CI browser runner
+can move or mirror the Web Worker smoke here if that becomes easier to maintain.
 
 ## USB Serial Tests
 

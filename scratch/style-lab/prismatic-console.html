@@ -1,0 +1,659 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LightPlayer Style Lab - Prismatic Console</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #080a0f;
+        --bg-2: #10151c;
+        --pane: rgba(18, 24, 32, 0.76);
+        --pane-strong: rgba(21, 28, 37, 0.94);
+        --line: rgba(206, 232, 246, 0.18);
+        --line-hot: rgba(123, 224, 178, 0.72);
+        --text: #f6f2e9;
+        --muted: #9eabb7;
+        --soft: #cdd7dc;
+        --accent: #7be0b2;
+        --accent-2: #78b7ff;
+        --accent-3: #ff7acc;
+        --accent-4: #ffd36e;
+        --danger: #ff776e;
+        --radius: 8px;
+        --gap: 10px;
+        --pad: 10px;
+        --control-h: 30px;
+        --rainbow: linear-gradient(90deg, #7be0b2, #78b7ff, #ff7acc, #ffd36e);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        background:
+          radial-gradient(circle at 10% 8%, rgba(123, 224, 178, 0.18), transparent 24%),
+          radial-gradient(circle at 84% 12%, rgba(255, 122, 204, 0.15), transparent 28%),
+          linear-gradient(145deg, #07090d 0%, #11161d 48%, #080a0f 100%);
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .shell {
+        container-type: inline-size;
+        min-height: 100vh;
+        padding: 10px;
+      }
+
+      .topbar,
+      .pane {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--pane);
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.36), inset 0 1px rgba(255, 255, 255, 0.06);
+        backdrop-filter: blur(18px) saturate(145%);
+      }
+
+      .topbar {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        margin-bottom: var(--gap);
+        padding: 8px;
+      }
+
+      .brand {
+        display: grid;
+        grid-template-columns: 34px minmax(0, 1fr);
+        gap: 8px;
+        align-items: center;
+        min-width: 0;
+      }
+
+      .mark {
+        width: 34px;
+        height: 34px;
+        border-radius: 7px;
+        background:
+          radial-gradient(circle at 30% 30%, white 0 2px, transparent 3px),
+          var(--rainbow);
+        box-shadow: 0 0 22px rgba(123, 224, 178, 0.28);
+      }
+
+      .brand strong,
+      .brand span,
+      .pane-title span,
+      .pane-title strong,
+      .metric strong,
+      .metric span {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .brand strong {
+        font-size: 0.95rem;
+      }
+
+      .brand span,
+      .pane-title span,
+      .metric span,
+      label,
+      .tab,
+      .log span {
+        color: var(--muted);
+        font-size: 0.72rem;
+        font-weight: 700;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      .transport,
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+      }
+
+      .icon,
+      .chip,
+      .tab,
+      .scene,
+      .text-button {
+        min-height: var(--control-h);
+        border: 1px solid rgba(214, 235, 248, 0.18);
+        border-radius: 6px;
+        color: var(--text);
+        background: rgba(11, 15, 20, 0.58);
+      }
+
+      .icon {
+        width: 34px;
+      }
+
+      .text-button {
+        padding: 0 10px;
+        font-weight: 800;
+      }
+
+      .primary {
+        border-color: rgba(123, 224, 178, 0.76);
+        color: #07120d;
+        background: var(--accent);
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        padding: 0 8px;
+        color: var(--soft);
+        font-size: 0.78rem;
+      }
+
+      .workbench {
+        display: grid;
+        grid-template-areas: "nav" "main" "inspect" "status";
+        gap: var(--gap);
+      }
+
+      .nav {
+        grid-area: nav;
+      }
+
+      .main {
+        grid-area: main;
+        display: grid;
+        gap: var(--gap);
+      }
+
+      .inspect {
+        grid-area: inspect;
+      }
+
+      .status {
+        grid-area: status;
+      }
+
+      .pane {
+        min-width: 0;
+        overflow: hidden;
+      }
+
+      .pane-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-height: 38px;
+        padding: 7px var(--pad);
+        border-bottom: 1px solid var(--line);
+      }
+
+      .pane-title strong {
+        font-size: 0.9rem;
+      }
+
+      .pane-body {
+        padding: var(--pad);
+      }
+
+      .scene-list {
+        display: grid;
+        gap: 6px;
+      }
+
+      .scene {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 8px;
+        align-items: center;
+        width: 100%;
+        padding: 7px 8px;
+        text-align: left;
+      }
+
+      .scene.is-active {
+        border-color: var(--line-hot);
+        background: rgba(123, 224, 178, 0.11);
+      }
+
+      .meter {
+        width: 44px;
+        height: 7px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, var(--accent), var(--accent-2), var(--accent-3));
+      }
+
+      .mini-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        margin-top: 8px;
+      }
+
+      .metric,
+      .swatch {
+        min-width: 0;
+        padding: 8px;
+        border: 1px solid rgba(214, 235, 248, 0.14);
+        border-radius: 6px;
+        background: rgba(7, 10, 14, 0.48);
+      }
+
+      .metric strong {
+        margin-top: 3px;
+        font-size: 0.9rem;
+      }
+
+      .swatches {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 5px;
+        margin-top: 8px;
+      }
+
+      .swatches i {
+        display: block;
+        height: 18px;
+        border-radius: 4px;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 6px;
+        min-width: 0;
+      }
+
+      .tab {
+        padding: 6px 8px;
+      }
+
+      .tab.is-active {
+        color: var(--text);
+        border-color: var(--accent-2);
+      }
+
+      pre {
+        margin: 0;
+        min-height: 260px;
+        overflow: auto;
+        padding: 12px;
+        border-radius: 0 0 var(--radius) var(--radius);
+        background:
+          linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px) 0 0 / 42px 42px,
+          rgba(4, 7, 10, 0.82);
+        color: #d8f6ff;
+        font: 0.78rem/1.48 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      .code-accent {
+        color: #ffb7e6;
+      }
+
+      .visual {
+        display: grid;
+        gap: 8px;
+      }
+
+      .led-view {
+        position: relative;
+        min-height: 238px;
+        overflow: hidden;
+        border: 1px solid rgba(214, 235, 248, 0.18);
+        border-radius: 6px;
+        background:
+          radial-gradient(circle at 30% 28%, rgba(255, 122, 204, 0.95), transparent 22%),
+          radial-gradient(circle at 70% 36%, rgba(123, 224, 178, 0.92), transparent 24%),
+          radial-gradient(circle at 48% 72%, rgba(120, 183, 255, 0.88), transparent 24%),
+          #05070a;
+      }
+
+      .led-view::before {
+        content: "";
+        position: absolute;
+        inset: 8px;
+        background: radial-gradient(circle, rgba(255, 255, 255, 0.78) 0 2px, transparent 3px) 0 0 / 16px 16px;
+        mix-blend-mode: screen;
+        opacity: 0.82;
+      }
+
+      .led-view::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background:
+          linear-gradient(transparent 49%, rgba(255, 255, 255, 0.08) 50%, transparent 51%) 0 0 / 100% 18px,
+          linear-gradient(90deg, transparent 49%, rgba(255, 255, 255, 0.08) 50%, transparent 51%) 0 0 / 18px 100%;
+      }
+
+      .timeline {
+        display: grid;
+        grid-template-columns: repeat(8, 1fr);
+        gap: 4px;
+      }
+
+      .timeline i {
+        height: 24px;
+        border-radius: 4px;
+        background: linear-gradient(180deg, rgba(255, 255, 255, 0.22), rgba(255, 255, 255, 0.04)), var(--accent-2);
+      }
+
+      .controls {
+        display: grid;
+        gap: 10px;
+      }
+
+      .control-row {
+        display: grid;
+        grid-template-columns: 74px minmax(0, 1fr) 58px;
+        gap: 8px;
+        align-items: center;
+      }
+
+      input[type="range"] {
+        width: 100%;
+        accent-color: var(--accent);
+      }
+
+      input[type="number"] {
+        width: 100%;
+        height: var(--control-h);
+        border: 1px solid rgba(214, 235, 248, 0.18);
+        border-radius: 6px;
+        color: var(--text);
+        background: rgba(4, 7, 10, 0.58);
+        text-align: right;
+      }
+
+      .knobs {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+      }
+
+      .knob-card {
+        display: grid;
+        justify-items: center;
+        gap: 6px;
+        padding: 8px;
+        border: 1px solid rgba(214, 235, 248, 0.14);
+        border-radius: 6px;
+        background: rgba(4, 7, 10, 0.4);
+      }
+
+      .knob {
+        position: relative;
+        width: 56px;
+        aspect-ratio: 1;
+        border-radius: 50%;
+        background: conic-gradient(from -135deg, var(--accent) 0 62%, rgba(255, 255, 255, 0.12) 62% 100%);
+      }
+
+      .knob::after {
+        content: "";
+        position: absolute;
+        inset: 13px;
+        border-radius: 50%;
+        background: var(--pane-strong);
+        box-shadow: inset 0 1px rgba(255, 255, 255, 0.1);
+      }
+
+      .knob::before {
+        content: "";
+        position: absolute;
+        z-index: 1;
+        left: 50%;
+        top: 8px;
+        width: 2px;
+        height: 16px;
+        background: var(--text);
+        transform: translateX(-50%) rotate(35deg);
+        transform-origin: 50% 20px;
+      }
+
+      .log-grid {
+        display: grid;
+        gap: 6px;
+      }
+
+      .log {
+        display: grid;
+        grid-template-columns: 68px minmax(0, 1fr);
+        gap: 8px;
+        padding: 7px 8px;
+        border: 1px solid rgba(214, 235, 248, 0.12);
+        border-radius: 6px;
+        background: rgba(4, 7, 10, 0.42);
+      }
+
+      .log strong {
+        overflow-wrap: anywhere;
+      }
+
+      @media (min-width: 720px) {
+        .shell {
+          padding: 14px;
+        }
+
+        .topbar {
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: center;
+        }
+
+        .transport {
+          justify-content: end;
+        }
+
+        .chips {
+          grid-column: 1 / -1;
+        }
+
+        .workbench {
+          grid-template-columns: 210px minmax(0, 1fr);
+          grid-template-areas:
+            "nav main"
+            "inspect main"
+            "status status";
+        }
+      }
+
+      @media (min-width: 1024px) {
+        .shell {
+          padding: 18px;
+        }
+
+        .topbar {
+          grid-template-columns: minmax(250px, 1fr) auto minmax(270px, auto);
+        }
+
+        .chips {
+          grid-column: auto;
+          justify-content: end;
+        }
+
+        .workbench {
+          grid-template-columns: 220px minmax(0, 1fr) 286px;
+          grid-template-areas:
+            "nav main inspect"
+            "status status status";
+        }
+
+        .main {
+          grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.85fr);
+        }
+      }
+
+      @media (max-width: 430px) {
+        .control-row {
+          grid-template-columns: 1fr;
+        }
+
+        .icon {
+          flex: 1 0 32px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar" aria-label="Studio status and transport">
+        <div class="brand">
+          <span class="mark" aria-hidden="true"></span>
+          <div>
+            <strong>LightPlayer Studio</strong>
+            <span>Aurora Rack / ESP32-C6 live JIT</span>
+          </div>
+        </div>
+        <div class="transport" aria-label="Transport">
+          <button class="icon" title="Previous">|&lt;</button>
+          <button class="icon primary" title="Play">&gt;</button>
+          <button class="icon" title="Stop">[]</button>
+          <button class="text-button">Compile</button>
+        </div>
+        <div class="chips" aria-label="Runtime status">
+          <span class="chip">USB ready</span>
+          <span class="chip">JIT 2.7 ms</span>
+          <span class="chip">Heap 58 K</span>
+        </div>
+      </section>
+
+      <section class="workbench">
+        <aside class="pane nav">
+          <div class="pane-head">
+            <div class="pane-title">
+              <span>Project</span>
+              <strong>Scenes</strong>
+            </div>
+          </div>
+          <div class="pane-body">
+            <div class="scene-list">
+              <button class="scene is-active"><strong>Aurora boreal</strong><span class="meter"></span></button>
+              <button class="scene"><strong>Pixel rain</strong><span class="meter"></span></button>
+              <button class="scene"><strong>Warm scanner</strong><span class="meter"></span></button>
+              <button class="scene"><strong>Audio bloom</strong><span class="meter"></span></button>
+            </div>
+            <div class="mini-grid">
+              <div class="metric"><span>FPS</span><strong>60.0</strong></div>
+              <div class="metric"><span>Nodes</span><strong>18</strong></div>
+              <div class="metric"><span>LPIR</span><strong>824 B</strong></div>
+              <div class="metric"><span>RV32</span><strong>436 B</strong></div>
+            </div>
+            <div class="swatch">
+              <span>Palette</span>
+              <div class="swatches">
+                <i style="background:#7be0b2"></i>
+                <i style="background:#78b7ff"></i>
+                <i style="background:#ff7acc"></i>
+                <i style="background:#ffd36e"></i>
+                <i style="background:#f6f2e9"></i>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <section class="main">
+          <section class="pane editor">
+            <div class="pane-head">
+              <div class="pane-title">
+                <span>Shader</span>
+                <strong>fragment.glsl</strong>
+              </div>
+              <div class="tabs">
+                <span class="tab is-active">GLSL</span>
+                <span class="tab">LPIR</span>
+                <span class="tab">RV32</span>
+              </div>
+            </div>
+            <pre><code>vec3 palette(float t) {
+  return 0.5 + 0.5 * cos(6.28318 *
+    (vec3(0.00, 0.32, 0.67) + t));
+}
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+  vec2 p = fragCoord / iResolution.xy;
+  float wave = sin((p.x + time * 0.18) * 18.0);
+  float bloom = smoothstep(0.30, 0.96, wave * p.y);
+  vec3 rgb = palette(p.x + time * 0.07);
+  fragColor = vec4(mix(rgb * 0.18, rgb, bloom), 1.0);
+}</code></pre>
+          </section>
+
+          <section class="pane visual">
+            <div class="pane-head">
+              <div class="pane-title">
+                <span>Texture</span>
+                <strong>LED preview</strong>
+              </div>
+              <span class="chip">64 x 32</span>
+            </div>
+            <div class="pane-body visual">
+              <div class="led-view" role="img" aria-label="Prismatic LED preview"></div>
+              <div class="timeline" aria-hidden="true">
+                <i style="background:#7be0b2"></i>
+                <i style="background:#78b7ff"></i>
+                <i style="background:#ff7acc"></i>
+                <i style="background:#ffd36e"></i>
+                <i style="background:#7be0b2"></i>
+                <i style="background:#78b7ff"></i>
+                <i style="background:#ff7acc"></i>
+                <i style="background:#ffd36e"></i>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <aside class="pane inspect">
+          <div class="pane-head">
+            <div class="pane-title">
+              <span>Controls</span>
+              <strong>Aurora rack</strong>
+            </div>
+            <span class="chip">Live</span>
+          </div>
+          <div class="pane-body controls">
+            <div class="knobs">
+              <div class="knob-card"><div class="knob"></div><label>Hue</label></div>
+              <div class="knob-card"><div class="knob"></div><label>Bloom</label></div>
+              <div class="knob-card"><div class="knob"></div><label>Drift</label></div>
+              <div class="knob-card"><div class="knob"></div><label>Gamma</label></div>
+            </div>
+            <div class="control-row"><label>Speed</label><input type="range" value="68"><input type="number" value="0.68" step="0.01"></div>
+            <div class="control-row"><label>Density</label><input type="range" value="43"><input type="number" value="43"></div>
+            <div class="control-row"><label>Gain</label><input type="range" value="81"><input type="number" value="1.24" step="0.01"></div>
+            <button class="text-button primary">Push to device</button>
+          </div>
+        </aside>
+
+        <section class="pane status">
+          <div class="pane-head">
+            <div class="pane-title">
+              <span>Runtime</span>
+              <strong>Recent activity</strong>
+            </div>
+          </div>
+          <div class="pane-body log-grid">
+            <div class="log"><span>info</span><strong>compiled fragment.glsl to RV32 native</strong></div>
+            <div class="log"><span>debug</span><strong>pool allocator reused 9 registers</strong></div>
+            <div class="log"><span>warn</span><strong>texture slot rainbow LUT is simulated</strong></div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

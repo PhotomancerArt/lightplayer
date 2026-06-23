@@ -188,6 +188,16 @@ fn handle_load_project(
 ) -> Result<ServerMessagePayload, ServerError> {
     backtrace::set_oom_context("server handler: load project");
     log::info!("Loading project: {}", path.as_str());
+    let loaded_count = project_manager.list_loaded_projects().len();
+    if loaded_count > 0 {
+        log::info!(
+            "Unloading {loaded_count} project(s) before loading {}",
+            path.as_str()
+        );
+        log_memory(memory_stats, "load_project unload existing before");
+        project_manager.unload_all_projects()?;
+        log_memory(memory_stats, "load_project unload existing after");
+    }
     log_memory(memory_stats, "load_project before");
     let handle = project_manager.load_project(
         path,

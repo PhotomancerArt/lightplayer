@@ -1,0 +1,773 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LightPlayer Style Lab - Iridescent Minimal</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0b0d0e;
+        --panel: rgba(18, 22, 24, 0.68);
+        --panel-2: rgba(27, 32, 34, 0.62);
+        --line: rgba(255, 255, 255, 0.24);
+        --line-soft: rgba(255, 255, 255, 0.14);
+        --line-strong: rgba(255, 255, 255, 0.38);
+        --line-bright: rgba(255, 255, 255, 0.58);
+        --text: #f4f1ea;
+        --muted: #9aa4a3;
+        --accent: #9ff4c8;
+        --accent-2: #8fb7ff;
+        --accent-3: #ff9fcf;
+        --accent-4: #f3d06f;
+        --glass-glow: rgba(255, 255, 255, 0.12);
+        --glass-glow-strong: rgba(255, 255, 255, 0.22);
+        --radius: 6px;
+        --gap: 9px;
+        --pad: 9px;
+        --control-h: 30px;
+        --iridescent: linear-gradient(90deg, #9ff4c8, #8fb7ff, #ff9fcf, #f3d06f);
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent 220px),
+          linear-gradient(115deg, transparent 0 54%, rgba(255, 255, 255, 0.025) 55%, transparent 67%),
+          radial-gradient(circle at 90% 12%, rgba(255, 255, 255, 0.08), transparent 22%),
+          radial-gradient(circle at 12% 10%, rgba(143, 183, 255, 0.055), transparent 24%),
+          #0b0d0e;
+      }
+
+      button,
+      input {
+        font: inherit;
+      }
+
+      button {
+        appearance: none;
+        cursor: pointer;
+        position: relative;
+        overflow: hidden;
+      }
+
+      .shell {
+        container-type: inline-size;
+        min-height: 100vh;
+        padding: 9px;
+      }
+
+      .topbar,
+      .pane {
+        position: relative;
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background:
+          linear-gradient(145deg, rgba(255, 255, 255, 0.075), transparent 34%),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 42%),
+          var(--panel);
+        box-shadow:
+          0 16px 44px rgba(0, 0, 0, 0.30),
+          inset 0 1px rgba(255, 255, 255, 0.08),
+          inset 0 -1px rgba(0, 0, 0, 0.34);
+        -webkit-backdrop-filter: blur(18px) saturate(132%);
+        backdrop-filter: blur(18px) saturate(132%);
+        transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
+      }
+
+      .topbar::before,
+      .pane::before {
+        content: "";
+        position: absolute;
+        inset: -1px -1px auto;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.76), transparent);
+        opacity: 0.5;
+        z-index: 2;
+      }
+
+      .topbar::after,
+      .pane::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        pointer-events: none;
+        background: linear-gradient(120deg, rgba(255, 255, 255, 0.10), transparent 18%, transparent 76%, rgba(255, 255, 255, 0.035));
+        opacity: 0.54;
+        z-index: 0;
+      }
+
+      .topbar > *,
+      .pane > * {
+        position: relative;
+        z-index: 1;
+      }
+
+      .topbar {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 7px;
+        overflow: hidden;
+        margin-bottom: var(--gap);
+        padding: 8px;
+      }
+
+      .brand {
+        display: grid;
+        grid-template-columns: 32px minmax(0, 1fr);
+        gap: 8px;
+        align-items: center;
+      }
+
+      .mark {
+        width: 32px;
+        height: 32px;
+        border: 1px solid var(--line-strong);
+        border-radius: 6px;
+        background:
+          linear-gradient(135deg, transparent 0 32%, rgba(255, 255, 255, 0.20) 33% 36%, transparent 37%),
+          var(--iridescent);
+        box-shadow: inset 0 1px rgba(255, 255, 255, 0.42), 0 0 18px rgba(255, 255, 255, 0.12);
+      }
+
+      .brand strong,
+      .brand span,
+      .pane-title strong,
+      .pane-title span,
+      .metric strong,
+      .metric span {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .brand strong {
+        font-size: 0.95rem;
+      }
+
+      .brand span,
+      .pane-title span,
+      .metric span,
+      label,
+      .tab,
+      .log span {
+        color: var(--muted);
+        font-size: 0.72rem;
+        font-weight: 800;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      .transport,
+      .chips {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 5px;
+      }
+
+      .icon,
+      .chip,
+      .tab,
+      .scene,
+      .text-button {
+        min-height: var(--control-h);
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        color: var(--text);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.035)),
+          rgba(12, 15, 16, 0.56);
+        box-shadow:
+          inset 0 1px rgba(255, 255, 255, 0.12),
+          inset 0 -1px rgba(0, 0, 0, 0.22);
+        transition: border-color 130ms ease, box-shadow 130ms ease, background-color 130ms ease, color 130ms ease;
+      }
+
+      button::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        border-radius: inherit;
+        pointer-events: none;
+        background: linear-gradient(105deg, transparent 0 43%, rgba(255, 255, 255, 0.36) 49%, transparent 56%);
+        background-size: 260% 100%;
+        background-position: -180% 0;
+        opacity: 0;
+        transition: background-position 900ms ease, opacity 220ms ease;
+      }
+
+      .icon {
+        width: 33px;
+      }
+
+      .text-button {
+        padding: 0 10px;
+        font-weight: 800;
+      }
+
+      .primary {
+        border-color: var(--line-strong);
+        color: var(--text);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.045)),
+          rgba(17, 21, 22, 0.68);
+        box-shadow:
+          inset 0 1px rgba(255, 255, 255, 0.16),
+          inset 0 -2px rgba(255, 255, 255, 0.58),
+          0 0 0 1px rgba(255, 255, 255, 0.08);
+      }
+
+      .chip {
+        display: inline-flex;
+        align-items: center;
+        min-height: 24px;
+        padding: 0 8px;
+        color: #dce5e2;
+        font-size: 0.78rem;
+      }
+
+      .workbench {
+        display: grid;
+        grid-template-areas: "nav" "main" "inspect" "status";
+        gap: var(--gap);
+      }
+
+      .nav {
+        grid-area: nav;
+      }
+
+      .main {
+        grid-area: main;
+        display: grid;
+        gap: var(--gap);
+      }
+
+      .inspect {
+        grid-area: inspect;
+      }
+
+      .status {
+        grid-area: status;
+      }
+
+      .pane {
+        min-width: 0;
+        overflow: hidden;
+      }
+
+      .pane-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-height: 36px;
+        padding: 7px var(--pad);
+        border-bottom: 1px solid var(--line);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.075), transparent),
+          var(--panel-2);
+      }
+
+      .pane-title strong {
+        font-size: 0.9rem;
+      }
+
+      .pane-body {
+        padding: var(--pad);
+      }
+
+      .scene-list,
+      .controls,
+      .log-grid,
+      .visual {
+        display: grid;
+        gap: 6px;
+      }
+
+      .scene {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 48px;
+        gap: 8px;
+        align-items: center;
+        width: 100%;
+        padding: 7px 8px;
+        text-align: left;
+      }
+
+      .scene.is-active {
+        border-color: var(--line-strong);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.13), rgba(255, 255, 255, 0.035)),
+          rgba(13, 16, 17, 0.62);
+        box-shadow:
+          inset 2px 0 rgba(255, 255, 255, 0.64),
+          inset 0 1px rgba(255, 255, 255, 0.08);
+      }
+
+      .meter {
+        height: 7px;
+        border-radius: 999px;
+        background: var(--iridescent);
+      }
+
+      .mini-grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+        margin-top: 7px;
+      }
+
+      .metric,
+      .swatch,
+      .knob-card {
+        min-width: 0;
+        padding: 8px;
+        border: 1px solid var(--line-soft);
+        border-radius: 5px;
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.055), transparent 58%),
+          rgba(13, 16, 17, 0.52);
+        box-shadow: inset 0 1px rgba(255, 255, 255, 0.05);
+      }
+
+      .metric strong {
+        margin-top: 2px;
+        font-size: 0.9rem;
+      }
+
+      .swatches {
+        display: grid;
+        grid-template-columns: repeat(5, 1fr);
+        gap: 4px;
+        margin-top: 7px;
+      }
+
+      .swatches i {
+        display: block;
+        height: 17px;
+        border-radius: 3px;
+      }
+
+      .tabs {
+        display: flex;
+        gap: 5px;
+      }
+
+      .tab {
+        padding: 5px 8px;
+      }
+
+      .tab.is-active {
+        color: var(--text);
+        border-color: var(--line-strong);
+        box-shadow:
+          inset 0 -2px rgba(143, 183, 255, 0.76),
+          inset 0 1px rgba(255, 255, 255, 0.08);
+      }
+
+      pre {
+        margin: 0;
+        min-height: 260px;
+        overflow: auto;
+        padding: 12px;
+        background:
+          linear-gradient(115deg, rgba(255, 255, 255, 0.055), transparent 19%),
+          linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px) 0 0 / 42px 42px,
+          rgba(6, 8, 9, 0.82);
+        color: #dff7f0;
+        font: 0.78rem/1.48 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+
+      .led-view {
+        position: relative;
+        min-height: 236px;
+        overflow: hidden;
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        background:
+          linear-gradient(125deg, rgba(255, 255, 255, 0.12), transparent 20%, transparent 70%, rgba(255, 255, 255, 0.04)),
+          radial-gradient(circle at 27% 30%, rgba(159, 244, 200, 0.92), transparent 20%),
+          radial-gradient(circle at 70% 42%, rgba(143, 183, 255, 0.86), transparent 21%),
+          radial-gradient(circle at 48% 76%, rgba(255, 159, 207, 0.78), transparent 20%),
+          #050607;
+      }
+
+      .led-view::before {
+        content: "";
+        position: absolute;
+        inset: 7px;
+        background: radial-gradient(circle, rgba(255, 255, 255, 0.74) 0 2px, transparent 3px) 0 0 / 15px 15px;
+        mix-blend-mode: screen;
+      }
+
+      .led-view::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(110deg, transparent 0 58%, rgba(255, 255, 255, 0.10) 60%, transparent 63%);
+      }
+
+      .timeline {
+        display: grid;
+        grid-template-columns: repeat(8, 1fr);
+        gap: 3px;
+      }
+
+      .timeline i {
+        height: 23px;
+        border-radius: 4px;
+        background: var(--accent);
+      }
+
+      .control-row {
+        display: grid;
+        grid-template-columns: 72px minmax(0, 1fr) 56px;
+        gap: 7px;
+        align-items: center;
+      }
+
+      input[type="range"] {
+        width: 100%;
+        accent-color: #f4f1ea;
+      }
+
+      input[type="number"] {
+        width: 100%;
+        height: var(--control-h);
+        border: 1px solid var(--line);
+        border-radius: 5px;
+        color: var(--text);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.06), transparent),
+          rgba(8, 10, 11, 0.70);
+        text-align: right;
+        transition: border-color 130ms ease, box-shadow 130ms ease, background-color 130ms ease;
+      }
+
+      .knobs {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 6px;
+      }
+
+      .knob-card {
+        display: grid;
+        justify-items: center;
+        gap: 5px;
+      }
+
+      .knob {
+        position: relative;
+        width: 54px;
+        aspect-ratio: 1;
+        border-radius: 50%;
+        background:
+          radial-gradient(circle at 32% 24%, rgba(255, 255, 255, 0.44), transparent 13%),
+          conic-gradient(from -135deg, rgba(255, 255, 255, 0.78) 0 58%, rgba(255, 255, 255, 0.11) 58% 100%);
+        box-shadow: inset 0 1px rgba(255, 255, 255, 0.16), 0 8px 18px rgba(0, 0, 0, 0.18);
+        transition: box-shadow 140ms ease, filter 140ms ease;
+      }
+
+      .knob::after {
+        content: "";
+        position: absolute;
+        inset: 13px;
+        border-radius: 50%;
+        background:
+          linear-gradient(145deg, rgba(255, 255, 255, 0.10), transparent 48%),
+          rgba(16, 19, 20, 0.88);
+      }
+
+      .knob::before {
+        content: "";
+        position: absolute;
+        z-index: 1;
+        left: 50%;
+        top: 7px;
+        width: 2px;
+        height: 16px;
+        background: var(--text);
+        transform: translateX(-50%) rotate(38deg);
+        transform-origin: 50% 20px;
+      }
+
+      .log {
+        display: grid;
+        grid-template-columns: 66px minmax(0, 1fr);
+        gap: 7px;
+        padding: 7px 8px;
+        border: 1px solid var(--line-soft);
+        border-radius: 5px;
+        background: rgba(13, 16, 17, 0.54);
+      }
+
+      .log strong {
+        overflow-wrap: anywhere;
+      }
+
+      .pane:hover,
+      .topbar:hover {
+        border-color: var(--line-strong);
+        box-shadow:
+          0 18px 50px rgba(0, 0, 0, 0.34),
+          0 0 0 1px var(--glass-glow),
+          inset 0 1px rgba(255, 255, 255, 0.10),
+          inset 0 -1px rgba(0, 0, 0, 0.34);
+      }
+
+      button:hover,
+      .tab:hover,
+      .scene:hover {
+        border-color: var(--line-strong);
+        background:
+          linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.045)),
+          rgba(19, 24, 25, 0.72);
+        box-shadow:
+          inset 0 1px rgba(255, 255, 255, 0.15),
+          inset 0 -1px rgba(0, 0, 0, 0.22),
+          0 0 0 1px var(--glass-glow);
+      }
+
+      button:hover::after {
+        background-position: 180% 0;
+        opacity: 0.46;
+      }
+
+      .primary:hover {
+        box-shadow:
+          inset 0 1px rgba(255, 255, 255, 0.20),
+          inset 0 -2px rgba(255, 255, 255, 0.72),
+          0 0 0 3px var(--glass-glow);
+      }
+
+      .scene.is-active {
+        box-shadow:
+          inset 2px 0 rgba(255, 255, 255, 0.68),
+          inset 0 1px rgba(255, 255, 255, 0.10),
+          0 0 0 1px rgba(255, 255, 255, 0.07);
+      }
+
+      .tab.is-active {
+        box-shadow:
+          inset 0 -2px rgba(255, 255, 255, 0.70),
+          inset 0 1px rgba(255, 255, 255, 0.10),
+          0 0 0 1px rgba(255, 255, 255, 0.07);
+      }
+
+      input[type="number"]:focus,
+      input[type="range"]:focus {
+        outline: none;
+      }
+
+      button:focus-visible,
+      input:focus-visible,
+      .tab:focus-visible {
+        border-color: var(--line-bright);
+        box-shadow: 0 0 0 3px var(--glass-glow-strong), inset 0 1px rgba(255, 255, 255, 0.14);
+        outline: none;
+      }
+
+      .knob-card:hover .knob {
+        filter: saturate(1.02);
+        box-shadow: inset 0 1px rgba(255, 255, 255, 0.24), 0 0 0 3px var(--glass-glow), 0 10px 20px rgba(0, 0, 0, 0.20);
+      }
+
+      .led-view:hover {
+        border-color: var(--line-strong);
+        box-shadow: 0 0 0 2px var(--glass-glow);
+      }
+
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          transition-duration: 0.001ms !important;
+        }
+      }
+
+      @media (min-width: 720px) {
+        .shell {
+          padding: 13px;
+        }
+
+        .topbar {
+          grid-template-columns: minmax(0, 1fr) auto;
+          align-items: center;
+        }
+
+        .transport {
+          justify-content: end;
+        }
+
+        .chips {
+          grid-column: 1 / -1;
+        }
+
+        .workbench {
+          grid-template-columns: 208px minmax(0, 1fr);
+          grid-template-areas:
+            "nav main"
+            "inspect main"
+            "status status";
+        }
+      }
+
+      @media (min-width: 1024px) {
+        .shell {
+          padding: 17px;
+        }
+
+        .topbar {
+          grid-template-columns: minmax(250px, 1fr) auto minmax(270px, auto);
+        }
+
+        .chips {
+          grid-column: auto;
+          justify-content: end;
+        }
+
+        .workbench {
+          grid-template-columns: 218px minmax(0, 1fr) 286px;
+          grid-template-areas:
+            "nav main inspect"
+            "status status status";
+        }
+
+        .main {
+          grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.85fr);
+        }
+      }
+
+      @media (max-width: 430px) {
+        .control-row {
+          grid-template-columns: 1fr;
+        }
+
+        .icon {
+          flex: 1 0 31px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="shell">
+      <section class="topbar" aria-label="Studio status and transport">
+        <div class="brand">
+          <span class="mark" aria-hidden="true"></span>
+          <div>
+            <strong>LightPlayer Studio</strong>
+            <span>Aurora Rack / ESP32-C6 live JIT</span>
+          </div>
+        </div>
+        <div class="transport" aria-label="Transport">
+          <button class="icon" title="Previous">|&lt;</button>
+          <button class="icon primary" title="Play">&gt;</button>
+          <button class="icon" title="Stop">[]</button>
+          <button class="text-button">Compile</button>
+        </div>
+        <div class="chips" aria-label="Runtime status">
+          <span class="chip">USB ready</span>
+          <span class="chip">JIT 2.7 ms</span>
+          <span class="chip">Heap 58 K</span>
+        </div>
+      </section>
+
+      <section class="workbench">
+        <aside class="pane nav">
+          <div class="pane-head"><div class="pane-title"><span>Project</span><strong>Scenes</strong></div></div>
+          <div class="pane-body">
+            <div class="scene-list">
+              <button class="scene is-active"><strong>Aurora boreal</strong><span class="meter"></span></button>
+              <button class="scene"><strong>Pixel rain</strong><span class="meter"></span></button>
+              <button class="scene"><strong>Warm scanner</strong><span class="meter"></span></button>
+              <button class="scene"><strong>Audio bloom</strong><span class="meter"></span></button>
+            </div>
+            <div class="mini-grid">
+              <div class="metric"><span>FPS</span><strong>60.0</strong></div>
+              <div class="metric"><span>Nodes</span><strong>18</strong></div>
+              <div class="metric"><span>LPIR</span><strong>824 B</strong></div>
+              <div class="metric"><span>RV32</span><strong>436 B</strong></div>
+            </div>
+            <div class="swatch">
+              <span>Palette</span>
+              <div class="swatches">
+                <i style="background:#9ff4c8"></i>
+                <i style="background:#8fb7ff"></i>
+                <i style="background:#ff9fcf"></i>
+                <i style="background:#f3d06f"></i>
+                <i style="background:#f4f1ea"></i>
+              </div>
+            </div>
+          </div>
+        </aside>
+
+        <section class="main">
+          <section class="pane editor">
+            <div class="pane-head">
+              <div class="pane-title"><span>Shader</span><strong>fragment.glsl</strong></div>
+              <div class="tabs"><span class="tab is-active">GLSL</span><span class="tab">LPIR</span><span class="tab">RV32</span></div>
+            </div>
+            <pre><code>vec3 palette(float t) {
+  return 0.5 + 0.5 * cos(6.28318 *
+    (vec3(0.00, 0.32, 0.67) + t));
+}
+
+void mainImage(out vec4 fragColor, in vec2 fragCoord) {
+  vec2 p = fragCoord / iResolution.xy;
+  float wave = sin((p.x + time * 0.18) * 18.0);
+  float bloom = smoothstep(0.30, 0.96, wave * p.y);
+  vec3 rgb = palette(p.x + time * 0.07);
+  fragColor = vec4(mix(rgb * 0.18, rgb, bloom), 1.0);
+}</code></pre>
+          </section>
+
+          <section class="pane visual">
+            <div class="pane-head"><div class="pane-title"><span>Texture</span><strong>LED preview</strong></div><span class="chip">64 x 32</span></div>
+            <div class="pane-body visual">
+              <div class="led-view" role="img" aria-label="Iridescent minimal LED preview"></div>
+              <div class="timeline" aria-hidden="true">
+                <i style="background:#9ff4c8"></i><i style="background:#8fb7ff"></i><i style="background:#ff9fcf"></i><i style="background:#f3d06f"></i>
+                <i style="background:#9ff4c8"></i><i style="background:#8fb7ff"></i><i style="background:#ff9fcf"></i><i style="background:#f3d06f"></i>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <aside class="pane inspect">
+          <div class="pane-head"><div class="pane-title"><span>Controls</span><strong>Aurora rack</strong></div><span class="chip">Live</span></div>
+          <div class="pane-body controls">
+            <div class="knobs">
+              <div class="knob-card"><div class="knob"></div><label>Hue</label></div>
+              <div class="knob-card"><div class="knob"></div><label>Bloom</label></div>
+              <div class="knob-card"><div class="knob"></div><label>Drift</label></div>
+              <div class="knob-card"><div class="knob"></div><label>Gamma</label></div>
+            </div>
+            <div class="control-row"><label>Speed</label><input type="range" value="68"><input type="number" value="0.68" step="0.01"></div>
+            <div class="control-row"><label>Density</label><input type="range" value="43"><input type="number" value="43"></div>
+            <div class="control-row"><label>Gain</label><input type="range" value="81"><input type="number" value="1.24" step="0.01"></div>
+            <button class="text-button primary">Push to device</button>
+          </div>
+        </aside>
+
+        <section class="pane status">
+          <div class="pane-head"><div class="pane-title"><span>Runtime</span><strong>Recent activity</strong></div></div>
+          <div class="pane-body log-grid">
+            <div class="log"><span>info</span><strong>compiled fragment.glsl to RV32 native</strong></div>
+            <div class="log"><span>debug</span><strong>pool allocator reused 9 registers</strong></div>
+            <div class="log"><span>warn</span><strong>texture slot rainbow LUT is simulated</strong></div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

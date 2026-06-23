@@ -1,0 +1,31 @@
+{
+  "output_spec": "/src/strip.output",
+  "texture_spec": "/src/main.texture",
+  "mapping": {
+    "PathPoints": {
+      "paths": [
+        {
+          "RingArray": {
+            "center": [0.5, 0.5],
+            "diameter": 1.0,
+            "start_ring_inclusive": 0,
+            "end_ring_exclusive": 9,
+            "ring_lamp_counts": [1, 8, 12, 16, 24, 32, 40, 48, 60],
+            "offset_angle": 0.0,
+            "order": "InnerFirst"
+          }
+        }
+      ],
+      "sample_diameter": 2
+    }
+  },
+  "color_order": "Rgb",
+  "transform": [
+    [1.0, 0.0, 0.0, 0.0],
+    [0.0, 1.0, 0.0, 0.0],
+    [0.0, 0.0, 1.0, 0.0],
+    [0.0, 0.0, 0.0, 1.0]
+  ],
+  "brightness": 255,
+  "gamma_correction": false
+}

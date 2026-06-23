@@ -141,6 +141,9 @@ fn serial_thread_loop(
                 }
             };
             let line_str = line_str.trim_end_matches('\r');
+            if line_str.is_empty() {
+                continue;
+            }
 
             if let Some(observer) = &options.line_observer {
                 observer.observe_line(line_str);

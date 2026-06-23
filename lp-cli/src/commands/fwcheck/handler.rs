@@ -5,15 +5,15 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
 use fw_checks::{FW_CHECK_JSON_PREFIX, FwCheckConfig, FwCheckTarget, all_checks, find_check};
-use lpa_client::transport_serial::{
-    HardwareSerialOptions, SerialLineObserver, create_hardware_serial_transport_pair_with_options,
-};
-use lpa_client::{ClientTransport, LpClient};
+use lpa_client::transport_serial::SerialLineObserver;
+use lpa_client::{ClientTransport, TokioLpClient};
+use lpa_link::providers::host_serial_esp32::HostSerialEsp32Options;
 use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 use lpfs::{LpFs, LpFsStd};
 use tokio::time::sleep;
 
-use crate::commands::dev::{push_project_async, validation};
+use crate::client::host_serial_esp32::connect_host_serial_esp32_with_options;
+use crate::commands::dev::{deploy_project_async, validation};
 
 use super::args::{FwcheckCli, FwcheckCommand, FwcheckDemoArgs, FwcheckRunArgs, FwcheckTargetArg};
 use super::{port, process, report, trace_dir};
@@ -218,19 +218,16 @@ fn run_demo_capture(
 ) -> Result<DemoResult> {
     let capture = Arc::new(SerialCapture::new(&trace.trace_txt)?);
     let observer: Arc<dyn SerialLineObserver> = capture.clone();
-    let options = HardwareSerialOptions {
+    let options = HostSerialEsp32Options {
+        baud_rate: Some(DEFAULT_SERIAL_BAUD_RATE),
         reset_after_open: true,
         line_observer: Some(observer),
     };
-    let transport = create_hardware_serial_transport_pair_with_options(
-        port_name,
-        DEFAULT_SERIAL_BAUD_RATE,
-        options,
-    )
-    .map_err(|e| anyhow::anyhow!("Failed to create serial transport: {e}"))?;
+    let transport = connect_host_serial_esp32_with_options(port_name, options)
+        .map_err(|e| anyhow::anyhow!("Failed to create serial transport: {e}"))?;
     let transport: Box<dyn ClientTransport> = Box::new(transport);
     let shared_transport = Arc::new(tokio::sync::Mutex::new(transport));
-    let client = LpClient::new_shared(Arc::clone(&shared_transport));
+    let client = TokioLpClient::new_shared(Arc::clone(&shared_transport));
     let local_fs: Arc<dyn LpFs + Send + Sync> = Arc::new(LpFsStd::new(project_dir.to_owned()));
     let runtime = tokio::runtime::Runtime::new()?;
 
@@ -265,7 +262,7 @@ fn run_demo_capture(
 }
 
 async fn run_demo_capture_async(
-    client: &LpClient,
+    client: &TokioLpClient,
     capture: &Arc<SerialCapture>,
     local_fs: Arc<dyn LpFs + Send + Sync>,
     project_uid: &str,
@@ -274,23 +271,13 @@ async fn run_demo_capture_async(
 ) -> Result<String> {
     wait_for_boot_ready(capture).await?;
 
-    if let Err(e) = run_client_step(capture, "stop all projects", client.stop_all_projects()).await
-    {
-        eprintln!("Warning: Failed to stop all projects: {e}");
-        eprintln!("Continuing with project push...");
-    }
-
-    run_client_step(
+    let handle = run_client_step(
         capture,
-        "push project",
-        push_project_async(client, local_fs.as_ref(), project_uid),
+        "deploy project",
+        deploy_project_async(client, local_fs.as_ref(), project_uid),
     )
-    .await?;
-
-    let project_path = format!("projects/{project_uid}");
-    let handle = run_client_step(capture, "load project", client.project_load(&project_path))
-        .await
-        .with_context(|| format!("load {project_path}"))?;
+    .await
+    .with_context(|| format!("deploy projects/{project_uid}"))?;
 
     let _ = handle;
 
@@ -310,7 +297,7 @@ async fn run_demo_capture_async(
     let _ = transport.close().await;
 
     Ok(format!(
-        "status: ok\nproject: {project_path}\nloaded_projects: {loaded}\nsettled_for: {settle_secs}s\n",
+        "status: ok\nproject: projects/{project_uid}\nloaded_projects: {loaded}\nsettled_for: {settle_secs}s\n",
     ))
 }
 

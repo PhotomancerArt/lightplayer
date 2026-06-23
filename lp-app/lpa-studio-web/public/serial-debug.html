@@ -1,0 +1,604 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LightPlayer Serial Debug</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #101417;
+        --panel: #171d21;
+        --panel-2: #1c2429;
+        --line: #334047;
+        --text: #f5f3ec;
+        --muted: #adb7b7;
+        --accent: #92d4bd;
+        --warn: #ffcd8a;
+        --error: #ff9b9b;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background: var(--bg);
+        color: var(--text);
+        font-family:
+          ui-sans-serif,
+          system-ui,
+          -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+      }
+
+      main {
+        width: min(1400px, calc(100vw - 48px));
+        margin: 0 auto;
+        padding: 28px 0 36px;
+      }
+
+      header {
+        display: flex;
+        align-items: end;
+        justify-content: space-between;
+        gap: 24px;
+        margin-bottom: 22px;
+      }
+
+      h1 {
+        margin: 0;
+        font-size: 24px;
+        letter-spacing: 0;
+      }
+
+      .status {
+        color: var(--muted);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 13px;
+      }
+
+      .layout {
+        display: grid;
+        grid-template-columns: minmax(320px, 440px) minmax(0, 1fr);
+        gap: 18px;
+      }
+
+      section {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: var(--panel);
+        padding: 16px;
+      }
+
+      section + section {
+        margin-top: 14px;
+      }
+
+      h2 {
+        margin: 0 0 12px;
+        color: var(--accent);
+        font-size: 13px;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+
+      label {
+        display: grid;
+        gap: 6px;
+        margin-bottom: 12px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+
+      .inline-check {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .inline-check input {
+        width: auto;
+      }
+
+      input,
+      select,
+      textarea {
+        width: 100%;
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #0d1113;
+        color: var(--text);
+        font: inherit;
+        padding: 9px 10px;
+      }
+
+      textarea {
+        min-height: 72px;
+        resize: vertical;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+      }
+
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+
+      button {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: var(--panel-2);
+        color: var(--text);
+        cursor: pointer;
+        font: inherit;
+        font-size: 13px;
+        padding: 8px 10px;
+      }
+
+      button:hover {
+        border-color: var(--accent);
+      }
+
+      button.primary {
+        background: #14372e;
+        border-color: #317c67;
+      }
+
+      button.warning {
+        background: #3a2817;
+        border-color: #8a6234;
+      }
+
+      button:disabled {
+        cursor: not-allowed;
+        opacity: 0.45;
+      }
+
+      .readout {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .metric {
+        border: 1px solid var(--line);
+        border-radius: 6px;
+        background: #11171a;
+        padding: 9px 10px;
+      }
+
+      .metric span {
+        display: block;
+        color: var(--muted);
+        font-size: 11px;
+        text-transform: uppercase;
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 3px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 13px;
+        font-weight: 500;
+      }
+
+      .terminal-wrap {
+        display: grid;
+        grid-template-rows: auto minmax(420px, calc(100vh - 210px));
+        gap: 12px;
+      }
+
+      .terminal-toolbar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .terminal {
+        overflow: auto;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        background: #070a0b;
+        padding: 12px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 12px;
+        line-height: 1.45;
+        white-space: pre-wrap;
+      }
+
+      .line-system {
+        color: var(--accent);
+      }
+
+      .line-warn {
+        color: var(--warn);
+      }
+
+      .line-error {
+        color: var(--error);
+      }
+
+      @media (max-width: 860px) {
+        main {
+          width: min(100vw - 28px, 720px);
+          padding-top: 18px;
+        }
+
+        header,
+        .layout {
+          display: block;
+        }
+
+        header .status {
+          margin-top: 8px;
+        }
+
+        .right {
+          margin-top: 14px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <h1>LightPlayer Serial Debug</h1>
+          <div class="status" id="support">Checking Web Serial...</div>
+        </div>
+        <div class="status" id="portLabel">No port selected</div>
+      </header>
+
+      <div class="layout">
+        <div class="left">
+          <section>
+            <h2>Port</h2>
+            <label>
+              Baud rate
+              <input id="baudRate" type="number" min="300" step="1" value="115200" />
+            </label>
+            <div class="row">
+              <button class="primary" id="requestPort">Request port</button>
+              <button id="openPort">Open</button>
+              <button id="closePort">Close</button>
+              <button id="snapshotSignals">Signals</button>
+            </div>
+            <div class="readout">
+              <div class="metric">
+                <span>Port</span>
+                <strong id="portState">none</strong>
+              </div>
+              <div class="metric">
+                <span>Reader</span>
+                <strong id="readerState">stopped</strong>
+              </div>
+              <div class="metric">
+                <span>DTR</span>
+                <strong id="dtrState">unknown</strong>
+              </div>
+              <div class="metric">
+                <span>RTS</span>
+                <strong id="rtsState">unknown</strong>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <h2>Reset</h2>
+            <label>
+              Read window after reset (ms)
+              <input id="readWindowMs" type="number" min="0" step="100" value="5000" />
+            </label>
+            <div class="row">
+              <button class="primary" id="resetClassic">Normal reset + read</button>
+              <button id="resetUsbJtag">USB-JTAG download reset + read</button>
+              <button id="resetRtsOnly">RTS release + read</button>
+              <button id="readOnly">Read without reset</button>
+            </div>
+            <div class="row" style="margin-top: 8px">
+              <button id="setDtr0">DTR 0</button>
+              <button id="setDtr1">DTR 1</button>
+              <button id="setRts0">RTS 0</button>
+              <button id="setRts1">RTS 1</button>
+            </div>
+          </section>
+
+          <section>
+            <h2>Custom Sequence</h2>
+            <label>
+              Commands
+              <textarea id="sequence">R0 D0 W100 D1 R0 W100 R1 D0 R1 W100 R0 D0</textarea>
+            </label>
+            <div class="row">
+              <button id="runSequence">Run sequence</button>
+              <button id="runSequenceAndRead">Run sequence + read</button>
+            </div>
+          </section>
+        </div>
+
+        <section class="right terminal-wrap">
+          <div class="terminal-toolbar">
+            <h2>Serial Output</h2>
+            <div class="row">
+              <button id="startRead">Start read</button>
+              <button id="stopRead">Stop read</button>
+              <button class="warning" id="clearLog">Clear</button>
+            </div>
+          </div>
+          <div class="terminal" id="terminal" aria-live="polite"></div>
+        </section>
+      </div>
+    </main>
+
+    <script type="module">
+      import {
+        BrowserEsp32DeviceController,
+        errorMessage,
+      } from "/lpa-link/browser_esp32_device_controller.js";
+
+      const els = {
+        support: document.querySelector("#support"),
+        portLabel: document.querySelector("#portLabel"),
+        baudRate: document.querySelector("#baudRate"),
+        readWindowMs: document.querySelector("#readWindowMs"),
+        sequence: document.querySelector("#sequence"),
+        terminal: document.querySelector("#terminal"),
+        portState: document.querySelector("#portState"),
+        readerState: document.querySelector("#readerState"),
+        dtrState: document.querySelector("#dtrState"),
+        rtsState: document.querySelector("#rtsState"),
+      };
+
+      let controller = null;
+      let unsubscribeController = null;
+      let dtr = null;
+      let rts = null;
+
+      bind("#requestPort", requestPort);
+      bind("#openPort", openPort);
+      bind("#closePort", closePort);
+      bind("#snapshotSignals", snapshotSignals);
+      bind("#startRead", startRead);
+      bind("#stopRead", stopRead);
+      bind("#clearLog", () => {
+        els.terminal.textContent = "";
+      });
+      bind("#resetUsbJtag", () => controllerResetAndRead("usb-jtag-download"));
+      bind("#resetClassic", () => controllerResetAndRead("normal"));
+      bind("#resetRtsOnly", () => controllerResetAndRead("rts-only"));
+      bind("#readOnly", controllerReadOnly);
+      bind("#setDtr0", () => setDTR(false));
+      bind("#setDtr1", () => setDTR(true));
+      bind("#setRts0", () => setRTS(false));
+      bind("#setRts1", () => setRTS(true));
+      bind("#runSequence", () => runSequence(els.sequence.value));
+      bind("#runSequenceAndRead", controllerRunSequenceAndRead);
+
+      if (BrowserEsp32DeviceController.isSupported()) {
+        els.support.textContent = "Web Serial available";
+      } else {
+        els.support.textContent = "Web Serial unavailable in this context";
+        logSystem("Web Serial is not available. Use Chrome/Edge on localhost or HTTPS.", "error");
+      }
+      renderState();
+
+      function bind(selector, handler) {
+        document.querySelector(selector).addEventListener("click", () => {
+          void run(handler);
+        });
+      }
+
+      async function run(handler) {
+        try {
+          await handler();
+        } catch (error) {
+          logSystem(errorMessage(error), "error");
+        } finally {
+          renderState();
+        }
+      }
+
+      async function requestPort() {
+        const selected = await BrowserEsp32DeviceController.requestPort();
+        controller = new BrowserEsp32DeviceController(selected);
+        subscribeController();
+        dtr = null;
+        rts = null;
+        logSystem(`selected ${controller.label}`);
+      }
+
+      async function openPort() {
+        requireController();
+        if (controller.isOpen()) {
+          logSystem("port already open", "warn");
+          return;
+        }
+        await controller.openForRead({ baudRate: baudRate(), log: controllerLog });
+        logSystem(`opened at ${baudRate()} baud`);
+        await snapshotSignals();
+      }
+
+      async function closePort() {
+        if (!controller) {
+          return;
+        }
+        await controller.close();
+        logSystem("closed port");
+      }
+
+      async function startRead() {
+        requireOpenController();
+        if (controller.reader) {
+          logSystem("reader already running", "warn");
+          return;
+        }
+        controller.startReadPump();
+        els.readerState.textContent = "running";
+        logSystem("started raw read");
+      }
+
+      async function stopRead() {
+        if (!controller?.reader) {
+          return;
+        }
+        await controller.stopReadPump();
+      }
+
+      async function controllerResetAndRead(resetKind) {
+        requireController();
+        await controller.resetAndRead({
+          baudRate: baudRate(),
+          readWindowMs: readWindowMs(),
+          resetKind,
+        });
+      }
+
+      async function controllerReadOnly() {
+        requireController();
+        await controller.readFor({
+          baudRate: baudRate(),
+          readWindowMs: readWindowMs(),
+        });
+      }
+
+      async function controllerRunSequenceAndRead() {
+        requireController();
+        await controller.releaseProtocol({ collectErrors: false });
+        await controller.openForRead({ baudRate: baudRate(), clear: false, log: controllerLog });
+        await controller.runSignalSequence(els.sequence.value, { log: controllerLog });
+        const ms = readWindowMs();
+        if (ms > 0) {
+          await sleep(ms);
+          await controller.stopReadPump();
+          logSystem(`read window complete (${ms}ms)`);
+        }
+      }
+
+      async function runSequence(text) {
+        requireOpenController();
+        const commands = text
+          .split(/[\s|,]+/)
+          .map((command) => command.trim())
+          .filter(Boolean);
+        logSystem(`running custom sequence: ${commands.join(" ")}`);
+        await controller.runSignalSequence(text, { log: controllerLog });
+      }
+
+      async function setDTR(value) {
+        requireOpenController();
+        const next = Boolean(value);
+        try {
+          await controller.setDTR(next);
+        } catch (error) {
+          throw new Error(`DTR=${Number(next)} failed: ${errorMessage(error)}`);
+        }
+        dtr = next;
+        renderState();
+        logSystem(`DTR=${Number(dtr)}`);
+      }
+
+      async function setRTS(value) {
+        requireOpenController();
+        const next = Boolean(value);
+        try {
+          await controller.setRTS(next);
+        } catch (error) {
+          throw new Error(`RTS=${Number(next)} failed: ${errorMessage(error)}`);
+        }
+        rts = next;
+        renderState();
+        logSystem(`RTS=${Number(rts)}`);
+      }
+
+      async function snapshotSignals() {
+        requireOpenController();
+        const signals = await controller.snapshotSignals();
+        logSystem(`signals: ${JSON.stringify(signals)}`);
+      }
+
+      function appendText(text) {
+        els.terminal.append(document.createTextNode(text));
+        els.terminal.scrollTop = els.terminal.scrollHeight;
+      }
+
+      function logSystem(message, level = "system") {
+        const line = document.createElement("div");
+        line.className = `line-${level}`;
+        line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+        els.terminal.append(line);
+        els.terminal.scrollTop = els.terminal.scrollHeight;
+      }
+
+      function renderState() {
+        els.portState.textContent = controller
+          ? controller.isOpen()
+            ? "open"
+            : "selected"
+          : "none";
+        els.readerState.textContent = controller?.reader ? "running" : "stopped";
+        els.dtrState.textContent = dtr == null ? "unknown" : String(Number(dtr));
+        els.rtsState.textContent = rts == null ? "unknown" : String(Number(rts));
+        els.portLabel.textContent = controller ? controller.label : "No port selected";
+      }
+
+      function subscribeController() {
+        unsubscribeController?.();
+        unsubscribeController = controller.subscribe((event) => {
+          if (event.type === "raw") {
+            appendText(event.text);
+          } else if (event.type === "log") {
+            logSystem(`[${event.source}] ${event.text}`);
+          } else if (event.type === "error") {
+            logSystem(event.error, "error");
+          }
+          renderState();
+        });
+      }
+
+      function controllerLog(source, text) {
+        controller?.emit({ type: "log", source, text });
+      }
+
+      function requireController() {
+        if (!controller) {
+          throw new Error("No serial port selected.");
+        }
+      }
+
+      function requireOpenController() {
+        requireController();
+        if (!controller.isOpen()) {
+          throw new Error("Serial port is not open.");
+        }
+      }
+
+      function baudRate() {
+        const value = Number(els.baudRate.value);
+        if (!Number.isInteger(value) || value <= 0) {
+          throw new Error("Invalid baud rate.");
+        }
+        return value;
+      }
+
+      function readWindowMs() {
+        const value = Number(els.readWindowMs.value);
+        if (!Number.isFinite(value) || value < 0) {
+          throw new Error("Invalid read window.");
+        }
+        return value;
+      }
+
+      function sleep(ms) {
+        return new Promise((resolve) => setTimeout(resolve, ms));
+      }
+    </script>
+  </body>
+</html>

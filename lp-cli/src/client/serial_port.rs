@@ -4,6 +4,10 @@
 //! the appropriate port for ESP32 communication.
 
 use anyhow::{Context, Result, bail};
+use lpa_link::LinkProvider;
+use lpa_link::providers::host_serial_esp32::{
+    HostSerialEsp32Provider, is_likely_esp32_serial_port,
+};
 use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 
 /// Serial port configuration
@@ -53,15 +57,15 @@ pub fn detect_serial_port(port: Option<&str>, baud_rate: Option<u32>) -> Result<
 
 /// Auto-detect serial port
 ///
-/// Lists all `/dev/cu.*` ports and intelligently selects USB serial ports.
+/// Lists serial endpoints from `lpa-link` and intelligently selects USB serial ports.
 /// If exactly one USB serial port is found, uses it automatically.
 /// Otherwise prompts user if multiple USB serial ports or no USB serial ports found.
 fn auto_detect_port(baud_rate: u32) -> Result<SerialPortConfig> {
-    let all_ports = list_cu_ports()?;
+    let all_ports = list_host_serial_esp32_ports()?;
 
     if all_ports.is_empty() {
         bail!(
-            "No serial ports found (looking for /dev/cu.* devices).\n\
+            "No serial ports found.\n\
              Make sure your ESP32 is connected via USB."
         );
     }
@@ -69,12 +73,7 @@ fn auto_detect_port(baud_rate: u32) -> Result<SerialPortConfig> {
     // Filter for USB serial ports (usbmodem, ttyUSB, etc.)
     let usb_ports: Vec<String> = all_ports
         .iter()
-        .filter(|port| {
-            port.contains("usbmodem")
-                || port.contains("ttyUSB")
-                || port.contains("ttyACM")
-                || port.contains("tty.usbserial")
-        })
+        .filter(|port| is_likely_esp32_serial_port(port))
         .cloned()
         .collect();
 
@@ -107,29 +106,23 @@ fn auto_detect_port(baud_rate: u32) -> Result<SerialPortConfig> {
     }
 }
 
-/// List all `/dev/cu.*` ports
-///
-/// Filters to only callout devices (cu.*), ignoring terminal devices (tty.*).
-fn list_cu_ports() -> Result<Vec<String>> {
-    let all_ports = serialport::available_ports().context("Failed to list serial ports")?;
-
-    // Filter to only cu.* devices and collect unique base names
-    let mut cu_ports: Vec<String> = all_ports
+/// List host serial ESP32 provider ports without prompting.
+fn list_host_serial_esp32_ports() -> Result<Vec<String>> {
+    let mut provider = HostSerialEsp32Provider::new();
+    let endpoints =
+        pollster::block_on(provider.discover()).context("Failed to list serial ports")?;
+    let mut ports: Vec<String> = endpoints
         .iter()
-        .filter_map(|port_info| {
-            let name = &port_info.port_name;
-            if name.starts_with("/dev/cu.") {
-                Some(name.clone())
-            } else {
-                None
-            }
+        .filter_map(|endpoint| {
+            provider
+                .port_name_for_endpoint(&endpoint.id)
+                .map(ToOwned::to_owned)
         })
         .collect();
 
-    // Sort for consistent ordering
-    cu_ports.sort();
+    ports.sort();
 
-    Ok(cu_ports)
+    Ok(ports)
 }
 
 /// Prompt user to select a port from multiple options

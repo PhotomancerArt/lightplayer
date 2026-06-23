@@ -1,0 +1,23 @@
+//! Browser/Web Worker LightPlayer firmware runtime.
+//!
+//! JavaScript owns worker creation and `postMessage`; this crate owns the
+//! firmware-shaped runtime behind that boundary: `LpServer`, filesystem,
+//! virtual hardware/output, tick state, logs, and protocol message routing.
+
+#![cfg(target_arch = "wasm32")]
+
+mod envelope;
+mod executor;
+mod manual_time_provider;
+mod runtime;
+mod runtime_registry;
+mod server_transport;
+mod wasm_exports;
+
+pub use wasm_exports::{
+    create_runtime, drain_output_json, fw_browser_init_exports, handle_envelope_json,
+    runtime_count, tick_runtime,
+};
+
+#[cfg(test)]
+mod tests;

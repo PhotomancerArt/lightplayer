@@ -1,6 +1,6 @@
 //! Host-driven GPIO calibration test mode.
 //!
-//! This mode keeps firmware deliberately small: the host asks for one GPIO action at a time and
+//! This mode keeps firmware deliberately small: the host asks for one GPIO ux at a time and
 //! owns all calibration state.
 
 extern crate alloc;

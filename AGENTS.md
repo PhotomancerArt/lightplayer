@@ -222,6 +222,58 @@ deprecated. Do not adopt it in new code. If a plan file you are executing
 asks for "tests at the top", treat that as a stale instruction and put the
 test module at the bottom anyway.
 
+## Personal planning workflow
+
+New agent planning work uses the Photomancer personal planning workspace, not
+new repo-local plan or roadmap directories.
+
+- Use `pm-plan` for new planning, roadmap, and investigation artifacts.
+- Use `pm-implement` to execute an existing shared `plan.md`.
+- Use `pm-review` for durable review artifacts.
+- Resolve context from `agent-context.toml`; the repo slug is `lightplayer`.
+- Resolve the workspace from `PHOTOMANCER_PLANNING_ROOT`, or from the default
+  `~/.photomancer/planning` link.
+- Store new active artifacts under
+  `<planning-root>/lightplayer/<YYYY-MM-DD>-<name>/`.
+- Store completed artifacts under `<planning-root>/lightplayer/_archive/`.
+- Store review artifacts under `<planning-root>/lightplayer/_reviews/`.
+
+Durable decisions belong in repo ADRs under `docs/adr/`. Intermediate plans,
+phase prompts, review notes, scratch reports, and implementation logs belong in
+the shared planning workspace. Existing `docs/plans`, `docs/plans-old`,
+`docs/roadmaps`, and `docs/roadmaps-old` content is historical and should not
+be migrated unless a separate migration plan asks for it.
+
+## Studio UI visual baselines
+
+When a change touches non-generated files under `lp-app/lp-studio-web/`, run the
+Studio story baseline helper before committing:
+
+```bash
+just studio-story-baselines-if-needed
+```
+
+If it updates files under `lp-app/lp-studio-web/story-images/`, include those
+PNG changes in the same commit and mention the affected story baselines in the
+final summary. The helper intentionally ignores generated web artifacts,
+scratch PNGs, fresh check PNGs, and the baseline PNGs themselves.
+
+Useful related commands:
+
+```bash
+just studio-story-pngs        # ignored scratch PNGs for quick local review
+just studio-story-baselines   # update committed story baselines
+just studio-story-check       # compare fresh PNGs to committed baselines
+```
+
+`studio-story-baselines` and `studio-story-check` require `oxipng`; run
+`scripts/dev-init.sh` or install it with `cargo install oxipng` /
+`brew install oxipng`.
+
+Do not add an auto-mutating Git hook for this workflow unless the user asks for
+one explicitly. Hooks that rewrite the working tree during commit are annoying
+during rebases, merges, and partial commits.
+
 ## Validation Commands
 
 These commands must pass for any change touching the shader pipeline:

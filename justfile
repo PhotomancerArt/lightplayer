@@ -9,6 +9,7 @@ rv32_firmware_packages := "fw-esp32"
 # fw-esp32 uses release-esp32 (panic=unwind, nightly) for panic recovery
 
 fw_esp32_profile := "release-esp32"
+fw_esp32_elf := "target/" + rv32_target + "/" + fw_esp32_profile + "/fw-esp32"
 lps_dir := "lp-shader"
 
 # Default recipe - show available commands
@@ -66,7 +67,7 @@ web-demo-build: install-wasm32-target
     wasm-bindgen target/wasm32-unknown-unknown/release/web_demo.wasm \
         --out-dir lp-app/web-demo/www/pkg --target web
     mkdir -p lp-app/web-demo/www
-    cp examples/basic/src/rainbow.shader/main.glsl lp-app/web-demo/www/rainbow-default.glsl
+    cp examples/basic/shader.glsl lp-app/web-demo/www/rainbow-default.glsl
     echo "Artifacts: lp-app/web-demo/www/ (index.html, pkg/)"
 
 # Build and serve the web demo (installs miniserve via cargo if missing)
@@ -79,6 +80,27 @@ web-demo: web-demo-build
     fi
     echo "Serving http://127.0.0.1:2812 (Ctrl+C to stop)"
     miniserve --index index.html -p 2812 lp-app/web-demo/www/
+
+# Build a clean GitHub Pages artifact for the web demo.
+web-demo-deploy-dir channel="local" out_dir="target/pages/web-demo" domain="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just web-demo-build
+    args=(--kind web-demo --channel "{{ channel }}" --out "{{ out_dir }}")
+    if [[ -n "{{ domain }}" ]]; then
+        args+=(--domain "{{ domain }}")
+    fi
+    node scripts/pages/prepare-pages-artifact.mjs "${args[@]}"
+
+# Smoke-check the staged web demo Pages artifact.
+web-demo-smoke out_dir="target/pages/web-demo":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    node scripts/pages/static-site-smoke.mjs \
+        --kind web-demo \
+        --dir "{{ out_dir }}" \
+        --port "${WEB_DEMO_SMOKE_PORT:-2831}" \
+        --server "${PAGES_SMOKE_SERVER:-required}"
 
 # Deploy web demo to gh-pages branch
 web-demo-deploy: web-demo-build
@@ -120,6 +142,216 @@ web-demo-deploy: web-demo-build
     fi
     cd -
     git worktree remove --force "$tmp_dir/wt"
+
+# ============================================================================
+# fw-browser (browser/Web Worker runtime proof)
+# ============================================================================
+
+fw-browser-build: install-wasm32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Building fw-browser for wasm32..."
+    cargo build -p fw-browser --target wasm32-unknown-unknown --release
+    if ! command -v wasm-bindgen >/dev/null 2>&1; then
+        echo "wasm-bindgen not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
+        exit 1
+    fi
+    echo "Generating fw-browser JS glue..."
+    wasm-bindgen target/wasm32-unknown-unknown/release/fw_browser.wasm \
+        --out-dir lp-fw/fw-browser/www/pkg --target web
+    echo "Artifacts: lp-fw/fw-browser/www/ (smoke.html, pkg/)"
+
+fw-browser-test: install-wasm32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v wasm-bindgen-test-runner >/dev/null 2>&1; then
+        echo "wasm-bindgen-test-runner not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
+        exit 1
+    fi
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
+        cargo test -p fw-browser --target wasm32-unknown-unknown
+
+fw-browser-smoke: fw-browser-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port="${FW_BROWSER_SMOKE_PORT:-2819}"
+    echo "Serving fw-browser smoke page at http://127.0.0.1:${port}/smoke.html"
+    echo "Success: page shows ok and documentElement.dataset.smoke is 'ok'."
+    cd lp-fw/fw-browser/www
+    python3 -m http.server "${port}" --bind 127.0.0.1
+
+# ============================================================================
+# Studio web app
+# ============================================================================
+
+studio-web-dev-build: install-wasm32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Building fw-browser for wasm32 debug..."
+    cargo build -p fw-browser --target wasm32-unknown-unknown
+    echo "Building lpa-studio-web for wasm32 debug with stories..."
+    cargo build -p lpa-studio-web --target wasm32-unknown-unknown --features stories
+    if ! command -v wasm-bindgen >/dev/null 2>&1; then
+        echo "wasm-bindgen not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
+        exit 1
+    fi
+    echo "Generating fw-browser debug JS glue..."
+    wasm-bindgen target/wasm32-unknown-unknown/debug/fw_browser.wasm \
+        --out-dir lp-fw/fw-browser/www/pkg --target web
+    echo "Generating Studio web debug JS glue..."
+    mkdir -p lp-app/lpa-studio-web/public/pkg
+    wasm-bindgen target/wasm32-unknown-unknown/debug/lpa-studio-web.wasm \
+        --out-dir lp-app/lpa-studio-web/public/pkg --target web
+    echo "Copying fw-browser wasm artifacts..."
+    cp lp-fw/fw-browser/www/pkg/fw_browser.js lp-app/lpa-studio-web/public/pkg/fw_browser.js
+    cp lp-fw/fw-browser/www/pkg/fw_browser_bg.wasm lp-app/lpa-studio-web/public/pkg/fw_browser_bg.wasm
+    echo "Artifacts: lp-app/lpa-studio-web/public/ (debug build)"
+
+studio-story-pngs: studio-web-dev-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs
+
+studio-story-baselines: studio-web-dev-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs baselines
+
+studio-story-check: studio-web-dev-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs check
+
+studio-story-baselines-if-needed:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tracked="$(git diff --name-only HEAD -- \
+        lp-app/lpa-studio-web \
+        ':!lp-app/lpa-studio-web/public/**' \
+        ':!lp-app/lpa-studio-web/story-images/**')"
+    untracked="$(git ls-files --others --exclude-standard -- lp-app/lpa-studio-web \
+        | grep -v '^lp-app/lpa-studio-web/public/' \
+        | grep -v '^lp-app/lpa-studio-web/story-images/' \
+        || true)"
+    changed="$(printf '%s\n%s\n' "$tracked" "$untracked" | sed '/^$/d' | sort -u)"
+    if [[ -z "$changed" ]]; then
+        echo "No Studio UI source changes; skipping story baseline generation."
+        exit 0
+    fi
+    echo "Studio UI source changed; updating story baselines:"
+    printf '%s\n' "$changed" | sed 's/^/  /'
+    just studio-story-baselines
+
+studio-dev: studio-web-dev-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port="${STUDIO_WEB_PORT:-2820}"
+    echo "Serving LightPlayer Studio dev build at http://127.0.0.1:${port}/"
+    echo "Storybook: http://127.0.0.1:${port}/#/stories"
+    echo "Re-run just studio-dev after Rust changes; generated artifacts are ignored."
+    cd lp-app/lpa-studio-web/public
+    python3 -m http.server "${port}" --bind 127.0.0.1
+
+studio-firmware-package-esp32c6: install-rv32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v espflash >/dev/null 2>&1; then
+        echo "espflash not found. Install it before packaging Studio firmware assets."
+        exit 1
+    fi
+
+    firmware_id="lightplayer-esp32c6-server"
+    display_name="LightPlayer ESP32-C6 server firmware"
+    features="esp32c6,server"
+    out_dir="lp-app/lpa-studio-web/public/firmware/esp32c6"
+    image_name="fw-esp32c6-server-merged.bin"
+    image_file="${out_dir}/${image_name}"
+    manifest_file="${out_dir}/manifest.json"
+
+    echo "Building ${display_name}..."
+    (cd lp-fw/fw-esp32 && cargo build --target {{ rv32_target }} --profile {{ fw_esp32_profile }} --features "${features}")
+
+    mkdir -p "${out_dir}"
+    rm -f "${out_dir}"/*.bin "${manifest_file}"
+
+    echo "Generating browser-flashable merged ESP32-C6 image..."
+    espflash save-image \
+        --chip esp32c6 \
+        --partition-table lp-fw/fw-esp32/partitions.csv \
+        --merge \
+        --skip-padding \
+        {{ fw_esp32_elf }} \
+        "${image_file}"
+
+    size_bytes="$(wc -c < "${image_file}" | tr -d ' ')"
+    sha256="$(shasum -a 256 "${image_file}" | awk '{print $1}')"
+    generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    source_commit="$(git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
+    source_dirty=false
+    if ! git diff --quiet --ignore-submodules -- || ! git diff --cached --quiet --ignore-submodules --; then
+        source_dirty=true
+    fi
+
+    MANIFEST_FIRMWARE_ID="${firmware_id}" \
+    MANIFEST_DISPLAY_NAME="${display_name}" \
+    MANIFEST_TARGET="{{ rv32_target }}" \
+    MANIFEST_PROFILE="{{ fw_esp32_profile }}" \
+    MANIFEST_SOURCE_COMMIT="${source_commit}" \
+    MANIFEST_SOURCE_DIRTY="${source_dirty}" \
+    MANIFEST_GENERATED_AT="${generated_at}" \
+    MANIFEST_IMAGE_PATH="${image_name}" \
+    MANIFEST_IMAGE_SIZE="${size_bytes}" \
+    MANIFEST_IMAGE_SHA256="${sha256}" \
+    node lp-app/lpa-studio-web/scripts/studio-firmware-manifest.mjs "${manifest_file}"
+    echo "Firmware manifest: ${manifest_file}"
+    echo "Firmware image: ${image_file} (${size_bytes} bytes, sha256=${sha256})"
+
+studio-web-build: install-wasm32-target fw-browser-build studio-firmware-package-esp32c6
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo "Building lpa-studio-web for wasm32..."
+    cargo build -p lpa-studio-web --target wasm32-unknown-unknown --release
+    if ! command -v wasm-bindgen >/dev/null 2>&1; then
+        echo "wasm-bindgen not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
+        exit 1
+    fi
+    echo "Generating Studio web JS glue..."
+    mkdir -p lp-app/lpa-studio-web/public/pkg
+    wasm-bindgen target/wasm32-unknown-unknown/release/lpa-studio-web.wasm \
+        --out-dir lp-app/lpa-studio-web/public/pkg --target web
+    echo "Copying fw-browser wasm artifacts..."
+    cp lp-fw/fw-browser/www/pkg/fw_browser.js lp-app/lpa-studio-web/public/pkg/fw_browser.js
+    cp lp-fw/fw-browser/www/pkg/fw_browser_bg.wasm lp-app/lpa-studio-web/public/pkg/fw_browser_bg.wasm
+    echo "Artifacts: lp-app/lpa-studio-web/public/ (index.html, pkg/)"
+
+# Build a clean GitHub Pages artifact for Studio.
+studio-web-deploy-dir channel="local" out_dir="target/pages/studio" domain="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just studio-web-build
+    args=(--kind studio --channel "{{ channel }}" --out "{{ out_dir }}")
+    if [[ -n "{{ domain }}" ]]; then
+        args+=(--domain "{{ domain }}")
+    fi
+    node scripts/pages/prepare-pages-artifact.mjs "${args[@]}"
+
+# Smoke-check the staged Studio Pages artifact.
+studio-web-smoke out_dir="target/pages/studio":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    node scripts/pages/static-site-smoke.mjs \
+        --kind studio \
+        --dir "{{ out_dir }}" \
+        --port "${STUDIO_WEB_SMOKE_PORT:-2830}" \
+        --server "${PAGES_SMOKE_SERVER:-required}"
+
+studio-web: studio-web-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    port="${STUDIO_WEB_PORT:-2820}"
+    echo "Serving LightPlayer Studio at http://127.0.0.1:${port}/"
+    cd lp-app/lpa-studio-web/public
+    python3 -m http.server "${port}" --bind 127.0.0.1
 
 # ============================================================================
 # Build commands - Workspace-wide
@@ -404,11 +636,6 @@ merge: check
 # Example: just demo basic
 demo example="basic":
     cd lp-cli && cargo run -- dev ../examples/{{ example }}
-
-# Run firmware on ESP32-C6 device
-# Path to fw-esp32 ELF (release-esp32 profile)
-
-fw_esp32_elf := "target/" + rv32_target + "/" + fw_esp32_profile + "/fw-esp32"
 
 # Requires: ESP32-C6 device connected via USB. Builds the default lps-glsl frontend path.
 # Usage: just demo-esp32c6-host [example-name]

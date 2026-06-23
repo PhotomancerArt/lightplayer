@@ -11,7 +11,7 @@ use lp_riscv_emu::{
     test_util::{BinaryBuildConfig, ensure_binary_built},
 };
 use lp_riscv_inst::Gpr;
-use lpa_client::LpClient;
+use lpa_client::TokioLpClient;
 use lpa_client::transport_emu_serial::SerialEmuClientTransport;
 use std::collections::HashSet;
 use std::path::Component;
@@ -139,7 +139,7 @@ async fn handle_profile_async(args: ProfileArgs) -> Result<()> {
     let transport = SerialEmuClientTransport::new(emulator_arc.clone())
         .with_backtrace(load_info.symbol_map.clone(), load_info.code_end);
 
-    let client = LpClient::new(Box::new(transport));
+    let client = TokioLpClient::new(Box::new(transport));
 
     let workload_result =
         workload::run_workload(&client, &emulator_arc, &dir, &project_uid, args.max_cycles).await;

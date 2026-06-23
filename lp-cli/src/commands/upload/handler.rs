@@ -7,7 +7,7 @@ use lpfs::{LpFs, LpFsStd};
 use std::sync::Arc;
 
 use crate::client::{LpClient, client_connect};
-use crate::commands::dev::{push_project_async, validation};
+use crate::commands::dev::{deploy_project_async, validation};
 use lpa_client::HostSpecifier;
 
 use super::args::UploadArgs;
@@ -47,20 +47,9 @@ async fn handle_upload_async(args: UploadArgs) -> Result<()> {
 
     let local_fs: Arc<dyn LpFs> = Arc::new(LpFsStd::new(dir));
 
-    if let Err(e) = client.stop_all_projects().await {
-        eprintln!("Warning: Failed to stop all projects: {e}");
-        eprintln!("Continuing with project push...");
-    }
-
-    push_project_async(&client, &*local_fs, &project_uid)
+    deploy_project_async(&client, &*local_fs, &project_uid)
         .await
-        .with_context(|| format!("Failed to push project to server (host: {host_spec_str})"))?;
-
-    let project_path = format!("projects/{project_uid}");
-    client
-        .project_load(&project_path)
-        .await
-        .with_context(|| format!("Failed to load project on server: {project_path}"))?;
+        .with_context(|| format!("Failed to deploy project to server (host: {host_spec_str})"))?;
 
     println!("Project uploaded and loaded successfully.");
     Ok(())

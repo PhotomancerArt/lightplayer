@@ -195,6 +195,9 @@ fn emulator_thread_loop(
                     continue;
                 }
             };
+            if message_str.is_empty() {
+                continue;
+            }
 
             // Check for M! prefix - protocol messages; non-M! lines are server logs
             if !message_str.starts_with("M!") {

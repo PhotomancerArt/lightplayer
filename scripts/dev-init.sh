@@ -95,6 +95,12 @@ if ! check_command "just"; then
     MISSING_TOOLS=1
 fi
 
+if ! check_command "oxipng"; then
+    echo "  Install oxipng for Studio story image baselines: cargo install oxipng"
+    echo "  Or via package manager: brew install oxipng"
+    MISSING_TOOLS=1
+fi
+
 # Check Rust version
 if ! check_rust_version; then
     MISSING_TOOLS=1
@@ -121,6 +127,11 @@ if cargo install just; then
     echo -e "${GREEN}✓${NC} just updated"
 else
     echo -e "${YELLOW}⚠${NC} just update skipped (try: cargo install just)"
+fi
+if cargo install oxipng; then
+    echo -e "${GREEN}✓${NC} oxipng updated"
+else
+    echo -e "${YELLOW}⚠${NC} oxipng update skipped (try: cargo install oxipng or brew install oxipng)"
 fi
 echo ""
 
