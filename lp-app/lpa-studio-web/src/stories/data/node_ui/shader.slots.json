@@ -1,0 +1,26 @@
+{
+  "source": {
+    "project": "projects/test/fyeah-sign",
+    "read_revision": 102,
+    "request": "ProjectReadRequest::default_debug(None) after 102 x 33ms ticks"
+  },
+  "node": {
+    "id": 8,
+    "title": "blast",
+    "path": "/fyeah_sign.show/playlist.playlist/blast.shader"
+  },
+  "roots": {
+    "roots": [
+      {
+        "name": "node.8.def",
+        "shape": 3733861171,
+        "data": {"kind":"record","fields_revision":0,"fields":[{"kind":"value","changed_at":0,"value":"blast.glsl"},{"kind":"value","changed_at":0,"value":0},{"kind":"map","keys_revision":0,"entries":[{"key":"progress","data":{"kind":"record","fields_revision":0,"fields":[{"kind":"option","presence_revision":0,"present":false},{"kind":"option","presence_revision":0,"present":true,"data":{"kind":"value","changed_at":0,"value":"..#entry_progress"}},{"kind":"option","presence_revision":0,"present":false}]}},{"key":"time","data":{"kind":"record","fields_revision":0,"fields":[{"kind":"option","presence_revision":0,"present":false},{"kind":"option","presence_revision":0,"present":true,"data":{"kind":"value","changed_at":0,"value":"..#entry_time"}},{"kind":"option","presence_revision":0,"present":false}]}}]},{"kind":"record","fields_revision":0,"fields":[{"kind":"value","changed_at":0,"value":"wrapping"},{"kind":"value","changed_at":0,"value":"wrapping"},{"kind":"value","changed_at":0,"value":"reciprocal"}]},{"kind":"map","keys_revision":0,"entries":[]},{"kind":"map","keys_revision":0,"entries":[{"key":"progress","data":{"kind":"record","fields_revision":0,"fields":[{"kind":"value","changed_at":0,"value":"value"},{"kind":"value","changed_at":0,"value":"f32"},{"kind":"option","presence_revision":0,"present":false},{"kind":"option","presence_revision":0,"present":true,"data":{"kind":"value","changed_at":0,"value":0}},{"kind":"option","presence_revision":0,"present":false},{"kind":"option","presence_revision":0,"present":false},{"kind":"option","presence_revision":0,"present":false},{"kind":"value","changed_at":0,"value":""},{"kind":"value","changed_at":0,"value":""}]}},{"key":"time","data":{"kind":"record","fields_revision":0,"fields":[{"kind":"value","changed_at":0,"value":"value"},{"kind":"value","changed_at":0,"value":"f32"},{"kind":"option","presence_revision":0,"present":false},{"kind":"option","presence_revision":0,"present":true,"data":{"kind":"value","changed_at":0,"value":0}},{"kind":"option","presence_revision":0,"present":false},{"kind":"option","presence_revision":0,"present":false},{"kind":"option","presence_revision":0,"present":false},{"kind":"value","changed_at":0,"value":""},{"kind":"value","changed_at":0,"value":""}]}}]}]}
+      },
+      {
+        "name": "node.8.state",
+        "shape": 3824465175,
+        "data": {"kind":"record","fields_revision":0,"fields":[{"kind":"value","changed_at":0,"value":{"kind":"visual","node":8,"output":0}}]}
+      }
+    ]
+  }
+}

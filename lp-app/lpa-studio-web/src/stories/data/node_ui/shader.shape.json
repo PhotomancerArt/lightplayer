@@ -1,0 +1,625 @@
+{
+  "source": {
+    "project": "projects/test/fyeah-sign",
+    "read_revision": 102,
+    "request": "ProjectReadRequest::default_debug(None) after 102 x 33ms ticks"
+  },
+  "node": {
+    "id": 8,
+    "title": "blast",
+    "path": "/fyeah_sign.show/playlist.playlist/blast.shader"
+  },
+  "root_shapes": [
+    {
+      "name": "node.8.def",
+      "shape": 3733861171
+    },
+    {
+      "name": "node.8.state",
+      "shape": 3824465175
+    }
+  ],
+  "registry": {
+    "ids_revision": 0,
+    "shapes": {
+      "90603770": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::shader::shader_slot_def::ShaderSlotDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "kind",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2435360456,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "value",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 3864786694,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "key",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 1124041669,
+                          "ty": "string",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "default",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 2605450937,
+                          "ty": "f32",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "min",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 2605450937,
+                          "ty": "f32",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "max",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 2605450937,
+                          "ty": "f32",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "mapping",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "ref": {
+                        "id": 4227971207
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "label",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2612013983,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "description",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2612013983,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "1885459118": {
+        "changed_at": 0,
+        "name": "lpc_model::binding::binding_def::BindingDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "value",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 3678527952,
+                          "ty": "any",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "source",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 1364391883,
+                          "ty": "string",
+                          "meta": {},
+                          "editor": "path"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "target",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 1364391883,
+                          "ty": "string",
+                          "meta": {},
+                          "editor": "path"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "3464771014": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::shader::shader_param_def::ScalarHint",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "value",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2960302901,
+                      "ty": "f32",
+                      "meta": {},
+                      "editor": {
+                        "number": {
+                          "min": 0.0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "3712581622": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::shader::shader_param_def::ShaderParamDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "label",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2612013983,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "description",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2612013983,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "value_type",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2612013983,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "default",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 1724747812,
+                      "ty": "f32",
+                      "meta": {},
+                      "editor": {
+                        "slider": {
+                          "min": 0.0,
+                          "max": 1.0,
+                          "step": 0.01
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "min",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "ref": {
+                        "id": 3464771014
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "3733861171": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::shader::shader_def::ShaderDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "source",
+                "shape": {
+                  "custom": {
+                    "meta": {},
+                    "codec": 2355797192,
+                    "shape": {
+                      "value": {
+                        "shape": {
+                          "id": 177956922,
+                          "ty": "string",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "render_order",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 1231123999,
+                      "ty": "i32",
+                      "meta": {},
+                      "editor": {
+                        "number": {
+                          "step": 1.0
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "bindings",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 1885459118
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "glsl_opts",
+                "shape": {
+                  "ref": {
+                    "id": 4084892601
+                  }
+                }
+              },
+              {
+                "name": "param_defs",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 3712581622
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "consumed",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 90603770
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "3824465175": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::shader::shader_state::ShaderState",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "output",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 689649576,
+                      "ty": {
+                        "product": "visual"
+                      },
+                      "meta": {},
+                      "editor": "visual_product"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "4084892601": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::shader::glsl_opts::GlslOpts",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "add_sub",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 1838283229,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": {
+                        "dropdown": {
+                          "options": [
+                            {
+                              "value": "saturating",
+                              "label": "Saturating"
+                            },
+                            {
+                              "value": "wrapping",
+                              "label": "Wrapping"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "mul",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2912674014,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": {
+                        "dropdown": {
+                          "options": [
+                            {
+                              "value": "saturating",
+                              "label": "Saturating"
+                            },
+                            {
+                              "value": "wrapping",
+                              "label": "Wrapping"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "div",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 1295061595,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": {
+                        "dropdown": {
+                          "options": [
+                            {
+                              "value": "saturating",
+                              "label": "Saturating"
+                            },
+                            {
+                              "value": "reciprocal",
+                              "label": "Reciprocal"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "4227971207": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::shader::shader_slot_mapping::ShaderSlotMappingDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "kind",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 3102355672,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "len",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 3065358156,
+                      "ty": "u32",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "key",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2612013983,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "empty_key",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 3065358156,
+                      "ty": "u32",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

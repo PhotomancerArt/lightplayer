@@ -2,6 +2,15 @@ use dioxus::prelude::*;
 
 use crate::stories::story::StoryDescriptor;
 
+const CLOCK_SHAPE_JSON: &str = include_str!("data/node_ui/clock.shape.json");
+const CLOCK_SLOTS_JSON: &str = include_str!("data/node_ui/clock.slots.json");
+const FIXTURE_SHAPE_JSON: &str = include_str!("data/node_ui/fixture.shape.json");
+const FIXTURE_SLOTS_JSON: &str = include_str!("data/node_ui/fixture.slots.json");
+const PLAYLIST_SHAPE_JSON: &str = include_str!("data/node_ui/playlist.shape.json");
+const PLAYLIST_SLOTS_JSON: &str = include_str!("data/node_ui/playlist.slots.json");
+const SHADER_SHAPE_JSON: &str = include_str!("data/node_ui/shader.shape.json");
+const SHADER_SLOTS_JSON: &str = include_str!("data/node_ui/shader.slots.json");
+
 pub const STORIES: &[StoryDescriptor] = &[
     StoryDescriptor::new(
         "studio/node-ui/clock-instrument",
@@ -153,7 +162,7 @@ fn NodeUiProjectContext() -> Element {
             note: "The intended hierarchy: project root scopes every ordinary node beneath it.",
             div { class: "ux-node-ui-project-layout",
                 aside { class: "ux-node-ui-project-tree",
-                    p { class: "ux-node-ui-tree-heading", "fyeah-sign.project" }
+                    p { class: "ux-node-ui-tree-heading", "fyeah_sign.show" }
                     ol {
                         li { class: "ux-node-ui-tree-item ux-node-ui-tree-root", "Project" }
                         li { class: "ux-node-ui-tree-item ux-node-ui-tree-depth-1", "Clock" }
@@ -182,10 +191,19 @@ fn NodeUiProjectContext() -> Element {
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn NodeWindow(node: NodeUiNode, variant: NodeUiVariant) -> Element {
+    let mut active_tab = use_signal(|| 0_usize);
     let class = match variant {
         NodeUiVariant::Instrument => "ux-node-ui-window ux-node-ui-window-instrument",
         NodeUiVariant::Compact => "ux-node-ui-window ux-node-ui-window-compact",
     };
+    let tabs = node.tabs.clone();
+    let active_index = active_tab().min(tabs.len().saturating_sub(1));
+    let active_content = tabs
+        .get(active_index)
+        .map(|tab| tab.content)
+        .unwrap_or(NodeUiTabContent::None);
+    let presentation = node.presentation.clone();
+    let values = node.values.clone();
     let children = node.children.clone();
     rsx! {
         div { class: "ux-node-ui-node-stack",
@@ -195,22 +213,24 @@ fn NodeWindow(node: NodeUiNode, variant: NodeUiVariant) -> Element {
                     kind: node.kind,
                     status: node.status,
                     perf: node.perf,
+                    tabs: tabs.clone(),
+                    active_index,
+                    on_select: move |index| active_tab.set(index),
                 }
-                if !node.presentation.is_empty() {
-                    NodePresentation {
-                        items: node.presentation,
-                        variant,
-                    }
-                }
-                if !node.values.is_empty() {
-                    NodeValueGroups {
-                        groups: node.values,
-                    }
-                }
-                if !node.tabs.is_empty() {
-                    NodeTabStrip {
-                        tabs: node.tabs,
-                    }
+                match active_content {
+                    NodeUiTabContent::None => rsx! {
+                        NodeMainTabPanel {
+                            presentation,
+                            values,
+                            variant,
+                        }
+                    },
+                    NodeUiTabContent::Json { title, body } => rsx! {
+                        NodeJsonTabPanel {
+                            title,
+                            body,
+                        }
+                    },
                 }
             }
             if !children.is_empty() {
@@ -229,6 +249,9 @@ fn NodeHeader(
     kind: &'static str,
     status: NodeUiStatus,
     perf: Option<&'static str>,
+    tabs: Vec<NodeUiTab>,
+    active_index: usize,
+    on_select: EventHandler<usize>,
 ) -> Element {
     rsx! {
         header { class: "ux-node-ui-header",
@@ -243,6 +266,35 @@ fn NodeHeader(
                     span { class: "ux-node-ui-perf", "{perf}" }
                 }
                 span { class: "{status.class_name()}", "{status.label}" }
+                if !tabs.is_empty() {
+                    NodeTabList {
+                        tabs,
+                        active_index,
+                        on_select,
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NodeMainTabPanel(
+    presentation: Vec<NodeUiPresentationItem>,
+    values: Vec<NodeUiValueGroup>,
+    variant: NodeUiVariant,
+) -> Element {
+    rsx! {
+        if !presentation.is_empty() {
+            NodePresentation {
+                items: presentation,
+                variant,
+            }
+        }
+        if !values.is_empty() {
+            NodeValueGroups {
+                groups: values,
             }
         }
     }
@@ -418,22 +470,35 @@ fn NodeChildren(items: Vec<NodeUiChild>) -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn NodeTabStrip(tabs: Vec<NodeUiTab>) -> Element {
-    let mut active = use_signal(|| 0_usize);
-    let active_index = active().min(tabs.len().saturating_sub(1));
+fn NodeTabList(
+    tabs: Vec<NodeUiTab>,
+    active_index: usize,
+    on_select: EventHandler<usize>,
+) -> Element {
     rsx! {
-        section { class: "ux-node-ui-tabs",
-            div { class: "ux-node-ui-tab-list", role: "tablist",
-                for (index, tab) in tabs.clone().into_iter().enumerate() {
-                    button {
-                        class: if index == active_index { "ux-node-ui-tab ux-node-ui-tab-active" } else { "ux-node-ui-tab" },
-                        r#type: "button",
-                        role: "tab",
-                        aria_selected: "{index == active_index}",
-                        onclick: move |_| active.set(index),
-                        "{tab.label}"
-                    }
+        div { class: "ux-node-ui-header-tabs", role: "tablist",
+            for (index, tab) in tabs.clone().into_iter().enumerate() {
+                button {
+                    class: if index == active_index { "ux-node-ui-tab ux-node-ui-tab-active" } else { "ux-node-ui-tab" },
+                    r#type: "button",
+                    role: "tab",
+                    aria_selected: "{index == active_index}",
+                    onclick: move |_| on_select.call(index),
+                    "{tab.label}"
                 }
+            }
+        }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NodeJsonTabPanel(title: &'static str, body: &'static str) -> Element {
+    rsx! {
+        div { class: "ux-node-ui-tab-panel", role: "tabpanel",
+            div { class: "ux-node-ui-json-heading", "{title}" }
+            pre { class: "ux-node-ui-json",
+                code { "{body}" }
             }
         }
     }
@@ -443,13 +508,13 @@ fn clock_node() -> NodeUiNode {
     NodeUiNode {
         title: "Clock",
         kind: "Clock",
-        path: "/fyeah-sign.project/clock.clock",
+        path: "/fyeah_sign.show/clock.clock",
         status: NodeUiStatus::good("Running"),
         perf: Some("936 fps"),
         presentation: vec![
             NodeUiPresentationItem::Metric(NodeUiMetric {
                 label: "Seconds",
-                value: "3.43",
+                value: "3.333",
                 detail: Some("project time"),
             }),
             NodeUiPresentationItem::Metric(NodeUiMetric {
@@ -461,11 +526,11 @@ fn clock_node() -> NodeUiNode {
         values: vec![NodeUiValueGroup {
             rows: vec![
                 value_row(NodeUiValueSource::Direct, "Running", "true"),
-                value_row(NodeUiValueSource::Direct, "Rate", "1.0"),
+                value_row(NodeUiValueSource::Direct, "Rate", "1"),
                 value_row(NodeUiValueSource::Direct, "Scrub offset", "0.0 s"),
             ],
         }],
-        tabs: vec![NodeUiTab { label: "main" }, NodeUiTab { label: "debug" }],
+        tabs: node_json_tabs(CLOCK_SHAPE_JSON, CLOCK_SLOTS_JSON),
         children: Vec::new(),
     }
 }
@@ -474,7 +539,7 @@ fn shader_node() -> NodeUiNode {
     NodeUiNode {
         title: "blast",
         kind: "Shader",
-        path: "/fyeah-sign.project/playlist.playlist/blast.shader",
+        path: "/fyeah_sign.show/playlist.playlist/blast.shader",
         status: NodeUiStatus::good("Running"),
         perf: Some("64 ms compile"),
         presentation: vec![NodeUiPresentationItem::Product(NodeUiProduct {
@@ -487,22 +552,21 @@ fn shader_node() -> NodeUiNode {
             NodeUiValueGroup {
                 rows: vec![
                     value_row(NodeUiValueSource::Bound, "Time", "../playlist#entry_time"),
-                    value_row(NodeUiValueSource::Direct, "Brightness", "0.72"),
-                    value_row(NodeUiValueSource::Direct, "Center", "(0.5, 0.5)"),
+                    value_row(
+                        NodeUiValueSource::Bound,
+                        "Progress",
+                        "../playlist#entry_progress",
+                    ),
                 ],
             },
             NodeUiValueGroup {
                 rows: vec![
                     value_row(NodeUiValueSource::Direct, "Shader", "blast.glsl"),
-                    value_row(NodeUiValueSource::Direct, "Render order", "10"),
+                    value_row(NodeUiValueSource::Direct, "Render order", "0"),
                 ],
             },
         ],
-        tabs: vec![
-            NodeUiTab { label: "main" },
-            NodeUiTab { label: "source" },
-            NodeUiTab { label: "debug" },
-        ],
+        tabs: node_json_tabs(SHADER_SHAPE_JSON, SHADER_SLOTS_JSON),
         children: Vec::new(),
     }
 }
@@ -511,13 +575,13 @@ fn fixture_node() -> NodeUiNode {
     NodeUiNode {
         title: "Fixture",
         kind: "Fixture",
-        path: "/fyeah-sign.project/fixture.fixture",
+        path: "/fyeah_sign.show/fixture.fixture",
         status: NodeUiStatus::good("Running"),
-        perf: Some("241 LEDs"),
+        perf: Some("657 samples"),
         presentation: vec![NodeUiPresentationItem::Product(NodeUiProduct {
             kind: NodeUiProductKind::Control,
             name: "output",
-            size: Some("1 x 241"),
+            size: Some("1 x 657"),
             preview_cells: 30,
         })],
         values: vec![
@@ -525,30 +589,22 @@ fn fixture_node() -> NodeUiNode {
                 rows: vec![
                     value_row(NodeUiValueSource::Direct, "Render size", "16 x 16"),
                     value_row(NodeUiValueSource::Direct, "Color order", "RGB"),
-                    value_row(NodeUiValueSource::Direct, "Brightness", "64"),
+                    value_row(NodeUiValueSource::Direct, "Brightness", "255"),
                     NodeUiValueRow {
                         source: NodeUiValueSource::Direct,
                         label: "Mapping",
-                        value: "PathPoints",
+                        value: "SvgPath",
                         nested: Some(NodeUiNestedValue {
-                            title: "paths[0].RingArray",
-                            summary: "concentric sign ring",
+                            title: "fyeah-mapping.svg",
+                            summary: "sample diameter 2.0",
                             items: vec![
                                 NodeUiNestedItem {
-                                    label: "center",
-                                    value: "(0.5, 0.5)",
+                                    label: "source",
+                                    value: "./fyeah-mapping.svg",
                                 },
                                 NodeUiNestedItem {
-                                    label: "diameter",
-                                    value: "1.0",
-                                },
-                                NodeUiNestedItem {
-                                    label: "rings",
-                                    value: "0..8",
-                                },
-                                NodeUiNestedItem {
-                                    label: "lamp counts",
-                                    value: "1, 8, 12, 18, 24, 30, 42, 106",
+                                    label: "sampling",
+                                    value: "direct",
                                 },
                             ],
                         }),
@@ -563,11 +619,7 @@ fn fixture_node() -> NodeUiNode {
                 )],
             },
         ],
-        tabs: vec![
-            NodeUiTab { label: "main" },
-            NodeUiTab { label: "source" },
-            NodeUiTab { label: "debug" },
-        ],
+        tabs: node_json_tabs(FIXTURE_SHAPE_JSON, FIXTURE_SLOTS_JSON),
         children: Vec::new(),
     }
 }
@@ -576,9 +628,9 @@ fn playlist_node() -> NodeUiNode {
     NodeUiNode {
         title: "Playlist",
         kind: "Playlist",
-        path: "/fyeah-sign.project/playlist.playlist",
+        path: "/fyeah_sign.show/playlist.playlist",
         status: NodeUiStatus::good("Running"),
-        perf: Some("entry 2"),
+        perf: Some("entry 1"),
         presentation: vec![
             NodeUiPresentationItem::Product(NodeUiProduct {
                 kind: NodeUiProductKind::Visual,
@@ -588,13 +640,13 @@ fn playlist_node() -> NodeUiNode {
             }),
             NodeUiPresentationItem::Metric(NodeUiMetric {
                 label: "Entry time",
-                value: "1.52",
+                value: "3.333",
                 detail: Some("seconds"),
             }),
             NodeUiPresentationItem::Metric(NodeUiMetric {
-                label: "Progress",
-                value: "15%",
-                detail: Some("blast"),
+                label: "Active",
+                value: "idle",
+                detail: Some("entry 1"),
             }),
         ],
         values: vec![
@@ -603,7 +655,7 @@ fn playlist_node() -> NodeUiNode {
                     value_row(NodeUiValueSource::Bound, "Time", "bus#time.seconds"),
                     value_row(NodeUiValueSource::Direct, "Idle entry", "1"),
                     value_row(NodeUiValueSource::Direct, "Default fade", "0.35 s"),
-                    value_row(NodeUiValueSource::Direct, "Active entry", "2"),
+                    value_row(NodeUiValueSource::Direct, "Active entry", "1"),
                 ],
             },
             NodeUiValueGroup {
@@ -614,26 +666,45 @@ fn playlist_node() -> NodeUiNode {
                 ],
             },
         ],
-        tabs: vec![
-            NodeUiTab { label: "main" },
-            NodeUiTab { label: "source" },
-            NodeUiTab { label: "debug" },
-        ],
+        tabs: node_json_tabs(PLAYLIST_SHAPE_JSON, PLAYLIST_SLOTS_JSON),
         children: vec![
             NodeUiChild {
                 label: "idle",
                 detail: "./idle.toml",
-                state: "fade_after 0.12 s",
-                active: false,
+                state: "active, fade_after 0.12 s",
+                active: true,
             },
             NodeUiChild {
                 label: "blast",
                 detail: "./blast.toml",
-                state: "active, trigger bus#trigger",
-                active: true,
+                state: "duration 10 s, trigger bus#trigger",
+                active: false,
             },
         ],
     }
+}
+
+fn node_json_tabs(shape_json: &'static str, slots_json: &'static str) -> Vec<NodeUiTab> {
+    vec![
+        NodeUiTab {
+            label: "main",
+            content: NodeUiTabContent::None,
+        },
+        NodeUiTab {
+            label: "shape",
+            content: NodeUiTabContent::Json {
+                title: "Shape JSON",
+                body: shape_json,
+            },
+        },
+        NodeUiTab {
+            label: "slots",
+            content: NodeUiTabContent::Json {
+                title: "Slot value JSON",
+                body: slots_json,
+            },
+        },
+    ]
 }
 
 fn value_row(
@@ -784,6 +855,16 @@ struct NodeUiNestedItem {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct NodeUiTab {
     label: &'static str,
+    content: NodeUiTabContent,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NodeUiTabContent {
+    None,
+    Json {
+        title: &'static str,
+        body: &'static str,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

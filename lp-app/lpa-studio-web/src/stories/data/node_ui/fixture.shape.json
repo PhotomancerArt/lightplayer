@@ -1,0 +1,585 @@
+{
+  "source": {
+    "project": "projects/test/fyeah-sign",
+    "read_revision": 102,
+    "request": "ProjectReadRequest::default_debug(None) after 102 x 33ms ticks"
+  },
+  "node": {
+    "id": 3,
+    "title": "Fixture",
+    "path": "/fyeah_sign.show/fixture.fixture"
+  },
+  "root_shapes": [
+    {
+      "name": "node.3.def",
+      "shape": 814168903
+    },
+    {
+      "name": "node.3.state",
+      "shape": 1983594935
+    }
+  ],
+  "registry": {
+    "ids_revision": 0,
+    "shapes": {
+      "814168903": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::fixture::fixture_def::FixtureDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "render_size",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2973013964,
+                      "ty": {
+                        "struct": {
+                          "name": "Dim2u",
+                          "fields": [
+                            {
+                              "name": "width",
+                              "ty": "u32"
+                            },
+                            {
+                              "name": "height",
+                              "ty": "u32"
+                            }
+                          ]
+                        }
+                      },
+                      "meta": {},
+                      "editor": "dimensions"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "bindings",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 1885459118
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "sampling",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 1216569569,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "diagnostic_mode",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 4232169722,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": {
+                        "dropdown": {
+                          "options": [
+                            {
+                              "value": "off",
+                              "label": "Off"
+                            },
+                            {
+                              "value": "led_index",
+                              "label": "LED index"
+                            },
+                            {
+                              "value": "groups_10",
+                              "label": "RGB groups of 10"
+                            },
+                            {
+                              "value": "path_colors",
+                              "label": "Path colors"
+                            },
+                            {
+                              "value": "chase",
+                              "label": "Chase"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "mapping",
+                "shape": {
+                  "enum": {
+                    "meta": {},
+                    "variants": [
+                      {
+                        "name": "Unset",
+                        "shape": {
+                          "unit": {
+                            "meta": {}
+                          }
+                        }
+                      },
+                      {
+                        "name": "PathPoints",
+                        "shape": {
+                          "record": {
+                            "meta": {},
+                            "fields": [
+                              {
+                                "name": "paths",
+                                "shape": {
+                                  "map": {
+                                    "meta": {},
+                                    "key": "u32",
+                                    "value": {
+                                      "enum": {
+                                        "meta": {},
+                                        "variants": [
+                                          {
+                                            "name": "RingArray",
+                                            "shape": {
+                                              "record": {
+                                                "meta": {},
+                                                "fields": [
+                                                  {
+                                                    "name": "center",
+                                                    "shape": {
+                                                      "value": {
+                                                        "shape": {
+                                                          "id": 1477692922,
+                                                          "ty": "vec2",
+                                                          "meta": {},
+                                                          "editor": "xy"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "diameter",
+                                                    "shape": {
+                                                      "value": {
+                                                        "shape": {
+                                                          "id": 2960302901,
+                                                          "ty": "f32",
+                                                          "meta": {},
+                                                          "editor": {
+                                                            "number": {
+                                                              "min": 0.0
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "start_ring_inclusive",
+                                                    "shape": {
+                                                      "value": {
+                                                        "shape": {
+                                                          "id": 3065358156,
+                                                          "ty": "u32",
+                                                          "meta": {},
+                                                          "editor": "plain"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "end_ring_exclusive",
+                                                    "shape": {
+                                                      "value": {
+                                                        "shape": {
+                                                          "id": 3065358156,
+                                                          "ty": "u32",
+                                                          "meta": {},
+                                                          "editor": "plain"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "ring_lamp_counts",
+                                                    "shape": {
+                                                      "map": {
+                                                        "meta": {},
+                                                        "key": "u32",
+                                                        "value": {
+                                                          "value": {
+                                                            "shape": {
+                                                              "id": 3065358156,
+                                                              "ty": "u32",
+                                                              "meta": {},
+                                                              "editor": "plain"
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "offset_angle",
+                                                    "shape": {
+                                                      "value": {
+                                                        "shape": {
+                                                          "id": 2605450937,
+                                                          "ty": "f32",
+                                                          "meta": {},
+                                                          "editor": "plain"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "order",
+                                                    "shape": {
+                                                      "value": {
+                                                        "shape": {
+                                                          "id": 2101432397,
+                                                          "ty": "string",
+                                                          "meta": {},
+                                                          "editor": {
+                                                            "dropdown": {
+                                                              "options": [
+                                                                {
+                                                                  "value": "inner_first",
+                                                                  "label": "Inner first"
+                                                                },
+                                                                {
+                                                                  "value": "outer_first",
+                                                                  "label": "Outer first"
+                                                                }
+                                                              ]
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "name": "PointList",
+                                            "shape": {
+                                              "record": {
+                                                "meta": {},
+                                                "fields": [
+                                                  {
+                                                    "name": "first_channel",
+                                                    "shape": {
+                                                      "value": {
+                                                        "shape": {
+                                                          "id": 3065358156,
+                                                          "ty": "u32",
+                                                          "meta": {},
+                                                          "editor": "plain"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "points",
+                                                    "shape": {
+                                                      "map": {
+                                                        "meta": {},
+                                                        "key": "u32",
+                                                        "value": {
+                                                          "value": {
+                                                            "shape": {
+                                                              "id": 1477692922,
+                                                              "ty": "vec2",
+                                                              "meta": {},
+                                                              "editor": "xy"
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "name": "sample_diameter",
+                                "shape": {
+                                  "value": {
+                                    "shape": {
+                                      "id": 2960302901,
+                                      "ty": "f32",
+                                      "meta": {},
+                                      "editor": {
+                                        "number": {
+                                          "min": 0.0
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "name": "SvgPath",
+                        "shape": {
+                          "record": {
+                            "meta": {},
+                            "fields": [
+                              {
+                                "name": "source",
+                                "shape": {
+                                  "custom": {
+                                    "meta": {},
+                                    "codec": 2355797192,
+                                    "shape": {
+                                      "value": {
+                                        "shape": {
+                                          "id": 177956922,
+                                          "ty": "string",
+                                          "meta": {},
+                                          "editor": "plain"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "name": "sample_diameter",
+                                "shape": {
+                                  "value": {
+                                    "shape": {
+                                      "id": 2960302901,
+                                      "ty": "f32",
+                                      "meta": {},
+                                      "editor": {
+                                        "number": {
+                                          "min": 0.0
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "name": "color_order",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 1235394384,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": {
+                        "dropdown": {
+                          "options": [
+                            {
+                              "value": "rgb",
+                              "label": "RGB"
+                            },
+                            {
+                              "value": "grb",
+                              "label": "GRB"
+                            },
+                            {
+                              "value": "rbg",
+                              "label": "RBG"
+                            },
+                            {
+                              "value": "gbr",
+                              "label": "GBR"
+                            },
+                            {
+                              "value": "brg",
+                              "label": "BRG"
+                            },
+                            {
+                              "value": "bgr",
+                              "label": "BGR"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "transform",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 120141864,
+                      "ty": "mat3x3",
+                      "meta": {},
+                      "editor": "affine2d"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "brightness",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 3065358156,
+                          "ty": "u32",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "gamma_correction",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 1196386242,
+                          "ty": "bool",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "1885459118": {
+        "changed_at": 0,
+        "name": "lpc_model::binding::binding_def::BindingDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "value",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 3678527952,
+                          "ty": "any",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "source",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 1364391883,
+                          "ty": "string",
+                          "meta": {},
+                          "editor": "path"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "target",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 1364391883,
+                          "ty": "string",
+                          "meta": {},
+                          "editor": "path"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "1983594935": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::fixture::fixture_state::FixtureState",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "output",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 4213724405,
+                      "ty": {
+                        "product": "control"
+                      },
+                      "meta": {},
+                      "editor": "control_product"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

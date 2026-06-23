@@ -1,0 +1,238 @@
+{
+  "source": {
+    "project": "projects/test/fyeah-sign",
+    "read_revision": 102,
+    "request": "ProjectReadRequest::default_debug(None) after 102 x 33ms ticks"
+  },
+  "node": {
+    "id": 2,
+    "title": "Clock",
+    "path": "/fyeah_sign.show/clock.clock"
+  },
+  "root_shapes": [
+    {
+      "name": "node.2.def",
+      "shape": 520345680
+    },
+    {
+      "name": "node.2.state",
+      "shape": 3175756068
+    }
+  ],
+  "registry": {
+    "ids_revision": 0,
+    "shapes": {
+      "520345680": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::clock::clock_def::ClockDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "bindings",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 1885459118
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "controls",
+                "shape": {
+                  "record": {
+                    "meta": {},
+                    "fields": [
+                      {
+                        "name": "running",
+                        "shape": {
+                          "value": {
+                            "shape": {
+                              "id": 1196386242,
+                              "ty": "bool",
+                              "meta": {},
+                              "editor": "plain"
+                            }
+                          }
+                        },
+                        "policy": {
+                          "persistence": "transient"
+                        }
+                      },
+                      {
+                        "name": "rate",
+                        "shape": {
+                          "value": {
+                            "shape": {
+                              "id": 885023043,
+                              "ty": "f32",
+                              "meta": {},
+                              "editor": {
+                                "slider": {
+                                  "min": 0.0,
+                                  "max": 4.0,
+                                  "step": 0.05
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "policy": {
+                          "persistence": "transient"
+                        }
+                      },
+                      {
+                        "name": "scrub_offset_seconds",
+                        "shape": {
+                          "value": {
+                            "shape": {
+                              "id": 3375024484,
+                              "ty": "f32",
+                              "meta": {},
+                              "editor": {
+                                "slider": {
+                                  "min": -10.0,
+                                  "max": 10.0,
+                                  "step": 0.016666668
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "policy": {
+                          "persistence": "transient"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "1885459118": {
+        "changed_at": 0,
+        "name": "lpc_model::binding::binding_def::BindingDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "value",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 3678527952,
+                          "ty": "any",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "source",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 1364391883,
+                          "ty": "string",
+                          "meta": {},
+                          "editor": "path"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "target",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 1364391883,
+                          "ty": "string",
+                          "meta": {},
+                          "editor": "path"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "3175756068": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::clock::clock_state::ClockState",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "seconds",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2605450937,
+                      "ty": "f32",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                },
+                "semantics": {
+                  "direction": "produced"
+                },
+                "policy": {
+                  "writable": false,
+                  "persistence": "transient"
+                }
+              },
+              {
+                "name": "delta_seconds",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2605450937,
+                      "ty": "f32",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                },
+                "semantics": {
+                  "direction": "produced"
+                },
+                "policy": {
+                  "writable": false,
+                  "persistence": "transient"
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}
