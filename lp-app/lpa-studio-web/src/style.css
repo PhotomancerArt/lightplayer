@@ -1821,10 +1821,14 @@ select {
 .story-book {
   display: grid;
   grid-template-columns: 260px minmax(0, 1fr);
-  min-height: 100vh;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .story-sidebar {
+  min-height: 0;
+  overflow-y: auto;
   border-right: 1px solid var(--studio-color-border);
   background: var(--studio-color-surface-subtle);
   padding: 18px;
@@ -1842,34 +1846,62 @@ select {
 
 .story-nav {
   display: grid;
-  gap: 8px;
+  gap: 18px;
+}
+
+.story-nav-group {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.story-nav-group h2 {
+  margin: 0 0 2px;
+  color: var(--studio-color-heading);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.story-nav-links {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding-left: 10px;
+  border-left: 1px solid var(--studio-color-border-muted);
 }
 
 .story-nav-link {
   display: block;
-  padding: 10px;
-  border: 1px solid var(--studio-color-border-subtle);
-  border-radius: var(--studio-radius-sm);
-  color: var(--studio-color-text-soft);
+  min-width: 0;
+  padding: 4px 0 4px 10px;
+  border-left: 2px solid transparent;
+  color: var(--studio-color-text-muted);
+  font-size: 0.82rem;
+  line-height: 1.25;
   text-decoration: none;
-  background: var(--studio-color-surface);
+  overflow-wrap: anywhere;
+}
+
+.story-nav-link:hover,
+.story-nav-link.is-active {
+  color: var(--studio-color-text-strong);
 }
 
 .story-nav-link.is-active {
   border-color: var(--studio-color-accent-border);
-}
-
-.story-nav-group {
-  display: block;
-  margin-bottom: 3px;
-  color: var(--studio-color-heading);
-  font-size: 0.72rem;
-  text-transform: uppercase;
+  background: linear-gradient(90deg, var(--studio-status-good-bg), transparent 90%);
 }
 
 .story-stage,
 .story-png-page {
   padding: 22px;
+}
+
+.story-stage {
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .story-toolbar {
@@ -1896,15 +1928,31 @@ select {
 }
 
 .story-viewport-button {
-  padding: 7px 10px;
+  display: grid;
+  gap: 1px;
+  min-width: 58px;
+  padding: 6px 10px;
   border: 1px solid var(--studio-color-border-strong);
   border-radius: var(--studio-radius-sm);
   color: var(--studio-color-text-soft);
   background: var(--studio-color-surface-raised);
+  line-height: 1.1;
+  text-align: left;
 }
 
 .story-viewport-button.is-active {
   border-color: var(--studio-color-accent-border);
+}
+
+.story-viewport-label {
+  color: var(--studio-color-text-strong);
+  font-size: 0.78rem;
+  font-weight: 800;
+}
+
+.story-viewport-detail {
+  color: var(--studio-color-text-subtle);
+  font-size: 0.66rem;
 }
 
 .story-canvas-shell {

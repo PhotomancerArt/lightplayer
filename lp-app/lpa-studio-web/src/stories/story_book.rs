@@ -4,14 +4,16 @@ use crate::stories::story_registry::{DEFAULT_STORY_ID, all_stories, render_story
 
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn StoryBook() -> Element {
-    let initial_story_id = selected_story_id_from_hash();
-    let mut selected_story_id = use_signal(move || initial_story_id);
-    let mut viewport = use_signal(|| StoryViewport::Wide);
+    let initial_route = selected_story_route_from_hash();
+    let mut selected_story_id = use_signal(move || initial_route.story_id);
+    let mut viewport = use_signal(move || initial_route.viewport);
     let selected = selected_story_id.read().clone();
+    let selected_viewport = *viewport.read();
     let descriptor = story_by_id(&selected).unwrap_or_else(|| {
         story_by_id(DEFAULT_STORY_ID).expect("default story descriptor is registered")
     });
     let stories = all_stories();
+    let story_groups = story_groups(&stories);
 
     if is_story_png_mode() {
         return rsx! {
@@ -20,13 +22,13 @@ pub fn StoryBook() -> Element {
                     story_id: descriptor.id,
                     label: descriptor.label,
                     description: descriptor.description,
-                    frame_style: StoryViewport::Wide.frame_style(),
+                    frame_style: story_png_viewport().frame_style(),
                 }
             }
         };
     }
 
-    let frame_style = viewport.read().frame_style();
+    let frame_style = selected_viewport.frame_style();
     rsx! {
         main { class: "story-book",
             aside { class: "story-sidebar",
@@ -35,21 +37,28 @@ pub fn StoryBook() -> Element {
                     p { "{stories.len()} component states" }
                 }
                 nav { class: "story-nav",
-                    for story in stories.iter() {
-                        {
-                            let story_id = story.id;
-                            let link_class = if story.id == selected {
-                                "story-nav-link is-active"
-                            } else {
-                                "story-nav-link"
-                            };
-                            rsx! {
-                                a {
-                                    class: "{link_class}",
-                                    href: "#/stories/{story.id}",
-                                    onclick: move |_| selected_story_id.set(story_id.to_string()),
-                                    span { class: "story-nav-group", "{story.group}" }
-                                    strong { "{story.label}" }
+                    for group in story_groups {
+                        section { class: "story-nav-group",
+                            h2 { "{group.label}" }
+                            div { class: "story-nav-links",
+                                for story in group.stories {
+                                    {
+                                        let story_id = story.id;
+                                        let link_class = if story.id == selected {
+                                            "story-nav-link is-active"
+                                        } else {
+                                            "story-nav-link"
+                                        };
+                                        let story_href = story_hash(story_id, selected_viewport);
+                                        rsx! {
+                                            a {
+                                                class: "{link_class}",
+                                                href: "{story_href}",
+                                                onclick: move |_| selected_story_id.set(story_id.to_string()),
+                                                "{story.label}"
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -63,20 +72,20 @@ pub fn StoryBook() -> Element {
                         p { "{descriptor.group} / {descriptor.id}" }
                     }
                     div { class: "story-viewport-controls",
-                        ViewportButton {
-                            label: "Narrow",
-                            active: *viewport.read() == StoryViewport::Narrow,
-                            onclick: move |_| viewport.set(StoryViewport::Narrow),
-                        }
-                        ViewportButton {
-                            label: "Panel",
-                            active: *viewport.read() == StoryViewport::Panel,
-                            onclick: move |_| viewport.set(StoryViewport::Panel),
-                        }
-                        ViewportButton {
-                            label: "Wide",
-                            active: *viewport.read() == StoryViewport::Wide,
-                            onclick: move |_| viewport.set(StoryViewport::Wide),
+                        for target_viewport in [StoryViewport::Sm, StoryViewport::Md, StoryViewport::Lg] {
+                            {
+                                let selected_for_button = selected.clone();
+                                rsx! {
+                                    ViewportButton {
+                                        viewport: target_viewport,
+                                        active: selected_viewport == target_viewport,
+                                        onclick: move |_| {
+                                            viewport.set(target_viewport);
+                                            set_story_hash(&selected_for_button, target_viewport);
+                                        },
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -89,6 +98,33 @@ pub fn StoryBook() -> Element {
             }
         }
     }
+}
+
+#[derive(Clone, Debug)]
+struct StoryRoute {
+    story_id: String,
+    viewport: StoryViewport,
+}
+
+#[derive(Clone, Debug)]
+struct StoryGroup {
+    label: &'static str,
+    stories: Vec<crate::stories::story::StoryDescriptor>,
+}
+
+fn story_groups(stories: &[crate::stories::story::StoryDescriptor]) -> Vec<StoryGroup> {
+    let mut groups = Vec::<StoryGroup>::new();
+    for story in stories {
+        if let Some(group) = groups.iter_mut().find(|group| group.label == story.group) {
+            group.stories.push(*story);
+        } else {
+            groups.push(StoryGroup {
+                label: story.group,
+                stories: vec![*story],
+            });
+        }
+    }
+    groups
 }
 
 pub fn should_show_story_book() -> bool {
@@ -122,7 +158,11 @@ fn StoryCanvas(
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ViewportButton(label: &'static str, active: bool, onclick: EventHandler<MouseEvent>) -> Element {
+fn ViewportButton(
+    viewport: StoryViewport,
+    active: bool,
+    onclick: EventHandler<MouseEvent>,
+) -> Element {
     let class = if active {
         "story-viewport-button is-active"
     } else {
@@ -133,33 +173,105 @@ fn ViewportButton(label: &'static str, active: bool, onclick: EventHandler<Mouse
             class,
             type: "button",
             onclick: move |event| onclick.call(event),
-            "{label}"
+            span { class: "story-viewport-label", "{viewport.slug()}" }
+            span { class: "story-viewport-detail", "{viewport.width_label()}" }
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum StoryViewport {
-    Narrow,
-    Panel,
-    Wide,
+    Sm,
+    Md,
+    Lg,
 }
 
 impl StoryViewport {
     fn frame_style(self) -> &'static str {
         match self {
-            Self::Narrow => "max-width: 390px;",
-            Self::Panel => "max-width: 720px;",
-            Self::Wide => "max-width: 1040px;",
+            Self::Sm => "max-width: 390px;",
+            Self::Md => "max-width: 720px;",
+            Self::Lg => "max-width: 1080px;",
+        }
+    }
+
+    const fn slug(self) -> &'static str {
+        match self {
+            Self::Sm => "sm",
+            Self::Md => "md",
+            Self::Lg => "lg",
+        }
+    }
+
+    const fn width_label(self) -> &'static str {
+        match self {
+            Self::Sm => "390 px",
+            Self::Md => "720 px",
+            Self::Lg => "1080 px",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "sm" => Some(Self::Sm),
+            "md" => Some(Self::Md),
+            "lg" => Some(Self::Lg),
+            _ => None,
         }
     }
 }
 
-fn selected_story_id_from_hash() -> String {
+fn selected_story_route_from_hash() -> StoryRoute {
     location_hash()
-        .and_then(|hash| hash.strip_prefix("#/stories/").map(str::to_string))
-        .filter(|id| story_by_id(id).is_some())
-        .unwrap_or_else(|| DEFAULT_STORY_ID.to_string())
+        .and_then(|hash| parse_story_hash(&hash))
+        .unwrap_or_else(|| StoryRoute {
+            story_id: DEFAULT_STORY_ID.to_string(),
+            viewport: StoryViewport::Lg,
+        })
+}
+
+fn parse_story_hash(hash: &str) -> Option<StoryRoute> {
+    let route = hash.strip_prefix("#/stories/")?;
+    let (story_id, query) = route.split_once('?').unwrap_or((route, ""));
+    let story_id = story_by_id(story_id).map(|story| story.id.to_string())?;
+    let viewport = query
+        .split('&')
+        .filter_map(|part| part.split_once('='))
+        .find_map(|(key, value)| {
+            (key == "viewport")
+                .then(|| StoryViewport::parse(value))
+                .flatten()
+        })
+        .unwrap_or(StoryViewport::Lg);
+    Some(StoryRoute { story_id, viewport })
+}
+
+fn story_hash(story_id: &str, viewport: StoryViewport) -> String {
+    format!("#/stories/{story_id}?viewport={}", viewport.slug())
+}
+
+fn set_story_hash(story_id: &str, viewport: StoryViewport) {
+    if let Some(location) = web_sys::window().map(|window| window.location()) {
+        let _ = location.set_hash(&story_hash(story_id, viewport));
+    }
+}
+
+fn story_png_viewport() -> StoryViewport {
+    web_sys::window()
+        .map(|window| window.location())
+        .and_then(|location| location.search().ok())
+        .and_then(|search| {
+            search
+                .trim_start_matches('?')
+                .split('&')
+                .filter_map(|part| part.split_once('='))
+                .find_map(|(key, value)| {
+                    (key == "viewport")
+                        .then(|| StoryViewport::parse(value))
+                        .flatten()
+                })
+        })
+        .unwrap_or(StoryViewport::Lg)
 }
 
 fn is_story_png_mode() -> bool {
