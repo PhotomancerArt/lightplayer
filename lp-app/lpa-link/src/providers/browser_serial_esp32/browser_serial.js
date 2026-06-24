@@ -1,13 +1,13 @@
-import { BrowserEsp32DeviceController } from "/lpa-link/browser_esp32_device_controller.js";
-
 const sessions = new Map();
 let nextSessionId = 1;
+let controllerModulePromise = null;
 
 export function isSupported() {
-  return BrowserEsp32DeviceController.isSupported();
+  return Boolean(globalThis.navigator?.serial);
 }
 
 export async function requestPort() {
+  const { BrowserEsp32DeviceController } = await loadControllerModule();
   const { port, label } = await BrowserEsp32DeviceController.requestPort();
   const id = nextSessionId++;
   sessions.set(id, new BrowserEsp32DeviceController({ port, label }));
@@ -57,4 +57,13 @@ function requireSession(id) {
     throw new Error(`Unknown browser serial session: ${id}`);
   }
   return session;
+}
+
+function loadControllerModule() {
+  controllerModulePromise ??= import(controllerModulePath());
+  return controllerModulePromise;
+}
+
+function controllerModulePath() {
+  return "/lpa-link/browser_esp32_device_controller.js";
 }

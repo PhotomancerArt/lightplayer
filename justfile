@@ -187,10 +187,9 @@ fw-browser-smoke: fw-browser-build
 studio-web-dev-build: install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail
+    rm -rf lp-app/lpa-studio-web/public/pkg
     echo "Building fw-browser for wasm32 debug..."
     cargo build -p fw-browser --target wasm32-unknown-unknown
-    echo "Building lpa-studio-web for wasm32 debug with stories..."
-    cargo build -p lpa-studio-web --target wasm32-unknown-unknown --features stories
     if ! command -v wasm-bindgen >/dev/null 2>&1; then
         echo "wasm-bindgen not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
         exit 1
@@ -198,29 +197,54 @@ studio-web-dev-build: install-wasm32-target
     echo "Generating fw-browser debug JS glue..."
     wasm-bindgen target/wasm32-unknown-unknown/debug/fw_browser.wasm \
         --out-dir lp-fw/fw-browser/www/pkg --target web
-    echo "Generating Studio web debug JS glue..."
     mkdir -p lp-app/lpa-studio-web/public/pkg
-    wasm-bindgen target/wasm32-unknown-unknown/debug/lpa-studio-web.wasm \
-        --out-dir lp-app/lpa-studio-web/public/pkg --target web
     echo "Copying fw-browser wasm artifacts..."
     cp lp-fw/fw-browser/www/pkg/fw_browser.js lp-app/lpa-studio-web/public/pkg/fw_browser.js
     cp lp-fw/fw-browser/www/pkg/fw_browser_bg.wasm lp-app/lpa-studio-web/public/pkg/fw_browser_bg.wasm
-    echo "Artifacts: lp-app/lpa-studio-web/public/ (debug build)"
+    echo "Building lpa-studio-web with dx for wasm32 debug with stories..."
+    rm -rf target/dx/lpa-studio-web/debug/web/public
+    dx build --web -p lpa-studio-web --features stories --debug-symbols false
+    echo "Artifacts: target/dx/lpa-studio-web/debug/web/public/ (debug build)"
 
-studio-story-pngs: studio-web-dev-build
+studio-web-story-build: install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail
-    node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs
+    rm -rf lp-app/lpa-studio-web/public/pkg
+    echo "Building fw-browser for wasm32 debug..."
+    cargo build -p fw-browser --target wasm32-unknown-unknown
+    if ! command -v wasm-bindgen >/dev/null 2>&1; then
+        echo "wasm-bindgen not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
+        exit 1
+    fi
+    echo "Generating fw-browser debug JS glue..."
+    wasm-bindgen target/wasm32-unknown-unknown/debug/fw_browser.wasm \
+        --out-dir lp-fw/fw-browser/www/pkg --target web
+    mkdir -p lp-app/lpa-studio-web/public/pkg
+    echo "Copying fw-browser wasm artifacts..."
+    cp lp-fw/fw-browser/www/pkg/fw_browser.js lp-app/lpa-studio-web/public/pkg/fw_browser.js
+    cp lp-fw/fw-browser/www/pkg/fw_browser_bg.wasm lp-app/lpa-studio-web/public/pkg/fw_browser_bg.wasm
+    echo "Building lpa-studio-web with dx for story capture..."
+    rm -rf target/dx/lpa-studio-web/release/web/public
+    dx build --web -p lpa-studio-web --features stories --release --debug-symbols false
+    echo "Artifacts: target/dx/lpa-studio-web/release/web/public/ (story build)"
 
-studio-story-baselines: studio-web-dev-build
+studio-story-pngs: studio-web-story-build
     #!/usr/bin/env bash
     set -euo pipefail
-    node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs baselines
+    STUDIO_STORY_SITE_DIR="target/dx/lpa-studio-web/release/web/public" \
+        node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs
 
-studio-story-check: studio-web-dev-build
+studio-story-baselines: studio-web-story-build
     #!/usr/bin/env bash
     set -euo pipefail
-    node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs check
+    STUDIO_STORY_SITE_DIR="target/dx/lpa-studio-web/release/web/public" \
+        node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs baselines
+
+studio-story-check: studio-web-story-build
+    #!/usr/bin/env bash
+    set -euo pipefail
+    STUDIO_STORY_SITE_DIR="target/dx/lpa-studio-web/release/web/public" \
+        node lp-app/lpa-studio-web/scripts/studio-story-pngs.mjs check
 
 studio-story-baselines-if-needed:
     #!/usr/bin/env bash
@@ -242,15 +266,27 @@ studio-story-baselines-if-needed:
     printf '%s\n' "$changed" | sed 's/^/  /'
     just studio-story-baselines
 
-studio-dev: studio-web-dev-build
+studio-dev: install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail
+    rm -rf lp-app/lpa-studio-web/public/pkg
+    echo "Building fw-browser for wasm32 debug..."
+    cargo build -p fw-browser --target wasm32-unknown-unknown
+    if ! command -v wasm-bindgen >/dev/null 2>&1; then
+        echo "wasm-bindgen not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
+        exit 1
+    fi
+    echo "Generating fw-browser debug JS glue..."
+    wasm-bindgen target/wasm32-unknown-unknown/debug/fw_browser.wasm \
+        --out-dir lp-fw/fw-browser/www/pkg --target web
+    echo "Copying fw-browser wasm artifacts..."
+    mkdir -p lp-app/lpa-studio-web/public/pkg
+    cp lp-fw/fw-browser/www/pkg/fw_browser.js lp-app/lpa-studio-web/public/pkg/fw_browser.js
+    cp lp-fw/fw-browser/www/pkg/fw_browser_bg.wasm lp-app/lpa-studio-web/public/pkg/fw_browser_bg.wasm
     port="${STUDIO_WEB_PORT:-2820}"
     echo "Serving LightPlayer Studio dev build at http://127.0.0.1:${port}/"
     echo "Storybook: http://127.0.0.1:${port}/#/stories"
-    echo "Re-run just studio-dev after Rust changes; generated artifacts are ignored."
-    cd lp-app/lpa-studio-web/public
-    python3 -m http.server "${port}" --bind 127.0.0.1
+    dx serve --web -p lpa-studio-web --features stories --port "${port}" --addr 127.0.0.1 --open false
 
 studio-firmware-package-esp32c6: install-rv32-target
     #!/usr/bin/env bash
@@ -309,20 +345,15 @@ studio-firmware-package-esp32c6: install-rv32-target
 studio-web-build: install-wasm32-target fw-browser-build studio-firmware-package-esp32c6
     #!/usr/bin/env bash
     set -euo pipefail
-    echo "Building lpa-studio-web for wasm32..."
-    cargo build -p lpa-studio-web --target wasm32-unknown-unknown --release
-    if ! command -v wasm-bindgen >/dev/null 2>&1; then
-        echo "wasm-bindgen not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
-        exit 1
-    fi
-    echo "Generating Studio web JS glue..."
-    mkdir -p lp-app/lpa-studio-web/public/pkg
-    wasm-bindgen target/wasm32-unknown-unknown/release/lpa-studio-web.wasm \
-        --out-dir lp-app/lpa-studio-web/public/pkg --target web
+    rm -rf lp-app/lpa-studio-web/public/pkg
     echo "Copying fw-browser wasm artifacts..."
+    mkdir -p lp-app/lpa-studio-web/public/pkg
     cp lp-fw/fw-browser/www/pkg/fw_browser.js lp-app/lpa-studio-web/public/pkg/fw_browser.js
     cp lp-fw/fw-browser/www/pkg/fw_browser_bg.wasm lp-app/lpa-studio-web/public/pkg/fw_browser_bg.wasm
-    echo "Artifacts: lp-app/lpa-studio-web/public/ (index.html, pkg/)"
+    echo "Building lpa-studio-web with dx for wasm32 release..."
+    rm -rf target/dx/lpa-studio-web/release/web/public
+    dx build --web -p lpa-studio-web --release --debug-symbols false
+    echo "Artifacts: target/dx/lpa-studio-web/release/web/public/ (index.html, assets/, pkg/)"
 
 # Build a clean GitHub Pages artifact for Studio.
 studio-web-deploy-dir channel="local" out_dir="target/pages/studio" domain="":
@@ -350,7 +381,7 @@ studio-web: studio-web-build
     set -euo pipefail
     port="${STUDIO_WEB_PORT:-2820}"
     echo "Serving LightPlayer Studio at http://127.0.0.1:${port}/"
-    cd lp-app/lpa-studio-web/public
+    cd target/dx/lpa-studio-web/release/web/public
     python3 -m http.server "${port}" --bind 127.0.0.1
 
 # ============================================================================

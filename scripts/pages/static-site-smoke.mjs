@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -16,12 +16,13 @@ const baseUrl = `http://127.0.0.1:${port}/`;
 
 const checks = {
   studio: {
-    indexNeedle: "pkg/lpa-studio-web.js",
+    indexNeedle: "assets/lpa-studio-web-",
     required: [
       "index.html",
       "version.json",
-      "pkg/lpa-studio-web.js",
-      "pkg/lpa-studio-web_bg.wasm",
+      { prefix: "assets/tailwind-", suffix: ".css" },
+      { prefix: "assets/lpa-studio-web-", suffix: ".js" },
+      { prefix: "assets/lpa-studio-web_bg-", suffix: ".wasm" },
       "pkg/fw_browser.js",
       "pkg/fw_browser_bg.wasm",
       "firmware/esp32c6/manifest.json",
@@ -66,7 +67,7 @@ try {
     throw new Error(`index.html does not reference ${check.indexNeedle}`);
   }
   for (const asset of check.required) {
-    await fetchBytes(new URL(asset, baseUrl));
+    await fetchBytes(new URL(requiredAssetPath(asset), baseUrl));
   }
   await maybeRunBrowserSmoke();
   console.log(`Static smoke passed: ${kind} at ${path.relative(repoRoot, siteDir)}`);
@@ -81,14 +82,51 @@ function checkLocalFiles() {
     throw new Error(`index.html does not reference ${check.indexNeedle}`);
   }
   for (const asset of check.required) {
-    const assetPath = path.join(siteDir, asset);
+    const assetPath = findRequiredAsset(asset);
     if (!existsSync(assetPath)) {
-      throw new Error(`missing required asset: ${asset}`);
+      throw new Error(`missing required asset: ${formatRequiredAsset(asset)}`);
     }
     if (statSync(assetPath).size === 0) {
-      throw new Error(`required asset is empty: ${asset}`);
+      throw new Error(`required asset is empty: ${formatRequiredAsset(asset)}`);
     }
   }
+}
+
+function findRequiredAsset(required) {
+  if (typeof required === "string") {
+    return path.join(siteDir, required);
+  }
+
+  const match = listFiles(siteDir).find((file) => {
+    const relative = path.relative(siteDir, file);
+    return relative.startsWith(required.prefix) && relative.endsWith(required.suffix);
+  });
+  return match ?? path.join(siteDir, `${required.prefix}*${required.suffix}`);
+}
+
+function requiredAssetPath(required) {
+  const assetPath = findRequiredAsset(required);
+  return path.relative(siteDir, assetPath).split(path.sep).join("/");
+}
+
+function formatRequiredAsset(required) {
+  if (typeof required === "string") {
+    return required;
+  }
+  return `${required.prefix}*${required.suffix}`;
+}
+
+function listFiles(directory) {
+  const files = [];
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const entryPath = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...listFiles(entryPath));
+    } else if (entry.isFile()) {
+      files.push(entryPath);
+    }
+  }
+  return files;
 }
 
 async function maybeRunBrowserSmoke() {

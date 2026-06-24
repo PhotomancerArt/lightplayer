@@ -18,7 +18,10 @@ import path from "node:path";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../../..");
-const publicDir = path.join(repoRoot, "lp-app/lpa-studio-web/public");
+const publicDir = path.resolve(
+  repoRoot,
+  process.env.STUDIO_STORY_SITE_DIR ?? "target/dx/lpa-studio-web/debug/web/public",
+);
 const storyRoot = path.join(repoRoot, "lp-app/lpa-studio-web");
 const mode = parseMode(process.argv.slice(2));
 const port = process.env.STUDIO_STORY_PNGS_PORT ?? "2822";

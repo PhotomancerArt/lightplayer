@@ -17,6 +17,7 @@ pub fn App() -> Element {
     if crate::stories::story_book::should_show_story_book() {
         return rsx! {
             style { "{STYLE}" }
+            document::Stylesheet { href: asset!("/assets/tailwind.css") }
             crate::stories::story_book::StoryBook {}
         };
     }
@@ -32,6 +33,7 @@ pub fn App() -> Element {
 
     rsx! {
         style { "{STYLE}" }
+        document::Stylesheet { href: asset!("/assets/tailwind.css") }
         StudioShell {
             view,
             running,
