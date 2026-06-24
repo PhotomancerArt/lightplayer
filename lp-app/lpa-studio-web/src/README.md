@@ -52,3 +52,18 @@ ui_base <- ui_core <- ui_studio
 
 Imports should follow the arrows. If a component wants to import “up” the stack,
 it probably belongs in the higher family.
+
+## Stories
+
+Component stories are colocated with the component family they describe. Add
+story modules as adjacent `*_story.rs` files and expose this small contract:
+
+```rust
+pub fn stories() -> Vec<StoryDescriptor>;
+pub fn render_story(id: &str) -> Option<Element>;
+```
+
+`build.rs` discovers those files and generates the central story registry, so
+`src/stories` should stay focused on storybook routing, shell chrome, and shared
+story types. Open-ended explorations can still live in a story module near the
+surface being explored, with the group label making their status clear.

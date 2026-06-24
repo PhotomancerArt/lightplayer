@@ -3,14 +3,14 @@ use dioxus::prelude::*;
 use crate::stories::story::StoryDescriptor;
 use crate::ui_base::{StudioIcon, StudioIconName};
 
-const CLOCK_SHAPE_JSON: &str = include_str!("data/node_ui/clock.shape.json");
-const CLOCK_SLOTS_JSON: &str = include_str!("data/node_ui/clock.slots.json");
-const FIXTURE_SHAPE_JSON: &str = include_str!("data/node_ui/fixture.shape.json");
-const FIXTURE_SLOTS_JSON: &str = include_str!("data/node_ui/fixture.slots.json");
-const PLAYLIST_SHAPE_JSON: &str = include_str!("data/node_ui/playlist.shape.json");
-const PLAYLIST_SLOTS_JSON: &str = include_str!("data/node_ui/playlist.slots.json");
-const SHADER_SHAPE_JSON: &str = include_str!("data/node_ui/shader.shape.json");
-const SHADER_SLOTS_JSON: &str = include_str!("data/node_ui/shader.slots.json");
+const CLOCK_SHAPE_JSON: &str = include_str!("story_data/clock.shape.json");
+const CLOCK_SLOTS_JSON: &str = include_str!("story_data/clock.slots.json");
+const FIXTURE_SHAPE_JSON: &str = include_str!("story_data/fixture.shape.json");
+const FIXTURE_SLOTS_JSON: &str = include_str!("story_data/fixture.slots.json");
+const PLAYLIST_SHAPE_JSON: &str = include_str!("story_data/playlist.shape.json");
+const PLAYLIST_SLOTS_JSON: &str = include_str!("story_data/playlist.slots.json");
+const SHADER_SHAPE_JSON: &str = include_str!("story_data/shader.shape.json");
+const SHADER_SLOTS_JSON: &str = include_str!("story_data/shader.slots.json");
 
 pub const STORIES: &[StoryDescriptor] = &[
     StoryDescriptor::new(
@@ -62,6 +62,10 @@ pub const STORIES: &[StoryDescriptor] = &[
         "Clock, Fixture, Shader, and Playlist examples on one review surface.",
     ),
 ];
+
+pub fn stories() -> Vec<StoryDescriptor> {
+    STORIES.to_vec()
+}
 
 pub fn render_story(id: &str) -> Option<Element> {
     match id {

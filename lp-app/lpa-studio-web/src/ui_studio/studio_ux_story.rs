@@ -161,6 +161,10 @@ pub const STORIES: &[StoryDescriptor] = &[
     ),
 ];
 
+pub fn stories() -> Vec<StoryDescriptor> {
+    STORIES.to_vec()
+}
+
 pub fn render_story(id: &str) -> Option<Element> {
     match id {
         "studio/actions/provider-actions" => {

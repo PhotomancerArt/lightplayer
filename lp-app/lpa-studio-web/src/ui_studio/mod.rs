@@ -6,6 +6,7 @@
 
 pub mod device;
 pub mod layout;
+pub mod node;
 pub mod project;
 
 pub use device::RuntimeLog;
