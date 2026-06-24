@@ -1,31 +1,19 @@
-use dioxus::prelude::*;
+//! Base popover stories.
+//!
+//! This file is intentionally small because it is the canonical example of the
+//! path-inferred story contract: `base/popover_story.rs#edge_placement` becomes
+//! `base/popover/edge-placement`.
 
-use crate::stories::story::StoryDescriptor;
+use dioxus::prelude::*;
+use lpa_studio_web_story_macros::story;
+
 use crate::ui_base::{IconPopoverButton, PopoverPlacement, StudioIconName};
 
-pub const STORIES: &[StoryDescriptor] = &[StoryDescriptor::new(
-    "base/popover/edge-placement",
-    "Base",
-    "Popover placement",
-    "Icon popovers anchored near viewport and container edges.",
-)];
-
-pub fn stories() -> Vec<StoryDescriptor> {
-    STORIES.to_vec()
-}
-
-pub fn render_story(id: &str) -> Option<Element> {
-    match id {
-        "base/popover/edge-placement" => Some(rsx! {
-            PopoverPlacementStory {}
-        }),
-        _ => None,
-    }
-}
-
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn PopoverPlacementStory() -> Element {
+#[story(
+    label = "Popover placement",
+    description = "Icon popovers anchored near viewport and container edges."
+)]
+fn edge_placement() -> Element {
     rsx! {
         section { class: "ux-popover-story",
             header { class: "ux-popover-story-heading",

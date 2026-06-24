@@ -1,4 +1,12 @@
+//! Studio UX fixture stories.
+//!
+//! This file keeps the broad shell/device/project fixture helpers together
+//! while the `#[story]` functions at the top provide the generated story
+//! entries. If this grows much further, split the helpers into stable support
+//! modules before adding more story families.
+
 use dioxus::prelude::*;
+use lpa_studio_web_story_macros::story;
 use lpa_studio_ux::{
     DeviceOp, DeviceUx, LinkEndpointId, LinkProviderKind, ProgressState, ProjectEditorOp,
     ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary, ProjectNodeStatusTone,
@@ -9,304 +17,298 @@ use lpa_studio_ux::{
     UiTerminalLine, UxIssue, UxLogEntry, UxLogLevel, UxNodeId,
 };
 
-use crate::stories::story::StoryDescriptor;
 use crate::ui_base::{FieldRow, TabItem, Tabs};
 use crate::ui_core::{ActionStrip, AppPane, MetricGrid};
 use crate::ui_studio::{PaneFrame, StudioShell};
 
-pub const STORIES: &[StoryDescriptor] = &[
-    StoryDescriptor::new(
-        "studio/actions/provider-actions",
-        "Core",
-        "Connection actions",
-        "Generic action strip for connection choices exposed by Device UX.",
-    ),
-    StoryDescriptor::new(
-        "studio/primitives/editor-fields",
-        "Core",
-        "Editor fields",
-        "Field, metric, and tab primitives for the project editor foundation.",
-    ),
-    StoryDescriptor::new(
-        "studio/editor-shell",
-        "Studio",
-        "Editor shell",
-        "Responsive project editor shell with node tree, node workspace, and device rail.",
-    ),
-    StoryDescriptor::new(
-        "studio/panes/device",
-        "Studio",
-        "Device pane",
-        "Device pane rendered from a stack of connection, LightPlayer, and project steps.",
-    ),
-    StoryDescriptor::new(
-        "studio/panes/project",
-        "Studio",
-        "Project pane",
-        "Loaded project pane rendered directly from the Project UX view.",
-    ),
-    StoryDescriptor::new(
-        "studio/device-project-empty",
-        "Studio",
-        "Project launcher",
-        "Device pane offering running-project attach and demo loading.",
-    ),
-    StoryDescriptor::new(
-        "studio/device-project-selection",
-        "Studio",
-        "Project selection",
-        "Loaded project choices exposed in the Device open-project step.",
-    ),
-    StoryDescriptor::new(
-        "studio/simulator-idle",
-        "Studio",
-        "Simulator idle",
-        "Initial Studio UX state before launching the browser simulator.",
-    ),
-    StoryDescriptor::new(
-        "studio/browser-serial-canceled",
-        "Studio",
-        "Serial chooser canceled",
-        "Browser serial picker after the native dialog was canceled.",
-    ),
-    StoryDescriptor::new(
-        "studio/browser-serial-open-failed",
-        "Studio",
-        "Serial open failed",
-        "Recoverable serial-open failure with picker actions still available.",
-    ),
-    StoryDescriptor::new(
-        "studio/simulator-endpoint",
-        "Studio",
-        "Simulator endpoint",
-        "Endpoint choices returned by the selected lpa-link provider.",
-    ),
-    StoryDescriptor::new(
-        "studio/simulator-starting",
-        "Studio",
-        "Simulator starting",
-        "Progress state while the selected endpoint is opening.",
-    ),
-    StoryDescriptor::new(
-        "studio/simulator-ready",
-        "Studio",
-        "Simulator ready",
-        "Connected simulator after the UX layer auto-loads the demo project.",
-    ),
-    StoryDescriptor::new(
-        "studio/server-disconnected-link-ready",
-        "Studio",
-        "Server disconnected",
-        "Open device session with LightPlayer detached and reconnect action available.",
-    ),
-    StoryDescriptor::new(
-        "studio/provision-ready",
-        "Studio",
-        "Flash ready",
-        "Blank ESP32 device session offering firmware flashing.",
-    ),
-    StoryDescriptor::new(
-        "studio/browser-serial-blank-firmware",
-        "Studio",
-        "Blank firmware readiness",
-        "Browser serial readiness with boot logs and firmware flashing available.",
-    ),
-    StoryDescriptor::new(
-        "studio/provisioning",
-        "Studio",
-        "Flashing",
-        "Progress while Studio flashes packaged LightPlayer firmware.",
-    ),
-    StoryDescriptor::new(
-        "studio/provision-failed",
-        "Studio",
-        "Flash failed",
-        "Firmware flashing issue with retry and disconnect actions.",
-    ),
-    StoryDescriptor::new(
-        "studio/resetting-to-blank",
-        "Studio",
-        "Wiping",
-        "Progress while Studio erases an existing ESP32.",
-    ),
-    StoryDescriptor::new(
-        "studio/reset-complete",
-        "Studio",
-        "Reset complete",
-        "Blank ESP32 after erase with firmware flashing available again.",
-    ),
-    StoryDescriptor::new(
-        "studio/project-ready",
-        "Studio",
-        "Project ready",
-        "Demo project loaded and synced through the UX view.",
-    ),
-    StoryDescriptor::new(
-        "studio/project-syncing",
-        "Studio",
-        "Project syncing",
-        "Loaded project while Studio is reading the project mirror.",
-    ),
-    StoryDescriptor::new(
-        "studio/project-sync-failed",
-        "Studio",
-        "Project sync failed",
-        "Loaded project with recoverable sync failure and refresh available.",
-    ),
-    StoryDescriptor::new(
-        "studio/error",
-        "Studio",
-        "Action error",
-        "Failure state shown through the same shell and action surface.",
-    ),
-];
-
-pub fn stories() -> Vec<StoryDescriptor> {
-    STORIES.to_vec()
+#[story(
+    label = "Connection actions",
+    description = "Generic action strip for connection choices exposed by Device UX."
+)]
+fn provider_actions() -> Element {
+    rsx! {
+        PaneFrame {
+            title: "Actions",
+            primary: true,
+            status: None::<UiStatus>,
+            ActionStrip {
+                actions: start_actions(),
+                running: false,
+                on_action: move |_| {},
+            }
+        }
+    }
 }
 
-pub fn render_story(id: &str) -> Option<Element> {
-    match id {
-        "studio/actions/provider-actions" => {
-            return Some(rsx! {
-                PaneFrame {
-                    title: "Actions",
-                    primary: true,
-                    status: None::<UiStatus>,
-                    ActionStrip {
-                        actions: start_actions(),
-                        running: false,
-                        on_action: move |_| {},
-                    }
-                }
-            });
+#[story(
+    label = "Editor fields",
+    description = "Field, metric, and tab primitives for the project editor foundation."
+)]
+fn editor_fields() -> Element {
+    editor_primitives_story()
+}
+
+#[story(
+    label = "Editor shell",
+    description = "Responsive project editor shell with node tree, node workspace, and device rail."
+)]
+fn editor_shell() -> Element {
+    editor_shell_story()
+}
+
+#[story(
+    label = "Device pane",
+    description = "Device pane rendered from a stack of connection, LightPlayer, and project steps."
+)]
+fn device_pane() -> Element {
+    let view = idle_device_view();
+    rsx! {
+        AppPane {
+            view,
+            primary: true,
+            running: false,
+            on_action: move |_| {},
         }
-        "studio/primitives/editor-fields" => return Some(editor_primitives_story()),
-        "studio/editor-shell" => return Some(editor_shell_story()),
-        "studio/panes/device" => {
-            let view = idle_device_view();
-            return Some(rsx! {
-                AppPane {
-                    view,
-                    primary: true,
-                    running: false,
-                    on_action: move |_| {},
-                }
-            });
-        }
-        "studio/panes/project" => {
-            let view = project_view(project_ready_state(), true);
-            return Some(rsx! {
-                AppPane {
-                    view,
-                    primary: false,
-                    running: false,
-                    on_action: move |_| {},
-                }
-            });
-        }
-        "studio/device-project-empty" => {
-            let view = device_project_empty_view();
-            return Some(rsx! {
-                AppPane {
-                    view,
-                    primary: true,
-                    running: false,
-                    on_action: move |_| {},
-                }
-            });
-        }
-        "studio/device-project-selection" => {
-            let view = device_project_selection_view();
-            return Some(rsx! {
-                AppPane {
-                    view,
-                    primary: true,
-                    running: false,
-                    on_action: move |_| {},
-                }
-            });
-        }
-        _ => {}
     }
+}
 
-    let (mut view, running, story_logs) = match id {
-        "studio/simulator-idle" => (idle_view(), false, Vec::new()),
-        "studio/browser-serial-canceled" => (browser_serial_canceled_view(), false, Vec::new()),
-        "studio/browser-serial-open-failed" => {
-            (browser_serial_open_failed_view(), false, Vec::new())
+#[story(
+    label = "Project pane",
+    description = "Loaded project pane rendered directly from the Project UX view."
+)]
+fn project_pane() -> Element {
+    let view = project_view(project_ready_state(), true);
+    rsx! {
+        AppPane {
+            view,
+            primary: false,
+            running: false,
+            on_action: move |_| {},
         }
-        "studio/simulator-endpoint" => (endpoint_view(), false, Vec::new()),
-        "studio/simulator-starting" => (starting_view(), true, Vec::new()),
-        "studio/simulator-ready" => (
-            simulator_ready_view(),
-            false,
-            vec![
-                studio_log(UxLogLevel::Info, "Simulator is running"),
-                studio_log(UxLogLevel::Info, "Demo project loaded"),
-            ],
-        ),
-        "studio/server-disconnected-link-ready" => (
-            lightplayer_disconnected_view(),
-            false,
-            vec![studio_log(UxLogLevel::Info, "LightPlayer disconnected")],
-        ),
-        "studio/provision-ready" => (provision_ready_view(), false, Vec::new()),
-        "studio/browser-serial-blank-firmware" => {
-            (browser_serial_blank_firmware_view(), false, Vec::new())
+    }
+}
+
+#[story(
+    label = "Project launcher",
+    description = "Device pane offering running-project attach and demo loading."
+)]
+fn device_project_empty() -> Element {
+    let view = device_project_empty_view();
+    rsx! {
+        AppPane {
+            view,
+            primary: true,
+            running: false,
+            on_action: move |_| {},
         }
-        "studio/provisioning" => (provisioning_view(), true, Vec::new()),
-        "studio/provision-failed" => (
-            provision_failed_view(),
-            false,
-            vec![studio_log(
-                UxLogLevel::Error,
-                "browser serial firmware flashing failed",
-            )],
-        ),
-        "studio/resetting-to-blank" => (resetting_to_blank_view(), true, Vec::new()),
-        "studio/reset-complete" => (
-            reset_complete_view(),
-            false,
-            vec![studio_log(UxLogLevel::Info, "ESP32-C6 wiped")],
-        ),
-        "studio/project-ready" => (
-            project_ready_view(),
-            false,
-            vec![studio_log(UxLogLevel::Info, "Demo project loaded")],
-        ),
-        "studio/project-syncing" => (
-            project_syncing_view(),
-            true,
-            vec![studio_log(UxLogLevel::Info, "Reading project shapes")],
-        ),
-        "studio/project-sync-failed" => (
-            project_sync_failed_view(),
-            false,
-            vec![studio_log(
-                UxLogLevel::Error,
-                "project sync failed: protocol timeout",
-            )],
-        ),
-        "studio/error" => (
-            error_view(),
-            false,
-            vec![studio_log(
-                UxLogLevel::Error,
-                "browser worker boot timed out",
-            )],
-        ),
-        _ => return None,
-    };
+    }
+}
+
+#[story(
+    label = "Project selection",
+    description = "Loaded project choices exposed in the Device open-project step."
+)]
+fn device_project_selection() -> Element {
+    let view = device_project_selection_view();
+    rsx! {
+        AppPane {
+            view,
+            primary: true,
+            running: false,
+            on_action: move |_| {},
+        }
+    }
+}
+
+#[story(
+    label = "Simulator idle",
+    description = "Initial Studio UX state before launching the browser simulator."
+)]
+fn simulator_idle() -> Element {
+    shell_story(idle_view(), false, Vec::new())
+}
+
+#[story(
+    label = "Serial chooser canceled",
+    description = "Browser serial picker after the native dialog was canceled."
+)]
+fn browser_serial_canceled() -> Element {
+    shell_story(browser_serial_canceled_view(), false, Vec::new())
+}
+
+#[story(
+    label = "Serial open failed",
+    description = "Recoverable serial-open failure with picker actions still available."
+)]
+fn browser_serial_open_failed() -> Element {
+    shell_story(browser_serial_open_failed_view(), false, Vec::new())
+}
+
+#[story(
+    label = "Simulator endpoint",
+    description = "Endpoint choices returned by the selected lpa-link provider."
+)]
+fn simulator_endpoint() -> Element {
+    shell_story(endpoint_view(), false, Vec::new())
+}
+
+#[story(
+    label = "Simulator starting",
+    description = "Progress state while the selected endpoint is opening."
+)]
+fn simulator_starting() -> Element {
+    shell_story(starting_view(), true, Vec::new())
+}
+
+#[story(
+    label = "Simulator ready",
+    description = "Connected simulator after the UX layer auto-loads the demo project."
+)]
+fn simulator_ready() -> Element {
+    shell_story(
+        simulator_ready_view(),
+        false,
+        vec![
+            studio_log(UxLogLevel::Info, "Simulator is running"),
+            studio_log(UxLogLevel::Info, "Demo project loaded"),
+        ],
+    )
+}
+
+#[story(
+    label = "Server disconnected",
+    description = "Open device session with LightPlayer detached and reconnect action available."
+)]
+fn server_disconnected_link_ready() -> Element {
+    shell_story(
+        lightplayer_disconnected_view(),
+        false,
+        vec![studio_log(UxLogLevel::Info, "LightPlayer disconnected")],
+    )
+}
+
+#[story(
+    label = "Flash ready",
+    description = "Blank ESP32 device session offering firmware flashing."
+)]
+fn provision_ready() -> Element {
+    shell_story(provision_ready_view(), false, Vec::new())
+}
+
+#[story(
+    label = "Blank firmware readiness",
+    description = "Browser serial readiness with boot logs and firmware flashing available."
+)]
+fn browser_serial_blank_firmware() -> Element {
+    shell_story(browser_serial_blank_firmware_view(), false, Vec::new())
+}
+
+#[story(
+    label = "Flashing",
+    description = "Progress while Studio flashes packaged LightPlayer firmware."
+)]
+fn provisioning() -> Element {
+    shell_story(provisioning_view(), true, Vec::new())
+}
+
+#[story(
+    label = "Flash failed",
+    description = "Firmware flashing issue with retry and disconnect actions."
+)]
+fn provision_failed() -> Element {
+    shell_story(
+        provision_failed_view(),
+        false,
+        vec![studio_log(
+            UxLogLevel::Error,
+            "browser serial firmware flashing failed",
+        )],
+    )
+}
+
+#[story(
+    label = "Wiping",
+    description = "Progress while Studio erases an existing ESP32."
+)]
+fn resetting_to_blank() -> Element {
+    shell_story(resetting_to_blank_view(), true, Vec::new())
+}
+
+#[story(
+    label = "Reset complete",
+    description = "Blank ESP32 after erase with firmware flashing available again."
+)]
+fn reset_complete() -> Element {
+    shell_story(
+        reset_complete_view(),
+        false,
+        vec![studio_log(UxLogLevel::Info, "ESP32-C6 wiped")],
+    )
+}
+
+#[story(
+    label = "Project ready",
+    description = "Demo project loaded and synced through the UX view."
+)]
+fn project_ready() -> Element {
+    shell_story(
+        project_ready_view(),
+        false,
+        vec![studio_log(UxLogLevel::Info, "Demo project loaded")],
+    )
+}
+
+#[story(
+    label = "Project syncing",
+    description = "Loaded project while Studio is reading the project mirror."
+)]
+fn project_syncing() -> Element {
+    shell_story(
+        project_syncing_view(),
+        true,
+        vec![studio_log(UxLogLevel::Info, "Reading project shapes")],
+    )
+}
+
+#[story(
+    label = "Project sync failed",
+    description = "Loaded project with recoverable sync failure and refresh available."
+)]
+fn project_sync_failed() -> Element {
+    shell_story(
+        project_sync_failed_view(),
+        false,
+        vec![studio_log(
+            UxLogLevel::Error,
+            "project sync failed: protocol timeout",
+        )],
+    )
+}
+
+#[story(
+    label = "Action error",
+    description = "Failure state shown through the same shell and action surface."
+)]
+fn action_error() -> Element {
+    shell_story(
+        error_view(),
+        false,
+        vec![studio_log(
+            UxLogLevel::Error,
+            "browser worker boot timed out",
+        )],
+    )
+}
+
+fn shell_story(mut view: StudioView, running: bool, story_logs: Vec<UxLogEntry>) -> Element {
     view.logs.extend(story_logs);
-
-    Some(rsx! {
+    rsx! {
         StudioShell {
             view,
             running,
             on_action: move |_| {},
         }
-    })
+    }
 }
 
 fn editor_primitives_story() -> Element {

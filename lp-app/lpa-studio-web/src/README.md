@@ -55,15 +55,67 @@ it probably belongs in the higher family.
 
 ## Stories
 
-Component stories are colocated with the component family they describe. Add
-story modules as adjacent `*_story.rs` files and expose this small contract:
+Component stories are colocated with the family or exploration they describe,
+but they are not wired by hand. Add `*_story.rs` files under the story family
+tree and mark story entry functions with `#[story]`.
 
-```rust
-pub fn stories() -> Vec<StoryDescriptor>;
-pub fn render_story(id: &str) -> Option<Element>;
+```text
+src/<family>/<component>_story.rs
+src/<family>/<category>/<component>_story.rs
 ```
 
-`build.rs` discovers those files and generates the central story registry, so
-`src/stories` should stay focused on storybook routing, shell chrome, and shared
-story types. Open-ended explorations can still live in a story module near the
-surface being explored, with the group label making their status clear.
+Examples:
+
+```text
+src/base/popover_story.rs                -> base/popover/<story>
+src/studio/device/picker_story.rs        -> studio/device/picker/<story>
+src/exploration/node_ui_story.rs         -> exploration/node-ui/<story>
+```
+
+Within a story file, define zero-argument functions returning `Element`:
+
+```rust
+use dioxus::prelude::*;
+use lpa_studio_web_story_macros::story;
+
+#[story(
+    label = "Popover placement",
+    description = "Icon popovers anchored near viewport edges."
+)]
+fn edge_placement() -> Element {
+    rsx! { section { "..." } }
+}
+```
+
+Story ids are inferred from the path plus function name. The example above in
+`src/base/popover_story.rs` becomes:
+
+```text
+base/popover/edge-placement
+```
+
+Use `snake_case` for Rust filenames and functions; the registry converts those
+segments to `kebab-case` for story routes and baseline PNG names.
+
+`build.rs` parses `#[story]` metadata with `syn` and generates the central
+story registry. If a story is malformed, the build should fail with a concrete
+diagnostic telling you which file, function, or route is wrong. Do not recreate
+manual `StoryDescriptor` arrays or per-file `render_story` matches.
+
+Story family guidance:
+
+- `base`: generic building blocks such as popovers, tabs, buttons, and icons.
+- `core`: data-driven controls that render generic `Ui*` values.
+- `studio`: app/domain surfaces such as device, project, panes, and shell.
+- `exploration`: spikes and mockups that are intentionally not production
+  component stories yet.
+
+When a change touches Studio web source or story output, follow the repo
+baseline workflow:
+
+```bash
+just studio-story-baselines-if-needed
+```
+
+Include updated files from `lp-app/lpa-studio-web/story-images/` with the same
+commit when baselines change.

@@ -1,0 +1,20 @@
+[package]
+name = "lpa-studio-web-story-macros"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+description = "Proc macros for LightPlayer Studio web stories"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full", "parsing"] }
+
+[lints]
+workspace = true

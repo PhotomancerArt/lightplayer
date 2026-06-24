@@ -69,7 +69,7 @@ pub fn StoryBook() -> Element {
                 div { class: "story-toolbar",
                     div {
                         h2 { "{descriptor.label}" }
-                        p { "{descriptor.group} / {descriptor.id}" }
+                        p { "{descriptor.family_label()} / {descriptor.id}" }
                     }
                     div { class: "story-viewport-controls",
                         for target_viewport in [StoryViewport::Sm, StoryViewport::Md, StoryViewport::Lg] {
@@ -115,11 +115,12 @@ struct StoryGroup {
 fn story_groups(stories: &[crate::stories::story::StoryDescriptor]) -> Vec<StoryGroup> {
     let mut groups = Vec::<StoryGroup>::new();
     for story in stories {
-        if let Some(group) = groups.iter_mut().find(|group| group.label == story.group) {
+        let label = story.family_label();
+        if let Some(group) = groups.iter_mut().find(|group| group.label == label) {
             group.stories.push(*story);
         } else {
             groups.push(StoryGroup {
-                label: story.group,
+                label,
                 stories: vec![*story],
             });
         }
@@ -137,6 +138,7 @@ fn story_group_order(label: &str) -> usize {
         "Base" => 0,
         "Core" => 1,
         "Studio" => 2,
+        "Exploration" => 3,
         _ => 99,
     }
 }

@@ -2,12 +2,17 @@ use dioxus::prelude::*;
 
 use crate::stories::story::StoryDescriptor;
 
-pub const DEFAULT_STORY_ID: &str = "studio/simulator-idle";
+pub const DEFAULT_STORY_ID: &str = "studio/studio-ux/simulator-idle";
 
 mod generated {
     include!(concat!(env!("OUT_DIR"), "/story_registry.generated.rs"));
 }
 
+/// Return every generated story descriptor.
+///
+/// The source of truth is the set of `#[story]` functions discovered by
+/// `lpa-studio-web/build.rs`; this module intentionally contains no hand-written
+/// story list.
 pub fn all_stories() -> Vec<StoryDescriptor> {
     generated::all_generated_stories()
 }

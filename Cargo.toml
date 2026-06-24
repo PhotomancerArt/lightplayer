@@ -14,6 +14,7 @@ members = [
     "lp-app/lpa-link",
     "lp-app/lpa-studio-ux",
     "lp-app/lpa-studio-web",
+    "lp-app/lpa-studio-web-story-macros",
     "lp-fw/fw-browser",
     "lp-fw/fw-core",
     "lp-fw/fw-host",

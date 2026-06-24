@@ -1,6 +1,12 @@
-use dioxus::prelude::*;
+//! Exploratory node UI stories.
+//!
+//! These stories are grounded in real project shape/slot JSON, but they are
+//! still design spike surfaces. Keeping them under `exploration` makes that
+//! status visible in the generated story route and navigation.
 
-use crate::stories::story::StoryDescriptor;
+use dioxus::prelude::*;
+use lpa_studio_web_story_macros::story;
+
 use crate::ui_base::{IconPopoverButton, PopoverPlacement, StudioIcon, StudioIconName};
 
 const CLOCK_SHAPE_JSON: &str = include_str!("story_data/clock.shape.json");
@@ -12,123 +18,118 @@ const PLAYLIST_SLOTS_JSON: &str = include_str!("story_data/playlist.slots.json")
 const SHADER_SHAPE_JSON: &str = include_str!("story_data/shader.shape.json");
 const SHADER_SLOTS_JSON: &str = include_str!("story_data/shader.slots.json");
 
-pub const STORIES: &[StoryDescriptor] = &[
-    StoryDescriptor::new(
-        "studio/node-ui/clock-instrument",
-        "Studio",
-        "Clock",
-        "Basic Clock node using the instrument-window direction.",
-    ),
-    StoryDescriptor::new(
-        "studio/node-ui/clock-compact",
-        "Studio",
-        "Clock compact",
-        "Basic Clock node using the compact-inspector direction.",
-    ),
-    StoryDescriptor::new(
-        "studio/node-ui/fixture-control-product",
-        "Studio",
-        "Fixture",
-        "Fixture node with a rough control-product preview and nested mapping.",
-    ),
-    StoryDescriptor::new(
-        "studio/node-ui/shader-visual-product",
-        "Studio",
-        "Shader",
-        "Shader node with a rough visual-product preview and compact slot rows.",
-    ),
-    StoryDescriptor::new(
-        "studio/node-ui/playlist-children",
-        "Studio",
-        "Playlist",
-        "Fyeah-inspired Playlist node with active entry and owned child visuals.",
-    ),
-    StoryDescriptor::new(
-        "studio/node-ui/status-indicators",
-        "Studio",
-        "Status indicators",
-        "Minimal nodes showing Running, Idle, and Error status chrome.",
-    ),
-    StoryDescriptor::new(
-        "studio/node-ui/project-context",
-        "Studio",
-        "Project context",
-        "Project-root hierarchy with representative node surfaces in context.",
-    ),
-    StoryDescriptor::new(
-        "studio/node-ui/gallery",
-        "Studio",
-        "Node gallery",
-        "Clock, Fixture, Shader, and Playlist examples on one review surface.",
-    ),
-];
-
-pub fn stories() -> Vec<StoryDescriptor> {
-    STORIES.to_vec()
+#[story(
+    label = "Clock",
+    description = "Basic Clock node using the instrument-window direction."
+)]
+fn clock_instrument() -> Element {
+    rsx! {
+        NodeUiStoryCanvas {
+            title: "Clock",
+            note: "Instrument-window direction for a simple produced-value node.",
+            NodeWindow {
+                node: clock_node(),
+                variant: NodeUiVariant::Instrument,
+            }
+        }
+    }
 }
 
-pub fn render_story(id: &str) -> Option<Element> {
-    match id {
-        "studio/node-ui/clock-instrument" => Some(rsx! {
-            NodeUiStoryCanvas {
-                title: "Clock",
-                note: "Instrument-window direction for a simple produced-value node.",
-                NodeWindow {
-                    node: clock_node(),
-                    variant: NodeUiVariant::Instrument,
-                }
+#[story(
+    label = "Clock compact",
+    description = "Basic Clock node using the compact-inspector direction."
+)]
+fn clock_compact() -> Element {
+    rsx! {
+        NodeUiStoryCanvas {
+            title: "Clock compact",
+            note: "Compact-inspector direction with the same Clock data.",
+            NodeWindow {
+                node: clock_node(),
+                variant: NodeUiVariant::Compact,
             }
-        }),
-        "studio/node-ui/clock-compact" => Some(rsx! {
-            NodeUiStoryCanvas {
-                title: "Clock compact",
-                note: "Compact-inspector direction with the same Clock data.",
-                NodeWindow {
-                    node: clock_node(),
-                    variant: NodeUiVariant::Compact,
-                }
+        }
+    }
+}
+
+#[story(
+    label = "Fixture",
+    description = "Fixture node with a rough control-product preview and nested mapping."
+)]
+fn fixture_control_product() -> Element {
+    rsx! {
+        NodeUiStoryCanvas {
+            title: "Fixture",
+            note: "Control product node with a rough probed-output box and one-level mapping detail.",
+            NodeWindow {
+                node: fixture_node(),
+                variant: NodeUiVariant::Instrument,
             }
-        }),
-        "studio/node-ui/fixture-control-product" => Some(rsx! {
-            NodeUiStoryCanvas {
-                title: "Fixture",
-                note: "Control product node with a rough probed-output box and one-level mapping detail.",
-                NodeWindow {
-                    node: fixture_node(),
-                    variant: NodeUiVariant::Instrument,
-                }
+        }
+    }
+}
+
+#[story(
+    label = "Shader",
+    description = "Shader node with a rough visual-product preview and compact slot rows."
+)]
+fn shader_visual_product() -> Element {
+    rsx! {
+        NodeUiStoryCanvas {
+            title: "Shader",
+            note: "Visual product node with a rough render preview surface.",
+            NodeWindow {
+                node: shader_node(),
+                variant: NodeUiVariant::Instrument,
             }
-        }),
-        "studio/node-ui/shader-visual-product" => Some(rsx! {
-            NodeUiStoryCanvas {
-                title: "Shader",
-                note: "Visual product node with a rough render preview surface.",
-                NodeWindow {
-                    node: shader_node(),
-                    variant: NodeUiVariant::Instrument,
-                }
+        }
+    }
+}
+
+#[story(
+    label = "Playlist",
+    description = "Fyeah-inspired Playlist node with active entry and owned child visuals."
+)]
+fn playlist_children() -> Element {
+    rsx! {
+        NodeUiStoryCanvas {
+            title: "Playlist",
+            note: "Fyeah-inspired Playlist node with active child ownership and product output.",
+            NodeWindow {
+                node: playlist_node(),
+                variant: NodeUiVariant::Instrument,
             }
-        }),
-        "studio/node-ui/playlist-children" => Some(rsx! {
-            NodeUiStoryCanvas {
-                title: "Playlist",
-                note: "Fyeah-inspired Playlist node with active child ownership and product output.",
-                NodeWindow {
-                    node: playlist_node(),
-                    variant: NodeUiVariant::Instrument,
-                }
-            }
-        }),
-        "studio/node-ui/status-indicators" => Some(rsx! {
-            NodeUiStatusStory {}
-        }),
-        "studio/node-ui/project-context" => Some(rsx! {
-            NodeUiProjectContext {}
-        }),
-        "studio/node-ui/gallery" => Some(rsx! {
-            NodeUiGallery {}
-        }),
-        _ => None,
+        }
+    }
+}
+
+#[story(
+    label = "Status indicators",
+    description = "Minimal nodes showing Running, Idle, and Error status chrome."
+)]
+fn status_indicators() -> Element {
+    rsx! {
+        NodeUiStatusStory {}
+    }
+}
+
+#[story(
+    label = "Project context",
+    description = "Project-root hierarchy with representative node surfaces in context."
+)]
+fn project_context() -> Element {
+    rsx! {
+        NodeUiProjectContext {}
+    }
+}
+
+#[story(
+    label = "Node gallery",
+    description = "Clock, Fixture, Shader, and Playlist examples on one review surface."
+)]
+fn gallery() -> Element {
+    rsx! {
+        NodeUiGallery {}
     }
 }
 

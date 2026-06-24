@@ -5156,7 +5156,18 @@ dependencies = [
  "dioxus",
  "dioxus-icons",
  "lpa-studio-ux",
+ "lpa-studio-web-story-macros",
+ "syn 2.0.117",
  "web-sys",
+]
+
+[[package]]
+name = "lpa-studio-web-story-macros"
+version = "40.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]
