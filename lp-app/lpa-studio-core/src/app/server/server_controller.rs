@@ -145,7 +145,7 @@ fn server_body(state: &ServerState) -> UiViewContent {
         ServerState::Disconnected => {
             UiViewContent::text("Open a link endpoint to attach the server protocol.")
         }
-        ServerState::Connecting { progress } => UiViewContent::Progress(progress.clone()),
+        ServerState::Connecting { progress } => UiViewContent::Progress(progress.clone().into()),
         ServerState::Connected { protocol } => {
             UiViewContent::Metrics(vec![UiMetric::new("Protocol", protocol)])
         }

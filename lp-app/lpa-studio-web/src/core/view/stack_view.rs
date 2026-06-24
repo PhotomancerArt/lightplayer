@@ -1,4 +1,4 @@
-use crate::core::{ActionStrip, ViewContent};
+use crate::core::{ActionStrip, TerminalOutput, ViewContent};
 use dioxus::prelude::*;
 use lpa_studio_core::core::view::steps_view::UiStepState;
 use lpa_studio_core::{UiAction, UiStepsView};
@@ -6,6 +6,7 @@ use lpa_studio_core::{UiAction, UiStepsView};
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn StepsView(stack: UiStepsView, running: bool, on_action: EventHandler<UiAction>) -> Element {
+    let terminal = stack.terminal;
     let sections = stack
         .sections
         .into_iter()
@@ -38,6 +39,9 @@ pub fn StepsView(stack: UiStepsView, running: bool, on_action: EventHandler<UiAc
                         }
                     }
                 }
+            }
+            TerminalOutput {
+                lines: terminal,
             }
         }
     }

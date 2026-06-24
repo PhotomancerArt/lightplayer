@@ -1,4 +1,12 @@
 pub mod activity_view;
+#[cfg(feature = "stories")]
+pub(crate) mod activity_view_stories;
 pub mod pane_view;
+#[cfg(feature = "stories")]
+pub(crate) mod pane_view_stories;
 pub mod stack_view;
+#[cfg(feature = "stories")]
+pub(crate) mod steps_view_stories;
 pub mod view_content;
+#[cfg(feature = "stories")]
+pub(crate) mod view_content_stories;

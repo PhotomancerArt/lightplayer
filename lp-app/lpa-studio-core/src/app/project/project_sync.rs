@@ -2,7 +2,7 @@ use lpc_model::{
     NodeId, Revision, SlotData, SlotMapKey, SlotShapeId, SlotShapeLookup, SlotShapeRegistry,
     SlotShapeView, TreePath,
 };
-use lpc_view::{apply_project_read_response, ProjectView, SlotMirrorView, TreeEntryView};
+use lpc_view::{ProjectView, SlotMirrorView, TreeEntryView, apply_project_read_response};
 use lpc_wire::{
     NodeReadQuery, NodeReadSelection, NodeRuntimeStatus, ProjectReadQuery, ProjectReadRequest,
     ProjectReadResponse, ProjectReadResult, ReadLevel, ResourcePayloadRead, ResourceReadQuery,

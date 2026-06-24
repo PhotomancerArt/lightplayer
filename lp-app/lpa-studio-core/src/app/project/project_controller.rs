@@ -428,7 +428,7 @@ fn project_body(
         )),
         ProjectState::ConnectingRunningProject { progress }
         | ProjectState::LoadingDemoProject { progress } => {
-            UiViewContent::Progress(progress.clone())
+            UiViewContent::Progress(progress.clone().into())
         }
         ProjectState::Ready {
             project_id,

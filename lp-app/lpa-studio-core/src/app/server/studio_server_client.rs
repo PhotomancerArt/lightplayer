@@ -5,7 +5,7 @@ use lpa_client::{ClientError, ClientEvent, ClientIo, LpClient};
 use lpa_link::{LinkConnection, LinkConnectionKind};
 use lpc_wire::{ProjectReadRequest, ProjectReadResponse, WireProjectHandle};
 
-use crate::app::project::demo_project::{demo_project_deploy_files, DEMO_PROJECT_ID};
+use crate::app::project::demo_project::{DEMO_PROJECT_ID, demo_project_deploy_files};
 use crate::{
     LoadedProjectChoice, ProjectInventorySummary, SharedLinkRegistry, UiError, UiLogEntry,
     UiLogLevel, UxUpdateSink,

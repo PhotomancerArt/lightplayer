@@ -16,7 +16,7 @@ use crate::core::PaneView;
 pub(crate) fn device_pane() -> Element {
     let view = idle_device_view();
     rsx! {
-        AppPane {
+        PaneView {
             view,
             primary: true,
             running: false,

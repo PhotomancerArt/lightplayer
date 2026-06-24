@@ -2,14 +2,14 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use async_trait::async_trait;
-use lpa_client::project_deploy::request_label;
 use lpa_client::ClientIo;
+use lpa_client::project_deploy::request_label;
 use lpa_link::provider::session::LinkSessionId;
 use lpa_link::providers::browser_serial_esp32::BrowserSerialEsp32Provider;
 use lpa_link::providers::{LinkProviderInstance, LinkProviderRegistry};
 use lpa_link::{LinkProvider, LinkProviderKind};
-use lpc_wire::{json, ClientMessage, TransportError, WireServerMessage};
-use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
+use lpc_wire::{ClientMessage, TransportError, WireServerMessage, json};
+use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use wasm_bindgen_futures::JsFuture;
 
 use super::browser_serial_readiness::{

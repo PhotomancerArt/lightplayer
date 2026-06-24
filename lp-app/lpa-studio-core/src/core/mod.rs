@@ -1,3 +1,9 @@
+//! Data-driven UI contracts shared by Studio controllers and renderers.
+//!
+//! Types in this module describe what the UI should render, not how a specific
+//! frontend should render it. Controllers produce `Ui*` data, while web
+//! components in `lpa-studio-web/src/core` consume the same data.
+
 pub mod action;
 pub mod error;
 pub mod issue;

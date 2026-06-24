@@ -811,8 +811,8 @@ mod tests {
     use std::rc::Rc;
 
     use lpa_client::ClientIo;
-    use lpa_link::providers::fake::FakeProvider;
     use lpa_link::providers::LinkProviderRegistry;
+    use lpa_link::providers::fake::FakeProvider;
     use lpa_link::{
         LinkCapabilities, LinkConnection, LinkConnectionKind, LinkEndpoint, LinkEndpointId,
         LinkProviderKind, LinkSession,

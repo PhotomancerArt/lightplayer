@@ -1,7 +1,7 @@
-use crate::core::ProgressBar;
+use crate::core::{ProgressBar, TerminalOutput};
 use dioxus::prelude::*;
-use lpa_studio_core::core::view::activity_view::UiActivityStepState;
 use lpa_studio_core::UiActivityView;
+use lpa_studio_core::core::view::activity_view::UiActivityStepState;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -10,6 +10,7 @@ pub fn ActivityView(activity: UiActivityView) -> Element {
     let detail = activity.detail;
     let progress = activity.progress;
     let steps = activity.steps;
+    let terminal = activity.terminal;
 
     rsx! {
         div { class: "ux-activity",
@@ -34,6 +35,9 @@ pub fn ActivityView(activity: UiActivityView) -> Element {
                         }
                     }
                 }
+            }
+            TerminalOutput {
+                lines: terminal,
             }
         }
     }

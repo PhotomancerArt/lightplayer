@@ -248,6 +248,11 @@ select {
   color: var(--studio-status-error-text);
 }
 
+.ux-issue {
+  display: grid;
+  gap: 4px;
+}
+
 .ux-stack {
   display: grid;
   gap: 14px;
@@ -2333,6 +2338,11 @@ select {
 .ux-project-empty p,
 .ux-project-slot-empty {
   color: var(--studio-color-text-muted);
+}
+
+.ux-story-stack {
+  display: grid;
+  gap: 18px;
 }
 
 .story-book {

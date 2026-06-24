@@ -1,22 +1,37 @@
-use crate::{ProgressState, ProjectEditorView, UiActivityView, UiIssue, UiMetric, UiStepsView};
+use crate::{ProjectEditorView, UiActivityView, UiIssue, UiMetric, UiProgress, UiStepsView};
 
+/// Generic body content for panes and workflow steps.
+///
+/// This enum lets controllers describe common renderable content without
+/// choosing web components directly. Keep app-specific surfaces in app view
+/// DTOs and use these variants for reusable body shapes.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiViewContent {
+    /// No visible body content.
     Empty,
+    /// A single paragraph of text.
     Text(String),
-    Progress(ProgressState),
+    /// Progress for ongoing work.
+    Progress(UiProgress),
+    /// A multi-step activity.
     Activity(UiActivityView),
+    /// An inline problem that needs attention.
     Issue(UiIssue),
+    /// A compact label/value metric grid.
     Metrics(Vec<UiMetric>),
+    /// A composed workflow with ordered steps.
     Stack(Box<UiStepsView>),
+    /// Project editor surface.
     ProjectEditor(Box<ProjectEditorView>),
 }
 
 impl UiViewContent {
+    /// Create text body content.
     pub fn text(value: impl Into<String>) -> Self {
         Self::Text(value.into())
     }
 
+    /// Render the body as plain text lines for fallback renderers and tests.
     pub fn render_text_lines(&self) -> Vec<String> {
         match self {
             Self::Empty => Vec::new(),

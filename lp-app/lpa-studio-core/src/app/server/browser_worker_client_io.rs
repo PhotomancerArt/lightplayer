@@ -9,7 +9,7 @@ use lpa_link::providers::browser_worker::{
 };
 use lpa_link::providers::{LinkProviderInstance, LinkProviderRegistry};
 use lpa_link::{LinkProvider, LinkProviderKind};
-use lpc_wire::{json, ClientMessage, TransportError, WireServerMessage};
+use lpc_wire::{ClientMessage, TransportError, WireServerMessage, json};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 

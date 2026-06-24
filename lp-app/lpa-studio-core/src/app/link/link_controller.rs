@@ -560,18 +560,23 @@ fn link_body(state: &LinkState) -> UiViewContent {
         LinkState::DiscoveringEndpoints {
             provider_id,
             progress,
-        } => UiViewContent::Progress(progress.clone().with_detail(format!(
-            "Discovering endpoints from {}.",
-            provider_id.label()
-        ))),
+        } => UiViewContent::Progress(
+            progress
+                .clone()
+                .with_detail(format!(
+                    "Discovering endpoints from {}.",
+                    provider_id.label()
+                ))
+                .into(),
+        ),
         LinkState::SelectingEndpoint { endpoints, .. } => endpoints
             .first()
             .map(|endpoint| UiViewContent::text(endpoint.summary.clone()))
             .unwrap_or_else(|| {
                 UiViewContent::text("No endpoints are available for this provider.")
             }),
-        LinkState::Connecting { progress, .. } => UiViewContent::Progress(progress.clone()),
-        LinkState::Managing { progress, .. } => UiViewContent::Progress(progress.clone()),
+        LinkState::Connecting { progress, .. } => UiViewContent::Progress(progress.clone().into()),
+        LinkState::Managing { progress, .. } => UiViewContent::Progress(progress.clone().into()),
         LinkState::Connected { device } => UiViewContent::Metrics(vec![
             UiMetric::new("Provider", device.provider_id.label()),
             UiMetric::new("Endpoint", &device.endpoint_id),
@@ -858,8 +863,8 @@ mod tests {
     use std::sync::Arc;
     use std::task::{Context, Poll, Wake, Waker};
 
-    use lpa_link::providers::fake::FakeProvider;
     use lpa_link::providers::LinkProviderRegistry;
+    use lpa_link::providers::fake::FakeProvider;
     use lpa_link::{
         LinkCapabilities, LinkConnectionKind, LinkEndpoint, LinkManagementEvent,
         LinkManagementRequest, LinkProviderKind, LinkSession,

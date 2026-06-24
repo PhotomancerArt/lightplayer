@@ -208,9 +208,15 @@ impl DeviceController {
                 "Connect device",
                 UiStepState::Active,
             )
-            .with_body(UiViewContent::Progress(progress.clone().with_detail(
-                format!("Discovering endpoints from {}.", provider_id.label()),
-            ))),
+            .with_body(UiViewContent::Progress(
+                progress
+                    .clone()
+                    .with_detail(format!(
+                        "Discovering endpoints from {}.",
+                        provider_id.label()
+                    ))
+                    .into(),
+            )),
             LinkState::SelectingEndpoint {
                 provider_id,
                 endpoints,
@@ -226,7 +232,7 @@ impl DeviceController {
                 "Connect device",
                 UiStepState::Active,
             )
-            .with_body(UiViewContent::Progress(progress.clone())),
+            .with_body(UiViewContent::Progress(progress.clone().into())),
             LinkState::Connected { device } | LinkState::Managing { device, .. } => {
                 let section = UiStepView::new(
                     Self::SECTION_CONNECT_DEVICE,
@@ -266,7 +272,7 @@ impl DeviceController {
                 "Connect LightPlayer",
                 UiStepState::Active,
             )
-            .with_body(UiViewContent::Progress(progress.clone())),
+            .with_body(UiViewContent::Progress(progress.clone().into())),
             (LinkState::Connected { .. }, ServerState::Connected { protocol }) => UiStepView::new(
                 Self::SECTION_CONNECT_LIGHTPLAYER,
                 "Connect LightPlayer",
@@ -307,7 +313,7 @@ impl DeviceController {
                 progress.label.clone(),
                 UiStepState::Active,
             )
-            .with_body(UiViewContent::Progress(progress.clone())),
+            .with_body(UiViewContent::Progress(progress.clone().into())),
             _ => UiStepView::new(
                 Self::SECTION_CONNECT_LIGHTPLAYER,
                 "Connect LightPlayer",
@@ -365,7 +371,7 @@ impl DeviceController {
                 "Open project",
                 UiStepState::Active,
             )
-            .with_body(UiViewContent::Progress(progress.clone())),
+            .with_body(UiViewContent::Progress(progress.clone().into())),
             ProjectState::Ready { project_id, .. } => UiStepView::new(
                 Self::SECTION_OPEN_PROJECT,
                 "Open project",

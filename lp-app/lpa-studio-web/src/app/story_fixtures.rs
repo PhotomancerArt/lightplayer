@@ -11,12 +11,12 @@ use dioxus::prelude::*;
 use lpa_studio_core::core::view::activity_view::{UiActivityStep, UiActivityStepState};
 use lpa_studio_core::core::view::steps_view::{UiStepState, UiStepView};
 use lpa_studio_core::{
-    ControllerId, DeviceController, DeviceOp, LinkEndpointId, LinkProviderKind, ProgressState,
-    ProjectController, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
-    ProjectInventorySummary, ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTreeItem,
-    ProjectNodeTreeView, ProjectNodeView, ProjectOp, ProjectRuntimeSummary, ProjectSlotRowView,
-    ProjectState, ProjectSyncPhase, ProjectSyncSummary, UiAction, UiActivityView, UiIssue,
-    UiLogEntry, UiLogLevel, UiMetric, UiPaneView, UiProgress, UiStatus, UiStepsView, UiStudioView,
+    ControllerId, DeviceController, DeviceOp, LinkEndpointId, LinkProviderKind, ProjectController,
+    ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
+    ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView,
+    ProjectNodeView, ProjectOp, ProjectRuntimeSummary, ProjectSlotRowView, ProjectState,
+    ProjectSyncPhase, ProjectSyncSummary, UiAction, UiActivityView, UiIssue, UiLogEntry,
+    UiLogLevel, UiMetric, UiPaneView, UiProgress, UiStatus, UiStepsView, UiStudioView,
     UiTerminalLine, UiViewContent,
 };
 
@@ -581,7 +581,7 @@ pub(crate) fn starting_device_view() -> UiPaneView {
                 "connect-lightplayer",
                 "Connect LightPlayer",
                 UiStepState::Active,
-                UiViewContent::Progress(ProgressState::new("Opening server protocol")),
+                UiViewContent::Progress(UiProgress::indeterminate("Opening server protocol")),
                 Vec::new(),
             ),
         ],

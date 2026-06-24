@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiViewContent};
 
 use crate::app::ProjectSidebar;
-use crate::core::{ActivityView, MetricGrid, StepsView};
+use crate::core::{ActivityView, IssueView, MetricGrid, ProgressBar, StepsView};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -16,29 +16,15 @@ pub fn ViewContent(
         UiViewContent::Text(text) => rsx! {
             p { class: "ux-panel-copy", "{text}" }
         },
-        UiViewContent::Progress(progress) => {
-            let label = progress.label;
-            let detail = progress.detail;
-            rsx! {
-                p { class: "ux-panel-copy", "{label}" }
-                if let Some(detail) = detail.as_ref() {
-                    p { class: "ux-panel-copy ux-panel-detail", "{detail}" }
-                }
-            }
-        }
+        UiViewContent::Progress(progress) => rsx! {
+            ProgressBar { progress }
+        },
         UiViewContent::Activity(activity) => rsx! {
             ActivityView { activity }
         },
-        UiViewContent::Issue(issue) => {
-            let message = issue.message;
-            let detail = issue.detail;
-            rsx! {
-                p { class: "ux-panel-copy ux-panel-issue", "{message}" }
-                if let Some(detail) = detail.as_ref() {
-                    p { class: "ux-panel-copy ux-panel-detail", "{detail}" }
-                }
-            }
-        }
+        UiViewContent::Issue(issue) => rsx! {
+            IssueView { issue }
+        },
         UiViewContent::Metrics(metrics) => rsx! {
             MetricGrid { metrics }
         },

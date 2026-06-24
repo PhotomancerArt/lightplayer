@@ -15,7 +15,7 @@ use crate::core::PaneView;
 pub(crate) fn project_pane() -> Element {
     let view = project_view(project_ready_state(), true);
     rsx! {
-        AppPane {
+        PaneView {
             view,
             primary: false,
             running: false,
@@ -28,7 +28,7 @@ pub(crate) fn project_pane() -> Element {
 pub(crate) fn device_project_empty() -> Element {
     let view = device_project_empty_view();
     rsx! {
-        AppPane {
+        PaneView {
             view,
             primary: true,
             running: false,
@@ -41,7 +41,7 @@ pub(crate) fn device_project_empty() -> Element {
 pub(crate) fn device_project_selection() -> Element {
     let view = device_project_selection_view();
     rsx! {
-        AppPane {
+        PaneView {
             view,
             primary: true,
             running: false,

@@ -18,17 +18,22 @@ Examples: icon, tabs, simple field rows.
 
 ## `core`
 
-Data-driven app controls. These render generic `Ui*` structs from
-`lpa-studio-core`.
+Data-driven controls. These render generic `Ui*` data structs from
+`lpa-studio-core` with unprefixed component names in `lpa-studio-web`.
 
 Rules:
 
 - May depend on `lpa-studio-core` generic UI types such as `UiAction`,
-  `UiProgress`, `UiActivity`, `UiPaneView`, and `UiStackView`.
+  `UiStatus`, `UiProgress`, `UiIssue`, `UiActivityView`, `UiPaneView`,
+  and `UiStepsView`.
 - May compose `base`.
-- Should not own Studio workflows when `app` can compose them.
+- Should not own Studio-specific workflows when `app` can compose them.
+- Use the `view` submodule for composed render surfaces such as pane bodies,
+  activities, and step workflows. Smaller controls such as status chips,
+  progress bars, log lists, and issue views live directly under `core`.
 
-Examples: app actions, app progress, app activity, app stack, app pane.
+Examples: action strips, status chips, progress bars, metric grids, issue
+views, log lists, terminal output, activity views, steps views, pane views.
 
 ## `app`
 
@@ -42,7 +47,8 @@ Rules:
 - May compose `core` and `base`.
 - Owns layout and workflow composition for Studio surfaces.
 
-Examples: Studio shell, pane frame, project workspace, device log, node UI.
+Examples: Studio shell, pane frame, project workspace, runtime log chrome, node
+UI.
 
 ## Dependency Direction
 
@@ -75,7 +81,7 @@ Examples:
 
 ```text
 src/base/popover_stories.rs             -> base/popover/<story>
-src/core/actions/action_strip_stories.rs -> core/actions/action-strip/<story>
+src/core/action/action_strip_stories.rs  -> core/action/action-strip/<story>
 src/app/device/device_pane_stories.rs  -> studio/device/device-pane/<story>
 src/exploration/node_ui_stories.rs       -> exploration/node-ui/<story>
 ```
@@ -126,7 +132,8 @@ Broad fixture modules are allowed during exploration, but story entrypoints
 should live in real component-adjacent files. Shared story fixtures should not
 end in `_stories.rs`; for example, `app/story_fixtures.rs` can support
 stories under `app/device/*_stories.rs`,
-`app/project/*_stories.rs`, and `app/layout/*_stories.rs`.
+`app/project/*_stories.rs`, and `app/layout/*_stories.rs`, while
+`core/story_fixtures.rs` can support data-driven core component stories.
 
 Story source-root guidance:
 
