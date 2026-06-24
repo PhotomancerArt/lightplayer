@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 
-use crate::stories::story_registry::{DEFAULT_STORY_ID, all_stories, render_story, story_by_id};
+use crate::stories::story::StoryDescriptor;
+use crate::stories::story_registry::{all_stories, render_story, story_by_id, DEFAULT_STORY_ID};
 
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn StoryBook() -> Element {
@@ -33,29 +34,102 @@ pub fn StoryBook() -> Element {
         main { class: "story-book",
             aside { class: "story-sidebar",
                 div { class: "story-sidebar-heading",
-                    h1 { "Studio Stories" }
+                    h1 { "Lightplayer Stories" }
                     p { "{stories.len()} component states" }
                 }
+                div { class: "story-discovery-links", "aria-hidden": "true",
+                    for story in stories.iter() {
+                        {
+                            let story_href = story_hash(story.id, selected_viewport);
+                            rsx! {
+                                a {
+                                    href: "{story_href}",
+                                    tabindex: "-1",
+                                    "{story.label}"
+                                }
+                            }
+                        }
+                    }
+                }
                 nav { class: "story-nav",
-                    for group in story_groups {
-                        section { class: "story-nav-group",
-                            h2 { "{group.label}" }
-                            div { class: "story-nav-links",
-                                for story in group.stories {
+                    for family in story_groups {
+                        section { class: "story-nav-family",
+                            h2 { "{family.label}" }
+                            div { class: "story-nav-family-body",
+                                for category in family.categories {
                                     {
-                                        let story_id = story.id;
-                                        let link_class = if story.id == selected {
-                                            "story-nav-link is-active"
-                                        } else {
-                                            "story-nav-link"
-                                        };
-                                        let story_href = story_hash(story_id, selected_viewport);
                                         rsx! {
-                                            a {
-                                                class: "{link_class}",
-                                                href: "{story_href}",
-                                                onclick: move |_| selected_story_id.set(story_id.to_string()),
-                                                "{story.label}"
+                                            div { class: "story-nav-category",
+                                                if let Some(category_label) = category.label.as_deref() {
+                                                    h3 { "{category_label}" }
+                                                }
+                                                div { class: "story-nav-components",
+                                                    for component in category.components {
+                                                        {
+                                                            let first_story_id = component
+                                                                .stories
+                                                                .first()
+                                                                .map(|story| story.id)
+                                                                .unwrap_or(DEFAULT_STORY_ID);
+                                                            let expanded = component
+                                                                .stories
+                                                                .iter()
+                                                                .any(|story| story.id == selected);
+                                                            let component_class = if expanded {
+                                                                "story-nav-component is-active"
+                                                            } else {
+                                                                "story-nav-component"
+                                                            };
+                                                            let component_href = story_hash(first_story_id, selected_viewport);
+                                                            rsx! {
+                                                                div { class: "story-nav-component-group",
+                                                                    a {
+                                                                        class: "{component_class}",
+                                                                        href: "{component_href}",
+                                                                        onclick: move |_| selected_story_id.set(first_story_id.to_string()),
+                                                                        span { class: "story-nav-component-label", "{component.label}" }
+                                                                        span { class: "story-nav-component-count", "{component.stories.len()}" }
+                                                                    }
+                                                                    {
+                                                                        let story_list_class = if expanded {
+                                                                            "story-nav-story-list is-expanded"
+                                                                        } else {
+                                                                            "story-nav-story-list"
+                                                                        };
+                                                                        rsx! {
+                                                                            div {
+                                                                                class: "{story_list_class}",
+                                                                                "aria-hidden": if expanded { "false" } else { "true" },
+                                                                                div { class: "story-nav-story-list-inner",
+                                                                                    for story in component.stories {
+                                                                                        {
+                                                                                            let story_id = story.id;
+                                                                                            let link_class = if story.id == selected {
+                                                                                                "story-nav-link is-active"
+                                                                                            } else {
+                                                                                                "story-nav-link"
+                                                                                            };
+                                                                                            let story_href = story_hash(story_id, selected_viewport);
+                                                                                            rsx! {
+                                                                                                a {
+                                                                                                    class: "{link_class}",
+                                                                                                    href: "{story_href}",
+                                                                                                    tabindex: if expanded { "0" } else { "-1" },
+                                                                                                    onclick: move |_| selected_story_id.set(story_id.to_string()),
+                                                                                                    "{story.label}"
+                                                                                                }
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                }
+                                                                            }
+                                                                        }
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
                                             }
                                         }
                                     }
@@ -107,40 +181,107 @@ struct StoryRoute {
 }
 
 #[derive(Clone, Debug)]
-struct StoryGroup {
+struct StoryFamilyGroup {
+    key: &'static str,
     label: &'static str,
-    stories: Vec<crate::stories::story::StoryDescriptor>,
+    categories: Vec<StoryCategoryGroup>,
 }
 
-fn story_groups(stories: &[crate::stories::story::StoryDescriptor]) -> Vec<StoryGroup> {
-    let mut groups = Vec::<StoryGroup>::new();
+#[derive(Clone, Debug)]
+struct StoryCategoryGroup {
+    key: Option<&'static str>,
+    label: Option<String>,
+    components: Vec<StoryComponentGroup>,
+}
+
+#[derive(Clone, Debug)]
+struct StoryComponentGroup {
+    key: &'static str,
+    label: String,
+    stories: Vec<StoryDescriptor>,
+}
+
+fn story_groups(stories: &[StoryDescriptor]) -> Vec<StoryFamilyGroup> {
+    let mut groups = Vec::<StoryFamilyGroup>::new();
     for story in stories {
-        let label = story.family_label();
-        if let Some(group) = groups.iter_mut().find(|group| group.label == label) {
-            group.stories.push(*story);
-        } else {
-            groups.push(StoryGroup {
-                label,
-                stories: vec![*story],
+        let family_index = groups
+            .iter()
+            .position(|group| group.key == story.family)
+            .unwrap_or_else(|| {
+                groups.push(StoryFamilyGroup {
+                    key: story.family,
+                    label: story.family_label(),
+                    categories: Vec::new(),
+                });
+                groups.len() - 1
             });
-        }
+        let family = &mut groups[family_index];
+        let category_index = family
+            .categories
+            .iter()
+            .position(|category| category.key == story.category)
+            .unwrap_or_else(|| {
+                family.categories.push(StoryCategoryGroup {
+                    key: story.category,
+                    label: story.category.map(segment_label),
+                    components: Vec::new(),
+                });
+                family.categories.len() - 1
+            });
+        let category = &mut family.categories[category_index];
+        let component_index = category
+            .components
+            .iter()
+            .position(|component| component.key == story.component)
+            .unwrap_or_else(|| {
+                category.components.push(StoryComponentGroup {
+                    key: story.component,
+                    label: segment_label(story.component),
+                    stories: Vec::new(),
+                });
+                category.components.len() - 1
+            });
+        category.components[component_index].stories.push(*story);
     }
     groups.sort_by(|left, right| {
-        story_group_order(left.label)
-            .cmp(&story_group_order(right.label))
+        story_group_order(left.key)
+            .cmp(&story_group_order(right.key))
             .then_with(|| left.label.cmp(right.label))
     });
     groups
 }
 
-fn story_group_order(label: &str) -> usize {
-    match label {
-        "Base" => 0,
-        "Core" => 1,
-        "Studio" => 2,
-        "Exploration" => 3,
+fn story_group_order(family: &str) -> usize {
+    match family {
+        "base" => 0,
+        "core" => 1,
+        "studio" => 2,
+        "exploration" => 3,
         _ => 99,
     }
+}
+
+fn segment_label(segment: &str) -> String {
+    segment
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .map(|part| match part {
+            "ui" => "UI".to_string(),
+            "ux" => "UX".to_string(),
+            "usb" => "USB".to_string(),
+            "esp32" => "ESP32".to_string(),
+            _ => {
+                let mut chars = part.chars();
+                let Some(first) = chars.next() else {
+                    return String::new();
+                };
+                let mut label = first.to_ascii_uppercase().to_string();
+                label.push_str(&chars.as_str().to_ascii_lowercase());
+                label
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 pub fn should_show_story_book() -> bool {

@@ -2366,13 +2366,17 @@ select {
   gap: 18px;
 }
 
-.story-nav-group {
+.story-discovery-links {
+  display: none;
+}
+
+.story-nav-family {
   display: grid;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 
-.story-nav-group h2 {
+.story-nav-family h2 {
   margin: 0 0 2px;
   color: var(--studio-color-heading);
   font-size: 0.72rem;
@@ -2381,12 +2385,100 @@ select {
   text-transform: uppercase;
 }
 
-.story-nav-links {
+.story-nav-family-body,
+.story-nav-category,
+.story-nav-components,
+.story-nav-component-group,
+.story-nav-story-list {
   display: grid;
+  min-width: 0;
+}
+
+.story-nav-family-body {
   gap: 2px;
+}
+
+.story-nav-category {
+  gap: 3px;
   min-width: 0;
   padding-left: 10px;
   border-left: 1px solid var(--studio-color-border-muted);
+}
+
+.story-nav-category h3 {
+  margin: 8px 0 3px;
+  color: var(--studio-color-text-subtle);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.story-nav-components {
+  gap: 3px;
+}
+
+.story-nav-component {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 5px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--studio-radius-sm);
+  color: var(--studio-color-text-soft);
+  font-size: 0.82rem;
+  line-height: 1.2;
+  text-decoration: none;
+}
+
+.story-nav-component:hover,
+.story-nav-component.is-active {
+  color: var(--studio-color-text-strong);
+  background: var(--studio-color-surface-raised);
+}
+
+.story-nav-component.is-active {
+  border-color: var(--studio-color-border-strong);
+}
+
+.story-nav-component-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.story-nav-component-count {
+  color: var(--studio-color-text-subtle);
+  font-size: 0.72rem;
+}
+
+.story-nav-story-list {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition:
+    grid-template-rows 140ms ease,
+    opacity 120ms ease,
+    transform 140ms ease;
+}
+
+.story-nav-story-list.is-expanded {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.story-nav-story-list-inner {
+  display: grid;
+  gap: 2px;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  padding-left: 8px;
 }
 
 .story-nav-link {
@@ -2490,6 +2582,13 @@ select {
 
 .story-frame {
   width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .story-nav-story-list {
+    transition: none;
+    transform: none;
+  }
 }
 
 @keyframes ux-progress-sweep {

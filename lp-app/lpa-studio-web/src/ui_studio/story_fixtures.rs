@@ -1,10 +1,12 @@
-//! Studio UX fixture stories.
+//! Studio story fixtures.
 //!
-//! This file keeps the broad shell/device/project fixture helpers together
-//! while the `#[story]` functions at the top provide the generated story
-//! entries. If this grows much further, split the helpers into stable support
-//! modules before adding more story families.
+//! This module is compiled only for storybook builds. It keeps broad
+//! shell/device/project fixture builders in one place while story entrypoints
+//! live next to their component families.
 
+use crate::ui_base::{FieldRow, TabItem, Tabs};
+use crate::ui_core::MetricGrid;
+use crate::ui_studio::{PaneFrame, StudioShell};
 use dioxus::prelude::*;
 use lpa_studio_ux::{
     DeviceOp, DeviceUx, LinkEndpointId, LinkProviderKind, ProgressState, ProjectEditorOp,
@@ -15,220 +17,12 @@ use lpa_studio_ux::{
     UiMetric, UiPaneView, UiProgress, UiStackSection, UiStackView, UiStatus, UiStepState,
     UiTerminalLine, UxIssue, UxLogEntry, UxLogLevel, UxNodeId,
 };
-use lpa_studio_web_story_macros::story;
 
-use crate::ui_base::{FieldRow, TabItem, Tabs};
-use crate::ui_core::{ActionStrip, AppPane, MetricGrid};
-use crate::ui_studio::{PaneFrame, StudioShell};
-
-#[story]
-fn provider_actions() -> Element {
-    rsx! {
-        PaneFrame {
-            title: "Actions",
-            primary: true,
-            status: None::<UiStatus>,
-            ActionStrip {
-                actions: start_actions(),
-                running: false,
-                on_action: move |_| {},
-            }
-        }
-    }
-}
-
-#[story]
-fn editor_fields() -> Element {
-    editor_primitives_story()
-}
-
-#[story]
-fn editor_shell() -> Element {
-    editor_shell_story()
-}
-
-#[story]
-fn device_pane() -> Element {
-    let view = idle_device_view();
-    rsx! {
-        AppPane {
-            view,
-            primary: true,
-            running: false,
-            on_action: move |_| {},
-        }
-    }
-}
-
-#[story]
-fn project_pane() -> Element {
-    let view = project_view(project_ready_state(), true);
-    rsx! {
-        AppPane {
-            view,
-            primary: false,
-            running: false,
-            on_action: move |_| {},
-        }
-    }
-}
-
-#[story]
-fn device_project_empty() -> Element {
-    let view = device_project_empty_view();
-    rsx! {
-        AppPane {
-            view,
-            primary: true,
-            running: false,
-            on_action: move |_| {},
-        }
-    }
-}
-
-#[story]
-fn device_project_selection() -> Element {
-    let view = device_project_selection_view();
-    rsx! {
-        AppPane {
-            view,
-            primary: true,
-            running: false,
-            on_action: move |_| {},
-        }
-    }
-}
-
-#[story]
-fn simulator_idle() -> Element {
-    shell_story(idle_view(), false, Vec::new())
-}
-
-#[story]
-fn browser_serial_canceled() -> Element {
-    shell_story(browser_serial_canceled_view(), false, Vec::new())
-}
-
-#[story]
-fn browser_serial_open_failed() -> Element {
-    shell_story(browser_serial_open_failed_view(), false, Vec::new())
-}
-
-#[story]
-fn simulator_endpoint() -> Element {
-    shell_story(endpoint_view(), false, Vec::new())
-}
-
-#[story]
-fn simulator_starting() -> Element {
-    shell_story(starting_view(), true, Vec::new())
-}
-
-#[story]
-fn simulator_ready() -> Element {
-    shell_story(
-        simulator_ready_view(),
-        false,
-        vec![
-            studio_log(UxLogLevel::Info, "Simulator is running"),
-            studio_log(UxLogLevel::Info, "Demo project loaded"),
-        ],
-    )
-}
-
-#[story]
-fn server_disconnected_link_ready() -> Element {
-    shell_story(
-        lightplayer_disconnected_view(),
-        false,
-        vec![studio_log(UxLogLevel::Info, "LightPlayer disconnected")],
-    )
-}
-
-#[story]
-fn provision_ready() -> Element {
-    shell_story(provision_ready_view(), false, Vec::new())
-}
-
-#[story]
-fn browser_serial_blank_firmware() -> Element {
-    shell_story(browser_serial_blank_firmware_view(), false, Vec::new())
-}
-
-#[story]
-fn provisioning() -> Element {
-    shell_story(provisioning_view(), true, Vec::new())
-}
-
-#[story]
-fn provision_failed() -> Element {
-    shell_story(
-        provision_failed_view(),
-        false,
-        vec![studio_log(
-            UxLogLevel::Error,
-            "browser serial firmware flashing failed",
-        )],
-    )
-}
-
-#[story]
-fn resetting_to_blank() -> Element {
-    shell_story(resetting_to_blank_view(), true, Vec::new())
-}
-
-#[story]
-fn reset_complete() -> Element {
-    shell_story(
-        reset_complete_view(),
-        false,
-        vec![studio_log(UxLogLevel::Info, "ESP32-C6 wiped")],
-    )
-}
-
-#[story]
-fn project_ready() -> Element {
-    shell_story(
-        project_ready_view(),
-        false,
-        vec![studio_log(UxLogLevel::Info, "Demo project loaded")],
-    )
-}
-
-#[story]
-fn project_syncing() -> Element {
-    shell_story(
-        project_syncing_view(),
-        true,
-        vec![studio_log(UxLogLevel::Info, "Reading project shapes")],
-    )
-}
-
-#[story]
-fn project_sync_failed() -> Element {
-    shell_story(
-        project_sync_failed_view(),
-        false,
-        vec![studio_log(
-            UxLogLevel::Error,
-            "project sync failed: protocol timeout",
-        )],
-    )
-}
-
-#[story]
-fn action_error() -> Element {
-    shell_story(
-        error_view(),
-        false,
-        vec![studio_log(
-            UxLogLevel::Error,
-            "browser worker boot timed out",
-        )],
-    )
-}
-
-fn shell_story(mut view: StudioView, running: bool, story_logs: Vec<UxLogEntry>) -> Element {
+pub(crate) fn shell_story(
+    mut view: StudioView,
+    running: bool,
+    story_logs: Vec<UxLogEntry>,
+) -> Element {
     view.logs.extend(story_logs);
     rsx! {
         StudioShell {
@@ -239,7 +33,7 @@ fn shell_story(mut view: StudioView, running: bool, story_logs: Vec<UxLogEntry>)
     }
 }
 
-fn editor_primitives_story() -> Element {
+pub(crate) fn editor_primitives_story() -> Element {
     rsx! {
         PaneFrame {
             title: "Node inspector",
@@ -285,7 +79,7 @@ fn editor_primitives_story() -> Element {
     }
 }
 
-fn editor_shell_story() -> Element {
+pub(crate) fn editor_shell_story() -> Element {
     rsx! {
         div { class: "ux-editor-shell",
             div { class: "ux-editor-desktop-tree",
@@ -310,7 +104,7 @@ fn editor_shell_story() -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn NodeTreePane() -> Element {
+pub(crate) fn NodeTreePane() -> Element {
     rsx! {
         PaneFrame {
             title: "Node tree",
@@ -329,7 +123,7 @@ fn NodeTreePane() -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn NodeWorkspacePane() -> Element {
+pub(crate) fn NodeWorkspacePane() -> Element {
     rsx! {
         PaneFrame {
             title: "Shader: orbit",
@@ -378,7 +172,7 @@ fn NodeWorkspacePane() -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn DeviceSidePane() -> Element {
+pub(crate) fn DeviceSidePane() -> Element {
     rsx! {
         PaneFrame {
             title: "Device",
@@ -398,7 +192,7 @@ fn DeviceSidePane() -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ConsoleSidePane() -> Element {
+pub(crate) fn ConsoleSidePane() -> Element {
     rsx! {
         PaneFrame {
             title: "Console",
@@ -415,7 +209,7 @@ fn ConsoleSidePane() -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SecondaryTabsPane() -> Element {
+pub(crate) fn SecondaryTabsPane() -> Element {
     rsx! {
         PaneFrame {
             title: "Project side panel",
@@ -436,7 +230,7 @@ fn SecondaryTabsPane() -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn MobileEditorTabsPane() -> Element {
+pub(crate) fn MobileEditorTabsPane() -> Element {
     rsx! {
         PaneFrame {
             title: "Project",
@@ -456,33 +250,33 @@ fn MobileEditorTabsPane() -> Element {
     }
 }
 
-fn studio_log(level: UxLogLevel, message: impl Into<String>) -> UxLogEntry {
+pub(crate) fn studio_log(level: UxLogLevel, message: impl Into<String>) -> UxLogEntry {
     UxLogEntry::new(level, "studio", message)
 }
 
-fn idle_view() -> StudioView {
+pub(crate) fn idle_view() -> StudioView {
     StudioView::new(vec![idle_device_view()], Vec::new())
 }
 
-fn browser_serial_canceled_view() -> StudioView {
+pub(crate) fn browser_serial_canceled_view() -> StudioView {
     StudioView::new(
         vec![idle_device_view()],
         vec![studio_log(UxLogLevel::Info, "Port selection canceled")],
     )
 }
 
-fn browser_serial_open_failed_view() -> StudioView {
+pub(crate) fn browser_serial_open_failed_view() -> StudioView {
     picker_issue_view(
         "Failed to open serial port.",
         "Failed to execute 'open' on 'SerialPort': Failed to open serial port.",
     )
 }
 
-fn endpoint_view() -> StudioView {
+pub(crate) fn endpoint_view() -> StudioView {
     StudioView::new(vec![endpoint_device_view()], Vec::new())
 }
 
-fn starting_view() -> StudioView {
+pub(crate) fn starting_view() -> StudioView {
     StudioView::new(
         vec![starting_device_view()],
         vec![UxLogEntry::new(
@@ -493,7 +287,7 @@ fn starting_view() -> StudioView {
     )
 }
 
-fn simulator_ready_view() -> StudioView {
+pub(crate) fn simulator_ready_view() -> StudioView {
     StudioView::new(
         vec![project_synced_pane_view(), simulator_ready_device_view()],
         vec![
@@ -508,7 +302,7 @@ fn simulator_ready_view() -> StudioView {
     )
 }
 
-fn project_ready_view() -> StudioView {
+pub(crate) fn project_ready_view() -> StudioView {
     StudioView::new(
         vec![project_synced_pane_view(), simulator_ready_device_view()],
         vec![
@@ -522,7 +316,7 @@ fn project_ready_view() -> StudioView {
     )
 }
 
-fn project_syncing_view() -> StudioView {
+pub(crate) fn project_syncing_view() -> StudioView {
     StudioView::new(
         vec![project_syncing_pane_view(), simulator_ready_device_view()],
         vec![UxLogEntry::new(
@@ -533,7 +327,7 @@ fn project_syncing_view() -> StudioView {
     )
 }
 
-fn project_sync_failed_view() -> StudioView {
+pub(crate) fn project_sync_failed_view() -> StudioView {
     StudioView::new(
         vec![
             project_sync_failed_pane_view(),
@@ -547,7 +341,7 @@ fn project_sync_failed_view() -> StudioView {
     )
 }
 
-fn lightplayer_disconnected_view() -> StudioView {
+pub(crate) fn lightplayer_disconnected_view() -> StudioView {
     StudioView::new(
         vec![device_view(
             UiStatus::good("Simulator connected"),
@@ -575,7 +369,7 @@ fn lightplayer_disconnected_view() -> StudioView {
     )
 }
 
-fn provision_ready_view() -> StudioView {
+pub(crate) fn provision_ready_view() -> StudioView {
     StudioView::new(
         vec![blank_device_view(
             UiStatus::warning("Ready to flash"),
@@ -590,7 +384,7 @@ fn provision_ready_view() -> StudioView {
     )
 }
 
-fn browser_serial_blank_firmware_view() -> StudioView {
+pub(crate) fn browser_serial_blank_firmware_view() -> StudioView {
     StudioView::new(
         vec![blank_device_view(
             UiStatus::warning("Ready to flash"),
@@ -609,7 +403,7 @@ fn browser_serial_blank_firmware_view() -> StudioView {
     )
 }
 
-fn provisioning_view() -> StudioView {
+pub(crate) fn provisioning_view() -> StudioView {
     StudioView::new(
         vec![device_view(
             UiStatus::working("Flashing"),
@@ -638,7 +432,7 @@ fn provisioning_view() -> StudioView {
     )
 }
 
-fn provision_failed_view() -> StudioView {
+pub(crate) fn provision_failed_view() -> StudioView {
     StudioView::new(
         vec![device_view(
             UiStatus::error("Needs attention"),
@@ -670,7 +464,7 @@ fn provision_failed_view() -> StudioView {
     )
 }
 
-fn resetting_to_blank_view() -> StudioView {
+pub(crate) fn resetting_to_blank_view() -> StudioView {
     StudioView::new(
         vec![device_view(
             UiStatus::working("Resetting"),
@@ -698,7 +492,7 @@ fn resetting_to_blank_view() -> StudioView {
     )
 }
 
-fn reset_complete_view() -> StudioView {
+pub(crate) fn reset_complete_view() -> StudioView {
     StudioView::new(
         vec![blank_device_view(
             UiStatus::warning("Blank ESP32"),
@@ -713,14 +507,14 @@ fn reset_complete_view() -> StudioView {
     )
 }
 
-fn error_view() -> StudioView {
+pub(crate) fn error_view() -> StudioView {
     picker_issue_view(
         "browser worker boot timed out",
         "browser worker boot timed out",
     )
 }
 
-fn picker_issue_view(message: &'static str, log_message: &'static str) -> StudioView {
+pub(crate) fn picker_issue_view(message: &'static str, log_message: &'static str) -> StudioView {
     StudioView::new(
         vec![device_view(
             UiStatus::error("Needs attention"),
@@ -737,7 +531,7 @@ fn picker_issue_view(message: &'static str, log_message: &'static str) -> Studio
     )
 }
 
-fn idle_device_view() -> UiPaneView {
+pub(crate) fn idle_device_view() -> UiPaneView {
     device_view(
         UiStatus::neutral("Choose connection"),
         vec![stack_section(
@@ -751,7 +545,7 @@ fn idle_device_view() -> UiPaneView {
     )
 }
 
-fn endpoint_device_view() -> UiPaneView {
+pub(crate) fn endpoint_device_view() -> UiPaneView {
     device_view(
         UiStatus::working("Connecting"),
         vec![
@@ -775,7 +569,7 @@ fn endpoint_device_view() -> UiPaneView {
     )
 }
 
-fn starting_device_view() -> UiPaneView {
+pub(crate) fn starting_device_view() -> UiPaneView {
     device_view(
         UiStatus::working("Connecting"),
         vec![
@@ -796,7 +590,7 @@ fn starting_device_view() -> UiPaneView {
     )
 }
 
-fn simulator_ready_device_view() -> UiPaneView {
+pub(crate) fn simulator_ready_device_view() -> UiPaneView {
     device_view(
         UiStatus::good("LightPlayer ready"),
         vec![
@@ -828,7 +622,7 @@ fn simulator_ready_device_view() -> UiPaneView {
     )
 }
 
-fn device_project_empty_view() -> UiPaneView {
+pub(crate) fn device_project_empty_view() -> UiPaneView {
     device_view(
         UiStatus::good("LightPlayer ready"),
         vec![
@@ -859,7 +653,7 @@ fn device_project_empty_view() -> UiPaneView {
     )
 }
 
-fn device_project_selection_view() -> UiPaneView {
+pub(crate) fn device_project_selection_view() -> UiPaneView {
     device_view(
         UiStatus::good("LightPlayer ready"),
         vec![
@@ -894,7 +688,7 @@ fn device_project_selection_view() -> UiPaneView {
     )
 }
 
-fn blank_device_view(status: UiStatus, body: UiBody, after_reset: bool) -> UiPaneView {
+pub(crate) fn blank_device_view(status: UiStatus, body: UiBody, after_reset: bool) -> UiPaneView {
     let detail = if after_reset {
         vec![
             "[lpa-link] Chip erase completed successfully",
@@ -924,7 +718,7 @@ fn blank_device_view(status: UiStatus, body: UiBody, after_reset: bool) -> UiPan
     )
 }
 
-fn blank_firmware_activity() -> UiActivity {
+pub(crate) fn blank_firmware_activity() -> UiActivity {
     UiActivity::new("Connecting ESP32 server")
         .with_detail("ESP32 boot output looks like blank or erased flash.")
         .with_steps(vec![
@@ -941,7 +735,7 @@ fn blank_firmware_activity() -> UiActivity {
         ])
 }
 
-fn provisioning_activity() -> UiActivity {
+pub(crate) fn provisioning_activity() -> UiActivity {
     UiActivity::new("Flashing firmware")
         .with_detail("Writing packaged LightPlayer ESP32-C6 firmware.")
         .with_progress(UiProgress::determinate("Writing flash", 42))
@@ -954,7 +748,7 @@ fn provisioning_activity() -> UiActivity {
         ])
 }
 
-fn reset_activity() -> UiActivity {
+pub(crate) fn reset_activity() -> UiActivity {
     UiActivity::new("Wiping device")
         .with_detail("Erasing ESP32 flash through the bootloader.")
         .with_progress(UiProgress::determinate("Erasing flash", 58))
@@ -966,7 +760,7 @@ fn reset_activity() -> UiActivity {
         ])
 }
 
-fn device_view(
+pub(crate) fn device_view(
     status: UiStatus,
     sections: Vec<UiStackSection>,
     terminal: Vec<&'static str>,
@@ -987,7 +781,7 @@ fn device_view(
     )
 }
 
-fn stack_section(
+pub(crate) fn stack_section(
     id: &'static str,
     title: &'static str,
     state: UiStepState,
@@ -999,7 +793,7 @@ fn stack_section(
         .with_actions(actions)
 }
 
-fn select_connection_complete(label: &'static str) -> UiStackSection {
+pub(crate) fn select_connection_complete(label: &'static str) -> UiStackSection {
     stack_section(
         "select-connection",
         "Select connection",
@@ -1009,11 +803,11 @@ fn select_connection_complete(label: &'static str) -> UiStackSection {
     )
 }
 
-fn connect_device_complete(metrics: Vec<UiMetric>) -> UiStackSection {
+pub(crate) fn connect_device_complete(metrics: Vec<UiMetric>) -> UiStackSection {
     connect_device_complete_with_actions(metrics, Vec::new())
 }
 
-fn connect_device_complete_with_actions(
+pub(crate) fn connect_device_complete_with_actions(
     metrics: Vec<UiMetric>,
     actions: Vec<UiAction>,
 ) -> UiStackSection {
@@ -1026,7 +820,7 @@ fn connect_device_complete_with_actions(
     )
 }
 
-fn browser_worker_metrics() -> Vec<UiMetric> {
+pub(crate) fn browser_worker_metrics() -> Vec<UiMetric> {
     vec![
         UiMetric::new("Provider", "Browser worker"),
         UiMetric::new("Endpoint", "browser-worker-worker-1"),
@@ -1034,7 +828,7 @@ fn browser_worker_metrics() -> Vec<UiMetric> {
     ]
 }
 
-fn esp32_metrics() -> Vec<UiMetric> {
+pub(crate) fn esp32_metrics() -> Vec<UiMetric> {
     vec![
         UiMetric::new("Provider", "Browser serial ESP32"),
         UiMetric::new("Endpoint", "browser-serial-esp32-port-1"),
@@ -1042,7 +836,7 @@ fn esp32_metrics() -> Vec<UiMetric> {
     ]
 }
 
-fn project_synced_pane_view() -> UiPaneView {
+pub(crate) fn project_synced_pane_view() -> UiPaneView {
     UiPaneView::new(
         ProjectUx::NODE_ID,
         "Project",
@@ -1052,7 +846,7 @@ fn project_synced_pane_view() -> UiPaneView {
     )
 }
 
-fn project_syncing_pane_view() -> UiPaneView {
+pub(crate) fn project_syncing_pane_view() -> UiPaneView {
     UiPaneView::new(
         ProjectUx::NODE_ID,
         "Project",
@@ -1064,7 +858,7 @@ fn project_syncing_pane_view() -> UiPaneView {
     )
 }
 
-fn project_sync_failed_pane_view() -> UiPaneView {
+pub(crate) fn project_sync_failed_pane_view() -> UiPaneView {
     UiPaneView::new(
         ProjectUx::NODE_ID,
         "Project",
@@ -1076,7 +870,7 @@ fn project_sync_failed_pane_view() -> UiPaneView {
     )
 }
 
-fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorView {
+pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorView {
     let running = story_node_status("Running", ProjectNodeStatusTone::Good);
     let warning = ProjectNodeStatusView::new(
         "Warning",
@@ -1240,7 +1034,7 @@ fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorView {
     )
 }
 
-fn project_editor_empty_fixture(phase: ProjectSyncPhase) -> ProjectEditorView {
+pub(crate) fn project_editor_empty_fixture(phase: ProjectSyncPhase) -> ProjectEditorView {
     ProjectEditorView::new(
         "studio-demo",
         1,
@@ -1256,7 +1050,7 @@ fn project_editor_empty_fixture(phase: ProjectSyncPhase) -> ProjectEditorView {
     )
 }
 
-fn project_editor_summary(phase: ProjectSyncPhase) -> ProjectSyncSummary {
+pub(crate) fn project_editor_summary(phase: ProjectSyncPhase) -> ProjectSyncSummary {
     ProjectSyncSummary {
         phase,
         revision: 42,
@@ -1278,7 +1072,7 @@ fn project_editor_summary(phase: ProjectSyncPhase) -> ProjectSyncSummary {
     }
 }
 
-fn tree_item(
+pub(crate) fn tree_item(
     node_id: &str,
     label: &str,
     kind: &str,
@@ -1301,7 +1095,7 @@ fn tree_item(
     clippy::too_many_arguments,
     reason = "story fixtures read more clearly with direct node view data"
 )]
-fn node_view(
+pub(crate) fn node_view(
     node_id: &str,
     label: &str,
     kind: &str,
@@ -1328,7 +1122,7 @@ fn node_view(
     )
 }
 
-fn project_focus_action(node_id: &str, label: &str) -> UiAction {
+pub(crate) fn project_focus_action(node_id: &str, label: &str) -> UiAction {
     UiAction::from_op(
         ProjectEditorTarget::node(node_id).node_id(),
         ProjectEditorOp::Focus,
@@ -1336,11 +1130,11 @@ fn project_focus_action(node_id: &str, label: &str) -> UiAction {
     .with_label(format!("Focus {label}"))
 }
 
-fn story_node_status(label: &str, tone: ProjectNodeStatusTone) -> ProjectNodeStatusView {
+pub(crate) fn story_node_status(label: &str, tone: ProjectNodeStatusTone) -> ProjectNodeStatusView {
     ProjectNodeStatusView::new(label, None, tone)
 }
 
-fn sync_story_label(phase: ProjectSyncPhase) -> &'static str {
+pub(crate) fn sync_story_label(phase: ProjectSyncPhase) -> &'static str {
     match phase {
         ProjectSyncPhase::Empty => "Not synced",
         ProjectSyncPhase::SyncingShapes | ProjectSyncPhase::SyncingProject => "Syncing",
@@ -1349,7 +1143,7 @@ fn sync_story_label(phase: ProjectSyncPhase) -> &'static str {
     }
 }
 
-fn project_synced_metrics() -> Vec<UiMetric> {
+pub(crate) fn project_synced_metrics() -> Vec<UiMetric> {
     vec![
         UiMetric::new("Project", "studio-demo"),
         UiMetric::new("Handle", 1),
@@ -1369,14 +1163,14 @@ fn project_synced_metrics() -> Vec<UiMetric> {
     ]
 }
 
-fn project_ready_actions() -> Vec<UiAction> {
+pub(crate) fn project_ready_actions() -> Vec<UiAction> {
     vec![
         project_action(ProjectOp::RefreshProject),
         project_action(ProjectOp::DisconnectProject),
     ]
 }
 
-fn project_view(state: ProjectState, server_connected: bool) -> UiPaneView {
+pub(crate) fn project_view(state: ProjectState, server_connected: bool) -> UiPaneView {
     let mut project = ProjectUx::new();
     let no_running_project = matches!(state, ProjectState::NotLoaded) && server_connected;
     project.set_state(state);
@@ -1386,7 +1180,7 @@ fn project_view(state: ProjectState, server_connected: bool) -> UiPaneView {
     project.view(server_connected)
 }
 
-fn project_ready_state() -> ProjectState {
+pub(crate) fn project_ready_state() -> ProjectState {
     ProjectState::Ready {
         project_id: "studio-demo".to_string(),
         handle_id: 1,
@@ -1398,7 +1192,7 @@ fn project_ready_state() -> ProjectState {
     }
 }
 
-fn start_actions() -> Vec<UiAction> {
+pub(crate) fn start_actions() -> Vec<UiAction> {
     vec![
         device_action(DeviceOp::OpenProvider {
             provider_id: LinkProviderKind::BrowserWorker,
@@ -1417,19 +1211,19 @@ fn start_actions() -> Vec<UiAction> {
     ]
 }
 
-fn disconnect_device_action() -> UiAction {
+pub(crate) fn disconnect_device_action() -> UiAction {
     device_action(DeviceOp::DisconnectDevice)
 }
 
-fn disconnect_lightplayer_action() -> UiAction {
+pub(crate) fn disconnect_lightplayer_action() -> UiAction {
     device_action(DeviceOp::DisconnectLightPlayer)
 }
 
-fn connect_lightplayer_action() -> UiAction {
+pub(crate) fn connect_lightplayer_action() -> UiAction {
     device_action(DeviceOp::ConnectLightPlayer)
 }
 
-fn device_management_actions() -> Vec<UiAction> {
+pub(crate) fn device_management_actions() -> Vec<UiAction> {
     vec![
         device_action(DeviceOp::ProvisionFirmware),
         device_action(DeviceOp::ResetToBlank),
@@ -1437,10 +1231,10 @@ fn device_management_actions() -> Vec<UiAction> {
     ]
 }
 
-fn device_action(op: DeviceOp) -> UiAction {
+pub(crate) fn device_action(op: DeviceOp) -> UiAction {
     UiAction::from_op(UxNodeId::new(DeviceUx::NODE_ID), op)
 }
 
-fn project_action(op: ProjectOp) -> UiAction {
+pub(crate) fn project_action(op: ProjectOp) -> UiAction {
     UiAction::from_op(UxNodeId::new(ProjectUx::NODE_ID), op)
 }

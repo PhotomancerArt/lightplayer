@@ -56,13 +56,16 @@ it probably belongs in the higher family.
 ## Stories
 
 Component stories are colocated with the component family they describe, but
-they are not wired by hand or listed in `mod.rs`. Add `*_stories.rs` files
-beside the relevant component family and mark story entry functions with
-`#[story]`; the generated story registry includes those files directly.
+they are not listed in the central story registry by hand. Add `*_stories.rs`
+files beside the relevant component family, list them in the nearest `mod.rs`
+behind `#[cfg(feature = "stories")]`, and mark story entry functions with
+`#[story]`; the generated story registry discovers those files and calls the
+normal Rust module path.
 
 ```text
 src/ui_base/<component>_stories.rs
 src/ui_core/<component>_stories.rs
+src/ui_core/<category>/<component>_stories.rs
 src/ui_studio/<component>_stories.rs
 src/ui_studio/<category>/<component>_stories.rs
 src/ui_exploration/<component>_stories.rs
@@ -72,8 +75,8 @@ Examples:
 
 ```text
 src/ui_base/popover_stories.rs             -> base/popover/<story>
-src/ui_core/action_strip_stories.rs         -> core/action-strip/<story>
-src/ui_studio/device/picker_stories.rs      -> studio/device/picker/<story>
+src/ui_core/actions/action_strip_stories.rs -> core/actions/action-strip/<story>
+src/ui_studio/device/device_pane_stories.rs -> studio/device/device-pane/<story>
 src/ui_exploration/node_ui_stories.rs       -> exploration/node-ui/<story>
 ```
 
@@ -108,11 +111,11 @@ story registry. If a story is malformed, the build should fail with a concrete
 diagnostic telling you which file, function, or route is wrong. Do not recreate
 manual `StoryDescriptor` arrays or per-file `render_story` matches.
 
-Broad fixture modules are allowed during exploration, but production component
-stories should migrate toward real component-adjacent files. For example, a
-temporary `ui_studio/studio_ux_stories.rs` file can hold app-wide shell
-fixtures, but device-specific stories should eventually live under
-`ui_studio/device/*_stories.rs`.
+Broad fixture modules are allowed during exploration, but story entrypoints
+should live in real component-adjacent files. Shared story fixtures should not
+end in `_stories.rs`; for example, `ui_studio/story_fixtures.rs` can support
+stories under `ui_studio/device/*_stories.rs`,
+`ui_studio/project/*_stories.rs`, and `ui_studio/layout/*_stories.rs`.
 
 Story source-root guidance:
 
