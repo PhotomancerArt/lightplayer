@@ -19,10 +19,7 @@ const PLAYLIST_SLOTS_JSON: &str = include_str!("story_data/playlist.slots.json")
 const SHADER_SHAPE_JSON: &str = include_str!("story_data/shader.shape.json");
 const SHADER_SLOTS_JSON: &str = include_str!("story_data/shader.slots.json");
 
-#[story(
-    label = "Clock",
-    description = "Basic Clock node using the instrument-window direction."
-)]
+#[story]
 fn clock_instrument() -> Element {
     rsx! {
         NodeUiStoryCanvas {
@@ -36,10 +33,7 @@ fn clock_instrument() -> Element {
     }
 }
 
-#[story(
-    label = "Clock compact",
-    description = "Basic Clock node using the compact-inspector direction."
-)]
+#[story]
 fn clock_compact() -> Element {
     rsx! {
         NodeUiStoryCanvas {
@@ -53,10 +47,7 @@ fn clock_compact() -> Element {
     }
 }
 
-#[story(
-    label = "Fixture",
-    description = "Fixture node with a rough control-product preview and nested mapping."
-)]
+#[story]
 fn fixture_control_product() -> Element {
     rsx! {
         NodeUiStoryCanvas {
@@ -70,10 +61,7 @@ fn fixture_control_product() -> Element {
     }
 }
 
-#[story(
-    label = "Shader",
-    description = "Shader node with a rough visual-product preview and compact slot rows."
-)]
+#[story]
 fn shader_visual_product() -> Element {
     rsx! {
         NodeUiStoryCanvas {
@@ -87,10 +75,7 @@ fn shader_visual_product() -> Element {
     }
 }
 
-#[story(
-    label = "Playlist",
-    description = "Fyeah-inspired Playlist node with active entry and owned child visuals."
-)]
+#[story]
 fn playlist_children() -> Element {
     rsx! {
         NodeUiStoryCanvas {
@@ -104,30 +89,21 @@ fn playlist_children() -> Element {
     }
 }
 
-#[story(
-    label = "Status indicators",
-    description = "Minimal nodes showing Running, Idle, and Error status chrome."
-)]
+#[story]
 fn status_indicators() -> Element {
     rsx! {
         NodeUiStatusStory {}
     }
 }
 
-#[story(
-    label = "Project context",
-    description = "Project-root hierarchy with representative node surfaces in context."
-)]
+#[story]
 fn project_context() -> Element {
     rsx! {
         NodeUiProjectContext {}
     }
 }
 
-#[story(
-    label = "Node gallery",
-    description = "Clock, Fixture, Shader, and Playlist examples on one review surface."
-)]
+#[story]
 fn gallery() -> Element {
     rsx! {
         NodeUiGallery {}
@@ -1045,15 +1021,13 @@ fn playlist_node() -> NodeUiNode {
                     bindings: produced_bindings(None, &["../playlist#output"], &[]),
                     revision: 98,
                 })],
-                values: vec![
-                    NodeUiValueGroup {
-                        rows: vec![
-                            value_row(NodeUiValueSource::Bound, "Time", "../playlist#entry_time"),
-                            value_row(NodeUiValueSource::Bound, "Trigger", "bus#trigger"),
-                            value_row(NodeUiValueSource::Direct, "Shader", "blast.glsl"),
-                        ],
-                    },
-                ],
+                values: vec![NodeUiValueGroup {
+                    rows: vec![
+                        value_row(NodeUiValueSource::Bound, "Time", "../playlist#entry_time"),
+                        value_row(NodeUiValueSource::Bound, "Trigger", "bus#trigger"),
+                        value_row(NodeUiValueSource::Direct, "Shader", "blast.glsl"),
+                    ],
+                }],
             },
         ],
     }
@@ -1307,9 +1281,7 @@ struct NodeUiProducedBindings {
 
 impl NodeUiProducedBindings {
     fn has_any(&self) -> bool {
-        self.bus_target.is_some()
-            || !self.target_bindings.is_empty()
-            || !self.consumers.is_empty()
+        self.bus_target.is_some() || !self.target_bindings.is_empty() || !self.consumers.is_empty()
     }
 }
 

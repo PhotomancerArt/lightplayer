@@ -56,24 +56,25 @@ it probably belongs in the higher family.
 ## Stories
 
 Component stories are colocated with the component family they describe, but
-they are not wired by hand. Add `*_story.rs` files beside the relevant
-component family and mark story entry functions with `#[story]`.
+they are not wired by hand or listed in `mod.rs`. Add `*_stories.rs` files
+beside the relevant component family and mark story entry functions with
+`#[story]`; the generated story registry includes those files directly.
 
 ```text
-src/ui_base/<component>_story.rs
-src/ui_core/<component>_story.rs
-src/ui_studio/<component>_story.rs
-src/ui_studio/<category>/<component>_story.rs
-src/ui_exploration/<component>_story.rs
+src/ui_base/<component>_stories.rs
+src/ui_core/<component>_stories.rs
+src/ui_studio/<component>_stories.rs
+src/ui_studio/<category>/<component>_stories.rs
+src/ui_exploration/<component>_stories.rs
 ```
 
 Examples:
 
 ```text
-src/ui_base/popover_story.rs             -> base/popover/<story>
-src/ui_core/action_strip_story.rs         -> core/action-strip/<story>
-src/ui_studio/device/picker_story.rs      -> studio/device/picker/<story>
-src/ui_exploration/node_ui_story.rs       -> exploration/node-ui/<story>
+src/ui_base/popover_stories.rs             -> base/popover/<story>
+src/ui_core/action_strip_stories.rs         -> core/action-strip/<story>
+src/ui_studio/device/picker_stories.rs      -> studio/device/picker/<story>
+src/ui_exploration/node_ui_stories.rs       -> exploration/node-ui/<story>
 ```
 
 Within a story file, define zero-argument functions returning `Element`:
@@ -82,29 +83,36 @@ Within a story file, define zero-argument functions returning `Element`:
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
-#[story(
-    label = "Popover placement",
-    description = "Icon popovers anchored near viewport edges."
-)]
+#[story]
 fn edge_placement() -> Element {
     rsx! { section { "..." } }
 }
 ```
 
 Story ids are inferred from the path plus function name. The example above in
-`src/ui_base/popover_story.rs` becomes:
+`src/ui_base/popover_stories.rs` becomes:
 
 ```text
 base/popover/edge-placement
 ```
 
 Use `snake_case` for Rust filenames and functions; the registry converts those
-segments to `kebab-case` for story routes and baseline PNG names.
+segments to `kebab-case` for story routes and baseline PNG names. The visible
+story label is also derived from the function name, so `edge_placement` renders
+as `Edge placement`. Use `#[story(label = "...")]` only when the derived label
+would be misleading, and `description = "..."` only when the storybook chrome
+needs extra context.
 
 `build.rs` parses `#[story]` metadata with `syn` and generates the central
 story registry. If a story is malformed, the build should fail with a concrete
 diagnostic telling you which file, function, or route is wrong. Do not recreate
 manual `StoryDescriptor` arrays or per-file `render_story` matches.
+
+Broad fixture modules are allowed during exploration, but production component
+stories should migrate toward real component-adjacent files. For example, a
+temporary `ui_studio/studio_ux_stories.rs` file can hold app-wide shell
+fixtures, but device-specific stories should eventually live under
+`ui_studio/device/*_stories.rs`.
 
 Story source-root guidance:
 

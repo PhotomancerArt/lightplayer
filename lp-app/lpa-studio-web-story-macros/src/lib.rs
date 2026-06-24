@@ -12,17 +12,16 @@ use syn::{Error, FnArg, ItemFn, LitStr, ReturnType, Visibility, parse_macro_inpu
 
 /// Mark a zero-argument function as a Studio story.
 ///
-/// Required arguments:
-///
 /// ```ignore
-/// #[story(
-///     label = "Human label",
-///     description = "What this story is meant to show."
-/// )]
+/// #[story]
 /// fn example() -> Element {
 ///     /* ... */
 /// }
 /// ```
+///
+/// `label` and `description` can be passed as optional display metadata, but
+/// ordinary stories should let the build script derive the label from the
+/// function name.
 ///
 /// Story route identity is inferred by `lpa-studio-web/build.rs` from the file
 /// path plus function name, so this macro intentionally does not accept an id,
@@ -30,14 +29,14 @@ use syn::{Error, FnArg, ItemFn, LitStr, ReturnType, Visibility, parse_macro_inpu
 #[proc_macro_attribute]
 pub fn story(args: TokenStream, item: TokenStream) -> TokenStream {
     let mut function = parse_macro_input!(item as ItemFn);
-    let args = parse_macro_input!(args with StoryArgs::parse);
+    parse_macro_input!(args with StoryArgs::parse);
 
-    if let Err(error) = validate_story_function(&function, &args) {
+    if let Err(error) = validate_story_function(&function) {
         return error.to_compile_error().into();
     }
 
     if matches!(function.vis, Visibility::Inherited) {
-        function.vis = parse_quote!(pub(super));
+        function.vis = parse_quote!(pub(crate));
     }
 
     quote!(#function).into()
@@ -54,6 +53,9 @@ impl StoryArgs {
             label: None,
             description: None,
         };
+        if input.is_empty() {
+            return Ok(args);
+        }
 
         let parser = syn::meta::parser(|meta| args.parse_meta(meta));
         let tokens = input.parse()?;
@@ -81,7 +83,7 @@ impl StoryArgs {
             .map(ToString::to_string)
             .unwrap_or_else(|| quote!(#path).to_string());
         Err(meta.error(format!(
-            "unsupported story argument `{name}`; expected `label = \"...\"` or `description = \"...\"`"
+            "unsupported story argument `{name}`; use `#[story]`, `label = \"...\"`, or `description = \"...\"`"
         )))
     }
 
@@ -102,20 +104,7 @@ impl StoryArgs {
     }
 }
 
-fn validate_story_function(function: &ItemFn, args: &StoryArgs) -> syn::Result<()> {
-    if args.label.is_none() {
-        return Err(Error::new_spanned(
-            &function.sig.ident,
-            "missing `label = \"...\"` in #[story]",
-        ));
-    }
-    if args.description.is_none() {
-        return Err(Error::new_spanned(
-            &function.sig.ident,
-            "missing `description = \"...\"` in #[story]",
-        ));
-    }
-
+fn validate_story_function(function: &ItemFn) -> syn::Result<()> {
     if let Some(input) = function.sig.inputs.first() {
         let input_label = match input {
             FnArg::Receiver(_) => "self parameter",

@@ -1,7 +1,7 @@
 //! Base popover stories.
 //!
 //! This file is intentionally small because it is the canonical example of the
-//! path-inferred story contract: `ui_base/popover_story.rs#edge_placement`
+//! path-inferred story contract: `ui_base/popover_stories.rs#edge_placement`
 //! becomes `base/popover/edge-placement`.
 
 use dioxus::prelude::*;
@@ -9,10 +9,7 @@ use lpa_studio_web_story_macros::story;
 
 use crate::ui_base::{IconPopoverButton, PopoverPlacement, StudioIconName};
 
-#[story(
-    label = "Popover placement",
-    description = "Icon popovers anchored near viewport and container edges."
-)]
+#[story]
 fn edge_placement() -> Element {
     rsx! {
         section { class: "ux-popover-story",

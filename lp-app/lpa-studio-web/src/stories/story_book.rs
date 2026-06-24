@@ -163,7 +163,9 @@ fn StoryCanvas(
             "data-story-label": "{label}",
             div { class: "story-canvas-meta",
                 h3 { "{label}" }
-                p { "{description}" }
+                if !description.is_empty() {
+                    p { "{description}" }
+                }
             }
             div { class: "story-frame", style: "{frame_style}",
                 {render_story(story_id)}

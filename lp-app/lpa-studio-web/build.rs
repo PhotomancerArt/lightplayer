@@ -4,7 +4,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use syn::{Attribute, Item};
+use syn::{Attribute, Item, Meta};
 
 fn main() {
     println!("cargo:rerun-if-changed=src");
@@ -19,9 +19,8 @@ fn main() {
     });
     let story_modules = story_files
         .iter()
-        .enumerate()
-        .map(|(index, story_file)| {
-            StoryModule::read(&src_dir, story_file, index).unwrap_or_else(|error| {
+        .map(|story_file| {
+            StoryModule::read(&src_dir, story_file).unwrap_or_else(|error| {
                 panic!(
                     "failed to parse Studio story file {}:\n{error}",
                     story_file.display()
@@ -54,7 +53,7 @@ fn collect_story_files(dir: &Path, story_files: &mut Vec<PathBuf>) -> io::Result
         let Some(file_name) = path.file_name().and_then(|file_name| file_name.to_str()) else {
             continue;
         };
-        if file_name.ends_with("_story.rs") {
+        if file_name.ends_with("_stories.rs") {
             story_files.push(path);
         }
     }
@@ -64,18 +63,18 @@ fn collect_story_files(dir: &Path, story_files: &mut Vec<PathBuf>) -> io::Result
 #[derive(Debug)]
 struct StoryModule {
     path: PathBuf,
-    module_name: String,
+    module_path: String,
     stories: Vec<StorySpec>,
 }
 
 impl StoryModule {
-    fn read(src_dir: &Path, story_file: &Path, index: usize) -> Result<Self, String> {
+    fn read(src_dir: &Path, story_file: &Path) -> Result<Self, String> {
         let source = fs::read_to_string(story_file)
             .map_err(|error| format!("could not read story file: {error}"))?;
         let parsed = syn::parse_file(&source)
             .map_err(|error| format!("Rust parse error before story discovery: {error}"))?;
         let path_info = StoryPathInfo::from_path(src_dir, story_file)?;
-        let module_name = story_module_name(src_dir, story_file, index);
+        let module_path = story_module_path(src_dir, story_file)?;
 
         let mut stories = Vec::new();
         for item in parsed.items {
@@ -103,15 +102,15 @@ impl StoryModule {
 
         if stories.is_empty() {
             return Err(format!(
-                "story file matched `*_story.rs` but contains no `#[story(...)]` functions.\n\
-                 Add functions like `#[story(label = \"...\", description = \"...\")] fn example() -> Element {{ ... }}`,\n\
-                 or rename the file so it does not end with `_story.rs`."
+                "story file matched `*_stories.rs` but contains no `#[story]` functions.\n\
+                 Add functions like `#[story] fn example() -> Element {{ ... }}`,\n\
+                 or rename the file so it does not end with `_stories.rs`."
             ));
         }
 
         Ok(Self {
             path: story_file.to_path_buf(),
-            module_name,
+            module_path,
             stories,
         })
     }
@@ -149,7 +148,7 @@ impl StoryPathInfo {
                 "unsupported story path `{}`.\n\
                  Expected a story file under `src/ui_base`, `src/ui_core`, \
                  `src/ui_studio`, or `src/ui_exploration`, using either \
-                 `<component>_story.rs` or `<category>/<component>_story.rs`.",
+                 `<component>_stories.rs` or `<category>/<component>_stories.rs`.",
                 relative.display()
             )),
         }
@@ -181,57 +180,87 @@ impl StoryMetadata {
         let mut description = None;
         let mut errors = Vec::new();
 
-        attribute
-            .parse_nested_meta(|meta| {
-                if meta.path.is_ident("label") {
-                    let value = meta.value()?;
-                    let literal: syn::LitStr = value.parse()?;
-                    if label.replace(literal.value()).is_some() {
-                        errors.push(format!(
-                            "`{function_name}` has duplicate `label` entries in #[story]"
-                        ));
-                    }
-                    return Ok(());
-                }
+        match &attribute.meta {
+            Meta::Path(_) => {}
+            Meta::List(_) => {
+                attribute
+                    .parse_nested_meta(|meta| {
+                        if meta.path.is_ident("label") {
+                            let value = meta.value()?;
+                            let literal: syn::LitStr = value.parse()?;
+                            if label.replace(literal.value()).is_some() {
+                                errors.push(format!(
+                                    "`{function_name}` has duplicate `label` entries in #[story]"
+                                ));
+                            }
+                            return Ok(());
+                        }
 
-                if meta.path.is_ident("description") {
-                    let value = meta.value()?;
-                    let literal: syn::LitStr = value.parse()?;
-                    if description.replace(literal.value()).is_some() {
-                        errors.push(format!(
-                            "`{function_name}` has duplicate `description` entries in #[story]"
-                        ));
-                    }
-                    return Ok(());
-                }
+                        if meta.path.is_ident("description") {
+                            let value = meta.value()?;
+                            let literal: syn::LitStr = value.parse()?;
+                            if description.replace(literal.value()).is_some() {
+                                errors.push(format!(
+                                    "`{function_name}` has duplicate `description` entries in #[story]"
+                                ));
+                            }
+                            return Ok(());
+                        }
 
-                let name = meta
-                    .path
-                    .get_ident()
-                    .map(ToString::to_string)
-                    .unwrap_or_else(|| "<unknown>".to_string());
+                        let name = meta
+                            .path
+                            .get_ident()
+                            .map(ToString::to_string)
+                            .unwrap_or_else(|| "<unknown>".to_string());
+                        errors.push(format!(
+                            "`{function_name}` uses unsupported #[story] argument `{name}`; \
+                             use `#[story]`, `label = \"...\"`, or `description = \"...\"`"
+                        ));
+                        Ok(())
+                    })
+                    .map_err(|error| {
+                        format!("could not parse #[story(...)] on `{function_name}`: {error}")
+                    })?;
+            }
+            Meta::NameValue(_) => {
                 errors.push(format!(
-                    "`{function_name}` uses unsupported #[story] argument `{name}`; \
-                     expected `label = \"...\"` or `description = \"...\"`"
+                    "`{function_name}` uses unsupported #[story = ...] syntax; \
+                     use `#[story]` or `#[story(label = \"...\")]`"
                 ));
-                Ok(())
-            })
-            .map_err(|error| {
-                format!("could not parse #[story(...)] on `{function_name}`: {error}")
-            })?;
+            }
+        }
 
         if !errors.is_empty() {
             return Err(errors.join("\n"));
         }
 
-        let label = label
-            .ok_or_else(|| format!("`{function_name}` is missing `label = \"...\"` in #[story]"))?;
-        let description = description.ok_or_else(|| {
-            format!("`{function_name}` is missing `description = \"...\"` in #[story]")
-        })?;
-
-        Ok(Self { label, description })
+        Ok(Self {
+            label: label.unwrap_or_else(|| story_label_from_ident(function_name)),
+            description: description.unwrap_or_default(),
+        })
     }
+}
+
+fn story_label_from_ident(function_name: &str) -> String {
+    let mut label = String::with_capacity(function_name.len());
+    let mut previous_was_space = false;
+    for ch in function_name.chars() {
+        if ch.is_ascii_alphanumeric() {
+            if label.is_empty() {
+                label.push(ch.to_ascii_uppercase());
+            } else {
+                label.push(ch.to_ascii_lowercase());
+            }
+            previous_was_space = false;
+        } else if !label.is_empty() && !previous_was_space {
+            label.push(' ');
+            previous_was_space = true;
+        }
+    }
+    if label.ends_with(' ') {
+        label.pop();
+    }
+    label
 }
 
 #[derive(Debug)]
@@ -273,15 +302,6 @@ fn validate_story_ids(story_modules: &[StoryModule]) {
 fn generate_registry(story_modules: &[StoryModule]) -> String {
     let mut generated = String::new();
     generated.push_str("// @generated by lpa-studio-web/build.rs\n\n");
-
-    for story_module in story_modules {
-        generated.push_str("#[path = \"");
-        generated.push_str(&rust_string_literal_path(&story_module.path));
-        generated.push_str("\"]\n");
-        generated.push_str("mod ");
-        generated.push_str(&story_module.module_name);
-        generated.push_str(";\n");
-    }
 
     generated.push_str(
         "\npub fn all_generated_stories() -> Vec<crate::stories::story::StoryDescriptor> {\n",
@@ -333,7 +353,7 @@ fn generate_registry(story_modules: &[StoryModule]) -> String {
             generated.push_str("        \"");
             generated.push_str(&rust_string_literal(&story.id));
             generated.push_str("\" => Some(");
-            generated.push_str(&story_module.module_name);
+            generated.push_str(&story_module.module_path);
             generated.push_str("::");
             generated.push_str(&story.function_name);
             generated.push_str("()),\n");
@@ -369,14 +389,14 @@ fn story_family_from_source_root(source_root: &str) -> Result<String, String> {
 }
 
 fn component_from_story_file(file_name: &str) -> Result<String, String> {
-    let Some(component) = file_name.strip_suffix("_story.rs") else {
+    let Some(component) = file_name.strip_suffix("_stories.rs") else {
         return Err(format!(
-            "story file `{file_name}` should end with `_story.rs`"
+            "story file `{file_name}` should end with `_stories.rs`"
         ));
     };
     if component.is_empty() {
         return Err(format!(
-            "story file `{file_name}` must include a component name before `_story.rs`"
+            "story file `{file_name}` must include a component name before `_stories.rs`"
         ));
     }
     Ok(route_segment_from_ident(component))
@@ -400,27 +420,18 @@ fn route_segment_from_ident(value: &str) -> String {
     segment.trim_matches('-').to_string()
 }
 
-fn story_module_name(src_dir: &Path, story_file: &Path, index: usize) -> String {
+fn story_module_path(src_dir: &Path, story_file: &Path) -> Result<String, String> {
     let relative = story_file
         .strip_prefix(src_dir)
-        .expect("story file under src");
-    let mut name = format!("story_{index}");
+        .map_err(|_| "story file is not under src".to_string())?;
+    let mut module_path = "crate".to_string();
     for component in relative.components() {
-        name.push('_');
         let segment = component.as_os_str().to_string_lossy();
-        for ch in segment.chars() {
-            if ch.is_ascii_alphanumeric() {
-                name.push(ch.to_ascii_lowercase());
-            } else {
-                name.push('_');
-            }
-        }
+        let segment = segment.strip_suffix(".rs").unwrap_or(&segment);
+        module_path.push_str("::");
+        module_path.push_str(segment);
     }
-    name
-}
-
-fn rust_string_literal_path(path: &Path) -> String {
-    rust_string_literal(&path.to_string_lossy())
+    Ok(module_path)
 }
 
 fn rust_string_literal(value: &str) -> String {

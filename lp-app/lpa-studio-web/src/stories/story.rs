@@ -1,9 +1,10 @@
 /// Metadata for one generated Studio story.
 ///
 /// Story authors do not construct this by hand. Story files declare
-/// `#[story(label = "...", description = "...")]` functions, and
-/// `lpa-studio-web/build.rs` infers the family/category/component/story fields
-/// from the file path plus function name.
+/// `#[story]` functions, and `lpa-studio-web/build.rs` infers the
+/// family/category/component/story fields from the file path plus function name.
+/// Labels are derived from function names unless a story provides an explicit
+/// `label = "..."` override.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct StoryDescriptor {
     pub id: &'static str,
