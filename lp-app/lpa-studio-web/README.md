@@ -54,7 +54,9 @@ serves `http://127.0.0.1:2820/` through `dx serve`.
 Use `just studio-web-build` or `just studio-web` for the release/static build
 path. `dx build` writes Studio app assets under
 `target/dx/lpa-studio-web/{debug,release}/web/public/`, while `public/`
-contains durable static sidecars copied into that output. Release app assets are
+contains only hand-authored static files that are copied into that output.
+Generated runtime sidecars are built under `target/studio-web-assets/` and then
+mirrored into the generated Dioxus public directory. Release app assets are
 hash-named under `assets/`. The release build still packages ESP32-C6 firmware
 assets for future browser flashing work.
 
@@ -78,11 +80,11 @@ Operational setup, DNS records, and GitHub Pages HTTPS steps are documented in
 [`docs/deploy/studio-pages.md`](../../docs/deploy/studio-pages.md).
 
 Browser-worker assets are served from `pkg/` in the generated site. The source
-sidecar files are staged under `public/pkg/` before `dx build` copies them into
-`target/dx/lpa-studio-web/.../public/pkg/`. The UX boot path resolves those
-paths to page-absolute URLs before sending them into the embedded blob worker,
-which lets worker import/init failures surface as actionable link errors instead
-of silent boot timeouts.
+sidecar files are generated under `target/studio-web-assets/{debug,release}/pkg/`
+and copied into `target/dx/lpa-studio-web/.../public/pkg/` after `dx` builds
+the Studio app. The UX boot path resolves those paths to page-absolute URLs
+before sending them into the embedded blob worker, which lets worker import/init
+failures surface as actionable link errors instead of silent boot timeouts.
 
 Browser ESP32 Web Serial uses the shared app-served controller at
 `public/lpa-link/browser_esp32_device_controller.js`. Both Studio's wasm-bound
@@ -90,9 +92,10 @@ Browser ESP32 Web Serial uses the shared app-served controller at
 module, so normal connect/reset/read debugging exercises the same Web Serial
 lifecycle code that Studio uses.
 
-ESP32-C6 firmware assets are served from
-`public/firmware/esp32c6/manifest.json`. Browser serial provisioning imports a
-pinned browser ESM `esptool-js` module from
+ESP32-C6 firmware assets are generated under
+`target/studio-web-assets/firmware/esp32c6/` and served from
+`firmware/esp32c6/manifest.json` in the generated site. Browser serial
+provisioning imports a pinned browser ESM `esptool-js` module from
 `https://cdn.jsdelivr.net/npm/esptool-js@0.6.0/+esm` by default; deployments can
 override the `BrowserSerialEsp32Options` path if they want to serve that module
 themselves. The CDN ESM endpoint avoids raw package bare imports such as `pako`,

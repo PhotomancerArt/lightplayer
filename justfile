@@ -11,6 +11,7 @@ rv32_firmware_packages := "fw-esp32"
 fw_esp32_profile := "release-esp32"
 fw_esp32_elf := "target/" + rv32_target + "/" + fw_esp32_profile + "/fw-esp32"
 lps_dir := "lp-shader"
+studio_assets_dir := "target/studio-web-assets"
 
 # Default recipe - show available commands
 default:
@@ -184,48 +185,84 @@ fw-browser-smoke: fw-browser-build
 # Studio web app
 # ============================================================================
 
-studio-web-dev-build: install-wasm32-target
+studio-fw-browser-sidecar profile="debug": install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail
-    rm -rf lp-app/lpa-studio-web/public/pkg
-    echo "Building fw-browser for wasm32 debug..."
-    cargo build -p fw-browser --target wasm32-unknown-unknown
     if ! command -v wasm-bindgen >/dev/null 2>&1; then
         echo "wasm-bindgen not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
         exit 1
     fi
-    echo "Generating fw-browser debug JS glue..."
-    wasm-bindgen target/wasm32-unknown-unknown/debug/fw_browser.wasm \
-        --out-dir lp-fw/fw-browser/www/pkg --target web
-    mkdir -p lp-app/lpa-studio-web/public/pkg
-    echo "Copying fw-browser wasm artifacts..."
-    cp lp-fw/fw-browser/www/pkg/fw_browser.js lp-app/lpa-studio-web/public/pkg/fw_browser.js
-    cp lp-fw/fw-browser/www/pkg/fw_browser_bg.wasm lp-app/lpa-studio-web/public/pkg/fw_browser_bg.wasm
+
+    case "{{ profile }}" in
+        debug)
+            cargo_profile="dev"
+            wasm_file="target/wasm32-unknown-unknown/debug/fw_browser.wasm"
+            ;;
+        release)
+            cargo_profile="release"
+            wasm_file="target/wasm32-unknown-unknown/release/fw_browser.wasm"
+            ;;
+        *)
+            echo "unknown fw-browser sidecar profile: {{ profile }}" >&2
+            exit 2
+            ;;
+    esac
+
+    out_dir="{{ studio_assets_dir }}/{{ profile }}/pkg"
+    echo "Building fw-browser for wasm32 ${cargo_profile}..."
+    if [[ "{{ profile }}" == "release" ]]; then
+        cargo build -p fw-browser --target wasm32-unknown-unknown --release
+    else
+        cargo build -p fw-browser --target wasm32-unknown-unknown
+    fi
+    rm -rf "${out_dir}"
+    mkdir -p "${out_dir}"
+    echo "Generating fw-browser ${cargo_profile} JS glue..."
+    wasm-bindgen "${wasm_file}" --out-dir "${out_dir}" --target web
+    echo "Artifacts: ${out_dir}/"
+
+studio-web-copy-sidecars profile out_dir include_firmware="false":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    sidecar_dir="{{ studio_assets_dir }}/{{ profile }}/pkg"
+    if [[ ! -f "${sidecar_dir}/fw_browser.js" || ! -f "${sidecar_dir}/fw_browser_bg.wasm" ]]; then
+        echo "missing fw-browser sidecar artifacts in ${sidecar_dir}" >&2
+        exit 1
+    fi
+
+    mkdir -p "{{ out_dir }}/pkg"
+    cp "${sidecar_dir}/fw_browser.js" "{{ out_dir }}/pkg/fw_browser.js"
+    cp "${sidecar_dir}/fw_browser_bg.wasm" "{{ out_dir }}/pkg/fw_browser_bg.wasm"
+
+    if [[ "{{ include_firmware }}" == "true" ]]; then
+        firmware_dir="{{ studio_assets_dir }}/firmware/esp32c6"
+        if [[ ! -f "${firmware_dir}/manifest.json" ]]; then
+            echo "missing Studio firmware assets in ${firmware_dir}" >&2
+            exit 1
+        fi
+        mkdir -p "{{ out_dir }}/firmware/esp32c6"
+        cp "${firmware_dir}/manifest.json" "{{ out_dir }}/firmware/esp32c6/manifest.json"
+        cp "${firmware_dir}"/*.bin "{{ out_dir }}/firmware/esp32c6/"
+    fi
+
+studio-web-dev-build: install-wasm32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just studio-fw-browser-sidecar debug
     echo "Building lpa-studio-web with dx for wasm32 debug with stories..."
     rm -rf target/dx/lpa-studio-web/debug/web/public
     dx build --web -p lpa-studio-web --features stories --debug-symbols false
+    just studio-web-copy-sidecars debug target/dx/lpa-studio-web/debug/web/public false
     echo "Artifacts: target/dx/lpa-studio-web/debug/web/public/ (debug build)"
 
 studio-web-story-build: install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail
-    rm -rf lp-app/lpa-studio-web/public/pkg
-    echo "Building fw-browser for wasm32 debug..."
-    cargo build -p fw-browser --target wasm32-unknown-unknown
-    if ! command -v wasm-bindgen >/dev/null 2>&1; then
-        echo "wasm-bindgen not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
-        exit 1
-    fi
-    echo "Generating fw-browser debug JS glue..."
-    wasm-bindgen target/wasm32-unknown-unknown/debug/fw_browser.wasm \
-        --out-dir lp-fw/fw-browser/www/pkg --target web
-    mkdir -p lp-app/lpa-studio-web/public/pkg
-    echo "Copying fw-browser wasm artifacts..."
-    cp lp-fw/fw-browser/www/pkg/fw_browser.js lp-app/lpa-studio-web/public/pkg/fw_browser.js
-    cp lp-fw/fw-browser/www/pkg/fw_browser_bg.wasm lp-app/lpa-studio-web/public/pkg/fw_browser_bg.wasm
+    just studio-fw-browser-sidecar debug
     echo "Building lpa-studio-web with dx for story capture..."
     rm -rf target/dx/lpa-studio-web/release/web/public
     dx build --web -p lpa-studio-web --features stories --release --debug-symbols false
+    just studio-web-copy-sidecars debug target/dx/lpa-studio-web/release/web/public false
     echo "Artifacts: target/dx/lpa-studio-web/release/web/public/ (story build)"
 
 studio-story-pngs: studio-web-story-build
@@ -269,21 +306,24 @@ studio-story-baselines-if-needed:
 studio-dev: install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail
-    rm -rf lp-app/lpa-studio-web/public/pkg
-    echo "Building fw-browser for wasm32 debug..."
-    cargo build -p fw-browser --target wasm32-unknown-unknown
-    if ! command -v wasm-bindgen >/dev/null 2>&1; then
-        echo "wasm-bindgen not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
-        exit 1
-    fi
-    echo "Generating fw-browser debug JS glue..."
-    wasm-bindgen target/wasm32-unknown-unknown/debug/fw_browser.wasm \
-        --out-dir lp-fw/fw-browser/www/pkg --target web
-    echo "Copying fw-browser wasm artifacts..."
-    mkdir -p lp-app/lpa-studio-web/public/pkg
-    cp lp-fw/fw-browser/www/pkg/fw_browser.js lp-app/lpa-studio-web/public/pkg/fw_browser.js
-    cp lp-fw/fw-browser/www/pkg/fw_browser_bg.wasm lp-app/lpa-studio-web/public/pkg/fw_browser_bg.wasm
+    just studio-fw-browser-sidecar debug
     port="${STUDIO_WEB_PORT:-2820}"
+    public_dir="target/dx/lpa-studio-web/debug/web/public"
+    sidecar_dir="{{ studio_assets_dir }}/debug/pkg"
+    sync_sidecars() {
+        [[ -d "${public_dir}" ]] || return 0
+        mkdir -p "${public_dir}/pkg"
+        cp "${sidecar_dir}/fw_browser.js" "${public_dir}/pkg/fw_browser.js"
+        cp "${sidecar_dir}/fw_browser_bg.wasm" "${public_dir}/pkg/fw_browser_bg.wasm"
+    }
+    (
+        while true; do
+            sync_sidecars || true
+            sleep 1
+        done
+    ) &
+    sync_pid="$!"
+    trap 'kill "${sync_pid}" 2>/dev/null || true' EXIT
     echo "Serving LightPlayer Studio dev build at http://127.0.0.1:${port}/"
     echo "Storybook: http://127.0.0.1:${port}/#/stories"
     dx serve --web -p lpa-studio-web --features stories --port "${port}" --addr 127.0.0.1 --open false
@@ -299,7 +339,7 @@ studio-firmware-package-esp32c6: install-rv32-target
     firmware_id="lightplayer-esp32c6-server"
     display_name="LightPlayer ESP32-C6 server firmware"
     features="esp32c6,server"
-    out_dir="lp-app/lpa-studio-web/public/firmware/esp32c6"
+    out_dir="{{ studio_assets_dir }}/firmware/esp32c6"
     image_name="fw-esp32c6-server-merged.bin"
     image_file="${out_dir}/${image_name}"
     manifest_file="${out_dir}/manifest.json"
@@ -342,18 +382,15 @@ studio-firmware-package-esp32c6: install-rv32-target
     echo "Firmware manifest: ${manifest_file}"
     echo "Firmware image: ${image_file} (${size_bytes} bytes, sha256=${sha256})"
 
-studio-web-build: install-wasm32-target fw-browser-build studio-firmware-package-esp32c6
+studio-web-build: install-wasm32-target studio-firmware-package-esp32c6
     #!/usr/bin/env bash
     set -euo pipefail
-    rm -rf lp-app/lpa-studio-web/public/pkg
-    echo "Copying fw-browser wasm artifacts..."
-    mkdir -p lp-app/lpa-studio-web/public/pkg
-    cp lp-fw/fw-browser/www/pkg/fw_browser.js lp-app/lpa-studio-web/public/pkg/fw_browser.js
-    cp lp-fw/fw-browser/www/pkg/fw_browser_bg.wasm lp-app/lpa-studio-web/public/pkg/fw_browser_bg.wasm
+    just studio-fw-browser-sidecar release
     echo "Building lpa-studio-web with dx for wasm32 release..."
     rm -rf target/dx/lpa-studio-web/release/web/public
     dx build --web -p lpa-studio-web --release --debug-symbols false
-    echo "Artifacts: target/dx/lpa-studio-web/release/web/public/ (index.html, assets/, pkg/)"
+    just studio-web-copy-sidecars release target/dx/lpa-studio-web/release/web/public true
+    echo "Artifacts: target/dx/lpa-studio-web/release/web/public/ (index.html, assets/, pkg/, firmware/)"
 
 # Build a clean GitHub Pages artifact for Studio.
 studio-web-deploy-dir channel="local" out_dir="target/pages/studio" domain="":

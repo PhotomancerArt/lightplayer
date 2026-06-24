@@ -40,8 +40,10 @@ manual workflow, then published as static commits to the corresponding Pages
 repository.
 
 Deployment tooling stages clean release-only artifacts under `target/pages/`
-and generates `version.json`, `.nojekyll`, and `CNAME` files. This avoids
-uploading stale debug wasm from `lp-app/lpa-studio-web/public/pkg`.
+and generates `version.json`, `.nojekyll`, and `CNAME` files. Studio app
+JS/WASM comes from `dx` release output, and generated runtime sidecars are
+copied into that output from `target/studio-web-assets/` instead of being staged
+under source `public/`.
 
 ## Consequences
 
