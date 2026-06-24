@@ -6,8 +6,10 @@
 
 pub mod field_row;
 pub mod icon;
+pub mod popover;
 pub mod tabs;
 
 pub use field_row::FieldRow;
 pub use icon::{StudioIcon, StudioIconName, action_icon_name};
+pub use popover::{IconPopoverButton, PopoverPlacement};
 pub use tabs::{TabItem, Tabs};

@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use crate::stories::story::StoryDescriptor;
-use crate::ui_base::{StudioIcon, StudioIconName};
+use crate::ui_base::{IconPopoverButton, PopoverPlacement, StudioIcon, StudioIconName};
 
 const CLOCK_SHAPE_JSON: &str = include_str!("story_data/clock.shape.json");
 const CLOCK_SLOTS_JSON: &str = include_str!("story_data/clock.slots.json");
@@ -15,49 +15,49 @@ const SHADER_SLOTS_JSON: &str = include_str!("story_data/shader.slots.json");
 pub const STORIES: &[StoryDescriptor] = &[
     StoryDescriptor::new(
         "studio/node-ui/clock-instrument",
-        "Node UI Spike",
+        "Studio",
         "Clock",
         "Basic Clock node using the instrument-window direction.",
     ),
     StoryDescriptor::new(
         "studio/node-ui/clock-compact",
-        "Node UI Spike",
+        "Studio",
         "Clock compact",
         "Basic Clock node using the compact-inspector direction.",
     ),
     StoryDescriptor::new(
         "studio/node-ui/fixture-control-product",
-        "Node UI Spike",
+        "Studio",
         "Fixture",
         "Fixture node with a rough control-product preview and nested mapping.",
     ),
     StoryDescriptor::new(
         "studio/node-ui/shader-visual-product",
-        "Node UI Spike",
+        "Studio",
         "Shader",
         "Shader node with a rough visual-product preview and compact slot rows.",
     ),
     StoryDescriptor::new(
         "studio/node-ui/playlist-children",
-        "Node UI Spike",
+        "Studio",
         "Playlist",
         "Fyeah-inspired Playlist node with active entry and owned child visuals.",
     ),
     StoryDescriptor::new(
         "studio/node-ui/status-indicators",
-        "Node UI Spike",
+        "Studio",
         "Status indicators",
         "Minimal nodes showing Running, Idle, and Error status chrome.",
     ),
     StoryDescriptor::new(
         "studio/node-ui/project-context",
-        "Node UI Spike",
+        "Studio",
         "Project context",
         "Project-root hierarchy with representative node surfaces in context.",
     ),
     StoryDescriptor::new(
         "studio/node-ui/gallery",
-        "Node UI Spike",
+        "Studio",
         "Node gallery",
         "Clock, Fixture, Shader, and Playlist examples on one review surface.",
     ),
@@ -257,6 +257,7 @@ fn NodeUiProjectContext() -> Element {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn NodeWindow(node: NodeUiNode, variant: NodeUiVariant) -> Element {
     let mut active_tab = use_signal(|| 0_usize);
+    let mut collapsed = use_signal(|| false);
     let base_class = match variant {
         NodeUiVariant::Instrument => "ux-node-ui-window ux-node-ui-window-instrument",
         NodeUiVariant::Compact => "ux-node-ui-window ux-node-ui-window-compact",
@@ -284,24 +285,28 @@ fn NodeWindow(node: NodeUiNode, variant: NodeUiVariant) -> Element {
                     tabs: tabs.clone(),
                     active_index,
                     on_select: move |index| active_tab.set(index),
+                    collapsed: collapsed(),
+                    on_toggle_collapsed: move |_| collapsed.set(!collapsed()),
                 }
-                match active_content {
-                    NodeUiTabContent::None => rsx! {
-                        NodeMainTabPanel {
-                            presentation,
-                            values,
-                            variant,
-                        }
-                    },
-                    NodeUiTabContent::Json { title, body } => rsx! {
-                        NodeJsonTabPanel {
-                            title,
-                            body,
-                        }
-                    },
+                if !collapsed() {
+                    match active_content {
+                        NodeUiTabContent::None => rsx! {
+                            NodeMainTabPanel {
+                                presentation,
+                                values,
+                                variant,
+                            }
+                        },
+                        NodeUiTabContent::Json { title, body } => rsx! {
+                            NodeJsonTabPanel {
+                                title,
+                                body,
+                            }
+                        },
+                    }
                 }
             }
-            if !children.is_empty() {
+            if !collapsed() && !children.is_empty() {
                 NodeChildren {
                     items: children,
                 }
@@ -322,9 +327,22 @@ fn NodeHeader(
     tabs: Vec<NodeUiTab>,
     active_index: usize,
     on_select: EventHandler<usize>,
+    collapsed: bool,
+    on_toggle_collapsed: EventHandler<MouseEvent>,
 ) -> Element {
     rsx! {
         header { class: "ux-node-ui-header",
+            button {
+                class: "ux-node-ui-collapse-button",
+                r#type: "button",
+                aria_label: if collapsed { "Expand node" } else { "Collapse node" },
+                title: if collapsed { "Expand node" } else { "Collapse node" },
+                onclick: move |event| on_toggle_collapsed.call(event),
+                StudioIcon {
+                    name: if collapsed { StudioIconName::Collapsed } else { StudioIconName::Expanded },
+                    size: 14,
+                }
+            }
             NodeStatusIndicator {
                 kind,
                 source,
@@ -360,52 +378,40 @@ fn NodeStatusIndicator(
     initially_open: bool,
     perf: Option<&'static str>,
 ) -> Element {
-    let mut open = use_signal(|| initially_open);
-    let trigger_class = if open() {
-        format!(
-            "{} ux-node-ui-status-button-open",
-            status.indicator_class_name()
-        )
-    } else {
-        status.indicator_class_name().to_string()
-    };
+    let open_class = format!(
+        "{} ux-node-ui-status-button-open",
+        status.indicator_class_name()
+    );
     rsx! {
         div { class: "ux-node-ui-status-control",
-            button {
-                class: "{trigger_class}",
-                r#type: "button",
-                aria_label: "{status.label} status details",
-                title: "{status.label} status details",
-                aria_expanded: "{open()}",
-                onclick: move |_| open.set(!open()),
-                span { aria_hidden: "true",
-                    StudioIcon {
-                        name: status.icon_name(),
-                        size: 14,
-                    }
-                }
-            }
-            if open() {
-                div { class: "{status.popup_class_name()}",
-                    div { class: "ux-node-ui-status-popup-summary",
-                        div { class: "ux-node-ui-status-popup-line",
-                            strong { class: "ux-node-ui-status-popup-kind", "{kind}" }
-                            span { class: "ux-node-ui-status-popup-perf",
-                                if let Some(perf) = perf {
-                                    "{perf}"
-                                } else {
-                                    "{status.label}"
-                                }
+            IconPopoverButton {
+                class: status.indicator_class_name().to_string(),
+                open_class,
+                icon: status.icon_name(),
+                icon_size: 14,
+                label: format!("{} status details", status.label),
+                title: format!("{} status details", status.label),
+                popup_class: status.popup_class_name().to_string(),
+                placement: PopoverPlacement::BottomStart,
+                initially_open,
+                div { class: "ux-node-ui-status-popup-summary",
+                    div { class: "ux-node-ui-status-popup-line",
+                        strong { class: "ux-node-ui-status-popup-kind", "{kind}" }
+                        span { class: "ux-node-ui-status-popup-perf",
+                            if let Some(perf) = perf {
+                                "{perf}"
+                            } else {
+                                "{status.label}"
                             }
                         }
-                        if let Some(source) = source {
-                            div { class: "ux-node-ui-status-popup-source", "{source}" }
-                        }
                     }
-                    if let Some(detail) = status.error_detail() {
-                        pre { class: "ux-node-ui-status-popup-error-detail",
-                            code { "{detail}" }
-                        }
+                    if let Some(source) = source {
+                        div { class: "ux-node-ui-status-popup-source", "{source}" }
+                    }
+                }
+                if let Some(detail) = status.error_detail() {
+                    pre { class: "ux-node-ui-status-popup-error-detail",
+                        code { "{detail}" }
                     }
                 }
             }
@@ -420,10 +426,12 @@ fn NodeMainTabPanel(
     values: Vec<NodeUiValueGroup>,
     variant: NodeUiVariant,
 ) -> Element {
+    let (products, metrics) = split_presentation_items(presentation);
     rsx! {
-        if !presentation.is_empty() {
-            NodePresentation {
-                items: presentation,
+        if !products.is_empty() || !metrics.is_empty() {
+            NodeProducedSection {
+                products,
+                metrics,
                 variant,
             }
         }
@@ -437,27 +445,29 @@ fn NodeMainTabPanel(
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn NodePresentation(items: Vec<NodeUiPresentationItem>, variant: NodeUiVariant) -> Element {
-    if let [NodeUiPresentationItem::Product(product)] = items.as_slice() {
-        return rsx! {
-            NodeProductTile { product: *product }
-        };
-    }
-
+fn NodeProducedSection(
+    products: Vec<NodeUiProduct>,
+    metrics: Vec<NodeUiMetric>,
+    variant: NodeUiVariant,
+) -> Element {
     let class = match variant {
-        NodeUiVariant::Instrument => "ux-node-ui-presentation ux-node-ui-presentation-instrument",
-        NodeUiVariant::Compact => "ux-node-ui-presentation ux-node-ui-presentation-compact",
+        NodeUiVariant::Instrument => "ux-node-ui-produced ux-node-ui-produced-instrument",
+        NodeUiVariant::Compact => "ux-node-ui-produced ux-node-ui-produced-compact",
     };
     rsx! {
         section { class,
-            for item in items {
-                match item {
-                    NodeUiPresentationItem::Metric(metric) => rsx! {
-                        NodePresentationMetric { metric }
-                    },
-                    NodeUiPresentationItem::Product(product) => rsx! {
+            if !products.is_empty() {
+                div { class: "ux-node-ui-products",
+                    for product in products {
                         NodeProductTile { product }
-                    },
+                    }
+                }
+            }
+            if !metrics.is_empty() {
+                div { class: "ux-node-ui-produced-values",
+                    for metric in metrics {
+                        NodePresentationMetric { metric }
+                    }
                 }
             }
         }
@@ -467,8 +477,15 @@ fn NodePresentation(items: Vec<NodeUiPresentationItem>, variant: NodeUiVariant) 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn NodePresentationMetric(metric: NodeUiMetric) -> Element {
+    let bindings = metric.bindings.clone();
     rsx! {
         div { class: "ux-node-ui-metric",
+            ProducedBindingButton {
+                label: metric.label,
+                type_label: "produced value",
+                bindings,
+                revision: metric.revision,
+            }
             span { class: "ux-node-ui-metric-label", "{metric.label}" }
             strong { "{metric.value}" }
             if let Some(detail) = metric.detail {
@@ -485,16 +502,96 @@ fn NodeProductTile(product: NodeUiProduct) -> Element {
         NodeUiProductKind::Visual => "ux-node-ui-product ux-node-ui-product-visual",
         NodeUiProductKind::Control => "ux-node-ui-product ux-node-ui-product-control",
     };
+    let bindings = product.bindings.clone();
     rsx! {
-        NodeProductPreviewBox { product }
+        NodeProductPreviewBox { product: product.clone() }
         div { class,
             footer { class: "ux-node-ui-product-meta",
+                ProducedBindingButton {
+                    label: product.name,
+                    type_label: product.kind.product_label(),
+                    bindings,
+                    revision: product.revision,
+                }
                 em { "{product.name}" }
                 span { "{product.kind.label()}" }
                 if let Some(size) = product.size {
                     small { "{size}" }
                 }
             }
+        }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ProducedBindingButton(
+    label: &'static str,
+    type_label: &'static str,
+    bindings: NodeUiProducedBindings,
+    revision: u32,
+) -> Element {
+    let bus_target = bindings.bus_target;
+    let target_bindings = bindings.target_bindings.clone();
+    let consumers = bindings.consumers.clone();
+    let trigger_class = if bindings.has_any() {
+        "ux-node-ui-popup-trigger ux-node-ui-popup-trigger-routed"
+    } else {
+        "ux-node-ui-popup-trigger"
+    };
+    let open_class = "ux-node-ui-popup-trigger ux-node-ui-popup-trigger-open";
+    rsx! {
+        IconPopoverButton {
+            class: trigger_class.to_string(),
+            open_class: open_class.to_string(),
+            icon: StudioIconName::BoundValue,
+            icon_size: 13,
+            label: format!("{label} bindings"),
+            title: format!("{label} bindings"),
+            popup_class: "ux-node-ui-popup ux-node-ui-route-popup".to_string(),
+            placement: PopoverPlacement::BottomEnd,
+            div { class: "ux-node-ui-popup-kicker", "{type_label}" }
+            strong { "{label}" }
+            div { class: "ux-node-ui-binding-section ux-node-ui-bus-binding-section",
+                div { class: "ux-node-ui-binding-heading", "bus binding" }
+                if let Some(bus_target) = bus_target {
+                    div { class: "ux-node-ui-bus-binding-row",
+                        span { "bus#" }
+                        code { "{bus_binding_name(bus_target)}" }
+                        button { r#type: "button", "del" }
+                    }
+                } else {
+                    div { class: "ux-node-ui-bus-binding-row ux-node-ui-bus-binding-row-empty",
+                        span { "bus#" }
+                        code { "not assigned" }
+                        button { r#type: "button", "add" }
+                    }
+                }
+            }
+            if !target_bindings.is_empty() {
+                div { class: "ux-node-ui-binding-section",
+                    div { class: "ux-node-ui-binding-heading", "target bindings" }
+                    for target in target_bindings {
+                        div { class: "ux-node-ui-binding-item",
+                            span { class: "ux-node-ui-binding-arrow", "->" }
+                            code { "{target}" }
+                            button { r#type: "button", "del" }
+                        }
+                    }
+                    button { class: "ux-node-ui-binding-add", r#type: "button", "add" }
+                }
+            }
+            if !consumers.is_empty() {
+                div { class: "ux-node-ui-binding-section",
+                    div { class: "ux-node-ui-binding-heading", "consumed by" }
+                    for consumer in consumers {
+                        div { class: "ux-node-ui-binding-item ux-node-ui-binding-item-readonly",
+                            code { "{consumer}" }
+                        }
+                    }
+                }
+            }
+            small { "rev {revision}" }
         }
     }
 }
@@ -537,11 +634,28 @@ fn NodeValueGroups(groups: Vec<NodeUiValueGroup>) -> Element {
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn NodeValueRow(row: NodeUiValueRow) -> Element {
+    let class = if row.source == NodeUiValueSource::Bound {
+        "ux-node-ui-row ux-node-ui-row-bound"
+    } else {
+        "ux-node-ui-row"
+    };
     rsx! {
-        div { class: "ux-node-ui-row",
-            SlotSourceButton { source: row.source }
+        div { class,
+            SlotSourceButton {
+                source: row.source,
+                label: row.label,
+                value: row.value,
+                binding_target: row.binding_target,
+                revision: row.revision,
+            }
             span { class: "ux-node-ui-row-label", "{row.label}" }
-            span { class: "ux-node-ui-row-value", "{row.value}" }
+            span { class: "ux-node-ui-row-value",
+                if let Some(target) = row.binding_target {
+                    span { class: "ux-node-ui-row-binding", "{target}" }
+                } else {
+                    "{row.value}"
+                }
+            }
             if let Some(nested) = row.nested {
                 NodeNestedValue { nested }
             }
@@ -551,12 +665,46 @@ fn NodeValueRow(row: NodeUiValueRow) -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SlotSourceButton(source: NodeUiValueSource) -> Element {
+fn SlotSourceButton(
+    source: NodeUiValueSource,
+    label: &'static str,
+    value: &'static str,
+    binding_target: Option<&'static str>,
+    revision: u32,
+) -> Element {
+    let open_class = format!("{} ux-node-ui-popup-trigger-open", source.class_name());
     rsx! {
-        span {
-            class: "{source.class_name()}",
-            title: "{source.title()}",
-            aria_label: "{source.title()}",
+        IconPopoverButton {
+            class: source.class_name().to_string(),
+            open_class,
+            icon: source.icon_name(),
+            icon_size: 13,
+            title: source.title().to_string(),
+            label: format!("{label} source"),
+            popup_class: "ux-node-ui-popup ux-node-ui-slot-popup".to_string(),
+            placement: PopoverPlacement::BottomStart,
+            div { class: "ux-node-ui-popup-kicker", "consumed value" }
+            strong { "{label}" }
+            p {
+                if let Some(target) = binding_target {
+                    "source {target}"
+                } else {
+                    "assigned value {value}"
+                }
+            }
+            div { class: "ux-node-ui-popup-actions",
+                button {
+                    class: if source == NodeUiValueSource::Direct { "is-active" } else { "" },
+                    r#type: "button",
+                    "assigned value"
+                }
+                button {
+                    class: if source == NodeUiValueSource::Bound { "is-active" } else { "" },
+                    r#type: "button",
+                    "source binding"
+                }
+            }
+            small { "rev {revision}" }
         }
     }
 }
@@ -588,15 +736,48 @@ fn NodeChildren(items: Vec<NodeUiChild>) -> Element {
     rsx! {
         section { class: "ux-node-ui-children",
             h4 { "Children" }
-            ol {
+            div { class: "ux-node-ui-child-nodes",
                 for child in items {
-                    li { class: if child.active { "ux-node-ui-child ux-node-ui-child-active" } else { "ux-node-ui-child" },
-                        div {
-                            strong { "{child.label}" }
-                            span { "{child.detail}" }
-                        }
-                        small { "{child.state}" }
-                    }
+                    NodeChildWindow { child }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NodeChildWindow(child: NodeUiChild) -> Element {
+    let mut collapsed = use_signal(|| true);
+    let status = if child.active {
+        NodeUiStatus::running()
+    } else {
+        NodeUiStatus::idle(Some("Waiting for playlist entry"))
+    };
+    let class = format!(
+        "ux-node-ui-window ux-node-ui-child-node {}",
+        status.window_class_name()
+    );
+    rsx! {
+        article { class,
+            NodeHeader {
+                title: child.label,
+                kind: child.kind,
+                source: Some(child.detail),
+                status,
+                initially_open: false,
+                perf: Some(child.state),
+                tabs: Vec::new(),
+                active_index: 0,
+                on_select: move |_| {},
+                collapsed: collapsed(),
+                on_toggle_collapsed: move |_| collapsed.set(!collapsed()),
+            }
+            if !collapsed() {
+                NodeMainTabPanel {
+                    presentation: child.presentation,
+                    values: child.values,
+                    variant: NodeUiVariant::Compact,
                 }
             }
         }
@@ -653,11 +834,15 @@ fn clock_node() -> NodeUiNode {
                 label: "Seconds",
                 value: "3.333",
                 detail: Some("project time"),
+                bindings: produced_bindings(Some("bus#time.seconds"), &[], &["Playlist.time"]),
+                revision: 102,
             }),
             NodeUiPresentationItem::Metric(NodeUiMetric {
                 label: "Delta",
                 value: "0.033",
                 detail: Some("seconds/frame"),
+                bindings: produced_bindings(None, &[], &[]),
+                revision: 102,
             }),
         ],
         values: vec![NodeUiValueGroup {
@@ -686,6 +871,8 @@ fn shader_node() -> NodeUiNode {
             name: "output",
             size: Some("128 x 72"),
             preview_cells: 24,
+            bindings: produced_bindings(None, &[], &["Playlist.entry.visual"]),
+            revision: 42,
         })],
         values: vec![
             NodeUiValueGroup {
@@ -724,6 +911,8 @@ fn fixture_node() -> NodeUiNode {
             name: "output",
             size: Some("1 x 657"),
             preview_cells: 30,
+            bindings: produced_bindings(Some("bus#control.fixture"), &[], &["Output.main"]),
+            revision: 44,
         })],
         values: vec![
             NodeUiValueGroup {
@@ -735,6 +924,8 @@ fn fixture_node() -> NodeUiNode {
                         source: NodeUiValueSource::Direct,
                         label: "Mapping",
                         value: "SvgPath",
+                        binding_target: None,
+                        revision: 42,
                         nested: Some(NodeUiNestedValue {
                             title: "fyeah-mapping.svg",
                             summary: "sample diameter 2.0",
@@ -780,16 +971,22 @@ fn playlist_node() -> NodeUiNode {
                 name: "output",
                 size: Some("128 x 72"),
                 preview_cells: 18,
+                bindings: produced_bindings(Some("bus#visual.out"), &[], &["Fixture.visual"]),
+                revision: 104,
             }),
             NodeUiPresentationItem::Metric(NodeUiMetric {
                 label: "Entry time",
                 value: "3.333",
                 detail: Some("seconds"),
+                bindings: produced_bindings(None, &[], &["idle.Time", "blast.Time"]),
+                revision: 104,
             }),
             NodeUiPresentationItem::Metric(NodeUiMetric {
                 label: "Active",
                 value: "idle",
                 detail: Some("entry 1"),
+                bindings: produced_bindings(None, &[], &[]),
+                revision: 104,
             }),
         ],
         values: vec![
@@ -813,15 +1010,48 @@ fn playlist_node() -> NodeUiNode {
         children: vec![
             NodeUiChild {
                 label: "idle",
+                kind: "Shader",
                 detail: "./idle.toml",
                 state: "active, fade_after 0.12 s",
                 active: true,
+                presentation: vec![NodeUiPresentationItem::Product(NodeUiProduct {
+                    kind: NodeUiProductKind::Visual,
+                    name: "output",
+                    size: Some("128 x 72"),
+                    preview_cells: 12,
+                    bindings: produced_bindings(None, &["../playlist#output"], &[]),
+                    revision: 103,
+                })],
+                values: vec![NodeUiValueGroup {
+                    rows: vec![
+                        value_row(NodeUiValueSource::Bound, "Time", "../playlist#entry_time"),
+                        value_row(NodeUiValueSource::Direct, "Shader", "idle.glsl"),
+                    ],
+                }],
             },
             NodeUiChild {
                 label: "blast",
+                kind: "Shader",
                 detail: "./blast.toml",
                 state: "duration 10 s, trigger bus#trigger",
                 active: false,
+                presentation: vec![NodeUiPresentationItem::Product(NodeUiProduct {
+                    kind: NodeUiProductKind::Visual,
+                    name: "output",
+                    size: Some("128 x 72"),
+                    preview_cells: 12,
+                    bindings: produced_bindings(None, &["../playlist#output"], &[]),
+                    revision: 98,
+                })],
+                values: vec![
+                    NodeUiValueGroup {
+                        rows: vec![
+                            value_row(NodeUiValueSource::Bound, "Time", "../playlist#entry_time"),
+                            value_row(NodeUiValueSource::Bound, "Trigger", "bus#trigger"),
+                            value_row(NodeUiValueSource::Direct, "Shader", "blast.glsl"),
+                        ],
+                    },
+                ],
             },
         ],
     }
@@ -888,8 +1118,44 @@ fn value_row(
         source,
         label,
         value,
+        binding_target: (source == NodeUiValueSource::Bound).then_some(value),
+        revision: match source {
+            NodeUiValueSource::Direct => 42,
+            NodeUiValueSource::Bound => 104,
+            NodeUiValueSource::Child => 0,
+        },
         nested: None,
     }
+}
+
+fn produced_bindings(
+    bus_target: Option<&'static str>,
+    target_bindings: &[&'static str],
+    consumers: &[&'static str],
+) -> NodeUiProducedBindings {
+    NodeUiProducedBindings {
+        bus_target,
+        target_bindings: target_bindings.to_vec(),
+        consumers: consumers.to_vec(),
+    }
+}
+
+fn bus_binding_name(binding_ref: &'static str) -> &'static str {
+    binding_ref.strip_prefix("bus#").unwrap_or(binding_ref)
+}
+
+fn split_presentation_items(
+    items: Vec<NodeUiPresentationItem>,
+) -> (Vec<NodeUiProduct>, Vec<NodeUiMetric>) {
+    let mut products = Vec::new();
+    let mut metrics = Vec::new();
+    for item in items {
+        match item {
+            NodeUiPresentationItem::Product(product) => products.push(product),
+            NodeUiPresentationItem::Metric(metric) => metrics.push(metric),
+        }
+    }
+    (products, metrics)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1011,19 +1277,38 @@ enum NodeUiPresentationItem {
     Product(NodeUiProduct),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct NodeUiMetric {
     label: &'static str,
     value: &'static str,
     detail: Option<&'static str>,
+    bindings: NodeUiProducedBindings,
+    revision: u32,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 struct NodeUiProduct {
     kind: NodeUiProductKind,
     name: &'static str,
     size: Option<&'static str>,
     preview_cells: usize,
+    bindings: NodeUiProducedBindings,
+    revision: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct NodeUiProducedBindings {
+    bus_target: Option<&'static str>,
+    target_bindings: Vec<&'static str>,
+    consumers: Vec<&'static str>,
+}
+
+impl NodeUiProducedBindings {
+    fn has_any(&self) -> bool {
+        self.bus_target.is_some()
+            || !self.target_bindings.is_empty()
+            || !self.consumers.is_empty()
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1039,6 +1324,13 @@ impl NodeUiProductKind {
             Self::Control => "control",
         }
     }
+
+    fn product_label(self) -> &'static str {
+        match self {
+            Self::Visual => "visual product",
+            Self::Control => "control product",
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1051,6 +1343,8 @@ struct NodeUiValueRow {
     source: NodeUiValueSource,
     label: &'static str,
     value: &'static str,
+    binding_target: Option<&'static str>,
+    revision: u32,
     nested: Option<NodeUiNestedValue>,
 }
 
@@ -1075,6 +1369,14 @@ impl NodeUiValueSource {
             Self::Direct => "direct value",
             Self::Bound => "bound value",
             Self::Child => "child node",
+        }
+    }
+
+    fn icon_name(self) -> StudioIconName {
+        match self {
+            Self::Direct => StudioIconName::AssignedValue,
+            Self::Bound => StudioIconName::BoundValue,
+            Self::Child => StudioIconName::ChildValue,
         }
     }
 }
@@ -1107,10 +1409,13 @@ enum NodeUiTabContent {
     },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct NodeUiChild {
     label: &'static str,
+    kind: &'static str,
     detail: &'static str,
     state: &'static str,
     active: bool,
+    presentation: Vec<NodeUiPresentationItem>,
+    values: Vec<NodeUiValueGroup>,
 }

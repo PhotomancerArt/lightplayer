@@ -201,6 +201,7 @@ async function discoverStoryIds() {
   ]);
   return Array.from(html.matchAll(/href="#\/stories\/([^"]+)"/g))
     .map((match) => decodeURIComponent(match[1]))
+    .map((storyId) => storyId.split(/[?#]/, 1)[0])
     .filter((value, index, values) => values.indexOf(value) === index)
     .sort();
 }

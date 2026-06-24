@@ -1,5 +1,8 @@
 use dioxus::prelude::*;
-use dioxus_icons::lucide::{CircleAlert, CircleMinus, FlaskConical, Play, Usb};
+use dioxus_icons::lucide::{
+    ChevronDown, ChevronRight, CircleAlert, CircleDot, CircleMinus, FlaskConical, Link2, Play,
+    SquareArrowRight, Usb,
+};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -11,6 +14,11 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::StatusRunning => rsx! { Play { size } },
         StudioIconName::StatusIdle => rsx! { CircleMinus { size } },
         StudioIconName::StatusError => rsx! { CircleAlert { size } },
+        StudioIconName::AssignedValue => rsx! { CircleDot { size } },
+        StudioIconName::BoundValue => rsx! { Link2 { size } },
+        StudioIconName::ChildValue => rsx! { SquareArrowRight { size } },
+        StudioIconName::Expanded => rsx! { ChevronDown { size } },
+        StudioIconName::Collapsed => rsx! { ChevronRight { size } },
     }
 }
 
@@ -31,4 +39,9 @@ pub enum StudioIconName {
     StatusRunning,
     StatusIdle,
     StatusError,
+    AssignedValue,
+    BoundValue,
+    ChildValue,
+    Expanded,
+    Collapsed,
 }

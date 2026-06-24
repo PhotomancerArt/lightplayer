@@ -124,7 +124,21 @@ fn story_groups(stories: &[crate::stories::story::StoryDescriptor]) -> Vec<Story
             });
         }
     }
+    groups.sort_by(|left, right| {
+        story_group_order(left.label)
+            .cmp(&story_group_order(right.label))
+            .then_with(|| left.label.cmp(right.label))
+    });
     groups
+}
+
+fn story_group_order(label: &str) -> usize {
+    match label {
+        "Base" => 0,
+        "Core" => 1,
+        "Studio" => 2,
+        _ => 99,
+    }
 }
 
 pub fn should_show_story_book() -> bool {
