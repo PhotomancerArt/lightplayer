@@ -3,6 +3,7 @@ mod app;
 mod stories;
 pub mod ui_base;
 pub mod ui_core;
+pub mod ui_exploration;
 pub mod ui_studio;
 
 fn main() {

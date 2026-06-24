@@ -64,7 +64,7 @@ src/ui_base/<component>_story.rs
 src/ui_core/<component>_story.rs
 src/ui_studio/<component>_story.rs
 src/ui_studio/<category>/<component>_story.rs
-src/exploration/<component>_story.rs
+src/ui_exploration/<component>_story.rs
 ```
 
 Examples:
@@ -73,7 +73,7 @@ Examples:
 src/ui_base/popover_story.rs             -> base/popover/<story>
 src/ui_core/action_strip_story.rs         -> core/action-strip/<story>
 src/ui_studio/device/picker_story.rs      -> studio/device/picker/<story>
-src/exploration/node_ui_story.rs          -> exploration/node-ui/<story>
+src/ui_exploration/node_ui_story.rs       -> exploration/node-ui/<story>
 ```
 
 Within a story file, define zero-argument functions returning `Element`:
@@ -114,8 +114,8 @@ Story source-root guidance:
   render generic `Ui*` values.
 - `ui_studio` generates the `studio` story family for app/domain surfaces such
   as device, project, panes, and shell.
-- `exploration` generates the `exploration` story family for spikes and mockups
-  that are intentionally not production
+- `ui_exploration` generates the `exploration` story family for spikes and
+  mockups that are intentionally not production
   component stories yet.
 
 When a change touches Studio web source or story output, follow the repo

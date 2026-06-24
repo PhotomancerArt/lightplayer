@@ -1,8 +1,9 @@
 //! Exploratory node UI stories.
 //!
 //! These stories are grounded in real project shape/slot JSON, but they are
-//! still design spike surfaces. Keeping them under `exploration` makes that
-//! status visible in the generated story route and navigation.
+//! still design spike surfaces. Keeping them under `ui_exploration` makes the
+//! generated `exploration` story family honest without creating a parallel
+//! source tree beside `ui_base`, `ui_core`, and `ui_studio`.
 
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
