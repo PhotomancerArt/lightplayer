@@ -1,11 +1,11 @@
-mod app;
+pub mod app;
+pub mod base;
+pub mod core;
+pub mod exploration;
 #[cfg(feature = "stories")]
 mod stories;
-pub mod ui_base;
-pub mod ui_core;
-pub mod ui_exploration;
-pub mod ui_studio;
+mod web_app;
 
 fn main() {
-    dioxus::launch(app::App);
+    dioxus::launch(web_app::App);
 }

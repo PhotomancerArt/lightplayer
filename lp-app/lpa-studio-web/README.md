@@ -1,23 +1,23 @@
 # lpa-studio-web
 
-`lpa-studio-web` is the static browser shell for the `lpa-studio-ux` slice.
+`lpa-studio-web` is the static browser shell for `lpa-studio-core`.
 
 The web app owns Dioxus presentation. It renders `StudioView` panes and
 contextual `UiAction` controls, then dispatches those actions back into
 `StudioUx`. It also applies live `UxUpdate` values while long async actions are
 running. Browser-worker lifecycle, provider routing, protocol request
 correlation, running-project attach, demo project deployment, and project
-inventory reads belong below the UI in `lpa-studio-ux`, `lpa-link`, and
+inventory reads belong below the UI in `lpa-studio-core`, `lpa-link`, and
 `lpa-client`.
 
 ## Current Surface
 
 The active first screen is the Device pane, rendered from stack sections and
-actions owned by the UX layer. In the browser build it starts with simulator
+actions owned by the core layer. In the browser build it starts with simulator
 and ESP32 connection actions:
 
 ```text
-lpa-studio-web -> lpa-studio-ux -> DeviceUx -> LinkProviderRegistry -> browser-worker -> fw-browser -> lp-server
+lpa-studio-web -> lpa-studio-core -> DeviceUx -> LinkProviderRegistry -> browser-worker -> fw-browser -> lp-server
 ```
 
 `DeviceUx` is the user-facing workflow for selecting a connection, opening the
@@ -82,7 +82,7 @@ Operational setup, DNS records, and GitHub Pages HTTPS steps are documented in
 Browser-worker assets are served from `pkg/` in the generated site. The source
 sidecar files are generated under `target/studio-web-assets/{debug,release}/pkg/`
 and copied into `target/dx/lpa-studio-web/.../public/pkg/` after `dx` builds
-the Studio app. The UX boot path resolves those paths to page-absolute URLs
+the Studio app. The app-core boot path resolves those paths to page-absolute URLs
 before sending them into the embedded blob worker, which lets worker import/init
 failures surface as actionable link errors instead of silent boot timeouts.
 
@@ -148,7 +148,7 @@ semantic tokens for Studio color, surfaces, borders, text, status states, action
 accents, spacing, radii, typography, and shadows. Prefer new component styles to
 consume those tokens instead of adding one-off literals.
 
-Reusable Dioxus primitives live under `src/components/`:
+Reusable Dioxus surfaces live under `src/base`, `src/core`, and `src/app`:
 
 - `ActionButton` and `ActionStrip` render `UiAction` controls.
 - `PaneFrame`, `StatusChip`, and `MetricGrid` provide shared pane structure.
@@ -174,7 +174,7 @@ asset editing belong to later milestones.
 
 ## Stories
 
-The storybook covers the active UX shell, connection action strip, Device stack
+The storybook covers the active Studio shell, connection action strip, Device stack
 states, loaded Project pane state with readonly node workspace,
 browser-serial blank-firmware readiness, provision-ready/provisioning/
 provision-failed, wipe states, and editor-foundation primitives.
@@ -219,7 +219,7 @@ journey fixtures alone.
 
 ## Boundary
 
-- `lpa-studio-ux` owns Studio product state, `StudioView` panes, stack views,
+- `lpa-studio-core` owns Studio product state, `StudioView` panes, stack views,
   snapshots, actions, live `UxUpdate` activity, async dispatch, UX node ids, the
   link provider registry, and the connected server client.
 - `lpa-link` owns provider implementations, provider resources, sessions, and

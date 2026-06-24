@@ -148,8 +148,8 @@ impl StoryPathInfo {
             }),
             _ => Err(format!(
                 "unsupported story path `{}`.\n\
-                 Expected a story file under `src/ui_base`, `src/ui_core`, \
-                 `src/ui_studio`, or `src/ui_exploration`, using either \
+                 Expected a story file under `src/base`, `src/core`, \
+                 `src/app`, or `src/exploration`, using either \
                  `<component>_stories.rs` or `<category>/<component>_stories.rs`.",
                 relative.display()
             )),
@@ -382,14 +382,14 @@ fn is_story_attr(attribute: &Attribute) -> bool {
 
 fn story_family_from_source_root(source_root: &str) -> Result<String, String> {
     match source_root {
-        "ui_base" => Ok("base".to_string()),
-        "ui_core" => Ok("core".to_string()),
-        "ui_studio" => Ok("studio".to_string()),
-        "ui_exploration" => Ok("exploration".to_string()),
+        "base" => Ok("base".to_string()),
+        "core" => Ok("core".to_string()),
+        "app" => Ok("studio".to_string()),
+        "exploration" => Ok("exploration".to_string()),
         _ => Err(format!(
             "unsupported story source root `{source_root}`.\n\
-             Component stories should live beside their components in `ui_base`, \
-             `ui_core`, or `ui_studio`. Design spikes may live in `ui_exploration`."
+             Component stories should live beside their components in `base`, \
+             `core`, or `app`. Design spikes may live in `exploration`."
         )),
     }
 }

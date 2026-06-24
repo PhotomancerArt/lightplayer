@@ -3,34 +3,34 @@
 Studio web UI components are organized by dependency direction and domain
 knowledge.
 
-## `ui_base`
+## `base`
 
 Base building blocks. These are generic controls and display primitives, similar
 to components Studio might get from a design-system package.
 
 Rules:
 
-- Do not depend on `lpa-studio-ux`.
+- Do not depend on `lpa-studio-core`.
 - Do not know about Studio devices, projects, nodes, or panes.
-- Prefer stable, reusable props over rendering ux-layer view models directly.
+- Prefer stable, reusable props over rendering app-core view models directly.
 
 Examples: icon, tabs, simple field rows.
 
-## `ui_core`
+## `core`
 
 Data-driven app controls. These render generic `Ui*` structs from
-`lpa-studio-ux`.
+`lpa-studio-core`.
 
 Rules:
 
-- May depend on `lpa-studio-ux` generic UI types such as `UiAction`,
+- May depend on `lpa-studio-core` generic UI types such as `UiAction`,
   `UiProgress`, `UiActivity`, `UiPaneView`, and `UiStackView`.
-- May compose `ui_base`.
-- Should not own Studio workflows when `ui_studio` can compose them.
+- May compose `base`.
+- Should not own Studio workflows when `app` can compose them.
 
 Examples: app actions, app progress, app activity, app stack, app pane.
 
-## `ui_studio`
+## `app`
 
 Studio-specific surfaces and workflows. These components understand LightPlayer
 Studio concepts and compose page-level UI.
@@ -39,7 +39,7 @@ Rules:
 
 - May depend on domain-specific ux views such as project, device, and node
   views.
-- May compose `ui_core` and `ui_base`.
+- May compose `core` and `base`.
 - Owns layout and workflow composition for Studio surfaces.
 
 Examples: Studio shell, pane frame, project workspace, device log, node UI.
@@ -47,7 +47,7 @@ Examples: Studio shell, pane frame, project workspace, device log, node UI.
 ## Dependency Direction
 
 ```text
-ui_base <- ui_core <- ui_studio
+base <- core <- app
 ```
 
 Imports should follow the arrows. If a component wants to import “up” the stack,
@@ -63,21 +63,21 @@ behind `#[cfg(feature = "stories")]`, and mark story entry functions with
 normal Rust module path.
 
 ```text
-src/ui_base/<component>_stories.rs
-src/ui_core/<component>_stories.rs
-src/ui_core/<category>/<component>_stories.rs
-src/ui_studio/<component>_stories.rs
-src/ui_studio/<category>/<component>_stories.rs
-src/ui_exploration/<component>_stories.rs
+src/base/<component>_stories.rs
+src/core/<component>_stories.rs
+src/core/<category>/<component>_stories.rs
+src/app/<component>_stories.rs
+src/app/<category>/<component>_stories.rs
+src/exploration/<component>_stories.rs
 ```
 
 Examples:
 
 ```text
-src/ui_base/popover_stories.rs             -> base/popover/<story>
-src/ui_core/actions/action_strip_stories.rs -> core/actions/action-strip/<story>
-src/ui_studio/device/device_pane_stories.rs -> studio/device/device-pane/<story>
-src/ui_exploration/node_ui_stories.rs       -> exploration/node-ui/<story>
+src/base/popover_stories.rs             -> base/popover/<story>
+src/core/actions/action_strip_stories.rs -> core/actions/action-strip/<story>
+src/app/device/device_pane_stories.rs  -> studio/device/device-pane/<story>
+src/exploration/node_ui_stories.rs       -> exploration/node-ui/<story>
 ```
 
 Within a story file, define zero-argument functions returning `Element`:
@@ -93,7 +93,7 @@ fn edge_placement() -> Element {
 ```
 
 Story ids are inferred from the path plus function name. The example above in
-`src/ui_base/popover_stories.rs` becomes:
+`src/base/popover_stories.rs` becomes:
 
 ```text
 base/popover/edge-placement
@@ -124,19 +124,19 @@ manual `StoryDescriptor` arrays or per-file `render_story` matches.
 
 Broad fixture modules are allowed during exploration, but story entrypoints
 should live in real component-adjacent files. Shared story fixtures should not
-end in `_stories.rs`; for example, `ui_studio/story_fixtures.rs` can support
-stories under `ui_studio/device/*_stories.rs`,
-`ui_studio/project/*_stories.rs`, and `ui_studio/layout/*_stories.rs`.
+end in `_stories.rs`; for example, `app/story_fixtures.rs` can support
+stories under `app/device/*_stories.rs`,
+`app/project/*_stories.rs`, and `app/layout/*_stories.rs`.
 
 Story source-root guidance:
 
-- `ui_base` generates the `base` story family for generic building blocks such
+- `base` generates the `base` story family for generic building blocks such
   as popovers, tabs, buttons, and icons.
-- `ui_core` generates the `core` story family for data-driven controls that
+- `core` generates the `core` story family for data-driven controls that
   render generic `Ui*` values.
-- `ui_studio` generates the `studio` story family for app/domain surfaces such
+- `app` generates the `studio` story family for app/domain surfaces such
   as device, project, panes, and shell.
-- `ui_exploration` generates the `exploration` story family for spikes and
+- `exploration` generates the `exploration` story family for spikes and
   mockups that are intentionally not production
   component stories yet.
 
