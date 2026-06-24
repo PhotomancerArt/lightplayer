@@ -1,4 +1,4 @@
-use crate::{UiError, UxNodeId};
+use crate::{ControllerId, UiError};
 
 use super::ProjectController;
 
@@ -44,7 +44,7 @@ impl ProjectEditorTarget {
         Self::Bus
     }
 
-    pub fn node_id(&self) -> UxNodeId {
+    pub fn node_id(&self) -> ControllerId {
         let root = project_node_id();
         match self {
             Self::NodeTree => root.child("node_tree"),
@@ -59,7 +59,7 @@ impl ProjectEditorTarget {
         }
     }
 
-    pub fn parse(node_id: &UxNodeId) -> Result<Self, UiError> {
+    pub fn parse(node_id: &ControllerId) -> Result<Self, UiError> {
         let root = project_node_id();
         let Some(tail) = node_id.strip_prefix(&root) else {
             return Err(unsupported_project_target(node_id));
@@ -79,18 +79,18 @@ impl ProjectEditorTarget {
     }
 }
 
-fn project_node_id() -> UxNodeId {
-    UxNodeId::new(ProjectController::NODE_ID)
+fn project_node_id() -> ControllerId {
+    ControllerId::new(ProjectController::NODE_ID)
 }
 
-fn append_dotted_path(mut node_id: UxNodeId, value: &str) -> UxNodeId {
+fn append_dotted_path(mut node_id: ControllerId, value: &str) -> ControllerId {
     for segment in value.split('.') {
         node_id = node_id.child(segment);
     }
     node_id
 }
 
-fn unsupported_project_target(node_id: &UxNodeId) -> UiError {
+fn unsupported_project_target(node_id: &ControllerId) -> UiError {
     UiError::UnsupportedAction(format!("unknown project editor target {node_id}"))
 }
 
@@ -131,37 +131,38 @@ mod tests {
     #[test]
     fn parser_accepts_expected_project_targets() {
         assert_eq!(
-            ProjectEditorTarget::parse(&UxNodeId::new("studio.project.node_tree")).unwrap(),
+            ProjectEditorTarget::parse(&ControllerId::new("studio.project.node_tree")).unwrap(),
             ProjectEditorTarget::NodeTree
         );
         assert_eq!(
-            ProjectEditorTarget::parse(&UxNodeId::new("studio.project.node.4")).unwrap(),
+            ProjectEditorTarget::parse(&ControllerId::new("studio.project.node.4")).unwrap(),
             ProjectEditorTarget::node("4")
         );
         assert_eq!(
-            ProjectEditorTarget::parse(&UxNodeId::new(
+            ProjectEditorTarget::parse(&ControllerId::new(
                 "studio.project.node.4.slot.palette.primary",
             ))
             .unwrap(),
             ProjectEditorTarget::slot("4", "palette.primary")
         );
         assert_eq!(
-            ProjectEditorTarget::parse(&UxNodeId::new("studio.project.asset.shader_main")).unwrap(),
+            ProjectEditorTarget::parse(&ControllerId::new("studio.project.asset.shader_main"))
+                .unwrap(),
             ProjectEditorTarget::asset("shader_main")
         );
         assert_eq!(
-            ProjectEditorTarget::parse(&UxNodeId::new("studio.project.changes")).unwrap(),
+            ProjectEditorTarget::parse(&ControllerId::new("studio.project.changes")).unwrap(),
             ProjectEditorTarget::Changes
         );
         assert_eq!(
-            ProjectEditorTarget::parse(&UxNodeId::new("studio.project.bus")).unwrap(),
+            ProjectEditorTarget::parse(&ControllerId::new("studio.project.bus")).unwrap(),
             ProjectEditorTarget::Bus
         );
     }
 
     #[test]
     fn parser_rejects_unknown_project_targets() {
-        let error = ProjectEditorTarget::parse(&UxNodeId::new("studio.project.unknown"))
+        let error = ProjectEditorTarget::parse(&ControllerId::new("studio.project.unknown"))
             .expect_err("target should be rejected");
 
         assert!(matches!(error, UiError::UnsupportedAction(_)));
@@ -170,7 +171,7 @@ mod tests {
 
     #[test]
     fn parser_rejects_malformed_slot_target() {
-        let error = ProjectEditorTarget::parse(&UxNodeId::new("studio.project.node.4.slot"))
+        let error = ProjectEditorTarget::parse(&ControllerId::new("studio.project.node.4.slot"))
             .expect_err("target should be rejected");
 
         assert!(matches!(error, UiError::UnsupportedAction(_)));

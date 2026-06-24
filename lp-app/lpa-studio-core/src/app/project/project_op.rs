@@ -1,6 +1,6 @@
 use core::any::Any;
 
-use crate::{ActionMeta, ActionPriority, UxOp};
+use crate::{ActionMeta, ActionPriority, ControllerOp};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProjectOp {
@@ -11,7 +11,7 @@ pub enum ProjectOp {
     DisconnectProject,
 }
 
-impl UxOp for ProjectOp {
+impl ControllerOp for ProjectOp {
     fn default_action_meta(&self) -> ActionMeta {
         match self {
             Self::ConnectRunningProject => ActionMeta::new(
@@ -42,11 +42,11 @@ impl UxOp for ProjectOp {
         }
     }
 
-    fn clone_box(&self) -> Box<dyn UxOp> {
+    fn clone_box(&self) -> Box<dyn ControllerOp> {
         Box::new(self.clone())
     }
 
-    fn eq_op(&self, other: &dyn UxOp) -> bool {
+    fn eq_op(&self, other: &dyn ControllerOp) -> bool {
         other.as_any().downcast_ref::<Self>() == Some(self)
     }
 

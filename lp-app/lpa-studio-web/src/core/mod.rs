@@ -5,17 +5,16 @@
 //! workflows directly when an `app` component can compose them instead.
 
 pub mod action;
-pub mod app_activity;
-pub mod app_body;
-pub mod app_progress;
 pub mod metric_grid;
+pub mod progress_bar;
 pub mod status_chip;
+pub mod view;
 
-pub use crate::view::app_pane::AppPane;
-pub use crate::view::app_stack::AppStack;
 pub use action::{ActionButton, ActionStrip};
-pub use app_activity::AppActivity;
-pub use app_body::AppBody;
-pub use app_progress::AppProgress;
 pub use metric_grid::MetricGrid;
+pub use progress_bar::ProgressBar;
 pub use status_chip::StatusChip;
+pub use view::activity_view::ActivityView;
+pub use view::pane_view::PaneView;
+pub use view::stack_view::StepsView;
+pub use view::view_content::ViewContent;

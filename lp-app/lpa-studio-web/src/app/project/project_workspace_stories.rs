@@ -9,7 +9,7 @@ use crate::app::story_fixtures::{
     project_ready_view, project_sync_failed_view, project_syncing_view, project_view, shell_story,
     studio_log,
 };
-use crate::core::AppPane;
+use crate::core::PaneView;
 
 #[story]
 pub(crate) fn project_pane() -> Element {

@@ -10,7 +10,7 @@ use crate::app::story_fixtures::{
     provision_failed_view, provision_ready_view, provisioning_view, reset_complete_view,
     resetting_to_blank_view, shell_story, studio_log,
 };
-use crate::core::AppPane;
+use crate::core::PaneView;
 
 #[story]
 pub(crate) fn device_pane() -> Element {

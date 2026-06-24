@@ -1,6 +1,6 @@
 use core::fmt;
 
-pub type UxResult = Result<crate::UiNotices, UiError>;
+pub type UiResult = Result<crate::UiNotices, UiError>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiError {

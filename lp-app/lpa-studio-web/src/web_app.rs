@@ -3,10 +3,10 @@ use std::rc::Rc;
 
 use crate::app::StudioShell;
 use dioxus::prelude::*;
-use lpa_studio_core::view::steps_view::UiStepState;
+use lpa_studio_core::core::view::steps_view::UiStepState;
 use lpa_studio_core::{
-    NoticeLevel, StudioController, UiAction, UiActivity, UiError, UiLogEntry, UiLogLevel, UiNotice,
-    UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
+    StudioController, UiAction, UiActivityView, UiError, UiLogEntry, UiLogLevel, UiNotice,
+    UiNoticeLevel, UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 const STYLE: &str = include_str!("style.css");
@@ -104,7 +104,7 @@ impl StudioWebModel {
         &mut self,
         target: UxActivityTarget,
         status: UiStatus,
-        activity: UiActivity,
+        activity: UiActivityView,
     ) {
         let Some(pane) = self
             .view
@@ -190,11 +190,11 @@ fn log_from_notice(notice: UiNotice) -> UiLogEntry {
     )
 }
 
-fn log_level_from_notice(level: NoticeLevel) -> UiLogLevel {
+fn log_level_from_notice(level: UiNoticeLevel) -> UiLogLevel {
     match level {
-        NoticeLevel::Info => UiLogLevel::Info,
-        NoticeLevel::Warning => UiLogLevel::Warn,
-        NoticeLevel::Error => UiLogLevel::Error,
+        UiNoticeLevel::Info => UiLogLevel::Info,
+        UiNoticeLevel::Warning => UiLogLevel::Warn,
+        UiNoticeLevel::Error => UiLogLevel::Error,
     }
 }
 

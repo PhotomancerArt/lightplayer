@@ -1,7 +1,7 @@
 use crate::{UiProgress, UiTerminalLine};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UiActivity {
+pub struct UiActivityView {
     pub title: String,
     pub detail: Option<String>,
     pub progress: Option<UiProgress>,
@@ -9,7 +9,7 @@ pub struct UiActivity {
     pub terminal: Vec<UiTerminalLine>,
 }
 
-impl UiActivity {
+impl UiActivityView {
     pub fn new(title: impl Into<String>) -> Self {
         Self {
             title: title.into(),

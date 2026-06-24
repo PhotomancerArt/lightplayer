@@ -13,7 +13,7 @@ use crate::{
     ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
     ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView,
     ProjectNodeView, ProjectRuntimeSummary, ProjectSlotRowView, ProjectSyncPhase,
-    ProjectSyncSummary, UiAction, UiError, UiMetric, UxIssue,
+    ProjectSyncSummary, UiAction, UiError, UiIssue, UiMetric,
 };
 
 use super::{format_lp_value, format_slot_map_key};
@@ -31,7 +31,7 @@ pub struct ProjectSync {
     shape_cursor: Option<SlotShapeId>,
     shape_page_count: u32,
     shapes_complete: bool,
-    issue: Option<UxIssue>,
+    issue: Option<UiIssue>,
 }
 
 impl ProjectSync {
@@ -182,7 +182,7 @@ impl ProjectSync {
 
     pub fn fail(&mut self, issue: impl Into<String>) {
         self.phase = ProjectSyncPhase::Failed;
-        self.issue = Some(UxIssue::new(issue));
+        self.issue = Some(UiIssue::new(issue));
     }
 }
 

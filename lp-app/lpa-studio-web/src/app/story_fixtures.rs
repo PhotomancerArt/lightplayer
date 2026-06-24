@@ -8,16 +8,16 @@ use crate::app::{PaneFrame, StudioShell};
 use crate::base::{FieldRow, TabItem, Tabs};
 use crate::core::MetricGrid;
 use dioxus::prelude::*;
-use lpa_studio_core::core::activity::{UiActivityStep, UiActivityStepState};
-use lpa_studio_core::view::steps_view::{UiStepState, UiStepView};
+use lpa_studio_core::core::view::activity_view::{UiActivityStep, UiActivityStepState};
+use lpa_studio_core::core::view::steps_view::{UiStepState, UiStepView};
 use lpa_studio_core::{
-    DeviceController, DeviceOp, LinkEndpointId, LinkProviderKind, ProgressState, ProjectController,
-    ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
-    ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView,
-    ProjectNodeView, ProjectOp, ProjectRuntimeSummary, ProjectSlotRowView, ProjectState,
-    ProjectSyncPhase, ProjectSyncSummary, UiAction, UiActivity, UiLogEntry, UiLogLevel, UiMetric,
-    UiPaneView, UiProgress, UiStatus, UiStepsView, UiStudioView, UiTerminalLine, UiViewContent,
-    UxIssue, UxNodeId,
+    ControllerId, DeviceController, DeviceOp, LinkEndpointId, LinkProviderKind, ProgressState,
+    ProjectController, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
+    ProjectInventorySummary, ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTreeItem,
+    ProjectNodeTreeView, ProjectNodeView, ProjectOp, ProjectRuntimeSummary, ProjectSlotRowView,
+    ProjectState, ProjectSyncPhase, ProjectSyncSummary, UiAction, UiActivityView, UiIssue,
+    UiLogEntry, UiLogLevel, UiMetric, UiPaneView, UiProgress, UiStatus, UiStepsView, UiStudioView,
+    UiTerminalLine, UiViewContent,
 };
 
 pub(crate) fn shell_story(
@@ -446,7 +446,7 @@ pub(crate) fn provision_failed_view() -> UiStudioView {
                     "Flashing firmware",
                     UiStepState::NeedsAttention,
                     UiViewContent::Issue(
-                        UxIssue::new("firmware flashing failed").with_detail(
+                        UiIssue::new("firmware flashing failed").with_detail(
                             "Check the cable, boot mode, and browser serial permission.",
                         ),
                     ),
@@ -524,7 +524,7 @@ pub(crate) fn picker_issue_view(message: &'static str, log_message: &'static str
                 "select-connection",
                 "Select connection",
                 UiStepState::NeedsAttention,
-                UiViewContent::Issue(UxIssue::new(message)),
+                UiViewContent::Issue(UiIssue::new(message)),
                 start_actions(),
             )],
             Vec::new(),
@@ -724,8 +724,8 @@ pub(crate) fn blank_device_view(
     )
 }
 
-pub(crate) fn blank_firmware_activity() -> UiActivity {
-    UiActivity::new("Connecting ESP32 server")
+pub(crate) fn blank_firmware_activity() -> UiActivityView {
+    UiActivityView::new("Connecting ESP32 server")
         .with_detail("ESP32 boot output looks like blank or erased flash.")
         .with_steps(vec![
             UiActivityStep::new("serial-access", "Serial access")
@@ -741,8 +741,8 @@ pub(crate) fn blank_firmware_activity() -> UiActivity {
         ])
 }
 
-pub(crate) fn provisioning_activity() -> UiActivity {
-    UiActivity::new("Flashing firmware")
+pub(crate) fn provisioning_activity() -> UiActivityView {
+    UiActivityView::new("Flashing firmware")
         .with_detail("Writing packaged LightPlayer ESP32-C6 firmware.")
         .with_progress(UiProgress::determinate("Writing flash", 42))
         .with_steps(vec![
@@ -754,8 +754,8 @@ pub(crate) fn provisioning_activity() -> UiActivity {
         ])
 }
 
-pub(crate) fn reset_activity() -> UiActivity {
-    UiActivity::new("Wiping device")
+pub(crate) fn reset_activity() -> UiActivityView {
+    UiActivityView::new("Wiping device")
         .with_detail("Erasing ESP32 flash through the bootloader.")
         .with_progress(UiProgress::determinate("Erasing flash", 58))
         .with_steps(vec![
@@ -1074,7 +1074,7 @@ pub(crate) fn project_editor_summary(phase: ProjectSyncPhase) -> ProjectSyncSumm
             used_bytes: Some(60 * 1024),
             total_bytes: Some(292 * 1024),
         }),
-        issue: (phase == ProjectSyncPhase::Failed).then(|| UxIssue::new("protocol timeout")),
+        issue: (phase == ProjectSyncPhase::Failed).then(|| UiIssue::new("protocol timeout")),
     }
 }
 
@@ -1238,9 +1238,9 @@ pub(crate) fn device_management_actions() -> Vec<UiAction> {
 }
 
 pub(crate) fn device_action(op: DeviceOp) -> UiAction {
-    UiAction::from_op(UxNodeId::new(DeviceController::NODE_ID), op)
+    UiAction::from_op(ControllerId::new(DeviceController::NODE_ID), op)
 }
 
 pub(crate) fn project_action(op: ProjectOp) -> UiAction {
-    UiAction::from_op(UxNodeId::new(ProjectController::NODE_ID), op)
+    UiAction::from_op(ControllerId::new(ProjectController::NODE_ID), op)
 }

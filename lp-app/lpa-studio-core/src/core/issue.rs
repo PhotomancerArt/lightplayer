@@ -1,10 +1,10 @@
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UxIssue {
+pub struct UiIssue {
     pub message: String,
     pub detail: Option<String>,
 }
 
-impl UxIssue {
+impl UiIssue {
     pub fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),

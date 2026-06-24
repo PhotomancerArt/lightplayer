@@ -1,7 +1,7 @@
 use core::fmt;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct UxNodeId {
+pub struct ControllerId {
     value: String,
     segments: Vec<String>,
 }
@@ -11,7 +11,7 @@ pub struct UxNodePath<'a> {
     segments: &'a [String],
 }
 
-impl UxNodeId {
+impl ControllerId {
     pub fn new(value: impl Into<String>) -> Self {
         let value = value.into();
         let segments = parse_dotted_path(&value);
@@ -43,34 +43,34 @@ impl UxNodeId {
         Self::from_segments(segments)
     }
 
-    pub fn is_descendant_of(&self, parent: &UxNodeId) -> bool {
+    pub fn is_descendant_of(&self, parent: &ControllerId) -> bool {
         self.segments.len() > parent.segments.len() && self.segments.starts_with(&parent.segments)
     }
 
-    pub fn is_self_or_descendant_of(&self, parent: &UxNodeId) -> bool {
+    pub fn is_self_or_descendant_of(&self, parent: &ControllerId) -> bool {
         self.segments.starts_with(&parent.segments)
     }
 
-    pub fn strip_prefix<'a>(&'a self, parent: &UxNodeId) -> Option<UxNodePath<'a>> {
+    pub fn strip_prefix<'a>(&'a self, parent: &ControllerId) -> Option<UxNodePath<'a>> {
         self.is_self_or_descendant_of(parent).then(|| UxNodePath {
             segments: &self.segments[parent.segments.len()..],
         })
     }
 }
 
-impl fmt::Display for UxNodeId {
+impl fmt::Display for ControllerId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl From<String> for UxNodeId {
+impl From<String> for ControllerId {
     fn from(value: String) -> Self {
         Self::new(value)
     }
 }
 
-impl From<&str> for UxNodeId {
+impl From<&str> for ControllerId {
     fn from(value: &str) -> Self {
         Self::new(value)
     }
@@ -131,7 +131,7 @@ mod tests {
 
     #[test]
     fn dotted_static_id_keeps_display_and_segments() {
-        let node_id = UxNodeId::new("studio.project");
+        let node_id = ControllerId::new("studio.project");
 
         assert_eq!(node_id.as_str(), "studio.project");
         assert_eq!(node_id.to_string(), "studio.project");
@@ -143,23 +143,23 @@ mod tests {
 
     #[test]
     fn from_segments_builds_dotted_display() {
-        let node_id = UxNodeId::from_segments(["studio", "project", "node_tree"]);
+        let node_id = ControllerId::from_segments(["studio", "project", "node_tree"]);
 
         assert_eq!(node_id.as_str(), "studio.project.node_tree");
     }
 
     #[test]
     fn child_appends_one_segment() {
-        let node_id = UxNodeId::new("studio.project").child("node_tree");
+        let node_id = ControllerId::new("studio.project").child("node_tree");
 
         assert_eq!(node_id.as_str(), "studio.project.node_tree");
     }
 
     #[test]
     fn descendant_checks_are_strict() {
-        let project = UxNodeId::new("studio.project");
+        let project = ControllerId::new("studio.project");
         let node_tree = project.child("node_tree");
-        let device = UxNodeId::new("studio.device");
+        let device = ControllerId::new("studio.device");
 
         assert!(node_tree.is_descendant_of(&project));
         assert!(node_tree.is_self_or_descendant_of(&project));
@@ -170,7 +170,7 @@ mod tests {
 
     #[test]
     fn strip_prefix_returns_tail_segments() {
-        let project = UxNodeId::new("studio.project");
+        let project = ControllerId::new("studio.project");
         let slot = project
             .child("node")
             .child("4")
@@ -188,6 +188,6 @@ mod tests {
     #[test]
     #[should_panic(expected = "UX node id segments must not contain dots")]
     fn child_rejects_dotted_segment() {
-        let _ = UxNodeId::new("studio.project").child("node.tree");
+        let _ = ControllerId::new("studio.project").child("node.tree");
     }
 }

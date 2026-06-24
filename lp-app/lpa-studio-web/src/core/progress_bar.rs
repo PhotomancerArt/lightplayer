@@ -3,7 +3,7 @@ use lpa_studio_core::UiProgress;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn AppProgress(progress: UiProgress) -> Element {
+pub fn ProgressBar(progress: UiProgress) -> Element {
     let label = progress.label;
     let detail = progress.detail;
     let percent = progress.percent;

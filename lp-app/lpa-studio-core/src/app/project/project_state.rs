@@ -1,4 +1,4 @@
-use crate::{LoadedProjectChoice, ProgressState, ProjectInventorySummary, UxIssue};
+use crate::{LoadedProjectChoice, ProgressState, ProjectInventorySummary, UiIssue};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProjectState {
@@ -18,6 +18,6 @@ pub enum ProjectState {
         inventory: ProjectInventorySummary,
     },
     Failed {
-        issue: UxIssue,
+        issue: UiIssue,
     },
 }

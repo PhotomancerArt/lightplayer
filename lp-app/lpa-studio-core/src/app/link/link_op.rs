@@ -2,7 +2,7 @@ use core::any::Any;
 
 use lpa_link::{LinkEndpointId, LinkProviderKind};
 
-use crate::{ActionConfirmation, ActionMeta, ActionPriority, UxOp};
+use crate::{ActionConfirmation, ActionMeta, ActionPriority, ControllerOp};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LinkOp {
@@ -20,7 +20,7 @@ pub enum LinkOp {
     },
 }
 
-impl UxOp for LinkOp {
+impl ControllerOp for LinkOp {
     fn default_action_meta(&self) -> ActionMeta {
         match self {
             Self::ProvisionFirmware => ActionMeta::new(
@@ -71,11 +71,11 @@ impl UxOp for LinkOp {
         }
     }
 
-    fn clone_box(&self) -> Box<dyn UxOp> {
+    fn clone_box(&self) -> Box<dyn ControllerOp> {
         Box::new(self.clone())
     }
 
-    fn eq_op(&self, other: &dyn UxOp) -> bool {
+    fn eq_op(&self, other: &dyn ControllerOp) -> bool {
         other.as_any().downcast_ref::<Self>() == Some(self)
     }
 

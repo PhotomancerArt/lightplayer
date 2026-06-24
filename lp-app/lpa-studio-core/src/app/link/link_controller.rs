@@ -11,10 +11,10 @@ use lpa_link::{
 use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 
 use crate::{
-    ActionPriority, ConnectedDeviceSummary, EndpointChoice, LinkOp, LinkSnapshot, LinkState,
-    ProgressState, ProviderChoice, UiAction, UiActivity, UiError, UiLogEntry, UiLogLevel, UiMetric,
-    UiPaneView, UiProgress, UiStatus, UiViewContent, UxIssue, UxNode, UxNodeId, UxUpdate,
-    UxUpdateSink,
+    ActionPriority, ConnectedDeviceSummary, Controller, ControllerId, EndpointChoice, LinkOp,
+    LinkSnapshot, LinkState, ProgressState, ProviderChoice, UiAction, UiActivityView, UiError,
+    UiIssue, UiLogEntry, UiLogLevel, UiMetric, UiPaneView, UiProgress, UiStatus, UiViewContent,
+    UxUpdate, UxUpdateSink,
 };
 use lpa_link::{LinkManagementEvent, LinkManagementEventSink};
 
@@ -144,7 +144,7 @@ impl LinkController {
         self.reset_to_provider_selection(None);
     }
 
-    fn reset_to_provider_selection(&mut self, issue: Option<UxIssue>) {
+    fn reset_to_provider_selection(&mut self, issue: Option<UiIssue>) {
         self.active_provider = None;
         self.active_endpoint = None;
         self.active_session = None;
@@ -154,7 +154,7 @@ impl LinkController {
     }
 
     fn recover_to_provider_selection(&mut self, message: impl Into<String>) {
-        self.reset_to_provider_selection(Some(UxIssue::new(message)));
+        self.reset_to_provider_selection(Some(UiIssue::new(message)));
     }
 
     pub async fn disconnect(&mut self) -> Result<(), UiError> {
@@ -390,7 +390,7 @@ impl LinkController {
         };
         let node_id = self.node_id();
         let activity = Rc::new(RefCell::new(
-            UiActivity::new(progress_label.clone())
+            UiActivityView::new(progress_label.clone())
                 .with_progress(UiProgress::indeterminate(progress_label.clone())),
         ));
         updates.emit(UxUpdate::Activity {
@@ -444,7 +444,7 @@ impl LinkController {
 
     pub fn fail(&mut self, message: impl Into<String>) {
         self.state = LinkState::Failed {
-            issue: UxIssue::new(message),
+            issue: UiIssue::new(message),
         };
     }
 
@@ -488,11 +488,11 @@ impl LinkController {
     }
 }
 
-impl UxNode for LinkController {
+impl Controller for LinkController {
     type Op = LinkOp;
 
-    fn node_id(&self) -> UxNodeId {
-        UxNodeId::new(Self::NODE_ID)
+    fn node_id(&self) -> ControllerId {
+        ControllerId::new(Self::NODE_ID)
     }
 }
 
@@ -627,8 +627,8 @@ fn management_result_logs(result: &LinkManagementResult) -> Vec<UiLogEntry> {
 }
 
 fn management_activity_sink(
-    node_id: UxNodeId,
-    activity: Rc<RefCell<UiActivity>>,
+    node_id: ControllerId,
+    activity: Rc<RefCell<UiActivityView>>,
     updates: UxUpdateSink,
 ) -> LinkManagementEventSink {
     LinkManagementEventSink::new(move |event| {
@@ -646,7 +646,7 @@ fn management_activity_sink(
     })
 }
 
-fn apply_management_event(activity: &mut UiActivity, event: LinkManagementEvent) {
+fn apply_management_event(activity: &mut UiActivityView, event: LinkManagementEvent) {
     match event {
         LinkManagementEvent::Log { .. } => {}
         LinkManagementEvent::Progress(progress) => {
@@ -987,7 +987,7 @@ mod tests {
 
     #[test]
     fn management_log_events_are_ux_logs_not_activity_terminal_lines() {
-        let mut activity = UiActivity::new("Flashing firmware");
+        let mut activity = UiActivityView::new("Flashing firmware");
         let event = LinkManagementEvent::log("Writing at 0x10000... (42%)");
 
         let log = management_event_log(&event).expect("log event should produce a UX log");

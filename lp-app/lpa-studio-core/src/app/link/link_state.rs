@@ -1,11 +1,11 @@
-use crate::{ConnectedDeviceSummary, EndpointChoice, ProgressState, ProviderChoice, UxIssue};
+use crate::{ConnectedDeviceSummary, EndpointChoice, ProgressState, ProviderChoice, UiIssue};
 use lpa_link::LinkProviderKind;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LinkState {
     SelectingProvider {
         providers: Vec<ProviderChoice>,
-        issue: Option<UxIssue>,
+        issue: Option<UiIssue>,
     },
     DiscoveringEndpoints {
         provider_id: LinkProviderKind,
@@ -27,6 +27,6 @@ pub enum LinkState {
         device: ConnectedDeviceSummary,
     },
     Failed {
-        issue: UxIssue,
+        issue: UiIssue,
     },
 }

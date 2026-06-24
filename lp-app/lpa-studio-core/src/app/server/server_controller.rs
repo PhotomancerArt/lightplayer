@@ -1,9 +1,9 @@
 use lpa_link::LinkConnection;
 
 use crate::{
-    ProgressState, ServerFailureKind, ServerOp, ServerSnapshot, ServerState, SharedLinkRegistry,
-    StudioServerClient, UiAction, UiError, UiMetric, UiPaneView, UiStatus, UiViewContent, UxIssue,
-    UxNode, UxNodeId, UxUpdateSink,
+    Controller, ControllerId, ProgressState, ServerFailureKind, ServerOp, ServerSnapshot,
+    ServerState, SharedLinkRegistry, StudioServerClient, UiAction, UiError, UiIssue, UiMetric,
+    UiPaneView, UiStatus, UiViewContent, UxUpdateSink,
 };
 
 pub struct ServerController {
@@ -106,7 +106,7 @@ impl ServerController {
     pub fn fail_with_kind(&mut self, message: impl Into<String>, kind: ServerFailureKind) {
         self.client = None;
         self.state = ServerState::Failed {
-            issue: UxIssue::new(message),
+            issue: UiIssue::new(message),
             kind,
         };
     }
@@ -117,11 +117,11 @@ impl ServerController {
     }
 }
 
-impl UxNode for ServerController {
+impl Controller for ServerController {
     type Op = ServerOp;
 
-    fn node_id(&self) -> UxNodeId {
-        UxNodeId::new(Self::NODE_ID)
+    fn node_id(&self) -> ControllerId {
+        ControllerId::new(Self::NODE_ID)
     }
 }
 

@@ -3,18 +3,15 @@
 pub use lpa_link::{LinkEndpointId, LinkEndpointStatus, LinkProviderKind};
 
 pub mod app;
+pub mod controller;
 pub mod core;
-pub mod node;
-pub mod view;
 
-pub use self::core::activity::UiActivityStep;
-pub use self::core::activity::UiActivityStepState;
 pub use self::core::status::UiStatusKind;
 pub use app::device::{DeviceController, DeviceOp, DeviceSnapshot};
 pub use app::link::{
     ConnectedDeviceSummary, ConnectedLink, EndpointChoice, LinkController, LinkManagementOutcome,
     LinkOp, LinkOpenOutcome, LinkSnapshot, LinkState, ProgressState, ProviderChoice,
-    SharedLinkRegistry, UxIssue,
+    SharedLinkRegistry, UiIssue,
 };
 pub use app::project::{
     LoadedProjectChoice, ProjectConnectResult, ProjectController, ProjectEditorOp,
@@ -29,16 +26,19 @@ pub use app::server::{
     ServerSnapshot, ServerState, StudioProjectRead, StudioServerClient,
 };
 pub use app::studio::{
-    NoticeLevel, StudioController, StudioSnapshot, UiError, UiLogEntry, UiLogLevel, UiNotice,
-    UxActivityTarget, UxResult, UxUpdate, UxUpdateSink,
+    StudioController, StudioSnapshot, UiError, UiLogEntry, UiLogLevel, UiNotice, UiNoticeLevel,
+    UiResult, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 pub use core::notice::UiNotices;
+pub use core::view::activity_view::UiActivityStep;
+pub use core::view::activity_view::UiActivityStepState;
+pub use core::view::steps_view::UiStepState;
+pub use core::view::steps_view::UiStepView;
 pub use core::{
-    ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, UiAction, UiActions,
-    UiActivity, UiMetric, UiPaneView, UiProgress, UiStatus, UiStepsView, UiStudioView,
-    UiTerminalLine, UiViewContent, UxContext, UxNode, UxNodeId, UxNodePath, UxOp,
+    ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, Controller,
+    ControllerContext, ControllerId, ControllerOp, UiAction, UiActions, UiActivityView, UiMetric,
+    UiPaneView, UiProgress, UiStatus, UiStepsView, UiStudioView, UiTerminalLine, UiViewContent,
+    UxNodePath,
 };
-pub use view::steps_view::UiStepState;
-pub use view::steps_view::UiStepView;
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "studio-demo";

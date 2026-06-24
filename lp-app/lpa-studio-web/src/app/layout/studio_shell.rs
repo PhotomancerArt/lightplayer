@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::{DeviceController, UiAction, UiPaneView, UiStudioView, UiViewContent};
 
 use crate::app::{ProjectNodeWorkspace, RuntimeLog};
-use crate::core::AppPane;
+use crate::core::PaneView;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -35,7 +35,7 @@ pub fn StudioShell(
                 if let Some(project_editor) = project_editor {
                     div { class: "ux-project-sidebar-column",
                         for (index, pane) in main.into_iter().enumerate() {
-                            AppPane {
+                            PaneView {
                                 key: "{pane.node_id}",
                                 view: pane,
                                 primary: index == 0,
@@ -50,7 +50,7 @@ pub fn StudioShell(
                 } else if !main.is_empty() {
                     div { class: "ux-main-column",
                         for (index, pane) in main.into_iter().enumerate() {
-                            AppPane {
+                            PaneView {
                                 key: "{pane.node_id}",
                                 view: pane,
                                 primary: index == 0,
@@ -63,7 +63,7 @@ pub fn StudioShell(
 
                 div { class: "ux-device-column",
                     if let Some(device) = device {
-                        AppPane {
+                        PaneView {
                             key: "{device.node_id}",
                             view: device,
                             primary: device_is_primary,

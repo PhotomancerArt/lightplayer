@@ -1,9 +1,9 @@
-use crate::view::steps_view::{UiStepState, UiStepView};
+use crate::core::view::steps_view::{UiStepState, UiStepView};
 use crate::{
-    ConnectedDeviceSummary, DeviceOp, DeviceSnapshot, EndpointChoice, LinkController, LinkOp,
-    LinkState, ProjectOp, ProjectState, ProviderChoice, ServerController, ServerFailureKind,
-    ServerState, UiAction, UiLogEntry, UiMetric, UiPaneView, UiStatus, UiStepsView, UiTerminalLine,
-    UiViewContent, UxNode, UxNodeId,
+    ConnectedDeviceSummary, Controller, ControllerId, DeviceOp, DeviceSnapshot, EndpointChoice,
+    LinkController, LinkOp, LinkState, ProjectOp, ProjectState, ProviderChoice, ServerController,
+    ServerFailureKind, ServerState, UiAction, UiLogEntry, UiMetric, UiPaneView, UiStatus,
+    UiStepsView, UiTerminalLine, UiViewContent,
 };
 
 pub struct DeviceController {
@@ -428,11 +428,11 @@ fn not_loaded_project_prompt(actions: &[UiAction]) -> &'static str {
     }
 }
 
-impl UxNode for DeviceController {
+impl Controller for DeviceController {
     type Op = DeviceOp;
 
-    fn node_id(&self) -> UxNodeId {
-        UxNodeId::new(Self::NODE_ID)
+    fn node_id(&self) -> ControllerId {
+        ControllerId::new(Self::NODE_ID)
     }
 }
 
@@ -442,7 +442,7 @@ impl Default for DeviceController {
     }
 }
 
-fn provider_actions(providers: &[ProviderChoice], node_id: UxNodeId) -> Vec<UiAction> {
+fn provider_actions(providers: &[ProviderChoice], node_id: ControllerId) -> Vec<UiAction> {
     providers
         .iter()
         .map(|provider| {
@@ -464,7 +464,7 @@ fn provider_actions(providers: &[ProviderChoice], node_id: UxNodeId) -> Vec<UiAc
 fn endpoint_actions(
     provider_id: lpa_link::LinkProviderKind,
     endpoints: &[EndpointChoice],
-    node_id: UxNodeId,
+    node_id: ControllerId,
 ) -> Vec<UiAction> {
     endpoints
         .iter()
@@ -482,7 +482,7 @@ fn endpoint_actions(
         .collect()
 }
 
-fn map_link_action(action: UiAction, node_id: UxNodeId) -> Option<UiAction> {
+fn map_link_action(action: UiAction, node_id: ControllerId) -> Option<UiAction> {
     let meta = action.meta().clone();
     let op = match action.op_as::<LinkOp>()? {
         LinkOp::RefreshProviders => DeviceOp::RefreshConnections,

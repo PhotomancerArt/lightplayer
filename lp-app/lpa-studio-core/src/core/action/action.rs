@@ -1,9 +1,9 @@
-use crate::{ActionConfirmation, ActionMeta, ActionPriority, UiError, UxNodeId, UxOp};
+use crate::{ActionConfirmation, ActionMeta, ActionPriority, ControllerId, ControllerOp, UiError};
 
 #[derive(Clone, Debug)]
 pub struct UiAction {
-    node_id: UxNodeId,
-    op: Box<dyn UxOp>,
+    node_id: ControllerId,
+    op: Box<dyn ControllerOp>,
     meta: ActionMeta,
 }
 
@@ -16,7 +16,7 @@ impl PartialEq for UiAction {
 impl Eq for UiAction {}
 
 impl UiAction {
-    pub fn from_op(node_id: impl Into<UxNodeId>, op: impl UxOp) -> Self {
+    pub fn from_op(node_id: impl Into<ControllerId>, op: impl ControllerOp) -> Self {
         let meta = op.default_action_meta();
         Self {
             node_id: node_id.into(),
@@ -25,7 +25,7 @@ impl UiAction {
         }
     }
 
-    pub fn node_id(&self) -> &UxNodeId {
+    pub fn node_id(&self) -> &ControllerId {
         &self.node_id
     }
 
@@ -39,14 +39,14 @@ impl UiAction {
 
     pub fn op_as<T>(&self) -> Option<&T>
     where
-        T: UxOp,
+        T: ControllerOp,
     {
         self.op.as_any().downcast_ref::<T>()
     }
 
     pub fn into_op<T>(self) -> Result<T, UiError>
     where
-        T: UxOp,
+        T: ControllerOp,
     {
         let node_id = self.node_id;
         self.op
@@ -61,7 +61,7 @@ impl UiAction {
             })
     }
 
-    pub async fn execute(self, ctx: &mut impl crate::UxContext) -> crate::UxResult {
+    pub async fn execute(self, ctx: &mut impl crate::ControllerContext) -> crate::UiResult {
         ctx.dispatch(self).await
     }
 
@@ -110,11 +110,11 @@ impl UiAction {
 mod tests {
     use core::any::Any;
 
-    use crate::{ActionMeta, ActionPriority, UiAction, UxNodeId, UxOp};
+    use crate::{ActionMeta, ActionPriority, ControllerId, ControllerOp, UiAction};
 
     #[test]
     fn cloned_action_clones_boxed_op() {
-        let action = UiAction::from_op(UxNodeId::new("test.node"), TestOp::Run);
+        let action = UiAction::from_op(ControllerId::new("test.node"), TestOp::Run);
 
         let cloned = action.clone();
 
@@ -123,7 +123,7 @@ mod tests {
 
     #[test]
     fn into_op_downcasts_matching_type() {
-        let action = UiAction::from_op(UxNodeId::new("test.node"), TestOp::Run);
+        let action = UiAction::from_op(ControllerId::new("test.node"), TestOp::Run);
 
         let op = action.into_op::<TestOp>().unwrap();
 
@@ -132,14 +132,14 @@ mod tests {
 
     #[test]
     fn into_op_rejects_wrong_type() {
-        let action = UiAction::from_op(UxNodeId::new("test.node"), TestOp::Run);
+        let action = UiAction::from_op(ControllerId::new("test.node"), TestOp::Run);
 
         assert!(action.into_op::<OtherOp>().is_err());
     }
 
     #[test]
     fn metadata_overrides_change_only_metadata() {
-        let action = UiAction::from_op(UxNodeId::new("test.node"), TestOp::Run)
+        let action = UiAction::from_op(ControllerId::new("test.node"), TestOp::Run)
             .with_label("Go")
             .with_summary("Run it")
             .with_short_label("Go")
@@ -157,16 +157,16 @@ mod tests {
         Run,
     }
 
-    impl UxOp for TestOp {
+    impl ControllerOp for TestOp {
         fn default_action_meta(&self) -> ActionMeta {
             ActionMeta::new("Run", "Run the test operation.", ActionPriority::Primary)
         }
 
-        fn clone_box(&self) -> Box<dyn UxOp> {
+        fn clone_box(&self) -> Box<dyn ControllerOp> {
             Box::new(self.clone())
         }
 
-        fn eq_op(&self, other: &dyn UxOp) -> bool {
+        fn eq_op(&self, other: &dyn ControllerOp) -> bool {
             other.as_any().downcast_ref::<Self>() == Some(self)
         }
 
@@ -182,16 +182,16 @@ mod tests {
     #[derive(Clone, Debug, Eq, PartialEq)]
     struct OtherOp;
 
-    impl UxOp for OtherOp {
+    impl ControllerOp for OtherOp {
         fn default_action_meta(&self) -> ActionMeta {
             ActionMeta::new("Other", "Run the other operation.", ActionPriority::Primary)
         }
 
-        fn clone_box(&self) -> Box<dyn UxOp> {
+        fn clone_box(&self) -> Box<dyn ControllerOp> {
             Box::new(self.clone())
         }
 
-        fn eq_op(&self, other: &dyn UxOp) -> bool {
+        fn eq_op(&self, other: &dyn ControllerOp) -> bool {
             other.as_any().downcast_ref::<Self>() == Some(self)
         }
 

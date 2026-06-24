@@ -1,8 +1,8 @@
-use crate::{UiAction, UiStatus, UiViewContent, UxNodeId};
+use crate::{ControllerId, UiAction, UiStatus, UiViewContent};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiPaneView {
-    pub node_id: UxNodeId,
+    pub node_id: ControllerId,
     pub title: String,
     pub status: UiStatus,
     pub body: UiViewContent,
@@ -11,7 +11,7 @@ pub struct UiPaneView {
 
 impl UiPaneView {
     pub fn new(
-        node_id: impl Into<UxNodeId>,
+        node_id: impl Into<ControllerId>,
         title: impl Into<String>,
         status: UiStatus,
         body: UiViewContent,

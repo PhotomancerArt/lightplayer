@@ -1,9 +1,11 @@
-use crate::{UiAction, UxNodeId, UxOp};
+use crate::{ControllerId, ControllerOp, UiAction};
 
-pub trait UxNode {
-    type Op: UxOp;
+//
+//
+pub trait Controller {
+    type Op: ControllerOp;
 
-    fn node_id(&self) -> UxNodeId;
+    fn node_id(&self) -> ControllerId;
 
     fn action(&self, op: Self::Op) -> UiAction {
         UiAction::from_op(self.node_id(), op)

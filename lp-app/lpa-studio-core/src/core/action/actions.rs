@@ -1,4 +1,4 @@
-use crate::{UiAction, UxNodeId};
+use crate::{ControllerId, UiAction};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UiActions {
@@ -30,7 +30,7 @@ impl UiActions {
         self.actions.extend(actions);
     }
 
-    pub fn for_node(&self, node_id: &UxNodeId) -> Vec<UiAction> {
+    pub fn for_node(&self, node_id: &ControllerId) -> Vec<UiAction> {
         self.actions
             .iter()
             .filter(|action| action.node_id() == node_id)

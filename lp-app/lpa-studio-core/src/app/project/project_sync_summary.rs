@@ -1,4 +1,4 @@
-use crate::{ProjectRuntimeSummary, ProjectSyncPhase, UxIssue};
+use crate::{ProjectRuntimeSummary, ProjectSyncPhase, UiIssue};
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ProjectSyncSummary {
@@ -11,5 +11,5 @@ pub struct ProjectSyncSummary {
     pub shape_count: usize,
     pub shapes_complete: bool,
     pub runtime: Option<ProjectRuntimeSummary>,
-    pub issue: Option<UxIssue>,
+    pub issue: Option<UiIssue>,
 }

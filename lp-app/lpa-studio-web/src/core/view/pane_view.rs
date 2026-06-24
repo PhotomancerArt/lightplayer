@@ -2,11 +2,11 @@ use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiPaneView};
 
 use crate::app::PaneFrame;
-use crate::core::{ActionStrip, AppBody};
+use crate::core::{ActionStrip, ViewContent};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn AppPane(
+pub fn PaneView(
     view: UiPaneView,
     primary: bool,
     running: bool,
@@ -24,7 +24,7 @@ pub fn AppPane(
             title,
             primary,
             status: Some(status),
-            AppBody {
+            ViewContent {
                 body,
                 running,
                 on_action,

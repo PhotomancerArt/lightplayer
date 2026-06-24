@@ -7,7 +7,7 @@ pub mod link_state;
 pub mod progress_state;
 pub mod provider_choice;
 
-pub use crate::core::issue::UxIssue;
+pub use crate::core::issue::UiIssue;
 pub use connected_device_summary::ConnectedDeviceSummary;
 pub use endpoint_choice::EndpointChoice;
 pub use link_controller::{

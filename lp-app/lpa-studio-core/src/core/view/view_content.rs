@@ -1,12 +1,12 @@
-use crate::{ProgressState, ProjectEditorView, UiActivity, UiMetric, UiStepsView, UxIssue};
+use crate::{ProgressState, ProjectEditorView, UiActivityView, UiIssue, UiMetric, UiStepsView};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UiViewContent {
     Empty,
     Text(String),
     Progress(ProgressState),
-    Activity(UiActivity),
-    Issue(UxIssue),
+    Activity(UiActivityView),
+    Issue(UiIssue),
     Metrics(Vec<UiMetric>),
     Stack(Box<UiStepsView>),
     ProjectEditor(Box<ProjectEditorView>),

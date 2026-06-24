@@ -1,4 +1,4 @@
-use crate::{ProgressState, UxIssue};
+use crate::{ProgressState, UiIssue};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ServerState {
@@ -10,7 +10,7 @@ pub enum ServerState {
         protocol: String,
     },
     Failed {
-        issue: UxIssue,
+        issue: UiIssue,
         kind: ServerFailureKind,
     },
 }

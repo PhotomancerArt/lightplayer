@@ -1,4 +1,4 @@
-use crate::{UiActivity, UiLogEntry, UiStatus, UiStudioView, UxNodeId};
+use crate::{ControllerId, UiActivityView, UiLogEntry, UiStatus, UiStudioView};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UxUpdate {
@@ -6,7 +6,7 @@ pub enum UxUpdate {
     Activity {
         target: UxActivityTarget,
         status: UiStatus,
-        activity: UiActivity,
+        activity: UiActivityView,
     },
     Log(UiLogEntry),
 }
@@ -14,29 +14,32 @@ pub enum UxUpdate {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UxActivityTarget {
     Pane {
-        node_id: UxNodeId,
+        node_id: ControllerId,
     },
     StackSection {
-        pane_node_id: UxNodeId,
+        pane_node_id: ControllerId,
         section_id: String,
     },
 }
 
 impl UxActivityTarget {
-    pub fn pane(node_id: impl Into<UxNodeId>) -> Self {
+    pub fn pane(node_id: impl Into<ControllerId>) -> Self {
         Self::Pane {
             node_id: node_id.into(),
         }
     }
 
-    pub fn stack_section(pane_node_id: impl Into<UxNodeId>, section_id: impl Into<String>) -> Self {
+    pub fn stack_section(
+        pane_node_id: impl Into<ControllerId>,
+        section_id: impl Into<String>,
+    ) -> Self {
         Self::StackSection {
             pane_node_id: pane_node_id.into(),
             section_id: section_id.into(),
         }
     }
 
-    pub fn pane_node_id(&self) -> &UxNodeId {
+    pub fn pane_node_id(&self) -> &ControllerId {
         match self {
             Self::Pane { node_id } => node_id,
             Self::StackSection { pane_node_id, .. } => pane_node_id,

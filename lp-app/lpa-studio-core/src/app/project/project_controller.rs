@@ -1,9 +1,10 @@
 use crate::core::notice::UiNotices;
 use crate::{
-    LoadedProjectChoice, ProgressState, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget,
-    ProjectInventorySummary, ProjectOp, ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncRun,
-    ProjectSyncSummary, StudioServerClient, UiAction, UiError, UiLogEntry, UiLogLevel, UiMetric,
-    UiPaneView, UiStatus, UiViewContent, UxIssue, UxNode, UxNodeId, UxResult, UxUpdateSink,
+    Controller, ControllerId, LoadedProjectChoice, ProgressState, ProjectConnectResult,
+    ProjectEditorOp, ProjectEditorTarget, ProjectInventorySummary, ProjectOp, ProjectSnapshot,
+    ProjectState, ProjectSync, ProjectSyncRun, ProjectSyncSummary, StudioServerClient, UiAction,
+    UiError, UiIssue, UiLogEntry, UiLogLevel, UiMetric, UiPaneView, UiResult, UiStatus,
+    UiViewContent, UxUpdateSink,
 };
 
 pub struct ProjectController {
@@ -133,7 +134,7 @@ impl ProjectController {
     pub fn fail(&mut self, message: impl Into<String>) {
         self.running_project_status = RunningProjectStatus::Unknown;
         self.state = ProjectState::Failed {
-            issue: UxIssue::new(message),
+            issue: UiIssue::new(message),
         };
         self.sync = None;
     }
@@ -235,7 +236,7 @@ impl ProjectController {
         &mut self,
         action: UiAction,
         _updates: UxUpdateSink,
-    ) -> UxResult {
+    ) -> UiResult {
         let target = ProjectEditorTarget::parse(action.node_id())?;
         let op = action.into_op::<ProjectEditorOp>()?;
         self.execute_editor_op(target, op).await
@@ -269,7 +270,7 @@ impl ProjectController {
         &mut self,
         target: ProjectEditorTarget,
         op: ProjectEditorOp,
-    ) -> UxResult {
+    ) -> UiResult {
         match op {
             ProjectEditorOp::Focus => {
                 self.active_editor_target = Some(target);
@@ -368,11 +369,11 @@ impl ProjectController {
     }
 }
 
-impl UxNode for ProjectController {
+impl Controller for ProjectController {
     type Op = ProjectOp;
 
-    fn node_id(&self) -> UxNodeId {
-        UxNodeId::new(Self::NODE_ID)
+    fn node_id(&self) -> ControllerId {
+        ControllerId::new(Self::NODE_ID)
     }
 }
 

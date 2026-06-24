@@ -1,5 +1,5 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum NoticeLevel {
+pub enum UiNoticeLevel {
     Info,
     Warning,
     Error,
@@ -7,21 +7,21 @@ pub enum NoticeLevel {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiNotice {
-    pub level: NoticeLevel,
+    pub level: UiNoticeLevel,
     pub message: String,
 }
 
 impl UiNotice {
     pub fn info(message: impl Into<String>) -> Self {
         Self {
-            level: NoticeLevel::Info,
+            level: UiNoticeLevel::Info,
             message: message.into(),
         }
     }
 
     pub fn warning(message: impl Into<String>) -> Self {
         Self {
-            level: NoticeLevel::Warning,
+            level: UiNoticeLevel::Warning,
             message: message.into(),
         }
     }

@@ -15,10 +15,10 @@ use wasm_bindgen_futures::JsFuture;
 use super::browser_serial_readiness::{
     BrowserSerialReadinessClassifier, BrowserSerialReadinessFailure,
 };
-use crate::core::activity::{UiActivityStep, UiActivityStepState};
+use crate::core::view::activity_view::{UiActivityStep, UiActivityStepState};
 use crate::{
-    ServerController, SharedLinkRegistry, UiActivity, UiLogEntry, UiLogLevel, UiStatus,
-    UxActivityTarget, UxNodeId, UxUpdate, UxUpdateSink,
+    ControllerId, ServerController, SharedLinkRegistry, UiActivityView, UiLogEntry, UiLogLevel,
+    UiStatus, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 const RESPONSE_POLL_LIMIT: usize = 500;
@@ -329,7 +329,7 @@ struct BrowserSerialClientState {
     session_id: LinkSessionId,
     logs: Rc<RefCell<Vec<UiLogEntry>>>,
     updates: UxUpdateSink,
-    readiness_activity: UiActivity,
+    readiness_activity: UiActivityView,
     readiness_classifier: BrowserSerialReadinessClassifier,
     boot_output_seen: bool,
     last_request: Option<BrowserSerialRequest>,
@@ -409,8 +409,8 @@ impl BrowserSerialClientState {
     }
 }
 
-fn initial_readiness_activity() -> UiActivity {
-    UiActivity::new("Connecting ESP32 server")
+fn initial_readiness_activity() -> UiActivityView {
+    UiActivityView::new("Connecting ESP32 server")
         .with_detail("Waiting for LightPlayer boot output and protocol frames.")
         .with_steps(vec![
             UiActivityStep::new(STEP_SERIAL_ACCESS, "Serial access")
@@ -426,8 +426,8 @@ fn initial_readiness_activity() -> UiActivity {
         ])
 }
 
-fn server_node_id() -> UxNodeId {
-    UxNodeId::new(ServerController::NODE_ID)
+fn server_node_id() -> ControllerId {
+    ControllerId::new(ServerController::NODE_ID)
 }
 
 #[derive(Clone, Copy)]

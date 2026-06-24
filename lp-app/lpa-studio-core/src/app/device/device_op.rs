@@ -2,7 +2,7 @@ use core::any::Any;
 
 use lpa_link::{LinkEndpointId, LinkProviderKind};
 
-use crate::{ActionConfirmation, ActionMeta, ActionPriority, UxOp};
+use crate::{ActionConfirmation, ActionMeta, ActionPriority, ControllerOp};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DeviceOp {
@@ -21,7 +21,7 @@ pub enum DeviceOp {
     RefreshConnections,
 }
 
-impl UxOp for DeviceOp {
+impl ControllerOp for DeviceOp {
     fn default_action_meta(&self) -> ActionMeta {
         match self {
             Self::OpenProvider { .. } => ActionMeta::new(
@@ -77,11 +77,11 @@ impl UxOp for DeviceOp {
         }
     }
 
-    fn clone_box(&self) -> Box<dyn UxOp> {
+    fn clone_box(&self) -> Box<dyn ControllerOp> {
         Box::new(self.clone())
     }
 
-    fn eq_op(&self, other: &dyn UxOp) -> bool {
+    fn eq_op(&self, other: &dyn ControllerOp) -> bool {
         other.as_any().downcast_ref::<Self>() == Some(self)
     }
 

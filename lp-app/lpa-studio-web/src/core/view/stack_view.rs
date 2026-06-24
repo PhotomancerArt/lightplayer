@@ -1,11 +1,11 @@
-use crate::core::{ActionStrip, AppBody};
+use crate::core::{ActionStrip, ViewContent};
 use dioxus::prelude::*;
-use lpa_studio_core::view::steps_view::UiStepState;
+use lpa_studio_core::core::view::steps_view::UiStepState;
 use lpa_studio_core::{UiAction, UiStepsView};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn AppStack(stack: UiStepsView, running: bool, on_action: EventHandler<UiAction>) -> Element {
+pub fn StepsView(stack: UiStepsView, running: bool, on_action: EventHandler<UiAction>) -> Element {
     let sections = stack
         .sections
         .into_iter()
@@ -22,7 +22,7 @@ pub fn AppStack(stack: UiStepsView, running: bool, on_action: EventHandler<UiAct
                         div { class: "ux-stack-section-content",
                             h3 { "{section.title}" }
                             div { class: "ux-stack-section-body",
-                                AppBody {
+                                ViewContent {
                                     body: section.body,
                                     running,
                                     on_action,

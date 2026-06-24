@@ -2,11 +2,15 @@ use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiViewContent};
 
 use crate::app::ProjectSidebar;
-use crate::core::{AppActivity, AppStack, MetricGrid};
+use crate::core::{ActivityView, MetricGrid, StepsView};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn AppBody(body: UiViewContent, running: bool, on_action: EventHandler<UiAction>) -> Element {
+pub fn ViewContent(
+    body: UiViewContent,
+    running: bool,
+    on_action: EventHandler<UiAction>,
+) -> Element {
     match body {
         UiViewContent::Empty => rsx! {},
         UiViewContent::Text(text) => rsx! {
@@ -23,7 +27,7 @@ pub fn AppBody(body: UiViewContent, running: bool, on_action: EventHandler<UiAct
             }
         }
         UiViewContent::Activity(activity) => rsx! {
-            AppActivity { activity }
+            ActivityView { activity }
         },
         UiViewContent::Issue(issue) => {
             let message = issue.message;
@@ -39,7 +43,7 @@ pub fn AppBody(body: UiViewContent, running: bool, on_action: EventHandler<UiAct
             MetricGrid { metrics }
         },
         UiViewContent::Stack(stack) => rsx! {
-            AppStack {
+            StepsView {
                 stack: *stack,
                 running,
                 on_action,

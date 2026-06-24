@@ -1,11 +1,11 @@
-use crate::core::AppProgress;
+use crate::core::ProgressBar;
 use dioxus::prelude::*;
-use lpa_studio_core::core::activity::UiActivityStepState;
-use lpa_studio_core::UiActivity;
+use lpa_studio_core::core::view::activity_view::UiActivityStepState;
+use lpa_studio_core::UiActivityView;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn AppActivity(activity: UiActivity) -> Element {
+pub fn ActivityView(activity: UiActivityView) -> Element {
     let title = activity.title;
     let detail = activity.detail;
     let progress = activity.progress;
@@ -18,7 +18,7 @@ pub fn AppActivity(activity: UiActivity) -> Element {
                 p { class: "ux-panel-copy ux-panel-detail", "{detail}" }
             }
             if let Some(progress) = progress {
-                AppProgress { progress }
+                ProgressBar { progress }
             }
             if !steps.is_empty() {
                 ol { class: "ux-activity-steps",
