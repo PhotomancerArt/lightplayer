@@ -1,4 +1,24 @@
-# Studio UI Language
+# Lightplayer Language
+
+## Product Names
+
+Use **Lightplayer** as the umbrella product and brand name. Treat **Light
+Player** as descriptive prose only when the sentence is intentionally about
+playing light, not the product name.
+
+Use surface names when the distinction matters:
+
+- **Lightplayer Studio** for the frontend design and control app.
+- **Lightplayer Firmware** for the ESP32 device firmware.
+- **Lightplayer Engine** for the runtime, compiler, and node graph layer.
+- **Lightplayer Compiler** for the GLSL to LPIR to machine-code pipeline.
+- **Lightplayer Native** only when the custom RV32 backend needs a proper name.
+
+In general prose, prefer **Lightplayer** when the surface does not matter. Do
+not make **Studio** stand alone as the public product name; internally, `studio`
+is fine as a short implementation name.
+
+## Studio UI Language
 
 Studio UI should present the user's working model first and the system model
 second.
