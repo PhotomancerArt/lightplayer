@@ -1,8 +1,8 @@
 //! Base popover stories.
 //!
 //! This file is intentionally small because it is the canonical example of the
-//! path-inferred story contract: `base/popover_story.rs#edge_placement` becomes
-//! `base/popover/edge-placement`.
+//! path-inferred story contract: `ui_base/popover_story.rs#edge_placement`
+//! becomes `base/popover/edge-placement`.
 
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;

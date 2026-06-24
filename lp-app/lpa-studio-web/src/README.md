@@ -55,21 +55,25 @@ it probably belongs in the higher family.
 
 ## Stories
 
-Component stories are colocated with the family or exploration they describe,
-but they are not wired by hand. Add `*_story.rs` files under the story family
-tree and mark story entry functions with `#[story]`.
+Component stories are colocated with the component family they describe, but
+they are not wired by hand. Add `*_story.rs` files beside the relevant
+component family and mark story entry functions with `#[story]`.
 
 ```text
-src/<family>/<component>_story.rs
-src/<family>/<category>/<component>_story.rs
+src/ui_base/<component>_story.rs
+src/ui_core/<component>_story.rs
+src/ui_studio/<component>_story.rs
+src/ui_studio/<category>/<component>_story.rs
+src/exploration/<component>_story.rs
 ```
 
 Examples:
 
 ```text
-src/base/popover_story.rs                -> base/popover/<story>
-src/studio/device/picker_story.rs        -> studio/device/picker/<story>
-src/exploration/node_ui_story.rs         -> exploration/node-ui/<story>
+src/ui_base/popover_story.rs             -> base/popover/<story>
+src/ui_core/action_strip_story.rs         -> core/action-strip/<story>
+src/ui_studio/device/picker_story.rs      -> studio/device/picker/<story>
+src/exploration/node_ui_story.rs          -> exploration/node-ui/<story>
 ```
 
 Within a story file, define zero-argument functions returning `Element`:
@@ -88,7 +92,7 @@ fn edge_placement() -> Element {
 ```
 
 Story ids are inferred from the path plus function name. The example above in
-`src/base/popover_story.rs` becomes:
+`src/ui_base/popover_story.rs` becomes:
 
 ```text
 base/popover/edge-placement
@@ -102,12 +106,16 @@ story registry. If a story is malformed, the build should fail with a concrete
 diagnostic telling you which file, function, or route is wrong. Do not recreate
 manual `StoryDescriptor` arrays or per-file `render_story` matches.
 
-Story family guidance:
+Story source-root guidance:
 
-- `base`: generic building blocks such as popovers, tabs, buttons, and icons.
-- `core`: data-driven controls that render generic `Ui*` values.
-- `studio`: app/domain surfaces such as device, project, panes, and shell.
-- `exploration`: spikes and mockups that are intentionally not production
+- `ui_base` generates the `base` story family for generic building blocks such
+  as popovers, tabs, buttons, and icons.
+- `ui_core` generates the `core` story family for data-driven controls that
+  render generic `Ui*` values.
+- `ui_studio` generates the `studio` story family for app/domain surfaces such
+  as device, project, panes, and shell.
+- `exploration` generates the `exploration` story family for spikes and mockups
+  that are intentionally not production
   component stories yet.
 
 When a change touches Studio web source or story output, follow the repo

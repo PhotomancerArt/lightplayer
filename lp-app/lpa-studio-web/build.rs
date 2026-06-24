@@ -135,20 +135,21 @@ impl StoryPathInfo {
             .collect::<Vec<_>>();
 
         match segments.as_slice() {
-            [family, file_name] => Ok(Self {
-                family: route_segment_from_ident(family),
+            [source_root, file_name] => Ok(Self {
+                family: story_family_from_source_root(source_root)?,
                 category: None,
                 component: component_from_story_file(file_name)?,
             }),
-            [family, category, file_name] => Ok(Self {
-                family: route_segment_from_ident(family),
+            [source_root, category, file_name] => Ok(Self {
+                family: story_family_from_source_root(source_root)?,
                 category: Some(route_segment_from_ident(category)),
                 component: component_from_story_file(file_name)?,
             }),
             _ => Err(format!(
                 "unsupported story path `{}`.\n\
-                 Expected `src/<family>/<component>_story.rs` or \
-                 `src/<family>/<category>/<component>_story.rs`.",
+                 Expected a story file under `src/ui_base`, `src/ui_core`, \
+                 `src/ui_studio`, or `src/exploration`, using either \
+                 `<component>_story.rs` or `<category>/<component>_story.rs`.",
                 relative.display()
             )),
         }
@@ -351,6 +352,20 @@ fn is_story_attr(attribute: &Attribute) -> bool {
         .segments
         .last()
         .is_some_and(|segment| segment.ident == "story")
+}
+
+fn story_family_from_source_root(source_root: &str) -> Result<String, String> {
+    match source_root {
+        "ui_base" => Ok("base".to_string()),
+        "ui_core" => Ok("core".to_string()),
+        "ui_studio" => Ok("studio".to_string()),
+        "exploration" => Ok("exploration".to_string()),
+        _ => Err(format!(
+            "unsupported story source root `{source_root}`.\n\
+             Component stories should live beside their components in `ui_base`, \
+             `ui_core`, or `ui_studio`. Design spikes may live in `exploration`."
+        )),
+    }
 }
 
 fn component_from_story_file(file_name: &str) -> Result<String, String> {
