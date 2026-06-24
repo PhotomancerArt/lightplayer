@@ -2,22 +2,23 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use async_trait::async_trait;
-use lpa_client::ClientIo;
 use lpa_client::project_deploy::request_label;
+use lpa_client::ClientIo;
 use lpa_link::provider::session::LinkSessionId;
 use lpa_link::providers::browser_serial_esp32::BrowserSerialEsp32Provider;
 use lpa_link::providers::{LinkProviderInstance, LinkProviderRegistry};
 use lpa_link::{LinkProvider, LinkProviderKind};
-use lpc_wire::{ClientMessage, TransportError, WireServerMessage, json};
-use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
+use lpc_wire::{json, ClientMessage, TransportError, WireServerMessage};
+use wasm_bindgen::{prelude::wasm_bindgen, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
 use super::browser_serial_readiness::{
     BrowserSerialReadinessClassifier, BrowserSerialReadinessFailure,
 };
+use crate::core::activity::{UiActivityStep, UiActivityStepState};
 use crate::{
-    ServerUx, SharedLinkRegistry, UiActivity, UiActivityStep, UiActivityStepState, UiStatus,
-    UxActivityTarget, UxLogEntry, UxLogLevel, UxNodeId, UxUpdate, UxUpdateSink,
+    ServerController, SharedLinkRegistry, UiActivity, UiLogEntry, UiLogLevel, UiStatus,
+    UxActivityTarget, UxNodeId, UxUpdate, UxUpdateSink,
 };
 
 const RESPONSE_POLL_LIMIT: usize = 500;
@@ -38,7 +39,7 @@ impl BrowserSerialClientIo {
     pub fn new(
         registry: SharedLinkRegistry,
         session_id: LinkSessionId,
-        logs: Rc<RefCell<Vec<UxLogEntry>>>,
+        logs: Rc<RefCell<Vec<UiLogEntry>>>,
         updates: UxUpdateSink,
     ) -> Self {
         let readiness_activity = initial_readiness_activity();
@@ -112,7 +113,7 @@ impl BrowserSerialClientIo {
                 state.protocol_ready = true;
                 state.mark_protocol_ready();
                 state.push_log(
-                    UxLogLevel::Info,
+                    UiLogLevel::Info,
                     "browser-serial",
                     "server protocol stream is ready",
                 );
@@ -155,7 +156,7 @@ impl BrowserSerialClientIo {
             ));
             self.state
                 .borrow()
-                .push_log(UxLogLevel::Warn, "browser-serial", message);
+                .push_log(UiLogLevel::Warn, "browser-serial", message);
             self.state
                 .borrow_mut()
                 .mark_protocol_failed(&no_firmware_message, true);
@@ -165,7 +166,7 @@ impl BrowserSerialClientIo {
         console_error(&format!("[browser-serial] {message}"));
         self.state
             .borrow()
-            .push_log(UxLogLevel::Error, "browser-serial", message.clone());
+            .push_log(UiLogLevel::Error, "browser-serial", message.clone());
         self.state
             .borrow_mut()
             .mark_protocol_failed(&message, false);
@@ -215,7 +216,7 @@ impl BrowserSerialClientIo {
         console_warn(&format!("[browser-serial] {message}"));
         let mut state = self.state.borrow_mut();
         state.last_protocol_issue = Some(issue);
-        state.push_log(UxLogLevel::Warn, "browser-serial", message);
+        state.push_log(UiLogLevel::Warn, "browser-serial", message);
     }
 
     fn wait_context(&self) -> String {
@@ -286,7 +287,7 @@ impl ClientIo for BrowserSerialClientIo {
                 console_error(&format!("[browser-serial] {message}"));
                 self.state
                     .borrow()
-                    .push_log(UxLogLevel::Error, "browser-serial", message.clone());
+                    .push_log(UiLogLevel::Error, "browser-serial", message.clone());
                 return Err(TransportError::Other(message));
             }
 
@@ -326,7 +327,7 @@ impl ClientIo for BrowserSerialClientIo {
 struct BrowserSerialClientState {
     registry: SharedLinkRegistry,
     session_id: LinkSessionId,
-    logs: Rc<RefCell<Vec<UxLogEntry>>>,
+    logs: Rc<RefCell<Vec<UiLogEntry>>>,
     updates: UxUpdateSink,
     readiness_activity: UiActivity,
     readiness_classifier: BrowserSerialReadinessClassifier,
@@ -337,15 +338,15 @@ struct BrowserSerialClientState {
 }
 
 impl BrowserSerialClientState {
-    fn push_log(&self, level: UxLogLevel, source: impl Into<String>, message: impl Into<String>) {
+    fn push_log(&self, level: UiLogLevel, source: impl Into<String>, message: impl Into<String>) {
         self.logs
             .borrow_mut()
-            .push(UxLogEntry::new(level, source, message));
+            .push(UiLogEntry::new(level, source, message));
     }
 
-    fn record_readiness_device_line(&mut self, level: UxLogLevel, message: String) {
+    fn record_readiness_device_line(&mut self, level: UiLogLevel, message: String) {
         self.readiness_classifier.observe_line(message.clone());
-        let entry = UxLogEntry::new(level, "fw-esp32", message.clone());
+        let entry = UiLogEntry::new(level, "fw-esp32", message.clone());
         self.logs.borrow_mut().push(entry.clone());
         self.updates.emit(UxUpdate::Log(entry));
         if !self.boot_output_seen {
@@ -426,7 +427,7 @@ fn initial_readiness_activity() -> UiActivity {
 }
 
 fn server_node_id() -> UxNodeId {
-    UxNodeId::new(ServerUx::NODE_ID)
+    UxNodeId::new(ServerController::NODE_ID)
 }
 
 #[derive(Clone, Copy)]
@@ -453,25 +454,25 @@ fn link_error_to_transport(error: lpa_link::LinkError) -> TransportError {
     TransportError::Other(error.to_string())
 }
 
-fn device_line_level(line: &str) -> UxLogLevel {
+fn device_line_level(line: &str) -> UiLogLevel {
     if line.starts_with("[ERROR]") {
-        UxLogLevel::Error
+        UiLogLevel::Error
     } else if line.starts_with("[WARN]") {
-        UxLogLevel::Warn
+        UiLogLevel::Warn
     } else if line.starts_with("[DEBUG]") || line.starts_with("[TRACE]") {
-        UxLogLevel::Debug
+        UiLogLevel::Debug
     } else {
-        UxLogLevel::Info
+        UiLogLevel::Info
     }
 }
 
-fn log_device_line(level: UxLogLevel, message: &str) {
+fn log_device_line(level: UiLogLevel, message: &str) {
     let message = format!("[fw-esp32] {message}");
     match level {
-        UxLogLevel::Error => console_error(&message),
-        UxLogLevel::Warn => console_warn(&message),
-        UxLogLevel::Debug => console_debug(&message),
-        UxLogLevel::Info => console_log(&message),
+        UiLogLevel::Error => console_error(&message),
+        UiLogLevel::Warn => console_warn(&message),
+        UiLogLevel::Debug => console_debug(&message),
+        UiLogLevel::Info => console_log(&message),
     }
 }
 

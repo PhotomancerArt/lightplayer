@@ -1,4 +1,4 @@
-use crate::{UiActivityStep, UiActivityStepState, UiProgress, UiTerminalLine};
+use crate::{UiProgress, UiTerminalLine};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiActivity {
@@ -49,6 +49,54 @@ impl UiActivity {
         if self.terminal.len() > max_lines {
             let remove_count = self.terminal.len() - max_lines;
             self.terminal.drain(0..remove_count);
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UiActivityStep {
+    pub id: String,
+    pub label: String,
+    pub state: UiActivityStepState,
+    pub detail: Option<String>,
+}
+
+impl UiActivityStep {
+    pub fn new(id: impl Into<String>, label: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            label: label.into(),
+            state: UiActivityStepState::Pending,
+            detail: None,
+        }
+    }
+
+    pub fn with_state(mut self, state: UiActivityStepState) -> Self {
+        self.state = state;
+        self
+    }
+
+    pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
+        self.detail = Some(detail.into());
+        self
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UiActivityStepState {
+    Pending,
+    Active,
+    Complete,
+    Failed,
+}
+
+impl UiActivityStepState {
+    pub fn text_marker(self) -> &'static str {
+        match self {
+            Self::Pending => "[ ]",
+            Self::Active => "[*]",
+            Self::Complete => "[x]",
+            Self::Failed => "[!]",
         }
     }
 }

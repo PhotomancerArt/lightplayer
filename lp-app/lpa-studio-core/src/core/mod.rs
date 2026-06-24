@@ -1,35 +1,29 @@
 pub mod action;
 pub mod activity;
-pub mod activity_step;
-pub mod activity_step_state;
-pub mod body;
+pub mod error;
+pub mod issue;
+pub mod log;
 pub mod metric;
-pub mod node;
-pub mod pane_view;
+pub mod notice;
 pub mod progress;
-pub mod stack_section;
-pub mod stack_view;
 pub mod status;
-pub mod status_kind;
-pub mod step_state;
-pub mod studio_view;
 pub mod terminal_line;
 
-pub use activity::UiActivity;
-pub use activity_step::UiActivityStep;
-pub use activity_step_state::UiActivityStepState;
-pub use body::UiBody;
-pub use metric::UiMetric;
-pub use node::{
+pub use crate::app::studio::ui_studio_view::UiStudioView;
+pub use crate::node::{
     ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, UiAction, UiActions,
     UxContext, UxNode, UxNodeId, UxNodePath, UxOp,
 };
-pub use pane_view::UiPaneView;
+pub use crate::view::body::UiViewContent;
+pub use crate::view::pane_view::UiPaneView;
+pub use crate::view::steps_view::UiStepState;
+pub use crate::view::steps_view::UiStepView;
+pub use crate::view::steps_view::UiStepsView;
+pub use activity::UiActivity;
+pub use activity::UiActivityStep;
+pub use activity::UiActivityStepState;
+pub use metric::UiMetric;
 pub use progress::UiProgress;
-pub use stack_section::UiStackSection;
-pub use stack_view::UiStackView;
 pub use status::UiStatus;
-pub use status_kind::UiStatusKind;
-pub use step_state::UiStepState;
-pub use studio_view::StudioView;
+pub use status::UiStatusKind;
 pub use terminal_line::UiTerminalLine;

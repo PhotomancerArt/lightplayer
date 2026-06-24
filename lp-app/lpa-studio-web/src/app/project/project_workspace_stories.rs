@@ -1,7 +1,7 @@
 //! Stories for loaded-project workspace states.
 
 use dioxus::prelude::*;
-use lpa_studio_core::UxLogLevel;
+use lpa_studio_core::UiLogLevel;
 use lpa_studio_web_story_macros::story;
 
 use crate::app::story_fixtures::{
@@ -55,7 +55,7 @@ pub(crate) fn project_ready() -> Element {
     shell_story(
         project_ready_view(),
         false,
-        vec![studio_log(UxLogLevel::Info, "Demo project loaded")],
+        vec![studio_log(UiLogLevel::Info, "Demo project loaded")],
     )
 }
 
@@ -64,7 +64,7 @@ pub(crate) fn project_syncing() -> Element {
     shell_story(
         project_syncing_view(),
         true,
-        vec![studio_log(UxLogLevel::Info, "Reading project shapes")],
+        vec![studio_log(UiLogLevel::Info, "Reading project shapes")],
     )
 }
 
@@ -74,7 +74,7 @@ pub(crate) fn project_sync_failed() -> Element {
         project_sync_failed_view(),
         false,
         vec![studio_log(
-            UxLogLevel::Error,
+            UiLogLevel::Error,
             "project sync failed: protocol timeout",
         )],
     )

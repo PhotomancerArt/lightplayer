@@ -1,11 +1,11 @@
-use crate::{UiAction, UiBody, UiStatus, UxNodeId};
+use crate::{UiAction, UiStatus, UiViewContent, UxNodeId};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiPaneView {
     pub node_id: UxNodeId,
     pub title: String,
     pub status: UiStatus,
-    pub body: UiBody,
+    pub body: UiViewContent,
     pub actions: Vec<UiAction>,
 }
 
@@ -14,7 +14,7 @@ impl UiPaneView {
         node_id: impl Into<UxNodeId>,
         title: impl Into<String>,
         status: UiStatus,
-        body: UiBody,
+        body: UiViewContent,
         actions: Vec<UiAction>,
     ) -> Self {
         Self {

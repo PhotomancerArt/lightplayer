@@ -1,18 +1,19 @@
+use crate::core::notice::UiNotices;
 use crate::{
     LoadedProjectChoice, ProgressState, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget,
     ProjectInventorySummary, ProjectOp, ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncRun,
-    ProjectSyncSummary, StudioServerClient, UiAction, UiBody, UiMetric, UiPaneView, UiStatus,
-    UxError, UxIssue, UxLogEntry, UxLogLevel, UxNode, UxNodeId, UxOutcome, UxResult, UxUpdateSink,
+    ProjectSyncSummary, StudioServerClient, UiAction, UiError, UiLogEntry, UiLogLevel, UiMetric,
+    UiPaneView, UiStatus, UiViewContent, UxIssue, UxNode, UxNodeId, UxResult, UxUpdateSink,
 };
 
-pub struct ProjectUx {
+pub struct ProjectController {
     state: ProjectState,
     running_project_status: RunningProjectStatus,
     active_editor_target: Option<ProjectEditorTarget>,
     sync: Option<ProjectSync>,
 }
 
-impl ProjectUx {
+impl ProjectController {
     pub const NODE_ID: &'static str = "studio.project";
 
     pub fn new() -> Self {
@@ -163,7 +164,7 @@ impl ProjectUx {
     pub async fn load_demo_project(
         &mut self,
         server: &mut StudioServerClient,
-    ) -> Result<Vec<UxLogEntry>, UxError> {
+    ) -> Result<Vec<UiLogEntry>, UiError> {
         self.mark_loading_demo();
         let loaded = server.load_demo_project().await?;
         self.mark_ready(loaded.project_id, loaded.handle_id, loaded.inventory);
@@ -173,7 +174,7 @@ impl ProjectUx {
     pub async fn connect_running_project(
         &mut self,
         server: &mut StudioServerClient,
-    ) -> Result<ProjectConnectResult, UxError> {
+    ) -> Result<ProjectConnectResult, UiError> {
         self.mark_connecting_running();
         let catalog = server.list_loaded_projects().await?;
         self.connect_from_catalog(server, catalog.projects, catalog.logs)
@@ -183,7 +184,7 @@ impl ProjectUx {
     pub async fn connect_running_project_if_available(
         &mut self,
         server: &mut StudioServerClient,
-    ) -> Result<ProjectConnectResult, UxError> {
+    ) -> Result<ProjectConnectResult, UiError> {
         let catalog = server.list_loaded_projects().await?;
         self.connect_from_catalog(server, catalog.projects, catalog.logs)
             .await
@@ -193,7 +194,7 @@ impl ProjectUx {
         &mut self,
         server: &mut StudioServerClient,
         handle_id: u32,
-    ) -> Result<Vec<UxLogEntry>, UxError> {
+    ) -> Result<Vec<UiLogEntry>, UiError> {
         let choice = self.loaded_project_choice(handle_id)?;
         self.mark_connecting_running();
         let project = server.connect_loaded_project(choice).await?;
@@ -205,7 +206,7 @@ impl ProjectUx {
     pub async fn sync_loaded_project(
         &mut self,
         server: &mut StudioServerClient,
-    ) -> Result<ProjectSyncRun, UxError> {
+    ) -> Result<ProjectSyncRun, UiError> {
         let handle_id = self.ready_handle_id()?;
         self.sync
             .get_or_insert_with(ProjectSync::new)
@@ -219,7 +220,7 @@ impl ProjectUx {
     pub async fn refresh_project(
         &mut self,
         server: &mut StudioServerClient,
-    ) -> Result<ProjectSyncRun, UxError> {
+    ) -> Result<ProjectSyncRun, UiError> {
         let handle_id = self.ready_handle_id()?;
         self.sync
             .get_or_insert_with(ProjectSync::new)
@@ -244,8 +245,8 @@ impl ProjectUx {
         &mut self,
         server: &mut StudioServerClient,
         projects: Vec<LoadedProjectChoice>,
-        mut logs: Vec<UxLogEntry>,
-    ) -> Result<ProjectConnectResult, UxError> {
+        mut logs: Vec<UiLogEntry>,
+    ) -> Result<ProjectConnectResult, UiError> {
         match projects.as_slice() {
             [] => {
                 self.mark_no_running_project();
@@ -272,32 +273,32 @@ impl ProjectUx {
         match op {
             ProjectEditorOp::Focus => {
                 self.active_editor_target = Some(target);
-                Ok(UxOutcome::new())
+                Ok(UiNotices::new())
             }
         }
     }
 
-    fn loaded_project_choice(&self, handle_id: u32) -> Result<LoadedProjectChoice, UxError> {
+    fn loaded_project_choice(&self, handle_id: u32) -> Result<LoadedProjectChoice, UiError> {
         match &self.state {
             ProjectState::SelectingLoadedProject { projects } => projects
                 .iter()
                 .find(|project| project.handle_id == handle_id)
                 .cloned()
                 .ok_or_else(|| {
-                    UxError::Project(format!(
+                    UiError::Project(format!(
                         "loaded project handle {handle_id} is not available"
                     ))
                 }),
-            _ => Err(UxError::Project(
+            _ => Err(UiError::Project(
                 "loaded project selection is not active".to_string(),
             )),
         }
     }
 
-    fn ready_handle_id(&self) -> Result<u32, UxError> {
+    fn ready_handle_id(&self) -> Result<u32, UiError> {
         match &self.state {
             ProjectState::Ready { handle_id, .. } => Ok(*handle_id),
-            _ => Err(UxError::Project(
+            _ => Err(UiError::Project(
                 "project sync requires a loaded project".to_string(),
             )),
         }
@@ -307,7 +308,7 @@ impl ProjectUx {
         &mut self,
         server: &mut StudioServerClient,
         handle_id: u32,
-    ) -> Result<Vec<UxLogEntry>, UxError> {
+    ) -> Result<Vec<UiLogEntry>, UiError> {
         let mut logs = Vec::new();
         loop {
             let request = {
@@ -334,7 +335,7 @@ impl ProjectUx {
         &mut self,
         server: &mut StudioServerClient,
         handle_id: u32,
-    ) -> Result<Vec<UxLogEntry>, UxError> {
+    ) -> Result<Vec<UiLogEntry>, UiError> {
         let request = self.sync_mut()?.refresh_project_read_request();
         let read = server.project_read(handle_id, request).await?;
         let logs = read.logs;
@@ -343,20 +344,20 @@ impl ProjectUx {
         Ok(logs)
     }
 
-    fn sync_mut(&mut self) -> Result<&mut ProjectSync, UxError> {
+    fn sync_mut(&mut self) -> Result<&mut ProjectSync, UiError> {
         self.sync
             .as_mut()
-            .ok_or_else(|| UxError::Project("project sync is not initialized".to_string()))
+            .ok_or_else(|| UiError::Project("project sync is not initialized".to_string()))
     }
 
     fn record_sync_failure(
         &mut self,
         server: &mut StudioServerClient,
-        error: UxError,
+        error: UiError,
     ) -> ProjectSyncRun {
         let mut logs = server.take_pending_logs();
-        logs.push(UxLogEntry::new(
-            UxLogLevel::Error,
+        logs.push(UiLogEntry::new(
+            UiLogLevel::Error,
             "lpa-studio-core",
             format!("project sync failed: {error}"),
         ));
@@ -367,7 +368,7 @@ impl ProjectUx {
     }
 }
 
-impl UxNode for ProjectUx {
+impl UxNode for ProjectController {
     type Op = ProjectOp;
 
     fn node_id(&self) -> UxNodeId {
@@ -375,7 +376,7 @@ impl UxNode for ProjectUx {
     }
 }
 
-impl Default for ProjectUx {
+impl Default for ProjectController {
     fn default() -> Self {
         Self::new()
     }
@@ -410,26 +411,30 @@ fn project_body(
     running_project_status: RunningProjectStatus,
     sync: Option<&ProjectSync>,
     active_target: Option<&ProjectEditorTarget>,
-) -> UiBody {
+) -> UiViewContent {
     match state {
         ProjectState::NotLoaded if running_project_status == RunningProjectStatus::NoneKnown => {
-            UiBody::text("No running project is loaded. Load the demo project when you're ready.")
+            UiViewContent::text(
+                "No running project is loaded. Load the demo project when you're ready.",
+            )
         }
         ProjectState::NotLoaded => {
-            UiBody::text("Connect to a running project or load the demo project.")
+            UiViewContent::text("Connect to a running project or load the demo project.")
         }
-        ProjectState::SelectingLoadedProject { projects } => UiBody::text(format!(
+        ProjectState::SelectingLoadedProject { projects } => UiViewContent::text(format!(
             "{} projects are running. Choose one to attach.",
             projects.len()
         )),
         ProjectState::ConnectingRunningProject { progress }
-        | ProjectState::LoadingDemoProject { progress } => UiBody::Progress(progress.clone()),
+        | ProjectState::LoadingDemoProject { progress } => {
+            UiViewContent::Progress(progress.clone())
+        }
         ProjectState::Ready {
             project_id,
             handle_id,
             inventory,
         } => ready_project_body(project_id, *handle_id, inventory, sync, active_target),
-        ProjectState::Failed { issue } => UiBody::Issue(issue.clone()),
+        ProjectState::Failed { issue } => UiViewContent::Issue(issue.clone()),
     }
 }
 
@@ -439,9 +444,9 @@ fn ready_project_body(
     inventory: &ProjectInventorySummary,
     sync: Option<&ProjectSync>,
     active_target: Option<&ProjectEditorTarget>,
-) -> UiBody {
+) -> UiViewContent {
     if let Some(sync) = sync {
-        return UiBody::ProjectEditor(Box::new(sync.editor_view(
+        return UiViewContent::ProjectEditor(Box::new(sync.editor_view(
             project_id,
             handle_id,
             inventory,
@@ -459,7 +464,7 @@ fn ready_project_body(
 
     metrics.push(UiMetric::new("Sync", "Not synced"));
 
-    UiBody::Metrics(metrics)
+    UiViewContent::Metrics(metrics)
 }
 
 #[cfg(test)]
@@ -470,14 +475,14 @@ mod tests {
 
     #[test]
     fn disconnected_project_has_no_actions() {
-        let project = ProjectUx::new();
+        let project = ProjectController::new();
 
         assert!(project.actions(false).is_empty());
     }
 
     #[test]
     fn connected_not_loaded_project_offers_attach_and_demo_actions() {
-        let project = ProjectUx::new();
+        let project = ProjectController::new();
 
         let actions = project.actions(true);
 
@@ -496,7 +501,7 @@ mod tests {
 
     #[test]
     fn connected_project_with_no_running_project_only_offers_demo_load() {
-        let mut project = ProjectUx::new();
+        let mut project = ProjectController::new();
         project.mark_no_running_project();
 
         let actions = project.actions(true);
@@ -510,7 +515,7 @@ mod tests {
 
     #[test]
     fn multiple_loaded_projects_offer_project_specific_actions() {
-        let mut project = ProjectUx::new();
+        let mut project = ProjectController::new();
         project.mark_selecting_loaded_project(vec![
             LoadedProjectChoice::new("/projects/a", 1),
             LoadedProjectChoice::new("/projects/b", 2),
@@ -532,7 +537,7 @@ mod tests {
 
     #[test]
     fn ready_project_offers_refresh_and_disconnect_actions() {
-        let mut project = ProjectUx::new();
+        let mut project = ProjectController::new();
         project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
 
         let actions = project.actions(true);
@@ -552,7 +557,7 @@ mod tests {
 
     #[test]
     fn ready_project_initializes_sync_summary() {
-        let mut project = ProjectUx::new();
+        let mut project = ProjectController::new();
         project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
 
         assert_eq!(
@@ -563,7 +568,7 @@ mod tests {
 
     #[test]
     fn disconnect_clears_sync_summary() {
-        let mut project = ProjectUx::new();
+        let mut project = ProjectController::new();
         project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
 
         project.disconnect();

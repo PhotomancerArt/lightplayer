@@ -1,7 +1,7 @@
-use dioxus::prelude::*;
-use lpa_studio_core::{UiActivity, UiActivityStepState};
-
 use crate::core::AppProgress;
+use dioxus::prelude::*;
+use lpa_studio_core::core::activity::UiActivityStepState;
+use lpa_studio_core::UiActivity;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]

@@ -1,13 +1,13 @@
 use std::cell::Cell;
 use std::rc::Rc;
 
-use dioxus::prelude::*;
-use lpa_studio_core::{
-    StudioUx, StudioView, UiAction, UiActivity, UiBody, UiStatus, UiStepState, UxActivityTarget,
-    UxError, UxLogEntry, UxLogLevel, UxNotice, UxNoticeLevel, UxUpdate, UxUpdateSink,
-};
-
 use crate::app::StudioShell;
+use dioxus::prelude::*;
+use lpa_studio_core::view::steps_view::UiStepState;
+use lpa_studio_core::{
+    NoticeLevel, StudioController, UiAction, UiActivity, UiError, UiLogEntry, UiLogLevel, UiNotice,
+    UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
+};
 
 const STYLE: &str = include_str!("style.css");
 
@@ -43,15 +43,15 @@ pub fn App() -> Element {
 }
 
 struct StudioWebModel {
-    ux: Option<StudioUx>,
-    view: StudioView,
+    ux: Option<StudioController>,
+    view: UiStudioView,
     running: bool,
-    console_logs: Vec<UxLogEntry>,
+    console_logs: Vec<UiLogEntry>,
 }
 
 impl StudioWebModel {
     fn new() -> Self {
-        let ux = StudioUx::new();
+        let ux = StudioController::new();
         let view = ux.view();
         Self {
             ux: Some(ux),
@@ -87,7 +87,7 @@ impl StudioWebModel {
         }
     }
 
-    fn push_console_log(&mut self, log: UxLogEntry) {
+    fn push_console_log(&mut self, log: UiLogEntry) {
         self.console_logs.push(log.clone());
         if self.console_logs.len() > 80 {
             let remove_count = self.console_logs.len() - 80;
@@ -118,22 +118,22 @@ impl StudioWebModel {
 
         match target {
             UxActivityTarget::Pane { .. } => {
-                pane.body = UiBody::Activity(activity);
+                pane.body = UiViewContent::Activity(activity);
             }
             UxActivityTarget::StackSection { section_id, .. } => {
-                if let UiBody::Stack(stack) = &mut pane.body {
+                if let UiViewContent::Stack(stack) = &mut pane.body {
                     if let Some(section) = stack
                         .sections
                         .iter_mut()
                         .find(|section| section.id == section_id)
                     {
                         section.state = UiStepState::Active;
-                        section.body = UiBody::Activity(activity);
+                        section.body = UiViewContent::Activity(activity);
                         section.actions.clear();
                         return;
                     }
                 }
-                pane.body = UiBody::Activity(activity);
+                pane.body = UiViewContent::Activity(activity);
             }
         }
     }
@@ -148,8 +148,8 @@ async fn execute_action(mut model: Signal<StudioWebModel>, action: UiAction) {
         state.running = true;
         state.ux.take()
     }) else {
-        model.write().push_console_log(UxLogEntry::new(
-            UxLogLevel::Error,
+        model.write().push_console_log(UiLogEntry::new(
+            UiLogLevel::Error,
             "studio",
             "Studio UX is already busy.",
         ));
@@ -182,27 +182,27 @@ async fn execute_action(mut model: Signal<StudioWebModel>, action: UiAction) {
     state.running = false;
 }
 
-fn log_from_notice(notice: UxNotice) -> UxLogEntry {
-    UxLogEntry::new(
+fn log_from_notice(notice: UiNotice) -> UiLogEntry {
+    UiLogEntry::new(
         log_level_from_notice(notice.level),
         "studio",
         notice.message,
     )
 }
 
-fn log_level_from_notice(level: UxNoticeLevel) -> UxLogLevel {
+fn log_level_from_notice(level: NoticeLevel) -> UiLogLevel {
     match level {
-        UxNoticeLevel::Info => UxLogLevel::Info,
-        UxNoticeLevel::Warning => UxLogLevel::Warn,
-        UxNoticeLevel::Error => UxLogLevel::Error,
+        NoticeLevel::Info => UiLogLevel::Info,
+        NoticeLevel::Warning => UiLogLevel::Warn,
+        NoticeLevel::Error => UiLogLevel::Error,
     }
 }
 
-fn log_from_error(error: UxError) -> UxLogEntry {
-    let level = if matches!(&error, UxError::Cancelled(_)) {
-        UxLogLevel::Info
+fn log_from_error(error: UiError) -> UiLogEntry {
+    let level = if matches!(&error, UiError::Cancelled(_)) {
+        UiLogLevel::Info
     } else {
-        UxLogLevel::Error
+        UiLogLevel::Error
     };
-    UxLogEntry::new(level, "studio", error.to_string())
+    UiLogEntry::new(level, "studio", error.to_string())
 }

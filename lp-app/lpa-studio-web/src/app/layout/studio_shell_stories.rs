@@ -1,7 +1,7 @@
 //! Stories for whole-Studio shell states.
 
 use dioxus::prelude::*;
-use lpa_studio_core::UxLogLevel;
+use lpa_studio_core::UiLogLevel;
 use lpa_studio_web_story_macros::story;
 
 use crate::app::story_fixtures::{
@@ -35,8 +35,8 @@ pub(crate) fn simulator_ready() -> Element {
         simulator_ready_view(),
         false,
         vec![
-            studio_log(UxLogLevel::Info, "Simulator is running"),
-            studio_log(UxLogLevel::Info, "Demo project loaded"),
+            studio_log(UiLogLevel::Info, "Simulator is running"),
+            studio_log(UiLogLevel::Info, "Demo project loaded"),
         ],
     )
 }
@@ -47,7 +47,7 @@ pub(crate) fn action_error() -> Element {
         error_view(),
         false,
         vec![studio_log(
-            UxLogLevel::Error,
+            UiLogLevel::Error,
             "browser worker boot timed out",
         )],
     )

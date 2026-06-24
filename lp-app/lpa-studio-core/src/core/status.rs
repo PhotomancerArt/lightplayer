@@ -1,5 +1,3 @@
-use crate::UiStatusKind;
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiStatus {
     pub label: String,
@@ -33,4 +31,13 @@ impl UiStatus {
     pub fn error(label: impl Into<String>) -> Self {
         Self::new(label, UiStatusKind::Error)
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UiStatusKind {
+    Neutral,
+    Working,
+    Good,
+    Warning,
+    Error,
 }

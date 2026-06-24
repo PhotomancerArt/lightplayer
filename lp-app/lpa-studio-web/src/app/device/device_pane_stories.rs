@@ -1,7 +1,7 @@
 //! Stories for the Studio device pane.
 
 use dioxus::prelude::*;
-use lpa_studio_core::UxLogLevel;
+use lpa_studio_core::UiLogLevel;
 use lpa_studio_web_story_macros::story;
 
 use crate::app::story_fixtures::{
@@ -40,7 +40,7 @@ pub(crate) fn server_disconnected_link_ready() -> Element {
     shell_story(
         lightplayer_disconnected_view(),
         false,
-        vec![studio_log(UxLogLevel::Info, "LightPlayer disconnected")],
+        vec![studio_log(UiLogLevel::Info, "LightPlayer disconnected")],
     )
 }
 
@@ -65,7 +65,7 @@ pub(crate) fn provision_failed() -> Element {
         provision_failed_view(),
         false,
         vec![studio_log(
-            UxLogLevel::Error,
+            UiLogLevel::Error,
             "browser serial firmware flashing failed",
         )],
     )
@@ -81,6 +81,6 @@ pub(crate) fn reset_complete() -> Element {
     shell_story(
         reset_complete_view(),
         false,
-        vec![studio_log(UxLogLevel::Info, "ESP32-C6 wiped")],
+        vec![studio_log(UiLogLevel::Info, "ESP32-C6 wiped")],
     )
 }

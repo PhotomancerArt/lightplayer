@@ -9,11 +9,11 @@ use lpa_link::providers::browser_worker::{
 };
 use lpa_link::providers::{LinkProviderInstance, LinkProviderRegistry};
 use lpa_link::{LinkProvider, LinkProviderKind};
-use lpc_wire::{ClientMessage, TransportError, WireServerMessage, json};
+use lpc_wire::{json, ClientMessage, TransportError, WireServerMessage};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 
-use crate::{SharedLinkRegistry, UxLogEntry, UxLogLevel};
+use crate::{SharedLinkRegistry, UiLogEntry, UiLogLevel};
 
 const RESPONSE_POLL_LIMIT: usize = 240;
 
@@ -25,7 +25,7 @@ impl BrowserWorkerClientIo {
     pub fn new(
         registry: SharedLinkRegistry,
         session_id: LinkSessionId,
-        logs: Rc<RefCell<Vec<UxLogEntry>>>,
+        logs: Rc<RefCell<Vec<UiLogEntry>>>,
     ) -> Self {
         Self {
             state: Rc::new(RefCell::new(BrowserWorkerClientState {
@@ -88,7 +88,7 @@ impl ClientIo for BrowserWorkerClientIo {
 struct BrowserWorkerClientState {
     registry: SharedLinkRegistry,
     session_id: LinkSessionId,
-    logs: Rc<RefCell<Vec<UxLogEntry>>>,
+    logs: Rc<RefCell<Vec<UiLogEntry>>>,
 }
 
 impl BrowserWorkerClientState {
@@ -127,12 +127,12 @@ fn browser_worker_provider_mut(
     }
 }
 
-fn worker_output_to_log(output: BrowserOutputEnvelope) -> Option<UxLogEntry> {
+fn worker_output_to_log(output: BrowserOutputEnvelope) -> Option<UiLogEntry> {
     match output {
         BrowserOutputEnvelope::Status {
             status, message, ..
-        } => Some(UxLogEntry::new(
-            UxLogLevel::Info,
+        } => Some(UiLogEntry::new(
+            UiLogLevel::Info,
             "fw-browser",
             message.unwrap_or(status),
         )),
@@ -141,7 +141,7 @@ fn worker_output_to_log(output: BrowserOutputEnvelope) -> Option<UxLogEntry> {
             target,
             message,
             ..
-        } => Some(UxLogEntry::new(
+        } => Some(UiLogEntry::new(
             parse_worker_log_level(&level),
             target,
             message,
@@ -150,12 +150,12 @@ fn worker_output_to_log(output: BrowserOutputEnvelope) -> Option<UxLogEntry> {
     }
 }
 
-fn parse_worker_log_level(level: &str) -> UxLogLevel {
+fn parse_worker_log_level(level: &str) -> UiLogLevel {
     match level {
-        "trace" | "debug" => UxLogLevel::Debug,
-        "warn" => UxLogLevel::Warn,
-        "error" => UxLogLevel::Error,
-        _ => UxLogLevel::Info,
+        "trace" | "debug" => UiLogLevel::Debug,
+        "warn" => UiLogLevel::Warn,
+        "error" => UiLogLevel::Error,
+        _ => UiLogLevel::Info,
     }
 }
 

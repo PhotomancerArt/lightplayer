@@ -1,15 +1,15 @@
 use core::fmt::Write;
 
-use crate::{ActionPriority, UiPaneView, UxLogEntry};
+use crate::{ActionPriority, UiLogEntry, UiPaneView};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct StudioView {
+pub struct UiStudioView {
     pub panes: Vec<UiPaneView>,
-    pub logs: Vec<UxLogEntry>,
+    pub logs: Vec<UiLogEntry>,
 }
 
-impl StudioView {
-    pub fn new(panes: Vec<UiPaneView>, logs: Vec<UxLogEntry>) -> Self {
+impl UiStudioView {
+    pub fn new(panes: Vec<UiPaneView>, logs: Vec<UiLogEntry>) -> Self {
         Self { panes, logs }
     }
 

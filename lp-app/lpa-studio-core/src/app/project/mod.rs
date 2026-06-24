@@ -1,6 +1,7 @@
 pub mod demo_project;
 pub mod loaded_project_choice;
 pub mod project_connect_result;
+pub mod project_controller;
 pub mod project_editor_op;
 pub mod project_editor_target;
 pub mod project_editor_view;
@@ -16,11 +17,11 @@ pub mod project_sync;
 pub mod project_sync_phase;
 pub mod project_sync_run;
 pub mod project_sync_summary;
-pub mod project_ux;
 pub mod project_value_format;
 
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use project_connect_result::ProjectConnectResult;
+pub use project_controller::ProjectController;
 pub use project_editor_op::ProjectEditorOp;
 pub use project_editor_target::ProjectEditorTarget;
 pub use project_editor_view::ProjectEditorView;
@@ -40,5 +41,4 @@ pub use project_sync::ProjectSync;
 pub use project_sync_phase::ProjectSyncPhase;
 pub use project_sync_run::ProjectSyncRun;
 pub use project_sync_summary::ProjectSyncSummary;
-pub use project_ux::ProjectUx;
 pub use project_value_format::{format_lp_value, format_slot_map_key};

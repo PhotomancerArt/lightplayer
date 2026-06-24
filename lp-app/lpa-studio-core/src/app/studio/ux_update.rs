@@ -1,14 +1,14 @@
-use crate::{StudioView, UiActivity, UiStatus, UxLogEntry, UxNodeId};
+use crate::{UiActivity, UiLogEntry, UiStatus, UiStudioView, UxNodeId};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum UxUpdate {
-    View(StudioView),
+    View(UiStudioView),
     Activity {
         target: UxActivityTarget,
         status: UiStatus,
         activity: UiActivity,
     },
-    Log(UxLogEntry),
+    Log(UiLogEntry),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

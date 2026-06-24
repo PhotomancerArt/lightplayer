@@ -29,7 +29,7 @@ mod tests {
     use std::cell::RefCell;
     use std::rc::Rc;
 
-    use crate::{StudioView, UxUpdate};
+    use crate::{UiStudioView, UxUpdate};
 
     use super::*;
 
@@ -43,8 +43,8 @@ mod tests {
             }
         });
 
-        sink.emit(UxUpdate::View(StudioView::new(Vec::new(), Vec::new())));
-        sink.emit(UxUpdate::View(StudioView::new(Vec::new(), Vec::new())));
+        sink.emit(UxUpdate::View(UiStudioView::new(Vec::new(), Vec::new())));
+        sink.emit(UxUpdate::View(UiStudioView::new(Vec::new(), Vec::new())));
 
         assert_eq!(*count.borrow(), 2);
     }

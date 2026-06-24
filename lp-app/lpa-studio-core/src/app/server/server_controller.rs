@@ -2,16 +2,16 @@ use lpa_link::LinkConnection;
 
 use crate::{
     ProgressState, ServerFailureKind, ServerOp, ServerSnapshot, ServerState, SharedLinkRegistry,
-    StudioServerClient, UiAction, UiBody, UiMetric, UiPaneView, UiStatus, UxError, UxIssue, UxNode,
-    UxNodeId, UxUpdateSink,
+    StudioServerClient, UiAction, UiError, UiMetric, UiPaneView, UiStatus, UiViewContent, UxIssue,
+    UxNode, UxNodeId, UxUpdateSink,
 };
 
-pub struct ServerUx {
+pub struct ServerController {
     state: ServerState,
     client: Option<StudioServerClient>,
 }
 
-impl ServerUx {
+impl ServerController {
     pub const NODE_ID: &'static str = "studio.server";
 
     pub fn new() -> Self {
@@ -70,7 +70,7 @@ impl ServerUx {
         registry: SharedLinkRegistry,
         connection: &LinkConnection,
         updates: UxUpdateSink,
-    ) -> Result<(), UxError> {
+    ) -> Result<(), UiError> {
         self.mark_connecting("Opening server protocol");
         let client = StudioServerClient::from_link_connection(registry, connection, updates)?;
         let protocol = client.protocol().to_string();
@@ -79,13 +79,13 @@ impl ServerUx {
         Ok(())
     }
 
-    pub fn client_mut(&mut self) -> Result<&mut StudioServerClient, UxError> {
+    pub fn client_mut(&mut self) -> Result<&mut StudioServerClient, UiError> {
         self.client
             .as_mut()
-            .ok_or_else(|| UxError::MissingSession("server client is not connected".to_string()))
+            .ok_or_else(|| UiError::MissingSession("server client is not connected".to_string()))
     }
 
-    pub fn take_pending_logs(&mut self) -> Vec<crate::UxLogEntry> {
+    pub fn take_pending_logs(&mut self) -> Vec<crate::UiLogEntry> {
         self.client
             .as_mut()
             .map(StudioServerClient::take_pending_logs)
@@ -117,7 +117,7 @@ impl ServerUx {
     }
 }
 
-impl UxNode for ServerUx {
+impl UxNode for ServerController {
     type Op = ServerOp;
 
     fn node_id(&self) -> UxNodeId {
@@ -125,7 +125,7 @@ impl UxNode for ServerUx {
     }
 }
 
-impl Default for ServerUx {
+impl Default for ServerController {
     fn default() -> Self {
         Self::new()
     }
@@ -140,15 +140,15 @@ fn server_status(state: &ServerState) -> UiStatus {
     }
 }
 
-fn server_body(state: &ServerState) -> UiBody {
+fn server_body(state: &ServerState) -> UiViewContent {
     match state {
         ServerState::Disconnected => {
-            UiBody::text("Open a link endpoint to attach the server protocol.")
+            UiViewContent::text("Open a link endpoint to attach the server protocol.")
         }
-        ServerState::Connecting { progress } => UiBody::Progress(progress.clone()),
+        ServerState::Connecting { progress } => UiViewContent::Progress(progress.clone()),
         ServerState::Connected { protocol } => {
-            UiBody::Metrics(vec![UiMetric::new("Protocol", protocol)])
+            UiViewContent::Metrics(vec![UiMetric::new("Protocol", protocol)])
         }
-        ServerState::Failed { issue, .. } => UiBody::Issue(issue.clone()),
+        ServerState::Failed { issue, .. } => UiViewContent::Issue(issue.clone()),
     }
 }

@@ -1,5 +1,6 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{UiStatus, UiStatusKind};
+use lpa_studio_core::core::status::UiStatusKind;
+use lpa_studio_core::UiStatus;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]

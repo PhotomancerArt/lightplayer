@@ -1,18 +1,18 @@
-use crate::{ProgressState, ProjectEditorView, UiActivity, UiMetric, UiStackView, UxIssue};
+use crate::{ProgressState, ProjectEditorView, UiActivity, UiMetric, UiStepsView, UxIssue};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum UiBody {
+pub enum UiViewContent {
     Empty,
     Text(String),
     Progress(ProgressState),
     Activity(UiActivity),
     Issue(UxIssue),
     Metrics(Vec<UiMetric>),
-    Stack(Box<UiStackView>),
+    Stack(Box<UiStepsView>),
     ProjectEditor(Box<ProjectEditorView>),
 }
 
-impl UiBody {
+impl UiViewContent {
     pub fn text(value: impl Into<String>) -> Self {
         Self::Text(value.into())
     }

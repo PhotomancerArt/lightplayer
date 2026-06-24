@@ -1,4 +1,4 @@
-use crate::{ActionConfirmation, ActionMeta, ActionPriority, UxError, UxNodeId, UxOp};
+use crate::{ActionConfirmation, ActionMeta, ActionPriority, UiError, UxNodeId, UxOp};
 
 #[derive(Clone, Debug)]
 pub struct UiAction {
@@ -44,7 +44,7 @@ impl UiAction {
         self.op.as_any().downcast_ref::<T>()
     }
 
-    pub fn into_op<T>(self) -> Result<T, UxError>
+    pub fn into_op<T>(self) -> Result<T, UiError>
     where
         T: UxOp,
     {
@@ -54,7 +54,7 @@ impl UiAction {
             .downcast::<T>()
             .map(|op| *op)
             .map_err(|_| {
-                UxError::UnsupportedAction(format!(
+                UiError::UnsupportedAction(format!(
                     "action for node {node_id} did not contain operation {}",
                     core::any::type_name::<T>()
                 ))

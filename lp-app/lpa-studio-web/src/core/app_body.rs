@@ -1,18 +1,18 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiBody};
+use lpa_studio_core::{UiAction, UiViewContent};
 
 use crate::app::ProjectSidebar;
 use crate::core::{AppActivity, AppStack, MetricGrid};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn AppBody(body: UiBody, running: bool, on_action: EventHandler<UiAction>) -> Element {
+pub fn AppBody(body: UiViewContent, running: bool, on_action: EventHandler<UiAction>) -> Element {
     match body {
-        UiBody::Empty => rsx! {},
-        UiBody::Text(text) => rsx! {
+        UiViewContent::Empty => rsx! {},
+        UiViewContent::Text(text) => rsx! {
             p { class: "ux-panel-copy", "{text}" }
         },
-        UiBody::Progress(progress) => {
+        UiViewContent::Progress(progress) => {
             let label = progress.label;
             let detail = progress.detail;
             rsx! {
@@ -22,10 +22,10 @@ pub fn AppBody(body: UiBody, running: bool, on_action: EventHandler<UiAction>) -
                 }
             }
         }
-        UiBody::Activity(activity) => rsx! {
+        UiViewContent::Activity(activity) => rsx! {
             AppActivity { activity }
         },
-        UiBody::Issue(issue) => {
+        UiViewContent::Issue(issue) => {
             let message = issue.message;
             let detail = issue.detail;
             rsx! {
@@ -35,17 +35,17 @@ pub fn AppBody(body: UiBody, running: bool, on_action: EventHandler<UiAction>) -
                 }
             }
         }
-        UiBody::Metrics(metrics) => rsx! {
+        UiViewContent::Metrics(metrics) => rsx! {
             MetricGrid { metrics }
         },
-        UiBody::Stack(stack) => rsx! {
+        UiViewContent::Stack(stack) => rsx! {
             AppStack {
                 stack: *stack,
                 running,
                 on_action,
             }
         },
-        UiBody::ProjectEditor(editor) => rsx! {
+        UiViewContent::ProjectEditor(editor) => rsx! {
             ProjectSidebar {
                 view: *editor,
                 running,

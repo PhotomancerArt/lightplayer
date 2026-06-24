@@ -5,16 +5,16 @@ use lpa_client::{ClientError, ClientEvent, ClientIo, LpClient};
 use lpa_link::{LinkConnection, LinkConnectionKind};
 use lpc_wire::{ProjectReadRequest, ProjectReadResponse, WireProjectHandle};
 
-use crate::app::project::demo_project::{DEMO_PROJECT_ID, demo_project_deploy_files};
+use crate::app::project::demo_project::{demo_project_deploy_files, DEMO_PROJECT_ID};
 use crate::{
-    LoadedProjectChoice, ProjectInventorySummary, SharedLinkRegistry, UxError, UxLogEntry,
-    UxLogLevel, UxUpdateSink,
+    LoadedProjectChoice, ProjectInventorySummary, SharedLinkRegistry, UiError, UiLogEntry,
+    UiLogLevel, UxUpdateSink,
 };
 
 pub struct StudioServerClient {
     client: LpClient<Box<dyn ClientIo>>,
     protocol: String,
-    pending_logs: Rc<RefCell<Vec<UxLogEntry>>>,
+    pending_logs: Rc<RefCell<Vec<UiLogEntry>>>,
 }
 
 impl StudioServerClient {
@@ -31,7 +31,7 @@ impl StudioServerClient {
         registry: SharedLinkRegistry,
         connection: &LinkConnection,
         updates: UxUpdateSink,
-    ) -> Result<Self, UxError> {
+    ) -> Result<Self, UiError> {
         let pending_logs = Rc::new(RefCell::new(Vec::new()));
         let protocol = connection_protocol(&connection.kind);
         let io = server_io_from_link_connection(
@@ -51,7 +51,7 @@ impl StudioServerClient {
         &self.protocol
     }
 
-    pub async fn load_demo_project(&mut self) -> Result<LoadedDemoProject, UxError> {
+    pub async fn load_demo_project(&mut self) -> Result<LoadedDemoProject, UiError> {
         let deploy = self
             .client
             .deploy_project_files(DEMO_PROJECT_ID, demo_project_deploy_files())
@@ -75,7 +75,7 @@ impl StudioServerClient {
         })
     }
 
-    pub fn take_pending_logs(&mut self) -> Vec<UxLogEntry> {
+    pub fn take_pending_logs(&mut self) -> Vec<UiLogEntry> {
         core::mem::take(&mut *self.pending_logs.borrow_mut())
     }
 }
@@ -84,12 +84,12 @@ pub struct LoadedDemoProject {
     pub project_id: String,
     pub handle_id: u32,
     pub inventory: ProjectInventorySummary,
-    pub logs: Vec<UxLogEntry>,
+    pub logs: Vec<UiLogEntry>,
 }
 
 pub struct LoadedProjectCatalog {
     pub projects: Vec<LoadedProjectChoice>,
-    pub logs: Vec<UxLogEntry>,
+    pub logs: Vec<UiLogEntry>,
 }
 
 pub struct LoadedRunningProject {
@@ -100,11 +100,11 @@ pub struct LoadedRunningProject {
 
 pub struct StudioProjectRead {
     pub response: ProjectReadResponse,
-    pub logs: Vec<UxLogEntry>,
+    pub logs: Vec<UiLogEntry>,
 }
 
 impl StudioServerClient {
-    pub async fn list_loaded_projects(&mut self) -> Result<LoadedProjectCatalog, UxError> {
+    pub async fn list_loaded_projects(&mut self) -> Result<LoadedProjectCatalog, UiError> {
         let loaded = self
             .client
             .project_list_loaded()
@@ -125,7 +125,7 @@ impl StudioServerClient {
     pub async fn connect_loaded_project(
         &mut self,
         choice: LoadedProjectChoice,
-    ) -> Result<LoadedRunningProject, UxError> {
+    ) -> Result<LoadedRunningProject, UiError> {
         let inventory = self
             .client
             .project_inventory_read(WireProjectHandle::new(choice.handle_id))
@@ -145,7 +145,7 @@ impl StudioServerClient {
         &mut self,
         handle_id: u32,
         request: ProjectReadRequest,
-    ) -> Result<StudioProjectRead, UxError> {
+    ) -> Result<StudioProjectRead, UiError> {
         let read = self
             .client
             .project_read(WireProjectHandle::new(handle_id), request)
@@ -163,9 +163,9 @@ impl StudioServerClient {
 fn server_io_from_link_connection(
     _registry: SharedLinkRegistry,
     connection: &LinkConnection,
-    _pending_logs: Rc<RefCell<Vec<UxLogEntry>>>,
+    _pending_logs: Rc<RefCell<Vec<UiLogEntry>>>,
     _updates: UxUpdateSink,
-) -> Result<Box<dyn ClientIo>, UxError> {
+) -> Result<Box<dyn ClientIo>, UiError> {
     match &connection.kind {
         #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
         LinkConnectionKind::BrowserWorker { .. } => Ok(Box::new(
@@ -176,7 +176,7 @@ fn server_io_from_link_connection(
             ),
         )),
         #[cfg(not(all(feature = "browser-worker", target_arch = "wasm32")))]
-        LinkConnectionKind::BrowserWorker { .. } => Err(UxError::UnsupportedFeature(
+        LinkConnectionKind::BrowserWorker { .. } => Err(UiError::UnsupportedFeature(
             "browser worker server I/O requires the browser-worker feature on wasm".to_string(),
         )),
         #[cfg(all(feature = "browser-serial-esp32", target_arch = "wasm32"))]
@@ -189,16 +189,16 @@ fn server_io_from_link_connection(
             ),
         )),
         #[cfg(not(all(feature = "browser-serial-esp32", target_arch = "wasm32")))]
-        LinkConnectionKind::BrowserSerialEsp32 { .. } => Err(UxError::UnsupportedFeature(
+        LinkConnectionKind::BrowserSerialEsp32 { .. } => Err(UiError::UnsupportedFeature(
             "browser serial ESP32 server I/O requires the browser-serial-esp32 feature on wasm"
                 .to_string(),
         )),
-        LinkConnectionKind::Fake => Err(UxError::UnsupportedFeature(
+        LinkConnectionKind::Fake => Err(UiError::UnsupportedFeature(
             "fake links do not expose a server protocol".to_string(),
         )),
         LinkConnectionKind::HostProcess
         | LinkConnectionKind::HostSerialEsp32
-        | LinkConnectionKind::PendingImplementation { .. } => Err(UxError::UnsupportedFeature(
+        | LinkConnectionKind::PendingImplementation { .. } => Err(UiError::UnsupportedFeature(
             format!("server I/O is not implemented for {:?}", connection.kind),
         )),
     }
@@ -215,7 +215,7 @@ fn connection_protocol(kind: &LinkConnectionKind) -> String {
     }
 }
 
-fn map_client_events(events: Vec<ClientEvent>) -> Vec<UxLogEntry> {
+fn map_client_events(events: Vec<ClientEvent>) -> Vec<UiLogEntry> {
     events
         .into_iter()
         .map(|event| match event {
@@ -223,19 +223,19 @@ fn map_client_events(events: Vec<ClientEvent>) -> Vec<UxLogEntry> {
                 frame_count,
                 uptime_ms,
                 ..
-            } => UxLogEntry::new(
-                UxLogLevel::Debug,
+            } => UiLogEntry::new(
+                UiLogLevel::Debug,
                 "lp-server",
                 format!("heartbeat frame={frame_count} uptime_ms={uptime_ms}"),
             ),
             ClientEvent::Log { level, message } => {
-                UxLogEntry::new(map_server_log_level(level), "lp-server", message)
+                UiLogEntry::new(map_server_log_level(level), "lp-server", message)
             }
             ClientEvent::UncorrelatedResponse {
                 response_id,
                 expected_id,
-            } => UxLogEntry::new(
-                UxLogLevel::Warn,
+            } => UiLogEntry::new(
+                UiLogLevel::Warn,
                 "lp-server",
                 format!("uncorrelated response {response_id}; expected {expected_id}"),
             ),
@@ -243,28 +243,28 @@ fn map_client_events(events: Vec<ClientEvent>) -> Vec<UxLogEntry> {
         .collect()
 }
 
-fn map_client_error(error: ClientError) -> UxError {
+fn map_client_error(error: ClientError) -> UiError {
     match error {
         ClientError::Transport(message)
             if super::browser_serial_readiness::is_no_firmware_detected_message(&message) =>
         {
-            UxError::NoFirmwareDetected(message)
+            UiError::NoFirmwareDetected(message)
         }
-        ClientError::Transport(message) => UxError::Transport(message),
-        ClientError::Server(message) | ClientError::Protocol(message) => UxError::Protocol(message),
+        ClientError::Transport(message) => UiError::Transport(message),
+        ClientError::Server(message) | ClientError::Protocol(message) => UiError::Protocol(message),
         ClientError::UnexpectedResponse {
             operation,
             response,
-        } => UxError::Protocol(format!("unexpected response for {operation}: {response}")),
+        } => UiError::Protocol(format!("unexpected response for {operation}: {response}")),
     }
 }
 
-fn map_server_log_level(level: lpc_wire::server::api::LogLevel) -> UxLogLevel {
+fn map_server_log_level(level: lpc_wire::server::api::LogLevel) -> UiLogLevel {
     match level {
-        lpc_wire::server::api::LogLevel::Debug => UxLogLevel::Debug,
-        lpc_wire::server::api::LogLevel::Info => UxLogLevel::Info,
-        lpc_wire::server::api::LogLevel::Warn => UxLogLevel::Warn,
-        lpc_wire::server::api::LogLevel::Error => UxLogLevel::Error,
+        lpc_wire::server::api::LogLevel::Debug => UiLogLevel::Debug,
+        lpc_wire::server::api::LogLevel::Info => UiLogLevel::Info,
+        lpc_wire::server::api::LogLevel::Warn => UiLogLevel::Warn,
+        lpc_wire::server::api::LogLevel::Error => UiLogLevel::Error,
     }
 }
 
@@ -279,6 +279,6 @@ mod tests {
             "Transport error: {NO_FIRMWARE_DETECTED_PREFIX}; recent serial output: invalid header"
         )));
 
-        assert!(matches!(error, UxError::NoFirmwareDetected(_)));
+        assert!(matches!(error, UiError::NoFirmwareDetected(_)));
     }
 }

@@ -1,11 +1,11 @@
-use crate::{LinkSnapshot, ProjectSnapshot, ServerSnapshot, UxLogEntry};
+use crate::{LinkSnapshot, ProjectSnapshot, ServerSnapshot, UiLogEntry};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct StudioSnapshot {
     pub link: LinkSnapshot,
     pub server: ServerSnapshot,
     pub project: ProjectSnapshot,
-    pub logs: Vec<UxLogEntry>,
+    pub logs: Vec<UiLogEntry>,
 }
 
 impl StudioSnapshot {
@@ -13,7 +13,7 @@ impl StudioSnapshot {
         link: LinkSnapshot,
         server: ServerSnapshot,
         project: ProjectSnapshot,
-        logs: Vec<UxLogEntry>,
+        logs: Vec<UiLogEntry>,
     ) -> Self {
         Self {
             link,

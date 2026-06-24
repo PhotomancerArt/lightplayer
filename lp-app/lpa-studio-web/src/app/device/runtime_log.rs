@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use dioxus::{html::geometry::PixelsVector2D, prelude::dioxus_core::use_after_render};
-use lpa_studio_core::{UxLogEntry, UxLogLevel};
+use lpa_studio_core::{UiLogEntry, UiLogLevel};
 use std::rc::Rc;
 
 const LOG_STICKY_THRESHOLD_PX: f64 = 48.0;
@@ -8,7 +8,7 @@ const LOG_ENTRY_LIMIT: usize = 80;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn RuntimeLog(logs: Vec<UxLogEntry>) -> Element {
+pub fn RuntimeLog(logs: Vec<UiLogEntry>) -> Element {
     let visible_logs = log_tail(logs, LOG_ENTRY_LIMIT);
     let mut log_element = use_signal(|| None::<Rc<MountedData>>);
     let mut stick_to_bottom = use_signal(|| true);
@@ -74,7 +74,7 @@ pub fn RuntimeLog(logs: Vec<UxLogEntry>) -> Element {
     }
 }
 
-fn log_tail(logs: Vec<UxLogEntry>, max_entries: usize) -> Vec<UxLogEntry> {
+fn log_tail(logs: Vec<UiLogEntry>, max_entries: usize) -> Vec<UiLogEntry> {
     let skip_count = logs.len().saturating_sub(max_entries);
     logs.into_iter().skip(skip_count).collect()
 }
@@ -83,20 +83,20 @@ fn is_log_near_bottom(scroll_top: f64, scroll_height: i32, client_height: i32) -
     f64::from(scroll_height) - scroll_top - f64::from(client_height) <= LOG_STICKY_THRESHOLD_PX
 }
 
-fn log_level_label(level: UxLogLevel) -> &'static str {
+fn log_level_label(level: UiLogLevel) -> &'static str {
     match level {
-        UxLogLevel::Debug => "debug",
-        UxLogLevel::Info => "info",
-        UxLogLevel::Warn => "warn",
-        UxLogLevel::Error => "error",
+        UiLogLevel::Debug => "debug",
+        UiLogLevel::Info => "info",
+        UiLogLevel::Warn => "warn",
+        UiLogLevel::Error => "error",
     }
 }
 
-fn log_class(level: UxLogLevel) -> &'static str {
+fn log_class(level: UiLogLevel) -> &'static str {
     match level {
-        UxLogLevel::Debug => "ux-log ux-log-debug",
-        UxLogLevel::Info => "ux-log ux-log-info",
-        UxLogLevel::Warn => "ux-log ux-log-warn",
-        UxLogLevel::Error => "ux-log ux-log-error",
+        UiLogLevel::Debug => "ux-log ux-log-debug",
+        UiLogLevel::Info => "ux-log ux-log-info",
+        UiLogLevel::Warn => "ux-log ux-log-warn",
+        UiLogLevel::Error => "ux-log ux-log-error",
     }
 }

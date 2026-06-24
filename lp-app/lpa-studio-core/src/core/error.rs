@@ -1,9 +1,9 @@
 use core::fmt;
 
-pub type UxResult = Result<crate::UxOutcome, UxError>;
+pub type UxResult = Result<crate::UiNotices, UiError>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum UxError {
+pub enum UiError {
     UnsupportedFeature(String),
     UnsupportedAction(String),
     MissingSession(String),
@@ -16,7 +16,7 @@ pub enum UxError {
     NoFirmwareDetected(String),
 }
 
-impl UxError {
+impl UiError {
     pub fn message(&self) -> &str {
         match self {
             Self::UnsupportedFeature(message)
@@ -33,7 +33,7 @@ impl UxError {
     }
 }
 
-impl fmt::Display for UxError {
+impl fmt::Display for UiError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnsupportedFeature(message) => write!(f, "unsupported feature: {message}"),
@@ -50,4 +50,4 @@ impl fmt::Display for UxError {
     }
 }
 
-impl std::error::Error for UxError {}
+impl std::error::Error for UiError {}

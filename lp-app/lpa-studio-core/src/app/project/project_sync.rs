@@ -2,7 +2,7 @@ use lpc_model::{
     NodeId, Revision, SlotData, SlotMapKey, SlotShapeId, SlotShapeLookup, SlotShapeRegistry,
     SlotShapeView, TreePath,
 };
-use lpc_view::{ProjectView, SlotMirrorView, TreeEntryView, apply_project_read_response};
+use lpc_view::{apply_project_read_response, ProjectView, SlotMirrorView, TreeEntryView};
 use lpc_wire::{
     NodeReadQuery, NodeReadSelection, NodeRuntimeStatus, ProjectReadQuery, ProjectReadRequest,
     ProjectReadResponse, ProjectReadResult, ReadLevel, ResourcePayloadRead, ResourceReadQuery,
@@ -13,7 +13,7 @@ use crate::{
     ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
     ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView,
     ProjectNodeView, ProjectRuntimeSummary, ProjectSlotRowView, ProjectSyncPhase,
-    ProjectSyncSummary, UiAction, UiMetric, UxError, UxIssue,
+    ProjectSyncSummary, UiAction, UiError, UiMetric, UxIssue,
 };
 
 use super::{format_lp_value, format_slot_map_key};
@@ -124,9 +124,9 @@ impl ProjectSync {
         !self.shapes_complete
     }
 
-    pub fn shape_sync_request(&self) -> Result<ProjectReadRequest, UxError> {
+    pub fn shape_sync_request(&self) -> Result<ProjectReadRequest, UiError> {
         if self.shape_page_count >= SHAPE_SYNC_MAX_PAGES {
-            return Err(UxError::Protocol(format!(
+            return Err(UiError::Protocol(format!(
                 "shape sync exceeded {SHAPE_SYNC_MAX_PAGES} pages"
             )));
         }
@@ -148,7 +148,7 @@ impl ProjectSync {
     pub fn apply_shape_sync_response(
         &mut self,
         response: ProjectReadResponse,
-    ) -> Result<(), UxError> {
+    ) -> Result<(), UiError> {
         let mut saw_shapes = false;
         for result in response.results {
             if let ProjectReadResult::Shapes(shapes) = result {
@@ -161,7 +161,7 @@ impl ProjectSync {
             }
         }
         if !saw_shapes {
-            return Err(UxError::Protocol(
+            return Err(UiError::Protocol(
                 "shape sync response did not include shapes".to_string(),
             ));
         }
@@ -172,9 +172,9 @@ impl ProjectSync {
     pub fn apply_project_read_response(
         &mut self,
         response: ProjectReadResponse,
-    ) -> Result<(), UxError> {
+    ) -> Result<(), UiError> {
         apply_project_read_response(&mut self.view, response)
-            .map_err(|error| UxError::Protocol(error.to_string()))?;
+            .map_err(|error| UiError::Protocol(error.to_string()))?;
         self.phase = ProjectSyncPhase::Ready;
         self.issue = None;
         Ok(())

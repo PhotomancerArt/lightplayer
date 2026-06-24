@@ -8,20 +8,22 @@ use crate::app::{PaneFrame, StudioShell};
 use crate::base::{FieldRow, TabItem, Tabs};
 use crate::core::MetricGrid;
 use dioxus::prelude::*;
+use lpa_studio_core::core::activity::{UiActivityStep, UiActivityStepState};
+use lpa_studio_core::view::steps_view::{UiStepState, UiStepView};
 use lpa_studio_core::{
-    DeviceOp, DeviceUx, LinkEndpointId, LinkProviderKind, ProgressState, ProjectEditorOp,
-    ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary, ProjectNodeStatusTone,
-    ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectNodeView, ProjectOp,
-    ProjectRuntimeSummary, ProjectSlotRowView, ProjectState, ProjectSyncPhase, ProjectSyncSummary,
-    ProjectUx, StudioView, UiAction, UiActivity, UiActivityStep, UiActivityStepState, UiBody,
-    UiMetric, UiPaneView, UiProgress, UiStackSection, UiStackView, UiStatus, UiStepState,
-    UiTerminalLine, UxIssue, UxLogEntry, UxLogLevel, UxNodeId,
+    DeviceController, DeviceOp, LinkEndpointId, LinkProviderKind, ProgressState, ProjectController,
+    ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
+    ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView,
+    ProjectNodeView, ProjectOp, ProjectRuntimeSummary, ProjectSlotRowView, ProjectState,
+    ProjectSyncPhase, ProjectSyncSummary, UiAction, UiActivity, UiLogEntry, UiLogLevel, UiMetric,
+    UiPaneView, UiProgress, UiStatus, UiStepsView, UiStudioView, UiTerminalLine, UiViewContent,
+    UxIssue, UxNodeId,
 };
 
 pub(crate) fn shell_story(
-    mut view: StudioView,
+    mut view: UiStudioView,
     running: bool,
-    story_logs: Vec<UxLogEntry>,
+    story_logs: Vec<UiLogEntry>,
 ) -> Element {
     view.logs.extend(story_logs);
     rsx! {
@@ -250,65 +252,65 @@ pub(crate) fn MobileEditorTabsPane() -> Element {
     }
 }
 
-pub(crate) fn studio_log(level: UxLogLevel, message: impl Into<String>) -> UxLogEntry {
-    UxLogEntry::new(level, "studio", message)
+pub(crate) fn studio_log(level: UiLogLevel, message: impl Into<String>) -> UiLogEntry {
+    UiLogEntry::new(level, "studio", message)
 }
 
-pub(crate) fn idle_view() -> StudioView {
-    StudioView::new(vec![idle_device_view()], Vec::new())
+pub(crate) fn idle_view() -> UiStudioView {
+    UiStudioView::new(vec![idle_device_view()], Vec::new())
 }
 
-pub(crate) fn browser_serial_canceled_view() -> StudioView {
-    StudioView::new(
+pub(crate) fn browser_serial_canceled_view() -> UiStudioView {
+    UiStudioView::new(
         vec![idle_device_view()],
-        vec![studio_log(UxLogLevel::Info, "Port selection canceled")],
+        vec![studio_log(UiLogLevel::Info, "Port selection canceled")],
     )
 }
 
-pub(crate) fn browser_serial_open_failed_view() -> StudioView {
+pub(crate) fn browser_serial_open_failed_view() -> UiStudioView {
     picker_issue_view(
         "Failed to open serial port.",
         "Failed to execute 'open' on 'SerialPort': Failed to open serial port.",
     )
 }
 
-pub(crate) fn endpoint_view() -> StudioView {
-    StudioView::new(vec![endpoint_device_view()], Vec::new())
+pub(crate) fn endpoint_view() -> UiStudioView {
+    UiStudioView::new(vec![endpoint_device_view()], Vec::new())
 }
 
-pub(crate) fn starting_view() -> StudioView {
-    StudioView::new(
+pub(crate) fn starting_view() -> UiStudioView {
+    UiStudioView::new(
         vec![starting_device_view()],
-        vec![UxLogEntry::new(
-            UxLogLevel::Info,
+        vec![UiLogEntry::new(
+            UiLogLevel::Info,
             "lpa-link",
             "browser worker session created",
         )],
     )
 }
 
-pub(crate) fn simulator_ready_view() -> StudioView {
-    StudioView::new(
+pub(crate) fn simulator_ready_view() -> UiStudioView {
+    UiStudioView::new(
         vec![project_synced_pane_view(), simulator_ready_device_view()],
         vec![
-            UxLogEntry::new(UxLogLevel::Info, "fw-browser", "ready"),
-            UxLogEntry::new(
-                UxLogLevel::Info,
+            UiLogEntry::new(UiLogLevel::Info, "fw-browser", "ready"),
+            UiLogEntry::new(
+                UiLogLevel::Info,
                 "lpa-link",
                 "browser worker session owns Worker lifecycle in lpa-link",
             ),
-            UxLogEntry::new(UxLogLevel::Info, "fw-browser", "project loaded"),
+            UiLogEntry::new(UiLogLevel::Info, "fw-browser", "project loaded"),
         ],
     )
 }
 
-pub(crate) fn project_ready_view() -> StudioView {
-    StudioView::new(
+pub(crate) fn project_ready_view() -> UiStudioView {
+    UiStudioView::new(
         vec![project_synced_pane_view(), simulator_ready_device_view()],
         vec![
-            UxLogEntry::new(UxLogLevel::Info, "fw-browser", "project loaded"),
-            UxLogEntry::new(
-                UxLogLevel::Debug,
+            UiLogEntry::new(UiLogLevel::Info, "fw-browser", "project loaded"),
+            UiLogEntry::new(
+                UiLogLevel::Debug,
                 "lp-server",
                 "heartbeat frame=42 uptime_ms=700",
             ),
@@ -316,33 +318,33 @@ pub(crate) fn project_ready_view() -> StudioView {
     )
 }
 
-pub(crate) fn project_syncing_view() -> StudioView {
-    StudioView::new(
+pub(crate) fn project_syncing_view() -> UiStudioView {
+    UiStudioView::new(
         vec![project_syncing_pane_view(), simulator_ready_device_view()],
-        vec![UxLogEntry::new(
-            UxLogLevel::Info,
+        vec![UiLogEntry::new(
+            UiLogLevel::Info,
             "lpa-studio-core",
             "syncing project",
         )],
     )
 }
 
-pub(crate) fn project_sync_failed_view() -> StudioView {
-    StudioView::new(
+pub(crate) fn project_sync_failed_view() -> UiStudioView {
+    UiStudioView::new(
         vec![
             project_sync_failed_pane_view(),
             simulator_ready_device_view(),
         ],
-        vec![UxLogEntry::new(
-            UxLogLevel::Error,
+        vec![UiLogEntry::new(
+            UiLogLevel::Error,
             "lpa-studio-core",
             "project sync failed: protocol timeout",
         )],
     )
 }
 
-pub(crate) fn lightplayer_disconnected_view() -> StudioView {
-    StudioView::new(
+pub(crate) fn lightplayer_disconnected_view() -> UiStudioView {
+    UiStudioView::new(
         vec![device_view(
             UiStatus::good("Simulator connected"),
             vec![
@@ -355,47 +357,47 @@ pub(crate) fn lightplayer_disconnected_view() -> StudioView {
                     "connect-lightplayer",
                     "Connect LightPlayer",
                     UiStepState::Active,
-                    UiBody::text("Attach Studio to LightPlayer on the connected simulator."),
+                    UiViewContent::text("Attach Studio to LightPlayer on the connected simulator."),
                     vec![connect_lightplayer_action()],
                 ),
             ],
             vec!["[lpa-studio-core] LightPlayer protocol detached; device session remains open"],
         )],
-        vec![UxLogEntry::new(
-            UxLogLevel::Info,
+        vec![UiLogEntry::new(
+            UiLogLevel::Info,
             "lpa-studio-core",
             "LightPlayer protocol detached; device session remains open",
         )],
     )
 }
 
-pub(crate) fn provision_ready_view() -> StudioView {
-    StudioView::new(
+pub(crate) fn provision_ready_view() -> UiStudioView {
+    UiStudioView::new(
         vec![blank_device_view(
             UiStatus::warning("Ready to flash"),
-            UiBody::text("No LightPlayer firmware is running on this ESP32."),
+            UiViewContent::text("No LightPlayer firmware is running on this ESP32."),
             false,
         )],
-        vec![UxLogEntry::new(
-            UxLogLevel::Warn,
+        vec![UiLogEntry::new(
+            UiLogLevel::Warn,
             "lpa-studio-core",
             "server protocol is unavailable; firmware flashing is available",
         )],
     )
 }
 
-pub(crate) fn browser_serial_blank_firmware_view() -> StudioView {
-    StudioView::new(
+pub(crate) fn browser_serial_blank_firmware_view() -> UiStudioView {
+    UiStudioView::new(
         vec![blank_device_view(
             UiStatus::warning("Ready to flash"),
-            UiBody::Activity(blank_firmware_activity()),
+            UiViewContent::Activity(blank_firmware_activity()),
             false,
         )],
         vec![
-            UxLogEntry::new(UxLogLevel::Info, "fw-esp32", "ESP-ROM:esp32c6-20220919"),
-            UxLogEntry::new(UxLogLevel::Info, "fw-esp32", "invalid header: 0xffffffff"),
-            UxLogEntry::new(
-                UxLogLevel::Warn,
+            UiLogEntry::new(UiLogLevel::Info, "fw-esp32", "ESP-ROM:esp32c6-20220919"),
+            UiLogEntry::new(UiLogLevel::Info, "fw-esp32", "invalid header: 0xffffffff"),
+            UiLogEntry::new(
+                UiLogLevel::Warn,
                 "lpa-studio-core",
                 "no LightPlayer firmware detected; firmware flashing is available",
             ),
@@ -403,8 +405,8 @@ pub(crate) fn browser_serial_blank_firmware_view() -> StudioView {
     )
 }
 
-pub(crate) fn provisioning_view() -> StudioView {
-    StudioView::new(
+pub(crate) fn provisioning_view() -> UiStudioView {
+    UiStudioView::new(
         vec![device_view(
             UiStatus::working("Flashing"),
             vec![
@@ -414,7 +416,7 @@ pub(crate) fn provisioning_view() -> StudioView {
                     "connect-lightplayer",
                     "Flashing firmware",
                     UiStepState::Active,
-                    UiBody::Activity(provisioning_activity()),
+                    UiViewContent::Activity(provisioning_activity()),
                     Vec::new(),
                 ),
             ],
@@ -424,16 +426,16 @@ pub(crate) fn provisioning_view() -> StudioView {
                 "[lpa-link] Progress 42%",
             ],
         )],
-        vec![UxLogEntry::new(
-            UxLogLevel::Info,
+        vec![UiLogEntry::new(
+            UiLogLevel::Info,
             "lpa-link",
             "Connected to ESP32 bootloader",
         )],
     )
 }
 
-pub(crate) fn provision_failed_view() -> StudioView {
-    StudioView::new(
+pub(crate) fn provision_failed_view() -> UiStudioView {
+    UiStudioView::new(
         vec![device_view(
             UiStatus::error("Needs attention"),
             vec![
@@ -443,7 +445,7 @@ pub(crate) fn provision_failed_view() -> StudioView {
                     "connect-lightplayer",
                     "Flashing firmware",
                     UiStepState::NeedsAttention,
-                    UiBody::Issue(
+                    UiViewContent::Issue(
                         UxIssue::new("firmware flashing failed").with_detail(
                             "Check the cable, boot mode, and browser serial permission.",
                         ),
@@ -456,16 +458,16 @@ pub(crate) fn provision_failed_view() -> StudioView {
                 "[lpa-link] failed to write firmware image",
             ],
         )],
-        vec![UxLogEntry::new(
-            UxLogLevel::Error,
+        vec![UiLogEntry::new(
+            UiLogLevel::Error,
             "lpa-link",
             "failed to write firmware image",
         )],
     )
 }
 
-pub(crate) fn resetting_to_blank_view() -> StudioView {
-    StudioView::new(
+pub(crate) fn resetting_to_blank_view() -> UiStudioView {
+    UiStudioView::new(
         vec![device_view(
             UiStatus::working("Resetting"),
             vec![
@@ -475,7 +477,7 @@ pub(crate) fn resetting_to_blank_view() -> StudioView {
                     "connect-lightplayer",
                     "Wiping device",
                     UiStepState::Active,
-                    UiBody::Activity(reset_activity()),
+                    UiViewContent::Activity(reset_activity()),
                     Vec::new(),
                 ),
             ],
@@ -484,50 +486,50 @@ pub(crate) fn resetting_to_blank_view() -> StudioView {
                 "[lpa-link] Erasing device flash",
             ],
         )],
-        vec![UxLogEntry::new(
-            UxLogLevel::Info,
+        vec![UiLogEntry::new(
+            UiLogLevel::Info,
             "lpa-link",
             "Erasing device flash",
         )],
     )
 }
 
-pub(crate) fn reset_complete_view() -> StudioView {
-    StudioView::new(
+pub(crate) fn reset_complete_view() -> UiStudioView {
+    UiStudioView::new(
         vec![blank_device_view(
             UiStatus::warning("Blank ESP32"),
-            UiBody::text("The device has been erased and can be flashed again."),
+            UiViewContent::text("The device has been erased and can be flashed again."),
             true,
         )],
-        vec![UxLogEntry::new(
-            UxLogLevel::Info,
+        vec![UiLogEntry::new(
+            UiLogLevel::Info,
             "lpa-link",
             "Chip erase completed successfully",
         )],
     )
 }
 
-pub(crate) fn error_view() -> StudioView {
+pub(crate) fn error_view() -> UiStudioView {
     picker_issue_view(
         "browser worker boot timed out",
         "browser worker boot timed out",
     )
 }
 
-pub(crate) fn picker_issue_view(message: &'static str, log_message: &'static str) -> StudioView {
-    StudioView::new(
+pub(crate) fn picker_issue_view(message: &'static str, log_message: &'static str) -> UiStudioView {
+    UiStudioView::new(
         vec![device_view(
             UiStatus::error("Needs attention"),
             vec![stack_section(
                 "select-connection",
                 "Select connection",
                 UiStepState::NeedsAttention,
-                UiBody::Issue(UxIssue::new(message)),
+                UiViewContent::Issue(UxIssue::new(message)),
                 start_actions(),
             )],
             Vec::new(),
         )],
-        vec![studio_log(UxLogLevel::Error, log_message)],
+        vec![studio_log(UiLogLevel::Error, log_message)],
     )
 }
 
@@ -538,7 +540,7 @@ pub(crate) fn idle_device_view() -> UiPaneView {
             "select-connection",
             "Select connection",
             UiStepState::Active,
-            UiBody::text("Choose how Studio should connect."),
+            UiViewContent::text("Choose how Studio should connect."),
             start_actions(),
         )],
         Vec::new(),
@@ -554,7 +556,7 @@ pub(crate) fn endpoint_device_view() -> UiPaneView {
                 "connect-device",
                 "Connect device",
                 UiStepState::Active,
-                UiBody::text("Choose the device endpoint to open."),
+                UiViewContent::text("Choose the device endpoint to open."),
                 vec![
                     device_action(DeviceOp::ConnectEndpoint {
                         provider_id: LinkProviderKind::BrowserWorker,
@@ -579,7 +581,7 @@ pub(crate) fn starting_device_view() -> UiPaneView {
                 "connect-lightplayer",
                 "Connect LightPlayer",
                 UiStepState::Active,
-                UiBody::Progress(ProgressState::new("Opening server protocol")),
+                UiViewContent::Progress(ProgressState::new("Opening server protocol")),
                 Vec::new(),
             ),
         ],
@@ -600,7 +602,7 @@ pub(crate) fn simulator_ready_device_view() -> UiPaneView {
                 "connect-lightplayer",
                 "Connect LightPlayer",
                 UiStepState::Complete,
-                UiBody::Metrics(vec![UiMetric::new(
+                UiViewContent::Metrics(vec![UiMetric::new(
                     "Protocol",
                     "fw-browser-post-message-v1",
                 )]),
@@ -610,7 +612,7 @@ pub(crate) fn simulator_ready_device_view() -> UiPaneView {
                 "open-project",
                 "Open project",
                 UiStepState::Complete,
-                UiBody::text("Project controls are available in the Project pane."),
+                UiViewContent::text("Project controls are available in the Project pane."),
                 Vec::new(),
             ),
         ],
@@ -632,14 +634,14 @@ pub(crate) fn device_project_empty_view() -> UiPaneView {
                 "connect-lightplayer",
                 "Connect LightPlayer",
                 UiStepState::Complete,
-                UiBody::Metrics(vec![UiMetric::new("Protocol", "lp-serial-json-lines-v1")]),
+                UiViewContent::Metrics(vec![UiMetric::new("Protocol", "lp-serial-json-lines-v1")]),
                 vec![disconnect_lightplayer_action()],
             ),
             stack_section(
                 "open-project",
                 "Open project",
                 UiStepState::Active,
-                UiBody::text("Connect to a running project or load the demo project."),
+                UiViewContent::text("Connect to a running project or load the demo project."),
                 vec![
                     project_action(ProjectOp::ConnectRunningProject),
                     project_action(ProjectOp::LoadDemoProject),
@@ -663,14 +665,14 @@ pub(crate) fn device_project_selection_view() -> UiPaneView {
                 "connect-lightplayer",
                 "Connect LightPlayer",
                 UiStepState::Complete,
-                UiBody::Metrics(vec![UiMetric::new("Protocol", "lp-serial-json-lines-v1")]),
+                UiViewContent::Metrics(vec![UiMetric::new("Protocol", "lp-serial-json-lines-v1")]),
                 vec![disconnect_lightplayer_action()],
             ),
             stack_section(
                 "open-project",
                 "Open project",
                 UiStepState::Active,
-                UiBody::text("2 projects are running. Choose one to open."),
+                UiViewContent::text("2 projects are running. Choose one to open."),
                 vec![
                     project_action(ProjectOp::ConnectLoadedProject { handle_id: 1 })
                         .with_label("Connect /projects/ambient")
@@ -688,7 +690,11 @@ pub(crate) fn device_project_selection_view() -> UiPaneView {
     )
 }
 
-pub(crate) fn blank_device_view(status: UiStatus, body: UiBody, after_reset: bool) -> UiPaneView {
+pub(crate) fn blank_device_view(
+    status: UiStatus,
+    body: UiViewContent,
+    after_reset: bool,
+) -> UiPaneView {
     let detail = if after_reset {
         vec![
             "[lpa-link] Chip erase completed successfully",
@@ -762,15 +768,15 @@ pub(crate) fn reset_activity() -> UiActivity {
 
 pub(crate) fn device_view(
     status: UiStatus,
-    sections: Vec<UiStackSection>,
+    sections: Vec<UiStepView>,
     terminal: Vec<&'static str>,
 ) -> UiPaneView {
     UiPaneView::new(
-        DeviceUx::NODE_ID,
+        DeviceController::NODE_ID,
         "Device",
         status,
-        UiBody::Stack(Box::new(
-            UiStackView::new(sections).with_terminal(
+        UiViewContent::Stack(Box::new(
+            UiStepsView::new(sections).with_terminal(
                 terminal
                     .into_iter()
                     .map(UiTerminalLine::new)
@@ -785,37 +791,37 @@ pub(crate) fn stack_section(
     id: &'static str,
     title: &'static str,
     state: UiStepState,
-    body: UiBody,
+    body: UiViewContent,
     actions: Vec<UiAction>,
-) -> UiStackSection {
-    UiStackSection::new(id, title, state)
+) -> UiStepView {
+    UiStepView::new(id, title, state)
         .with_body(body)
         .with_actions(actions)
 }
 
-pub(crate) fn select_connection_complete(label: &'static str) -> UiStackSection {
+pub(crate) fn select_connection_complete(label: &'static str) -> UiStepView {
     stack_section(
         "select-connection",
         "Select connection",
         UiStepState::Complete,
-        UiBody::text(label),
+        UiViewContent::text(label),
         Vec::new(),
     )
 }
 
-pub(crate) fn connect_device_complete(metrics: Vec<UiMetric>) -> UiStackSection {
+pub(crate) fn connect_device_complete(metrics: Vec<UiMetric>) -> UiStepView {
     connect_device_complete_with_actions(metrics, Vec::new())
 }
 
 pub(crate) fn connect_device_complete_with_actions(
     metrics: Vec<UiMetric>,
     actions: Vec<UiAction>,
-) -> UiStackSection {
+) -> UiStepView {
     stack_section(
         "connect-device",
         "Connect device",
         UiStepState::Complete,
-        UiBody::Metrics(metrics),
+        UiViewContent::Metrics(metrics),
         actions,
     )
 }
@@ -838,20 +844,20 @@ pub(crate) fn esp32_metrics() -> Vec<UiMetric> {
 
 pub(crate) fn project_synced_pane_view() -> UiPaneView {
     UiPaneView::new(
-        ProjectUx::NODE_ID,
+        ProjectController::NODE_ID,
         "Project",
         UiStatus::good("Ready"),
-        UiBody::ProjectEditor(Box::new(project_editor_fixture(ProjectSyncPhase::Ready))),
+        UiViewContent::ProjectEditor(Box::new(project_editor_fixture(ProjectSyncPhase::Ready))),
         project_ready_actions(),
     )
 }
 
 pub(crate) fn project_syncing_pane_view() -> UiPaneView {
     UiPaneView::new(
-        ProjectUx::NODE_ID,
+        ProjectController::NODE_ID,
         "Project",
         UiStatus::working("Syncing"),
-        UiBody::ProjectEditor(Box::new(project_editor_empty_fixture(
+        UiViewContent::ProjectEditor(Box::new(project_editor_empty_fixture(
             ProjectSyncPhase::SyncingShapes,
         ))),
         Vec::new(),
@@ -860,10 +866,10 @@ pub(crate) fn project_syncing_pane_view() -> UiPaneView {
 
 pub(crate) fn project_sync_failed_pane_view() -> UiPaneView {
     UiPaneView::new(
-        ProjectUx::NODE_ID,
+        ProjectController::NODE_ID,
         "Project",
         UiStatus::error("Sync issue"),
-        UiBody::ProjectEditor(Box::new(project_editor_empty_fixture(
+        UiViewContent::ProjectEditor(Box::new(project_editor_empty_fixture(
             ProjectSyncPhase::Failed,
         ))),
         project_ready_actions(),
@@ -1171,7 +1177,7 @@ pub(crate) fn project_ready_actions() -> Vec<UiAction> {
 }
 
 pub(crate) fn project_view(state: ProjectState, server_connected: bool) -> UiPaneView {
-    let mut project = ProjectUx::new();
+    let mut project = ProjectController::new();
     let no_running_project = matches!(state, ProjectState::NotLoaded) && server_connected;
     project.set_state(state);
     if no_running_project {
@@ -1232,9 +1238,9 @@ pub(crate) fn device_management_actions() -> Vec<UiAction> {
 }
 
 pub(crate) fn device_action(op: DeviceOp) -> UiAction {
-    UiAction::from_op(UxNodeId::new(DeviceUx::NODE_ID), op)
+    UiAction::from_op(UxNodeId::new(DeviceController::NODE_ID), op)
 }
 
 pub(crate) fn project_action(op: ProjectOp) -> UiAction {
-    UiAction::from_op(UxNodeId::new(ProjectUx::NODE_ID), op)
+    UiAction::from_op(UxNodeId::new(ProjectController::NODE_ID), op)
 }

@@ -1,17 +1,18 @@
+use crate::view::steps_view::{UiStepState, UiStepView};
 use crate::{
-    ConnectedDeviceSummary, DeviceOp, DeviceSnapshot, EndpointChoice, LinkOp, LinkState, LinkUx,
-    ProjectOp, ProjectState, ProviderChoice, ServerFailureKind, ServerState, ServerUx, UiAction,
-    UiBody, UiMetric, UiPaneView, UiStackSection, UiStackView, UiStatus, UiStepState,
-    UiTerminalLine, UxLogEntry, UxNode, UxNodeId,
+    ConnectedDeviceSummary, DeviceOp, DeviceSnapshot, EndpointChoice, LinkController, LinkOp,
+    LinkState, ProjectOp, ProjectState, ProviderChoice, ServerController, ServerFailureKind,
+    ServerState, UiAction, UiLogEntry, UiMetric, UiPaneView, UiStatus, UiStepsView, UiTerminalLine,
+    UiViewContent, UxNode, UxNodeId,
 };
 
-pub struct DeviceUx {
-    pub(crate) link: LinkUx,
-    pub(crate) server: ServerUx,
+pub struct DeviceController {
+    pub(crate) link: LinkController,
+    pub(crate) server: ServerController,
     terminal: Vec<UiTerminalLine>,
 }
 
-impl DeviceUx {
+impl DeviceController {
     pub const NODE_ID: &'static str = "studio.device";
     pub const SECTION_SELECT_CONNECTION: &'static str = "select-connection";
     pub const SECTION_CONNECT_DEVICE: &'static str = "connect-device";
@@ -20,8 +21,8 @@ impl DeviceUx {
 
     pub fn new() -> Self {
         Self {
-            link: LinkUx::new(),
-            server: ServerUx::new(),
+            link: LinkController::new(),
+            server: ServerController::new(),
             terminal: Vec::new(),
         }
     }
@@ -52,7 +53,7 @@ impl DeviceUx {
         !matches!(self.link.state(), LinkState::SelectingProvider { .. })
     }
 
-    pub fn record_logs(&mut self, logs: &[UxLogEntry]) {
+    pub fn record_logs(&mut self, logs: &[UiLogEntry]) {
         self.terminal.extend(
             logs.iter()
                 .filter(|log| is_device_log_source(&log.source))
@@ -65,7 +66,7 @@ impl DeviceUx {
     }
 
     pub fn view(&self, project_state: &ProjectState, project_actions: Vec<UiAction>) -> UiPaneView {
-        let stack = UiStackView::new(self.sections(project_state, project_actions)).with_terminal(
+        let stack = UiStepsView::new(self.sections(project_state, project_actions)).with_terminal(
             if self.has_meaningful_terminal() {
                 self.terminal.clone()
             } else {
@@ -77,7 +78,7 @@ impl DeviceUx {
             Self::NODE_ID,
             "Device",
             self.status(),
-            UiBody::Stack(Box::new(stack)),
+            UiViewContent::Stack(Box::new(stack)),
             Vec::new(),
         )
     }
@@ -86,7 +87,7 @@ impl DeviceUx {
         &self,
         project_state: &ProjectState,
         project_actions: Vec<UiAction>,
-    ) -> Vec<UiStackSection> {
+    ) -> Vec<UiStepView> {
         let mut sections = vec![self.select_connection_section()];
         if self.should_show_connect_device() {
             sections.push(self.connect_device_section());
@@ -153,10 +154,10 @@ impl DeviceUx {
         }
     }
 
-    fn select_connection_section(&self) -> UiStackSection {
+    fn select_connection_section(&self) -> UiStepView {
         match self.link.state() {
             LinkState::SelectingProvider { providers, issue } => {
-                let section = UiStackSection::new(
+                let section = UiStepView::new(
                     Self::SECTION_SELECT_CONNECTION,
                     "Select connection",
                     if issue.is_some() {
@@ -167,64 +168,67 @@ impl DeviceUx {
                 )
                 .with_actions(provider_actions(providers, self.node_id()));
                 match issue {
-                    Some(issue) => section.with_body(UiBody::Issue(issue.clone())),
-                    None => section.with_body(UiBody::text("Choose how Studio should connect.")),
+                    Some(issue) => section.with_body(UiViewContent::Issue(issue.clone())),
+                    None => {
+                        section.with_body(UiViewContent::text("Choose how Studio should connect."))
+                    }
                 }
             }
-            LinkState::Failed { .. } => UiStackSection::new(
+            LinkState::Failed { .. } => UiStepView::new(
                 Self::SECTION_SELECT_CONNECTION,
                 "Select connection",
                 UiStepState::NeedsAttention,
             )
-            .with_body(UiBody::text("Refresh connections to try again."))
+            .with_body(UiViewContent::text("Refresh connections to try again."))
             .with_actions(vec![self.action(DeviceOp::RefreshConnections)]),
-            _ => UiStackSection::new(
+            _ => UiStepView::new(
                 Self::SECTION_SELECT_CONNECTION,
                 "Select connection",
                 UiStepState::Complete,
             )
-            .with_body(UiBody::text(selected_connection_label(self.link.state()))),
+            .with_body(UiViewContent::text(selected_connection_label(
+                self.link.state(),
+            ))),
         }
     }
 
-    fn connect_device_section(&self) -> UiStackSection {
+    fn connect_device_section(&self) -> UiStepView {
         match self.link.state() {
-            LinkState::SelectingProvider { .. } => UiStackSection::new(
+            LinkState::SelectingProvider { .. } => UiStepView::new(
                 Self::SECTION_CONNECT_DEVICE,
                 "Connect device",
                 UiStepState::Pending,
             )
-            .with_body(UiBody::text("Choose a connection first.")),
+            .with_body(UiViewContent::text("Choose a connection first.")),
             LinkState::DiscoveringEndpoints {
                 provider_id,
                 progress,
-            } => UiStackSection::new(
+            } => UiStepView::new(
                 Self::SECTION_CONNECT_DEVICE,
                 "Connect device",
                 UiStepState::Active,
             )
-            .with_body(UiBody::Progress(progress.clone().with_detail(format!(
-                "Discovering endpoints from {}.",
-                provider_id.label()
-            )))),
+            .with_body(UiViewContent::Progress(progress.clone().with_detail(
+                format!("Discovering endpoints from {}.", provider_id.label()),
+            ))),
             LinkState::SelectingEndpoint {
                 provider_id,
                 endpoints,
-            } => UiStackSection::new(
+            } => UiStepView::new(
                 Self::SECTION_CONNECT_DEVICE,
                 "Connect device",
                 UiStepState::Active,
             )
-            .with_body(UiBody::text("Choose the device endpoint to open."))
+            .with_body(UiViewContent::text("Choose the device endpoint to open."))
             .with_actions(endpoint_actions(*provider_id, endpoints, self.node_id())),
-            LinkState::Connecting { progress, .. } => UiStackSection::new(
+            LinkState::Connecting { progress, .. } => UiStepView::new(
                 Self::SECTION_CONNECT_DEVICE,
                 "Connect device",
                 UiStepState::Active,
             )
-            .with_body(UiBody::Progress(progress.clone())),
+            .with_body(UiViewContent::Progress(progress.clone())),
             LinkState::Connected { device } | LinkState::Managing { device, .. } => {
-                let section = UiStackSection::new(
+                let section = UiStepView::new(
                     Self::SECTION_CONNECT_DEVICE,
                     "Connect device",
                     UiStepState::Complete,
@@ -236,47 +240,45 @@ impl DeviceUx {
                     section
                 }
             }
-            LinkState::Failed { issue } => UiStackSection::new(
+            LinkState::Failed { issue } => UiStepView::new(
                 Self::SECTION_CONNECT_DEVICE,
                 "Connect device",
                 UiStepState::NeedsAttention,
             )
-            .with_body(UiBody::Issue(issue.clone()))
+            .with_body(UiViewContent::Issue(issue.clone()))
             .with_actions(vec![self.action(DeviceOp::RefreshConnections)]),
         }
     }
 
-    fn connect_lightplayer_section(&self) -> UiStackSection {
+    fn connect_lightplayer_section(&self) -> UiStepView {
         match (self.link.state(), &self.server.snapshot().state) {
-            (LinkState::Connected { .. }, ServerState::Disconnected) => UiStackSection::new(
+            (LinkState::Connected { .. }, ServerState::Disconnected) => UiStepView::new(
                 Self::SECTION_CONNECT_LIGHTPLAYER,
                 "Connect LightPlayer",
                 UiStepState::Active,
             )
-            .with_body(UiBody::text(
+            .with_body(UiViewContent::text(
                 "Attach Studio to LightPlayer on the connected device.",
             ))
             .with_actions(self.connect_lightplayer_actions()),
-            (LinkState::Connected { .. }, ServerState::Connecting { progress }) => {
-                UiStackSection::new(
-                    Self::SECTION_CONNECT_LIGHTPLAYER,
-                    "Connect LightPlayer",
-                    UiStepState::Active,
-                )
-                .with_body(UiBody::Progress(progress.clone()))
-            }
-            (LinkState::Connected { .. }, ServerState::Connected { protocol }) => {
-                UiStackSection::new(
-                    Self::SECTION_CONNECT_LIGHTPLAYER,
-                    "Connect LightPlayer",
-                    UiStepState::Complete,
-                )
-                .with_body(UiBody::Metrics(vec![UiMetric::new("Protocol", protocol)]))
-                .with_actions(vec![self.action(DeviceOp::DisconnectLightPlayer)])
-            }
+            (LinkState::Connected { .. }, ServerState::Connecting { progress }) => UiStepView::new(
+                Self::SECTION_CONNECT_LIGHTPLAYER,
+                "Connect LightPlayer",
+                UiStepState::Active,
+            )
+            .with_body(UiViewContent::Progress(progress.clone())),
+            (LinkState::Connected { .. }, ServerState::Connected { protocol }) => UiStepView::new(
+                Self::SECTION_CONNECT_LIGHTPLAYER,
+                "Connect LightPlayer",
+                UiStepState::Complete,
+            )
+            .with_body(UiViewContent::Metrics(vec![UiMetric::new(
+                "Protocol", protocol,
+            )]))
+            .with_actions(vec![self.action(DeviceOp::DisconnectLightPlayer)]),
             (LinkState::Connected { .. }, ServerState::Failed { issue, kind }) => {
                 let no_firmware = *kind == ServerFailureKind::NoFirmware;
-                UiStackSection::new(
+                UiStepView::new(
                     Self::SECTION_CONNECT_LIGHTPLAYER,
                     if no_firmware {
                         "LightPlayer unavailable"
@@ -290,9 +292,9 @@ impl DeviceUx {
                     },
                 )
                 .with_body(if no_firmware {
-                    UiBody::text("No LightPlayer firmware is running on this ESP32.")
+                    UiViewContent::text("No LightPlayer firmware is running on this ESP32.")
                 } else {
-                    UiBody::Issue(issue.clone())
+                    UiViewContent::Issue(issue.clone())
                 })
                 .with_actions(if no_firmware {
                     Vec::new()
@@ -300,18 +302,18 @@ impl DeviceUx {
                     self.connect_lightplayer_actions()
                 })
             }
-            (LinkState::Managing { progress, .. }, _) => UiStackSection::new(
+            (LinkState::Managing { progress, .. }, _) => UiStepView::new(
                 Self::SECTION_CONNECT_LIGHTPLAYER,
                 progress.label.clone(),
                 UiStepState::Active,
             )
-            .with_body(UiBody::Progress(progress.clone())),
-            _ => UiStackSection::new(
+            .with_body(UiViewContent::Progress(progress.clone())),
+            _ => UiStepView::new(
                 Self::SECTION_CONNECT_LIGHTPLAYER,
                 "Connect LightPlayer",
                 UiStepState::Pending,
             )
-            .with_body(UiBody::text("Connect a device first.")),
+            .with_body(UiViewContent::text("Connect a device first.")),
         }
     }
 
@@ -319,61 +321,63 @@ impl DeviceUx {
         &self,
         project_state: &ProjectState,
         actions: Vec<UiAction>,
-    ) -> UiStackSection {
+    ) -> UiStepView {
         if !self.has_lightplayer_state() {
             if self.needs_firmware() {
-                return UiStackSection::new(
+                return UiStepView::new(
                     Self::SECTION_OPEN_PROJECT,
                     "Open project",
                     UiStepState::Pending,
                 )
-                .with_body(UiBody::text("Flash firmware before opening a project."));
+                .with_body(UiViewContent::text(
+                    "Flash firmware before opening a project.",
+                ));
             }
-            return UiStackSection::new(
+            return UiStepView::new(
                 Self::SECTION_OPEN_PROJECT,
                 "Open project",
                 UiStepState::Pending,
             )
-            .with_body(UiBody::text("Connect LightPlayer first."));
+            .with_body(UiViewContent::text("Connect LightPlayer first."));
         }
 
         match project_state {
-            ProjectState::NotLoaded => UiStackSection::new(
+            ProjectState::NotLoaded => UiStepView::new(
                 Self::SECTION_OPEN_PROJECT,
                 "Open project",
                 UiStepState::Active,
             )
-            .with_body(UiBody::text(not_loaded_project_prompt(&actions)))
+            .with_body(UiViewContent::text(not_loaded_project_prompt(&actions)))
             .with_actions(actions),
-            ProjectState::SelectingLoadedProject { projects } => UiStackSection::new(
+            ProjectState::SelectingLoadedProject { projects } => UiStepView::new(
                 Self::SECTION_OPEN_PROJECT,
                 "Open project",
                 UiStepState::Active,
             )
-            .with_body(UiBody::text(format!(
+            .with_body(UiViewContent::text(format!(
                 "{} projects are running. Choose one to open.",
                 projects.len()
             )))
             .with_actions(actions),
             ProjectState::ConnectingRunningProject { progress }
-            | ProjectState::LoadingDemoProject { progress } => UiStackSection::new(
+            | ProjectState::LoadingDemoProject { progress } => UiStepView::new(
                 Self::SECTION_OPEN_PROJECT,
                 "Open project",
                 UiStepState::Active,
             )
-            .with_body(UiBody::Progress(progress.clone())),
-            ProjectState::Ready { project_id, .. } => UiStackSection::new(
+            .with_body(UiViewContent::Progress(progress.clone())),
+            ProjectState::Ready { project_id, .. } => UiStepView::new(
                 Self::SECTION_OPEN_PROJECT,
                 "Open project",
                 UiStepState::Complete,
             )
-            .with_body(UiBody::text(format!("{project_id} is loaded."))),
-            ProjectState::Failed { issue } => UiStackSection::new(
+            .with_body(UiViewContent::text(format!("{project_id} is loaded."))),
+            ProjectState::Failed { issue } => UiStepView::new(
                 Self::SECTION_OPEN_PROJECT,
                 "Open project",
                 UiStepState::NeedsAttention,
             )
-            .with_body(UiBody::Issue(issue.clone()))
+            .with_body(UiViewContent::Issue(issue.clone()))
             .with_actions(actions),
         }
     }
@@ -424,7 +428,7 @@ fn not_loaded_project_prompt(actions: &[UiAction]) -> &'static str {
     }
 }
 
-impl UxNode for DeviceUx {
+impl UxNode for DeviceController {
     type Op = DeviceOp;
 
     fn node_id(&self) -> UxNodeId {
@@ -432,7 +436,7 @@ impl UxNode for DeviceUx {
     }
 }
 
-impl Default for DeviceUx {
+impl Default for DeviceController {
     fn default() -> Self {
         Self::new()
     }
@@ -518,8 +522,8 @@ fn map_link_action(action: UiAction, node_id: UxNodeId) -> Option<UiAction> {
     }
 }
 
-fn device_summary_body(device: &ConnectedDeviceSummary) -> UiBody {
-    UiBody::Metrics(vec![
+fn device_summary_body(device: &ConnectedDeviceSummary) -> UiViewContent {
+    UiViewContent::Metrics(vec![
         UiMetric::new("Provider", device.provider_id.label()),
         UiMetric::new("Endpoint", &device.endpoint_id),
         UiMetric::new("Session", &device.session_id),

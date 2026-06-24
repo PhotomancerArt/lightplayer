@@ -1,6 +1,6 @@
-use crate::{UxError, UxNodeId};
+use crate::{UiError, UxNodeId};
 
-use super::ProjectUx;
+use super::ProjectController;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProjectEditorTarget {
@@ -59,7 +59,7 @@ impl ProjectEditorTarget {
         }
     }
 
-    pub fn parse(node_id: &UxNodeId) -> Result<Self, UxError> {
+    pub fn parse(node_id: &UxNodeId) -> Result<Self, UiError> {
         let root = project_node_id();
         let Some(tail) = node_id.strip_prefix(&root) else {
             return Err(unsupported_project_target(node_id));
@@ -80,7 +80,7 @@ impl ProjectEditorTarget {
 }
 
 fn project_node_id() -> UxNodeId {
-    UxNodeId::new(ProjectUx::NODE_ID)
+    UxNodeId::new(ProjectController::NODE_ID)
 }
 
 fn append_dotted_path(mut node_id: UxNodeId, value: &str) -> UxNodeId {
@@ -90,8 +90,8 @@ fn append_dotted_path(mut node_id: UxNodeId, value: &str) -> UxNodeId {
     node_id
 }
 
-fn unsupported_project_target(node_id: &UxNodeId) -> UxError {
-    UxError::UnsupportedAction(format!("unknown project editor target {node_id}"))
+fn unsupported_project_target(node_id: &UxNodeId) -> UiError {
+    UiError::UnsupportedAction(format!("unknown project editor target {node_id}"))
 }
 
 #[cfg(test)]
@@ -164,7 +164,7 @@ mod tests {
         let error = ProjectEditorTarget::parse(&UxNodeId::new("studio.project.unknown"))
             .expect_err("target should be rejected");
 
-        assert!(matches!(error, UxError::UnsupportedAction(_)));
+        assert!(matches!(error, UiError::UnsupportedAction(_)));
         assert!(error.message().contains("studio.project.unknown"));
     }
 
@@ -173,7 +173,7 @@ mod tests {
         let error = ProjectEditorTarget::parse(&UxNodeId::new("studio.project.node.4.slot"))
             .expect_err("target should be rejected");
 
-        assert!(matches!(error, UxError::UnsupportedAction(_)));
+        assert!(matches!(error, UiError::UnsupportedAction(_)));
         assert!(error.message().contains("studio.project.node.4.slot"));
     }
 }

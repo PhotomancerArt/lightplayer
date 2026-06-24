@@ -1,13 +1,17 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{DeviceUx, StudioView, UiAction, UiBody, UiPaneView};
+use lpa_studio_core::{DeviceController, UiAction, UiPaneView, UiStudioView, UiViewContent};
 
 use crate::app::{ProjectNodeWorkspace, RuntimeLog};
 use crate::core::AppPane;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn StudioShell(view: StudioView, running: bool, on_action: EventHandler<UiAction>) -> Element {
-    let StudioView { panes, logs } = view;
+pub fn StudioShell(
+    view: UiStudioView,
+    running: bool,
+    on_action: EventHandler<UiAction>,
+) -> Element {
+    let UiStudioView { panes, logs } = view;
     let PaneGroups { main, device } = group_panes(panes);
     let project_editor = project_editor_view(&main);
     let layout_class = if project_editor.is_some() {
@@ -83,7 +87,7 @@ fn group_panes(panes: Vec<UiPaneView>) -> PaneGroups {
     let mut main = Vec::new();
     let mut device = None;
     for pane in panes {
-        if pane.node_id.as_str() == DeviceUx::NODE_ID {
+        if pane.node_id.as_str() == DeviceController::NODE_ID {
             device = Some(pane);
         } else {
             main.push(pane);
@@ -94,7 +98,7 @@ fn group_panes(panes: Vec<UiPaneView>) -> PaneGroups {
 
 fn project_editor_view(panes: &[UiPaneView]) -> Option<lpa_studio_core::ProjectEditorView> {
     panes.iter().find_map(|pane| match &pane.body {
-        UiBody::ProjectEditor(editor) => Some((**editor).clone()),
+        UiViewContent::ProjectEditor(editor) => Some((**editor).clone()),
         _ => None,
     })
 }
