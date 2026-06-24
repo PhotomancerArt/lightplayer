@@ -106,6 +106,17 @@ as `Edge placement`. Use `#[story(label = "...")]` only when the derived label
 would be misleading, and `description = "..."` only when the storybook chrome
 needs extra context.
 
+The storybook creates one synthetic overview route per component, such as:
+
+```text
+base/popover/overview
+```
+
+Overview pages render every story for that component in one scrollable review
+surface. They are storybook UI affordances, not generated story functions.
+Individual story pages should keep their own chrome minimal: title, optional
+description, and the source file path supplied by the generated descriptor.
+
 `build.rs` parses `#[story]` metadata with `syn` and generates the central
 story registry. If a story is malformed, the build should fail with a concrete
 diagnostic telling you which file, function, or route is wrong. Do not recreate

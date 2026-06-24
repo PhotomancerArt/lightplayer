@@ -19,12 +19,10 @@ const PLAYLIST_SLOTS_JSON: &str = include_str!("story_data/playlist.slots.json")
 const SHADER_SHAPE_JSON: &str = include_str!("story_data/shader.shape.json");
 const SHADER_SLOTS_JSON: &str = include_str!("story_data/shader.slots.json");
 
-#[story]
+#[story(description = "Instrument-window direction for a simple produced-value node.")]
 fn clock_instrument() -> Element {
     rsx! {
         NodeUiStoryCanvas {
-            title: "Clock",
-            note: "Instrument-window direction for a simple produced-value node.",
             NodeWindow {
                 node: clock_node(),
                 variant: NodeUiVariant::Instrument,
@@ -33,12 +31,10 @@ fn clock_instrument() -> Element {
     }
 }
 
-#[story]
+#[story(description = "Compact-inspector direction with the same Clock data.")]
 fn clock_compact() -> Element {
     rsx! {
         NodeUiStoryCanvas {
-            title: "Clock compact",
-            note: "Compact-inspector direction with the same Clock data.",
             NodeWindow {
                 node: clock_node(),
                 variant: NodeUiVariant::Compact,
@@ -47,12 +43,12 @@ fn clock_compact() -> Element {
     }
 }
 
-#[story]
+#[story(
+    description = "Control product node with a rough probed-output box and one-level mapping detail."
+)]
 fn fixture_control_product() -> Element {
     rsx! {
         NodeUiStoryCanvas {
-            title: "Fixture",
-            note: "Control product node with a rough probed-output box and one-level mapping detail.",
             NodeWindow {
                 node: fixture_node(),
                 variant: NodeUiVariant::Instrument,
@@ -61,12 +57,10 @@ fn fixture_control_product() -> Element {
     }
 }
 
-#[story]
+#[story(description = "Visual product node with a rough render preview surface.")]
 fn shader_visual_product() -> Element {
     rsx! {
         NodeUiStoryCanvas {
-            title: "Shader",
-            note: "Visual product node with a rough render preview surface.",
             NodeWindow {
                 node: shader_node(),
                 variant: NodeUiVariant::Instrument,
@@ -75,12 +69,12 @@ fn shader_visual_product() -> Element {
     }
 }
 
-#[story]
+#[story(
+    description = "Fyeah-inspired Playlist node with active child ownership and product output."
+)]
 fn playlist_children() -> Element {
     rsx! {
         NodeUiStoryCanvas {
-            title: "Playlist",
-            note: "Fyeah-inspired Playlist node with active child ownership and product output.",
             NodeWindow {
                 node: playlist_node(),
                 variant: NodeUiVariant::Instrument,
@@ -89,21 +83,25 @@ fn playlist_children() -> Element {
     }
 }
 
-#[story]
+#[story(
+    description = "Minimal node windows for checking status color, icon, tint, and the details popup."
+)]
 fn status_indicators() -> Element {
     rsx! {
         NodeUiStatusStory {}
     }
 }
 
-#[story]
+#[story(
+    description = "The intended hierarchy: project root scopes every ordinary node beneath it."
+)]
 fn project_context() -> Element {
     rsx! {
         NodeUiProjectContext {}
     }
 }
 
-#[story]
+#[story(description = "All representative node presentations on one review surface.")]
 fn gallery() -> Element {
     rsx! {
         NodeUiGallery {}
@@ -112,13 +110,9 @@ fn gallery() -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn NodeUiStoryCanvas(title: &'static str, note: &'static str, children: Element) -> Element {
+fn NodeUiStoryCanvas(children: Element) -> Element {
     rsx! {
         section { class: "ux-node-ui-story",
-            header { class: "ux-node-ui-story-heading",
-                h2 { "{title}" }
-                p { "{note}" }
-            }
             {children}
         }
     }
@@ -130,8 +124,6 @@ fn NodeUiGallery() -> Element {
     let nodes = vec![clock_node(), fixture_node(), shader_node(), playlist_node()];
     rsx! {
         NodeUiStoryCanvas {
-            title: "Node gallery",
-            note: "All representative node presentations on one review surface.",
             div { class: "ux-node-ui-gallery",
                 for node in nodes {
                     NodeWindow {
@@ -181,8 +173,6 @@ fn NodeUiStatusStory() -> Element {
     ];
     rsx! {
         NodeUiStoryCanvas {
-            title: "Status indicators",
-            note: "Minimal node windows for checking status color, icon, tint, and the details popup.",
             div { class: "ux-node-ui-status-gallery",
                 for node in nodes {
                     NodeWindow {
@@ -201,8 +191,6 @@ fn NodeUiStatusStory() -> Element {
 fn NodeUiProjectContext() -> Element {
     rsx! {
         NodeUiStoryCanvas {
-            title: "Project context",
-            note: "The intended hierarchy: project root scopes every ordinary node beneath it.",
             div { class: "ux-node-ui-project-layout",
                 aside { class: "ux-node-ui-project-tree",
                     p { class: "ux-node-ui-tree-heading", "fyeah_sign.show" }

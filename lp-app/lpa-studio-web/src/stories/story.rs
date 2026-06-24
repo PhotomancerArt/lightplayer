@@ -8,6 +8,7 @@
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct StoryDescriptor {
     pub id: &'static str,
+    pub source_path: &'static str,
     pub family: &'static str,
     pub category: Option<&'static str>,
     pub component: &'static str,
@@ -19,6 +20,7 @@ pub struct StoryDescriptor {
 impl StoryDescriptor {
     pub const fn new(
         id: &'static str,
+        source_path: &'static str,
         family: &'static str,
         category: Option<&'static str>,
         component: &'static str,
@@ -28,6 +30,7 @@ impl StoryDescriptor {
     ) -> Self {
         Self {
             id,
+            source_path,
             family,
             category,
             component,

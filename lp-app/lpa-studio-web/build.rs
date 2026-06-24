@@ -75,6 +75,7 @@ impl StoryModule {
             .map_err(|error| format!("Rust parse error before story discovery: {error}"))?;
         let path_info = StoryPathInfo::from_path(src_dir, story_file)?;
         let module_path = story_module_path(src_dir, story_file)?;
+        let source_path = story_source_path(src_dir, story_file)?;
 
         let mut stories = Vec::new();
         for item in parsed.items {
@@ -90,6 +91,7 @@ impl StoryModule {
             let id = path_info.story_id(&story_segment);
             stories.push(StorySpec {
                 id,
+                source_path: source_path.clone(),
                 family: path_info.family.clone(),
                 category: path_info.category.clone(),
                 component: path_info.component.clone(),
@@ -266,6 +268,7 @@ fn story_label_from_ident(function_name: &str) -> String {
 #[derive(Debug)]
 struct StorySpec {
     id: String,
+    source_path: String,
     family: String,
     category: Option<String>,
     component: String,
@@ -312,6 +315,9 @@ fn generate_registry(story_modules: &[StoryModule]) -> String {
             generated.push_str("        crate::stories::story::StoryDescriptor::new(\n");
             generated.push_str("            \"");
             generated.push_str(&rust_string_literal(&story.id));
+            generated.push_str("\",\n");
+            generated.push_str("            \"");
+            generated.push_str(&rust_string_literal(&story.source_path));
             generated.push_str("\",\n");
             generated.push_str("            \"");
             generated.push_str(&rust_string_literal(&story.family));
@@ -432,6 +438,20 @@ fn story_module_path(src_dir: &Path, story_file: &Path) -> Result<String, String
         module_path.push_str(segment);
     }
     Ok(module_path)
+}
+
+fn story_source_path(src_dir: &Path, story_file: &Path) -> Result<String, String> {
+    let relative = story_file
+        .strip_prefix(src_dir)
+        .map_err(|_| "story file is not under src".to_string())?;
+    Ok(format!("src/{}", slash_path(relative)))
+}
+
+fn slash_path(path: &Path) -> String {
+    path.iter()
+        .map(|segment| segment.to_string_lossy())
+        .collect::<Vec<_>>()
+        .join("/")
 }
 
 fn rust_string_literal(value: &str) -> String {

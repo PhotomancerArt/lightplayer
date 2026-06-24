@@ -1,30 +1,30 @@
 use dioxus::prelude::*;
 
 use crate::stories::story::StoryDescriptor;
-use crate::stories::story_registry::{all_stories, render_story, story_by_id, DEFAULT_STORY_ID};
+use crate::stories::story_registry::{DEFAULT_STORY_ID, all_stories, render_story, story_by_id};
 
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn StoryBook() -> Element {
     let initial_route = selected_story_route_from_hash();
     let mut selected_story_id = use_signal(move || initial_route.story_id);
     let mut viewport = use_signal(move || initial_route.viewport);
-    let selected = selected_story_id.read().clone();
-    let selected_viewport = *viewport.read();
-    let descriptor = story_by_id(&selected).unwrap_or_else(|| {
-        story_by_id(DEFAULT_STORY_ID).expect("default story descriptor is registered")
-    });
     let stories = all_stories();
     let story_groups = story_groups(&stories);
+    let selected = selected_story_id.read().clone();
+    let selected_viewport = *viewport.read();
+    let selection = story_selection(&selected, &story_groups)
+        .or_else(|| story_selection(DEFAULT_STORY_ID, &story_groups))
+        .expect("default story descriptor is registered");
+    let page_title = selection.label();
+    let page_description = selection.description();
+    let page_source_ref = selection.source_ref();
+    let page_id = selection.id().to_string();
 
     if is_story_png_mode() {
+        let frame_style = story_png_viewport().frame_style();
         return rsx! {
             main { class: "story-png-page",
-                StoryCanvas {
-                    story_id: descriptor.id,
-                    label: descriptor.label,
-                    description: descriptor.description,
-                    frame_style: story_png_viewport().frame_style(),
-                }
+                {render_story_selection(&selection, frame_style)}
             }
         };
     }
@@ -38,25 +38,41 @@ pub fn StoryBook() -> Element {
                     p { "{stories.len()} component states" }
                 }
                 div { class: "story-discovery-links", "aria-hidden": "true",
-                    for story in stories.iter() {
-                        {
-                            let story_href = story_hash(story.id, selected_viewport);
-                            rsx! {
-                                a {
-                                    href: "{story_href}",
-                                    tabindex: "-1",
-                                    "{story.label}"
+                    for family in story_groups.iter() {
+                        for category in family.categories.iter() {
+                            for component in category.components.iter() {
+                                {
+                                    let overview_href = story_hash(&component.overview_id, selected_viewport);
+                                    rsx! {
+                                        a {
+                                            href: "{overview_href}",
+                                            tabindex: "-1",
+                                            "{component.label} overview"
+                                        }
+                                    }
+                                }
+                                for story in component.stories.iter() {
+                                    {
+                                        let story_href = story_hash(story.id, selected_viewport);
+                                        rsx! {
+                                            a {
+                                                href: "{story_href}",
+                                                tabindex: "-1",
+                                                "{story.label}"
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
                 nav { class: "story-nav",
-                    for family in story_groups {
+                    for family in story_groups.iter() {
                         section { class: "story-nav-family",
                             h2 { "{family.label}" }
                             div { class: "story-nav-family-body",
-                                for category in family.categories {
+                                for category in family.categories.iter() {
                                     {
                                         rsx! {
                                             div { class: "story-nav-category",
@@ -64,14 +80,9 @@ pub fn StoryBook() -> Element {
                                                     h3 { "{category_label}" }
                                                 }
                                                 div { class: "story-nav-components",
-                                                    for component in category.components {
+                                                    for component in category.components.iter() {
                                                         {
-                                                            let first_story_id = component
-                                                                .stories
-                                                                .first()
-                                                                .map(|story| story.id)
-                                                                .unwrap_or(DEFAULT_STORY_ID);
-                                                            let expanded = component
+                                                            let expanded = component.overview_id == selected || component
                                                                 .stories
                                                                 .iter()
                                                                 .any(|story| story.id == selected);
@@ -80,13 +91,14 @@ pub fn StoryBook() -> Element {
                                                             } else {
                                                                 "story-nav-component"
                                                             };
-                                                            let component_href = story_hash(first_story_id, selected_viewport);
+                                                            let component_href = story_hash(&component.overview_id, selected_viewport);
+                                                            let overview_id_for_component = component.overview_id.clone();
                                                             rsx! {
                                                                 div { class: "story-nav-component-group",
                                                                     a {
                                                                         class: "{component_class}",
                                                                         href: "{component_href}",
-                                                                        onclick: move |_| selected_story_id.set(first_story_id.to_string()),
+                                                                        onclick: move |_| selected_story_id.set(overview_id_for_component.clone()),
                                                                         span { class: "story-nav-component-label", "{component.label}" }
                                                                         span { class: "story-nav-component-count", "{component.stories.len()}" }
                                                                     }
@@ -101,7 +113,25 @@ pub fn StoryBook() -> Element {
                                                                                 class: "{story_list_class}",
                                                                                 "aria-hidden": if expanded { "false" } else { "true" },
                                                                                 div { class: "story-nav-story-list-inner",
-                                                                                    for story in component.stories {
+                                                                                    {
+                                                                                        let overview_link_class = if component.overview_id == selected {
+                                                                                            "story-nav-link story-nav-overview-link is-active"
+                                                                                        } else {
+                                                                                            "story-nav-link story-nav-overview-link"
+                                                                                        };
+                                                                                        let overview_href = story_hash(&component.overview_id, selected_viewport);
+                                                                                        let overview_id_for_link = component.overview_id.clone();
+                                                                                        rsx! {
+                                                                                            a {
+                                                                                                class: "{overview_link_class}",
+                                                                                                href: "{overview_href}",
+                                                                                                tabindex: if expanded { "0" } else { "-1" },
+                                                                                                onclick: move |_| selected_story_id.set(overview_id_for_link.clone()),
+                                                                                                "Overview"
+                                                                                            }
+                                                                                        }
+                                                                                    }
+                                                                                    for story in component.stories.iter() {
                                                                                         {
                                                                                             let story_id = story.id;
                                                                                             let link_class = if story.id == selected {
@@ -141,14 +171,17 @@ pub fn StoryBook() -> Element {
             }
             section { class: "story-stage",
                 div { class: "story-toolbar",
-                    div {
-                        h2 { "{descriptor.label}" }
-                        p { "{descriptor.family_label()} / {descriptor.id}" }
+                    div { class: "story-toolbar-copy",
+                        h2 { "{page_title}" }
+                        p { class: "story-toolbar-path", "{page_source_ref}" }
+                        if !page_description.is_empty() {
+                            p { class: "story-toolbar-description", "{page_description}" }
+                        }
                     }
                     div { class: "story-viewport-controls",
                         for target_viewport in [StoryViewport::Sm, StoryViewport::Md, StoryViewport::Lg] {
                             {
-                                let selected_for_button = selected.clone();
+                                let selected_for_button = page_id.clone();
                                 rsx! {
                                     ViewportButton {
                                         viewport: target_viewport,
@@ -163,12 +196,7 @@ pub fn StoryBook() -> Element {
                         }
                     }
                 }
-                StoryCanvas {
-                    story_id: descriptor.id,
-                    label: descriptor.label,
-                    description: descriptor.description,
-                    frame_style,
-                }
+                {render_story_selection(&selection, frame_style)}
             }
         }
     }
@@ -198,7 +226,54 @@ struct StoryCategoryGroup {
 struct StoryComponentGroup {
     key: &'static str,
     label: String,
+    overview_id: String,
     stories: Vec<StoryDescriptor>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum StorySelection {
+    Story(StoryDescriptor),
+    ComponentOverview {
+        id: String,
+        label: String,
+        description: String,
+        source_path: String,
+        stories: Vec<StoryDescriptor>,
+    },
+}
+
+impl StorySelection {
+    fn id(&self) -> &str {
+        match self {
+            Self::Story(story) => story.id,
+            Self::ComponentOverview { id, .. } => id,
+        }
+    }
+
+    fn label(&self) -> String {
+        match self {
+            Self::Story(story) => story.label.to_string(),
+            Self::ComponentOverview { label, .. } => label.clone(),
+        }
+    }
+
+    fn description(&self) -> String {
+        match self {
+            Self::Story(story) => story.description.to_string(),
+            Self::ComponentOverview { description, .. } => description.clone(),
+        }
+    }
+
+    fn source_ref(&self) -> String {
+        match self {
+            Self::Story(story) => {
+                format!("{}:{}", story.source_path, story_function_name(story.story))
+            }
+            Self::ComponentOverview { source_path, .. } => {
+                format!("{source_path}:overview")
+            }
+        }
+    }
 }
 
 fn story_groups(stories: &[StoryDescriptor]) -> Vec<StoryFamilyGroup> {
@@ -237,6 +312,7 @@ fn story_groups(stories: &[StoryDescriptor]) -> Vec<StoryFamilyGroup> {
                 category.components.push(StoryComponentGroup {
                     key: story.component,
                     label: segment_label(story.component),
+                    overview_id: component_overview_id(story),
                     stories: Vec::new(),
                 });
                 category.components.len() - 1
@@ -249,6 +325,75 @@ fn story_groups(stories: &[StoryDescriptor]) -> Vec<StoryFamilyGroup> {
             .then_with(|| left.label.cmp(right.label))
     });
     groups
+}
+
+fn story_selection(selected_id: &str, groups: &[StoryFamilyGroup]) -> Option<StorySelection> {
+    for family in groups {
+        for category in &family.categories {
+            for component in &category.components {
+                if component.overview_id == selected_id {
+                    return Some(StorySelection::ComponentOverview {
+                        id: component.overview_id.clone(),
+                        label: format!("{} Overview", component.label),
+                        description: format!(
+                            "All {} stories for this component.",
+                            component.stories.len()
+                        ),
+                        source_path: component_source_path(&component.stories),
+                        stories: component.stories.clone(),
+                    });
+                }
+
+                if let Some(story) = component
+                    .stories
+                    .iter()
+                    .find(|story| story.id == selected_id)
+                {
+                    return Some(StorySelection::Story(*story));
+                }
+            }
+        }
+    }
+    None
+}
+
+fn story_route_exists(story_id: &str) -> bool {
+    if story_by_id(story_id).is_some() {
+        return true;
+    }
+
+    let stories = all_stories();
+    let groups = story_groups(&stories);
+    story_selection(story_id, &groups).is_some()
+}
+
+fn component_source_path(stories: &[StoryDescriptor]) -> String {
+    let Some(first) = stories.first() else {
+        return "generated overview".to_string();
+    };
+    if stories
+        .iter()
+        .all(|story| story.source_path == first.source_path)
+    {
+        return first.source_path.to_string();
+    }
+    "multiple story files".to_string()
+}
+
+fn component_overview_id(story: &StoryDescriptor) -> String {
+    let mut id = story.family.to_string();
+    id.push('/');
+    if let Some(category) = story.category {
+        id.push_str(category);
+        id.push('/');
+    }
+    id.push_str(story.component);
+    id.push_str("/overview");
+    id
+}
+
+fn story_function_name(story_segment: &str) -> String {
+    story_segment.replace('-', "_")
 }
 
 fn story_group_order(family: &str) -> usize {
@@ -290,26 +435,61 @@ pub fn should_show_story_book() -> bool {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn StoryCanvas(
-    story_id: &'static str,
-    label: &'static str,
-    description: &'static str,
-    frame_style: &'static str,
-) -> Element {
+fn StoryCanvas(story_id: &'static str, frame_style: &'static str) -> Element {
     rsx! {
         div {
             class: "story-canvas-shell",
             "data-story-capture": "1",
             "data-story-id": "{story_id}",
-            "data-story-label": "{label}",
-            div { class: "story-canvas-meta",
-                h3 { "{label}" }
-                if !description.is_empty() {
-                    p { "{description}" }
-                }
-            }
             div { class: "story-frame", style: "{frame_style}",
                 {render_story(story_id)}
+            }
+        }
+    }
+}
+
+fn render_story_selection(selection: &StorySelection, frame_style: &'static str) -> Element {
+    match selection {
+        StorySelection::Story(story) => rsx! {
+            StoryCanvas {
+                story_id: story.id,
+                frame_style,
+            }
+        },
+        StorySelection::ComponentOverview { id, stories, .. } => rsx! {
+            StoryOverviewCanvas {
+                story_id: id.clone(),
+                stories: stories.clone(),
+                frame_style,
+            }
+        },
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn StoryOverviewCanvas(
+    story_id: String,
+    stories: Vec<StoryDescriptor>,
+    frame_style: &'static str,
+) -> Element {
+    rsx! {
+        div {
+            class: "story-canvas-shell story-overview-canvas",
+            "data-story-capture": "1",
+            "data-story-id": "{story_id}",
+            div { class: "story-overview-list", style: "{frame_style}",
+                for story in stories {
+                    section { class: "story-overview-item",
+                        header { class: "story-overview-item-header",
+                            h3 { "{story.label}" }
+                            p { "{story.source_path}" }
+                        }
+                        div { class: "story-overview-frame",
+                            {render_story(story.id)}
+                        }
+                    }
+                }
             }
         }
     }
@@ -392,7 +572,10 @@ fn selected_story_route_from_hash() -> StoryRoute {
 fn parse_story_hash(hash: &str) -> Option<StoryRoute> {
     let route = hash.strip_prefix("#/stories/")?;
     let (story_id, query) = route.split_once('?').unwrap_or((route, ""));
-    let story_id = story_by_id(story_id).map(|story| story.id.to_string())?;
+    if !story_route_exists(story_id) {
+        return None;
+    }
+    let story_id = story_id.to_string();
     let viewport = query
         .split('&')
         .filter_map(|part| part.split_once('='))
