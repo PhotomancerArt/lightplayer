@@ -4,7 +4,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::{UiConfigSlot, UiConfigSlotBody, UiSlotFieldState};
 
 use crate::app::node::{
-    SlotAspectMenu, SlotRecordEditor, SlotValueEditor, primary_affordance, slot_row_class,
+    SlotDetailButton, SlotRecordEditor, SlotValueEditor, primary_affordance, slot_row_class,
 };
 use crate::base::{StudioIcon, StudioIconName};
 
@@ -15,13 +15,18 @@ pub fn ConfigSlotRow(
     depth: usize,
     index: usize,
     #[props(default = false)] initially_open: bool,
+    #[props(default = None)] initially_expanded: Option<bool>,
 ) -> Element {
     let child_record = match &slot.body {
         UiConfigSlotBody::Record(record) if !record.fields.is_empty() => Some(record.clone()),
         _ => None,
     };
-    let has_children = child_record.is_some();
-    let mut expanded = use_signal(|| depth > 0 || !has_children);
+    let child_asset = match &slot.body {
+        UiConfigSlotBody::Asset(asset) => Some(asset.clone()),
+        _ => None,
+    };
+    let has_children = child_record.is_some() || child_asset.is_some();
+    let mut expanded = use_signal(|| initially_expanded.unwrap_or(depth > 0 || !has_children));
     let aspects = slot.visible_aspects();
     let primary = primary_affordance(&aspects);
     let row_class = slot_row_class(primary, index);
@@ -60,7 +65,7 @@ pub fn ConfigSlotRow(
                 div { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-end tw:gap-2 tw:text-sm tw:leading-tight tw:text-muted-foreground",
                     SlotBodyPreview { body: slot.body.clone(), state: slot.state.clone(), expanded: expanded() }
                 }
-                SlotAspectMenu {
+                SlotDetailButton {
                     label: slot.label.clone(),
                     aspects,
                     initially_open,
@@ -73,6 +78,9 @@ pub fn ConfigSlotRow(
                         depth: depth + 1,
                         separated: true,
                     }
+                }
+                if let Some(asset) = child_asset {
+                    AssetSlotEditor { asset }
                 }
             }
         }
@@ -97,6 +105,34 @@ fn SlotBodyPreview(body: UiConfigSlotBody, state: UiSlotFieldState, expanded: bo
             };
             rsx! {
                 span { class: record_summary_class(expanded), "{label}" }
+            }
+        }
+        UiConfigSlotBody::Asset(asset) => rsx! {
+            code { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-xs tw:text-muted-foreground", "{asset.source}" }
+        },
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn AssetSlotEditor(asset: lpa_studio_core::UiSlotAsset) -> Element {
+    rsx! {
+        div { class: "tw:border-t tw:border-border-muted tw:bg-page tw:px-2 tw:py-2",
+            div { class: "tw:mb-1.5 tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-2",
+                code { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-xs tw:text-subtle-foreground", "{asset.source}" }
+                span { class: "tw:flex-none tw:text-xs tw:font-bold tw:text-subtle-foreground", "{asset.editor_label()}" }
+            }
+            if let Some(detail) = asset.detail.as_ref() {
+                p { class: "tw:m-0 tw:mb-1.5 tw:text-xs tw:text-subtle-foreground tw:break-words", "{detail}" }
+            }
+            if let Some(content) = asset.content {
+                pre { class: "tw:m-0 tw:max-h-48 tw:overflow-auto tw:rounded-xs tw:border tw:border-border-subtle tw:bg-terminal tw:p-3 tw:font-mono tw:text-xs tw:leading-normal tw:text-muted-foreground",
+                    code { "{content}" }
+                }
+            } else {
+                pre { class: "tw:m-0 tw:rounded-xs tw:border tw:border-border-subtle tw:bg-terminal tw:p-3 tw:font-mono tw:text-xs tw:leading-normal tw:text-subtle-foreground",
+                    code { "// asset content not loaded" }
+                }
             }
         }
     }

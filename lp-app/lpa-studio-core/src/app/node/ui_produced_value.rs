@@ -1,6 +1,6 @@
 //! Produced scalar or structured values.
 
-use crate::{UiNodeDirtyState, UiProducedBinding};
+use crate::{UiNodeDirtyState, UiProducedBinding, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
 
 /// A non-product output rendered as a compact value box.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -34,4 +34,25 @@ impl UiProducedValue {
         self.detail = Some(detail.into());
         self
     }
+
+    /// Shared detail aspects for produced value popups.
+    pub fn visible_aspects(&self) -> Vec<UiSlotAspect> {
+        vec![
+            produced_value_info_aspect(self),
+            self.binding.output_aspect(),
+        ]
+    }
+}
+
+fn produced_value_info_aspect(value: &UiProducedValue) -> UiSlotAspect {
+    let mut display = value.value.clone();
+    if let Some(detail) = value.detail.as_ref() {
+        display.push(' ');
+        display.push_str(detail);
+    }
+
+    UiSlotAspect::new(UiSlotAspectKind::TypeInfo, "Info")
+        .with_row(UiSlotAspectRow::new("Name", value.label.clone()))
+        .with_row(UiSlotAspectRow::new("Shape", "Produced value"))
+        .with_row(UiSlotAspectRow::new("Value", display))
 }

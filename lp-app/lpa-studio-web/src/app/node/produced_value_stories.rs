@@ -29,3 +29,17 @@ pub(crate) fn bound_stat() -> Element {
         ProducedValueView { value }
     }
 }
+
+#[story(description = "An open produced value detail popup.")]
+pub(crate) fn detail_popup() -> Element {
+    let value = produced_value_variants_fixture().remove(2);
+
+    rsx! {
+        div { class: "tw:min-h-48",
+            ProducedValueView {
+                value,
+                initially_open: true,
+            }
+        }
+    }
+}

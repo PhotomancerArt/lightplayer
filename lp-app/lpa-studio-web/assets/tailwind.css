@@ -132,6 +132,9 @@
   .tw\:mb-0\.5 {
     margin-bottom: calc(var(--tw-spacing) * 0.5);
   }
+  .tw\:mb-1\.5 {
+    margin-bottom: calc(var(--tw-spacing) * 1.5);
+  }
   .tw\:mb-3 {
     margin-bottom: calc(var(--tw-spacing) * 3);
   }
@@ -189,8 +192,8 @@
   .tw\:h-screen {
     height: 100vh;
   }
-  .tw\:max-h-32 {
-    max-height: calc(var(--tw-spacing) * 32);
+  .tw\:max-h-48 {
+    max-height: calc(var(--tw-spacing) * 48);
   }
   .tw\:max-h-60 {
     max-height: calc(var(--tw-spacing) * 60);
@@ -218,6 +221,9 @@
   }
   .tw\:min-h-32 {
     min-height: calc(var(--tw-spacing) * 32);
+  }
+  .tw\:min-h-48 {
+    min-height: calc(var(--tw-spacing) * 48);
   }
   .tw\:min-h-56 {
     min-height: calc(var(--tw-spacing) * 56);
@@ -799,9 +805,6 @@
   .tw\:pt-1\.5 {
     padding-top: calc(var(--tw-spacing) * 1.5);
   }
-  .tw\:pt-3 {
-    padding-top: calc(var(--tw-spacing) * 3);
-  }
   .tw\:pt-7 {
     padding-top: calc(var(--tw-spacing) * 7);
   }
@@ -1075,6 +1078,16 @@
     &:hover {
       @media (hover: hover) {
         background-color: var(--tw-color-card-subtle);
+      }
+    }
+  }
+  .tw\:hover\:bg-card-subtle\/60 {
+    &:hover {
+      @media (hover: hover) {
+        background-color: var(--tw-color-card-subtle);
+        @supports (color: color-mix(in lab, red, red)) {
+          background-color: color-mix(in oklab, var(--tw-color-card-subtle) 60%, transparent);
+        }
       }
     }
   }

@@ -14,10 +14,10 @@ pub use app::link::{
     SharedLinkRegistry, UiIssue,
 };
 pub use app::node::{
-    UiAssetEditorKind, UiBindingEndpoint, UiConfigAsset, UiConfigSlot, UiConfigSlotBody,
-    UiNodeChild, UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody,
-    UiNodeView, UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue,
-    UiProductKind, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
+    UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConfigSlotBody, UiNodeChild,
+    UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView,
+    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind,
+    UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset,
     UiSlotEditorHint, UiSlotFieldState, UiSlotOption, UiSlotRecord, UiSlotSourceState, UiSlotValue,
     UiSlotValueKind,
 };

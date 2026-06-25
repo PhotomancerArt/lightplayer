@@ -6,7 +6,7 @@ use lpa_studio_core::{
 };
 
 use crate::app::node::{
-    ConfigAssets, NodeChildren, NodeHeader, ProducedProducts, ProducedValues, SlotRecordEditor,
+    NodeChildren, NodeHeader, ProducedProducts, ProducedValues, SlotRecordEditor,
 };
 use crate::base::{IconMenuButton, IconMenuTone, PopoverPlacement, StudioIcon, StudioIconName};
 
@@ -29,7 +29,7 @@ pub fn NodePane(view: UiNodeView) -> Element {
             article { class: "tw:grid tw:min-w-0 tw:rounded-md tw:border {focused_class} tw:bg-card tw:p-4",
                 header { class: "{header_class}",
                     button {
-                        class: "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-r tw:border-border-muted tw:bg-card-muted tw:p-0 tw:text-subtle-foreground tw:hover:bg-card-subtle",
+                        class: "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-r tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:bg-card-subtle/60",
                         r#type: "button",
                         aria_label: if collapsed() { "Expand node" } else { "Collapse node" },
                         title: if collapsed() { "Expand node" } else { "Collapse node" },
@@ -130,8 +130,10 @@ pub fn NodeSection(section: UiNodeSection, #[props(default = false)] first: bool
             }
         },
         UiNodeSection::ConfigAssets(assets) => rsx! {
-            section { class: section_class("tw:bg-card-subtle tw:px-4 tw:py-4", first),
-                ConfigAssets { assets }
+            section { class: section_class("tw:bg-card tw:p-0", first),
+                SlotRecordEditor {
+                    record: UiSlotRecord::new(assets),
+                }
             }
         },
         UiNodeSection::Children(children) => rsx! {

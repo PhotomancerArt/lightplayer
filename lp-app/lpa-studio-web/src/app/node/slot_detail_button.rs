@@ -1,4 +1,4 @@
-//! Unified aspect menu and row treatment for config slots.
+//! Shared slot detail button and row treatment for node slot-like surfaces.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
@@ -7,7 +7,7 @@ use crate::base::{IconMenuButton, IconMenuTone, PopoverPlacement, StudioIcon, St
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn SlotAspectMenu(
+pub fn SlotDetailButton(
     label: String,
     aspects: Vec<UiSlotAspect>,
     #[props(default = false)] initially_open: bool,
@@ -27,9 +27,9 @@ pub fn SlotAspectMenu(
                 placement: PopoverPlacement::BottomEnd,
                 active: style.active,
                 initially_open,
-                popup_class: slot_aspect_popup_class().to_string(),
+                popup_class: slot_detail_popup_class().to_string(),
                 for aspect in aspects {
-                    SlotAspectSection { aspect }
+                    SlotDetailSection { aspect }
                 }
             }
         }
@@ -69,12 +69,12 @@ pub(crate) fn primary_affordance(aspects: &[UiSlotAspect]) -> UiSlotAffordance {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SlotAspectSection(aspect: UiSlotAspect) -> Element {
+fn SlotDetailSection(aspect: UiSlotAspect) -> Element {
     let summary = aspect_summary(&aspect);
     let section_class = aspect_section_class(summary.highlight);
     let heading_class = aspect_heading_class(summary.tone);
     let icon_class = aspect_icon_class(summary.tone);
-    let details = aspect_detail_lines(&aspect);
+    let details = aspect_detail_rows(&aspect);
     let info_rows = if aspect.kind == UiSlotAspectKind::TypeInfo {
         type_info_detail_rows(&aspect)
     } else {
@@ -87,10 +87,12 @@ fn SlotAspectSection(aspect: UiSlotAspect) -> Element {
     rsx! {
         section { class: section_class,
             header { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:leading-none",
-                span { class: icon_class,
-                    StudioIcon {
-                        name: summary.icon,
-                        size: 12,
+                if aspect.kind != UiSlotAspectKind::TypeInfo {
+                    span { class: icon_class,
+                        StudioIcon {
+                            name: summary.icon,
+                            size: 12,
+                        }
                     }
                 }
                 if title_is_code {
@@ -103,15 +105,15 @@ fn SlotAspectSection(aspect: UiSlotAspect) -> Element {
                 }
             }
             if aspect.kind == UiSlotAspectKind::TypeInfo {
-                div { class: "tw:grid tw:gap-0.5 tw:pl-[18px] tw:pt-0.5",
+                div { class: "tw:grid tw:gap-0.5 tw:pt-0.5",
                     for row in info_rows {
                         SlotInfoRow { row }
                     }
                 }
             } else if !details.is_empty() {
                 div { class: "tw:grid tw:gap-0.5 tw:pl-[18px] tw:pt-0.5",
-                    for detail in details {
-                        p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-muted-foreground tw:break-words", "{detail}" }
+                    for row in details {
+                        SlotDetailRow { row }
                     }
                 }
             }
@@ -181,7 +183,7 @@ fn slot_affordance_style(affordance: UiSlotAffordance) -> SlotAffordanceStyle {
     }
 }
 
-fn slot_aspect_popup_class() -> &'static str {
+fn slot_detail_popup_class() -> &'static str {
     "tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:gap-0 tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:text-sm tw:text-muted-foreground tw:shadow-lg"
 }
 
@@ -270,7 +272,7 @@ fn edit_state_summary(aspect: &UiSlotAspect) -> AspectSummary {
 fn binding_summary(aspect: &UiSlotAspect) -> AspectSummary {
     match aspect.affordance {
         Some(UiSlotAffordance::Bound) => AspectSummary {
-            title: "Bound from".to_string(),
+            title: binding_title(aspect),
             code: first_row_value(aspect),
             title_is_code: false,
             icon: StudioIconName::BoundValue,
@@ -296,6 +298,15 @@ fn binding_summary(aspect: &UiSlotAspect) -> AspectSummary {
     }
 }
 
+fn binding_title(aspect: &UiSlotAspect) -> String {
+    match aspect.rows.first().map(|row| row.label.as_str()) {
+        Some(label) if label.eq_ignore_ascii_case("Published") => "Published as".to_string(),
+        Some(label) if label.eq_ignore_ascii_case("Bound to") => "Bound to".to_string(),
+        Some(label) if label.eq_ignore_ascii_case("Consumed by") => "Consumed by".to_string(),
+        _ => "Bound from".to_string(),
+    }
+}
+
 fn first_row_label_is(aspect: &UiSlotAspect, label: &str) -> bool {
     aspect
         .rows
@@ -303,7 +314,7 @@ fn first_row_label_is(aspect: &UiSlotAspect, label: &str) -> bool {
         .is_some_and(|row| row.label.eq_ignore_ascii_case(label))
 }
 
-fn aspect_detail_lines(aspect: &UiSlotAspect) -> Vec<String> {
+fn aspect_detail_rows(aspect: &UiSlotAspect) -> Vec<UiSlotAspectRow> {
     if aspect.kind == UiSlotAspectKind::TypeInfo {
         return Vec::new();
     }
@@ -313,16 +324,13 @@ fn aspect_detail_lines(aspect: &UiSlotAspect) -> Vec<String> {
     aspect
         .rows
         .iter()
-        .flat_map(|row| {
-            let mut lines = Vec::new();
-            if !value_is_header_code && !row.value.is_empty() {
-                lines.push(row.value.clone());
-            }
-            if let Some(detail) = row.detail.as_ref().filter(|detail| !detail.is_empty()) {
-                lines.push(detail.clone());
-            }
-            lines
+        .enumerate()
+        .filter(|(index, row)| {
+            !(value_is_header_code && *index == 0)
+                && (!row.value.is_empty()
+                    || row.detail.as_ref().is_some_and(|detail| !detail.is_empty()))
         })
+        .map(|(_, row)| row.clone())
         .collect()
 }
 
@@ -366,12 +374,34 @@ fn SlotInfoRow(row: UiSlotAspectRow) -> Element {
     rsx! {
         if !row.value.is_empty() {
             p { class: "tw:m-0 tw:flex tw:min-w-0 tw:flex-wrap tw:items-baseline tw:gap-x-1.5 tw:text-xs tw:leading-snug",
-                span { class: "tw:font-bold tw:text-subtle-foreground", "{row.label}:" }
+                if !row.label.eq_ignore_ascii_case("Shape") {
+                    span { class: "tw:font-bold tw:text-subtle-foreground", "{row.label}:" }
+                }
                 span { class: "tw:text-muted-foreground tw:break-words", "{row.value}" }
                 if let Some(detail) = row.detail {
                     if !detail.is_empty() {
                         span { class: "tw:text-subtle-foreground tw:break-words", "{detail}" }
                     }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn SlotDetailRow(row: UiSlotAspectRow) -> Element {
+    rsx! {
+        p { class: "tw:m-0 tw:flex tw:min-w-0 tw:flex-wrap tw:items-baseline tw:gap-x-1.5 tw:text-xs tw:leading-snug",
+            if !row.label.is_empty() {
+                span { class: "tw:font-bold tw:text-subtle-foreground", "{row.label}:" }
+            }
+            if !row.value.is_empty() {
+                span { class: "tw:text-muted-foreground tw:break-words", "{row.value}" }
+            }
+            if let Some(detail) = row.detail {
+                if !detail.is_empty() {
+                    span { class: "tw:text-subtle-foreground tw:break-words", "{detail}" }
                 }
             }
         }

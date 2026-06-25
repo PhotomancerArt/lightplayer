@@ -3,13 +3,14 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{UiProducedProduct, UiProductKind};
 
-use crate::app::node::{DirtyMark, ProducedBindingMark};
+use crate::app::node::SlotDetailButton;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ProducedProductView(
     product: UiProducedProduct,
     #[props(default = false)] separated: bool,
+    #[props(default = false)] initially_open: bool,
 ) -> Element {
     let class = if separated {
         format!(
@@ -20,6 +21,7 @@ pub fn ProducedProductView(
         product_view_class(product.kind).to_string()
     };
     let label = product_label(product.kind);
+    let aspects = product.visible_aspects();
 
     rsx! {
         article { class,
@@ -29,16 +31,16 @@ pub fn ProducedProductView(
                 }
             }
             footer { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-x-2 tw:gap-y-1 tw:text-xs tw:text-muted-foreground",
-                ProducedBindingMark {
-                    label: product.name.clone(),
-                    bindings: product.binding.bindings.clone(),
-                }
                 strong { class: "tw:min-w-0 tw:text-sm tw:text-strong-foreground tw:break-words", "{product.name}" }
                 span { "{label}" }
                 if let Some(detail) = product.detail.as_ref() {
                     span { "{detail}" }
                 }
-                DirtyMark { dirty: product.dirty }
+                SlotDetailButton {
+                    label: product.name.clone(),
+                    aspects,
+                    initially_open,
+                }
             }
         }
     }

@@ -3,11 +3,16 @@
 use dioxus::prelude::*;
 use lpa_studio_core::UiProducedValue;
 
-use crate::app::node::{DirtyMark, ProducedBindingMark};
+use crate::app::node::SlotDetailButton;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn ProducedValueView(value: UiProducedValue) -> Element {
+pub fn ProducedValueView(
+    value: UiProducedValue,
+    #[props(default = false)] initially_open: bool,
+) -> Element {
+    let aspects = value.visible_aspects();
+
     rsx! {
         div { class: "tw:grid tw:min-h-20 tw:min-w-0 tw:content-between tw:rounded-sm tw:border tw:border-border-subtle tw:bg-card-muted tw:p-2",
             dd { class: "tw:m-0 tw:flex tw:min-w-0 tw:items-baseline tw:gap-1 tw:leading-none",
@@ -16,13 +21,13 @@ pub fn ProducedValueView(value: UiProducedValue) -> Element {
                     small { class: "tw:text-xs tw:font-bold tw:text-subtle-foreground tw:break-words", "{detail}" }
                 }
             }
-            dt { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:text-xs tw:font-bold tw:leading-tight tw:text-subtle-foreground",
+            dt { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-1.5 tw:text-xs tw:font-bold tw:leading-tight tw:text-subtle-foreground",
                 span { class: "tw:min-w-0 tw:break-words", "{value.label}" }
-                ProducedBindingMark {
+                SlotDetailButton {
                     label: value.label.clone(),
-                    bindings: value.binding.bindings.clone(),
+                    aspects,
+                    initially_open,
                 }
-                DirtyMark { dirty: value.dirty }
             }
         }
     }

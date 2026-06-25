@@ -2,7 +2,7 @@
 
 use crate::{
     UiBindingEndpoint, UiNodeDirtyState, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind,
-    UiSlotAspectRow, UiSlotFieldState, UiSlotRecord, UiSlotSourceState, UiSlotValue,
+    UiSlotAspectRow, UiSlotAsset, UiSlotFieldState, UiSlotRecord, UiSlotSourceState, UiSlotValue,
 };
 
 /// The renderable body of a config slot row.
@@ -14,6 +14,8 @@ pub enum UiConfigSlotBody {
     Value(UiSlotValue),
     /// A structured slot rendered by `SlotRecordEditor`.
     Record(UiSlotRecord),
+    /// An asset slot rendered by an editor-like expansion.
+    Asset(UiSlotAsset),
 }
 
 /// A config slot row projected from the LightPlayer slot tree.
@@ -61,6 +63,11 @@ impl UiConfigSlot {
     /// Create an empty config slot row.
     pub fn empty(key: impl Into<String>, label: impl Into<String>) -> Self {
         Self::new(key, label, UiConfigSlotBody::Empty)
+    }
+
+    /// Create an asset config slot.
+    pub fn asset(key: impl Into<String>, label: impl Into<String>, asset: UiSlotAsset) -> Self {
+        Self::new(key, label, UiConfigSlotBody::Asset(asset))
     }
 
     /// Create a config slot with an explicit body.
@@ -223,6 +230,9 @@ fn type_info_aspect(slot: &UiConfigSlot) -> UiSlotAspect {
             };
             aspect.with_row(UiSlotAspectRow::new("Shape", "Record").with_detail(detail))
         }
+        UiConfigSlotBody::Asset(asset) => aspect
+            .with_row(UiSlotAspectRow::new("Shape", asset.editor_label()))
+            .with_row(UiSlotAspectRow::new("Source", asset.source.clone())),
     };
 
     aspect
@@ -231,8 +241,8 @@ fn type_info_aspect(slot: &UiConfigSlot) -> UiSlotAspect {
 #[cfg(test)]
 mod tests {
     use crate::{
-        UiBindingEndpoint, UiConfigSlot, UiConfigSlotBody, UiNodeDirtyState, UiSlotAffordance,
-        UiSlotFieldState, UiSlotSourceState, UiSlotValue,
+        UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConfigSlotBody, UiNodeDirtyState,
+        UiSlotAffordance, UiSlotAsset, UiSlotFieldState, UiSlotSourceState, UiSlotValue,
     };
 
     #[test]
@@ -261,6 +271,22 @@ mod tests {
             panic!("expected record slot");
         };
         assert_eq!(record.fields[0].label, "Duration");
+    }
+
+    #[test]
+    fn asset_slot_keeps_editor_data() {
+        let slot = UiConfigSlot::asset(
+            "shader",
+            "Shader",
+            UiSlotAsset::new("./shader.glsl", UiAssetEditorKind::Glsl)
+                .with_content("void mainImage(out vec4 color, in vec2 uv) {}"),
+        );
+
+        let UiConfigSlotBody::Asset(asset) = slot.body else {
+            panic!("expected asset slot");
+        };
+        assert_eq!(asset.source, "./shader.glsl");
+        assert_eq!(asset.editor_label(), "GLSL asset");
     }
 
     #[test]

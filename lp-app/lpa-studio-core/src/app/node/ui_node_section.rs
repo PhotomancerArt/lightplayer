@@ -1,6 +1,6 @@
 //! Typed sections inside a node tab.
 
-use crate::{UiConfigAsset, UiConfigSlot, UiNodeChild, UiProducedProduct, UiProducedValue};
+use crate::{UiConfigSlot, UiNodeChild, UiProducedProduct, UiProducedValue};
 
 /// A semantic section in a node tab body.
 #[derive(Clone, Debug, PartialEq)]
@@ -12,7 +12,7 @@ pub enum UiNodeSection {
     /// Normal configurable input slots.
     ConfigSlots(Vec<UiConfigSlot>),
     /// Asset slots promoted to editor-level treatment.
-    ConfigAssets(Vec<UiConfigAsset>),
+    ConfigAssets(Vec<UiConfigSlot>),
     /// Children shown inline for small compositions or story isolation.
     Children(Vec<UiNodeChild>),
 }

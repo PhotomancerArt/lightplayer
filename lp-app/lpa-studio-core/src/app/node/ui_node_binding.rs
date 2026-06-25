@@ -1,5 +1,7 @@
 //! Binding summaries for node data.
 
+use crate::{UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
+
 /// A human-readable binding endpoint shown in node binding popovers.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UiBindingEndpoint {
@@ -75,10 +77,45 @@ impl UiProducedBinding {
             revision: None,
         }
     }
+
+    /// Build the shared detail aspect for produced output routing.
+    pub fn output_aspect(&self) -> UiSlotAspect {
+        let mut aspect = UiSlotAspect::new(UiSlotAspectKind::Binding, "Output");
+
+        if let Some(bus_target) = self.bindings.bus_target.as_ref() {
+            aspect = aspect.with_row(endpoint_row("Published", bus_target));
+        }
+        for target in &self.bindings.target_bindings {
+            aspect = aspect.with_row(endpoint_row("Bound to", target));
+        }
+        for consumer in &self.bindings.consumers {
+            aspect = aspect.with_row(endpoint_row("Consumed by", consumer));
+        }
+
+        if let Some(revision) = self.revision.as_ref() {
+            aspect = aspect.with_row(UiSlotAspectRow::new("Revision", revision.clone()));
+        }
+
+        if self.bindings.has_any() {
+            aspect.with_affordance(UiSlotAffordance::Bound)
+        } else if aspect.rows.is_empty() {
+            aspect.with_row(UiSlotAspectRow::new("Unbound", ""))
+        } else {
+            aspect
+        }
+    }
 }
 
 impl Default for UiProducedBinding {
     fn default() -> Self {
         Self::none()
     }
+}
+
+fn endpoint_row(label: &'static str, endpoint: &UiBindingEndpoint) -> UiSlotAspectRow {
+    let mut row = UiSlotAspectRow::new(label, endpoint.label.clone());
+    if let Some(detail) = endpoint.detail.as_ref() {
+        row = row.with_detail(detail.clone());
+    }
+    row
 }

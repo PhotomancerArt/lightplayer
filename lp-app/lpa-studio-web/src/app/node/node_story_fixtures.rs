@@ -1,11 +1,26 @@
 //! Shared fixtures for Studio node component stories.
 
 use lpa_studio_core::{
-    UiAssetEditorKind, UiBindingEndpoint, UiConfigAsset, UiConfigSlot, UiNodeChild,
-    UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView,
-    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiSlotEditorHint,
+    UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiNodeChild, UiNodeDirtyState,
+    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiProducedBinding,
+    UiProducedBindings, UiProducedProduct, UiProducedValue, UiSlotAsset, UiSlotEditorHint,
     UiSlotFieldState, UiSlotRecord, UiSlotSourceState, UiSlotValue, UiStatus,
 };
+
+const IDLE_GLSL: &str = r#"vec3 palette(float t) {
+    return 0.5 + 0.5 * cos(6.28318 * (vec3(0.1, 0.3, 0.6) + t));
+}
+
+void mainImage(out vec4 color, in vec2 uv) {
+    float glow = smoothstep(0.9, 0.2, length(uv - 0.5));
+    color = vec4(palette(glow), 1.0);
+}"#;
+
+const BLAST_GLSL: &str = r#"void mainImage(out vec4 color, in vec2 uv) {
+    vec3 base = vec3(1.0, 0.18, 0.05);
+    float ring = sin(length(uv - 0.5) * 64.0);
+    color = vec4(base * ring, 1.0);
+}"#;
 
 pub(crate) fn playlist_node_view() -> UiNodeView {
     UiNodeView::new(
@@ -15,7 +30,7 @@ pub(crate) fn playlist_node_view() -> UiNodeView {
                 UiNodeSection::ProducedProducts(produced_products_fixture()),
                 UiNodeSection::ProducedValues(produced_values_fixture()),
                 UiNodeSection::ConfigSlots(config_slots_fixture()),
-                UiNodeSection::ConfigAssets(config_assets_fixture()),
+                UiNodeSection::ConfigAssets(asset_slots_fixture()),
             ]),
             UiNodeTab::new(
                 "raw",
@@ -43,8 +58,13 @@ pub(crate) fn error_node_view() -> UiNodeView {
                     .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Error)),
             ]),
             UiNodeSection::ConfigAssets(vec![
-                UiConfigAsset::new("Shader", "./blast.glsl", UiAssetEditorKind::Glsl)
-                    .with_summary("vec3 color = sample(uv2);"),
+                UiConfigSlot::asset(
+                    "shader_source",
+                    "Shader",
+                    UiSlotAsset::new("./blast.glsl", UiAssetEditorKind::Glsl)
+                        .with_content("vec3 color = sample(uv2);"),
+                )
+                .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Error)),
             ]),
         ])],
     )
@@ -139,11 +159,24 @@ pub(crate) fn config_slots_fixture() -> Vec<UiConfigSlot> {
     ]
 }
 
-pub(crate) fn config_assets_fixture() -> Vec<UiConfigAsset> {
+pub(crate) fn asset_slots_fixture() -> Vec<UiConfigSlot> {
     vec![
-        UiConfigAsset::new("Playlist", "./playlist.toml", UiAssetEditorKind::Text)
-            .with_detail("artifact, rev 22")
-            .with_summary("[[entries]]\nname = \"idle\"\nsource = \"./idle.toml\""),
+        UiConfigSlot::asset(
+            "idle_shader",
+            "Idle shader",
+            UiSlotAsset::new("./idle.glsl", UiAssetEditorKind::Glsl)
+                .with_detail("artifact, rev 22")
+                .with_content(IDLE_GLSL),
+        )
+        .with_detail("artifact, rev 22"),
+        UiConfigSlot::asset(
+            "blast_shader",
+            "Blast shader",
+            UiSlotAsset::new("./blast.glsl", UiAssetEditorKind::Glsl)
+                .with_detail("artifact, rev 19")
+                .with_content(BLAST_GLSL),
+        )
+        .with_detail("artifact, rev 19"),
     ]
 }
 

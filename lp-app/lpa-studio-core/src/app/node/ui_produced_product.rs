@@ -1,6 +1,6 @@
 //! Produced product data for primary node output surfaces.
 
-use crate::{UiNodeDirtyState, UiProducedBinding};
+use crate::{UiNodeDirtyState, UiProducedBinding, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
 
 /// The family of product a node emits.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -62,4 +62,35 @@ impl UiProducedProduct {
         self.detail = Some(detail.into());
         self
     }
+
+    /// Shared detail aspects for produced product popups.
+    pub fn visible_aspects(&self) -> Vec<UiSlotAspect> {
+        vec![
+            produced_product_info_aspect(self),
+            self.binding.output_aspect(),
+        ]
+    }
+}
+
+impl UiProductKind {
+    /// Compact label for product detail rows.
+    pub fn detail_label(self) -> &'static str {
+        match self {
+            Self::Empty => "Empty product",
+            Self::Visual => "Visual product",
+            Self::Control => "Control product",
+            Self::Other => "Product",
+        }
+    }
+}
+
+fn produced_product_info_aspect(product: &UiProducedProduct) -> UiSlotAspect {
+    let mut shape_row = UiSlotAspectRow::new("Shape", product.kind.detail_label());
+    if let Some(detail) = product.detail.as_ref() {
+        shape_row = shape_row.with_detail(detail.clone());
+    }
+
+    UiSlotAspect::new(UiSlotAspectKind::TypeInfo, "Info")
+        .with_row(UiSlotAspectRow::new("Name", product.name.clone()))
+        .with_row(shape_row)
 }

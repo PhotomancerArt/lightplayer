@@ -28,6 +28,20 @@ pub(crate) fn visual_product() -> Element {
     }
 }
 
+#[story(description = "An open produced product detail popup.")]
+pub(crate) fn detail_popup() -> Element {
+    let product = produced_product_variants_fixture().remove(1);
+
+    rsx! {
+        div { class: "tw:min-h-56",
+            ProducedProductView {
+                product,
+                initially_open: true,
+            }
+        }
+    }
+}
+
 #[story(description = "A non-visual control product.")]
 pub(crate) fn control_product() -> Element {
     rsx! {
