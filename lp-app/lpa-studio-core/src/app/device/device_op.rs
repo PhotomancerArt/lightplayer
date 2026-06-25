@@ -15,6 +15,7 @@ pub enum DeviceOp {
     },
     ConnectLightPlayer,
     DisconnectLightPlayer,
+    ResetDevice,
     ProvisionFirmware,
     ResetToBlank,
     DisconnectDevice,
@@ -42,6 +43,11 @@ impl ControllerOp for DeviceOp {
             Self::DisconnectLightPlayer => ActionMeta::new(
                 "Disconnect",
                 "Detach Studio from LightPlayer while keeping the device connected.",
+                ActionPriority::Tertiary,
+            ),
+            Self::ResetDevice => ActionMeta::new(
+                "Reset device",
+                "Reboot the connected device without erasing firmware or data.",
                 ActionPriority::Tertiary,
             ),
             Self::ProvisionFirmware => ActionMeta::new(

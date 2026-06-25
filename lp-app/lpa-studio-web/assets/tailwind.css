@@ -63,7 +63,7 @@
     --tw-color-status-error-bg: var(--studio-status-error-bg);
     --tw-color-status-error-border: var(--studio-status-error-border);
     --tw-color-status-error-foreground: var(--studio-status-error-text);
-    --tw-color-step-marker: var(--studio-step-marker-bg);
+    --tw-color-step-active: var(--studio-step-active-bg);
     --tw-radius-pill: var(--studio-radius-pill);
   }
 }
@@ -103,9 +103,6 @@
   }
   .tw\:mt-2 {
     margin-top: calc(var(--tw-spacing) * 2);
-  }
-  .tw\:mt-px {
-    margin-top: 1px;
   }
   .tw\:mb-0\.5 {
     margin-bottom: calc(var(--tw-spacing) * 0.5);
@@ -221,6 +218,9 @@
   .tw\:grid-cols-\[28px_minmax\(0\,1fr\)\] {
     grid-template-columns: 28px minmax(0,1fr);
   }
+  .tw\:grid-cols-\[32px_minmax\(0\,1fr\)\] {
+    grid-template-columns: 32px minmax(0,1fr);
+  }
   .tw\:grid-cols-\[52px_72px_minmax\(0\,1fr\)\] {
     grid-template-columns: 52px 72px minmax(0,1fr);
   }
@@ -316,6 +316,15 @@
   }
   .tw\:gap-px {
     gap: 1px;
+  }
+  .tw\:gap-x-3 {
+    column-gap: calc(var(--tw-spacing) * 3);
+  }
+  .tw\:gap-y-2 {
+    row-gap: calc(var(--tw-spacing) * 2);
+  }
+  .tw\:self-center {
+    align-self: center;
   }
   .tw\:overflow-auto {
     overflow: auto;
@@ -451,8 +460,8 @@
   .tw\:bg-status-working-bg {
     background-color: var(--tw-color-status-working-bg);
   }
-  .tw\:bg-step-marker {
-    background-color: var(--tw-color-step-marker);
+  .tw\:bg-step-active {
+    background-color: var(--tw-color-step-active);
   }
   .tw\:bg-terminal {
     background-color: var(--tw-color-terminal);
@@ -675,13 +684,6 @@
   .tw\:last\:pb-0 {
     &:last-child {
       padding-bottom: calc(var(--tw-spacing) * 0);
-    }
-  }
-  .tw\:hover\:border-border-strong {
-    &:hover {
-      @media (hover: hover) {
-        border-color: var(--tw-color-border-strong);
-      }
     }
   }
   .tw\:hover\:bg-accent-hover {

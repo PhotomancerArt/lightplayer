@@ -10,12 +10,14 @@ pub const NO_FIRMWARE_DETECTED_PREFIX: &str = "no LightPlayer firmware detected"
 
 const RECENT_LINE_LIMIT: usize = 80;
 const FAILURE_SNIPPET_LINE_LIMIT: usize = 6;
+const SAFE_TO_REPLACE_FIRMWARE_BOOT_STRINGS: &[&str] = &["hello from seeed studio xiao esp32-c6"];
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct BrowserSerialReadinessClassifier {
     recent_lines: Vec<String>,
     invalid_blank_header_count: usize,
     rom_download_mode_count: usize,
+    safe_to_replace_firmware_count: usize,
     server_started: bool,
 }
 
@@ -32,6 +34,12 @@ impl BrowserSerialReadinessClassifier {
         }
         if normalized.contains("waiting for download") || normalized.contains("(download(") {
             self.rom_download_mode_count += 1;
+        }
+        if SAFE_TO_REPLACE_FIRMWARE_BOOT_STRINGS
+            .iter()
+            .any(|known_boot_string| normalized.contains(known_boot_string))
+        {
+            self.safe_to_replace_firmware_count += 1;
         }
         if normalized.contains("fw-esp32 initialized, starting server loop") {
             self.server_started = true;
@@ -59,7 +67,9 @@ impl BrowserSerialReadinessClassifier {
     }
 
     pub fn no_firmware_detected(&self) -> bool {
-        self.invalid_blank_header_count > 0 || self.rom_download_mode_count > 0
+        self.invalid_blank_header_count > 0
+            || self.rom_download_mode_count > 0
+            || self.safe_to_replace_firmware_count > 0
     }
 
     pub fn server_started(&self) -> bool {
@@ -73,6 +83,8 @@ impl BrowserSerialReadinessClassifier {
     fn no_firmware_reason(&self) -> NoFirmwareReason {
         if self.rom_download_mode_count > 0 {
             NoFirmwareReason::RomDownloadMode
+        } else if self.safe_to_replace_firmware_count > 0 {
+            NoFirmwareReason::SafeToReplaceFirmware
         } else {
             NoFirmwareReason::BlankOrErasedFlash
         }
@@ -95,6 +107,7 @@ pub enum BrowserSerialReadinessFailure {
 pub enum NoFirmwareReason {
     BlankOrErasedFlash,
     RomDownloadMode,
+    SafeToReplaceFirmware,
 }
 
 impl BrowserSerialReadinessFailure {
@@ -111,6 +124,9 @@ impl BrowserSerialReadinessFailure {
                     ),
                     NoFirmwareReason::RomDownloadMode => format!(
                         "{NO_FIRMWARE_DETECTED_PREFIX}; ESP32 is waiting in ROM download mode"
+                    ),
+                    NoFirmwareReason::SafeToReplaceFirmware => format!(
+                        "{NO_FIRMWARE_DETECTED_PREFIX}; ESP32 is running known replaceable non-LightPlayer firmware"
                     ),
                 };
                 append_recent_lines(&mut message, recent_lines);
@@ -193,6 +209,27 @@ mod tests {
                 .classify_timeout()
                 .message()
                 .contains("ESP32 is waiting in ROM download mode")
+        );
+    }
+
+    #[test]
+    fn known_replaceable_firmware_classifies_as_no_firmware() {
+        let mut classifier = BrowserSerialReadinessClassifier::new();
+
+        classifier.observe_line("Hello from Seeed Studio XIAO ESP32-C6");
+
+        assert_eq!(
+            classifier.classify_timeout(),
+            BrowserSerialReadinessFailure::NoFirmwareDetected {
+                recent_lines: vec!["Hello from Seeed Studio XIAO ESP32-C6".to_string()],
+                reason: NoFirmwareReason::SafeToReplaceFirmware,
+            }
+        );
+        assert!(
+            classifier
+                .classify_timeout()
+                .message()
+                .contains("known replaceable non-LightPlayer firmware")
         );
     }
 

@@ -121,6 +121,9 @@ impl LinkController {
                     actions.push(self.action(LinkOp::ProvisionFirmware));
                 }
                 actions.push(self.action(LinkOp::ConnectServer));
+                if self.active_supports(LinkOperation::Reset) {
+                    actions.push(self.action(LinkOp::ResetDevice));
+                }
                 if self.active_supports(LinkOperation::EraseDeviceFlash) {
                     actions.push(self.action(LinkOp::ResetToBlank));
                 }
@@ -940,14 +943,15 @@ mod tests {
 
         let actions = link.actions(false);
 
-        assert_eq!(actions.len(), 4);
+        assert_eq!(actions.len(), 5);
         assert_eq!(
             actions[0].op_as::<LinkOp>(),
             Some(&LinkOp::ProvisionFirmware)
         );
         assert_eq!(actions[1].op_as::<LinkOp>(), Some(&LinkOp::ConnectServer));
-        assert_eq!(actions[2].op_as::<LinkOp>(), Some(&LinkOp::ResetToBlank));
-        assert_eq!(actions[3].op_as::<LinkOp>(), Some(&LinkOp::DisconnectLink));
+        assert_eq!(actions[2].op_as::<LinkOp>(), Some(&LinkOp::ResetDevice));
+        assert_eq!(actions[3].op_as::<LinkOp>(), Some(&LinkOp::ResetToBlank));
+        assert_eq!(actions[4].op_as::<LinkOp>(), Some(&LinkOp::DisconnectLink));
     }
 
     #[test]

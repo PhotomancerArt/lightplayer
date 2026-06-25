@@ -64,7 +64,7 @@ fn action_class(priority: ActionPriority) -> &'static str {
             "tw:inline-flex tw:min-h-9 tw:max-w-full tw:items-center tw:justify-center tw:gap-2 tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-raised tw:px-3 tw:text-sm tw:font-bold tw:leading-none tw:text-soft-foreground tw:break-words tw:hover:bg-card-raised-strong tw:disabled:cursor-not-allowed tw:disabled:opacity-60"
         }
         ActionPriority::Tertiary => {
-            "tw:inline-flex tw:min-h-9 tw:max-w-full tw:items-center tw:justify-center tw:gap-2 tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-3 tw:text-sm tw:font-bold tw:leading-none tw:text-muted-foreground tw:break-words tw:hover:border-border-strong tw:hover:bg-card-muted tw:disabled:cursor-not-allowed tw:disabled:opacity-60"
+            "tw:inline-flex tw:min-h-9 tw:max-w-full tw:items-center tw:justify-center tw:gap-2 tw:rounded-sm tw:border tw:border-border-strong tw:bg-transparent tw:px-3 tw:text-sm tw:font-bold tw:leading-none tw:text-muted-foreground tw:break-words tw:hover:bg-card-muted tw:disabled:cursor-not-allowed tw:disabled:opacity-60"
         }
     }
 }

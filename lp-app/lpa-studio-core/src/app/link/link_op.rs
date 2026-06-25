@@ -8,6 +8,7 @@ use crate::{ActionConfirmation, ActionMeta, ActionPriority, ControllerOp};
 pub enum LinkOp {
     RefreshProviders,
     ConnectServer,
+    ResetDevice,
     ProvisionFirmware,
     ResetToBlank,
     DisconnectLink,
@@ -43,6 +44,11 @@ impl ControllerOp for LinkOp {
                 "This erases firmware and device data from the selected ESP32.",
                 "Wipe device",
             )),
+            Self::ResetDevice => ActionMeta::new(
+                "Reset device",
+                "Reboot the connected device without erasing firmware or data.",
+                ActionPriority::Tertiary,
+            ),
             Self::ConnectServer => ActionMeta::new(
                 "Connect server",
                 "Attach Studio to the server protocol over the open link session.",

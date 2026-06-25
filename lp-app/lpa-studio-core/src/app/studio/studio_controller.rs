@@ -99,6 +99,7 @@ impl StudioController {
         match op {
             DeviceOp::DisconnectDevice => self.disconnect_device().await,
             DeviceOp::DisconnectLightPlayer => self.disconnect_lightplayer().await,
+            DeviceOp::ResetDevice => self.reset_device(updates).await,
             DeviceOp::ConnectLightPlayer => self.connect_server_from_link(updates).await,
             DeviceOp::ProvisionFirmware => self.provision_firmware(updates).await,
             DeviceOp::ResetToBlank => self.reset_to_blank(updates).await,
@@ -499,6 +500,77 @@ impl StudioController {
         self.project.reset();
         self.device.server.disconnect();
         Ok(UiNotices::new().with_notice(UiNotice::info("LightPlayer disconnected")))
+    }
+
+    async fn reset_device(&mut self, updates: UxUpdateSink) -> UiResult {
+        self.project.reset();
+        self.device.server.disconnect();
+        let captured_logs = Rc::new(RefCell::new(Vec::new()));
+        let management_updates = capture_log_updates(
+            retarget_activity_updates(
+                updates.clone(),
+                device_section_target(DeviceController::SECTION_CONNECT_DEVICE),
+            ),
+            Rc::clone(&captured_logs),
+        );
+        let management = match self
+            .device
+            .link
+            .manage_with_updates(
+                LinkManagementRequest::ResetRuntime,
+                "Resetting device",
+                management_updates,
+            )
+            .await
+        {
+            Ok(management) => management,
+            Err(error) => {
+                self.record_logs(core::mem::take(&mut *captured_logs.borrow_mut()));
+                return Err(error);
+            }
+        };
+        self.record_logs(core::mem::take(&mut *captured_logs.borrow_mut()));
+        self.device.record_logs(&management.logs);
+        self.logs.extend(management.logs);
+
+        let mut outcome = UiNotices::new().with_notice(UiNotice::info("Device reset"));
+        emit_activity(
+            &updates,
+            device_section_target(DeviceController::SECTION_CONNECT_LIGHTPLAYER),
+            "Reconnecting device",
+            "Connecting",
+            "Waiting for device boot",
+        );
+        match self.device.link.reopen_active_connection().await {
+            Ok(connected) => match self.attach_connected_link(connected, updates).await {
+                Ok(mut attach_outcome) => {
+                    outcome.notices.append(&mut attach_outcome.notices);
+                    Ok(outcome)
+                }
+                Err(error) => {
+                    self.logs.push(UiLogEntry::new(
+                        UiLogLevel::Warn,
+                        "lpa-studio-core",
+                        format!("device reset but server reconnect failed: {error}"),
+                    ));
+                    self.device.server.fail(error.to_string());
+                    Ok(outcome.with_notice(UiNotice::info(
+                        "Device reset; reconnect after it finishes booting",
+                    )))
+                }
+            },
+            Err(error) => {
+                self.logs.push(UiLogEntry::new(
+                    UiLogLevel::Warn,
+                    "lpa-studio-core",
+                    format!("device reset but serial reopen failed: {error}"),
+                ));
+                self.device.server.fail(error.to_string());
+                Ok(outcome.with_notice(UiNotice::info(
+                    "Device reset; reconnect the device after it finishes booting",
+                )))
+            }
+        }
     }
 
     async fn provision_firmware(&mut self, updates: UxUpdateSink) -> UiResult {
@@ -1021,6 +1093,27 @@ mod tests {
         assert!(!actions.iter().any(|action| matches!(
             action.op_as::<DeviceOp>(),
             Some(DeviceOp::ResetToBlank | DeviceOp::DisconnectDevice)
+        )));
+    }
+
+    #[test]
+    fn connected_lightplayer_offers_non_destructive_device_reset() {
+        let mut studio = connected_studio();
+        studio
+            .device
+            .link
+            .set_active_session_for_test(management_capable_session());
+
+        let actions = view_actions(&studio.view());
+
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetDevice)))
+        );
+        assert!(actions.iter().any(|action| matches!(
+            action.op_as::<DeviceOp>(),
+            Some(DeviceOp::DisconnectLightPlayer)
         )));
     }
 

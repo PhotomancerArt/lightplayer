@@ -24,6 +24,11 @@ pub struct BrowserSerialProtocolProgress {
     pub percent: Option<u32>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct BrowserSerialResetResult {
+    pub logs: Vec<String>,
+}
+
 #[wasm_bindgen(module = "/src/providers/browser_serial_esp32/browser_serial.js")]
 extern "C" {
     #[wasm_bindgen(js_name = isSupported)]
@@ -46,6 +51,9 @@ extern "C" {
 
     #[wasm_bindgen(js_name = releasePort)]
     fn js_release(id: u32) -> Promise;
+
+    #[wasm_bindgen(js_name = resetAndRead)]
+    fn js_reset_and_read(id: u32, baud_rate: u32, read_window_ms: u32) -> Promise;
 
     #[wasm_bindgen(js_name = closePort)]
     fn js_close(id: u32) -> Promise;
@@ -94,6 +102,19 @@ pub async fn release(id: u32) -> Result<(), LinkError> {
         .await
         .map(|_| ())
         .map_err(js_error)
+}
+
+pub async fn reset_and_read(
+    id: u32,
+    baud_rate: u32,
+    read_window_ms: u32,
+) -> Result<BrowserSerialResetResult, LinkError> {
+    let value = JsFuture::from(js_reset_and_read(id, baud_rate, read_window_ms))
+        .await
+        .map_err(js_error)?;
+    Ok(BrowserSerialResetResult {
+        logs: reflect_string_array(&value, "logs")?,
+    })
 }
 
 pub async fn close(id: u32) -> Result<(), LinkError> {

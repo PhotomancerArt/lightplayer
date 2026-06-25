@@ -18,6 +18,9 @@ use crate::{
     LinkManagementProgress, LinkProvider, LinkSession, LinkSessionStatus,
 };
 
+const RESET_BAUD_RATE: u32 = 115_200;
+const RESET_READ_WINDOW_MS: u32 = 1_500;
+
 pub fn descriptor() -> LinkProviderDescriptor {
     LinkProviderKind::BrowserSerialEsp32.descriptor()
 }
@@ -205,6 +208,7 @@ impl BrowserSerialEsp32Provider {
     ) -> Result<LinkManagementResult, LinkError> {
         self.session_capabilities_support(session_id, &request)?;
         let endpoint_id = self.session(session_id)?.session.endpoint_id.clone();
+        let port_id = self.session(session_id)?.port_id;
         self.release_protocol_if_open(session_id).await?;
         match request {
             LinkManagementRequest::FlashFirmware => {
@@ -249,7 +253,30 @@ impl BrowserSerialEsp32Provider {
                     map_erase_device_result(result),
                 ))
             }
-            LinkManagementRequest::ResetRuntime | LinkManagementRequest::EraseRawFilesystem => {
+            LinkManagementRequest::ResetRuntime => {
+                events.emit(crate::LinkManagementEvent::log("Resetting device"));
+                let result =
+                    browser_serial::reset_and_read(port_id, RESET_BAUD_RATE, RESET_READ_WINDOW_MS)
+                        .await?;
+                for message in &result.logs {
+                    events.emit(crate::LinkManagementEvent::log(message.clone()));
+                }
+                let logs = result
+                    .logs
+                    .iter()
+                    .map(|message| {
+                        LinkLogEntry::new(
+                            endpoint_id.clone(),
+                            Some(session_id.clone()),
+                            LinkLogLevel::Info,
+                            message.clone(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                self.session_mut(session_id)?.logs.extend(logs);
+                Ok(LinkManagementResult::ResetRuntime)
+            }
+            LinkManagementRequest::EraseRawFilesystem => {
                 Err(LinkError::unsupported(format!("{:?}", request.operation())))
             }
         }

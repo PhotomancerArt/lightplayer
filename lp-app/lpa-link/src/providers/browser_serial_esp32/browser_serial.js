@@ -47,6 +47,13 @@ export async function releasePort(id) {
   await session.releaseProtocol();
 }
 
+export async function resetAndRead(id, baudRate, readWindowMs) {
+  return requireSession(id).resetAndRead({
+    baudRate,
+    readWindowMs,
+  });
+}
+
 export function getPort(id) {
   return requireSession(id).port;
 }

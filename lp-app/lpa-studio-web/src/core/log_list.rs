@@ -8,10 +8,19 @@ const LOG_STICKY_THRESHOLD_PX: f64 = 48.0;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn LogList(logs: Vec<UiLogEntry>, max_entries: usize) -> Element {
+pub fn LogList(
+    logs: Vec<UiLogEntry>,
+    max_entries: usize,
+    #[props(default = true)] framed: bool,
+) -> Element {
     let visible_logs = log_tail(logs, max_entries);
     let mut log_element = use_signal(|| None::<Rc<MountedData>>);
     let mut stick_to_bottom = use_signal(|| true);
+    let list_class = if framed {
+        "tw:m-0 tw:grid tw:max-h-80 tw:gap-0 tw:overflow-auto tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-0 tw:list-none"
+    } else {
+        "tw:m-0 tw:grid tw:max-h-80 tw:gap-0 tw:overflow-auto tw:bg-transparent tw:p-0 tw:list-none"
+    };
 
     use_after_render(move || {
         if !stick_to_bottom() {
@@ -33,7 +42,7 @@ pub fn LogList(logs: Vec<UiLogEntry>, max_entries: usize) -> Element {
 
     rsx! {
         ol {
-            class: "tw:m-0 tw:grid tw:max-h-80 tw:gap-0 tw:overflow-auto tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-0 tw:list-none",
+            class: "{list_class}",
             onmounted: move |event| {
                 log_element.set(Some(event.data()));
             },

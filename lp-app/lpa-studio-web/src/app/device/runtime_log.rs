@@ -16,6 +16,7 @@ pub fn RuntimeLog(logs: Vec<UiLogEntry>) -> Element {
             LogList {
                 logs,
                 max_entries: LOG_ENTRY_LIMIT,
+                framed: false,
             }
         }
     }

@@ -281,7 +281,7 @@ impl DeviceController {
             .with_body(UiViewContent::Metrics(vec![UiMetric::new(
                 "Protocol", protocol,
             )]))
-            .with_actions(vec![self.action(DeviceOp::DisconnectLightPlayer)]),
+            .with_actions(self.connected_lightplayer_actions()),
             (LinkState::Connected { .. }, ServerState::Failed { issue, kind }) => {
                 let no_firmware = *kind == ServerFailureKind::NoFirmware;
                 UiStepView::new(
@@ -408,6 +408,16 @@ impl DeviceController {
             .collect()
     }
 
+    fn connected_lightplayer_actions(&self) -> Vec<UiAction> {
+        let mut actions = self
+            .lightplayer_actions(false)
+            .into_iter()
+            .filter(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetDevice)))
+            .collect::<Vec<_>>();
+        actions.push(self.action(DeviceOp::DisconnectLightPlayer));
+        actions
+    }
+
     fn device_control_actions(&self) -> Vec<UiAction> {
         self.lightplayer_actions(false)
             .into_iter()
@@ -493,6 +503,7 @@ fn map_link_action(action: UiAction, node_id: ControllerId) -> Option<UiAction> 
     let op = match action.op_as::<LinkOp>()? {
         LinkOp::RefreshProviders => DeviceOp::RefreshConnections,
         LinkOp::ConnectServer => DeviceOp::ConnectLightPlayer,
+        LinkOp::ResetDevice => DeviceOp::ResetDevice,
         LinkOp::ProvisionFirmware => DeviceOp::ProvisionFirmware,
         LinkOp::ResetToBlank => DeviceOp::ResetToBlank,
         LinkOp::DisconnectLink => DeviceOp::DisconnectDevice,
