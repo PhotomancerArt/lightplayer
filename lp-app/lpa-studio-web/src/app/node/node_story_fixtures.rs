@@ -209,6 +209,12 @@ pub(crate) fn config_row_states_fixture() -> Vec<UiConfigSlot> {
             .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
         UiConfigSlot::value("invalid", "Invalid value", UiSlotValue::f32(-1.0))
             .with_state(UiSlotFieldState::editable().with_invalid("value must be non-negative")),
+        UiConfigSlot::value(
+            "write_failed",
+            "Write failed",
+            UiSlotValue::string("blast.glsl"),
+        )
+        .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Error)),
         UiConfigSlot::empty("optional_trigger", "Optional trigger")
             .with_source(UiSlotSourceState::Unset),
         UiConfigSlot::record(

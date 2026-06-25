@@ -17,6 +17,10 @@ pub fn all_stories() -> Vec<StoryDescriptor> {
     generated::all_generated_stories()
 }
 
+pub fn generated_at_utc() -> &'static str {
+    generated::GENERATED_AT_UTC
+}
+
 pub fn story_by_id(id: &str) -> Option<StoryDescriptor> {
     all_stories().into_iter().find(|story| story.id == id)
 }

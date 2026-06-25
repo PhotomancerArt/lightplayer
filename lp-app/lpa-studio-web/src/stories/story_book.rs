@@ -1,7 +1,9 @@
 use dioxus::prelude::*;
 
 use crate::stories::story::StoryDescriptor;
-use crate::stories::story_registry::{DEFAULT_STORY_ID, all_stories, render_story, story_by_id};
+use crate::stories::story_registry::{
+    DEFAULT_STORY_ID, all_stories, generated_at_utc, render_story, story_by_id,
+};
 
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn StoryBook() -> Element {
@@ -15,6 +17,8 @@ pub fn StoryBook() -> Element {
     let selection = story_selection(&selected, &story_groups)
         .or_else(|| story_selection(DEFAULT_STORY_ID, &story_groups))
         .expect("default story descriptor is registered");
+    let build_stamp = generated_at_utc();
+    let story_summary = format!("{} states / sm md lg", stories.len());
     let page_title = selection.label();
     let page_description = selection.description();
     let page_source_ref = selection.source_ref();
@@ -31,10 +35,13 @@ pub fn StoryBook() -> Element {
 
     rsx! {
         main { class: "tw:grid tw:h-screen tw:min-h-0 tw:grid-cols-[260px_minmax(0,1fr)] tw:overflow-hidden tw:max-[880px]:grid-cols-1",
-            aside { class: "tw:min-h-0 tw:overflow-y-auto tw:border-r tw:border-border tw:bg-card-subtle tw:p-[18px] tw:max-[880px]:border-b tw:max-[880px]:border-r-0",
-                div {
-                    h1 { class: "tw:m-0 tw:mb-1.5 tw:text-lg tw:font-bold tw:text-strong-foreground", "Lightplayer Stories" }
-                    p { class: "tw:m-0 tw:mb-[18px] tw:text-sm tw:text-dim-foreground", "{stories.len()} component states" }
+            aside { class: "tw:min-h-0 tw:overflow-y-auto tw:border-r tw:border-border tw:bg-card-subtle tw:max-[880px]:border-b tw:max-[880px]:border-r-0",
+                header { class: "tw:grid tw:gap-2 tw:border-b tw:border-border-muted tw:bg-[linear-gradient(135deg,var(--studio-color-surface-muted),var(--studio-status-good-bg)_54%,var(--studio-color-surface-subtle))] tw:px-[18px] tw:py-4",
+                    h1 { class: "tw:m-0 tw:text-lg tw:font-extrabold tw:leading-tight tw:text-strong-foreground", "Lightplayer Design" }
+                    div { class: "tw:grid tw:gap-1",
+                        p { class: "tw:m-0 tw:font-mono tw:text-[0.68rem] tw:leading-tight tw:text-muted-foreground", "built {build_stamp}" }
+                        p { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:leading-tight tw:text-subtle-foreground", "{story_summary}" }
+                    }
                 }
                 div { class: "tw:hidden", "aria-hidden": "true",
                     for family in story_groups.iter() {
@@ -66,7 +73,7 @@ pub fn StoryBook() -> Element {
                         }
                     }
                 }
-                nav { class: "tw:grid tw:gap-[18px]",
+                nav { class: "tw:grid tw:gap-[18px] tw:p-[18px]",
                     for family in story_groups.iter() {
                         section { class: "tw:grid tw:min-w-0 tw:gap-2",
                             h2 { class: "tw:m-0 tw:mb-0.5 tw:text-xs tw:font-extrabold tw:uppercase tw:text-heading", "{family.label}" }

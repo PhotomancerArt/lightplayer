@@ -11,11 +11,12 @@ use crate::app::node::ConfigSlotRow;
 use crate::app::node::node_story_fixtures::config_row_states_fixture;
 
 #[story(
+    label = "All States",
     description = "Representative config rows for direct, bound, edited, invalid, and record slots."
 )]
-pub(crate) fn overview() -> Element {
+pub(crate) fn all_states() -> Element {
     rsx! {
-        div { class: "tw:grid tw:min-w-0 tw:overflow-hidden",
+        div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:divide-y tw:divide-border-muted",
             for (index, slot) in config_row_states_fixture().into_iter().enumerate() {
                 ConfigSlotRow { slot, depth: 0, index }
             }
@@ -65,6 +66,18 @@ pub(crate) fn invalid_value() -> Element {
         ConfigSlotRow {
             slot: UiConfigSlot::value("fade_after", "Fade after", UiSlotValue::f32(-1.0))
                 .with_state(UiSlotFieldState::editable().with_invalid("value must be non-negative")),
+            depth: 0,
+            index: 0,
+        }
+    }
+}
+
+#[story(description = "A row preserving an edited value after a failed write.")]
+pub(crate) fn write_failed() -> Element {
+    rsx! {
+        ConfigSlotRow {
+            slot: UiConfigSlot::value("shader", "Shader", UiSlotValue::string("blast.glsl"))
+                .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Error)),
             depth: 0,
             index: 0,
         }

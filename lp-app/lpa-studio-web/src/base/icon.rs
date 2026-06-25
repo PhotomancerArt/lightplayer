@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
     Asterisk, Check, ChevronDown, ChevronRight, CircleAlert, CircleDot, CircleMinus, FlaskConical,
-    Link2, Play, SquareArrowRight, TriangleAlert, Usb,
+    Link2, Pencil, Play, SquareArrowRight, TriangleAlert, Usb,
 };
 
 #[component]
@@ -20,6 +20,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::AssignedValue => rsx! { CircleDot { size } },
         StudioIconName::BoundValue => rsx! { Link2 { size } },
         StudioIconName::ChildValue => rsx! { SquareArrowRight { size } },
+        StudioIconName::Edited => rsx! { Pencil { size } },
         StudioIconName::Expanded => rsx! { ChevronDown { size } },
         StudioIconName::Collapsed => rsx! { ChevronRight { size } },
     }
@@ -48,6 +49,7 @@ pub enum StudioIconName {
     AssignedValue,
     BoundValue,
     ChildValue,
+    Edited,
     Expanded,
     Collapsed,
 }
