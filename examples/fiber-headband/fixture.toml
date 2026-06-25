@@ -1,0 +1,28 @@
+kind = "Fixture"
+color_order = "rgb"
+brightness = 255
+gamma_correction = false
+sampling = "direct"
+transform = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
+
+[bindings.input]
+source = "bus#visual.out"
+
+[bindings.output]
+target = "bus#control.out"
+
+[render_size]
+width = 2
+height = 1
+
+[mapping]
+kind = "PathPoints"
+sample_diameter = 1.0
+
+[mapping.paths.0]
+kind = "PointList"
+first_channel = 0
+
+[mapping.paths.0.points]
+0 = [0.25, 0.5]
+1 = [0.75, 0.5]
