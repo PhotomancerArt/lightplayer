@@ -1,0 +1,680 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>LightPlayer Style Lab - Dynamic Logo</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #090b0d;
+        --panel: rgba(18, 22, 25, 0.9);
+        --panel-strong: rgba(24, 29, 33, 0.96);
+        --line: rgba(240, 247, 248, 0.16);
+        --text: #f7f4ec;
+        --muted: #a8b1b2;
+        --accent: #79e3b5;
+        --accent-2: #ff8ac7;
+        --accent-3: #ffd16a;
+        --radius: 8px;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: var(--bg);
+        color: var(--text);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        min-width: 320px;
+        min-height: 100vh;
+        background:
+          radial-gradient(circle at 18% 18%, rgba(121, 227, 181, 0.15), transparent 26%),
+          radial-gradient(circle at 80% 12%, rgba(255, 138, 199, 0.13), transparent 24%),
+          linear-gradient(180deg, #111418 0%, #070809 100%);
+      }
+
+      main {
+        width: min(960px, 100%);
+        margin: 0 auto;
+        padding: 24px;
+      }
+
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        font-size: clamp(1.5rem, 3vw, 2.2rem);
+        line-height: 1.08;
+      }
+
+      h2 {
+        font-size: 0.85rem;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      p {
+        color: var(--muted);
+        line-height: 1.55;
+      }
+
+      .shell {
+        display: grid;
+        gap: 14px;
+      }
+
+      .hero,
+      .strip,
+      .sample {
+        border: 1px solid var(--line);
+        border-radius: var(--radius);
+        background: var(--panel);
+        box-shadow: 0 22px 60px rgba(0, 0, 0, 0.36), inset 0 1px rgba(255, 255, 255, 0.06);
+      }
+
+      .hero {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 18px;
+        min-height: 360px;
+        padding: 18px;
+        overflow: hidden;
+      }
+
+      .hero-copy {
+        display: grid;
+        align-content: center;
+        gap: 10px;
+        max-width: 620px;
+      }
+
+      .logo-stage {
+        display: grid;
+        place-items: center;
+        min-height: 230px;
+        border: 1px solid rgba(240, 247, 248, 0.12);
+        border-radius: var(--radius);
+        background:
+          linear-gradient(135deg, rgba(255, 255, 255, 0.06), transparent 34%),
+          linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(0, 0, 0, 0.18)),
+          #0b0e10;
+      }
+
+      .logo-glow {
+        display: grid;
+        place-items: center;
+        width: min(430px, 100%);
+        min-height: 180px;
+        border-radius: 999px;
+        background: radial-gradient(circle, rgba(121, 227, 181, 0.16), transparent 66%);
+      }
+
+      .brand-row,
+      .sample {
+        display: grid;
+        grid-template-columns: 64px minmax(0, 1fr);
+        gap: 12px;
+        align-items: center;
+      }
+
+      .brand-row {
+        width: min(430px, 100%);
+        padding: 12px;
+        border: 1px solid rgba(240, 247, 248, 0.14);
+        border-radius: var(--radius);
+        background: rgba(6, 8, 9, 0.68);
+      }
+
+      .wordmark {
+        display: grid;
+        gap: 2px;
+        min-width: 0;
+      }
+
+      .wordmark strong,
+      .wordmark span {
+        display: block;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .wordmark strong {
+        font-size: 1.05rem;
+      }
+
+      .wordmark span,
+      .meta {
+        color: var(--muted);
+        font-size: 0.78rem;
+        font-weight: 800;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      .strip {
+        display: grid;
+        gap: 12px;
+        padding: 14px;
+      }
+
+      .sample-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 10px;
+      }
+
+      .sample {
+        min-height: 98px;
+        padding: 12px;
+        background: var(--panel-strong);
+      }
+
+      .sample.is-plain {
+        background: #080a0b;
+      }
+
+      .sample.is-warm {
+        background:
+          linear-gradient(135deg, rgba(255, 209, 106, 0.13), transparent 54%),
+          #11100d;
+      }
+
+      .sample.is-cool {
+        background:
+          linear-gradient(135deg, rgba(103, 171, 255, 0.13), transparent 54%),
+          #0b1015;
+      }
+
+      .logo-mark {
+        width: 64px;
+        height: 64px;
+        contain: strict;
+      }
+
+      .logo-mark svg {
+        display: block;
+        width: 64px;
+        height: 64px;
+        overflow: visible;
+      }
+
+      .canvas-host {
+        width: 64px;
+        height: 64px;
+      }
+
+      .logo-mark canvas {
+        display: block;
+        width: 64px;
+        height: 64px;
+        background: transparent;
+      }
+
+      .logo-border {
+        fill: none;
+        stroke: rgba(255, 255, 255, 0.94);
+        stroke-width: 4;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        vector-effect: non-scaling-stroke;
+        filter: drop-shadow(0 1px 0 rgba(0, 0, 0, 0.38)) drop-shadow(0 0 12px rgba(255, 255, 255, 0.10));
+      }
+
+      .logo-hairline {
+        fill: none;
+        stroke: rgba(255, 255, 255, 0.26);
+        stroke-width: 1;
+        stroke-linecap: round;
+        stroke-linejoin: round;
+        vector-effect: non-scaling-stroke;
+      }
+
+      @media (min-width: 760px) {
+        .hero {
+          grid-template-columns: minmax(0, 0.92fr) minmax(300px, 1fr);
+          align-items: center;
+          padding: 24px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <section class="shell">
+        <section class="hero" aria-label="Dynamic logo concept">
+          <div class="hero-copy">
+            <p class="meta">Logo sketch</p>
+            <h1>LightPlayer dynamic shader mark</h1>
+            <p>A 64px play-logo canvas with quiet procedural motion, independent animation and palette cycles, and a crisp white border for dark surfaces.</p>
+          </div>
+          <div class="logo-stage">
+            <div class="logo-glow">
+              <div class="brand-row">
+                <div class="logo-mark" aria-label="Animated LightPlayer logo">
+                  <svg viewBox="0 0 64 64" role="img" aria-hidden="true">
+                    <defs>
+                      <clipPath id="logo-play-clip">
+                        <path d="M23.9 13.8 L45.3 27.6 Q52 32 45.3 36.4 L23.9 50.2 Q18 54 18 46 L18 18 Q18 10 23.9 13.8 Z"></path>
+                      </clipPath>
+                    </defs>
+                    <foreignObject x="0" y="0" width="64" height="64" clip-path="url(#logo-play-clip)">
+                      <div xmlns="http://www.w3.org/1999/xhtml" class="canvas-host">
+                        <canvas class="shader-canvas" width="64" height="64"></canvas>
+                      </div>
+                    </foreignObject>
+                    <path class="logo-border" d="M23.9 13.8 L45.3 27.6 Q52 32 45.3 36.4 L23.9 50.2 Q18 54 18 46 L18 18 Q18 10 23.9 13.8 Z"></path>
+                    <path class="logo-hairline" d="M24.7 17.4 L42.1 28.8 Q46.9 32 42.1 35.2 L24.7 46.6 Q21.8 48.5 21.8 44.7 L21.8 19.3 Q21.8 15.5 24.7 17.4 Z"></path>
+                  </svg>
+                </div>
+                <div class="wordmark">
+                  <strong>LightPlayer</strong>
+                  <span>On-device shader runtime</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="strip" aria-label="Surface samples">
+          <h2>64px surface check</h2>
+          <div class="sample-grid">
+            <div class="sample is-plain">
+              <div class="logo-mark" aria-label="Animated LightPlayer logo on dark">
+                <svg viewBox="0 0 64 64" role="img" aria-hidden="true">
+                  <defs>
+                    <clipPath id="logo-play-clip-plain">
+                      <path d="M23.9 13.8 L45.3 27.6 Q52 32 45.3 36.4 L23.9 50.2 Q18 54 18 46 L18 18 Q18 10 23.9 13.8 Z"></path>
+                    </clipPath>
+                  </defs>
+                  <foreignObject x="0" y="0" width="64" height="64" clip-path="url(#logo-play-clip-plain)">
+                    <div xmlns="http://www.w3.org/1999/xhtml" class="canvas-host">
+                      <canvas class="shader-canvas" width="64" height="64"></canvas>
+                    </div>
+                  </foreignObject>
+                  <path class="logo-border" d="M23.9 13.8 L45.3 27.6 Q52 32 45.3 36.4 L23.9 50.2 Q18 54 18 46 L18 18 Q18 10 23.9 13.8 Z"></path>
+                  <path class="logo-hairline" d="M24.7 17.4 L42.1 28.8 Q46.9 32 42.1 35.2 L24.7 46.6 Q21.8 48.5 21.8 44.7 L21.8 19.3 Q21.8 15.5 24.7 17.4 Z"></path>
+                </svg>
+              </div>
+              <div class="wordmark">
+                <strong>Dark chrome</strong>
+                <span>App shell</span>
+              </div>
+            </div>
+            <div class="sample is-cool">
+              <div class="logo-mark" aria-label="Animated LightPlayer logo on cool surface">
+                <svg viewBox="0 0 64 64" role="img" aria-hidden="true">
+                  <defs>
+                    <clipPath id="logo-play-clip-cool">
+                      <path d="M23.9 13.8 L45.3 27.6 Q52 32 45.3 36.4 L23.9 50.2 Q18 54 18 46 L18 18 Q18 10 23.9 13.8 Z"></path>
+                    </clipPath>
+                  </defs>
+                  <foreignObject x="0" y="0" width="64" height="64" clip-path="url(#logo-play-clip-cool)">
+                    <div xmlns="http://www.w3.org/1999/xhtml" class="canvas-host">
+                      <canvas class="shader-canvas" width="64" height="64"></canvas>
+                    </div>
+                  </foreignObject>
+                  <path class="logo-border" d="M23.9 13.8 L45.3 27.6 Q52 32 45.3 36.4 L23.9 50.2 Q18 54 18 46 L18 18 Q18 10 23.9 13.8 Z"></path>
+                  <path class="logo-hairline" d="M24.7 17.4 L42.1 28.8 Q46.9 32 42.1 35.2 L24.7 46.6 Q21.8 48.5 21.8 44.7 L21.8 19.3 Q21.8 15.5 24.7 17.4 Z"></path>
+                </svg>
+              </div>
+              <div class="wordmark">
+                <strong>Cool panel</strong>
+                <span>Sidebar</span>
+              </div>
+            </div>
+            <div class="sample is-warm">
+              <div class="logo-mark" aria-label="Animated LightPlayer logo on warm surface">
+                <svg viewBox="0 0 64 64" role="img" aria-hidden="true">
+                  <defs>
+                    <clipPath id="logo-play-clip-warm">
+                      <path d="M23.9 13.8 L45.3 27.6 Q52 32 45.3 36.4 L23.9 50.2 Q18 54 18 46 L18 18 Q18 10 23.9 13.8 Z"></path>
+                    </clipPath>
+                  </defs>
+                  <foreignObject x="0" y="0" width="64" height="64" clip-path="url(#logo-play-clip-warm)">
+                    <div xmlns="http://www.w3.org/1999/xhtml" class="canvas-host">
+                      <canvas class="shader-canvas" width="64" height="64"></canvas>
+                    </div>
+                  </foreignObject>
+                  <path class="logo-border" d="M23.9 13.8 L45.3 27.6 Q52 32 45.3 36.4 L23.9 50.2 Q18 54 18 46 L18 18 Q18 10 23.9 13.8 Z"></path>
+                  <path class="logo-hairline" d="M24.7 17.4 L42.1 28.8 Q46.9 32 42.1 35.2 L24.7 46.6 Q21.8 48.5 21.8 44.7 L21.8 19.3 Q21.8 15.5 24.7 17.4 Z"></path>
+                </svg>
+              </div>
+              <div class="wordmark">
+                <strong>Warm panel</strong>
+                <span>Device view</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script>
+      const vertexSource = `
+        attribute vec2 a_position;
+        varying vec2 v_uv;
+
+        void main() {
+          v_uv = a_position * 0.5 + 0.5;
+          gl_Position = vec4(a_position, 0.0, 1.0);
+        }
+      `;
+
+      const fragmentSource = `
+        precision highp float;
+
+        uniform vec2 u_resolution;
+        uniform float u_time;
+
+        varying vec2 v_uv;
+
+        const float TAU = 6.28318530718;
+
+        mat2 rotate2d(float a) {
+          float c = cos(a);
+          float s = sin(a);
+          return mat2(c, -s, s, c);
+        }
+
+        float hash21(vec2 p) {
+          vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+          p3 += dot(p3, p3.yzx + 33.33);
+          return fract((p3.x + p3.y) * p3.z);
+        }
+
+        float valueNoise(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          vec2 u = f * f * (3.0 - 2.0 * f);
+          float a = hash21(i);
+          float b = hash21(i + vec2(1.0, 0.0));
+          float c = hash21(i + vec2(0.0, 1.0));
+          float d = hash21(i + vec2(1.0, 1.0));
+          return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+        }
+
+        float fbm(vec2 p) {
+          float v = 0.0;
+          float a = 0.52;
+          mat2 m = mat2(0.82, -0.58, 0.58, 0.82);
+          for (int i = 0; i < 5; i++) {
+            v += a * valueNoise(p);
+            p = m * p * 2.03 + 17.17;
+            a *= 0.5;
+          }
+          return v;
+        }
+
+        float cellular(vec2 p) {
+          vec2 i = floor(p);
+          vec2 f = fract(p);
+          float nearest = 8.0;
+          for (int y = -1; y <= 1; y++) {
+            for (int x = -1; x <= 1; x++) {
+              vec2 cell = vec2(float(x), float(y));
+              vec2 h = vec2(hash21(i + cell), hash21(i + cell + 7.13));
+              vec2 r = cell + h - f;
+              nearest = min(nearest, dot(r, r));
+            }
+          }
+          return sqrt(nearest);
+        }
+
+        float patternFbm(vec2 p, float t) {
+          vec2 drift = vec2(t * 0.035, -t * 0.024);
+          float n = fbm(p * 3.0 + drift + 0.24 * sin(vec2(t * 0.13, t * 0.09)));
+          return smoothstep(0.12, 0.92, n);
+        }
+
+        float patternCells(vec2 p, float t) {
+          vec2 q = rotate2d(0.24 * sin(t * 0.06)) * p;
+          float c = cellular(q * 4.1 + vec2(t * 0.018, t * 0.026));
+          float veined = 1.0 - smoothstep(0.12, 0.78, c);
+          float haze = fbm(q * 2.2 - vec2(t * 0.02, 0.0));
+          return clamp(mix(haze, veined, 0.62), 0.0, 1.0);
+        }
+
+        float patternRidged(vec2 p, float t) {
+          vec2 q = p * 3.7 + vec2(-t * 0.032, t * 0.018);
+          float n = fbm(q);
+          float ridge = 1.0 - abs(2.0 * n - 1.0);
+          return smoothstep(0.1, 0.88, ridge);
+        }
+
+        float patternFlow(vec2 p, float t) {
+          vec2 q = p;
+          q.x += 0.18 * sin(p.y * 5.4 + t * 0.16);
+          q.y += 0.12 * sin(p.x * 3.6 - t * 0.11);
+          float bands = 0.5 + 0.5 * sin((q.x * 3.2 + q.y * 1.7) * TAU + t * 0.22);
+          float n = fbm(q * 2.1 + vec2(t * 0.018, -t * 0.012));
+          return smoothstep(0.04, 0.98, mix(n, bands, 0.42));
+        }
+
+        float patternAt(vec2 p, float t, float id) {
+          if (id < 0.5) {
+            return patternFbm(p, t);
+          }
+          if (id < 1.5) {
+            return patternCells(p, t);
+          }
+          if (id < 2.5) {
+            return patternRidged(p, t);
+          }
+          return patternFlow(p, t);
+        }
+
+        vec3 paletteHeatmap(float t) {
+          vec3 r = t * 2.1 - vec3(1.8, 1.14, 0.3);
+          return clamp(1.0 - r * r, 0.0, 1.0);
+        }
+
+        vec3 paletteRainbow(float t) {
+          float r = 0.33333;
+          vec3 v = abs(mod(fract(1.0 - t) + vec3(0.0, 1.0, 2.0) * r, 1.0) * 2.0 - 1.0);
+          return v * v * (3.0 - 2.0 * v);
+        }
+
+        vec3 paletteFire(float t) {
+          return clamp(vec3(1.0, 0.25, 0.0625) * exp(3.2 * t - 0.72), 0.0, 1.0);
+        }
+
+        vec3 paletteCool(float t) {
+          vec3 a = vec3(0.48, 0.52, 0.55);
+          vec3 b = vec3(0.44, 0.42, 0.50);
+          vec3 c = vec3(1.0, 1.0, 1.0);
+          vec3 d = vec3(0.21, 0.29, 0.36);
+          return clamp(a + b * cos(TAU * (c * t + d)), 0.0, 1.0);
+        }
+
+        vec3 paletteWarm(float t) {
+          vec3 a = vec3(0.56, 0.47, 0.36);
+          vec3 b = vec3(0.48, 0.37, 0.34);
+          vec3 c = vec3(1.0, 1.0, 1.0);
+          vec3 d = vec3(0.01, 0.10, 0.18);
+          return clamp(a + b * cos(TAU * (c * t + d)), 0.0, 1.0);
+        }
+
+        vec3 paletteSignal(float t) {
+          vec3 a = vec3(0.50, 0.49, 0.50);
+          vec3 b = vec3(0.50, 0.42, 0.50);
+          vec3 c = vec3(1.0, 1.0, 1.0);
+          vec3 d = vec3(0.48, 0.06, 0.28);
+          return clamp(a + b * cos(TAU * (c * t + d)), 0.0, 1.0);
+        }
+
+        vec3 paletteAt(float t, float id) {
+          if (id < 0.5) {
+            return paletteHeatmap(t);
+          }
+          if (id < 1.5) {
+            return paletteRainbow(t);
+          }
+          if (id < 2.5) {
+            return paletteFire(t);
+          }
+          if (id < 3.5) {
+            return paletteCool(t);
+          }
+          if (id < 4.5) {
+            return paletteWarm(t);
+          }
+          return paletteSignal(t);
+        }
+
+        void main() {
+          float t = u_time * 0.72;
+          vec2 p = (gl_FragCoord.xy - u_resolution * 0.5) / min(u_resolution.x, u_resolution.y);
+          p = rotate2d(0.08 * sin(t * 0.07)) * p;
+
+          float patternCycle = mod(t / 34.0, 4.0);
+          float patternId = floor(patternCycle);
+          float nextPatternId = mod(patternId + 1.0, 4.0);
+          float patternBlend = smoothstep(0.68, 1.0, fract(patternCycle));
+
+          float v0 = patternAt(p, t, patternId);
+          float v1 = patternAt(p, t, nextPatternId);
+          float v = mix(v0, v1, patternBlend);
+
+          float paletteCycle = mod(t / 28.0, 6.0);
+          float paletteId = floor(paletteCycle);
+          float nextPaletteId = mod(paletteId + 1.0, 6.0);
+          float paletteBlend = smoothstep(0.62, 1.0, fract(paletteCycle));
+
+          float shimmer = 0.035 * sin(t * 0.41 + fbm(p * 5.0) * TAU);
+          float paletteCoord = fract(v * 0.86 + 0.07 * sin(t * 0.08) + shimmer);
+          vec3 color = mix(
+            paletteAt(paletteCoord, paletteId),
+            paletteAt(paletteCoord, nextPaletteId),
+            paletteBlend
+          );
+
+          float vignette = smoothstep(0.64, 0.08, length(p));
+          float lift = 0.64 + 0.36 * smoothstep(0.06, 0.96, v);
+          color *= mix(0.78, 1.08, vignette) * lift;
+          color = pow(color, vec3(0.86));
+
+          gl_FragColor = vec4(color, 1.0);
+        }
+      `;
+
+      function compile(gl, type, source) {
+        const shader = gl.createShader(type);
+        gl.shaderSource(shader, source);
+        gl.compileShader(shader);
+
+        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+          throw new Error(gl.getShaderInfoLog(shader) || "Shader compile failed");
+        }
+
+        return shader;
+      }
+
+      function createProgram(gl) {
+        const program = gl.createProgram();
+        gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, vertexSource));
+        gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, fragmentSource));
+        gl.linkProgram(program);
+
+        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+          throw new Error(gl.getProgramInfoLog(program) || "Program link failed");
+        }
+
+        return program;
+      }
+
+      function createLogoRenderer(canvas, timeOffset) {
+        const gl = canvas.getContext("webgl", {
+          alpha: true,
+          antialias: true,
+          depth: false,
+          premultipliedAlpha: true,
+          preserveDrawingBuffer: false,
+          stencil: false
+        });
+
+        if (!gl) {
+          canvas.style.background = "conic-gradient(from 30deg, #79e3b5, #ff8ac7, #ffd16a, #67abff, #79e3b5)";
+          return null;
+        }
+
+        const program = createProgram(gl);
+        const positionLocation = gl.getAttribLocation(program, "a_position");
+        const resolutionLocation = gl.getUniformLocation(program, "u_resolution");
+        const timeLocation = gl.getUniformLocation(program, "u_time");
+        const buffer = gl.createBuffer();
+
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        gl.bufferData(
+          gl.ARRAY_BUFFER,
+          new Float32Array([
+            -1, -1,
+             1, -1,
+            -1,  1,
+            -1,  1,
+             1, -1,
+             1,  1
+          ]),
+          gl.STATIC_DRAW
+        );
+
+        function resize() {
+          const rect = canvas.getBoundingClientRect();
+          const scale = Math.min(Math.max(window.devicePixelRatio || 1, 2), 4);
+          const width = Math.max(1, Math.round(rect.width * scale));
+          const height = Math.max(1, Math.round(rect.height * scale));
+
+          if (canvas.width !== width || canvas.height !== height) {
+            canvas.width = width;
+            canvas.height = height;
+          }
+        }
+
+        function render(now) {
+          resize();
+          gl.viewport(0, 0, canvas.width, canvas.height);
+          gl.clearColor(0, 0, 0, 0);
+          gl.clear(gl.COLOR_BUFFER_BIT);
+          gl.useProgram(program);
+          gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+          gl.enableVertexAttribArray(positionLocation);
+          gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+          gl.uniform2f(resolutionLocation, canvas.width, canvas.height);
+          gl.uniform1f(timeLocation, now * 0.001 + timeOffset);
+          gl.drawArrays(gl.TRIANGLES, 0, 6);
+        }
+
+        return { render, resize };
+      }
+
+      const renderers = Array.from(document.querySelectorAll(".shader-canvas"))
+        .map((canvas, index) => createLogoRenderer(canvas, index * 0.18))
+        .filter(Boolean);
+
+      const observer = new ResizeObserver(() => {
+        for (const renderer of renderers) {
+          renderer.resize();
+        }
+      });
+
+      for (const canvas of document.querySelectorAll(".shader-canvas")) {
+        observer.observe(canvas);
+      }
+
+      function frame(now) {
+        for (const renderer of renderers) {
+          renderer.render(now);
+        }
+        requestAnimationFrame(frame);
+      }
+
+      requestAnimationFrame(frame);
+    </script>
+  </body>
+</html>
