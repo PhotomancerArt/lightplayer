@@ -1,4 +1,6 @@
 use dioxus::prelude::*;
+use std::rc::Rc;
+use wasm_bindgen::{JsCast, closure::Closure};
 
 use crate::stories::story::StoryDescriptor;
 use crate::stories::story_registry::{
@@ -10,6 +12,7 @@ pub fn StoryBook() -> Element {
     let initial_route = selected_story_route_from_hash();
     let mut selected_story_id = use_signal(move || initial_route.story_id);
     let mut viewport = use_signal(move || initial_route.viewport);
+    let _hash_listener = use_hook(move || install_story_hash_listener(selected_story_id, viewport));
     let stories = all_stories();
     let story_groups = story_groups(&stories);
     let selected = selected_story_id.read().clone();
@@ -678,6 +681,38 @@ fn story_hash(story_id: &str, viewport: StoryViewport) -> String {
 fn set_story_hash(story_id: &str, viewport: StoryViewport) {
     if let Some(location) = web_sys::window().map(|window| window.location()) {
         let _ = location.set_hash(&story_hash(story_id, viewport));
+    }
+}
+
+fn install_story_hash_listener(
+    mut selected_story_id: Signal<String>,
+    mut viewport: Signal<StoryViewport>,
+) -> Option<Rc<StoryHashListener>> {
+    let window = web_sys::window()?;
+    let callback = Closure::<dyn FnMut(web_sys::Event)>::wrap(Box::new(move |_| {
+        let route = selected_story_route_from_hash();
+        selected_story_id.set(route.story_id);
+        viewport.set(route.viewport);
+    }));
+
+    window
+        .add_event_listener_with_callback("hashchange", callback.as_ref().unchecked_ref())
+        .ok()?;
+
+    Some(Rc::new(StoryHashListener { window, callback }))
+}
+
+struct StoryHashListener {
+    window: web_sys::Window,
+    callback: Closure<dyn FnMut(web_sys::Event)>,
+}
+
+impl Drop for StoryHashListener {
+    fn drop(&mut self) {
+        let _ = self.window.remove_event_listener_with_callback(
+            "hashchange",
+            self.callback.as_ref().unchecked_ref(),
+        );
     }
 }
 

@@ -20,6 +20,7 @@ mod produced_products;
 pub(crate) mod produced_value_stories;
 mod produced_value_view;
 mod produced_values;
+mod slot_aspect_menu;
 mod slot_fields;
 mod slot_issue_list;
 mod slot_record_editor;
@@ -40,6 +41,7 @@ pub use produced_product_view::ProducedProductView;
 pub use produced_products::ProducedProducts;
 pub use produced_value_view::ProducedValueView;
 pub use produced_values::ProducedValues;
+pub(crate) use slot_aspect_menu::{SlotAspectMenu, primary_affordance, slot_row_class};
 pub use slot_fields::{
     BoolSlotField, DropdownSlotField, FloatSlotField, IntSlotField, StringSlotField, UIntSlotField,
     Vec2SlotField, Vec3SlotField, XySlotField,

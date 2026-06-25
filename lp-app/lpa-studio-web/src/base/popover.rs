@@ -41,6 +41,7 @@ pub fn IconPopoverButton(
         span { class: "tw:relative tw:inline-grid tw:min-w-0 tw:place-items-center",
             button {
                 class: "{button_class}",
+                style: "cursor: pointer;",
                 r#type: "button",
                 aria_label: "{label}",
                 title: "{title}",

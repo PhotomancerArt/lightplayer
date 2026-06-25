@@ -21,6 +21,34 @@ pub enum UiSlotValueKind {
     Vec3([f32; 3]),
 }
 
+impl UiSlotValueKind {
+    /// Compact type label for slot metadata.
+    pub fn type_label(&self) -> &'static str {
+        match self {
+            Self::String(_) => "String",
+            Self::I32(_) => "I32",
+            Self::U32(_) => "U32",
+            Self::F32(_) => "F32",
+            Self::Bool(_) => "Bool",
+            Self::Vec2(_) => "Vec2",
+            Self::Vec3(_) => "Vec3",
+        }
+    }
+
+    /// Short type description for slot metadata.
+    pub fn type_description(&self) -> &'static str {
+        match self {
+            Self::String(_) => "Text or resource-like scalar value.",
+            Self::I32(_) => "Signed integer value.",
+            Self::U32(_) => "Unsigned integer value.",
+            Self::F32(_) => "Floating point value.",
+            Self::Bool(_) => "Boolean value.",
+            Self::Vec2(_) => "Two-component floating point vector.",
+            Self::Vec3(_) => "Three-component floating point vector.",
+        }
+    }
+}
+
 /// A typed slot value plus display and editor metadata.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiSlotValue {

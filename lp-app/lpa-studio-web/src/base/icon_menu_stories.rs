@@ -3,12 +3,18 @@
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
-use crate::base::{IconMenuButton, IconMenuTone, StudioIconName};
+use crate::base::{IconMenuButton, IconMenuTone, IconMenuVisualState, StudioIconName};
 
 #[story(description = "Standard icon-triggered menus used by dense Studio controls.")]
 fn tones() -> Element {
     rsx! {
         div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-3",
+            IconMenuStoryButton {
+                label: "Quiet",
+                tone: IconMenuTone::Quiet,
+                icon: StudioIconName::Info,
+                active: true,
+            }
             IconMenuStoryButton {
                 label: "Neutral",
                 tone: IconMenuTone::Neutral,
@@ -43,6 +49,67 @@ fn tones() -> Element {
     }
 }
 
+#[story(description = "Forced trigger states for the low-level icon menu primitive.")]
+fn trigger_states() -> Element {
+    let states = [
+        ("Rest", IconMenuVisualState::Rest),
+        ("Hover", IconMenuVisualState::Hover),
+        ("Open", IconMenuVisualState::Open),
+    ];
+    let tones = [
+        ("Quiet", IconMenuTone::Quiet, StudioIconName::Info, true),
+        (
+            "Neutral",
+            IconMenuTone::Neutral,
+            StudioIconName::AssignedValue,
+            false,
+        ),
+        (
+            "Bound",
+            IconMenuTone::Accent,
+            StudioIconName::BoundValue,
+            true,
+        ),
+        (
+            "Warning",
+            IconMenuTone::Warning,
+            StudioIconName::StepAttention,
+            true,
+        ),
+        (
+            "Error",
+            IconMenuTone::Error,
+            StudioIconName::StatusError,
+            true,
+        ),
+    ];
+
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:gap-2",
+            div { class: "tw:grid tw:grid-cols-[72px_repeat(3,44px)] tw:items-center tw:gap-2",
+                span { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground", "Tone" }
+                for (state_label, _) in states {
+                    span { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground", "{state_label}" }
+                }
+            }
+            for (tone_label, tone, icon, active) in tones {
+                div { class: "tw:grid tw:grid-cols-[72px_repeat(3,44px)] tw:items-center tw:gap-2",
+                    span { class: "tw:text-xs tw:font-bold tw:text-strong-foreground", "{tone_label}" }
+                    for (_, state) in states {
+                        IconMenuStoryButton {
+                            label: tone_label,
+                            tone,
+                            icon,
+                            active,
+                            visual_state: state,
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn IconMenuStoryButton(
@@ -50,6 +117,7 @@ fn IconMenuStoryButton(
     tone: IconMenuTone,
     icon: StudioIconName,
     active: bool,
+    #[props(default = IconMenuVisualState::Rest)] visual_state: IconMenuVisualState,
 ) -> Element {
     rsx! {
         IconMenuButton {
@@ -58,6 +126,7 @@ fn IconMenuStoryButton(
             title: format!("{label} menu"),
             tone,
             active,
+            visual_state,
             div { class: "tw:grid tw:gap-1",
                 span { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-heading", "icon menu" }
                 strong { class: "tw:text-sm tw:text-strong-foreground", "{label}" }

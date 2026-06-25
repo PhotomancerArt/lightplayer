@@ -1,6 +1,9 @@
 //! Typed config slot rows for the Studio node editor.
 
-use crate::{UiSlotFieldState, UiSlotRecord, UiSlotSourceState, UiSlotValue};
+use crate::{
+    UiBindingEndpoint, UiNodeDirtyState, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind,
+    UiSlotAspectRow, UiSlotFieldState, UiSlotRecord, UiSlotSourceState, UiSlotValue,
+};
 
 /// The renderable body of a config slot row.
 #[derive(Clone, Debug, PartialEq)]
@@ -32,6 +35,8 @@ pub struct UiConfigSlot {
     pub state: UiSlotFieldState,
     /// Projection or validation issues associated with this slot.
     pub issues: Vec<String>,
+    /// Stable popup sections and row-level presentation affordances.
+    pub aspects: Vec<UiSlotAspect>,
 }
 
 impl UiConfigSlot {
@@ -69,6 +74,7 @@ impl UiConfigSlot {
             body,
             state: UiSlotFieldState::editable(),
             issues: Vec::new(),
+            aspects: Vec::new(),
         }
     }
 
@@ -101,11 +107,128 @@ impl UiConfigSlot {
         self.issues.push(issue.into());
         self
     }
+
+    /// Add one explicit aspect section.
+    pub fn with_aspect(mut self, aspect: UiSlotAspect) -> Self {
+        self.aspects.push(aspect);
+        self
+    }
+
+    /// Set explicit aspect sections.
+    pub fn with_aspects(mut self, aspects: Vec<UiSlotAspect>) -> Self {
+        self.aspects = aspects;
+        self
+    }
+
+    /// Return explicit aspects, or transitional aspects derived from legacy fields.
+    pub fn visible_aspects(&self) -> Vec<UiSlotAspect> {
+        if self.aspects.is_empty() {
+            default_aspects(self)
+        } else {
+            self.aspects.clone()
+        }
+    }
+
+    /// Return the most important row-level affordance for this slot.
+    pub fn primary_affordance(&self) -> UiSlotAffordance {
+        self.visible_aspects()
+            .iter()
+            .filter_map(|aspect| aspect.affordance)
+            .max()
+            .unwrap_or(UiSlotAffordance::Info)
+    }
+}
+
+fn default_aspects(slot: &UiConfigSlot) -> Vec<UiSlotAspect> {
+    vec![
+        validation_aspect(slot),
+        edit_state_aspect(&slot.state),
+        binding_aspect(&slot.source),
+        type_info_aspect(slot),
+    ]
+}
+
+fn validation_aspect(slot: &UiConfigSlot) -> UiSlotAspect {
+    let mut aspect = UiSlotAspect::new(UiSlotAspectKind::Validation, "Validation");
+    if let Some(invalid) = slot.state.invalid.as_ref() {
+        aspect = aspect
+            .with_row(UiSlotAspectRow::new("Invalid", invalid.clone()))
+            .with_affordance(UiSlotAffordance::Invalid);
+    }
+    for issue in &slot.issues {
+        aspect = aspect.with_row(UiSlotAspectRow::new("Issue", issue.clone()));
+    }
+    if !slot.issues.is_empty() {
+        aspect = aspect.with_affordance(UiSlotAffordance::Error);
+    }
+    if aspect.rows.is_empty() {
+        aspect = aspect.with_row(UiSlotAspectRow::new("Valid", ""));
+    }
+    aspect
+}
+
+fn edit_state_aspect(state: &UiSlotFieldState) -> UiSlotAspect {
+    match state.dirty {
+        UiNodeDirtyState::Clean => UiSlotAspect::new(UiSlotAspectKind::EditState, "Edit state")
+            .with_row(UiSlotAspectRow::new("No changes", "")),
+        UiNodeDirtyState::Dirty => UiSlotAspect::new(UiSlotAspectKind::EditState, "Edit state")
+            .with_row(UiSlotAspectRow::new("Edited", "Pending local change."))
+            .with_affordance(UiSlotAffordance::Edited),
+        UiNodeDirtyState::Saving => UiSlotAspect::new(UiSlotAspectKind::EditState, "Edit state")
+            .with_row(UiSlotAspectRow::new("Saving", "Value is being written."))
+            .with_affordance(UiSlotAffordance::Saving),
+        UiNodeDirtyState::Error => UiSlotAspect::new(UiSlotAspectKind::EditState, "Edit state")
+            .with_row(UiSlotAspectRow::new(
+                "Write failed",
+                "The edited value is still preserved.",
+            ))
+            .with_affordance(UiSlotAffordance::Error),
+    }
+}
+
+fn binding_aspect(source: &UiSlotSourceState) -> UiSlotAspect {
+    match source {
+        UiSlotSourceState::Direct => UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
+            .with_row(UiSlotAspectRow::new("Direct value", "")),
+        UiSlotSourceState::Bound(endpoint) => bound_binding_aspect(endpoint),
+        UiSlotSourceState::Unset => UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
+            .with_row(UiSlotAspectRow::new("Unbound", "")),
+    }
+}
+
+fn bound_binding_aspect(endpoint: &UiBindingEndpoint) -> UiSlotAspect {
+    let mut row = UiSlotAspectRow::new("Bound", endpoint.label.clone());
+    if let Some(detail) = endpoint.detail.as_ref() {
+        row = row.with_detail(detail.clone());
+    }
+    UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
+        .with_row(row)
+        .with_affordance(UiSlotAffordance::Bound)
+}
+
+fn type_info_aspect(slot: &UiConfigSlot) -> UiSlotAspect {
+    let mut aspect = UiSlotAspect::new(UiSlotAspectKind::TypeInfo, "Info")
+        .with_row(UiSlotAspectRow::new("Name", slot.key.clone()));
+
+    aspect = match &slot.body {
+        UiConfigSlotBody::Empty => {
+            aspect.with_row(UiSlotAspectRow::new("Value", "No authored value body."))
+        }
+        UiConfigSlotBody::Value(value) => {
+            aspect.with_row(UiSlotAspectRow::new("Type", value.kind.type_label()))
+        }
+        UiConfigSlotBody::Record(_) => aspect.with_row(UiSlotAspectRow::new("Type", "Record")),
+    };
+
+    aspect
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{UiConfigSlot, UiConfigSlotBody, UiSlotValue};
+    use crate::{
+        UiBindingEndpoint, UiConfigSlot, UiConfigSlotBody, UiNodeDirtyState, UiSlotAffordance,
+        UiSlotFieldState, UiSlotSourceState, UiSlotValue,
+    };
 
     #[test]
     fn value_slot_keeps_typed_value() {
@@ -133,5 +256,29 @@ mod tests {
             panic!("expected record slot");
         };
         assert_eq!(record.fields[0].label, "Duration");
+    }
+
+    #[test]
+    fn primary_affordance_uses_highest_aspect_affordance() {
+        let slot = UiConfigSlot::value("fade", "Fade", UiSlotValue::f32(-1.0))
+            .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
+                "bus#time.seconds",
+            )))
+            .with_state(
+                UiSlotFieldState::editable()
+                    .with_dirty(UiNodeDirtyState::Dirty)
+                    .with_invalid("value must be non-negative"),
+            );
+
+        assert_eq!(slot.primary_affordance(), UiSlotAffordance::Invalid);
+    }
+
+    #[test]
+    fn bound_source_provides_bound_affordance() {
+        let slot = UiConfigSlot::value("time", "Time", UiSlotValue::f32(3.333)).with_source(
+            UiSlotSourceState::Bound(UiBindingEndpoint::new("bus#time.seconds")),
+        );
+
+        assert_eq!(slot.primary_affordance(), UiSlotAffordance::Bound);
     }
 }
