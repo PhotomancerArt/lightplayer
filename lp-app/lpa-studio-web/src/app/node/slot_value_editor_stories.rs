@@ -4,11 +4,11 @@ use dioxus::prelude::*;
 use lpa_studio_core::{UiSlotEditorHint, UiSlotFieldState, UiSlotValue};
 use lpa_studio_web_story_macros::story;
 
-use crate::app::node::SlotValueEditor;
 use crate::app::node::node_story_fixtures::slot_value_variants_fixture;
+use crate::app::node::SlotValueEditor;
 
 #[story(description = "Slot value editor dispatch across the M1 value types.")]
-pub(crate) fn overview() -> Element {
+pub(crate) fn gallery() -> Element {
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:max-w-[420px] tw:gap-2",
             for value in slot_value_variants_fixture() {

@@ -3,13 +3,13 @@
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
-use crate::app::node::SlotRecordEditor;
 use crate::app::node::node_story_fixtures::config_record_fixture;
+use crate::app::node::SlotRecordEditor;
 
 #[story(
     description = "A record editor with scalar fields and one collapsed top-level nested record."
 )]
-pub(crate) fn overview() -> Element {
+pub(crate) fn gallery() -> Element {
     rsx! {
         SlotRecordEditor { record: config_record_fixture() }
     }

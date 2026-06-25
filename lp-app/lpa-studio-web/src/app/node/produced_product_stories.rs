@@ -8,7 +8,7 @@ use crate::app::node::node_story_fixtures::produced_product_variants_fixture;
 use crate::app::node::{ProducedProductView, ProducedProducts};
 
 #[story(description = "Produced product variants shown as a node pane section would render them.")]
-pub(crate) fn overview() -> Element {
+pub(crate) fn gallery() -> Element {
     rsx! {
         ProducedProducts { products: produced_product_variants_fixture() }
     }

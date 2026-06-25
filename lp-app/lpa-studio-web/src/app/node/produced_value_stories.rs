@@ -8,7 +8,7 @@ use crate::app::node::node_story_fixtures::produced_value_variants_fixture;
 use crate::app::node::{ProducedValueView, ProducedValues};
 
 #[story(description = "Produced values rendered as compact stat boxes.")]
-pub(crate) fn overview() -> Element {
+pub(crate) fn gallery() -> Element {
     rsx! {
         ProducedValues { values: produced_value_variants_fixture() }
     }
