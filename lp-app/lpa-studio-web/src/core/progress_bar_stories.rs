@@ -7,23 +7,18 @@ use crate::core::ProgressBar;
 #[story]
 pub(crate) fn variants() -> Element {
     rsx! {
-        section { class: "ux-panel",
-            div { class: "ux-panel-heading",
-                h2 { "Progress variants" }
+        div { class: "ux-story-stack",
+            ProgressBar {
+                progress: UiProgress::indeterminate("Opening link session")
+                    .with_detail("Waiting for the browser serial provider."),
             }
-            div { class: "ux-story-stack",
-                ProgressBar {
-                    progress: UiProgress::indeterminate("Opening link session")
-                        .with_detail("Waiting for the browser serial provider."),
-                }
-                ProgressBar {
-                    progress: UiProgress::determinate("Writing firmware", 42)
-                        .with_detail("app image at 0x10000"),
-                }
-                ProgressBar {
-                    progress: UiProgress::timeout("Waiting for boot", 5000)
-                        .with_detail("Studio will retry when the device responds."),
-                }
+            ProgressBar {
+                progress: UiProgress::determinate("Writing firmware", 42)
+                    .with_detail("app image at 0x10000"),
+            }
+            ProgressBar {
+                progress: UiProgress::timeout("Waiting for boot", 5000)
+                    .with_detail("Studio will retry when the device responds."),
             }
         }
     }

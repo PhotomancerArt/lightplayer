@@ -13,10 +13,6 @@ use crate::base::{IconPopoverButton, PopoverPlacement, StudioIconName};
 fn edge_placement() -> Element {
     rsx! {
         section { class: "ux-popover-story",
-            header { class: "ux-popover-story-heading",
-                h2 { "Popover placement" }
-                p { "Open each trigger to check viewport clamping, edge anchoring, and click-away behavior." }
-            }
             div { class: "ux-popover-story-grid",
                 div { class: "ux-popover-story-cell ux-popover-story-cell-start",
                     PopoverStoryButton {

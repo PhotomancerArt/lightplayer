@@ -9,13 +9,8 @@ use crate::core::story_fixtures::{story_activity, story_terminal_lines};
 #[story]
 pub(crate) fn flashing() -> Element {
     rsx! {
-        section { class: "ux-panel",
-            div { class: "ux-panel-heading",
-                h2 { "Activity view" }
-            }
-            ActivityView {
-                activity: story_activity(),
-            }
+        ActivityView {
+            activity: story_activity(),
         }
     }
 }
@@ -36,13 +31,8 @@ pub(crate) fn failed_step() -> Element {
         .with_terminal(story_terminal_lines());
 
     rsx! {
-        section { class: "ux-panel",
-            div { class: "ux-panel-heading",
-                h2 { "Failed activity" }
-            }
-            ActivityView {
-                activity,
-            }
+        ActivityView {
+            activity,
         }
     }
 }

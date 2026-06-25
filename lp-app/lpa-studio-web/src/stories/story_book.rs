@@ -21,15 +21,14 @@ pub fn StoryBook() -> Element {
     let page_id = selection.id().to_string();
 
     if is_story_png_mode() {
-        let frame_style = story_png_viewport().frame_style();
+        let story_viewport = story_png_viewport();
         return rsx! {
             main { class: "story-png-page",
-                {render_story_selection(&selection, frame_style)}
+                {render_story_selection(&selection, story_viewport)}
             }
         };
     }
 
-    let frame_style = selected_viewport.frame_style();
     rsx! {
         main { class: "story-book",
             aside { class: "story-sidebar",
@@ -196,7 +195,7 @@ pub fn StoryBook() -> Element {
                         }
                     }
                 }
-                {render_story_selection(&selection, frame_style)}
+                {render_story_selection(&selection, selected_viewport)}
             }
         }
     }
@@ -435,32 +434,60 @@ pub fn should_show_story_book() -> bool {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn StoryCanvas(story_id: &'static str, frame_style: &'static str) -> Element {
+fn StoryCanvas(story_id: &'static str, viewport: StoryViewport) -> Element {
+    let frame_style = viewport.frame_style();
+    let canvas_label = viewport.canvas_label();
+
     rsx! {
         div {
             class: "story-canvas-shell",
             "data-story-capture": "1",
             "data-story-id": "{story_id}",
-            div { class: "story-frame", style: "{frame_style}",
-                {render_story(story_id)}
+            div { class: "story-frame-boundary", style: "{frame_style}",
+                div { class: "story-frame-header",
+                    span { "{canvas_label}" }
+                }
+                div { class: "story-frame",
+                    {render_story(story_id)}
+                }
             }
         }
     }
 }
 
-fn render_story_selection(selection: &StorySelection, frame_style: &'static str) -> Element {
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn StoryFrame(story_id: &'static str, viewport: StoryViewport) -> Element {
+    let frame_style = viewport.frame_style();
+    let canvas_label = viewport.canvas_label();
+
+    rsx! {
+        div { class: "story-canvas-shell",
+            div { class: "story-frame-boundary", style: "{frame_style}",
+                div { class: "story-frame-header",
+                    span { "{canvas_label}" }
+                }
+                div { class: "story-frame",
+                    {render_story(story_id)}
+                }
+            }
+        }
+    }
+}
+
+fn render_story_selection(selection: &StorySelection, viewport: StoryViewport) -> Element {
     match selection {
         StorySelection::Story(story) => rsx! {
             StoryCanvas {
                 story_id: story.id,
-                frame_style,
+                viewport,
             }
         },
         StorySelection::ComponentOverview { id, stories, .. } => rsx! {
             StoryOverviewCanvas {
                 story_id: id.clone(),
                 stories: stories.clone(),
-                frame_style,
+                viewport,
             }
         },
     }
@@ -471,22 +498,22 @@ fn render_story_selection(selection: &StorySelection, frame_style: &'static str)
 fn StoryOverviewCanvas(
     story_id: String,
     stories: Vec<StoryDescriptor>,
-    frame_style: &'static str,
+    viewport: StoryViewport,
 ) -> Element {
     rsx! {
-        div {
-            class: "story-canvas-shell story-overview-canvas",
+        div { class: "story-overview-list",
             "data-story-capture": "1",
             "data-story-id": "{story_id}",
-            div { class: "story-overview-list", style: "{frame_style}",
-                for story in stories {
-                    section { class: "story-overview-item",
-                        header { class: "story-overview-item-header",
-                            h3 { "{story.label}" }
-                            p { "{story.source_path}" }
-                        }
-                        div { class: "story-overview-frame",
-                            {render_story(story.id)}
+            for story in stories {
+                section { class: "story-overview-item",
+                    header { class: "story-overview-item-header",
+                        h3 { "{story.label}" }
+                        p { "{story.source_path}" }
+                    }
+                    div { class: "story-overview-frame",
+                        StoryFrame {
+                            story_id: story.id,
+                            viewport,
                         }
                     }
                 }
@@ -494,7 +521,6 @@ fn StoryOverviewCanvas(
         }
     }
 }
-
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ViewportButton(
@@ -528,9 +554,9 @@ enum StoryViewport {
 impl StoryViewport {
     fn frame_style(self) -> &'static str {
         match self {
-            Self::Sm => "max-width: 390px;",
-            Self::Md => "max-width: 720px;",
-            Self::Lg => "max-width: 1080px;",
+            Self::Sm => "width: 390px;",
+            Self::Md => "width: 720px;",
+            Self::Lg => "width: 1080px;",
         }
     }
 
@@ -544,9 +570,17 @@ impl StoryViewport {
 
     const fn width_label(self) -> &'static str {
         match self {
-            Self::Sm => "390 px",
-            Self::Md => "720 px",
-            Self::Lg => "1080 px",
+            Self::Sm => "390px",
+            Self::Md => "720px",
+            Self::Lg => "1080px",
+        }
+    }
+
+    const fn canvas_label(self) -> &'static str {
+        match self {
+            Self::Sm => "sm - 390px",
+            Self::Md => "md - 720px",
+            Self::Lg => "lg - 1080px",
         }
     }
 

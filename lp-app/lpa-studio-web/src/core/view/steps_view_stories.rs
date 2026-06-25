@@ -12,15 +12,10 @@ use crate::core::story_fixtures::{
 #[story]
 pub(crate) fn workflow() -> Element {
     rsx! {
-        section { class: "ux-panel",
-            div { class: "ux-panel-heading",
-                h2 { "Steps view" }
-            }
-            StepsView {
-                stack: story_steps(),
-                running: false,
-                on_action: move |_| {},
-            }
+        StepsView {
+            stack: story_steps(),
+            running: false,
+            on_action: move |_| {},
         }
     }
 }
@@ -45,15 +40,10 @@ pub(crate) fn nested_content() -> Element {
     .with_terminal(story_terminal_lines());
 
     rsx! {
-        section { class: "ux-panel",
-            div { class: "ux-panel-heading",
-                h2 { "Nested step content" }
-            }
-            StepsView {
-                stack: steps,
-                running: false,
-                on_action: move |_| {},
-            }
+        StepsView {
+            stack: steps,
+            running: false,
+            on_action: move |_| {},
         }
     }
 }
@@ -67,15 +57,10 @@ pub(crate) fn running_actions() -> Element {
     ]);
 
     rsx! {
-        section { class: "ux-panel",
-            div { class: "ux-panel-heading",
-                h2 { "Running steps" }
-            }
-            StepsView {
-                stack: steps,
-                running: true,
-                on_action: move |_| {},
-            }
+        StepsView {
+            stack: steps,
+            running: true,
+            on_action: move |_| {},
         }
     }
 }
