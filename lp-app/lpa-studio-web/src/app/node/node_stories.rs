@@ -11,6 +11,39 @@ use crate::app::node::{
     ProducedValues,
 };
 
+#[story(description = "A composed node pane showing the current node anatomy direction.")]
+pub(crate) fn node_pane() -> Element {
+    rsx! {
+        NodePane { view: playlist_node_view() }
+    }
+}
+
+#[story(description = "Node pane with an error status and projection issues.")]
+pub(crate) fn error_node() -> Element {
+    let mut view = UiNodeView::new(
+        UiNodeHeader::new("blast", "Shader", "/show/playlist/blast")
+            .with_source("blast.glsl")
+            .with_status(UiStatus::error("Error"))
+            .with_summary("compile failed")
+            .with_detail("unknown identifier `uv2` at line 18"),
+        vec![UiNodeTab::main(vec![
+            UiNodeSection::ConsumedValues(vec![
+                UiConsumedSlot::direct("Shader", "blast.glsl").with_dirty(UiNodeDirtyState::Error),
+            ]),
+            UiNodeSection::ConsumedAssets(vec![
+                UiConsumedAsset::new("Shader", "./blast.glsl", UiAssetEditorKind::Glsl)
+                    .with_summary("vec3 color = sample(uv2);"),
+            ]),
+        ])],
+    )
+    .with_node_id("shader-blast");
+    view.issues = vec!["Shader compile failed".to_string()];
+
+    rsx! {
+        NodePane { view }
+    }
+}
+
 #[story(description = "Header anatomy with identity, status, source, and runtime summary.")]
 pub(crate) fn header() -> Element {
     rsx! {
@@ -50,39 +83,6 @@ pub(crate) fn consumed_assets() -> Element {
 pub(crate) fn children() -> Element {
     rsx! {
         NodeChildren { items: children_fixture() }
-    }
-}
-
-#[story(description = "A composed node pane showing the current node anatomy direction.")]
-pub(crate) fn node_pane() -> Element {
-    rsx! {
-        NodePane { view: playlist_node_view() }
-    }
-}
-
-#[story(description = "Node pane with an error status and projection issues.")]
-pub(crate) fn error_node() -> Element {
-    let mut view = UiNodeView::new(
-        UiNodeHeader::new("blast", "Shader", "/show/playlist/blast")
-            .with_source("blast.glsl")
-            .with_status(UiStatus::error("Error"))
-            .with_summary("compile failed")
-            .with_detail("unknown identifier `uv2` at line 18"),
-        vec![UiNodeTab::main(vec![
-            UiNodeSection::ConsumedValues(vec![
-                UiConsumedSlot::direct("Shader", "blast.glsl").with_dirty(UiNodeDirtyState::Error),
-            ]),
-            UiNodeSection::ConsumedAssets(vec![
-                UiConsumedAsset::new("Shader", "./blast.glsl", UiAssetEditorKind::Glsl)
-                    .with_summary("vec3 color = sample(uv2);"),
-            ]),
-        ])],
-    )
-    .with_node_id("shader-blast");
-    view.issues = vec!["Shader compile failed".to_string()];
-
-    rsx! {
-        NodePane { view }
     }
 }
 

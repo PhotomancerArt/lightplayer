@@ -1,12 +1,14 @@
 use dioxus::prelude::*;
+use lpa_studio_core::core::status::UiStatusKind;
 use lpa_studio_core::{
-    UiNodeDirtyState, UiNodeSection, UiNodeTabBody, UiNodeView, UiProducedBindings,
+    UiBindingEndpoint, UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTabBody, UiNodeView,
+    UiProducedBindings,
 };
 
 use crate::app::node::{
     ConsumedAssets, ConsumedSlots, NodeChildren, NodeHeader, ProducedProducts, ProducedValues,
 };
-use crate::base::{StudioIcon, StudioIconName};
+use crate::base::{IconMenuButton, IconMenuTone, PopoverPlacement, StudioIcon, StudioIconName};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -24,18 +26,27 @@ pub fn NodePane(view: UiNodeView) -> Element {
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3",
             article { class: "tw:grid tw:min-w-0 tw:gap-3 tw:rounded-md tw:border {focused_class} tw:bg-card tw:p-4",
-                div { class: "tw:grid tw:grid-cols-[auto_minmax(0,1fr)] tw:gap-2",
+                header { class: "tw:-mx-4 tw:-mt-4 tw:grid tw:min-h-[46px] tw:min-w-0 tw:grid-cols-[34px_38px_minmax(0,1fr)_auto] tw:items-stretch tw:overflow-hidden tw:rounded-t-md tw:border-b tw:border-border-muted",
                     button {
-                        class: "tw:mt-0.5 tw:inline-flex tw:h-7 tw:w-7 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-subtle tw:bg-card-muted tw:text-muted-foreground tw:hover:border-border-strong",
+                        class: "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-r tw:border-border-muted tw:bg-card-muted tw:p-0 tw:text-subtle-foreground tw:hover:bg-card-subtle",
                         r#type: "button",
                         aria_label: if collapsed() { "Expand node" } else { "Collapse node" },
+                        title: if collapsed() { "Expand node" } else { "Collapse node" },
                         onclick: move |_| collapsed.set(!collapsed()),
                         StudioIcon {
                             name: if collapsed() { StudioIconName::Collapsed } else { StudioIconName::Expanded },
-                            size: 15,
+                            size: 14,
                         }
                     }
+                    NodeStatusMenu { header: view.header.clone() }
                     NodeHeader { header: view.header.clone() }
+                    if view.tabs.len() > 1 {
+                        NodeTabs {
+                            tabs: view.tabs.clone(),
+                            active_index,
+                            on_select: move |index| active_tab.set(index),
+                        }
+                    }
                 }
                 if !collapsed() {
                     if !view.issues.is_empty() {
@@ -43,13 +54,6 @@ pub fn NodePane(view: UiNodeView) -> Element {
                             for issue in view.issues.clone() {
                                 li { class: "tw:text-sm tw:text-status-error-foreground", "{issue}" }
                             }
-                        }
-                    }
-                    if view.tabs.len() > 1 {
-                        NodeTabs {
-                            tabs: view.tabs.clone(),
-                            active_index,
-                            on_select: move |index| active_tab.set(index),
                         }
                     }
                     match active_body {
@@ -111,13 +115,13 @@ fn NodeTabs(
     on_select: EventHandler<usize>,
 ) -> Element {
     rsx! {
-        div { class: "tw:flex tw:flex-wrap tw:gap-1 tw:border-b tw:border-border-muted", role: "tablist",
+        div { class: "tw:flex tw:h-full tw:items-stretch tw:overflow-hidden tw:border-l tw:border-border-muted tw:bg-card-muted", role: "tablist",
             for (index, tab) in tabs.into_iter().enumerate() {
                 button {
                     class: if index == active_index {
-                        "tw:border-b-2 tw:border-accent tw:bg-transparent tw:px-3 tw:pb-2 tw:pt-1 tw:text-xs tw:font-bold tw:text-strong-foreground"
+                        "tw:min-h-full tw:border-0 tw:border-r tw:border-border-muted tw:bg-card-subtle tw:px-4 tw:text-xs tw:font-bold tw:text-strong-foreground"
                     } else {
-                        "tw:border-b-2 tw:border-transparent tw:bg-transparent tw:px-3 tw:pb-2 tw:pt-1 tw:text-xs tw:font-bold tw:text-muted-foreground tw:hover:text-strong-foreground"
+                        "tw:min-h-full tw:border-0 tw:border-r tw:border-border-muted tw:bg-transparent tw:px-4 tw:text-xs tw:font-bold tw:text-muted-foreground tw:hover:bg-card-subtle tw:hover:text-strong-foreground"
                     },
                     r#type: "button",
                     role: "tab",
@@ -127,6 +131,54 @@ fn NodeTabs(
                 }
             }
         }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NodeStatusMenu(header: UiNodeHeader) -> Element {
+    let (tone, icon) = status_menu_tone(header.status.kind);
+    let label = format!("{} status details", header.title);
+
+    rsx! {
+        span { class: "tw:flex tw:h-full tw:min-h-[46px] tw:w-[38px] tw:items-center tw:justify-center tw:border-r tw:border-border-muted tw:bg-card-muted",
+            IconMenuButton {
+                icon,
+                icon_size: 14,
+                label,
+                title: format!("{} status details", header.title),
+                tone,
+                placement: PopoverPlacement::BottomStart,
+                active: true,
+                div { class: "tw:grid tw:gap-1",
+                    span { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-heading", "node status" }
+                    strong { class: "tw:text-sm tw:text-strong-foreground", "{header.title}" }
+                    div { class: "tw:flex tw:flex-wrap tw:gap-2 tw:text-xs tw:text-subtle-foreground",
+                        span { "{header.kind}" }
+                        span { "{header.status.label}" }
+                        if let Some(summary) = header.summary.as_ref() {
+                            span { "{summary}" }
+                        }
+                    }
+                    if let Some(source) = header.source.as_ref() {
+                        code { class: "tw:font-mono tw:text-xs tw:text-muted-foreground tw:break-words", "{source}" }
+                    }
+                }
+                if let Some(detail) = header.detail.as_ref() {
+                    p { class: "tw:m-0 tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page tw:p-2 tw:text-xs tw:leading-normal tw:text-muted-foreground tw:break-words", "{detail}" }
+                }
+            }
+        }
+    }
+}
+
+fn status_menu_tone(kind: UiStatusKind) -> (IconMenuTone, StudioIconName) {
+    match kind {
+        UiStatusKind::Neutral => (IconMenuTone::Neutral, StudioIconName::StatusIdle),
+        UiStatusKind::Working => (IconMenuTone::Working, StudioIconName::StatusRunning),
+        UiStatusKind::Good => (IconMenuTone::Good, StudioIconName::StatusRunning),
+        UiStatusKind::Warning => (IconMenuTone::Warning, StudioIconName::StepAttention),
+        UiStatusKind::Error => (IconMenuTone::Error, StudioIconName::StatusError),
     }
 }
 
@@ -161,20 +213,65 @@ pub fn DirtyMark(dirty: UiNodeDirtyState) -> Element {
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ProducedBindingMark(label: String, bindings: UiProducedBindings) -> Element {
-    let class = if bindings.has_any() {
-        "tw:inline-flex tw:h-5 tw:w-5 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-accent-border tw:bg-accent-bg tw:text-accent"
-    } else {
-        "tw:inline-flex tw:h-5 tw:w-5 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page tw:text-subtle-foreground"
-    };
-    let title = if bindings.has_any() {
-        format!("{label} has bindings")
-    } else {
-        format!("{label} has no bindings")
-    };
+    let has_bindings = bindings.has_any();
+    let title = format!("{label} bindings");
 
     rsx! {
-        span { class, title,
-            StudioIcon { name: StudioIconName::BoundValue, size: 12 }
+        IconMenuButton {
+            icon: StudioIconName::BoundValue,
+            icon_size: 12,
+            label: title.clone(),
+            title,
+            tone: IconMenuTone::Accent,
+            placement: PopoverPlacement::BottomStart,
+            active: has_bindings,
+            div { class: "tw:grid tw:gap-1",
+                span { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-heading", "binding" }
+                strong { class: "tw:text-sm tw:text-strong-foreground", "{label}" }
+            }
+            BindingEndpointSection {
+                title: "bus target",
+                empty: "not assigned",
+                endpoints: bindings.bus_target.into_iter().collect(),
+            }
+            BindingEndpointSection {
+                title: "target bindings",
+                empty: "none",
+                endpoints: bindings.target_bindings,
+            }
+            BindingEndpointSection {
+                title: "consumed by",
+                empty: "no consumers",
+                endpoints: bindings.consumers,
+            }
+        }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn BindingEndpointSection(
+    title: &'static str,
+    empty: &'static str,
+    endpoints: Vec<UiBindingEndpoint>,
+) -> Element {
+    rsx! {
+        div { class: "tw:grid tw:gap-1",
+            span { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground", "{title}" }
+            if endpoints.is_empty() {
+                p { class: "tw:m-0 tw:text-xs tw:text-subtle-foreground", "{empty}" }
+            } else {
+                div { class: "tw:grid tw:gap-1",
+                    for endpoint in endpoints {
+                        div { class: "tw:grid tw:min-w-0 tw:gap-0.5 tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page tw:p-2",
+                            code { class: "tw:font-mono tw:text-xs tw:text-muted-foreground tw:break-words", "{endpoint.label}" }
+                            if let Some(detail) = endpoint.detail.as_ref() {
+                                small { class: "tw:text-xs tw:text-subtle-foreground tw:break-words", "{detail}" }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

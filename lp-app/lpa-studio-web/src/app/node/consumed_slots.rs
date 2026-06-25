@@ -2,7 +2,7 @@ use dioxus::prelude::*;
 use lpa_studio_core::{UiConsumedSlot, UiSlotSource};
 
 use crate::app::node::DirtyMark;
-use crate::base::{StudioIcon, StudioIconName};
+use crate::base::{IconMenuButton, IconMenuTone, PopoverPlacement, StudioIconName};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -23,7 +23,6 @@ pub fn ConsumedSlots(slots: Vec<UiConsumedSlot>) -> Element {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ConsumedSlotRow(slot: UiConsumedSlot, depth: usize) -> Element {
     let source_label = source_label(&slot.source);
-    let icon = source_icon(&slot.source);
     let indent = depth * 12;
 
     rsx! {
@@ -31,9 +30,7 @@ fn ConsumedSlotRow(slot: UiConsumedSlot, depth: usize) -> Element {
             div {
                 class: "tw:grid tw:min-w-0 tw:grid-cols-[auto_minmax(86px,0.42fr)_minmax(0,1fr)_auto] tw:items-start tw:gap-2 tw:rounded-sm tw:border tw:border-border-subtle tw:bg-card-muted tw:p-2",
                 style: "margin-left: {indent}px;",
-                span { class: "tw:mt-0.5 tw:inline-flex tw:h-5 tw:w-5 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page tw:text-muted-foreground",
-                    StudioIcon { name: icon, size: 13 }
-                }
+                SlotSourceMenu { slot: slot.clone() }
                 div { class: "tw:min-w-0",
                     div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5",
                         strong { class: "tw:min-w-0 tw:text-sm tw:leading-tight tw:text-strong-foreground tw:break-words", "{slot.label}" }
@@ -72,6 +69,71 @@ fn ConsumedSlotRow(slot: UiConsumedSlot, depth: usize) -> Element {
             if !slot.children.is_empty() {
                 for child in slot.children {
                     ConsumedSlotRow { slot: child, depth: depth + 1 }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn SlotSourceMenu(slot: UiConsumedSlot) -> Element {
+    let source = slot.source.clone();
+    let label = format!("{} source", slot.label);
+    let tone = match source {
+        UiSlotSource::Bound(_) => IconMenuTone::Accent,
+        UiSlotSource::Child(_) => IconMenuTone::Neutral,
+        UiSlotSource::Direct => IconMenuTone::Neutral,
+        UiSlotSource::Unset => IconMenuTone::Warning,
+    };
+    let active = !matches!(source, UiSlotSource::Unset);
+
+    rsx! {
+        div { class: "tw:mt-0.5",
+            IconMenuButton {
+                icon: source_icon(&source),
+                icon_size: 13,
+                label: label.clone(),
+                title: label,
+                tone,
+                placement: PopoverPlacement::BottomStart,
+                active,
+                div { class: "tw:grid tw:gap-1",
+                    span { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-heading", "consumed slot" }
+                    strong { class: "tw:text-sm tw:text-strong-foreground", "{slot.label}" }
+                    if let Some(detail) = slot.detail.as_ref() {
+                        small { class: "tw:text-xs tw:text-subtle-foreground tw:break-words", "{detail}" }
+                    }
+                }
+                match source {
+                    UiSlotSource::Direct => rsx! {
+                        p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground tw:break-words",
+                            "assigned value "
+                            if let Some(value) = slot.value.as_ref() {
+                                code { class: "tw:font-mono", "{value}" }
+                            } else {
+                                code { class: "tw:font-mono", "unit" }
+                            }
+                        }
+                    },
+                    UiSlotSource::Bound(endpoint) => rsx! {
+                        div { class: "tw:grid tw:gap-1",
+                            span { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground", "source binding" }
+                            code { class: "tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page tw:p-2 tw:font-mono tw:text-xs tw:text-muted-foreground tw:break-words", "{endpoint.label}" }
+                            if let Some(detail) = endpoint.detail.as_ref() {
+                                small { class: "tw:text-xs tw:text-subtle-foreground tw:break-words", "{detail}" }
+                            }
+                        }
+                    },
+                    UiSlotSource::Child(child) => rsx! {
+                        div { class: "tw:grid tw:gap-1",
+                            span { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground", "child node" }
+                            code { class: "tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page tw:p-2 tw:font-mono tw:text-xs tw:text-muted-foreground tw:break-words", "{child}" }
+                        }
+                    },
+                    UiSlotSource::Unset => rsx! {
+                        p { class: "tw:m-0 tw:text-xs tw:text-status-warning-foreground", "No assigned value or source binding." }
+                    },
                 }
             }
         }

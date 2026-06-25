@@ -6,6 +6,9 @@
 
 pub mod field_row;
 pub mod icon;
+pub mod icon_menu;
+#[cfg(feature = "stories")]
+pub(crate) mod icon_menu_stories;
 pub mod popover;
 #[cfg(feature = "stories")]
 pub(crate) mod popover_stories;
@@ -13,5 +16,6 @@ pub mod tabs;
 
 pub use field_row::FieldRow;
 pub use icon::{StudioIcon, StudioIconName, action_icon_name};
+pub use icon_menu::{IconMenuButton, IconMenuTone};
 pub use popover::{IconPopoverButton, PopoverPlacement};
 pub use tabs::{TabItem, Tabs};
