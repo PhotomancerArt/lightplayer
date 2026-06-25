@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::core::status::UiStatusKind;
 use lpa_studio_core::{
-    UiBindingEndpoint, UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTabBody, UiNodeView,
+    UiBindingEndpoint, UiNodeDirtyState, UiNodeSection, UiNodeTabBody, UiNodeView,
     UiProducedBindings,
 };
 
@@ -22,11 +22,12 @@ pub fn NodePane(view: UiNodeView) -> Element {
     };
     let active_index = active_tab().min(view.tabs.len().saturating_sub(1));
     let active_body = view.tabs.get(active_index).map(|tab| tab.body.clone());
+    let header_class = node_header_class(view.header.status.kind);
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3",
-            article { class: "tw:grid tw:min-w-0 tw:gap-3 tw:rounded-md tw:border {focused_class} tw:bg-card tw:p-4",
-                header { class: "tw:-mx-4 tw:-mt-4 tw:grid tw:min-h-[46px] tw:min-w-0 tw:grid-cols-[34px_38px_minmax(0,1fr)_auto] tw:items-stretch tw:overflow-hidden tw:rounded-t-md tw:border-b tw:border-border-muted",
+            article { class: "tw:grid tw:min-w-0 tw:rounded-md tw:border {focused_class} tw:bg-card tw:p-4",
+                header { class: "{header_class}",
                     button {
                         class: "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-r tw:border-border-muted tw:bg-card-muted tw:p-0 tw:text-subtle-foreground tw:hover:bg-card-subtle",
                         r#type: "button",
@@ -38,7 +39,6 @@ pub fn NodePane(view: UiNodeView) -> Element {
                             size: 14,
                         }
                     }
-                    NodeStatusMenu { header: view.header.clone() }
                     NodeHeader { header: view.header.clone() }
                     if view.tabs.len() > 1 {
                         NodeTabs {
@@ -58,9 +58,12 @@ pub fn NodePane(view: UiNodeView) -> Element {
                     }
                     match active_body {
                         Some(UiNodeTabBody::Sections(sections)) => rsx! {
-                            div { class: "tw:grid tw:min-w-0 tw:gap-4",
-                                for section in sections {
-                                    NodeSection { section }
+                            div { class: "tw:-mx-4 tw:-mb-4 tw:grid tw:min-w-0",
+                                for (index, section) in sections.into_iter().enumerate() {
+                                    NodeSection {
+                                        section,
+                                        first: index == 0,
+                                    }
                                 }
                             }
                         },
@@ -85,25 +88,63 @@ pub fn NodePane(view: UiNodeView) -> Element {
     }
 }
 
+fn node_header_class(kind: UiStatusKind) -> &'static str {
+    match kind {
+        UiStatusKind::Neutral => {
+            "tw:-mx-4 tw:-mt-4 tw:grid tw:min-h-[46px] tw:min-w-0 tw:grid-cols-[34px_minmax(0,1fr)_auto] tw:items-stretch tw:overflow-hidden tw:rounded-t-md tw:border-b tw:border-border-muted tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-status-neutral-bg),transparent_62%)]"
+        }
+        UiStatusKind::Working => {
+            "tw:-mx-4 tw:-mt-4 tw:grid tw:min-h-[46px] tw:min-w-0 tw:grid-cols-[34px_minmax(0,1fr)_auto] tw:items-stretch tw:overflow-hidden tw:rounded-t-md tw:border-b tw:border-border-muted tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-status-working-bg),transparent_62%)]"
+        }
+        UiStatusKind::Good => {
+            "tw:-mx-4 tw:-mt-4 tw:grid tw:min-h-[46px] tw:min-w-0 tw:grid-cols-[34px_minmax(0,1fr)_auto] tw:items-stretch tw:overflow-hidden tw:rounded-t-md tw:border-b tw:border-border-muted tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-status-good-bg),transparent_62%)]"
+        }
+        UiStatusKind::Warning => {
+            "tw:-mx-4 tw:-mt-4 tw:grid tw:min-h-[46px] tw:min-w-0 tw:grid-cols-[34px_minmax(0,1fr)_auto] tw:items-stretch tw:overflow-hidden tw:rounded-t-md tw:border-b tw:border-border-muted tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-status-warning-bg),transparent_62%)]"
+        }
+        UiStatusKind::Error => {
+            "tw:-mx-4 tw:-mt-4 tw:grid tw:min-h-[46px] tw:min-w-0 tw:grid-cols-[34px_minmax(0,1fr)_auto] tw:items-stretch tw:overflow-hidden tw:rounded-t-md tw:border-b tw:border-border-muted tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-status-error-bg),transparent_66%)]"
+        }
+    }
+}
+
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn NodeSection(section: UiNodeSection) -> Element {
+pub fn NodeSection(section: UiNodeSection, #[props(default = false)] first: bool) -> Element {
     match section {
         UiNodeSection::ProducedProducts(products) => rsx! {
-            ProducedProducts { products }
+            section { class: section_class("tw:bg-card tw:p-0", first),
+                ProducedProducts { products }
+            }
         },
         UiNodeSection::ProducedValues(values) => rsx! {
-            ProducedValues { values }
+            section { class: section_class("tw:bg-card-subtle tw:px-4 tw:py-4", first),
+                ProducedValues { values }
+            }
         },
         UiNodeSection::ConsumedValues(slots) => rsx! {
-            ConsumedSlots { slots }
+            section { class: section_class("tw:bg-card tw:p-0", first),
+                ConsumedSlots { slots }
+            }
         },
         UiNodeSection::ConsumedAssets(assets) => rsx! {
-            ConsumedAssets { assets }
+            section { class: section_class("tw:bg-card-subtle tw:px-4 tw:py-4", first),
+                ConsumedAssets { assets }
+            }
         },
         UiNodeSection::Children(children) => rsx! {
-            NodeChildren { items: children }
+            section { class: section_class("tw:bg-card tw:px-4 tw:py-4", first),
+                NodeChildren { items: children }
+            }
         },
+    }
+}
+
+fn section_class(body_class: &'static str, first: bool) -> String {
+    if first {
+        format!("tw:min-w-0 {body_class}")
+    } else {
+        format!("tw:min-w-0 tw:border-t tw:border-border-muted {body_class}")
     }
 }
 
@@ -131,54 +172,6 @@ fn NodeTabs(
                 }
             }
         }
-    }
-}
-
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn NodeStatusMenu(header: UiNodeHeader) -> Element {
-    let (tone, icon) = status_menu_tone(header.status.kind);
-    let label = format!("{} status details", header.title);
-
-    rsx! {
-        span { class: "tw:flex tw:h-full tw:min-h-[46px] tw:w-[38px] tw:items-center tw:justify-center tw:border-r tw:border-border-muted tw:bg-card-muted",
-            IconMenuButton {
-                icon,
-                icon_size: 14,
-                label,
-                title: format!("{} status details", header.title),
-                tone,
-                placement: PopoverPlacement::BottomStart,
-                active: true,
-                div { class: "tw:grid tw:gap-1",
-                    span { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-heading", "node status" }
-                    strong { class: "tw:text-sm tw:text-strong-foreground", "{header.title}" }
-                    div { class: "tw:flex tw:flex-wrap tw:gap-2 tw:text-xs tw:text-subtle-foreground",
-                        span { "{header.kind}" }
-                        span { "{header.status.label}" }
-                        if let Some(summary) = header.summary.as_ref() {
-                            span { "{summary}" }
-                        }
-                    }
-                    if let Some(source) = header.source.as_ref() {
-                        code { class: "tw:font-mono tw:text-xs tw:text-muted-foreground tw:break-words", "{source}" }
-                    }
-                }
-                if let Some(detail) = header.detail.as_ref() {
-                    p { class: "tw:m-0 tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page tw:p-2 tw:text-xs tw:leading-normal tw:text-muted-foreground tw:break-words", "{detail}" }
-                }
-            }
-        }
-    }
-}
-
-fn status_menu_tone(kind: UiStatusKind) -> (IconMenuTone, StudioIconName) {
-    match kind {
-        UiStatusKind::Neutral => (IconMenuTone::Neutral, StudioIconName::StatusIdle),
-        UiStatusKind::Working => (IconMenuTone::Working, StudioIconName::StatusRunning),
-        UiStatusKind::Good => (IconMenuTone::Good, StudioIconName::StatusRunning),
-        UiStatusKind::Warning => (IconMenuTone::Warning, StudioIconName::StepAttention),
-        UiStatusKind::Error => (IconMenuTone::Error, StudioIconName::StatusError),
     }
 }
 

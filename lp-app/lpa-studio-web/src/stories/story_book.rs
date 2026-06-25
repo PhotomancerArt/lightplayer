@@ -436,7 +436,7 @@ fn StoryCanvas(story_id: &'static str, viewport: StoryViewport) -> Element {
 
     rsx! {
         div {
-            class: "tw:grid tw:min-w-0 tw:w-full tw:overflow-x-auto",
+            class: "tw:inline-grid tw:w-max tw:overflow-visible",
             "data-story-capture": "1",
             "data-story-id": "{story_id}",
             div { class: "tw:box-content tw:flow-root tw:min-w-0 tw:overflow-hidden tw:rounded-sm tw:border-4 tw:border-border-muted tw:bg-card-muted", style: "{frame_style}",
@@ -460,7 +460,7 @@ fn StoryFrame(story_id: &'static str, viewport: StoryViewport) -> Element {
     let canvas_label = viewport.canvas_label();
 
     rsx! {
-        div { class: "tw:grid tw:min-w-0 tw:w-full tw:overflow-x-auto",
+        div { class: "tw:inline-grid tw:w-max tw:overflow-visible",
             div { class: "tw:box-content tw:flow-root tw:min-w-0 tw:overflow-hidden tw:rounded-sm tw:border-4 tw:border-border-muted tw:bg-card-muted", style: "{frame_style}",
                 div { class: "tw:flex tw:min-w-0 tw:w-full tw:justify-start tw:border-b-4 tw:border-border-muted tw:bg-border-muted",
                     span { class: "tw:px-2 tw:py-1 tw:font-mono tw:text-xs tw:leading-none tw:text-subtle-foreground", "{canvas_label}" }
@@ -501,11 +501,11 @@ fn StoryOverviewCanvas(
     viewport: StoryViewport,
 ) -> Element {
     rsx! {
-        div { class: "tw:grid tw:w-full tw:gap-[26px]",
+        div { class: "tw:grid tw:w-max tw:gap-[26px]",
             "data-story-capture": "1",
             "data-story-id": "{story_id}",
             for story in stories {
-                section { class: "tw:grid tw:min-w-0 tw:gap-2.5 tw:border-b tw:border-border-muted tw:pb-6 tw:last:border-b-0 tw:last:pb-0",
+                section { class: "tw:grid tw:w-max tw:gap-2.5 tw:border-b tw:border-border-muted tw:pb-6 tw:last:border-b-0 tw:last:pb-0",
                     header { class: "tw:grid tw:min-w-0 tw:gap-1",
                         h3 { class: "tw:m-0 tw:text-base tw:font-bold tw:text-strong-foreground", "{story.label}" }
                         p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-dim-foreground tw:break-words", "{story.source_path}" }

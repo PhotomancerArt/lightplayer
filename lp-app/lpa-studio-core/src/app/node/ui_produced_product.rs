@@ -5,6 +5,8 @@ use crate::{UiNodeDirtyState, UiProducedBinding};
 /// The family of product a node emits.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UiProductKind {
+    /// No product has been resolved for this output yet.
+    Empty,
     /// A visual image, shader result, or other displayable surface.
     Visual,
     /// A control stream, fixture map, or nonvisual device output.
@@ -43,6 +45,11 @@ impl UiProducedProduct {
     /// Create a visual product.
     pub fn visual(name: impl Into<String>) -> Self {
         Self::new(name, UiProductKind::Visual)
+    }
+
+    /// Create an empty product placeholder.
+    pub fn empty(name: impl Into<String>) -> Self {
+        Self::new(name, UiProductKind::Empty)
     }
 
     /// Create a control product.

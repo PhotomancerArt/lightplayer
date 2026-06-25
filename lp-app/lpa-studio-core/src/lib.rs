@@ -14,10 +14,11 @@ pub use app::link::{
     SharedLinkRegistry, UiIssue,
 };
 pub use app::node::{
-    UiAssetEditorKind, UiBindingEndpoint, UiConsumedAsset, UiConsumedSlot, UiNodeChild,
-    UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView,
-    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind,
-    UiSlotSource,
+    UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConfigSlotBody, UiConsumedAsset,
+    UiConsumedSlot, UiNodeChild, UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab,
+    UiNodeTabBody, UiNodeView, UiProducedBinding, UiProducedBindings, UiProducedProduct,
+    UiProducedValue, UiProductKind, UiSlotEditorHint, UiSlotFieldState, UiSlotOption, UiSlotRecord,
+    UiSlotSource, UiSlotSourceState, UiSlotValue, UiSlotValueKind,
 };
 pub use app::project::{
     LoadedProjectChoice, ProjectConnectResult, ProjectController, ProjectEditorOp,

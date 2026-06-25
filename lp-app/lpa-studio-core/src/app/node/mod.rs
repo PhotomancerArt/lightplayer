@@ -4,6 +4,7 @@
 //! model, slot, binding, and asset state into these `Ui*` structs, and the web
 //! crate renders them without needing to understand the runtime model directly.
 
+mod ui_config_slot;
 mod ui_consumed_asset;
 mod ui_consumed_slot;
 mod ui_node_binding;
@@ -15,7 +16,13 @@ mod ui_node_tab;
 mod ui_node_view;
 mod ui_produced_product;
 mod ui_produced_value;
+mod ui_slot_editor_hint;
+mod ui_slot_field_state;
+mod ui_slot_record;
+mod ui_slot_source_state;
+mod ui_slot_value;
 
+pub use ui_config_slot::{UiConfigSlot, UiConfigSlotBody};
 pub use ui_consumed_asset::{UiAssetEditorKind, UiConsumedAsset};
 pub use ui_consumed_slot::{UiConsumedSlot, UiSlotSource};
 pub use ui_node_binding::{UiBindingEndpoint, UiProducedBinding, UiProducedBindings};
@@ -27,6 +34,11 @@ pub use ui_node_tab::{UiNodeTab, UiNodeTabBody};
 pub use ui_node_view::UiNodeView;
 pub use ui_produced_product::{UiProducedProduct, UiProductKind};
 pub use ui_produced_value::UiProducedValue;
+pub use ui_slot_editor_hint::{UiSlotEditorHint, UiSlotOption};
+pub use ui_slot_field_state::UiSlotFieldState;
+pub use ui_slot_record::UiSlotRecord;
+pub use ui_slot_source_state::UiSlotSourceState;
+pub use ui_slot_value::{UiSlotValue, UiSlotValueKind};
 
 #[cfg(test)]
 mod tests {

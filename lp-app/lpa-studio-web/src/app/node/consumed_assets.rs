@@ -7,11 +7,12 @@ use crate::app::node::DirtyMark;
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ConsumedAssets(assets: Vec<UiConsumedAsset>) -> Element {
     rsx! {
-        section { class: "tw:grid tw:min-w-0 tw:gap-2",
-            h4 { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:leading-none tw:text-heading", "Consumed assets" }
-            div { class: "tw:grid tw:min-w-0 tw:gap-2",
-                for asset in assets {
-                    AssetPanel { asset }
+        div { class: "tw:grid tw:min-w-0 tw:gap-0",
+            for (index, asset) in assets.into_iter().enumerate() {
+                AssetPanel {
+                    key: "{asset.label}",
+                    asset,
+                    separated: index > 0,
                 }
             }
         }
@@ -20,9 +21,15 @@ pub fn ConsumedAssets(assets: Vec<UiConsumedAsset>) -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn AssetPanel(asset: UiConsumedAsset) -> Element {
+fn AssetPanel(asset: UiConsumedAsset, separated: bool) -> Element {
+    let class = if separated {
+        "tw:grid tw:min-w-0 tw:gap-2 tw:border-t tw:border-border-muted tw:pt-3"
+    } else {
+        "tw:grid tw:min-w-0 tw:gap-2"
+    };
+
     rsx! {
-        article { class: "tw:grid tw:min-w-0 tw:gap-2 tw:rounded-sm tw:border tw:border-border-subtle tw:bg-card-muted tw:p-3",
+        article { class,
             header { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-start tw:justify-between tw:gap-2",
                 div { class: "tw:min-w-0",
                     div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5",
@@ -37,7 +44,7 @@ fn AssetPanel(asset: UiConsumedAsset) -> Element {
                 p { class: "tw:m-0 tw:text-xs tw:text-subtle-foreground tw:break-words", "{detail}" }
             }
             if let Some(summary) = asset.summary.as_ref() {
-                pre { class: "tw:m-0 tw:max-h-28 tw:overflow-auto tw:rounded-xs tw:border tw:border-border-muted tw:bg-page tw:p-2 tw:text-xs tw:leading-normal tw:text-muted-foreground",
+                pre { class: "tw:m-0 tw:max-h-32 tw:overflow-auto tw:bg-page tw:p-3 tw:text-xs tw:leading-normal tw:text-muted-foreground",
                     code { "{summary}" }
                 }
             }
