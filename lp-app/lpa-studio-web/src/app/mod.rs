@@ -13,4 +13,5 @@ pub(crate) mod story_fixtures;
 
 pub use device::RuntimeLog;
 pub use layout::{PaneFrame, StudioShell};
+pub use node::NodePane;
 pub use project::{ProjectNodeWorkspace, ProjectSidebar, ProjectWorkspace};

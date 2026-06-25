@@ -1,0 +1,63 @@
+//! Complete node pane data.
+
+use crate::{UiNodeChild, UiNodeHeader, UiNodeTab, UiNodeTabBody};
+
+/// The full data model for a Studio node pane.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UiNodeView {
+    /// Stable id used by renderers for keys and future actions.
+    pub node_id: String,
+    /// Header identity and status metadata.
+    pub header: UiNodeHeader,
+    /// Tabs rendered inside the node pane.
+    pub tabs: Vec<UiNodeTab>,
+    /// Child nodes extracted from the consumed slot tree.
+    pub children: Vec<UiNodeChild>,
+    /// Whether this node is the focused/selected node.
+    pub focused: bool,
+    /// Whether the pane starts collapsed.
+    pub collapsed: bool,
+    /// Projection or runtime issues for the whole node.
+    pub issues: Vec<String>,
+}
+
+impl UiNodeView {
+    /// Create a node pane view.
+    pub fn new(header: UiNodeHeader, tabs: Vec<UiNodeTab>) -> Self {
+        let node_id = header.path.clone();
+        Self {
+            node_id,
+            header,
+            tabs,
+            children: Vec::new(),
+            focused: false,
+            collapsed: false,
+            issues: Vec::new(),
+        }
+    }
+
+    /// Override the stable id.
+    pub fn with_node_id(mut self, node_id: impl Into<String>) -> Self {
+        self.node_id = node_id.into();
+        self
+    }
+
+    /// Set extracted child nodes.
+    pub fn with_children(mut self, children: Vec<UiNodeChild>) -> Self {
+        self.children = children;
+        self
+    }
+
+    /// Returns true when any tab contains node anatomy sections.
+    pub fn has_sections(&self) -> bool {
+        self.tabs.iter().any(|tab| match &tab.body {
+            UiNodeTabBody::Sections(sections) => sections.iter().any(|section| !section.is_empty()),
+            UiNodeTabBody::Text { .. } => false,
+        })
+    }
+
+    /// Returns true when this node has extracted children.
+    pub fn has_children(&self) -> bool {
+        !self.children.is_empty()
+    }
+}

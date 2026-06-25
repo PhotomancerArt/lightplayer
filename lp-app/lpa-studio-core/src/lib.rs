@@ -13,6 +13,12 @@ pub use app::link::{
     LinkOp, LinkOpenOutcome, LinkSnapshot, LinkState, ProgressState, ProviderChoice,
     SharedLinkRegistry, UiIssue,
 };
+pub use app::node::{
+    UiAssetEditorKind, UiBindingEndpoint, UiConsumedAsset, UiConsumedSlot, UiNodeChild,
+    UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView,
+    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind,
+    UiSlotSource,
+};
 pub use app::project::{
     LoadedProjectChoice, ProjectConnectResult, ProjectController, ProjectEditorOp,
     ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary, ProjectNodeStatusTone,
