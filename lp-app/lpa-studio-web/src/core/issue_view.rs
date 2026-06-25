@@ -8,10 +8,10 @@ pub fn IssueView(issue: UiIssue) -> Element {
     let detail = issue.detail;
 
     rsx! {
-        div { class: "ux-issue",
-            p { class: "ux-panel-copy ux-panel-issue", "{message}" }
+        div { class: "tw:grid tw:min-w-0 tw:gap-1",
+            p { class: "tw:m-0 tw:text-sm tw:leading-normal tw:text-status-error-foreground", "{message}" }
             if let Some(detail) = detail.as_ref() {
-                p { class: "ux-panel-copy ux-panel-detail", "{detail}" }
+                p { class: "tw:m-0 tw:text-sm tw:leading-normal tw:text-subtle-foreground", "{detail}" }
             }
         }
     }

@@ -15,25 +15,25 @@ pub fn StudioShell(
     let PaneGroups { main, device } = group_panes(panes);
     let project_editor = project_editor_view(&main);
     let layout_class = if project_editor.is_some() {
-        "ux-layout ux-layout-project-editor"
+        "tw:grid tw:grid-cols-[minmax(220px,280px)_minmax(0,1fr)_minmax(300px,360px)] tw:gap-3.5 tw:max-[960px]:grid-cols-1"
     } else if main.is_empty() {
-        "ux-layout ux-layout-device-only"
+        "tw:grid tw:grid-cols-1 tw:gap-3.5"
     } else {
-        "ux-layout ux-layout-main-device"
+        "tw:grid tw:grid-cols-[minmax(0,1fr)_minmax(300px,380px)] tw:gap-3.5 tw:max-[880px]:grid-cols-1"
     };
     let device_is_primary = main.is_empty();
 
     rsx! {
-        main { class: "ux-shell",
-            header { class: "ux-header",
+        main { class: "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]",
+            header { class: "tw:mb-[18px] tw:flex tw:items-center tw:justify-start tw:gap-5",
                 div {
-                    p { class: "ux-eyebrow", "LightPlayer Studio" }
+                    p { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "LightPlayer Studio" }
                 }
             }
 
             section { class: "{layout_class}",
                 if let Some(project_editor) = project_editor {
-                    div { class: "ux-project-sidebar-column",
+                    div { class: "tw:order-1 tw:grid tw:min-w-0 tw:content-start tw:gap-3.5 tw:max-[960px]:order-2",
                         for (index, pane) in main.into_iter().enumerate() {
                             PaneView {
                                 key: "{pane.node_id}",
@@ -44,11 +44,11 @@ pub fn StudioShell(
                             }
                         }
                     }
-                    div { class: "ux-editor-center-column",
+                    div { class: "tw:order-2 tw:grid tw:min-w-0 tw:content-start tw:gap-3.5 tw:max-[960px]:order-1",
                         ProjectNodeWorkspace { view: project_editor }
                     }
                 } else if !main.is_empty() {
-                    div { class: "ux-main-column",
+                    div { class: "tw:grid tw:min-w-0 tw:content-start tw:gap-3.5",
                         for (index, pane) in main.into_iter().enumerate() {
                             PaneView {
                                 key: "{pane.node_id}",
@@ -61,7 +61,7 @@ pub fn StudioShell(
                     }
                 }
 
-                div { class: "ux-device-column",
+                div { class: "tw:order-3 tw:grid tw:min-w-0 tw:content-start tw:gap-3.5",
                     if let Some(device) = device {
                         PaneView {
                             key: "{device.node_id}",

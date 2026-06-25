@@ -14,7 +14,7 @@ pub fn ViewContent(
     match body {
         UiViewContent::Empty => rsx! {},
         UiViewContent::Text(text) => rsx! {
-            p { class: "ux-panel-copy", "{text}" }
+            p { class: "tw:m-0 tw:text-sm tw:leading-normal tw:text-muted-foreground", "{text}" }
         },
         UiViewContent::Progress(progress) => rsx! {
             ProgressBar { progress }

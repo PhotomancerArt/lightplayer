@@ -4,23 +4,23 @@ use dioxus::prelude::*;
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn FieldRow(label: String, value: String, changed: bool, detail: Option<String>) -> Element {
     let class = if changed {
-        "ux-field-row ux-field-row-changed"
+        "tw:grid tw:grid-cols-[minmax(120px,0.35fr)_minmax(0,1fr)] tw:gap-3 tw:rounded-sm tw:border tw:border-accent-border tw:bg-status-good-bg tw:p-3"
     } else {
-        "ux-field-row"
+        "tw:grid tw:grid-cols-[minmax(120px,0.35fr)_minmax(0,1fr)] tw:gap-3 tw:rounded-sm tw:border tw:border-border-subtle tw:bg-card-muted tw:p-3"
     };
 
     rsx! {
         div { class,
-            div { class: "ux-field-label",
+            div { class: "tw:grid tw:min-w-0 tw:gap-1",
                 span { "{label}" }
                 if changed {
-                    small { "modified" }
+                    small { class: "tw:text-xs tw:font-bold tw:uppercase tw:text-accent", "modified" }
                 }
             }
-            div { class: "ux-field-value",
+            div { class: "tw:grid tw:min-w-0 tw:gap-1 tw:text-right",
                 span { "{value}" }
                 if let Some(detail) = detail.as_ref() {
-                    small { "{detail}" }
+                    small { class: "tw:text-xs tw:text-subtle-foreground", "{detail}" }
                 }
             }
         }

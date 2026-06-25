@@ -14,7 +14,7 @@ pub fn ProjectWorkspace(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     rsx! {
-        div { class: "ux-project-workspace",
+        div { class: "tw:grid tw:grid-cols-[minmax(170px,240px)_minmax(0,1fr)] tw:gap-3.5 tw:max-[640px]:grid-cols-1",
             ProjectSidebar {
                 view: view.clone(),
                 running,
@@ -37,21 +37,21 @@ pub fn ProjectSidebar(
     let roots = view.tree.roots;
 
     rsx! {
-        div { class: "ux-project-sidebar",
-            div { class: "ux-project-tree-panel",
-                h3 { "Node tree" }
+        div { class: "tw:grid tw:min-w-0 tw:content-start tw:gap-3.5",
+            div { class: "tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-4",
+                h3 { class: "tw:m-0 tw:mb-3 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "Node tree" }
                 if let Some(issue) = sync_issue.as_ref() {
-                    div { class: "ux-project-sync-issue",
+                    div { class: "tw:mb-3 tw:grid tw:gap-1 tw:rounded-sm tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-3 tw:text-sm tw:text-status-error-foreground",
                         strong { "{issue.message}" }
                         if let Some(detail) = issue.detail.as_ref() {
-                            p { "{detail}" }
+                            p { class: "tw:m-0 tw:text-xs tw:text-status-error-foreground", "{detail}" }
                         }
                     }
                 }
                 if roots.is_empty() {
-                    p { class: "ux-panel-copy ux-panel-detail", "Project sync has not returned nodes yet." }
+                    p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "Project sync has not returned nodes yet." }
                 } else {
-                    ol { class: "ux-project-tree",
+                    ol { class: "tw:m-0 tw:grid tw:list-none tw:gap-1 tw:p-0",
                         for item in roots {
                             ProjectNodeTreeItemView {
                                 key: "{item.node_id}",
@@ -64,8 +64,8 @@ pub fn ProjectSidebar(
                     }
                 }
             }
-            div { class: "ux-project-stats-panel",
-                h3 { "Project stats" }
+            div { class: "tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-4",
+                h3 { class: "tw:m-0 tw:mb-3 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "Project stats" }
                 MetricGrid { metrics: stats }
             }
         }
@@ -78,11 +78,11 @@ pub fn ProjectNodeWorkspace(view: ProjectEditorView) -> Element {
     let nodes = view.nodes;
 
     rsx! {
-        section { class: "ux-project-nodes",
+        section { class: "tw:grid tw:min-w-0 tw:content-start tw:gap-3.5",
             if nodes.is_empty() {
-                div { class: "ux-project-empty",
-                    h3 { "Waiting for project data" }
-                    p { "Studio will show node bodies here once the project mirror has synced." }
+                div { class: "tw:grid tw:min-w-0 tw:gap-2 tw:rounded-md tw:border tw:border-border-subtle tw:bg-card-subtle tw:p-4",
+                    h3 { class: "tw:m-0 tw:text-base tw:text-strong-foreground", "Waiting for project data" }
+                    p { class: "tw:m-0 tw:text-sm tw:text-muted-foreground", "Studio will show node bodies here once the project mirror has synced." }
                 }
             } else {
                 for node in nodes {
@@ -107,9 +107,9 @@ fn ProjectNodeTreeItemView(
     let action = item.action.clone();
     let children = item.children;
     let class = if item.focused {
-        "ux-project-tree-item ux-project-tree-item-focused"
+        "tw:grid tw:w-full tw:grid-cols-[minmax(0,1fr)_auto_auto] tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-accent-border tw:bg-status-good-bg tw:px-2 tw:py-1.5 tw:text-left"
     } else {
-        "ux-project-tree-item"
+        "tw:grid tw:w-full tw:grid-cols-[minmax(0,1fr)_auto_auto] tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-2 tw:py-1.5 tw:text-left tw:hover:bg-card-muted"
     };
     let indent = depth * 14;
     let status_class = node_status_class(item.status.tone);
@@ -124,15 +124,15 @@ fn ProjectNodeTreeItemView(
                 disabled: running,
                 style: "padding-left: {indent}px;",
                 onclick: move |_| on_action.call(action.clone()),
-                span { class: "ux-project-tree-label", "{item.label}" }
-                span { class: "ux-project-tree-kind", "{item.kind}" }
+                span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-sm tw:text-soft-foreground", "{item.label}" }
+                span { class: "tw:text-xs tw:text-subtle-foreground", "{item.kind}" }
                 span { class: "{status_class}", "{status_label}" }
             }
             if let Some(detail) = detail.as_ref() {
-                p { class: "ux-project-tree-detail", "{detail}" }
+                p { class: "tw:m-0 tw:pl-2 tw:text-xs tw:text-subtle-foreground", "{detail}" }
             }
             if !children.is_empty() {
-                ol { class: "ux-project-tree-children",
+                ol { class: "tw:m-0 tw:grid tw:list-none tw:gap-1 tw:p-0",
                     for child in children {
                         ProjectNodeTreeItemView {
                             key: "{child.node_id}",
@@ -154,9 +154,9 @@ fn ProjectNodeCard(node: ProjectNodeView) -> Element {
     let has_slots = node.has_slots();
     let has_issues = !node.issues.is_empty();
     let card_class = if node.focused {
-        "ux-project-node-card ux-project-node-card-focused"
+        "tw:grid tw:min-w-0 tw:gap-4 tw:rounded-md tw:border tw:border-accent-border tw:bg-card tw:p-4"
     } else {
-        "ux-project-node-card"
+        "tw:grid tw:min-w-0 tw:gap-4 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-4"
     };
     let status_class = node_status_class(node.status.tone);
     let status_label = node.status.label;
@@ -164,23 +164,23 @@ fn ProjectNodeCard(node: ProjectNodeView) -> Element {
 
     rsx! {
         article { class: "{card_class}",
-            header { class: "ux-project-node-header",
-                div { class: "ux-project-node-title",
-                    h3 { "{node.label}" }
-                    p { "{node.path}" }
+            header { class: "tw:flex tw:flex-wrap tw:items-start tw:justify-between tw:gap-3",
+                div { class: "tw:grid tw:min-w-0 tw:gap-1",
+                    h3 { class: "tw:m-0 tw:text-base tw:font-bold tw:text-strong-foreground", "{node.label}" }
+                    p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-subtle-foreground tw:break-words", "{node.path}" }
                 }
-                div { class: "ux-project-node-meta",
-                    span { class: "ux-project-node-kind", "{node.kind}" }
+                div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-2",
+                    span { class: "tw:rounded-xs tw:border tw:border-border-subtle tw:bg-card-muted tw:px-2 tw:py-1 tw:text-xs tw:text-muted-foreground", "{node.kind}" }
                     span { class: "{status_class}", "{status_label}" }
                 }
             }
             if let Some(detail) = status_detail.as_ref() {
-                p { class: "ux-project-node-status-detail", "{detail}" }
+                p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "{detail}" }
             }
             if has_issues {
-                ul { class: "ux-project-node-issues",
+                ul { class: "tw:m-0 tw:grid tw:list-none tw:gap-1 tw:rounded-sm tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-3",
                     for issue in node.issues {
-                        li { "{issue}" }
+                        li { class: "tw:text-sm tw:text-status-error-foreground", "{issue}" }
                     }
                 }
             }
@@ -213,7 +213,7 @@ fn ProjectNodeCard(node: ProjectNodeView) -> Element {
                 }
             }
             if !has_slots && !has_issues {
-                p { class: "ux-panel-copy ux-panel-detail", "No synced slot roots for this node yet." }
+                p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "No synced slot roots for this node yet." }
             }
         }
     }
@@ -227,14 +227,14 @@ fn ProjectSlotSection(
     prominent: bool,
 ) -> Element {
     let class = if prominent {
-        "ux-project-slot-section ux-project-slot-section-prominent"
+        "tw:grid tw:min-w-0 tw:gap-2"
     } else {
-        "ux-project-slot-section"
+        "tw:grid tw:min-w-0 tw:gap-2"
     };
     rsx! {
         section { class,
-            h4 { "{title}" }
-            div { class: "ux-project-slot-rows",
+            h4 { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "{title}" }
+            div { class: "tw:grid tw:min-w-0 tw:gap-2",
                 for row in rows {
                     ProjectSlotRow { row }
                 }
@@ -263,11 +263,11 @@ fn ProjectSlotRow(row: ProjectSlotRowView) -> Element {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ProjectSlotValue(value: ProjectSlotValueView) -> Element {
     rsx! {
-        div { class: "ux-project-slot-row",
-            span { class: "ux-project-slot-label", "{value.label}" }
-            span { class: "ux-project-slot-value", "{value.value}" }
+        div { class: "tw:grid tw:grid-cols-[minmax(110px,0.35fr)_minmax(0,1fr)] tw:gap-2 tw:rounded-sm tw:border tw:border-border-subtle tw:bg-card-muted tw:p-2",
+            span { class: "tw:text-xs tw:text-subtle-foreground", "{value.label}" }
+            span { class: "tw:min-w-0 tw:text-right tw:font-mono tw:text-xs tw:text-muted-foreground tw:break-words", "{value.value}" }
             if let Some(detail) = value.detail.as_ref() {
-                small { "{detail}" }
+                small { class: "tw:col-span-2 tw:text-xs tw:text-subtle-foreground", "{detail}" }
             }
         }
     }
@@ -277,17 +277,17 @@ fn ProjectSlotValue(value: ProjectSlotValueView) -> Element {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ProjectSlotGroup(group: ProjectSlotGroupView) -> Element {
     rsx! {
-        div { class: "ux-project-slot-group",
-            div { class: "ux-project-slot-group-heading",
+        div { class: "tw:grid tw:min-w-0 tw:gap-2 tw:rounded-sm tw:border tw:border-border-subtle tw:bg-card-muted tw:p-2",
+            div { class: "tw:flex tw:flex-wrap tw:items-baseline tw:justify-between tw:gap-2",
                 span { "{group.label}" }
                 if let Some(detail) = group.detail.as_ref() {
-                    small { "{detail}" }
+                    small { class: "tw:text-xs tw:text-subtle-foreground", "{detail}" }
                 }
             }
             if group.rows.is_empty() {
-                p { class: "ux-project-slot-empty", "empty" }
+                p { class: "tw:m-0 tw:text-sm tw:text-muted-foreground", "empty" }
             } else {
-                div { class: "ux-project-slot-group-rows",
+                div { class: "tw:grid tw:min-w-0 tw:gap-2 tw:border-l tw:border-border-muted tw:pl-2",
                     for row in group.rows {
                         ProjectSlotRow { row }
                     }
@@ -301,18 +301,26 @@ fn ProjectSlotGroup(group: ProjectSlotGroupView) -> Element {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ProjectSlotIssue(issue: ProjectSlotIssueView) -> Element {
     rsx! {
-        div { class: "ux-project-slot-row ux-project-slot-row-issue",
-            span { class: "ux-project-slot-label", "{issue.label}" }
-            span { class: "ux-project-slot-value", "{issue.message}" }
+        div { class: "tw:grid tw:grid-cols-[minmax(110px,0.35fr)_minmax(0,1fr)] tw:gap-2 tw:rounded-sm tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-2",
+            span { class: "tw:text-xs tw:text-status-error-foreground", "{issue.label}" }
+            span { class: "tw:min-w-0 tw:text-right tw:text-xs tw:text-status-error-foreground tw:break-words", "{issue.message}" }
         }
     }
 }
 
 fn node_status_class(tone: ProjectNodeStatusTone) -> &'static str {
     match tone {
-        ProjectNodeStatusTone::Neutral => "ux-project-node-status ux-project-node-status-neutral",
-        ProjectNodeStatusTone::Good => "ux-project-node-status ux-project-node-status-good",
-        ProjectNodeStatusTone::Warning => "ux-project-node-status ux-project-node-status-warning",
-        ProjectNodeStatusTone::Error => "ux-project-node-status ux-project-node-status-error",
+        ProjectNodeStatusTone::Neutral => {
+            "tw:rounded-pill tw:border tw:border-status-neutral-border tw:bg-status-neutral-bg tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:text-status-neutral-foreground"
+        }
+        ProjectNodeStatusTone::Good => {
+            "tw:rounded-pill tw:border tw:border-status-good-border tw:bg-status-good-bg tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:text-status-good-foreground"
+        }
+        ProjectNodeStatusTone::Warning => {
+            "tw:rounded-pill tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:text-status-warning-foreground"
+        }
+        ProjectNodeStatusTone::Error => {
+            "tw:rounded-pill tw:border tw:border-status-error-border tw:bg-status-error-bg tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:text-status-error-foreground"
+        }
     }
 }

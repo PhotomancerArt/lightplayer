@@ -15,14 +15,14 @@ pub fn StepsView(stack: UiStepsView, running: bool, on_action: EventHandler<UiAc
         .collect::<Vec<_>>();
 
     rsx! {
-        div { class: "ux-stack",
-            ol { class: "ux-stack-sections",
+        div { class: "tw:grid tw:min-w-0 tw:gap-4",
+            ol { class: "tw:m-0 tw:grid tw:list-none tw:gap-0 tw:p-0",
                 for (step_number, section) in sections {
                     li { class: "{stack_section_class(section.state)}",
-                        div { class: "ux-stack-section-marker", "{step_number}" }
-                        div { class: "ux-stack-section-content",
-                            h3 { "{section.title}" }
-                            div { class: "ux-stack-section-body",
+                        div { class: "tw:inline-flex tw:mt-px tw:h-6 tw:w-6 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-current tw:bg-step-marker tw:text-xs tw:font-bold tw:leading-none", "{step_number}" }
+                        div { class: "tw:grid tw:min-w-0 tw:gap-2",
+                            h3 { class: "tw:m-0 tw:text-base tw:font-bold tw:leading-tight tw:text-strong-foreground tw:break-words", "{section.title}" }
+                            div { class: "tw:min-w-0",
                                 ViewContent {
                                     body: section.body,
                                     running,
@@ -49,9 +49,17 @@ pub fn StepsView(stack: UiStepsView, running: bool, on_action: EventHandler<UiAc
 
 fn stack_section_class(state: UiStepState) -> &'static str {
     match state {
-        UiStepState::Pending => "ux-stack-section ux-stack-section-pending",
-        UiStepState::Active => "ux-stack-section ux-stack-section-active",
-        UiStepState::Complete => "ux-stack-section ux-stack-section-complete",
-        UiStepState::NeedsAttention => "ux-stack-section ux-stack-section-attention",
+        UiStepState::Pending => {
+            "tw:grid tw:grid-cols-[28px_minmax(0,1fr)] tw:gap-3 tw:border-t tw:border-border-muted tw:bg-transparent tw:py-3 tw:text-subtle-foreground tw:first:border-t-0"
+        }
+        UiStepState::Active => {
+            "tw:grid tw:grid-cols-[28px_minmax(0,1fr)] tw:gap-3 tw:border-t tw:border-border-muted tw:bg-transparent tw:py-3 tw:text-status-working-foreground tw:first:border-t-0"
+        }
+        UiStepState::Complete => {
+            "tw:grid tw:grid-cols-[28px_minmax(0,1fr)] tw:gap-3 tw:border-t tw:border-border-muted tw:bg-transparent tw:py-3 tw:text-status-good-foreground tw:first:border-t-0"
+        }
+        UiStepState::NeedsAttention => {
+            "tw:grid tw:grid-cols-[28px_minmax(0,1fr)] tw:gap-3 tw:border-t tw:border-border-muted tw:bg-transparent tw:py-3 tw:text-status-error-foreground tw:first:border-t-0"
+        }
     }
 }

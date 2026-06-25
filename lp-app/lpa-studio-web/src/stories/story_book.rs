@@ -23,20 +23,20 @@ pub fn StoryBook() -> Element {
     if is_story_png_mode() {
         let story_viewport = story_png_viewport();
         return rsx! {
-            main { class: "story-png-page",
+            main { class: "tw:p-[22px]",
                 {render_story_selection(&selection, story_viewport)}
             }
         };
     }
 
     rsx! {
-        main { class: "story-book",
-            aside { class: "story-sidebar",
-                div { class: "story-sidebar-heading",
-                    h1 { "Lightplayer Stories" }
-                    p { "{stories.len()} component states" }
+        main { class: "tw:grid tw:h-screen tw:min-h-0 tw:grid-cols-[260px_minmax(0,1fr)] tw:overflow-hidden tw:max-[880px]:grid-cols-1",
+            aside { class: "tw:min-h-0 tw:overflow-y-auto tw:border-r tw:border-border tw:bg-card-subtle tw:p-[18px] tw:max-[880px]:border-b tw:max-[880px]:border-r-0",
+                div {
+                    h1 { class: "tw:m-0 tw:mb-1.5 tw:text-lg tw:font-bold tw:text-strong-foreground", "Lightplayer Stories" }
+                    p { class: "tw:m-0 tw:mb-[18px] tw:text-sm tw:text-dim-foreground", "{stories.len()} component states" }
                 }
-                div { class: "story-discovery-links", "aria-hidden": "true",
+                div { class: "tw:hidden", "aria-hidden": "true",
                     for family in story_groups.iter() {
                         for category in family.categories.iter() {
                             for component in category.components.iter() {
@@ -66,57 +66,53 @@ pub fn StoryBook() -> Element {
                         }
                     }
                 }
-                nav { class: "story-nav",
+                nav { class: "tw:grid tw:gap-[18px]",
                     for family in story_groups.iter() {
-                        section { class: "story-nav-family",
-                            h2 { "{family.label}" }
-                            div { class: "story-nav-family-body",
+                        section { class: "tw:grid tw:min-w-0 tw:gap-2",
+                            h2 { class: "tw:m-0 tw:mb-0.5 tw:text-xs tw:font-extrabold tw:uppercase tw:text-heading", "{family.label}" }
+                            div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
                                 for category in family.categories.iter() {
                                     {
                                         rsx! {
-                                            div { class: "story-nav-category",
+                                            div { class: "tw:grid tw:min-w-0 tw:gap-1 tw:border-l tw:border-border-muted tw:pl-2.5",
                                                 if let Some(category_label) = category.label.as_deref() {
-                                                    h3 { "{category_label}" }
+                                                    h3 { class: "tw:m-0 tw:mt-2 tw:text-xs tw:font-extrabold tw:uppercase tw:text-subtle-foreground", "{category_label}" }
                                                 }
-                                                div { class: "story-nav-components",
+                                                div { class: "tw:grid tw:min-w-0 tw:gap-1",
                                                     for component in category.components.iter() {
                                                         {
                                                             let expanded = component.overview_id == selected || component
                                                                 .stories
                                                                 .iter()
                                                                 .any(|story| story.id == selected);
-                                                            let component_class = if expanded {
-                                                                "story-nav-component is-active"
-                                                            } else {
-                                                                "story-nav-component"
-                                                            };
+                                                            let component_class = story_nav_component_class(expanded);
                                                             let component_href = story_hash(&component.overview_id, selected_viewport);
                                                             let overview_id_for_component = component.overview_id.clone();
                                                             rsx! {
-                                                                div { class: "story-nav-component-group",
+                                                                div { class: "tw:grid tw:min-w-0",
                                                                     a {
                                                                         class: "{component_class}",
                                                                         href: "{component_href}",
                                                                         onclick: move |_| selected_story_id.set(overview_id_for_component.clone()),
-                                                                        span { class: "story-nav-component-label", "{component.label}" }
-                                                                        span { class: "story-nav-component-count", "{component.stories.len()}" }
+                                                                        span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap", "{component.label}" }
+                                                                        span { class: "tw:text-xs tw:text-subtle-foreground", "{component.stories.len()}" }
                                                                     }
                                                                     {
                                                                         let story_list_class = if expanded {
-                                                                            "story-nav-story-list is-expanded"
+                                                                            story_nav_story_list_class(true)
                                                                         } else {
-                                                                            "story-nav-story-list"
+                                                                            story_nav_story_list_class(false)
                                                                         };
                                                                         rsx! {
                                                                             div {
                                                                                 class: "{story_list_class}",
                                                                                 "aria-hidden": if expanded { "false" } else { "true" },
-                                                                                div { class: "story-nav-story-list-inner",
+                                                                                div { class: "tw:grid tw:min-h-0 tw:min-w-0 tw:gap-0.5 tw:overflow-hidden tw:pl-2",
                                                                                     {
                                                                                         let overview_link_class = if component.overview_id == selected {
-                                                                                            "story-nav-link story-nav-overview-link is-active"
+                                                                                            story_nav_link_class(true, true)
                                                                                         } else {
-                                                                                            "story-nav-link story-nav-overview-link"
+                                                                                            story_nav_link_class(true, false)
                                                                                         };
                                                                                         let overview_href = story_hash(&component.overview_id, selected_viewport);
                                                                                         let overview_id_for_link = component.overview_id.clone();
@@ -134,9 +130,9 @@ pub fn StoryBook() -> Element {
                                                                                         {
                                                                                             let story_id = story.id;
                                                                                             let link_class = if story.id == selected {
-                                                                                                "story-nav-link is-active"
+                                                                                                story_nav_link_class(false, true)
                                                                                             } else {
-                                                                                                "story-nav-link"
+                                                                                                story_nav_link_class(false, false)
                                                                                             };
                                                                                             let story_href = story_hash(story_id, selected_viewport);
                                                                                             rsx! {
@@ -168,16 +164,16 @@ pub fn StoryBook() -> Element {
                     }
                 }
             }
-            section { class: "story-stage",
-                div { class: "story-toolbar",
-                    div { class: "story-toolbar-copy",
-                        h2 { "{page_title}" }
-                        p { class: "story-toolbar-path", "{page_source_ref}" }
+            section { class: "tw:min-h-0 tw:overflow-y-auto tw:p-[22px]",
+                div { class: "tw:mb-4 tw:flex tw:items-start tw:justify-between tw:gap-4",
+                    div { class: "tw:grid tw:min-w-0 tw:gap-1",
+                        h2 { class: "tw:m-0 tw:text-xl tw:font-bold tw:text-strong-foreground", "{page_title}" }
+                        p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-dim-foreground tw:break-words", "{page_source_ref}" }
                         if !page_description.is_empty() {
-                            p { class: "story-toolbar-description", "{page_description}" }
+                            p { class: "tw:m-0 tw:pt-1.5 tw:text-sm tw:text-dim-foreground", "{page_description}" }
                         }
                     }
-                    div { class: "story-viewport-controls",
+                    div { class: "tw:flex tw:gap-2",
                         for target_viewport in [StoryViewport::Sm, StoryViewport::Md, StoryViewport::Lg] {
                             {
                                 let selected_for_button = page_id.clone();
@@ -440,15 +436,17 @@ fn StoryCanvas(story_id: &'static str, viewport: StoryViewport) -> Element {
 
     rsx! {
         div {
-            class: "story-canvas-shell",
+            class: "tw:grid tw:min-w-0 tw:w-full tw:overflow-x-auto",
             "data-story-capture": "1",
             "data-story-id": "{story_id}",
-            div { class: "story-frame-boundary", style: "{frame_style}",
-                div { class: "story-frame-header",
-                    span { "{canvas_label}" }
+            div { class: "tw:box-content tw:flow-root tw:min-w-0 tw:overflow-hidden tw:rounded-sm tw:border-4 tw:border-border-muted tw:bg-card-muted", style: "{frame_style}",
+                div { class: "tw:flex tw:min-w-0 tw:w-full tw:justify-start tw:border-b-4 tw:border-border-muted tw:bg-border-muted",
+                    span { class: "tw:px-2 tw:py-1 tw:font-mono tw:text-xs tw:leading-none tw:text-subtle-foreground", "{canvas_label}" }
                 }
-                div { class: "story-frame",
-                    {render_story(story_id)}
+                div { class: "tw:flow-root tw:min-w-0 tw:w-full tw:bg-card-muted tw:p-2",
+                    div { class: "story-frame-checker tw:flow-root tw:min-w-0 tw:w-full",
+                        {render_story(story_id)}
+                    }
                 }
             }
         }
@@ -462,13 +460,15 @@ fn StoryFrame(story_id: &'static str, viewport: StoryViewport) -> Element {
     let canvas_label = viewport.canvas_label();
 
     rsx! {
-        div { class: "story-canvas-shell",
-            div { class: "story-frame-boundary", style: "{frame_style}",
-                div { class: "story-frame-header",
-                    span { "{canvas_label}" }
+        div { class: "tw:grid tw:min-w-0 tw:w-full tw:overflow-x-auto",
+            div { class: "tw:box-content tw:flow-root tw:min-w-0 tw:overflow-hidden tw:rounded-sm tw:border-4 tw:border-border-muted tw:bg-card-muted", style: "{frame_style}",
+                div { class: "tw:flex tw:min-w-0 tw:w-full tw:justify-start tw:border-b-4 tw:border-border-muted tw:bg-border-muted",
+                    span { class: "tw:px-2 tw:py-1 tw:font-mono tw:text-xs tw:leading-none tw:text-subtle-foreground", "{canvas_label}" }
                 }
-                div { class: "story-frame",
-                    {render_story(story_id)}
+                div { class: "tw:flow-root tw:min-w-0 tw:w-full tw:bg-card-muted tw:p-2",
+                    div { class: "story-frame-checker tw:flow-root tw:min-w-0 tw:w-full",
+                        {render_story(story_id)}
+                    }
                 }
             }
         }
@@ -501,16 +501,16 @@ fn StoryOverviewCanvas(
     viewport: StoryViewport,
 ) -> Element {
     rsx! {
-        div { class: "story-overview-list",
+        div { class: "tw:grid tw:w-full tw:gap-[26px]",
             "data-story-capture": "1",
             "data-story-id": "{story_id}",
             for story in stories {
-                section { class: "story-overview-item",
-                    header { class: "story-overview-item-header",
-                        h3 { "{story.label}" }
-                        p { "{story.source_path}" }
+                section { class: "tw:grid tw:min-w-0 tw:gap-2.5 tw:border-b tw:border-border-muted tw:pb-6 tw:last:border-b-0 tw:last:pb-0",
+                    header { class: "tw:grid tw:min-w-0 tw:gap-1",
+                        h3 { class: "tw:m-0 tw:text-base tw:font-bold tw:text-strong-foreground", "{story.label}" }
+                        p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-dim-foreground tw:break-words", "{story.source_path}" }
                     }
-                    div { class: "story-overview-frame",
+                    div { class: "tw:min-w-0",
                         StoryFrame {
                             story_id: story.id,
                             viewport,
@@ -521,6 +521,48 @@ fn StoryOverviewCanvas(
         }
     }
 }
+
+fn story_nav_component_class(active: bool) -> &'static str {
+    if active {
+        "tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-2 tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-raised tw:px-2 tw:py-1.5 tw:text-sm tw:leading-tight tw:text-strong-foreground tw:no-underline"
+    } else {
+        "tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-2 tw:rounded-sm tw:border tw:border-transparent tw:px-2 tw:py-1.5 tw:text-sm tw:leading-tight tw:text-soft-foreground tw:no-underline tw:hover:bg-card-raised tw:hover:text-strong-foreground"
+    }
+}
+
+fn story_nav_story_list_class(expanded: bool) -> &'static str {
+    if expanded {
+        "tw:grid tw:grid-rows-[1fr] tw:opacity-100 tw:transition-[grid-template-rows,opacity] tw:duration-150"
+    } else {
+        "tw:grid tw:grid-rows-[0fr] tw:opacity-0 tw:transition-[grid-template-rows,opacity] tw:duration-150"
+    }
+}
+
+fn story_nav_link_class(overview: bool, active: bool) -> &'static str {
+    match (overview, active) {
+        (true, true) => {
+            "tw:block tw:min-w-0 tw:border-l-2 tw:border-accent-border tw:bg-[linear-gradient(90deg,var(--studio-status-good-bg),transparent_90%)] tw:py-1 tw:pl-2.5 tw:text-sm tw:font-extrabold tw:leading-tight tw:text-strong-foreground tw:no-underline tw:break-words"
+        }
+        (true, false) => {
+            "tw:block tw:min-w-0 tw:border-l-2 tw:border-transparent tw:py-1 tw:pl-2.5 tw:text-sm tw:font-extrabold tw:leading-tight tw:text-soft-foreground tw:no-underline tw:break-words tw:hover:text-strong-foreground"
+        }
+        (false, true) => {
+            "tw:block tw:min-w-0 tw:border-l-2 tw:border-accent-border tw:bg-[linear-gradient(90deg,var(--studio-status-good-bg),transparent_90%)] tw:py-1 tw:pl-2.5 tw:text-sm tw:leading-tight tw:text-strong-foreground tw:no-underline tw:break-words"
+        }
+        (false, false) => {
+            "tw:block tw:min-w-0 tw:border-l-2 tw:border-transparent tw:py-1 tw:pl-2.5 tw:text-sm tw:leading-tight tw:text-muted-foreground tw:no-underline tw:break-words tw:hover:text-strong-foreground"
+        }
+    }
+}
+
+fn viewport_button_class(active: bool) -> &'static str {
+    if active {
+        "tw:grid tw:min-w-[58px] tw:gap-px tw:rounded-sm tw:border tw:border-accent-border tw:bg-card-raised tw:px-2.5 tw:py-1.5 tw:text-left tw:leading-tight"
+    } else {
+        "tw:grid tw:min-w-[58px] tw:gap-px tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-raised tw:px-2.5 tw:py-1.5 tw:text-left tw:leading-tight"
+    }
+}
+
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ViewportButton(
@@ -529,17 +571,17 @@ fn ViewportButton(
     onclick: EventHandler<MouseEvent>,
 ) -> Element {
     let class = if active {
-        "story-viewport-button is-active"
+        viewport_button_class(true)
     } else {
-        "story-viewport-button"
+        viewport_button_class(false)
     };
     rsx! {
         button {
             class,
             type: "button",
             onclick: move |event| onclick.call(event),
-            span { class: "story-viewport-label", "{viewport.slug()}" }
-            span { class: "story-viewport-detail", "{viewport.width_label()}" }
+            span { class: "tw:text-xs tw:font-extrabold tw:text-strong-foreground", "{viewport.slug()}" }
+            span { class: "tw:text-[0.66rem] tw:text-subtle-foreground", "{viewport.width_label()}" }
         }
     }
 }

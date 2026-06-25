@@ -12,15 +12,15 @@ pub fn PaneFrame(
     children: Element,
 ) -> Element {
     let panel_class = if primary {
-        "ux-panel ux-panel-primary"
+        "tw:rounded-md tw:border tw:border-panel-primary-border tw:bg-panel-primary tw:p-[18px]"
     } else {
-        "ux-panel"
+        "tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-[18px]"
     };
 
     rsx! {
         section { class: "{panel_class}",
-            div { class: "ux-panel-heading",
-                p { "{title}" }
+            div { class: "tw:mb-3 tw:flex tw:flex-wrap tw:items-center tw:justify-between tw:gap-3",
+                p { class: "tw:m-0 tw:text-xs tw:font-extrabold tw:uppercase tw:leading-none tw:text-heading", "{title}" }
                 if let Some(status) = status {
                     StatusChip { status }
                 }

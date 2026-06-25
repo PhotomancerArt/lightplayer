@@ -9,11 +9,11 @@ pub fn Tabs(tabs: Vec<TabItem>, initial: usize) -> Element {
     let active_tab = tabs.get(active_index).cloned();
 
     rsx! {
-        div { class: "ux-tabs",
-            div { class: "ux-tab-list", role: "tablist",
+        div { class: "tw:grid tw:min-w-0 tw:gap-3",
+            div { class: "tw:flex tw:flex-wrap tw:gap-2", role: "tablist",
                 for (index, tab) in tabs.clone().into_iter().enumerate() {
                     button {
-                        class: if index == active_index { "ux-tab ux-tab-active" } else { "ux-tab" },
+                        class: tab_class(index == active_index),
                         r#type: "button",
                         role: "tab",
                         aria_selected: "{index == active_index}",
@@ -23,12 +23,20 @@ pub fn Tabs(tabs: Vec<TabItem>, initial: usize) -> Element {
                 }
             }
             if let Some(tab) = active_tab {
-                div { class: "ux-tab-panel", role: "tabpanel",
-                    h3 { "{tab.title}" }
-                    p { "{tab.body}" }
+                div { class: "tw:grid tw:min-w-0 tw:gap-2 tw:rounded-sm tw:border tw:border-border-subtle tw:bg-card-muted tw:p-3", role: "tabpanel",
+                    h3 { class: "tw:m-0 tw:text-base tw:font-bold tw:text-strong-foreground", "{tab.title}" }
+                    p { class: "tw:m-0 tw:text-sm tw:leading-normal tw:text-muted-foreground", "{tab.body}" }
                 }
             }
         }
+    }
+}
+
+fn tab_class(active: bool) -> &'static str {
+    if active {
+        "tw:min-h-8 tw:rounded-sm tw:border tw:border-accent-border tw:bg-status-good-bg tw:px-3 tw:text-sm tw:font-bold tw:text-strong-foreground"
+    } else {
+        "tw:min-h-8 tw:rounded-sm tw:border tw:border-border-strong tw:bg-transparent tw:px-3 tw:text-sm tw:text-muted-foreground tw:hover:bg-card-muted"
     }
 }
 

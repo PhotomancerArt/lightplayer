@@ -7,7 +7,7 @@ use crate::core::ProgressBar;
 #[story]
 pub(crate) fn variants() -> Element {
     rsx! {
-        div { class: "ux-story-stack",
+        div { class: "tw:grid tw:gap-[18px]",
             ProgressBar {
                 progress: UiProgress::indeterminate("Opening link session")
                     .with_detail("Waiting for the browser serial provider."),

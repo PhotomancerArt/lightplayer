@@ -7,7 +7,7 @@ use crate::core::StatusChip;
 #[story]
 pub(crate) fn kinds() -> Element {
     rsx! {
-        div { class: "ux-actions",
+        div { class: "tw:flex tw:flex-wrap tw:items-start tw:gap-2",
             StatusChip { status: UiStatus::neutral("Choose connection") }
             StatusChip { status: UiStatus::working("Connecting") }
             StatusChip { status: UiStatus::good("Ready") }

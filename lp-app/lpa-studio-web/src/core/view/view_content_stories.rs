@@ -8,7 +8,7 @@ use crate::core::story_fixtures::{story_activity, story_issue, story_metrics, st
 #[story]
 pub(crate) fn body_variants() -> Element {
     rsx! {
-        div { class: "ux-story-stack",
+        div { class: "tw:grid tw:gap-[18px]",
             ViewContent {
                 body: UiViewContent::text("Choose how Studio should connect."),
                 running: false,
@@ -39,7 +39,7 @@ pub(crate) fn body_variants() -> Element {
 #[story]
 pub(crate) fn composed_variants() -> Element {
     rsx! {
-        div { class: "ux-story-stack",
+        div { class: "tw:grid tw:gap-[18px]",
             ViewContent {
                 body: UiViewContent::Activity(story_activity()),
                 running: false,

@@ -9,9 +9,9 @@ pub fn TerminalOutput(lines: Vec<UiTerminalLine>) -> Element {
     }
 
     rsx! {
-        ol { class: "ux-terminal",
+        ol { class: "tw:m-0 tw:grid tw:max-h-60 tw:gap-1 tw:overflow-auto tw:rounded-sm tw:border tw:border-border-subtle tw:bg-terminal tw:p-3 tw:font-mono tw:text-[0.78rem] tw:leading-snug tw:text-muted-foreground",
             for line in lines {
-                li { "{line.text}" }
+                li { class: "tw:min-w-0 tw:list-none tw:break-words", "{line.text}" }
             }
         }
     }

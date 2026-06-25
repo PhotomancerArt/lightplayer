@@ -139,14 +139,19 @@ serial output without involving the full Studio UX.
 
 ## Theme And Layout
 
-Studio web styling keeps the existing `src/style.css` inline so mount-time
-layout measurements see the same CSS as soon as components render. Tailwind is
-enabled through `tailwind.css` and loaded as a Dioxus asset for opt-in utility
-classes; utilities are prefixed with `tw:` to avoid colliding with Studio's
-existing class names. The top-level `:root` section in `src/style.css` defines
-semantic tokens for Studio color, surfaces, borders, text, status states, action
-accents, spacing, radii, typography, and shadows. Prefer new component styles to
-consume those tokens instead of adding one-off literals.
+Studio web styling is Tailwind-first. Components should prefer semantic
+Tailwind utilities in their Dioxus markup, using the existing `tw:` prefix while
+legacy `ux-*` classes still exist. Theme values are defined as Studio CSS
+variables in `src/style.css` and exposed to Tailwind from `tailwind.css` with
+semantic names such as `background`, `card`, `border`, `muted-foreground`,
+`accent`, and `status-warning-bg`.
+
+Use direct utility strings for simple static styling. Use small Rust helper
+functions for repeated stateful variants such as status tones, action priority,
+step state, pane emphasis, and project node status. Avoid adding broad new
+selector families to `src/style.css`; that file should stay limited to theme
+variables, base rules, keyframes, browser/measurement behavior, and explicitly
+transitional story or exploration surfaces.
 
 Reusable Dioxus surfaces live under `src/base`, `src/core`, and `src/app`:
 

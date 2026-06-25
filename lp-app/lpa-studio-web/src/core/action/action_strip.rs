@@ -11,9 +11,9 @@ pub fn ActionStrip(
     on_action: EventHandler<UiAction>,
 ) -> Element {
     rsx! {
-        div { class: "ux-actions",
+        div { class: "tw:flex tw:flex-wrap tw:items-start tw:gap-2",
             if actions.is_empty() {
-                p { class: "ux-panel-copy", "No actions are currently available." }
+                p { class: "tw:m-0 tw:text-sm tw:leading-normal tw:text-muted-foreground", "No actions are currently available." }
             } else {
                 for action in actions {
                     ActionButton {

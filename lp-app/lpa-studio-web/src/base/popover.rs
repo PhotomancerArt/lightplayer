@@ -38,7 +38,7 @@ pub fn IconPopoverButton(
     let panel_style = position().style();
 
     rsx! {
-        span { class: "ux-popover-control",
+        span { class: "tw:relative tw:inline-grid tw:min-w-0 tw:place-items-center",
             button {
                 class: "{button_class}",
                 r#type: "button",
@@ -65,7 +65,7 @@ pub fn IconPopoverButton(
             }
             if open() {
                 div {
-                    class: "ux-popover-backdrop",
+                    class: "tw:fixed tw:inset-0 tw:z-[70] tw:bg-transparent",
                     aria_hidden: "true",
                     onclick: move |_| open.set(false),
                 }
