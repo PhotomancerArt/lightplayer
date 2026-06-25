@@ -4,8 +4,8 @@ use dioxus::prelude::*;
 use lpa_studio_core::{UiSlotEditorHint, UiSlotFieldState, UiSlotValue};
 use lpa_studio_web_story_macros::story;
 
-use crate::app::node::node_story_fixtures::slot_value_variants_fixture;
 use crate::app::node::SlotValueEditor;
+use crate::app::node::node_story_fixtures::slot_value_variants_fixture;
 
 #[story(description = "Slot value editor dispatch across the M1 value types.")]
 pub(crate) fn gallery() -> Element {

@@ -10,7 +10,12 @@ use crate::base::{StudioIcon, StudioIconName};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn ConfigSlotRow(slot: UiConfigSlot, depth: usize, index: usize) -> Element {
+pub fn ConfigSlotRow(
+    slot: UiConfigSlot,
+    depth: usize,
+    index: usize,
+    #[props(default = false)] initially_open: bool,
+) -> Element {
     let child_record = match &slot.body {
         UiConfigSlotBody::Record(record) if !record.fields.is_empty() => Some(record.clone()),
         _ => None,
@@ -58,6 +63,7 @@ pub fn ConfigSlotRow(slot: UiConfigSlot, depth: usize, index: usize) -> Element 
                 SlotAspectMenu {
                     label: slot.label.clone(),
                     aspects,
+                    initially_open,
                 }
             }
             if expanded() {

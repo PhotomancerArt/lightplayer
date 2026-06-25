@@ -219,6 +219,9 @@
   .tw\:min-h-32 {
     min-height: calc(var(--tw-spacing) * 32);
   }
+  .tw\:min-h-56 {
+    min-height: calc(var(--tw-spacing) * 56);
+  }
   .tw\:min-h-\[46px\] {
     min-height: 46px;
   }
@@ -442,6 +445,9 @@
   }
   .tw\:gap-px {
     gap: 1px;
+  }
+  .tw\:gap-x-1\.5 {
+    column-gap: calc(var(--tw-spacing) * 1.5);
   }
   .tw\:gap-x-2 {
     column-gap: calc(var(--tw-spacing) * 2);
@@ -786,6 +792,9 @@
   }
   .tw\:py-4 {
     padding-block: calc(var(--tw-spacing) * 4);
+  }
+  .tw\:pt-0\.5 {
+    padding-top: calc(var(--tw-spacing) * 0.5);
   }
   .tw\:pt-1\.5 {
     padding-top: calc(var(--tw-spacing) * 1.5);

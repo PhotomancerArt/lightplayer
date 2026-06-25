@@ -48,6 +48,21 @@ pub(crate) fn bound_value() -> Element {
     }
 }
 
+#[story(description = "An open slot info popup showing the compact aspect rows.")]
+pub(crate) fn info_popup() -> Element {
+    rsx! {
+        div { class: "tw:min-h-56",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("fade_after", "Fade after", UiSlotValue::f32(0.35))
+                    .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new("bus#time.seconds"))),
+                depth: 0,
+                index: 0,
+                initially_open: true,
+            }
+        }
+    }
+}
+
 #[story(description = "A row with a local edited-state affordance.")]
 pub(crate) fn edited_value() -> Element {
     rsx! {

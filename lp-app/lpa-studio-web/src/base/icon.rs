@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
     Asterisk, Check, ChevronDown, ChevronRight, CircleAlert, CircleDot, CircleMinus, FlaskConical,
-    Info, Link2, Pencil, Play, SquareArrowRight, TriangleAlert, Usb,
+    Info, Link2, Link2Off, Pencil, Play, SquareArrowRight, TriangleAlert, Usb,
 };
 
 #[component]
@@ -22,6 +22,14 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::ChildValue => rsx! { SquareArrowRight { size } },
         StudioIconName::Edited => rsx! { Pencil { size } },
         StudioIconName::Info => rsx! { Info { size } },
+        StudioIconName::InfoBare => rsx! {
+            span {
+                class: "tw:inline-flex tw:items-center tw:justify-center tw:font-mono tw:font-bold",
+                style: "font-size: {size}px; line-height: {size}px;",
+                "i"
+            }
+        },
+        StudioIconName::UnboundValue => rsx! { Link2Off { size } },
         StudioIconName::Expanded => rsx! { ChevronDown { size } },
         StudioIconName::Collapsed => rsx! { ChevronRight { size } },
     }
@@ -52,6 +60,8 @@ pub enum StudioIconName {
     ChildValue,
     Edited,
     Info,
+    InfoBare,
+    UnboundValue,
     Expanded,
     Collapsed,
 }

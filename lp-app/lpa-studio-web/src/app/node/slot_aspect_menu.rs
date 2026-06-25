@@ -7,7 +7,11 @@ use crate::base::{IconMenuButton, IconMenuTone, PopoverPlacement, StudioIcon, St
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn SlotAspectMenu(label: String, aspects: Vec<UiSlotAspect>) -> Element {
+pub fn SlotAspectMenu(
+    label: String,
+    aspects: Vec<UiSlotAspect>,
+    #[props(default = false)] initially_open: bool,
+) -> Element {
     let affordance = primary_affordance(&aspects);
     let style = slot_affordance_style(affordance);
     let menu_label = format!("{label} details");
@@ -22,10 +26,8 @@ pub fn SlotAspectMenu(label: String, aspects: Vec<UiSlotAspect>) -> Element {
                 tone: style.tone,
                 placement: PopoverPlacement::BottomEnd,
                 active: style.active,
+                initially_open,
                 popup_class: slot_aspect_popup_class().to_string(),
-                div { class: "tw:min-w-0 tw:px-3 tw:py-2",
-                    strong { class: "tw:block tw:text-sm tw:text-strong-foreground tw:break-words", "{label}" }
-                }
                 for aspect in aspects {
                     SlotAspectSection { aspect }
                 }
@@ -74,30 +76,40 @@ fn SlotAspectSection(aspect: UiSlotAspect) -> Element {
     let icon_class = aspect_icon_class(summary.tone);
     let details = aspect_detail_lines(&aspect);
     let info_rows = if aspect.kind == UiSlotAspectKind::TypeInfo {
-        aspect.rows.clone()
+        type_info_detail_rows(&aspect)
     } else {
         Vec::new()
     };
+    let title = summary.title.clone();
+    let code = summary.code.clone();
+    let title_is_code = summary.title_is_code;
 
     rsx! {
         section { class: section_class,
-            header { class: "tw:flex tw:items-center tw:gap-1.5 tw:leading-none",
+            header { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:leading-none",
                 span { class: icon_class,
                     StudioIcon {
                         name: summary.icon,
                         size: 12,
                     }
                 }
-                h3 { class: heading_class, "{summary.title}" }
+                if title_is_code {
+                    code { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-xs tw:font-bold tw:text-heading", "{title}" }
+                } else {
+                    h3 { class: heading_class, "{title}" }
+                }
+                if let Some(code) = code {
+                    code { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-xs tw:text-muted-foreground", "{code}" }
+                }
             }
             if aspect.kind == UiSlotAspectKind::TypeInfo {
-                div { class: "tw:grid tw:gap-0.5 tw:pl-[18px]",
+                div { class: "tw:grid tw:gap-0.5 tw:pl-[18px] tw:pt-0.5",
                     for row in info_rows {
                         SlotInfoRow { row }
                     }
                 }
             } else if !details.is_empty() {
-                div { class: "tw:grid tw:gap-0.5 tw:pl-[18px]",
+                div { class: "tw:grid tw:gap-0.5 tw:pl-[18px] tw:pt-0.5",
                     for detail in details {
                         p { class: "tw:m-0 tw:text-xs tw:leading-snug tw:text-muted-foreground tw:break-words", "{detail}" }
                     }
@@ -114,9 +126,11 @@ struct SlotAffordanceStyle {
     active: bool,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct AspectSummary {
-    title: &'static str,
+    title: String,
+    code: Option<String>,
+    title_is_code: bool,
     icon: StudioIconName,
     tone: AspectTone,
     highlight: Option<UiSlotAffordance>,
@@ -136,7 +150,7 @@ fn slot_affordance_style(affordance: UiSlotAffordance) -> SlotAffordanceStyle {
     match affordance {
         UiSlotAffordance::Info => SlotAffordanceStyle {
             tone: IconMenuTone::Quiet,
-            icon: StudioIconName::Info,
+            icon: StudioIconName::InfoBare,
             active: true,
         },
         UiSlotAffordance::Saving => SlotAffordanceStyle {
@@ -177,8 +191,10 @@ fn aspect_summary(aspect: &UiSlotAspect) -> AspectSummary {
         UiSlotAspectKind::EditState => edit_state_summary(aspect),
         UiSlotAspectKind::Binding => binding_summary(aspect),
         UiSlotAspectKind::TypeInfo => AspectSummary {
-            title: "Info",
-            icon: StudioIconName::Info,
+            title: type_info_title(aspect),
+            code: None,
+            title_is_code: true,
+            icon: StudioIconName::InfoBare,
             tone: AspectTone::Quiet,
             highlight: None,
         },
@@ -188,19 +204,25 @@ fn aspect_summary(aspect: &UiSlotAspect) -> AspectSummary {
 fn validation_summary(aspect: &UiSlotAspect) -> AspectSummary {
     match aspect.affordance {
         Some(UiSlotAffordance::Error) => AspectSummary {
-            title: "Error",
+            title: "Error".to_string(),
+            code: None,
+            title_is_code: false,
             icon: StudioIconName::StatusError,
             tone: AspectTone::Error,
             highlight: Some(UiSlotAffordance::Error),
         },
         Some(UiSlotAffordance::Invalid) => AspectSummary {
-            title: "Invalid",
+            title: "Invalid".to_string(),
+            code: None,
+            title_is_code: false,
             icon: StudioIconName::StepAttention,
             tone: AspectTone::Error,
             highlight: Some(UiSlotAffordance::Invalid),
         },
         _ => AspectSummary {
-            title: "Valid",
+            title: "Valid".to_string(),
+            code: None,
+            title_is_code: false,
             icon: StudioIconName::StepComplete,
             tone: AspectTone::Good,
             highlight: None,
@@ -211,25 +233,33 @@ fn validation_summary(aspect: &UiSlotAspect) -> AspectSummary {
 fn edit_state_summary(aspect: &UiSlotAspect) -> AspectSummary {
     match aspect.affordance {
         Some(UiSlotAffordance::Error) => AspectSummary {
-            title: "Write failed",
+            title: "Write failed".to_string(),
+            code: None,
+            title_is_code: false,
             icon: StudioIconName::StatusError,
             tone: AspectTone::Error,
             highlight: Some(UiSlotAffordance::Error),
         },
         Some(UiSlotAffordance::Edited) => AspectSummary {
-            title: "Edited",
+            title: "Edited".to_string(),
+            code: None,
+            title_is_code: false,
             icon: StudioIconName::Edited,
             tone: AspectTone::Warning,
             highlight: Some(UiSlotAffordance::Edited),
         },
         Some(UiSlotAffordance::Saving) => AspectSummary {
-            title: "Saving",
+            title: "Saving".to_string(),
+            code: None,
+            title_is_code: false,
             icon: StudioIconName::StatusRunning,
             tone: AspectTone::Working,
             highlight: Some(UiSlotAffordance::Saving),
         },
         _ => AspectSummary {
-            title: "No changes",
+            title: "No changes".to_string(),
+            code: None,
+            title_is_code: false,
             icon: StudioIconName::StepComplete,
             tone: AspectTone::Good,
             highlight: None,
@@ -240,19 +270,25 @@ fn edit_state_summary(aspect: &UiSlotAspect) -> AspectSummary {
 fn binding_summary(aspect: &UiSlotAspect) -> AspectSummary {
     match aspect.affordance {
         Some(UiSlotAffordance::Bound) => AspectSummary {
-            title: "Bound value",
+            title: "Bound from".to_string(),
+            code: first_row_value(aspect),
+            title_is_code: false,
             icon: StudioIconName::BoundValue,
             tone: AspectTone::Accent,
             highlight: Some(UiSlotAffordance::Bound),
         },
         _ if first_row_label_is(aspect, "Unbound") => AspectSummary {
-            title: "Unbound",
-            icon: StudioIconName::BoundValue,
+            title: "Unbound".to_string(),
+            code: None,
+            title_is_code: false,
+            icon: StudioIconName::UnboundValue,
             tone: AspectTone::Quiet,
             highlight: None,
         },
         _ => AspectSummary {
-            title: "Direct value",
+            title: "Unbound".to_string(),
+            code: None,
+            title_is_code: false,
             icon: StudioIconName::AssignedValue,
             tone: AspectTone::Quiet,
             highlight: None,
@@ -271,13 +307,15 @@ fn aspect_detail_lines(aspect: &UiSlotAspect) -> Vec<String> {
     if aspect.kind == UiSlotAspectKind::TypeInfo {
         return Vec::new();
     }
+    let value_is_header_code = aspect.kind == UiSlotAspectKind::Binding
+        && aspect.affordance == Some(UiSlotAffordance::Bound);
 
     aspect
         .rows
         .iter()
         .flat_map(|row| {
             let mut lines = Vec::new();
-            if !row.value.is_empty() {
+            if !value_is_header_code && !row.value.is_empty() {
                 lines.push(row.value.clone());
             }
             if let Some(detail) = row.detail.as_ref().filter(|detail| !detail.is_empty()) {
@@ -288,23 +326,53 @@ fn aspect_detail_lines(aspect: &UiSlotAspect) -> Vec<String> {
         .collect()
 }
 
+fn type_info_title(aspect: &UiSlotAspect) -> String {
+    aspect
+        .rows
+        .iter()
+        .find(|row| row.label.eq_ignore_ascii_case("Path") && !row.value.is_empty())
+        .or_else(|| {
+            aspect
+                .rows
+                .iter()
+                .find(|row| row.label.eq_ignore_ascii_case("Name") && !row.value.is_empty())
+        })
+        .map(|row| row.value.clone())
+        .unwrap_or_else(|| aspect.title.clone())
+}
+
+fn type_info_detail_rows(aspect: &UiSlotAspect) -> Vec<UiSlotAspectRow> {
+    aspect
+        .rows
+        .iter()
+        .filter(|row| {
+            !row.label.eq_ignore_ascii_case("Path") && !row.label.eq_ignore_ascii_case("Name")
+        })
+        .cloned()
+        .collect()
+}
+
+fn first_row_value(aspect: &UiSlotAspect) -> Option<String> {
+    aspect
+        .rows
+        .first()
+        .map(|row| row.value.clone())
+        .filter(|value| !value.is_empty())
+}
+
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn SlotInfoRow(row: UiSlotAspectRow) -> Element {
-    let is_monospace = matches!(row.label.as_str(), "Name" | "Path");
-    let value_class = if is_monospace {
-        "tw:font-mono tw:text-xs tw:leading-snug tw:text-muted-foreground tw:break-words"
-    } else {
-        "tw:text-xs tw:leading-snug tw:text-muted-foreground tw:break-words"
-    };
-
     rsx! {
         if !row.value.is_empty() {
-            span { class: value_class, "{row.value}" }
-        }
-        if let Some(detail) = row.detail {
-            if !detail.is_empty() {
-                span { class: "tw:text-xs tw:leading-snug tw:text-subtle-foreground tw:break-words", "{detail}" }
+            p { class: "tw:m-0 tw:flex tw:min-w-0 tw:flex-wrap tw:items-baseline tw:gap-x-1.5 tw:text-xs tw:leading-snug",
+                span { class: "tw:font-bold tw:text-subtle-foreground", "{row.label}:" }
+                span { class: "tw:text-muted-foreground tw:break-words", "{row.value}" }
+                if let Some(detail) = row.detail {
+                    if !detail.is_empty() {
+                        span { class: "tw:text-subtle-foreground tw:break-words", "{detail}" }
+                    }
+                }
             }
         }
     }

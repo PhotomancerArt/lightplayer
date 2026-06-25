@@ -28,7 +28,7 @@ impl UiSlotValueKind {
             Self::String(_) => "String",
             Self::I32(_) => "I32",
             Self::U32(_) => "U32",
-            Self::F32(_) => "F32",
+            Self::F32(_) => "Float32",
             Self::Bool(_) => "Bool",
             Self::Vec2(_) => "Vec2",
             Self::Vec3(_) => "Vec3",

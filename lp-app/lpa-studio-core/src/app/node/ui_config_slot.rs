@@ -141,10 +141,10 @@ impl UiConfigSlot {
 
 fn default_aspects(slot: &UiConfigSlot) -> Vec<UiSlotAspect> {
     vec![
+        type_info_aspect(slot),
         validation_aspect(slot),
         edit_state_aspect(&slot.state),
         binding_aspect(&slot.source),
-        type_info_aspect(slot),
     ]
 }
 
@@ -189,7 +189,7 @@ fn edit_state_aspect(state: &UiSlotFieldState) -> UiSlotAspect {
 fn binding_aspect(source: &UiSlotSourceState) -> UiSlotAspect {
     match source {
         UiSlotSourceState::Direct => UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
-            .with_row(UiSlotAspectRow::new("Direct value", "")),
+            .with_row(UiSlotAspectRow::new("Unbound", "")),
         UiSlotSourceState::Bound(endpoint) => bound_binding_aspect(endpoint),
         UiSlotSourceState::Unset => UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
             .with_row(UiSlotAspectRow::new("Unbound", "")),
@@ -211,13 +211,18 @@ fn type_info_aspect(slot: &UiConfigSlot) -> UiSlotAspect {
         .with_row(UiSlotAspectRow::new("Name", slot.key.clone()));
 
     aspect = match &slot.body {
-        UiConfigSlotBody::Empty => {
-            aspect.with_row(UiSlotAspectRow::new("Value", "No authored value body."))
-        }
+        UiConfigSlotBody::Empty => aspect.with_row(UiSlotAspectRow::new("Shape", "Empty")),
         UiConfigSlotBody::Value(value) => {
-            aspect.with_row(UiSlotAspectRow::new("Type", value.kind.type_label()))
+            aspect.with_row(UiSlotAspectRow::new("Shape", value.kind.type_label()))
         }
-        UiConfigSlotBody::Record(_) => aspect.with_row(UiSlotAspectRow::new("Type", "Record")),
+        UiConfigSlotBody::Record(record) => {
+            let detail = if record.fields.len() == 1 {
+                "1 field".to_string()
+            } else {
+                format!("{} fields", record.fields.len())
+            };
+            aspect.with_row(UiSlotAspectRow::new("Shape", "Record").with_detail(detail))
+        }
     };
 
     aspect
