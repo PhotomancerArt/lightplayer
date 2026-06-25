@@ -108,9 +108,6 @@
   .tw\:col-span-2 {
     grid-column: span 2 / span 2;
   }
-  .tw\:col-span-3 {
-    grid-column: span 3 / span 3;
-  }
   .tw\:m-0 {
     margin: calc(var(--tw-spacing) * 0);
   }
@@ -122,9 +119,6 @@
   }
   .tw\:-mt-4 {
     margin-top: calc(var(--tw-spacing) * -4);
-  }
-  .tw\:mt-0\.5 {
-    margin-top: calc(var(--tw-spacing) * 0.5);
   }
   .tw\:mt-1 {
     margin-top: calc(var(--tw-spacing) * 1);
@@ -176,9 +170,6 @@
   }
   .tw\:h-2 {
     height: calc(var(--tw-spacing) * 2);
-  }
-  .tw\:h-5 {
-    height: calc(var(--tw-spacing) * 5);
   }
   .tw\:h-6 {
     height: calc(var(--tw-spacing) * 6);
@@ -239,9 +230,6 @@
   }
   .tw\:w-2 {
     width: calc(var(--tw-spacing) * 2);
-  }
-  .tw\:w-5 {
-    width: calc(var(--tw-spacing) * 5);
   }
   .tw\:w-6 {
     width: calc(var(--tw-spacing) * 6);

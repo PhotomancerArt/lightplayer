@@ -1,10 +1,9 @@
 //! Studio node UI components and colocated node UI stories.
 
+mod config_assets;
 mod config_slot_row;
 #[cfg(feature = "stories")]
 pub(crate) mod config_slot_row_stories;
-mod consumed_assets;
-mod consumed_slots;
 mod node_children;
 mod node_header;
 mod node_pane;
@@ -26,14 +25,12 @@ mod slot_issue_list;
 mod slot_record_editor;
 #[cfg(feature = "stories")]
 pub(crate) mod slot_record_editor_stories;
-mod slot_source_indicator;
 mod slot_value_editor;
 #[cfg(feature = "stories")]
 pub(crate) mod slot_value_editor_stories;
 
+pub use config_assets::ConfigAssets;
 pub use config_slot_row::ConfigSlotRow;
-pub use consumed_assets::ConsumedAssets;
-pub use consumed_slots::ConsumedSlots;
 pub use node_children::NodeChildren;
 pub use node_header::NodeHeader;
 pub use node_pane::{DirtyMark, NodePane, NodeSection, ProducedBindingMark};
@@ -48,5 +45,4 @@ pub use slot_fields::{
 };
 pub use slot_issue_list::SlotIssueList;
 pub use slot_record_editor::SlotRecordEditor;
-pub use slot_source_indicator::SlotSourceIndicator;
 pub use slot_value_editor::SlotValueEditor;

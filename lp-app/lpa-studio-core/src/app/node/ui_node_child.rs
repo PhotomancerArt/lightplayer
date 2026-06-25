@@ -1,9 +1,9 @@
-//! Child nodes extracted from consumed slots.
+//! Child nodes extracted from config slots.
 
 use crate::{UiNodeDirtyState, UiNodeSection, UiStatus};
 
 /// A child node rendered outside its parent node pane.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiNodeChild {
     /// Child use label.
     pub label: String,

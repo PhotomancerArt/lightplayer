@@ -1,11 +1,11 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAssetEditorKind, UiConsumedAsset};
+use lpa_studio_core::{UiAssetEditorKind, UiConfigAsset};
 
 use crate::app::node::DirtyMark;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn ConsumedAssets(assets: Vec<UiConsumedAsset>) -> Element {
+pub fn ConfigAssets(assets: Vec<UiConfigAsset>) -> Element {
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-0",
             for (index, asset) in assets.into_iter().enumerate() {
@@ -21,7 +21,7 @@ pub fn ConsumedAssets(assets: Vec<UiConsumedAsset>) -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn AssetPanel(asset: UiConsumedAsset, separated: bool) -> Element {
+fn AssetPanel(asset: UiConfigAsset, separated: bool) -> Element {
     let class = if separated {
         "tw:grid tw:min-w-0 tw:gap-2 tw:border-t tw:border-border-muted tw:pt-3"
     } else {

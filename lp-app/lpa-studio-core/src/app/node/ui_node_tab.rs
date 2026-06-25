@@ -3,7 +3,7 @@
 use crate::UiNodeSection;
 
 /// A node pane tab.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiNodeTab {
     /// Short tab label.
     pub label: String,
@@ -27,7 +27,7 @@ impl UiNodeTab {
 }
 
 /// Content rendered inside a node tab.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum UiNodeTabBody {
     /// Domain-aware node anatomy sections.
     Sections(Vec<UiNodeSection>),

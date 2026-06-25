@@ -1,10 +1,10 @@
 //! Shared fixtures for Studio node component stories.
 
 use lpa_studio_core::{
-    UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConsumedAsset, UiConsumedSlot,
-    UiNodeChild, UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody,
-    UiNodeView, UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue,
-    UiSlotEditorHint, UiSlotFieldState, UiSlotRecord, UiSlotSourceState, UiSlotValue, UiStatus,
+    UiAssetEditorKind, UiBindingEndpoint, UiConfigAsset, UiConfigSlot, UiNodeChild,
+    UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView,
+    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiSlotEditorHint,
+    UiSlotFieldState, UiSlotRecord, UiSlotSourceState, UiSlotValue, UiStatus,
 };
 
 pub(crate) fn playlist_node_view() -> UiNodeView {
@@ -14,14 +14,14 @@ pub(crate) fn playlist_node_view() -> UiNodeView {
             UiNodeTab::main(vec![
                 UiNodeSection::ProducedProducts(produced_products_fixture()),
                 UiNodeSection::ProducedValues(produced_values_fixture()),
-                UiNodeSection::ConsumedValues(consumed_slots_fixture()),
-                UiNodeSection::ConsumedAssets(consumed_assets_fixture()),
+                UiNodeSection::ConfigSlots(config_slots_fixture()),
+                UiNodeSection::ConfigAssets(config_assets_fixture()),
             ]),
             UiNodeTab::new(
                 "raw",
                 UiNodeTabBody::Text {
                     title: "Slot extraction notes".to_string(),
-                    body: "def.input.time -> consumed value\nstate.output -> produced product\nentries.* -> extracted children".to_string(),
+                    body: "def.input.time -> config slot\nstate.output -> produced product\nentries.* -> extracted children".to_string(),
                 },
             ),
         ],
@@ -38,11 +38,12 @@ pub(crate) fn error_node_view() -> UiNodeView {
             .with_summary("compile failed")
             .with_detail("unknown identifier `uv2` at line 18"),
         vec![UiNodeTab::main(vec![
-            UiNodeSection::ConsumedValues(vec![
-                UiConsumedSlot::direct("Shader", "blast.glsl").with_dirty(UiNodeDirtyState::Error),
+            UiNodeSection::ConfigSlots(vec![
+                UiConfigSlot::value("shader", "Shader", UiSlotValue::string("blast.glsl"))
+                    .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Error)),
             ]),
-            UiNodeSection::ConsumedAssets(vec![
-                UiConsumedAsset::new("Shader", "./blast.glsl", UiAssetEditorKind::Glsl)
+            UiNodeSection::ConfigAssets(vec![
+                UiConfigAsset::new("Shader", "./blast.glsl", UiAssetEditorKind::Glsl)
                     .with_summary("vec3 color = sample(uv2);"),
             ]),
         ])],
@@ -111,17 +112,26 @@ pub(crate) fn produced_value_variants_fixture() -> Vec<UiProducedValue> {
     ]
 }
 
-pub(crate) fn consumed_slots_fixture() -> Vec<UiConsumedSlot> {
+pub(crate) fn config_slots_fixture() -> Vec<UiConfigSlot> {
     vec![
-        UiConsumedSlot::bound("Time", UiBindingEndpoint::new("bus#time.seconds")),
-        UiConsumedSlot::direct("Idle entry", "1"),
-        UiConsumedSlot::direct("Default fade", "0.35 s").with_dirty(UiNodeDirtyState::Dirty),
-        UiConsumedSlot::group(
+        UiConfigSlot::value("time", "Time", UiSlotValue::f32(3.333).with_detail("s")).with_source(
+            UiSlotSourceState::Bound(UiBindingEndpoint::new("bus#time.seconds")),
+        ),
+        UiConfigSlot::value("idle_entry", "Idle entry", UiSlotValue::u32(1)),
+        UiConfigSlot::value(
+            "default_fade",
+            "Default fade",
+            UiSlotValue::f32(0.35).with_detail("s"),
+        )
+        .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
+        UiConfigSlot::record(
+            "entries",
             "Entries",
             vec![
-                UiConsumedSlot::child("idle", "./idle.shader"),
-                UiConsumedSlot::child("blast", "./blast.shader"),
-                UiConsumedSlot::bound("blast.trigger", UiBindingEndpoint::new("bus#trigger"))
+                UiConfigSlot::value("blast_trigger", "Blast trigger", UiSlotValue::bool(false))
+                    .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
+                        "bus#trigger",
+                    )))
                     .with_detail("optional trigger"),
             ],
         )
@@ -129,9 +139,9 @@ pub(crate) fn consumed_slots_fixture() -> Vec<UiConsumedSlot> {
     ]
 }
 
-pub(crate) fn consumed_assets_fixture() -> Vec<UiConsumedAsset> {
+pub(crate) fn config_assets_fixture() -> Vec<UiConfigAsset> {
     vec![
-        UiConsumedAsset::new("Playlist", "./playlist.toml", UiAssetEditorKind::Text)
+        UiConfigAsset::new("Playlist", "./playlist.toml", UiAssetEditorKind::Text)
             .with_detail("artifact, rev 22")
             .with_summary("[[entries]]\nname = \"idle\"\nsource = \"./idle.toml\""),
     ]
@@ -145,16 +155,24 @@ pub(crate) fn children_fixture() -> Vec<UiNodeChild> {
                 UiNodeSection::ProducedProducts(vec![
                     UiProducedProduct::visual("output").with_detail("128 x 72"),
                 ]),
-                UiNodeSection::ConsumedValues(vec![
-                    UiConsumedSlot::bound("Time", UiBindingEndpoint::new("../playlist#entry_time")),
-                    UiConsumedSlot::direct("Shader", "idle.glsl"),
+                UiNodeSection::ConfigSlots(vec![
+                    UiConfigSlot::value("time", "Time", UiSlotValue::f32(3.333).with_detail("s"))
+                        .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
+                            "../playlist#entry_time",
+                        ))),
+                    UiConfigSlot::value("shader", "Shader", UiSlotValue::string("idle.glsl")),
                 ]),
             ]),
         UiNodeChild::new("blast", "Shader", "./blast.toml").with_sections(vec![
-            UiNodeSection::ConsumedValues(vec![
-                UiConsumedSlot::bound("Time", UiBindingEndpoint::new("../playlist#entry_time")),
-                UiConsumedSlot::bound("Trigger", UiBindingEndpoint::new("bus#trigger")),
-                UiConsumedSlot::direct("Shader", "blast.glsl"),
+            UiNodeSection::ConfigSlots(vec![
+                UiConfigSlot::value("time", "Time", UiSlotValue::f32(3.333).with_detail("s"))
+                    .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
+                        "../playlist#entry_time",
+                    ))),
+                UiConfigSlot::value("trigger", "Trigger", UiSlotValue::bool(false)).with_source(
+                    UiSlotSourceState::Bound(UiBindingEndpoint::new("bus#trigger")),
+                ),
+                UiConfigSlot::value("shader", "Shader", UiSlotValue::string("blast.glsl")),
             ]),
         ]),
     ]
@@ -291,24 +309,6 @@ impl NodeStoryValueExt for UiProducedValue {
     ) -> Self {
         self.binding = produced_binding(bus_target, target_bindings, consumers, revision);
         self
-    }
-}
-
-trait NodeStorySlotExt {
-    fn child(label: impl Into<String>, child: impl Into<String>) -> UiConsumedSlot;
-}
-
-impl NodeStorySlotExt for UiConsumedSlot {
-    fn child(label: impl Into<String>, child: impl Into<String>) -> UiConsumedSlot {
-        UiConsumedSlot {
-            label: label.into(),
-            value: None,
-            detail: None,
-            source: lpa_studio_core::UiSlotSource::Child(child.into()),
-            dirty: UiNodeDirtyState::Clean,
-            children: Vec::new(),
-            issues: Vec::new(),
-        }
     }
 }
 

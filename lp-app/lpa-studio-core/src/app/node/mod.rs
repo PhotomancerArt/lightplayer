@@ -4,9 +4,8 @@
 //! model, slot, binding, and asset state into these `Ui*` structs, and the web
 //! crate renders them without needing to understand the runtime model directly.
 
+mod ui_config_asset;
 mod ui_config_slot;
-mod ui_consumed_asset;
-mod ui_consumed_slot;
 mod ui_node_binding;
 mod ui_node_child;
 mod ui_node_dirty_state;
@@ -23,9 +22,8 @@ mod ui_slot_record;
 mod ui_slot_source_state;
 mod ui_slot_value;
 
+pub use ui_config_asset::{UiAssetEditorKind, UiConfigAsset};
 pub use ui_config_slot::{UiConfigSlot, UiConfigSlotBody};
-pub use ui_consumed_asset::{UiAssetEditorKind, UiConsumedAsset};
-pub use ui_consumed_slot::{UiConsumedSlot, UiSlotSource};
 pub use ui_node_binding::{UiBindingEndpoint, UiProducedBinding, UiProducedBindings};
 pub use ui_node_child::UiNodeChild;
 pub use ui_node_dirty_state::UiNodeDirtyState;
@@ -45,8 +43,8 @@ pub use ui_slot_value::{UiSlotValue, UiSlotValueKind};
 #[cfg(test)]
 mod tests {
     use crate::{
-        UiConsumedSlot, UiNodeChild, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody,
-        UiNodeView, UiProducedProduct, UiProducedValue, UiStatus,
+        UiConfigSlot, UiNodeChild, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody,
+        UiNodeView, UiProducedProduct, UiProducedValue, UiSlotValue, UiStatus,
     };
 
     #[test]
@@ -57,9 +55,10 @@ mod tests {
             vec![UiNodeTab::main(vec![
                 UiNodeSection::ProducedProducts(vec![UiProducedProduct::visual("output")]),
                 UiNodeSection::ProducedValues(vec![UiProducedValue::new("Entry time", "3.333")]),
-                UiNodeSection::ConsumedValues(vec![UiConsumedSlot::direct(
+                UiNodeSection::ConfigSlots(vec![UiConfigSlot::value(
+                    "default_fade",
                     "Default fade",
-                    "0.35 s",
+                    UiSlotValue::string("0.35 s"),
                 )]),
             ])],
         )

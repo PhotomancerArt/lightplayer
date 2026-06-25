@@ -14,12 +14,12 @@ pub use app::link::{
     SharedLinkRegistry, UiIssue,
 };
 pub use app::node::{
-    UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConfigSlotBody, UiConsumedAsset,
-    UiConsumedSlot, UiNodeChild, UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab,
-    UiNodeTabBody, UiNodeView, UiProducedBinding, UiProducedBindings, UiProducedProduct,
-    UiProducedValue, UiProductKind, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind,
-    UiSlotAspectRow, UiSlotEditorHint, UiSlotFieldState, UiSlotOption, UiSlotRecord, UiSlotSource,
-    UiSlotSourceState, UiSlotValue, UiSlotValueKind,
+    UiAssetEditorKind, UiBindingEndpoint, UiConfigAsset, UiConfigSlot, UiConfigSlotBody,
+    UiNodeChild, UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody,
+    UiNodeView, UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue,
+    UiProductKind, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
+    UiSlotEditorHint, UiSlotFieldState, UiSlotOption, UiSlotRecord, UiSlotSourceState, UiSlotValue,
+    UiSlotValueKind,
 };
 pub use app::project::{
     LoadedProjectChoice, ProjectConnectResult, ProjectController, ProjectEditorOp,

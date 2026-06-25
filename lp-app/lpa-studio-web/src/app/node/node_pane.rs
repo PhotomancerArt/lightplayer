@@ -2,11 +2,11 @@ use dioxus::prelude::*;
 use lpa_studio_core::core::status::UiStatusKind;
 use lpa_studio_core::{
     UiBindingEndpoint, UiNodeDirtyState, UiNodeSection, UiNodeTabBody, UiNodeView,
-    UiProducedBindings,
+    UiProducedBindings, UiSlotRecord,
 };
 
 use crate::app::node::{
-    ConsumedAssets, ConsumedSlots, NodeChildren, NodeHeader, ProducedProducts, ProducedValues,
+    ConfigAssets, NodeChildren, NodeHeader, ProducedProducts, ProducedValues, SlotRecordEditor,
 };
 use crate::base::{IconMenuButton, IconMenuTone, PopoverPlacement, StudioIcon, StudioIconName};
 
@@ -122,14 +122,16 @@ pub fn NodeSection(section: UiNodeSection, #[props(default = false)] first: bool
                 ProducedValues { values }
             }
         },
-        UiNodeSection::ConsumedValues(slots) => rsx! {
+        UiNodeSection::ConfigSlots(slots) => rsx! {
             section { class: section_class("tw:bg-card tw:p-0", first),
-                ConsumedSlots { slots }
+                SlotRecordEditor {
+                    record: UiSlotRecord::new(slots),
+                }
             }
         },
-        UiNodeSection::ConsumedAssets(assets) => rsx! {
+        UiNodeSection::ConfigAssets(assets) => rsx! {
             section { class: section_class("tw:bg-card-subtle tw:px-4 tw:py-4", first),
-                ConsumedAssets { assets }
+                ConfigAssets { assets }
             }
         },
         UiNodeSection::Children(children) => rsx! {

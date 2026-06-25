@@ -3,7 +3,7 @@
 use crate::{UiNodeChild, UiNodeHeader, UiNodeTab, UiNodeTabBody};
 
 /// The full data model for a Studio node pane.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiNodeView {
     /// Stable id used by renderers for keys and future actions.
     pub node_id: String,
@@ -11,7 +11,7 @@ pub struct UiNodeView {
     pub header: UiNodeHeader,
     /// Tabs rendered inside the node pane.
     pub tabs: Vec<UiNodeTab>,
-    /// Child nodes extracted from the consumed slot tree.
+    /// Child nodes extracted from the config slot tree.
     pub children: Vec<UiNodeChild>,
     /// Whether this node is the focused/selected node.
     pub focused: bool,

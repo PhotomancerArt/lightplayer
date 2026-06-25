@@ -1,4 +1,4 @@
-//! Binding summaries for produced and consumed node data.
+//! Binding summaries for node data.
 
 /// A human-readable binding endpoint shown in node binding popovers.
 #[derive(Clone, Debug, Eq, PartialEq)]

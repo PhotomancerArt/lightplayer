@@ -1,4 +1,4 @@
-//! Consumed assets extracted from the slot tree.
+//! Config assets extracted from the slot tree.
 
 use crate::UiNodeDirtyState;
 
@@ -15,9 +15,9 @@ pub enum UiAssetEditorKind {
     Binary,
 }
 
-/// A consumed asset promoted to top-level treatment in the node pane.
+/// A config asset promoted to top-level treatment in the node pane.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UiConsumedAsset {
+pub struct UiConfigAsset {
     /// Slot or asset label.
     pub label: String,
     /// Asset path, inline label, or source reference.
@@ -32,7 +32,7 @@ pub struct UiConsumedAsset {
     pub dirty: UiNodeDirtyState,
 }
 
-impl UiConsumedAsset {
+impl UiConfigAsset {
     /// Create an extracted asset.
     pub fn new(
         label: impl Into<String>,
