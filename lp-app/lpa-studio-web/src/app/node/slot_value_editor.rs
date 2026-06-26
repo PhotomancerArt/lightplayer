@@ -11,6 +11,8 @@ use crate::app::node::{
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn SlotValueEditor(value: UiSlotValue, state: UiSlotFieldState) -> Element {
+    let unit = value.display_unit();
+
     match value.editor.clone() {
         UiSlotEditorHint::Dropdown(options) => rsx! {
             DropdownSlotField {
@@ -33,13 +35,13 @@ pub fn SlotValueEditor(value: UiSlotValue, state: UiSlotFieldState) -> Element {
                 StringSlotField { value, state }
             },
             UiSlotValueKind::I32(value) => rsx! {
-                IntSlotField { value, state }
+                IntSlotField { value, state, unit }
             },
             UiSlotValueKind::U32(value) => rsx! {
-                UIntSlotField { value, state }
+                UIntSlotField { value, state, unit }
             },
             UiSlotValueKind::F32(value) => rsx! {
-                FloatSlotField { value, state }
+                FloatSlotField { value, state, unit }
             },
             UiSlotValueKind::Bool(value) => rsx! {
                 BoolSlotField { value, state }

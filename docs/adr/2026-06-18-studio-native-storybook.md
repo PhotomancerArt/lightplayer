@@ -17,7 +17,7 @@ props. That makes them well suited to local fixture-driven stories.
 
 ## Decision
 
-Studio component stories will be native Dioxus code in `lp-studio-web`.
+Studio component stories will be native Dioxus code in `lpa-studio-web`.
 
 - Story files live next to components as sibling `*_stories.rs` modules.
 - A small explicit Rust registry collects story descriptors and render functions.

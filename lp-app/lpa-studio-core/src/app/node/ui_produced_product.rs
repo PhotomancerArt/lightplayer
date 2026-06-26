@@ -1,6 +1,9 @@
 //! Produced product data for primary node output surfaces.
 
-use crate::{UiNodeDirtyState, UiProducedBinding, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
+use crate::{
+    UiNodeDirtyState, UiProducedBinding, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
+    UiSlotShape,
+};
 
 /// The family of product a node emits.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -85,7 +88,9 @@ impl UiProductKind {
 }
 
 fn produced_product_info_aspect(product: &UiProducedProduct) -> UiSlotAspect {
-    let mut shape_row = UiSlotAspectRow::new("Shape", product.kind.detail_label());
+    let mut shape_row = UiSlotAspectRow::shape(UiSlotShape::Product(
+        product.kind.detail_label().to_string(),
+    ));
     if let Some(detail) = product.detail.as_ref() {
         shape_row = shape_row.with_detail(detail.clone());
     }

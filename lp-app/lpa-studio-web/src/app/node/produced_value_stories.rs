@@ -1,7 +1,7 @@
 //! Stories for produced value stat views.
 
 use dioxus::prelude::*;
-use lpa_studio_core::UiProducedValue;
+use lpa_studio_core::{UiProducedValue, UiSlotUnit};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::node_story_fixtures::produced_value_variants_fixture;
@@ -17,7 +17,9 @@ pub(crate) fn gallery() -> Element {
 #[story(description = "A numeric produced value with a short unit detail.")]
 pub(crate) fn numeric_stat() -> Element {
     rsx! {
-        ProducedValueView { value: UiProducedValue::new("Entry time", "320").with_detail("s") }
+        ProducedValueView {
+            value: UiProducedValue::new("Entry time", "3.33").with_unit(UiSlotUnit::seconds())
+        }
     }
 }
 

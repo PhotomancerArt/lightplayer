@@ -1,6 +1,6 @@
 //! Typed display data for config slot values.
 
-use crate::UiSlotEditorHint;
+use crate::{UiSlotEditorHint, UiSlotUnit};
 
 /// The typed value family that a slot field should render.
 #[derive(Clone, Debug, PartialEq)]
@@ -26,8 +26,8 @@ impl UiSlotValueKind {
     pub fn type_label(&self) -> &'static str {
         match self {
             Self::String(_) => "String",
-            Self::I32(_) => "I32",
-            Self::U32(_) => "U32",
+            Self::I32(_) => "Int32",
+            Self::U32(_) => "UInt32",
             Self::F32(_) => "Float32",
             Self::Bool(_) => "Bool",
             Self::Vec2(_) => "Vec2",
@@ -58,6 +58,8 @@ pub struct UiSlotValue {
     pub display: String,
     /// Optional unit, shape, or secondary detail.
     pub detail: Option<String>,
+    /// Structured unit metadata for value presentation.
+    pub unit: Option<UiSlotUnit>,
     /// Preferred editor treatment for this value.
     pub editor: UiSlotEditorHint,
 }
@@ -116,6 +118,7 @@ impl UiSlotValue {
             kind,
             display: display.into(),
             detail: None,
+            unit: None,
             editor: UiSlotEditorHint::Auto,
         }
     }
@@ -124,6 +127,21 @@ impl UiSlotValue {
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
         self
+    }
+
+    /// Add structured unit metadata.
+    pub fn with_unit(mut self, unit: UiSlotUnit) -> Self {
+        self.unit = Some(unit);
+        self
+    }
+
+    /// Return structured unit metadata, recognizing legacy detail labels.
+    pub fn display_unit(&self) -> Option<UiSlotUnit> {
+        self.unit.clone().or_else(|| {
+            self.detail
+                .as_deref()
+                .and_then(UiSlotUnit::from_known_label)
+        })
     }
 
     /// Add an editor hint.

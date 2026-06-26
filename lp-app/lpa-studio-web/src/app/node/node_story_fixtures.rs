@@ -4,7 +4,7 @@ use lpa_studio_core::{
     UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiNodeChild, UiNodeDirtyState,
     UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiProducedBinding,
     UiProducedBindings, UiProducedProduct, UiProducedValue, UiSlotAsset, UiSlotEditorHint,
-    UiSlotFieldState, UiSlotRecord, UiSlotSourceState, UiSlotValue, UiStatus,
+    UiSlotFieldState, UiSlotRecord, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus,
 };
 
 const IDLE_GLSL: &str = r#"vec3 palette(float t) {
@@ -114,15 +114,15 @@ pub(crate) fn produced_product_variants_fixture() -> Vec<UiProducedProduct> {
 pub(crate) fn produced_values_fixture() -> Vec<UiProducedValue> {
     vec![
         UiProducedValue::new("Entry time", "3.333")
-            .with_detail("seconds")
+            .with_unit(UiSlotUnit::seconds())
             .with_binding_routes(None, &[], &["idle.Time", "blast.Time"], Some("rev 104")),
     ]
 }
 
 pub(crate) fn produced_value_variants_fixture() -> Vec<UiProducedValue> {
     vec![
-        UiProducedValue::new("Entry time", "320").with_detail("s"),
-        UiProducedValue::new("FPS", "447").with_detail("Hz"),
+        UiProducedValue::new("Entry time", "3.33").with_unit(UiSlotUnit::seconds()),
+        UiProducedValue::new("FPS", "447").with_unit(UiSlotUnit::hertz()),
         UiProducedValue::new("Peers", "2").with_binding_routes(
             Some("bus#radio.peer_count"),
             &[],
@@ -134,14 +134,19 @@ pub(crate) fn produced_value_variants_fixture() -> Vec<UiProducedValue> {
 
 pub(crate) fn config_slots_fixture() -> Vec<UiConfigSlot> {
     vec![
-        UiConfigSlot::value("time", "Time", UiSlotValue::f32(3.333).with_detail("s")).with_source(
-            UiSlotSourceState::Bound(UiBindingEndpoint::new("bus#time.seconds")),
-        ),
+        UiConfigSlot::value(
+            "time",
+            "Time",
+            UiSlotValue::f32(3.333).with_unit(UiSlotUnit::seconds()),
+        )
+        .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
+            "bus#time.seconds",
+        ))),
         UiConfigSlot::value("idle_entry", "Idle entry", UiSlotValue::u32(1)),
         UiConfigSlot::value(
             "default_fade",
             "Default fade",
-            UiSlotValue::f32(0.35).with_detail("s"),
+            UiSlotValue::f32(0.35).with_unit(UiSlotUnit::seconds()),
         )
         .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
         UiConfigSlot::record(
@@ -189,19 +194,27 @@ pub(crate) fn children_fixture() -> Vec<UiNodeChild> {
                     UiProducedProduct::visual("output").with_detail("128 x 72"),
                 ]),
                 UiNodeSection::ConfigSlots(vec![
-                    UiConfigSlot::value("time", "Time", UiSlotValue::f32(3.333).with_detail("s"))
-                        .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
-                            "../playlist#entry_time",
-                        ))),
+                    UiConfigSlot::value(
+                        "time",
+                        "Time",
+                        UiSlotValue::f32(3.333).with_unit(UiSlotUnit::seconds()),
+                    )
+                    .with_source(UiSlotSourceState::Bound(
+                        UiBindingEndpoint::new("../playlist#entry_time"),
+                    )),
                     UiConfigSlot::value("shader", "Shader", UiSlotValue::string("idle.glsl")),
                 ]),
             ]),
         UiNodeChild::new("blast", "Shader", "./blast.toml").with_sections(vec![
             UiNodeSection::ConfigSlots(vec![
-                UiConfigSlot::value("time", "Time", UiSlotValue::f32(3.333).with_detail("s"))
-                    .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
-                        "../playlist#entry_time",
-                    ))),
+                UiConfigSlot::value(
+                    "time",
+                    "Time",
+                    UiSlotValue::f32(3.333).with_unit(UiSlotUnit::seconds()),
+                )
+                .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
+                    "../playlist#entry_time",
+                ))),
                 UiConfigSlot::value("trigger", "Trigger", UiSlotValue::bool(false)).with_source(
                     UiSlotSourceState::Bound(UiBindingEndpoint::new("bus#trigger")),
                 ),
@@ -224,15 +237,18 @@ pub(crate) fn config_record_fixture() -> UiSlotRecord {
             "fade_after",
             "Fade after",
             UiSlotValue::f32(0.35)
-                .with_detail("s")
+                .with_unit(UiSlotUnit::seconds())
                 .with_editor(UiSlotEditorHint::number()),
         )
         .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
-        UiConfigSlot::value("time", "Time", UiSlotValue::f32(3.333).with_detail("s")).with_source(
-            UiSlotSourceState::Bound(
-                UiBindingEndpoint::new("bus#time.seconds").with_detail("global clock"),
-            ),
-        ),
+        UiConfigSlot::value(
+            "time",
+            "Time",
+            UiSlotValue::f32(3.333).with_unit(UiSlotUnit::seconds()),
+        )
+        .with_source(UiSlotSourceState::Bound(
+            UiBindingEndpoint::new("bus#time.seconds").with_detail("global clock"),
+        )),
         UiConfigSlot::record(
             "transform",
             "Transform",
@@ -253,9 +269,14 @@ pub(crate) fn config_record_fixture() -> UiSlotRecord {
 pub(crate) fn config_row_states_fixture() -> Vec<UiConfigSlot> {
     vec![
         UiConfigSlot::value("direct", "Direct value", UiSlotValue::f32(0.72)),
-        UiConfigSlot::value("bound", "Bound value", UiSlotValue::f32(3.333)).with_source(
-            UiSlotSourceState::Bound(UiBindingEndpoint::new("bus#time.seconds")),
-        ),
+        UiConfigSlot::value(
+            "bound",
+            "Bound value",
+            UiSlotValue::f32(3.333).with_unit(UiSlotUnit::seconds()),
+        )
+        .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
+            "bus#time.seconds",
+        ))),
         UiConfigSlot::value("dirty", "Edited value", UiSlotValue::string("idle.glsl"))
             .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
         UiConfigSlot::value("invalid", "Invalid value", UiSlotValue::f32(-1.0))
@@ -285,7 +306,7 @@ pub(crate) fn slot_value_variants_fixture() -> Vec<UiSlotValue> {
         UiSlotValue::string("./idle.glsl").with_editor(UiSlotEditorHint::Text),
         UiSlotValue::i32(-4),
         UiSlotValue::u32(128),
-        UiSlotValue::f32(0.35).with_detail("s"),
+        UiSlotValue::f32(0.35).with_unit(UiSlotUnit::seconds()),
         UiSlotValue::f32(0.72).with_editor(UiSlotEditorHint::slider(0.0, 1.0)),
         UiSlotValue::bool(true),
         UiSlotValue::vec2([0.42, 0.58]),
