@@ -12,7 +12,7 @@ pub struct ServerController {
 }
 
 impl ServerController {
-    pub const NODE_ID: &'static str = "studio.server";
+    pub const NODE_ID: &'static str = "studio|server";
 
     pub fn new() -> Self {
         Self {

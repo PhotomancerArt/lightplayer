@@ -30,7 +30,7 @@ pub struct LinkController {
 }
 
 impl LinkController {
-    pub const NODE_ID: &'static str = "studio.link";
+    pub const NODE_ID: &'static str = "studio|link";
 
     pub fn new() -> Self {
         Self::with_env(LinkEnv::default())

@@ -142,7 +142,7 @@ mod tests {
 
     #[test]
     fn cloned_action_clones_boxed_op() {
-        let action = UiAction::from_op(ControllerId::new("test.node"), TestOp::Run);
+        let action = UiAction::from_op(ControllerId::new("test|node"), TestOp::Run);
 
         let cloned = action.clone();
 
@@ -151,7 +151,7 @@ mod tests {
 
     #[test]
     fn into_op_downcasts_matching_type() {
-        let action = UiAction::from_op(ControllerId::new("test.node"), TestOp::Run);
+        let action = UiAction::from_op(ControllerId::new("test|node"), TestOp::Run);
 
         let op = action.into_op::<TestOp>().unwrap();
 
@@ -160,14 +160,14 @@ mod tests {
 
     #[test]
     fn into_op_rejects_wrong_type() {
-        let action = UiAction::from_op(ControllerId::new("test.node"), TestOp::Run);
+        let action = UiAction::from_op(ControllerId::new("test|node"), TestOp::Run);
 
         assert!(action.into_op::<OtherOp>().is_err());
     }
 
     #[test]
     fn metadata_overrides_change_only_metadata() {
-        let action = UiAction::from_op(ControllerId::new("test.node"), TestOp::Run)
+        let action = UiAction::from_op(ControllerId::new("test|node"), TestOp::Run)
             .with_label("Go")
             .with_summary("Run it")
             .with_short_label("Go")

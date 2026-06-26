@@ -20,7 +20,7 @@ pub(crate) fn workflow_pane() -> Element {
 #[story]
 pub(crate) fn attention_pane() -> Element {
     let pane = UiPaneView::new(
-        ControllerId::new("story.core.attention-pane"),
+        ControllerId::new("story|core|attention-pane"),
         "Project",
         UiStatus::error("Sync issue"),
         UiViewContent::Issue(story_issue()),
@@ -40,7 +40,7 @@ pub(crate) fn attention_pane() -> Element {
 #[story]
 pub(crate) fn quiet_pane() -> Element {
     let pane = UiPaneView::new(
-        ControllerId::new("story.core.quiet-pane"),
+        ControllerId::new("story|core|quiet-pane"),
         "Server",
         UiStatus::neutral("Offline"),
         UiViewContent::text("Open a link endpoint to attach the server protocol."),

@@ -15,7 +15,7 @@ pub struct ProjectController {
 }
 
 impl ProjectController {
-    pub const NODE_ID: &'static str = "studio.project";
+    pub const NODE_ID: &'static str = "studio|project";
 
     pub fn new() -> Self {
         Self {

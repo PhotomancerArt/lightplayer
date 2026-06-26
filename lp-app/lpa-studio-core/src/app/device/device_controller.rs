@@ -13,7 +13,7 @@ pub struct DeviceController {
 }
 
 impl DeviceController {
-    pub const NODE_ID: &'static str = "studio.device";
+    pub const NODE_ID: &'static str = "studio|device";
     pub const SECTION_SELECT_CONNECTION: &'static str = "select-connection";
     pub const SECTION_CONNECT_DEVICE: &'static str = "connect-device";
     pub const SECTION_CONNECT_LIGHTPLAYER: &'static str = "connect-lightplayer";

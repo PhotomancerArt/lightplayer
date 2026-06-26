@@ -102,7 +102,7 @@ pub(crate) fn story_steps() -> UiStepsView {
 
 pub(crate) fn story_pane() -> UiPaneView {
     UiPaneView::new(
-        ControllerId::new("story.core.pane"),
+        ControllerId::new("story|core|pane"),
         "Device",
         UiStatus::working("Connecting"),
         UiViewContent::Stack(Box::new(story_steps())),
@@ -111,7 +111,7 @@ pub(crate) fn story_pane() -> UiPaneView {
 }
 
 pub(crate) fn story_action(op: StoryOp) -> UiAction {
-    UiAction::from_op(ControllerId::new("story.core"), op)
+    UiAction::from_op(ControllerId::new("story|core"), op)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

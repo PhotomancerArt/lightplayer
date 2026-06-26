@@ -1298,14 +1298,14 @@ mod tests {
     #[test]
     fn unknown_top_level_dispatch_fails_clearly() {
         let mut studio = StudioController::new();
-        let action = UiAction::from_op(ControllerId::new("studio.unknown"), ProjectEditorOp::Focus);
+        let action = UiAction::from_op(ControllerId::new("studio|unknown"), ProjectEditorOp::Focus);
 
         let result = block_on_ready(studio.dispatch(action));
 
         assert!(matches!(
             result,
             Err(UiError::UnsupportedAction(message))
-                if message.contains("unknown UX node studio.unknown")
+                if message.contains("unknown UX node studio|unknown")
         ));
     }
 
@@ -1313,7 +1313,7 @@ mod tests {
     fn unknown_project_descendant_dispatch_fails_as_project_target() {
         let mut studio = StudioController::new();
         let action = UiAction::from_op(
-            ControllerId::new("studio.project.unknown"),
+            ControllerId::new("studio|project|unknown"),
             ProjectEditorOp::Focus,
         );
 
@@ -1322,7 +1322,7 @@ mod tests {
         assert!(matches!(
             result,
             Err(UiError::UnsupportedAction(message))
-                if message.contains("unknown project editor target studio.project.unknown")
+                if message.contains("unknown project editor target studio|project|unknown")
         ));
     }
 
