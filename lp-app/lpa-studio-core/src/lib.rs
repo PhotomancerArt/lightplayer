@@ -22,16 +22,14 @@ pub use app::node::{
     UiSlotValueKind,
 };
 pub use app::project::{
-    LoadedProjectChoice, ProjectConnectResult, ProjectController, ProjectEditorOp,
-    ProjectEditorTarget, ProjectEditorTree, ProjectEditorTreeDescriptor, ProjectEditorView,
-    ProjectInventorySummary, ProjectNodeAddress, ProjectNodeController, ProjectNodeControllerState,
-    ProjectNodeDescriptor, ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTarget,
-    ProjectNodeTreeItem, ProjectNodeTreeView, ProjectNodeView, ProjectOp,
+    LoadedProjectChoice, NodeController, NodeControllerState, ProjectConnectResult,
+    ProjectController, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
+    ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
+    ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectNodeView, ProjectOp,
     ProjectProductSubscriptionIntent, ProjectRuntimeSummary, ProjectSlotAddress,
-    ProjectSlotController, ProjectSlotControllerState, ProjectSlotDescriptor,
-    ProjectSlotDescriptorKind, ProjectSlotGroupView, ProjectSlotIssueView, ProjectSlotRoot,
-    ProjectSlotRowView, ProjectSlotValueView, ProjectSnapshot, ProjectState, ProjectSync,
-    ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary,
+    ProjectSlotGroupView, ProjectSlotIssueView, ProjectSlotRoot, ProjectSlotRowView,
+    ProjectSlotValueView, ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase,
+    ProjectSyncRun, ProjectSyncSummary, SlotController, SlotControllerState, SlotKind,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerController, ServerFailureKind, ServerOp,

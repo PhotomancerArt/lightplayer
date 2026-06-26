@@ -49,6 +49,12 @@ app/project/node/*
 app/project/slot/*
 ```
 
+`ProjectController` is the synthetic root of the Studio controller tree. It
+owns root `NodeController` values directly. Node controllers own child node
+controllers and root slot controllers. Slot controllers own child slot
+controllers. A separate public `ProjectEditorTree` aggregate and public
+descriptor layer are intentionally not part of the architecture.
+
 Project nodes use a split identity model:
 
 - `ProjectNodeAddress` wraps the stable authored `TreePath` and is the

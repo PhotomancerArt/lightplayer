@@ -1,17 +1,29 @@
+use std::collections::BTreeMap;
+
 use crate::core::notice::UiNotices;
 use crate::{
     Controller, ControllerId, LoadedProjectChoice, ProgressState, ProjectConnectResult,
-    ProjectEditorOp, ProjectEditorTarget, ProjectInventorySummary, ProjectOp, ProjectSnapshot,
-    ProjectState, ProjectSync, ProjectSyncRun, ProjectSyncSummary, StudioServerClient, UiAction,
-    UiError, UiIssue, UiLogEntry, UiLogLevel, UiMetric, UiPaneView, UiResult, UiStatus,
-    UiViewContent, UxUpdateSink,
+    ProjectEditorOp, ProjectEditorTarget, ProjectInventorySummary, ProjectNodeAddress, ProjectOp,
+    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncRun, ProjectSyncSummary,
+    StudioServerClient, UiAction, UiError, UiIssue, UiLogEntry, UiLogLevel, UiMetric, UiPaneView,
+    UiResult, UiStatus, UiViewContent, UxUpdateSink,
 };
+use lpc_model::{NodeId, TreePath};
+use lpc_view::ProjectView;
 
+use super::NodeController;
+
+/// Project-level Studio controller and synthetic root for node controllers.
+///
+/// `ProjectSync` owns the protocol mirror lifecycle. `ProjectController` owns
+/// the UI-independent controller tree that applies that mirror and preserves
+/// local Studio state for stable node/slot addresses.
 pub struct ProjectController {
     state: ProjectState,
     running_project_status: RunningProjectStatus,
     active_editor_target: Option<ProjectEditorTarget>,
     sync: Option<ProjectSync>,
+    root_nodes: Vec<NodeController>,
 }
 
 impl ProjectController {
@@ -23,12 +35,13 @@ impl ProjectController {
             running_project_status: RunningProjectStatus::Unknown,
             active_editor_target: None,
             sync: None,
+            root_nodes: Vec::new(),
         }
     }
 
     pub fn set_state(&mut self, state: ProjectState) {
         if !matches!(state, ProjectState::Ready { .. }) {
-            self.sync = None;
+            self.clear_loaded_project_state();
         }
         self.state = state;
     }
@@ -43,6 +56,29 @@ impl ProjectController {
 
     pub fn sync_summary(&self) -> Option<ProjectSyncSummary> {
         self.sync.as_ref().map(ProjectSync::summary)
+    }
+
+    /// Root node controllers in project tree order.
+    pub fn root_nodes(&self) -> &[NodeController] {
+        &self.root_nodes
+    }
+
+    /// Find a node controller by stable address.
+    pub fn node(&self, address: &ProjectNodeAddress) -> Option<&NodeController> {
+        self.root_nodes.iter().find_map(|node| node.node(address))
+    }
+
+    /// Find a mutable node controller by stable address.
+    pub fn node_mut(&mut self, address: &ProjectNodeAddress) -> Option<&mut NodeController> {
+        self.root_nodes
+            .iter_mut()
+            .find_map(|node| node.node_mut(address))
+    }
+
+    /// Apply the latest project mirror into the owned controller tree.
+    pub fn apply_project_view(&mut self, view: &ProjectView) -> Result<(), UiError> {
+        reconcile_root_nodes(&mut self.root_nodes, view);
+        Ok(())
     }
 
     pub fn actions(&self, server_connected: bool) -> Vec<UiAction> {
@@ -100,17 +136,20 @@ impl ProjectController {
     }
 
     pub fn mark_connecting_running(&mut self) {
+        self.clear_loaded_project_state();
         self.state = ProjectState::ConnectingRunningProject {
             progress: ProgressState::new("Connecting running project"),
         };
     }
 
     pub fn mark_selecting_loaded_project(&mut self, projects: Vec<LoadedProjectChoice>) {
+        self.clear_loaded_project_state();
         self.running_project_status = RunningProjectStatus::Available;
         self.state = ProjectState::SelectingLoadedProject { projects };
     }
 
     pub fn mark_loading_demo(&mut self) {
+        self.clear_loaded_project_state();
         self.state = ProjectState::LoadingDemoProject {
             progress: ProgressState::new("Loading demo project"),
         };
@@ -129,6 +168,7 @@ impl ProjectController {
             inventory,
         };
         self.sync = Some(ProjectSync::new());
+        self.root_nodes.clear();
     }
 
     pub fn fail(&mut self, message: impl Into<String>) {
@@ -136,7 +176,7 @@ impl ProjectController {
         self.state = ProjectState::Failed {
             issue: UiIssue::new(message),
         };
-        self.sync = None;
+        self.clear_loaded_project_state();
     }
 
     pub fn disconnect(&mut self) {
@@ -147,19 +187,20 @@ impl ProjectController {
         };
         self.state = ProjectState::NotLoaded;
         self.active_editor_target = None;
-        self.sync = None;
+        self.clear_loaded_project_state();
     }
 
     pub fn reset(&mut self) {
         self.running_project_status = RunningProjectStatus::Unknown;
         self.state = ProjectState::NotLoaded;
         self.active_editor_target = None;
-        self.sync = None;
+        self.clear_loaded_project_state();
     }
 
     pub fn mark_no_running_project(&mut self) {
         self.running_project_status = RunningProjectStatus::NoneKnown;
         self.state = ProjectState::NotLoaded;
+        self.clear_loaded_project_state();
     }
 
     pub async fn load_demo_project(
@@ -329,6 +370,7 @@ impl ProjectController {
         logs.extend(read.logs);
         self.sync_mut()?
             .apply_project_read_response(read.response)?;
+        self.apply_synced_project_view()?;
         Ok(logs)
     }
 
@@ -342,6 +384,7 @@ impl ProjectController {
         let logs = read.logs;
         self.sync_mut()?
             .apply_project_read_response(read.response)?;
+        self.apply_synced_project_view()?;
         Ok(logs)
     }
 
@@ -349,6 +392,20 @@ impl ProjectController {
         self.sync
             .as_mut()
             .ok_or_else(|| UiError::Project("project sync is not initialized".to_string()))
+    }
+
+    fn clear_loaded_project_state(&mut self) {
+        self.sync = None;
+        self.root_nodes.clear();
+    }
+
+    fn apply_synced_project_view(&mut self) -> Result<(), UiError> {
+        let sync = self
+            .sync
+            .as_ref()
+            .ok_or_else(|| UiError::Project("project sync is not initialized".to_string()))?;
+        reconcile_root_nodes(&mut self.root_nodes, sync.project_view());
+        Ok(())
     }
 
     fn record_sync_failure(
@@ -388,6 +445,46 @@ enum RunningProjectStatus {
     Unknown,
     NoneKnown,
     Available,
+}
+
+fn reconcile_root_nodes(root_nodes: &mut Vec<NodeController>, view: &ProjectView) {
+    let mut previous = root_nodes
+        .drain(..)
+        .map(|node| (node.address().clone(), node))
+        .collect::<BTreeMap<_, _>>();
+
+    *root_nodes = root_node_ids(view)
+        .into_iter()
+        .filter_map(|node_id| view.tree.get(node_id))
+        .map(|entry| {
+            let address = ProjectNodeAddress::new(entry.path.clone());
+            if let Some(mut controller) = previous.remove(&address) {
+                controller.apply_tree_entry(entry, view);
+                controller
+            } else {
+                NodeController::from_tree_entry(entry, view)
+            }
+        })
+        .collect();
+}
+
+fn root_node_ids(view: &ProjectView) -> Vec<NodeId> {
+    let mut roots = view
+        .tree
+        .nodes
+        .values()
+        .filter(|entry| entry.parent.is_none())
+        .map(|entry| entry.id)
+        .collect::<Vec<_>>();
+    roots.sort_by(|a, b| tree_path_sort_key(view, *a).cmp(&tree_path_sort_key(view, *b)));
+    roots
+}
+
+fn tree_path_sort_key(view: &ProjectView, node_id: NodeId) -> TreePath {
+    view.tree
+        .get(node_id)
+        .map(|entry| entry.path.clone())
+        .unwrap_or_else(|| TreePath(Vec::new()))
 }
 
 fn project_status(state: &ProjectState, sync: Option<&ProjectSync>) -> UiStatus {
@@ -470,7 +567,18 @@ fn ready_project_body(
 
 #[cfg(test)]
 mod tests {
-    use crate::{ActionPriority, ProjectOp, ProjectSyncPhase};
+    use lpc_model::{
+        LpType, LpValue, NodeId, Revision, SlotData, SlotFieldShape, SlotMapDyn, SlotMapKey,
+        SlotMapKeyShape, SlotMeta, SlotPath, SlotRecord, SlotShape, SlotShapeId, TreePath,
+        WithRevision,
+    };
+    use lpc_view::{ProjectView, TreeEntryView};
+    use lpc_wire::{NodeRuntimeStatus, ProjectReadResponse, ProjectReadResult, WireEntryState};
+
+    use crate::{
+        ActionPriority, ProjectOp, ProjectProductSubscriptionIntent, ProjectSlotAddress,
+        ProjectSlotRoot, ProjectSyncPhase, SlotKind,
+    };
 
     use super::*;
 
@@ -575,5 +683,422 @@ mod tests {
         project.disconnect();
 
         assert!(project.sync_summary().is_none());
+    }
+
+    #[test]
+    fn empty_project_view_yields_empty_controller_tree() {
+        let mut project = ProjectController::new();
+
+        project.apply_project_view(&ProjectView::new()).unwrap();
+
+        assert!(project.root_nodes().is_empty());
+    }
+
+    #[test]
+    fn project_view_creates_owned_node_tree_in_order() {
+        let mut project = ProjectController::new();
+
+        project.apply_project_view(&tree_view()).unwrap();
+
+        assert_eq!(project.root_nodes().len(), 1);
+        let root = &project.root_nodes()[0];
+        assert_eq!(root.label(), "Demo");
+        assert_eq!(
+            root.children()
+                .iter()
+                .map(|child| child.label())
+                .collect::<Vec<_>>(),
+            vec!["Clock", "Orbit"]
+        );
+    }
+
+    #[test]
+    fn node_update_preserves_local_state_and_refreshes_runtime_id() {
+        let address = node_address("/demo.project/orbit.shader");
+        let mut project = ProjectController::new();
+        project
+            .apply_project_view(&single_node_view(1, NodeRuntimeStatus::Ok))
+            .unwrap();
+        let node = project.node_mut(&address).unwrap();
+        node.state_mut().collapsed = true;
+        node.state_mut().focused = true;
+        node.state_mut().product_subscription_intent = ProjectProductSubscriptionIntent::Subscribed;
+
+        project
+            .apply_project_view(&single_node_view(
+                42,
+                NodeRuntimeStatus::Warn("low fps".to_string()),
+            ))
+            .unwrap();
+
+        let node = project.node(&address).unwrap();
+        assert_eq!(node.target().node_id, NodeId::new(42));
+        assert_eq!(node.status().label, "Warning");
+        assert!(node.state().collapsed);
+        assert!(node.state().focused);
+        assert_eq!(
+            node.state().product_subscription_intent,
+            ProjectProductSubscriptionIntent::Subscribed
+        );
+    }
+
+    #[test]
+    fn node_add_remove_and_reorder_follow_project_view() {
+        let mut project = ProjectController::new();
+        project
+            .apply_project_view(&root_view(&[
+                (1, "/demo.project/a.shader"),
+                (2, "/demo.project/b.shader"),
+            ]))
+            .unwrap();
+
+        project
+            .apply_project_view(&root_view(&[
+                (3, "/demo.project/c.shader"),
+                (1, "/demo.project/a.shader"),
+            ]))
+            .unwrap();
+
+        assert_eq!(
+            project
+                .root_nodes()
+                .iter()
+                .map(|node| node.label())
+                .collect::<Vec<_>>(),
+            vec!["A", "C"]
+        );
+        assert!(
+            project
+                .node(&node_address("/demo.project/b.shader"))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn disconnect_and_reset_clear_controller_tree() {
+        let mut project = ProjectController::new();
+        project
+            .apply_project_view(&single_node_view(1, NodeRuntimeStatus::Ok))
+            .unwrap();
+
+        project.disconnect();
+
+        assert!(project.root_nodes().is_empty());
+
+        project
+            .apply_project_view(&single_node_view(1, NodeRuntimeStatus::Ok))
+            .unwrap();
+        project.reset();
+
+        assert!(project.root_nodes().is_empty());
+    }
+
+    #[test]
+    fn synced_project_view_applies_to_controller_tree() {
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project
+            .sync_mut()
+            .unwrap()
+            .apply_project_read_response(ProjectReadResponse {
+                revision: Revision::new(12),
+                results: vec![ProjectReadResult::Nodes(lpc_wire::NodeReadResult {
+                    level: lpc_wire::ReadLevel::Detail,
+                    tree_deltas: vec![lpc_wire::WireTreeDelta::Created {
+                        id: NodeId::new(1),
+                        path: TreePath::parse("/demo.project").unwrap(),
+                        parent: None,
+                        child_kind: None,
+                        children: Vec::new(),
+                        status: NodeRuntimeStatus::Ok,
+                        state: WireEntryState::Alive,
+                        created_frame: Revision::new(1),
+                        change_frame: Revision::new(1),
+                        children_ver: Revision::new(1),
+                    }],
+                    slots: None,
+                })],
+                probes: Vec::new(),
+            })
+            .unwrap();
+
+        project.apply_synced_project_view().unwrap();
+
+        assert_eq!(project.root_nodes()[0].label(), "Demo");
+    }
+
+    #[test]
+    fn def_and_state_slot_roots_create_slot_controller_roots() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_test_slots(&mut view, 1, Revision::new(2), false);
+        let mut project = ProjectController::new();
+
+        project.apply_project_view(&view).unwrap();
+
+        let node = project
+            .node(&node_address("/demo.project/orbit.shader"))
+            .unwrap();
+        assert_eq!(
+            node.slots()
+                .iter()
+                .map(|slot| slot.label())
+                .collect::<Vec<_>>(),
+            vec!["Def", "State"]
+        );
+        assert_eq!(node.slots()[0].children()[1].label(), "Brightness");
+    }
+
+    #[test]
+    fn slot_update_preserves_local_state() {
+        let node = node_address("/demo.project/orbit.shader");
+        let brightness = ProjectSlotAddress::new(
+            node.clone(),
+            ProjectSlotRoot::def(),
+            SlotPath::parse("brightness").unwrap(),
+        );
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_test_slots(&mut view, 1, Revision::new(2), false);
+        let mut project = ProjectController::new();
+        project.apply_project_view(&view).unwrap();
+        project
+            .node_mut(&node)
+            .unwrap()
+            .slot_mut(&brightness)
+            .unwrap()
+            .state_mut()
+            .expanded = true;
+
+        install_test_slots(&mut view, 1, Revision::new(3), false);
+        project.apply_project_view(&view).unwrap();
+
+        let slot = project
+            .node_mut(&node)
+            .unwrap()
+            .slot_mut(&brightness)
+            .unwrap();
+        assert_eq!(slot.revision(), Some(Revision::new(3)));
+        assert!(slot.state().expanded);
+    }
+
+    #[test]
+    fn record_to_scalar_shape_change_removes_stale_slot_children() {
+        let node = node_address("/demo.project/orbit.shader");
+        let root = ProjectSlotAddress::root(node.clone(), ProjectSlotRoot::def());
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_test_slots(&mut view, 1, Revision::new(2), false);
+        let mut project = ProjectController::new();
+        project.apply_project_view(&view).unwrap();
+        assert_eq!(project.node(&node).unwrap().slots()[0].children().len(), 3);
+
+        install_test_slots(&mut view, 1, Revision::new(3), true);
+        project.apply_project_view(&view).unwrap();
+
+        let slot = &project.node(&node).unwrap().slots()[0];
+        assert_eq!(slot.address(), &root);
+        assert_eq!(slot.kind(), SlotKind::Value);
+        assert!(slot.children().is_empty());
+    }
+
+    #[test]
+    fn map_entry_changes_reconcile_keyed_slot_children() {
+        let node = node_address("/demo.project/orbit.shader");
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_map_slot(&mut view, 1, Revision::new(2), &["a", "b"]);
+        let mut project = ProjectController::new();
+        project.apply_project_view(&view).unwrap();
+
+        assert_eq!(
+            project.node(&node).unwrap().slots()[0]
+                .children()
+                .iter()
+                .map(|slot| slot.label())
+                .collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
+
+        install_map_slot(&mut view, 1, Revision::new(3), &["b", "c"]);
+        project.apply_project_view(&view).unwrap();
+
+        assert_eq!(
+            project.node(&node).unwrap().slots()[0]
+                .children()
+                .iter()
+                .map(|slot| slot.label())
+                .collect::<Vec<_>>(),
+            vec!["b", "c"]
+        );
+    }
+
+    fn tree_view() -> ProjectView {
+        let mut view = ProjectView::new();
+        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        root.children = vec![NodeId::new(2), NodeId::new(3)];
+        view.tree.insert(root);
+        view.tree.insert(node_entry(
+            2,
+            "/demo.project/clock.clock",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        view.tree.insert(node_entry(
+            3,
+            "/demo.project/orbit.shader",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        view
+    }
+
+    fn single_node_view(id: u32, status: NodeRuntimeStatus) -> ProjectView {
+        let mut view = ProjectView::new();
+        view.tree
+            .insert(node_entry(id, "/demo.project/orbit.shader", None, status));
+        view
+    }
+
+    fn root_view(nodes: &[(u32, &str)]) -> ProjectView {
+        let mut view = ProjectView::new();
+        for (id, path) in nodes {
+            view.tree
+                .insert(node_entry(*id, path, None, NodeRuntimeStatus::Ok));
+        }
+        view
+    }
+
+    fn node_entry(
+        id: u32,
+        path: &str,
+        parent: Option<u32>,
+        status: NodeRuntimeStatus,
+    ) -> TreeEntryView {
+        TreeEntryView::new(
+            NodeId::new(id),
+            TreePath::parse(path).unwrap(),
+            parent.map(NodeId::new),
+            None,
+            status,
+            WireEntryState::Alive,
+            Revision::new(1),
+            Revision::new(1),
+            Revision::new(1),
+        )
+    }
+
+    fn install_test_slots(
+        view: &mut ProjectView,
+        node_id: u32,
+        revision: Revision,
+        scalar_def_root: bool,
+    ) {
+        view.slots.root_shapes.clear();
+        view.slots.roots.clear();
+        let def_shape = SlotShapeId::new(100);
+        let state_shape = SlotShapeId::new(101);
+        view.slots.registry = Default::default();
+        view.slots
+            .registry
+            .register_dynamic_shape(
+                def_shape,
+                if scalar_def_root {
+                    SlotShape::value(LpType::F32)
+                } else {
+                    SlotShape::Record {
+                        meta: SlotMeta::empty(),
+                        fields: vec![
+                            SlotFieldShape::new("input", SlotShape::value(LpType::F32)).unwrap(),
+                            SlotFieldShape::new("brightness", SlotShape::value(LpType::F32))
+                                .unwrap(),
+                            SlotFieldShape::new(
+                                "bindings",
+                                SlotShape::Record {
+                                    meta: SlotMeta::empty(),
+                                    fields: Vec::new(),
+                                },
+                            )
+                            .unwrap(),
+                        ],
+                    }
+                },
+            )
+            .unwrap();
+        view.slots
+            .registry
+            .register_dynamic_shape(
+                state_shape,
+                SlotShape::Record {
+                    meta: SlotMeta::empty(),
+                    fields: vec![
+                        SlotFieldShape::new("output", SlotShape::value(LpType::F32)).unwrap(),
+                    ],
+                },
+            )
+            .unwrap();
+        view.slots
+            .root_shapes
+            .insert(format!("node.{node_id}.def"), def_shape);
+        view.slots.roots.insert(
+            format!("node.{node_id}.def"),
+            if scalar_def_root {
+                SlotData::Value(WithRevision::new(revision, LpValue::F32(0.75)))
+            } else {
+                SlotData::Record(SlotRecord::with_revision(
+                    revision,
+                    vec![
+                        SlotData::Value(WithRevision::new(revision, LpValue::F32(0.5))),
+                        SlotData::Value(WithRevision::new(revision, LpValue::F32(0.75))),
+                        SlotData::Record(SlotRecord::with_revision(revision, Vec::new())),
+                    ],
+                ))
+            },
+        );
+        view.slots
+            .root_shapes
+            .insert(format!("node.{node_id}.state"), state_shape);
+        view.slots.roots.insert(
+            format!("node.{node_id}.state"),
+            SlotData::Record(SlotRecord::with_revision(
+                revision,
+                vec![SlotData::Value(WithRevision::new(
+                    revision,
+                    LpValue::F32(1.0),
+                ))],
+            )),
+        );
+    }
+
+    fn install_map_slot(view: &mut ProjectView, node_id: u32, revision: Revision, keys: &[&str]) {
+        view.slots.root_shapes.clear();
+        view.slots.roots.clear();
+        view.slots.registry = Default::default();
+        let shape = SlotShapeId::new(200);
+        view.slots
+            .registry
+            .register_dynamic_shape(
+                shape,
+                SlotShape::Map {
+                    meta: SlotMeta::empty(),
+                    key: SlotMapKeyShape::String,
+                    value: Box::new(SlotShape::value(LpType::F32)),
+                },
+            )
+            .unwrap();
+        view.slots
+            .root_shapes
+            .insert(format!("node.{node_id}.def"), shape);
+
+        let mut map = SlotMapDyn::with_revision(revision, Default::default());
+        for (index, key) in keys.iter().enumerate() {
+            map.entries.insert(
+                SlotMapKey::String((*key).to_string()),
+                SlotData::Value(WithRevision::new(revision, LpValue::F32(index as f32))),
+            );
+        }
+        view.slots
+            .roots
+            .insert(format!("node.{node_id}.def"), SlotData::Map(map));
+    }
+
+    fn node_address(path: &str) -> ProjectNodeAddress {
+        ProjectNodeAddress::parse(path).unwrap()
     }
 }

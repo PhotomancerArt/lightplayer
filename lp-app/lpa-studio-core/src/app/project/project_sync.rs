@@ -79,6 +79,11 @@ impl ProjectSync {
         }
     }
 
+    /// Latest protocol/client project mirror.
+    pub fn project_view(&self) -> &ProjectView {
+        &self.view
+    }
+
     pub fn editor_view(
         &self,
         project_id: &str,

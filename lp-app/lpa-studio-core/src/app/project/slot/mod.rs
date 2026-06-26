@@ -6,11 +6,9 @@
 //! state, and future edits have addressable homes.
 
 pub mod project_slot_address;
-pub mod project_slot_controller;
-pub mod project_slot_descriptor;
 pub mod project_slot_root;
+pub mod slot_controller;
 
 pub use project_slot_address::ProjectSlotAddress;
-pub use project_slot_controller::{ProjectSlotController, ProjectSlotControllerState};
-pub use project_slot_descriptor::{ProjectSlotDescriptor, ProjectSlotDescriptorKind};
 pub use project_slot_root::ProjectSlotRoot;
+pub use slot_controller::{SlotController, SlotControllerState, SlotKind};

@@ -28,6 +28,15 @@ impl ProjectSlotRoot {
         Self::Other(name.into())
     }
 
+    /// Build a root from the mirror root suffix.
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "def" => Self::Def,
+            "state" => Self::State,
+            name => Self::Other(name.to_string()),
+        }
+    }
+
     /// Human-readable root name.
     pub fn name(&self) -> &str {
         match self {

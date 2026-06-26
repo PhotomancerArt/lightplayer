@@ -5,14 +5,10 @@
 //! [`ProjectNodeTarget`] adds the current runtime `NodeId` for actions that
 //! need to talk back to the server.
 
+pub mod node_controller;
 pub mod project_node_address;
-pub mod project_node_controller;
-pub mod project_node_descriptor;
 pub mod project_node_target;
 
+pub use node_controller::{NodeController, NodeControllerState, ProjectProductSubscriptionIntent};
 pub use project_node_address::ProjectNodeAddress;
-pub use project_node_controller::{
-    ProjectNodeController, ProjectNodeControllerState, ProjectProductSubscriptionIntent,
-};
-pub use project_node_descriptor::ProjectNodeDescriptor;
 pub use project_node_target::ProjectNodeTarget;
