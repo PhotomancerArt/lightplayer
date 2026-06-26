@@ -15,8 +15,6 @@
       --text: #f4f0e8;
       --muted: #b9c0c7;
       --accent: #72deb0;
-      --button-gradient-top: rgba(114, 222, 176, 0.12);
-      --button-gradient-bottom: rgba(114, 222, 176, 0);
       --button-fill-top: #223433;
       --button-fill-bottom: var(--surface);
       --popup-fill-away: #1b2428;
@@ -135,7 +133,7 @@
       color: var(--accent);
       border: var(--border-width) solid var(--accent);
       border-radius: var(--button-radius);
-      background: linear-gradient(180deg, var(--button-gradient-top), var(--button-gradient-bottom) 70%), var(--surface);
+      background: linear-gradient(180deg, var(--button-fill-top), var(--button-fill-bottom) 95%);
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
       cursor: pointer;
     }
@@ -144,6 +142,18 @@
       width: 22px;
       height: 22px;
       stroke-width: 2.4;
+    }
+
+    .anchor-button.is-below {
+      border-bottom-left-radius: 0;
+      border-bottom-right-radius: 0;
+      box-shadow: none;
+    }
+
+    .anchor-button.is-above {
+      border-top-left-radius: 0;
+      border-top-right-radius: 0;
+      box-shadow: none;
     }
 
     .popup {
@@ -214,7 +224,7 @@
     .bridge {
       position: absolute;
       z-index: 100;
-      height: calc(var(--popup-radius) + var(--border-width));
+      height: var(--border-width);
       pointer-events: none;
       background: var(--bridge-fill);
     }
@@ -240,7 +250,7 @@
     }
 
     .bridge.is-below .bridge-corner {
-      bottom: var(--border-width);
+      bottom: 0;
     }
 
     .bridge.is-below .bridge-corner-left {
@@ -276,7 +286,7 @@
     }
 
     .bridge.is-above .bridge-corner {
-      top: var(--border-width);
+      top: 0;
     }
 
     .bridge.is-above .bridge-corner-left {
@@ -471,8 +481,8 @@
       );
       const buttonBottom = buttonTop + input.buttonHeight;
       const bridgeTop = input.side === "below"
-        ? buttonBottom - input.popupRadius
-        : buttonTop - input.borderWidth;
+        ? buttonBottom - input.borderWidth
+        : buttonTop;
 
       return {
         side: input.side,
@@ -493,7 +503,7 @@
           left: buttonLeft,
           top: bridgeTop,
           width: input.buttonWidth,
-          height: input.popupRadius + input.borderWidth,
+          height: input.borderWidth,
           showLeftCorner: aligned.showLeftCorner,
           showRightCorner: aligned.showRightCorner,
         },
@@ -561,6 +571,10 @@
       setRect(elements.button, layout.button);
       setRect(elements.popup, layout.popup);
       setRect(elements.bridge, layout.bridge);
+      elements.button.className = [
+        "anchor-button",
+        `is-${layout.side}`,
+      ].join(" ");
       elements.popup.className = [
         "popup",
         `is-${layout.side}`,

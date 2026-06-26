@@ -32,6 +32,7 @@ fn NodeStatusMenu(header: UiNodeHeader) -> Element {
             label,
             title: format!("{} status details", header.title),
             popup_class: node_status_popup_class(header.status.kind).to_string(),
+            chrome_class: node_status_chrome_class(header.status.kind).to_string(),
             placement: PopoverPlacement::BottomStart,
             div { class: "tw:grid tw:min-w-0 tw:gap-3 tw:p-3",
                 div { class: "tw:flex tw:min-w-0 tw:items-start tw:justify-between tw:gap-4",
@@ -144,6 +145,16 @@ fn node_status_popup_class(kind: UiStatusKind) -> &'static str {
         UiStatusKind::Error => {
             "tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:overflow-hidden tw:rounded-md tw:border tw:border-status-error-border tw:bg-card tw:bg-[linear-gradient(90deg,var(--studio-status-error-bg),transparent_74%)] tw:text-sm tw:text-muted-foreground tw:shadow-lg"
         }
+    }
+}
+
+fn node_status_chrome_class(kind: UiStatusKind) -> &'static str {
+    match kind {
+        UiStatusKind::Neutral => "ux-popover-chrome-neutral",
+        UiStatusKind::Working => "ux-popover-chrome-working",
+        UiStatusKind::Good => "ux-popover-chrome-good",
+        UiStatusKind::Warning => "ux-popover-chrome-warning",
+        UiStatusKind::Error => "ux-popover-chrome-error",
     }
 }
 

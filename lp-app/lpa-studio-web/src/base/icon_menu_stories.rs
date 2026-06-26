@@ -3,7 +3,9 @@
 use dioxus::prelude::*;
 use lpa_studio_web_story_macros::story;
 
-use crate::base::{IconMenuButton, IconMenuTone, IconMenuVisualState, StudioIconName};
+use crate::base::{
+    IconMenuButton, IconMenuTone, IconMenuVisualState, PopoverPlacement, StudioIcon, StudioIconName,
+};
 
 #[story(description = "Standard icon-triggered menus used by dense Studio controls.")]
 fn tones() -> Element {
@@ -51,14 +53,30 @@ fn tones() -> Element {
 
 #[story(description = "An open icon menu with the popup positioned near its trigger.")]
 fn open_menu() -> Element {
+    let cases = [
+        ("Below / Start", "below-start", "below", "start"),
+        ("Below / Middle", "below-middle", "below", "middle"),
+        ("Below / End", "below-end", "below", "end"),
+        ("Above / Start", "above-start", "above", "start"),
+        ("Above / Middle", "above-middle", "above", "middle"),
+        ("Above / End", "above-end", "above", "end"),
+    ];
+
     rsx! {
-        div { class: "tw:flex tw:min-h-72 tw:justify-end tw:pr-24 tw:pt-16",
-            IconMenuStoryButton {
-                label: "Bound",
-                tone: IconMenuTone::Accent,
-                icon: StudioIconName::BoundValue,
-                active: true,
-                initially_open: true,
+        section { class: "ux-attached-popover-story",
+            for (title, meta, side, align) in cases {
+                article { class: "ux-attached-popover-story-card ux-attached-popover-story-card-{meta}",
+                    header { class: "ux-attached-popover-story-heading",
+                        strong { "{title}" }
+                        span { "{meta}" }
+                    }
+                    div { class: "ux-attached-popover-story-canvas ux-attached-popover-story-canvas-{meta}",
+                        AttachedIconMenuStoryCase {
+                            side,
+                            align,
+                        }
+                    }
+                }
             }
         }
     }
@@ -127,11 +145,75 @@ fn trigger_states() -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn AttachedIconMenuStoryCase(side: &'static str, align: &'static str) -> Element {
+    let panel_corner_class = attached_story_panel_corner_class(side, align);
+    let bridge_corner_class = attached_story_bridge_corner_class(align);
+    let button_class = format!(
+        "tw:inline-flex tw:h-6 tw:w-6 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-accent-border tw:bg-transparent tw:p-0 tw:text-accent ux-popover-chrome-accent ux-popover-trigger-attached ux-popover-trigger-attached-{side} ux-attached-popover-story-button ux-attached-popover-story-button-{side} ux-attached-popover-story-{align}"
+    );
+    let panel_class = format!(
+        "tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:gap-3 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-3 tw:text-sm tw:text-muted-foreground tw:shadow-lg ux-popover-chrome-accent ux-popover-panel ux-attached-popover-panel ux-attached-popover-panel-{side} ux-attached-popover-story-panel ux-attached-popover-story-panel-{side} ux-attached-popover-story-{align} {panel_corner_class}"
+    );
+    let bridge_class = format!(
+        "ux-popover-chrome-accent ux-popover-bridge ux-popover-bridge-{side} ux-attached-popover-story-bridge ux-attached-popover-story-bridge-{side} ux-attached-popover-story-{align} {bridge_corner_class}"
+    );
+
+    rsx! {
+        button {
+            class: "{button_class}",
+            r#type: "button",
+            aria_label: "Bound menu",
+            title: "Bound menu",
+            aria_expanded: "true",
+            StudioIcon {
+                name: StudioIconName::BoundValue,
+                size: 14,
+            }
+        }
+        aside {
+            class: "{panel_class}",
+            role: "dialog",
+            div { class: "tw:grid tw:gap-1",
+                span { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-heading", "icon menu" }
+                strong { class: "tw:text-sm tw:text-strong-foreground", "Bound" }
+                p { class: "tw:m-0 tw:text-xs tw:text-muted-foreground", "Reusable icon-triggered menu chrome." }
+            }
+        }
+        div {
+            class: "{bridge_class}",
+            aria_hidden: "true",
+            span { class: "ux-popover-bridge-corner ux-popover-bridge-corner-left" }
+            span { class: "ux-popover-bridge-corner ux-popover-bridge-corner-right" }
+        }
+    }
+}
+
+fn attached_story_panel_corner_class(side: &str, align: &str) -> &'static str {
+    match (side, align) {
+        ("below", "start") => "ux-attached-popover-panel-square-top-left",
+        ("below", "end") => "ux-attached-popover-panel-square-top-right",
+        ("above", "start") => "ux-attached-popover-panel-square-bottom-left",
+        ("above", "end") => "ux-attached-popover-panel-square-bottom-right",
+        _ => "",
+    }
+}
+
+fn attached_story_bridge_corner_class(align: &str) -> &'static str {
+    match align {
+        "start" => "ux-popover-bridge-no-left-corner",
+        "end" => "ux-popover-bridge-no-right-corner",
+        _ => "",
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn IconMenuStoryButton(
     label: &'static str,
     tone: IconMenuTone,
     icon: StudioIconName,
     active: bool,
+    #[props(default = PopoverPlacement::BottomEnd)] placement: PopoverPlacement,
     #[props(default = IconMenuVisualState::Rest)] visual_state: IconMenuVisualState,
     #[props(default = false)] initially_open: bool,
 ) -> Element {
@@ -142,6 +224,7 @@ fn IconMenuStoryButton(
             title: format!("{label} menu"),
             tone,
             active,
+            placement,
             visual_state,
             initially_open,
             div { class: "tw:grid tw:gap-1",
