@@ -10,7 +10,7 @@ use lpc_model::{
 use crate::{
     ProjectSlotAddress, ProjectSlotRoot, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody,
     UiProducedProduct, UiProducedValue, UiProductRef, UiSlotAsset, UiSlotEditorHint,
-    UiSlotFieldState, UiSlotOptionality, UiSlotRecord, UiSlotSourceState, UiSlotValue,
+    UiSlotFieldState, UiSlotOptionality, UiSlotRecord, UiSlotSourceState, UiSlotUnit, UiSlotValue,
     app::project::format_slot_map_key,
 };
 
@@ -298,6 +298,7 @@ impl SlotController {
         let ui_value = UiSlotValue::from_lp_value(value);
         let mut produced = UiProducedValue::new(self.label.clone(), ui_value.display);
         produced.detail = Some(ui_value.kind.type_label().to_string());
+        produced.unit = self.ui_unit();
         Some(produced)
     }
 
@@ -788,6 +789,10 @@ impl SlotController {
         } else {
             UiSlotOptionality::excluded(self.policy.writable)
         })
+    }
+
+    fn ui_unit(&self) -> Option<UiSlotUnit> {
+        UiSlotUnit::from_known_label(&self.label)
     }
 
     fn ui_field_state(&self) -> UiSlotFieldState {

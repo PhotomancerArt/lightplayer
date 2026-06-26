@@ -51,4 +51,4 @@ pub use core::{
     UxNodePath,
 };
 
-pub const STUDIO_DEMO_PROJECT_ID: &str = "studio-demo";
+pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/basic";

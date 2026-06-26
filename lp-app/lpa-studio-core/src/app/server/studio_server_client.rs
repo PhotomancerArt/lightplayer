@@ -5,7 +5,9 @@ use lpa_client::{ClientError, ClientEvent, ClientIo, LpClient};
 use lpa_link::{LinkConnection, LinkConnectionKind};
 use lpc_wire::{ProjectReadRequest, ProjectReadResponse, WireProjectHandle};
 
-use crate::app::project::demo_project::{DEMO_PROJECT_ID, demo_project_deploy_files};
+use crate::app::project::demo_project::{
+    DEMO_PROJECT_ID, DEMO_PROJECT_STORAGE_ID, demo_project_deploy_files,
+};
 use crate::{
     LoadedProjectChoice, ProjectInventorySummary, SharedLinkRegistry, UiError, UiLogEntry,
     UiLogLevel, UxUpdateSink,
@@ -54,7 +56,7 @@ impl StudioServerClient {
     pub async fn load_demo_project(&mut self) -> Result<LoadedDemoProject, UiError> {
         let deploy = self
             .client
-            .deploy_project_files(DEMO_PROJECT_ID, demo_project_deploy_files())
+            .deploy_project_files(DEMO_PROJECT_STORAGE_ID, demo_project_deploy_files())
             .await
             .map_err(map_client_error)?;
         let handle = deploy.value;

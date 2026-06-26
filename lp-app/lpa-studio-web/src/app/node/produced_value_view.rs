@@ -3,7 +3,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{UiProducedValue, UiSlotUnit};
 
-use crate::app::node::{SlotDetailButton, SlotUnitSuffix};
+use crate::app::node::{SlotDetailButton, SlotUnitDisplay, SlotUnitDisplayMode};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -13,15 +13,22 @@ pub fn ProducedValueView(
 ) -> Element {
     let aspects = value.visible_aspects();
     let unit = value.display_unit();
-    let detail = produced_value_detail(value.detail.as_ref(), unit.as_ref());
+    let display_value = produced_value_display(&value.value, unit.as_ref());
+    let reading_class = produced_value_reading_class(unit.is_some());
 
     rsx! {
-        div { class: "tw:grid tw:min-h-20 tw:min-w-0 tw:content-between tw:rounded-sm tw:border tw:border-border-subtle tw:bg-card-muted tw:p-2",
-            dd { class: "tw:m-0 tw:flex tw:min-w-0 tw:items-baseline tw:gap-1 tw:leading-none",
-                strong { class: "tw:min-w-0 tw:text-xl tw:font-bold tw:text-strong-foreground tw:break-words", "{value.value}" }
-                SlotUnitSuffix { unit, reserve: false }
-                if let Some(detail) = detail {
-                    small { class: "tw:text-xs tw:font-bold tw:text-subtle-foreground tw:break-words", "{detail}" }
+        div { class: "ux-produced-value-card",
+            dd { class: "tw:m-0 tw:min-w-0 tw:leading-none",
+                span { class: "{reading_class}",
+                    strong { class: "ux-produced-value-number", "{display_value}" }
+                    if let Some(unit) = unit {
+                        span { class: "ux-produced-value-unit",
+                            SlotUnitDisplay {
+                                unit,
+                                mode: SlotUnitDisplayMode::Short,
+                            }
+                        }
+                    }
                 }
             }
             dt { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-1.5 tw:text-xs tw:font-bold tw:leading-tight tw:text-subtle-foreground",
@@ -36,9 +43,32 @@ pub fn ProducedValueView(
     }
 }
 
-fn produced_value_detail(detail: Option<&String>, unit: Option<&UiSlotUnit>) -> Option<String> {
-    let detail = detail?;
-    let is_unit = unit.is_some_and(|unit| detail == &unit.short || detail == &unit.long)
-        || UiSlotUnit::from_known_label(detail).is_some();
-    (!is_unit).then(|| detail.clone())
+fn produced_value_display(value: &str, unit: Option<&UiSlotUnit>) -> String {
+    let trimmed = value.trim();
+    let Some(decimals) = produced_value_decimal_places(trimmed, unit) else {
+        return value.to_string();
+    };
+    let Ok(number) = trimmed.parse::<f64>() else {
+        return value.to_string();
+    };
+    if number.is_finite() {
+        format!("{number:.decimals$}")
+    } else {
+        value.to_string()
+    }
+}
+
+fn produced_value_decimal_places(value: &str, unit: Option<&UiSlotUnit>) -> Option<usize> {
+    if unit.is_some_and(|unit| unit.short == "s" || unit.short == "ms") {
+        return Some(3);
+    }
+    (value.contains('.') || value.contains('e') || value.contains('E')).then_some(3)
+}
+
+fn produced_value_reading_class(has_unit: bool) -> &'static str {
+    if has_unit {
+        "ux-produced-value-reading ux-produced-value-reading-with-unit"
+    } else {
+        "ux-produced-value-reading"
+    }
 }

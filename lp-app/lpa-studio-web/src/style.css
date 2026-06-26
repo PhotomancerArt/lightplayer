@@ -771,6 +771,60 @@ select {
         rgba(8, 12, 14, 0.46);
 }
 
+.ux-produced-value-card {
+    display: grid;
+    min-height: 80px;
+    min-width: 0;
+    align-content: space-between;
+    gap: var(--studio-space-2);
+    padding: var(--studio-space-2);
+    border: 1px solid var(--studio-color-border-subtle);
+    border-radius: var(--studio-radius-sm);
+    background: var(--studio-color-surface-muted);
+}
+
+.ux-produced-value-reading {
+    display: inline-grid;
+    position: relative;
+    width: max-content;
+    min-width: 9.75ch;
+    max-width: 100%;
+    color: var(--studio-color-text-strong);
+    font-family: var(--studio-font-mono);
+    font-size: 1.35rem;
+    font-variant-numeric: tabular-nums;
+    line-height: 1;
+}
+
+.ux-produced-value-reading-with-unit {
+    padding-right: 2.35ch;
+}
+
+.ux-produced-value-number {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: inherit;
+    font-weight: 800;
+}
+
+.ux-produced-value-unit {
+    display: inline-flex;
+    position: absolute;
+    right: 0;
+    bottom: 0.05em;
+    align-items: baseline;
+    color: var(--studio-color-text-subtle);
+    font-family: var(--studio-font-sans);
+    font-size: 0.72rem;
+    font-weight: 800;
+    line-height: 1;
+}
+
 .ux-node-ui-perf,
 .ux-node-ui-status {
     display: inline-flex;

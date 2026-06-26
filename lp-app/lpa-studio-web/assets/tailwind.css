@@ -216,9 +216,6 @@
   .tw\:min-h-9 {
     min-height: calc(var(--tw-spacing) * 9);
   }
-  .tw\:min-h-20 {
-    min-height: calc(var(--tw-spacing) * 20);
-  }
   .tw\:min-h-32 {
     min-height: calc(var(--tw-spacing) * 32);
   }

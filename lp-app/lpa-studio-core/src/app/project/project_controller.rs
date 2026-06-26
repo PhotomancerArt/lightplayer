@@ -89,6 +89,7 @@ impl ProjectController {
     /// Apply the latest project mirror into the owned controller tree.
     pub fn apply_project_view(&mut self, view: &ProjectView) -> Result<(), UiError> {
         reconcile_root_nodes(&mut self.root_nodes, view);
+        ensure_default_node_focus(&mut self.root_nodes);
         Ok(())
     }
 
@@ -567,6 +568,7 @@ impl ProjectController {
         if let Some(target) = self.active_editor_target.clone() {
             self.focus_editor_target(&target);
         }
+        ensure_default_node_focus(&mut self.root_nodes);
         Ok(())
     }
 
@@ -660,6 +662,25 @@ fn clear_node_focus(nodes: &mut [NodeController]) {
         node.state_mut().focused = false;
         clear_node_focus(node.children_mut());
     }
+}
+
+fn ensure_default_node_focus(nodes: &mut [NodeController]) {
+    if has_focused_node(nodes) {
+        return;
+    }
+    if let Some(node) = first_root_child_mut(nodes) {
+        node.state_mut().focused = true;
+    }
+}
+
+fn has_focused_node(nodes: &[NodeController]) -> bool {
+    nodes
+        .iter()
+        .any(|node| node.state().focused || has_focused_node(node.children()))
+}
+
+fn first_root_child_mut(nodes: &mut [NodeController]) -> Option<&mut NodeController> {
+    nodes.first_mut()?.children_mut().first_mut()
 }
 
 fn tree_path_sort_key(view: &ProjectView, node_id: NodeId) -> TreePath {
@@ -904,6 +925,38 @@ mod tests {
                 .map(|child| child.label())
                 .collect::<Vec<_>>(),
             vec!["Clock", "Orbit"]
+        );
+    }
+
+    #[test]
+    fn project_view_focuses_first_root_child_by_default() {
+        let mut project = ProjectController::new();
+
+        project.apply_project_view(&tree_view()).unwrap();
+
+        let root = &project.root_nodes()[0];
+        assert!(!root.state().focused);
+        assert!(root.children()[0].state().focused);
+        assert!(!root.children()[1].state().focused);
+    }
+
+    #[test]
+    fn project_view_keeps_existing_focus_when_syncing() {
+        let mut project = ProjectController::new();
+        project.apply_project_view(&tree_view()).unwrap();
+        let orbit = node_address("/demo.project/orbit.shader");
+
+        clear_node_focus(&mut project.root_nodes);
+        project.node_mut(&orbit).unwrap().state_mut().focused = true;
+        project.apply_project_view(&tree_view()).unwrap();
+
+        assert!(project.node(&orbit).unwrap().state().focused);
+        assert!(
+            !project
+                .node(&node_address("/demo.project/clock.clock"))
+                .unwrap()
+                .state()
+                .focused
         );
     }
 
@@ -1263,8 +1316,9 @@ mod tests {
 
         let produced_values = section_produced_values(sections);
         assert_eq!(produced_values.len(), 1);
-        assert_eq!(produced_values[0].label, "Time");
+        assert_eq!(produced_values[0].label, "Seconds");
         assert_eq!(produced_values[0].value, "3.333");
+        assert_eq!(produced_values[0].unit, Some(crate::UiSlotUnit::seconds()));
 
         let assets = section_asset_slots(sections);
         assert_eq!(assets.len(), 1);
@@ -1769,7 +1823,7 @@ mod tests {
                             SlotShape::value(LpType::Product(ProductKind::Control)),
                         )
                         .unwrap(),
-                        SlotFieldShape::new("time", SlotShape::value(LpType::F32)).unwrap(),
+                        SlotFieldShape::new("seconds", SlotShape::value(LpType::F32)).unwrap(),
                     ],
                 },
             )

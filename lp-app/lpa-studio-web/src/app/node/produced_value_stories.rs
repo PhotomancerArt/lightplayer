@@ -18,7 +18,7 @@ pub(crate) fn gallery() -> Element {
 pub(crate) fn numeric_stat() -> Element {
     rsx! {
         ProducedValueView {
-            value: UiProducedValue::new("Entry time", "3.33").with_unit(UiSlotUnit::seconds())
+            value: UiProducedValue::new("Seconds", "123.435").with_unit(UiSlotUnit::seconds())
         }
     }
 }
