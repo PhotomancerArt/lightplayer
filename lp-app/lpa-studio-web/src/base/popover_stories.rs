@@ -23,7 +23,7 @@ fn edge_placement() -> Element {
                 div { class: "ux-popover-story-cell ux-popover-story-cell-center",
                     PopoverStoryButton {
                         label: "Center",
-                        placement: PopoverPlacement::BottomEnd,
+                        placement: PopoverPlacement::BottomMiddle,
                     }
                 }
                 div { class: "ux-popover-story-cell ux-popover-story-cell-end",
@@ -74,11 +74,12 @@ fn PopoverStoryButton(
             label: format!("{label} details"),
             title: format!("{label} details"),
             popup_class: "ux-node-ui-popup ux-popover-story-panel".to_string(),
+            chrome_class: "ux-popover-chrome-accent".to_string(),
             placement,
             initially_open,
             div { class: "ux-node-ui-popup-kicker", "popover" }
             strong { "{label}" }
-            p { "This panel is positioned with fixed coordinates and clamped to the viewport." }
+            p { "This panel is attached from the browser top layer." }
             div { class: "ux-node-ui-binding-section ux-node-ui-bus-binding-section",
                 div { class: "ux-node-ui-binding-heading", "example binding" }
                 div { class: "ux-node-ui-bus-binding-row",

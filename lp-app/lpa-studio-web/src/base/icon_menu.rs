@@ -18,6 +18,7 @@ pub fn IconMenuButton(
     children: Element,
 ) -> Element {
     let class = icon_menu_visual_class(tone, active, visual_state);
+    let chrome_class = icon_menu_chrome_class(tone);
 
     rsx! {
         IconPopoverButton {
@@ -28,6 +29,7 @@ pub fn IconMenuButton(
             label,
             title,
             popup_class,
+            chrome_class: chrome_class.to_string(),
             placement,
             initially_open,
             {children}
@@ -37,6 +39,18 @@ pub fn IconMenuButton(
 
 fn default_icon_menu_popup_class() -> &'static str {
     "tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:gap-3 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-3 tw:text-sm tw:text-muted-foreground tw:shadow-lg"
+}
+
+fn icon_menu_chrome_class(tone: IconMenuTone) -> &'static str {
+    match tone {
+        IconMenuTone::Quiet => "ux-popover-chrome-quiet",
+        IconMenuTone::Neutral => "ux-popover-chrome-neutral",
+        IconMenuTone::Accent => "ux-popover-chrome-accent",
+        IconMenuTone::Good => "ux-popover-chrome-good",
+        IconMenuTone::Working => "ux-popover-chrome-working",
+        IconMenuTone::Warning => "ux-popover-chrome-warning",
+        IconMenuTone::Error => "ux-popover-chrome-error",
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
