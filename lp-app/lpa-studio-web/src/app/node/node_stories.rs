@@ -11,6 +11,17 @@ pub(crate) fn node_pane() -> Element {
     }
 }
 
+#[story(description = "A selected node pane collapsed down to its header.")]
+pub(crate) fn collapsed_node_pane() -> Element {
+    let mut view = playlist_node_view();
+    view.focused = true;
+    view.collapsed = true;
+
+    rsx! {
+        NodePane { view }
+    }
+}
+
 #[story(description = "Node pane with an error status and projection issues.")]
 pub(crate) fn error_node() -> Element {
     rsx! {

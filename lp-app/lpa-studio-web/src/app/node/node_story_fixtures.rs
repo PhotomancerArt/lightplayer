@@ -84,7 +84,7 @@ pub(crate) fn playlist_header() -> UiNodeHeader {
 pub(crate) fn produced_products_fixture() -> Vec<UiProducedProduct> {
     vec![
         UiProducedProduct::visual("output")
-            .with_detail("128 x 72")
+            .with_detail("128 x 128")
             .with_binding_routes(
                 Some("bus#visual.out"),
                 &[],
@@ -98,7 +98,7 @@ pub(crate) fn produced_product_variants_fixture() -> Vec<UiProducedProduct> {
     vec![
         UiProducedProduct::empty("output").with_detail("not resolved"),
         UiProducedProduct::visual("output")
-            .with_detail("128 x 72")
+            .with_detail("128 x 128")
             .with_binding_routes(
                 Some("bus#visual.out"),
                 &[],
@@ -191,7 +191,7 @@ pub(crate) fn children_fixture() -> Vec<UiNodeChild> {
             .active("active, fade_after 0.12 s")
             .with_sections(vec![
                 UiNodeSection::ProducedProducts(vec![
-                    UiProducedProduct::visual("output").with_detail("128 x 72"),
+                    UiProducedProduct::visual("output").with_detail("128 x 128"),
                 ]),
                 UiNodeSection::ConfigSlots(vec![
                     UiConfigSlot::value(

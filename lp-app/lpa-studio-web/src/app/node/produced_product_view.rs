@@ -25,11 +25,7 @@ pub fn ProducedProductView(
 
     rsx! {
         article { class,
-            div { class: "tw:grid tw:min-h-20 tw:grid-cols-8 tw:gap-1",
-                for index in 0..24 {
-                    span { key: "{index}", class: preview_cell_class(product.kind, index) }
-                }
-            }
+            ProductPreview { kind: product.kind }
             footer { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-x-2 tw:gap-y-1 tw:text-xs tw:text-muted-foreground",
                 strong { class: "tw:min-w-0 tw:text-sm tw:text-strong-foreground tw:break-words", "{product.name}" }
                 span { "{label}" }
@@ -41,6 +37,24 @@ pub fn ProducedProductView(
                     aspects,
                     initially_open,
                 }
+            }
+        }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ProductPreview(kind: UiProductKind) -> Element {
+    if kind == UiProductKind::Visual {
+        return rsx! {
+            div { class: "ux-produced-product-preview ux-produced-product-preview-visual", aria_hidden: "true" }
+        };
+    }
+
+    rsx! {
+        div { class: "tw:grid tw:min-h-20 tw:grid-cols-8 tw:gap-1",
+            for index in 0..24 {
+                span { key: "{index}", class: preview_cell_class(kind, index) }
             }
         }
     }
@@ -78,12 +92,7 @@ fn preview_cell_class(kind: UiProductKind, index: usize) -> &'static str {
             "tw:block tw:aspect-square tw:rounded-[1px] tw:bg-card-subtle"
         }
         UiProductKind::Empty => "tw:block tw:aspect-square tw:rounded-[1px] tw:bg-card-muted",
-        UiProductKind::Visual if index % 5 == 0 => {
-            "tw:block tw:aspect-square tw:rounded-[1px] tw:bg-accent"
-        }
-        UiProductKind::Visual => {
-            "tw:block tw:aspect-square tw:rounded-[1px] tw:bg-status-working-border"
-        }
+        UiProductKind::Visual => "tw:block tw:aspect-square tw:rounded-[1px] tw:bg-accent",
         UiProductKind::Control if index % 4 == 0 => {
             "tw:block tw:aspect-square tw:rounded-[1px] tw:bg-status-good-foreground"
         }

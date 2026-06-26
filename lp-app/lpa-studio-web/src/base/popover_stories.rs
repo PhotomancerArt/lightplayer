@@ -43,9 +43,28 @@ fn edge_placement() -> Element {
     }
 }
 
+#[story(description = "An open popover positioned near its trigger.")]
+fn open_popover() -> Element {
+    rsx! {
+        section { class: "tw:min-h-80 tw:pt-16",
+            div { class: "tw:flex tw:justify-end tw:pr-24",
+                PopoverStoryButton {
+                    label: "Open",
+                    placement: PopoverPlacement::BottomEnd,
+                    initially_open: true,
+                }
+            }
+        }
+    }
+}
+
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn PopoverStoryButton(label: &'static str, placement: PopoverPlacement) -> Element {
+fn PopoverStoryButton(
+    label: &'static str,
+    placement: PopoverPlacement,
+    #[props(default = false)] initially_open: bool,
+) -> Element {
     rsx! {
         IconPopoverButton {
             class: "ux-node-ui-popup-trigger".to_string(),
@@ -56,6 +75,7 @@ fn PopoverStoryButton(label: &'static str, placement: PopoverPlacement) -> Eleme
             title: format!("{label} details"),
             popup_class: "ux-node-ui-popup ux-popover-story-panel".to_string(),
             placement,
+            initially_open,
             div { class: "ux-node-ui-popup-kicker", "popover" }
             strong { "{label}" }
             p { "This panel is positioned with fixed coordinates and clamped to the viewport." }

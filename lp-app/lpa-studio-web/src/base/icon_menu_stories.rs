@@ -8,7 +8,7 @@ use crate::base::{IconMenuButton, IconMenuTone, IconMenuVisualState, StudioIconN
 #[story(description = "Standard icon-triggered menus used by dense Studio controls.")]
 fn tones() -> Element {
     rsx! {
-        div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-3",
+        div { class: "tw:flex tw:min-h-56 tw:flex-wrap tw:items-start tw:gap-3 tw:pt-8",
             IconMenuStoryButton {
                 label: "Quiet",
                 tone: IconMenuTone::Quiet,
@@ -44,6 +44,21 @@ fn tones() -> Element {
                 tone: IconMenuTone::Error,
                 icon: StudioIconName::StatusError,
                 active: true,
+            }
+        }
+    }
+}
+
+#[story(description = "An open icon menu with the popup positioned near its trigger.")]
+fn open_menu() -> Element {
+    rsx! {
+        div { class: "tw:flex tw:min-h-72 tw:justify-end tw:pr-24 tw:pt-16",
+            IconMenuStoryButton {
+                label: "Bound",
+                tone: IconMenuTone::Accent,
+                icon: StudioIconName::BoundValue,
+                active: true,
+                initially_open: true,
             }
         }
     }
@@ -118,6 +133,7 @@ fn IconMenuStoryButton(
     icon: StudioIconName,
     active: bool,
     #[props(default = IconMenuVisualState::Rest)] visual_state: IconMenuVisualState,
+    #[props(default = false)] initially_open: bool,
 ) -> Element {
     rsx! {
         IconMenuButton {
@@ -127,6 +143,7 @@ fn IconMenuStoryButton(
             tone,
             active,
             visual_state,
+            initially_open,
             div { class: "tw:grid tw:gap-1",
                 span { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-heading", "icon menu" }
                 strong { class: "tw:text-sm tw:text-strong-foreground", "{label}" }

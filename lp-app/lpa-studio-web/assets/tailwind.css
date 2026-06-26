@@ -231,6 +231,12 @@
   .tw\:min-h-56 {
     min-height: calc(var(--tw-spacing) * 56);
   }
+  .tw\:min-h-72 {
+    min-height: calc(var(--tw-spacing) * 72);
+  }
+  .tw\:min-h-80 {
+    min-height: calc(var(--tw-spacing) * 80);
+  }
   .tw\:min-h-\[46px\] {
     min-height: 46px;
   }
@@ -682,9 +688,6 @@
   .tw\:bg-status-working-bg {
     background-color: var(--tw-color-status-working-bg);
   }
-  .tw\:bg-status-working-border {
-    background-color: var(--tw-color-status-working-border);
-  }
   .tw\:bg-step-active {
     background-color: var(--tw-color-step-active);
   }
@@ -828,6 +831,15 @@
   }
   .tw\:pt-7 {
     padding-top: calc(var(--tw-spacing) * 7);
+  }
+  .tw\:pt-8 {
+    padding-top: calc(var(--tw-spacing) * 8);
+  }
+  .tw\:pt-16 {
+    padding-top: calc(var(--tw-spacing) * 16);
+  }
+  .tw\:pr-24 {
+    padding-right: calc(var(--tw-spacing) * 24);
   }
   .tw\:pb-1\.5 {
     padding-bottom: calc(var(--tw-spacing) * 1.5);
