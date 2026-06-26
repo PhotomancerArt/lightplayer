@@ -1,7 +1,11 @@
+use std::rc::Rc;
+
+use dioxus::prelude::dioxus_core::use_after_render;
 use dioxus::prelude::*;
 use lpa_studio_core::{ProjectEditorView, ProjectNodeStatusTone, ProjectNodeTreeItem, UiAction};
 
 use crate::app::node::NodePane;
+use crate::base::{StudioIcon, StudioIconName};
 use crate::core::MetricGrid;
 
 #[component]
@@ -103,17 +107,33 @@ fn ProjectNodeTreeItemView(
     running: bool,
     on_action: EventHandler<UiAction>,
 ) -> Element {
+    let focused = item.focused;
+    let mut focused_button = use_signal(|| None::<Rc<MountedData>>);
+    use_after_render(move || {
+        if !focused {
+            return;
+        }
+        let Some(element) = focused_button.read().as_ref().cloned() else {
+            return;
+        };
+        spawn(async move {
+            let _ = element.scroll_to(ScrollBehavior::Smooth).await;
+        });
+    });
+
     let action = item.action.clone();
     let children = item.children;
-    let class = if item.focused {
-        "tw:grid tw:w-full tw:grid-cols-[minmax(0,1fr)_auto_auto] tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-accent-border tw:bg-status-good-bg tw:px-2 tw:py-1.5 tw:text-left"
+    let class = if focused {
+        "tw:grid tw:w-full tw:grid-cols-[18px_minmax(0,1fr)_auto] tw:items-center tw:gap-2 tw:scroll-my-4 tw:rounded-sm tw:border tw:border-accent-border tw:bg-status-good-bg tw:px-2 tw:py-1.5 tw:text-left"
     } else {
-        "tw:grid tw:w-full tw:grid-cols-[minmax(0,1fr)_auto_auto] tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-2 tw:py-1.5 tw:text-left tw:hover:bg-card-muted"
+        "tw:grid tw:w-full tw:grid-cols-[18px_minmax(0,1fr)_auto] tw:items-center tw:gap-2 tw:rounded-sm tw:border tw:border-transparent tw:bg-transparent tw:px-2 tw:py-1.5 tw:text-left tw:hover:bg-card-muted"
     };
     let indent = depth * 14;
     let status_class = node_status_class(item.status.tone);
     let status_label = item.status.label;
     let detail = item.status.detail;
+    let label = item.label;
+    let kind_label = item.kind;
 
     rsx! {
         li {
@@ -122,9 +142,20 @@ fn ProjectNodeTreeItemView(
                 r#type: "button",
                 disabled: running,
                 style: "padding-left: {indent}px;",
+                title: "{kind_label}",
+                onmounted: move |event| {
+                    if focused {
+                        focused_button.set(Some(event.data()));
+                    }
+                },
                 onclick: move |_| on_action.call(action.clone()),
-                span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-sm tw:text-soft-foreground", "{item.label}" }
-                span { class: "tw:text-xs tw:text-subtle-foreground", "{item.kind}" }
+                span { class: "tw:inline-flex tw:h-4 tw:w-4 tw:items-center tw:justify-center tw:text-subtle-foreground",
+                    StudioIcon {
+                        name: StudioIconName::NodeTreeItem,
+                        size: 14,
+                    }
+                }
+                span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-sm tw:text-soft-foreground", "{label}" }
                 span { class: "{status_class}", "{status_label}" }
             }
             if let Some(detail) = detail.as_ref() {

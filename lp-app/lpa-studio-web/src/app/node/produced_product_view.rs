@@ -341,15 +341,10 @@ fn product_label(kind: UiProductKind) -> &'static str {
 
 fn preview_detail(preview: &UiProductPreview, tracking: UiProductTrackingState) -> Option<String> {
     match preview {
-        UiProductPreview::VisualSrgb8 {
-            width,
-            height,
-            revision,
-            ..
-        } => Some(format!("{width} x {height} rev {revision}")),
+        UiProductPreview::VisualSrgb8 { width, height, .. } => Some(format!("{width} x {height}")),
         UiProductPreview::ControlNative(preview) => Some(format!(
-            "{} x {} samples rev {}",
-            preview.extent.rows, preview.extent.samples_per_row, preview.revision
+            "{} x {} samples",
+            preview.extent.rows, preview.extent.samples_per_row
         )),
         UiProductPreview::Pending if tracking == UiProductTrackingState::Tracking => {
             Some("preview pending".to_string())

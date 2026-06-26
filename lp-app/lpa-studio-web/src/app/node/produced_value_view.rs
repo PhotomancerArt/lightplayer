@@ -31,7 +31,7 @@ pub fn ProducedValueView(
                     }
                 }
             }
-            dt { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-1.5 tw:text-xs tw:font-bold tw:leading-tight tw:text-subtle-foreground",
+            dt { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-1.5 tw:text-xs tw:font-semibold tw:leading-tight tw:text-subtle-foreground",
                 span { class: "tw:min-w-0 tw:break-words", "{value.label}" }
                 SlotDetailButton {
                     label: value.label.clone(),

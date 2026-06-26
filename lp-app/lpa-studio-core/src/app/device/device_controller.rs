@@ -2,14 +2,13 @@ use crate::core::view::steps_view::{UiStepState, UiStepView};
 use crate::{
     ConnectedDeviceSummary, Controller, ControllerId, DeviceOp, DeviceSnapshot, EndpointChoice,
     LinkController, LinkOp, LinkState, ProjectOp, ProjectState, ProviderChoice, ServerController,
-    ServerFailureKind, ServerState, UiAction, UiLogEntry, UiMetric, UiPaneView, UiStatus,
-    UiStepsView, UiTerminalLine, UiViewContent,
+    ServerFailureKind, ServerState, UiAction, UiMetric, UiPaneView, UiStatus, UiStepsView,
+    UiViewContent,
 };
 
 pub struct DeviceController {
     pub(crate) link: LinkController,
     pub(crate) server: ServerController,
-    terminal: Vec<UiTerminalLine>,
 }
 
 impl DeviceController {
@@ -23,7 +22,6 @@ impl DeviceController {
         Self {
             link: LinkController::new(),
             server: ServerController::new(),
-            terminal: Vec::new(),
         }
     }
 
@@ -49,30 +47,8 @@ impl DeviceController {
         )
     }
 
-    pub fn has_meaningful_terminal(&self) -> bool {
-        !matches!(self.link.state(), LinkState::SelectingProvider { .. })
-    }
-
-    pub fn record_logs(&mut self, logs: &[UiLogEntry]) {
-        self.terminal.extend(
-            logs.iter()
-                .filter(|log| is_device_log_source(&log.source))
-                .map(|log| UiTerminalLine::new(format!("[{}] {}", log.source, log.message))),
-        );
-        if self.terminal.len() > 240 {
-            let remove_count = self.terminal.len() - 240;
-            self.terminal.drain(0..remove_count);
-        }
-    }
-
     pub fn view(&self, project_state: &ProjectState, project_actions: Vec<UiAction>) -> UiPaneView {
-        let stack = UiStepsView::new(self.sections(project_state, project_actions)).with_terminal(
-            if self.has_meaningful_terminal() {
-                self.terminal.clone()
-            } else {
-                Vec::new()
-            },
-        );
+        let stack = UiStepsView::new(self.sections(project_state, project_actions));
 
         UiPaneView::new(
             Self::NODE_ID,
@@ -603,11 +579,4 @@ fn provider_action_priority(kind: lpa_link::LinkProviderKind) -> crate::ActionPr
         | lpa_link::LinkProviderKind::HostSerialEsp32 => crate::ActionPriority::Secondary,
         lpa_link::LinkProviderKind::Fake => crate::ActionPriority::Tertiary,
     }
-}
-
-fn is_device_log_source(source: &str) -> bool {
-    matches!(
-        source,
-        "lpa-link" | "browser-serial" | "fw-esp32" | "fw-browser" | "lp-server"
-    )
 }

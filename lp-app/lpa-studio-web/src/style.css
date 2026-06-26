@@ -1992,7 +1992,7 @@ select {
     gap: 0.4rem;
     color: var(--studio-color-text-subtle);
     font-size: 0.68rem;
-    font-weight: 700;
+    font-weight: 600;
     line-height: 1;
     cursor: pointer;
     user-select: none;
