@@ -163,24 +163,47 @@
 
     .bridge-corner {
       position: absolute;
-      bottom: 0;
+      bottom: var(--border-width);
       width: var(--popup-radius);
       height: var(--popup-radius);
-      background: var(--surface);
+    }
+
+    .bridge-corner::before {
+      position: absolute;
+      z-index: -1;
+      content: "";
     }
 
     .bridge-corner-left {
-      left: calc(-1 * var(--popup-radius));
-      border-bottom: 1px solid var(--accent);
-      border-right: 1px solid var(--accent);
+      left: calc(-1 * var(--popup-radius) + var(--border-width));
+      border-bottom: var(--border-width) solid var(--accent);
+      border-right: var(--border-width) solid var(--accent);
       border-bottom-right-radius: var(--popup-radius);
     }
 
+    .bridge-corner-left::before {
+      inset: 0 calc(-1 * var(--border-width)) calc(-1 * var(--border-width)) 0;
+      background: radial-gradient(
+        circle at top left,
+        transparent 0 calc(var(--popup-radius) - var(--border-width)),
+        var(--surface) calc(var(--popup-radius) - var(--border-width) + 0.5px)
+      );
+    }
+
     .bridge-corner-right {
-      right: calc(-1 * var(--popup-radius));
-      border-bottom: 1px solid var(--accent);
-      border-left: 1px solid var(--accent);
+      right: calc(-1 * var(--popup-radius) + var(--border-width));
+      border-bottom: var(--border-width) solid var(--accent);
+      border-left: var(--border-width) solid var(--accent);
       border-bottom-left-radius: var(--popup-radius);
+    }
+
+    .bridge-corner-right::before {
+      inset: 0 0 calc(-1 * var(--border-width)) calc(-1 * var(--border-width));
+      background: radial-gradient(
+        circle at top right,
+        transparent 0 calc(var(--popup-radius) - var(--border-width)),
+        var(--surface) calc(var(--popup-radius) - var(--border-width) + 0.5px)
+      );
     }
   </style>
 </head>
