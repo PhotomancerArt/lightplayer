@@ -11,7 +11,7 @@ use lpc_wire::{
 
 use crate::{
     ProjectRuntimeSummary, ProjectSyncPhase, ProjectSyncSummary, UiError, UiIssue,
-    UiProductPreview, UiProductRef,
+    UiProductPreview, UiProductPreviewFrame, UiProductRef,
 };
 
 // Keep shape pages small. Some shape definitions include other shapes and can
@@ -20,8 +20,7 @@ use crate::{
 // limitation is fixed.
 const SHAPE_SYNC_PAGE_LIMIT: u32 = 4;
 const SHAPE_SYNC_MAX_PAGES: u32 = 256;
-const PRODUCT_PREVIEW_WIDTH: u32 = 64;
-const PRODUCT_PREVIEW_HEIGHT: u32 = 36;
+const VISUAL_PRODUCT_PREVIEW_FRAME: UiProductPreviewFrame = UiProductPreviewFrame::VISUAL_DEFAULT;
 
 pub struct ProjectSync {
     view: ProjectView,
@@ -203,8 +202,8 @@ impl ProjectSync {
             .map(|product| {
                 ProjectProbeRequest::RenderProduct(RenderProductProbeRequest {
                     product,
-                    width: PRODUCT_PREVIEW_WIDTH,
-                    height: PRODUCT_PREVIEW_HEIGHT,
+                    width: VISUAL_PRODUCT_PREVIEW_FRAME.width,
+                    height: VISUAL_PRODUCT_PREVIEW_FRAME.height,
                     format: WireTextureFormat::Srgb8,
                 })
             })
@@ -421,8 +420,8 @@ mod tests {
             request.probes[0],
             ProjectProbeRequest::RenderProduct(RenderProductProbeRequest {
                 product,
-                width: PRODUCT_PREVIEW_WIDTH,
-                height: PRODUCT_PREVIEW_HEIGHT,
+                width: VISUAL_PRODUCT_PREVIEW_FRAME.width,
+                height: VISUAL_PRODUCT_PREVIEW_FRAME.height,
                 format: WireTextureFormat::Srgb8,
             })
         );

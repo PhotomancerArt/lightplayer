@@ -637,6 +637,140 @@ select {
             #f97390);
 }
 
+.ux-produced-product-frame {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+    overflow: hidden;
+    border: 1px solid var(--studio-color-border-subtle);
+    background: var(--studio-color-terminal);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.025);
+}
+
+.ux-produced-product-pixel-grid {
+    display: grid;
+    position: absolute;
+    inset: 0;
+    min-width: 0;
+    background: var(--studio-color-terminal);
+}
+
+.ux-produced-product-skeleton {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    align-content: center;
+    gap: var(--studio-space-3);
+    padding: var(--studio-space-3);
+    overflow: hidden;
+    background:
+        linear-gradient(135deg, rgba(255, 255, 255, 0.035), transparent 38%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent),
+        var(--studio-color-terminal);
+}
+
+.ux-produced-product-skeleton-visual {
+    background:
+        radial-gradient(circle at 24% 18%, rgba(96, 165, 250, 0.18), transparent 24%),
+        radial-gradient(circle at 78% 22%, rgba(123, 224, 178, 0.14), transparent 20%),
+        linear-gradient(135deg, rgba(255, 255, 255, 0.035), transparent 38%),
+        var(--studio-color-terminal);
+}
+
+.ux-produced-product-skeleton-control {
+    background:
+        linear-gradient(135deg, rgba(123, 224, 178, 0.11), transparent 42%),
+        linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent),
+        var(--studio-color-terminal);
+}
+
+.ux-produced-product-skeleton-working {
+    box-shadow: inset 0 0 0 1px var(--studio-status-working-border);
+}
+
+.ux-produced-product-skeleton-graphic {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 5px;
+    opacity: 0.78;
+}
+
+.ux-produced-product-skeleton-bar {
+    height: 10px;
+    border-radius: var(--studio-radius-pill);
+    background: linear-gradient(90deg,
+            var(--studio-color-surface-muted),
+            var(--studio-color-surface-subtle));
+}
+
+.ux-produced-product-skeleton-bar:nth-child(3n) {
+    opacity: 0.62;
+}
+
+.ux-produced-product-skeleton-bar:nth-child(4n) {
+    opacity: 0.42;
+}
+
+.ux-produced-product-message {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: var(--studio-space-3);
+    text-align: center;
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.ux-produced-product-message-warning {
+    color: var(--studio-status-warning-text);
+    background: var(--studio-status-warning-bg);
+}
+
+.ux-produced-product-message-error {
+    color: var(--studio-status-error-text);
+    background: var(--studio-status-error-bg);
+}
+
+.ux-produced-product-overlay {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-content: center;
+    gap: var(--studio-space-1);
+    width: 100%;
+    border: 0;
+    padding: var(--studio-space-3);
+    color: var(--studio-color-text-strong);
+    text-align: center;
+    background:
+        linear-gradient(180deg, rgba(8, 12, 14, 0.58), rgba(8, 12, 14, 0.72)),
+        rgba(8, 12, 14, 0.52);
+    backdrop-filter: blur(2px);
+}
+
+.ux-produced-product-overlay strong {
+    font-size: 0.92rem;
+}
+
+.ux-produced-product-overlay span {
+    color: var(--studio-color-text-muted);
+    font-size: 0.75rem;
+    font-weight: 700;
+}
+
+.ux-produced-product-overlay-button {
+    cursor: pointer;
+    transition: background-color 120ms ease, color 120ms ease;
+}
+
+.ux-produced-product-overlay-button:hover {
+    color: var(--studio-color-accent);
+    background:
+        linear-gradient(180deg, rgba(8, 12, 14, 0.48), rgba(8, 12, 14, 0.66)),
+        rgba(8, 12, 14, 0.46);
+}
+
 .ux-node-ui-perf,
 .ux-node-ui-status {
     display: inline-flex;

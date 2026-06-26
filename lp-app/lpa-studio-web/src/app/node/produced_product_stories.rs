@@ -1,7 +1,7 @@
 //! Stories for produced product views.
 
 use dioxus::prelude::*;
-use lpa_studio_core::UiProducedProduct;
+use lpa_studio_core::{UiProducedProduct, UiProductPreview, UiProductTrackingState};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::node_story_fixtures::{
@@ -23,10 +23,22 @@ pub(crate) fn empty_product() -> Element {
     }
 }
 
-#[story(description = "A visual product with the primary preview texture.")]
+#[story(description = "A visual product that exists but is not being tracked.")]
+pub(crate) fn visual_untracked() -> Element {
+    rsx! {
+        ProducedProductView { product: UiProducedProduct::visual("output").with_detail("64 x 36 preview") }
+    }
+}
+
+#[story(description = "A visual product waiting for its first tracked preview.")]
 pub(crate) fn visual_pending() -> Element {
     rsx! {
-        ProducedProductView { product: UiProducedProduct::visual("output").with_detail("128 x 128") }
+        ProducedProductView {
+            product: UiProducedProduct::visual("output")
+                .with_detail("64 x 36 preview")
+                .with_preview(UiProductPreview::Pending)
+                .with_tracking(UiProductTrackingState::Tracking)
+        }
     }
 }
 
@@ -34,6 +46,16 @@ pub(crate) fn visual_pending() -> Element {
 pub(crate) fn visual_loaded() -> Element {
     rsx! {
         ProducedProductView { product: visual_preview_product("output") }
+    }
+}
+
+#[story(description = "A visual product with cached preview bytes that is not being tracked now.")]
+pub(crate) fn visual_paused() -> Element {
+    rsx! {
+        ProducedProductView {
+            product: visual_preview_product("output")
+                .with_tracking(UiProductTrackingState::Paused)
+        }
     }
 }
 
@@ -46,7 +68,7 @@ pub(crate) fn visual_error() -> Element {
 
 #[story(description = "An open produced product detail popup.")]
 pub(crate) fn detail_popup() -> Element {
-    let product = produced_product_variants_fixture().remove(2);
+    let product = produced_product_variants_fixture().remove(3);
 
     rsx! {
         div { class: "tw:min-h-56",

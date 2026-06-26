@@ -105,7 +105,20 @@ impl StudioController {
             return self.execute_project_op(op, updates).await;
         }
         if node_id.is_descendant_of(&project_node_id) {
-            return self.project.dispatch_editor_action(action, updates).await;
+            let outcome = self
+                .project
+                .dispatch_editor_action(action, updates.clone())
+                .await?;
+            updates.emit(UxUpdate::View(self.view()));
+            if self.project_is_loaded() && self.device.is_lightplayer_connected() {
+                let sync = {
+                    let server = self.device.server.client_mut()?;
+                    self.project.refresh_project(server).await?
+                };
+                self.record_project_sync_run(&sync);
+                updates.emit(UxUpdate::View(self.view()));
+            }
+            return Ok(outcome);
         }
         Err(crate::UiError::UnsupportedAction(format!(
             "unknown UX node {node_id}",
@@ -906,11 +919,16 @@ mod tests {
         LinkCapabilities, LinkConnection, LinkConnectionKind, LinkEndpoint, LinkEndpointId,
         LinkProviderKind, LinkSession,
     };
-    use lpc_model::Revision;
+    use lpc_model::{
+        LpType, LpValue, NodeId, ProductKind, ProductRef, Revision, SlotData, SlotFieldShape,
+        SlotMeta, SlotRecord, SlotShape, SlotShapeId, TreePath, VisualProduct, WithRevision,
+    };
+    use lpc_view::{ProjectView, TreeEntryView};
     use lpc_wire::{
-        ClientMessage, ClientRequest, MemoryStats, ProjectReadResponse, ProjectReadResult,
-        ProjectRuntimeStatus, RuntimeReadResult, ServerRuntimeStatus, TransportError,
-        WireServerMessage, WireServerMsgBody,
+        ClientMessage, ClientRequest, MemoryStats, NodeRuntimeStatus, ProjectProbeRequest,
+        ProjectReadResponse, ProjectReadResult, ProjectRuntimeStatus, RenderProductProbeRequest,
+        RuntimeReadResult, ServerRuntimeStatus, TransportError, WireEntryState, WireServerMessage,
+        WireServerMsgBody, WireTextureFormat,
     };
 
     use super::*;
@@ -918,9 +936,9 @@ mod tests {
     use crate::core::view::steps_view::UiStepState;
     use crate::{
         ConnectedDeviceSummary, ControllerId, LinkController, LinkState, ProjectController,
-        ProjectEditorOp, ProjectEditorTarget, ProjectInventorySummary, ProjectState,
-        ProjectSyncPhase, ServerController, ServerFailureKind, ServerState, StudioServerClient,
-        UiIssue,
+        ProjectEditorOp, ProjectEditorTarget, ProjectInventorySummary, ProjectNodeAddress,
+        ProjectNodeTarget, ProjectState, ProjectSyncPhase, ServerController, ServerFailureKind,
+        ServerState, StudioServerClient, UiIssue,
     };
 
     #[test]
@@ -1313,6 +1331,45 @@ mod tests {
     }
 
     #[test]
+    fn project_node_focus_dispatch_requests_visual_product_preview() {
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        let io = ScriptedClientIo::new(
+            Rc::clone(&sent),
+            vec![project_read_response_with_runtime(1, Revision::new(13))],
+        );
+        let mut studio = connected_studio_with_client(io);
+        studio
+            .project
+            .apply_project_view(&single_product_project_view(3))
+            .unwrap();
+        let product = VisualProduct::new(NodeId::new(3), 0);
+        let target = ProjectEditorTarget::addressed_node(ProjectNodeTarget::new(
+            ProjectNodeAddress::new(TreePath::parse("/demo.project/orbit.shader").unwrap()),
+            NodeId::new(3),
+        ));
+        let action = UiAction::from_op(target.node_id(), ProjectEditorOp::Focus);
+
+        block_on_ready(studio.dispatch(action)).unwrap();
+
+        let sent = sent.borrow();
+        assert_eq!(sent.len(), 1);
+        let ClientRequest::ProjectRequest { request, .. } = &sent[0].msg else {
+            panic!("node focus should send a project read request");
+        };
+        assert_eq!(
+            request.probes,
+            vec![ProjectProbeRequest::RenderProduct(
+                RenderProductProbeRequest {
+                    product,
+                    width: 64,
+                    height: 36,
+                    format: WireTextureFormat::Srgb8,
+                },
+            )]
+        );
+    }
+
+    #[test]
     fn unknown_top_level_dispatch_fails_clearly() {
         let mut studio = StudioController::new();
         let action = UiAction::from_op(ControllerId::new("studio|unknown"), ProjectEditorOp::Focus);
@@ -1488,6 +1545,57 @@ mod tests {
             ),
         });
         studio
+    }
+
+    fn single_product_project_view(node_id: u32) -> ProjectView {
+        let revision = Revision::new(1);
+        let path = TreePath::parse("/demo.project/orbit.shader").unwrap();
+        let state_shape = SlotShapeId::new(700);
+        let mut view = ProjectView::new();
+        view.tree.insert(TreeEntryView::new(
+            NodeId::new(node_id),
+            path,
+            None,
+            None,
+            NodeRuntimeStatus::Ok,
+            WireEntryState::Alive,
+            revision,
+            revision,
+            revision,
+        ));
+        view.slots
+            .registry
+            .register_dynamic_shape(
+                state_shape,
+                SlotShape::Record {
+                    meta: SlotMeta::empty(),
+                    fields: vec![
+                        SlotFieldShape::new(
+                            "output",
+                            SlotShape::value(LpType::Product(ProductKind::Visual)),
+                        )
+                        .unwrap(),
+                    ],
+                },
+            )
+            .unwrap();
+        view.slots
+            .root_shapes
+            .insert(format!("node.{node_id}.state"), state_shape);
+        view.slots.roots.insert(
+            format!("node.{node_id}.state"),
+            SlotData::Record(SlotRecord::with_revision(
+                revision,
+                vec![SlotData::Value(WithRevision::new(
+                    revision,
+                    LpValue::Product(ProductRef::visual(VisualProduct::new(
+                        NodeId::new(node_id),
+                        0,
+                    ))),
+                ))],
+            )),
+        );
+        view
     }
 
     fn device_section_ids(view: &UiStudioView) -> Vec<&str> {

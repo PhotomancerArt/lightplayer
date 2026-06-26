@@ -20,6 +20,40 @@ pub enum UiProductKind {
     Other,
 }
 
+/// Whether Studio is actively requesting previews for this product.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UiProductTrackingState {
+    /// The product has not been watched in this Studio session.
+    Untracked,
+    /// Studio is actively requesting preview updates for the product.
+    Tracking,
+    /// Studio has preview data, but this product is not the active watch target.
+    Paused,
+}
+
+/// Stable frame geometry for preview surfaces.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UiProductPreviewFrame {
+    /// Preview frame width in logical sample units.
+    pub width: u32,
+    /// Preview frame height in logical sample units.
+    pub height: u32,
+}
+
+impl UiProductPreviewFrame {
+    /// Default visual-product probe frame.
+    pub const VISUAL_DEFAULT: Self = Self::new(64, 36);
+
+    /// Create a preview frame with a nonzero fallback.
+    #[must_use]
+    pub const fn new(width: u32, height: u32) -> Self {
+        Self {
+            width: if width == 0 { 1 } else { width },
+            height: if height == 0 { 1 } else { height },
+        }
+    }
+}
+
 /// Stable UI-facing identity for a lazy graph product.
 ///
 /// The Studio DTO keeps this separate from rendering state so controllers can
@@ -128,6 +162,10 @@ pub struct UiProducedProduct {
     pub product: Option<UiProductRef>,
     /// Current preview state for this product.
     pub preview: UiProductPreview,
+    /// Whether Studio is watching this product now.
+    pub tracking: UiProductTrackingState,
+    /// Stable preview frame used even before bytes are available.
+    pub frame: UiProductPreviewFrame,
     /// Optional size, shape, or sample-count detail.
     pub detail: Option<String>,
     /// Binding and revision metadata for the product.
@@ -144,6 +182,8 @@ impl UiProducedProduct {
             kind,
             product: None,
             preview: UiProductPreview::for_kind(kind),
+            tracking: UiProductTrackingState::Untracked,
+            frame: UiProductPreviewFrame::VISUAL_DEFAULT,
             detail: None,
             binding: UiProducedBinding::none(),
             dirty: UiNodeDirtyState::Clean,
@@ -182,6 +222,20 @@ impl UiProducedProduct {
     #[must_use]
     pub fn with_preview(mut self, preview: UiProductPreview) -> Self {
         self.preview = preview;
+        self
+    }
+
+    /// Attach the current tracking state.
+    #[must_use]
+    pub fn with_tracking(mut self, tracking: UiProductTrackingState) -> Self {
+        self.tracking = tracking;
+        self
+    }
+
+    /// Attach stable preview frame geometry.
+    #[must_use]
+    pub fn with_frame(mut self, frame: UiProductPreviewFrame) -> Self {
+        self.frame = frame;
         self
     }
 

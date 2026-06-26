@@ -7,12 +7,14 @@ use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::core::view::steps_view::UiStepState;
 use lpa_studio_core::{
-    StudioController, UiAction, UiActivityView, UiError, UiLogEntry, UiLogLevel, UiNotice,
-    UiNoticeLevel, UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
+    LinkProviderKind, LinkState, StudioController, UiAction, UiActivityView, UiError, UiLogEntry,
+    UiLogLevel, UiNotice, UiNoticeLevel, UiStatus, UiStudioView, UiViewContent, UxActivityTarget,
+    UxUpdate, UxUpdateSink,
 };
 
 const STYLE: &str = include_str!("style.css");
-const PROJECT_REFRESH_INTERVAL_MS: u32 = 750;
+const DEVICE_PROJECT_REFRESH_INTERVAL_MS: u32 = 750;
+const SIMULATOR_PROJECT_REFRESH_INTERVAL_MS: u32 = 16;
 
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn App() -> Element {
@@ -36,7 +38,7 @@ pub fn App() -> Element {
     let refresh_model = model;
     let _refresh_task = use_future(move || async move {
         loop {
-            TimeoutFuture::new(PROJECT_REFRESH_INTERVAL_MS).await;
+            wait_for_next_project_refresh(refresh_model).await;
             execute_refresh_tick(refresh_model).await;
         }
     });
@@ -119,6 +121,14 @@ impl StudioWebModel {
         self.view.logs.extend(self.console_logs.clone());
     }
 
+    fn project_refresh_cadence(&self) -> ProjectRefreshCadence {
+        self.ux
+            .as_ref()
+            .map(StudioController::snapshot)
+            .map(|snapshot| project_refresh_cadence_for_link_state(&snapshot.link.state))
+            .unwrap_or(ProjectRefreshCadence::Device)
+    }
+
     fn apply_activity_update(
         &mut self,
         target: UxActivityTarget,
@@ -158,21 +168,66 @@ impl StudioWebModel {
     }
 }
 
-async fn execute_action(mut model: Signal<StudioWebModel>, action: UiAction) {
-    let Some(mut ux) = ({
-        let mut state = model.write();
-        if state.running || state.refreshing {
-            return;
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ProjectRefreshCadence {
+    Simulator,
+    Device,
+}
+
+async fn wait_for_next_project_refresh(model: Signal<StudioWebModel>) {
+    let cadence = {
+        let state = model.read();
+        state.project_refresh_cadence()
+    };
+    match cadence {
+        ProjectRefreshCadence::Simulator => {
+            TimeoutFuture::new(SIMULATOR_PROJECT_REFRESH_INTERVAL_MS).await;
         }
-        state.running = true;
-        state.ux.take()
-    }) else {
-        model.write().push_console_log(UiLogEntry::new(
-            UiLogLevel::Error,
-            "studio",
-            "Studio UX is already busy.",
-        ));
-        return;
+        ProjectRefreshCadence::Device => {
+            TimeoutFuture::new(DEVICE_PROJECT_REFRESH_INTERVAL_MS).await;
+        }
+    }
+}
+
+fn project_refresh_cadence_for_link_state(state: &LinkState) -> ProjectRefreshCadence {
+    match state {
+        LinkState::Connected { device } | LinkState::Managing { device, .. }
+            if device.provider_id == LinkProviderKind::BrowserWorker =>
+        {
+            ProjectRefreshCadence::Simulator
+        }
+        _ => ProjectRefreshCadence::Device,
+    }
+}
+
+async fn execute_action(mut model: Signal<StudioWebModel>, action: UiAction) {
+    let mut ux = loop {
+        let acquire = {
+            let mut state = model.write();
+            if state.running {
+                return;
+            }
+            if state.refreshing {
+                ActionAcquire::Wait
+            } else if let Some(ux) = state.ux.take() {
+                state.running = true;
+                ActionAcquire::Ready(ux)
+            } else {
+                ActionAcquire::MissingUx
+            }
+        };
+        match acquire {
+            ActionAcquire::Ready(ux) => break ux,
+            ActionAcquire::Wait => TimeoutFuture::new(25).await,
+            ActionAcquire::MissingUx => {
+                model.write().push_console_log(UiLogEntry::new(
+                    UiLogLevel::Error,
+                    "studio",
+                    "Studio UX is already busy.",
+                ));
+                return;
+            }
+        }
     };
 
     studio_url::update_for_action(&action);
@@ -200,6 +255,12 @@ async fn execute_action(mut model: Signal<StudioWebModel>, action: UiAction) {
         }
     }
     state.running = false;
+}
+
+enum ActionAcquire {
+    Ready(StudioController),
+    Wait,
+    MissingUx,
 }
 
 async fn execute_refresh_tick(mut model: Signal<StudioWebModel>) {
@@ -250,4 +311,63 @@ fn log_from_error(error: UiError) -> UiLogEntry {
         UiLogLevel::Error
     };
     UiLogEntry::new(level, "studio", error.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use lpa_studio_core::{ConnectedDeviceSummary, LinkState, ProgressState};
+
+    use super::*;
+
+    #[test]
+    fn browser_worker_link_uses_simulator_refresh_cadence() {
+        let state = LinkState::Connected {
+            device: ConnectedDeviceSummary::new(
+                LinkProviderKind::BrowserWorker,
+                "browser-worker",
+                "session",
+                "Simulator",
+            ),
+        };
+
+        assert_eq!(
+            project_refresh_cadence_for_link_state(&state),
+            ProjectRefreshCadence::Simulator
+        );
+    }
+
+    #[test]
+    fn serial_link_keeps_device_refresh_cadence() {
+        let state = LinkState::Connected {
+            device: ConnectedDeviceSummary::new(
+                LinkProviderKind::BrowserSerialEsp32,
+                "serial",
+                "session",
+                "ESP32",
+            ),
+        };
+
+        assert_eq!(
+            project_refresh_cadence_for_link_state(&state),
+            ProjectRefreshCadence::Device
+        );
+    }
+
+    #[test]
+    fn managing_browser_worker_keeps_simulator_refresh_cadence() {
+        let state = LinkState::Managing {
+            device: ConnectedDeviceSummary::new(
+                LinkProviderKind::BrowserWorker,
+                "browser-worker",
+                "session",
+                "Simulator",
+            ),
+            progress: ProgressState::new("Resetting simulator"),
+        };
+
+        assert_eq!(
+            project_refresh_cadence_for_link_state(&state),
+            ProjectRefreshCadence::Simulator
+        );
+    }
 }

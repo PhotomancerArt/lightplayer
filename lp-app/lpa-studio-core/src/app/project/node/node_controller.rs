@@ -8,7 +8,7 @@ use crate::{
     ProjectEditorOp, ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone,
     ProjectNodeStatusView, ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController,
     UiAction, UiNodeChild, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiProductPreview,
-    UiProductRef, UiStatus,
+    UiProductRef, UiProductTrackingState, UiStatus,
 };
 
 /// User/controller intent for product subscriptions owned by a node.
@@ -318,12 +318,21 @@ impl NodeController {
 
         let mut sections = Vec::new();
         if !products.is_empty() {
+            let base_tracking = self.product_tracking_state();
             for product in &mut products {
+                let mut has_cached_preview = false;
                 if let Some(product_ref) = product.product
                     && let Some(preview) = product_preview(&product_ref)
                 {
                     product.preview = preview;
+                    has_cached_preview = true;
                 }
+                product.tracking =
+                    if base_tracking == UiProductTrackingState::Untracked && has_cached_preview {
+                        UiProductTrackingState::Paused
+                    } else {
+                        base_tracking
+                    }
             }
             sections.push(UiNodeSection::ProducedProducts(products));
         }
@@ -368,6 +377,17 @@ impl NodeController {
             ProjectNodeStatusTone::Good => UiStatus::good(self.status.label.clone()),
             ProjectNodeStatusTone::Warning => UiStatus::warning(self.status.label.clone()),
             ProjectNodeStatusTone::Error => UiStatus::error(self.status.label.clone()),
+        }
+    }
+
+    fn product_tracking_state(&self) -> UiProductTrackingState {
+        match self.state.product_subscription_intent {
+            ProjectProductSubscriptionIntent::Default if self.state.focused => {
+                UiProductTrackingState::Tracking
+            }
+            ProjectProductSubscriptionIntent::Default => UiProductTrackingState::Untracked,
+            ProjectProductSubscriptionIntent::Subscribed => UiProductTrackingState::Tracking,
+            ProjectProductSubscriptionIntent::Unsubscribed => UiProductTrackingState::Paused,
         }
     }
 }

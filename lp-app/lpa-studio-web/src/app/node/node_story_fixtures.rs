@@ -3,9 +3,9 @@
 use lpa_studio_core::{
     UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiNodeChild, UiNodeDirtyState,
     UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiProducedBinding,
-    UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductPreview, UiSlotAsset,
-    UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality, UiSlotRecord, UiSlotSourceState,
-    UiSlotUnit, UiSlotValue, UiStatus,
+    UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductPreview,
+    UiProductTrackingState, UiSlotAsset, UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality,
+    UiSlotRecord, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus,
 };
 
 const IDLE_GLSL: &str = r#"vec3 palette(float t) {
@@ -94,13 +94,20 @@ pub(crate) fn produced_products_fixture() -> Vec<UiProducedProduct> {
 pub(crate) fn produced_product_variants_fixture() -> Vec<UiProducedProduct> {
     vec![
         UiProducedProduct::empty("output").with_detail("not resolved"),
-        UiProducedProduct::visual("output").with_detail("128 x 72"),
+        UiProducedProduct::visual("output").with_detail("64 x 36 preview"),
+        UiProducedProduct::visual("output")
+            .with_detail("64 x 36 preview")
+            .with_preview(UiProductPreview::Pending)
+            .with_tracking(UiProductTrackingState::Tracking),
         visual_preview_product("output").with_binding_routes(
             Some("bus#visual.out"),
             &[],
             &["Fixture.visual"],
             Some("rev 104"),
         ),
+        visual_preview_product("output")
+            .with_tracking(UiProductTrackingState::Paused)
+            .with_detail("cached preview"),
         visual_error_product("output"),
         UiProducedProduct::control("dmx")
             .with_detail("24 channels")
@@ -111,6 +118,7 @@ pub(crate) fn produced_product_variants_fixture() -> Vec<UiProducedProduct> {
 pub(crate) fn visual_preview_product(name: &str) -> UiProducedProduct {
     UiProducedProduct::visual(name)
         .with_detail("128 x 72")
+        .with_tracking(UiProductTrackingState::Tracking)
         .with_preview(UiProductPreview::VisualSrgb8 {
             width: 16,
             height: 9,
@@ -122,6 +130,7 @@ pub(crate) fn visual_preview_product(name: &str) -> UiProducedProduct {
 pub(crate) fn visual_error_product(name: &str) -> UiProducedProduct {
     UiProducedProduct::visual(name)
         .with_detail("128 x 72")
+        .with_tracking(UiProductTrackingState::Tracking)
         .with_preview(UiProductPreview::Error {
             message: "render probe failed".to_string(),
         })
@@ -221,7 +230,7 @@ pub(crate) fn children_fixture() -> Vec<UiNodeChild> {
             .active("active, fade_after 0.12 s")
             .with_sections(vec![
                 UiNodeSection::ProducedProducts(vec![
-                    UiProducedProduct::visual("output").with_detail("128 x 128"),
+                    UiProducedProduct::visual("output").with_detail("64 x 36 preview"),
                 ]),
                 UiNodeSection::ConfigSlots(vec![
                     UiConfigSlot::value(

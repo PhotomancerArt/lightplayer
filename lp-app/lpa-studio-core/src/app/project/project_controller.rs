@@ -772,7 +772,7 @@ mod tests {
         ActionPriority, ProjectNodeTarget, ProjectOp, ProjectProductSubscriptionIntent,
         ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotKind, UiAssetEditorKind,
         UiConfigSlotBody, UiNodeSection, UiNodeTabBody, UiProductKind, UiProductPreview,
-        UiProductRef, UiSlotOptionality, UiSlotSourceState,
+        UiProductRef, UiProductTrackingState, UiSlotOptionality, UiSlotSourceState,
     };
 
     use super::*;
@@ -1239,6 +1239,8 @@ mod tests {
         assert_eq!(products.len(), 2);
         assert_eq!(products[0].name, "Output");
         assert_eq!(products[0].kind, UiProductKind::Visual);
+        assert_eq!(products[0].preview, UiProductPreview::Pending);
+        assert_eq!(products[0].tracking, UiProductTrackingState::Untracked);
         assert_eq!(
             products[0].product,
             Some(UiProductRef::from_visual_product(VisualProduct::new(
@@ -1248,6 +1250,8 @@ mod tests {
         );
         assert_eq!(products[1].name, "Control");
         assert_eq!(products[1].kind, UiProductKind::Control);
+        assert_eq!(products[1].preview, UiProductPreview::MetadataOnly);
+        assert_eq!(products[1].tracking, UiProductTrackingState::Untracked);
         assert_eq!(
             products[1].product,
             Some(UiProductRef::from_control_product(ControlProduct::new(
@@ -1373,6 +1377,7 @@ mod tests {
 
         let nodes = project.ui_nodes();
         let products = section_products(node_sections(&nodes[0]));
+        assert_eq!(products[0].tracking, UiProductTrackingState::Paused);
         assert_eq!(
             products[0].preview,
             UiProductPreview::VisualSrgb8 {

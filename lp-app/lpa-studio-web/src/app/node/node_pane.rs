@@ -77,6 +77,8 @@ pub fn NodePane(
                                     NodeSection {
                                         section,
                                         first: index == 0,
+                                        focus_action: view.action.clone(),
+                                        on_action,
                                     }
                                 }
                             }
@@ -136,11 +138,16 @@ fn node_header_class(kind: UiStatusKind, collapsed: bool) -> String {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn NodeSection(section: UiNodeSection, #[props(default = false)] first: bool) -> Element {
+pub fn NodeSection(
+    section: UiNodeSection,
+    #[props(default = false)] first: bool,
+    #[props(default)] focus_action: Option<UiAction>,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
     match section {
         UiNodeSection::ProducedProducts(products) => rsx! {
             section { class: section_class("tw:bg-card tw:p-0", first),
-                ProducedProducts { products }
+                ProducedProducts { products, focus_action, on_action }
             }
         },
         UiNodeSection::ProducedValues(values) => rsx! {
