@@ -1,17 +1,21 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{UiNodeChild, UiNodeHeader, UiNodeTab, UiNodeView};
+use lpa_studio_core::{UiAction, UiNodeChild, UiNodeHeader, UiNodeTab, UiNodeView};
 
 use crate::app::node::NodePane;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn NodeChildren(items: Vec<UiNodeChild>) -> Element {
+pub fn NodeChildren(
+    items: Vec<UiNodeChild>,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3 tw:border-l tw:border-border-muted tw:pl-4",
             for child in items {
                 NodePane {
                     key: "{child.label}",
                     view: child_node_view(child),
+                    on_action,
                 }
             }
         }

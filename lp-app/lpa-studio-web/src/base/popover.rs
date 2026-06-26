@@ -52,7 +52,8 @@ pub fn IconPopoverButton(
                         measure_trigger(trigger, panel_size, trigger_rect, position, placement);
                     }
                 },
-                onclick: move |_| {
+                onclick: move |event| {
+                    event.stop_propagation();
                     let next_open = !open();
                     open.set(next_open);
                     if next_open {
@@ -68,12 +69,16 @@ pub fn IconPopoverButton(
                 div {
                     class: "tw:fixed tw:inset-0 tw:z-[70] tw:bg-transparent",
                     aria_hidden: "true",
-                    onclick: move |_| open.set(false),
+                    onclick: move |event| {
+                        event.stop_propagation();
+                        open.set(false);
+                    },
                 }
                 div {
                     class: "{panel_class}",
                     style: "{panel_style}",
                     role: "dialog",
+                    onclick: move |event| event.stop_propagation(),
                     onmounted: move |event| {
                         let panel_element = event.data();
                         let anchor = trigger_rect();

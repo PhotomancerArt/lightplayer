@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::core::notice::UiNotices;
 use crate::{
@@ -7,12 +7,12 @@ use crate::{
     ProjectNodeAddress, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp, ProjectSnapshot,
     ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary,
     StudioServerClient, UiAction, UiError, UiIssue, UiLogEntry, UiLogLevel, UiMetric, UiNodeView,
-    UiPaneView, UiResult, UiStatus, UiViewContent, UxUpdateSink,
+    UiPaneView, UiProductRef, UiResult, UiStatus, UiViewContent, UxUpdateSink,
 };
 use lpc_model::{NodeId, TreePath};
 use lpc_view::ProjectView;
 
-use super::NodeController;
+use super::{NodeController, ProjectProductSubscriptionIntent};
 
 /// Project-level Studio controller and synthetic root for node controllers.
 ///
@@ -66,9 +66,11 @@ impl ProjectController {
 
     /// Project root node controllers into node-pane DTOs in project tree order.
     pub fn ui_nodes(&self) -> Vec<UiNodeView> {
+        let product_preview =
+            |product: &UiProductRef| self.sync.as_ref()?.product_preview(product).cloned();
         self.root_nodes
             .iter()
-            .map(NodeController::ui_node)
+            .map(|node| node.ui_node_with_product_previews(&product_preview))
             .collect()
     }
 
@@ -420,6 +422,44 @@ impl ProjectController {
         }
     }
 
+    fn node_subscribes_products(&self, node: &NodeController) -> bool {
+        match node.state().product_subscription_intent {
+            ProjectProductSubscriptionIntent::Default => self.is_focused_node(node),
+            ProjectProductSubscriptionIntent::Subscribed => true,
+            ProjectProductSubscriptionIntent::Unsubscribed => false,
+        }
+    }
+
+    fn subscribed_visual_products(&self) -> Vec<lpc_model::VisualProduct> {
+        let mut product_refs = BTreeSet::new();
+        for node in &self.root_nodes {
+            self.collect_subscribed_visual_products(node, &mut product_refs);
+        }
+        product_refs
+            .into_iter()
+            .filter_map(UiProductRef::visual_product)
+            .collect()
+    }
+
+    fn collect_subscribed_visual_products(
+        &self,
+        node: &NodeController,
+        products: &mut BTreeSet<UiProductRef>,
+    ) {
+        if self.node_subscribes_products(node) {
+            let mut node_products = Vec::new();
+            node.collect_produced_product_refs(&mut node_products);
+            products.extend(
+                node_products
+                    .into_iter()
+                    .filter(|product| product.visual_product().is_some()),
+            );
+        }
+        for child in node.children() {
+            self.collect_subscribed_visual_products(child, products);
+        }
+    }
+
     fn focus_editor_target(&mut self, target: &ProjectEditorTarget) {
         clear_node_focus(&mut self.root_nodes);
         match target {
@@ -478,7 +518,10 @@ impl ProjectController {
             self.sync_mut()?.apply_shape_sync_response(read.response)?;
         }
 
-        let request = self.sync_mut()?.initial_project_read_request();
+        let visual_products = self.subscribed_visual_products();
+        let request = self
+            .sync_mut()?
+            .initial_project_read_request(visual_products);
         let read = server.project_read(handle_id, request).await?;
         logs.extend(read.logs);
         self.sync_mut()?
@@ -492,7 +535,10 @@ impl ProjectController {
         server: &mut StudioServerClient,
         handle_id: u32,
     ) -> Result<Vec<UiLogEntry>, UiError> {
-        let request = self.sync_mut()?.refresh_project_read_request();
+        let visual_products = self.subscribed_visual_products();
+        let request = self
+            .sync_mut()?
+            .refresh_project_read_request(visual_products);
         let read = server.project_read(handle_id, request).await?;
         let logs = read.logs;
         self.sync_mut()?
@@ -518,6 +564,9 @@ impl ProjectController {
             .as_ref()
             .ok_or_else(|| UiError::Project("project sync is not initialized".to_string()))?;
         reconcile_root_nodes(&mut self.root_nodes, sync.project_view());
+        if let Some(target) = self.active_editor_target.clone() {
+            self.focus_editor_target(&target);
+        }
         Ok(())
     }
 
@@ -713,13 +762,17 @@ mod tests {
         SlotShapeId, SlotVariantShape, TreePath, VisualProduct, WithRevision,
     };
     use lpc_view::{ProjectView, TreeEntryView};
-    use lpc_wire::{NodeRuntimeStatus, ProjectReadResponse, ProjectReadResult, WireEntryState};
+    use lpc_wire::{
+        NodeRuntimeStatus, ProjectProbeRequest, ProjectProbeResult, ProjectReadResponse,
+        ProjectReadResult, RenderProductProbeRequest, RenderProductProbeResult, WireEntryState,
+        WireTextureFormat,
+    };
 
     use crate::{
         ActionPriority, ProjectNodeTarget, ProjectOp, ProjectProductSubscriptionIntent,
         ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotKind, UiAssetEditorKind,
-        UiConfigSlotBody, UiNodeSection, UiNodeTabBody, UiProductKind, UiSlotOptionality,
-        UiSlotSourceState,
+        UiConfigSlotBody, UiNodeSection, UiNodeTabBody, UiProductKind, UiProductPreview,
+        UiProductRef, UiSlotOptionality, UiSlotSourceState,
     };
 
     use super::*;
@@ -1090,6 +1143,15 @@ mod tests {
         assert_eq!(nodes[0].header.status.label, "Running");
         assert!(nodes[0].focused);
         assert!(nodes[0].collapsed);
+        let action_target =
+            ProjectEditorTarget::parse(nodes[0].action.as_ref().unwrap().node_id()).unwrap();
+        assert_eq!(
+            action_target,
+            ProjectEditorTarget::addressed_node(ProjectNodeTarget::new(
+                node.clone(),
+                NodeId::new(1),
+            ))
+        );
         assert_eq!(
             nodes[0]
                 .children
@@ -1149,8 +1211,23 @@ mod tests {
         assert_eq!(products.len(), 2);
         assert_eq!(products[0].name, "Output");
         assert_eq!(products[0].kind, UiProductKind::Visual);
+        assert_eq!(
+            products[0].product,
+            Some(UiProductRef::from_visual_product(VisualProduct::new(
+                NodeId::new(1),
+                0,
+            )))
+        );
         assert_eq!(products[1].name, "Control");
         assert_eq!(products[1].kind, UiProductKind::Control);
+        assert_eq!(
+            products[1].product,
+            Some(UiProductRef::from_control_product(ControlProduct::new(
+                NodeId::new(1),
+                1,
+                ControlExtent::new(2, 16),
+            )))
+        );
 
         let produced_values = section_produced_values(sections);
         assert_eq!(produced_values.len(), 1);
@@ -1188,6 +1265,94 @@ mod tests {
                 .map(|field| field.label.as_str())
                 .collect::<Vec<_>>(),
             vec!["Primary", "Secondary"]
+        );
+    }
+
+    #[test]
+    fn focused_default_node_subscribes_visual_product_preview_probe() {
+        let node = node_address("/demo.project/orbit.shader");
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.apply_project_view(&view).unwrap();
+
+        assert!(project.subscribed_visual_products().is_empty());
+
+        project.node_mut(&node).unwrap().state_mut().focused = true;
+        assert_eq!(
+            project.subscribed_visual_products(),
+            vec![VisualProduct::new(NodeId::new(1), 0)]
+        );
+
+        project
+            .node_mut(&node)
+            .unwrap()
+            .state_mut()
+            .product_subscription_intent = ProjectProductSubscriptionIntent::Unsubscribed;
+        assert!(project.subscribed_visual_products().is_empty());
+
+        let state = project.node_mut(&node).unwrap().state_mut();
+        state.focused = false;
+        state.product_subscription_intent = ProjectProductSubscriptionIntent::Subscribed;
+        assert_eq!(
+            project.subscribed_visual_products(),
+            vec![VisualProduct::new(NodeId::new(1), 0)]
+        );
+    }
+
+    #[test]
+    fn ui_nodes_project_cached_visual_preview() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        project.apply_project_view(&view).unwrap();
+        let product = VisualProduct::new(NodeId::new(1), 0);
+        let bytes = vec![10, 20, 30, 40, 50, 60];
+        let request = project
+            .sync_mut()
+            .unwrap()
+            .refresh_project_read_request(vec![product]);
+        assert_eq!(
+            request.probes,
+            vec![ProjectProbeRequest::RenderProduct(
+                RenderProductProbeRequest {
+                    product,
+                    width: 64,
+                    height: 36,
+                    format: WireTextureFormat::Srgb8,
+                },
+            )]
+        );
+        project
+            .sync_mut()
+            .unwrap()
+            .apply_project_read_response(ProjectReadResponse {
+                revision: Revision::new(8),
+                results: Vec::new(),
+                probes: vec![ProjectProbeResult::RenderProduct(
+                    RenderProductProbeResult::Texture {
+                        product,
+                        revision: Revision::new(8),
+                        width: 1,
+                        height: 2,
+                        format: WireTextureFormat::Srgb8,
+                        bytes: bytes.clone(),
+                    },
+                )],
+            })
+            .unwrap();
+
+        let nodes = project.ui_nodes();
+        let products = section_products(node_sections(&nodes[0]));
+        assert_eq!(
+            products[0].preview,
+            UiProductPreview::VisualSrgb8 {
+                width: 1,
+                height: 2,
+                revision: 8,
+                bytes,
+            }
         );
     }
 

@@ -4,7 +4,9 @@ use dioxus::prelude::*;
 use lpa_studio_core::UiProducedProduct;
 use lpa_studio_web_story_macros::story;
 
-use crate::app::node::node_story_fixtures::produced_product_variants_fixture;
+use crate::app::node::node_story_fixtures::{
+    produced_product_variants_fixture, visual_error_product, visual_preview_product,
+};
 use crate::app::node::{ProducedProductView, ProducedProducts};
 
 #[story(description = "Produced product variants shown as a node pane section would render them.")]
@@ -22,15 +24,29 @@ pub(crate) fn empty_product() -> Element {
 }
 
 #[story(description = "A visual product with the primary preview texture.")]
-pub(crate) fn visual_product() -> Element {
+pub(crate) fn visual_pending() -> Element {
     rsx! {
         ProducedProductView { product: UiProducedProduct::visual("output").with_detail("128 x 72") }
     }
 }
 
+#[story(description = "A visual product with loaded RGB preview bytes.")]
+pub(crate) fn visual_loaded() -> Element {
+    rsx! {
+        ProducedProductView { product: visual_preview_product("output") }
+    }
+}
+
+#[story(description = "A visual product whose preview probe failed.")]
+pub(crate) fn visual_error() -> Element {
+    rsx! {
+        ProducedProductView { product: visual_error_product("output") }
+    }
+}
+
 #[story(description = "An open produced product detail popup.")]
 pub(crate) fn detail_popup() -> Element {
-    let product = produced_product_variants_fixture().remove(1);
+    let product = produced_product_variants_fixture().remove(2);
 
     rsx! {
         div { class: "tw:min-h-56",

@@ -1,6 +1,6 @@
 //! Complete node pane data.
 
-use crate::{UiNodeChild, UiNodeHeader, UiNodeTab, UiNodeTabBody};
+use crate::{UiAction, UiNodeChild, UiNodeHeader, UiNodeTab, UiNodeTabBody};
 
 /// The full data model for a Studio node pane.
 #[derive(Clone, Debug, PartialEq)]
@@ -15,6 +15,8 @@ pub struct UiNodeView {
     pub children: Vec<UiNodeChild>,
     /// Whether this node is the focused/selected node.
     pub focused: bool,
+    /// Action that focuses this node as the current Studio selection.
+    pub action: Option<UiAction>,
     /// Whether the pane starts collapsed.
     pub collapsed: bool,
     /// Projection or runtime issues for the whole node.
@@ -31,6 +33,7 @@ impl UiNodeView {
             tabs,
             children: Vec::new(),
             focused: false,
+            action: None,
             collapsed: false,
             issues: Vec::new(),
         }

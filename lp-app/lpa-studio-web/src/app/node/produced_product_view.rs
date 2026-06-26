@@ -1,7 +1,7 @@
 //! Leaf presentation for a produced product.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiProducedProduct, UiProductKind};
+use lpa_studio_core::{UiProducedProduct, UiProductKind, UiProductPreview};
 
 use crate::app::node::SlotDetailButton;
 
@@ -25,14 +25,13 @@ pub fn ProducedProductView(
 
     rsx! {
         article { class,
-            div { class: "tw:grid tw:min-h-20 tw:grid-cols-8 tw:gap-1",
-                for index in 0..24 {
-                    span { key: "{index}", class: preview_cell_class(product.kind, index) }
-                }
-            }
+            ProductPreview { kind: product.kind, preview: product.preview.clone() }
             footer { class: "tw:flex tw:min-w-0 tw:flex-wrap tw:items-center tw:gap-x-2 tw:gap-y-1 tw:text-xs tw:text-muted-foreground",
                 strong { class: "tw:min-w-0 tw:text-sm tw:text-strong-foreground tw:break-words", "{product.name}" }
                 span { "{label}" }
+                if let Some(detail) = preview_detail(&product.preview) {
+                    span { "{detail}" }
+                }
                 if let Some(detail) = product.detail.as_ref() {
                     span { "{detail}" }
                 }
@@ -43,6 +42,60 @@ pub fn ProducedProductView(
                 }
             }
         }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn ProductPreview(kind: UiProductKind, preview: UiProductPreview) -> Element {
+    match preview {
+        UiProductPreview::VisualSrgb8 {
+            width,
+            height: _,
+            bytes,
+            ..
+        } => {
+            let columns = width.max(1);
+            let grid_style = format!("grid-template-columns: repeat({columns}, minmax(0, 1fr));");
+            let pixels = rgb_pixel_styles(&bytes);
+            rsx! {
+                div {
+                    class: "tw:grid tw:min-h-20 tw:min-w-0 tw:overflow-hidden tw:rounded-sm tw:bg-page",
+                    style: "{grid_style}",
+                    for (index, style) in pixels.into_iter().enumerate() {
+                        span {
+                            key: "{index}",
+                            class: "tw:block tw:aspect-square",
+                            style: "{style}",
+                        }
+                    }
+                }
+            }
+        }
+        UiProductPreview::Pending => rsx! {
+            div { class: "tw:grid tw:min-h-20 tw:grid-cols-8 tw:gap-1 tw:opacity-75",
+                for index in 0..24 {
+                    span { key: "{index}", class: preview_cell_class(kind, index) }
+                }
+            }
+        },
+        UiProductPreview::Error { message } => rsx! {
+            div { class: "tw:grid tw:min-h-20 tw:place-items-center tw:bg-status-error-bg tw:p-3 tw:text-center tw:text-xs tw:font-bold tw:text-status-error-foreground",
+                "{message}"
+            }
+        },
+        UiProductPreview::Unsupported { reason } => rsx! {
+            div { class: "tw:grid tw:min-h-20 tw:place-items-center tw:bg-status-warning-bg tw:p-3 tw:text-center tw:text-xs tw:font-bold tw:text-status-warning-foreground",
+                "{reason}"
+            }
+        },
+        UiProductPreview::Empty | UiProductPreview::MetadataOnly => rsx! {
+            div { class: "tw:grid tw:min-h-20 tw:grid-cols-8 tw:gap-1",
+                for index in 0..24 {
+                    span { key: "{index}", class: preview_cell_class(kind, index) }
+                }
+            }
+        },
     }
 }
 
@@ -70,6 +123,34 @@ fn product_label(kind: UiProductKind) -> &'static str {
         UiProductKind::Control => "control product",
         UiProductKind::Other => "product",
     }
+}
+
+fn preview_detail(preview: &UiProductPreview) -> Option<String> {
+    match preview {
+        UiProductPreview::VisualSrgb8 {
+            width,
+            height,
+            revision,
+            ..
+        } => Some(format!("{width} x {height} rev {revision}")),
+        UiProductPreview::Pending => Some("preview pending".to_string()),
+        UiProductPreview::MetadataOnly => Some("metadata only".to_string()),
+        UiProductPreview::Empty
+        | UiProductPreview::Unsupported { .. }
+        | UiProductPreview::Error { .. } => None,
+    }
+}
+
+fn rgb_pixel_styles(bytes: &[u8]) -> Vec<String> {
+    bytes
+        .chunks_exact(3)
+        .map(|chunk| {
+            format!(
+                "background-color: rgb({} {} {});",
+                chunk[0], chunk[1], chunk[2]
+            )
+        })
+        .collect()
 }
 
 fn preview_cell_class(kind: UiProductKind, index: usize) -> &'static str {

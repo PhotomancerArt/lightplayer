@@ -3,6 +3,7 @@ use std::rc::Rc;
 
 use crate::app::StudioShell;
 use dioxus::prelude::*;
+use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::core::view::steps_view::UiStepState;
 use lpa_studio_core::{
     StudioController, UiAction, UiActivityView, UiError, UiLogEntry, UiLogLevel, UiNotice,
@@ -10,6 +11,7 @@ use lpa_studio_core::{
 };
 
 const STYLE: &str = include_str!("style.css");
+const PROJECT_REFRESH_INTERVAL_MS: u32 = 750;
 
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn App() -> Element {
@@ -23,6 +25,13 @@ pub fn App() -> Element {
     }
 
     let model = use_signal(StudioWebModel::new);
+    let refresh_model = model;
+    let _refresh_task = use_future(move || async move {
+        loop {
+            TimeoutFuture::new(PROJECT_REFRESH_INTERVAL_MS).await;
+            execute_refresh_tick(refresh_model).await;
+        }
+    });
     let view = model.read().view.clone();
     let running = model.read().running;
     let on_action = move |action: UiAction| {
@@ -46,6 +55,7 @@ struct StudioWebModel {
     ux: Option<StudioController>,
     view: UiStudioView,
     running: bool,
+    refreshing: bool,
     console_logs: Vec<UiLogEntry>,
 }
 
@@ -57,6 +67,7 @@ impl StudioWebModel {
             ux: Some(ux),
             view,
             running: false,
+            refreshing: false,
             console_logs: Vec::new(),
         }
     }
@@ -142,7 +153,7 @@ impl StudioWebModel {
 async fn execute_action(mut model: Signal<StudioWebModel>, action: UiAction) {
     let Some(mut ux) = ({
         let mut state = model.write();
-        if state.running {
+        if state.running || state.refreshing {
             return;
         }
         state.running = true;
@@ -180,6 +191,31 @@ async fn execute_action(mut model: Signal<StudioWebModel>, action: UiAction) {
         }
     }
     state.running = false;
+}
+
+async fn execute_refresh_tick(mut model: Signal<StudioWebModel>) {
+    let Some(mut ux) = ({
+        let mut state = model.write();
+        if state.running || state.refreshing {
+            return;
+        }
+        let ux = state.ux.take();
+        if ux.is_some() {
+            state.refreshing = true;
+        }
+        ux
+    }) else {
+        return;
+    };
+
+    let result = ux.refresh_loaded_project_tick().await;
+    let mut state = model.write();
+    state.ux = Some(ux);
+    state.refresh_from_ux();
+    if let Err(error) = result {
+        state.push_console_log(log_from_error(error));
+    }
+    state.refreshing = false;
 }
 
 fn log_from_notice(notice: UiNotice) -> UiLogEntry {

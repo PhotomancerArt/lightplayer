@@ -3,8 +3,9 @@
 use lpa_studio_core::{
     UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiNodeChild, UiNodeDirtyState,
     UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiProducedBinding,
-    UiProducedBindings, UiProducedProduct, UiProducedValue, UiSlotAsset, UiSlotEditorHint,
-    UiSlotFieldState, UiSlotOptionality, UiSlotRecord, UiSlotSourceState, UiSlotValue, UiStatus,
+    UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductPreview, UiSlotAsset,
+    UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality, UiSlotRecord, UiSlotSourceState,
+    UiSlotValue, UiStatus,
 };
 
 const IDLE_GLSL: &str = r#"vec3 palette(float t) {
@@ -82,33 +83,62 @@ pub(crate) fn playlist_header() -> UiNodeHeader {
 }
 
 pub(crate) fn produced_products_fixture() -> Vec<UiProducedProduct> {
-    vec![
-        UiProducedProduct::visual("output")
-            .with_detail("128 x 72")
-            .with_binding_routes(
-                Some("bus#visual.out"),
-                &[],
-                &["Fixture.visual"],
-                Some("rev 104"),
-            ),
-    ]
+    vec![visual_preview_product("output").with_binding_routes(
+        Some("bus#visual.out"),
+        &[],
+        &["Fixture.visual"],
+        Some("rev 104"),
+    )]
 }
 
 pub(crate) fn produced_product_variants_fixture() -> Vec<UiProducedProduct> {
     vec![
         UiProducedProduct::empty("output").with_detail("not resolved"),
-        UiProducedProduct::visual("output")
-            .with_detail("128 x 72")
-            .with_binding_routes(
-                Some("bus#visual.out"),
-                &[],
-                &["Fixture.visual"],
-                Some("rev 104"),
-            ),
+        UiProducedProduct::visual("output").with_detail("128 x 72"),
+        visual_preview_product("output").with_binding_routes(
+            Some("bus#visual.out"),
+            &[],
+            &["Fixture.visual"],
+            Some("rev 104"),
+        ),
+        visual_error_product("output"),
         UiProducedProduct::control("dmx")
             .with_detail("24 channels")
             .with_binding_routes(None, &["fixture#strip-a"], &[], Some("rev 104")),
     ]
+}
+
+pub(crate) fn visual_preview_product(name: &str) -> UiProducedProduct {
+    UiProducedProduct::visual(name)
+        .with_detail("128 x 72")
+        .with_preview(UiProductPreview::VisualSrgb8 {
+            width: 16,
+            height: 9,
+            revision: 104,
+            bytes: visual_preview_bytes(16, 9),
+        })
+}
+
+pub(crate) fn visual_error_product(name: &str) -> UiProducedProduct {
+    UiProducedProduct::visual(name)
+        .with_detail("128 x 72")
+        .with_preview(UiProductPreview::Error {
+            message: "render probe failed".to_string(),
+        })
+}
+
+fn visual_preview_bytes(width: u32, height: u32) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity((width * height * 3) as usize);
+    for y in 0..height {
+        for x in 0..width {
+            let u = x as f32 / width.saturating_sub(1).max(1) as f32;
+            let v = y as f32 / height.saturating_sub(1).max(1) as f32;
+            bytes.push((u * 255.0) as u8);
+            bytes.push(((1.0 - v) * 180.0 + 40.0) as u8);
+            bytes.push(((u * v) * 220.0 + 24.0) as u8);
+        }
+    }
+    bytes
 }
 
 pub(crate) fn produced_values_fixture() -> Vec<UiProducedValue> {

@@ -5,9 +5,10 @@ use lpc_view::{ProjectView, SlotMirrorView, TreeEntryView};
 use lpc_wire::{NodeRuntimeStatus, WireEntryState};
 
 use crate::{
-    ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTarget,
-    ProjectSlotAddress, ProjectSlotRoot, SlotController, UiNodeChild, UiNodeHeader, UiNodeSection,
-    UiNodeTab, UiNodeView, UiStatus,
+    ProjectEditorOp, ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone,
+    ProjectNodeStatusView, ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController,
+    UiAction, UiNodeChild, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiProductPreview,
+    UiProductRef, UiStatus,
 };
 
 /// User/controller intent for product subscriptions owned by a node.
@@ -157,6 +158,14 @@ impl NodeController {
 
     /// Project this controller and its slot controllers into the node-pane DTO.
     pub fn ui_node(&self) -> UiNodeView {
+        self.ui_node_with_product_previews(&|_| None)
+    }
+
+    /// Project this controller into a node-pane DTO with product preview state.
+    pub(in crate::app::project) fn ui_node_with_product_previews(
+        &self,
+        product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
+    ) -> UiNodeView {
         let header = UiNodeHeader::new(
             self.label.clone(),
             self.kind.clone(),
@@ -164,10 +173,16 @@ impl NodeController {
         )
         .with_status(self.ui_status());
 
-        let mut view = UiNodeView::new(header, vec![UiNodeTab::main(self.ui_sections())])
-            .with_node_id(self.address.to_string())
-            .with_children(self.ui_children());
+        let mut view = UiNodeView::new(
+            header,
+            vec![UiNodeTab::main(
+                self.ui_sections_with_product_previews(product_preview),
+            )],
+        )
+        .with_node_id(self.address.to_string())
+        .with_children(self.ui_children_with_product_previews(product_preview));
         view.focused = self.state.focused;
+        view.action = Some(node_focus_action(self));
         view.collapsed = self.state.collapsed;
         view.issues = self.issues.clone();
         view
@@ -269,7 +284,22 @@ impl NodeController {
             .collect();
     }
 
-    fn ui_sections(&self) -> Vec<UiNodeSection> {
+    /// Collect produced product identities emitted by this node.
+    pub(in crate::app::project) fn collect_produced_product_refs(
+        &self,
+        products: &mut Vec<UiProductRef>,
+    ) {
+        for slot in &self.slots {
+            if matches!(slot.address().root, ProjectSlotRoot::State) {
+                slot.collect_produced_product_refs(products);
+            }
+        }
+    }
+
+    fn ui_sections_with_product_previews(
+        &self,
+        product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
+    ) -> Vec<UiNodeSection> {
         let mut products = Vec::new();
         let mut produced_values = Vec::new();
         let mut config_slots = Vec::new();
@@ -288,6 +318,13 @@ impl NodeController {
 
         let mut sections = Vec::new();
         if !products.is_empty() {
+            for product in &mut products {
+                if let Some(product_ref) = product.product
+                    && let Some(preview) = product_preview(&product_ref)
+                {
+                    product.preview = preview;
+                }
+            }
             sections.push(UiNodeSection::ProducedProducts(products));
         }
         if !produced_values.is_empty() {
@@ -302,7 +339,10 @@ impl NodeController {
         sections
     }
 
-    fn ui_children(&self) -> Vec<UiNodeChild> {
+    fn ui_children_with_product_previews(
+        &self,
+        product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
+    ) -> Vec<UiNodeChild> {
         self.children
             .iter()
             .map(|child| {
@@ -313,8 +353,8 @@ impl NodeController {
                 );
                 view.status = child.ui_status();
                 view.summary = child.status.detail.clone();
-                view.sections = child.ui_sections();
-                view.children = child.ui_children();
+                view.sections = child.ui_sections_with_product_previews(product_preview);
+                view.children = child.ui_children_with_product_previews(product_preview);
                 view
             })
             .collect()
@@ -328,6 +368,15 @@ impl NodeController {
             ProjectNodeStatusTone::Error => UiStatus::error(self.status.label.clone()),
         }
     }
+}
+
+fn node_focus_action(node: &NodeController) -> UiAction {
+    UiAction::from_op(
+        ProjectEditorTarget::addressed_node(node.target().clone()).node_id(),
+        ProjectEditorOp::Focus,
+    )
+    .with_label(format!("Focus {}", node.label()))
+    .with_summary(format!("Focus node {}.", node.address()))
 }
 
 enum RootSlotApply<'a> {

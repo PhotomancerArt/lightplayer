@@ -38,7 +38,7 @@ pub use ui_node_header::UiNodeHeader;
 pub use ui_node_section::UiNodeSection;
 pub use ui_node_tab::{UiNodeTab, UiNodeTabBody};
 pub use ui_node_view::UiNodeView;
-pub use ui_produced_product::{UiProducedProduct, UiProductKind};
+pub use ui_produced_product::{UiProducedProduct, UiProductKind, UiProductPreview, UiProductRef};
 pub use ui_produced_value::UiProducedValue;
 pub use ui_slot_aspect::{UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
 pub use ui_slot_asset::{UiAssetEditorKind, UiSlotAsset};

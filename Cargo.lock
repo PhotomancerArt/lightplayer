@@ -5155,6 +5155,7 @@ version = "40.0.0"
 dependencies = [
  "dioxus",
  "dioxus-icons",
+ "gloo-timers",
  "lpa-studio-core",
  "lpa-studio-web-story-macros",
  "syn 2.0.117",

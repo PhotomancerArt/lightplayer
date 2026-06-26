@@ -45,7 +45,7 @@ pub fn StudioShell(
                         }
                     }
                     div { class: "tw:order-2 tw:grid tw:min-w-0 tw:content-start tw:gap-3.5 tw:max-[960px]:order-1",
-                        ProjectNodeWorkspace { view: project_editor }
+                        ProjectNodeWorkspace { view: project_editor, on_action }
                     }
                 } else if !main.is_empty() {
                     div { class: "tw:grid tw:min-w-0 tw:content-start tw:gap-3.5",

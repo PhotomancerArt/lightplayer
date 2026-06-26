@@ -17,9 +17,9 @@ pub use app::node::{
     UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConfigSlotBody, UiNodeChild,
     UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView,
     UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind,
-    UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset,
-    UiSlotEditorHint, UiSlotFieldState, UiSlotOption, UiSlotOptionality, UiSlotRecord,
-    UiSlotSourceState, UiSlotValue, UiSlotValueKind,
+    UiProductPreview, UiProductRef, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind,
+    UiSlotAspectRow, UiSlotAsset, UiSlotEditorHint, UiSlotFieldState, UiSlotOption,
+    UiSlotOptionality, UiSlotRecord, UiSlotSourceState, UiSlotValue, UiSlotValueKind,
 };
 pub use app::project::{
     LoadedProjectChoice, NodeController, NodeControllerState, ProjectConnectResult,

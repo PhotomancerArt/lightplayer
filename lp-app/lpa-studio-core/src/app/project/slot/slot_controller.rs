@@ -9,8 +9,8 @@ use lpc_model::{
 
 use crate::{
     ProjectSlotAddress, ProjectSlotRoot, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody,
-    UiProducedProduct, UiProducedValue, UiSlotAsset, UiSlotEditorHint, UiSlotFieldState,
-    UiSlotOptionality, UiSlotRecord, UiSlotSourceState, UiSlotValue,
+    UiProducedProduct, UiProducedValue, UiProductRef, UiSlotAsset, UiSlotEditorHint,
+    UiSlotFieldState, UiSlotOptionality, UiSlotRecord, UiSlotSourceState, UiSlotValue,
     app::project::format_slot_map_key,
 };
 
@@ -235,23 +235,31 @@ impl SlotController {
             return None;
         }
         match self.value() {
-            Some(LpValue::Product(ProductRef::Visual(product))) => Some(
-                UiProducedProduct::visual(self.label.clone()).with_detail(format!(
-                    "node {} output {}",
-                    product.node(),
-                    product.output()
-                )),
-            ),
+            Some(LpValue::Product(ProductRef::Visual(product))) => {
+                let product_ref = UiProductRef::from_visual_product(*product);
+                Some(
+                    UiProducedProduct::visual(self.label.clone())
+                        .with_product(product_ref)
+                        .with_detail(format!(
+                            "node {} output {}",
+                            product.node(),
+                            product.output()
+                        )),
+                )
+            }
             Some(LpValue::Product(ProductRef::Control(product))) => {
                 let extent = product.preferred_extent();
+                let product_ref = UiProductRef::from_control_product(*product);
                 Some(
-                    UiProducedProduct::control(self.label.clone()).with_detail(format!(
-                        "node {} output {} {}x{}",
-                        product.node(),
-                        product.output(),
-                        extent.rows,
-                        extent.samples_per_row
-                    )),
+                    UiProducedProduct::control(self.label.clone())
+                        .with_product(product_ref)
+                        .with_detail(format!(
+                            "node {} output {} {}x{}",
+                            product.node(),
+                            product.output(),
+                            extent.rows,
+                            extent.samples_per_row
+                        )),
                 )
             }
             Some(LpValue::Unset) if self.value_shape_is_product() => {
@@ -261,6 +269,23 @@ impl SlotController {
                 Some(UiProducedProduct::empty(self.label.clone()))
             }
             _ => None,
+        }
+    }
+
+    /// Collect concrete produced products under this slot.
+    pub(in crate::app::project) fn collect_produced_product_refs(
+        &self,
+        products: &mut Vec<UiProductRef>,
+    ) {
+        if let Some(product) = self
+            .ui_produced_product()
+            .and_then(|product| product.product)
+        {
+            products.push(product);
+            return;
+        }
+        for child in &self.children {
+            child.collect_produced_product_refs(products);
         }
     }
 

@@ -1,12 +1,18 @@
-use lpc_model::{Revision, SlotShapeId};
+use std::collections::BTreeMap;
+
+use lpc_model::{Revision, SlotShapeId, VisualProduct};
 use lpc_view::{ProjectView, apply_project_read_response};
 use lpc_wire::{
-    NodeReadQuery, NodeReadSelection, ProjectReadQuery, ProjectReadRequest, ProjectReadResponse,
-    ProjectReadResult, ReadLevel, ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery,
-    ShapeReadQuery,
+    NodeReadQuery, NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery,
+    ProjectReadRequest, ProjectReadResponse, ProjectReadResult, ReadLevel,
+    RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery,
+    RuntimeReadQuery, ShapeReadQuery, WireTextureFormat,
 };
 
-use crate::{ProjectRuntimeSummary, ProjectSyncPhase, ProjectSyncSummary, UiError, UiIssue};
+use crate::{
+    ProjectRuntimeSummary, ProjectSyncPhase, ProjectSyncSummary, UiError, UiIssue,
+    UiProductPreview, UiProductRef,
+};
 
 // Keep shape pages small. Some shape definitions include other shapes and can
 // overflow the firmware's 16KB internal JSON buffer, which has caused project
@@ -14,6 +20,8 @@ use crate::{ProjectRuntimeSummary, ProjectSyncPhase, ProjectSyncSummary, UiError
 // limitation is fixed.
 const SHAPE_SYNC_PAGE_LIMIT: u32 = 4;
 const SHAPE_SYNC_MAX_PAGES: u32 = 256;
+const PRODUCT_PREVIEW_WIDTH: u32 = 64;
+const PRODUCT_PREVIEW_HEIGHT: u32 = 36;
 
 pub struct ProjectSync {
     view: ProjectView,
@@ -21,6 +29,8 @@ pub struct ProjectSync {
     shape_cursor: Option<SlotShapeId>,
     shape_page_count: u32,
     shapes_complete: bool,
+    product_previews: BTreeMap<UiProductRef, UiProductPreview>,
+    requested_product_previews: Vec<UiProductRef>,
     issue: Option<UiIssue>,
 }
 
@@ -32,6 +42,8 @@ impl ProjectSync {
             shape_cursor: None,
             shape_page_count: 0,
             shapes_complete: false,
+            product_previews: BTreeMap::new(),
+            requested_product_previews: Vec::new(),
             issue: None,
         }
     }
@@ -74,6 +86,11 @@ impl ProjectSync {
         &self.view
     }
 
+    /// Latest cached preview state for a produced product.
+    pub fn product_preview(&self, product: &UiProductRef) -> Option<&UiProductPreview> {
+        self.product_previews.get(product)
+    }
+
     pub fn is_ready(&self) -> bool {
         self.phase == ProjectSyncPhase::Ready
     }
@@ -102,16 +119,26 @@ impl ProjectSync {
         Ok(shape_sync_request(self.shape_cursor))
     }
 
-    pub fn initial_project_read_request(&mut self) -> ProjectReadRequest {
+    pub fn initial_project_read_request(
+        &mut self,
+        visual_products: Vec<VisualProduct>,
+    ) -> ProjectReadRequest {
         self.phase = ProjectSyncPhase::SyncingProject;
-        project_read_request(None, true)
+        project_read_request(None, true, self.product_probe_requests(visual_products))
     }
 
-    pub fn refresh_project_read_request(&mut self) -> ProjectReadRequest {
+    pub fn refresh_project_read_request(
+        &mut self,
+        visual_products: Vec<VisualProduct>,
+    ) -> ProjectReadRequest {
         self.begin_refresh();
         let since = (self.view.revision != Revision::default()).then_some(self.view.revision);
         let include_slots = self.view.slots.roots.is_empty();
-        project_read_request(since, include_slots)
+        project_read_request(
+            since,
+            include_slots,
+            self.product_probe_requests(visual_products),
+        )
     }
 
     pub fn apply_shape_sync_response(
@@ -142,6 +169,7 @@ impl ProjectSync {
         &mut self,
         response: ProjectReadResponse,
     ) -> Result<(), UiError> {
+        self.apply_product_probe_results(&response.probes);
         apply_project_read_response(&mut self.view, response)
             .map_err(|error| UiError::Protocol(error.to_string()))?;
         self.phase = ProjectSyncPhase::Ready;
@@ -152,6 +180,43 @@ impl ProjectSync {
     pub fn fail(&mut self, issue: impl Into<String>) {
         self.phase = ProjectSyncPhase::Failed;
         self.issue = Some(UiIssue::new(issue));
+    }
+
+    fn product_probe_requests(
+        &mut self,
+        visual_products: Vec<VisualProduct>,
+    ) -> Vec<ProjectProbeRequest> {
+        self.requested_product_previews = visual_products
+            .iter()
+            .copied()
+            .map(UiProductRef::from_visual_product)
+            .collect();
+        for product in &self.requested_product_previews {
+            self.product_previews
+                .entry(*product)
+                .or_insert(UiProductPreview::Pending);
+        }
+        visual_products
+            .into_iter()
+            .map(|product| {
+                ProjectProbeRequest::RenderProduct(RenderProductProbeRequest {
+                    product,
+                    width: PRODUCT_PREVIEW_WIDTH,
+                    height: PRODUCT_PREVIEW_HEIGHT,
+                    format: WireTextureFormat::Srgb8,
+                })
+            })
+            .collect()
+    }
+
+    fn apply_product_probe_results(&mut self, probes: &[ProjectProbeResult]) {
+        let requested = core::mem::take(&mut self.requested_product_previews);
+        for (index, probe) in probes.iter().enumerate() {
+            let fallback_key = requested.get(index).copied();
+            if let Some((product, preview)) = product_preview_from_probe(probe, fallback_key) {
+                self.product_previews.insert(product, preview);
+            }
+        }
     }
 }
 
@@ -173,7 +238,11 @@ pub fn shape_sync_request(after: Option<SlotShapeId>) -> ProjectReadRequest {
     }
 }
 
-pub fn project_read_request(since: Option<Revision>, include_slots: bool) -> ProjectReadRequest {
+pub fn project_read_request(
+    since: Option<Revision>,
+    include_slots: bool,
+    probes: Vec<ProjectProbeRequest>,
+) -> ProjectReadRequest {
     ProjectReadRequest {
         since,
         queries: Vec::from([
@@ -188,7 +257,62 @@ pub fn project_read_request(since: Option<Revision>, include_slots: bool) -> Pro
             }),
             ProjectReadQuery::Runtime(RuntimeReadQuery),
         ]),
-        probes: Vec::new(),
+        probes,
+    }
+}
+
+fn product_preview_from_probe(
+    probe: &ProjectProbeResult,
+    fallback_key: Option<UiProductRef>,
+) -> Option<(UiProductRef, UiProductPreview)> {
+    match probe {
+        ProjectProbeResult::RenderProduct(RenderProductProbeResult::Texture {
+            product,
+            revision,
+            width,
+            height,
+            format: WireTextureFormat::Srgb8,
+            bytes,
+        }) => Some((
+            UiProductRef::from_visual_product(*product),
+            UiProductPreview::VisualSrgb8 {
+                width: *width,
+                height: *height,
+                revision: revision.0,
+                bytes: bytes.clone(),
+            },
+        )),
+        ProjectProbeResult::RenderProduct(RenderProductProbeResult::Texture {
+            product,
+            format,
+            ..
+        }) => Some((
+            UiProductRef::from_visual_product(*product),
+            UiProductPreview::Unsupported {
+                reason: format!("visual preview format {format:?} is not supported by Studio"),
+            },
+        )),
+        ProjectProbeResult::RenderProduct(RenderProductProbeResult::Unsupported { reason }) => {
+            fallback_key.map(|product| {
+                (
+                    product,
+                    UiProductPreview::Unsupported {
+                        reason: reason.clone(),
+                    },
+                )
+            })
+        }
+        ProjectProbeResult::RenderProduct(RenderProductProbeResult::Error { message }) => {
+            fallback_key.map(|product| {
+                (
+                    product,
+                    UiProductPreview::Error {
+                        message: message.clone(),
+                    },
+                )
+            })
+        }
+        ProjectProbeResult::ExplainSlot(_) => None,
     }
 }
 
@@ -216,7 +340,7 @@ mod tests {
 
     #[test]
     fn project_read_request_includes_nodes_resources_and_runtime() {
-        let request = project_read_request(Some(Revision::new(12)), true);
+        let request = project_read_request(Some(Revision::new(12)), true, Vec::new());
 
         assert_eq!(request.since, Some(Revision::new(12)));
         assert_eq!(request.queries.len(), 3);
@@ -247,7 +371,7 @@ mod tests {
         let mut sync = ProjectSync::new();
         sync.view.revision = Revision::new(9);
 
-        let request = sync.refresh_project_read_request();
+        let request = sync.refresh_project_read_request(Vec::new());
 
         assert_eq!(request.since, Some(Revision::new(9)));
         assert_eq!(
@@ -256,6 +380,63 @@ mod tests {
                 level: ReadLevel::Detail,
                 nodes: NodeReadSelection::All,
                 include_slots: true,
+            })
+        );
+    }
+
+    #[test]
+    fn refresh_request_includes_visual_product_probes() {
+        let mut sync = ProjectSync::new();
+        let product = VisualProduct::new(lpc_model::NodeId::new(7), 2);
+
+        let request = sync.refresh_project_read_request(vec![product]);
+
+        assert_eq!(request.probes.len(), 1);
+        assert_eq!(
+            request.probes[0],
+            ProjectProbeRequest::RenderProduct(RenderProductProbeRequest {
+                product,
+                width: PRODUCT_PREVIEW_WIDTH,
+                height: PRODUCT_PREVIEW_HEIGHT,
+                format: WireTextureFormat::Srgb8,
+            })
+        );
+        assert_eq!(
+            sync.product_preview(&UiProductRef::from_visual_product(product)),
+            Some(&UiProductPreview::Pending)
+        );
+    }
+
+    #[test]
+    fn project_read_response_caches_visual_product_preview() {
+        let mut sync = ProjectSync::new();
+        let product = VisualProduct::new(lpc_model::NodeId::new(7), 2);
+        let _ = sync.refresh_project_read_request(vec![product]);
+        let bytes = vec![1, 2, 3, 4, 5, 6];
+
+        sync.apply_project_read_response(ProjectReadResponse {
+            revision: Revision::new(9),
+            results: Vec::new(),
+            probes: vec![ProjectProbeResult::RenderProduct(
+                RenderProductProbeResult::Texture {
+                    product,
+                    revision: Revision::new(8),
+                    width: 1,
+                    height: 2,
+                    format: WireTextureFormat::Srgb8,
+                    bytes: bytes.clone(),
+                },
+            )],
+        })
+        .unwrap();
+
+        assert_eq!(
+            sync.product_preview(&UiProductRef::from_visual_product(product)),
+            Some(&UiProductPreview::VisualSrgb8 {
+                width: 1,
+                height: 2,
+                revision: 8,
+                bytes,
             })
         );
     }

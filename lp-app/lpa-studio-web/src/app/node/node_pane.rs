@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use lpa_studio_core::core::status::UiStatusKind;
-use lpa_studio_core::{UiNodeSection, UiNodeTabBody, UiNodeView, UiSlotRecord};
+use lpa_studio_core::{UiAction, UiNodeSection, UiNodeTabBody, UiNodeView, UiSlotRecord};
 
 use crate::app::node::{
     NodeChildren, NodeHeader, ProducedProducts, ProducedValues, SlotRecordEditor,
@@ -9,9 +9,14 @@ use crate::base::{StudioIcon, StudioIconName};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn NodePane(view: UiNodeView) -> Element {
+pub fn NodePane(
+    view: UiNodeView,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
     let mut active_tab = use_signal(|| 0_usize);
     let mut collapsed = use_signal(|| view.collapsed);
+    let focus_action = view.action.clone();
+    let focus_handler = on_action;
     let focused_class = if view.focused {
         "tw:border-accent-border"
     } else {
@@ -23,14 +28,23 @@ pub fn NodePane(view: UiNodeView) -> Element {
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3",
-            article { class: "tw:grid tw:min-w-0 tw:rounded-md tw:border {focused_class} tw:bg-card tw:p-4",
+            article {
+                class: "tw:grid tw:min-w-0 tw:rounded-md tw:border {focused_class} tw:bg-card tw:p-4",
+                onclick: move |_| {
+                    if let (Some(action), Some(handler)) = (focus_action.clone(), focus_handler) {
+                        handler.call(action);
+                    }
+                },
                 header { class: "{header_class}",
                     button {
                         class: "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-r tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:bg-card-subtle/60",
                         r#type: "button",
                         aria_label: if collapsed() { "Expand node" } else { "Collapse node" },
                         title: if collapsed() { "Expand node" } else { "Collapse node" },
-                        onclick: move |_| collapsed.set(!collapsed()),
+                        onclick: move |event| {
+                            event.stop_propagation();
+                            collapsed.set(!collapsed());
+                        },
                         StudioIcon {
                             name: if collapsed() { StudioIconName::Collapsed } else { StudioIconName::Expanded },
                             size: 14,
@@ -79,7 +93,10 @@ pub fn NodePane(view: UiNodeView) -> Element {
                 }
             }
             if !collapsed() && !view.children.is_empty() {
-                NodeChildren { items: view.children.clone() }
+                NodeChildren {
+                    items: view.children.clone(),
+                    on_action,
+                }
             }
         }
     }
@@ -135,7 +152,7 @@ pub fn NodeSection(section: UiNodeSection, #[props(default = false)] first: bool
         },
         UiNodeSection::Children(children) => rsx! {
             section { class: section_class("tw:bg-card tw:px-4 tw:py-4", first),
-                NodeChildren { items: children }
+                NodeChildren { items: children, on_action: None }
             }
         },
     }
@@ -168,7 +185,10 @@ fn NodeTabs(
                     r#type: "button",
                     role: "tab",
                     aria_selected: "{index == active_index}",
-                    onclick: move |_| on_select.call(index),
+                    onclick: move |event| {
+                        event.stop_propagation();
+                        on_select.call(index);
+                    },
                     "{tab.label}"
                 }
             }

@@ -74,6 +74,23 @@ impl StudioController {
         result
     }
 
+    /// Refresh a loaded project for passive UI updates.
+    ///
+    /// This bypasses the generic action activity/notice path so the web shell can
+    /// keep selected visual-product previews fresh without showing a user action
+    /// as running.
+    pub async fn refresh_loaded_project_tick(&mut self) -> Result<Option<ProjectSyncRun>, UiError> {
+        if !self.project_is_loaded() || !self.device.has_lightplayer_state() {
+            return Ok(None);
+        }
+        let sync = {
+            let server = self.device.server.client_mut()?;
+            self.project.refresh_project(server).await?
+        };
+        self.record_project_sync_run(&sync);
+        Ok(Some(sync))
+    }
+
     async fn dispatch_inner(&mut self, action: UiAction, updates: UxUpdateSink) -> UiResult {
         let node_id = action.node_id().clone();
         let device_node_id = self.device.node_id();

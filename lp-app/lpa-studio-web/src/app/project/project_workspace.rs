@@ -18,7 +18,7 @@ pub fn ProjectWorkspace(
                 running,
                 on_action,
             }
-            ProjectNodeWorkspace { view }
+            ProjectNodeWorkspace { view, on_action }
         }
     }
 }
@@ -72,7 +72,7 @@ pub fn ProjectSidebar(
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn ProjectNodeWorkspace(view: ProjectEditorView) -> Element {
+pub fn ProjectNodeWorkspace(view: ProjectEditorView, on_action: EventHandler<UiAction>) -> Element {
     let nodes = view.nodes;
 
     rsx! {
@@ -87,6 +87,7 @@ pub fn ProjectNodeWorkspace(view: ProjectEditorView) -> Element {
                     NodePane {
                         key: "{node.node_id}",
                         view: node,
+                        on_action,
                     }
                 }
             }
