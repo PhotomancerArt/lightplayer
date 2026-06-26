@@ -37,6 +37,7 @@ fn child_node_view(child: UiNodeChild) -> UiNodeView {
     let mut view = UiNodeView::new(header, vec![UiNodeTab::main(child.sections)])
         .with_node_id(format!("child:{}", child.label))
         .with_children(child.children);
-    view.focused = child.active;
+    view.focused = child.focused || child.active;
+    view.action = child.action;
     view
 }

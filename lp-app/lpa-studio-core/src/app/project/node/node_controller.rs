@@ -353,6 +353,8 @@ impl NodeController {
                 );
                 view.status = child.ui_status();
                 view.summary = child.status.detail.clone();
+                view.focused = child.state.focused;
+                view.action = Some(node_focus_action(child));
                 view.sections = child.ui_sections_with_product_previews(product_preview);
                 view.children = child.ui_children_with_product_previews(product_preview);
                 view

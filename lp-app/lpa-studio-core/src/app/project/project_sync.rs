@@ -133,7 +133,9 @@ impl ProjectSync {
     ) -> ProjectReadRequest {
         self.begin_refresh();
         let since = (self.view.revision != Revision::default()).then_some(self.view.revision);
-        let include_slots = self.view.slots.roots.is_empty();
+        // Runtime state slots carry live values/products, so refresh snapshots
+        // include slots even when the tree itself only changes by revision.
+        let include_slots = true;
         project_read_request(
             since,
             include_slots,
@@ -374,6 +376,29 @@ mod tests {
         let request = sync.refresh_project_read_request(Vec::new());
 
         assert_eq!(request.since, Some(Revision::new(9)));
+        assert_eq!(
+            request.queries[0],
+            ProjectReadQuery::Nodes(NodeReadQuery {
+                level: ReadLevel::Detail,
+                nodes: NodeReadSelection::All,
+                include_slots: true,
+            })
+        );
+    }
+
+    #[test]
+    fn refresh_request_includes_slots_after_roots_exist() {
+        let mut sync = ProjectSync::new();
+        sync.view.revision = Revision::new(9);
+        sync.view.slots.roots.insert(
+            "node.1.state".to_string(),
+            lpc_model::SlotData::Unit {
+                revision: Revision::new(9),
+            },
+        );
+
+        let request = sync.refresh_project_read_request(Vec::new());
+
         assert_eq!(
             request.queries[0],
             ProjectReadQuery::Nodes(NodeReadQuery {

@@ -1165,6 +1165,34 @@ mod tests {
     }
 
     #[test]
+    fn ui_child_nodes_keep_focus_action_and_state() {
+        let mut project = ProjectController::new();
+        let mut view = tree_view();
+        install_ui_projection_slots(&mut view, 3, Revision::new(4));
+        project.apply_project_view(&view).unwrap();
+        let child_address = node_address("/demo.project/orbit.shader");
+        project
+            .node_mut(&child_address)
+            .unwrap()
+            .state_mut()
+            .focused = true;
+
+        let nodes = project.ui_nodes();
+        let child = &nodes[0].children[1];
+
+        assert!(child.focused);
+        let action_target = ProjectEditorTarget::parse(child.action.as_ref().unwrap().node_id())
+            .expect("child action should be typed");
+        assert_eq!(
+            action_target,
+            ProjectEditorTarget::addressed_node(ProjectNodeTarget::new(
+                child_address,
+                NodeId::new(3),
+            ))
+        );
+    }
+
+    #[test]
     fn editor_view_uses_controller_nodes_and_navigation_targets() {
         let mut project = ProjectController::new();
         let inventory = ProjectInventorySummary {

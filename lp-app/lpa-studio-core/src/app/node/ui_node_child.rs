@@ -1,6 +1,6 @@
 //! Child nodes extracted from config slots.
 
-use crate::{UiNodeDirtyState, UiNodeSection, UiStatus};
+use crate::{UiAction, UiNodeDirtyState, UiNodeSection, UiStatus};
 
 /// A child node rendered outside its parent node pane.
 #[derive(Clone, Debug, PartialEq)]
@@ -17,6 +17,10 @@ pub struct UiNodeChild {
     pub summary: Option<String>,
     /// Whether this child is the active branch for its parent.
     pub active: bool,
+    /// Whether this child node is the focused/selected Studio node.
+    pub focused: bool,
+    /// Action that focuses this child node as the current Studio selection.
+    pub action: Option<UiAction>,
     /// Compact body sections for expanded child display.
     pub sections: Vec<UiNodeSection>,
     /// Nested child nodes extracted below this child.
@@ -39,6 +43,8 @@ impl UiNodeChild {
             status: UiStatus::neutral("Idle"),
             summary: None,
             active: false,
+            focused: false,
+            action: None,
             sections: Vec::new(),
             children: Vec::new(),
             dirty: UiNodeDirtyState::Clean,
