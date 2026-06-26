@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Attached Popup Playground</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --page: #0f1418;
+      --tile-a: #10171b;
+      --tile-b: #151c21;
+      --surface: #171d22;
+      --surface-raised: #1c242a;
+      --text: #f4f0e8;
+      --muted: #b9c0c7;
+      --accent: #72deb0;
+      --accent-soft: rgba(114, 222, 176, 0.12);
+      --border-width: 1px;
+      --button-radius: 7px;
+      --popup-radius: 8px;
+      --overlap: 1px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      color: var(--text);
+      font: 16px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        linear-gradient(45deg, var(--tile-a) 25%, transparent 25%) 0 0 / 32px 32px,
+        linear-gradient(-45deg, var(--tile-a) 25%, transparent 25%) 0 16px / 32px 32px,
+        linear-gradient(45deg, transparent 75%, var(--tile-a) 75%) 16px -16px / 32px 32px,
+        linear-gradient(-45deg, transparent 75%, var(--tile-a) 75%) -16px 0 / 32px 32px,
+        var(--tile-b);
+    }
+
+    .shell {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      min-height: 100vh;
+    }
+
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 18px;
+      align-items: end;
+      padding: 18px 20px;
+      border-bottom: 1px solid #29323a;
+      background: rgba(15, 20, 24, 0.92);
+      backdrop-filter: blur(12px);
+    }
+
+    label {
+      display: grid;
+      gap: 5px;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0;
+      text-transform: uppercase;
+    }
+
+    input,
+    select {
+      min-width: 92px;
+      height: 34px;
+      color: var(--text);
+      border: 1px solid #36424c;
+      border-radius: 6px;
+      background: #11171c;
+      padding: 0 9px;
+      font: inherit;
+    }
+
+    .stage {
+      position: relative;
+      min-height: 560px;
+      padding: 110px 48px;
+    }
+
+    .anchor-lane {
+      position: absolute;
+      top: 170px;
+      right: 220px;
+      display: grid;
+      place-items: center;
+    }
+
+    .anchor-button {
+      position: relative;
+      z-index: 40;
+      display: inline-grid;
+      width: 42px;
+      height: 42px;
+      place-items: center;
+      color: var(--accent);
+      border: var(--border-width) solid var(--accent);
+      border-radius: var(--button-radius);
+      background: linear-gradient(180deg, var(--accent-soft), transparent 70%), var(--surface);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
+      cursor: pointer;
+    }
+
+    .anchor-button svg {
+      width: 22px;
+      height: 22px;
+      stroke-width: 2.4;
+    }
+
+    .popup {
+      position: fixed;
+      z-index: 20;
+      width: min(320px, calc(100vw - 32px));
+      min-height: 148px;
+      color: var(--muted);
+      border: var(--border-width) solid var(--accent);
+      border-radius: var(--popup-radius);
+      background:
+        linear-gradient(90deg, rgba(114, 222, 176, 0.08), transparent 70%),
+        var(--surface);
+      box-shadow: 0 22px 55px rgba(0, 0, 0, 0.38);
+      padding: 16px 18px;
+    }
+
+    .popup h1 {
+      margin: 0 0 8px;
+      color: var(--text);
+      font-size: 18px;
+      line-height: 1.15;
+      letter-spacing: 0;
+    }
+
+    .popup p {
+      margin: 0 0 14px;
+    }
+
+    .popup code {
+      display: inline-flex;
+      align-items: center;
+      min-height: 28px;
+      padding: 2px 8px;
+      color: var(--text);
+      border: 1px solid #303b44;
+      border-radius: 6px;
+      background: #11171c;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+    }
+
+    .bridge {
+      position: fixed;
+      z-index: 100;
+      pointer-events: none;
+      background: var(--surface);
+      height: calc(var(--popup-radius) + var(--border-width));
+    }
+
+    .bridge-corner {
+      position: absolute;
+      bottom: 0;
+      width: var(--popup-radius);
+      height: var(--popup-radius);
+      background: var(--surface);
+    }
+
+    .bridge-corner-left {
+      left: calc(-1 * var(--popup-radius));
+      border-bottom: 1px solid var(--accent);
+      border-right: 1px solid var(--accent);
+      border-bottom-right-radius: var(--popup-radius);
+    }
+
+    .bridge-corner-right {
+      right: calc(-1 * var(--popup-radius));
+      border-bottom: 1px solid var(--accent);
+      border-left: 1px solid var(--accent);
+      border-bottom-left-radius: var(--popup-radius);
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <form class="toolbar" id="controls">
+      <label>
+        Placement
+        <select name="placement">
+          <option value="bottom-center" selected>bottom-center</option>
+        </select>
+      </label>
+      <label>
+        Popup radius
+        <input name="popupRadius" type="number" min="0" max="32" step="1" value="8">
+      </label>
+      <label>
+        Button radius
+        <input name="buttonRadius" type="number" min="0" max="24" step="1" value="7">
+      </label>
+      <label>
+        Border width
+        <input name="borderWidth" type="number" min="1" max="6" step="1" value="1">
+      </label>
+      <label>
+        Overlap
+        <input name="overlap" type="number" min="0" max="8" step="1" value="1">
+      </label>
+    </form>
+
+    <section class="stage" id="stage">
+      <div class="anchor-lane">
+        <button class="anchor-button" id="anchorButton" type="button" aria-expanded="true" aria-controls="popup">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+            <path d="M9 7H7a5 5 0 0 0 0 10h2"></path>
+            <path d="M15 7h2a5 5 0 0 1 0 10h-2"></path>
+            <path d="M8 12h8"></path>
+          </svg>
+        </button>
+      </div>
+
+      <aside class="popup" id="popup" role="dialog" aria-labelledby="popupTitle">
+        <h1 id="popupTitle">Bound value</h1>
+        <p>This is a scratch surface for working out attached popup border geometry.</p>
+        <code>bus#visual.out</code>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    const controls = document.querySelector("#controls");
+    const button = document.querySelector("#anchorButton");
+    const popup = document.querySelector("#popup");
+    let bridge = null;
+
+    function numberControl(name) {
+      return Number(controls.elements[name].value);
+    }
+
+    function readOptions() {
+      return {
+        placement: controls.elements.placement.value,
+        popupRadius: numberControl("popupRadius"),
+        buttonRadius: numberControl("buttonRadius"),
+        borderWidth: numberControl("borderWidth"),
+        overlap: numberControl("overlap"),
+      };
+    }
+
+    function applyOptions(options) {
+      document.documentElement.style.setProperty("--popup-radius", `${options.popupRadius}px`);
+      document.documentElement.style.setProperty("--button-radius", `${options.buttonRadius}px`);
+      document.documentElement.style.setProperty("--border-width", `${options.borderWidth}px`);
+      document.documentElement.style.setProperty("--overlap", `${options.overlap}px`);
+    }
+
+    function ensureBridge() {
+      if (bridge) {
+        return bridge;
+      }
+
+      bridge = document.createElement("div");
+      bridge.className = "bridge";
+      bridge.dataset.scratchBridge = "true";
+      bridge.innerHTML = `
+        <span class="bridge-corner bridge-corner-left"></span>
+        <span class="bridge-corner bridge-corner-right"></span>
+      `;
+      document.body.appendChild(bridge);
+      return bridge;
+    }
+
+    function layoutPopup() {
+      const options = readOptions();
+      applyOptions(options);
+
+      popup.style.left = "0px";
+      popup.style.top = "0px";
+
+      const buttonRect = button.getBoundingClientRect();
+      const popupRect = popup.getBoundingClientRect();
+      const viewportPad = 16;
+      const preferredLeft = buttonRect.left + (buttonRect.width - popupRect.width) / 2;
+      const left = clamp(
+        preferredLeft,
+        viewportPad,
+        window.innerWidth - popupRect.width - viewportPad,
+      );
+      const top = buttonRect.bottom - options.borderWidth;
+
+      popup.style.left = `${Math.round(left)}px`;
+      popup.style.top = `${Math.round(top)}px`;
+
+      repositionBridge(options);
+    }
+
+    function repositionBridge(options = readOptions()) {
+      const bridgeEl = ensureBridge();
+      const buttonRect = button.getBoundingClientRect();
+
+      bridgeEl.className = "bridge is-below";
+
+      const bridgeWidth = Math.round(buttonRect.width);
+      const left = buttonRect.left;
+      const top = buttonRect.bottom - options.popupRadius;
+
+      bridgeEl.style.left = `${Math.round(left)}px`;
+      bridgeEl.style.top = `${Math.round(top)}px`;
+      bridgeEl.style.width = `${bridgeWidth}px`;
+    }
+
+    function clamp(value, min, max) {
+      if (max < min) {
+        return min;
+      }
+      return Math.min(Math.max(value, min), max);
+    }
+
+    function scheduleLayout() {
+      requestAnimationFrame(layoutPopup);
+    }
+
+    controls.addEventListener("input", scheduleLayout);
+    controls.addEventListener("change", scheduleLayout);
+    window.addEventListener("resize", scheduleLayout);
+
+    new ResizeObserver(scheduleLayout).observe(button);
+    new ResizeObserver(scheduleLayout).observe(popup);
+
+    scheduleLayout();
+  </script>
+</body>
+</html>
