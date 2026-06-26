@@ -23,6 +23,8 @@ pub enum UiSlotAffordance {
 /// The stable categories shown in a slot detail popup.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum UiSlotAspectKind {
+    /// Optional inclusion state for a slot whose value may be absent.
+    Optionality,
     /// Validation rules and validation results.
     Validation,
     /// Local edit and persistence state.

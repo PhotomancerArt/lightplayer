@@ -189,6 +189,7 @@ fn slot_detail_popup_class() -> &'static str {
 
 fn aspect_summary(aspect: &UiSlotAspect) -> AspectSummary {
     match aspect.kind {
+        UiSlotAspectKind::Optionality => optionality_summary(aspect),
         UiSlotAspectKind::Validation => validation_summary(aspect),
         UiSlotAspectKind::EditState => edit_state_summary(aspect),
         UiSlotAspectKind::Binding => binding_summary(aspect),
@@ -200,6 +201,28 @@ fn aspect_summary(aspect: &UiSlotAspect) -> AspectSummary {
             tone: AspectTone::Quiet,
             highlight: None,
         },
+    }
+}
+
+fn optionality_summary(aspect: &UiSlotAspect) -> AspectSummary {
+    if first_row_label_is(aspect, "Enabled") {
+        AspectSummary {
+            title: "Enabled".to_string(),
+            code: None,
+            title_is_code: false,
+            icon: StudioIconName::AssignedValue,
+            tone: AspectTone::Good,
+            highlight: None,
+        }
+    } else {
+        AspectSummary {
+            title: "Disabled".to_string(),
+            code: None,
+            title_is_code: false,
+            icon: StudioIconName::UnboundValue,
+            tone: AspectTone::Quiet,
+            highlight: None,
+        }
     }
 }
 

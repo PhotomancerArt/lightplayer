@@ -10,7 +10,8 @@ use lpc_model::{
 use crate::{
     ProjectSlotAddress, ProjectSlotRoot, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody,
     UiProducedProduct, UiProducedValue, UiSlotAsset, UiSlotEditorHint, UiSlotFieldState,
-    UiSlotRecord, UiSlotSourceState, UiSlotValue, app::project::format_slot_map_key,
+    UiSlotOptionality, UiSlotRecord, UiSlotSourceState, UiSlotValue,
+    app::project::format_slot_map_key,
 };
 
 /// Compact structural family for a project slot controller.
@@ -201,6 +202,9 @@ impl SlotController {
         if let Some(detail) = self.ui_detail() {
             slot = slot.with_detail(detail);
         }
+        if let Some(optionality) = self.ui_optionality() {
+            slot = slot.with_optionality(optionality);
+        }
         for issue in &self.issues {
             slot = slot.with_issue(issue.clone());
         }
@@ -215,6 +219,9 @@ impl SlotController {
             .with_state(self.ui_field_state());
         if let Some(detail) = self.ui_detail() {
             slot = slot.with_detail(detail);
+        }
+        if let Some(optionality) = self.ui_optionality() {
+            slot = slot.with_optionality(optionality);
         }
         for issue in &self.issues {
             slot = slot.with_issue(issue.clone());
@@ -674,13 +681,21 @@ impl SlotController {
                     .map(Self::ui_config_slot)
                     .collect(),
             )),
-            SlotControllerBody::Option { present } if *present => UiConfigSlotBody::Record(
-                UiSlotRecord::new(self.children.iter().map(Self::ui_config_slot).collect()),
-            ),
+            SlotControllerBody::Option { present } if *present => self.ui_present_option_body(),
             SlotControllerBody::Option { .. } | SlotControllerBody::Issue => {
                 UiConfigSlotBody::Empty
             }
         }
+    }
+
+    fn ui_present_option_body(&self) -> UiConfigSlotBody {
+        let Some(child) = self.children.first() else {
+            return UiConfigSlotBody::Empty;
+        };
+        if let Some(asset) = child.ui_slot_asset() {
+            return UiConfigSlotBody::Asset(asset);
+        }
+        child.ui_config_slot_body()
     }
 
     fn ui_slot_value(&self, value: &LpValue) -> UiSlotValue {
@@ -730,10 +745,24 @@ impl SlotController {
     }
 
     fn ui_source(&self) -> UiSlotSourceState {
+        if matches!(&self.body, SlotControllerBody::Option { present: false }) {
+            return UiSlotSourceState::Unset;
+        }
         match self.value() {
             Some(LpValue::Unset) => UiSlotSourceState::Unset,
             _ => self.source.clone(),
         }
+    }
+
+    fn ui_optionality(&self) -> Option<UiSlotOptionality> {
+        let SlotControllerBody::Option { present } = &self.body else {
+            return None;
+        };
+        Some(if *present {
+            UiSlotOptionality::included(self.policy.writable)
+        } else {
+            UiSlotOptionality::excluded(self.policy.writable)
+        })
     }
 
     fn ui_field_state(&self) -> UiSlotFieldState {
@@ -760,11 +789,10 @@ impl SlotController {
             SlotControllerBody::Record => Some(child_count_detail(self.children.len(), "field")),
             SlotControllerBody::Map => Some(child_count_detail(self.children.len(), "entry")),
             SlotControllerBody::Enum { variant } => Some(format!("variant {variant}")),
-            SlotControllerBody::Option { present } => Some(if *present {
-                "set".to_string()
-            } else {
-                "unset".to_string()
-            }),
+            SlotControllerBody::Option { present: true } => {
+                self.children.first().and_then(|child| child.ui_detail())
+            }
+            SlotControllerBody::Option { present: false } => None,
             SlotControllerBody::Empty | SlotControllerBody::Issue => None,
         }
     }

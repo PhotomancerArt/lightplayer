@@ -30,7 +30,7 @@ mod ui_slot_record;
 mod ui_slot_source_state;
 mod ui_slot_value;
 
-pub use ui_config_slot::{UiConfigSlot, UiConfigSlotBody};
+pub use ui_config_slot::{UiConfigSlot, UiConfigSlotBody, UiSlotOptionality};
 pub use ui_node_binding::{UiBindingEndpoint, UiProducedBinding, UiProducedBindings};
 pub use ui_node_child::UiNodeChild;
 pub use ui_node_dirty_state::UiNodeDirtyState;

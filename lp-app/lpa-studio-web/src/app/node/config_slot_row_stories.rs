@@ -2,8 +2,8 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    UiBindingEndpoint, UiConfigSlot, UiNodeDirtyState, UiSlotFieldState, UiSlotSourceState,
-    UiSlotValue,
+    UiBindingEndpoint, UiConfigSlot, UiNodeDirtyState, UiSlotFieldState, UiSlotOptionality,
+    UiSlotSourceState, UiSlotValue,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -104,7 +104,56 @@ pub(crate) fn unset_value() -> Element {
     rsx! {
         ConfigSlotRow {
             slot: UiConfigSlot::empty("optional_trigger", "Optional trigger")
+                .with_optionality(UiSlotOptionality::excluded(true))
                 .with_source(UiSlotSourceState::Unset),
+            depth: 0,
+            index: 0,
+        }
+    }
+}
+
+#[story(
+    description = "An included optional scalar renders as a normal value with an enable toggle."
+)]
+pub(crate) fn optional_scalar_included() -> Element {
+    rsx! {
+        ConfigSlotRow {
+            slot: UiConfigSlot::value("brightness", "Brightness", UiSlotValue::u32(255))
+                .with_optionality(UiSlotOptionality::included(true)),
+            depth: 0,
+            index: 0,
+        }
+    }
+}
+
+#[story(
+    description = "An excluded optional scalar renders as an unset value with the enable toggle off."
+)]
+pub(crate) fn optional_scalar_excluded() -> Element {
+    rsx! {
+        ConfigSlotRow {
+            slot: UiConfigSlot::empty("brightness", "Brightness")
+                .with_optionality(UiSlotOptionality::excluded(true))
+                .with_source(UiSlotSourceState::Unset),
+            depth: 0,
+            index: 0,
+        }
+    }
+}
+
+#[story(description = "An included optional record expands into its real child fields.")]
+pub(crate) fn optional_record_included() -> Element {
+    rsx! {
+        ConfigSlotRow {
+            slot: UiConfigSlot::record(
+                "output_options",
+                "Output options",
+                vec![
+                    UiConfigSlot::value("dither", "Dither", UiSlotValue::bool(true)),
+                    UiConfigSlot::value("interpolate", "Interpolate", UiSlotValue::bool(false)),
+                ],
+            )
+            .with_optionality(UiSlotOptionality::included(true)),
             depth: 0,
             index: 0,
         }

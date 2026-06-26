@@ -1,7 +1,7 @@
 //! Table row presentation for a single config slot.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiConfigSlot, UiConfigSlotBody, UiSlotFieldState};
+use lpa_studio_core::{UiConfigSlot, UiConfigSlotBody, UiSlotFieldState, UiSlotOptionality};
 
 use crate::app::node::{
     SlotDetailButton, SlotRecordEditor, SlotValueEditor, primary_affordance, slot_row_class,
@@ -63,6 +63,9 @@ pub fn ConfigSlotRow(
                     }
                 }
                 div { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-end tw:gap-2 tw:text-sm tw:leading-tight tw:text-muted-foreground",
+                    if let Some(optionality) = slot.optionality {
+                        OptionalSlotToggle { optionality }
+                    }
                     SlotBodyPreview { body: slot.body.clone(), state: slot.state.clone(), expanded: expanded() }
                 }
                 SlotDetailButton {
@@ -83,6 +86,31 @@ pub fn ConfigSlotRow(
                     AssetSlotEditor { asset }
                 }
             }
+        }
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn OptionalSlotToggle(optionality: UiSlotOptionality) -> Element {
+    let title = if optionality.included {
+        "Optional value enabled"
+    } else {
+        "Optional value disabled"
+    };
+    rsx! {
+        label { class: "ux-slot-optional-toggle", title,
+            input {
+                class: "ux-slot-optional-toggle-input",
+                r#type: "checkbox",
+                checked: optionality.included,
+                disabled: !optionality.can_toggle,
+                aria_label: title,
+            }
+            span { class: "ux-slot-optional-toggle-track",
+                span { class: "ux-slot-optional-toggle-thumb" }
+            }
+            span { class: "ux-slot-optional-toggle-label", "enabled" }
         }
     }
 }

@@ -718,7 +718,8 @@ mod tests {
     use crate::{
         ActionPriority, ProjectNodeTarget, ProjectOp, ProjectProductSubscriptionIntent,
         ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotKind, UiAssetEditorKind,
-        UiConfigSlotBody, UiNodeSection, UiNodeTabBody, UiProductKind,
+        UiConfigSlotBody, UiNodeSection, UiNodeTabBody, UiProductKind, UiSlotOptionality,
+        UiSlotSourceState,
     };
 
     use super::*;
@@ -1214,7 +1215,12 @@ mod tests {
         assert_eq!(mode.fields[0].label, "Manual");
 
         assert!(matches!(config[1].body, UiConfigSlotBody::Empty));
-        assert_eq!(config[1].detail.as_deref(), Some("unset"));
+        assert_eq!(
+            config[1].optionality,
+            Some(UiSlotOptionality::excluded(true))
+        );
+        assert_eq!(config[1].detail, None);
+        assert_eq!(config[1].source, UiSlotSourceState::Unset);
 
         let UiConfigSlotBody::Record(entries) = &config[2].body else {
             panic!("expected map as record body");
@@ -1227,6 +1233,33 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["a", "b"]
         );
+
+        let root = view
+            .slots
+            .roots
+            .get_mut("node.1.def")
+            .expect("def root exists");
+        let SlotData::Record(record) = root else {
+            panic!("expected def record");
+        };
+        record.fields[1] = SlotData::Option(SlotOptionDyn::some_with_version(
+            Revision::new(9),
+            SlotData::Value(WithRevision::new(Revision::new(9), LpValue::F32(0.25))),
+        ));
+
+        project.apply_project_view(&view).unwrap();
+
+        let nodes = project.ui_nodes();
+        let config = section_config_slots(node_sections(&nodes[0]));
+        assert_eq!(
+            config[1].optionality,
+            Some(UiSlotOptionality::included(true))
+        );
+        assert_eq!(config[1].detail.as_deref(), Some("Float32"));
+        let UiConfigSlotBody::Value(value) = &config[1].body else {
+            panic!("expected included option as value body");
+        };
+        assert_eq!(value.display, "0.25");
     }
 
     #[test]

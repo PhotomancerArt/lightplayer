@@ -4,7 +4,7 @@ use lpa_studio_core::{
     UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiNodeChild, UiNodeDirtyState,
     UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiProducedBinding,
     UiProducedBindings, UiProducedProduct, UiProducedValue, UiSlotAsset, UiSlotEditorHint,
-    UiSlotFieldState, UiSlotRecord, UiSlotSourceState, UiSlotValue, UiStatus,
+    UiSlotFieldState, UiSlotOptionality, UiSlotRecord, UiSlotSourceState, UiSlotValue, UiStatus,
 };
 
 const IDLE_GLSL: &str = r#"vec3 palette(float t) {
@@ -267,6 +267,7 @@ pub(crate) fn config_row_states_fixture() -> Vec<UiConfigSlot> {
         )
         .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Error)),
         UiConfigSlot::empty("optional_trigger", "Optional trigger")
+            .with_optionality(UiSlotOptionality::excluded(true))
             .with_source(UiSlotSourceState::Unset),
         UiConfigSlot::record(
             "record",

@@ -18,6 +18,33 @@ pub enum UiConfigSlotBody {
     Asset(UiSlotAsset),
 }
 
+/// Optional inclusion state for a config slot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct UiSlotOptionality {
+    /// Whether the optional slot currently includes its value.
+    pub included: bool,
+    /// Whether the current user flow may toggle the inclusion state.
+    pub can_toggle: bool,
+}
+
+impl UiSlotOptionality {
+    /// Create an included optional slot state.
+    pub fn included(can_toggle: bool) -> Self {
+        Self {
+            included: true,
+            can_toggle,
+        }
+    }
+
+    /// Create an excluded optional slot state.
+    pub fn excluded(can_toggle: bool) -> Self {
+        Self {
+            included: false,
+            can_toggle,
+        }
+    }
+}
+
 /// A config slot row projected from the LightPlayer slot tree.
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiConfigSlot {
@@ -29,6 +56,8 @@ pub struct UiConfigSlot {
     pub description: Option<String>,
     /// Optional type, unit, shape, path, or revision detail.
     pub detail: Option<String>,
+    /// Optional inclusion state when this row represents an `OptionSlot`.
+    pub optionality: Option<UiSlotOptionality>,
     /// Whether the visible value is direct, bound, or unset.
     pub source: UiSlotSourceState,
     /// Value or record body for the row.
@@ -77,6 +106,7 @@ impl UiConfigSlot {
             label: label.into(),
             description: None,
             detail: None,
+            optionality: None,
             source: UiSlotSourceState::Direct,
             body,
             state: UiSlotFieldState::editable(),
@@ -94,6 +124,12 @@ impl UiConfigSlot {
     /// Add compact secondary detail.
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
+        self
+    }
+
+    /// Set optional inclusion metadata.
+    pub fn with_optionality(mut self, optionality: UiSlotOptionality) -> Self {
+        self.optionality = Some(optionality);
         self
     }
 
@@ -147,12 +183,26 @@ impl UiConfigSlot {
 }
 
 fn default_aspects(slot: &UiConfigSlot) -> Vec<UiSlotAspect> {
-    vec![
-        type_info_aspect(slot),
+    let mut aspects = vec![type_info_aspect(slot)];
+    if let Some(optionality) = slot.optionality {
+        aspects.push(optionality_aspect(optionality));
+    }
+    aspects.extend([
         validation_aspect(slot),
         edit_state_aspect(&slot.state),
         binding_aspect(&slot.source),
-    ]
+    ]);
+    aspects
+}
+
+fn optionality_aspect(optionality: UiSlotOptionality) -> UiSlotAspect {
+    let state = if optionality.included {
+        "Enabled"
+    } else {
+        "Disabled"
+    };
+    UiSlotAspect::new(UiSlotAspectKind::Optionality, "Optional")
+        .with_row(UiSlotAspectRow::new(state, ""))
 }
 
 fn validation_aspect(slot: &UiConfigSlot) -> UiSlotAspect {
