@@ -12,12 +12,13 @@ use lpa_studio_core::core::view::activity_view::{UiActivityStep, UiActivityStepS
 use lpa_studio_core::core::view::steps_view::{UiStepState, UiStepView};
 use lpa_studio_core::{
     ControllerId, DeviceController, DeviceOp, LinkEndpointId, LinkProviderKind, ProjectController,
-    ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
-    ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView,
-    ProjectNodeView, ProjectOp, ProjectRuntimeSummary, ProjectSlotRowView, ProjectState,
-    ProjectSyncPhase, ProjectSyncSummary, UiAction, UiActivityView, UiIssue, UiLogEntry,
-    UiLogLevel, UiMetric, UiPaneView, UiProgress, UiStatus, UiStepsView, UiStudioView,
-    UiTerminalLine, UiViewContent,
+    ProjectEditorOp, ProjectEditorView, ProjectInventorySummary, ProjectNodeStatusTone,
+    ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
+    ProjectRuntimeSummary, ProjectState, ProjectSyncPhase, ProjectSyncSummary, UiAction,
+    UiActivityView, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiIssue, UiLogEntry,
+    UiLogLevel, UiMetric, UiNodeChild, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView,
+    UiPaneView, UiProducedProduct, UiProducedValue, UiProgress, UiSlotAsset, UiSlotSourceState,
+    UiSlotValue, UiStatus, UiStepsView, UiStudioView, UiTerminalLine, UiViewContent,
 };
 
 pub(crate) fn shell_story(
@@ -884,15 +885,25 @@ pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorVi
         ProjectNodeStatusTone::Warning,
     );
     let project = tree_item(
-        "1",
+        1,
+        "/demo.project",
         "Demo",
         "Project",
         running.clone(),
         false,
         vec![
-            tree_item("2", "Clock", "Clock", running.clone(), false, Vec::new()),
             tree_item(
-                "3",
+                2,
+                "/demo.project/clock.clock",
+                "Clock",
+                "Clock",
+                running.clone(),
+                false,
+                Vec::new(),
+            ),
+            tree_item(
+                3,
+                "/demo.project/orbit.shader",
                 "Orbit shader",
                 "Shader",
                 running.clone(),
@@ -900,14 +911,23 @@ pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorVi
                 Vec::new(),
             ),
             tree_item(
-                "4",
+                4,
+                "/demo.project/palette.visual",
                 "Sunrise palette",
                 "Visual",
                 warning.clone(),
                 false,
                 Vec::new(),
             ),
-            tree_item("5", "Output", "Output", running.clone(), false, Vec::new()),
+            tree_item(
+                5,
+                "/demo.project/output.output",
+                "Output",
+                "Output",
+                running.clone(),
+                false,
+                Vec::new(),
+            ),
         ],
     );
     let summary = project_editor_summary(phase);
@@ -917,126 +937,7 @@ pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorVi
         summary,
         project_synced_metrics(),
         ProjectNodeTreeView::new(vec![project], 5),
-        vec![
-            node_view(
-                "1",
-                "Demo",
-                "Project",
-                "/demo.project",
-                running.clone(),
-                false,
-                vec![],
-                vec![
-                    ProjectSlotRowView::value_with_detail("Name", "studio-demo", "rev 42"),
-                    ProjectSlotRowView::value_with_detail("Enabled", "true", "rev 42"),
-                ],
-                vec![],
-            ),
-            node_view(
-                "2",
-                "Clock",
-                "Clock",
-                "/demo.project/clock.clock",
-                running.clone(),
-                false,
-                vec![ProjectSlotRowView::value_with_detail(
-                    "Output",
-                    "control product node 2 output 0 (1x1)",
-                    "rev 42",
-                )],
-                vec![ProjectSlotRowView::value_with_detail(
-                    "Tempo", "120.0", "rev 42",
-                )],
-                vec![ProjectSlotRowView::value_with_detail(
-                    "Frame", "512", "rev 42",
-                )],
-            ),
-            node_view(
-                "3",
-                "Orbit shader",
-                "Shader",
-                "/demo.project/orbit.shader",
-                running.clone(),
-                true,
-                vec![
-                    ProjectSlotRowView::value_with_detail(
-                        "Input",
-                        "visual product node 4 output 0",
-                        "rev 42",
-                    ),
-                    ProjectSlotRowView::value_with_detail(
-                        "Output",
-                        "visual product node 3 output 0",
-                        "rev 43",
-                    ),
-                ],
-                vec![
-                    ProjectSlotRowView::value_with_detail(
-                        "Shader",
-                        "assets/shaders/orbit.glsl",
-                        "rev 42",
-                    ),
-                    ProjectSlotRowView::group(
-                        "Parameters",
-                        Some("3 fields".to_string()),
-                        vec![
-                            ProjectSlotRowView::value_with_detail("Brightness", "0.72", "rev 44"),
-                            ProjectSlotRowView::value_with_detail("Speed", "1.5", "rev 42"),
-                            ProjectSlotRowView::value_with_detail("Center", "(0.5, 0.5)", "rev 42"),
-                        ],
-                    ),
-                ],
-                vec![ProjectSlotRowView::value_with_detail(
-                    "Compile status",
-                    "ok",
-                    "rev 43",
-                )],
-            ),
-            node_view(
-                "4",
-                "Sunrise palette",
-                "Visual",
-                "/demo.project/palette.vis",
-                warning,
-                false,
-                vec![ProjectSlotRowView::value_with_detail(
-                    "Output",
-                    "visual product node 4 output 0",
-                    "rev 42",
-                )],
-                vec![ProjectSlotRowView::group(
-                    "Colors",
-                    Some("3 entries".to_string()),
-                    vec![
-                        ProjectSlotRowView::value("Primary", "(1.0, 0.45, 0.18)"),
-                        ProjectSlotRowView::value("Secondary", "(0.08, 0.18, 0.42)"),
-                        ProjectSlotRowView::value("Accent", "(0.95, 0.86, 0.34)"),
-                    ],
-                )],
-                vec![],
-            ),
-            node_view(
-                "5",
-                "Output",
-                "Output",
-                "/demo.project/output.output",
-                running,
-                false,
-                vec![ProjectSlotRowView::value_with_detail(
-                    "Input",
-                    "visual product node 3 output 0",
-                    "rev 43",
-                )],
-                vec![ProjectSlotRowView::value_with_detail(
-                    "Endpoint",
-                    "ws281x:rmt:D10",
-                    "rev 42",
-                )],
-                vec![ProjectSlotRowView::value_with_detail(
-                    "Samples", "241", "rev 42",
-                )],
-            ),
-        ],
+        vec![project_root_node()],
     )
 }
 
@@ -1079,7 +980,8 @@ pub(crate) fn project_editor_summary(phase: ProjectSyncPhase) -> ProjectSyncSumm
 }
 
 pub(crate) fn tree_item(
-    node_id: &str,
+    runtime_id: u32,
+    path: &str,
     label: &str,
     kind: &str,
     status: ProjectNodeStatusView,
@@ -1087,53 +989,163 @@ pub(crate) fn tree_item(
     children: Vec<ProjectNodeTreeItem>,
 ) -> ProjectNodeTreeItem {
     ProjectNodeTreeItem::new(
-        node_id,
+        path,
         label,
         kind,
         status,
         focused,
-        project_focus_action(node_id, label),
+        project_focus_action(runtime_id, path, label),
         children,
     )
 }
 
-#[allow(
-    clippy::too_many_arguments,
-    reason = "story fixtures read more clearly with direct node view data"
-)]
-pub(crate) fn node_view(
-    node_id: &str,
-    label: &str,
-    kind: &str,
-    path: &str,
-    status: ProjectNodeStatusView,
-    focused: bool,
-    prominent_slots: Vec<ProjectSlotRowView>,
-    config_slots: Vec<ProjectSlotRowView>,
-    state_slots: Vec<ProjectSlotRowView>,
-) -> ProjectNodeView {
-    ProjectNodeView::new(
-        node_id,
-        label,
-        kind,
-        path,
-        status,
-        focused,
-        project_focus_action(node_id, label),
-        prominent_slots,
-        config_slots,
-        state_slots,
-        Vec::new(),
-        Vec::new(),
-    )
-}
-
-pub(crate) fn project_focus_action(node_id: &str, label: &str) -> UiAction {
+pub(crate) fn project_focus_action(runtime_id: u32, path: &str, label: &str) -> UiAction {
     UiAction::from_op(
-        ProjectEditorTarget::node(node_id).node_id(),
+        ControllerId::new(format!("studio|project|node|nid|{runtime_id}|path|{path}")),
         ProjectEditorOp::Focus,
     )
     .with_label(format!("Focus {label}"))
+}
+
+fn project_root_node() -> UiNodeView {
+    UiNodeView::new(
+        UiNodeHeader::new("Demo", "Project", "/demo.project")
+            .with_status(UiStatus::good("Running"))
+            .with_summary("4 child nodes")
+            .with_detail("Root composition node."),
+        vec![UiNodeTab::main(vec![UiNodeSection::ConfigSlots(vec![
+            UiConfigSlot::value("name", "Name", UiSlotValue::string("studio-demo")),
+            UiConfigSlot::value("enabled", "Enabled", UiSlotValue::bool(true)),
+        ])])],
+    )
+    .with_node_id("/demo.project")
+    .with_children(vec![
+        clock_node_child(),
+        orbit_shader_child(),
+        palette_node_child(),
+        output_node_child(),
+    ])
+}
+
+fn clock_node_child() -> UiNodeChild {
+    node_child(
+        "Clock",
+        "Clock",
+        "/demo.project/clock.clock",
+        UiStatus::good("Running"),
+    )
+    .with_sections(vec![
+        UiNodeSection::ProducedProducts(vec![
+            UiProducedProduct::control("time").with_detail("1 channel"),
+        ]),
+        UiNodeSection::ProducedValues(vec![
+            UiProducedValue::new("Frame", "512").with_detail("rev 42"),
+            UiProducedValue::new("Time", "3.333").with_detail("s"),
+        ]),
+        UiNodeSection::ConfigSlots(vec![UiConfigSlot::value(
+            "tempo",
+            "Tempo",
+            UiSlotValue::f32(120.0),
+        )]),
+    ])
+}
+
+fn orbit_shader_child() -> UiNodeChild {
+    node_child(
+        "Orbit shader",
+        "Shader",
+        "/demo.project/orbit.shader",
+        UiStatus::good("Running"),
+    )
+    .active("focused")
+    .with_sections(vec![
+        UiNodeSection::ProducedProducts(vec![
+            UiProducedProduct::visual("output").with_detail("128 x 72"),
+        ]),
+        UiNodeSection::AssetSlots(vec![
+            UiConfigSlot::asset(
+                "shader_source",
+                "Shader source",
+                UiSlotAsset::new("assets/shaders/orbit.glsl", UiAssetEditorKind::Glsl)
+                    .with_content(
+                        "void mainImage(out vec4 color, in vec2 uv) {\n    color = vec4(uv, 0.4 + 0.4 * sin(iTime), 1.0);\n}",
+                    ),
+            )
+            .with_detail("glsl, rev 42"),
+        ]),
+        UiNodeSection::ConfigSlots(vec![
+            UiConfigSlot::value("time", "Time", UiSlotValue::f32(3.333).with_detail("s"))
+                .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
+                    "clock#time.seconds",
+                ))),
+            UiConfigSlot::record(
+                "parameters",
+                "Parameters",
+                vec![
+                    UiConfigSlot::value("brightness", "Brightness", UiSlotValue::f32(0.72)),
+                    UiConfigSlot::value("speed", "Speed", UiSlotValue::f32(1.5)),
+                    UiConfigSlot::value("center", "Center", UiSlotValue::vec2([0.5, 0.5])),
+                ],
+            )
+            .with_detail("3 fields"),
+        ]),
+    ])
+}
+
+fn palette_node_child() -> UiNodeChild {
+    node_child(
+        "Sunrise palette",
+        "Visual",
+        "/demo.project/palette.visual",
+        UiStatus::warning("Warning"),
+    )
+    .with_sections(vec![
+        UiNodeSection::ProducedProducts(vec![
+            UiProducedProduct::visual("output").with_detail("128 x 72"),
+        ]),
+        UiNodeSection::ConfigSlots(vec![
+            UiConfigSlot::record(
+                "colors",
+                "Colors",
+                vec![
+                    UiConfigSlot::value("primary", "Primary", UiSlotValue::vec3([1.0, 0.45, 0.18])),
+                    UiConfigSlot::value(
+                        "secondary",
+                        "Secondary",
+                        UiSlotValue::vec3([0.08, 0.18, 0.42]),
+                    ),
+                    UiConfigSlot::value("accent", "Accent", UiSlotValue::vec3([0.95, 0.86, 0.34])),
+                ],
+            )
+            .with_detail("fallback palette"),
+        ]),
+    ])
+}
+
+fn output_node_child() -> UiNodeChild {
+    node_child(
+        "Output",
+        "Output",
+        "/demo.project/output.output",
+        UiStatus::good("Running"),
+    )
+    .with_sections(vec![UiNodeSection::ConfigSlots(vec![
+        UiConfigSlot::value("input", "Input", UiSlotValue::string("orbit#output")).with_source(
+            UiSlotSourceState::Bound(UiBindingEndpoint::new("orbit#visual.output")),
+        ),
+        UiConfigSlot::value(
+            "endpoint",
+            "Endpoint",
+            UiSlotValue::string("ws281x:rmt:D10"),
+        ),
+        UiConfigSlot::value("samples", "Samples", UiSlotValue::u32(241)),
+    ])])
+}
+
+fn node_child(label: &str, kind: &str, detail: &str, status: UiStatus) -> UiNodeChild {
+    let mut child = UiNodeChild::new(label, kind, detail);
+    child.status = status;
+    child
 }
 
 pub(crate) fn story_node_status(label: &str, tone: ProjectNodeStatusTone) -> ProjectNodeStatusView {

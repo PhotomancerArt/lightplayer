@@ -25,11 +25,10 @@ pub use app::project::{
     LoadedProjectChoice, NodeController, NodeControllerState, ProjectConnectResult,
     ProjectController, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
     ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
-    ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectNodeView, ProjectOp,
-    ProjectProductSubscriptionIntent, ProjectRuntimeSummary, ProjectSlotAddress,
-    ProjectSlotGroupView, ProjectSlotIssueView, ProjectSlotRoot, ProjectSlotRowView,
-    ProjectSlotValueView, ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase,
-    ProjectSyncRun, ProjectSyncSummary, SlotController, SlotControllerState, SlotKind,
+    ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
+    ProjectProductSubscriptionIntent, ProjectRuntimeSummary, ProjectSlotAddress, ProjectSlotRoot,
+    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
+    ProjectSyncSummary, SlotController, SlotControllerState, SlotKind,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerController, ServerFailureKind, ServerOp,

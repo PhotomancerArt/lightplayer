@@ -1,9 +1,7 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{
-    ProjectEditorView, ProjectNodeStatusTone, ProjectNodeTreeItem, ProjectNodeView,
-    ProjectSlotGroupView, ProjectSlotIssueView, ProjectSlotRowView, ProjectSlotValueView, UiAction,
-};
+use lpa_studio_core::{ProjectEditorView, ProjectNodeStatusTone, ProjectNodeTreeItem, UiAction};
 
+use crate::app::node::NodePane;
 use crate::core::MetricGrid;
 
 #[component]
@@ -86,9 +84,9 @@ pub fn ProjectNodeWorkspace(view: ProjectEditorView) -> Element {
                 }
             } else {
                 for node in nodes {
-                    ProjectNodeCard {
+                    NodePane {
                         key: "{node.node_id}",
-                        node,
+                        view: node,
                     }
                 }
             }
@@ -144,166 +142,6 @@ fn ProjectNodeTreeItemView(
                     }
                 }
             }
-        }
-    }
-}
-
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProjectNodeCard(node: ProjectNodeView) -> Element {
-    let has_slots = node.has_slots();
-    let has_issues = !node.issues.is_empty();
-    let card_class = if node.focused {
-        "tw:grid tw:min-w-0 tw:gap-4 tw:rounded-md tw:border tw:border-accent-border tw:bg-card tw:p-4"
-    } else {
-        "tw:grid tw:min-w-0 tw:gap-4 tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-4"
-    };
-    let status_class = node_status_class(node.status.tone);
-    let status_label = node.status.label;
-    let status_detail = node.status.detail;
-
-    rsx! {
-        article { class: "{card_class}",
-            header { class: "tw:flex tw:flex-wrap tw:items-start tw:justify-between tw:gap-3",
-                div { class: "tw:grid tw:min-w-0 tw:gap-1",
-                    h3 { class: "tw:m-0 tw:text-base tw:font-bold tw:text-strong-foreground", "{node.label}" }
-                    p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-subtle-foreground tw:break-words", "{node.path}" }
-                }
-                div { class: "tw:flex tw:flex-wrap tw:items-center tw:gap-2",
-                    span { class: "tw:rounded-xs tw:border tw:border-border-subtle tw:bg-card-muted tw:px-2 tw:py-1 tw:text-xs tw:text-muted-foreground", "{node.kind}" }
-                    span { class: "{status_class}", "{status_label}" }
-                }
-            }
-            if let Some(detail) = status_detail.as_ref() {
-                p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "{detail}" }
-            }
-            if has_issues {
-                ul { class: "tw:m-0 tw:grid tw:list-none tw:gap-1 tw:rounded-sm tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-3",
-                    for issue in node.issues {
-                        li { class: "tw:text-sm tw:text-status-error-foreground", "{issue}" }
-                    }
-                }
-            }
-            if !node.prominent_slots.is_empty() {
-                ProjectSlotSection {
-                    title: "Prominent",
-                    rows: node.prominent_slots,
-                    prominent: true,
-                }
-            }
-            if !node.config_slots.is_empty() {
-                ProjectSlotSection {
-                    title: "Config",
-                    rows: node.config_slots,
-                    prominent: false,
-                }
-            }
-            if !node.state_slots.is_empty() {
-                ProjectSlotSection {
-                    title: "State",
-                    rows: node.state_slots,
-                    prominent: false,
-                }
-            }
-            if !node.binding_slots.is_empty() {
-                ProjectSlotSection {
-                    title: "Bindings",
-                    rows: node.binding_slots,
-                    prominent: false,
-                }
-            }
-            if !has_slots && !has_issues {
-                p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "No synced slot roots for this node yet." }
-            }
-        }
-    }
-}
-
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProjectSlotSection(
-    title: &'static str,
-    rows: Vec<ProjectSlotRowView>,
-    prominent: bool,
-) -> Element {
-    let class = if prominent {
-        "tw:grid tw:min-w-0 tw:gap-2"
-    } else {
-        "tw:grid tw:min-w-0 tw:gap-2"
-    };
-    rsx! {
-        section { class,
-            h4 { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "{title}" }
-            div { class: "tw:grid tw:min-w-0 tw:gap-2",
-                for row in rows {
-                    ProjectSlotRow { row }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProjectSlotRow(row: ProjectSlotRowView) -> Element {
-    match row {
-        ProjectSlotRowView::Value(value) => rsx! {
-            ProjectSlotValue { value }
-        },
-        ProjectSlotRowView::Group(group) => rsx! {
-            ProjectSlotGroup { group }
-        },
-        ProjectSlotRowView::Issue(issue) => rsx! {
-            ProjectSlotIssue { issue }
-        },
-    }
-}
-
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProjectSlotValue(value: ProjectSlotValueView) -> Element {
-    rsx! {
-        div { class: "tw:grid tw:grid-cols-[minmax(110px,0.35fr)_minmax(0,1fr)] tw:gap-2 tw:rounded-sm tw:border tw:border-border-subtle tw:bg-card-muted tw:p-2",
-            span { class: "tw:text-xs tw:text-subtle-foreground", "{value.label}" }
-            span { class: "tw:min-w-0 tw:text-right tw:font-mono tw:text-xs tw:text-muted-foreground tw:break-words", "{value.value}" }
-            if let Some(detail) = value.detail.as_ref() {
-                small { class: "tw:col-span-2 tw:text-xs tw:text-subtle-foreground", "{detail}" }
-            }
-        }
-    }
-}
-
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProjectSlotGroup(group: ProjectSlotGroupView) -> Element {
-    rsx! {
-        div { class: "tw:grid tw:min-w-0 tw:gap-2 tw:rounded-sm tw:border tw:border-border-subtle tw:bg-card-muted tw:p-2",
-            div { class: "tw:flex tw:flex-wrap tw:items-baseline tw:justify-between tw:gap-2",
-                span { "{group.label}" }
-                if let Some(detail) = group.detail.as_ref() {
-                    small { class: "tw:text-xs tw:text-subtle-foreground", "{detail}" }
-                }
-            }
-            if group.rows.is_empty() {
-                p { class: "tw:m-0 tw:text-sm tw:text-muted-foreground", "empty" }
-            } else {
-                div { class: "tw:grid tw:min-w-0 tw:gap-2 tw:border-l tw:border-border-muted tw:pl-2",
-                    for row in group.rows {
-                        ProjectSlotRow { row }
-                    }
-                }
-            }
-        }
-    }
-}
-
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProjectSlotIssue(issue: ProjectSlotIssueView) -> Element {
-    rsx! {
-        div { class: "tw:grid tw:grid-cols-[minmax(110px,0.35fr)_minmax(0,1fr)] tw:gap-2 tw:rounded-sm tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-2",
-            span { class: "tw:text-xs tw:text-status-error-foreground", "{issue.label}" }
-            span { class: "tw:min-w-0 tw:text-right tw:text-xs tw:text-status-error-foreground tw:break-words", "{issue.message}" }
         }
     }
 }

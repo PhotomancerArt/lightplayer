@@ -8,18 +8,9 @@ use super::{ProjectController, ProjectNodeTarget, ProjectSlotAddress};
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProjectEditorTarget {
     NodeTree,
-    /// Legacy node target used by the current pre-M3 project workspace.
-    Node {
-        node_id: String,
-    },
     /// Typed node target used by the reconciled project editor model.
     AddressedNode {
         target: ProjectNodeTarget,
-    },
-    /// Legacy slot target used by the current pre-M3 project workspace.
-    Slot {
-        node_id: String,
-        slot_path: String,
     },
     /// Typed slot target used by the reconciled project editor model.
     AddressedSlot {
@@ -38,21 +29,8 @@ impl ProjectEditorTarget {
         Self::NodeTree
     }
 
-    pub fn node(node_id: impl Into<String>) -> Self {
-        Self::Node {
-            node_id: node_id.into(),
-        }
-    }
-
     pub fn addressed_node(target: ProjectNodeTarget) -> Self {
         Self::AddressedNode { target }
-    }
-
-    pub fn slot(node_id: impl Into<String>, slot_path: impl Into<String>) -> Self {
-        Self::Slot {
-            node_id: node_id.into(),
-            slot_path: slot_path.into(),
-        }
     }
 
     pub fn addressed_slot(target: ProjectNodeTarget, slot: ProjectSlotAddress) -> Self {
@@ -77,13 +55,7 @@ impl ProjectEditorTarget {
         let root = project_node_id();
         match self {
             Self::NodeTree => root.child("node_tree"),
-            Self::Node { node_id } => root.child("node").child(node_id.clone()),
             Self::AddressedNode { target } => node_target_id(&root, target),
-            Self::Slot { node_id, slot_path } => root
-                .child("node")
-                .child(node_id.clone())
-                .child("slot")
-                .child(slot_path.clone()),
             Self::AddressedSlot { target, slot } => slot_target_id(&root, target, slot),
             Self::Asset { asset_id } => root.child("asset").child(asset_id.clone()),
             Self::Changes => root.child("changes"),
@@ -105,8 +77,6 @@ impl ProjectEditorTarget {
         }
         match segments.as_slice() {
             ["node_tree"] => Ok(Self::NodeTree),
-            ["node", node_id] => Ok(Self::node(*node_id)),
-            ["node", node_id, "slot", slot_path] => Ok(Self::slot(*node_id, *slot_path)),
             ["asset", asset_id] => Ok(Self::asset(*asset_id)),
             ["changes"] => Ok(Self::Changes),
             ["bus"] => Ok(Self::Bus),
@@ -135,16 +105,6 @@ mod tests {
         assert_eq!(
             ProjectEditorTarget::node_tree().node_id().as_str(),
             "studio|project|node_tree"
-        );
-        assert_eq!(
-            ProjectEditorTarget::node("4").node_id().as_str(),
-            "studio|project|node|4"
-        );
-        assert_eq!(
-            ProjectEditorTarget::slot("4", "brightness")
-                .node_id()
-                .as_str(),
-            "studio|project|node|4|slot|brightness"
         );
         assert_eq!(
             ProjectEditorTarget::addressed_node(node_target())
@@ -177,17 +137,6 @@ mod tests {
         assert_eq!(
             ProjectEditorTarget::parse(&ControllerId::new("studio|project|node_tree")).unwrap(),
             ProjectEditorTarget::NodeTree
-        );
-        assert_eq!(
-            ProjectEditorTarget::parse(&ControllerId::new("studio|project|node|4")).unwrap(),
-            ProjectEditorTarget::node("4")
-        );
-        assert_eq!(
-            ProjectEditorTarget::parse(&ControllerId::new(
-                "studio|project|node|4|slot|palette.primary",
-            ))
-            .unwrap(),
-            ProjectEditorTarget::slot("4", "palette.primary")
         );
         assert_eq!(
             ProjectEditorTarget::parse(&ControllerId::new("studio|project|asset|shader_main"))

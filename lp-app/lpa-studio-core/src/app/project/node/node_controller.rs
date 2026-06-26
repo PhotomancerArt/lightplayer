@@ -145,6 +145,11 @@ impl NodeController {
         &self.children
     }
 
+    /// Mutable child node controllers in mirror order.
+    pub(in crate::app::project) fn children_mut(&mut self) -> &mut [NodeController] {
+        &mut self.children
+    }
+
     /// Root slot controllers in mirror order.
     pub fn slots(&self) -> &[SlotController] {
         &self.slots
@@ -308,6 +313,8 @@ impl NodeController {
                 );
                 view.status = child.ui_status();
                 view.summary = child.status.detail.clone();
+                view.sections = child.ui_sections();
+                view.children = child.ui_children();
                 view
             })
             .collect()

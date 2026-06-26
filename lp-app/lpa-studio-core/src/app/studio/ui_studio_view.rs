@@ -2,7 +2,7 @@ use core::fmt::Write;
 
 use crate::{ActionPriority, UiLogEntry, UiPaneView};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiStudioView {
     pub panes: Vec<UiPaneView>,
     pub logs: Vec<UiLogEntry>,

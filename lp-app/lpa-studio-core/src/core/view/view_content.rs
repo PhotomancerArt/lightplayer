@@ -5,7 +5,7 @@ use crate::{ProjectEditorView, UiActivityView, UiIssue, UiMetric, UiProgress, Ui
 /// This enum lets controllers describe common renderable content without
 /// choosing web components directly. Keep app-specific surfaces in app view
 /// DTOs and use these variants for reusable body shapes.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum UiViewContent {
     /// No visible body content.
     Empty,
@@ -109,9 +109,33 @@ impl UiViewContent {
                     format!("Nodes: {}", editor.nodes.len()),
                 ];
                 for node in &editor.nodes {
-                    lines.push(format!("{} {} {}", node.node_id, node.kind, node.path));
-                    for row in &node.prominent_slots {
-                        lines.push(format!("  {}", row.label()));
+                    lines.push(format!(
+                        "{} {} {}",
+                        node.node_id, node.header.kind, node.header.path
+                    ));
+                    for tab in &node.tabs {
+                        if let crate::UiNodeTabBody::Sections(sections) = &tab.body {
+                            lines.extend(sections.iter().map(|section| {
+                                let label = match section {
+                                    crate::UiNodeSection::ProducedProducts(items) => {
+                                        format!("produced products: {}", items.len())
+                                    }
+                                    crate::UiNodeSection::ProducedValues(items) => {
+                                        format!("produced values: {}", items.len())
+                                    }
+                                    crate::UiNodeSection::ConfigSlots(items) => {
+                                        format!("config slots: {}", items.len())
+                                    }
+                                    crate::UiNodeSection::AssetSlots(items) => {
+                                        format!("asset slots: {}", items.len())
+                                    }
+                                    crate::UiNodeSection::Children(items) => {
+                                        format!("children: {}", items.len())
+                                    }
+                                };
+                                format!("  {label}")
+                            }));
+                        }
                     }
                 }
                 lines

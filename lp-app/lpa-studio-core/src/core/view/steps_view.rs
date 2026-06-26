@@ -5,7 +5,7 @@ use crate::{UiAction, UiTerminalLine, UiViewContent};
 /// Use steps when a pane or another view needs to show ordered workflow
 /// sections, each with its own body and actions. The pane that contains the
 /// workflow still owns pane title/status/actions.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiStepsView {
     /// Ordered workflow sections.
     pub sections: Vec<UiStepView>,
@@ -30,7 +30,7 @@ impl UiStepsView {
 }
 
 /// One section inside a `UiStepsView`.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiStepView {
     /// Stable section id.
     pub id: String,

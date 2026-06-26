@@ -19,6 +19,8 @@ pub struct UiNodeChild {
     pub active: bool,
     /// Compact body sections for expanded child display.
     pub sections: Vec<UiNodeSection>,
+    /// Nested child nodes extracted below this child.
+    pub children: Vec<UiNodeChild>,
     /// Edited-state affordance for child invocation metadata.
     pub dirty: UiNodeDirtyState,
 }
@@ -38,6 +40,7 @@ impl UiNodeChild {
             summary: None,
             active: false,
             sections: Vec::new(),
+            children: Vec::new(),
             dirty: UiNodeDirtyState::Clean,
         }
     }
@@ -53,6 +56,12 @@ impl UiNodeChild {
     /// Add compact body sections.
     pub fn with_sections(mut self, sections: Vec<UiNodeSection>) -> Self {
         self.sections = sections;
+        self
+    }
+
+    /// Add nested child nodes.
+    pub fn with_children(mut self, children: Vec<UiNodeChild>) -> Self {
+        self.children = children;
         self
     }
 }

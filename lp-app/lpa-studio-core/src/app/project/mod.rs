@@ -31,10 +31,8 @@ pub mod project_editor_target;
 pub mod project_editor_view;
 pub mod project_inventory_summary;
 pub mod project_node_tree_view;
-pub mod project_node_view;
 pub mod project_op;
 pub mod project_runtime_summary;
-pub mod project_slot_view;
 pub mod project_snapshot;
 pub mod project_state;
 pub mod project_sync;
@@ -59,12 +57,8 @@ pub use project_inventory_summary::ProjectInventorySummary;
 pub use project_node_tree_view::{
     ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView,
 };
-pub use project_node_view::ProjectNodeView;
 pub use project_op::ProjectOp;
 pub use project_runtime_summary::ProjectRuntimeSummary;
-pub use project_slot_view::{
-    ProjectSlotGroupView, ProjectSlotIssueView, ProjectSlotRowView, ProjectSlotValueView,
-};
 pub use project_snapshot::ProjectSnapshot;
 pub use project_state::ProjectState;
 pub use project_sync::ProjectSync;

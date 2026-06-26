@@ -26,6 +26,7 @@ const storyRoot = path.join(repoRoot, "lp-app/lpa-studio-web");
 const mode = parseMode(process.argv.slice(2));
 const port = process.env.STUDIO_STORY_PNGS_PORT ?? "2822";
 const requestedCaptureConcurrency = parseCaptureConcurrency();
+const captureTimeoutMs = parsePositiveIntegerEnv("STUDIO_STORY_CAPTURE_TIMEOUT_MS", 10_000);
 const baseUrl = `http://127.0.0.1:${port}/`;
 const chrome = process.env.CHROME_BIN ?? findChrome();
 const baselineDir = path.resolve(repoRoot, baselineDirFromEnv());
@@ -185,10 +186,14 @@ function baselineDirFromEnv() {
 }
 
 function parseCaptureConcurrency() {
-  const value = process.env.STUDIO_STORY_PNGS_CONCURRENCY ?? "1";
+  return parsePositiveIntegerEnv("STUDIO_STORY_PNGS_CONCURRENCY", 1);
+}
+
+function parsePositiveIntegerEnv(name, defaultValue) {
+  const value = process.env[name] ?? defaultValue.toString();
   const parsed = Number.parseInt(value, 10);
   if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed.toString() !== value) {
-    console.error("STUDIO_STORY_PNGS_CONCURRENCY must be a positive integer.");
+    console.error(`${name} must be a positive integer.`);
     process.exit(2);
   }
   return parsed;
@@ -407,7 +412,7 @@ async function waitForCaptureBox(cdp, sessionId, storyId) {
     })()
   `;
   const started = Date.now();
-  while (Date.now() - started < 10_000) {
+  while (Date.now() - started < captureTimeoutMs) {
     const box = await evaluate(cdp, sessionId, expression);
     if (box) {
       return box;

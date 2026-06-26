@@ -1,13 +1,13 @@
-use crate::{ProjectNodeTreeView, ProjectNodeView, ProjectSyncSummary, UiMetric};
+use crate::{ProjectNodeTreeView, ProjectSyncSummary, UiMetric, UiNodeView};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ProjectEditorView {
     pub project_id: String,
     pub handle_id: u32,
     pub sync: ProjectSyncSummary,
     pub stats: Vec<UiMetric>,
     pub tree: ProjectNodeTreeView,
-    pub nodes: Vec<ProjectNodeView>,
+    pub nodes: Vec<UiNodeView>,
 }
 
 impl ProjectEditorView {
@@ -17,7 +17,7 @@ impl ProjectEditorView {
         sync: ProjectSyncSummary,
         stats: Vec<UiMetric>,
         tree: ProjectNodeTreeView,
-        nodes: Vec<ProjectNodeView>,
+        nodes: Vec<UiNodeView>,
     ) -> Self {
         Self {
             project_id: project_id.into(),

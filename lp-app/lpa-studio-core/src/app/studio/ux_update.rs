@@ -1,6 +1,6 @@
 use crate::{ControllerId, UiActivityView, UiLogEntry, UiStatus, UiStudioView};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum UxUpdate {
     View(UiStudioView),
     Activity {

@@ -350,9 +350,6 @@
   .tw\:grid-cols-\[minmax\(0\,1fr\)_minmax\(300px\,380px\)\] {
     grid-template-columns: minmax(0,1fr) minmax(300px,380px);
   }
-  .tw\:grid-cols-\[minmax\(110px\,0\.35fr\)_minmax\(0\,1fr\)\] {
-    grid-template-columns: minmax(110px,0.35fr) minmax(0,1fr);
-  }
   .tw\:grid-cols-\[minmax\(120px\,0\.4fr\)_minmax\(0\,1fr\)_24px\] {
     grid-template-columns: minmax(120px,0.4fr) minmax(0,1fr) 24px;
   }

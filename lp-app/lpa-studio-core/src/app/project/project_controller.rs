@@ -3,8 +3,9 @@ use std::collections::BTreeMap;
 use crate::core::notice::UiNotices;
 use crate::{
     Controller, ControllerId, LoadedProjectChoice, ProgressState, ProjectConnectResult,
-    ProjectEditorOp, ProjectEditorTarget, ProjectInventorySummary, ProjectNodeAddress, ProjectOp,
-    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncRun, ProjectSyncSummary,
+    ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
+    ProjectNodeAddress, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp, ProjectSnapshot,
+    ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary,
     StudioServerClient, UiAction, UiError, UiIssue, UiLogEntry, UiLogLevel, UiMetric, UiNodeView,
     UiPaneView, UiResult, UiStatus, UiViewContent, UxUpdateSink,
 };
@@ -133,13 +134,26 @@ impl ProjectController {
             Self::NODE_ID,
             "Project",
             project_status(&self.state, self.sync.as_ref()),
-            project_body(
-                &self.state,
-                self.running_project_status,
-                self.sync.as_ref(),
-                self.active_editor_target.as_ref(),
-            ),
+            self.body(),
             self.actions(server_connected),
+        )
+    }
+
+    /// Project the synced controller tree into the project editor shell DTO.
+    pub fn editor_view(
+        &self,
+        project_id: &str,
+        handle_id: u32,
+        inventory: &ProjectInventorySummary,
+    ) -> ProjectEditorView {
+        let summary = self.sync_summary().unwrap_or_default();
+        ProjectEditorView::new(
+            project_id,
+            handle_id,
+            summary.clone(),
+            project_editor_stats(project_id, handle_id, inventory, &summary),
+            self.node_tree_view(),
+            self.ui_nodes(),
         )
     }
 
@@ -322,9 +336,100 @@ impl ProjectController {
     ) -> UiResult {
         match op {
             ProjectEditorOp::Focus => {
+                self.focus_editor_target(&target);
                 self.active_editor_target = Some(target);
                 Ok(UiNotices::new())
             }
+        }
+    }
+
+    fn body(&self) -> UiViewContent {
+        match &self.state {
+            ProjectState::NotLoaded
+                if self.running_project_status == RunningProjectStatus::NoneKnown =>
+            {
+                UiViewContent::text(
+                    "No running project is loaded. Load the demo project when you're ready.",
+                )
+            }
+            ProjectState::NotLoaded => {
+                UiViewContent::text("Connect to a running project or load the demo project.")
+            }
+            ProjectState::SelectingLoadedProject { projects } => UiViewContent::text(format!(
+                "{} projects are running. Choose one to attach.",
+                projects.len()
+            )),
+            ProjectState::ConnectingRunningProject { progress }
+            | ProjectState::LoadingDemoProject { progress } => {
+                UiViewContent::Progress(progress.clone().into())
+            }
+            ProjectState::Ready {
+                project_id,
+                handle_id,
+                inventory,
+            } => {
+                if self.sync.is_some() {
+                    UiViewContent::ProjectEditor(Box::new(
+                        self.editor_view(project_id, *handle_id, inventory),
+                    ))
+                } else {
+                    ready_project_metrics(project_id, *handle_id, inventory)
+                }
+            }
+            ProjectState::Failed { issue } => UiViewContent::Issue(issue.clone()),
+        }
+    }
+
+    fn node_tree_view(&self) -> ProjectNodeTreeView {
+        ProjectNodeTreeView::new(
+            self.root_nodes
+                .iter()
+                .map(|node| self.node_tree_item(node))
+                .collect(),
+            self.root_nodes.iter().map(count_nodes).sum(),
+        )
+    }
+
+    fn node_tree_item(&self, node: &NodeController) -> ProjectNodeTreeItem {
+        ProjectNodeTreeItem::new(
+            node.address().to_string(),
+            node.label(),
+            node.kind(),
+            node.status().clone(),
+            self.is_focused_node(node),
+            node_focus_action(node),
+            node.children()
+                .iter()
+                .map(|child| self.node_tree_item(child))
+                .collect(),
+        )
+    }
+
+    fn is_focused_node(&self, node: &NodeController) -> bool {
+        if node.state().focused {
+            return true;
+        }
+        match self.active_editor_target.as_ref() {
+            Some(ProjectEditorTarget::AddressedNode { target }) => {
+                target.address == *node.address()
+            }
+            Some(ProjectEditorTarget::AddressedSlot { target, .. }) => {
+                target.address == *node.address()
+            }
+            _ => false,
+        }
+    }
+
+    fn focus_editor_target(&mut self, target: &ProjectEditorTarget) {
+        clear_node_focus(&mut self.root_nodes);
+        match target {
+            ProjectEditorTarget::AddressedNode { target }
+            | ProjectEditorTarget::AddressedSlot { target, .. } => {
+                if let Some(node) = self.node_mut(&target.address) {
+                    node.state_mut().focused = true;
+                }
+            }
+            _ => {}
         }
     }
 
@@ -488,6 +593,26 @@ fn root_node_ids(view: &ProjectView) -> Vec<NodeId> {
     roots
 }
 
+fn count_nodes(node: &NodeController) -> usize {
+    1 + node.children().iter().map(count_nodes).sum::<usize>()
+}
+
+fn node_focus_action(node: &NodeController) -> UiAction {
+    UiAction::from_op(
+        ProjectEditorTarget::addressed_node(node.target().clone()).node_id(),
+        ProjectEditorOp::Focus,
+    )
+    .with_label(format!("Focus {}", node.label()))
+    .with_summary(format!("Focus node {}.", node.address()))
+}
+
+fn clear_node_focus(nodes: &mut [NodeController]) {
+    for node in nodes {
+        node.state_mut().focused = false;
+        clear_node_focus(node.children_mut());
+    }
+}
+
 fn tree_path_sort_key(view: &ProjectView, node_id: NodeId) -> TreePath {
     view.tree
         .get(node_id)
@@ -512,54 +637,11 @@ fn project_status(state: &ProjectState, sync: Option<&ProjectSync>) -> UiStatus 
     }
 }
 
-fn project_body(
-    state: &ProjectState,
-    running_project_status: RunningProjectStatus,
-    sync: Option<&ProjectSync>,
-    active_target: Option<&ProjectEditorTarget>,
-) -> UiViewContent {
-    match state {
-        ProjectState::NotLoaded if running_project_status == RunningProjectStatus::NoneKnown => {
-            UiViewContent::text(
-                "No running project is loaded. Load the demo project when you're ready.",
-            )
-        }
-        ProjectState::NotLoaded => {
-            UiViewContent::text("Connect to a running project or load the demo project.")
-        }
-        ProjectState::SelectingLoadedProject { projects } => UiViewContent::text(format!(
-            "{} projects are running. Choose one to attach.",
-            projects.len()
-        )),
-        ProjectState::ConnectingRunningProject { progress }
-        | ProjectState::LoadingDemoProject { progress } => {
-            UiViewContent::Progress(progress.clone().into())
-        }
-        ProjectState::Ready {
-            project_id,
-            handle_id,
-            inventory,
-        } => ready_project_body(project_id, *handle_id, inventory, sync, active_target),
-        ProjectState::Failed { issue } => UiViewContent::Issue(issue.clone()),
-    }
-}
-
-fn ready_project_body(
+fn ready_project_metrics(
     project_id: &str,
     handle_id: u32,
     inventory: &ProjectInventorySummary,
-    sync: Option<&ProjectSync>,
-    active_target: Option<&ProjectEditorTarget>,
 ) -> UiViewContent {
-    if let Some(sync) = sync {
-        return UiViewContent::ProjectEditor(Box::new(sync.editor_view(
-            project_id,
-            handle_id,
-            inventory,
-            active_target,
-        )));
-    }
-
     let mut metrics = vec![
         UiMetric::new("Project", project_id),
         UiMetric::new("Handle", handle_id),
@@ -571,6 +653,55 @@ fn ready_project_body(
     metrics.push(UiMetric::new("Sync", "Not synced"));
 
     UiViewContent::Metrics(metrics)
+}
+
+fn project_editor_stats(
+    project_id: &str,
+    handle_id: u32,
+    inventory: &ProjectInventorySummary,
+    summary: &ProjectSyncSummary,
+) -> Vec<UiMetric> {
+    let mut stats = vec![
+        UiMetric::new("Project", project_id),
+        UiMetric::new("Handle", handle_id),
+        UiMetric::new("Revision", summary.revision),
+        UiMetric::new("Sync", sync_phase_label(summary.phase)),
+        UiMetric::new("Nodes", summary.node_count),
+        UiMetric::new("Assets", inventory.asset_count),
+        UiMetric::new("Definitions", inventory.definition_count),
+        UiMetric::new("Shapes", summary.shape_count),
+    ];
+    if let Some(runtime) = &summary.runtime {
+        stats.push(UiMetric::new("Frame", runtime.frame_num));
+        if runtime.frame_delta_ms > 0 {
+            stats.push(UiMetric::new(
+                "FPS",
+                1000_u32.saturating_div(runtime.frame_delta_ms),
+            ));
+        }
+        stats.push(UiMetric::new("Buffers", runtime.runtime_buffer_count));
+        if let Some(free_bytes) = runtime.free_bytes {
+            stats.push(UiMetric::new("Memory free", format_bytes(free_bytes)));
+        }
+    }
+    stats
+}
+
+fn sync_phase_label(phase: ProjectSyncPhase) -> &'static str {
+    match phase {
+        ProjectSyncPhase::Empty => "Not synced",
+        ProjectSyncPhase::SyncingShapes | ProjectSyncPhase::SyncingProject => "Syncing",
+        ProjectSyncPhase::Ready => "Synced",
+        ProjectSyncPhase::Failed => "Needs attention",
+    }
+}
+
+fn format_bytes(bytes: u64) -> String {
+    if bytes >= 1024 {
+        format!("{} KB", bytes / 1024)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 #[cfg(test)]
@@ -585,9 +716,9 @@ mod tests {
     use lpc_wire::{NodeRuntimeStatus, ProjectReadResponse, ProjectReadResult, WireEntryState};
 
     use crate::{
-        ActionPriority, ProjectOp, ProjectProductSubscriptionIntent, ProjectSlotAddress,
-        ProjectSlotRoot, ProjectSyncPhase, SlotKind, UiAssetEditorKind, UiConfigSlotBody,
-        UiNodeSection, UiNodeTabBody, UiProductKind,
+        ActionPriority, ProjectNodeTarget, ProjectOp, ProjectProductSubscriptionIntent,
+        ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotKind, UiAssetEditorKind,
+        UiConfigSlotBody, UiNodeSection, UiNodeTabBody, UiProductKind,
     };
 
     use super::*;
@@ -942,7 +1073,9 @@ mod tests {
     #[test]
     fn ui_nodes_project_header_state_and_child_summaries() {
         let mut project = ProjectController::new();
-        project.apply_project_view(&tree_view()).unwrap();
+        let mut view = tree_view();
+        install_ui_projection_slots(&mut view, 2, Revision::new(4));
+        project.apply_project_view(&view).unwrap();
         let node = node_address("/demo.project");
         project.node_mut(&node).unwrap().state_mut().focused = true;
         project.node_mut(&node).unwrap().state_mut().collapsed = true;
@@ -963,6 +1096,40 @@ mod tests {
                 .map(|child| child.label.as_str())
                 .collect::<Vec<_>>(),
             vec!["Clock", "Orbit"]
+        );
+        assert_eq!(nodes[0].children[0].detail, "/demo.project/clock.clock");
+        assert!(!nodes[0].children[0].sections.is_empty());
+    }
+
+    #[test]
+    fn editor_view_uses_controller_nodes_and_navigation_targets() {
+        let mut project = ProjectController::new();
+        let inventory = ProjectInventorySummary {
+            node_count: 3,
+            definition_count: 2,
+            asset_count: 1,
+        };
+        project.mark_ready("studio-demo", 7, inventory.clone());
+        project.apply_project_view(&tree_view()).unwrap();
+
+        let view = project.editor_view("studio-demo", 7, &inventory);
+
+        assert_eq!(view.project_id, "studio-demo");
+        assert_eq!(view.handle_id, 7);
+        assert_eq!(view.tree.total_count, 3);
+        assert_eq!(view.tree.roots[0].label, "Demo");
+        assert_eq!(view.tree.roots[0].children[1].label, "Orbit");
+        assert_eq!(view.nodes.len(), 1);
+        assert_eq!(view.nodes[0].header.title, "Demo");
+
+        let target = ProjectEditorTarget::parse(&view.tree.roots[0].children[1].action.node_id())
+            .expect("tree action should be typed");
+        assert_eq!(
+            target,
+            ProjectEditorTarget::addressed_node(ProjectNodeTarget::new(
+                node_address("/demo.project/orbit.shader"),
+                NodeId::new(3),
+            ))
         );
     }
 
