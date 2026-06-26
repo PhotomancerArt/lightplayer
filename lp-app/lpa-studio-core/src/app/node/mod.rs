@@ -41,8 +41,8 @@ pub use ui_node_section::UiNodeSection;
 pub use ui_node_tab::{UiNodeTab, UiNodeTabBody};
 pub use ui_node_view::UiNodeView;
 pub use ui_produced_product::{
-    UiProducedProduct, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductRef,
-    UiProductTrackingState,
+    UiControlProductPreview, UiControlSampleFormat, UiProducedProduct, UiProductKind,
+    UiProductPreview, UiProductPreviewFrame, UiProductRef, UiProductTrackingState,
 };
 pub use ui_produced_value::UiProducedValue;
 pub use ui_slot_aspect::{UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};

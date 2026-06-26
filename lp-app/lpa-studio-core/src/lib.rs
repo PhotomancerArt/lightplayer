@@ -1,6 +1,10 @@
 //! Headless LightPlayer Studio application core.
 
 pub use lpa_link::{LinkEndpointId, LinkEndpointStatus, LinkProviderKind};
+pub use lpc_model::{
+    ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
+    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, Revision,
+};
 
 pub mod app;
 pub mod controller;
@@ -14,13 +18,13 @@ pub use app::link::{
     SharedLinkRegistry, UiIssue,
 };
 pub use app::node::{
-    UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConfigSlotBody, UiNodeChild,
-    UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView,
-    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductKind,
-    UiProductPreview, UiProductPreviewFrame, UiProductRef, UiProductTrackingState,
-    UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset,
-    UiSlotEditorHint, UiSlotFieldState, UiSlotOption, UiSlotOptionality, UiSlotRecord, UiSlotShape,
-    UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
+    UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConfigSlotBody, UiControlProductPreview,
+    UiControlSampleFormat, UiNodeChild, UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab,
+    UiNodeTabBody, UiNodeView, UiProducedBinding, UiProducedBindings, UiProducedProduct,
+    UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductRef,
+    UiProductTrackingState, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
+    UiSlotAsset, UiSlotEditorHint, UiSlotFieldState, UiSlotOption, UiSlotOptionality, UiSlotRecord,
+    UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
 };
 pub use app::project::{
     LoadedProjectChoice, NodeController, NodeControllerState, ProjectConnectResult,

@@ -12,8 +12,10 @@ mod stream_response;
 
 pub use node_read::{NodeReadQuery, NodeReadResult, NodeReadSelection};
 pub use probe::{
-    ExplainSlotProbeRequest, ExplainSlotProbeResult, ProjectProbeRequest, ProjectProbeResult,
-    RenderProductProbeRequest, RenderProductProbeResult, SlotExplanation,
+    ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
+    ControlProductProbeResult, ExplainSlotProbeRequest, ExplainSlotProbeResult,
+    ProjectProbeRequest, ProjectProbeResult, RenderProductProbeRequest, RenderProductProbeResult,
+    SlotExplanation,
 };
 pub use project_read_request::{ProjectReadQuery, ProjectReadRequest};
 pub use project_read_response::{ProjectReadResponse, ProjectReadResult};

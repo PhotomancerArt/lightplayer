@@ -431,18 +431,15 @@ impl ProjectController {
         }
     }
 
-    fn subscribed_visual_products(&self) -> Vec<lpc_model::VisualProduct> {
+    fn subscribed_products(&self) -> Vec<UiProductRef> {
         let mut product_refs = BTreeSet::new();
         for node in &self.root_nodes {
-            self.collect_subscribed_visual_products(node, &mut product_refs);
+            self.collect_subscribed_products(node, &mut product_refs);
         }
-        product_refs
-            .into_iter()
-            .filter_map(UiProductRef::visual_product)
-            .collect()
+        product_refs.into_iter().collect()
     }
 
-    fn collect_subscribed_visual_products(
+    fn collect_subscribed_products(
         &self,
         node: &NodeController,
         products: &mut BTreeSet<UiProductRef>,
@@ -450,14 +447,10 @@ impl ProjectController {
         if self.node_subscribes_products(node) {
             let mut node_products = Vec::new();
             node.collect_produced_product_refs(&mut node_products);
-            products.extend(
-                node_products
-                    .into_iter()
-                    .filter(|product| product.visual_product().is_some()),
-            );
+            products.extend(node_products);
         }
         for child in node.children() {
-            self.collect_subscribed_visual_products(child, products);
+            self.collect_subscribed_products(child, products);
         }
     }
 
@@ -519,10 +512,8 @@ impl ProjectController {
             self.sync_mut()?.apply_shape_sync_response(read.response)?;
         }
 
-        let visual_products = self.subscribed_visual_products();
-        let request = self
-            .sync_mut()?
-            .initial_project_read_request(visual_products);
+        let products = self.subscribed_products();
+        let request = self.sync_mut()?.initial_project_read_request(products);
         let read = server.project_read(handle_id, request).await?;
         logs.extend(read.logs);
         self.sync_mut()?
@@ -536,10 +527,8 @@ impl ProjectController {
         server: &mut StudioServerClient,
         handle_id: u32,
     ) -> Result<Vec<UiLogEntry>, UiError> {
-        let visual_products = self.subscribed_visual_products();
-        let request = self
-            .sync_mut()?
-            .refresh_project_read_request(visual_products);
+        let products = self.subscribed_products();
+        let request = self.sync_mut()?.refresh_project_read_request(products);
         let read = server.project_read(handle_id, request).await?;
         let logs = read.logs;
         self.sync_mut()?
@@ -1303,7 +1292,7 @@ mod tests {
         );
         assert_eq!(products[1].name, "Control");
         assert_eq!(products[1].kind, UiProductKind::Control);
-        assert_eq!(products[1].preview, UiProductPreview::MetadataOnly);
+        assert_eq!(products[1].preview, UiProductPreview::Pending);
         assert_eq!(products[1].tracking, UiProductTrackingState::Untracked);
         assert_eq!(
             products[1].product,
@@ -1355,19 +1344,26 @@ mod tests {
     }
 
     #[test]
-    fn focused_default_node_subscribes_visual_product_preview_probe() {
+    fn focused_default_node_subscribes_product_preview_probes() {
         let node = node_address("/demo.project/orbit.shader");
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
         install_ui_projection_slots(&mut view, 1, Revision::new(4));
         let mut project = ProjectController::new();
         project.apply_project_view(&view).unwrap();
 
-        assert!(project.subscribed_visual_products().is_empty());
+        assert!(project.subscribed_products().is_empty());
 
         project.node_mut(&node).unwrap().state_mut().focused = true;
         assert_eq!(
-            project.subscribed_visual_products(),
-            vec![VisualProduct::new(NodeId::new(1), 0)]
+            project.subscribed_products(),
+            vec![
+                UiProductRef::from_visual_product(VisualProduct::new(NodeId::new(1), 0)),
+                UiProductRef::from_control_product(ControlProduct::new(
+                    NodeId::new(1),
+                    1,
+                    ControlExtent::new(2, 16),
+                )),
+            ]
         );
 
         project
@@ -1375,14 +1371,21 @@ mod tests {
             .unwrap()
             .state_mut()
             .product_subscription_intent = ProjectProductSubscriptionIntent::Unsubscribed;
-        assert!(project.subscribed_visual_products().is_empty());
+        assert!(project.subscribed_products().is_empty());
 
         let state = project.node_mut(&node).unwrap().state_mut();
         state.focused = false;
         state.product_subscription_intent = ProjectProductSubscriptionIntent::Subscribed;
         assert_eq!(
-            project.subscribed_visual_products(),
-            vec![VisualProduct::new(NodeId::new(1), 0)]
+            project.subscribed_products(),
+            vec![
+                UiProductRef::from_visual_product(VisualProduct::new(NodeId::new(1), 0)),
+                UiProductRef::from_control_product(ControlProduct::new(
+                    NodeId::new(1),
+                    1,
+                    ControlExtent::new(2, 16),
+                )),
+            ]
         );
     }
 
@@ -1398,7 +1401,7 @@ mod tests {
         let request = project
             .sync_mut()
             .unwrap()
-            .refresh_project_read_request(vec![product]);
+            .refresh_project_read_request(vec![UiProductRef::from_visual_product(product)]);
         assert_eq!(
             request.probes,
             vec![ProjectProbeRequest::RenderProduct(

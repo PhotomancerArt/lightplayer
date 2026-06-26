@@ -41,6 +41,9 @@ impl Engine {
                 ProjectProbeRequest::RenderProduct(request) => ProjectProbeResult::RenderProduct(
                     self.read_project_render_product_probe(registry, request),
                 ),
+                ProjectProbeRequest::ControlProduct(request) => ProjectProbeResult::ControlProduct(
+                    self.read_project_control_product_probe(registry, request),
+                ),
                 ProjectProbeRequest::ExplainSlot(request) => {
                     ProjectProbeResult::ExplainSlot(self.read_project_explain_slot_probe(request))
                 }

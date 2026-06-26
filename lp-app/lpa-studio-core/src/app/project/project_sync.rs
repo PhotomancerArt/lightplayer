@@ -1,17 +1,19 @@
 use std::collections::BTreeMap;
 
-use lpc_model::{Revision, SlotShapeId, VisualProduct};
+use lpc_model::{ControlDisplayLayout, Revision, SlotShapeId};
 use lpc_view::{ProjectView, apply_project_read_response};
 use lpc_wire::{
-    NodeReadQuery, NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery,
-    ProjectReadRequest, ProjectReadResponse, ProjectReadResult, ReadLevel,
-    RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery,
-    RuntimeReadQuery, ShapeReadQuery, WireTextureFormat,
+    ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
+    ControlProductProbeResult, NodeReadQuery, NodeReadSelection, ProjectProbeRequest,
+    ProjectProbeResult, ProjectReadQuery, ProjectReadRequest, ProjectReadResponse,
+    ProjectReadResult, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
+    ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, ShapeReadQuery,
+    WireChannelSampleFormat, WireTextureFormat,
 };
 
 use crate::{
-    ProjectRuntimeSummary, ProjectSyncPhase, ProjectSyncSummary, UiError, UiIssue,
-    UiProductPreview, UiProductPreviewFrame, UiProductRef,
+    ProjectRuntimeSummary, ProjectSyncPhase, ProjectSyncSummary, UiControlProductPreview,
+    UiControlSampleFormat, UiError, UiIssue, UiProductPreview, UiProductPreviewFrame, UiProductRef,
 };
 
 // Keep shape pages small. Some shape definitions include other shapes and can
@@ -120,26 +122,22 @@ impl ProjectSync {
 
     pub fn initial_project_read_request(
         &mut self,
-        visual_products: Vec<VisualProduct>,
+        products: Vec<UiProductRef>,
     ) -> ProjectReadRequest {
         self.phase = ProjectSyncPhase::SyncingProject;
-        project_read_request(None, true, self.product_probe_requests(visual_products))
+        project_read_request(None, true, self.product_probe_requests(products))
     }
 
     pub fn refresh_project_read_request(
         &mut self,
-        visual_products: Vec<VisualProduct>,
+        products: Vec<UiProductRef>,
     ) -> ProjectReadRequest {
         self.begin_refresh();
         let since = (self.view.revision != Revision::default()).then_some(self.view.revision);
         // Runtime state slots carry live values/products, so refresh snapshots
         // include slots even when the tree itself only changes by revision.
         let include_slots = true;
-        project_read_request(
-            since,
-            include_slots,
-            self.product_probe_requests(visual_products),
-        )
+        project_read_request(since, include_slots, self.product_probe_requests(products))
     }
 
     pub fn apply_shape_sync_response(
@@ -183,29 +181,32 @@ impl ProjectSync {
         self.issue = Some(UiIssue::new(issue));
     }
 
-    fn product_probe_requests(
-        &mut self,
-        visual_products: Vec<VisualProduct>,
-    ) -> Vec<ProjectProbeRequest> {
-        self.requested_product_previews = visual_products
-            .iter()
-            .copied()
-            .map(UiProductRef::from_visual_product)
-            .collect();
+    fn product_probe_requests(&mut self, products: Vec<UiProductRef>) -> Vec<ProjectProbeRequest> {
+        self.requested_product_previews = products;
         for product in &self.requested_product_previews {
             self.product_previews
                 .entry(*product)
                 .or_insert(UiProductPreview::Pending);
         }
-        visual_products
-            .into_iter()
-            .map(|product| {
-                ProjectProbeRequest::RenderProduct(RenderProductProbeRequest {
-                    product,
-                    width: VISUAL_PRODUCT_PREVIEW_FRAME.width,
-                    height: VISUAL_PRODUCT_PREVIEW_FRAME.height,
-                    format: WireTextureFormat::Srgb8,
-                })
+        self.requested_product_previews
+            .iter()
+            .copied()
+            .filter_map(|product| match product {
+                UiProductRef::Visual { .. } => product.visual_product().map(|product| {
+                    ProjectProbeRequest::RenderProduct(RenderProductProbeRequest {
+                        product,
+                        width: VISUAL_PRODUCT_PREVIEW_FRAME.width,
+                        height: VISUAL_PRODUCT_PREVIEW_FRAME.height,
+                        format: WireTextureFormat::Srgb8,
+                    })
+                }),
+                UiProductRef::Control { .. } => product.control_product().map(|control| {
+                    ProjectProbeRequest::ControlProduct(ControlProductProbeRequest {
+                        product: control,
+                        sample_format: WireChannelSampleFormat::U16,
+                        display_layout: self.display_layout_read_for(product),
+                    })
+                }),
             })
             .collect()
     }
@@ -214,9 +215,88 @@ impl ProjectSync {
         let requested = core::mem::take(&mut self.requested_product_previews);
         for (index, probe) in probes.iter().enumerate() {
             let fallback_key = requested.get(index).copied();
-            if let Some((product, preview)) = product_preview_from_probe(probe, fallback_key) {
+            if let Some((product, preview)) = self.product_preview_from_probe(probe, fallback_key) {
                 self.product_previews.insert(product, preview);
             }
+        }
+    }
+
+    fn display_layout_read_for(&self, product: UiProductRef) -> ControlDisplayLayoutRead {
+        match self
+            .product_previews
+            .get(&product)
+            .and_then(control_preview_display_layout)
+            .map(ControlDisplayLayout::revision)
+        {
+            Some(revision) => ControlDisplayLayoutRead::IfChanged {
+                known_revision: Some(revision),
+            },
+            None => ControlDisplayLayoutRead::Always,
+        }
+    }
+
+    fn product_preview_from_probe(
+        &self,
+        probe: &ProjectProbeResult,
+        fallback_key: Option<UiProductRef>,
+    ) -> Option<(UiProductRef, UiProductPreview)> {
+        match probe {
+            ProjectProbeResult::ControlProduct(ControlProductProbeResult::Preview {
+                product,
+                revision,
+                extent,
+                sample_format: WireChannelSampleFormat::U16,
+                sample_layout,
+                display_layout,
+                bytes,
+            }) => {
+                let product_ref = UiProductRef::from_control_product(*product);
+                let cached = self.product_previews.get(&product_ref);
+                let display_layout =
+                    display_layout_from_probe_result(display_layout, cached).cloned();
+                Some((
+                    product_ref,
+                    UiProductPreview::ControlNative(UiControlProductPreview {
+                        revision: revision.0,
+                        extent: *extent,
+                        sample_format: UiControlSampleFormat::U16,
+                        sample_layout: sample_layout.clone(),
+                        display_layout,
+                        bytes: bytes.clone(),
+                    }),
+                ))
+            }
+            ProjectProbeResult::ControlProduct(ControlProductProbeResult::Preview {
+                product,
+                sample_format,
+                ..
+            }) => Some((
+                UiProductRef::from_control_product(*product),
+                UiProductPreview::Unsupported {
+                    reason: format!(
+                        "control preview sample format {sample_format:?} is not supported by Studio"
+                    ),
+                },
+            )),
+            ProjectProbeResult::ControlProduct(ControlProductProbeResult::Unsupported {
+                product,
+                reason,
+            }) => Some((
+                UiProductRef::from_control_product(*product),
+                UiProductPreview::Unsupported {
+                    reason: reason.clone(),
+                },
+            )),
+            ProjectProbeResult::ControlProduct(ControlProductProbeResult::Error {
+                product,
+                message,
+            }) => Some((
+                UiProductRef::from_control_product(*product),
+                UiProductPreview::Error {
+                    message: message.clone(),
+                },
+            )),
+            _ => product_preview_from_probe(probe, fallback_key),
         }
     }
 }
@@ -313,13 +393,39 @@ fn product_preview_from_probe(
                 )
             })
         }
+        ProjectProbeResult::ControlProduct(_) => None,
         ProjectProbeResult::ExplainSlot(_) => None,
+    }
+}
+
+fn control_preview_display_layout(preview: &UiProductPreview) -> Option<&ControlDisplayLayout> {
+    match preview {
+        UiProductPreview::ControlNative(preview) => preview.display_layout.as_ref(),
+        _ => None,
+    }
+}
+
+fn display_layout_from_probe_result<'a>(
+    result: &'a ControlDisplayLayoutProbeResult,
+    cached: Option<&'a UiProductPreview>,
+) -> Option<&'a ControlDisplayLayout> {
+    match result {
+        ControlDisplayLayoutProbeResult::Layout(layout) => Some(layout),
+        ControlDisplayLayoutProbeResult::Unchanged { revision } => cached
+            .and_then(control_preview_display_layout)
+            .filter(|layout| layout.revision() == *revision),
+        ControlDisplayLayoutProbeResult::Omitted => cached.and_then(control_preview_display_layout),
+        ControlDisplayLayoutProbeResult::Unsupported { .. } => None,
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lpc_model::{
+        ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlProduct,
+        ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, NodeId, VisualProduct,
+    };
 
     #[test]
     fn shape_sync_request_uses_safe_page_limit_and_cursor() {
@@ -411,9 +517,10 @@ mod tests {
     #[test]
     fn refresh_request_includes_visual_product_probes() {
         let mut sync = ProjectSync::new();
-        let product = VisualProduct::new(lpc_model::NodeId::new(7), 2);
+        let product = VisualProduct::new(NodeId::new(7), 2);
 
-        let request = sync.refresh_project_read_request(vec![product]);
+        let request =
+            sync.refresh_project_read_request(vec![UiProductRef::from_visual_product(product)]);
 
         assert_eq!(request.probes.len(), 1);
         assert_eq!(
@@ -434,8 +541,8 @@ mod tests {
     #[test]
     fn project_read_response_caches_visual_product_preview() {
         let mut sync = ProjectSync::new();
-        let product = VisualProduct::new(lpc_model::NodeId::new(7), 2);
-        let _ = sync.refresh_project_read_request(vec![product]);
+        let product = VisualProduct::new(NodeId::new(7), 2);
+        let _ = sync.refresh_project_read_request(vec![UiProductRef::from_visual_product(product)]);
         let bytes = vec![1, 2, 3, 4, 5, 6];
 
         sync.apply_project_read_response(ProjectReadResponse {
@@ -462,6 +569,125 @@ mod tests {
                 revision: 8,
                 bytes,
             })
+        );
+    }
+
+    #[test]
+    fn refresh_request_includes_control_product_probes() {
+        let mut sync = ProjectSync::new();
+        let product = ControlProduct::new(NodeId::new(7), 2, ControlExtent::new(1, 3));
+        let product_ref = UiProductRef::from_control_product(product);
+
+        let request = sync.refresh_project_read_request(vec![product_ref]);
+
+        assert_eq!(
+            request.probes,
+            vec![ProjectProbeRequest::ControlProduct(
+                ControlProductProbeRequest {
+                    product,
+                    sample_format: WireChannelSampleFormat::U16,
+                    display_layout: ControlDisplayLayoutRead::Always,
+                },
+            )]
+        );
+        assert_eq!(
+            sync.product_preview(&product_ref),
+            Some(&UiProductPreview::Pending)
+        );
+    }
+
+    #[test]
+    fn control_product_preview_reuses_cached_display_layout_revision() {
+        let mut sync = ProjectSync::new();
+        let product = ControlProduct::new(NodeId::new(7), 2, ControlExtent::new(1, 3));
+        let product_ref = UiProductRef::from_control_product(product);
+        let sample_layout = ControlSampleLayout {
+            spans: vec![ControlSampleSpan {
+                row: 0,
+                start: 0,
+                len: 3,
+                encoding: ControlSampleEncoding::RgbPixels {
+                    count: 1,
+                    color_order: lpc_model::ColorOrder::Rgb,
+                },
+            }],
+        };
+        let display_layout = ControlDisplayLayout::Layout2d(ControlLayout2d::new(
+            Revision::new(12),
+            16,
+            16,
+            vec![ControlLamp2d {
+                lamp_index: 0,
+                sample_start: 0,
+                center: [0.5, 0.5],
+                radius: 0.1,
+            }],
+        ));
+        let first_bytes = vec![0, 0, 255, 255, 0, 0];
+        let _ = sync.refresh_project_read_request(vec![product_ref]);
+
+        sync.apply_project_read_response(ProjectReadResponse {
+            revision: Revision::new(9),
+            results: Vec::new(),
+            probes: vec![ProjectProbeResult::ControlProduct(
+                ControlProductProbeResult::Preview {
+                    product,
+                    revision: Revision::new(9),
+                    extent: product.preferred_extent(),
+                    sample_format: WireChannelSampleFormat::U16,
+                    sample_layout: sample_layout.clone(),
+                    display_layout: ControlDisplayLayoutProbeResult::Layout(display_layout.clone()),
+                    bytes: first_bytes,
+                },
+            )],
+        })
+        .unwrap();
+
+        let request = sync.refresh_project_read_request(vec![product_ref]);
+
+        assert_eq!(
+            request.probes,
+            vec![ProjectProbeRequest::ControlProduct(
+                ControlProductProbeRequest {
+                    product,
+                    sample_format: WireChannelSampleFormat::U16,
+                    display_layout: ControlDisplayLayoutRead::IfChanged {
+                        known_revision: Some(Revision::new(12)),
+                    },
+                },
+            )]
+        );
+
+        let second_bytes = vec![255, 255, 0, 0, 0, 0];
+        sync.apply_project_read_response(ProjectReadResponse {
+            revision: Revision::new(10),
+            results: Vec::new(),
+            probes: vec![ProjectProbeResult::ControlProduct(
+                ControlProductProbeResult::Preview {
+                    product,
+                    revision: Revision::new(10),
+                    extent: product.preferred_extent(),
+                    sample_format: WireChannelSampleFormat::U16,
+                    sample_layout: sample_layout.clone(),
+                    display_layout: ControlDisplayLayoutProbeResult::Unchanged {
+                        revision: Revision::new(12),
+                    },
+                    bytes: second_bytes.clone(),
+                },
+            )],
+        })
+        .unwrap();
+
+        assert_eq!(
+            sync.product_preview(&product_ref),
+            Some(&UiProductPreview::ControlNative(UiControlProductPreview {
+                revision: 10,
+                extent: product.preferred_extent(),
+                sample_format: UiControlSampleFormat::U16,
+                sample_layout,
+                display_layout: Some(display_layout),
+                bytes: second_bytes,
+            }))
         );
     }
 }

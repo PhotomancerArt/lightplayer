@@ -137,6 +137,10 @@ impl lpc_shared::transport::ProjectReadJsonSource for EngineProjectReadSource<'_
                 self.engine
                     .read_project_render_product_probe(self.registry, request),
             ),
+            ProjectProbeRequest::ControlProduct(request) => ProjectProbeResult::ControlProduct(
+                self.engine
+                    .read_project_control_product_probe(self.registry, request),
+            ),
             ProjectProbeRequest::ExplainSlot(request) => ProjectProbeResult::ExplainSlot(
                 self.engine.read_project_explain_slot_probe(request),
             ),

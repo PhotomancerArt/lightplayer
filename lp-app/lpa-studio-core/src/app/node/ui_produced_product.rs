@@ -1,6 +1,9 @@
 //! Produced product data for primary node output surfaces.
 
-use lpc_model::{ControlProduct, NodeId, ProductRef, VisualProduct};
+use lpc_model::{
+    ControlDisplayLayout, ControlExtent, ControlProduct, ControlSampleLayout, NodeId, ProductRef,
+    VisualProduct,
+};
 
 use crate::{
     UiNodeDirtyState, UiProducedBinding, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
@@ -112,13 +115,54 @@ impl UiProductRef {
             Self::Control { .. } => None,
         }
     }
+
+    /// Convert this identity back into a control product when possible.
+    #[must_use]
+    pub fn control_product(self) -> Option<ControlProduct> {
+        match self {
+            Self::Control {
+                node_id,
+                output,
+                rows,
+                samples_per_row,
+            } => Some(ControlProduct::new(
+                NodeId::new(node_id),
+                output,
+                ControlExtent::new(rows, samples_per_row),
+            )),
+            Self::Visual { .. } => None,
+        }
+    }
+}
+
+/// Native control sample format carried by a Studio preview DTO.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum UiControlSampleFormat {
+    U16,
+}
+
+/// Data-driven preview for a native control product.
+#[derive(Clone, Debug, PartialEq)]
+pub struct UiControlProductPreview {
+    /// Project revision that produced this sample payload.
+    pub revision: i64,
+    /// Native control sample extent.
+    pub extent: ControlExtent,
+    /// Native sample format.
+    pub sample_format: UiControlSampleFormat,
+    /// How to interpret the native sample buffer.
+    pub sample_layout: ControlSampleLayout,
+    /// Optional human-facing display layout for the sample data.
+    pub display_layout: Option<ControlDisplayLayout>,
+    /// Native sample bytes, little-endian for `U16`.
+    pub bytes: Vec<u8>,
 }
 
 /// Small, serializable-enough preview state for a produced product.
 ///
 /// Browser-specific DOM/canvas state belongs in the web crate. This DTO only
 /// carries bounded preview bytes and durable error/loading state.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum UiProductPreview {
     /// The product slot has no product value yet.
     Empty,
@@ -131,6 +175,8 @@ pub enum UiProductPreview {
         revision: i64,
         bytes: Vec<u8>,
     },
+    /// Native control samples plus optional display layout.
+    ControlNative(UiControlProductPreview),
     /// The product is represented by metadata only in this slice.
     MetadataOnly,
     /// The runtime explicitly does not support this preview.
@@ -146,13 +192,14 @@ impl UiProductPreview {
         match kind {
             UiProductKind::Empty => Self::Empty,
             UiProductKind::Visual => Self::Pending,
-            UiProductKind::Control | UiProductKind::Other => Self::MetadataOnly,
+            UiProductKind::Control => Self::Pending,
+            UiProductKind::Other => Self::MetadataOnly,
         }
     }
 }
 
 /// A produced output that deserves primary visual treatment in the node pane.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct UiProducedProduct {
     /// Product slot or friendly output name.
     pub name: String,

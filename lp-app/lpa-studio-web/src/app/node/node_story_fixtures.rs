@@ -1,9 +1,11 @@
 //! Shared fixtures for Studio node component stories.
 
 use lpa_studio_core::{
-    UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiNodeChild, UiNodeDirtyState,
-    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiProducedBinding,
-    UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductPreview,
+    ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
+    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, Revision, UiAssetEditorKind,
+    UiBindingEndpoint, UiConfigSlot, UiControlProductPreview, UiControlSampleFormat, UiNodeChild,
+    UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView,
+    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductPreview,
     UiProductTrackingState, UiSlotAsset, UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality,
     UiSlotRecord, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus,
 };
@@ -83,12 +85,20 @@ pub(crate) fn playlist_header() -> UiNodeHeader {
 }
 
 pub(crate) fn produced_products_fixture() -> Vec<UiProducedProduct> {
-    vec![visual_preview_product("output").with_binding_routes(
-        Some("bus#visual.out"),
-        &[],
-        &["Fixture.visual"],
-        Some("rev 104"),
-    )]
+    vec![
+        visual_preview_product("output").with_binding_routes(
+            Some("bus#visual.out"),
+            &[],
+            &["Fixture.visual"],
+            Some("rev 104"),
+        ),
+        control_preview_product("dmx").with_binding_routes(
+            None,
+            &["fixture#strip-a"],
+            &[],
+            Some("rev 104"),
+        ),
+    ]
 }
 
 pub(crate) fn produced_product_variants_fixture() -> Vec<UiProducedProduct> {
@@ -109,9 +119,12 @@ pub(crate) fn produced_product_variants_fixture() -> Vec<UiProducedProduct> {
             .with_tracking(UiProductTrackingState::Paused)
             .with_detail("cached preview"),
         visual_error_product("output"),
-        UiProducedProduct::control("dmx")
-            .with_detail("24 channels")
-            .with_binding_routes(None, &["fixture#strip-a"], &[], Some("rev 104")),
+        control_preview_product("dmx").with_binding_routes(
+            None,
+            &["fixture#strip-a"],
+            &[],
+            Some("rev 104"),
+        ),
     ]
 }
 
@@ -136,6 +149,39 @@ pub(crate) fn visual_error_product(name: &str) -> UiProducedProduct {
         })
 }
 
+pub(crate) fn control_preview_product(name: &str) -> UiProducedProduct {
+    UiProducedProduct::control(name)
+        .with_detail("16 RGB lamps")
+        .with_tracking(UiProductTrackingState::Tracking)
+        .with_preview(UiProductPreview::ControlNative(UiControlProductPreview {
+            revision: 104,
+            extent: ControlExtent::new(1, 48),
+            sample_format: UiControlSampleFormat::U16,
+            sample_layout: ControlSampleLayout {
+                spans: vec![ControlSampleSpan {
+                    row: 0,
+                    start: 0,
+                    len: 48,
+                    encoding: ControlSampleEncoding::RgbPixels {
+                        count: 16,
+                        color_order: ColorOrder::Rgb,
+                    },
+                }],
+            },
+            display_layout: Some(control_layout_2d_fixture()),
+            bytes: control_preview_bytes(16),
+        }))
+}
+
+pub(crate) fn control_unsupported_product(name: &str) -> UiProducedProduct {
+    UiProducedProduct::control(name)
+        .with_detail("raw samples")
+        .with_tracking(UiProductTrackingState::Tracking)
+        .with_preview(UiProductPreview::Unsupported {
+            reason: "Control product does not expose a 2D display layout.".to_string(),
+        })
+}
+
 fn visual_preview_bytes(width: u32, height: u32) -> Vec<u8> {
     let mut bytes = Vec::with_capacity((width * height * 3) as usize);
     for y in 0..height {
@@ -145,6 +191,34 @@ fn visual_preview_bytes(width: u32, height: u32) -> Vec<u8> {
             bytes.push((u * 255.0) as u8);
             bytes.push(((1.0 - v) * 180.0 + 40.0) as u8);
             bytes.push(((u * v) * 220.0 + 24.0) as u8);
+        }
+    }
+    bytes
+}
+
+fn control_layout_2d_fixture() -> ControlDisplayLayout {
+    let mut lamps = Vec::with_capacity(16);
+    for index in 0..16_u32 {
+        let angle = (index as f32 / 16.0) * core::f32::consts::TAU;
+        lamps.push(ControlLamp2d {
+            lamp_index: index,
+            sample_start: index * 3,
+            center: [0.5 + angle.cos() * 0.34, 0.5 + angle.sin() * 0.34],
+            radius: 0.045,
+        });
+    }
+    ControlDisplayLayout::Layout2d(ControlLayout2d::new(Revision::new(104), 1, 1, lamps))
+}
+
+fn control_preview_bytes(lamps: u32) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity((lamps * 3 * 2) as usize);
+    for index in 0..lamps {
+        let phase = index as f32 / lamps.max(1) as f32;
+        let r = ((phase * core::f32::consts::TAU).sin() * 0.5 + 0.5) * u16::MAX as f32;
+        let g = (((phase + 0.33) * core::f32::consts::TAU).sin() * 0.5 + 0.5) * u16::MAX as f32;
+        let b = (((phase + 0.66) * core::f32::consts::TAU).sin() * 0.5 + 0.5) * u16::MAX as f32;
+        for sample in [r as u16, g as u16, b as u16] {
+            bytes.extend_from_slice(&sample.to_le_bytes());
         }
     }
     bytes

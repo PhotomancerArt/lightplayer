@@ -805,6 +805,29 @@ select {
     background: var(--studio-color-terminal);
 }
 
+.ux-produced-product-control-layout {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    background:
+        linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+        linear-gradient(0deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+        radial-gradient(circle at 50% 50%, rgba(123, 224, 178, 0.08), transparent 58%),
+        var(--studio-color-terminal);
+    background-size: 24px 24px, 24px 24px, auto, auto;
+}
+
+.ux-produced-product-control-lamp {
+    position: absolute;
+    display: block;
+    transform: translate(-50%, -50%);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 50%;
+    box-shadow:
+        0 0 0 1px rgba(0, 0, 0, 0.45),
+        0 0 12px color-mix(in oklab, currentColor 35%, transparent);
+}
+
 .ux-produced-product-skeleton {
     position: absolute;
     inset: 0;
