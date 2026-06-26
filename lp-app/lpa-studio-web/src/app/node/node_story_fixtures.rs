@@ -30,7 +30,7 @@ pub(crate) fn playlist_node_view() -> UiNodeView {
                 UiNodeSection::ProducedProducts(produced_products_fixture()),
                 UiNodeSection::ProducedValues(produced_values_fixture()),
                 UiNodeSection::ConfigSlots(config_slots_fixture()),
-                UiNodeSection::ConfigAssets(asset_slots_fixture()),
+                UiNodeSection::AssetSlots(asset_slots_fixture()),
             ]),
             UiNodeTab::new(
                 "raw",
@@ -57,7 +57,7 @@ pub(crate) fn error_node_view() -> UiNodeView {
                 UiConfigSlot::value("shader", "Shader", UiSlotValue::string("blast.glsl"))
                     .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Error)),
             ]),
-            UiNodeSection::ConfigAssets(vec![
+            UiNodeSection::AssetSlots(vec![
                 UiConfigSlot::asset(
                     "shader_source",
                     "Shader",
@@ -290,6 +290,21 @@ pub(crate) fn slot_value_variants_fixture() -> Vec<UiSlotValue> {
         UiSlotValue::bool(true),
         UiSlotValue::vec2([0.42, 0.58]),
         UiSlotValue::vec3([1.0, 0.42, 0.2]),
+        UiSlotValue::vec4([1.0, 0.42, 0.2, 1.0]),
+        UiSlotValue::ivec3([-1, 0, 1]),
+        UiSlotValue::uvec4([1, 2, 3, 4]),
+        UiSlotValue::bvec3([true, false, true]),
+        UiSlotValue::mat2x2([[1.0, 0.0], [0.0, 1.0]]),
+        UiSlotValue::array(vec![UiSlotValue::f32(0.25), UiSlotValue::f32(0.75)]),
+        UiSlotValue::struct_value(
+            Some("Envelope".to_string()),
+            vec![
+                ("attack".to_string(), UiSlotValue::f32(0.1)),
+                ("release".to_string(), UiSlotValue::f32(0.8)),
+            ],
+        ),
+        UiSlotValue::enum_value(1, Some(UiSlotValue::string("Loop"))),
+        UiSlotValue::unset(),
         UiSlotValue::string("blast").with_editor(UiSlotEditorHint::dropdown([
             ("idle", "Idle"),
             ("blast", "Blast"),

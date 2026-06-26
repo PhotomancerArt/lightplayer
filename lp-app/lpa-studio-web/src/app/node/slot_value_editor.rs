@@ -19,7 +19,7 @@ pub fn SlotValueEditor(value: UiSlotValue, state: UiSlotFieldState) -> Element {
                 state,
             }
         },
-        UiSlotEditorHint::Xy => match value.kind {
+        UiSlotEditorHint::Xy => match value.kind.clone() {
             UiSlotValueKind::Vec2(value) => rsx! {
                 XySlotField { value, state }
             },
@@ -28,7 +28,7 @@ pub fn SlotValueEditor(value: UiSlotValue, state: UiSlotFieldState) -> Element {
         UiSlotEditorHint::Text
         | UiSlotEditorHint::Number { .. }
         | UiSlotEditorHint::Slider { .. }
-        | UiSlotEditorHint::Auto => match value.kind {
+        | UiSlotEditorHint::Auto => match value.kind.clone() {
             UiSlotValueKind::String(value) => rsx! {
                 StringSlotField { value, state }
             },
@@ -50,6 +50,25 @@ pub fn SlotValueEditor(value: UiSlotValue, state: UiSlotFieldState) -> Element {
             UiSlotValueKind::Vec3(value) => rsx! {
                 Vec3SlotField { value, state }
             },
+            UiSlotValueKind::Unset
+            | UiSlotValueKind::Vec4(_)
+            | UiSlotValueKind::IVec2(_)
+            | UiSlotValueKind::IVec3(_)
+            | UiSlotValueKind::IVec4(_)
+            | UiSlotValueKind::UVec2(_)
+            | UiSlotValueKind::UVec3(_)
+            | UiSlotValueKind::UVec4(_)
+            | UiSlotValueKind::BVec2(_)
+            | UiSlotValueKind::BVec3(_)
+            | UiSlotValueKind::BVec4(_)
+            | UiSlotValueKind::Mat2x2(_)
+            | UiSlotValueKind::Mat3x3(_)
+            | UiSlotValueKind::Mat4x4(_)
+            | UiSlotValueKind::Array(_)
+            | UiSlotValueKind::Struct { .. }
+            | UiSlotValueKind::Enum { .. }
+            | UiSlotValueKind::Resource(_)
+            | UiSlotValueKind::Product(_) => fallback_value(value, state),
         },
     }
 }
@@ -70,6 +89,26 @@ fn slot_value_key(value: &UiSlotValue) -> String {
         UiSlotValueKind::U32(value) => value.to_string(),
         UiSlotValueKind::F32(value) => value.to_string(),
         UiSlotValueKind::Bool(value) => value.to_string(),
-        UiSlotValueKind::Vec2(_) | UiSlotValueKind::Vec3(_) => value.display.clone(),
+        UiSlotValueKind::Unset
+        | UiSlotValueKind::Vec2(_)
+        | UiSlotValueKind::Vec3(_)
+        | UiSlotValueKind::Vec4(_)
+        | UiSlotValueKind::IVec2(_)
+        | UiSlotValueKind::IVec3(_)
+        | UiSlotValueKind::IVec4(_)
+        | UiSlotValueKind::UVec2(_)
+        | UiSlotValueKind::UVec3(_)
+        | UiSlotValueKind::UVec4(_)
+        | UiSlotValueKind::BVec2(_)
+        | UiSlotValueKind::BVec3(_)
+        | UiSlotValueKind::BVec4(_)
+        | UiSlotValueKind::Mat2x2(_)
+        | UiSlotValueKind::Mat3x3(_)
+        | UiSlotValueKind::Mat4x4(_)
+        | UiSlotValueKind::Array(_)
+        | UiSlotValueKind::Struct { .. }
+        | UiSlotValueKind::Enum { .. }
+        | UiSlotValueKind::Resource(_)
+        | UiSlotValueKind::Product(_) => value.display.clone(),
     }
 }

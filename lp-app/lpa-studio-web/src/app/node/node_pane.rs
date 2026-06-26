@@ -1,14 +1,11 @@
 use dioxus::prelude::*;
 use lpa_studio_core::core::status::UiStatusKind;
-use lpa_studio_core::{
-    UiBindingEndpoint, UiNodeDirtyState, UiNodeSection, UiNodeTabBody, UiNodeView,
-    UiProducedBindings, UiSlotRecord,
-};
+use lpa_studio_core::{UiNodeSection, UiNodeTabBody, UiNodeView, UiSlotRecord};
 
 use crate::app::node::{
     NodeChildren, NodeHeader, ProducedProducts, ProducedValues, SlotRecordEditor,
 };
-use crate::base::{IconMenuButton, IconMenuTone, PopoverPlacement, StudioIcon, StudioIconName};
+use crate::base::{StudioIcon, StudioIconName};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -129,7 +126,7 @@ pub fn NodeSection(section: UiNodeSection, #[props(default = false)] first: bool
                 }
             }
         },
-        UiNodeSection::ConfigAssets(assets) => rsx! {
+        UiNodeSection::AssetSlots(assets) => rsx! {
             section { class: section_class("tw:bg-card tw:p-0", first),
                 SlotRecordEditor {
                     record: UiSlotRecord::new(assets),
@@ -173,100 +170,6 @@ fn NodeTabs(
                     aria_selected: "{index == active_index}",
                     onclick: move |_| on_select.call(index),
                     "{tab.label}"
-                }
-            }
-        }
-    }
-}
-
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn DirtyMark(dirty: UiNodeDirtyState) -> Element {
-    if !dirty.needs_attention() {
-        return rsx! {};
-    }
-
-    let (label, class) = match dirty {
-        UiNodeDirtyState::Clean => ("clean", ""),
-        UiNodeDirtyState::Dirty => (
-            "edited",
-            "tw:rounded-xs tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-1.5 tw:py-0.5 tw:text-[0.65rem] tw:font-bold tw:uppercase tw:text-status-warning-foreground",
-        ),
-        UiNodeDirtyState::Saving => (
-            "saving",
-            "tw:rounded-xs tw:border tw:border-status-working-border tw:bg-status-working-bg tw:px-1.5 tw:py-0.5 tw:text-[0.65rem] tw:font-bold tw:uppercase tw:text-status-working-foreground",
-        ),
-        UiNodeDirtyState::Error => (
-            "error",
-            "tw:rounded-xs tw:border tw:border-status-error-border tw:bg-status-error-bg tw:px-1.5 tw:py-0.5 tw:text-[0.65rem] tw:font-bold tw:uppercase tw:text-status-error-foreground",
-        ),
-    };
-
-    rsx! {
-        span { class, "{label}" }
-    }
-}
-
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn ProducedBindingMark(label: String, bindings: UiProducedBindings) -> Element {
-    let has_bindings = bindings.has_any();
-    let title = format!("{label} bindings");
-
-    rsx! {
-        IconMenuButton {
-            icon: StudioIconName::BoundValue,
-            icon_size: 12,
-            label: title.clone(),
-            title,
-            tone: IconMenuTone::Accent,
-            placement: PopoverPlacement::BottomStart,
-            active: has_bindings,
-            div { class: "tw:grid tw:gap-1",
-                span { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-heading", "binding" }
-                strong { class: "tw:text-sm tw:text-strong-foreground", "{label}" }
-            }
-            BindingEndpointSection {
-                title: "bus target",
-                empty: "not assigned",
-                endpoints: bindings.bus_target.into_iter().collect(),
-            }
-            BindingEndpointSection {
-                title: "target bindings",
-                empty: "none",
-                endpoints: bindings.target_bindings,
-            }
-            BindingEndpointSection {
-                title: "consumed by",
-                empty: "no consumers",
-                endpoints: bindings.consumers,
-            }
-        }
-    }
-}
-
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn BindingEndpointSection(
-    title: &'static str,
-    empty: &'static str,
-    endpoints: Vec<UiBindingEndpoint>,
-) -> Element {
-    rsx! {
-        div { class: "tw:grid tw:gap-1",
-            span { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground", "{title}" }
-            if endpoints.is_empty() {
-                p { class: "tw:m-0 tw:text-xs tw:text-subtle-foreground", "{empty}" }
-            } else {
-                div { class: "tw:grid tw:gap-1",
-                    for endpoint in endpoints {
-                        div { class: "tw:grid tw:min-w-0 tw:gap-0.5 tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page tw:p-2",
-                            code { class: "tw:font-mono tw:text-xs tw:text-muted-foreground tw:break-words", "{endpoint.label}" }
-                            if let Some(detail) = endpoint.detail.as_ref() {
-                                small { class: "tw:text-xs tw:text-subtle-foreground tw:break-words", "{detail}" }
-                            }
-                        }
-                    }
                 }
             }
         }

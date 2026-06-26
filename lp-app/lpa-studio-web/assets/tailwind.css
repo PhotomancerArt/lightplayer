@@ -760,9 +760,6 @@
   .tw\:p-\[22px\] {
     padding: 22px;
   }
-  .tw\:px-1\.5 {
-    padding-inline: calc(var(--tw-spacing) * 1.5);
-  }
   .tw\:px-2 {
     padding-inline: calc(var(--tw-spacing) * 2);
   }
@@ -780,9 +777,6 @@
   }
   .tw\:px-\[18px\] {
     padding-inline: 18px;
-  }
-  .tw\:py-0\.5 {
-    padding-block: calc(var(--tw-spacing) * 0.5);
   }
   .tw\:py-1 {
     padding-block: calc(var(--tw-spacing) * 1);
@@ -860,9 +854,6 @@
   }
   .tw\:text-\[0\.64rem\] {
     font-size: 0.64rem;
-  }
-  .tw\:text-\[0\.65rem\] {
-    font-size: 0.65rem;
   }
   .tw\:text-\[0\.66rem\] {
     font-size: 0.66rem;

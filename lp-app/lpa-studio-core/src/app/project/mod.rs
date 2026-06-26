@@ -1,3 +1,24 @@
+//! Studio project editor controller and sync model.
+//!
+//! The project editor intentionally keeps several trees separate:
+//!
+//! - The **mirror tree** is `lpc_view::ProjectView`, updated from LightPlayer
+//!   project sync responses. It is a client/protocol model and knows nothing
+//!   about Studio UI concepts.
+//! - The **controller tree** is the Studio business-logic layer that reconciles
+//!   against the mirror tree. It owns project editor identity, actions, local
+//!   interaction state, and future slot/product behavior without depending on a
+//!   particular UI framework.
+//! - The **DTO tree** is the data-driven render model emitted by controllers,
+//!   primarily `UiNodeView` and its child `Ui*` structs.
+//! - The **component tree** lives in `lpa-studio-web`; Dioxus components own
+//!   browser-specific view state such as popovers, animation, and transient
+//!   layout mechanics.
+//!
+//! `ProjectSync` is still the bridge from the mirror tree to the current editor
+//! DTOs. The controller tree will make that bridge explicit so incoming project
+//! updates can reconcile durable node and slot controllers before rendering.
+
 pub mod demo_project;
 pub mod loaded_project_choice;
 pub mod project_connect_result;

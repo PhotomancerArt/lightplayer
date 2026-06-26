@@ -1,8 +1,16 @@
 //! Data models for Studio node panes.
 //!
-//! The node UI is intentionally data-driven: controllers project LightPlayer
-//! model, slot, binding, and asset state into these `Ui*` structs, and the web
-//! crate renders them without needing to understand the runtime model directly.
+//! The node UI is intentionally data-driven. Studio controllers project
+//! LightPlayer model, slot, binding, and asset state into these `Ui*` structs,
+//! and renderers consume the DTOs without needing to understand the runtime
+//! model directly.
+//!
+//! This module owns the **DTO tree** in the project editor architecture:
+//! `UiNodeView`, tabs, sections, config slots, produced values, produced
+//! products, and slot detail aspects. DTOs carry renderable data and stable
+//! identifiers, but they do not own reconciliation, editing, server sync, or
+//! browser-local state. Those belong to the project controller tree and the web
+//! component tree respectively.
 
 mod ui_config_slot;
 mod ui_node_binding;
