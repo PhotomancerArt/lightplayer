@@ -1,7 +1,9 @@
 //! Basic field renderers for the first config slot editor slice.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiSlotFieldState, UiSlotOption};
+use lpa_studio_core::{UiSlotFieldState, UiSlotOption, UiSlotUnit};
+
+use crate::app::node::SlotUnitSuffix;
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -13,25 +15,46 @@ pub fn StringSlotField(value: String, state: UiSlotFieldState) -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn IntSlotField(value: i32, state: UiSlotFieldState) -> Element {
+pub fn IntSlotField(
+    value: i32,
+    state: UiSlotFieldState,
+    #[props(default = None)] unit: Option<UiSlotUnit>,
+) -> Element {
     rsx! {
-        span { class: numeric_field_class(&state), "{value}" }
+        span { class: numeric_field_class(&state),
+            span { class: "tw:font-mono", "{value}" }
+            SlotUnitSuffix { unit, reserve: true }
+        }
     }
 }
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn UIntSlotField(value: u32, state: UiSlotFieldState) -> Element {
+pub fn UIntSlotField(
+    value: u32,
+    state: UiSlotFieldState,
+    #[props(default = None)] unit: Option<UiSlotUnit>,
+) -> Element {
     rsx! {
-        span { class: numeric_field_class(&state), "{value}" }
+        span { class: numeric_field_class(&state),
+            span { class: "tw:font-mono", "{value}" }
+            SlotUnitSuffix { unit, reserve: true }
+        }
     }
 }
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn FloatSlotField(value: f32, state: UiSlotFieldState) -> Element {
+pub fn FloatSlotField(
+    value: f32,
+    state: UiSlotFieldState,
+    #[props(default = None)] unit: Option<UiSlotUnit>,
+) -> Element {
     rsx! {
-        span { class: numeric_field_class(&state), "{format_float(value)}" }
+        span { class: numeric_field_class(&state),
+            span { class: "tw:font-mono", "{format_float(value)}" }
+            SlotUnitSuffix { unit, reserve: true }
+        }
     }
 }
 

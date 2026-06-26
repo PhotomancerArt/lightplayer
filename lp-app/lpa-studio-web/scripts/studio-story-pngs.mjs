@@ -203,9 +203,11 @@ async function discoverStoryIds() {
   const html = await runChrome([
     "--headless=new",
     "--disable-gpu",
+    "--disable-application-cache",
+    "--disk-cache-size=0",
     "--virtual-time-budget=5000",
     "--dump-dom",
-    `${baseUrl}#/stories`,
+    `${baseUrl}?story-discovery=${Date.now()}#/stories`,
   ]);
   return Array.from(html.matchAll(/href="#\/stories\/([^"]+)"/g))
     .map((match) => decodeURIComponent(match[1]))
@@ -338,6 +340,8 @@ async function createCapturePage(cdp) {
         sessionId,
       );
       await cdp.send("Page.navigate", { url }, sessionId);
+      await waitForCaptureBox(cdp, sessionId, storyId);
+      await waitForStoryReady(cdp, sessionId, storyId);
       const box = await waitForCaptureBox(cdp, sessionId, storyId);
       const clip = captureClip(box);
       const { data } = await cdp.send(
@@ -420,6 +424,27 @@ async function waitForCaptureBox(cdp, sessionId, storyId) {
     await delay(100);
   }
   throw new Error(`Timed out waiting for story capture target: ${storyId}`);
+}
+
+async function waitForStoryReady(cdp, sessionId, storyId) {
+  const expression = `
+    (() => {
+      const el = document.querySelector('[data-story-capture="1"]');
+      if (!el || el.getAttribute('data-story-id') !== ${JSON.stringify(storyId)}) {
+        return false;
+      }
+      return !document.querySelector('[data-story-wait="1"]');
+    })()
+  `;
+  const started = Date.now();
+  while (Date.now() - started < 10_000) {
+    const ready = await evaluate(cdp, sessionId, expression);
+    if (ready) {
+      return;
+    }
+    await delay(50);
+  }
+  throw new Error(`Timed out waiting for story ready state: ${storyId}`);
 }
 
 async function evaluate(cdp, sessionId, expression) {

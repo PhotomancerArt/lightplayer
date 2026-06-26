@@ -73,11 +73,7 @@ fn ProductPreview(kind: UiProductKind, preview: UiProductPreview) -> Element {
             }
         }
         UiProductPreview::Pending => rsx! {
-            div { class: "tw:grid tw:min-h-20 tw:grid-cols-8 tw:gap-1 tw:opacity-75",
-                for index in 0..24 {
-                    span { key: "{index}", class: preview_cell_class(kind, index) }
-                }
-            }
+            PreviewPlaceholder { kind, faded: true }
         },
         UiProductPreview::Error { message } => rsx! {
             div { class: "tw:grid tw:min-h-20 tw:place-items-center tw:bg-status-error-bg tw:p-3 tw:text-center tw:text-xs tw:font-bold tw:text-status-error-foreground",
@@ -90,12 +86,27 @@ fn ProductPreview(kind: UiProductKind, preview: UiProductPreview) -> Element {
             }
         },
         UiProductPreview::Empty | UiProductPreview::MetadataOnly => rsx! {
-            div { class: "tw:grid tw:min-h-20 tw:grid-cols-8 tw:gap-1",
-                for index in 0..24 {
-                    span { key: "{index}", class: preview_cell_class(kind, index) }
-                }
-            }
+            PreviewPlaceholder { kind, faded: false }
         },
+    }
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn PreviewPlaceholder(kind: UiProductKind, faded: bool) -> Element {
+    let opacity_class = if faded { "tw:opacity-75" } else { "" };
+    if kind == UiProductKind::Visual {
+        return rsx! {
+            div { class: "ux-produced-product-preview ux-produced-product-preview-visual {opacity_class}", aria_hidden: "true" }
+        };
+    }
+
+    rsx! {
+        div { class: "tw:grid tw:min-h-20 tw:grid-cols-8 tw:gap-1 {opacity_class}",
+            for index in 0..24 {
+                span { key: "{index}", class: preview_cell_class(kind, index) }
+            }
+        }
     }
 }
 
@@ -159,12 +170,7 @@ fn preview_cell_class(kind: UiProductKind, index: usize) -> &'static str {
             "tw:block tw:aspect-square tw:rounded-[1px] tw:bg-card-subtle"
         }
         UiProductKind::Empty => "tw:block tw:aspect-square tw:rounded-[1px] tw:bg-card-muted",
-        UiProductKind::Visual if index % 5 == 0 => {
-            "tw:block tw:aspect-square tw:rounded-[1px] tw:bg-accent"
-        }
-        UiProductKind::Visual => {
-            "tw:block tw:aspect-square tw:rounded-[1px] tw:bg-status-working-border"
-        }
+        UiProductKind::Visual => "tw:block tw:aspect-square tw:rounded-[1px] tw:bg-accent",
         UiProductKind::Control if index % 4 == 0 => {
             "tw:block tw:aspect-square tw:rounded-[1px] tw:bg-status-good-foreground"
         }

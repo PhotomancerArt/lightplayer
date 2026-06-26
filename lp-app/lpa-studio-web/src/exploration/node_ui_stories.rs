@@ -228,7 +228,15 @@ fn NodeWindow(node: NodeUiNode, variant: NodeUiVariant) -> Element {
         NodeUiVariant::Instrument => "ux-node-ui-window ux-node-ui-window-instrument",
         NodeUiVariant::Compact => "ux-node-ui-window ux-node-ui-window-compact",
     };
-    let class = format!("{base_class} {}", node.status.window_class_name());
+    let collapsed_class = if collapsed() {
+        " ux-node-ui-window-collapsed"
+    } else {
+        ""
+    };
+    let class = format!(
+        "{base_class} {}{collapsed_class}",
+        node.status.window_class_name()
+    );
     let tabs = node.tabs.clone();
     let active_index = active_tab().min(tabs.len().saturating_sub(1));
     let active_content = tabs
@@ -571,9 +579,13 @@ fn NodeProductPreviewBox(product: NodeUiProduct) -> Element {
     };
     rsx! {
         div { class,
-            div { class: "ux-node-ui-preview-grid",
-                for index in 0..product.preview_cells {
-                    span { key: "{index}" }
+            if product.kind == NodeUiProductKind::Visual {
+                div { class: "ux-node-ui-shader-preview", aria_hidden: "true" }
+            } else {
+                div { class: "ux-node-ui-preview-grid",
+                    for index in 0..product.preview_cells {
+                        span { key: "{index}" }
+                    }
                 }
             }
         }
@@ -720,8 +732,13 @@ fn NodeChildWindow(child: NodeUiChild) -> Element {
     } else {
         NodeUiStatus::idle(Some("Waiting for playlist entry"))
     };
+    let collapsed_class = if collapsed() {
+        " ux-node-ui-window-collapsed"
+    } else {
+        ""
+    };
     let class = format!(
-        "ux-node-ui-window ux-node-ui-child-node {}",
+        "ux-node-ui-window ux-node-ui-child-node {}{collapsed_class}",
         status.window_class_name()
     );
     rsx! {
@@ -835,7 +852,7 @@ fn shader_node() -> NodeUiNode {
         presentation: vec![NodeUiPresentationItem::Product(NodeUiProduct {
             kind: NodeUiProductKind::Visual,
             name: "output",
-            size: Some("128 x 72"),
+            size: Some("128 x 128"),
             preview_cells: 24,
             bindings: produced_bindings(None, &[], &["Playlist.entry.visual"]),
             revision: 42,
@@ -935,7 +952,7 @@ fn playlist_node() -> NodeUiNode {
             NodeUiPresentationItem::Product(NodeUiProduct {
                 kind: NodeUiProductKind::Visual,
                 name: "output",
-                size: Some("128 x 72"),
+                size: Some("128 x 128"),
                 preview_cells: 18,
                 bindings: produced_bindings(Some("bus#visual.out"), &[], &["Fixture.visual"]),
                 revision: 104,
@@ -983,7 +1000,7 @@ fn playlist_node() -> NodeUiNode {
                 presentation: vec![NodeUiPresentationItem::Product(NodeUiProduct {
                     kind: NodeUiProductKind::Visual,
                     name: "output",
-                    size: Some("128 x 72"),
+                    size: Some("128 x 128"),
                     preview_cells: 12,
                     bindings: produced_bindings(None, &["../playlist#output"], &[]),
                     revision: 103,
@@ -1004,7 +1021,7 @@ fn playlist_node() -> NodeUiNode {
                 presentation: vec![NodeUiPresentationItem::Product(NodeUiProduct {
                     kind: NodeUiProductKind::Visual,
                     name: "output",
-                    size: Some("128 x 72"),
+                    size: Some("128 x 128"),
                     preview_cells: 12,
                     bindings: produced_bindings(None, &["../playlist#output"], &[]),
                     revision: 98,

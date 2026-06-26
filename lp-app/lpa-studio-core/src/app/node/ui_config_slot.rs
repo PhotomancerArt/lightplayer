@@ -2,7 +2,8 @@
 
 use crate::{
     UiBindingEndpoint, UiNodeDirtyState, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind,
-    UiSlotAspectRow, UiSlotAsset, UiSlotFieldState, UiSlotRecord, UiSlotSourceState, UiSlotValue,
+    UiSlotAspectRow, UiSlotAsset, UiSlotFieldState, UiSlotRecord, UiSlotShape, UiSlotShapeField,
+    UiSlotSourceState, UiSlotValue,
 };
 
 /// The renderable body of a config slot row.
@@ -267,25 +268,38 @@ fn type_info_aspect(slot: &UiConfigSlot) -> UiSlotAspect {
     let mut aspect = UiSlotAspect::new(UiSlotAspectKind::TypeInfo, "Info")
         .with_row(UiSlotAspectRow::new("Name", slot.key.clone()));
 
+    aspect = aspect.with_row(UiSlotAspectRow::shape(body_shape(&slot.body)));
+
     aspect = match &slot.body {
-        UiConfigSlotBody::Empty => aspect.with_row(UiSlotAspectRow::new("Shape", "Empty")),
         UiConfigSlotBody::Value(value) => {
-            aspect.with_row(UiSlotAspectRow::new("Shape", value.kind.type_label()))
-        }
-        UiConfigSlotBody::Record(record) => {
-            let detail = if record.fields.len() == 1 {
-                "1 field".to_string()
+            if let Some(unit) = value.display_unit() {
+                aspect.with_row(UiSlotAspectRow::unit(unit))
             } else {
-                format!("{} fields", record.fields.len())
-            };
-            aspect.with_row(UiSlotAspectRow::new("Shape", "Record").with_detail(detail))
+                aspect
+            }
         }
-        UiConfigSlotBody::Asset(asset) => aspect
-            .with_row(UiSlotAspectRow::new("Shape", asset.editor_label()))
-            .with_row(UiSlotAspectRow::new("Source", asset.source.clone())),
+        UiConfigSlotBody::Empty | UiConfigSlotBody::Record(_) => aspect,
+        UiConfigSlotBody::Asset(asset) => {
+            aspect.with_row(UiSlotAspectRow::new("Source", asset.source.clone()))
+        }
     };
 
     aspect
+}
+
+fn body_shape(body: &UiConfigSlotBody) -> UiSlotShape {
+    match body {
+        UiConfigSlotBody::Empty => UiSlotShape::Empty,
+        UiConfigSlotBody::Value(value) => UiSlotShape::from_value_kind(&value.kind),
+        UiConfigSlotBody::Record(record) => UiSlotShape::Record(
+            record
+                .fields
+                .iter()
+                .map(|field| UiSlotShapeField::new(field.label.clone(), body_shape(&field.body)))
+                .collect(),
+        ),
+        UiConfigSlotBody::Asset(asset) => UiSlotShape::Asset(asset.editor_label().to_string()),
+    }
 }
 
 #[cfg(test)]

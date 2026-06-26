@@ -489,12 +489,14 @@ fn render_story_selection(selection: &StorySelection, viewport: StoryViewport) -
     match selection {
         StorySelection::Story(story) => rsx! {
             StoryCanvas {
+                key: "{story.id}",
                 story_id: story.id,
                 viewport,
             }
         },
         StorySelection::ComponentOverview { id, stories, .. } => rsx! {
             StoryOverviewCanvas {
+                key: "{id}",
                 story_id: id.clone(),
                 stories: stories.clone(),
                 viewport,
@@ -515,13 +517,16 @@ fn StoryOverviewCanvas(
             "data-story-capture": "1",
             "data-story-id": "{story_id}",
             for story in stories {
-                section { class: "tw:grid tw:w-max tw:gap-2.5 tw:border-b tw:border-border-muted tw:pb-6 tw:last:border-b-0 tw:last:pb-0",
+                section {
+                    key: "{story.id}",
+                    class: "tw:grid tw:w-max tw:gap-2.5 tw:border-b tw:border-border-muted tw:pb-6 tw:last:border-b-0 tw:last:pb-0",
                     header { class: "tw:grid tw:min-w-0 tw:gap-1",
                         h3 { class: "tw:m-0 tw:text-base tw:font-bold tw:text-strong-foreground", "{story.label}" }
                         p { class: "tw:m-0 tw:font-mono tw:text-xs tw:text-dim-foreground tw:break-words", "{story.source_path}" }
                     }
                     div { class: "tw:min-w-0",
                         StoryFrame {
+                            key: "{story.id}",
                             story_id: story.id,
                             viewport,
                         }

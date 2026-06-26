@@ -3,7 +3,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     UiBindingEndpoint, UiConfigSlot, UiNodeDirtyState, UiSlotFieldState, UiSlotOptionality,
-    UiSlotSourceState, UiSlotValue,
+    UiSlotSourceState, UiSlotUnit, UiSlotValue,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -39,9 +39,14 @@ pub(crate) fn direct_value() -> Element {
 pub(crate) fn bound_value() -> Element {
     rsx! {
         ConfigSlotRow {
-            slot: UiConfigSlot::value("time", "Time", UiSlotValue::f32(3.333)).with_source(
-                UiSlotSourceState::Bound(UiBindingEndpoint::new("bus#time.seconds")),
-            ),
+            slot: UiConfigSlot::value(
+                "time",
+                "Time",
+                UiSlotValue::f32(3.333).with_unit(UiSlotUnit::seconds()),
+            )
+            .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
+                "bus#time.seconds",
+            ))),
             depth: 0,
             index: 0,
         }
@@ -53,8 +58,14 @@ pub(crate) fn info_popup() -> Element {
     rsx! {
         div { class: "tw:min-h-56",
             ConfigSlotRow {
-                slot: UiConfigSlot::value("fade_after", "Fade after", UiSlotValue::f32(0.35))
-                    .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new("bus#time.seconds"))),
+                slot: UiConfigSlot::value(
+                    "fade_after",
+                    "Fade after",
+                    UiSlotValue::f32(0.35).with_unit(UiSlotUnit::seconds()),
+                )
+                .with_source(UiSlotSourceState::Bound(UiBindingEndpoint::new(
+                    "bus#time.seconds",
+                ))),
                 depth: 0,
                 index: 0,
                 initially_open: true,

@@ -24,6 +24,12 @@ mod slot_issue_list;
 mod slot_record_editor;
 #[cfg(feature = "stories")]
 pub(crate) mod slot_record_editor_stories;
+mod slot_shape_display;
+#[cfg(feature = "stories")]
+pub(crate) mod slot_shape_display_stories;
+mod slot_unit_display;
+#[cfg(feature = "stories")]
+pub(crate) mod slot_unit_display_stories;
 mod slot_value_editor;
 #[cfg(feature = "stories")]
 pub(crate) mod slot_value_editor_stories;
@@ -43,4 +49,8 @@ pub use slot_fields::{
 };
 pub use slot_issue_list::SlotIssueList;
 pub use slot_record_editor::SlotRecordEditor;
+pub(crate) use slot_shape_display::{
+    SlotShapeDisplay, SlotShapeDisplayMode, legacy_shape_from_parts,
+};
+pub(crate) use slot_unit_display::{SlotUnitDisplay, SlotUnitDisplayMode, SlotUnitSuffix};
 pub use slot_value_editor::SlotValueEditor;

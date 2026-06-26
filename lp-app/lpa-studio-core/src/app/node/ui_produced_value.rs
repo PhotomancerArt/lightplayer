@@ -1,6 +1,9 @@
 //! Produced scalar or structured values.
 
-use crate::{UiNodeDirtyState, UiProducedBinding, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
+use crate::{
+    UiNodeDirtyState, UiProducedBinding, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
+    UiSlotShape, UiSlotUnit,
+};
 
 /// A non-product output rendered as a compact value box.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -11,6 +14,8 @@ pub struct UiProducedValue {
     pub value: String,
     /// Optional type, unit, or runtime detail.
     pub detail: Option<String>,
+    /// Structured unit metadata for value presentation.
+    pub unit: Option<UiSlotUnit>,
     /// Binding and revision metadata for the value.
     pub binding: UiProducedBinding,
     /// Edited-state affordance for authored produced-value metadata.
@@ -24,6 +29,7 @@ impl UiProducedValue {
             label: label.into(),
             value: value.into(),
             detail: None,
+            unit: None,
             binding: UiProducedBinding::none(),
             dirty: UiNodeDirtyState::Clean,
         }
@@ -33,6 +39,21 @@ impl UiProducedValue {
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
         self
+    }
+
+    /// Add structured unit metadata.
+    pub fn with_unit(mut self, unit: UiSlotUnit) -> Self {
+        self.unit = Some(unit);
+        self
+    }
+
+    /// Return structured unit metadata, recognizing legacy detail labels.
+    pub fn display_unit(&self) -> Option<UiSlotUnit> {
+        self.unit.clone().or_else(|| {
+            self.detail
+                .as_deref()
+                .and_then(UiSlotUnit::from_known_label)
+        })
     }
 
     /// Shared detail aspects for produced value popups.
@@ -46,13 +67,19 @@ impl UiProducedValue {
 
 fn produced_value_info_aspect(value: &UiProducedValue) -> UiSlotAspect {
     let mut display = value.value.clone();
-    if let Some(detail) = value.detail.as_ref() {
+    if let Some(unit) = value.display_unit() {
         display.push(' ');
-        display.push_str(detail);
+        display.push_str(&unit.short);
     }
 
-    UiSlotAspect::new(UiSlotAspectKind::TypeInfo, "Info")
+    let mut aspect = UiSlotAspect::new(UiSlotAspectKind::TypeInfo, "Info")
         .with_row(UiSlotAspectRow::new("Name", value.label.clone()))
-        .with_row(UiSlotAspectRow::new("Shape", "Produced value"))
-        .with_row(UiSlotAspectRow::new("Value", display))
+        .with_row(UiSlotAspectRow::shape(UiSlotShape::ProducedValue))
+        .with_row(UiSlotAspectRow::new("Value", display));
+
+    if let Some(unit) = value.display_unit() {
+        aspect = aspect.with_row(UiSlotAspectRow::unit(unit));
+    }
+
+    aspect
 }

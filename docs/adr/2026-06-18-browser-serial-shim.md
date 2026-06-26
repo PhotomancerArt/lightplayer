@@ -22,7 +22,7 @@ into unrelated Rust validation.
 
 Use a tiny JavaScript shim for direct Web Serial stream ownership.
 
-- `lp-app/lp-studio-web/public/browser-serial.js` owns
+- `lp-app/lpa-studio-web/public/browser-serial.js` owns
   `navigator.serial.requestPort()`, `SerialPort.open()`, stream readers,
   stream writers, line buffering, and close/cancel behavior.
 - The shim installs a narrow global function surface before the Rust wasm module

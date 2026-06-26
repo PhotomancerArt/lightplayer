@@ -1,6 +1,6 @@
 //! Typed display data for config slot values.
 
-use crate::UiSlotEditorHint;
+use crate::{UiSlotEditorHint, UiSlotUnit};
 use lpc_model::{LpValue, ProductRef, ResourceDomain, ResourceRef};
 
 /// The typed value family that a slot field should render.
@@ -76,8 +76,8 @@ impl UiSlotValueKind {
         match self {
             Self::Unset => "Unset",
             Self::String(_) => "String",
-            Self::I32(_) => "I32",
-            Self::U32(_) => "U32",
+            Self::I32(_) => "Int32",
+            Self::U32(_) => "UInt32",
             Self::F32(_) => "Float32",
             Self::Bool(_) => "Bool",
             Self::Vec2(_) => "Vec2",
@@ -145,6 +145,8 @@ pub struct UiSlotValue {
     pub display: String,
     /// Optional unit, shape, or secondary detail.
     pub detail: Option<String>,
+    /// Structured unit metadata for value presentation.
+    pub unit: Option<UiSlotUnit>,
     /// Preferred editor treatment for this value.
     pub editor: UiSlotEditorHint,
 }
@@ -350,6 +352,7 @@ impl UiSlotValue {
             kind,
             display: display.into(),
             detail: None,
+            unit: None,
             editor: UiSlotEditorHint::Auto,
         }
     }
@@ -358,6 +361,21 @@ impl UiSlotValue {
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
         self
+    }
+
+    /// Add structured unit metadata.
+    pub fn with_unit(mut self, unit: UiSlotUnit) -> Self {
+        self.unit = Some(unit);
+        self
+    }
+
+    /// Return structured unit metadata, recognizing legacy detail labels.
+    pub fn display_unit(&self) -> Option<UiSlotUnit> {
+        self.unit.clone().or_else(|| {
+            self.detail
+                .as_deref()
+                .and_then(UiSlotUnit::from_known_label)
+        })
     }
 
     /// Add an editor hint.
@@ -484,8 +502,8 @@ mod tests {
         let cases = [
             (LpValue::Unset, "Unset", "unset"),
             (LpValue::String("idle".to_string()), "String", "idle"),
-            (LpValue::I32(-4), "I32", "-4"),
-            (LpValue::U32(4), "U32", "4"),
+            (LpValue::I32(-4), "Int32", "-4"),
+            (LpValue::U32(4), "UInt32", "4"),
             (LpValue::F32(0.35), "Float32", "0.35"),
             (LpValue::Bool(true), "Bool", "true"),
         ];

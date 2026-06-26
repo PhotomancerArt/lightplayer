@@ -27,7 +27,9 @@ mod ui_slot_asset;
 mod ui_slot_editor_hint;
 mod ui_slot_field_state;
 mod ui_slot_record;
+mod ui_slot_shape;
 mod ui_slot_source_state;
+mod ui_slot_unit;
 mod ui_slot_value;
 
 pub use ui_config_slot::{UiConfigSlot, UiConfigSlotBody, UiSlotOptionality};
@@ -45,7 +47,9 @@ pub use ui_slot_asset::{UiAssetEditorKind, UiSlotAsset};
 pub use ui_slot_editor_hint::{UiSlotEditorHint, UiSlotOption};
 pub use ui_slot_field_state::UiSlotFieldState;
 pub use ui_slot_record::UiSlotRecord;
+pub use ui_slot_shape::{UiSlotShape, UiSlotShapeField};
 pub use ui_slot_source_state::UiSlotSourceState;
+pub use ui_slot_unit::UiSlotUnit;
 pub use ui_slot_value::{UiSlotValue, UiSlotValueKind};
 
 #[cfg(test)]

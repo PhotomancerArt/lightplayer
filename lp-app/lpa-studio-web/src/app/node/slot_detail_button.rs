@@ -3,6 +3,10 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
 
+use crate::app::node::{
+    SlotShapeDisplay, SlotShapeDisplayMode, SlotUnitDisplay, SlotUnitDisplayMode,
+    legacy_shape_from_parts,
+};
 use crate::base::{IconMenuButton, IconMenuTone, PopoverPlacement, StudioIcon, StudioIconName};
 
 #[component]
@@ -394,8 +398,30 @@ fn first_row_value(aspect: &UiSlotAspect) -> Option<String> {
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn SlotInfoRow(row: UiSlotAspectRow) -> Element {
+    let shape = row.shape.clone().or_else(|| {
+        row.label
+            .eq_ignore_ascii_case("Shape")
+            .then(|| legacy_shape_from_parts(&row.value, row.detail.as_deref()))
+    });
+    let unit = row.unit.clone();
+
     rsx! {
-        if !row.value.is_empty() {
+        if let Some(shape) = shape {
+            p { class: "tw:m-0 tw:flex tw:min-w-0 tw:flex-wrap tw:items-baseline tw:gap-x-1.5 tw:text-xs tw:leading-snug",
+                SlotShapeDisplay {
+                    shape,
+                    mode: SlotShapeDisplayMode::CompactFriendly,
+                }
+            }
+        } else if let Some(unit) = unit {
+            p { class: "tw:m-0 tw:flex tw:min-w-0 tw:flex-wrap tw:items-baseline tw:gap-x-1.5 tw:text-xs tw:leading-snug",
+                span { class: "tw:font-bold tw:text-subtle-foreground", "{row.label}:" }
+                SlotUnitDisplay {
+                    unit,
+                    mode: SlotUnitDisplayMode::Long,
+                }
+            }
+        } else if !row.value.is_empty() {
             p { class: "tw:m-0 tw:flex tw:min-w-0 tw:flex-wrap tw:items-baseline tw:gap-x-1.5 tw:text-xs tw:leading-snug",
                 if !row.label.eq_ignore_ascii_case("Shape") {
                     span { class: "tw:font-bold tw:text-subtle-foreground", "{row.label}:" }

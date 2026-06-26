@@ -1,7 +1,7 @@
 //! Stories for slot value editor field variants.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiSlotEditorHint, UiSlotFieldState, UiSlotValue};
+use lpa_studio_core::{UiSlotEditorHint, UiSlotFieldState, UiSlotUnit, UiSlotValue};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::SlotValueEditor;
@@ -55,7 +55,7 @@ pub(crate) fn uint_field() -> Element {
 pub(crate) fn float_field() -> Element {
     rsx! {
         SlotValueEditor {
-            value: UiSlotValue::f32(0.35).with_detail("s"),
+            value: UiSlotValue::f32(0.35).with_unit(UiSlotUnit::seconds()),
             state: UiSlotFieldState::editable(),
         }
     }

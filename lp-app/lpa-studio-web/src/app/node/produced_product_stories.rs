@@ -26,7 +26,7 @@ pub(crate) fn empty_product() -> Element {
 #[story(description = "A visual product with the primary preview texture.")]
 pub(crate) fn visual_pending() -> Element {
     rsx! {
-        ProducedProductView { product: UiProducedProduct::visual("output").with_detail("128 x 72") }
+        ProducedProductView { product: UiProducedProduct::visual("output").with_detail("128 x 128") }
     }
 }
 

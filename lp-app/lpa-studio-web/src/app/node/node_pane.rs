@@ -22,14 +22,17 @@ pub fn NodePane(
     } else {
         "tw:border-border"
     };
+    let article_class = format!(
+        "tw:grid tw:min-w-0 tw:overflow-hidden tw:rounded-md tw:border {focused_class} tw:bg-card tw:p-4"
+    );
     let active_index = active_tab().min(view.tabs.len().saturating_sub(1));
     let active_body = view.tabs.get(active_index).map(|tab| tab.body.clone());
-    let header_class = node_header_class(view.header.status.kind);
+    let header_class = node_header_class(view.header.status.kind, collapsed());
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3",
             article {
-                class: "tw:grid tw:min-w-0 tw:rounded-md tw:border {focused_class} tw:bg-card tw:p-4",
+                class: "{article_class}",
                 onclick: move |_| {
                     if let (Some(action), Some(handler)) = (focus_action.clone(), focus_handler) {
                         handler.call(action);
@@ -102,24 +105,33 @@ pub fn NodePane(
     }
 }
 
-fn node_header_class(kind: UiStatusKind) -> &'static str {
-    match kind {
+fn node_header_class(kind: UiStatusKind, collapsed: bool) -> String {
+    let shape_class = if collapsed {
+        "tw:-mb-4 tw:rounded-md"
+    } else {
+        "tw:rounded-t-md tw:border-b tw:border-border-muted"
+    };
+    let status_class = match kind {
         UiStatusKind::Neutral => {
-            "tw:-mx-4 tw:-mt-4 tw:grid tw:min-h-[46px] tw:min-w-0 tw:grid-cols-[34px_minmax(0,1fr)_auto] tw:items-stretch tw:overflow-hidden tw:rounded-t-md tw:border-b tw:border-border-muted tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-status-neutral-bg),transparent_62%)]"
+            "tw:bg-[linear-gradient(90deg,var(--studio-status-neutral-bg),transparent_62%)]"
         }
         UiStatusKind::Working => {
-            "tw:-mx-4 tw:-mt-4 tw:grid tw:min-h-[46px] tw:min-w-0 tw:grid-cols-[34px_minmax(0,1fr)_auto] tw:items-stretch tw:overflow-hidden tw:rounded-t-md tw:border-b tw:border-border-muted tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-status-working-bg),transparent_62%)]"
+            "tw:bg-[linear-gradient(90deg,var(--studio-status-working-bg),transparent_62%)]"
         }
         UiStatusKind::Good => {
-            "tw:-mx-4 tw:-mt-4 tw:grid tw:min-h-[46px] tw:min-w-0 tw:grid-cols-[34px_minmax(0,1fr)_auto] tw:items-stretch tw:overflow-hidden tw:rounded-t-md tw:border-b tw:border-border-muted tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-status-good-bg),transparent_62%)]"
+            "tw:bg-[linear-gradient(90deg,var(--studio-status-good-bg),transparent_62%)]"
         }
         UiStatusKind::Warning => {
-            "tw:-mx-4 tw:-mt-4 tw:grid tw:min-h-[46px] tw:min-w-0 tw:grid-cols-[34px_minmax(0,1fr)_auto] tw:items-stretch tw:overflow-hidden tw:rounded-t-md tw:border-b tw:border-border-muted tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-status-warning-bg),transparent_62%)]"
+            "tw:bg-[linear-gradient(90deg,var(--studio-status-warning-bg),transparent_62%)]"
         }
         UiStatusKind::Error => {
-            "tw:-mx-4 tw:-mt-4 tw:grid tw:min-h-[46px] tw:min-w-0 tw:grid-cols-[34px_minmax(0,1fr)_auto] tw:items-stretch tw:overflow-hidden tw:rounded-t-md tw:border-b tw:border-border-muted tw:bg-card-subtle tw:bg-[linear-gradient(90deg,var(--studio-status-error-bg),transparent_66%)]"
+            "tw:bg-[linear-gradient(90deg,var(--studio-status-error-bg),transparent_66%)]"
         }
-    }
+    };
+
+    format!(
+        "tw:-mx-4 tw:-mt-4 tw:grid tw:min-h-[46px] tw:min-w-0 tw:grid-cols-[34px_minmax(0,1fr)_auto] tw:items-stretch tw:overflow-hidden {shape_class} tw:bg-card-subtle {status_class}"
+    )
 }
 
 #[component]

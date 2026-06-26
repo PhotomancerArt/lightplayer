@@ -1,5 +1,7 @@
 //! Stable popup sections and summary affordances for config slots.
 
+use super::{ui_slot_shape::UiSlotShape, ui_slot_unit::UiSlotUnit};
+
 /// Compact row-level summary emitted by a slot aspect.
 ///
 /// The enum order is intentional: later variants are more important and win
@@ -81,6 +83,10 @@ pub struct UiSlotAspectRow {
     pub value: String,
     /// Optional supporting detail.
     pub detail: Option<String>,
+    /// Typed shape metadata for rich renderers.
+    pub shape: Option<UiSlotShape>,
+    /// Typed unit metadata for rich renderers.
+    pub unit: Option<UiSlotUnit>,
 }
 
 impl UiSlotAspectRow {
@@ -90,12 +96,54 @@ impl UiSlotAspectRow {
             label: label.into(),
             value: value.into(),
             detail: None,
+            shape: None,
+            unit: None,
+        }
+    }
+
+    /// Create a typed shape detail row.
+    pub fn shape(shape: UiSlotShape) -> Self {
+        let value = shape.summary_label();
+        let detail = shape.summary_detail();
+        Self {
+            label: "Shape".to_string(),
+            value,
+            detail,
+            shape: Some(shape),
+            unit: None,
+        }
+    }
+
+    /// Create a typed unit detail row.
+    pub fn unit(unit: UiSlotUnit) -> Self {
+        Self {
+            label: "Unit".to_string(),
+            value: unit.long.clone(),
+            detail: Some(unit.short.clone()),
+            shape: None,
+            unit: Some(unit),
         }
     }
 
     /// Add supporting detail.
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
+        self
+    }
+
+    /// Add typed shape metadata.
+    pub fn with_shape(mut self, shape: UiSlotShape) -> Self {
+        self.value = shape.summary_label();
+        self.detail = shape.summary_detail();
+        self.shape = Some(shape);
+        self
+    }
+
+    /// Add typed unit metadata.
+    pub fn with_unit(mut self, unit: UiSlotUnit) -> Self {
+        self.value = unit.long.clone();
+        self.detail = Some(unit.short.clone());
+        self.unit = Some(unit);
         self
     }
 }
