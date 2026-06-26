@@ -15,11 +15,14 @@
       --text: #f4f0e8;
       --muted: #b9c0c7;
       --accent: #72deb0;
-      --accent-soft: rgba(114, 222, 176, 0.12);
+      --button-gradient-top: rgba(114, 222, 176, 0.12);
+      --button-gradient-bottom: rgba(114, 222, 176, 0);
+      --button-fill-top: #223433;
+      --button-fill-bottom: var(--surface);
+      --popup-fill-away: #1b2428;
       --border-width: 1px;
       --button-radius: 7px;
       --popup-radius: 8px;
-      --overlap: 1px;
     }
 
     * {
@@ -66,9 +69,8 @@
       text-transform: uppercase;
     }
 
-    input,
-    select {
-      min-width: 92px;
+    input {
+      width: 96px;
       height: 34px;
       color: var(--text);
       border: 1px solid #36424c;
@@ -78,22 +80,53 @@
       font: inherit;
     }
 
-    .stage {
-      position: relative;
-      min-height: 560px;
-      padding: 110px 48px;
+    .gallery {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+      gap: 18px;
+      padding: 20px;
     }
 
-    .anchor-lane {
-      position: absolute;
-      top: 170px;
-      right: 220px;
+    .case-card {
       display: grid;
-      place-items: center;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .case-heading {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: baseline;
+      min-width: 0;
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 800;
+    }
+
+    .case-heading span {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .case-canvas {
+      position: relative;
+      min-height: 270px;
+      overflow: hidden;
+      border: 1px solid #28323a;
+      border-radius: 8px;
+      background:
+        linear-gradient(45deg, var(--tile-a) 25%, transparent 25%) 0 0 / 24px 24px,
+        linear-gradient(-45deg, var(--tile-a) 25%, transparent 25%) 0 12px / 24px 24px,
+        linear-gradient(45deg, transparent 75%, var(--tile-a) 75%) 12px -12px / 24px 24px,
+        linear-gradient(-45deg, transparent 75%, var(--tile-a) 75%) -12px 0 / 24px 24px,
+        var(--tile-b);
     }
 
     .anchor-button {
-      position: relative;
+      position: absolute;
       z-index: 40;
       display: inline-grid;
       width: 42px;
@@ -102,7 +135,7 @@
       color: var(--accent);
       border: var(--border-width) solid var(--accent);
       border-radius: var(--button-radius);
-      background: linear-gradient(180deg, var(--accent-soft), transparent 70%), var(--surface);
+      background: linear-gradient(180deg, var(--button-gradient-top), var(--button-gradient-bottom) 70%), var(--surface);
       box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
       cursor: pointer;
     }
@@ -114,56 +147,88 @@
     }
 
     .popup {
-      position: fixed;
+      --popup-seam-fill: var(--button-fill-bottom);
+      position: absolute;
       z-index: 20;
-      width: min(320px, calc(100vw - 32px));
-      min-height: 148px;
+      width: min(280px, calc(100% - 32px));
+      min-height: 132px;
       color: var(--muted);
       border: var(--border-width) solid var(--accent);
       border-radius: var(--popup-radius);
-      background:
-        linear-gradient(90deg, rgba(114, 222, 176, 0.08), transparent 70%),
-        var(--surface);
-      box-shadow: 0 22px 55px rgba(0, 0, 0, 0.38);
-      padding: 16px 18px;
+      background: linear-gradient(180deg, var(--popup-seam-fill), var(--popup-fill-away));
+      box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+      padding: 14px 16px;
+    }
+
+    .popup.is-below {
+      --popup-seam-fill: var(--button-fill-bottom);
+    }
+
+    .popup.is-above {
+      --popup-seam-fill: var(--button-fill-top);
+      background: linear-gradient(180deg, var(--popup-fill-away), var(--popup-seam-fill));
     }
 
     .popup h1 {
-      margin: 0 0 8px;
+      margin: 0 0 7px;
       color: var(--text);
-      font-size: 18px;
+      font-size: 16px;
       line-height: 1.15;
       letter-spacing: 0;
     }
 
     .popup p {
-      margin: 0 0 14px;
+      margin: 0 0 12px;
+      font-size: 13px;
     }
 
     .popup code {
       display: inline-flex;
       align-items: center;
-      min-height: 28px;
+      min-height: 26px;
       padding: 2px 8px;
       color: var(--text);
       border: 1px solid #303b44;
       border-radius: 6px;
       background: #11171c;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      font-size: 13px;
+      font-size: 12px;
+    }
+
+    .popup.square-top-left {
+      border-top-left-radius: 0;
+    }
+
+    .popup.square-top-right {
+      border-top-right-radius: 0;
+    }
+
+    .popup.square-bottom-left {
+      border-bottom-left-radius: 0;
+    }
+
+    .popup.square-bottom-right {
+      border-bottom-right-radius: 0;
     }
 
     .bridge {
-      position: fixed;
+      position: absolute;
       z-index: 100;
-      pointer-events: none;
-      background: var(--surface);
       height: calc(var(--popup-radius) + var(--border-width));
+      pointer-events: none;
+      background: var(--bridge-fill);
+    }
+
+    .bridge.is-below {
+      --bridge-fill: var(--button-fill-bottom);
+    }
+
+    .bridge.is-above {
+      --bridge-fill: var(--button-fill-top);
     }
 
     .bridge-corner {
       position: absolute;
-      bottom: var(--border-width);
       width: var(--popup-radius);
       height: var(--popup-radius);
     }
@@ -174,48 +239,95 @@
       content: "";
     }
 
-    .bridge-corner-left {
+    .bridge.is-below .bridge-corner {
+      bottom: var(--border-width);
+    }
+
+    .bridge.is-below .bridge-corner-left {
       left: calc(-1 * var(--popup-radius) + var(--border-width));
-      border-bottom: var(--border-width) solid var(--accent);
       border-right: var(--border-width) solid var(--accent);
+      border-bottom: var(--border-width) solid var(--accent);
       border-bottom-right-radius: var(--popup-radius);
     }
 
-    .bridge-corner-left::before {
+    .bridge.is-below .bridge-corner-left::before {
       inset: 0 calc(-1 * var(--border-width)) calc(-1 * var(--border-width)) 0;
       background: radial-gradient(
         circle at top left,
         transparent 0 calc(var(--popup-radius) - var(--border-width)),
-        var(--surface) calc(var(--popup-radius) - var(--border-width) + 0.5px)
+        var(--bridge-fill) calc(var(--popup-radius) - var(--border-width) + 0.5px)
       );
     }
 
-    .bridge-corner-right {
+    .bridge.is-below .bridge-corner-right {
       right: calc(-1 * var(--popup-radius) + var(--border-width));
       border-bottom: var(--border-width) solid var(--accent);
       border-left: var(--border-width) solid var(--accent);
       border-bottom-left-radius: var(--popup-radius);
     }
 
-    .bridge-corner-right::before {
+    .bridge.is-below .bridge-corner-right::before {
       inset: 0 0 calc(-1 * var(--border-width)) calc(-1 * var(--border-width));
       background: radial-gradient(
         circle at top right,
         transparent 0 calc(var(--popup-radius) - var(--border-width)),
-        var(--surface) calc(var(--popup-radius) - var(--border-width) + 0.5px)
+        var(--bridge-fill) calc(var(--popup-radius) - var(--border-width) + 0.5px)
       );
+    }
+
+    .bridge.is-above .bridge-corner {
+      top: var(--border-width);
+    }
+
+    .bridge.is-above .bridge-corner-left {
+      left: calc(-1 * var(--popup-radius) + var(--border-width));
+      border-top: var(--border-width) solid var(--accent);
+      border-right: var(--border-width) solid var(--accent);
+      border-top-right-radius: var(--popup-radius);
+    }
+
+    .bridge.is-above .bridge-corner-left::before {
+      inset: calc(-1 * var(--border-width)) calc(-1 * var(--border-width)) 0 0;
+      background: radial-gradient(
+        circle at bottom left,
+        transparent 0 calc(var(--popup-radius) - var(--border-width)),
+        var(--bridge-fill) calc(var(--popup-radius) - var(--border-width) + 0.5px)
+      );
+    }
+
+    .bridge.is-above .bridge-corner-right {
+      right: calc(-1 * var(--popup-radius) + var(--border-width));
+      border-top: var(--border-width) solid var(--accent);
+      border-left: var(--border-width) solid var(--accent);
+      border-top-left-radius: var(--popup-radius);
+    }
+
+    .bridge.is-above .bridge-corner-right::before {
+      inset: calc(-1 * var(--border-width)) 0 0 calc(-1 * var(--border-width));
+      background: radial-gradient(
+        circle at bottom right,
+        transparent 0 calc(var(--popup-radius) - var(--border-width)),
+        var(--bridge-fill) calc(var(--popup-radius) - var(--border-width) + 0.5px)
+      );
+    }
+
+    .bridge.no-left-corner .bridge-corner-left,
+    .bridge.no-right-corner .bridge-corner-right {
+      display: none;
+    }
+
+    .bridge.no-left-corner {
+      border-left: var(--border-width) solid var(--accent);
+    }
+
+    .bridge.no-right-corner {
+      border-right: var(--border-width) solid var(--accent);
     }
   </style>
 </head>
 <body>
   <main class="shell">
     <form class="toolbar" id="controls">
-      <label>
-        Placement
-        <select name="placement">
-          <option value="bottom-center" selected>bottom-center</option>
-        </select>
-      </label>
       <label>
         Popup radius
         <input name="popupRadius" type="number" min="0" max="32" step="1" value="8">
@@ -228,36 +340,47 @@
         Border width
         <input name="borderWidth" type="number" min="1" max="6" step="1" value="1">
       </label>
-      <label>
-        Overlap
-        <input name="overlap" type="number" min="0" max="8" step="1" value="1">
-      </label>
     </form>
 
-    <section class="stage" id="stage">
-      <div class="anchor-lane">
-        <button class="anchor-button" id="anchorButton" type="button" aria-expanded="true" aria-controls="popup">
+    <section class="gallery" id="gallery" aria-label="Attached popup permutations"></section>
+  </main>
+
+  <template id="caseTemplate">
+    <article class="case-card">
+      <div class="case-heading">
+        <strong data-case-title></strong>
+        <span data-case-meta></span>
+      </div>
+      <div class="case-canvas">
+        <button class="anchor-button" type="button" aria-expanded="true">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
             <path d="M9 7H7a5 5 0 0 0 0 10h2"></path>
             <path d="M15 7h2a5 5 0 0 1 0 10h-2"></path>
             <path d="M8 12h8"></path>
           </svg>
         </button>
+        <aside class="popup" role="dialog">
+          <h1>Bound value</h1>
+          <p>This popup is attached by a bridge that owns the seam.</p>
+          <code>bus#visual.out</code>
+        </aside>
       </div>
-
-      <aside class="popup" id="popup" role="dialog" aria-labelledby="popupTitle">
-        <h1 id="popupTitle">Bound value</h1>
-        <p>This is a scratch surface for working out attached popup border geometry.</p>
-        <code>bus#visual.out</code>
-      </aside>
-    </section>
-  </main>
+    </article>
+  </template>
 
   <script>
+    const CASES = [
+      { side: "below", align: "start" },
+      { side: "below", align: "middle" },
+      { side: "below", align: "end" },
+      { side: "above", align: "start" },
+      { side: "above", align: "middle" },
+      { side: "above", align: "end" },
+    ];
+
     const controls = document.querySelector("#controls");
-    const button = document.querySelector("#anchorButton");
-    const popup = document.querySelector("#popup");
-    let bridge = null;
+    const gallery = document.querySelector("#gallery");
+    const caseTemplate = document.querySelector("#caseTemplate");
 
     function numberControl(name) {
       return Number(controls.elements[name].value);
@@ -265,11 +388,9 @@
 
     function readOptions() {
       return {
-        placement: controls.elements.placement.value,
         popupRadius: numberControl("popupRadius"),
         buttonRadius: numberControl("buttonRadius"),
         borderWidth: numberControl("borderWidth"),
-        overlap: numberControl("overlap"),
       };
     }
 
@@ -277,62 +398,206 @@
       document.documentElement.style.setProperty("--popup-radius", `${options.popupRadius}px`);
       document.documentElement.style.setProperty("--button-radius", `${options.buttonRadius}px`);
       document.documentElement.style.setProperty("--border-width", `${options.borderWidth}px`);
-      document.documentElement.style.setProperty("--overlap", `${options.overlap}px`);
     }
 
-    function ensureBridge() {
+    function renderCases() {
+      const fragment = document.createDocumentFragment();
+      for (const config of CASES) {
+        const node = caseTemplate.content.firstElementChild.cloneNode(true);
+        node.dataset.side = config.side;
+        node.dataset.align = config.align;
+        node.querySelector("[data-case-title]").textContent = `${titleCase(config.side)} / ${titleCase(config.align)}`;
+        node.querySelector("[data-case-meta]").textContent = `${config.side}-${config.align}`;
+        fragment.appendChild(node);
+      }
+      gallery.replaceChildren(fragment);
+    }
+
+    function layoutAllCases() {
+      const options = readOptions();
+      applyOptions(options);
+
+      for (const card of gallery.querySelectorAll(".case-card")) {
+        const elements = elementsForCase(card);
+        const layout = computeAttachedPopupLayout({
+          canvasWidth: elements.canvas.clientWidth,
+          canvasHeight: elements.canvas.clientHeight,
+          buttonWidth: 42,
+          buttonHeight: 42,
+          popupWidth: Math.min(280, elements.canvas.clientWidth - 32),
+          popupHeight: 132,
+          side: card.dataset.side,
+          align: card.dataset.align,
+          popupRadius: options.popupRadius,
+          borderWidth: options.borderWidth,
+        });
+        applyAttachedPopupLayout(elements, layout);
+      }
+    }
+
+    function elementsForCase(card) {
+      const canvas = card.querySelector(".case-canvas");
+      return {
+        canvas,
+        button: canvas.querySelector(".anchor-button"),
+        popup: canvas.querySelector(".popup"),
+        bridge: ensureBridge(canvas),
+      };
+    }
+
+    function computeAttachedPopupLayout(input) {
+      const canvasPadding = 16;
+      const popupLeft = Math.round((input.canvasWidth - input.popupWidth) / 2);
+      const totalHeight = input.popupHeight + input.buttonHeight - input.borderWidth;
+      const blockTop = Math.round((input.canvasHeight - totalHeight) / 2);
+      const popupTop = input.side === "below"
+        ? blockTop + input.buttonHeight - input.borderWidth
+        : blockTop;
+      const buttonTop = input.side === "below"
+        ? blockTop
+        : blockTop + input.popupHeight - input.borderWidth;
+      const aligned = solveHorizontalAlignment({
+        popupLeft,
+        popupWidth: input.popupWidth,
+        buttonWidth: input.buttonWidth,
+        align: input.align,
+        popupRadius: input.popupRadius,
+        borderWidth: input.borderWidth,
+      });
+      const buttonLeft = clamp(
+        aligned.buttonLeft,
+        canvasPadding,
+        input.canvasWidth - input.buttonWidth - canvasPadding,
+      );
+      const buttonBottom = buttonTop + input.buttonHeight;
+      const bridgeTop = input.side === "below"
+        ? buttonBottom - input.popupRadius
+        : buttonTop - input.borderWidth;
+
+      return {
+        side: input.side,
+        button: {
+          left: buttonLeft,
+          top: buttonTop,
+          width: input.buttonWidth,
+          height: input.buttonHeight,
+        },
+        popup: {
+          left: popupLeft,
+          top: popupTop,
+          width: input.popupWidth,
+          height: input.popupHeight,
+          squareCorners: squarePopupCorners(input.side, aligned),
+        },
+        bridge: {
+          left: buttonLeft,
+          top: bridgeTop,
+          width: input.buttonWidth,
+          height: input.popupRadius + input.borderWidth,
+          showLeftCorner: aligned.showLeftCorner,
+          showRightCorner: aligned.showRightCorner,
+        },
+      };
+    }
+
+    function squarePopupCorners(side, aligned) {
+      return {
+        topLeft: side === "below" && !aligned.showLeftCorner,
+        topRight: side === "below" && !aligned.showRightCorner,
+        bottomLeft: side === "above" && !aligned.showLeftCorner,
+        bottomRight: side === "above" && !aligned.showRightCorner,
+      };
+    }
+
+    function solveHorizontalAlignment(input) {
+      const popupRight = input.popupLeft + input.popupWidth;
+      const edgeClearance = Math.max(0, input.popupRadius - input.borderWidth);
+      const bothCornersMin = input.popupLeft + edgeClearance;
+      const bothCornersMax = popupRight - input.buttonWidth - edgeClearance;
+
+      if (input.align === "start") {
+        return {
+          buttonLeft: input.popupLeft,
+          showLeftCorner: false,
+          showRightCorner: true,
+        };
+      }
+
+      if (input.align === "end") {
+        return {
+          buttonLeft: popupRight - input.buttonWidth,
+          showLeftCorner: true,
+          showRightCorner: false,
+        };
+      }
+
+      const desired = input.popupLeft + (input.popupWidth - input.buttonWidth) / 2;
+      if (bothCornersMin <= bothCornersMax) {
+        return {
+          buttonLeft: clamp(desired, bothCornersMin, bothCornersMax),
+          showLeftCorner: true,
+          showRightCorner: true,
+        };
+      }
+
+      const startLeft = input.popupLeft;
+      const endLeft = popupRight - input.buttonWidth;
+      if (Math.abs(desired - startLeft) <= Math.abs(desired - endLeft)) {
+        return {
+          buttonLeft: startLeft,
+          showLeftCorner: false,
+          showRightCorner: true,
+        };
+      }
+
+      return {
+        buttonLeft: endLeft,
+        showLeftCorner: true,
+        showRightCorner: false,
+      };
+    }
+
+    function applyAttachedPopupLayout(elements, layout) {
+      setRect(elements.button, layout.button);
+      setRect(elements.popup, layout.popup);
+      setRect(elements.bridge, layout.bridge);
+      elements.popup.className = [
+        "popup",
+        `is-${layout.side}`,
+        layout.popup.squareCorners.topLeft ? "square-top-left" : "",
+        layout.popup.squareCorners.topRight ? "square-top-right" : "",
+        layout.popup.squareCorners.bottomLeft ? "square-bottom-left" : "",
+        layout.popup.squareCorners.bottomRight ? "square-bottom-right" : "",
+      ].filter(Boolean).join(" ");
+      elements.bridge.className = [
+        "bridge",
+        `is-${layout.side}`,
+        layout.bridge.showLeftCorner ? "" : "no-left-corner",
+        layout.bridge.showRightCorner ? "" : "no-right-corner",
+      ].filter(Boolean).join(" ");
+    }
+
+    function ensureBridge(canvas) {
+      let bridge = canvas.querySelector(".bridge");
       if (bridge) {
         return bridge;
       }
 
       bridge = document.createElement("div");
       bridge.className = "bridge";
-      bridge.dataset.scratchBridge = "true";
       bridge.innerHTML = `
         <span class="bridge-corner bridge-corner-left"></span>
         <span class="bridge-corner bridge-corner-right"></span>
       `;
-      document.body.appendChild(bridge);
+      canvas.appendChild(bridge);
       return bridge;
     }
 
-    function layoutPopup() {
-      const options = readOptions();
-      applyOptions(options);
-
-      popup.style.left = "0px";
-      popup.style.top = "0px";
-
-      const buttonRect = button.getBoundingClientRect();
-      const popupRect = popup.getBoundingClientRect();
-      const viewportPad = 16;
-      const preferredLeft = buttonRect.left + (buttonRect.width - popupRect.width) / 2;
-      const left = clamp(
-        preferredLeft,
-        viewportPad,
-        window.innerWidth - popupRect.width - viewportPad,
-      );
-      const top = buttonRect.bottom - options.borderWidth;
-
-      popup.style.left = `${Math.round(left)}px`;
-      popup.style.top = `${Math.round(top)}px`;
-
-      repositionBridge(options);
-    }
-
-    function repositionBridge(options = readOptions()) {
-      const bridgeEl = ensureBridge();
-      const buttonRect = button.getBoundingClientRect();
-
-      bridgeEl.className = "bridge is-below";
-
-      const bridgeWidth = Math.round(buttonRect.width);
-      const left = buttonRect.left;
-      const top = buttonRect.bottom - options.popupRadius;
-
-      bridgeEl.style.left = `${Math.round(left)}px`;
-      bridgeEl.style.top = `${Math.round(top)}px`;
-      bridgeEl.style.width = `${bridgeWidth}px`;
+    function setRect(element, rect) {
+      element.style.left = `${Math.round(rect.left)}px`;
+      element.style.top = `${Math.round(rect.top)}px`;
+      element.style.width = `${Math.round(rect.width)}px`;
+      element.style.height = `${Math.round(rect.height)}px`;
     }
 
     function clamp(value, min, max) {
@@ -342,17 +607,19 @@
       return Math.min(Math.max(value, min), max);
     }
 
-    function scheduleLayout() {
-      requestAnimationFrame(layoutPopup);
+    function titleCase(value) {
+      return value.slice(0, 1).toUpperCase() + value.slice(1);
     }
 
+    function scheduleLayout() {
+      requestAnimationFrame(layoutAllCases);
+    }
+
+    renderCases();
     controls.addEventListener("input", scheduleLayout);
     controls.addEventListener("change", scheduleLayout);
     window.addEventListener("resize", scheduleLayout);
-
-    new ResizeObserver(scheduleLayout).observe(button);
-    new ResizeObserver(scheduleLayout).observe(popup);
-
+    new ResizeObserver(scheduleLayout).observe(gallery);
     scheduleLayout();
   </script>
 </body>
