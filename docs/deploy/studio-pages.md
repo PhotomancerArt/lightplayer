@@ -96,6 +96,13 @@ Beta and demo:
 
 ## Build And Smoke Locally
 
+Studio builds require `dx` from `dioxus-cli` in addition to `wasm-bindgen-cli`
+and `espflash`:
+
+```bash
+cargo install dioxus-cli --version 0.7.9 --locked
+```
+
 Studio production artifact:
 
 ```bash

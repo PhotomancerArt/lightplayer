@@ -1,0 +1,2310 @@
+{
+  "source": {
+    "project": "projects/test/fyeah-sign",
+    "read_revision": 102,
+    "request": "ProjectReadRequest::default_debug(None) after 102 x 33ms ticks"
+  },
+  "node": {
+    "id": 5,
+    "title": "Playlist",
+    "path": "/fyeah_sign.show/playlist.playlist"
+  },
+  "root_shapes": [
+    {
+      "name": "node.5.def",
+      "shape": 1520921198
+    },
+    {
+      "name": "node.5.state",
+      "shape": 237636858
+    }
+  ],
+  "registry": {
+    "ids_revision": 0,
+    "shapes": {
+      "90603770": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::shader::shader_slot_def::ShaderSlotDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "kind",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2435360456,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "value",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 3864786694,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "key",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 1124041669,
+                          "ty": "string",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "default",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 2605450937,
+                          "ty": "f32",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "min",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 2605450937,
+                          "ty": "f32",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "max",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 2605450937,
+                          "ty": "f32",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "mapping",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "ref": {
+                        "id": 4227971207
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "label",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2612013983,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "description",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2612013983,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "237636858": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::playlist::playlist_state::PlaylistState",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "output",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 689649576,
+                      "ty": {
+                        "product": "visual"
+                      },
+                      "meta": {},
+                      "editor": "visual_product"
+                    }
+                  }
+                },
+                "semantics": {
+                  "direction": "produced"
+                },
+                "policy": {
+                  "writable": false,
+                  "persistence": "transient"
+                }
+              },
+              {
+                "name": "entry_time",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2605450937,
+                      "ty": "f32",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                },
+                "semantics": {
+                  "direction": "produced"
+                },
+                "policy": {
+                  "writable": false,
+                  "persistence": "transient"
+                }
+              },
+              {
+                "name": "entry_progress",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2605450937,
+                      "ty": "f32",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                },
+                "semantics": {
+                  "direction": "produced"
+                },
+                "policy": {
+                  "writable": false,
+                  "persistence": "transient"
+                }
+              },
+              {
+                "name": "active_entry",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 3065358156,
+                      "ty": "u32",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                },
+                "semantics": {
+                  "direction": "produced"
+                },
+                "policy": {
+                  "writable": false,
+                  "persistence": "transient"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "520345680": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::clock::clock_def::ClockDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "bindings",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 1885459118
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "controls",
+                "shape": {
+                  "record": {
+                    "meta": {},
+                    "fields": [
+                      {
+                        "name": "running",
+                        "shape": {
+                          "value": {
+                            "shape": {
+                              "id": 1196386242,
+                              "ty": "bool",
+                              "meta": {},
+                              "editor": "plain"
+                            }
+                          }
+                        },
+                        "policy": {
+                          "persistence": "transient"
+                        }
+                      },
+                      {
+                        "name": "rate",
+                        "shape": {
+                          "value": {
+                            "shape": {
+                              "id": 885023043,
+                              "ty": "f32",
+                              "meta": {},
+                              "editor": {
+                                "slider": {
+                                  "min": 0.0,
+                                  "max": 4.0,
+                                  "step": 0.05
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "policy": {
+                          "persistence": "transient"
+                        }
+                      },
+                      {
+                        "name": "scrub_offset_seconds",
+                        "shape": {
+                          "value": {
+                            "shape": {
+                              "id": 3375024484,
+                              "ty": "f32",
+                              "meta": {},
+                              "editor": {
+                                "slider": {
+                                  "min": -10.0,
+                                  "max": 10.0,
+                                  "step": 0.016666668
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "policy": {
+                          "persistence": "transient"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "770241759": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::output::output_def::OutputDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "endpoint",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 397552907,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "bindings",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 1885459118
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "options",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "ref": {
+                        "id": 2660578566
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "814168903": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::fixture::fixture_def::FixtureDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "render_size",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2973013964,
+                      "ty": {
+                        "struct": {
+                          "name": "Dim2u",
+                          "fields": [
+                            {
+                              "name": "width",
+                              "ty": "u32"
+                            },
+                            {
+                              "name": "height",
+                              "ty": "u32"
+                            }
+                          ]
+                        }
+                      },
+                      "meta": {},
+                      "editor": "dimensions"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "bindings",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 1885459118
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "sampling",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 1216569569,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "diagnostic_mode",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 4232169722,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": {
+                        "dropdown": {
+                          "options": [
+                            {
+                              "value": "off",
+                              "label": "Off"
+                            },
+                            {
+                              "value": "led_index",
+                              "label": "LED index"
+                            },
+                            {
+                              "value": "groups_10",
+                              "label": "RGB groups of 10"
+                            },
+                            {
+                              "value": "path_colors",
+                              "label": "Path colors"
+                            },
+                            {
+                              "value": "chase",
+                              "label": "Chase"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "mapping",
+                "shape": {
+                  "enum": {
+                    "meta": {},
+                    "variants": [
+                      {
+                        "name": "Unset",
+                        "shape": {
+                          "unit": {
+                            "meta": {}
+                          }
+                        }
+                      },
+                      {
+                        "name": "PathPoints",
+                        "shape": {
+                          "record": {
+                            "meta": {},
+                            "fields": [
+                              {
+                                "name": "paths",
+                                "shape": {
+                                  "map": {
+                                    "meta": {},
+                                    "key": "u32",
+                                    "value": {
+                                      "enum": {
+                                        "meta": {},
+                                        "variants": [
+                                          {
+                                            "name": "RingArray",
+                                            "shape": {
+                                              "record": {
+                                                "meta": {},
+                                                "fields": [
+                                                  {
+                                                    "name": "center",
+                                                    "shape": {
+                                                      "value": {
+                                                        "shape": {
+                                                          "id": 1477692922,
+                                                          "ty": "vec2",
+                                                          "meta": {},
+                                                          "editor": "xy"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "diameter",
+                                                    "shape": {
+                                                      "value": {
+                                                        "shape": {
+                                                          "id": 2960302901,
+                                                          "ty": "f32",
+                                                          "meta": {},
+                                                          "editor": {
+                                                            "number": {
+                                                              "min": 0.0
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "start_ring_inclusive",
+                                                    "shape": {
+                                                      "value": {
+                                                        "shape": {
+                                                          "id": 3065358156,
+                                                          "ty": "u32",
+                                                          "meta": {},
+                                                          "editor": "plain"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "end_ring_exclusive",
+                                                    "shape": {
+                                                      "value": {
+                                                        "shape": {
+                                                          "id": 3065358156,
+                                                          "ty": "u32",
+                                                          "meta": {},
+                                                          "editor": "plain"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "ring_lamp_counts",
+                                                    "shape": {
+                                                      "map": {
+                                                        "meta": {},
+                                                        "key": "u32",
+                                                        "value": {
+                                                          "value": {
+                                                            "shape": {
+                                                              "id": 3065358156,
+                                                              "ty": "u32",
+                                                              "meta": {},
+                                                              "editor": "plain"
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "offset_angle",
+                                                    "shape": {
+                                                      "value": {
+                                                        "shape": {
+                                                          "id": 2605450937,
+                                                          "ty": "f32",
+                                                          "meta": {},
+                                                          "editor": "plain"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "order",
+                                                    "shape": {
+                                                      "value": {
+                                                        "shape": {
+                                                          "id": 2101432397,
+                                                          "ty": "string",
+                                                          "meta": {},
+                                                          "editor": {
+                                                            "dropdown": {
+                                                              "options": [
+                                                                {
+                                                                  "value": "inner_first",
+                                                                  "label": "Inner first"
+                                                                },
+                                                                {
+                                                                  "value": "outer_first",
+                                                                  "label": "Outer first"
+                                                                }
+                                                              ]
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "name": "PointList",
+                                            "shape": {
+                                              "record": {
+                                                "meta": {},
+                                                "fields": [
+                                                  {
+                                                    "name": "first_channel",
+                                                    "shape": {
+                                                      "value": {
+                                                        "shape": {
+                                                          "id": 3065358156,
+                                                          "ty": "u32",
+                                                          "meta": {},
+                                                          "editor": "plain"
+                                                        }
+                                                      }
+                                                    }
+                                                  },
+                                                  {
+                                                    "name": "points",
+                                                    "shape": {
+                                                      "map": {
+                                                        "meta": {},
+                                                        "key": "u32",
+                                                        "value": {
+                                                          "value": {
+                                                            "shape": {
+                                                              "id": 1477692922,
+                                                              "ty": "vec2",
+                                                              "meta": {},
+                                                              "editor": "xy"
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ]
+                                              }
+                                            }
+                                          }
+                                        ]
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "name": "sample_diameter",
+                                "shape": {
+                                  "value": {
+                                    "shape": {
+                                      "id": 2960302901,
+                                      "ty": "f32",
+                                      "meta": {},
+                                      "editor": {
+                                        "number": {
+                                          "min": 0.0
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      {
+                        "name": "SvgPath",
+                        "shape": {
+                          "record": {
+                            "meta": {},
+                            "fields": [
+                              {
+                                "name": "source",
+                                "shape": {
+                                  "custom": {
+                                    "meta": {},
+                                    "codec": 2355797192,
+                                    "shape": {
+                                      "value": {
+                                        "shape": {
+                                          "id": 177956922,
+                                          "ty": "string",
+                                          "meta": {},
+                                          "editor": "plain"
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "name": "sample_diameter",
+                                "shape": {
+                                  "value": {
+                                    "shape": {
+                                      "id": 2960302901,
+                                      "ty": "f32",
+                                      "meta": {},
+                                      "editor": {
+                                        "number": {
+                                          "min": 0.0
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "name": "color_order",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 1235394384,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": {
+                        "dropdown": {
+                          "options": [
+                            {
+                              "value": "rgb",
+                              "label": "RGB"
+                            },
+                            {
+                              "value": "grb",
+                              "label": "GRB"
+                            },
+                            {
+                              "value": "rbg",
+                              "label": "RBG"
+                            },
+                            {
+                              "value": "gbr",
+                              "label": "GBR"
+                            },
+                            {
+                              "value": "brg",
+                              "label": "BRG"
+                            },
+                            {
+                              "value": "bgr",
+                              "label": "BGR"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "transform",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 120141864,
+                      "ty": "mat3x3",
+                      "meta": {},
+                      "editor": "affine2d"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "brightness",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 3065358156,
+                          "ty": "u32",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "gamma_correction",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 1196386242,
+                          "ty": "bool",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "899201012": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::playlist::playlist_entry::PlaylistEntry",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "bindings",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 1885459118
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "trigger",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "u32",
+                    "value": {
+                      "ref": {
+                        "id": 2014621053
+                      }
+                    }
+                  }
+                },
+                "semantics": {
+                  "direction": "consumed",
+                  "merge": "by_key"
+                }
+              },
+              {
+                "name": "name",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 2612013983,
+                          "ty": "string",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "duration",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 2960302901,
+                          "ty": "f32",
+                          "meta": {},
+                          "editor": {
+                            "number": {
+                              "min": 0.0
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "fade_after",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 2960302901,
+                          "ty": "f32",
+                          "meta": {},
+                          "editor": {
+                            "number": {
+                              "min": 0.0
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "node",
+                "shape": {
+                  "enum": {
+                    "meta": {},
+                    "encoding": "external",
+                    "variants": [
+                      {
+                        "name": "unset",
+                        "shape": {
+                          "unit": {
+                            "meta": {}
+                          }
+                        }
+                      },
+                      {
+                        "name": "ref",
+                        "shape": {
+                          "value": {
+                            "shape": {
+                              "id": 2244609540,
+                              "ty": "string",
+                              "meta": {},
+                              "editor": "path"
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "name": "def",
+                        "shape": {
+                          "ref": {
+                            "id": 3831631647
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "1018556980": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::button::button_def::ButtonDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "bindings",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 1885459118
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "endpoint",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 397552907,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "id",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 3065358156,
+                      "ty": "u32",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "stable_ms",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 3065358156,
+                      "ty": "u32",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "1520921198": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::playlist::playlist_def::PlaylistDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "bindings",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 1885459118
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "time",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2605450937,
+                      "ty": "f32",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                },
+                "semantics": {
+                  "direction": "consumed"
+                }
+              },
+              {
+                "name": "idle_entry",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 3065358156,
+                      "ty": "u32",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "default_fade",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2960302901,
+                      "ty": "f32",
+                      "meta": {},
+                      "editor": {
+                        "number": {
+                          "min": 0.0
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "entries",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "u32",
+                    "value": {
+                      "ref": {
+                        "id": 899201012
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "1885459118": {
+        "changed_at": 0,
+        "name": "lpc_model::binding::binding_def::BindingDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "value",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 3678527952,
+                          "ty": "any",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "source",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 1364391883,
+                          "ty": "string",
+                          "meta": {},
+                          "editor": "path"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "target",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 1364391883,
+                          "ty": "string",
+                          "meta": {},
+                          "editor": "path"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "2014621053": {
+        "changed_at": 0,
+        "name": "lp::control::Message",
+        "shape": {
+          "value": {
+            "shape": {
+              "id": 2014621053,
+              "ty": {
+                "struct": {
+                  "name": "ControlMessage",
+                  "fields": [
+                    {
+                      "name": "id",
+                      "ty": "u32"
+                    },
+                    {
+                      "name": "seq",
+                      "ty": "u32"
+                    }
+                  ]
+                }
+              },
+              "meta": {},
+              "editor": "plain"
+            }
+          }
+        }
+      },
+      "2328756067": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::project::project_def::ProjectDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "name",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "value": {
+                        "shape": {
+                          "id": 2612013983,
+                          "ty": "string",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "nodes",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "enum": {
+                        "meta": {},
+                        "encoding": "external",
+                        "variants": [
+                          {
+                            "name": "unset",
+                            "shape": {
+                              "unit": {
+                                "meta": {}
+                              }
+                            }
+                          },
+                          {
+                            "name": "ref",
+                            "shape": {
+                              "value": {
+                                "shape": {
+                                  "id": 2244609540,
+                                  "ty": "string",
+                                  "meta": {},
+                                  "editor": "path"
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "name": "def",
+                            "shape": {
+                              "ref": {
+                                "id": 3831631647
+                              }
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "2405894887": {
+        "changed_at": 0,
+        "name": "lp::fluid::Emitter",
+        "shape": {
+          "value": {
+            "shape": {
+              "id": 2405894887,
+              "ty": {
+                "struct": {
+                  "name": "FluidEmitter",
+                  "fields": [
+                    {
+                      "name": "id",
+                      "ty": "u32"
+                    },
+                    {
+                      "name": "pos",
+                      "ty": "vec2"
+                    },
+                    {
+                      "name": "dir",
+                      "ty": "vec2"
+                    },
+                    {
+                      "name": "radius",
+                      "ty": "f32"
+                    },
+                    {
+                      "name": "color",
+                      "ty": "vec3"
+                    },
+                    {
+                      "name": "velocity",
+                      "ty": "f32"
+                    },
+                    {
+                      "name": "intensity",
+                      "ty": "f32"
+                    }
+                  ]
+                }
+              },
+              "meta": {},
+              "editor": "plain"
+            }
+          }
+        }
+      },
+      "2579233885": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::texture::texture_def::TextureDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "size",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2973013964,
+                      "ty": {
+                        "struct": {
+                          "name": "Dim2u",
+                          "fields": [
+                            {
+                              "name": "width",
+                              "ty": "u32"
+                            },
+                            {
+                              "name": "height",
+                              "ty": "u32"
+                            }
+                          ]
+                        }
+                      },
+                      "meta": {},
+                      "editor": "dimensions"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "bindings",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 1885459118
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "2660578566": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::output::output_def::OutputDriverOptionsConfig",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "white_point",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2618928957,
+                      "ty": "vec3",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "brightness",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 1724747812,
+                      "ty": "f32",
+                      "meta": {},
+                      "editor": {
+                        "slider": {
+                          "min": 0.0,
+                          "max": 1.0,
+                          "step": 0.01
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "interpolation_enabled",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 1196386242,
+                      "ty": "bool",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "dithering_enabled",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 1196386242,
+                      "ty": "bool",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "lut_enabled",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 1196386242,
+                      "ty": "bool",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "2887292794": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::fluid::fluid_def::FluidDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "bindings",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 1885459118
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "size",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2973013964,
+                      "ty": {
+                        "struct": {
+                          "name": "Dim2u",
+                          "fields": [
+                            {
+                              "name": "width",
+                              "ty": "u32"
+                            },
+                            {
+                              "name": "height",
+                              "ty": "u32"
+                            }
+                          ]
+                        }
+                      },
+                      "meta": {},
+                      "editor": "dimensions"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "solver_iterations",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 3065358156,
+                      "ty": "u32",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "step_hz",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2960302901,
+                      "ty": "f32",
+                      "meta": {},
+                      "editor": {
+                        "number": {
+                          "min": 0.0
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "fade_speed",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 1724747812,
+                      "ty": "f32",
+                      "meta": {},
+                      "editor": {
+                        "slider": {
+                          "min": 0.0,
+                          "max": 1.0,
+                          "step": 0.01
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "viscosity",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2960302901,
+                      "ty": "f32",
+                      "meta": {},
+                      "editor": {
+                        "number": {
+                          "min": 0.0
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "time",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2605450937,
+                      "ty": "f32",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                },
+                "semantics": {
+                  "direction": "consumed"
+                }
+              },
+              {
+                "name": "emitters",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "u32",
+                    "value": {
+                      "ref": {
+                        "id": 2405894887
+                      }
+                    }
+                  }
+                },
+                "semantics": {
+                  "direction": "consumed",
+                  "merge": "by_key"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "3464771014": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::shader::shader_param_def::ScalarHint",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "value",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2960302901,
+                      "ty": "f32",
+                      "meta": {},
+                      "editor": {
+                        "number": {
+                          "min": 0.0
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "3622644300": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::shader::compute_shader_def::ComputeShaderDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "source",
+                "shape": {
+                  "custom": {
+                    "meta": {},
+                    "codec": 2355797192,
+                    "shape": {
+                      "value": {
+                        "shape": {
+                          "id": 177956922,
+                          "ty": "string",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "bindings",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 1885459118
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "glsl_opts",
+                "shape": {
+                  "ref": {
+                    "id": 4084892601
+                  }
+                }
+              },
+              {
+                "name": "consumed",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 90603770
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "produced",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 90603770
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "3712581622": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::shader::shader_param_def::ShaderParamDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "label",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2612013983,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "description",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2612013983,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "value_type",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2612013983,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "default",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 1724747812,
+                      "ty": "f32",
+                      "meta": {},
+                      "editor": {
+                        "slider": {
+                          "min": 0.0,
+                          "max": 1.0,
+                          "step": 0.01
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "min",
+                "shape": {
+                  "option": {
+                    "meta": {},
+                    "some": {
+                      "ref": {
+                        "id": 3464771014
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "3733861171": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::shader::shader_def::ShaderDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "source",
+                "shape": {
+                  "custom": {
+                    "meta": {},
+                    "codec": 2355797192,
+                    "shape": {
+                      "value": {
+                        "shape": {
+                          "id": 177956922,
+                          "ty": "string",
+                          "meta": {},
+                          "editor": "plain"
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "render_order",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 1231123999,
+                      "ty": "i32",
+                      "meta": {},
+                      "editor": {
+                        "number": {
+                          "step": 1.0
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "bindings",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 1885459118
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "glsl_opts",
+                "shape": {
+                  "ref": {
+                    "id": 4084892601
+                  }
+                }
+              },
+              {
+                "name": "param_defs",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 3712581622
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "consumed",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 90603770
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "3831631647": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::node_def::NodeArtifact",
+        "shape": {
+          "enum": {
+            "meta": {},
+            "variants": [
+              {
+                "name": "Project",
+                "shape": {
+                  "ref": {
+                    "id": 2328756067
+                  }
+                }
+              },
+              {
+                "name": "Button",
+                "shape": {
+                  "ref": {
+                    "id": 1018556980
+                  }
+                }
+              },
+              {
+                "name": "Clock",
+                "shape": {
+                  "ref": {
+                    "id": 520345680
+                  }
+                }
+              },
+              {
+                "name": "Texture",
+                "shape": {
+                  "ref": {
+                    "id": 2579233885
+                  }
+                }
+              },
+              {
+                "name": "Shader",
+                "shape": {
+                  "ref": {
+                    "id": 3733861171
+                  }
+                }
+              },
+              {
+                "name": "ComputeShader",
+                "shape": {
+                  "ref": {
+                    "id": 3622644300
+                  }
+                }
+              },
+              {
+                "name": "Fluid",
+                "shape": {
+                  "ref": {
+                    "id": 2887292794
+                  }
+                }
+              },
+              {
+                "name": "Playlist",
+                "shape": {
+                  "ref": {
+                    "id": 1520921198
+                  }
+                }
+              },
+              {
+                "name": "ControlRadio",
+                "shape": {
+                  "ref": {
+                    "id": 4099574392
+                  }
+                }
+              },
+              {
+                "name": "Output",
+                "shape": {
+                  "ref": {
+                    "id": 770241759
+                  }
+                }
+              },
+              {
+                "name": "Fixture",
+                "shape": {
+                  "ref": {
+                    "id": 814168903
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "4084892601": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::shader::glsl_opts::GlslOpts",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "add_sub",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 1838283229,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": {
+                        "dropdown": {
+                          "options": [
+                            {
+                              "value": "saturating",
+                              "label": "Saturating"
+                            },
+                            {
+                              "value": "wrapping",
+                              "label": "Wrapping"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "mul",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2912674014,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": {
+                        "dropdown": {
+                          "options": [
+                            {
+                              "value": "saturating",
+                              "label": "Saturating"
+                            },
+                            {
+                              "value": "wrapping",
+                              "label": "Wrapping"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "div",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 1295061595,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": {
+                        "dropdown": {
+                          "options": [
+                            {
+                              "value": "saturating",
+                              "label": "Saturating"
+                            },
+                            {
+                              "value": "reciprocal",
+                              "label": "Reciprocal"
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "4099574392": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::radio::control_radio_def::ControlRadioDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "bindings",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "string",
+                    "value": {
+                      "ref": {
+                        "id": 1885459118
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "name": "endpoint",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 397552907,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "channel",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 3065358156,
+                      "ty": "u32",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "repeat_count",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 3065358156,
+                      "ty": "u32",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "wifi_channel",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 3065358156,
+                      "ty": "u32",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "input",
+                "shape": {
+                  "map": {
+                    "meta": {},
+                    "key": "u32",
+                    "value": {
+                      "ref": {
+                        "id": 2014621053
+                      }
+                    }
+                  }
+                },
+                "semantics": {
+                  "direction": "consumed",
+                  "merge": "by_key"
+                }
+              }
+            ]
+          }
+        }
+      },
+      "4227971207": {
+        "changed_at": 0,
+        "name": "lpc_model::nodes::shader::shader_slot_mapping::ShaderSlotMappingDef",
+        "shape": {
+          "record": {
+            "meta": {},
+            "fields": [
+              {
+                "name": "kind",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 3102355672,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "len",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 3065358156,
+                      "ty": "u32",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "key",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 2612013983,
+                      "ty": "string",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              },
+              {
+                "name": "empty_key",
+                "shape": {
+                  "value": {
+                    "shape": {
+                      "id": 3065358156,
+                      "ty": "u32",
+                      "meta": {},
+                      "editor": "plain"
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

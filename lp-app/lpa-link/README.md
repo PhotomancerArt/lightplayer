@@ -96,7 +96,7 @@ Browser providers own their browser resource bindings:
 - `browser-serial-esp32` owns Web Serial permission/open/release/close and ESP32
   probe/flash bindings.
 
-`lpa-studio-ux` adapts provider send/receive streams into
+`lpa-studio-core` adapts provider send/receive streams into
 `lpa-client::ClientIo`; UI shells should not reimplement provider resource
 ownership, request ids, response correlation, server error handling,
 heartbeat/log handling, or project deploy ordering.

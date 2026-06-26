@@ -1,0 +1,139 @@
+//! Stories for produced product views.
+
+use dioxus::prelude::*;
+use lpa_studio_core::{UiProducedProduct, UiProductPreview, UiProductTrackingState};
+use lpa_studio_web_story_macros::story;
+
+use crate::app::node::node_story_fixtures::{
+    control_preview_product, control_unsupported_product, produced_product_variants_fixture,
+    visual_error_product, visual_preview_product,
+};
+use crate::app::node::{ProducedProductView, ProducedProducts};
+
+#[story(description = "Produced product variants shown as a node pane section would render them.")]
+pub(crate) fn gallery() -> Element {
+    rsx! {
+        ProducedProducts { products: produced_product_variants_fixture() }
+    }
+}
+
+#[story(description = "An output slot that has not resolved to a product yet.")]
+pub(crate) fn empty_product() -> Element {
+    rsx! {
+        ProducedProductView { product: UiProducedProduct::empty("output").with_detail("not resolved") }
+    }
+}
+
+#[story(description = "A visual product that exists but is not being tracked.")]
+pub(crate) fn visual_untracked() -> Element {
+    rsx! {
+        ProducedProductView { product: UiProducedProduct::visual("output").with_detail("32 x 32 preview") }
+    }
+}
+
+#[story(description = "A visual product waiting for its first tracked preview.")]
+pub(crate) fn visual_pending() -> Element {
+    rsx! {
+        ProducedProductView {
+            product: UiProducedProduct::visual("output")
+                .with_detail("32 x 32 preview")
+                .with_preview(UiProductPreview::Pending)
+                .with_tracking(UiProductTrackingState::Tracking)
+        }
+    }
+}
+
+#[story(description = "A visual product with loaded RGB preview bytes.")]
+pub(crate) fn visual_loaded() -> Element {
+    rsx! {
+        ProducedProductView { product: visual_preview_product("output") }
+    }
+}
+
+#[story(description = "A visual product with cached preview bytes that is not being tracked now.")]
+pub(crate) fn visual_paused() -> Element {
+    rsx! {
+        ProducedProductView {
+            product: visual_preview_product("output")
+                .with_tracking(UiProductTrackingState::Paused)
+        }
+    }
+}
+
+#[story(description = "A visual product whose preview probe failed.")]
+pub(crate) fn visual_error() -> Element {
+    rsx! {
+        ProducedProductView { product: visual_error_product("output") }
+    }
+}
+
+#[story(description = "An open produced product detail popup.")]
+pub(crate) fn detail_popup() -> Element {
+    let product = produced_product_variants_fixture().remove(3);
+
+    rsx! {
+        div { class: "tw:min-h-56",
+            ProducedProductView {
+                product,
+                initially_open: true,
+            }
+        }
+    }
+}
+
+#[story(description = "A control product that exists but is not being tracked.")]
+pub(crate) fn control_untracked() -> Element {
+    rsx! {
+        ProducedProductView { product: UiProducedProduct::control("dmx").with_detail("16 RGB lamps") }
+    }
+}
+
+#[story(description = "A control product waiting for its first tracked preview.")]
+pub(crate) fn control_pending() -> Element {
+    rsx! {
+        ProducedProductView {
+            product: UiProducedProduct::control("dmx")
+                .with_detail("16 RGB lamps")
+                .with_preview(UiProductPreview::Pending)
+                .with_tracking(UiProductTrackingState::Tracking)
+        }
+    }
+}
+
+#[story(description = "A control product with native samples and a 2D display layout.")]
+pub(crate) fn control_loaded() -> Element {
+    rsx! {
+        ProducedProductView { product: control_preview_product("dmx") }
+    }
+}
+
+#[story(description = "A control product with cached preview bytes that is not being tracked now.")]
+pub(crate) fn control_paused() -> Element {
+    rsx! {
+        ProducedProductView {
+            product: control_preview_product("dmx")
+                .with_tracking(UiProductTrackingState::Paused)
+        }
+    }
+}
+
+#[story(description = "A control product whose native samples cannot be shown as a 2D layout.")]
+pub(crate) fn control_unsupported() -> Element {
+    rsx! {
+        ProducedProductView { product: control_unsupported_product("dmx") }
+    }
+}
+
+#[story(description = "A control product whose preview probe failed.")]
+pub(crate) fn control_error() -> Element {
+    rsx! {
+        ProducedProductView {
+            product: UiProducedProduct::control("dmx")
+                .with_detail("16 RGB lamps")
+                .with_tracking(UiProductTrackingState::Tracking)
+                .with_preview(UiProductPreview::Error {
+                    message: "control probe failed".to_string(),
+                })
+        }
+    }
+}

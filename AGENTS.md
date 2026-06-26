@@ -246,14 +246,14 @@ be migrated unless a separate migration plan asks for it.
 
 ## Studio UI visual baselines
 
-When a change touches non-generated files under `lp-app/lp-studio-web/`, run the
+When a change touches non-generated files under `lp-app/lpa-studio-web/`, run the
 Studio story baseline helper before committing:
 
 ```bash
 just studio-story-baselines-if-needed
 ```
 
-If it updates files under `lp-app/lp-studio-web/story-images/`, include those
+If it updates files under `lp-app/lpa-studio-web/story-images/`, include those
 PNG changes in the same commit and mention the affected story baselines in the
 final summary. The helper intentionally ignores generated web artifacts,
 scratch PNGs, fresh check PNGs, and the baseline PNGs themselves.

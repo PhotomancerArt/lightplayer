@@ -9,8 +9,9 @@ use lpc_model::nodes::fixture::{
     ColorOrder, FixtureDiagnosticMode, FixtureSamplingConfig, MappingConfig, PathSpec, RingOrder,
 };
 use lpc_model::{
-    ControlExtent, ControlProduct, Dim2u, FixtureDefView, FixtureState, Revision, SlotAccess,
-    SlotPath, SlotShapeRegistry, SlotShapeRegistryError,
+    ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlProduct, Dim2u,
+    FixtureDefView, FixtureState, Revision, SlotAccess, SlotPath, SlotShapeRegistry,
+    SlotShapeRegistryError,
 };
 use lps_q32::q32::{Q32, ToQ32};
 
@@ -52,6 +53,7 @@ pub struct FixtureNode {
     /// `(width, height, mapping_ver)` key for cached precomputed pixel entries.
     precomputed: Option<(u32, u32, Revision, alloc::vec::Vec<PixelMappingEntry>)>,
     direct_points: Option<(Revision, alloc::vec::Vec<DirectSamplePoint>)>,
+    display_layout_revision: Option<(FixtureDisplayLayoutKey, Revision)>,
 }
 
 impl FixtureNode {
@@ -75,6 +77,7 @@ impl FixtureNode {
             sample_target: None,
             precomputed: None,
             direct_points: None,
+            display_layout_revision: None,
         }
     }
 
@@ -140,8 +143,29 @@ impl FixtureNode {
             self.mapping_version = ctx.revision();
             self.precomputed = None;
             self.direct_points = None;
+            self.display_layout_revision = None;
         }
         Ok(())
+    }
+
+    fn control_display_layout_revision(
+        &mut self,
+        settings: FixtureRenderSettings,
+        ctx: &ControlRenderContext<'_>,
+    ) -> Revision {
+        let key = FixtureDisplayLayoutKey {
+            mapping_version: self.mapping_version,
+            width: settings.width,
+            height: settings.height,
+        };
+        match self.display_layout_revision {
+            Some((cached, revision)) if cached == key => revision,
+            _ => {
+                let revision = ctx.revision();
+                self.display_layout_revision = Some((key, revision));
+                revision
+            }
+        }
     }
 }
 
@@ -150,6 +174,13 @@ struct DirectSamplePoint {
     channel: u32,
     x_norm_q16: i32,
     y_norm_q16: i32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct FixtureDisplayLayoutKey {
+    mapping_version: Revision,
+    width: u32,
+    height: u32,
 }
 
 pub fn fixture_input_path() -> SlotPath {
@@ -465,6 +496,38 @@ impl ControlNode for FixtureNode {
             settings.gamma_correction,
         )
     }
+
+    fn control_display_layout(
+        &mut self,
+        _product: ControlProduct,
+        ctx: &mut ControlRenderContext<'_>,
+    ) -> Result<Option<ControlDisplayLayout>, NodeError> {
+        let settings = self
+            .last_settings
+            .ok_or_else(|| NodeError::msg("fixture display layout missing cached settings"))?;
+        let revision = self.control_display_layout_revision(settings, ctx);
+        let points = crate::nodes::fixture::mapping::generate_mapping_points(
+            &self.mapping,
+            settings.width,
+            settings.height,
+        );
+        let lamps = points
+            .into_iter()
+            .map(|point| ControlLamp2d {
+                lamp_index: point.channel,
+                sample_start: point.channel.saturating_mul(3),
+                center: point.center,
+                radius: point.radius,
+            })
+            .collect();
+
+        Ok(Some(ControlDisplayLayout::Layout2d(ControlLayout2d::new(
+            revision,
+            settings.width,
+            settings.height,
+            lamps,
+        ))))
+    }
 }
 
 fn ensure_fixture_render_target<'a>(
@@ -631,7 +694,7 @@ fn render_direct_fixture_control(
             row: 0,
             start: 0,
             len: written_samples as u32,
-            hint: ControlHint::RgbPixels {
+            encoding: ControlHint::RgbPixels {
                 count: (written_samples / 3) as u32,
                 color_order: settings.color_order,
             },
@@ -705,7 +768,7 @@ fn render_fixture_diagnostic_control(
             row: 0,
             start: 0,
             len: (rendered_lamps * 3) as u32,
-            hint: ControlHint::RgbPixels {
+            encoding: ControlHint::RgbPixels {
                 count: rendered_lamps as u32,
                 color_order: settings.color_order,
             },
@@ -1030,7 +1093,7 @@ fn render_fixture_control_target(
             row: 0,
             start: 0,
             len: written_samples as u32,
-            hint: ControlHint::RgbPixels {
+            encoding: ControlHint::RgbPixels {
                 count: (written_samples / 3) as u32,
                 color_order,
             },
@@ -1144,7 +1207,11 @@ mod tests {
     use lpc_model::nodes::fixture::{PathSpec, RingOrder};
     use lpc_model::{Dim2u, Kind, LpValue, ToLpValue, TreePath};
     use lpc_registry::ProjectRegistry;
-    use lpc_wire::{WireChildKind, WireSlotIndex};
+    use lpc_wire::{
+        ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
+        ControlProductProbeResult, ProjectProbeRequest, ProjectProbeResult, ProjectReadRequest,
+        WireChannelSampleFormat, WireChildKind, WireSlotIndex,
+    };
 
     use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
     use crate::engine::{Engine, default_demand_input_path};
@@ -1938,6 +2005,188 @@ mod tests {
         assert_eq!(samples, vec![65535u16, 0, 0]);
         assert_eq!(layout.spans.len(), 1);
         assert_eq!(layout.spans[0].len, 3);
+    }
+
+    #[test]
+    fn fixture_project_read_control_probe_returns_native_samples_and_cached_layout() {
+        let ticks = Arc::new(AtomicU32::new(0));
+        let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
+        let registry = ProjectRegistry::new();
+        engine.set_graphics(Some(Arc::new(crate::Graphics::new())));
+        let frame = Revision::new(1);
+        let root = engine.tree().root();
+        let spine = test_placeholder_spine();
+
+        let sh_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("sh").unwrap(),
+                lpc_model::NodeName::parse("shader").unwrap(),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                spine.clone(),
+                frame,
+            )
+            .unwrap();
+
+        let out_path = shader_output_path();
+        engine
+            .attach_runtime_node(
+                sh_id,
+                Box::new(FixtureTickCountSolidProducer {
+                    state: ShaderState::new(VisualProduct::new(sh_id, 0)),
+                    ticks: Arc::clone(&ticks),
+                    color: [u16::MAX, 0, 0, u16::MAX],
+                }),
+                frame,
+            )
+            .unwrap();
+
+        let mapping = MappingConfig::path_points_vec(
+            vec![PathSpec::ring_array_counts(
+                [0.5, 0.5],
+                1.0,
+                0,
+                1,
+                &[1],
+                0.0,
+                RingOrder::InnerFirst,
+            )],
+            2.0,
+        );
+
+        let fix_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("fx").unwrap(),
+                lpc_model::NodeName::parse("fixture").unwrap(),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                spine,
+                frame,
+            )
+            .unwrap();
+
+        engine
+            .attach_runtime_node(
+                fix_id,
+                Box::new(FixtureNode::new(
+                    fix_id,
+                    mapping,
+                    FixtureSamplingConfig::Direct,
+                    frame,
+                )),
+                frame,
+            )
+            .unwrap();
+        bind_fixture_def_defaults(&mut engine, fix_id, frame);
+        engine
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::ProducedSlot {
+                        node: sh_id,
+                        slot: out_path,
+                    },
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: fixture_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: fix_id,
+                },
+                frame,
+            )
+            .unwrap();
+        engine
+            .add_binding(
+                BindingDraft {
+                    source: BindingSource::Literal(LpValue::F32(0.0)),
+                    target: BindingTarget::ConsumedSlot {
+                        node: fix_id,
+                        slot: default_demand_input_path(),
+                    },
+                    priority: BindingPriority::new(0),
+                    kind: Kind::Color,
+                    owner: fix_id,
+                },
+                frame,
+            )
+            .unwrap();
+
+        engine.add_demand_root(fix_id);
+        engine.tick(&registry, 10).unwrap();
+
+        let extent = ControlExtent::new(1, 3);
+        let product = ControlProduct::new(fix_id, 0, extent);
+        let first = engine.read_project(
+            &registry,
+            ProjectReadRequest {
+                since: None,
+                queries: vec![],
+                probes: vec![ProjectProbeRequest::ControlProduct(
+                    ControlProductProbeRequest {
+                        product,
+                        sample_format: WireChannelSampleFormat::U16,
+                        display_layout: ControlDisplayLayoutRead::Always,
+                    },
+                )],
+            },
+        );
+
+        let ProjectProbeResult::ControlProduct(ControlProductProbeResult::Preview {
+            extent: returned_extent,
+            sample_format,
+            sample_layout,
+            display_layout:
+                ControlDisplayLayoutProbeResult::Layout(ControlDisplayLayout::Layout2d(layout)),
+            bytes,
+            ..
+        }) = &first.probes[0]
+        else {
+            panic!("expected fixture control preview with layout");
+        };
+        assert_eq!(*returned_extent, extent);
+        assert_eq!(*sample_format, WireChannelSampleFormat::U16);
+        assert_eq!(bytes, &[255, 255, 0, 0, 0, 0]);
+        assert_eq!(sample_layout.spans.len(), 1);
+        assert_eq!(sample_layout.spans[0].len, 3);
+        assert_eq!(layout.width_hint, 4);
+        assert_eq!(layout.height_hint, 4);
+        assert_eq!(layout.lamps.len(), 1);
+        assert_eq!(layout.lamps[0].sample_start, 0);
+
+        let known_revision = layout.revision;
+        let second = engine.read_project(
+            &registry,
+            ProjectReadRequest {
+                since: None,
+                queries: vec![],
+                probes: vec![ProjectProbeRequest::ControlProduct(
+                    ControlProductProbeRequest {
+                        product,
+                        sample_format: WireChannelSampleFormat::U16,
+                        display_layout: ControlDisplayLayoutRead::IfChanged {
+                            known_revision: Some(known_revision),
+                        },
+                    },
+                )],
+            },
+        );
+        let ProjectProbeResult::ControlProduct(ControlProductProbeResult::Preview {
+            display_layout: ControlDisplayLayoutProbeResult::Unchanged { revision },
+            bytes,
+            ..
+        }) = &second.probes[0]
+        else {
+            panic!("expected unchanged fixture display layout");
+        };
+        assert_eq!(*revision, known_revision);
+        assert_eq!(bytes, &[255, 255, 0, 0, 0, 0]);
     }
 
     #[test]

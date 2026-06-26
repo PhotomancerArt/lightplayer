@@ -23,7 +23,7 @@ plug into the same user journey.
 
 ## Decision
 
-Use a thin browser-side provisioning controller in `lp-studio-web`.
+Use a thin browser-side provisioning controller in `lpa-studio-web`.
 
 - The controller dispatches real `StudioActionKind` values into `StudioApp`.
 - It drains returned `StudioEffect` values through the active browser runtime.

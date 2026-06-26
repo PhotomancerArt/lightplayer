@@ -1,23 +1,23 @@
 # lpa-studio-web
 
-`lpa-studio-web` is the static browser shell for the `lpa-studio-ux` slice.
+`lpa-studio-web` is the static browser shell for `lpa-studio-core`.
 
 The web app owns Dioxus presentation. It renders `StudioView` panes and
 contextual `UiAction` controls, then dispatches those actions back into
 `StudioUx`. It also applies live `UxUpdate` values while long async actions are
 running. Browser-worker lifecycle, provider routing, protocol request
 correlation, running-project attach, demo project deployment, and project
-inventory reads belong below the UI in `lpa-studio-ux`, `lpa-link`, and
+inventory reads belong below the UI in `lpa-studio-core`, `lpa-link`, and
 `lpa-client`.
 
 ## Current Surface
 
 The active first screen is the Device pane, rendered from stack sections and
-actions owned by the UX layer. In the browser build it starts with simulator
+actions owned by the core layer. In the browser build it starts with simulator
 and ESP32 connection actions:
 
 ```text
-lpa-studio-web -> lpa-studio-ux -> DeviceUx -> LinkProviderRegistry -> browser-worker -> fw-browser -> lp-server
+lpa-studio-web -> lpa-studio-core -> DeviceUx -> LinkProviderRegistry -> browser-worker -> fw-browser -> lp-server
 ```
 
 `DeviceUx` is the user-facing workflow for selecting a connection, opening the
@@ -37,9 +37,9 @@ The current surface can launch the browser-local firmware runtime with the demo
 project, connect browser serial hardware, open the LightPlayer server protocol,
 attach to an already-loaded running project, explicitly load the built-in demo
 project on hardware, provision a blank ESP32-C6 with packaged LightPlayer
-firmware, reset a provisioned ESP32-C6 back to blank, and display a small
-project inventory summary. Project attach/load choices appear in the Device
-pane. The Project pane appears once a project is loaded.
+firmware, reset a provisioned ESP32-C6 back to blank, and render a readonly
+project workspace once a project is loaded. Project attach/load choices appear
+in the Device pane. The Project pane appears once a project is loaded.
 
 ## Run
 
@@ -48,12 +48,17 @@ just studio-dev
 ```
 
 `studio-dev` builds debug wasm artifacts for `lpa-studio-web` and `fw-browser`,
-packages them with wasm-bindgen, prepares the wasm sidecar assets, and serves
-`http://127.0.0.1:2820/`.
+packages `fw-browser` with wasm-bindgen, prepares the wasm sidecar assets, and
+serves `http://127.0.0.1:2820/` through `dx serve`.
 
 Use `just studio-web-build` or `just studio-web` for the release/static build
-path. The release build still packages ESP32-C6 firmware assets for future
-browser flashing work.
+path. `dx build` writes Studio app assets under
+`target/dx/lpa-studio-web/{debug,release}/web/public/`, while `public/`
+contains only hand-authored static files that are copied into that output.
+Generated runtime sidecars are built under `target/studio-web-assets/` and then
+mirrored into the generated Dioxus public directory. Release app assets are
+hash-named under `assets/`. The release build still packages ESP32-C6 firmware
+assets for future browser flashing work.
 
 ## Deploy
 
@@ -66,18 +71,20 @@ just studio-web-smoke target/pages/studio
 ```
 
 The deploy artifact is staged under `target/pages/studio` and includes
-`version.json`, `.nojekyll`, and `CNAME`. It is built from release wasm outputs
-so stale debug artifacts left by `studio-dev` are not uploaded.
+`version.json`, `.nojekyll`, and `CNAME`. It is built from the release `dx`
+output so stale debug artifacts left by `studio-dev` are not uploaded.
 
 Manual beta deployment uses the same artifact recipe with
 `beta.lightplayer.app` and is published by the `Deploy Pages Channel` workflow.
 Operational setup, DNS records, and GitHub Pages HTTPS steps are documented in
 [`docs/deploy/studio-pages.md`](../../docs/deploy/studio-pages.md).
 
-Browser-worker assets are served from `public/pkg/`. The UX boot path resolves
-those paths to page-absolute URLs before sending them into the embedded blob
-worker, which lets worker import/init failures surface as actionable link
-errors instead of silent boot timeouts.
+Browser-worker assets are served from `pkg/` in the generated site. The source
+sidecar files are generated under `target/studio-web-assets/{debug,release}/pkg/`
+and copied into `target/dx/lpa-studio-web/.../public/pkg/` after `dx` builds
+the Studio app. The app-core boot path resolves those paths to page-absolute URLs
+before sending them into the embedded blob worker, which lets worker import/init
+failures surface as actionable link errors instead of silent boot timeouts.
 
 Browser ESP32 Web Serial uses the shared app-served controller at
 `public/lpa-link/browser_esp32_device_controller.js`. Both Studio's wasm-bound
@@ -85,9 +92,10 @@ Browser ESP32 Web Serial uses the shared app-served controller at
 module, so normal connect/reset/read debugging exercises the same Web Serial
 lifecycle code that Studio uses.
 
-ESP32-C6 firmware assets are served from
-`public/firmware/esp32c6/manifest.json`. Browser serial provisioning imports a
-pinned browser ESM `esptool-js` module from
+ESP32-C6 firmware assets are generated under
+`target/studio-web-assets/firmware/esp32c6/` and served from
+`firmware/esp32c6/manifest.json` in the generated site. Browser serial
+provisioning imports a pinned browser ESM `esptool-js` module from
 `https://cdn.jsdelivr.net/npm/esptool-js@0.6.0/+esm` by default; deployments can
 override the `BrowserSerialEsp32Options` path if they want to serve that module
 themselves. The CDN ESM endpoint avoids raw package bare imports such as `pako`,
@@ -129,11 +137,52 @@ The page can select a Web Serial port, run the same normal reset/read path as
 Studio, exercise explicit USB-JTAG downloader reset experiments, and show raw
 serial output without involving the full Studio UX.
 
+## Theme And Layout
+
+Studio web styling is Tailwind-first. Components should prefer semantic
+Tailwind utilities in their Dioxus markup, using the existing `tw:` prefix while
+legacy `ux-*` classes still exist. Theme values are defined as Studio CSS
+variables in `src/style.css` and exposed to Tailwind from `tailwind.css` with
+semantic names such as `background`, `card`, `border`, `muted-foreground`,
+`accent`, and `status-warning-bg`.
+
+Use direct utility strings for simple static styling. Use small Rust helper
+functions for repeated stateful variants such as status tones, action priority,
+step state, pane emphasis, and project node status. Avoid adding broad new
+selector families to `src/style.css`; that file should stay limited to theme
+variables, base rules, keyframes, browser/measurement behavior, and explicitly
+transitional story or exploration surfaces.
+
+Reusable Dioxus surfaces live under `src/base`, `src/core`, and `src/app`:
+
+- `ActionButton` and `ActionStrip` render `UiAction` controls.
+- `PaneFrame`, `StatusChip`, and `MetricGrid` provide shared pane structure.
+- `ProjectSidebar` renders the Project rail with compact node tree, project
+  stats, and project actions.
+- `ProjectNodeWorkspace` renders all synced node bodies in tree order as the
+  transparent center workspace.
+- `FieldRow` and `Tabs` remain editor-foundation primitives used by stories and
+  future editing surfaces.
+- `StudioShell`, `UxPane`, and `RuntimeLog` render the active `StudioView`.
+
+The project editor layout target is:
+
+```text
+lg: [ node tree ] [ nodes/editor ] [ device/secondary ]
+md: [ nodes/editor ] [ tabs: node tree / device / bus / console ]
+sm: [ tabs: nodes / node tree / device / bus / console ]
+```
+
+The active Project pane currently renders readonly synced node data. Slot
+editing, overlay dirty-state, binding authoring, bus modeling, probes, and
+asset editing belong to later milestones.
+
 ## Stories
 
-The storybook covers the active UX shell, connection action strip, Device stack
-states, loaded Project pane state, browser-serial blank-firmware readiness,
-provision-ready/provisioning/provision-failed, and wipe states.
+The storybook covers the active Studio shell, connection action strip, Device stack
+states, loaded Project pane state with readonly node workspace,
+browser-serial blank-firmware readiness, provision-ready/provisioning/
+provision-failed, wipe states, and editor-foundation primitives.
 Run the dev server and open:
 
 ```text
@@ -146,12 +195,36 @@ Generate or update visual baselines with:
 just studio-story-baselines-if-needed
 ```
 
-The baseline set intentionally reflects the active view-driven UX surface rather
-than the old provisioning journey fixtures.
+Baselines are captured for `sm`, `md`, and `lg` viewports. Files are named as a
+story id plus viewport suffix, for example:
+
+```text
+studio__editor-shell__sm.png
+studio__editor-shell__md.png
+studio__editor-shell__lg.png
+```
+
+Useful commands:
+
+```bash
+just studio-story-pngs        # scratch captures under story-images/.scratch
+just studio-story-baselines   # update committed sm/md/lg baselines
+just studio-story-check       # compare fresh captures with committed baselines
+```
+
+Baseline and check modes require `oxipng` so committed and fresh PNGs are
+losslessly normalized. Install it with `brew install oxipng` or
+`cargo install oxipng`. The capture script defaults to one Chrome page for
+stable baseline/check output; set `STUDIO_STORY_PNGS_CONCURRENCY` for faster
+scratch runs when needed.
+
+The baseline set intentionally reflects the active view-driven UX surface,
+including the semantic project workspace, rather than the old provisioning
+journey fixtures alone.
 
 ## Boundary
 
-- `lpa-studio-ux` owns Studio product state, `StudioView` panes, stack views,
+- `lpa-studio-core` owns Studio product state, `StudioView` panes, stack views,
   snapshots, actions, live `UxUpdate` activity, async dispatch, UX node ids, the
   link provider registry, and the connected server client.
 - `lpa-link` owns provider implementations, provider resources, sessions, and

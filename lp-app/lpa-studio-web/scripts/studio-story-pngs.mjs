@@ -18,16 +18,25 @@ import path from "node:path";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../../..");
-const publicDir = path.join(repoRoot, "lp-app/lpa-studio-web/public");
+const publicDir = path.resolve(
+  repoRoot,
+  process.env.STUDIO_STORY_SITE_DIR ?? "target/dx/lpa-studio-web/debug/web/public",
+);
 const storyRoot = path.join(repoRoot, "lp-app/lpa-studio-web");
 const mode = parseMode(process.argv.slice(2));
 const port = process.env.STUDIO_STORY_PNGS_PORT ?? "2822";
 const requestedCaptureConcurrency = parseCaptureConcurrency();
+const captureTimeoutMs = parsePositiveIntegerEnv("STUDIO_STORY_CAPTURE_TIMEOUT_MS", 10_000);
 const baseUrl = `http://127.0.0.1:${port}/`;
 const chrome = process.env.CHROME_BIN ?? findChrome();
 const baselineDir = path.resolve(repoRoot, baselineDirFromEnv());
 const outputDir = path.resolve(repoRoot, outputDirForMode(mode));
 const captureDir = mode === "baselines" ? path.join(baselineDir, ".new") : outputDir;
+const STORY_VIEWPORTS = [
+  { id: "sm", width: 390, height: 760 },
+  { id: "md", width: 720, height: 760 },
+  { id: "lg", width: 1080, height: 760 },
+];
 
 class CdpConnection {
   static async open(url) {
@@ -177,10 +186,14 @@ function baselineDirFromEnv() {
 }
 
 function parseCaptureConcurrency() {
-  const value = process.env.STUDIO_STORY_PNGS_CONCURRENCY ?? "4";
+  return parsePositiveIntegerEnv("STUDIO_STORY_PNGS_CONCURRENCY", 1);
+}
+
+function parsePositiveIntegerEnv(name, defaultValue) {
+  const value = process.env[name] ?? defaultValue.toString();
   const parsed = Number.parseInt(value, 10);
   if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed.toString() !== value) {
-    console.error("STUDIO_STORY_PNGS_CONCURRENCY must be a positive integer.");
+    console.error(`${name} must be a positive integer.`);
     process.exit(2);
   }
   return parsed;
@@ -190,23 +203,29 @@ async function discoverStoryIds() {
   const html = await runChrome([
     "--headless=new",
     "--disable-gpu",
+    "--disable-application-cache",
+    "--disk-cache-size=0",
     "--virtual-time-budget=5000",
     "--dump-dom",
-    `${baseUrl}#/stories`,
+    `${baseUrl}?story-discovery=${Date.now()}#/stories`,
   ]);
   return Array.from(html.matchAll(/href="#\/stories\/([^"]+)"/g))
     .map((match) => decodeURIComponent(match[1]))
+    .map((storyId) => storyId.split(/[?#]/, 1)[0])
     .filter((value, index, values) => values.indexOf(value) === index)
     .sort();
 }
 
 async function captureStories(storyIds, directory) {
-  const concurrency = Math.min(requestedCaptureConcurrency, storyIds.length);
-  const files = new Array(storyIds.length);
+  const targets = storyTargets(storyIds);
+  const concurrency = Math.min(requestedCaptureConcurrency, targets.length);
+  const files = new Array(targets.length);
   const browser = await launchCaptureBrowser(concurrency);
-  let nextStoryIndex = 0;
+  let nextTargetIndex = 0;
 
-  console.log(`Capturing ${storyIds.length} stories with ${concurrency} Chrome pages...`);
+  console.log(
+    `Capturing ${targets.length} story viewports (${storyIds.length} stories x ${STORY_VIEWPORTS.length} sizes) with ${concurrency} Chrome pages...`,
+  );
 
   try {
     await Promise.all(
@@ -215,9 +234,9 @@ async function captureStories(storyIds, directory) {
           browser,
           directory,
           files,
-          nextStoryIndex: () => nextStoryIndex++,
+          nextTargetIndex: () => nextTargetIndex++,
           pageIndex,
-          storyIds,
+          targets,
         }),
       ),
     );
@@ -231,21 +250,27 @@ async function captureStoryWorker({
   browser,
   directory,
   files,
-  nextStoryIndex,
+  nextTargetIndex,
   pageIndex,
-  storyIds,
+  targets,
 }) {
   while (true) {
-    const storyIndex = nextStoryIndex();
-    if (storyIndex >= storyIds.length) {
+    const targetIndex = nextTargetIndex();
+    if (targetIndex >= targets.length) {
       return;
     }
 
-    const storyId = storyIds[storyIndex];
-    const file = path.join(directory, storyFileName(storyId));
-    await browser.capture(pageIndex, storyPngUrl(storyId), storyId, file);
+    const target = targets[targetIndex];
+    const file = path.join(directory, storyFileName(target.storyId, target.viewport));
+    await browser.capture(
+      pageIndex,
+      storyPngUrl(target.storyId, target.viewport),
+      target.storyId,
+      target.viewport,
+      file,
+    );
     console.log(`wrote ${path.relative(repoRoot, file)}`);
-    files[storyIndex] = file;
+    files[targetIndex] = file;
   }
 }
 
@@ -274,8 +299,8 @@ async function launchCaptureBrowser(pageCount) {
   );
 
   return {
-    async capture(pageIndex, url, storyId, file) {
-      await pages[pageIndex].capture(url, storyId, file);
+    async capture(pageIndex, url, storyId, viewport, file) {
+      await pages[pageIndex].capture(url, storyId, viewport, file);
     },
 
     async close() {
@@ -301,20 +326,22 @@ async function createCapturePage(cdp) {
   });
   await cdp.send("Page.enable", {}, sessionId);
   await cdp.send("Runtime.enable", {}, sessionId);
-  await cdp.send(
-    "Emulation.setDeviceMetricsOverride",
-    {
-      width: 1080,
-      height: 760,
-      deviceScaleFactor: 1,
-      mobile: false,
-    },
-    sessionId,
-  );
 
   return {
-    async capture(url, storyId, file) {
+    async capture(url, storyId, viewport, file) {
+      await cdp.send(
+        "Emulation.setDeviceMetricsOverride",
+        {
+          width: viewport.width,
+          height: viewport.height,
+          deviceScaleFactor: 1,
+          mobile: viewport.width <= 640,
+        },
+        sessionId,
+      );
       await cdp.send("Page.navigate", { url }, sessionId);
+      await waitForCaptureBox(cdp, sessionId, storyId);
+      await waitForStoryReady(cdp, sessionId, storyId);
       const box = await waitForCaptureBox(cdp, sessionId, storyId);
       const clip = captureClip(box);
       const { data } = await cdp.send(
@@ -389,7 +416,7 @@ async function waitForCaptureBox(cdp, sessionId, storyId) {
     })()
   `;
   const started = Date.now();
-  while (Date.now() - started < 10_000) {
+  while (Date.now() - started < captureTimeoutMs) {
     const box = await evaluate(cdp, sessionId, expression);
     if (box) {
       return box;
@@ -397,6 +424,27 @@ async function waitForCaptureBox(cdp, sessionId, storyId) {
     await delay(100);
   }
   throw new Error(`Timed out waiting for story capture target: ${storyId}`);
+}
+
+async function waitForStoryReady(cdp, sessionId, storyId) {
+  const expression = `
+    (() => {
+      const el = document.querySelector('[data-story-capture="1"]');
+      if (!el || el.getAttribute('data-story-id') !== ${JSON.stringify(storyId)}) {
+        return false;
+      }
+      return !document.querySelector('[data-story-wait="1"]');
+    })()
+  `;
+  const started = Date.now();
+  while (Date.now() - started < 10_000) {
+    const ready = await evaluate(cdp, sessionId, expression);
+    if (ready) {
+      return;
+    }
+    await delay(50);
+  }
+  throw new Error(`Timed out waiting for story ready state: ${storyId}`);
 }
 
 async function evaluate(cdp, sessionId, expression) {
@@ -442,14 +490,17 @@ async function optimizePngs(files, { required }) {
 }
 
 async function compareBaselines(storyIds, expectedDir, actualDir) {
-  const expectedFiles = new Set(storyIds.map(storyFileName));
+  const targets = storyTargets(storyIds);
+  const expectedFiles = new Set(
+    targets.map((target) => storyFileName(target.storyId, target.viewport)),
+  );
   const baselineFiles = await listPngFiles(expectedDir);
   const unexpected = baselineFiles.filter((file) => !expectedFiles.has(file));
   const missing = [];
   const changed = [];
 
-  for (const storyId of storyIds) {
-    const fileName = storyFileName(storyId);
+  for (const target of targets) {
+    const fileName = storyFileName(target.storyId, target.viewport);
     const expectedFile = path.join(expectedDir, fileName);
     const actualFile = path.join(actualDir, fileName);
     const expected = await readOptionalFile(expectedFile);
@@ -560,12 +611,18 @@ function printComparison(label, files) {
   }
 }
 
-function storyFileName(storyId) {
-  return `${storyId.replaceAll("/", "__")}.png`;
+function storyTargets(storyIds) {
+  return storyIds.flatMap((storyId) =>
+    STORY_VIEWPORTS.map((viewport) => ({ storyId, viewport })),
+  );
 }
 
-function storyPngUrl(storyId) {
-  return `${baseUrl}?story-png=1&story=${encodeURIComponent(storyId)}#/stories/${storyId}`;
+function storyFileName(storyId, viewport) {
+  return `${storyId.replaceAll("/", "__")}__${viewport.id}.png`;
+}
+
+function storyPngUrl(storyId, viewport) {
+  return `${baseUrl}?story-png=1&story=${encodeURIComponent(storyId)}&viewport=${viewport.id}#/stories/${storyId}`;
 }
 
 function findCommand(command) {

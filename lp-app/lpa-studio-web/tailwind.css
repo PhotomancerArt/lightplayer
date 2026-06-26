@@ -1,0 +1,63 @@
+@layer theme, base, components, utilities;
+@import "tailwindcss/theme.css" layer(theme) prefix(tw);
+@import "tailwindcss/utilities.css" layer(utilities) prefix(tw);
+@source "./src/**/*.{rs,html,css}";
+
+@theme {
+    --font-sans: var(--studio-font-sans);
+    --font-mono: var(--studio-font-mono);
+
+    --color-background: var(--studio-color-bg);
+    --color-background-wash: var(--studio-color-bg-wash);
+    --color-foreground: var(--studio-color-text);
+    --color-card: var(--studio-color-surface);
+    --color-card-subtle: var(--studio-color-surface-subtle);
+    --color-card-muted: var(--studio-color-surface-muted);
+    --color-card-raised: var(--studio-color-surface-raised);
+    --color-card-raised-strong: var(--studio-color-surface-raised-strong);
+    --color-panel-primary: var(--studio-color-panel-primary);
+    --color-terminal: var(--studio-color-terminal);
+    --color-track: var(--studio-color-track);
+
+    --color-border: var(--studio-color-border);
+    --color-border-muted: var(--studio-color-border-muted);
+    --color-border-subtle: var(--studio-color-border-subtle);
+    --color-border-strong: var(--studio-color-border-strong);
+    --color-panel-primary-border: var(--studio-color-panel-primary-border);
+
+    --color-strong-foreground: var(--studio-color-text-strong);
+    --color-soft-foreground: var(--studio-color-text-soft);
+    --color-muted-foreground: var(--studio-color-text-muted);
+    --color-subtle-foreground: var(--studio-color-text-subtle);
+    --color-dim-foreground: var(--studio-color-text-dim);
+    --color-heading: var(--studio-color-heading);
+    --color-accent: var(--studio-color-accent);
+    --color-accent-border: var(--studio-color-accent-border);
+    --color-accent-hover: var(--studio-color-accent-hover);
+    --color-accent-foreground: var(--studio-color-accent-text-on-fill);
+
+    --color-status-neutral-bg: var(--studio-status-neutral-bg);
+    --color-status-neutral-border: var(--studio-status-neutral-border);
+    --color-status-neutral-foreground: var(--studio-status-neutral-text);
+    --color-status-working-bg: var(--studio-status-working-bg);
+    --color-status-working-border: var(--studio-status-working-border);
+    --color-status-working-foreground: var(--studio-status-working-text);
+    --color-status-good-bg: var(--studio-status-good-bg);
+    --color-status-good-border: var(--studio-status-good-border);
+    --color-status-good-foreground: var(--studio-status-good-text);
+    --color-status-warning-bg: var(--studio-status-warning-bg);
+    --color-status-warning-border: var(--studio-status-warning-border);
+    --color-status-warning-foreground: var(--studio-status-warning-text);
+    --color-status-error-bg: var(--studio-status-error-bg);
+    --color-status-error-border: var(--studio-status-error-border);
+    --color-status-error-foreground: var(--studio-status-error-text);
+
+    --color-step-marker: var(--studio-step-marker-bg);
+    --color-step-active: var(--studio-step-active-bg);
+    --color-step-active-border: var(--studio-step-active-border);
+
+    --radius-xs: var(--studio-radius-xs);
+    --radius-sm: var(--studio-radius-sm);
+    --radius-md: var(--studio-radius-md);
+    --radius-pill: var(--studio-radius-pill);
+}

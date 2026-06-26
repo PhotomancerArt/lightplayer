@@ -1,0 +1,26 @@
+{
+  "source": {
+    "project": "projects/test/fyeah-sign",
+    "read_revision": 102,
+    "request": "ProjectReadRequest::default_debug(None) after 102 x 33ms ticks"
+  },
+  "node": {
+    "id": 2,
+    "title": "Clock",
+    "path": "/fyeah_sign.show/clock.clock"
+  },
+  "roots": {
+    "roots": [
+      {
+        "name": "node.2.def",
+        "shape": 520345680,
+        "data": {"kind":"record","fields_revision":0,"fields":[{"kind":"map","keys_revision":0,"entries":[]},{"kind":"record","fields_revision":0,"fields":[{"kind":"value","changed_at":0,"value":true},{"kind":"value","changed_at":0,"value":1},{"kind":"value","changed_at":0,"value":0}]}]}
+      },
+      {
+        "name": "node.2.state",
+        "shape": 3175756068,
+        "data": {"kind":"record","fields_revision":0,"fields":[{"kind":"value","changed_at":102,"value":3.333},{"kind":"value","changed_at":102,"value":0.032999992}]}
+      }
+    ]
+  }
+}

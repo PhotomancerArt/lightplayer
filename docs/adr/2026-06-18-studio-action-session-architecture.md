@@ -32,7 +32,7 @@ Studio is split into three application-facing crates:
   events, diagnostics, capabilities, and session records.
 - `lp-studio-runtime` executes effects and translates link/client/runtime facts
   back into Studio events.
-- `lp-studio-web` renders `StudioState` with Dioxus and dispatches
+- `lpa-studio-web` renders `StudioState` with Dioxus and dispatches
   `StudioAction` values.
 
 The core loop is:

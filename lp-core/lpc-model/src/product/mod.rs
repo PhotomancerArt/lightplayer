@@ -7,6 +7,9 @@
 
 pub mod product_ref;
 
-pub use crate::products::control::{ControlExtent, ControlProduct};
+pub use crate::products::control::{
+    ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlProduct,
+    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan,
+};
 pub use crate::products::visual::VisualProduct;
 pub use product_ref::{ProductKind, ProductRef};

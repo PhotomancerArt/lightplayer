@@ -1,5 +1,7 @@
 //! Optional runtime capability for nodes that can materialize control products.
 
+use lpc_model::ControlDisplayLayout;
+
 use crate::products::control::{
     ControlLayout, ControlProduct, ControlRenderRequest, ControlRenderTarget,
 };
@@ -15,4 +17,13 @@ pub trait ControlNode {
         target: ControlRenderTarget<'_>,
         ctx: &mut ControlRenderContext<'_>,
     ) -> Result<ControlLayout, NodeError>;
+
+    fn control_display_layout(
+        &mut self,
+        product: ControlProduct,
+        ctx: &mut ControlRenderContext<'_>,
+    ) -> Result<Option<ControlDisplayLayout>, NodeError> {
+        let _ = (product, ctx);
+        Ok(None)
+    }
 }

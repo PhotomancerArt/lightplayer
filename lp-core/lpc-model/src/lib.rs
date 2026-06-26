@@ -110,7 +110,11 @@ pub use nodes::{
     ShaderValueShapeRef, TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView,
     generate_compute_shader_header, resolve_artifact_specifier,
 };
-pub use product::{ControlExtent, ControlProduct, ProductKind, ProductRef, VisualProduct};
+pub use product::{
+    ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlProduct,
+    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, ProductKind, ProductRef,
+    VisualProduct,
+};
 pub use project::overlay::{
     ArtifactOverlay, AssetBodyOverlay, ProjectOverlay, SlotEdit, SlotEditOp, SlotOverlay,
 };

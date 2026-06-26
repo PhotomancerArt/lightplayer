@@ -35,6 +35,10 @@ const TARGET_UI_FPS: u64 = 30;
 const TARGET_UI_FRAME_MS: u64 = 1000 / TARGET_UI_FPS;
 const PROJECT_POLL_INTERVAL: Duration = Duration::from_millis(TARGET_UI_FRAME_MS);
 const UI_REPAINT_INTERVAL: Duration = Duration::from_millis(TARGET_UI_FRAME_MS);
+// Keep shape pages small. Some shape definitions include other shapes and can
+// overflow the firmware's 16KB internal JSON buffer, which has caused project
+// sync parse errors/crashes. Raise this only after the server buffer/streaming
+// limitation is fixed.
 const SHAPE_SYNC_PAGE_LIMIT: u32 = 4;
 
 /// Debug UI application state.
@@ -336,6 +340,7 @@ fn node_id_from_def_root(root: &str) -> Option<NodeId> {
 fn render_product_probe(probe: &ProjectProbeResult) -> Option<&RenderProductProbeResult> {
     match probe {
         ProjectProbeResult::RenderProduct(probe) => Some(probe),
+        ProjectProbeResult::ControlProduct(_) => None,
         ProjectProbeResult::ExplainSlot(_) => None,
     }
 }

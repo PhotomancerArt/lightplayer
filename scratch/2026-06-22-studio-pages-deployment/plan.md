@@ -2,9 +2,11 @@
 kind: plan
 size: sm
 depth: small
-status: active
+status: done
 repo: lightplayer
 created: 2026-06-22
+completed: 2026-06-22
+commit: pending
 adr: expected
 ---
 

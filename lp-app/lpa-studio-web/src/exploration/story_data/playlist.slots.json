@@ -1,0 +1,26 @@
+{
+  "source": {
+    "project": "projects/test/fyeah-sign",
+    "read_revision": 102,
+    "request": "ProjectReadRequest::default_debug(None) after 102 x 33ms ticks"
+  },
+  "node": {
+    "id": 5,
+    "title": "Playlist",
+    "path": "/fyeah_sign.show/playlist.playlist"
+  },
+  "roots": {
+    "roots": [
+      {
+        "name": "node.5.def",
+        "shape": 1520921198,
+        "data": {"kind":"record","fields_revision":0,"fields":[{"kind":"map","keys_revision":0,"entries":[{"key":"time","data":{"kind":"record","fields_revision":0,"fields":[{"kind":"option","presence_revision":0,"present":false},{"kind":"option","presence_revision":0,"present":true,"data":{"kind":"value","changed_at":0,"value":"bus#time.seconds"}},{"kind":"option","presence_revision":0,"present":false}]}}]},{"kind":"value","changed_at":0,"value":0},{"kind":"value","changed_at":0,"value":1},{"kind":"value","changed_at":0,"value":0.35},{"kind":"map","keys_revision":0,"entries":[{"key":1,"data":{"kind":"record","fields_revision":0,"fields":[{"kind":"map","keys_revision":0,"entries":[]},{"kind":"map","keys_revision":0,"entries":[]},{"kind":"option","presence_revision":0,"present":true,"data":{"kind":"value","changed_at":0,"value":"idle"}},{"kind":"option","presence_revision":0,"present":false},{"kind":"option","presence_revision":0,"present":true,"data":{"kind":"value","changed_at":0,"value":0.12}},{"kind":"enum","variant_revision":0,"variant":"ref","data":{"kind":"value","changed_at":0,"value":"./idle.toml"}}]}},{"key":2,"data":{"kind":"record","fields_revision":0,"fields":[{"kind":"map","keys_revision":0,"entries":[{"key":"trigger","data":{"kind":"record","fields_revision":0,"fields":[{"kind":"option","presence_revision":0,"present":false},{"kind":"option","presence_revision":0,"present":true,"data":{"kind":"value","changed_at":0,"value":"bus#trigger"}},{"kind":"option","presence_revision":0,"present":false}]}}]},{"kind":"map","keys_revision":0,"entries":[]},{"kind":"option","presence_revision":0,"present":true,"data":{"kind":"value","changed_at":0,"value":"blast"}},{"kind":"option","presence_revision":0,"present":true,"data":{"kind":"value","changed_at":0,"value":10}},{"kind":"option","presence_revision":0,"present":true,"data":{"kind":"value","changed_at":0,"value":2}},{"kind":"enum","variant_revision":0,"variant":"ref","data":{"kind":"value","changed_at":0,"value":"./blast.toml"}}]}}]}]}
+      },
+      {
+        "name": "node.5.state",
+        "shape": 237636858,
+        "data": {"kind":"record","fields_revision":0,"fields":[{"kind":"value","changed_at":102,"value":{"kind":"visual","node":5,"output":0}},{"kind":"value","changed_at":102,"value":3.333},{"kind":"value","changed_at":102,"value":-1},{"kind":"value","changed_at":102,"value":1}]}
+      }
+    ]
+  }
+}

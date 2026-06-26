@@ -1,9 +1,16 @@
 [application]
 name = "lpa-studio-web"
 default_platform = "web"
+sub_package = "lpa-studio-web"
 asset_dir = "public"
 out_dir = "dist"
 
 [web.app]
 title = "LightPlayer Studio"
 base_path = "/"
+
+[web.watcher]
+watch_path = ["lp-app/lpa-studio-web/src", "lp-app/lpa-studio-web/public", "lp-app/lpa-studio-web/tailwind.css"]
+
+[web.wasm_opt]
+level = "z"

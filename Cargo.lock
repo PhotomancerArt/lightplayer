@@ -2133,6 +2133,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "dioxus-icons"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6ae929a4cdde2e51fca98ccb8a8fe2ea11640e5026c57486b15dbd5618ba7e56"
+dependencies = [
+ "dioxus",
+ "dioxus-signals",
+ "lazy-js-bundle",
+]
+
+[[package]]
 name = "dioxus-interpreter-js"
 version = "0.7.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5123,7 +5134,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "lpa-studio-ux"
+name = "lpa-studio-core"
 version = "40.0.0"
 dependencies = [
  "async-trait",
@@ -5131,6 +5142,7 @@ dependencies = [
  "lpa-client",
  "lpa-link",
  "lpc-model",
+ "lpc-view",
  "lpc-wire",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -5142,8 +5154,22 @@ name = "lpa-studio-web"
 version = "40.0.0"
 dependencies = [
  "dioxus",
- "lpa-studio-ux",
+ "dioxus-icons",
+ "gloo-timers",
+ "lpa-studio-core",
+ "lpa-studio-web-story-macros",
+ "syn 2.0.117",
+ "wasm-bindgen",
  "web-sys",
+]
+
+[[package]]
+name = "lpa-studio-web-story-macros"
+version = "40.0.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
 ]
 
 [[package]]

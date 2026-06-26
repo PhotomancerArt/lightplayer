@@ -129,7 +129,7 @@ profile, then runs `espflash save-image --merge --skip-padding` to emit a merged
 binary image and manifest under:
 
 ```text
-lp-app/lp-studio-web/public/firmware/esp32c6/
+lp-app/lpa-studio-web/public/firmware/esp32c6/
 ```
 
 The package is generated output and is gitignored. `just studio-web-build`

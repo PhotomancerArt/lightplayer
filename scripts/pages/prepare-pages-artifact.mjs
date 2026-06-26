@@ -16,12 +16,13 @@ const domain = args.domain ?? "";
 const configs = {
   studio: {
     app: "lightplayer-studio",
-    sourceDir: path.join(repoRoot, "lp-app/lpa-studio-web/public"),
-    entries: ["index.html", "pkg", "lpa-link", "firmware", "serial-debug.html"],
+    sourceDir: path.join(repoRoot, "target/dx/lpa-studio-web/release/web/public"),
+    entries: ["index.html", "assets", "pkg", "lpa-link", "firmware", "serial-debug.html"],
     required: [
       "index.html",
-      "pkg/lpa-studio-web.js",
-      "pkg/lpa-studio-web_bg.wasm",
+      { prefix: "assets/tailwind-", suffix: ".css" },
+      { prefix: "assets/lpa-studio-web-", suffix: ".js" },
+      { prefix: "assets/lpa-studio-web_bg-", suffix: ".wasm" },
       "pkg/fw_browser.js",
       "pkg/fw_browser_bg.wasm",
       "lpa-link/browser_esp32_device_controller.js",
@@ -53,9 +54,9 @@ for (const entry of config.entries) {
 }
 
 for (const required of config.required) {
-  const file = path.join(outDir, required);
+  const file = await findRequiredAsset(outDir, required);
   if (!existsSync(file)) {
-    throw new Error(`missing required deploy asset: ${required}`);
+    throw new Error(`missing required deploy asset: ${formatRequiredAsset(required)}`);
   }
 }
 
@@ -112,6 +113,26 @@ async function listFiles(directory) {
     }
   }
   return files;
+}
+
+async function findRequiredAsset(root, required) {
+  if (typeof required === "string") {
+    return path.join(root, required);
+  }
+
+  const files = await listFiles(root);
+  const match = files.find((file) => {
+    const relative = path.relative(root, file.path);
+    return relative.startsWith(required.prefix) && relative.endsWith(required.suffix);
+  });
+  return match?.path ?? path.join(root, `${required.prefix}*${required.suffix}`);
+}
+
+function formatRequiredAsset(required) {
+  if (typeof required === "string") {
+    return required;
+  }
+  return `${required.prefix}*${required.suffix}`;
 }
 
 function isDirty() {

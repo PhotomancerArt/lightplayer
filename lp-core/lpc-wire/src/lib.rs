@@ -22,8 +22,9 @@ pub mod tree;
 
 pub use messages::{ClientMessage, ClientRequest, Message, NoDomain, ServerMessage};
 pub use messages::{
-    ExplainSlotProbeRequest, ExplainSlotProbeResult, NodeReadQuery, NodeReadResult,
-    NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery,
+    ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
+    ControlProductProbeResult, ExplainSlotProbeRequest, ExplainSlotProbeResult, NodeReadQuery,
+    NodeReadResult, NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery,
     ProjectReadRequest, ProjectReadResponse, ProjectReadResponseWriter, ProjectReadResult,
     ProjectRuntimeStatus, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
     ResourcePayloadRead, ResourceReadQuery, ResourceReadResult, RuntimeReadQuery,

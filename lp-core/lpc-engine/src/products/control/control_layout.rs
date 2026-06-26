@@ -1,34 +1,9 @@
-//! Metadata describing rendered logical control samples.
+//! Engine-facing aliases for core control sample layout metadata.
+//!
+//! The durable vocabulary lives in `lpc-model`. These aliases preserve the
+//! existing engine names while the runtime moves onto the shared model types.
 
-use alloc::vec::Vec;
-
-use lpc_model::ColorOrder;
-
-/// Debug/inspection metadata for one rendered control range.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct ControlSpan {
-    pub row: u32,
-    pub start: u32,
-    pub len: u32,
-    pub hint: ControlHint,
-}
-
-/// Semantic hint for interpreting a range of control samples.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum ControlHint {
-    RgbPixels { count: u32, color_order: ColorOrder },
-    Raw,
-}
-
-/// Debug/inspection metadata returned after control rendering.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct ControlLayout {
-    pub spans: Vec<ControlSpan>,
-}
-
-impl ControlLayout {
-    #[must_use]
-    pub fn empty() -> Self {
-        Self { spans: Vec::new() }
-    }
-}
+pub use lpc_model::{
+    ControlSampleEncoding as ControlHint, ControlSampleLayout as ControlLayout,
+    ControlSampleSpan as ControlSpan,
+};

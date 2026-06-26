@@ -15,7 +15,7 @@ use lpc_model::{
 };
 use lpc_registry::ProjectRegistry;
 use lpc_shared::time::TimeProvider;
-use lpc_wire::NodeRuntimeStatus;
+use lpc_wire::{ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, NodeRuntimeStatus};
 
 use crate::dataflow::binding::{BindingDraft, BindingError, BindingRef};
 use crate::dataflow::bus::Bus;
@@ -480,6 +480,34 @@ impl Engine {
             frame_time_seconds: time_s,
         };
         host.render_node_control(product, request, target)
+    }
+
+    pub(crate) fn render_control_product_probe(
+        &mut self,
+        registry: &ProjectRegistry,
+        product: ControlProduct,
+        request: &ControlRenderRequest,
+        target: ControlRenderTarget<'_>,
+        display_layout: ControlDisplayLayoutRead,
+    ) -> Result<(ControlLayout, ControlDisplayLayoutProbeResult), SessionResolveError> {
+        let mut producers_ticked = VecSet::new();
+        let time_s = self.frame_time.total_ms as f32 / 1000.0;
+        let time_provider = self.services.time_provider();
+        let button_service = self.services.button_service();
+        let radio_service = self.services.radio_service();
+        let mut host = EngineResolveHost {
+            tree: &mut self.tree,
+            registry,
+            producers_ticked: &mut producers_ticked,
+            runtime_buffers: &mut self.runtime_buffers,
+            slot_shapes: &self.slot_shapes,
+            graphics: self.graphics.clone(),
+            time_provider,
+            button_service,
+            radio_service,
+            frame_time_seconds: time_s,
+        };
+        host.render_node_control_probe(product, request, target, display_layout)
     }
 }
 
@@ -1207,6 +1235,133 @@ impl EngineResolveHost<'_> {
             }
         }
     }
+
+    fn render_node_control_probe(
+        &mut self,
+        product: ControlProduct,
+        request: &ControlRenderRequest,
+        target: ControlRenderTarget<'_>,
+        display_layout: ControlDisplayLayoutRead,
+    ) -> Result<(ControlLayout, ControlDisplayLayoutProbeResult), SessionResolveError> {
+        let node_id = product.node();
+        let revision = current_revision();
+        let mut node_runtime = {
+            let entry = self.tree.get_mut(node_id).ok_or_else(|| {
+                SessionResolveError::other(format!(
+                    "control product probe: unknown node {node_id:?}"
+                ))
+            })?;
+            let old_changed_at = entry.state.changed_at();
+            let executing = NodeEntryState::Executing {
+                call: NodeCallKey::new(node_id, NodeCall::Control { product }),
+            };
+            let stolen = core::mem::replace(
+                &mut entry.state,
+                WithRevision::new(old_changed_at, executing),
+            );
+            match stolen.into_value() {
+                NodeEntryState::Alive(n) => n,
+                NodeEntryState::Executing { call } => {
+                    entry.state = WithRevision::new(
+                        old_changed_at,
+                        NodeEntryState::Executing { call: call.clone() },
+                    );
+                    return Err(SessionResolveError::other(format!(
+                        "node {node_id:?} is already executing {}; re-entry through EngineSession is unsupported",
+                        call.call.label()
+                    )));
+                }
+                other => {
+                    entry.state = WithRevision::new(old_changed_at, other);
+                    return Err(SessionResolveError::other(format!(
+                        "control product probe: node {node_id:?} not alive"
+                    )));
+                }
+            }
+        };
+
+        let result = {
+            let Some(control_node) = node_runtime.control_node() else {
+                return restore_node_after_failed_control_probe(
+                    self.tree,
+                    node_id,
+                    node_runtime,
+                    revision,
+                    SessionResolveError::other(format!(
+                        "node {node_id:?} cannot render control product output {}: NodeRuntime::control_node() returned None",
+                        product.output()
+                    )),
+                );
+            };
+            let mut ctx = ControlRenderContext::new(
+                node_id,
+                revision,
+                self.graphics.clone(),
+                self.frame_time_seconds,
+                self,
+            );
+            catch_node_panic(|| {
+                let sample_layout =
+                    control_node.render_control(product, request, target, &mut ctx)?;
+                let display_layout =
+                    control_display_layout_result(control_node, product, display_layout, &mut ctx)?;
+                Ok((sample_layout, display_layout))
+            })
+        };
+
+        let entry = self.tree.get_mut(node_id).ok_or_else(|| {
+            SessionResolveError::other(format!("control product probe: unknown node {node_id:?}"))
+        })?;
+        let runtime_status = runtime_status_or_ok(&*node_runtime);
+        entry.set_state(NodeEntryState::Alive(node_runtime), revision);
+
+        match result {
+            Ok(probe) => {
+                set_entry_status_if_changed(entry, runtime_status, revision);
+                Ok(probe)
+            }
+            Err(e) => {
+                let message = e.to_string();
+                set_entry_status_if_changed(
+                    entry,
+                    NodeRuntimeStatus::Error(message.clone()),
+                    revision,
+                );
+                Err(SessionResolveError::other(format!(
+                    "control product probe: {message}"
+                )))
+            }
+        }
+    }
+}
+
+fn control_display_layout_result(
+    control_node: &mut dyn crate::node::ControlNode,
+    product: ControlProduct,
+    request: ControlDisplayLayoutRead,
+    ctx: &mut ControlRenderContext<'_>,
+) -> Result<ControlDisplayLayoutProbeResult, NodeError> {
+    match request {
+        ControlDisplayLayoutRead::None => Ok(ControlDisplayLayoutProbeResult::Omitted),
+        ControlDisplayLayoutRead::Always | ControlDisplayLayoutRead::IfChanged { .. } => {
+            let Some(layout) = control_node.control_display_layout(product, ctx)? else {
+                return Ok(ControlDisplayLayoutProbeResult::Unsupported {
+                    reason: alloc::string::String::from(
+                        "control product does not expose display layout",
+                    ),
+                });
+            };
+            let revision = layout.revision();
+            match request {
+                ControlDisplayLayoutRead::IfChanged {
+                    known_revision: Some(known),
+                } if known == revision => {
+                    Ok(ControlDisplayLayoutProbeResult::Unchanged { revision })
+                }
+                _ => Ok(ControlDisplayLayoutProbeResult::Layout(layout)),
+            }
+        }
+    }
 }
 
 fn slot_path_semantics(
@@ -1393,6 +1548,19 @@ fn restore_node_after_failed_control(
     revision: Revision,
     err: SessionResolveError,
 ) -> Result<ControlLayout, SessionResolveError> {
+    if let Some(entry) = tree.get_mut(node_id) {
+        entry.set_state(NodeEntryState::Alive(node_runtime), revision);
+    }
+    Err(err)
+}
+
+fn restore_node_after_failed_control_probe(
+    tree: &mut RuntimeNodeTree<Box<dyn NodeRuntime>>,
+    node_id: NodeId,
+    node_runtime: Box<dyn NodeRuntime>,
+    revision: Revision,
+    err: SessionResolveError,
+) -> Result<(ControlLayout, ControlDisplayLayoutProbeResult), SessionResolveError> {
     if let Some(entry) = tree.get_mut(node_id) {
         entry.set_state(NodeEntryState::Alive(node_runtime), revision);
     }

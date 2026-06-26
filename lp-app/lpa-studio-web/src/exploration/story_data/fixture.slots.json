@@ -1,0 +1,26 @@
+{
+  "source": {
+    "project": "projects/test/fyeah-sign",
+    "read_revision": 102,
+    "request": "ProjectReadRequest::default_debug(None) after 102 x 33ms ticks"
+  },
+  "node": {
+    "id": 3,
+    "title": "Fixture",
+    "path": "/fyeah_sign.show/fixture.fixture"
+  },
+  "roots": {
+    "roots": [
+      {
+        "name": "node.3.def",
+        "shape": 814168903,
+        "data": {"kind":"record","fields_revision":0,"fields":[{"kind":"value","changed_at":0,"value":{"width":16,"height":16}},{"kind":"map","keys_revision":0,"entries":[{"key":"input","data":{"kind":"record","fields_revision":0,"fields":[{"kind":"option","presence_revision":0,"present":false},{"kind":"option","presence_revision":0,"present":true,"data":{"kind":"value","changed_at":0,"value":"bus#visual.out"}},{"kind":"option","presence_revision":0,"present":false}]}},{"key":"output","data":{"kind":"record","fields_revision":0,"fields":[{"kind":"option","presence_revision":0,"present":false},{"kind":"option","presence_revision":0,"present":false},{"kind":"option","presence_revision":0,"present":true,"data":{"kind":"value","changed_at":0,"value":"bus#control.out"}}]}}]},{"kind":"value","changed_at":0,"value":"direct"},{"kind":"value","changed_at":0,"value":"off"},{"kind":"enum","variant_revision":0,"variant":"SvgPath","data":{"kind":"record","fields_revision":0,"fields":[{"kind":"value","changed_at":0,"value":"fyeah-mapping.svg"},{"kind":"value","changed_at":0,"value":2}]}},{"kind":"value","changed_at":0,"value":"rgb"},{"kind":"value","changed_at":0,"value":[[1,0,0],[0,1,0],[0,0,1]]},{"kind":"option","presence_revision":0,"present":true,"data":{"kind":"value","changed_at":0,"value":255}},{"kind":"option","presence_revision":0,"present":true,"data":{"kind":"value","changed_at":0,"value":false}}]}
+      },
+      {
+        "name": "node.3.state",
+        "shape": 1983594935,
+        "data": {"kind":"record","fields_revision":0,"fields":[{"kind":"value","changed_at":102,"value":{"kind":"control","node":3,"output":0,"preferred_extent":{"rows":1,"samples_per_row":657}}}]}
+      }
+    ]
+  }
+}

@@ -1,14 +1,18 @@
 //! Project probe helpers.
 
 use alloc::format;
+use alloc::vec;
+use alloc::vec::Vec;
 
 use lpc_registry::ProjectRegistry;
 use lpc_wire::{
-    ExplainSlotProbeRequest, ExplainSlotProbeResult, RenderProductProbeRequest,
-    RenderProductProbeResult, SlotExplanation,
+    ControlProductProbeRequest, ControlProductProbeResult, ExplainSlotProbeRequest,
+    ExplainSlotProbeResult, RenderProductProbeRequest, RenderProductProbeResult, SlotExplanation,
+    WireChannelSampleFormat,
 };
 use lps_shared::TextureStorageFormat;
 
+use crate::products::control::{ControlRenderRequest, ControlRenderTarget};
 use crate::products::visual::RenderTextureRequest;
 
 use super::Engine;
@@ -68,6 +72,62 @@ impl Engine {
             ),
         }
     }
+
+    pub(super) fn read_project_control_product_probe(
+        &mut self,
+        registry: &ProjectRegistry,
+        request: ControlProductProbeRequest,
+    ) -> ControlProductProbeResult {
+        let product = request.product;
+        let extent = product.preferred_extent();
+        let WireChannelSampleFormat::U16 = request.sample_format else {
+            return ControlProductProbeResult::Unsupported {
+                product,
+                reason: format!(
+                    "control product preview sample format {:?} is not supported",
+                    request.sample_format
+                ),
+            };
+        };
+        let sample_count = extent.sample_count() as usize;
+        let mut samples = vec![0u16; sample_count];
+        let render_request = ControlRenderRequest::unorm16(extent);
+        let target = ControlRenderTarget::new(
+            extent,
+            crate::products::control::ControlSampleFormat::Unorm16,
+            samples.as_mut_slice(),
+        );
+        let revision = self.revision();
+        match self.render_control_product_probe(
+            registry,
+            product,
+            &render_request,
+            target,
+            request.display_layout,
+        ) {
+            Ok((sample_layout, display_layout)) => ControlProductProbeResult::Preview {
+                product,
+                revision,
+                extent,
+                sample_format: request.sample_format,
+                sample_layout,
+                display_layout,
+                bytes: control_samples_u16_to_bytes(&samples),
+            },
+            Err(error) => ControlProductProbeResult::Error {
+                product,
+                message: format!("{error}"),
+            },
+        }
+    }
+}
+
+fn control_samples_u16_to_bytes(samples: &[u16]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(samples.len() * 2);
+    for sample in samples {
+        bytes.extend_from_slice(&sample.to_le_bytes());
+    }
+    bytes
 }
 
 fn rgba16_linear_to_srgb8(bytes: &[u8]) -> alloc::vec::Vec<u8> {
