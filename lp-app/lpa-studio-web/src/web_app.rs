@@ -2,6 +2,7 @@ use std::cell::Cell;
 use std::rc::Rc;
 
 use crate::app::StudioShell;
+use crate::studio_url;
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::core::view::steps_view::UiStepState;
@@ -25,6 +26,13 @@ pub fn App() -> Element {
     }
 
     let model = use_signal(StudioWebModel::new);
+    let startup_intent = use_hook(studio_url::read_connection_intent);
+    let startup_model = model;
+    let _startup_task = use_future(move || async move {
+        if let Some(action) = startup_intent.and_then(|intent| intent.startup_action()) {
+            execute_action(startup_model, action).await;
+        }
+    });
     let refresh_model = model;
     let _refresh_task = use_future(move || async move {
         loop {
@@ -167,6 +175,7 @@ async fn execute_action(mut model: Signal<StudioWebModel>, action: UiAction) {
         return;
     };
 
+    studio_url::update_for_action(&action);
     let accepting_updates = Rc::new(Cell::new(true));
     let mut update_model = model;
     let update_gate = Rc::clone(&accepting_updates);
