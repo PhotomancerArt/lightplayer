@@ -938,7 +938,7 @@ mod tests {
         ConnectedDeviceSummary, ControllerId, LinkController, LinkState, ProjectController,
         ProjectEditorOp, ProjectEditorTarget, ProjectInventorySummary, ProjectNodeAddress,
         ProjectNodeTarget, ProjectState, ProjectSyncPhase, ServerController, ServerFailureKind,
-        ServerState, StudioServerClient, UiIssue,
+        ServerState, StudioServerClient, UiIssue, UiProductPreviewFrame,
     };
 
     #[test]
@@ -1361,8 +1361,8 @@ mod tests {
             vec![ProjectProbeRequest::RenderProduct(
                 RenderProductProbeRequest {
                     product,
-                    width: 64,
-                    height: 36,
+                    width: UiProductPreviewFrame::VISUAL_DEFAULT.width,
+                    height: UiProductPreviewFrame::VISUAL_DEFAULT.height,
                     format: WireTextureFormat::Srgb8,
                 },
             )]

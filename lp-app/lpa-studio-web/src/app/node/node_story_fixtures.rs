@@ -104,9 +104,9 @@ pub(crate) fn produced_products_fixture() -> Vec<UiProducedProduct> {
 pub(crate) fn produced_product_variants_fixture() -> Vec<UiProducedProduct> {
     vec![
         UiProducedProduct::empty("output").with_detail("not resolved"),
-        UiProducedProduct::visual("output").with_detail("64 x 36 preview"),
+        UiProducedProduct::visual("output").with_detail("32 x 32 preview"),
         UiProducedProduct::visual("output")
-            .with_detail("64 x 36 preview")
+            .with_detail("32 x 32 preview")
             .with_preview(UiProductPreview::Pending)
             .with_tracking(UiProductTrackingState::Tracking),
         visual_preview_product("output").with_binding_routes(
@@ -130,19 +130,19 @@ pub(crate) fn produced_product_variants_fixture() -> Vec<UiProducedProduct> {
 
 pub(crate) fn visual_preview_product(name: &str) -> UiProducedProduct {
     UiProducedProduct::visual(name)
-        .with_detail("128 x 72")
+        .with_detail("32 x 32")
         .with_tracking(UiProductTrackingState::Tracking)
         .with_preview(UiProductPreview::VisualSrgb8 {
-            width: 16,
-            height: 9,
+            width: 32,
+            height: 32,
             revision: 104,
-            bytes: visual_preview_bytes(16, 9),
+            bytes: visual_preview_bytes(32, 32),
         })
 }
 
 pub(crate) fn visual_error_product(name: &str) -> UiProducedProduct {
     UiProducedProduct::visual(name)
-        .with_detail("128 x 72")
+        .with_detail("32 x 32")
         .with_tracking(UiProductTrackingState::Tracking)
         .with_preview(UiProductPreview::Error {
             message: "render probe failed".to_string(),
@@ -304,7 +304,7 @@ pub(crate) fn children_fixture() -> Vec<UiNodeChild> {
             .active("active, fade_after 0.12 s")
             .with_sections(vec![
                 UiNodeSection::ProducedProducts(vec![
-                    UiProducedProduct::visual("output").with_detail("64 x 36 preview"),
+                    UiProducedProduct::visual("output").with_detail("32 x 32 preview"),
                 ]),
                 UiNodeSection::ConfigSlots(vec![
                     UiConfigSlot::value(

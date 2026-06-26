@@ -27,7 +27,7 @@ pub(crate) fn empty_product() -> Element {
 #[story(description = "A visual product that exists but is not being tracked.")]
 pub(crate) fn visual_untracked() -> Element {
     rsx! {
-        ProducedProductView { product: UiProducedProduct::visual("output").with_detail("64 x 36 preview") }
+        ProducedProductView { product: UiProducedProduct::visual("output").with_detail("32 x 32 preview") }
     }
 }
 
@@ -36,7 +36,7 @@ pub(crate) fn visual_pending() -> Element {
     rsx! {
         ProducedProductView {
             product: UiProducedProduct::visual("output")
-                .with_detail("64 x 36 preview")
+                .with_detail("32 x 32 preview")
                 .with_preview(UiProductPreview::Pending)
                 .with_tracking(UiProductTrackingState::Tracking)
         }

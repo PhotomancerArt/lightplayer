@@ -45,7 +45,7 @@ pub struct UiProductPreviewFrame {
 
 impl UiProductPreviewFrame {
     /// Default visual-product probe frame.
-    pub const VISUAL_DEFAULT: Self = Self::new(64, 36);
+    pub const VISUAL_DEFAULT: Self = Self::new(32, 32);
 
     /// Create a preview frame with a nonzero fallback.
     #[must_use]

@@ -36,6 +36,7 @@ impl ConnectionIntent {
         }
     }
 
+    #[cfg(any(target_arch = "wasm32", test))]
     fn query_value(self) -> &'static str {
         match self {
             Self::Simulator => "simulator",
@@ -140,6 +141,7 @@ fn connection_intent_from_search(search: &str) -> Option<ConnectionIntent> {
         })
 }
 
+#[cfg(any(target_arch = "wasm32", test))]
 fn search_with_connection_intent(search: &str, intent: Option<ConnectionIntent>) -> String {
     let mut params = search
         .trim_start_matches('?')

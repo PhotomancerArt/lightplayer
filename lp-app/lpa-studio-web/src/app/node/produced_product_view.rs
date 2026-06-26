@@ -71,11 +71,12 @@ fn ProductPreview(
     focus_action: Option<UiAction>,
     on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
+    let frame_class = product_frame_class(kind);
     let frame_style = preview_frame_style(&preview, frame);
     let overlay = product_tracking_overlay(kind, tracking);
 
     rsx! {
-        div { class: "ux-produced-product-frame", style: "{frame_style}",
+        div { class: "{frame_class}", style: "{frame_style}",
             match preview {
                 UiProductPreview::VisualSrgb8 {
                     width,
@@ -141,6 +142,15 @@ fn ProductPreview(
                 }
             }
         }
+    }
+}
+
+fn product_frame_class(kind: UiProductKind) -> &'static str {
+    match kind {
+        UiProductKind::Visual | UiProductKind::Control => {
+            "ux-produced-product-frame ux-produced-product-frame-capped"
+        }
+        _ => "ux-produced-product-frame",
     }
 }
 
@@ -433,9 +443,9 @@ fn control_lamp_styles(preview: &UiControlProductPreview) -> Vec<String> {
         .iter()
         .map(|lamp| {
             let [r, g, b] = control_rgb_at_sample(preview, lamp.sample_start).unwrap_or([0, 0, 0]);
-            let diameter = (lamp.radius.max(0.006) * 200.0).min(40.0);
+            let diameter = (lamp.radius.max(0.006) * 96.0).clamp(3.5, 18.0);
             format!(
-                "left: {:.3}%; top: {:.3}%; width: max(6px, {:.3}%); height: max(6px, {:.3}%); color: rgb({r} {g} {b}); background-color: rgb({r} {g} {b});",
+                "--lamp-r: {r}; --lamp-g: {g}; --lamp-b: {b}; left: {:.3}%; top: {:.3}%; width: max(5px, {:.3}%); height: max(5px, {:.3}%);",
                 lamp.center[0].clamp(0.0, 1.0) * 100.0,
                 lamp.center[1].clamp(0.0, 1.0) * 100.0,
                 diameter,

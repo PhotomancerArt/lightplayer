@@ -1060,7 +1060,7 @@ fn orbit_shader_child() -> UiNodeChild {
     .active("focused")
     .with_sections(vec![
         UiNodeSection::ProducedProducts(vec![
-            UiProducedProduct::visual("output").with_detail("128 x 72"),
+            UiProducedProduct::visual("output").with_detail("32 x 32"),
         ]),
         UiNodeSection::AssetSlots(vec![
             UiConfigSlot::asset(
@@ -1101,7 +1101,7 @@ fn palette_node_child() -> UiNodeChild {
     )
     .with_sections(vec![
         UiNodeSection::ProducedProducts(vec![
-            UiProducedProduct::visual("output").with_detail("128 x 72"),
+            UiProducedProduct::visual("output").with_detail("32 x 32"),
         ]),
         UiNodeSection::ConfigSlots(vec![
             UiConfigSlot::record(

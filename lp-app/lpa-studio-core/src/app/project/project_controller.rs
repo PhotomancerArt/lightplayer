@@ -657,7 +657,7 @@ fn ensure_default_node_focus(nodes: &mut [NodeController]) {
     if has_focused_node(nodes) {
         return;
     }
-    if let Some(node) = first_root_child_mut(nodes) {
+    if let Some(node) = default_focus_node_mut(nodes) {
         node.state_mut().focused = true;
     }
 }
@@ -668,8 +668,24 @@ fn has_focused_node(nodes: &[NodeController]) -> bool {
         .any(|node| node.state().focused || has_focused_node(node.children()))
 }
 
-fn first_root_child_mut(nodes: &mut [NodeController]) -> Option<&mut NodeController> {
-    nodes.first_mut()?.children_mut().first_mut()
+fn default_focus_node_mut(nodes: &mut [NodeController]) -> Option<&mut NodeController> {
+    let root = nodes.first_mut()?;
+    let index = {
+        root.children()
+            .iter()
+            .enumerate()
+            .min_by_key(|(index, node)| (default_focus_kind_priority(node.kind()), *index))
+            .map(|(index, _)| index)
+    }?;
+    root.children_mut().get_mut(index)
+}
+
+fn default_focus_kind_priority(kind: &str) -> u8 {
+    match kind {
+        "Fixture" => 0,
+        "Shader" => 1,
+        _ => 2,
+    }
 }
 
 fn tree_path_sort_key(view: &ProjectView, node_id: NodeId) -> TreePath {
@@ -782,7 +798,8 @@ mod tests {
         ActionPriority, ProjectNodeTarget, ProjectOp, ProjectProductSubscriptionIntent,
         ProjectSlotAddress, ProjectSlotRoot, ProjectSyncPhase, SlotKind, UiAssetEditorKind,
         UiConfigSlotBody, UiNodeSection, UiNodeTabBody, UiProductKind, UiProductPreview,
-        UiProductRef, UiProductTrackingState, UiSlotOptionality, UiSlotSourceState,
+        UiProductPreviewFrame, UiProductRef, UiProductTrackingState, UiSlotOptionality,
+        UiSlotSourceState,
     };
 
     use super::*;
@@ -918,13 +935,43 @@ mod tests {
     }
 
     #[test]
-    fn project_view_focuses_first_root_child_by_default() {
+    fn project_view_focuses_first_shader_when_no_fixture_by_default() {
         let mut project = ProjectController::new();
 
         project.apply_project_view(&tree_view()).unwrap();
 
         let root = &project.root_nodes()[0];
         assert!(!root.state().focused);
+        assert!(!root.children()[0].state().focused);
+        assert!(root.children()[1].state().focused);
+    }
+
+    #[test]
+    fn project_view_prefers_fixture_for_default_focus() {
+        let mut project = ProjectController::new();
+
+        project.apply_project_view(&fixture_tree_view()).unwrap();
+
+        let root = &project.root_nodes()[0];
+        assert_eq!(
+            root.children()
+                .iter()
+                .filter(|node| node.state().focused)
+                .map(|node| node.label())
+                .collect::<Vec<_>>(),
+            vec!["Pixels"]
+        );
+    }
+
+    #[test]
+    fn project_view_focuses_first_child_when_no_fixture_or_shader() {
+        let mut project = ProjectController::new();
+
+        project
+            .apply_project_view(&clock_output_tree_view())
+            .unwrap();
+
+        let root = &project.root_nodes()[0];
         assert!(root.children()[0].state().focused);
         assert!(!root.children()[1].state().focused);
     }
@@ -1407,8 +1454,8 @@ mod tests {
             vec![ProjectProbeRequest::RenderProduct(
                 RenderProductProbeRequest {
                     product,
-                    width: 64,
-                    height: 36,
+                    width: UiProductPreviewFrame::VISUAL_DEFAULT.width,
+                    height: UiProductPreviewFrame::VISUAL_DEFAULT.height,
                     format: WireTextureFormat::Srgb8,
                 },
             )]
@@ -1642,6 +1689,52 @@ mod tests {
         view.tree.insert(node_entry(
             3,
             "/demo.project/orbit.shader",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        view
+    }
+
+    fn fixture_tree_view() -> ProjectView {
+        let mut view = ProjectView::new();
+        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        root.children = vec![NodeId::new(2), NodeId::new(3), NodeId::new(4)];
+        view.tree.insert(root);
+        view.tree.insert(node_entry(
+            2,
+            "/demo.project/clock.clock",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        view.tree.insert(node_entry(
+            3,
+            "/demo.project/orbit.shader",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        view.tree.insert(node_entry(
+            4,
+            "/demo.project/pixels.fixture",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        view
+    }
+
+    fn clock_output_tree_view() -> ProjectView {
+        let mut view = ProjectView::new();
+        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        root.children = vec![NodeId::new(2), NodeId::new(3)];
+        view.tree.insert(root);
+        view.tree.insert(node_entry(
+            2,
+            "/demo.project/clock.clock",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        view.tree.insert(node_entry(
+            3,
+            "/demo.project/dmx.output",
             Some(1),
             NodeRuntimeStatus::Ok,
         ));

@@ -340,6 +340,7 @@ fn node_id_from_def_root(root: &str) -> Option<NodeId> {
 fn render_product_probe(probe: &ProjectProbeResult) -> Option<&RenderProductProbeResult> {
     match probe {
         ProjectProbeResult::RenderProduct(probe) => Some(probe),
+        ProjectProbeResult::ControlProduct(_) => None,
         ProjectProbeResult::ExplainSlot(_) => None,
     }
 }
