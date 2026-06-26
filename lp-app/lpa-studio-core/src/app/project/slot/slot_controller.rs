@@ -1,10 +1,17 @@
 use std::collections::BTreeMap;
 
+use lpc_model::slot::SlotFieldShapeView;
 use lpc_model::{
-    Revision, SlotData, SlotMapKey, SlotName, SlotShapeLookup, SlotShapeRegistry, SlotShapeView,
+    LpType, LpValue, ProductRef, Revision, SlotData, SlotDirection, SlotMapKey, SlotName,
+    SlotPathSegment, SlotPolicy, SlotSemantics, SlotShapeLookup, SlotShapeRegistry, SlotShapeView,
+    SlotValueShape, SlotValueShapeView, ValueEditorHint,
 };
 
-use crate::{ProjectSlotAddress, app::project::format_slot_map_key};
+use crate::{
+    ProjectSlotAddress, ProjectSlotRoot, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody,
+    UiProducedProduct, UiProducedValue, UiSlotAsset, UiSlotEditorHint, UiSlotFieldState,
+    UiSlotRecord, UiSlotSourceState, UiSlotValue, app::project::format_slot_map_key,
+};
 
 /// Compact structural family for a project slot controller.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -16,6 +23,18 @@ pub enum SlotKind {
     Enum,
     Option,
     Asset,
+    Issue,
+}
+
+/// Latest render-relevant body facts for a project slot controller.
+#[derive(Clone, Debug, PartialEq)]
+enum SlotControllerBody {
+    Empty,
+    Value { value: LpValue },
+    Record,
+    Map,
+    Enum { variant: String },
+    Option { present: bool },
     Issue,
 }
 
@@ -42,13 +61,20 @@ impl Default for SlotControllerState {
 ///
 /// Slot controllers are recursive. Containers and leaves both get controllers
 /// so future editing, binding, validation, and expansion state have stable
-/// addressable homes.
-#[derive(Clone, Debug, Eq, PartialEq)]
+/// addressable homes. Each controller also retains the latest mirror-derived
+/// value, shape, semantics, and policy facts needed to project node DTOs without
+/// walking the project mirror a second time.
+#[derive(Clone, Debug, PartialEq)]
 pub struct SlotController {
     address: ProjectSlotAddress,
     label: String,
     kind: SlotKind,
+    body: SlotControllerBody,
     revision: Option<Revision>,
+    semantics: SlotSemantics,
+    policy: SlotPolicy,
+    value_shape: Option<SlotValueShape>,
+    source: UiSlotSourceState,
     issues: Vec<String>,
     state: SlotControllerState,
     children: Vec<SlotController>,
@@ -73,8 +99,7 @@ impl SlotController {
         issue: impl Into<String>,
     ) -> Self {
         let mut controller = Self::empty(address, label.into());
-        controller.kind = SlotKind::Issue;
-        controller.issues.push(issue.into());
+        controller.apply_issue(issue);
         controller
     }
 
@@ -88,6 +113,7 @@ impl SlotController {
     ) {
         self.address = address;
         self.label = label;
+        self.apply_context(SlotApplyContext::for_root(&self.address.root));
         self.apply_slot_data(data, shape, registry);
     }
 
@@ -99,16 +125,23 @@ impl SlotController {
     ) {
         self.address = address;
         self.label = label;
+        self.apply_context(SlotApplyContext::for_root(&self.address.root));
         self.revision = None;
         self.apply_issue(issue);
     }
 
     fn empty(address: ProjectSlotAddress, label: String) -> Self {
+        let context = SlotApplyContext::for_root(&address.root);
         Self {
             address,
             label,
             kind: SlotKind::Issue,
+            body: SlotControllerBody::Issue,
             revision: None,
+            semantics: context.semantics,
+            policy: context.policy,
+            value_shape: None,
+            source: UiSlotSourceState::Direct,
             issues: Vec::new(),
             state: SlotControllerState::new(),
             children: Vec::new(),
@@ -155,6 +188,128 @@ impl SlotController {
         &self.children
     }
 
+    /// Project this slot and its descendants as a config slot row.
+    pub(in crate::app::project) fn ui_config_slot(&self) -> UiConfigSlot {
+        let mut slot = UiConfigSlot::new(
+            self.ui_key(),
+            self.label.clone(),
+            self.ui_config_slot_body(),
+        )
+        .with_source(self.ui_source())
+        .with_state(self.ui_field_state());
+
+        if let Some(detail) = self.ui_detail() {
+            slot = slot.with_detail(detail);
+        }
+        for issue in &self.issues {
+            slot = slot.with_issue(issue.clone());
+        }
+        slot
+    }
+
+    /// Project this slot as an asset row if it looks asset-like.
+    pub(in crate::app::project) fn ui_asset_slot(&self) -> Option<UiConfigSlot> {
+        let asset = self.ui_slot_asset()?;
+        let mut slot = UiConfigSlot::asset(self.ui_key(), self.label.clone(), asset)
+            .with_source(self.ui_source())
+            .with_state(self.ui_field_state());
+        if let Some(detail) = self.ui_detail() {
+            slot = slot.with_detail(detail);
+        }
+        for issue in &self.issues {
+            slot = slot.with_issue(issue.clone());
+        }
+        Some(slot)
+    }
+
+    /// Project this slot as a produced product if it carries product output.
+    pub(in crate::app::project) fn ui_produced_product(&self) -> Option<UiProducedProduct> {
+        if !self.is_produced_slot() {
+            return None;
+        }
+        match self.value() {
+            Some(LpValue::Product(ProductRef::Visual(product))) => Some(
+                UiProducedProduct::visual(self.label.clone()).with_detail(format!(
+                    "node {} output {}",
+                    product.node(),
+                    product.output()
+                )),
+            ),
+            Some(LpValue::Product(ProductRef::Control(product))) => {
+                let extent = product.preferred_extent();
+                Some(
+                    UiProducedProduct::control(self.label.clone()).with_detail(format!(
+                        "node {} output {} {}x{}",
+                        product.node(),
+                        product.output(),
+                        extent.rows,
+                        extent.samples_per_row
+                    )),
+                )
+            }
+            Some(LpValue::Unset) if self.value_shape_is_product() => {
+                Some(UiProducedProduct::empty(self.label.clone()))
+            }
+            None if self.value_shape_is_product() => {
+                Some(UiProducedProduct::empty(self.label.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    /// Project this slot as a compact produced value if it is produced but not a product.
+    pub(in crate::app::project) fn ui_produced_value(&self) -> Option<UiProducedValue> {
+        if !self.is_produced_slot() || self.ui_produced_product().is_some() {
+            return None;
+        }
+        let value = self.value()?;
+        let ui_value = UiSlotValue::from_lp_value(value);
+        let mut produced = UiProducedValue::new(self.label.clone(), ui_value.display);
+        produced.detail = Some(ui_value.kind.type_label().to_string());
+        Some(produced)
+    }
+
+    /// Collect produced section items under this slot.
+    pub(in crate::app::project) fn collect_produced(
+        &self,
+        products: &mut Vec<UiProducedProduct>,
+        values: &mut Vec<UiProducedValue>,
+    ) {
+        if let Some(product) = self.ui_produced_product() {
+            products.push(product);
+            return;
+        }
+        if let Some(value) = self.ui_produced_value() {
+            values.push(value);
+            return;
+        }
+        for child in &self.children {
+            child.collect_produced(products, values);
+        }
+    }
+
+    /// Collect config and asset rows under this slot.
+    pub(in crate::app::project) fn collect_config(
+        &self,
+        config_slots: &mut Vec<UiConfigSlot>,
+        asset_slots: &mut Vec<UiConfigSlot>,
+    ) {
+        if self.is_internal_config_slot() {
+            return;
+        }
+        if let Some(asset) = self.ui_asset_slot() {
+            asset_slots.push(asset);
+            return;
+        }
+        if self.address.is_root() && self.children_are_top_level_rows() {
+            for child in &self.children {
+                child.collect_config(config_slots, asset_slots);
+            }
+            return;
+        }
+        config_slots.push(self.ui_config_slot());
+    }
+
     /// Find a mutable descendant slot controller by address.
     pub fn slot_mut(&mut self, address: &ProjectSlotAddress) -> Option<&mut SlotController> {
         if self.address() == address {
@@ -173,6 +328,8 @@ impl SlotController {
     ) {
         self.revision = data_revision(data);
         self.issues.clear();
+        self.body = SlotControllerBody::Issue;
+        self.value_shape = None;
 
         let Ok(shape) = resolve_shape(shape, registry) else {
             self.apply_issue("slot shape could not be resolved");
@@ -181,8 +338,8 @@ impl SlotController {
 
         if shape.is_unit() {
             self.apply_unit(data);
-        } else if shape.value_shape().is_some() {
-            self.apply_value(data);
+        } else if let Some(value_shape) = shape.value_shape() {
+            self.apply_value(data, value_shape);
         } else if let Some(field_count) = shape.record_fields_len() {
             self.apply_record(data, shape, field_count, registry);
         } else if let Some(value_shape) = shape.map_value() {
@@ -200,16 +357,21 @@ impl SlotController {
         match data {
             SlotData::Unit { .. } => {
                 self.kind = SlotKind::Unit;
+                self.body = SlotControllerBody::Empty;
                 self.children.clear();
             }
             _ => self.apply_issue("expected unit data"),
         }
     }
 
-    fn apply_value(&mut self, data: &SlotData) {
+    fn apply_value(&mut self, data: &SlotData, shape: SlotValueShapeView<'_>) {
         match data {
-            SlotData::Value(_) => {
+            SlotData::Value(value) => {
                 self.kind = SlotKind::Value;
+                self.body = SlotControllerBody::Value {
+                    value: value.get().clone(),
+                };
+                self.value_shape = Some(owned_value_shape(shape));
                 self.children.clear();
             }
             _ => self.apply_issue("expected value data"),
@@ -229,6 +391,7 @@ impl SlotController {
         };
 
         self.kind = SlotKind::Record;
+        self.body = SlotControllerBody::Record;
         let children = (0..field_count)
             .map(|index| {
                 let Some(field) = shape.record_field(index) else {
@@ -236,21 +399,25 @@ impl SlotController {
                         address: self.address.clone(),
                         label: format!("field {index}"),
                         message: "field shape is missing".to_string(),
+                        context: self.context(),
                     };
                 };
                 let label = human_label(field.name_str());
                 let address = self.address_with_field(field.name_str());
+                let context = self.field_context(field);
                 match record.fields.get(index) {
                     Some(data) => SlotChildApply::Data {
                         address,
                         label,
                         data,
                         shape: field.shape(),
+                        context,
                     },
                     None => SlotChildApply::Issue {
                         address,
                         label,
                         message: "field data is missing".to_string(),
+                        context,
                     },
                 }
             })
@@ -270,6 +437,7 @@ impl SlotController {
         };
 
         self.kind = SlotKind::Map;
+        self.body = SlotControllerBody::Map;
         let children = map
             .entries
             .iter()
@@ -282,6 +450,7 @@ impl SlotController {
                 label: map_key_label(key),
                 data,
                 shape: value_shape,
+                context: self.context(),
             })
             .collect();
         self.reconcile_children(children, registry);
@@ -299,6 +468,9 @@ impl SlotController {
         };
 
         self.kind = SlotKind::Enum;
+        self.body = SlotControllerBody::Enum {
+            variant: value.variant.as_str().to_string(),
+        };
         let Some(variant_shape) = shape.enum_variant_by_name(&value.variant) else {
             self.apply_issue(format!(
                 "enum variant {} is missing from shape",
@@ -316,6 +488,7 @@ impl SlotController {
             label: human_label(value.variant.as_str()),
             data: &value.data,
             shape: variant_shape.shape(),
+            context: self.context(),
         }];
         self.reconcile_children(children, registry);
     }
@@ -332,6 +505,9 @@ impl SlotController {
         };
 
         self.kind = SlotKind::Option;
+        self.body = SlotControllerBody::Option {
+            present: value.data.is_some(),
+        };
         let Some(data) = &value.data else {
             self.children.clear();
             return;
@@ -348,12 +524,15 @@ impl SlotController {
             label: "Value".to_string(),
             data,
             shape: some_shape,
+            context: self.context(),
         }];
         self.reconcile_children(children, registry);
     }
 
     fn apply_issue(&mut self, issue: impl Into<String>) {
         self.kind = SlotKind::Issue;
+        self.body = SlotControllerBody::Issue;
+        self.value_shape = None;
         self.issues.clear();
         self.issues.push(issue.into());
         self.children.clear();
@@ -391,18 +570,22 @@ impl SlotController {
                 label,
                 data,
                 shape,
+                context,
             } => {
                 self.address = address;
                 self.label = label;
+                self.apply_context(context);
                 self.apply_slot_data(data, shape, registry);
             }
             SlotChildApply::Issue {
                 address,
                 label,
                 message,
+                context,
             } => {
                 self.address = address;
                 self.label = label;
+                self.apply_context(context);
                 self.revision = None;
                 self.apply_issue(message);
             }
@@ -416,12 +599,24 @@ impl SlotController {
                 label,
                 data,
                 shape,
-            } => Self::from_slot_data(address, label, data, shape, registry),
+                context,
+            } => {
+                let mut controller = Self::empty(address, label);
+                controller.apply_context(context);
+                controller.apply_slot_data(data, shape, registry);
+                controller
+            }
             SlotChildApply::Issue {
                 address,
                 label,
                 message,
-            } => Self::issue(address, label, message),
+                context,
+            } => {
+                let mut controller = Self::empty(address, label);
+                controller.apply_context(context);
+                controller.apply_issue(message);
+                controller
+            }
         }
     }
 
@@ -434,6 +629,216 @@ impl SlotController {
                 .child(SlotName::parse(field_name).expect("shape field name is valid")),
         )
     }
+
+    fn context(&self) -> SlotApplyContext {
+        SlotApplyContext {
+            semantics: self.semantics,
+            policy: self.policy,
+        }
+    }
+
+    fn apply_context(&mut self, context: SlotApplyContext) {
+        self.semantics = context.semantics;
+        self.policy = context.policy;
+    }
+
+    fn field_context(&self, field: SlotFieldShapeView<'_>) -> SlotApplyContext {
+        let semantics = field.semantics();
+        let policy = field.policy();
+        let default_semantics = semantics == SlotSemantics::default();
+        let default_policy = policy == SlotPolicy::default();
+        let mut context =
+            if self.address.root == ProjectSlotRoot::State && default_semantics && default_policy {
+                self.context()
+            } else {
+                SlotApplyContext { semantics, policy }
+            };
+        if context.semantics.direction == SlotDirection::Produced && default_policy {
+            context.policy = SlotPolicy::read_only_transient();
+        }
+        context
+    }
+
+    fn ui_config_slot_body(&self) -> UiConfigSlotBody {
+        match &self.body {
+            SlotControllerBody::Empty => UiConfigSlotBody::Empty,
+            SlotControllerBody::Value { value } => {
+                UiConfigSlotBody::Value(self.ui_slot_value(value))
+            }
+            SlotControllerBody::Record
+            | SlotControllerBody::Map
+            | SlotControllerBody::Enum { .. } => UiConfigSlotBody::Record(UiSlotRecord::new(
+                self.children
+                    .iter()
+                    .filter(|child| !child.is_internal_config_slot())
+                    .map(Self::ui_config_slot)
+                    .collect(),
+            )),
+            SlotControllerBody::Option { present } if *present => UiConfigSlotBody::Record(
+                UiSlotRecord::new(self.children.iter().map(Self::ui_config_slot).collect()),
+            ),
+            SlotControllerBody::Option { .. } | SlotControllerBody::Issue => {
+                UiConfigSlotBody::Empty
+            }
+        }
+    }
+
+    fn ui_slot_value(&self, value: &LpValue) -> UiSlotValue {
+        let mut value = UiSlotValue::from_lp_value(value);
+        if let Some(shape) = &self.value_shape {
+            value.editor = ui_editor_hint(&shape.editor);
+            if let Some(description) = shape.meta.description.as_ref() {
+                value = value.with_detail(description.clone());
+            }
+        }
+        value
+    }
+
+    fn ui_slot_asset(&self) -> Option<UiSlotAsset> {
+        if !self.is_asset_like() {
+            return None;
+        }
+        let value = self.value()?;
+        let (source, content) = match value {
+            LpValue::String(value) if looks_like_inline_glsl(value) => {
+                ("inline.glsl".to_string(), Some(value.clone()))
+            }
+            LpValue::String(value) if looks_like_inline_svg(value) => {
+                ("inline.svg".to_string(), Some(value.clone()))
+            }
+            LpValue::String(value) => (value.clone(), None),
+            LpValue::Resource(resource) => (
+                format!("resource {:?}:{}", resource.domain, resource.id),
+                None,
+            ),
+            other => (UiSlotValue::from_lp_value(other).display, None),
+        };
+        let editor = asset_editor_kind(&source, content.as_deref(), self.value_shape.as_ref());
+        let mut asset = UiSlotAsset::new(source, editor);
+        if let Some(content) = content {
+            asset = asset.with_content(content);
+        }
+        Some(asset)
+    }
+
+    fn ui_key(&self) -> String {
+        if self.address.path.is_root() {
+            self.address.root.name().to_string()
+        } else {
+            self.address.path.to_string()
+        }
+    }
+
+    fn ui_source(&self) -> UiSlotSourceState {
+        match self.value() {
+            Some(LpValue::Unset) => UiSlotSourceState::Unset,
+            _ => self.source.clone(),
+        }
+    }
+
+    fn ui_field_state(&self) -> UiSlotFieldState {
+        let state = if self.policy.writable {
+            UiSlotFieldState::editable()
+        } else {
+            UiSlotFieldState::readonly()
+        };
+        if let Some(issue) = self.issues.first() {
+            state.with_invalid(issue.clone())
+        } else {
+            state
+        }
+    }
+
+    fn ui_detail(&self) -> Option<String> {
+        match &self.body {
+            SlotControllerBody::Value { value } => Some(
+                UiSlotValue::from_lp_value(value)
+                    .kind
+                    .type_label()
+                    .to_string(),
+            ),
+            SlotControllerBody::Record => Some(child_count_detail(self.children.len(), "field")),
+            SlotControllerBody::Map => Some(child_count_detail(self.children.len(), "entry")),
+            SlotControllerBody::Enum { variant } => Some(format!("variant {variant}")),
+            SlotControllerBody::Option { present } => Some(if *present {
+                "set".to_string()
+            } else {
+                "unset".to_string()
+            }),
+            SlotControllerBody::Empty | SlotControllerBody::Issue => None,
+        }
+    }
+
+    fn value(&self) -> Option<&LpValue> {
+        match &self.body {
+            SlotControllerBody::Value { value } => Some(value),
+            _ => None,
+        }
+    }
+
+    fn is_produced_slot(&self) -> bool {
+        self.address.root == ProjectSlotRoot::State
+            || self.semantics.direction == SlotDirection::Produced
+    }
+
+    fn value_shape_is_product(&self) -> bool {
+        matches!(
+            self.value_shape.as_ref().map(|shape| &shape.ty),
+            Some(LpType::Product(_))
+        ) || matches!(
+            self.value_shape.as_ref().map(|shape| &shape.editor),
+            Some(ValueEditorHint::VisualProduct | ValueEditorHint::ControlProduct)
+        )
+    }
+
+    fn is_asset_like(&self) -> bool {
+        if self.is_produced_slot() {
+            return false;
+        }
+        if matches!(
+            self.value_shape.as_ref().map(|shape| &shape.editor),
+            Some(ValueEditorHint::Resource | ValueEditorHint::RuntimeBufferResource)
+        ) {
+            return true;
+        }
+        let key = self.ui_key().to_ascii_lowercase();
+        if matches!(key.as_str(), "source" | "shader" | "glsl" | "svg")
+            || key.ends_with(".source")
+            || key.ends_with(".shader")
+            || key.ends_with(".glsl")
+            || key.ends_with(".svg")
+        {
+            return matches!(
+                self.value(),
+                Some(LpValue::String(_) | LpValue::Resource(_))
+            );
+        }
+        matches!(
+            self.value(),
+            Some(LpValue::String(value))
+                if value.ends_with(".glsl")
+                    || value.ends_with(".svg")
+                    || looks_like_inline_glsl(value)
+                    || looks_like_inline_svg(value)
+        )
+    }
+
+    fn is_internal_config_slot(&self) -> bool {
+        matches!(
+            self.address.path.segments().first(),
+            Some(SlotPathSegment::Field(name)) if name.as_str() == "bindings"
+        )
+    }
+
+    fn children_are_top_level_rows(&self) -> bool {
+        matches!(
+            self.body,
+            SlotControllerBody::Record
+                | SlotControllerBody::Map
+                | SlotControllerBody::Enum { .. }
+                | SlotControllerBody::Option { present: true }
+        )
+    }
 }
 
 enum SlotChildApply<'a> {
@@ -442,11 +847,13 @@ enum SlotChildApply<'a> {
         label: String,
         data: &'a SlotData,
         shape: SlotShapeView<'a>,
+        context: SlotApplyContext,
     },
     Issue {
         address: ProjectSlotAddress,
         label: String,
         message: String,
+        context: SlotApplyContext,
     },
 }
 
@@ -454,6 +861,31 @@ impl SlotChildApply<'_> {
     fn address(&self) -> &ProjectSlotAddress {
         match self {
             Self::Data { address, .. } | Self::Issue { address, .. } => address,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct SlotApplyContext {
+    semantics: SlotSemantics,
+    policy: SlotPolicy,
+}
+
+impl SlotApplyContext {
+    fn for_root(root: &ProjectSlotRoot) -> Self {
+        match root {
+            ProjectSlotRoot::Def => Self {
+                semantics: SlotSemantics::local(),
+                policy: SlotPolicy::writable_persisted(),
+            },
+            ProjectSlotRoot::State => Self {
+                semantics: SlotSemantics::produced(),
+                policy: SlotPolicy::read_only_transient(),
+            },
+            ProjectSlotRoot::Other(_) => Self {
+                semantics: SlotSemantics::local(),
+                policy: SlotPolicy::read_only_persisted(),
+            },
         }
     }
 }
@@ -498,4 +930,80 @@ fn human_label(raw: &str) -> String {
         return String::new();
     };
     first.to_uppercase().collect::<String>() + chars.as_str()
+}
+
+fn owned_value_shape(shape: SlotValueShapeView<'_>) -> SlotValueShape {
+    match shape {
+        SlotValueShapeView::Static(shape) => shape.to_owned_value_shape(),
+        SlotValueShapeView::Dynamic(shape) => shape.clone(),
+    }
+}
+
+fn ui_editor_hint(editor: &ValueEditorHint) -> UiSlotEditorHint {
+    match editor {
+        ValueEditorHint::Plain
+        | ValueEditorHint::NodeRef
+        | ValueEditorHint::Path
+        | ValueEditorHint::Dimensions
+        | ValueEditorHint::Affine2d
+        | ValueEditorHint::Resource
+        | ValueEditorHint::RuntimeBufferResource
+        | ValueEditorHint::VisualProduct
+        | ValueEditorHint::ControlProduct => UiSlotEditorHint::Auto,
+        ValueEditorHint::Number { min, max, step } => UiSlotEditorHint::Number {
+            min: min.map(|value| value.0),
+            max: max.map(|value| value.0),
+            step: step.map(|value| value.0),
+        },
+        ValueEditorHint::Slider { min, max, step } => UiSlotEditorHint::Slider {
+            min: min.0,
+            max: max.0,
+            step: step.map(|value| value.0),
+        },
+        ValueEditorHint::Xy => UiSlotEditorHint::Xy,
+        ValueEditorHint::Dropdown { options } => UiSlotEditorHint::dropdown(
+            options
+                .iter()
+                .map(|option| (option.value.clone(), option.label.clone())),
+        ),
+    }
+}
+
+fn asset_editor_kind(
+    source: &str,
+    content: Option<&str>,
+    shape: Option<&SlotValueShape>,
+) -> UiAssetEditorKind {
+    let lower = source.to_ascii_lowercase();
+    if lower.ends_with(".glsl") || content.is_some_and(looks_like_inline_glsl) {
+        UiAssetEditorKind::Glsl
+    } else if lower.ends_with(".svg") || content.is_some_and(looks_like_inline_svg) {
+        UiAssetEditorKind::Svg
+    } else if matches!(
+        shape.map(|shape| &shape.editor),
+        Some(ValueEditorHint::RuntimeBufferResource)
+    ) {
+        UiAssetEditorKind::Binary
+    } else {
+        UiAssetEditorKind::Text
+    }
+}
+
+fn looks_like_inline_glsl(value: &str) -> bool {
+    value.contains("#version")
+        || value.contains("void main")
+        || value.contains("void mainImage")
+        || value.contains("gl_FragColor")
+}
+
+fn looks_like_inline_svg(value: &str) -> bool {
+    value.trim_start().starts_with("<svg")
+}
+
+fn child_count_detail(count: usize, noun: &str) -> String {
+    if count == 1 {
+        format!("1 {noun}")
+    } else {
+        format!("{count} {noun}s")
+    }
 }

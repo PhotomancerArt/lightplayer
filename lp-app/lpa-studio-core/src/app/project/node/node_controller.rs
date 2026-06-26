@@ -6,7 +6,8 @@ use lpc_wire::{NodeRuntimeStatus, WireEntryState};
 
 use crate::{
     ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTarget,
-    ProjectSlotAddress, ProjectSlotRoot, SlotController,
+    ProjectSlotAddress, ProjectSlotRoot, SlotController, UiNodeChild, UiNodeHeader, UiNodeSection,
+    UiNodeTab, UiNodeView, UiStatus,
 };
 
 /// User/controller intent for product subscriptions owned by a node.
@@ -50,7 +51,7 @@ impl Default for NodeControllerState {
 ///
 /// Node controllers form an owned tree under `ProjectController`. Each node
 /// owns its child node controllers and its root slot controllers.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct NodeController {
     address: ProjectNodeAddress,
     target: ProjectNodeTarget,
@@ -149,6 +150,24 @@ impl NodeController {
         &self.slots
     }
 
+    /// Project this controller and its slot controllers into the node-pane DTO.
+    pub fn ui_node(&self) -> UiNodeView {
+        let header = UiNodeHeader::new(
+            self.label.clone(),
+            self.kind.clone(),
+            self.address.to_string(),
+        )
+        .with_status(self.ui_status());
+
+        let mut view = UiNodeView::new(header, vec![UiNodeTab::main(self.ui_sections())])
+            .with_node_id(self.address.to_string())
+            .with_children(self.ui_children());
+        view.focused = self.state.focused;
+        view.collapsed = self.state.collapsed;
+        view.issues = self.issues.clone();
+        view
+    }
+
     /// Find a descendant node controller by stable address.
     pub fn node(&self, address: &ProjectNodeAddress) -> Option<&NodeController> {
         if self.address() == address {
@@ -243,6 +262,64 @@ impl NodeController {
                 }
             })
             .collect();
+    }
+
+    fn ui_sections(&self) -> Vec<UiNodeSection> {
+        let mut products = Vec::new();
+        let mut produced_values = Vec::new();
+        let mut config_slots = Vec::new();
+        let mut asset_slots = Vec::new();
+
+        for slot in &self.slots {
+            match slot.address().root {
+                ProjectSlotRoot::State => {
+                    slot.collect_produced(&mut products, &mut produced_values);
+                }
+                ProjectSlotRoot::Def | ProjectSlotRoot::Other(_) => {
+                    slot.collect_config(&mut config_slots, &mut asset_slots);
+                }
+            }
+        }
+
+        let mut sections = Vec::new();
+        if !products.is_empty() {
+            sections.push(UiNodeSection::ProducedProducts(products));
+        }
+        if !produced_values.is_empty() {
+            sections.push(UiNodeSection::ProducedValues(produced_values));
+        }
+        if !asset_slots.is_empty() {
+            sections.push(UiNodeSection::AssetSlots(asset_slots));
+        }
+        if !config_slots.is_empty() {
+            sections.push(UiNodeSection::ConfigSlots(config_slots));
+        }
+        sections
+    }
+
+    fn ui_children(&self) -> Vec<UiNodeChild> {
+        self.children
+            .iter()
+            .map(|child| {
+                let mut view = UiNodeChild::new(
+                    child.label.clone(),
+                    child.kind.clone(),
+                    child.address.to_string(),
+                );
+                view.status = child.ui_status();
+                view.summary = child.status.detail.clone();
+                view
+            })
+            .collect()
+    }
+
+    fn ui_status(&self) -> UiStatus {
+        match self.status.tone {
+            ProjectNodeStatusTone::Neutral => UiStatus::neutral(self.status.label.clone()),
+            ProjectNodeStatusTone::Good => UiStatus::good(self.status.label.clone()),
+            ProjectNodeStatusTone::Warning => UiStatus::warning(self.status.label.clone()),
+            ProjectNodeStatusTone::Error => UiStatus::error(self.status.label.clone()),
+        }
     }
 }
 

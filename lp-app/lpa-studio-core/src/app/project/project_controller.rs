@@ -5,8 +5,8 @@ use crate::{
     Controller, ControllerId, LoadedProjectChoice, ProgressState, ProjectConnectResult,
     ProjectEditorOp, ProjectEditorTarget, ProjectInventorySummary, ProjectNodeAddress, ProjectOp,
     ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncRun, ProjectSyncSummary,
-    StudioServerClient, UiAction, UiError, UiIssue, UiLogEntry, UiLogLevel, UiMetric, UiPaneView,
-    UiResult, UiStatus, UiViewContent, UxUpdateSink,
+    StudioServerClient, UiAction, UiError, UiIssue, UiLogEntry, UiLogLevel, UiMetric, UiNodeView,
+    UiPaneView, UiResult, UiStatus, UiViewContent, UxUpdateSink,
 };
 use lpc_model::{NodeId, TreePath};
 use lpc_view::ProjectView;
@@ -61,6 +61,14 @@ impl ProjectController {
     /// Root node controllers in project tree order.
     pub fn root_nodes(&self) -> &[NodeController] {
         &self.root_nodes
+    }
+
+    /// Project root node controllers into node-pane DTOs in project tree order.
+    pub fn ui_nodes(&self) -> Vec<UiNodeView> {
+        self.root_nodes
+            .iter()
+            .map(NodeController::ui_node)
+            .collect()
     }
 
     /// Find a node controller by stable address.
@@ -568,16 +576,18 @@ fn ready_project_body(
 #[cfg(test)]
 mod tests {
     use lpc_model::{
-        LpType, LpValue, NodeId, Revision, SlotData, SlotFieldShape, SlotMapDyn, SlotMapKey,
-        SlotMapKeyShape, SlotMeta, SlotPath, SlotRecord, SlotShape, SlotShapeId, TreePath,
-        WithRevision,
+        ControlExtent, ControlProduct, LpType, LpValue, NodeId, ProductKind, ProductRef, Revision,
+        SlotData, SlotEnum, SlotEnumEncoding, SlotFieldShape, SlotMapDyn, SlotMapKey,
+        SlotMapKeyShape, SlotMeta, SlotName, SlotOptionDyn, SlotPath, SlotRecord, SlotShape,
+        SlotShapeId, SlotVariantShape, TreePath, VisualProduct, WithRevision,
     };
     use lpc_view::{ProjectView, TreeEntryView};
     use lpc_wire::{NodeRuntimeStatus, ProjectReadResponse, ProjectReadResult, WireEntryState};
 
     use crate::{
         ActionPriority, ProjectOp, ProjectProductSubscriptionIntent, ProjectSlotAddress,
-        ProjectSlotRoot, ProjectSyncPhase, SlotKind,
+        ProjectSlotRoot, ProjectSyncPhase, SlotKind, UiAssetEditorKind, UiConfigSlotBody,
+        UiNodeSection, UiNodeTabBody, UiProductKind,
     };
 
     use super::*;
@@ -929,6 +939,240 @@ mod tests {
         );
     }
 
+    #[test]
+    fn ui_nodes_project_header_state_and_child_summaries() {
+        let mut project = ProjectController::new();
+        project.apply_project_view(&tree_view()).unwrap();
+        let node = node_address("/demo.project");
+        project.node_mut(&node).unwrap().state_mut().focused = true;
+        project.node_mut(&node).unwrap().state_mut().collapsed = true;
+
+        let nodes = project.ui_nodes();
+
+        assert_eq!(nodes.len(), 1);
+        assert_eq!(nodes[0].header.title, "Demo");
+        assert_eq!(nodes[0].header.kind, "Project");
+        assert_eq!(nodes[0].header.path, "/demo.project");
+        assert_eq!(nodes[0].header.status.label, "Running");
+        assert!(nodes[0].focused);
+        assert!(nodes[0].collapsed);
+        assert_eq!(
+            nodes[0]
+                .children
+                .iter()
+                .map(|child| child.label.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Clock", "Orbit"]
+        );
+    }
+
+    #[test]
+    fn ui_node_projection_classifies_products_values_assets_and_config() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+
+        project.apply_project_view(&view).unwrap();
+
+        let nodes = project.ui_nodes();
+        let sections = node_sections(&nodes[0]);
+
+        let products = section_products(sections);
+        assert_eq!(products.len(), 2);
+        assert_eq!(products[0].name, "Output");
+        assert_eq!(products[0].kind, UiProductKind::Visual);
+        assert_eq!(products[1].name, "Control");
+        assert_eq!(products[1].kind, UiProductKind::Control);
+
+        let produced_values = section_produced_values(sections);
+        assert_eq!(produced_values.len(), 1);
+        assert_eq!(produced_values[0].label, "Time");
+        assert_eq!(produced_values[0].value, "3.333");
+
+        let assets = section_asset_slots(sections);
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].label, "Shader");
+        let UiConfigSlotBody::Asset(asset) = &assets[0].body else {
+            panic!("expected asset slot body");
+        };
+        assert_eq!(asset.editor, UiAssetEditorKind::Glsl);
+        assert!(asset.content.as_deref().unwrap().contains("void mainImage"));
+
+        let config = section_config_slots(sections);
+        assert_eq!(
+            config
+                .iter()
+                .map(|slot| slot.label.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Brightness", "Palette"]
+        );
+        let UiConfigSlotBody::Value(value) = &config[0].body else {
+            panic!("expected brightness value body");
+        };
+        assert_eq!(value.display, "0.72");
+        let UiConfigSlotBody::Record(record) = &config[1].body else {
+            panic!("expected palette record body");
+        };
+        assert_eq!(
+            record
+                .fields
+                .iter()
+                .map(|field| field.label.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Primary", "Secondary"]
+        );
+    }
+
+    #[test]
+    fn ui_config_projection_handles_enum_option_and_map_shapes() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_structural_config_slots(&mut view, 1, Revision::new(8));
+        let mut project = ProjectController::new();
+
+        project.apply_project_view(&view).unwrap();
+
+        let nodes = project.ui_nodes();
+        let config = section_config_slots(node_sections(&nodes[0]));
+        assert_eq!(
+            config
+                .iter()
+                .map(|slot| slot.label.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Mode", "Optional", "Entries"]
+        );
+
+        let UiConfigSlotBody::Record(mode) = &config[0].body else {
+            panic!("expected enum as record body");
+        };
+        assert_eq!(mode.fields[0].label, "Manual");
+
+        assert!(matches!(config[1].body, UiConfigSlotBody::Empty));
+        assert_eq!(config[1].detail.as_deref(), Some("unset"));
+
+        let UiConfigSlotBody::Record(entries) = &config[2].body else {
+            panic!("expected map as record body");
+        };
+        assert_eq!(
+            entries
+                .fields
+                .iter()
+                .map(|field| field.label.as_str())
+                .collect::<Vec<_>>(),
+            vec!["a", "b"]
+        );
+    }
+
+    #[test]
+    fn ui_config_projection_keeps_slot_issues() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        view.slots.root_shapes.clear();
+        view.slots.roots.clear();
+        view.slots
+            .root_shapes
+            .insert("node.1.def".to_string(), SlotShapeId::new(999));
+        let mut project = ProjectController::new();
+
+        project.apply_project_view(&view).unwrap();
+
+        let nodes = project.ui_nodes();
+        let config = section_config_slots(node_sections(&nodes[0]));
+        assert_eq!(config.len(), 1);
+        assert_eq!(config[0].label, "Def");
+        assert_eq!(config[0].issues, vec!["node.1.def data is missing"]);
+        assert_eq!(
+            config[0].state.invalid.as_deref(),
+            Some("node.1.def data is missing")
+        );
+    }
+
+    #[test]
+    fn projected_ui_value_updates_while_slot_state_is_preserved() {
+        let node = node_address("/demo.project/orbit.shader");
+        let brightness = ProjectSlotAddress::new(
+            node.clone(),
+            ProjectSlotRoot::def(),
+            SlotPath::parse("brightness").unwrap(),
+        );
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_test_slots(&mut view, 1, Revision::new(2), false);
+        let mut project = ProjectController::new();
+        project.apply_project_view(&view).unwrap();
+        project
+            .node_mut(&node)
+            .unwrap()
+            .slot_mut(&brightness)
+            .unwrap()
+            .state_mut()
+            .expanded = true;
+
+        install_test_slots(&mut view, 1, Revision::new(3), false);
+        set_brightness(&mut view, 1, Revision::new(3), 0.25);
+        project.apply_project_view(&view).unwrap();
+
+        let ui_nodes = project.ui_nodes();
+        let config = section_config_slots(node_sections(&ui_nodes[0]));
+        let UiConfigSlotBody::Value(value) = &config[1].body else {
+            panic!("expected brightness value");
+        };
+        assert_eq!(value.display, "0.25");
+        assert!(
+            project
+                .node_mut(&node)
+                .unwrap()
+                .slot_mut(&brightness)
+                .unwrap()
+                .state()
+                .expanded
+        );
+    }
+
+    fn node_sections(node: &crate::UiNodeView) -> &[UiNodeSection] {
+        let UiNodeTabBody::Sections(sections) = &node.tabs[0].body else {
+            panic!("expected node sections");
+        };
+        sections
+    }
+
+    fn section_products(sections: &[UiNodeSection]) -> &[crate::UiProducedProduct] {
+        sections
+            .iter()
+            .find_map(|section| match section {
+                UiNodeSection::ProducedProducts(items) => Some(items.as_slice()),
+                _ => None,
+            })
+            .unwrap_or(&[])
+    }
+
+    fn section_produced_values(sections: &[UiNodeSection]) -> &[crate::UiProducedValue] {
+        sections
+            .iter()
+            .find_map(|section| match section {
+                UiNodeSection::ProducedValues(items) => Some(items.as_slice()),
+                _ => None,
+            })
+            .unwrap_or(&[])
+    }
+
+    fn section_asset_slots(sections: &[UiNodeSection]) -> &[crate::UiConfigSlot] {
+        sections
+            .iter()
+            .find_map(|section| match section {
+                UiNodeSection::AssetSlots(items) => Some(items.as_slice()),
+                _ => None,
+            })
+            .unwrap_or(&[])
+    }
+
+    fn section_config_slots(sections: &[UiNodeSection]) -> &[crate::UiConfigSlot] {
+        sections
+            .iter()
+            .find_map(|section| match section {
+                UiNodeSection::ConfigSlots(items) => Some(items.as_slice()),
+                _ => None,
+            })
+            .unwrap_or(&[])
+    }
+
     fn tree_view() -> ProjectView {
         let mut view = ProjectView::new();
         let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
@@ -1064,6 +1308,222 @@ mod tests {
                 ))],
             )),
         );
+    }
+
+    fn install_ui_projection_slots(view: &mut ProjectView, node_id: u32, revision: Revision) {
+        view.slots.root_shapes.clear();
+        view.slots.roots.clear();
+        view.slots.registry = Default::default();
+        let def_shape = SlotShapeId::new(300);
+        let state_shape = SlotShapeId::new(301);
+
+        view.slots
+            .registry
+            .register_dynamic_shape(
+                def_shape,
+                SlotShape::Record {
+                    meta: SlotMeta::empty(),
+                    fields: vec![
+                        SlotFieldShape::new("brightness", SlotShape::value(LpType::F32)).unwrap(),
+                        SlotFieldShape::new("shader", SlotShape::value(LpType::String)).unwrap(),
+                        SlotFieldShape::new(
+                            "palette",
+                            SlotShape::Record {
+                                meta: SlotMeta::empty(),
+                                fields: vec![
+                                    SlotFieldShape::new("primary", SlotShape::value(LpType::Vec3))
+                                        .unwrap(),
+                                    SlotFieldShape::new(
+                                        "secondary",
+                                        SlotShape::value(LpType::Vec3),
+                                    )
+                                    .unwrap(),
+                                ],
+                            },
+                        )
+                        .unwrap(),
+                        SlotFieldShape::new(
+                            "bindings",
+                            SlotShape::Record {
+                                meta: SlotMeta::empty(),
+                                fields: Vec::new(),
+                            },
+                        )
+                        .unwrap(),
+                    ],
+                },
+            )
+            .unwrap();
+        view.slots
+            .registry
+            .register_dynamic_shape(
+                state_shape,
+                SlotShape::Record {
+                    meta: SlotMeta::empty(),
+                    fields: vec![
+                        SlotFieldShape::new(
+                            "output",
+                            SlotShape::value(LpType::Product(ProductKind::Visual)),
+                        )
+                        .unwrap(),
+                        SlotFieldShape::new(
+                            "control",
+                            SlotShape::value(LpType::Product(ProductKind::Control)),
+                        )
+                        .unwrap(),
+                        SlotFieldShape::new("time", SlotShape::value(LpType::F32)).unwrap(),
+                    ],
+                },
+            )
+            .unwrap();
+
+        view.slots
+            .root_shapes
+            .insert(format!("node.{node_id}.def"), def_shape);
+        view.slots.roots.insert(
+            format!("node.{node_id}.def"),
+            SlotData::Record(SlotRecord::with_revision(
+                revision,
+                vec![
+                    SlotData::Value(WithRevision::new(revision, LpValue::F32(0.72))),
+                    SlotData::Value(WithRevision::new(
+                        revision,
+                        LpValue::String(
+                            "void mainImage(out vec4 color, in vec2 uv) {}".to_string(),
+                        ),
+                    )),
+                    SlotData::Record(SlotRecord::with_revision(
+                        revision,
+                        vec![
+                            SlotData::Value(WithRevision::new(
+                                revision,
+                                LpValue::Vec3([1.0, 0.2, 0.1]),
+                            )),
+                            SlotData::Value(WithRevision::new(
+                                revision,
+                                LpValue::Vec3([0.1, 0.2, 1.0]),
+                            )),
+                        ],
+                    )),
+                    SlotData::Record(SlotRecord::with_revision(revision, Vec::new())),
+                ],
+            )),
+        );
+        view.slots
+            .root_shapes
+            .insert(format!("node.{node_id}.state"), state_shape);
+        view.slots.roots.insert(
+            format!("node.{node_id}.state"),
+            SlotData::Record(SlotRecord::with_revision(
+                revision,
+                vec![
+                    SlotData::Value(WithRevision::new(
+                        revision,
+                        LpValue::Product(ProductRef::visual(VisualProduct::new(
+                            NodeId::new(node_id),
+                            0,
+                        ))),
+                    )),
+                    SlotData::Value(WithRevision::new(
+                        revision,
+                        LpValue::Product(ProductRef::control(ControlProduct::new(
+                            NodeId::new(node_id),
+                            1,
+                            ControlExtent::new(2, 16),
+                        ))),
+                    )),
+                    SlotData::Value(WithRevision::new(revision, LpValue::F32(3.333))),
+                ],
+            )),
+        );
+    }
+
+    fn install_structural_config_slots(view: &mut ProjectView, node_id: u32, revision: Revision) {
+        view.slots.root_shapes.clear();
+        view.slots.roots.clear();
+        view.slots.registry = Default::default();
+        let shape = SlotShapeId::new(400);
+        view.slots
+            .registry
+            .register_dynamic_shape(
+                shape,
+                SlotShape::Record {
+                    meta: SlotMeta::empty(),
+                    fields: vec![
+                        SlotFieldShape::new(
+                            "mode",
+                            SlotShape::Enum {
+                                meta: SlotMeta::empty(),
+                                encoding: SlotEnumEncoding::default(),
+                                variants: vec![
+                                    SlotVariantShape::new("manual", SlotShape::value(LpType::F32))
+                                        .unwrap(),
+                                ],
+                            },
+                        )
+                        .unwrap(),
+                        SlotFieldShape::new(
+                            "optional",
+                            SlotShape::Option {
+                                meta: SlotMeta::empty(),
+                                some: Box::new(SlotShape::value(LpType::F32)),
+                            },
+                        )
+                        .unwrap(),
+                        SlotFieldShape::new(
+                            "entries",
+                            SlotShape::Map {
+                                meta: SlotMeta::empty(),
+                                key: SlotMapKeyShape::String,
+                                value: Box::new(SlotShape::value(LpType::F32)),
+                            },
+                        )
+                        .unwrap(),
+                    ],
+                },
+            )
+            .unwrap();
+        view.slots
+            .root_shapes
+            .insert(format!("node.{node_id}.def"), shape);
+
+        let mut map = SlotMapDyn::with_revision(revision, Default::default());
+        map.entries.insert(
+            SlotMapKey::String("a".to_string()),
+            SlotData::Value(WithRevision::new(revision, LpValue::F32(1.0))),
+        );
+        map.entries.insert(
+            SlotMapKey::String("b".to_string()),
+            SlotData::Value(WithRevision::new(revision, LpValue::F32(2.0))),
+        );
+
+        view.slots.roots.insert(
+            format!("node.{node_id}.def"),
+            SlotData::Record(SlotRecord::with_revision(
+                revision,
+                vec![
+                    SlotData::Enum(SlotEnum::with_version(
+                        revision,
+                        SlotName::parse("manual").unwrap(),
+                        SlotData::Value(WithRevision::new(revision, LpValue::F32(0.5))),
+                    )),
+                    SlotData::Option(SlotOptionDyn::none_with_version(revision)),
+                    SlotData::Map(map),
+                ],
+            )),
+        );
+    }
+
+    fn set_brightness(view: &mut ProjectView, node_id: u32, revision: Revision, brightness: f32) {
+        let root = view
+            .slots
+            .roots
+            .get_mut(&format!("node.{node_id}.def"))
+            .expect("def root exists");
+        let SlotData::Record(record) = root else {
+            panic!("expected def record");
+        };
+        record.fields[1] = SlotData::Value(WithRevision::new(revision, LpValue::F32(brightness)));
     }
 
     fn install_map_slot(view: &mut ProjectView, node_id: u32, revision: Revision, keys: &[&str]) {
