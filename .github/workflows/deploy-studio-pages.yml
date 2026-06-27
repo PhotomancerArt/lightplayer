@@ -70,7 +70,7 @@ jobs:
         run: cargo install dioxus-cli --version 0.7.9 --locked
 
       - name: Install espflash
-        run: cargo install espflash --version 3.3.0 --locked
+        run: cargo install espflash --version 3.3.0 --locked --force
 
       - name: Build Pages artifact
         run: just studio-web-deploy-dir production target/pages/studio lightplayer.app
