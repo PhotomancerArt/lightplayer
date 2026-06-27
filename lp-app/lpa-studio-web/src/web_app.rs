@@ -529,6 +529,7 @@ fn action_preempts_passive_refresh(action: &UiAction) -> bool {
             matches!(
                 op,
                 DeviceOp::OpenProvider { .. }
+                    | DeviceOp::OpenProviderForRecovery { .. }
                     | DeviceOp::ConnectEndpoint { .. }
                     | DeviceOp::ConnectLightPlayer
                     | DeviceOp::DisconnectLightPlayer
@@ -968,6 +969,20 @@ mod tests {
     }
 
     #[test]
+    fn open_for_flashing_preempts_refresh_and_foreground_action() {
+        let action = UiAction::from_op(
+            DeviceController::NODE_ID,
+            DeviceOp::OpenProviderForRecovery {
+                provider_id: LinkProviderKind::BrowserSerialEsp32,
+            },
+        );
+
+        assert!(action_preempts_passive_refresh(&action));
+        assert!(action_preempts_foreground_action(&action));
+        assert_eq!(foreground_action_timeout_ms(&action), None);
+    }
+
+    #[test]
     fn project_editor_actions_have_foreground_timeout() {
         let action = UiAction::from_op("studio|project|node:fixture", ProjectEditorOp::Focus);
 
@@ -982,7 +997,12 @@ mod tests {
         let mut model = StudioWebModel::new();
         let running_action =
             UiAction::from_op(DeviceController::NODE_ID, DeviceOp::ConnectLightPlayer);
-        let pending_action = UiAction::from_op(DeviceController::NODE_ID, DeviceOp::ResetDevice);
+        let pending_action = UiAction::from_op(
+            DeviceController::NODE_ID,
+            DeviceOp::OpenProviderForRecovery {
+                provider_id: LinkProviderKind::BrowserSerialEsp32,
+            },
+        );
         let start = model
             .begin_foreground_action(&running_action)
             .expect("action starts");

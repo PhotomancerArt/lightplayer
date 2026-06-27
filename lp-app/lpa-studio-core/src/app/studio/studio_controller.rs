@@ -159,6 +159,9 @@ impl StudioController {
                 self.project.reset();
                 Ok(UiNotices::new().with_notice(UiNotice::info("Connection catalog refreshed")))
             }
+            DeviceOp::OpenProviderForRecovery { provider_id } => {
+                self.open_provider_link_only(provider_id, updates).await
+            }
             DeviceOp::OpenProvider { provider_id } => {
                 if provider_id != LinkProviderKind::BrowserSerialEsp32 {
                     emit_activity(
@@ -220,6 +223,35 @@ impl StudioController {
         self.logs.extend(connected.logs);
         self.connect_server_connection(&connected.connection, updates)
             .await
+    }
+
+    async fn open_provider_link_only(
+        &mut self,
+        provider_id: LinkProviderKind,
+        updates: UxUpdateSink,
+    ) -> UiResult {
+        self.project.reset();
+        self.device.server.disconnect();
+        emit_activity(
+            &updates,
+            device_section_target(DeviceController::SECTION_CONNECT_DEVICE),
+            "Opening device for flashing",
+            "Opening",
+            "Opening device without attaching LightPlayer",
+        );
+        match self.device.link.open_provider(provider_id).await? {
+            LinkOpenOutcome::Opened => Ok(UiNotices::new().with_notice(UiNotice::info(
+                "Choose the device endpoint to open for flashing",
+            ))),
+            LinkOpenOutcome::Cancelled { message } => {
+                Ok(UiNotices::new().with_notice(UiNotice::info(message)))
+            }
+            LinkOpenOutcome::Connected(connected) => {
+                self.logs.extend(connected.logs);
+                updates.emit(UxUpdate::View(self.view()));
+                Ok(UiNotices::new().with_notice(UiNotice::info("Device opened for flashing")))
+            }
+        }
     }
 
     async fn connect_server_from_link(&mut self, updates: UxUpdateSink) -> UiResult {
@@ -1013,10 +1045,17 @@ mod tests {
             action.op_as::<DeviceOp>(),
             Some(DeviceOp::DisconnectLightPlayer)
         )));
-        assert!(!actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ResetToBlank | DeviceOp::DisconnectDevice)
-        )));
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
+        );
+        assert!(
+            actions.iter().any(|action| matches!(
+                action.op_as::<DeviceOp>(),
+                Some(DeviceOp::DisconnectDevice)
+            ))
+        );
     }
 
     #[test]
@@ -1130,10 +1169,17 @@ mod tests {
             action.op_as::<DeviceOp>(),
             Some(DeviceOp::DisconnectLightPlayer)
         )));
-        assert!(!actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ResetToBlank | DeviceOp::DisconnectDevice)
-        )));
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
+        );
+        assert!(
+            actions.iter().any(|action| matches!(
+                action.op_as::<DeviceOp>(),
+                Some(DeviceOp::DisconnectDevice)
+            ))
+        );
     }
 
     #[test]
@@ -1155,6 +1201,99 @@ mod tests {
             action.op_as::<DeviceOp>(),
             Some(DeviceOp::DisconnectLightPlayer)
         )));
+        assert!(actions.iter().any(|action| matches!(
+            action.op_as::<DeviceOp>(),
+            Some(DeviceOp::ProvisionFirmware)
+        )));
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
+        );
+        assert!(
+            actions.iter().any(|action| matches!(
+                action.op_as::<DeviceOp>(),
+                Some(DeviceOp::DisconnectDevice)
+            ))
+        );
+        assert!(!actions.iter().any(|action| matches!(
+            action.op_as::<DeviceOp>(),
+            Some(DeviceOp::ConnectLightPlayer)
+        )));
+    }
+
+    #[test]
+    fn loaded_project_keeps_management_recovery_actions_visible() {
+        let mut studio = connected_studio();
+        studio
+            .device
+            .link
+            .set_active_session_for_test(management_capable_session());
+
+        let actions = view_actions(&studio.view());
+
+        assert!(actions.iter().any(|action| matches!(
+            action.op_as::<ProjectOp>(),
+            Some(ProjectOp::DisconnectProject)
+        )));
+        assert!(actions.iter().any(|action| matches!(
+            action.op_as::<DeviceOp>(),
+            Some(DeviceOp::DisconnectLightPlayer)
+        )));
+        assert!(actions.iter().any(|action| matches!(
+            action.op_as::<DeviceOp>(),
+            Some(DeviceOp::ProvisionFirmware)
+        )));
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetDevice)))
+        );
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
+        );
+        assert!(
+            actions.iter().any(|action| matches!(
+                action.op_as::<DeviceOp>(),
+                Some(DeviceOp::DisconnectDevice)
+            ))
+        );
+        assert!(!actions.iter().any(|action| matches!(
+            action.op_as::<DeviceOp>(),
+            Some(DeviceOp::ConnectLightPlayer)
+        )));
+    }
+
+    #[test]
+    fn open_provider_for_recovery_skips_server_attach() {
+        let mut studio = StudioController::new();
+        studio.device.link = LinkController::with_registry(registry_with_fake_endpoint());
+
+        let outcome = block_on_ready(
+            studio.open_provider_link_only(LinkProviderKind::Fake, UxUpdateSink::noop()),
+        )
+        .unwrap();
+
+        assert!(
+            outcome
+                .notices
+                .iter()
+                .any(|notice| notice.message == "Choose the device endpoint to open for flashing")
+        );
+        assert!(matches!(
+            studio.project.snapshot().state,
+            ProjectState::NotLoaded
+        ));
+        assert!(matches!(
+            studio.device.server.snapshot().state,
+            ServerState::Disconnected
+        ));
+        assert!(matches!(
+            studio.device.link.snapshot().state,
+            LinkState::SelectingEndpoint { .. }
+        ));
     }
 
     #[test]
@@ -1630,6 +1769,16 @@ mod tests {
                 ))
                 .with_connect_error(message),
         );
+        registry
+    }
+
+    fn registry_with_fake_endpoint() -> LinkProviderRegistry {
+        let mut registry = LinkProviderRegistry::new();
+        registry.insert(FakeProvider::new().with_endpoint(LinkEndpoint::new(
+            "fake-runtime",
+            LinkProviderKind::Fake,
+            "Fake runtime",
+        )));
         registry
     }
 

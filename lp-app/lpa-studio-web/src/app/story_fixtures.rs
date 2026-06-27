@@ -372,6 +372,33 @@ pub(crate) fn lightplayer_disconnected_view() -> UiStudioView {
     )
 }
 
+pub(crate) fn open_for_flashing_view() -> UiStudioView {
+    UiStudioView::new(
+        vec![device_view(
+            UiStatus::good("ESP32 over USB"),
+            vec![
+                select_connection_complete("ESP32 over USB"),
+                connect_device_complete_with_actions(esp32_metrics(), device_management_actions()),
+                stack_section(
+                    "connect-lightplayer",
+                    "Connect LightPlayer",
+                    UiStepState::Active,
+                    UiViewContent::text(
+                        "Device is open for recovery. Flash firmware or connect LightPlayer.",
+                    ),
+                    vec![connect_lightplayer_action()],
+                ),
+            ],
+            vec!["[lpa-link] ESP32 opened for flashing"],
+        )],
+        vec![UiLogEntry::new(
+            UiLogLevel::Info,
+            "lpa-studio-core",
+            "Device opened for flashing",
+        )],
+    )
+}
+
 pub(crate) fn provision_ready_view() -> UiStudioView {
     UiStudioView::new(
         vec![blank_device_view(
@@ -607,7 +634,7 @@ pub(crate) fn simulator_ready_device_view() -> UiPaneView {
                     "Protocol",
                     "fw-browser-post-message-v1",
                 )]),
-                vec![disconnect_lightplayer_action()],
+                vec![disconnect_device_action(), disconnect_lightplayer_action()],
             ),
             stack_section(
                 "open-project",
@@ -636,7 +663,7 @@ pub(crate) fn device_project_empty_view() -> UiPaneView {
                 "Connect LightPlayer",
                 UiStepState::Complete,
                 UiViewContent::Metrics(vec![UiMetric::new("Protocol", "lp-serial-json-lines-v1")]),
-                vec![disconnect_lightplayer_action()],
+                connected_esp32_recovery_actions(),
             ),
             stack_section(
                 "open-project",
@@ -667,7 +694,7 @@ pub(crate) fn device_project_selection_view() -> UiPaneView {
                 "Connect LightPlayer",
                 UiStepState::Complete,
                 UiViewContent::Metrics(vec![UiMetric::new("Protocol", "lp-serial-json-lines-v1")]),
-                vec![disconnect_lightplayer_action()],
+                connected_esp32_recovery_actions(),
             ),
             stack_section(
                 "open-project",
@@ -1226,6 +1253,13 @@ pub(crate) fn start_actions() -> Vec<UiAction> {
         .with_summary("Connect to ESP32 hardware through browser Web Serial.")
         .with_short_label("ESP32")
         .with_icon("usb"),
+        device_action(DeviceOp::OpenProviderForRecovery {
+            provider_id: LinkProviderKind::BrowserSerialEsp32,
+        })
+        .with_label("Open for flashing")
+        .with_summary("Open the ESP32 connection without attaching LightPlayer.")
+        .with_short_label("Flash")
+        .with_icon("usb"),
     ]
 }
 
@@ -1246,6 +1280,16 @@ pub(crate) fn device_management_actions() -> Vec<UiAction> {
         device_action(DeviceOp::ProvisionFirmware),
         device_action(DeviceOp::ResetToBlank),
         disconnect_device_action(),
+    ]
+}
+
+pub(crate) fn connected_esp32_recovery_actions() -> Vec<UiAction> {
+    vec![
+        device_action(DeviceOp::ProvisionFirmware),
+        device_action(DeviceOp::ResetDevice),
+        device_action(DeviceOp::ResetToBlank),
+        disconnect_device_action(),
+        disconnect_lightplayer_action().with_label("Disconnect LightPlayer"),
     ]
 }
 

@@ -7,8 +7,8 @@ use lpa_studio_web_story_macros::story;
 use crate::app::story_fixtures::{
     browser_serial_blank_firmware_view, browser_serial_canceled_view,
     browser_serial_open_failed_view, idle_device_view, lightplayer_disconnected_view,
-    provision_failed_view, provision_ready_view, provisioning_view, reset_complete_view,
-    resetting_to_blank_view, shell_story, studio_log,
+    open_for_flashing_view, provision_failed_view, provision_ready_view, provisioning_view,
+    reset_complete_view, resetting_to_blank_view, shell_story, studio_log,
 };
 use crate::core::PaneView;
 
@@ -42,6 +42,11 @@ pub(crate) fn server_disconnected_link_ready() -> Element {
         false,
         vec![studio_log(UiLogLevel::Info, "LightPlayer disconnected")],
     )
+}
+
+#[story]
+pub(crate) fn open_for_flashing() -> Element {
+    shell_story(open_for_flashing_view(), false, Vec::new())
 }
 
 #[story]

@@ -9,6 +9,9 @@ pub enum DeviceOp {
     OpenProvider {
         provider_id: LinkProviderKind,
     },
+    OpenProviderForRecovery {
+        provider_id: LinkProviderKind,
+    },
     ConnectEndpoint {
         provider_id: LinkProviderKind,
         endpoint_id: LinkEndpointId,
@@ -29,6 +32,11 @@ impl ControllerOp for DeviceOp {
                 "Choose connection",
                 "Select this way to connect a LightPlayer device.",
                 ActionPriority::Primary,
+            ),
+            Self::OpenProviderForRecovery { .. } => ActionMeta::new(
+                "Open for flashing",
+                "Open the ESP32 connection without attaching LightPlayer.",
+                ActionPriority::Secondary,
             ),
             Self::ConnectEndpoint { .. } => ActionMeta::new(
                 "Connect device",
