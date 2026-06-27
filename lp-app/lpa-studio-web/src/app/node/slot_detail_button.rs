@@ -21,10 +21,9 @@ pub fn SlotDetailButton(
     let menu_label = format!("{label} details");
 
     rsx! {
-        span { class: "tw:inline-flex tw:w-6 tw:justify-end",
+        span { class: "tw:inline-flex tw:w-8 tw:justify-end",
             IconMenuButton {
                 icon: style.icon,
-                icon_size: 13,
                 label: menu_label.clone(),
                 title: menu_label,
                 tone: style.tone,
@@ -43,22 +42,22 @@ pub fn SlotDetailButton(
 pub(crate) fn slot_row_class(affordance: UiSlotAffordance, index: usize) -> &'static str {
     match affordance {
         UiSlotAffordance::Error | UiSlotAffordance::Invalid => {
-            "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_24px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-status-error-bg)_0%,var(--studio-status-error-bg)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
+            "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-status-error-bg)_0%,var(--studio-status-error-bg)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
         }
         UiSlotAffordance::Edited => {
-            "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_24px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-status-warning-bg)_0%,var(--studio-status-warning-bg)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
+            "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-status-warning-bg)_0%,var(--studio-status-warning-bg)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
         }
         UiSlotAffordance::Saving => {
-            "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_24px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-status-working-bg)_0%,var(--studio-status-working-bg)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
+            "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-status-working-bg)_0%,var(--studio-status-working-bg)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
         }
         UiSlotAffordance::Bound => {
-            "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_24px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-status-good-bg)_0%,var(--studio-status-good-bg)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
+            "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-status-good-bg)_0%,var(--studio-status-good-bg)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
         }
         UiSlotAffordance::Info if index % 2 == 0 => {
-            "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_24px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-color-surface-muted)_0%,var(--studio-color-surface-muted)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
+            "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-color-surface-muted)_0%,var(--studio-color-surface-muted)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
         }
         UiSlotAffordance::Info => {
-            "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_24px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-color-surface-subtle)_0%,var(--studio-color-surface-subtle)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
+            "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-color-surface-subtle)_0%,var(--studio-color-surface-subtle)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
         }
     }
 }

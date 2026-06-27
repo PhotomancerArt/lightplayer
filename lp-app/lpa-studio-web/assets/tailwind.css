@@ -16,6 +16,7 @@
     --tw-text-xl: 1.25rem;
     --tw-text-xl--line-height: calc(1.75 / 1.25);
     --tw-font-weight-medium: 500;
+    --tw-font-weight-semibold: 600;
     --tw-font-weight-bold: 700;
     --tw-font-weight-extrabold: 800;
     --tw-leading-tight: 1.25;
@@ -174,8 +175,14 @@
   .tw\:h-2 {
     height: calc(var(--tw-spacing) * 2);
   }
+  .tw\:h-4 {
+    height: calc(var(--tw-spacing) * 4);
+  }
   .tw\:h-6 {
     height: calc(var(--tw-spacing) * 6);
+  }
+  .tw\:h-8 {
+    height: calc(var(--tw-spacing) * 8);
   }
   .tw\:h-14 {
     height: calc(var(--tw-spacing) * 14);
@@ -240,8 +247,14 @@
   .tw\:w-2 {
     width: calc(var(--tw-spacing) * 2);
   }
+  .tw\:w-4 {
+    width: calc(var(--tw-spacing) * 4);
+  }
   .tw\:w-6 {
     width: calc(var(--tw-spacing) * 6);
+  }
+  .tw\:w-8 {
+    width: calc(var(--tw-spacing) * 8);
   }
   .tw\:w-14 {
     width: calc(var(--tw-spacing) * 14);
@@ -329,6 +342,9 @@
   .tw\:grid-cols-3 {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+  .tw\:grid-cols-\[18px_minmax\(0\,1fr\)_auto\] {
+    grid-template-columns: 18px minmax(0,1fr) auto;
+  }
   .tw\:grid-cols-\[28px_minmax\(0\,1fr\)\] {
     grid-template-columns: 28px minmax(0,1fr);
   }
@@ -353,17 +369,14 @@
   .tw\:grid-cols-\[260px_minmax\(0\,1fr\)\] {
     grid-template-columns: 260px minmax(0,1fr);
   }
-  .tw\:grid-cols-\[minmax\(0\,1fr\)_auto_auto\] {
-    grid-template-columns: minmax(0,1fr) auto auto;
-  }
   .tw\:grid-cols-\[minmax\(0\,1fr\)_minmax\(300px\,380px\)\] {
     grid-template-columns: minmax(0,1fr) minmax(300px,380px);
   }
   .tw\:grid-cols-\[minmax\(80px\,0\.35fr\)_minmax\(0\,1fr\)\] {
     grid-template-columns: minmax(80px,0.35fr) minmax(0,1fr);
   }
-  .tw\:grid-cols-\[minmax\(120px\,0\.4fr\)_minmax\(0\,1fr\)_24px\] {
-    grid-template-columns: minmax(120px,0.4fr) minmax(0,1fr) 24px;
+  .tw\:grid-cols-\[minmax\(120px\,0\.4fr\)_minmax\(0\,1fr\)_32px\] {
+    grid-template-columns: minmax(120px,0.4fr) minmax(0,1fr) 32px;
   }
   .tw\:grid-cols-\[minmax\(120px\,0\.35fr\)_minmax\(0\,1fr\)\] {
     grid-template-columns: minmax(120px,0.35fr) minmax(0,1fr);
@@ -912,6 +925,10 @@
   .tw\:font-medium {
     --tw-font-weight: var(--tw-font-weight-medium);
     font-weight: var(--tw-font-weight-medium);
+  }
+  .tw\:font-semibold {
+    --tw-font-weight: var(--tw-font-weight-semibold);
+    font-weight: var(--tw-font-weight-semibold);
   }
   .tw\:break-words {
     overflow-wrap: break-word;

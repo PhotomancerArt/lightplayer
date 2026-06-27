@@ -56,10 +56,7 @@ pub fn ConfigSlotRow(
                         span { class: "tw:h-6 tw:w-6 tw:flex-none" }
                     }
                     div { class: "tw:min-w-0",
-                        strong { class: "tw:block tw:min-w-0 tw:text-sm tw:leading-tight tw:text-strong-foreground tw:break-words", "{slot.label}" }
-                        if let Some(detail) = slot.detail.as_ref() {
-                            small { class: "tw:block tw:text-xs tw:text-subtle-foreground tw:break-words", "{detail}" }
-                        }
+                        strong { class: "tw:block tw:min-w-0 tw:text-sm tw:font-semibold tw:leading-tight tw:text-strong-foreground tw:break-words", "{slot.label}" }
                     }
                 }
                 div { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-end tw:gap-2 tw:text-sm tw:leading-tight tw:text-muted-foreground",
@@ -168,9 +165,9 @@ fn AssetSlotEditor(asset: lpa_studio_core::UiSlotAsset) -> Element {
 
 fn record_summary_class(expanded: bool) -> &'static str {
     if expanded {
-        "tw:text-xs tw:font-bold tw:uppercase tw:text-subtle-foreground"
+        "tw:text-xs tw:font-semibold tw:uppercase tw:text-subtle-foreground"
     } else {
-        "tw:text-xs tw:font-bold tw:uppercase tw:text-muted-foreground"
+        "tw:text-xs tw:font-semibold tw:uppercase tw:text-muted-foreground"
     }
 }
 

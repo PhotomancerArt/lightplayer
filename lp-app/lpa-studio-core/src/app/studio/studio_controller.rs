@@ -197,7 +197,6 @@ impl StudioController {
         connected: ConnectedLink,
         updates: UxUpdateSink,
     ) -> UiResult {
-        self.device.record_logs(&connected.logs);
         self.logs.extend(connected.logs);
         self.connect_server_connection(&connected.connection, updates)
             .await
@@ -263,7 +262,6 @@ impl StudioController {
                     Ok(auto_connect) => auto_connect,
                     Err(error) => {
                         let pending_logs = self.device.server.take_pending_logs();
-                        self.device.record_logs(&pending_logs);
                         self.logs.extend(pending_logs);
                         self.project.reset();
                         if matches!(error, UiError::NoFirmwareDetected(_)) {
@@ -326,7 +324,6 @@ impl StudioController {
         };
         match result {
             Ok(ProjectConnectResult::Connected { logs }) => {
-                self.device.record_logs(&logs);
                 self.logs.extend(logs);
                 let sync = self.sync_project_after_attach(updates).await?;
                 Ok(UiNotices::new().with_notice(project_sync_notice(
@@ -336,12 +333,10 @@ impl StudioController {
                 )))
             }
             Ok(ProjectConnectResult::SelectionRequired { logs }) => {
-                self.device.record_logs(&logs);
                 self.logs.extend(logs);
                 Ok(UiNotices::new().with_notice(UiNotice::info("Choose running project")))
             }
             Ok(ProjectConnectResult::NotFound { logs }) => {
-                self.device.record_logs(&logs);
                 self.logs.extend(logs);
                 Ok(UiNotices::new().with_notice(UiNotice::info("No running project found")))
             }
@@ -376,7 +371,6 @@ impl StudioController {
         };
         match result? {
             ProjectConnectResult::Connected { logs } => {
-                self.device.record_logs(&logs);
                 self.logs.extend(logs);
                 let sync = self.sync_project_after_attach(updates).await?;
                 Ok(AutoProjectConnect::Connected {
@@ -384,12 +378,10 @@ impl StudioController {
                 })
             }
             ProjectConnectResult::SelectionRequired { logs } => {
-                self.device.record_logs(&logs);
                 self.logs.extend(logs);
                 Ok(AutoProjectConnect::SelectionRequired)
             }
             ProjectConnectResult::NotFound { logs } => {
-                self.device.record_logs(&logs);
                 self.logs.extend(logs);
                 Ok(AutoProjectConnect::NotFound)
             }
@@ -410,7 +402,6 @@ impl StudioController {
         };
         match result {
             Ok(logs) => {
-                self.device.record_logs(&logs);
                 self.logs.extend(logs);
                 let sync = self.sync_project_after_attach(updates).await?;
                 Ok(UiNotices::new().with_notice(project_sync_notice(
@@ -445,7 +436,6 @@ impl StudioController {
         };
         match result {
             Ok(logs) => {
-                self.device.record_logs(&logs);
                 self.logs.extend(logs);
                 let sync = self.sync_project_after_attach(updates).await?;
                 Ok(UiNotices::new().with_notice(project_sync_notice(
@@ -515,7 +505,6 @@ impl StudioController {
     }
 
     fn record_project_sync_run(&mut self, sync: &ProjectSyncRun) {
-        self.device.record_logs(&sync.logs);
         self.logs.extend(sync.logs.clone());
     }
 
@@ -560,7 +549,6 @@ impl StudioController {
             }
         };
         self.record_logs(core::mem::take(&mut *captured_logs.borrow_mut()));
-        self.device.record_logs(&management.logs);
         self.logs.extend(management.logs);
 
         let mut outcome = UiNotices::new().with_notice(UiNotice::info("Device reset"));
@@ -630,7 +618,6 @@ impl StudioController {
                 return Err(error);
             }
         };
-        self.device.record_logs(&management.logs);
         self.logs.extend(management.logs);
         let mut outcome = UiNotices::new().with_notice(provision_notice(&management.result));
         emit_activity(
@@ -699,7 +686,6 @@ impl StudioController {
                 return Err(error);
             }
         };
-        self.device.record_logs(&management.logs);
         self.logs.extend(management.logs);
         let mut outcome = UiNotices::new().with_notice(reset_notice(&management.result));
         emit_activity(
@@ -749,7 +735,6 @@ impl StudioController {
         if logs.is_empty() {
             return;
         }
-        self.device.record_logs(&logs);
         self.logs.extend(logs);
     }
 }

@@ -45,13 +45,13 @@ pub(crate) fn SlotUnitSuffix(
 fn unit_suffix_class(visible: bool, reserve: bool) -> &'static str {
     match (visible, reserve) {
         (true, true) => {
-            "tw:inline-flex tw:min-w-[2ch] tw:justify-start tw:text-xs tw:font-bold tw:text-subtle-foreground"
+            "tw:inline-flex tw:min-w-[2ch] tw:justify-start tw:text-xs tw:font-semibold tw:text-subtle-foreground"
         }
         (true, false) => {
-            "tw:inline-flex tw:justify-start tw:text-xs tw:font-bold tw:text-subtle-foreground"
+            "tw:inline-flex tw:justify-start tw:text-xs tw:font-semibold tw:text-subtle-foreground"
         }
         (false, true) => {
-            "tw:invisible tw:inline-flex tw:min-w-[2ch] tw:justify-start tw:text-xs tw:font-bold"
+            "tw:invisible tw:inline-flex tw:min-w-[2ch] tw:justify-start tw:text-xs tw:font-semibold"
         }
         (false, false) => "tw:hidden",
     }

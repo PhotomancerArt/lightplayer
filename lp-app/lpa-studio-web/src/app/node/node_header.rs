@@ -28,7 +28,7 @@ fn NodeStatusMenu(header: UiNodeHeader) -> Element {
             class: node_status_button_class(header.status.kind).to_string(),
             open_class: node_status_button_open_class(header.status.kind).to_string(),
             icon,
-            icon_size: 13,
+            icon_size: 16,
             label,
             title: format!("{} status details", header.title),
             popup_class: node_status_popup_class(header.status.kind).to_string(),
@@ -91,19 +91,19 @@ fn status_icon(kind: UiStatusKind) -> StudioIconName {
 fn node_status_button_class(kind: UiStatusKind) -> &'static str {
     match kind {
         UiStatusKind::Neutral => {
-            "tw:inline-flex tw:h-6 tw:w-6 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-neutral-border tw:bg-status-neutral-bg tw:p-0 tw:text-status-neutral-foreground"
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-neutral-border tw:bg-status-neutral-bg tw:p-0 tw:text-status-neutral-foreground"
         }
         UiStatusKind::Working => {
-            "tw:inline-flex tw:h-6 tw:w-6 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-working-border tw:bg-status-working-bg tw:p-0 tw:text-status-working-foreground"
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-working-border tw:bg-status-working-bg tw:p-0 tw:text-status-working-foreground"
         }
         UiStatusKind::Good => {
-            "tw:inline-flex tw:h-6 tw:w-6 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-good-border tw:bg-status-good-bg tw:p-0 tw:text-status-good-foreground"
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-good-border tw:bg-status-good-bg tw:p-0 tw:text-status-good-foreground"
         }
         UiStatusKind::Warning => {
-            "tw:inline-flex tw:h-6 tw:w-6 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:p-0 tw:text-status-warning-foreground"
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:p-0 tw:text-status-warning-foreground"
         }
         UiStatusKind::Error => {
-            "tw:inline-flex tw:h-6 tw:w-6 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-0 tw:text-status-error-foreground"
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-0 tw:text-status-error-foreground"
         }
     }
 }
@@ -111,19 +111,19 @@ fn node_status_button_class(kind: UiStatusKind) -> &'static str {
 fn node_status_button_open_class(kind: UiStatusKind) -> &'static str {
     match kind {
         UiStatusKind::Neutral => {
-            "tw:inline-flex tw:h-6 tw:w-6 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-neutral-border tw:bg-card-raised tw:p-0 tw:text-status-neutral-foreground"
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-neutral-border tw:bg-card-raised tw:p-0 tw:text-status-neutral-foreground"
         }
         UiStatusKind::Working => {
-            "tw:inline-flex tw:h-6 tw:w-6 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-working-border tw:bg-card-raised tw:p-0 tw:text-status-working-foreground"
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-working-border tw:bg-card-raised tw:p-0 tw:text-status-working-foreground"
         }
         UiStatusKind::Good => {
-            "tw:inline-flex tw:h-6 tw:w-6 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-good-border tw:bg-card-raised tw:p-0 tw:text-status-good-foreground"
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-good-border tw:bg-card-raised tw:p-0 tw:text-status-good-foreground"
         }
         UiStatusKind::Warning => {
-            "tw:inline-flex tw:h-6 tw:w-6 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-warning-border tw:bg-card-raised tw:p-0 tw:text-status-warning-foreground"
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-warning-border tw:bg-card-raised tw:p-0 tw:text-status-warning-foreground"
         }
         UiStatusKind::Error => {
-            "tw:inline-flex tw:h-6 tw:w-6 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-error-border tw:bg-card-raised tw:p-0 tw:text-status-error-foreground"
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-status-error-border tw:bg-card-raised tw:p-0 tw:text-status-error-foreground"
         }
     }
 }
