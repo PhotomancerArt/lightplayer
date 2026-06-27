@@ -20,17 +20,18 @@ pub mod slot;
 pub mod transport_error;
 pub mod tree;
 
-pub use messages::{ClientMessage, ClientRequest, Message, NoDomain, ServerMessage};
+pub use messages::{ClientMessage, ClientRequest, Message, ServerMessage};
 pub use messages::{
     ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
     ControlProductProbeResult, ExplainSlotProbeRequest, ExplainSlotProbeResult, NodeReadQuery,
-    NodeReadResult, NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery,
-    ProjectReadRequest, ProjectReadResponse, ProjectReadResponseWriter, ProjectReadResult,
-    ProjectRuntimeStatus, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
-    ResourcePayloadRead, ResourceReadQuery, ResourceReadResult, RuntimeReadQuery,
-    RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery, ShapeReadResult, SlotExplanation,
-    write_project_read_response, write_project_read_result_json, write_project_read_server_message,
-    write_server_message,
+    NodeReadResult, NodeReadSelection, PROJECT_READ_FRAME_MAX_BYTES, ProjectProbeRequest,
+    ProjectProbeResult, ProjectReadCollectError, ProjectReadCollectStatus, ProjectReadCollector,
+    ProjectReadEvent, ProjectReadFrame, ProjectReadNodeEvent, ProjectReadProbeEvent,
+    ProjectReadQuery, ProjectReadQueryEvent, ProjectReadRequest, ProjectReadResourceEvent,
+    ProjectReadResponse, ProjectReadResult, ProjectReadShapeEvent, ProjectRuntimeStatus, ReadLevel,
+    RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery,
+    ResourceReadResult, RuntimeReadQuery, RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery,
+    ShapeReadResult, SlotExplanation,
 };
 pub use project::{
     NodeRuntimeStatus, WireChannelSampleFormat, WireColorLayout, WireProjectHandle,
@@ -58,8 +59,8 @@ pub use transport_error::TransportError;
 pub use tree::{WireChildKind, WireEntryState, WireSlotIndex, WireTreeDelta};
 
 /// Canonical project-read message envelope.
-pub type WireMessage = Message<ProjectReadResponse>;
+pub type WireMessage = Message;
 /// Canonical project-read server message.
-pub type WireServerMessage = ServerMessage<ProjectReadResponse>;
+pub type WireServerMessage = ServerMessage;
 /// Canonical project-read server message body.
-pub type WireServerMsgBody = ServerMsgBody<ProjectReadResponse>;
+pub type WireServerMsgBody = ServerMsgBody;

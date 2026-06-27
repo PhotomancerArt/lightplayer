@@ -510,24 +510,10 @@ impl ProjectController {
         server: &mut StudioServerClient,
         handle_id: u32,
     ) -> Result<Vec<UiLogEntry>, UiError> {
-        let mut logs = Vec::new();
-        loop {
-            let request = {
-                let sync = self.sync_mut()?;
-                if !sync.needs_shape_sync() {
-                    break;
-                }
-                sync.shape_sync_request()?
-            };
-            let read = server.project_read(handle_id, request).await?;
-            logs.extend(read.logs);
-            self.sync_mut()?.apply_shape_sync_response(read.response)?;
-        }
-
         let products = self.subscribed_products();
         let request = self.sync_mut()?.initial_project_read_request(products);
         let read = server.project_read(handle_id, request).await?;
-        logs.extend(read.logs);
+        let logs = read.logs;
         self.sync_mut()?
             .apply_project_read_response(read.response)?;
         self.apply_synced_project_view()?;
@@ -777,7 +763,7 @@ fn project_editor_stats(
 fn sync_phase_label(phase: ProjectSyncPhase) -> &'static str {
     match phase {
         ProjectSyncPhase::Empty => "Not synced",
-        ProjectSyncPhase::SyncingShapes | ProjectSyncPhase::SyncingProject => "Syncing",
+        ProjectSyncPhase::SyncingProject => "Syncing",
         ProjectSyncPhase::Ready => "Synced",
         ProjectSyncPhase::Failed => "Needs attention",
     }

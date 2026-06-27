@@ -27,64 +27,9 @@ static INCOMING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new
 static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
 
 /// Server messages for transport serialization (capacity 1 = backpressure).
-///
-/// Large project-read responses use [`OUTGOING_SERVER_JSON_CHUNK`] instead.
-/// This channel is only for small responses such as heartbeat, load/unload, and
-/// filesystem acknowledgements.
 #[cfg(feature = "server")]
 static OUTGOING_SERVER_MSG: Channel<CriticalSectionRawMutex, lpc_wire::WireServerMessage, 1> =
     Channel::new();
-
-/// Raw server JSON frame chunks for large responses.
-///
-/// Project-read responses use this path so the firmware does not need to
-/// materialize a full `WireServerMessage` or a full JSON frame on the heap.
-#[cfg(feature = "server")]
-pub const SERVER_JSON_CHUNK_SIZE: usize = 1024;
-
-/// Number of queued project-read JSON chunks.
-///
-/// Project-read serialization is synchronous, so this queue must hold the
-/// largest frame the server can produce before the I/O task gets scheduled to
-/// drain it. This is intentionally a modest bump over the early 16 KiB budget:
-/// expanded fixture mappings can exceed 16 KiB, but RAM is tight enough that
-/// larger queues should be avoided. A future async JSON writer or paged slot
-/// sync should replace this bounded-frame workaround.
-#[cfg(feature = "server")]
-pub const SERVER_JSON_CHUNK_CAPACITY: usize = 24;
-
-#[cfg(feature = "server")]
-static OUTGOING_SERVER_JSON_CHUNK: Channel<
-    CriticalSectionRawMutex,
-    ServerJsonChunk,
-    SERVER_JSON_CHUNK_CAPACITY,
-> = Channel::new();
-
-#[cfg(feature = "server")]
-#[derive(Debug, Clone, Copy)]
-pub struct ServerJsonChunk {
-    len: u16,
-    bytes: [u8; SERVER_JSON_CHUNK_SIZE],
-}
-
-#[cfg(feature = "server")]
-impl ServerJsonChunk {
-    pub fn from_slice(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() > SERVER_JSON_CHUNK_SIZE || bytes.len() > u16::MAX as usize {
-            return None;
-        }
-        let mut chunk = Self {
-            len: bytes.len() as u16,
-            bytes: [0; SERVER_JSON_CHUNK_SIZE],
-        };
-        chunk.bytes[..bytes.len()].copy_from_slice(bytes);
-        Some(chunk)
-    }
-
-    fn bytes(&self) -> &[u8] {
-        &self.bytes[..self.len as usize]
-    }
-}
 
 /// Write timeout per chunk: if a chunk doesn't complete in this time, the host
 /// is likely gone. Short enough to detect disconnects, long enough for USB.
@@ -187,9 +132,6 @@ pub async fn io_task(usb_device: esp_hal::peripherals::USB_DEVICE<'static>) {
         let connected = conn.is_connected();
 
         #[cfg(feature = "server")]
-        drain_outgoing_server_json_chunks(&mut tx, connected).await;
-
-        #[cfg(feature = "server")]
         drain_outgoing_server_msg(&mut tx, connected).await;
 
         drain_outgoing_messages(&router, &mut tx, connected).await;
@@ -199,24 +141,6 @@ pub async fn io_task(usb_device: esp_hal::peripherals::USB_DEVICE<'static>) {
         }
 
         Timer::after(Duration::from_millis(1)).await;
-    }
-}
-
-/// Drain raw server JSON chunks. Always consumes; only writes if connected.
-#[cfg(feature = "server")]
-async fn drain_outgoing_server_json_chunks<W: Write>(tx: &mut W, connected: bool) {
-    let receiver = OUTGOING_SERVER_JSON_CHUNK.receiver();
-    loop {
-        match receiver.try_receive() {
-            Ok(chunk) if connected => {
-                if !timed_write_all(tx, chunk.bytes()).await {
-                    let _ = timed_write_all(tx, b"\n").await;
-                    break;
-                }
-            }
-            Ok(_) => {}
-            Err(_) => break,
-        }
     }
 }
 
@@ -280,21 +204,16 @@ async fn drain_outgoing_server_msg<W: Write>(tx: &mut W, connected: bool) {
 
 #[cfg(feature = "server")]
 async fn timed_write_server_msg<W: Write>(tx: &mut W, msg: lpc_wire::WireServerMessage) -> bool {
-    let Some(msg) = into_small_server_msg(msg) else {
-        log::error!(
-            "project-read response reached small serial message path; use streaming JSON chunks"
-        );
-        return false;
-    };
     timed_write_full_server_msg(tx, msg).await
 }
 
 #[cfg(feature = "server")]
 async fn timed_write_full_server_msg<W: Write>(
     tx: &mut W,
-    msg: lpc_wire::ServerMessage<lpc_wire::NoDomain>,
+    msg: lpc_wire::WireServerMessage,
 ) -> bool {
-    let mut buf = [0u8; 4 * 1024];
+    const SERVER_MSG_JSON_BUFFER_SIZE: usize = lpc_wire::PROJECT_READ_FRAME_MAX_BYTES + 16;
+    let mut buf = [0u8; SERVER_MSG_JSON_BUFFER_SIZE];
     let mut writer = StackJsonWriter::new(&mut buf);
     if writer.write(b"\nM!").is_err() {
         return false;
@@ -306,46 +225,6 @@ async fn timed_write_full_server_msg<W: Write>(
         return false;
     }
     timed_write_all(tx, writer.bytes()).await
-}
-
-#[cfg(feature = "server")]
-fn into_small_server_msg(
-    msg: lpc_wire::WireServerMessage,
-) -> Option<lpc_wire::ServerMessage<lpc_wire::NoDomain>> {
-    use lpc_wire::ServerMsgBody;
-
-    let id = msg.id;
-    let msg = match msg.msg {
-        ServerMsgBody::Filesystem(response) => ServerMsgBody::Filesystem(response),
-        ServerMsgBody::LoadProject { handle } => ServerMsgBody::LoadProject { handle },
-        ServerMsgBody::UnloadProject => ServerMsgBody::UnloadProject,
-        ServerMsgBody::ProjectRequest { .. } => return None,
-        ServerMsgBody::ProjectCommand { response } => ServerMsgBody::ProjectCommand { response },
-        ServerMsgBody::ListAvailableProjects { projects } => {
-            ServerMsgBody::ListAvailableProjects { projects }
-        }
-        ServerMsgBody::ListLoadedProjects { projects } => {
-            ServerMsgBody::ListLoadedProjects { projects }
-        }
-        ServerMsgBody::StopAllProjects => ServerMsgBody::StopAllProjects,
-        ServerMsgBody::Log { level, message } => ServerMsgBody::Log { level, message },
-        ServerMsgBody::Heartbeat {
-            fps,
-            frame_count,
-            loaded_projects,
-            uptime_ms,
-            memory,
-        } => ServerMsgBody::Heartbeat {
-            fps,
-            frame_count,
-            loaded_projects,
-            uptime_ms,
-            memory,
-        },
-        ServerMsgBody::Error { error } => ServerMsgBody::Error { error },
-    };
-
-    Some(lpc_wire::ServerMessage { id, msg })
 }
 
 /// Process read buffer and extract complete lines
@@ -398,13 +277,6 @@ pub fn get_message_channels() -> (
 pub fn get_server_msg_channel()
 -> &'static Channel<CriticalSectionRawMutex, lpc_wire::WireServerMessage, 1> {
     &OUTGOING_SERVER_MSG
-}
-
-/// Get reference to raw server JSON chunk channel.
-#[cfg(feature = "server")]
-pub fn get_server_json_chunk_channel()
--> &'static Channel<CriticalSectionRawMutex, ServerJsonChunk, SERVER_JSON_CHUNK_CAPACITY> {
-    &OUTGOING_SERVER_JSON_CHUNK
 }
 
 /// Write log output to the outgoing channel (serial to host).

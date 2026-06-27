@@ -1,4 +1,4 @@
-//! Project read response envelope.
+//! Project-read compatibility response envelope.
 
 use super::{
     NodeReadResult, ProjectProbeResult, ResourceReadResult, RuntimeReadResult, ShapeReadResult,
@@ -6,7 +6,12 @@ use super::{
 use alloc::vec::Vec;
 use lpc_model::Revision;
 
-/// Stateless project read response.
+/// Aggregate project-read response.
+///
+/// This is no longer the transport-level server response. It is the convenient
+/// compatibility shape rebuilt by
+/// [`ProjectReadCollector`](super::ProjectReadCollector) after the final
+/// [`ProjectReadFrame`](super::ProjectReadFrame) arrives.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ProjectReadResponse {
@@ -41,8 +46,6 @@ mod tests {
             results: vec![ProjectReadResult::Shapes(ShapeReadResult {
                 level: ReadLevel::Ids,
                 registry: None,
-                complete: true,
-                next: None,
             })],
             probes: Vec::new(),
         };

@@ -14,7 +14,7 @@ use lpc_engine::{ButtonService, LpGraphics, RadioService};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
-use lpc_shared::transport::ServerTransport;
+use lpc_shared::transport::{ProjectReadFrameSink, ServerTransport};
 use lpc_wire::{ClientRequest, WireMessage, WireServerMessage};
 use lpfs::{FsEvent, LpFs};
 
@@ -285,7 +285,7 @@ impl LpServer {
                 WireMessage::Client(client_msg) => {
                     let msg_id = client_msg.id;
                     match client_msg.msg {
-                        ClientRequest::ProjectRequest { handle, request } => {
+                        ClientRequest::ProjectRead { handle, request } => {
                             let server_status = self.runtime_status();
                             let Some(project) = self.project_manager.get_project_mut(handle) else {
                                 transport
@@ -308,8 +308,12 @@ impl LpServer {
                             };
                             let mut source =
                                 ServerProjectReadSource::new(project, Some(server_status));
-                            transport
-                                .send_project_read(msg_id, handle, &mut source, request)
+                            let mut sink = ProjectReadFrameSink::new(transport, msg_id);
+                            source
+                                .stream_project_read_events(request, &mut sink)
+                                .await
+                                .map_err(project_read_stream_error_to_server_error)?;
+                            sink.finish()
                                 .await
                                 .map_err(|error| ServerError::Core(format!("{error}")))?;
                             response_count += 1;
@@ -435,5 +439,16 @@ impl LpServer {
             last_frame_time_us: self.last_frame_time_us(),
             memory,
         }
+    }
+}
+
+fn project_read_stream_error_to_server_error<E: core::fmt::Display>(
+    error: lpc_engine::ProjectReadEventStreamError<E>,
+) -> ServerError {
+    match error {
+        lpc_engine::ProjectReadEventStreamError::Sink(error) => {
+            ServerError::Core(format!("{error}"))
+        }
+        lpc_engine::ProjectReadEventStreamError::Protocol(message) => ServerError::Core(message),
     }
 }

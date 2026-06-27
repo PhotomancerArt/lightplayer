@@ -108,8 +108,6 @@ mod tests {
         let ProjectReadResult::Shapes(shapes) = &response.results[0] else {
             panic!("first result should be shapes");
         };
-        assert!(shapes.complete);
-        assert_eq!(shapes.next, None);
         let registry = shapes.registry.as_ref().expect("shape registry");
         for id in dynamic_ids {
             assert!(

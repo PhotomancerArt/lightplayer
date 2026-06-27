@@ -12,12 +12,12 @@ use anyhow::{Error, Result};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_wire::server::api::LogLevel;
 use lpc_wire::{
-    ClientMessage, ClientRequest, FsRequest, ProjectReadRequest, ProjectReadResponse,
-    WireOverlayCommitRequest, WireOverlayCommitResponse, WireOverlayMutationRequest,
-    WireOverlayMutationResponse, WireOverlayReadRequest, WireOverlayReadResponse,
-    WireProjectCommand, WireProjectCommandResponse, WireProjectHandle,
-    WireProjectInventoryReadRequest, WireProjectInventoryReadResponse, WireServerMessage,
-    WireServerMsgBody,
+    ClientMessage, ClientRequest, FsRequest, ProjectReadCollectError, ProjectReadCollectStatus,
+    ProjectReadCollector, ProjectReadRequest, ProjectReadResponse, WireOverlayCommitRequest,
+    WireOverlayCommitResponse, WireOverlayMutationRequest, WireOverlayMutationResponse,
+    WireOverlayReadRequest, WireOverlayReadResponse, WireProjectCommand,
+    WireProjectCommandResponse, WireProjectHandle, WireProjectInventoryReadRequest,
+    WireProjectInventoryReadResponse, WireServerMessage, WireServerMsgBody,
     server::{AvailableProject, FsResponse, LoadedProject},
 };
 use tokio::sync::Mutex;
@@ -269,15 +269,77 @@ impl TokioLpClient {
         handle: WireProjectHandle,
         read: ProjectReadRequest,
     ) -> Result<ProjectReadResponse> {
-        let response = self
-            .send_request(ClientRequest::ProjectRequest {
-                handle,
-                request: read,
+        let run = self.project_read_inner(handle, read);
+        let outcome = match timeout(self.request_timeout, run).await {
+            Ok(Ok(outcome)) => outcome,
+            Ok(Err(error)) => return Err(error),
+            Err(_) => {
+                return Err(Error::msg(
+                    "Request timed out - server may not be receiving messages (check host->device serial)",
+                ));
+            }
+        };
+        self.handle_events(&outcome.events);
+        Ok(outcome.value)
+    }
+
+    async fn project_read_inner(
+        &self,
+        handle: WireProjectHandle,
+        read: ProjectReadRequest,
+    ) -> Result<ClientOutcome<ProjectReadResponse>> {
+        let mut state = self.state.lock().await;
+        let request_id = state.protocol.next_request_id();
+        let mut transport = state.transport.lock().await;
+        transport
+            .send(ClientMessage {
+                id: request_id,
+                msg: ClientRequest::ProjectRead {
+                    handle,
+                    request: read,
+                },
             })
-            .await?;
-        match response.value.msg {
-            WireServerMsgBody::ProjectRequest { response } => Ok(response),
-            other => Err(unexpected_response("project_read", other)),
+            .await
+            .map_err(|error| Error::msg(format!("Transport error: {error}")))?;
+
+        let mut collector = ProjectReadCollector::new();
+        let mut events = Vec::new();
+        loop {
+            let response = transport
+                .receive()
+                .await
+                .map_err(|error| Error::msg(format!("Transport error: {error}")))?;
+            match state.protocol.response_disposition(&response, request_id) {
+                ResponseDisposition::Matched => match response.msg {
+                    WireServerMsgBody::Error { error } => {
+                        return Err(Error::msg(error));
+                    }
+                    WireServerMsgBody::ProjectReadFrame { frame } => {
+                        match collector
+                            .accept_frame(frame)
+                            .map_err(project_read_collect_error)?
+                        {
+                            ProjectReadCollectStatus::Continue => {}
+                            ProjectReadCollectStatus::Complete(response) => {
+                                return Ok(ClientOutcome::new(response, events));
+                            }
+                        }
+                    }
+                    other => return Err(unexpected_response("project_read", other)),
+                },
+                ResponseDisposition::Unsolicited => {
+                    if let Some(event) = ClientEvent::from_unsolicited_message(response) {
+                        events.push(event);
+                    }
+                }
+                ResponseDisposition::Uncorrelated {
+                    response_id,
+                    expected_id,
+                } => events.push(ClientEvent::UncorrelatedResponse {
+                    response_id,
+                    expected_id,
+                }),
+            }
         }
     }
 
@@ -473,6 +535,15 @@ fn unexpected_response(operation: &'static str, response: impl std::fmt::Debug) 
     Error::msg(format!(
         "Unexpected response type for {operation}: {response:?}"
     ))
+}
+
+fn project_read_collect_error(error: ProjectReadCollectError) -> Error {
+    match error {
+        ProjectReadCollectError::Remote(message) => Error::msg(message),
+        ProjectReadCollectError::Protocol(message) => {
+            Error::msg(format!("Project read protocol error: {message}"))
+        }
+    }
 }
 
 fn server_log_level(level: &LogLevel) -> log::Level {

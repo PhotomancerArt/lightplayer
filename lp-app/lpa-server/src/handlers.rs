@@ -66,9 +66,9 @@ pub fn handle_client_message(
         lpc_wire::ClientRequest::UnloadProject { handle } => {
             handle_unload_project(project_manager, memory_stats, handle)?
         }
-        lpc_wire::ClientRequest::ProjectRequest { .. } => {
+        lpc_wire::ClientRequest::ProjectRead { .. } => {
             return Err(ServerError::Core(
-                "ProjectRequest must be handled by streaming transport".into(),
+                "project reads must be handled by streaming transport".into(),
             ));
         }
         lpc_wire::ClientRequest::ProjectCommand { handle, command } => {

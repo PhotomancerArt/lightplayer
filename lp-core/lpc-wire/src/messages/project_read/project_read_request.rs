@@ -1,4 +1,4 @@
-//! Project read request envelope.
+//! Project-read request envelope.
 
 use super::{
     NodeReadQuery, ProjectProbeRequest, ReadLevel, ResourcePayloadRead, ResourceReadQuery,
@@ -7,11 +7,16 @@ use super::{
 use alloc::vec::Vec;
 use lpc_model::Revision;
 
-/// Stateless project read request.
+/// Stateless project-read request.
 ///
 /// `since` is the only client-side sync state the server needs. `queries`
 /// select mirrorable project data; `probes` request diagnostic work outside the
 /// normal client mirror.
+///
+/// This request is semantic and transport independent. A server answers it by
+/// streaming [`ProjectReadEvent`](super::ProjectReadEvent) values inside
+/// [`ProjectReadFrame`](super::ProjectReadFrame) messages rather than by
+/// returning one large aggregate response.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ProjectReadRequest {
@@ -36,6 +41,11 @@ impl ProjectReadRequest {
 }
 
 /// One mirrorable domain requested by a project read.
+///
+/// The response stream uses query indexes, not query ids, so clients should keep
+/// this vector stable for the duration of a request and interpret each
+/// [`ProjectReadQueryEvent`](super::ProjectReadQueryEvent) against the matching
+/// position here.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
@@ -53,8 +63,6 @@ impl ProjectReadQuery {
         Vec::from([
             Self::Shapes(ShapeReadQuery {
                 level: ReadLevel::Detail,
-                after: None,
-                limit: None,
             }),
             Self::Nodes(NodeReadQuery::detail_all()),
             Self::Resources(ResourceReadQuery {

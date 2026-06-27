@@ -859,7 +859,7 @@ pub(crate) fn project_syncing_pane_view() -> UiPaneView {
         "Project",
         UiStatus::working("Syncing"),
         UiViewContent::ProjectEditor(Box::new(project_editor_empty_fixture(
-            ProjectSyncPhase::SyncingShapes,
+            ProjectSyncPhase::SyncingProject,
         ))),
         Vec::new(),
     )
@@ -1155,7 +1155,7 @@ pub(crate) fn story_node_status(label: &str, tone: ProjectNodeStatusTone) -> Pro
 pub(crate) fn sync_story_label(phase: ProjectSyncPhase) -> &'static str {
     match phase {
         ProjectSyncPhase::Empty => "Not synced",
-        ProjectSyncPhase::SyncingShapes | ProjectSyncPhase::SyncingProject => "Syncing",
+        ProjectSyncPhase::SyncingProject => "Syncing",
         ProjectSyncPhase::Ready => "Synced",
         ProjectSyncPhase::Failed => "Needs attention",
     }

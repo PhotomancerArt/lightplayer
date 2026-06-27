@@ -16,6 +16,10 @@ The crate is split into two layers:
 This keeps Studio web, CLI, host runtimes, and future agents on one protocol
 model while allowing each runtime to bind its own I/O.
 
+Project reads are multi-frame operations: one `ProjectReadRequest` can produce
+several same-id `ProjectReadFrame` messages before a terminal event. The public
+client API still returns `ProjectReadResponse` by collecting those frames.
+
 ## Feature Model
 
 | Feature | Purpose |

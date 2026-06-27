@@ -25,7 +25,7 @@ pub enum ClientRequest {
     UnloadProject {
         handle: WireProjectHandle,
     },
-    ProjectRequest {
+    ProjectRead {
         handle: WireProjectHandle,
         request: ProjectReadRequest,
     },
@@ -92,15 +92,15 @@ mod tests {
     }
 
     #[test]
-    fn test_project_request() {
-        let req = ClientRequest::ProjectRequest {
+    fn test_project_read_request() {
+        let req = ClientRequest::ProjectRead {
             handle: WireProjectHandle::new(1),
             request: crate::messages::ProjectReadRequest::default_debug(None),
         };
         let json = crate::json::to_string(&req).unwrap();
         let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
         match deserialized {
-            ClientRequest::ProjectRequest { handle, request } => {
+            ClientRequest::ProjectRead { handle, request } => {
                 assert_eq!(handle.id(), 1);
                 assert_eq!(
                     request,

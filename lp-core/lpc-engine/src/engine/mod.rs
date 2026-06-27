@@ -33,7 +33,7 @@ pub use frame_time::FrameTime;
 pub use loaded_project_runtime::LoadedProjectRuntime;
 pub use project_apply::RuntimeApplyResult;
 pub use project_loader::{ProjectLoadError, ProjectLoader};
-pub use project_read_stream::EngineProjectReadSource;
+pub use project_read_stream::{EngineProjectReadSource, ProjectReadEventStreamError};
 pub use project_runtime_index::ProjectRuntimeIndex;
 
 #[cfg(test)]

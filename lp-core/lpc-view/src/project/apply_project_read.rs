@@ -46,11 +46,7 @@ pub fn apply_project_read_response(
         match result {
             ProjectReadResult::Shapes(shapes) => {
                 if let Some(registry) = shapes.registry {
-                    if shapes.complete {
-                        view.slots.apply_registry_snapshot(registry);
-                    } else {
-                        view.slots.apply_registry_page(registry);
-                    }
+                    view.slots.apply_registry_snapshot(registry);
                 }
             }
             ProjectReadResult::Nodes(nodes) => {

@@ -1,49 +1,15 @@
-//! Streaming project-read response writer for [`Engine`].
+//! Streaming project-read response/event writer for [`Engine`].
 
-use lpc_model::{
-    SlotAccess,
-    slot_codec::{SlotWriteError, SlotWriter},
-    slot_sync_codec::write_slot_snapshot_value,
-};
+use alloc::string::String;
 use lpc_registry::ProjectRegistry;
-use lpc_wire::json::json_write::JsonWrite;
-use lpc_wire::json::json_writer::{JsonValue, JsonWriter, JsonWriterError};
+use lpc_shared::transport::ProjectReadEventSink;
 use lpc_wire::{
-    NodeReadQuery, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery, ProjectReadRequest,
-    ProjectReadResult, RuntimeReadQuery, ServerRuntimeStatus, ShapeReadQuery,
-    write_project_read_result_json, write_slot_shape_registry_snapshot_json,
+    ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent, ProjectReadNodeEvent,
+    ProjectReadProbeEvent, ProjectReadQuery, ProjectReadQueryEvent, ProjectReadRequest,
+    ProjectReadResourceEvent, ProjectReadShapeEvent, ServerRuntimeStatus,
 };
-
-use crate::node::{NodeEntryState, tree_deltas_since};
 
 use super::Engine;
-use super::project_read_nodes::{node_def_root_name, node_state_root_name};
-
-impl Engine {
-    /// Write one stateless project read response directly to a JSON sink.
-    ///
-    /// This preserves the same JSON shape as [`Self::read_project`], but writes
-    /// each query/probe result as soon as it is produced. The current
-    /// implementation may still allocate individual result objects; it avoids
-    /// allocating the whole response envelope and uses streaming base64 for
-    /// runtime-buffer payload fields.
-    pub fn write_project_read_json<W>(
-        &mut self,
-        registry: &ProjectRegistry,
-        request: ProjectReadRequest,
-        out: W,
-    ) -> Result<W, JsonWriterError<W::Error>>
-    where
-        W: JsonWrite,
-    {
-        let mut source = EngineProjectReadSource::new(self, registry);
-        lpc_shared::transport::ProjectReadJsonSource::write_project_read_json(
-            &mut source,
-            request,
-            out,
-        )
-    }
-}
 
 pub struct EngineProjectReadSource<'a> {
     engine: &'a mut Engine,
@@ -71,66 +37,167 @@ impl<'a> EngineProjectReadSource<'a> {
             server_status,
         }
     }
-}
 
-impl lpc_shared::transport::ProjectReadJsonSource for EngineProjectReadSource<'_> {
-    fn project_read_revision(&self) -> lpc_model::Revision {
-        self.engine.revision()
+    pub async fn stream_project_read_events<S>(
+        &mut self,
+        request: ProjectReadRequest,
+        sink: &mut S,
+    ) -> Result<(), ProjectReadEventStreamError<S::Error>>
+    where
+        S: ProjectReadEventSink,
+    {
+        let revision = self.engine.revision();
+        send_project_read_event(sink, ProjectReadEvent::Begin { revision }).await?;
+
+        let since = request.since;
+        for (index, query) in request.queries.into_iter().enumerate() {
+            self.stream_query_events(index as u32, since, query, sink)
+                .await?;
+        }
+
+        for (index, probe) in request.probes.into_iter().enumerate() {
+            self.stream_probe_event(index as u32, probe, sink).await?;
+        }
+
+        send_project_read_event(sink, ProjectReadEvent::End { revision }).await
     }
 
-    fn write_project_read_result_json<W>(
+    async fn stream_query_events<S>(
         &mut self,
+        index: u32,
         since: Option<lpc_model::Revision>,
         query: ProjectReadQuery,
-        out: W,
-    ) -> Result<W, JsonWriterError<W::Error>>
+        sink: &mut S,
+    ) -> Result<(), ProjectReadEventStreamError<S::Error>>
     where
-        W: JsonWrite,
+        S: ProjectReadEventSink,
     {
         match query {
             ProjectReadQuery::Shapes(query) => {
-                return self.engine.write_project_shape_read_result_json(query, out);
+                let result = self.engine.read_project_shapes(query);
+                if let Some(registry) = result.registry {
+                    send_query_event(
+                        sink,
+                        index,
+                        ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Begin {
+                            level: result.level,
+                            ids_revision: registry.ids_revision,
+                        }),
+                    )
+                    .await?;
+                    for (id, entry) in registry.shapes {
+                        send_query_event(
+                            sink,
+                            index,
+                            ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Entry {
+                                id,
+                                entry,
+                            }),
+                        )
+                        .await?;
+                    }
+                } else {
+                    send_query_event(
+                        sink,
+                        index,
+                        ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Begin {
+                            level: result.level,
+                            ids_revision: lpc_model::Revision::default(),
+                        }),
+                    )
+                    .await?;
+                }
+                send_query_event(
+                    sink,
+                    index,
+                    ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::End),
+                )
+                .await
             }
             ProjectReadQuery::Nodes(query) => {
-                return self.engine.write_project_node_read_result_json(
-                    self.registry,
-                    since,
-                    query,
-                    out,
-                );
+                let result = self.engine.read_project_nodes(self.registry, since, query);
+                send_query_event(
+                    sink,
+                    index,
+                    ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::Begin {
+                        level: result.level,
+                    }),
+                )
+                .await?;
+                if !result.tree_deltas.is_empty() {
+                    send_query_event(
+                        sink,
+                        index,
+                        ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::TreeDeltas {
+                            deltas: result.tree_deltas,
+                        }),
+                    )
+                    .await?;
+                }
+                if let Some(slots) = result.slots {
+                    for root in slots.roots {
+                        send_query_event(
+                            sink,
+                            index,
+                            ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::SlotRoot(root)),
+                        )
+                        .await?;
+                    }
+                }
+                send_query_event(
+                    sink,
+                    index,
+                    ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::End),
+                )
+                .await
+            }
+            ProjectReadQuery::Resources(query) => {
+                let result = self.engine.read_project_resources(query);
+                send_query_event(
+                    sink,
+                    index,
+                    ProjectReadQueryEvent::Resources(ProjectReadResourceEvent::Begin {
+                        level: result.level,
+                    }),
+                )
+                .await?;
+                for summary in result.summaries {
+                    send_query_event(
+                        sink,
+                        index,
+                        ProjectReadQueryEvent::Resources(ProjectReadResourceEvent::Summary(
+                            summary,
+                        )),
+                    )
+                    .await?;
+                }
+                for payload in result.runtime_buffer_payloads {
+                    stream_runtime_buffer_payload(index, payload, sink).await?;
+                }
+                send_query_event(
+                    sink,
+                    index,
+                    ProjectReadQueryEvent::Resources(ProjectReadResourceEvent::End),
+                )
+                .await
             }
             ProjectReadQuery::Runtime(query) => {
-                return self.engine.write_project_runtime_read_result_json(
-                    query,
-                    self.server_status.clone(),
-                    out,
-                );
+                let result = self
+                    .engine
+                    .read_project_runtime(query, self.server_status.clone());
+                send_query_event(sink, index, ProjectReadQueryEvent::Runtime(result)).await
             }
-            ProjectReadQuery::Resources(_) => {}
         }
-
-        let result = match query {
-            ProjectReadQuery::Resources(query) => {
-                ProjectReadResult::Resources(self.engine.read_project_resources(query))
-            }
-            ProjectReadQuery::Shapes(_)
-            | ProjectReadQuery::Nodes(_)
-            | ProjectReadQuery::Runtime(_) => {
-                unreachable!("handled above")
-            }
-        };
-        let mut writer = JsonWriter::new(out);
-        write_project_read_result_json(&mut writer, &result)?;
-        Ok(writer.into_inner())
     }
 
-    fn write_project_probe_result_json<W>(
+    async fn stream_probe_event<S>(
         &mut self,
+        index: u32,
         probe: ProjectProbeRequest,
-        out: W,
-    ) -> Result<W, JsonWriterError<W::Error>>
+        sink: &mut S,
+    ) -> Result<(), ProjectReadEventStreamError<S::Error>>
     where
-        W: JsonWrite,
+        S: ProjectReadEventSink,
     {
         let result = match probe {
             ProjectProbeRequest::RenderProduct(request) => ProjectProbeResult::RenderProduct(
@@ -145,163 +212,130 @@ impl lpc_shared::transport::ProjectReadJsonSource for EngineProjectReadSource<'_
                 self.engine.read_project_explain_slot_probe(request),
             ),
         };
-        let mut writer = JsonWriter::new(out);
-        writer.serde(&result)?;
-        Ok(writer.into_inner())
-    }
-}
-
-impl Engine {
-    fn write_project_shape_read_result_json<W>(
-        &mut self,
-        query: ShapeReadQuery,
-        out: W,
-    ) -> Result<W, JsonWriterError<W::Error>>
-    where
-        W: JsonWrite,
-    {
-        let mut writer = JsonWriter::new(out);
-        let mut result = writer.object()?;
-        let mut shapes = result.prop("shapes")?.object()?;
-        shapes.prop("level")?.serde(&query.level)?;
-        if let Some(limit) = query.limit {
-            let (snapshot, next) = self.slot_shapes().snapshot_page_with_static_catalog(
-                query.after,
-                usize::try_from(limit).unwrap_or(usize::MAX),
-            );
-            shapes.prop("registry")?.serde(&snapshot)?;
-            shapes.prop("complete")?.bool(next.is_none())?;
-            if let Some(next) = next {
-                shapes.prop("next")?.serde(&next)?;
-            }
-        } else {
-            write_slot_shape_registry_snapshot_json(shapes.prop("registry")?, self.slot_shapes())?;
-            shapes.prop("complete")?.bool(true)?;
-        }
-        shapes.finish()?;
-        result.finish()?;
-        Ok(writer.into_inner())
-    }
-
-    pub fn write_project_runtime_read_result_json<W>(
-        &mut self,
-        query: RuntimeReadQuery,
-        server: Option<ServerRuntimeStatus>,
-        out: W,
-    ) -> Result<W, JsonWriterError<W::Error>>
-    where
-        W: JsonWrite,
-    {
-        let result = ProjectReadResult::Runtime(self.read_project_runtime(query, server));
-        let mut writer = JsonWriter::new(out);
-        write_project_read_result_json(&mut writer, &result)?;
-        Ok(writer.into_inner())
-    }
-
-    fn write_project_node_read_result_json<W>(
-        &mut self,
-        registry: &ProjectRegistry,
-        since: Option<lpc_model::Revision>,
-        query: NodeReadQuery,
-        out: W,
-    ) -> Result<W, JsonWriterError<W::Error>>
-    where
-        W: JsonWrite,
-    {
-        let since = since.unwrap_or_default();
-        let mut writer = JsonWriter::new(out);
-        let mut result = writer.object()?;
-        let mut nodes = result.prop("nodes")?.object()?;
-        nodes.prop("level")?.serde(&query.level)?;
-
-        let tree_deltas = tree_deltas_since(self.tree(), since);
-        if !tree_deltas.is_empty() {
-            nodes.prop("tree_deltas")?.serde(&tree_deltas)?;
-        }
-
-        if query.include_slots && query.level == lpc_wire::ReadLevel::Detail {
-            let mut slots = nodes.prop("slots")?.object()?;
-            let mut roots = slots.prop("roots")?.array()?;
-            for entry in self.tree().entries() {
-                if let Some(def) = self.loaded_node_def_for_entry(registry, entry) {
-                    let mut root = roots.item()?.object()?;
-                    root.prop("name")?.string(&node_def_root_name(entry.id))?;
-                    root.prop("shape")?.serde(&def.shape_id())?;
-                    self.write_slot_sync_json_value(root.prop("data")?, def)?;
-                    root.finish()?;
-                }
-
-                if let NodeEntryState::Alive(node) = entry.state.value()
-                    && let Some(state) = node.runtime_state_slots()
-                {
-                    let mut root = roots.item()?.object()?;
-                    root.prop("name")?.string(&node_state_root_name(entry.id))?;
-                    root.prop("shape")?.serde(&state.shape_id())?;
-                    self.write_slot_sync_json_value(root.prop("data")?, state)?;
-                    root.finish()?;
-                }
-            }
-            roots.finish()?;
-            slots.finish()?;
-        } else {
-            nodes.prop("slots")?.null()?;
-        }
-
-        nodes.finish()?;
-        result.finish()?;
-        Ok(writer.into_inner())
-    }
-
-    fn write_slot_sync_json_value<W>(
-        &self,
-        value: JsonValue<'_, W>,
-        root: &dyn SlotAccess,
-    ) -> Result<(), JsonWriterError<W::Error>>
-    where
-        W: JsonWrite,
-    {
-        let mut writer = SlotWriter::new(value);
-        write_slot_snapshot_value(
-            self.slot_shapes(),
-            root.shape_id(),
-            root.data(),
-            writer.value(),
+        send_project_read_event(
+            sink,
+            ProjectReadEvent::Probe {
+                index,
+                event: ProjectReadProbeEvent::Result(result),
+            },
         )
-        .map_err(slot_write_error_to_json_error)
+        .await
     }
 }
 
-fn slot_write_error_to_json_error<E>(error: SlotWriteError<E>) -> JsonWriterError<E> {
-    match error {
-        SlotWriteError::Write(error) => JsonWriterError::Write(error),
-        SlotWriteError::InvalidSlotData(_) | SlotWriteError::Serialize => {
-            JsonWriterError::Serialize
-        }
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProjectReadEventStreamError<E> {
+    Sink(E),
+    Protocol(String),
+}
+
+async fn stream_runtime_buffer_payload<S>(
+    index: u32,
+    payload: lpc_wire::WireRuntimeBufferPayload,
+    sink: &mut S,
+) -> Result<(), ProjectReadEventStreamError<S::Error>>
+where
+    S: ProjectReadEventSink,
+{
+    const RUNTIME_BUFFER_PAYLOAD_CHUNK_BYTES: usize = 4 * 1024;
+
+    let lpc_wire::WireRuntimeBufferPayload {
+        resource_ref,
+        revision,
+        metadata,
+        bytes,
+    } = payload;
+    let byte_length = u32::try_from(bytes.len()).map_err(|_| {
+        ProjectReadEventStreamError::Protocol("runtime buffer payload is too large".into())
+    })?;
+    send_query_event(
+        sink,
+        index,
+        ProjectReadQueryEvent::Resources(ProjectReadResourceEvent::RuntimeBufferPayloadBegin {
+            resource_ref,
+            revision,
+            metadata,
+            byte_length,
+        }),
+    )
+    .await?;
+    for (chunk_index, chunk) in bytes.chunks(RUNTIME_BUFFER_PAYLOAD_CHUNK_BYTES).enumerate() {
+        let offset =
+            u32::try_from(chunk_index * RUNTIME_BUFFER_PAYLOAD_CHUNK_BYTES).map_err(|_| {
+                ProjectReadEventStreamError::Protocol("runtime buffer offset overflow".into())
+            })?;
+        send_query_event(
+            sink,
+            index,
+            ProjectReadQueryEvent::Resources(ProjectReadResourceEvent::RuntimeBufferPayloadBytes {
+                resource_ref,
+                offset,
+                bytes: chunk.to_vec(),
+            }),
+        )
+        .await?;
     }
+    send_query_event(
+        sink,
+        index,
+        ProjectReadQueryEvent::Resources(ProjectReadResourceEvent::RuntimeBufferPayloadEnd {
+            resource_ref,
+        }),
+    )
+    .await
+}
+
+async fn send_query_event<S>(
+    sink: &mut S,
+    index: u32,
+    event: ProjectReadQueryEvent,
+) -> Result<(), ProjectReadEventStreamError<S::Error>>
+where
+    S: ProjectReadEventSink,
+{
+    send_project_read_event(sink, ProjectReadEvent::Query { index, event }).await
+}
+
+async fn send_project_read_event<S>(
+    sink: &mut S,
+    event: ProjectReadEvent,
+) -> Result<(), ProjectReadEventStreamError<S::Error>>
+where
+    S: ProjectReadEventSink,
+{
+    sink.send_project_read_event(event)
+        .await
+        .map_err(ProjectReadEventStreamError::Sink)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::boxed::Box;
     use alloc::vec;
     use alloc::vec::Vec;
+    use core::future::Future;
+    use core::pin::Pin;
+    use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
     use lpc_model::{Revision, TreePath, WithRevision};
-    use lpc_wire::json::json_write::ChunkCountingWrite;
-    use lpc_wire::{ProjectReadResponse, ResourcePayloadRead, ResourceReadQuery};
+    use lpc_wire::{
+        ProjectReadCollector, ProjectReadEvent, ProjectReadResourceEvent, ProjectReadResponse,
+        ProjectReadResult, ResourcePayloadRead, ResourceReadQuery,
+    };
 
     use crate::engine::test_support::{EngineTestBuilder, output};
     use crate::resource::RuntimeBuffer;
 
     #[test]
-    fn streaming_project_read_matches_full_debug_response() {
+    fn event_stream_matches_full_debug_response() {
         let mut h = EngineTestBuilder::new().output_node("output").build();
         let request = ProjectReadRequest::default_debug(None);
 
-        assert_streams_to_full_response(&mut h.engine, &h.registry, request);
+        assert_events_collect_to_full_response(&mut h.engine, &h.registry, request);
     }
 
     #[test]
-    fn streaming_project_read_matches_resource_payload_response() {
+    fn event_stream_matches_resource_payload_response() {
         let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
         engine.runtime_buffers_mut().insert(WithRevision::new(
             Revision::new(1),
@@ -314,11 +348,11 @@ mod tests {
             payloads: ResourcePayloadRead::All,
         });
 
-        assert_streams_to_full_response(&mut engine, &registry, request);
+        assert_events_collect_to_full_response(&mut engine, &registry, request);
     }
 
     #[test]
-    fn streaming_project_read_slot_payloads_read_through_sync_codec() {
+    fn event_stream_slot_payloads_read_through_sync_codec() {
         let mut h = EngineTestBuilder::new()
             .shader("shader", output("outputs[0]", 0.75))
             .build();
@@ -328,17 +362,12 @@ mod tests {
     }
 
     #[test]
-    fn streaming_project_read_slot_payloads_deserialize_and_apply_to_view() {
+    fn event_stream_slot_payloads_apply_to_view() {
         let mut h = EngineTestBuilder::new()
             .shader("shader", output("outputs[0]", 0.75))
             .build();
         let request = ProjectReadRequest::default_debug(None);
-        let streamed = h
-            .engine
-            .write_project_read_json(&h.registry, request, Vec::new())
-            .expect("stream project read");
-        let decoded: ProjectReadResponse =
-            lpc_wire::json::from_slice(&streamed).expect("decode streamed project read");
+        let (decoded, _) = collect_event_response(&mut h.engine, &h.registry, request);
         let mut view = lpc_view::ProjectView::new();
 
         lpc_view::apply_project_read_response(&mut view, decoded).expect("apply project read");
@@ -353,38 +382,46 @@ mod tests {
     }
 
     #[test]
-    fn streaming_project_read_writes_multiple_chunks() {
+    fn event_stream_chunks_runtime_buffer_payloads() {
         let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
         engine.runtime_buffers_mut().insert(WithRevision::new(
             Revision::new(1),
-            RuntimeBuffer::raw(vec![1, 2, 3, 253, 254, 255]),
+            RuntimeBuffer::raw(vec![42; 5 * 1024]),
         ));
         let registry = ProjectRegistry::new();
+        let mut request = ProjectReadRequest::default_debug(None);
+        request.queries[2] = ProjectReadQuery::Resources(ResourceReadQuery {
+            level: lpc_wire::ReadLevel::Detail,
+            payloads: ResourcePayloadRead::All,
+        });
 
-        let out = engine
-            .write_project_read_json(
-                &registry,
-                ProjectReadRequest::default_debug(None),
-                ChunkCountingWrite::new(16),
-            )
-            .unwrap();
-        let decoded: ProjectReadResponse = lpc_wire::json::from_slice(out.bytes()).unwrap();
+        let (decoded, events) = collect_event_response(&mut engine, &registry, request);
+        let chunk_events = events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    ProjectReadEvent::Query {
+                        event: ProjectReadQueryEvent::Resources(
+                            ProjectReadResourceEvent::RuntimeBufferPayloadBytes { .. }
+                        ),
+                        ..
+                    }
+                )
+            })
+            .count();
 
         assert_eq!(decoded.results.len(), 4);
-        assert!(out.chunk_count() > 1);
+        assert!(chunk_events > 1);
     }
 
-    fn assert_streams_to_full_response(
+    fn assert_events_collect_to_full_response(
         engine: &mut Engine,
         registry: &ProjectRegistry,
         request: ProjectReadRequest,
     ) {
         let full = engine.read_project(registry, request.clone());
-        let streamed = engine
-            .write_project_read_json(registry, request, Vec::new())
-            .expect("stream project read");
-        let decoded: ProjectReadResponse =
-            lpc_wire::json::from_slice(&streamed).expect("decode streamed project read");
+        let (decoded, _) = collect_event_response(engine, registry, request);
 
         assert_eq!(decoded, full);
 
@@ -406,11 +443,7 @@ mod tests {
         registry: &ProjectRegistry,
         request: ProjectReadRequest,
     ) {
-        let streamed = engine
-            .write_project_read_json(registry, request, Vec::new())
-            .expect("stream project read");
-        let decoded: ProjectReadResponse =
-            lpc_wire::json::from_slice(&streamed).expect("decode project read");
+        let (decoded, _) = collect_event_response(engine, registry, request);
         let roots = detailed_node_slot_roots(&decoded);
 
         assert!(!roots.is_empty(), "expected detailed node slot roots");
@@ -437,5 +470,68 @@ mod tests {
             })
             .map(|slots| slots.roots.as_slice())
             .expect("detailed node slot roots")
+    }
+
+    fn collect_event_response(
+        engine: &mut Engine,
+        registry: &ProjectRegistry,
+        request: ProjectReadRequest,
+    ) -> (ProjectReadResponse, Vec<ProjectReadEvent>) {
+        let mut sink = CollectingEventSink::default();
+        block_on(async {
+            EngineProjectReadSource::new(engine, registry)
+                .stream_project_read_events(request, &mut sink)
+                .await
+                .unwrap();
+        });
+        let mut collector = ProjectReadCollector::new();
+        let events = sink.events;
+        for event in events.clone() {
+            if let Some(response) = collector.accept_event(event).unwrap() {
+                return (response, events);
+            }
+        }
+        panic!("event stream did not complete");
+    }
+
+    #[derive(Default)]
+    struct CollectingEventSink {
+        events: Vec<ProjectReadEvent>,
+    }
+
+    impl ProjectReadEventSink for CollectingEventSink {
+        type Error = core::convert::Infallible;
+
+        async fn send_project_read_event(
+            &mut self,
+            event: ProjectReadEvent,
+        ) -> Result<(), Self::Error> {
+            self.events.push(event);
+            Ok(())
+        }
+    }
+
+    fn block_on<F: Future>(future: F) -> F::Output {
+        let waker = noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let mut future = Box::pin(future);
+        loop {
+            match Future::poll(Pin::as_mut(&mut future), &mut cx) {
+                Poll::Ready(output) => return output,
+                Poll::Pending => {}
+            }
+        }
+    }
+
+    fn noop_waker() -> Waker {
+        unsafe fn clone(_: *const ()) -> RawWaker {
+            RawWaker::new(core::ptr::null(), &VTABLE)
+        }
+        unsafe fn wake(_: *const ()) {}
+        unsafe fn wake_by_ref(_: *const ()) {}
+        unsafe fn drop(_: *const ()) {}
+        static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop);
+
+        unsafe { Waker::from_raw(RawWaker::new(core::ptr::null(), &VTABLE)) }
     }
 }

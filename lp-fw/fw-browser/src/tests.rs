@@ -4,10 +4,11 @@ use std::rc::Rc;
 use lpc_model::{AsLpPath, AsLpPathBuf, NodeId};
 use lpc_shared::ProjectBuilder;
 use lpc_wire::{
-    ClientRequest, FsRequest, NodeReadQuery, ProjectReadQuery, ProjectReadRequest,
-    ProjectReadResult, ReadLevel, ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery,
-    WireChannelSampleFormat, WireRuntimeBufferMetadataPayload, WireServerMessage,
-    WireServerMsgBody, WireTreeDelta, json, messages::ClientMessage,
+    ClientRequest, FsRequest, NodeReadQuery, ProjectReadCollectStatus, ProjectReadCollector,
+    ProjectReadQuery, ProjectReadRequest, ProjectReadResponse, ProjectReadResult, ReadLevel,
+    ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, WireChannelSampleFormat,
+    WireRuntimeBufferMetadataPayload, WireServerMessage, WireServerMsgBody, WireTreeDelta, json,
+    messages::ClientMessage,
 };
 use lpfs::{LpFs, LpFsMemory};
 use serde::Serialize;
@@ -90,7 +91,7 @@ fn runtime_loads_project_and_renders_output_after_ticks() {
     let nodes_response = send_protocol_request(
         runtime_id,
         next_request_id(&mut next_id),
-        ClientRequest::ProjectRequest {
+        ClientRequest::ProjectRead {
             handle: project_handle,
             request: ProjectReadRequest {
                 since: None,
@@ -103,10 +104,8 @@ fn runtime_loads_project_and_renders_output_after_ticks() {
             },
         },
         16,
-    )
-    .into_iter()
-    .next()
-    .expect("project nodes response");
+    );
+    let nodes_response = collect_project_read_response(nodes_response);
 
     let output_id = output_node_id(nodes_response);
 
@@ -115,7 +114,7 @@ fn runtime_loads_project_and_renders_output_after_ticks() {
         let response = send_protocol_request(
             runtime_id,
             next_request_id(&mut next_id),
-            ClientRequest::ProjectRequest {
+            ClientRequest::ProjectRead {
                 handle: project_handle,
                 request: ProjectReadRequest {
                     since: None,
@@ -130,10 +129,8 @@ fn runtime_loads_project_and_renders_output_after_ticks() {
                 },
             },
             40,
-        )
-        .into_iter()
-        .next()
-        .expect("project resource response");
+        );
+        let response = collect_project_read_response(response);
 
         let sample = read_output_sample(response, output_id);
         assert!(sample.runtime_frame_num > 0);
@@ -184,6 +181,23 @@ fn collect_protocol_out(envelopes_json: &str) -> Vec<WireServerMessage> {
         .collect()
 }
 
+fn collect_project_read_response(messages: Vec<WireServerMessage>) -> ProjectReadResponse {
+    let mut collector = ProjectReadCollector::new();
+    for message in messages {
+        match message.msg {
+            WireServerMsgBody::ProjectReadFrame { frame } => {
+                match collector.accept_frame(frame).expect("collect project read") {
+                    ProjectReadCollectStatus::Continue => {}
+                    ProjectReadCollectStatus::Complete(response) => return response,
+                }
+            }
+            other => panic!("unexpected project-read frame response: {other:?}"),
+        }
+    }
+
+    panic!("project read did not complete");
+}
+
 fn build_smoke_project() -> Rc<RefCell<LpFsMemory>> {
     let fs = Rc::new(RefCell::new(LpFsMemory::new()));
     let mut builder = ProjectBuilder::new(fs.clone());
@@ -214,10 +228,7 @@ fn collect_project_files(fs: &LpFsMemory) -> Vec<(String, Vec<u8>)> {
     files
 }
 
-fn output_node_id(response: WireServerMessage) -> NodeId {
-    let WireServerMsgBody::ProjectRequest { response } = response.msg else {
-        panic!("unexpected project-read response");
-    };
+fn output_node_id(response: ProjectReadResponse) -> NodeId {
     let ProjectReadResult::Nodes(nodes) = response
         .results
         .first()
@@ -240,11 +251,7 @@ fn output_node_id(response: WireServerMessage) -> NodeId {
     panic!("output node not found; available paths: {available_paths:?}");
 }
 
-fn read_output_sample(response: WireServerMessage, output_id: NodeId) -> OutputSample {
-    let WireServerMsgBody::ProjectRequest { response } = response.msg else {
-        panic!("unexpected project-read response");
-    };
-
+fn read_output_sample(response: ProjectReadResponse, output_id: NodeId) -> OutputSample {
     let runtime_frame_num = match response.results.first() {
         Some(ProjectReadResult::Runtime(runtime)) => runtime.project.frame_num,
         other => panic!("first project-read result should be runtime: {other:?}"),

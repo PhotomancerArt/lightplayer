@@ -931,9 +931,9 @@ mod tests {
     use lpc_view::{ProjectView, TreeEntryView};
     use lpc_wire::{
         ClientMessage, ClientRequest, MemoryStats, NodeRuntimeStatus, ProjectProbeRequest,
-        ProjectReadResponse, ProjectReadResult, ProjectRuntimeStatus, RenderProductProbeRequest,
-        RuntimeReadResult, ServerRuntimeStatus, TransportError, WireEntryState, WireServerMessage,
-        WireServerMsgBody, WireTextureFormat,
+        ProjectReadEvent, ProjectReadFrame, ProjectReadQueryEvent, ProjectRuntimeStatus,
+        RenderProductProbeRequest, RuntimeReadResult, ServerRuntimeStatus, TransportError,
+        WireEntryState, WireServerMessage, WireServerMsgBody, WireTextureFormat,
     };
 
     use super::*;
@@ -1299,13 +1299,13 @@ mod tests {
         );
         let sent = sent.borrow();
         assert_eq!(sent.len(), 1);
-        let ClientRequest::ProjectRequest { handle, request } = &sent[0].msg else {
+        let ClientRequest::ProjectRead { handle, request } = &sent[0].msg else {
             panic!("refresh should send a project read request");
         };
         assert_eq!(sent[0].id, 1);
         assert_eq!(handle.id(), 7);
         assert_eq!(request.since, None);
-        assert_eq!(request.queries.len(), 3);
+        assert_eq!(request.queries.len(), 4);
 
         let sync = studio
             .project
@@ -1358,7 +1358,7 @@ mod tests {
 
         let sent = sent.borrow();
         assert_eq!(sent.len(), 1);
-        let ClientRequest::ProjectRequest { request, .. } = &sent[0].msg else {
+        let ClientRequest::ProjectRead { request, .. } = &sent[0].msg else {
             panic!("node focus should send a project read request");
         };
         assert_eq!(
@@ -1648,30 +1648,36 @@ mod tests {
     fn project_read_response_with_runtime(id: u64, revision: Revision) -> WireServerMessage {
         WireServerMessage {
             id,
-            msg: WireServerMsgBody::ProjectRequest {
-                response: ProjectReadResponse {
-                    revision,
-                    results: vec![ProjectReadResult::Runtime(RuntimeReadResult {
-                        project: ProjectRuntimeStatus {
-                            revision,
-                            frame_num: 77,
-                            frame_delta_ms: 16,
-                            frame_total_ms: 17,
-                            demand_root_count: 2,
-                            runtime_buffer_count: 3,
-                        },
-                        server: Some(ServerRuntimeStatus {
-                            theoretical_fps: Some(60.0),
-                            last_frame_time_us: Some(16_000),
-                            memory: Some(MemoryStats {
-                                free_bytes: 4096,
-                                used_bytes: 2048,
-                                total_bytes: 6144,
+            msg: WireServerMsgBody::ProjectReadFrame {
+                frame: ProjectReadFrame::new(
+                    0,
+                    vec![
+                        ProjectReadEvent::Begin { revision },
+                        ProjectReadEvent::Query {
+                            index: 0,
+                            event: ProjectReadQueryEvent::Runtime(RuntimeReadResult {
+                                project: ProjectRuntimeStatus {
+                                    revision,
+                                    frame_num: 77,
+                                    frame_delta_ms: 16,
+                                    frame_total_ms: 17,
+                                    demand_root_count: 2,
+                                    runtime_buffer_count: 3,
+                                },
+                                server: Some(ServerRuntimeStatus {
+                                    theoretical_fps: Some(60.0),
+                                    last_frame_time_us: Some(16_000),
+                                    memory: Some(MemoryStats {
+                                        free_bytes: 4096,
+                                        used_bytes: 2048,
+                                        total_bytes: 6144,
+                                    }),
+                                }),
                             }),
-                        }),
-                    })],
-                    probes: Vec::new(),
-                },
+                        },
+                        ProjectReadEvent::End { revision },
+                    ],
+                ),
             },
         }
     }

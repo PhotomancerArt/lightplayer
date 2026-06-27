@@ -1,4 +1,4 @@
-use crate::messages::ProjectReadRequest;
+use crate::messages::{ProjectReadFrame, ProjectReadRequest};
 use crate::project::WireProjectHandle;
 use crate::project_command::{WireProjectCommand, WireProjectCommandResponse};
 use crate::server::fs_api::{FsRequest, FsResponse};
@@ -16,8 +16,8 @@ pub enum ClientMsgBody {
     LoadProject { path: LpPathBuf },
     /// Unload a project
     UnloadProject { handle: WireProjectHandle },
-    /// Project-specific request
-    ProjectRequest {
+    /// Project read request that expects project-read frames.
+    ProjectRead {
         handle: WireProjectHandle,
         request: ProjectReadRequest,
     },
@@ -34,7 +34,7 @@ pub enum ClientMsgBody {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum ServerMsgBody<R> {
+pub enum ServerMsgBody {
     /// Filesystem operation response
     Filesystem(FsResponse),
     /// Response to LoadProject
@@ -43,9 +43,9 @@ pub enum ServerMsgBody<R> {
     },
     /// Response to UnloadProject
     UnloadProject,
-    /// Response to ProjectRequest
-    ProjectRequest {
-        response: R,
+    /// Bounded project-read continuation frame.
+    ProjectReadFrame {
+        frame: ProjectReadFrame,
     },
     /// Response to ProjectCommand
     ProjectCommand {

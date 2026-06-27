@@ -3,8 +3,6 @@
 use core::ops::{Deref, DerefMut};
 
 use lpc_registry::ProjectRegistry;
-use lpc_wire::json::json_write::JsonWrite;
-use lpc_wire::json::json_writer::JsonWriterError;
 use lpc_wire::{ProjectReadRequest, ProjectReadResponse};
 
 use super::{Engine, EngineError};
@@ -50,18 +48,6 @@ impl LoadedProjectRuntime {
 
     pub fn read_project(&mut self, request: ProjectReadRequest) -> ProjectReadResponse {
         self.engine.read_project(&self.registry, request)
-    }
-
-    pub fn write_project_read_json<W>(
-        &mut self,
-        request: ProjectReadRequest,
-        out: W,
-    ) -> Result<W, JsonWriterError<W::Error>>
-    where
-        W: JsonWrite,
-    {
-        self.engine
-            .write_project_read_json(&self.registry, request, out)
     }
 
     #[cfg(test)]

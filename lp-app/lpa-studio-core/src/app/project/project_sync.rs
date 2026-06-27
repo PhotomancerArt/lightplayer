@@ -1,14 +1,13 @@
 use std::collections::BTreeMap;
 
-use lpc_model::{ControlDisplayLayout, Revision, SlotShapeId};
+use lpc_model::{ControlDisplayLayout, Revision};
 use lpc_view::{ProjectView, apply_project_read_response};
 use lpc_wire::{
     ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
     ControlProductProbeResult, NodeReadQuery, NodeReadSelection, ProjectProbeRequest,
-    ProjectProbeResult, ProjectReadQuery, ProjectReadRequest, ProjectReadResponse,
-    ProjectReadResult, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
-    ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, ShapeReadQuery,
-    WireChannelSampleFormat, WireTextureFormat,
+    ProjectProbeResult, ProjectReadQuery, ProjectReadRequest, ProjectReadResponse, ReadLevel,
+    RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery,
+    RuntimeReadQuery, ShapeReadQuery, WireChannelSampleFormat, WireTextureFormat,
 };
 
 use crate::{
@@ -16,19 +15,11 @@ use crate::{
     UiControlSampleFormat, UiError, UiIssue, UiProductPreview, UiProductPreviewFrame, UiProductRef,
 };
 
-// Keep shape pages small. Some shape definitions include other shapes and can
-// inflate quickly on firmware serial links. Raise this only after the project
-// read transport has a true async JSON writer instead of a bounded chunk queue.
-const SHAPE_SYNC_PAGE_LIMIT: u32 = 4;
-const SHAPE_SYNC_MAX_PAGES: u32 = 256;
 const VISUAL_PRODUCT_PREVIEW_FRAME: UiProductPreviewFrame = UiProductPreviewFrame::VISUAL_DEFAULT;
 
 pub struct ProjectSync {
     view: ProjectView,
     phase: ProjectSyncPhase,
-    shape_cursor: Option<SlotShapeId>,
-    shape_page_count: u32,
-    shapes_complete: bool,
     control_product_probes_enabled: bool,
     control_product_probe_unsupported_reason: Option<String>,
     product_previews: BTreeMap<UiProductRef, UiProductPreview>,
@@ -41,9 +32,6 @@ impl ProjectSync {
         Self {
             view: ProjectView::new(),
             phase: ProjectSyncPhase::Empty,
-            shape_cursor: None,
-            shape_page_count: 0,
-            shapes_complete: false,
             control_product_probes_enabled: true,
             control_product_probe_unsupported_reason: None,
             product_previews: BTreeMap::new(),
@@ -54,7 +42,7 @@ impl ProjectSync {
 
     pub fn begin_initial_sync(&mut self) {
         *self = Self {
-            phase: ProjectSyncPhase::SyncingShapes,
+            phase: ProjectSyncPhase::SyncingProject,
             ..Self::new()
         };
     }
@@ -79,7 +67,7 @@ impl ProjectSync {
             slot_root_count: self.view.slots.roots.len(),
             resource_count: self.view.resource_cache.summary_count(),
             shape_count: self.view.slots.registry.iter().count(),
-            shapes_complete: self.shapes_complete,
+            shapes_complete: self.phase == ProjectSyncPhase::Ready,
             runtime: self.view.runtime.as_ref().map(ProjectRuntimeSummary::from),
             issue: self.issue.clone(),
         }
@@ -104,23 +92,7 @@ impl ProjectSync {
     }
 
     pub fn is_syncing(&self) -> bool {
-        matches!(
-            self.phase,
-            ProjectSyncPhase::SyncingShapes | ProjectSyncPhase::SyncingProject
-        )
-    }
-
-    pub fn needs_shape_sync(&self) -> bool {
-        !self.shapes_complete
-    }
-
-    pub fn shape_sync_request(&self) -> Result<ProjectReadRequest, UiError> {
-        if self.shape_page_count >= SHAPE_SYNC_MAX_PAGES {
-            return Err(UiError::Protocol(format!(
-                "shape sync exceeded {SHAPE_SYNC_MAX_PAGES} pages"
-            )));
-        }
-        Ok(shape_sync_request(self.shape_cursor))
+        self.phase == ProjectSyncPhase::SyncingProject
     }
 
     pub fn initial_project_read_request(
@@ -141,30 +113,6 @@ impl ProjectSync {
         // include slots even when the tree itself only changes by revision.
         let include_slots = true;
         project_read_request(since, include_slots, self.product_probe_requests(products))
-    }
-
-    pub fn apply_shape_sync_response(
-        &mut self,
-        response: ProjectReadResponse,
-    ) -> Result<(), UiError> {
-        let mut saw_shapes = false;
-        for result in response.results {
-            if let ProjectReadResult::Shapes(shapes) = result {
-                saw_shapes = true;
-                if let Some(registry) = shapes.registry {
-                    self.view.slots.apply_registry_page(registry);
-                }
-                self.shapes_complete = shapes.complete;
-                self.shape_cursor = shapes.next;
-            }
-        }
-        if !saw_shapes {
-            return Err(UiError::Protocol(
-                "shape sync response did not include shapes".to_string(),
-            ));
-        }
-        self.shape_page_count = self.shape_page_count.saturating_add(1);
-        Ok(())
     }
 
     pub fn apply_project_read_response(
@@ -348,18 +296,6 @@ impl Default for ProjectSync {
     }
 }
 
-pub fn shape_sync_request(after: Option<SlotShapeId>) -> ProjectReadRequest {
-    ProjectReadRequest {
-        since: None,
-        queries: Vec::from([ProjectReadQuery::Shapes(ShapeReadQuery {
-            level: ReadLevel::Detail,
-            after,
-            limit: Some(SHAPE_SYNC_PAGE_LIMIT),
-        })]),
-        probes: Vec::new(),
-    }
-}
-
 pub fn project_read_request(
     since: Option<Revision>,
     include_slots: bool,
@@ -368,6 +304,9 @@ pub fn project_read_request(
     ProjectReadRequest {
         since,
         queries: Vec::from([
+            ProjectReadQuery::Shapes(ShapeReadQuery {
+                level: ReadLevel::Detail,
+            }),
             ProjectReadQuery::Nodes(NodeReadQuery {
                 level: ReadLevel::Detail,
                 nodes: NodeReadSelection::All,
@@ -469,31 +408,19 @@ mod tests {
     };
 
     #[test]
-    fn shape_sync_request_uses_safe_page_limit_and_cursor() {
-        let after = SlotShapeId::new(7);
-        let request = shape_sync_request(Some(after));
+    fn project_read_request_includes_shapes_nodes_resources_and_runtime() {
+        let request = project_read_request(Some(Revision::new(12)), true, Vec::new());
 
-        assert_eq!(request.since, None);
-        assert!(request.probes.is_empty());
-        assert_eq!(request.queries.len(), 1);
+        assert_eq!(request.since, Some(Revision::new(12)));
+        assert_eq!(request.queries.len(), 4);
         assert_eq!(
             request.queries[0],
             ProjectReadQuery::Shapes(ShapeReadQuery {
                 level: ReadLevel::Detail,
-                after: Some(after),
-                limit: Some(4),
             })
         );
-    }
-
-    #[test]
-    fn project_read_request_includes_nodes_resources_and_runtime() {
-        let request = project_read_request(Some(Revision::new(12)), true, Vec::new());
-
-        assert_eq!(request.since, Some(Revision::new(12)));
-        assert_eq!(request.queries.len(), 3);
         assert_eq!(
-            request.queries[0],
+            request.queries[1],
             ProjectReadQuery::Nodes(NodeReadQuery {
                 level: ReadLevel::Detail,
                 nodes: NodeReadSelection::All,
@@ -501,14 +428,14 @@ mod tests {
             })
         );
         assert_eq!(
-            request.queries[1],
+            request.queries[2],
             ProjectReadQuery::Resources(ResourceReadQuery {
                 level: ReadLevel::Summary,
                 payloads: ResourcePayloadRead::None,
             })
         );
         assert_eq!(
-            request.queries[2],
+            request.queries[3],
             ProjectReadQuery::Runtime(RuntimeReadQuery)
         );
         assert!(request.probes.is_empty());
@@ -523,7 +450,7 @@ mod tests {
 
         assert_eq!(request.since, Some(Revision::new(9)));
         assert_eq!(
-            request.queries[0],
+            request.queries[1],
             ProjectReadQuery::Nodes(NodeReadQuery {
                 level: ReadLevel::Detail,
                 nodes: NodeReadSelection::All,
@@ -546,7 +473,7 @@ mod tests {
         let request = sync.refresh_project_read_request(Vec::new());
 
         assert_eq!(
-            request.queries[0],
+            request.queries[1],
             ProjectReadQuery::Nodes(NodeReadQuery {
                 level: ReadLevel::Detail,
                 nodes: NodeReadSelection::All,

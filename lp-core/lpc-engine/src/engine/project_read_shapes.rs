@@ -6,27 +6,16 @@ use super::Engine;
 
 impl Engine {
     pub(super) fn read_project_shapes(&self, query: ShapeReadQuery) -> ShapeReadResult {
-        let (registry, complete, next) = match query.level {
-            ReadLevel::Ids | ReadLevel::Summary | ReadLevel::Detail => {
-                if let Some(limit) = query.limit {
-                    let (snapshot, next) = self.slot_shapes().snapshot_page_with_static_catalog(
-                        query.after,
-                        usize::try_from(limit).unwrap_or(usize::MAX),
-                    );
-                    (Some(snapshot), next.is_none(), next)
-                } else {
-                    let (snapshot, next) = self
-                        .slot_shapes()
-                        .snapshot_page_with_static_catalog(query.after, usize::MAX);
-                    (Some(snapshot), next.is_none(), next)
-                }
-            }
+        let registry = match query.level {
+            ReadLevel::Ids | ReadLevel::Summary | ReadLevel::Detail => Some(
+                self.slot_shapes()
+                    .snapshot_page_with_static_catalog(None, usize::MAX)
+                    .0,
+            ),
         };
         ShapeReadResult {
             level: query.level,
             registry,
-            complete,
-            next,
         }
     }
 }
