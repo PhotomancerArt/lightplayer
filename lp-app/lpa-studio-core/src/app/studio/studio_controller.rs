@@ -91,6 +91,14 @@ impl StudioController {
         Ok(Some(sync))
     }
 
+    pub fn mark_passive_project_refresh_failed(&mut self, message: impl Into<String>) {
+        self.project.mark_project_sync_failed(message);
+    }
+
+    pub fn disable_control_product_probes(&mut self, reason: impl Into<String>) -> bool {
+        self.project.disable_control_product_probes(reason)
+    }
+
     async fn dispatch_inner(&mut self, action: UiAction, updates: UxUpdateSink) -> UiResult {
         let node_id = action.node_id().clone();
         let device_node_id = self.device.node_id();

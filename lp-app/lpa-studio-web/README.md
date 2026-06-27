@@ -127,6 +127,11 @@ tertiary action when the provider advertises whole-device erase. Confirming it
 erases the device flash, clears server/project state, and returns the device to a
 provisionable state. Wipe uses the same live activity renderer.
 
+Project refresh is passive background work in the web shell. Device recovery
+actions such as disconnect, reset, flash, and wipe preempt passive refresh so
+older firmware or a stuck project read cannot trap the user away from firmware
+recovery controls.
+
 For low-level browser serial debugging, open:
 
 ```text

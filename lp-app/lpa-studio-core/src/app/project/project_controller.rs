@@ -222,6 +222,18 @@ impl ProjectController {
         self.clear_loaded_project_state();
     }
 
+    pub fn mark_project_sync_failed(&mut self, message: impl Into<String>) {
+        if let Some(sync) = &mut self.sync {
+            sync.fail(message.into());
+        }
+    }
+
+    pub fn disable_control_product_probes(&mut self, reason: impl Into<String>) -> bool {
+        self.sync
+            .as_mut()
+            .is_some_and(|sync| sync.disable_control_product_probes(reason))
+    }
+
     pub fn mark_no_running_project(&mut self) {
         self.running_project_status = RunningProjectStatus::NoneKnown;
         self.state = ProjectState::NotLoaded;

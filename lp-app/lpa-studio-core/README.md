@@ -124,6 +124,13 @@ anything reaches a UI. Sync failures are treated as project-pane issues rather
 than generic action failures so the attached project can stay visible while
 Studio explains what needs attention.
 
+The web shell treats passive project refresh as lower priority than foreground
+device/server recovery. If a browser refresh is interrupted or times out, Studio
+marks the project sync as needing attention and returns the controller to the UI
+so device actions can run. Control-product probes can also be disabled for the
+current sync when a timeout suggests older firmware does not understand the newer
+probe request shape.
+
 The first editor view renders every synced node in stable tree order rather
 than requiring a selected-node detail view. Node bodies show headers, status,
 prominent `input`/`output` slots, config/state slot rows, compact bindings when
