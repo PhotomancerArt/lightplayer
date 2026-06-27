@@ -132,6 +132,9 @@ impl BrowserSerialClientIo {
         self.state
             .borrow_mut()
             .mark_protocol_failed(&message, no_firmware);
+        self.state
+            .borrow()
+            .push_log(UiLogLevel::Warn, "browser-serial", message.clone());
         Err(TransportError::Other(message))
     }
 
@@ -247,6 +250,14 @@ impl ClientIo for BrowserSerialClientIo {
             "[browser-serial] tx request id={request_id} kind={label} json_bytes={}",
             frame.len()
         ));
+        self.state.borrow().push_log(
+            UiLogLevel::Debug,
+            "browser-serial",
+            format!(
+                "tx request id={request_id} kind={label} json_bytes={}",
+                frame.len()
+            ),
+        );
 
         let (registry, session_id) = {
             let state = self.state.borrow();
@@ -308,6 +319,9 @@ impl ClientIo for BrowserSerialClientIo {
             message.push_str("; last malformed protocol frame: ");
             message.push_str(&issue);
         }
+        self.state
+            .borrow()
+            .push_log(UiLogLevel::Warn, "browser-serial", message.clone());
         Err(TransportError::Other(message))
     }
 
@@ -339,9 +353,9 @@ struct BrowserSerialClientState {
 
 impl BrowserSerialClientState {
     fn push_log(&self, level: UiLogLevel, source: impl Into<String>, message: impl Into<String>) {
-        self.logs
-            .borrow_mut()
-            .push(UiLogEntry::new(level, source, message));
+        let entry = UiLogEntry::new(level, source, message);
+        self.logs.borrow_mut().push(entry.clone());
+        self.updates.emit(UxUpdate::Log(entry));
     }
 
     fn record_readiness_device_line(&mut self, level: UiLogLevel, message: String) {

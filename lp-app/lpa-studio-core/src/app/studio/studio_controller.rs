@@ -99,6 +99,18 @@ impl StudioController {
         self.project.disable_control_product_probes(reason)
     }
 
+    pub fn recover_from_foreground_action_timeout(
+        &mut self,
+        message: impl Into<String>,
+        fail_server: bool,
+    ) {
+        let message = message.into();
+        self.project.mark_project_sync_failed(message.clone());
+        if fail_server {
+            self.device.server.fail(message);
+        }
+    }
+
     async fn dispatch_inner(&mut self, action: UiAction, updates: UxUpdateSink) -> UiResult {
         let node_id = action.node_id().clone();
         let device_node_id = self.device.node_id();

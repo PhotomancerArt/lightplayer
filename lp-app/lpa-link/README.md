@@ -194,10 +194,10 @@ cargo check -p lpa-link --features browser-worker --target wasm32-unknown-unknow
   same-origin `firmware_manifest_path` and optional `esptool_module_path`
   options for app-owned assets. The default esptool module is pinned to the
   browser ESM endpoint `https://cdn.jsdelivr.net/npm/esptool-js@0.6.0/+esm` for
-  development. The ESM CDN rewrite is important because the raw package imports
-  dependencies such as `pako` by bare specifier, which browsers cannot resolve
-  without a bundler or import map. This endpoint has also been checked against
-  the ESP32-C6 stub decoding path used by reset/provisioning. A deployed app can
+  development. The jsDelivr ESM rewrite is important because the raw package
+  imports dependencies such as `pako` by bare specifier, which browsers cannot
+  resolve without a bundler or import map, and it exposes ESP32-C6 flasher stub
+  JSON with the named exports expected by `esptool-js`. A deployed app can
   override the default with a hosted module path. The provider releases normal
   protocol ownership before probe/flash/erase takes exclusive bootloader access.
   Opening the normal serial server protocol opens the port once, starts reading

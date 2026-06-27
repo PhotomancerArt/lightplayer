@@ -17,9 +17,8 @@ use crate::{
 };
 
 // Keep shape pages small. Some shape definitions include other shapes and can
-// overflow the firmware's 16KB internal JSON buffer, which has caused project
-// sync parse errors/crashes. Raise this only after the server buffer/streaming
-// limitation is fixed.
+// inflate quickly on firmware serial links. Raise this only after the project
+// read transport has a true async JSON writer instead of a bounded chunk queue.
 const SHAPE_SYNC_PAGE_LIMIT: u32 = 4;
 const SHAPE_SYNC_MAX_PAGES: u32 = 256;
 const VISUAL_PRODUCT_PREVIEW_FRAME: UiProductPreviewFrame = UiProductPreviewFrame::VISUAL_DEFAULT;
