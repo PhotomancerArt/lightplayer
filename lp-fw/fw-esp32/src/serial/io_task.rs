@@ -46,9 +46,12 @@ pub const SERVER_JSON_CHUNK_SIZE: usize = 1024;
 ///
 /// Project-read serialization is synchronous, so this queue must hold the
 /// largest frame the server can produce before the I/O task gets scheduled to
-/// drain it.
+/// drain it. This is intentionally a modest bump over the early 16 KiB budget:
+/// expanded fixture mappings can exceed 16 KiB, but RAM is tight enough that
+/// larger queues should be avoided. A future async JSON writer or paged slot
+/// sync should replace this bounded-frame workaround.
 #[cfg(feature = "server")]
-pub const SERVER_JSON_CHUNK_CAPACITY: usize = 16;
+pub const SERVER_JSON_CHUNK_CAPACITY: usize = 24;
 
 #[cfg(feature = "server")]
 static OUTGOING_SERVER_JSON_CHUNK: Channel<
