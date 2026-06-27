@@ -81,7 +81,7 @@ jobs:
 
       - name: Install espflash
         if: inputs.channel == 'beta'
-        run: cargo install espflash --version 3.3.0 --locked
+        run: cargo install espflash --version 3.3.0 --locked --force
 
       - name: Build beta artifact
         if: inputs.channel == 'beta'
