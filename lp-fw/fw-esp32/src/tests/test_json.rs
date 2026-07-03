@@ -67,7 +67,7 @@ pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
             };
 
             let (server_write_request, server_write_result) = io_task::get_server_write_channels();
-            server_write_request.sender().send(msg).await;
+            server_write_request.sender().send((0, msg)).await;
             let _ = server_write_result.receiver().receive().await;
 
             frame_count += 1;

@@ -20,8 +20,13 @@ use crate::serial::io_task;
 /// until io_task reports that the message was fully written or failed.
 pub struct StreamingMessageRouterTransport {
     incoming: &'static Channel<CriticalSectionRawMutex, alloc::string::String, 32>,
-    server_write_request: &'static Channel<CriticalSectionRawMutex, WireServerMessage, 1>,
-    server_write_result: &'static Channel<CriticalSectionRawMutex, Result<(), TransportError>, 1>,
+    server_write_request: &'static Channel<CriticalSectionRawMutex, (u32, WireServerMessage), 1>,
+    server_write_result:
+        &'static Channel<CriticalSectionRawMutex, (u32, Result<(), TransportError>), 1>,
+    /// Wrapping generation stamped on each write request. `send()` discards any
+    /// result whose generation does not match, so a result orphaned by a
+    /// cancelled send can never be misattributed to the next write.
+    generation: u32,
 }
 
 impl StreamingMessageRouterTransport {
@@ -33,6 +38,7 @@ impl StreamingMessageRouterTransport {
             incoming,
             server_write_request,
             server_write_result,
+            generation: 0,
         }
     }
 }
@@ -40,8 +46,25 @@ impl StreamingMessageRouterTransport {
 impl ServerTransport for StreamingMessageRouterTransport {
     async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
         let id = msg.id;
-        self.server_write_request.sender().send(msg).await;
-        let result = self.server_write_result.receiver().receive().await;
+        let generation = self.generation;
+        self.generation = self.generation.wrapping_add(1);
+        self.server_write_request
+            .sender()
+            .send((generation, msg))
+            .await;
+        // Await the result matching this generation. A mismatched result is a
+        // stale response orphaned by a previously cancelled send; discard it and
+        // keep waiting for the one io_task produced for this request.
+        let result = loop {
+            let (result_generation, result) = self.server_write_result.receiver().receive().await;
+            if result_generation == generation {
+                break result;
+            }
+            log::warn!(
+                "StreamingMessageRouterTransport: discarding stale write result \
+                 generation={result_generation} (awaiting {generation}) for id={id}"
+            );
+        };
         match &result {
             Ok(()) => log::debug!(
                 "StreamingMessageRouterTransport: wrote message id={id} through io_task"

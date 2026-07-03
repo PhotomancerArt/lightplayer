@@ -14,7 +14,7 @@ use lpc_engine::{ButtonService, LpGraphics, RadioService};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
-use lpc_shared::transport::{ProjectReadFrameSink, ServerTransport};
+use lpc_shared::transport::{ProjectReadFrameSink, ServerTransport, transport_error_is_signalable};
 use lpc_wire::{ClientRequest, WireMessage, WireServerMessage};
 use lpfs::{FsEvent, LpFs};
 
@@ -309,13 +309,39 @@ impl LpServer {
                             let mut source =
                                 ServerProjectReadSource::new(project, Some(server_status));
                             let mut sink = ProjectReadFrameSink::new(transport, msg_id);
-                            source
-                                .stream_project_read_events(request, &mut sink)
-                                .await
-                                .map_err(project_read_stream_error_to_server_error)?;
-                            sink.finish()
-                                .await
-                                .map_err(|error| ServerError::Core(format!("{error}")))?;
+                            let stream_result =
+                                source.stream_project_read_events(request, &mut sink).await;
+                            match stream_result {
+                                Ok(()) => {
+                                    sink.finish()
+                                        .await
+                                        .map_err(|error| ServerError::Core(format!("{error}")))?;
+                                }
+                                Err(error) => {
+                                    // Signalable failures (event too large for an
+                                    // empty frame, other serialization/budget
+                                    // errors) still have a live connection: send a
+                                    // terminal `Error` frame for this request id
+                                    // and continue the tick. Transport-write
+                                    // failures cannot be signaled and propagate.
+                                    match classify_project_read_stream_error(error) {
+                                        ProjectReadStreamOutcome::Signalable(message) => {
+                                            if let Err(send_error) =
+                                                sink.send_terminal_error(message).await
+                                            {
+                                                log::warn!(
+                                                    "tick_and_send: failed to send terminal \
+                                                     project-read error for id={msg_id}: \
+                                                     {send_error}"
+                                                );
+                                            }
+                                        }
+                                        ProjectReadStreamOutcome::Fatal(server_error) => {
+                                            return Err(server_error);
+                                        }
+                                    }
+                                }
+                            }
                             response_count += 1;
                         }
                         msg => {
@@ -442,13 +468,35 @@ impl LpServer {
     }
 }
 
-fn project_read_stream_error_to_server_error<E: core::fmt::Display>(
-    error: lpc_engine::ProjectReadEventStreamError<E>,
-) -> ServerError {
+/// Result of classifying a project-read event-stream failure.
+enum ProjectReadStreamOutcome {
+    /// The connection is still alive; send a terminal `Error` frame carrying
+    /// this message for the request id, then continue the tick.
+    Signalable(alloc::string::String),
+    /// A transport-write failure that cannot be signaled; abort the tick.
+    Fatal(ServerError),
+}
+
+/// Classify a project-read stream failure into signalable vs. fatal.
+///
+/// Signalable failures are engine-side protocol/budget errors and sink
+/// serialization/budget failures — the write path is still usable, so the
+/// server best-effort emits a terminal [`lpc_wire::ProjectReadEvent::Error`].
+/// Sink transport-write failures (connection lost, other) are fatal and
+/// propagate as before.
+fn classify_project_read_stream_error(
+    error: lpc_engine::ProjectReadEventStreamError<lpc_wire::TransportError>,
+) -> ProjectReadStreamOutcome {
     match error {
-        lpc_engine::ProjectReadEventStreamError::Sink(error) => {
-            ServerError::Core(format!("{error}"))
+        lpc_engine::ProjectReadEventStreamError::Protocol(message) => {
+            ProjectReadStreamOutcome::Signalable(message)
         }
-        lpc_engine::ProjectReadEventStreamError::Protocol(message) => ServerError::Core(message),
+        lpc_engine::ProjectReadEventStreamError::Sink(transport_error) => {
+            if transport_error_is_signalable(&transport_error) {
+                ProjectReadStreamOutcome::Signalable(format!("{transport_error}"))
+            } else {
+                ProjectReadStreamOutcome::Fatal(ServerError::Core(format!("{transport_error}")))
+            }
+        }
     }
 }

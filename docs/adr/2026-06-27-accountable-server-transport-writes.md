@@ -70,7 +70,10 @@ the failed frame pending instead of emitting later frames.
 
 - Hardware-verify that old firmware or disconnected USB now fails as a clean
   transport error without producing skipped project-read sequences.
-- Consider request-scoped completion tokens if ESP32 ever allows more than one
-  server response write in flight.
+- [x] Consider request-scoped completion tokens if ESP32 ever allows more than
+  one server response write in flight. *(M2: the write request/result channel
+  pair now carries a wrapping `u32` generation token; `transport.send()` stamps
+  each request and discards any result whose generation does not match, so a
+  result orphaned by a cancelled send can no longer be misattributed.)*
 - Revisit binary payload encoding after the bounded-message and accountable
   write contracts have settled.

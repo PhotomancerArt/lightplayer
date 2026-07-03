@@ -10,6 +10,8 @@
 extern crate alloc;
 
 use alloc::format;
+use alloc::string::String;
+use alloc::vec;
 use alloc::vec::Vec;
 use lpc_wire::{
     PROJECT_READ_FRAME_MAX_BYTES, ProjectReadEvent, ProjectReadFrame, TransportError,
@@ -125,6 +127,30 @@ where
         self.flush().await
     }
 
+    /// Best-effort emit a terminal [`ProjectReadEvent::Error`] frame.
+    ///
+    /// Called when the event stream failed with a *signalable* error (an event
+    /// too large for an empty frame, or another serialization/budget failure).
+    /// Any partially batched events are discarded — the stream is already
+    /// broken — and a standalone `Error` frame is sent at the current sequence
+    /// so the client sees a terminal failure for this request id instead of a
+    /// silent stall. A transport-write failure while emitting this frame is
+    /// returned to the caller but is expected to be logged and ignored.
+    pub async fn send_terminal_error(&mut self, message: String) -> Result<(), TransportError> {
+        // Drop any pending batch; those events could not be delivered anyway.
+        self.pending_events.clear();
+        let sequence = self.sequence;
+        let frame = ProjectReadFrame::new(sequence, vec![ProjectReadEvent::Error { message }]);
+        self.transport
+            .send(WireServerMessage {
+                id: self.id,
+                msg: lpc_wire::server::ServerMsgBody::ProjectReadFrame { frame },
+            })
+            .await?;
+        self.sequence = self.sequence.saturating_add(1);
+        Ok(())
+    }
+
     async fn push_event(&mut self, event: ProjectReadEvent) -> Result<(), TransportError> {
         let mut candidate = self.pending_events.clone();
         candidate.push(event.clone());
@@ -205,6 +231,18 @@ where
     ) -> Result<(), Self::Error> {
         self.push_event(event).await
     }
+}
+
+/// Whether a project-read sink failure can be signaled to the client.
+///
+/// Serialization/budget failures (an event too large for an empty frame, other
+/// encoding failures) are *signalable*: the connection is still alive, so the
+/// server can send a terminal [`ProjectReadEvent::Error`] frame for the request
+/// id. Connection/other transport-write failures cannot be signaled — the write
+/// path is the very thing that failed — and must propagate as today.
+#[must_use]
+pub fn transport_error_is_signalable(error: &TransportError) -> bool {
+    matches!(error, TransportError::Serialization(_))
 }
 
 #[cfg(test)]
@@ -307,6 +345,55 @@ mod tests {
 
         assert!(matches!(error, TransportError::Serialization(_)));
         assert!(transport.sent.is_empty());
+    }
+
+    #[test]
+    fn oversized_event_yields_terminal_error_frame_to_client() {
+        // An event that cannot fit an empty frame fails the stream with a
+        // signalable serialization error. The server must be able to deliver a
+        // terminal `Error` frame to the client for the same request id so the
+        // client sees a failure instead of a silent stall / watchdog timeout.
+        let event = ProjectReadEvent::Begin {
+            revision: Revision::new(7),
+        };
+        // One byte below the encoded size makes even this single event oversized.
+        let max_bytes = encoded_project_read_frame_len(9, 0, &[event.clone()]).saturating_sub(1);
+        let mut transport = CollectingTransport::default();
+
+        block_on(async {
+            let mut sink = ProjectReadFrameSink::with_max_bytes(&mut transport, 9, max_bytes);
+            // The oversized event cannot fit an empty frame: signalable failure.
+            let error = sink.send_project_read_event(event).await.unwrap_err();
+            assert!(transport_error_is_signalable(&error));
+            // Best-effort terminal error frame for this request id.
+            sink.send_terminal_error(alloc::format!("{error}"))
+                .await
+                .unwrap();
+        });
+
+        // The only thing the client receives is the terminal error frame.
+        assert_eq!(transport.sent.len(), 1);
+        assert_eq!(transport.sent[0].id, 9);
+        let lpc_wire::server::ServerMsgBody::ProjectReadFrame { frame } = &transport.sent[0].msg
+        else {
+            panic!("expected project-read frame");
+        };
+        assert_eq!(frame.sequence, 0);
+        assert_eq!(frame.events.len(), 1);
+        assert!(matches!(frame.events[0], ProjectReadEvent::Error { .. }));
+    }
+
+    #[test]
+    fn connection_lost_is_not_signalable() {
+        assert!(!transport_error_is_signalable(
+            &TransportError::ConnectionLost
+        ));
+        assert!(!transport_error_is_signalable(&TransportError::Other(
+            "usb dead".into()
+        )));
+        assert!(transport_error_is_signalable(
+            &TransportError::Serialization("too big".into())
+        ));
     }
 
     #[test]

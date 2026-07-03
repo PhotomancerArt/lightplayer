@@ -31,14 +31,23 @@ static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new
 /// The server transport submits one message here, then waits on
 /// `SERVER_WRITE_RESULT`. This keeps `ServerTransport::send().await` aligned
 /// with actual USB write completion instead of a best-effort task handoff.
+///
+/// Each request carries a wrapping `u32` generation token that `io_task` echoes
+/// back on the result channel. Pairing was previously purely positional: if the
+/// sending future were ever cancelled between submit and await, the orphaned
+/// result would be consumed by the next send and misattributed. The generation
+/// lets `transport.send()` discard any stale result instead of trusting order.
 #[cfg(feature = "server")]
-static SERVER_WRITE_REQUEST: Channel<CriticalSectionRawMutex, lpc_wire::WireServerMessage, 1> =
-    Channel::new();
+static SERVER_WRITE_REQUEST: Channel<
+    CriticalSectionRawMutex,
+    (u32, lpc_wire::WireServerMessage),
+    1,
+> = Channel::new();
 
 #[cfg(feature = "server")]
 static SERVER_WRITE_RESULT: Channel<
     CriticalSectionRawMutex,
-    Result<(), lpc_wire::TransportError>,
+    (u32, Result<(), lpc_wire::TransportError>),
     1,
 > = Channel::new();
 
@@ -195,12 +204,17 @@ async fn read_serial<R: Read>(rx: &mut R, read_buffer: &mut Vec<u8>, router: &Me
 #[cfg(feature = "server")]
 async fn drain_server_write_request<W: Write>(tx: &mut W, connected: bool) {
     let receiver = SERVER_WRITE_REQUEST.receiver();
-    let Ok(msg) = receiver.try_receive() else {
+    let Ok((generation, msg)) = receiver.try_receive() else {
         return;
     };
 
     let result = timed_write_server_msg(tx, msg, connected).await;
-    SERVER_WRITE_RESULT.sender().send(result).await;
+    // Echo the request generation so `transport.send()` can discard any stale
+    // result left over from a cancelled send.
+    SERVER_WRITE_RESULT
+        .sender()
+        .send((generation, result))
+        .await;
 }
 
 #[cfg(feature = "server")]
@@ -390,8 +404,8 @@ pub fn get_message_channels() -> (
 /// Get accountable server write channels for StreamingMessageRouterTransport.
 #[cfg(feature = "server")]
 pub fn get_server_write_channels() -> (
-    &'static Channel<CriticalSectionRawMutex, lpc_wire::WireServerMessage, 1>,
-    &'static Channel<CriticalSectionRawMutex, Result<(), lpc_wire::TransportError>, 1>,
+    &'static Channel<CriticalSectionRawMutex, (u32, lpc_wire::WireServerMessage), 1>,
+    &'static Channel<CriticalSectionRawMutex, (u32, Result<(), lpc_wire::TransportError>), 1>,
 ) {
     (&SERVER_WRITE_REQUEST, &SERVER_WRITE_RESULT)
 }
