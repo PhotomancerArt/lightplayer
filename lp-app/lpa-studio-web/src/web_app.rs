@@ -17,13 +17,12 @@ use lpa_studio_core::{
 
 const STYLE: &str = include_str!("style.css");
 const DEVICE_PROJECT_REFRESH_INTERVAL_MS: u32 = 750;
-const SIMULATOR_PROJECT_REFRESH_INTERVAL_MS: u32 = 16;
-const DEVICE_PASSIVE_REFRESH_TIMEOUT_MS: u32 = 6_000;
-const SIMULATOR_PASSIVE_REFRESH_TIMEOUT_MS: u32 = 1_000;
+const SIMULATOR_PROJECT_REFRESH_INTERVAL_MS: u32 = 33;
+const DEVICE_PASSIVE_REFRESH_TIMEOUT_MS: u32 = 12_000;
+const SIMULATOR_PASSIVE_REFRESH_TIMEOUT_MS: u32 = 4_000;
 const PASSIVE_REFRESH_CANCEL_POLL_MS: u32 = 25;
 const PASSIVE_REFRESH_FAILURE_BACKOFF_MS: u32 = 3_000;
 const PASSIVE_REFRESH_TIMEOUT_MESSAGE: &str = "passive project refresh timed out";
-const CONTROL_PRODUCT_PROBE_COMPATIBILITY_REASON: &str = "Control product previews are disabled after a protocol timeout. Update device firmware to enable them.";
 const ACTION_STOP_POLL_MS: u32 = 25;
 const CONNECT_LIGHTPLAYER_TIMEOUT_MS: u32 = 12_000;
 const PROJECT_ACTION_TIMEOUT_MS: u32 = 8_000;
@@ -464,7 +463,6 @@ async fn execute_action(mut model: Signal<StudioWebModel>, action: UiAction) {
     });
     let timeout_ms = foreground_action_timeout_ms(&action);
     let recovers_server = foreground_timeout_recovers_server(&action);
-    let disables_control_probes = foreground_timeout_disables_control_product_probes(&action);
     let outcome = execute_action_with_watchdog(ux, action, updates, model, id, timeout_ms).await;
     accepting_updates.set(false);
     match outcome {
@@ -495,19 +493,10 @@ async fn execute_action(mut model: Signal<StudioWebModel>, action: UiAction) {
                 }
             };
             ux.recover_from_foreground_action_timeout(message.clone(), recovers_server);
-            let control_probes_disabled = disables_control_probes
-                && ux.disable_control_product_probes(CONTROL_PRODUCT_PROBE_COMPATIBILITY_REASON);
             let mut state = model.write();
             let pending_action = state.finish_foreground_action(id, ux, true);
             state.delay_next_project_refresh(PASSIVE_REFRESH_FAILURE_BACKOFF_MS);
             state.push_console_log(UiLogEntry::new(UiLogLevel::Warn, "studio", message));
-            if control_probes_disabled {
-                state.push_console_log(UiLogEntry::new(
-                    UiLogLevel::Warn,
-                    "studio",
-                    CONTROL_PRODUCT_PROBE_COMPATIBILITY_REASON,
-                ));
-            }
             drop(state);
             if let Some(pending_action) = pending_action {
                 spawn(async move {
@@ -567,14 +556,6 @@ fn foreground_action_timeout_ms(action: &UiAction) -> Option<u32> {
 
 fn foreground_timeout_recovers_server(action: &UiAction) -> bool {
     foreground_action_timeout_ms(action).is_some()
-}
-
-fn foreground_timeout_disables_control_product_probes(action: &UiAction) -> bool {
-    action
-        .op_as::<DeviceOp>()
-        .is_some_and(|op| matches!(op, DeviceOp::ConnectLightPlayer))
-        || action.op_as::<ProjectOp>().is_some()
-        || action.op_as::<ProjectEditorOp>().is_some()
 }
 
 enum ActionAcquire {
@@ -681,25 +662,15 @@ async fn execute_refresh_tick(mut model: Signal<StudioWebModel>) {
     match outcome {
         PassiveRefreshOutcome::Completed(result) => {
             let failed = passive_refresh_result_failed(&result);
-            let disable_control_probes = passive_refresh_needs_control_probe_fallback(&result);
             if let Err(error) = &result {
                 ux.mark_passive_project_refresh_failed(error.to_string());
             }
-            let control_probes_disabled = disable_control_probes
-                && ux.disable_control_product_probes(CONTROL_PRODUCT_PROBE_COMPATIBILITY_REASON);
             let mut state = model.write();
             state.finish_project_refresh(id, ux);
             if failed {
                 state.delay_next_project_refresh(PASSIVE_REFRESH_FAILURE_BACKOFF_MS);
             } else {
                 state.passive_refresh_timeout_logged = false;
-            }
-            if control_probes_disabled {
-                state.push_console_log(UiLogEntry::new(
-                    UiLogLevel::Warn,
-                    "studio",
-                    CONTROL_PRODUCT_PROBE_COMPATIBILITY_REASON,
-                ));
             }
             if let Err(error) = result {
                 state.push_console_log(log_from_error(error));
@@ -711,8 +682,6 @@ async fn execute_refresh_tick(mut model: Signal<StudioWebModel>) {
                 PassiveRefreshStop::TimedOut => PASSIVE_REFRESH_TIMEOUT_MESSAGE,
             };
             ux.mark_passive_project_refresh_failed(message);
-            let control_probes_disabled = matches!(stop_reason, PassiveRefreshStop::TimedOut)
-                && ux.disable_control_product_probes(CONTROL_PRODUCT_PROBE_COMPATIBILITY_REASON);
             let mut state = model.write();
             state.finish_project_refresh(id, ux);
             if matches!(stop_reason, PassiveRefreshStop::TimedOut) {
@@ -721,13 +690,6 @@ async fn execute_refresh_tick(mut model: Signal<StudioWebModel>) {
                     state.push_console_log(UiLogEntry::new(UiLogLevel::Warn, "studio", message));
                     state.passive_refresh_timeout_logged = true;
                 }
-            }
-            if control_probes_disabled {
-                state.push_console_log(UiLogEntry::new(
-                    UiLogLevel::Warn,
-                    "studio",
-                    CONTROL_PRODUCT_PROBE_COMPATIBILITY_REASON,
-                ));
             }
         }
     }
@@ -766,27 +728,6 @@ fn passive_refresh_result_failed(result: &Result<Option<ProjectSyncRun>, UiError
         Ok(None) => false,
         Err(_) => true,
     }
-}
-
-fn passive_refresh_needs_control_probe_fallback(
-    result: &Result<Option<ProjectSyncRun>, UiError>,
-) -> bool {
-    match result {
-        Err(error) => refresh_failure_text_suggests_probe_compatibility(&error.to_string()),
-        Ok(Some(sync)) if !sync.synced => sync
-            .logs
-            .iter()
-            .any(|log| refresh_failure_text_suggests_probe_compatibility(&log.message)),
-        _ => false,
-    }
-}
-
-fn refresh_failure_text_suggests_probe_compatibility(message: &str) -> bool {
-    let message = message.to_ascii_lowercase();
-    message.contains("timed out")
-        || message.contains("timeout")
-        || message.contains("unknown variant")
-        || message.contains("control_product")
 }
 
 fn log_from_notice(notice: UiNotice) -> UiLogEntry {
@@ -957,7 +898,6 @@ mod tests {
             Some(CONNECT_LIGHTPLAYER_TIMEOUT_MS)
         );
         assert!(foreground_timeout_recovers_server(&action));
-        assert!(foreground_timeout_disables_control_product_probes(&action));
     }
 
     #[test]
@@ -1030,18 +970,5 @@ mod tests {
             model.next_project_refresh_delay_ms(),
             DEVICE_PROJECT_REFRESH_INTERVAL_MS
         );
-    }
-
-    #[test]
-    fn timeout_text_suggests_control_probe_fallback() {
-        assert!(refresh_failure_text_suggests_probe_compatibility(
-            "timed out waiting for browser serial protocol response"
-        ));
-        assert!(refresh_failure_text_suggests_probe_compatibility(
-            "unknown variant `control_product`"
-        ));
-        assert!(!refresh_failure_text_suggests_probe_compatibility(
-            "shape sync response did not include shapes"
-        ));
     }
 }

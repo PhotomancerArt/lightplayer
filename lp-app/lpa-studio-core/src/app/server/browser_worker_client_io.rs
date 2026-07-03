@@ -1,4 +1,5 @@
 use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::rc::Rc;
 
 use async_trait::async_trait;
@@ -32,6 +33,7 @@ impl BrowserWorkerClientIo {
                 registry,
                 session_id,
                 logs,
+                pending_protocol_out: VecDeque::new(),
             })),
         }
     }
@@ -49,6 +51,10 @@ impl ClientIo for BrowserWorkerClientIo {
 
     async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
         for _ in 0..RESPONSE_POLL_LIMIT {
+            if let Some(response) = self.state.borrow_mut().pending_protocol_out.pop_front() {
+                return Ok(response);
+            }
+
             self.state
                 .borrow()
                 .post(&BrowserInputEnvelope::Tick { delta_ms: Some(16) })?;
@@ -60,10 +66,17 @@ impl ClientIo for BrowserWorkerClientIo {
                     BrowserOutputEnvelope::ProtocolOut { frame } => {
                         let response = json::from_str(&frame)
                             .map_err(|error| TransportError::Deserialization(error.to_string()))?;
-                        return Ok(response);
+                        self.state
+                            .borrow_mut()
+                            .pending_protocol_out
+                            .push_back(response);
                     }
                     output => self.state.borrow().record_output(output),
                 }
+            }
+
+            if let Some(response) = self.state.borrow_mut().pending_protocol_out.pop_front() {
+                return Ok(response);
             }
         }
         Err(TransportError::Other(
@@ -89,6 +102,7 @@ struct BrowserWorkerClientState {
     registry: SharedLinkRegistry,
     session_id: LinkSessionId,
     logs: Rc<RefCell<Vec<UiLogEntry>>>,
+    pending_protocol_out: VecDeque<WireServerMessage>,
 }
 
 impl BrowserWorkerClientState {

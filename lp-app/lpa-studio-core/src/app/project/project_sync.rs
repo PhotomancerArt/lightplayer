@@ -20,8 +20,6 @@ const VISUAL_PRODUCT_PREVIEW_FRAME: UiProductPreviewFrame = UiProductPreviewFram
 pub struct ProjectSync {
     view: ProjectView,
     phase: ProjectSyncPhase,
-    control_product_probes_enabled: bool,
-    control_product_probe_unsupported_reason: Option<String>,
     product_previews: BTreeMap<UiProductRef, UiProductPreview>,
     requested_product_previews: Vec<UiProductRef>,
     issue: Option<UiIssue>,
@@ -32,8 +30,6 @@ impl ProjectSync {
         Self {
             view: ProjectView::new(),
             phase: ProjectSyncPhase::Empty,
-            control_product_probes_enabled: true,
-            control_product_probe_unsupported_reason: None,
             product_previews: BTreeMap::new(),
             requested_product_previews: Vec::new(),
             issue: None,
@@ -132,22 +128,6 @@ impl ProjectSync {
         self.issue = Some(UiIssue::new(issue));
     }
 
-    pub fn disable_control_product_probes(&mut self, reason: impl Into<String>) -> bool {
-        let reason = reason.into();
-        let changed = self.control_product_probes_enabled
-            || self.control_product_probe_unsupported_reason.as_ref() != Some(&reason);
-        self.control_product_probes_enabled = false;
-        self.control_product_probe_unsupported_reason = Some(reason.clone());
-        for (product, preview) in &mut self.product_previews {
-            if matches!(product, UiProductRef::Control { .. }) {
-                *preview = UiProductPreview::Unsupported {
-                    reason: reason.clone(),
-                };
-            }
-        }
-        changed
-    }
-
     fn product_probe_requests(&mut self, products: Vec<UiProductRef>) -> Vec<ProjectProbeRequest> {
         let mut probes = Vec::new();
         self.requested_product_previews.clear();
@@ -170,17 +150,6 @@ impl ProjectSync {
                     }
                 }
                 UiProductRef::Control { .. } => {
-                    if !self.control_product_probes_enabled {
-                        let reason = self
-                            .control_product_probe_unsupported_reason
-                            .clone()
-                            .unwrap_or_else(|| {
-                                "control product probes are disabled for this session".to_string()
-                            });
-                        self.product_previews
-                            .insert(product, UiProductPreview::Unsupported { reason });
-                        continue;
-                    }
                     self.product_previews
                         .entry(product)
                         .or_insert(UiProductPreview::Pending);
@@ -561,67 +530,6 @@ mod tests {
         assert_eq!(
             sync.product_preview(&product_ref),
             Some(&UiProductPreview::Pending)
-        );
-    }
-
-    #[test]
-    fn disabled_control_product_probes_preserve_visual_probe_alignment() {
-        let mut sync = ProjectSync::new();
-        let visual = VisualProduct::new(NodeId::new(7), 1);
-        let control = ControlProduct::new(NodeId::new(7), 2, ControlExtent::new(1, 3));
-        let visual_ref = UiProductRef::from_visual_product(visual);
-        let control_ref = UiProductRef::from_control_product(control);
-
-        assert!(sync.disable_control_product_probes("old firmware"));
-        let request = sync.refresh_project_read_request(vec![control_ref, visual_ref]);
-
-        assert_eq!(
-            request.probes,
-            vec![ProjectProbeRequest::RenderProduct(
-                RenderProductProbeRequest {
-                    product: visual,
-                    width: VISUAL_PRODUCT_PREVIEW_FRAME.width,
-                    height: VISUAL_PRODUCT_PREVIEW_FRAME.height,
-                    format: WireTextureFormat::Srgb8,
-                },
-            )]
-        );
-        assert_eq!(
-            sync.product_preview(&control_ref),
-            Some(&UiProductPreview::Unsupported {
-                reason: "old firmware".to_string(),
-            })
-        );
-        assert_eq!(
-            sync.product_preview(&visual_ref),
-            Some(&UiProductPreview::Pending)
-        );
-
-        let bytes = vec![1, 2, 3];
-        sync.apply_project_read_response(ProjectReadResponse {
-            revision: Revision::new(9),
-            results: Vec::new(),
-            probes: vec![ProjectProbeResult::RenderProduct(
-                RenderProductProbeResult::Texture {
-                    product: visual,
-                    revision: Revision::new(9),
-                    width: 1,
-                    height: 1,
-                    format: WireTextureFormat::Srgb8,
-                    bytes: bytes.clone(),
-                },
-            )],
-        })
-        .unwrap();
-
-        assert_eq!(
-            sync.product_preview(&visual_ref),
-            Some(&UiProductPreview::VisualSrgb8 {
-                width: 1,
-                height: 1,
-                revision: 9,
-                bytes,
-            })
         );
     }
 

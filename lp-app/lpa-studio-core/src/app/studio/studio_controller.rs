@@ -95,10 +95,6 @@ impl StudioController {
         self.project.mark_project_sync_failed(message);
     }
 
-    pub fn disable_control_product_probes(&mut self, reason: impl Into<String>) -> bool {
-        self.project.disable_control_product_probes(reason)
-    }
-
     pub fn recover_from_foreground_action_timeout(
         &mut self,
         message: impl Into<String>,
