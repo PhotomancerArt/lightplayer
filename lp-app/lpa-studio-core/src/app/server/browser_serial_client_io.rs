@@ -15,6 +15,7 @@ use wasm_bindgen_futures::JsFuture;
 use super::browser_serial_readiness::{
     BrowserSerialReadinessClassifier, BrowserSerialReadinessFailure,
 };
+use super::pending_server_messages::{BatchItem, PendingServerMessages};
 use crate::core::view::activity_view::{UiActivityStep, UiActivityStepState};
 use crate::{
     ControllerId, ServerController, SharedLinkRegistry, UiActivityView, UiLogEntry, UiLogLevel,
@@ -33,6 +34,7 @@ const STEP_PROTOCOL: &str = "server-protocol";
 
 pub struct BrowserSerialClientIo {
     state: Rc<RefCell<BrowserSerialClientState>>,
+    pending: PendingServerMessages<WireServerMessage>,
 }
 
 impl BrowserSerialClientIo {
@@ -61,6 +63,7 @@ impl BrowserSerialClientIo {
                 last_protocol_issue: None,
                 protocol_ready: false,
             })),
+            pending: PendingServerMessages::new(),
         }
     }
 
@@ -272,6 +275,10 @@ impl ClientIo for BrowserSerialClientIo {
     }
 
     async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
+        if let Some(response) = self.pending.pop() {
+            return Ok(response);
+        }
+
         for _ in 0..RESPONSE_POLL_LIMIT {
             let (registry, session_id) = {
                 let state = self.state.borrow();
@@ -302,10 +309,24 @@ impl ClientIo for BrowserSerialClientIo {
                 return Err(TransportError::Other(message));
             }
 
-            for line in lines {
-                if let Some(response) = self.handle_line(line)? {
-                    return Ok(response);
-                }
+            // Decode the whole drained batch: every `M!` frame is queued in
+            // order (a single `take_lines()` window can carry several 16 KiB
+            // project-read frames back to back), while device/log lines keep
+            // their existing handling inside `handle_line`. `pending` is moved
+            // out so the classifier can borrow `self` (for `handle_line`)
+            // without overlapping the `&mut self.pending` borrow.
+            let mut pending = std::mem::take(&mut self.pending);
+            let outcome = pending.ingest(lines, |line| {
+                self.handle_line(line).map(|decoded| match decoded {
+                    Some(response) => BatchItem::Protocol(response),
+                    None => BatchItem::Other,
+                })
+            });
+            self.pending = pending;
+            outcome?;
+
+            if let Some(response) = self.pending.pop() {
+                return Ok(response);
             }
 
             sleep_ms(RESPONSE_POLL_DELAY_MS).await?;

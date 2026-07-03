@@ -1,5 +1,4 @@
 use std::cell::RefCell;
-use std::collections::VecDeque;
 use std::rc::Rc;
 
 use async_trait::async_trait;
@@ -14,12 +13,14 @@ use lpc_wire::{ClientMessage, TransportError, WireServerMessage, json};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 
+use super::pending_server_messages::{BatchItem, PendingServerMessages};
 use crate::{SharedLinkRegistry, UiLogEntry, UiLogLevel};
 
 const RESPONSE_POLL_LIMIT: usize = 240;
 
 pub struct BrowserWorkerClientIo {
     state: Rc<RefCell<BrowserWorkerClientState>>,
+    pending: PendingServerMessages<WireServerMessage>,
 }
 
 impl BrowserWorkerClientIo {
@@ -33,8 +34,8 @@ impl BrowserWorkerClientIo {
                 registry,
                 session_id,
                 logs,
-                pending_protocol_out: VecDeque::new(),
             })),
+            pending: PendingServerMessages::new(),
         }
     }
 }
@@ -50,33 +51,30 @@ impl ClientIo for BrowserWorkerClientIo {
     }
 
     async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
-        for _ in 0..RESPONSE_POLL_LIMIT {
-            if let Some(response) = self.state.borrow_mut().pending_protocol_out.pop_front() {
-                return Ok(response);
-            }
+        if let Some(message) = self.pending.pop() {
+            return Ok(message);
+        }
 
+        for _ in 0..RESPONSE_POLL_LIMIT {
             self.state
                 .borrow()
                 .post(&BrowserInputEnvelope::Tick { delta_ms: Some(16) })?;
             sleep_ms(4).await?;
 
             let outputs = self.state.borrow().take_outputs()?;
-            for output in outputs {
-                match output {
-                    BrowserOutputEnvelope::ProtocolOut { frame } => {
-                        let response = json::from_str(&frame)
-                            .map_err(|error| TransportError::Deserialization(error.to_string()))?;
-                        self.state
-                            .borrow_mut()
-                            .pending_protocol_out
-                            .push_back(response);
-                    }
-                    output => self.state.borrow().record_output(output),
+            let state = &self.state;
+            self.pending.ingest(outputs, |output| match output {
+                BrowserOutputEnvelope::ProtocolOut { frame } => json::from_str(&frame)
+                    .map(BatchItem::Protocol)
+                    .map_err(|error| TransportError::Deserialization(error.to_string())),
+                output => {
+                    state.borrow().record_output(output);
+                    Ok(BatchItem::Other)
                 }
-            }
+            })?;
 
-            if let Some(response) = self.state.borrow_mut().pending_protocol_out.pop_front() {
-                return Ok(response);
+            if let Some(message) = self.pending.pop() {
+                return Ok(message);
             }
         }
         Err(TransportError::Other(
@@ -102,7 +100,6 @@ struct BrowserWorkerClientState {
     registry: SharedLinkRegistry,
     session_id: LinkSessionId,
     logs: Rc<RefCell<Vec<UiLogEntry>>>,
-    pending_protocol_out: VecDeque<WireServerMessage>,
 }
 
 impl BrowserWorkerClientState {
