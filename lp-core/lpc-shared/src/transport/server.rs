@@ -97,11 +97,35 @@ pub trait ServerTransport {
 }
 
 /// Shared project-read event batcher used by all server transports.
+///
+/// # Measurement and batching
+///
+/// The batcher measures frames with the **wire serializer** (`ser-write-json`,
+/// the same one the ESP32 firmware writes with) rather than `serde_json`. The
+/// two diverge on float formatting, so budgeting with `serde_json` can
+/// under-count the real on-wire bytes; measuring with the wire serializer keeps
+/// the 16 KiB budget honest.
+///
+/// Batching is O(events), not O(frame): each event is measured once on push and
+/// its encoded length accumulated. The full frame is only serialized by the
+/// transport at send time. A `ProjectReadFrame` body encodes as
+/// `{"id":..,"msg":{"projectReadFrame":{"sequence":..,"events":[e0,e1,..]}}}`,
+/// so the total encoded length is
+/// `empty_frame_len(sequence) + sum(event_len) + (n - 1)` commas — the empty
+/// frame already contains the two `[]` brackets, and each additional event adds
+/// one comma separator.
 pub struct ProjectReadFrameSink<'a, T> {
     transport: &'a mut T,
     id: u64,
     sequence: u32,
     pending_events: Vec<ProjectReadEvent>,
+    /// Cumulative encoded length of `pending_events` as they appear inside the
+    /// `events` array: `sum(event_len)` plus one comma between adjacent events.
+    /// Zero when `pending_events` is empty.
+    pending_events_len: usize,
+    /// Encoded length of an empty frame at the current `sequence` (envelope +
+    /// `[]`). Recomputed whenever `sequence` changes.
+    empty_frame_len: usize,
     max_bytes: usize,
 }
 
@@ -114,11 +138,14 @@ where
     }
 
     pub fn with_max_bytes(transport: &'a mut T, id: u64, max_bytes: usize) -> Self {
+        let empty_frame_len = Self::measure_empty_frame_len(id, 0);
         Self {
             transport,
             id,
             sequence: 0,
             pending_events: Vec::new(),
+            pending_events_len: 0,
+            empty_frame_len,
             max_bytes,
         }
     }
@@ -139,6 +166,7 @@ where
     pub async fn send_terminal_error(&mut self, message: String) -> Result<(), TransportError> {
         // Drop any pending batch; those events could not be delivered anyway.
         self.pending_events.clear();
+        self.pending_events_len = 0;
         let sequence = self.sequence;
         let frame = ProjectReadFrame::new(sequence, vec![ProjectReadEvent::Error { message }]);
         self.transport
@@ -147,24 +175,35 @@ where
                 msg: lpc_wire::server::ServerMsgBody::ProjectReadFrame { frame },
             })
             .await?;
-        self.sequence = self.sequence.saturating_add(1);
+        self.advance_sequence();
         Ok(())
     }
 
     async fn push_event(&mut self, event: ProjectReadEvent) -> Result<(), TransportError> {
-        let mut candidate = self.pending_events.clone();
-        candidate.push(event.clone());
-        if self.encoded_frame_len(self.sequence, candidate.as_slice())? <= self.max_bytes {
+        // Measure this event once with the wire serializer. Its contribution to
+        // the encoded frame is its own length plus one comma separator when it
+        // follows another event in the array.
+        let event_len = lpc_wire::ser_write_json_len(&event);
+        let separator = usize::from(!self.pending_events.is_empty());
+        let candidate_events_len = self
+            .pending_events_len
+            .saturating_add(event_len)
+            .saturating_add(separator);
+
+        if self.empty_frame_len.saturating_add(candidate_events_len) <= self.max_bytes {
             self.pending_events.push(event);
+            self.pending_events_len = candidate_events_len;
             return Ok(());
         }
 
+        // The event does not fit alongside the current batch. Flush it, then
+        // this event becomes the sole occupant of a fresh frame.
         if !self.pending_events.is_empty() {
             self.flush().await?;
         }
 
-        let single = [event.clone()];
-        if self.encoded_frame_len(self.sequence, &single)? > self.max_bytes {
+        // Empty frame length may have changed with the new sequence.
+        if self.empty_frame_len.saturating_add(event_len) > self.max_bytes {
             return Err(TransportError::Serialization(format!(
                 "project-read event exceeded frame budget of {} bytes",
                 self.max_bytes
@@ -172,6 +211,7 @@ where
         }
 
         self.pending_events.push(event);
+        self.pending_events_len = event_len;
         Ok(())
     }
 
@@ -181,41 +221,40 @@ where
         }
 
         let sequence = self.sequence;
-        let events = core::mem::take(&mut self.pending_events);
-        let frame = ProjectReadFrame::new(sequence, events.clone());
-        match self
-            .transport
+        // The frame owns its events (one clone into the message), but we keep
+        // `pending_events` intact so a send failure leaves the batch pending
+        // without a second up-front clone-to-restore.
+        let frame = ProjectReadFrame::new(sequence, self.pending_events.clone());
+        self.transport
             .send(WireServerMessage {
                 id: self.id,
                 msg: lpc_wire::server::ServerMsgBody::ProjectReadFrame { frame },
             })
-            .await
-        {
-            Ok(()) => {
-                self.sequence = self.sequence.saturating_add(1);
-                Ok(())
-            }
-            Err(error) => {
-                self.pending_events = events;
-                Err(error)
-            }
-        }
+            .await?;
+        // Confirmed send: clear the batch and advance.
+        self.pending_events.clear();
+        self.pending_events_len = 0;
+        self.advance_sequence();
+        Ok(())
     }
 
-    fn encoded_frame_len(
-        &self,
-        sequence: u32,
-        events: &[ProjectReadEvent],
-    ) -> Result<usize, TransportError> {
-        let message = WireServerMessage {
-            id: self.id,
+    /// Advance to the next frame sequence and refresh the cached empty-frame
+    /// length, which depends on the sequence number's digit count.
+    fn advance_sequence(&mut self) {
+        self.sequence = self.sequence.saturating_add(1);
+        self.empty_frame_len = Self::measure_empty_frame_len(self.id, self.sequence);
+    }
+
+    /// Encoded length of an empty frame (`events: []`) at `sequence`, measured
+    /// with the wire serializer. Used as the fixed envelope cost that per-event
+    /// lengths are added to.
+    fn measure_empty_frame_len(id: u64, sequence: u32) -> usize {
+        lpc_wire::ser_write_json_len(&WireServerMessage {
+            id,
             msg: lpc_wire::server::ServerMsgBody::ProjectReadFrame {
-                frame: ProjectReadFrame::new(sequence, events.to_vec()),
+                frame: ProjectReadFrame::new(sequence, Vec::new()),
             },
-        };
-        lpc_wire::json::to_string(&message)
-            .map(|json| json.len())
-            .map_err(|error| TransportError::Serialization(format!("{error}")))
+        })
     }
 }
 
@@ -542,19 +581,19 @@ mod tests {
         assert_eq!(frame.events.len(), events);
     }
 
+    /// Measure with the same wire serializer the sink budgets against so the
+    /// computed budgets in these tests match the sink's internal measurement.
     fn encoded_project_read_frame_len(
         id: u64,
         sequence: u32,
         events: &[ProjectReadEvent],
     ) -> usize {
-        lpc_wire::json::to_string(&WireServerMessage {
+        lpc_wire::ser_write_json_len(&WireServerMessage {
             id,
             msg: lpc_wire::server::ServerMsgBody::ProjectReadFrame {
                 frame: ProjectReadFrame::new(sequence, events.to_vec()),
             },
         })
-        .unwrap()
-        .len()
     }
 
     fn block_on<F: Future>(future: F) -> F::Output {

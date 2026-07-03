@@ -39,7 +39,8 @@ pub use project_read_event::{
     ProjectReadResourceEvent, ProjectReadShapeEvent,
 };
 pub use project_read_frame::{
-    PROJECT_READ_FRAME_MAX_BYTES, PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES, ProjectReadFrame,
+    PROJECT_READ_FRAME_MAX_BYTES, PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES,
+    PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES, PROJECT_READ_RUNTIME_CHUNK_BYTES, ProjectReadFrame,
 };
 pub use project_read_request::{ProjectReadQuery, ProjectReadRequest};
 pub use project_read_response::{ProjectReadResponse, ProjectReadResult};

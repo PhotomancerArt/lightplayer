@@ -241,8 +241,22 @@ async fn timed_write_full_server_msg<W: Write>(
     tx: &mut W,
     msg: lpc_wire::WireServerMessage,
 ) -> Result<(), lpc_wire::TransportError> {
+    // TODO(M3 stretch): this ~16.7 KiB stack buffer lives as async-fn state and
+    // is paid even for tiny acks. The preferred fix — a `SerWrite` that streams
+    // straight to the chunked+timeout USB writer — is blocked because
+    // `SerWrite::write` is synchronous while `timed_write_all` is `async`, so the
+    // streaming impl cannot `.await` the USB write without an internal buffer.
+    // The StaticCell fallback needs an aliasing/RAM measurement first (io_task is
+    // the sole writer, but drain paths interleave), so it is deferred rather than
+    // forced here. Revisit once an async-capable streaming writer exists.
+    //
+    // Derived from the shared budget: the serial buffer already reserves the
+    // frame budget plus `PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES`; this only adds
+    // room for the `\nM!` framing prefix and trailing `\n` written around the
+    // message (4 bytes, padded to 16 for alignment slack).
+    const SERVER_MSG_FRAMING_BYTES: usize = 16;
     const SERVER_MSG_JSON_BUFFER_SIZE: usize =
-        lpc_wire::PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES + 16;
+        lpc_wire::PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES + SERVER_MSG_FRAMING_BYTES;
     let mut buf = [0u8; SERVER_MSG_JSON_BUFFER_SIZE];
     let mut writer = StackJsonWriter::new(&mut buf);
     if writer.write(b"\nM!").is_err() {

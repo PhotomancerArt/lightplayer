@@ -14,6 +14,8 @@ pub mod project;
 pub mod project_command;
 pub mod project_inventory;
 pub mod project_overlay;
+#[cfg(feature = "ser-write-json")]
+pub mod ser_write;
 pub mod serde_base64;
 pub mod server;
 pub mod slot;
@@ -25,7 +27,8 @@ pub use messages::{
     ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
     ControlProductProbeResult, ExplainSlotProbeRequest, ExplainSlotProbeResult, NodeReadQuery,
     NodeReadResult, NodeReadSelection, PROJECT_READ_FRAME_MAX_BYTES,
-    PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES, ProjectProbeRequest, ProjectProbeResult,
+    PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES, PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES,
+    PROJECT_READ_RUNTIME_CHUNK_BYTES, ProjectProbeRequest, ProjectProbeResult,
     ProjectReadCollectError, ProjectReadCollectStatus, ProjectReadCollector, ProjectReadEvent,
     ProjectReadFrame, ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQuery,
     ProjectReadQueryEvent, ProjectReadRequest, ProjectReadResourceEvent, ProjectReadResponse,
@@ -46,6 +49,8 @@ pub use project_overlay::{
     WireOverlayCommitRequest, WireOverlayCommitResponse, WireOverlayMutationRequest,
     WireOverlayMutationResponse, WireOverlayReadRequest, WireOverlayReadResponse,
 };
+#[cfg(feature = "ser-write-json")]
+pub use ser_write::{CountingSerWrite, ser_write_json_len};
 pub use server::{
     AvailableProject, ClientMsgBody, FsRequest, FsResponse, LoadedProject, MemoryStats,
     SampleStats, ServerConfig, ServerMsgBody,

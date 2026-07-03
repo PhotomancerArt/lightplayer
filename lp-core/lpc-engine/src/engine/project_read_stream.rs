@@ -237,7 +237,10 @@ async fn stream_runtime_buffer_payload<S>(
 where
     S: ProjectReadEventSink,
 {
-    const RUNTIME_BUFFER_PAYLOAD_CHUNK_BYTES: usize = 4 * 1024;
+    // Derived from the frame budget in one place (`lpc-wire`) so a chunk's
+    // base64 always fits an empty project-read frame; see
+    // `PROJECT_READ_RUNTIME_CHUNK_BYTES` and its compile-time budget assertion.
+    const RUNTIME_BUFFER_PAYLOAD_CHUNK_BYTES: usize = lpc_wire::PROJECT_READ_RUNTIME_CHUNK_BYTES;
 
     let lpc_wire::WireRuntimeBufferPayload {
         resource_ref,
