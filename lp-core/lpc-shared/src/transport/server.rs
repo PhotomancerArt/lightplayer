@@ -76,7 +76,12 @@ pub trait ProjectReadEventSink {
 /// ```
 #[allow(async_fn_in_trait, reason = "trait async fn stable in Rust 1.75+")]
 pub trait ServerTransport {
-    /// Send a server message (consumes the message)
+    /// Send a server message (consumes the message).
+    ///
+    /// A successful return means the message has been accepted by the
+    /// underlying transport write path. Implementations must not report success
+    /// for a best-effort handoff that can still drop the message later without
+    /// surfacing an error to this future.
     async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError>;
 
     /// Receive a client message (non-blocking). Returns `Ok(None)` if no message is available.
@@ -149,14 +154,26 @@ where
             return Ok(());
         }
 
-        let frame = ProjectReadFrame::new(self.sequence, core::mem::take(&mut self.pending_events));
-        self.sequence = self.sequence.saturating_add(1);
-        self.transport
+        let sequence = self.sequence;
+        let events = core::mem::take(&mut self.pending_events);
+        let frame = ProjectReadFrame::new(sequence, events.clone());
+        match self
+            .transport
             .send(WireServerMessage {
                 id: self.id,
                 msg: lpc_wire::server::ServerMsgBody::ProjectReadFrame { frame },
             })
             .await
+        {
+            Ok(()) => {
+                self.sequence = self.sequence.saturating_add(1);
+                Ok(())
+            }
+            Err(error) => {
+                self.pending_events = events;
+                Err(error)
+            }
+        }
     }
 
     fn encoded_frame_len(
@@ -245,6 +262,37 @@ mod tests {
     }
 
     #[test]
+    fn frame_sink_finish_flushes_partial_final_frame() {
+        let event = ProjectReadEvent::Begin {
+            revision: Revision::new(7),
+        };
+        let max_bytes = encoded_project_read_frame_len(9, 0, &[event.clone()]) * 2;
+        let mut transport = CollectingTransport::default();
+
+        block_on(async {
+            let mut sink = ProjectReadFrameSink::with_max_bytes(&mut transport, 9, max_bytes);
+            sink.send_project_read_event(event).await.unwrap();
+            assert!(sink.transport.sent.is_empty());
+            sink.finish().await.unwrap();
+        });
+
+        assert_eq!(transport.sent.len(), 1);
+        assert_frame(&transport.sent[0], 9, 0, 1);
+    }
+
+    #[test]
+    fn frame_sink_finish_does_not_emit_empty_frame() {
+        let mut transport = CollectingTransport::default();
+
+        block_on(async {
+            let mut sink = ProjectReadFrameSink::with_max_bytes(&mut transport, 9, usize::MAX);
+            sink.finish().await.unwrap();
+        });
+
+        assert!(transport.sent.is_empty());
+    }
+
+    #[test]
     fn frame_sink_rejects_oversized_single_event() {
         let event = ProjectReadEvent::Begin {
             revision: Revision::new(7),
@@ -259,6 +307,53 @@ mod tests {
 
         assert!(matches!(error, TransportError::Serialization(_)));
         assert!(transport.sent.is_empty());
+    }
+
+    #[test]
+    fn frame_sink_does_not_advance_sequence_after_send_error() {
+        let begin = ProjectReadEvent::Begin {
+            revision: Revision::new(7),
+        };
+        let end = ProjectReadEvent::End {
+            revision: Revision::new(7),
+        };
+        let max_bytes = encoded_project_read_frame_len(9, 0, &[begin.clone()]);
+        let mut transport = FailingOnceTransport::default();
+
+        block_on(async {
+            let mut sink = ProjectReadFrameSink::with_max_bytes(&mut transport, 9, max_bytes);
+            sink.send_project_read_event(begin).await.unwrap();
+            sink.send_project_read_event(end.clone()).await.unwrap_err();
+            sink.send_project_read_event(end).await.unwrap();
+            sink.finish().await.unwrap();
+        });
+
+        assert_eq!(transport.inner.sent.len(), 2);
+        assert_frame(&transport.inner.sent[0], 9, 0, 1);
+        assert_frame(&transport.inner.sent[1], 9, 1, 1);
+    }
+
+    #[test]
+    fn frame_sink_stops_at_failed_sequence_without_emitting_later_frames() {
+        let event = ProjectReadEvent::Begin {
+            revision: Revision::new(7),
+        };
+        let max_bytes = encoded_project_read_frame_len(9, 0, &[event.clone()]);
+        let mut transport = FailingSequenceTransport::new(3);
+
+        block_on(async {
+            let mut sink = ProjectReadFrameSink::with_max_bytes(&mut transport, 9, max_bytes);
+            sink.send_project_read_event(event.clone()).await.unwrap();
+            sink.send_project_read_event(event.clone()).await.unwrap();
+            sink.send_project_read_event(event.clone()).await.unwrap();
+            sink.send_project_read_event(event.clone()).await.unwrap();
+            sink.send_project_read_event(event).await.unwrap_err();
+        });
+
+        assert_eq!(transport.inner.sent.len(), 3);
+        assert_frame(&transport.inner.sent[0], 9, 0, 1);
+        assert_frame(&transport.inner.sent[1], 9, 1, 1);
+        assert_frame(&transport.inner.sent[2], 9, 2, 1);
     }
 
     #[derive(Default)]
@@ -282,6 +377,72 @@ mod tests {
 
         async fn close(&mut self) -> Result<(), TransportError> {
             Ok(())
+        }
+    }
+
+    #[derive(Default)]
+    struct FailingOnceTransport {
+        inner: CollectingTransport,
+        failed: bool,
+    }
+
+    impl ServerTransport for FailingOnceTransport {
+        async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+            if !self.failed {
+                self.failed = true;
+                return Err(TransportError::Other("synthetic send failure".into()));
+            }
+            self.inner.send(msg).await
+        }
+
+        async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+            self.inner.receive().await
+        }
+
+        async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+            self.inner.receive_all().await
+        }
+
+        async fn close(&mut self) -> Result<(), TransportError> {
+            self.inner.close().await
+        }
+    }
+
+    struct FailingSequenceTransport {
+        inner: CollectingTransport,
+        fail_sequence: u32,
+    }
+
+    impl FailingSequenceTransport {
+        fn new(fail_sequence: u32) -> Self {
+            Self {
+                inner: CollectingTransport::default(),
+                fail_sequence,
+            }
+        }
+    }
+
+    impl ServerTransport for FailingSequenceTransport {
+        async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
+            let lpc_wire::server::ServerMsgBody::ProjectReadFrame { frame } = &msg.msg else {
+                return self.inner.send(msg).await;
+            };
+            if frame.sequence == self.fail_sequence {
+                return Err(TransportError::Other("synthetic sequence failure".into()));
+            }
+            self.inner.send(msg).await
+        }
+
+        async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {
+            self.inner.receive().await
+        }
+
+        async fn receive_all(&mut self) -> Result<Vec<ClientMessage>, TransportError> {
+            self.inner.receive_all().await
+        }
+
+        async fn close(&mut self) -> Result<(), TransportError> {
+            self.inner.close().await
         }
     }
 

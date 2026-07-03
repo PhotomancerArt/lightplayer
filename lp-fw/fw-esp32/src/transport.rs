@@ -1,7 +1,7 @@
-//! Streaming transport: serializes WireServerMessage in io_task, minimal buffering.
+//! Accountable transport: serializes WireServerMessage in io_task, minimal buffering.
 //!
-//! Sends WireServerMessage to OUTGOING_SERVER_MSG (capacity 1). io_task receives
-//! and serializes with ser-write-json directly to serial. Never buffers full JSON.
+//! Sends a server write request to io_task and waits for io_task to serialize
+//! and write the message before returning success.
 
 extern crate alloc;
 
@@ -14,23 +14,25 @@ use lpc_wire::{ClientMessage, TransportError, json};
 
 use crate::serial::io_task;
 
-/// Streaming transport that sends WireServerMessage to io_task for serialization
+/// Server transport that sends WireServerMessage to io_task for serialization.
 ///
-/// Uses Channel<WireServerMessage, 1> - at most one message in flight.
-/// transport.send(msg).await blocks until io_task receives (backpressure).
+/// Uses a single in-flight write request/result pair. `send(msg).await` blocks
+/// until io_task reports that the message was fully written or failed.
 pub struct StreamingMessageRouterTransport {
     incoming: &'static Channel<CriticalSectionRawMutex, alloc::string::String, 32>,
-    server_msg_channel: &'static Channel<CriticalSectionRawMutex, WireServerMessage, 1>,
+    server_write_request: &'static Channel<CriticalSectionRawMutex, WireServerMessage, 1>,
+    server_write_result: &'static Channel<CriticalSectionRawMutex, Result<(), TransportError>, 1>,
 }
 
 impl StreamingMessageRouterTransport {
     /// Create using channels from io_task
     pub fn from_io_channels() -> Self {
         let (incoming, _) = io_task::get_message_channels();
-        let server_msg = io_task::get_server_msg_channel();
+        let (server_write_request, server_write_result) = io_task::get_server_write_channels();
         Self {
             incoming,
-            server_msg_channel: server_msg,
+            server_write_request,
+            server_write_result,
         }
     }
 }
@@ -38,9 +40,17 @@ impl StreamingMessageRouterTransport {
 impl ServerTransport for StreamingMessageRouterTransport {
     async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
         let id = msg.id;
-        self.server_msg_channel.sender().send(msg).await;
-        log::debug!("StreamingMessageRouterTransport: Sent message id={id} via server_msg channel");
-        Ok(())
+        self.server_write_request.sender().send(msg).await;
+        let result = self.server_write_result.receiver().receive().await;
+        match &result {
+            Ok(()) => log::debug!(
+                "StreamingMessageRouterTransport: wrote message id={id} through io_task"
+            ),
+            Err(error) => log::warn!(
+                "StreamingMessageRouterTransport: failed to write message id={id}: {error}"
+            ),
+        }
+        result
     }
 
     async fn receive(&mut self) -> Result<Option<ClientMessage>, TransportError> {

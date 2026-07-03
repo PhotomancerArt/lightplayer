@@ -15,7 +15,16 @@ use super::ProjectReadEvent;
 /// The frame batcher measures the encoded `WireServerMessage` body against
 /// this budget. Tiny transport delimiters such as `M!` and the trailing newline
 /// are intentionally excluded.
-pub const PROJECT_READ_FRAME_MAX_BYTES: usize = 8 * 1024;
+pub const PROJECT_READ_FRAME_MAX_BYTES: usize = 16 * 1024;
+
+/// Minimum server-side scratch buffer for serializing one project-read frame.
+///
+/// Firmware transports can use this for their stack serialization buffer while
+/// still asking the shared batcher to keep each JSON message under
+/// [`PROJECT_READ_FRAME_MAX_BYTES`]. The small margin covers framing delimiters
+/// and serializer bookkeeping; it is not intended to raise the transport frame
+/// budget.
+pub const PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES: usize = PROJECT_READ_FRAME_MAX_BYTES + 256;
 
 /// One transport-level batch of project-read events.
 ///

@@ -38,7 +38,9 @@ pub use project_read_event::{
     ProjectReadEvent, ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQueryEvent,
     ProjectReadResourceEvent, ProjectReadShapeEvent,
 };
-pub use project_read_frame::{PROJECT_READ_FRAME_MAX_BYTES, ProjectReadFrame};
+pub use project_read_frame::{
+    PROJECT_READ_FRAME_MAX_BYTES, PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES, ProjectReadFrame,
+};
 pub use project_read_request::{ProjectReadQuery, ProjectReadRequest};
 pub use project_read_response::{ProjectReadResponse, ProjectReadResult};
 pub use read_level::ReadLevel;

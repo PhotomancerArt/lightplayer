@@ -27,7 +27,7 @@ A `ProjectReadRequest` is answered by one or more same-request-id
 terminal `End` event, terminal project-read `Error` event, or top-level server
 error.
 
-Frames are batched to an encoded JSON budget of 8 KiB. The batcher never splits
+Frames are batched to an encoded JSON budget of 16 KiB. The batcher never splits
 JSON mid-event. If an event does not fit in an empty frame, that event must be
 split into smaller semantic events rather than forcing transports to grow a
 larger buffer.
