@@ -70,8 +70,18 @@ pub enum ControlProductProbeResult {
 
 #[cfg(test)]
 mod tests {
+    use alloc::vec;
+
     use super::*;
-    use lpc_model::{ColorOrder, ControlSampleEncoding, ControlSampleSpan, NodeId};
+    use lpc_model::{
+        ColorOrder, ControlDisplayLayout, ControlLamp2d, ControlLayout2d, ControlSampleEncoding,
+        ControlSampleSpan, NodeId,
+    };
+
+    use crate::{
+        PROJECT_READ_FRAME_MAX_BYTES, ProjectReadEvent, ProjectReadFrame, ProjectReadProbeEvent,
+        server::ServerMsgBody,
+    };
 
     #[test]
     fn control_product_probe_round_trips_native_samples() {
@@ -100,5 +110,65 @@ mod tests {
         let round_trip: ControlProductProbeResult = serde_json::from_str(&json).unwrap();
 
         assert_eq!(round_trip, result);
+    }
+
+    #[test]
+    fn fixture_sized_control_preview_fits_project_read_frame_budget() {
+        let product = ControlProduct::new(NodeId::new(2), 0, ControlExtent::new(1, 723));
+        let result = ControlProductProbeResult::Preview {
+            product,
+            revision: Revision::new(18),
+            extent: ControlExtent::new(1, 723),
+            sample_format: WireChannelSampleFormat::U16,
+            sample_layout: ControlSampleLayout {
+                spans: Vec::from([ControlSampleSpan {
+                    row: 0,
+                    start: 0,
+                    len: 723,
+                    encoding: ControlSampleEncoding::RgbPixels {
+                        count: 241,
+                        color_order: ColorOrder::Rgb,
+                    },
+                }]),
+            },
+            display_layout: ControlDisplayLayoutProbeResult::Layout(ControlDisplayLayout::Layout2d(
+                ControlLayout2d::new(
+                    Revision::new(18),
+                    10,
+                    10,
+                    (0..241)
+                        .map(|index| ControlLamp2d {
+                            lamp_index: index,
+                            sample_start: index * 3,
+                            center: [(index % 17) as f32 / 16.0, (index / 17) as f32 / 15.0],
+                            radius: 0.02,
+                        })
+                        .collect(),
+                ),
+            )),
+            bytes: vec![0; 723 * 2],
+        };
+        let frame = ProjectReadFrame::new(
+            0,
+            Vec::from([ProjectReadEvent::Probe {
+                index: 0,
+                event: ProjectReadProbeEvent::Result(crate::ProjectProbeResult::ControlProduct(
+                    result,
+                )),
+            }]),
+        );
+        let message = crate::WireServerMessage {
+            id: 7,
+            msg: ServerMsgBody::ProjectReadFrame { frame },
+        };
+
+        let json = crate::json::to_string(&message).unwrap();
+
+        assert!(
+            json.len() <= PROJECT_READ_FRAME_MAX_BYTES,
+            "encoded control preview frame was {} bytes, budget is {}",
+            json.len(),
+            PROJECT_READ_FRAME_MAX_BYTES
+        );
     }
 }
