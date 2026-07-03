@@ -131,8 +131,8 @@ mod tests {
                     },
                 }]),
             },
-            display_layout: ControlDisplayLayoutProbeResult::Layout(ControlDisplayLayout::Layout2d(
-                ControlLayout2d::new(
+            display_layout: ControlDisplayLayoutProbeResult::Layout(
+                ControlDisplayLayout::Layout2d(ControlLayout2d::new(
                     Revision::new(18),
                     10,
                     10,
@@ -144,8 +144,8 @@ mod tests {
                             radius: 0.02,
                         })
                         .collect(),
-                ),
-            )),
+                )),
+            ),
             bytes: vec![0; 723 * 2],
         };
         let frame = ProjectReadFrame::new(

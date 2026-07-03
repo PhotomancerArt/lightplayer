@@ -478,8 +478,7 @@ impl ResourceCollectState {
                     .is_some()
                 {
                     return Err(protocol(format!(
-                        "runtime buffer payload {:?} began twice",
-                        resource_ref
+                        "runtime buffer payload {resource_ref:?} began twice"
                     )));
                 }
             }
@@ -494,8 +493,7 @@ impl ResourceCollectState {
                     .get_mut(&resource_ref)
                     .ok_or_else(|| {
                         protocol(format!(
-                            "runtime buffer payload bytes for {:?} arrived before begin",
-                            resource_ref
+                            "runtime buffer payload bytes for {resource_ref:?} arrived before begin"
                         ))
                     })?;
                 if usize::try_from(offset).ok() != Some(pending.bytes.len()) {
@@ -512,8 +510,7 @@ impl ResourceCollectState {
                 self.ensure_open("runtime buffer payload end")?;
                 let pending = self.pending_payloads.remove(&resource_ref).ok_or_else(|| {
                     protocol(format!(
-                        "runtime buffer payload end for {:?} arrived before begin",
-                        resource_ref
+                        "runtime buffer payload end for {resource_ref:?} arrived before begin"
                     ))
                 })?;
                 if usize::try_from(pending.byte_length).ok() != Some(pending.bytes.len()) {

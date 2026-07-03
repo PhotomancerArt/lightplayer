@@ -8,7 +8,6 @@ use crate::client::LpClient;
 use eframe::egui;
 use lpc_model::{
     MutationCmd, MutationCmdBatch, MutationCmdId, MutationOp, NodeId, Revision, SlotEdit, SlotPath,
-    SlotShapeId,
 };
 use lpc_view::{ProjectView, apply_project_read_response};
 use lpc_wire::{
@@ -35,11 +34,6 @@ const TARGET_UI_FPS: u64 = 30;
 const TARGET_UI_FRAME_MS: u64 = 1000 / TARGET_UI_FPS;
 const PROJECT_POLL_INTERVAL: Duration = Duration::from_millis(TARGET_UI_FRAME_MS);
 const UI_REPAINT_INTERVAL: Duration = Duration::from_millis(TARGET_UI_FRAME_MS);
-// Keep shape pages small. Some shape definitions include other shapes and can
-// overflow the firmware's 16KB internal JSON buffer, which has caused project
-// sync parse errors/crashes. Raise this only after the server buffer/streaming
-// limitation is fixed.
-const SHAPE_SYNC_PAGE_LIMIT: u32 = 4;
 
 /// Debug UI application state.
 pub struct DebugUiState {
@@ -56,7 +50,6 @@ pub struct DebugUiState {
     last_render_product_probe: Option<RenderProductProbeResult>,
     last_runtime_status: Option<RuntimeReadResult>,
     shapes_synced: bool,
-    next_shape_cursor: Option<SlotShapeId>,
     next_overlay_cmd_id: u64,
     queued_edits: BTreeMap<SlotEditKey, SlotEditIntent>,
     slot_edit_errors: BTreeMap<SlotEditKey, String>,
@@ -86,7 +79,6 @@ impl DebugUiState {
             last_render_product_probe: None,
             last_runtime_status: None,
             shapes_synced: false,
-            next_shape_cursor: None,
             next_overlay_cmd_id: 1,
             queued_edits: BTreeMap::new(),
             slot_edit_errors: BTreeMap::new(),
@@ -106,9 +98,12 @@ impl DebugUiState {
                     if let Some(runtime) = response.results.iter().find_map(runtime_result) {
                         self.last_runtime_status = Some(runtime.clone());
                     }
-                    if let Some(shape) = response.results.iter().find_map(shape_result) {
-                        self.shapes_synced = shape.complete;
-                        self.next_shape_cursor = shape.next;
+                    if response
+                        .results
+                        .iter()
+                        .any(|result| shape_result(result).is_some())
+                    {
+                        self.shapes_synced = true;
                     }
                     if let Ok(mut view) = self.project_view.lock() {
                         if let Err(error) = apply_debug_ui_project_read_response(
@@ -180,7 +175,7 @@ impl DebugUiState {
                 read_context.3,
             )
         } else {
-            debug_ui_shape_sync_read(self.next_shape_cursor)
+            debug_ui_shape_sync_read()
         };
         let mutation = read_context.4;
         let client = self.async_client.clone();
@@ -432,13 +427,11 @@ fn debug_ui_project_read(
     }
 }
 
-fn debug_ui_shape_sync_read(after: Option<SlotShapeId>) -> ProjectReadRequest {
+fn debug_ui_shape_sync_read() -> ProjectReadRequest {
     ProjectReadRequest {
         since: None,
         queries: Vec::from([ProjectReadQuery::Shapes(ShapeReadQuery {
             level: ReadLevel::Detail,
-            after,
-            limit: Some(SHAPE_SYNC_PAGE_LIMIT),
         })]),
         probes: Vec::new(),
     }
@@ -520,8 +513,6 @@ mod tests {
             results: vec![WireProjectReadResult::Shapes(ShapeReadResult {
                 level: ReadLevel::Detail,
                 registry: Some(final_page_registry.snapshot()),
-                complete: true,
-                next: None,
             })],
             probes: vec![],
         };
@@ -535,8 +526,7 @@ mod tests {
 
     #[test]
     fn initial_shape_sync_read_is_shape_only() {
-        let after = SlotShapeId::new(10);
-        let request = debug_ui_shape_sync_read(Some(after));
+        let request = debug_ui_shape_sync_read();
 
         assert_eq!(request.since, None);
         assert!(request.probes.is_empty());
@@ -545,8 +535,6 @@ mod tests {
             request.queries[0],
             ProjectReadQuery::Shapes(ShapeReadQuery {
                 level: ReadLevel::Detail,
-                after: Some(after),
-                limit: Some(SHAPE_SYNC_PAGE_LIMIT),
             })
         );
     }
