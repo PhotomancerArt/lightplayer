@@ -140,6 +140,7 @@ pub struct LoadedProject {
 
 /// Optional memory statistics (platform-dependent; ESP32 reports heap).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryStats {
     pub free_bytes: u32,

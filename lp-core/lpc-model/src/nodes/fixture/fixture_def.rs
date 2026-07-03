@@ -110,6 +110,7 @@ fn default_gamma_correction() -> OptionSlot<ValueSlot<bool>> {
 
 /// Color order for RGB channels.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ColorOrder {
     /// Red, Green, Blue.

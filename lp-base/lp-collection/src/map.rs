@@ -378,6 +378,33 @@ where
     }
 }
 
+// `VecMap` serializes as a JSON object/map (see the `Serialize` impl above,
+// which calls `collect_map`). Its wire form is therefore identical to
+// `BTreeMap<K, V>`, so its schema delegates to the canonical map schema rather
+// than describing the private sorted-`Vec` representation.
+#[cfg(feature = "schemars")]
+impl<K, V> schemars::JsonSchema for VecMap<K, V>
+where
+    K: schemars::JsonSchema,
+    V: schemars::JsonSchema,
+{
+    fn inline_schema() -> bool {
+        <alloc::collections::BTreeMap<K, V> as schemars::JsonSchema>::inline_schema()
+    }
+
+    fn schema_name() -> alloc::borrow::Cow<'static, str> {
+        <alloc::collections::BTreeMap<K, V> as schemars::JsonSchema>::schema_name()
+    }
+
+    fn schema_id() -> alloc::borrow::Cow<'static, str> {
+        <alloc::collections::BTreeMap<K, V> as schemars::JsonSchema>::schema_id()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        <alloc::collections::BTreeMap<K, V> as schemars::JsonSchema>::json_schema(generator)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     extern crate std;

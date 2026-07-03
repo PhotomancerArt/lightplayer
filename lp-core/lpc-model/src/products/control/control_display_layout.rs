@@ -60,12 +60,33 @@ impl ControlLayout2d {
 
 /// One logical lamp in a two-dimensional display layout.
 #[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ControlLamp2d {
     pub lamp_index: u32,
     pub sample_start: u32,
     pub center: [f32; 2],
     pub radius: f32,
+}
+
+// `ControlLamp2d` has a custom `Serialize` impl that emits a fixed 5-element
+// tuple `[lamp_index, sample_start, center_x, center_y, radius]`, so its schema
+// must describe that wire form — not the named-field struct. It mirrors the
+// `(u32, u32, f32, f32, f32)` tuple schema (`type: array` with `prefixItems` and
+// `minItems`/`maxItems` of 5).
+#[cfg(feature = "schema-gen")]
+impl schemars::JsonSchema for ControlLamp2d {
+    fn schema_name() -> alloc::borrow::Cow<'static, str> {
+        "ControlLamp2d".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let mut schema =
+            <(u32, u32, f32, f32, f32) as schemars::JsonSchema>::json_schema(generator);
+        schema.insert(
+            "description".into(),
+            "Compact lamp tuple: [lamp_index, sample_start, center_x, center_y, radius].".into(),
+        );
+        schema
+    }
 }
 
 impl serde::Serialize for ControlLamp2d {

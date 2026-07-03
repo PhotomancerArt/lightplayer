@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 #[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(transparent)]
 pub struct WireSlotData(
     #[cfg_attr(feature = "schema-gen", schemars(with = "serde_json::Value"))]
