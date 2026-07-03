@@ -55,10 +55,10 @@ impl ClientIo for BrowserWorkerClientIo {
             return Ok(message);
         }
 
+        // The worker owns its own clock (self-ticking with real deltas), so this
+        // loop is a pure consumer: it polls for worker outputs and never advances
+        // simulation time. Event-driven receive is future work (M7).
         for _ in 0..RESPONSE_POLL_LIMIT {
-            self.state
-                .borrow()
-                .post(&BrowserInputEnvelope::Tick { delta_ms: Some(16) })?;
             sleep_ms(4).await?;
 
             let outputs = self.state.borrow().take_outputs()?;

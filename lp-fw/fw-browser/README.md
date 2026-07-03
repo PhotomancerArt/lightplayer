@@ -44,6 +44,27 @@ Automated smoke coverage should load/tick projects through this boundary and
 inspect canonical project-read `OutputChannels` resources rather than reaching
 directly into shader or output-provider internals.
 
+## Clock Ownership (Tick Modes)
+
+The runtime never owns a clock; it advances its `ManualTimeProvider` by exactly
+the delta each `tick` envelope carries. Who supplies that delta is a *worker*
+concern, selected at boot:
+
+- **Self-ticking** (Studio simulator default): the worker JS runs its own timer
+  (~30 fps) and ticks the runtime with the *real* elapsed time measured via
+  `performance.now()`. Previews animate at roughly real time even when no
+  protocol request is in flight. The Studio client transport is a pure consumer
+  of worker output and posts no `tick` envelopes.
+- **Explicit** (tests/stories/smoke harnesses): no worker timer runs. Time
+  advances only when the host sends a `tick` envelope with a chosen delta. A
+  fixed delta gives deterministic advancement, so lockstep tests can pin exact
+  frame numbers.
+
+Because the runtime treats the delta opaquely, both modes exercise identical
+runtime code; only the *source* of the delta differs. The `lpa-link`
+`browser-worker` provider selects the mode through
+`BrowserWorkerOptions::tick_mode` (default `SelfTicking`).
+
 ## Validation
 
 ```bash

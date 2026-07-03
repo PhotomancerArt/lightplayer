@@ -17,6 +17,10 @@ use lpa_studio_core::{
 
 const STYLE: &str = include_str!("style.css");
 const DEVICE_PROJECT_REFRESH_INTERVAL_MS: u32 = 750;
+// The browser simulator now owns its clock (self-ticking with real deltas), so
+// this interval is purely how often the UI re-reads preview state, not a sim
+// heartbeat. It stays fast so self-ticked previews stay visibly fresh; full
+// cadence-policy cleanup is M7.
 const SIMULATOR_PROJECT_REFRESH_INTERVAL_MS: u32 = 33;
 const DEVICE_PASSIVE_REFRESH_TIMEOUT_MS: u32 = 12_000;
 const SIMULATOR_PASSIVE_REFRESH_TIMEOUT_MS: u32 = 4_000;

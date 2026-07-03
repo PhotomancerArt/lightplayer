@@ -41,6 +41,90 @@ fn runtime_serves_protocol_messages_after_tick() {
 }
 
 #[wasm_bindgen_test]
+fn explicit_ticks_advance_the_clock_deterministically() {
+    // In explicit mode (no worker self-timer) the runtime advances its clock by
+    // exactly the delta each `tick` carries. Two runtimes fed the identical
+    // sequence of explicit deltas must reach byte-for-byte identical frame
+    // numbers, and a runtime driven with double the deltas must advance strictly
+    // further. This is the property that lets tests and stories pin deterministic
+    // frames rather than depending on wall-clock self-ticking.
+    fw_browser_init_exports(wasm_bindgen::exports());
+
+    let frame_after_deltas = |label: &str, deltas: &[u32]| -> u64 {
+        let runtime_id = create_runtime(label).expect("create runtime");
+        let project_fs = build_smoke_project();
+        let mut next_id = 1;
+
+        for (path, content) in collect_project_files(&project_fs.borrow()) {
+            let full_path = format!("/projects/smoke/{path}").as_path_buf();
+            send_protocol_request(
+                runtime_id,
+                next_request_id(&mut next_id),
+                ClientRequest::Filesystem(FsRequest::Write {
+                    path: full_path,
+                    data: content,
+                }),
+                1,
+            );
+        }
+
+        let load_response = send_protocol_request(
+            runtime_id,
+            next_request_id(&mut next_id),
+            ClientRequest::LoadProject {
+                path: "smoke".to_string(),
+            },
+            1,
+        )
+        .into_iter()
+        .next()
+        .expect("load project response");
+        let project_handle = match load_response.msg {
+            WireServerMsgBody::LoadProject { handle } => handle,
+            other => panic!("unexpected load response: {other:?}"),
+        };
+
+        for delta in deltas {
+            tick_runtime(runtime_id, *delta).expect("explicit tick");
+        }
+
+        let response = send_protocol_request(
+            runtime_id,
+            next_request_id(&mut next_id),
+            ClientRequest::ProjectRead {
+                handle: project_handle,
+                request: ProjectReadRequest {
+                    since: None,
+                    queries: vec![ProjectReadQuery::Runtime(RuntimeReadQuery)],
+                    probes: Vec::new(),
+                },
+            },
+            0,
+        );
+        match collect_project_read_response(response).results.first() {
+            Some(ProjectReadResult::Runtime(runtime)) => runtime.project.frame_num,
+            other => panic!("expected runtime result: {other:?}"),
+        }
+    };
+
+    let deltas = [40_u32, 40, 40, 40];
+    let frame_a = frame_after_deltas("explicit-a", &deltas);
+    let frame_b = frame_after_deltas("explicit-b", &deltas);
+    assert_eq!(
+        frame_a, frame_b,
+        "identical explicit deltas must reach identical frame numbers: {frame_a} vs {frame_b}"
+    );
+    assert!(frame_a > 0, "explicit ticks must advance the frame");
+
+    let doubled: Vec<u32> = deltas.iter().flat_map(|delta| [*delta, *delta]).collect();
+    let frame_doubled = frame_after_deltas("explicit-doubled", &doubled);
+    assert!(
+        frame_doubled > frame_a,
+        "twice the explicit time must advance strictly further: {frame_doubled} vs {frame_a}"
+    );
+}
+
+#[wasm_bindgen_test]
 fn runtime_loads_project_and_renders_output_after_ticks() {
     fw_browser_init_exports(wasm_bindgen::exports());
 

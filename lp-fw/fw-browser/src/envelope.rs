@@ -12,7 +12,12 @@ use serde::{Deserialize, Serialize};
 pub(crate) enum BrowserInputEnvelope {
     /// Queue one complete `lpc_wire::ClientMessage` JSON frame.
     ProtocolIn { frame: String },
-    /// Advance the runtime by a deterministic amount of time.
+    /// Advance the runtime by the given delta.
+    ///
+    /// The delta is opaque to the runtime: the worker JS decides whether it is a
+    /// real measured elapsed time (self-ticking mode) or a fixed deterministic
+    /// step (explicit mode). The runtime always advances its clock by exactly the
+    /// delta it is handed, so a fixed delta yields deterministic advancement.
     Tick { delta_ms: Option<u32> },
     /// Mark the runtime as running for future autorun support.
     Start,
