@@ -114,4 +114,40 @@ mod tests {
 
         assert_eq!(back, sync);
     }
+
+    #[cfg(feature = "ser-write-json")]
+    #[test]
+    fn slot_data_serializes_as_json_value_with_ser_write_json() {
+        use core::convert::Infallible;
+        use ser_write_json::SerWrite;
+
+        struct VecWriter(Vec<u8>);
+
+        impl SerWrite for VecWriter {
+            type Error = Infallible;
+
+            fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+                self.0.extend_from_slice(buf);
+                Ok(())
+            }
+        }
+
+        let root = WireSlotRootSnapshot {
+            name: String::from("node.0.def"),
+            shape: SlotShapeId::new(7),
+            data: WireSlotData::from_json_string(String::from(
+                r#"{"kind":"value","changed_at":7,"value":2.0}"#,
+            ))
+            .unwrap(),
+        };
+
+        let mut writer = VecWriter(Vec::new());
+        ser_write_json::ser::to_writer(&mut writer, &root).unwrap();
+        let json = core::str::from_utf8(&writer.0).unwrap();
+
+        assert!(json.contains(r#""data":{"kind":"value""#), "{json}");
+        assert!(!json.contains("$serde_json::private::RawValue"), "{json}");
+        let back: WireSlotRootSnapshot = serde_json::from_str(json).unwrap();
+        assert_eq!(back, root);
+    }
 }

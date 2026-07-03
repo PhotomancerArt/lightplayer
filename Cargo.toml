@@ -231,6 +231,8 @@ codegen-units = 4
 esp-storage = { path = "third_party/esp-storage" }
 # no_std pp-rs fork for naga `glsl-in` on bare-metal (https://github.com/light-player/pp-rs)
 pp-rs = { path = "third_party/pp-rs" }
+# no_std JSON serializer patch: preserve serde_json::RawValue as raw JSON.
+ser-write-json = { path = "third_party/ser-write-json" }
 
 #####################################
 # Local dev patches

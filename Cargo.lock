@@ -7510,8 +7510,6 @@ dependencies = [
 [[package]]
 name = "ser-write-json"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b968997189e9b92e0d7f5ce4f2df3d94efa6534a331511137b1083b9b77d532"
 dependencies = [
  "ryu-js",
  "ser-write",
