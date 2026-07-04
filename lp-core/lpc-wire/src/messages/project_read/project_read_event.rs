@@ -84,6 +84,16 @@ pub enum ProjectReadShapeEvent {
         id: SlotShapeId,
         entry: SlotShapeEntry,
     },
+    /// Full current id set for membership sync.
+    ///
+    /// Emitted after entries and before [`End`](Self::End) only when the
+    /// registry's `ids_revision` is newer than the request `since`, so a client
+    /// reading a gated stream can prune any local shape whose id is absent from
+    /// this list. On a fresh or ungated read the list simply confirms the full
+    /// membership.
+    Membership {
+        ids: Vec<SlotShapeId>,
+    },
     End,
 }
 

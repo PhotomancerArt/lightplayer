@@ -21,7 +21,7 @@ impl Engine {
             .into_iter()
             .map(|query| match query {
                 ProjectReadQuery::Shapes(query) => {
-                    ProjectReadResult::Shapes(self.read_project_shapes(query))
+                    ProjectReadResult::Shapes(self.read_project_shapes(query, request.since))
                 }
                 ProjectReadQuery::Nodes(query) => ProjectReadResult::Nodes(
                     self.read_project_nodes(registry, request.since, query),

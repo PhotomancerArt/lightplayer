@@ -338,6 +338,15 @@ impl ShapeCollectState {
                 self.ensure_open("shape entry")?;
                 self.shapes.insert(id, entry);
             }
+            ProjectReadShapeEvent::Membership { ids } => {
+                self.ensure_open("shape membership")?;
+                // Prune any collected entry whose id is not in the current
+                // membership list. Harmless on a full stream (the list names
+                // every id already collected); on a gated stream it drops shapes
+                // that were removed since `since`. The collector is deleted in
+                // M6; this is the minimal tolerance the contract requires.
+                self.shapes.retain(|id, _| ids.contains(id));
+            }
             ProjectReadShapeEvent::End => {
                 self.ensure_open("shape end")?;
                 self.ended = true;

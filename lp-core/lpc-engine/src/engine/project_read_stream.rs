@@ -74,14 +74,15 @@ impl<'a> EngineProjectReadSource<'a> {
     {
         match query {
             ProjectReadQuery::Shapes(query) => {
-                let result = self.engine.read_project_shapes(query);
+                let result = self.engine.read_project_shapes(query, since);
                 if let Some(registry) = result.registry {
+                    let ids_revision = registry.ids_revision;
                     send_query_event(
                         sink,
                         index,
                         ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Begin {
                             level: result.level,
-                            ids_revision: registry.ids_revision,
+                            ids_revision,
                         }),
                     )
                     .await?;
@@ -92,6 +93,22 @@ impl<'a> EngineProjectReadSource<'a> {
                             ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Entry {
                                 id,
                                 entry,
+                            }),
+                        )
+                        .await?;
+                    }
+                    // Membership sync (G7): when the id set changed after `since`,
+                    // send the full current id list so the client can prune shapes
+                    // that vanished from a gated stream. A `None`/`0` since is
+                    // always older than any real `ids_revision`, so a fresh read
+                    // still carries the confirming list.
+                    if ids_revision > since.unwrap_or_default() {
+                        let ids = self.engine.project_shape_membership_ids();
+                        send_query_event(
+                            sink,
+                            index,
+                            ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Membership {
+                                ids,
                             }),
                         )
                         .await?;
@@ -416,6 +433,171 @@ mod tests {
 
         assert_eq!(decoded.results.len(), 4);
         assert!(chunk_events > 1);
+    }
+
+    // ---- Shapes revision-gating contract (M5 P1) ----
+
+    use lpc_model::{LpType, SlotShape, SlotShapeEntry, SlotShapeId};
+    use lpc_wire::{ProjectReadQuery, ReadLevel, ShapeReadQuery};
+
+    fn shapes_request(since: Option<Revision>) -> ProjectReadRequest {
+        ProjectReadRequest {
+            since,
+            queries: vec![ProjectReadQuery::Shapes(ShapeReadQuery {
+                level: ReadLevel::Detail,
+            })],
+            probes: Vec::new(),
+        }
+    }
+
+    fn collect_shape_events(
+        engine: &mut Engine,
+        registry: &ProjectRegistry,
+        since: Option<Revision>,
+    ) -> Vec<ProjectReadShapeEvent> {
+        let (_, events) = collect_event_response(engine, registry, shapes_request(since));
+        events
+            .into_iter()
+            .filter_map(|event| match event {
+                ProjectReadEvent::Query {
+                    event: ProjectReadQueryEvent::Shapes(shape_event),
+                    ..
+                } => Some(shape_event),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn shape_entry_ids(events: &[ProjectReadShapeEvent]) -> Vec<SlotShapeId> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                ProjectReadShapeEvent::Entry { id, .. } => Some(*id),
+                _ => None,
+            })
+            .collect()
+    }
+
+    fn shape_membership(events: &[ProjectReadShapeEvent]) -> Option<Vec<SlotShapeId>> {
+        events.iter().find_map(|event| match event {
+            ProjectReadShapeEvent::Membership { ids } => Some(ids.clone()),
+            _ => None,
+        })
+    }
+
+    fn empty_registry_engine() -> (Engine, ProjectRegistry) {
+        (
+            Engine::new(TreePath::parse("/shapes.project").unwrap()),
+            ProjectRegistry::new(),
+        )
+    }
+
+    #[test]
+    fn mutating_one_shape_sends_exactly_that_shape() {
+        let (mut engine, registry) = empty_registry_engine();
+        let stable = SlotShapeId::new(0x7000_0001);
+        let mutated = SlotShapeId::new(0x7000_0002);
+        engine
+            .slot_shapes_mut()
+            .register_shape_with_version(Revision::new(3), stable, SlotShape::value(LpType::Bool))
+            .expect("register stable shape");
+        engine
+            .slot_shapes_mut()
+            .register_shape_with_version(Revision::new(3), mutated, SlotShape::value(LpType::Bool))
+            .expect("register mutated shape");
+        let r_before = Revision::new(3);
+        // Re-stamp only `mutated`'s content past `r_before` while leaving the id
+        // set (and thus `ids_revision`) at `r_before`. Applying a partial
+        // snapshot keeps `ids_revision` fixed, isolating the per-entry
+        // `changed_at` gate from the membership gate.
+        let mut snapshot = engine.slot_shapes().snapshot();
+        snapshot.ids_revision = r_before;
+        snapshot.shapes.insert(
+            mutated,
+            SlotShapeEntry::new(Revision::new(5), SlotShape::value(LpType::F32)),
+        );
+        engine.slot_shapes_mut().apply_partial_snapshot(snapshot);
+
+        let events = collect_shape_events(&mut engine, &registry, Some(r_before));
+
+        assert_eq!(shape_entry_ids(&events), vec![mutated]);
+        assert_eq!(
+            shape_membership(&events),
+            None,
+            "id set unchanged: no membership event"
+        );
+    }
+
+    #[test]
+    fn removing_a_shape_emits_membership_without_it() {
+        let (mut engine, registry) = empty_registry_engine();
+        let kept = SlotShapeId::new(0x7000_0001);
+        let removed = SlotShapeId::new(0x7000_0002);
+        engine
+            .slot_shapes_mut()
+            .register_shape_with_version(Revision::new(3), kept, SlotShape::value(LpType::Bool))
+            .expect("register kept shape");
+        engine
+            .slot_shapes_mut()
+            .register_shape_with_version(Revision::new(3), removed, SlotShape::value(LpType::Bool))
+            .expect("register removed shape");
+        let r_before = Revision::new(3);
+        engine
+            .slot_shapes_mut()
+            .unregister_shape_with_version(Revision::new(5), &removed);
+
+        let events = collect_shape_events(&mut engine, &registry, Some(r_before));
+
+        let membership = shape_membership(&events).expect("membership event present");
+        assert!(
+            !membership.contains(&removed),
+            "removed id absent from membership"
+        );
+        assert!(membership.contains(&kept), "kept id present in membership");
+        assert!(
+            !shape_entry_ids(&events).contains(&removed),
+            "no entry for removed shape"
+        );
+    }
+
+    #[test]
+    fn unchanged_shapes_send_no_entries_or_membership() {
+        let (mut engine, registry) = empty_registry_engine();
+        let id = SlotShapeId::new(0x7000_0001);
+        engine
+            .slot_shapes_mut()
+            .register_shape_with_version(Revision::new(4), id, SlotShape::value(LpType::Bool))
+            .expect("register shape");
+        let r = Revision::new(4);
+
+        let events = collect_shape_events(&mut engine, &registry, Some(r));
+
+        assert!(
+            shape_entry_ids(&events).is_empty(),
+            "zero entries at since==R"
+        );
+        assert_eq!(shape_membership(&events), None, "no membership at since==R");
+    }
+
+    #[test]
+    fn fresh_read_includes_all_shapes() {
+        let (mut engine, registry) = empty_registry_engine();
+        let first = SlotShapeId::new(0x7000_0001);
+        let second = SlotShapeId::new(0x7000_0002);
+        engine
+            .slot_shapes_mut()
+            .register_shape_with_version(Revision::new(2), first, SlotShape::value(LpType::Bool))
+            .expect("register first shape");
+        engine
+            .slot_shapes_mut()
+            .register_shape_with_version(Revision::new(5), second, SlotShape::value(LpType::F32))
+            .expect("register second shape");
+
+        let events = collect_shape_events(&mut engine, &registry, None);
+
+        let ids = shape_entry_ids(&events);
+        assert!(ids.contains(&first), "fresh read includes first shape");
+        assert!(ids.contains(&second), "fresh read includes second shape");
     }
 
     fn assert_events_collect_to_full_response(
