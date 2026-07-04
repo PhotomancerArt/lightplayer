@@ -21,7 +21,9 @@ use crate::project_deploy::{
     validate_project_deploy_response,
 };
 use crate::protocol_session::{ProtocolSession, ResponseDisposition};
-use crate::pull_loop::{NeverCancel, ProgressDeadline, PullOutcome, run_project_read};
+use crate::pull_loop::{
+    CancelSignal, NeverCancel, ProgressDeadline, PullOutcome, run_project_read,
+};
 
 /// Result value plus protocol events observed while waiting for it.
 #[derive(Debug)]
@@ -237,20 +239,14 @@ where
     ) -> ClientResult<ClientOutcome<Vec<ProjectReadEvent>>> {
         // The portable client owns no runtime, so it carries no deadline: the
         // deadline's timer never resolves and cancellation is never requested.
-        // Host wrappers (`TokioLpClient`) add those conveniences around the same
-        // shared pull loop. Unsolicited events observed while reading are
-        // preserved on the outcome.
+        // Host wrappers (`TokioLpClient`) and the studio actor add those
+        // conveniences around the same shared pull loop via
+        // `project_read_gated`. Unsolicited events are preserved on the outcome.
         let deadline =
             ProgressDeadline::new(Duration::MAX, |_budget| core::future::pending::<()>());
-        match run_project_read(
-            &mut self.io,
-            &mut self.protocol,
-            handle,
-            read,
-            deadline,
-            &NeverCancel,
-        )
-        .await
+        match self
+            .project_read_gated(handle, read, deadline, &NeverCancel)
+            .await
         {
             PullOutcome::Completed { events, observed } => Ok(ClientOutcome::new(events, observed)),
             PullOutcome::Failed(error) => Err(error),
@@ -260,6 +256,37 @@ where
                 "project read ended without completing".to_string(),
             )),
         }
+    }
+
+    /// Drive one project read under a caller-supplied progress deadline and
+    /// cancel signal, returning the raw [`PullOutcome`].
+    ///
+    /// This is the seam the studio actor uses to own the pull-loop timing at the
+    /// app level: it hands in a platform timer factory (wasm `setTimeout` /
+    /// native `sleep`) for the deadline and a shared cancel signal it flips when
+    /// a preempting command arrives, so a passive refresh returns
+    /// [`PullOutcome::Cancelled`] cleanly instead of being dropped mid-stream.
+    pub async fn project_read_gated<MakeTimer, Timer, Cancel>(
+        &mut self,
+        handle: WireProjectHandle,
+        read: ProjectReadRequest,
+        deadline: ProgressDeadline<MakeTimer, Timer>,
+        cancel: &Cancel,
+    ) -> PullOutcome
+    where
+        MakeTimer: FnMut(Duration) -> Timer,
+        Timer: core::future::Future<Output = ()>,
+        Cancel: CancelSignal + ?Sized,
+    {
+        run_project_read(
+            &mut self.io,
+            &mut self.protocol,
+            handle,
+            read,
+            deadline,
+            cancel,
+        )
+        .await
     }
 
     pub async fn project_read_default_debug(

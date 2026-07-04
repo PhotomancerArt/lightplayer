@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
 use lpc_model::{ControlDisplayLayout, Revision};
 use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
@@ -44,6 +45,16 @@ impl ProjectSync {
     pub fn begin_refresh(&mut self) {
         self.phase = ProjectSyncPhase::SyncingProject;
         self.issue = None;
+    }
+
+    /// Roll a [`Self::begin_refresh`] back to `Ready` when a gated refresh ends
+    /// without applying (cancelled or timed out). The mirror is untouched, so
+    /// the prior revision is still valid and the summary should reflect it
+    /// rather than lingering in `SyncingProject`.
+    pub fn abort_refresh(&mut self) {
+        if self.phase == ProjectSyncPhase::SyncingProject {
+            self.phase = ProjectSyncPhase::Ready;
+        }
     }
 
     pub fn summary(&self) -> ProjectSyncSummary {
@@ -242,7 +253,7 @@ impl ProjectSync {
                         sample_format: UiControlSampleFormat::U16,
                         sample_layout: sample_layout.clone(),
                         display_layout,
-                        bytes: bytes.clone(),
+                        bytes: Rc::from(bytes.as_slice()),
                     }),
                 ))
             }
@@ -330,7 +341,7 @@ fn product_preview_from_probe(
                 width: *width,
                 height: *height,
                 revision: revision.0,
-                bytes: bytes.clone(),
+                bytes: Rc::from(bytes.as_slice()),
             },
         )),
         ProjectProbeResult::RenderProduct(RenderProductProbeResult::Texture {
@@ -592,7 +603,7 @@ mod tests {
                 width: 1,
                 height: 2,
                 revision: 8,
-                bytes,
+                bytes: Rc::from(bytes.as_slice()),
             })
         );
     }
@@ -751,7 +762,7 @@ mod tests {
                 sample_format: UiControlSampleFormat::U16,
                 sample_layout,
                 display_layout: Some(display_layout),
-                bytes: second_bytes,
+                bytes: Rc::from(second_bytes.as_slice()),
             }))
         );
     }

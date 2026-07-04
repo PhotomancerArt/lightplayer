@@ -1,4 +1,8 @@
+use core::future::Future;
+use core::time::Duration;
 use std::collections::{BTreeMap, BTreeSet};
+
+use lpa_client::{CancelSignal, ProgressDeadline};
 
 use crate::core::notice::UiNotices;
 use crate::{
@@ -6,8 +10,9 @@ use crate::{
     ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
     ProjectNodeAddress, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp, ProjectSnapshot,
     ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary,
-    StudioServerClient, UiAction, UiError, UiIssue, UiLogEntry, UiLogLevel, UiMetric, UiNodeView,
-    UiPaneView, UiProductRef, UiResult, UiStatus, UiViewContent, UxUpdateSink,
+    StudioProjectReadOutcome, StudioServerClient, UiAction, UiError, UiIssue, UiLogEntry,
+    UiLogLevel, UiMetric, UiNodeView, UiPaneView, UiProductRef, UiResult, UiStatus, UiViewContent,
+    UxUpdateSink,
 };
 use lpc_model::{NodeId, TreePath};
 use lpc_view::ProjectView;
@@ -314,6 +319,70 @@ impl ProjectController {
         }
     }
 
+    /// Refresh under a progress deadline and cancel signal (the actor's passive
+    /// tick path).
+    ///
+    /// Unlike [`Self::refresh_project`], this can end without applying anything:
+    /// a preempting command flips `cancel` (→ [`ProjectRefreshOutcome::Cancelled`])
+    /// or a stalled stream trips the deadline (→ [`ProjectRefreshOutcome::TimedOut`]).
+    /// In both cases the local mirror is left untouched — no partial apply — so
+    /// the next tick simply re-reads. A completed read applies exactly as the
+    /// ungated path does.
+    pub async fn refresh_project_gated<MakeTimer, Timer, Cancel>(
+        &mut self,
+        server: &mut StudioServerClient,
+        deadline: ProgressDeadline<MakeTimer, Timer>,
+        cancel: &Cancel,
+    ) -> Result<ProjectRefreshOutcome, UiError>
+    where
+        MakeTimer: FnMut(Duration) -> Timer,
+        Timer: Future<Output = ()>,
+        Cancel: CancelSignal + ?Sized,
+    {
+        let handle_id = self.ready_handle_id()?;
+        self.sync
+            .get_or_insert_with(ProjectSync::new)
+            .begin_refresh();
+        let products = self.subscribed_products();
+        let request = self.sync_mut()?.refresh_project_read_request(products);
+        let outcome = server
+            .project_read_gated(handle_id, request, deadline, cancel)
+            .await;
+        let read = match outcome {
+            Ok(StudioProjectReadOutcome::Completed(read)) => read,
+            // Cancel/timeout are non-failing: the begun refresh is rolled back to
+            // idle so the sync summary does not linger in a "refreshing" state,
+            // and nothing is applied.
+            Ok(StudioProjectReadOutcome::Cancelled) => {
+                self.abort_begun_refresh();
+                return Ok(ProjectRefreshOutcome::Cancelled);
+            }
+            Ok(StudioProjectReadOutcome::TimedOut) => {
+                self.abort_begun_refresh();
+                return Ok(ProjectRefreshOutcome::TimedOut);
+            }
+            Err(error) => {
+                return Ok(ProjectRefreshOutcome::Synced(
+                    self.record_sync_failure(server, error),
+                ));
+            }
+        };
+        match self.apply_refresh_read(server, handle_id, read).await {
+            Ok(logs) => Ok(ProjectRefreshOutcome::Synced(ProjectSyncRun::synced(logs))),
+            Err(error) => Ok(ProjectRefreshOutcome::Synced(
+                self.record_sync_failure(server, error),
+            )),
+        }
+    }
+
+    /// Roll a `begin_refresh` back to the prior ready summary when a gated pull
+    /// ends without applying (cancelled or timed out).
+    fn abort_begun_refresh(&mut self) {
+        if let Some(sync) = &mut self.sync {
+            sync.abort_refresh();
+        }
+    }
+
     pub async fn dispatch_editor_action(
         &mut self,
         action: UiAction,
@@ -529,10 +598,20 @@ impl ProjectController {
         handle_id: u32,
     ) -> Result<Vec<UiLogEntry>, UiError> {
         let products = self.subscribed_products();
-        let request = self
-            .sync_mut()?
-            .refresh_project_read_request(products.clone());
+        let request = self.sync_mut()?.refresh_project_read_request(products);
         let read = server.project_read(handle_id, request).await?;
+        self.apply_refresh_read(server, handle_id, read).await
+    }
+
+    /// Apply a completed refresh read into the mirror, resyncing from `since=0`
+    /// if the gated delta is rejected as malformed. Shared by the ungated
+    /// ([`Self::run_refresh`]) and gated ([`Self::refresh_project_gated`]) paths.
+    async fn apply_refresh_read(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+        read: crate::StudioProjectRead,
+    ) -> Result<Vec<UiLogEntry>, UiError> {
         let mut logs = read.logs;
         match self.sync_mut()?.apply_project_read_events(read.events) {
             Ok(()) => {}
@@ -551,6 +630,7 @@ impl ProjectController {
                     ),
                 ));
                 self.sync_mut()?.reset_view();
+                let products = self.subscribed_products();
                 let request = self.sync_mut()?.initial_project_read_request(products);
                 let resync = server.project_read(handle_id, request).await?;
                 logs.extend(resync.logs);
@@ -616,6 +696,18 @@ impl Default for ProjectController {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Result of a gated passive refresh ([`ProjectController::refresh_project_gated`]).
+pub enum ProjectRefreshOutcome {
+    /// The read completed (successfully or with a recorded sync failure); the
+    /// run summarizes what happened.
+    Synced(ProjectSyncRun),
+    /// A preempting command cancelled the pull at a frame boundary; nothing was
+    /// applied and the prior mirror is intact.
+    Cancelled,
+    /// The progress deadline fired on a stalled stream; nothing was applied.
+    TimedOut,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1535,7 +1627,7 @@ mod tests {
                 width: 1,
                 height: 2,
                 revision: 8,
-                bytes,
+                bytes: bytes.into(),
             }
         );
     }

@@ -31,17 +31,20 @@ pub use app::project::{
     ProjectController, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
     ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
     ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
-    ProjectProductSubscriptionIntent, ProjectRuntimeSummary, ProjectSlotAddress, ProjectSlotRoot,
-    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
-    ProjectSyncSummary, SlotController, SlotControllerState, SlotKind,
+    ProjectProductSubscriptionIntent, ProjectRefreshOutcome, ProjectRuntimeSummary,
+    ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState, ProjectSync,
+    ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotController, SlotControllerState,
+    SlotKind,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerController, ServerFailureKind, ServerOp,
-    ServerSnapshot, ServerState, StudioProjectRead, StudioServerClient,
+    ServerSnapshot, ServerState, StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
 };
 pub use app::studio::{
-    StudioController, StudioSnapshot, UiError, UiLogEntry, UiLogLevel, UiNotice, UiNoticeLevel,
-    UiResult, UxActivityTarget, UxUpdate, UxUpdateSink,
+    LOG_RING_CAPACITY, LogRing, StudioActor, StudioCommand, StudioController, StudioHandle,
+    StudioSnapshot, StudioViewReceiver, StudioViewSender, UiError, UiLogEntry, UiLogLevel,
+    UiNotice, UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink, ViewPublisher,
+    studio_view_channel,
 };
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;

@@ -49,7 +49,7 @@ pub use node::{
     ProjectProductSubscriptionIntent,
 };
 pub use project_connect_result::ProjectConnectResult;
-pub use project_controller::ProjectController;
+pub use project_controller::{ProjectController, ProjectRefreshOutcome};
 pub use project_editor_op::ProjectEditorOp;
 pub use project_editor_target::ProjectEditorTarget;
 pub use project_editor_view::ProjectEditorView;
