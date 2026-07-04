@@ -337,6 +337,6 @@ pub use dynamic_slot_reader::{
     apply_reader_to_slot, read_dynamic_slot, read_dynamic_slot_data, read_dynamic_slot_from_object,
 };
 pub use dynamic_slot_writer::{
-    SlotDataWriteError, write_dynamic_slot_json, write_dynamic_slot_toml,
-    write_slot_data_json_value, write_slot_data_toml_value,
+    SlotDataWriteError, write_dynamic_slot_json, write_dynamic_slot_json_pretty,
+    write_dynamic_slot_toml, write_slot_data_json_value, write_slot_data_toml_value,
 };

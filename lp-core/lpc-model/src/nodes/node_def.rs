@@ -155,6 +155,36 @@ impl NodeArtifact {
     pub fn write_toml(&self, registry: &SlotShapeRegistry) -> Result<String, NodeDefWriteError> {
         write_node_artifact(registry, self)
     }
+
+    /// Read an authored JSON node artifact through the slot registry.
+    ///
+    /// The codec streams, so the top-level `"kind"` field must precede the
+    /// variant's other fields — canonical [`Self::write_json`] output always
+    /// satisfies this.
+    pub fn read_json(registry: &SlotShapeRegistry, text: &str) -> Result<Self, NodeDefParseError> {
+        reject_unknown_kind_json(text)?;
+        let object = registry
+            .read_slot_json(NodeArtifact::SHAPE_ID, text)
+            .map_err(|error| NodeDefParseError::Toml {
+                error: error.to_string(),
+            })?;
+        downcast_node_artifact(object)
+    }
+
+    /// Write this artifact as authored JSON: pretty-printed, slot-shape
+    /// declaration order, trailing newline. Output is deterministic so
+    /// identical models produce byte-identical files.
+    pub fn write_json(&self, registry: &SlotShapeRegistry) -> Result<String, NodeDefWriteError> {
+        let mut out = registry
+            .write_slot_json_pretty(self, alloc::vec::Vec::new())
+            .map_err(|error| NodeDefWriteError {
+                error: error.to_string(),
+            })?;
+        out.push(b'\n');
+        String::from_utf8(out).map_err(|_| NodeDefWriteError {
+            error: String::from("slot JSON writer produced invalid UTF-8"),
+        })
+    }
 }
 
 impl NodeDef {
@@ -463,6 +493,22 @@ impl NodeDef {
     pub fn write_toml(&self, registry: &SlotShapeRegistry) -> Result<String, NodeDefWriteError> {
         NodeArtifact::new(self.clone()).write_toml(registry)
     }
+
+    /// Read an authored JSON node artifact through the slot registry.
+    pub fn read_json(registry: &SlotShapeRegistry, text: &str) -> Result<Self, NodeDefParseError> {
+        NodeArtifact::read_json(registry, text).map(NodeArtifact::into_node_def)
+    }
+
+    /// Read authored JSON using the model crate's generated static shape registry.
+    pub fn from_json_str(text: &str) -> Result<Self, NodeDefParseError> {
+        let registry = SlotShapeRegistry::default();
+        Self::read_json(&registry, text)
+    }
+
+    /// Write this node definition as authored JSON through the slot registry.
+    pub fn write_json(&self, registry: &SlotShapeRegistry) -> Result<String, NodeDefWriteError> {
+        NodeArtifact::new(self.clone()).write_json(registry)
+    }
 }
 
 fn project_node_path(base: &SlotPath, name: &str) -> Option<SlotPath> {
@@ -745,6 +791,12 @@ fn read_node_artifact(
         .map_err(|error| NodeDefParseError::Toml {
             error: error.to_string(),
         })?;
+    downcast_node_artifact(object)
+}
+
+fn downcast_node_artifact(
+    object: alloc::boxed::Box<dyn crate::SlotMutAccess>,
+) -> Result<NodeArtifact, NodeDefParseError> {
     object
         .into_any()
         .downcast::<NodeArtifact>()
@@ -755,6 +807,77 @@ fn read_node_artifact(
                 NodeArtifact::SHAPE_ID
             ),
         })
+}
+
+fn reject_unknown_kind_json(text: &str) -> Result<(), NodeDefParseError> {
+    let kind = read_kind_json(text)?;
+    if NODE_DEF_VARIANT_NAMES.contains(&kind.as_str()) {
+        Ok(())
+    } else {
+        Err(NodeDefParseError::UnknownKind { kind })
+    }
+}
+
+/// Streaming probe for the top-level `"kind"` string in an authored JSON
+/// artifact. Uses syntax events so device loads never materialize a value
+/// tree just to pre-check the kind.
+fn read_kind_json(text: &str) -> Result<String, NodeDefParseError> {
+    use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
+
+    let syntax_error = |error: crate::slot_codec::SyntaxError| NodeDefParseError::Toml {
+        error: error.to_string(),
+    };
+
+    let mut source = JsonSyntaxSource::new(text).map_err(syntax_error)?;
+    match source.next_event().map_err(syntax_error)? {
+        Some(SyntaxEvent::StartObject { .. }) => {}
+        _ => {
+            return Err(NodeDefParseError::Toml {
+                error: String::from("node definition JSON root must be an object"),
+            });
+        }
+    }
+
+    // Scan top-level props, skipping nested values by depth.
+    let mut depth = 0usize;
+    loop {
+        let Some(event) = source.next_event().map_err(syntax_error)? else {
+            return Err(NodeDefParseError::Toml {
+                error: String::from("missing required field `kind`"),
+            });
+        };
+        match event {
+            SyntaxEvent::Prop { name, .. } if depth == 0 && name == "kind" => {
+                let mut kind = String::new();
+                loop {
+                    match source.next_event().map_err(syntax_error)? {
+                        Some(SyntaxEvent::StringChunk { text, is_last, .. }) => {
+                            kind.push_str(&text);
+                            if is_last {
+                                return Ok(kind);
+                            }
+                        }
+                        _ => {
+                            return Err(NodeDefParseError::Toml {
+                                error: String::from("field `kind` must be a string"),
+                            });
+                        }
+                    }
+                }
+            }
+            SyntaxEvent::StartObject { .. } | SyntaxEvent::StartArray { .. } => depth += 1,
+            SyntaxEvent::EndArray { .. } => depth = depth.saturating_sub(1),
+            SyntaxEvent::EndObject { .. } => {
+                if depth == 0 {
+                    return Err(NodeDefParseError::Toml {
+                        error: String::from("missing required field `kind`"),
+                    });
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+    }
 }
 
 fn write_node_artifact(
@@ -1027,6 +1150,137 @@ size = { width = 1, height = 2 }
         };
         assert_eq!(def.size.value().width, 3);
         assert_eq!(def.size.value().height, 4);
+    }
+
+    #[test]
+    fn node_def_parses_project_and_texture_json() {
+        let registry = registry();
+        let project = NodeDef::read_json(
+            &registry,
+            r#"{
+  "kind": "Project",
+  "nodes": {
+    "texture": { "ref": "./texture.json" }
+  }
+}"#,
+        )
+        .expect("project");
+        assert!(matches!(project, NodeDef::Project(_)));
+
+        let texture = NodeDef::read_json(
+            &registry,
+            r#"{ "kind": "Texture", "size": { "width": 64, "height": 48 } }"#,
+        )
+        .expect("texture");
+        let NodeDef::Texture(def) = texture else {
+            panic!("expected texture");
+        };
+        assert_eq!(def.size.value().width, 64);
+        assert_eq!(def.size.value().height, 48);
+    }
+
+    #[test]
+    fn node_def_parses_shader_json_with_bindings() {
+        let registry = registry();
+        let shader = NodeDef::read_json(
+            &registry,
+            r#"{
+  "kind": "Shader",
+  "render_order": 2,
+  "source": { "path": "shader.glsl" },
+  "bindings": { "visual": { "target": "bus#visual.out" } }
+}"#,
+        )
+        .expect("shader");
+        assert!(matches!(shader, NodeDef::Shader(_)));
+    }
+
+    #[test]
+    fn node_def_json_rejects_missing_invalid_and_unknown_kind() {
+        let registry = registry();
+
+        let missing =
+            NodeDef::read_json(&registry, r#"{ "name": "missing" }"#).expect_err("missing kind");
+        assert!(missing.to_string().contains("kind"));
+
+        let invalid = NodeDef::read_json(&registry, r#"{ "kind": 7 }"#).expect_err("invalid kind");
+        assert!(invalid.to_string().contains("string"));
+
+        let not_object = NodeDef::read_json(&registry, r#"[1, 2]"#).expect_err("array root");
+        assert!(not_object.to_string().contains("object"));
+
+        let unknown =
+            NodeDef::read_json(&registry, r#"{ "kind": "bogus" }"#).expect_err("unknown kind");
+        assert_eq!(
+            unknown,
+            NodeDefParseError::UnknownKind {
+                kind: String::from("bogus")
+            }
+        );
+    }
+
+    #[test]
+    fn node_def_json_kind_probe_skips_nested_objects() {
+        let registry = registry();
+
+        // A nested "kind" key must not satisfy the top-level probe: this
+        // should report the missing top-level kind, not UnknownKind(Bogus).
+        let err = NodeDef::read_json(&registry, r#"{ "mapping": { "kind": "Bogus" } }"#)
+            .expect_err("missing top-level kind");
+        assert!(err.to_string().contains("missing required field"), "{err}");
+
+        // Nested kinds after the top-level one are fine.
+        let fixture = NodeDef::read_json(
+            &registry,
+            r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 8, "height": 8 },
+  "mapping": { "kind": "PathPoints" }
+}"#,
+        )
+        .expect("fixture");
+        assert!(matches!(fixture, NodeDef::Fixture(_)));
+    }
+
+    #[test]
+    fn node_def_writes_pretty_authored_json() {
+        let registry = registry();
+        let text = NodeDef::Texture(TextureDef::new(3, 4))
+            .write_json(&registry)
+            .expect("write texture");
+
+        assert!(text.starts_with("{\n  \"kind\": \"Texture\""), "{text}");
+        assert!(text.ends_with("}\n"), "{text}");
+        assert!(text.contains("\"width\": 3"), "{text}");
+        assert!(text.contains("\"height\": 4"), "{text}");
+
+        let read = NodeDef::read_json(&registry, &text).expect("read texture");
+        let NodeDef::Texture(def) = read else {
+            panic!("expected texture");
+        };
+        assert_eq!(def.size.value().width, 3);
+        assert_eq!(def.size.value().height, 4);
+    }
+
+    #[test]
+    fn node_def_json_round_trip_is_byte_stable() {
+        let registry = registry();
+        let fixture = crate::FixtureDef {
+            mapping: EnumSlot::new(MappingConfig::path_points_vec(
+                alloc::vec![PathSpec::point_list(
+                    3,
+                    alloc::vec![[0.0, 0.25], [1.0, 0.75]],
+                )],
+                2.0,
+            )),
+            ..crate::FixtureDef::default()
+        };
+        let first = NodeDef::Fixture(fixture)
+            .write_json(&registry)
+            .expect("write fixture");
+        let read = NodeDef::read_json(&registry, &first).expect("read fixture");
+        let second = read.write_json(&registry).expect("re-write fixture");
+        assert_eq!(first, second);
     }
 
     #[test]

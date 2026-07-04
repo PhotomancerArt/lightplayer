@@ -669,6 +669,18 @@ impl SlotShapeRegistry {
         crate::slot_codec::write_dynamic_slot_json(self, root, out)
     }
 
+    /// Pretty-printed [`Self::write_slot_json`] for authored files.
+    pub fn write_slot_json_pretty<W>(
+        &self,
+        root: &dyn crate::SlotAccess,
+        out: W,
+    ) -> Result<W, crate::slot_codec::SlotWriteError<W::Error>>
+    where
+        W: crate::slot_codec::SlotWrite,
+    {
+        crate::slot_codec::write_dynamic_slot_json_pretty(self, root, out)
+    }
+
     pub fn write_slot_json_value<W>(
         &self,
         id: SlotShapeId,

@@ -63,6 +63,20 @@ where
     Ok(writer.into_inner())
 }
 
+/// Pretty-printed variant of [`write_dynamic_slot_json`] for authored files.
+pub fn write_dynamic_slot_json_pretty<W>(
+    registry: &SlotShapeRegistry,
+    root: &dyn SlotAccess,
+    out: W,
+) -> Result<W, SlotWriteError<W::Error>>
+where
+    W: SlotWrite,
+{
+    let mut writer = SlotWriter::new_pretty(out);
+    write_slot_data_json_value(registry, root.shape_id(), root.data(), writer.value())?;
+    Ok(writer.into_inner())
+}
+
 pub fn write_slot_data_json_value<W>(
     registry: &SlotShapeRegistry,
     id: SlotShapeId,

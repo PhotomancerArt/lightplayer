@@ -56,11 +56,18 @@ impl<E: fmt::Display> fmt::Display for SlotWriteError<E> {
 }
 
 /// Slot-native JSON writer facade.
+///
+/// Compact by default (wire format). [`SlotWriter::new_pretty`] enables the
+/// authored-file style: 2-space indentation, one entry per line, `": "` after
+/// prop names. Output is deterministic either way — entries follow slot-shape
+/// declaration order upstream, so identical models serialize byte-identically.
 pub struct SlotWriter<W>
 where
     W: SlotWrite,
 {
     out: W,
+    pretty: bool,
+    depth: usize,
 }
 
 impl<W> SlotWriter<W>
@@ -68,7 +75,19 @@ where
     W: SlotWrite,
 {
     pub fn new(out: W) -> Self {
-        Self { out }
+        Self {
+            out,
+            pretty: false,
+            depth: 0,
+        }
+    }
+
+    pub fn new_pretty(out: W) -> Self {
+        Self {
+            out,
+            pretty: true,
+            depth: 0,
+        }
     }
 
     pub fn into_inner(self) -> W {
@@ -81,6 +100,7 @@ where
 
     pub fn object(&mut self) -> Result<SlotObjectWriter<'_, W>, SlotWriteError<W::Error>> {
         self.write_raw(b"{")?;
+        self.depth += 1;
         Ok(SlotObjectWriter {
             writer: self,
             first: true,
@@ -89,10 +109,34 @@ where
 
     fn array(&mut self) -> Result<SlotArrayWriter<'_, W>, SlotWriteError<W::Error>> {
         self.write_raw(b"[")?;
+        self.depth += 1;
         Ok(SlotArrayWriter {
             writer: self,
             first: true,
         })
+    }
+
+    fn entry_break(&mut self) -> Result<(), SlotWriteError<W::Error>> {
+        if !self.pretty {
+            return Ok(());
+        }
+        self.write_raw(b"\n")?;
+        for _ in 0..self.depth {
+            self.write_raw(b"  ")?;
+        }
+        Ok(())
+    }
+
+    fn close_container(
+        &mut self,
+        close: &[u8],
+        non_empty: bool,
+    ) -> Result<(), SlotWriteError<W::Error>> {
+        self.depth = self.depth.saturating_sub(1);
+        if non_empty {
+            self.entry_break()?;
+        }
+        self.write_raw(close)
     }
 
     fn write_raw(&mut self, bytes: &[u8]) -> Result<(), SlotWriteError<W::Error>> {
@@ -166,13 +210,16 @@ where
         self.before_entry()?;
         self.writer.write_json_string(name)?;
         self.writer.write_raw(b":")?;
+        if self.writer.pretty {
+            self.writer.write_raw(b" ")?;
+        }
         Ok(SlotValueWriter {
             writer: self.writer,
         })
     }
 
     pub fn finish(self) -> Result<(), SlotWriteError<W::Error>> {
-        self.writer.write_raw(b"}")
+        self.writer.close_container(b"}", !self.first)
     }
 
     fn before_entry(&mut self) -> Result<(), SlotWriteError<W::Error>> {
@@ -181,7 +228,7 @@ where
         } else {
             self.writer.write_raw(b",")?;
         }
-        Ok(())
+        self.writer.entry_break()
     }
 }
 
@@ -205,7 +252,7 @@ where
     }
 
     pub fn finish(self) -> Result<(), SlotWriteError<W::Error>> {
-        self.writer.write_raw(b"]")
+        self.writer.close_container(b"]", !self.first)
     }
 
     fn before_entry(&mut self) -> Result<(), SlotWriteError<W::Error>> {
@@ -214,7 +261,7 @@ where
         } else {
             self.writer.write_raw(b",")?;
         }
-        Ok(())
+        self.writer.entry_break()
     }
 }
 
