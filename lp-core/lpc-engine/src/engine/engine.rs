@@ -25,7 +25,7 @@ use crate::dataflow::resolver::{
 };
 use crate::gfx::LpGraphics;
 use crate::node::RuntimeNodeEntry;
-use crate::node::catch_node_panic::catch_node_panic;
+use crate::node::catch_node_panic::catch_node_panic_framed;
 use crate::node::{
     ControlRenderContext, ControlRenderServices, NodeCall, NodeCallKey, NodeError,
     NodeResourceInitContext, NodeRuntime, ProduceResult, RenderContext, TickContext,
@@ -653,6 +653,7 @@ impl EngineResolveHost<'_> {
         let radio_service = self.radio_service.clone();
         let time_s = self.frame_time_seconds;
         let slot_shapes = self.slot_shapes;
+        let recovery_name = recovery_frame_name(&self.tree, node_id);
         let produce_result = {
             let mut bridge = SessionHostResolver {
                 session,
@@ -670,7 +671,9 @@ impl EngineResolveHost<'_> {
                 radio_service,
                 time_s,
             );
-            catch_node_panic(|| node_runtime.produce(slot, &mut tick_ctx))
+            catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
+                node_runtime.produce(slot, &mut tick_ctx)
+            })
         };
 
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
@@ -922,6 +925,7 @@ impl EngineResolveHost<'_> {
             }
         };
 
+        let recovery_name = recovery_frame_name(&self.tree, node_id);
         let result = {
             let Some(render_node) = node_runtime.render_node() else {
                 return restore_node_after_failed_render(
@@ -943,7 +947,9 @@ impl EngineResolveHost<'_> {
                 self.frame_time_seconds,
                 self,
             );
-            catch_node_panic(|| render_node.render_texture(product, request, &mut ctx))
+            catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
+                render_node.render_texture(product, request, &mut ctx)
+            })
         };
 
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
@@ -1010,6 +1016,7 @@ impl EngineResolveHost<'_> {
             }
         };
 
+        let recovery_name = recovery_frame_name(&self.tree, node_id);
         let result = {
             let Some(render_node) = node_runtime.render_node() else {
                 return restore_node_after_failed_render_unit(
@@ -1031,7 +1038,9 @@ impl EngineResolveHost<'_> {
                 self.frame_time_seconds,
                 self,
             );
-            catch_node_panic(|| render_node.render_texture_into(product, request, target, &mut ctx))
+            catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
+                render_node.render_texture_into(product, request, target, &mut ctx)
+            })
         };
 
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
@@ -1098,6 +1107,7 @@ impl EngineResolveHost<'_> {
             }
         };
 
+        let recovery_name = recovery_frame_name(&self.tree, node_id);
         let result = {
             let Some(render_node) = node_runtime.render_node() else {
                 return restore_node_after_failed_render_unit(
@@ -1119,7 +1129,9 @@ impl EngineResolveHost<'_> {
                 self.frame_time_seconds,
                 self,
             );
-            catch_node_panic(|| render_node.sample_visual_into(product, request, target, &mut ctx))
+            catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
+                render_node.sample_visual_into(product, request, target, &mut ctx)
+            })
         };
 
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
@@ -1188,6 +1200,7 @@ impl EngineResolveHost<'_> {
             }
         };
 
+        let recovery_name = recovery_frame_name(&self.tree, node_id);
         let result = {
             let Some(control_node) = node_runtime.control_node() else {
                 return restore_node_after_failed_control(
@@ -1208,7 +1221,9 @@ impl EngineResolveHost<'_> {
                 self.frame_time_seconds,
                 self,
             );
-            catch_node_panic(|| control_node.render_control(product, request, target, &mut ctx))
+            catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
+                control_node.render_control(product, request, target, &mut ctx)
+            })
         };
 
         let entry = self.tree.get_mut(node_id).ok_or_else(|| {
@@ -1280,6 +1295,7 @@ impl EngineResolveHost<'_> {
             }
         };
 
+        let recovery_name = recovery_frame_name(&self.tree, node_id);
         let result = {
             let Some(control_node) = node_runtime.control_node() else {
                 return restore_node_after_failed_control_probe(
@@ -1300,7 +1316,7 @@ impl EngineResolveHost<'_> {
                 self.frame_time_seconds,
                 self,
             );
-            catch_node_panic(|| {
+            catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
                 let sample_layout =
                     control_node.render_control(product, request, target, &mut ctx)?;
                 let display_layout =
@@ -1514,6 +1530,15 @@ fn restore_node_after_failed_render(
     Err(err)
 }
 
+/// Display/identity name for a node's recovery frame: its stable tree path.
+/// The path (not the numeric id) keys crash blame, so it must survive
+/// project reloads and reboots.
+fn recovery_frame_name<N>(tree: &RuntimeNodeTree<N>, node_id: NodeId) -> alloc::string::String {
+    tree.get(node_id)
+        .map(|entry| entry.path.to_string())
+        .unwrap_or_default()
+}
+
 fn set_entry_status_if_changed<N>(
     entry: &mut RuntimeNodeEntry<N>,
     status: NodeRuntimeStatus,
@@ -1614,6 +1639,7 @@ fn consume_tree_node(
     let radio_service = host.radio_service.clone();
     let time_s = host.frame_time_seconds;
     let slot_shapes = host.slot_shapes;
+    let recovery_name = recovery_frame_name(&host.tree, node_id);
     let consume_result = {
         let mut bridge = SessionHostResolver {
             session,
@@ -1631,7 +1657,9 @@ fn consume_tree_node(
             radio_service,
             time_s,
         );
-        catch_node_panic(|| node_runtime.consume(&mut tick_ctx))
+        catch_node_panic_framed(lp_recovery::FrameKind::NodeRender, &recovery_name, || {
+            node_runtime.consume(&mut tick_ctx)
+        })
     };
 
     let entry = host

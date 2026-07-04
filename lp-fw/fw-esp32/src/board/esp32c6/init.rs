@@ -1,5 +1,6 @@
 use esp_hal::clock::CpuClock;
 use esp_hal::interrupt::software::SoftwareInterruptControl;
+use esp_hal::rtc_cntl::{Rtc, Rwdt};
 use esp_hal::timer::timg::{TimerGroup, TimerGroupInstance};
 
 /// Initialize ESP32-C6 hardware
@@ -7,6 +8,7 @@ use esp_hal::timer::timg::{TimerGroup, TimerGroupInstance};
 /// Sets up CPU clock, timers, and other board-specific hardware.
 /// Returns runtime components needed for Embassy and hardware peripherals.
 /// FLASH peripheral is included for persistent storage (default; disabled with memory_fs feature).
+/// The RTC watchdog is returned unarmed; the recovery subsystem arms it.
 pub fn init_board() -> (
     SoftwareInterruptControl<'static>,
     TimerGroup<'static, impl TimerGroupInstance>,
@@ -17,6 +19,7 @@ pub fn init_board() -> (
     esp_hal::peripherals::GPIO4<'static>,
     esp_hal::peripherals::GPIO20<'static>,
     esp_hal::peripherals::WIFI<'static>,
+    Rwdt,
 ) {
     // Configure CPU clock to maximum speed (160MHz for ESP32-C6)
     let config = esp_hal::Config::default().with_cpu_clock(CpuClock::max());
@@ -40,8 +43,12 @@ pub fn init_board() -> (
     let sw_int = SoftwareInterruptControl::new(peripherals.SW_INTERRUPT);
     let timg0 = TimerGroup::new(peripherals.TIMG0);
 
+    // RTC watchdog for the crash-recovery backstop (armed later by recovery).
+    let rtc = Rtc::new(peripherals.LPWR);
+    let rwdt = rtc.rwdt;
+
     (
-        sw_int, timg0, rmt, usb_device, gpio18, flash, gpio4, gpio20, wifi,
+        sw_int, timg0, rmt, usb_device, gpio18, flash, gpio4, gpio20, wifi, rwdt,
     )
 }
 

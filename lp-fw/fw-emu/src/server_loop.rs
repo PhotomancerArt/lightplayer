@@ -43,8 +43,13 @@ pub fn run_server_loop(
     time_provider: SyscallTimeProvider,
 ) -> ! {
     let mut last_tick = time_provider.now_ms();
+    let mut boot_completed = false;
 
     loop {
+        // Host-injected faults execute inside recovery frames, before the
+        // normal frame work.
+        crate::fault_injection::check_and_run_pending_fault();
+
         let frame_start = time_provider.now_ms();
 
         log::debug!(
@@ -71,6 +76,10 @@ pub fn run_server_loop(
         ));
         if let Some(error) = tick.server_error {
             log::warn!("run_server_loop: Server tick error: {error:?}");
+        } else if !boot_completed {
+            boot_completed = true;
+            lp_recovery::mark_boot_complete();
+            log::info!("[fw-emu][RECOVERY] boot complete (first frame served)");
         } else {
             log::trace!(
                 "run_server_loop: Server sent {} response(s)",

@@ -100,6 +100,10 @@ pub enum ServerMsgBody<R> {
         /// Optional memory statistics (ESP32 reports heap; absent on other platforms)
         #[serde(default)]
         memory: Option<MemoryStats>,
+        /// Crash-recovery state (level, last crash, gated paths); absent on
+        /// targets without a recovery region.
+        #[serde(default)]
+        recovery: Option<crate::server::RecoveryStatus>,
     },
     /// Error response for any request type
     Error {

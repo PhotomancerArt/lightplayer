@@ -443,6 +443,7 @@ impl TokioLpClient {
                     loaded_projects,
                     uptime_ms,
                     memory,
+                    recovery,
                 } if self.display_heartbeats => {
                     display_heartbeat(
                         fps,
@@ -450,6 +451,7 @@ impl TokioLpClient {
                         loaded_projects.as_slice(),
                         *uptime_ms,
                         memory,
+                        recovery,
                     );
                 }
                 ClientEvent::Log { level, message } => {
@@ -490,6 +492,7 @@ fn display_heartbeat(
     loaded_projects: &[lpc_wire::server::LoadedProject],
     uptime_ms: u64,
     memory: &Option<lpc_wire::server::MemoryStats>,
+    recovery: &Option<lpc_wire::server::RecoveryStatus>,
 ) {
     const BOLD: &str = "\x1b[1m";
     const DIM: &str = "\x1b[90m";
@@ -570,6 +573,27 @@ fn display_heartbeat(
         line.push_str(&format!(
             " {DIM}|{RESET} [{bar}] {bar_fill_color}{used_pct:.0}%{RESET} ({free_kb}k free / {total_kb}k total)"
         ));
+    }
+
+    if let Some(recovery) = recovery {
+        use lpc_wire::server::RecoveryLevelWire;
+        let (color, label) = match recovery.level {
+            RecoveryLevelWire::Green => (GREEN, "green"),
+            RecoveryLevelWire::Yellow => (YELLOW, "yellow"),
+            RecoveryLevelWire::Red => (RED, "red"),
+        };
+        if recovery.level != RecoveryLevelWire::Green || recovery.safe_mode {
+            line.push_str(&format!(" {DIM}|{RESET} {color}recovery {label}{RESET}"));
+            if recovery.safe_mode {
+                line.push_str(&format!(" {RED}{BOLD}SAFE MODE{RESET}"));
+            }
+            if let Some(crash) = &recovery.last_crash {
+                line.push_str(&format!(
+                    " {DIM}(last: {} at {}){RESET}",
+                    crash.cause, crash.path
+                ));
+            }
+        }
     }
 
     eprintln!("{line}");

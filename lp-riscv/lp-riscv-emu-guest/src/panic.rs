@@ -36,6 +36,16 @@ fn panic_syscall(
     ebreak()
 }
 
+/// Exit reporting a crash-recovery reset request to the host harness.
+///
+/// The emulator analog of `software_reset()`: the host recognizes the
+/// sentinel panic message, preserves the guest's recovery region, and
+/// reboots the guest with a software-reset cause.
+pub fn reset_request_exit() -> ! {
+    let sentinel = lp_riscv_emu_shared::recovery_handshake::RESET_REQUEST_SENTINEL;
+    panic_syscall(sentinel.as_ptr(), sentinel.len(), null(), 0, 0)
+}
+
 /// Format panic info and report to host via syscall. Used by both panic handlers.
 fn report_panic_to_host(info: &core::panic::PanicInfo) -> ! {
     let mut panic_msg_buf = [0u8; 256];
@@ -108,9 +118,24 @@ fn panic(info: &core::panic::PanicInfo) -> ! {
         (None, None)
     };
 
+    // Stage a breadcrumb in the recovery region (no-op when no recovery
+    // global is installed): if unwinding fails, the next boot reports it;
+    // if a catch boundary recovers, it voids/records the staged crash.
+    let location = info.location().map(|loc| (loc.file(), loc.line()));
+    lp_recovery::stage_crash(
+        lp_recovery::CrashCause::Panic,
+        &info.message(),
+        location,
+        &[],
+        None,
+    );
+
     let payload = lpc_shared::backtrace::PanicPayload::new(message, file.as_deref(), line);
     let _code = unwinding::panic::begin_panic(alloc::boxed::Box::new(payload));
 
-    // begin_panic returned — no catch_unwind on stack. Fall back to host report.
+    // begin_panic returned — no catch_unwind on stack. Commit the
+    // breadcrumb and request a reset (diverges via the reset sentinel when
+    // a recovery global is installed); otherwise report the raw panic.
+    let _ = lp_recovery::finalize_crash_and_reset();
     report_panic_to_host(info);
 }

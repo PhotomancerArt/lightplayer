@@ -5,7 +5,7 @@
 //! mutating UI state directly.
 
 use lpc_wire::server::api::LogLevel;
-use lpc_wire::server::{LoadedProject, MemoryStats, SampleStats};
+use lpc_wire::server::{LoadedProject, MemoryStats, RecoveryStatus, SampleStats};
 use lpc_wire::{WireServerMessage, WireServerMsgBody};
 
 /// Side-channel protocol event surfaced by `LpClient`.
@@ -18,6 +18,7 @@ pub enum ClientEvent {
         loaded_projects: Vec<LoadedProject>,
         uptime_ms: u64,
         memory: Option<MemoryStats>,
+        recovery: Option<RecoveryStatus>,
     },
     /// Firmware/server log line carried by the protocol.
     Log { level: LogLevel, message: String },
@@ -34,12 +35,14 @@ impl ClientEvent {
                 loaded_projects,
                 uptime_ms,
                 memory,
+                recovery,
             } => Some(Self::Heartbeat {
                 fps,
                 frame_count,
                 loaded_projects,
                 uptime_ms,
                 memory,
+                recovery,
             }),
             WireServerMsgBody::Log { level, message } => Some(Self::Log { level, message }),
             _ => None,

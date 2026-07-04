@@ -15,6 +15,7 @@ pub mod handlers;
 pub mod project;
 pub mod project_manager;
 mod project_read_source;
+pub mod recovery_report;
 pub mod server;
 pub mod template;
 

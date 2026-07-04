@@ -24,7 +24,7 @@ const DUTY_STEP_PERCENT: u8 = 10;
 const PULSE_LOOP_DELAY: Duration = Duration::from_micros(100);
 
 pub async fn run_gpio_calibration_test(_: embassy_executor::Spawner) -> ! {
-    let (sw_int, timg0, _rmt_peripheral, usb_device, gpio18, _flash, gpio4, _gpio20, _wifi) =
+    let (sw_int, timg0, _rmt_peripheral, usb_device, gpio18, _flash, gpio4, _gpio20, _wifi, _rwdt) =
         init_board();
     start_runtime(timg0, sw_int);
     drop(gpio18);
