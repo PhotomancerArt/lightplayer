@@ -37,7 +37,7 @@ impl BoardManifestStore {
             for file_entry in fs::read_dir(vendor_entry.path())? {
                 let file_entry = file_entry?;
                 let path = file_entry.path();
-                if path.extension().and_then(|ext| ext.to_str()) != Some("toml") {
+                if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
                     continue;
                 }
                 let manifest = self.load_path(&path)?;
@@ -72,7 +72,7 @@ impl BoardManifestStore {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let text = manifest.write_toml().map_err(|error| anyhow!("{error}"))?;
+        let text = manifest.write_json().map_err(|error| anyhow!("{error}"))?;
         fs::write(&path, text)?;
         Ok(path)
     }
@@ -102,7 +102,7 @@ impl BoardManifestStore {
         let text = fs::read_to_string(path)
             .with_context(|| format!("failed to read manifest {}", path.display()))?;
         let manifest =
-            HardwareManifestFile::read_toml(&text).map_err(|error| anyhow!("{error}"))?;
+            HardwareManifestFile::read_json(&text).map_err(|error| anyhow!("{error}"))?;
         manifest.validate().map_err(|error| anyhow!("{error}"))?;
         Ok(manifest)
     }
@@ -112,7 +112,7 @@ impl BoardManifestStore {
         let (vendor, name) = id
             .split_once('/')
             .ok_or_else(|| anyhow!("manifest id must look like vendor/name"))?;
-        Ok(self.boards_dir.join(vendor).join(format!("{name}.toml")))
+        Ok(self.boards_dir.join(vendor).join(format!("{name}.json")))
     }
 }
 

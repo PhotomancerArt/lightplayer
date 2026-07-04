@@ -8,13 +8,13 @@ rust-version.workspace = true
 
 [features]
 default = ["std"]
-std = ["toml/std"]
+std = ["serde_json/std"]
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }
 lpc-model = { path = "../lpc-model", default-features = false }
 serde = { workspace = true, features = ["derive"] }
-toml = { version = "0.9", default-features = false, features = ["parse", "serde", "display"] }
+serde_json = { workspace = true }
 
 [lints]
 workspace = true

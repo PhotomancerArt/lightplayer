@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{HardwareTarget, HwAddress, HwCapability, HwError, HwManifest, HwResource};
 
-/// TOML-friendly board manifest file.
+/// Serializable board manifest file (authored as JSON).
 ///
 /// This is the serializable form checked into the repo for board profiles. Use
 /// [`HardwareManifestFile::to_manifest`] to validate and convert it into the
@@ -51,14 +51,14 @@ impl HardwareManifestFile {
         }
     }
 
-    pub fn read_toml(toml_text: &str) -> Result<Self, HardwareManifestFileError> {
-        toml::from_str(toml_text).map_err(|error| HardwareManifestFileError::Parse {
+    pub fn read_json(json_text: &str) -> Result<Self, HardwareManifestFileError> {
+        serde_json::from_str(json_text).map_err(|error| HardwareManifestFileError::Parse {
             message: error.to_string(),
         })
     }
 
-    pub fn write_toml(&self) -> Result<String, HardwareManifestFileError> {
-        toml::to_string_pretty(self).map_err(|error| HardwareManifestFileError::Serialize {
+    pub fn write_json(&self) -> Result<String, HardwareManifestFileError> {
+        serde_json::to_string_pretty(self).map_err(|error| HardwareManifestFileError::Serialize {
             message: error.to_string(),
         })
     }
@@ -267,21 +267,23 @@ mod tests {
 
     #[test]
     fn parses_and_converts_manifest_file() {
-        let manifest = HardwareManifestFile::read_toml(
-            r#"
-id = "seeed/xiao-esp32-c6"
-target = "esp32c6"
-vendor = "seeed"
-product = "XIAO ESP32-C6"
-description = "Seeed Studio XIAO ESP32-C6 board profile."
-url = "https://www.seeedstudio.com/Seeed-Studio-XIAO-ESP32C6-p-5884.html"
-
-[[gpio]]
-address = "/gpio/18"
-display_label = "D6"
-capabilities = ["gpio-output", "gpio-input"]
-aliases = ["GPIO18", "IO18"]
-"#,
+        let manifest = HardwareManifestFile::read_json(
+            r#"{
+  "id": "seeed/xiao-esp32-c6",
+  "target": "esp32c6",
+  "vendor": "seeed",
+  "product": "XIAO ESP32-C6",
+  "description": "Seeed Studio XIAO ESP32-C6 board profile.",
+  "url": "https://www.seeedstudio.com/Seeed-Studio-XIAO-ESP32C6-p-5884.html",
+  "gpio": [
+    {
+      "address": "/gpio/18",
+      "display_label": "D6",
+      "capabilities": ["gpio-output", "gpio-input"],
+      "aliases": ["GPIO18", "IO18"]
+    }
+  ]
+}"#,
         )
         .unwrap();
 
