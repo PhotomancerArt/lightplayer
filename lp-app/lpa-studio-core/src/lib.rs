@@ -38,7 +38,8 @@ pub use app::project::{
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerController, ServerFailureKind, ServerOp,
-    ServerSnapshot, ServerState, StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
+    ServerSnapshot, ServerState, StudioOverlayRead, StudioProjectRead, StudioProjectReadOutcome,
+    StudioServerClient,
 };
 pub use app::studio::{
     DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY, LogRing, RefreshCadence,

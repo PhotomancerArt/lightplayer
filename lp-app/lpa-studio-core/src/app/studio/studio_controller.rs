@@ -1909,6 +1909,7 @@ mod tests {
                         event: ProjectReadQueryEvent::Runtime(RuntimeReadResult {
                             project: ProjectRuntimeStatus {
                                 revision,
+                                overlay_changed_at: Revision::default(),
                                 frame_num: 77,
                                 frame_delta_ms: 16,
                                 frame_total_ms: 17,

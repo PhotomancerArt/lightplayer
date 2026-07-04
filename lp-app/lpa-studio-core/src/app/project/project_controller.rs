@@ -586,9 +586,10 @@ impl ProjectController {
         let products = self.subscribed_products();
         let request = self.sync_mut()?.initial_project_read_request(products);
         let read = server.project_read(handle_id, request).await?;
-        let logs = read.logs;
+        let mut logs = read.logs;
         self.sync_mut()?.apply_project_read_events(read.events)?;
         self.apply_synced_project_view()?;
+        logs.extend(self.sync_overlay_mirror(server, handle_id).await?);
         Ok(logs)
     }
 
@@ -639,7 +640,31 @@ impl ProjectController {
             Err(error) => return Err(error),
         }
         self.apply_synced_project_view()?;
+        logs.extend(self.sync_overlay_mirror(server, handle_id).await?);
         Ok(logs)
+    }
+
+    /// Ride-along overlay fetch after a completed project read is applied.
+    ///
+    /// Compares the read's runtime `overlay_changed_at` against the mirror's
+    /// stamped revision and pulls the full overlay only when it advanced — a
+    /// sequential command on the same connection that just finished the
+    /// streamed read. A quiet-but-dirty project issues no overlay read. On
+    /// fetch failure the mirror and its revision are left unchanged (the next
+    /// tick retries naturally) and the error propagates to the caller, which
+    /// surfaces it on `ProjectSync.issue` exactly like other read failures.
+    async fn sync_overlay_mirror(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+    ) -> Result<Vec<UiLogEntry>, UiError> {
+        if !self.sync_mut()?.overlay_fetch_needed() {
+            return Ok(Vec::new());
+        }
+        let read = server.project_overlay_read(handle_id).await?;
+        self.sync_mut()?
+            .apply_overlay_read(read.overlay, read.revision);
+        Ok(read.logs)
     }
 
     fn sync_mut(&mut self) -> Result<&mut ProjectSync, UiError> {
@@ -2247,5 +2272,301 @@ mod tests {
 
     fn node_address(path: &str) -> ProjectNodeAddress {
         ProjectNodeAddress::parse(path).unwrap()
+    }
+
+    // --- Overlay mirror ride-along fetch contract tests ---------------------
+
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
+    use std::pin::Pin;
+    use std::rc::Rc;
+    use std::sync::Arc;
+    use std::task::{Context, Poll, Wake, Waker};
+
+    use lpa_client::ClientIo;
+    use lpc_model::{
+        ArtifactLocation, MutationCmd, MutationCmdId, MutationOp, ProjectOverlay, SlotEdit,
+        SlotEditOp,
+    };
+    use lpc_wire::{
+        ClientMessage, ClientRequest, ProjectRuntimeStatus, RuntimeReadResult, TransportError,
+        WireOverlayReadResponse, WireProjectCommand, WireProjectCommandResponse, WireServerMessage,
+        WireServerMsgBody,
+    };
+
+    fn overlay_artifact() -> ArtifactLocation {
+        ArtifactLocation::file("/orbit.shader.toml")
+    }
+
+    fn overlay_slot_path() -> SlotPath {
+        SlotPath::parse("controls.rate").unwrap()
+    }
+
+    fn overlay_with_rate_edit() -> ProjectOverlay {
+        let mut overlay = ProjectOverlay::new();
+        overlay.put_slot_edit(
+            overlay_artifact(),
+            SlotEdit::assign_value(overlay_slot_path(), LpValue::F32(0.5)),
+        );
+        overlay
+    }
+
+    /// A minimal project-read response whose runtime status carries
+    /// `overlay_changed_at` — the signal the ride-along fetch gates on.
+    fn runtime_read_response(id: u64, revision: i64, overlay_changed_at: i64) -> WireServerMessage {
+        let revision = Revision::new(revision);
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::ProjectRead {
+                events: vec![
+                    ProjectReadEvent::Begin { revision },
+                    ProjectReadEvent::Query {
+                        index: 0,
+                        event: ProjectReadQueryEvent::Runtime(RuntimeReadResult {
+                            project: ProjectRuntimeStatus {
+                                revision,
+                                overlay_changed_at: Revision::new(overlay_changed_at),
+                                frame_num: 1,
+                                frame_delta_ms: 16,
+                                frame_total_ms: 16,
+                                demand_root_count: 0,
+                                runtime_buffer_count: 0,
+                            },
+                            server: None,
+                        }),
+                    },
+                    ProjectReadEvent::End { revision },
+                ],
+            },
+        )
+    }
+
+    fn overlay_read_response(id: u64, overlay: ProjectOverlay, revision: i64) -> WireServerMessage {
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::ProjectCommand {
+                response: WireProjectCommandResponse::ReadOverlay {
+                    response: WireOverlayReadResponse::new(overlay, Revision::new(revision)),
+                },
+            },
+        )
+    }
+
+    fn error_response(id: u64, error: &str) -> WireServerMessage {
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::Error {
+                error: error.to_string(),
+            },
+        )
+    }
+
+    fn ready_project_with_scripted_client(
+        responses: Vec<WireServerMessage>,
+    ) -> (
+        ProjectController,
+        StudioServerClient,
+        Rc<RefCell<Vec<ClientMessage>>>,
+    ) {
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        let client = StudioServerClient::from_io_for_test(
+            "fake-protocol",
+            Box::new(OverlayScriptedClientIo {
+                sent: Rc::clone(&sent),
+                responses: RefCell::new(responses.into()),
+            }),
+        );
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        (project, client, sent)
+    }
+
+    fn sent_kinds(sent: &Rc<RefCell<Vec<ClientMessage>>>) -> Vec<&'static str> {
+        sent.borrow()
+            .iter()
+            .map(|message| match &message.msg {
+                ClientRequest::ProjectRead { .. } => "project_read",
+                ClientRequest::ProjectCommand {
+                    command: WireProjectCommand::ReadOverlay { .. },
+                    ..
+                } => "overlay_read",
+                _ => "other",
+            })
+            .collect()
+    }
+
+    #[test]
+    fn refresh_fetches_overlay_only_when_revision_advances() {
+        let (mut project, mut client, sent) = ready_project_with_scripted_client(vec![
+            runtime_read_response(1, 10, 5),
+            overlay_read_response(2, overlay_with_rate_edit(), 5),
+            runtime_read_response(3, 11, 5),
+        ]);
+
+        // First refresh: the runtime status reports an overlay revision the
+        // zero-stamped mirror has never seen, so exactly one ride-along fetch
+        // replaces the mirror.
+        block_on_ready(project.refresh_project(&mut client)).unwrap();
+
+        assert_eq!(sent_kinds(&sent), vec!["project_read", "overlay_read"]);
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(sync.overlay_revision(), Revision::new(5));
+        assert_eq!(
+            sync.overlay_edit_at(&overlay_artifact(), &overlay_slot_path()),
+            Some(&SlotEditOp::AssignValue(LpValue::F32(0.5)))
+        );
+
+        // Second refresh: quiet but dirty — the overlay revision is unchanged
+        // across ticks, so no overlay read is issued and the dirty mirror is
+        // retained as-is.
+        block_on_ready(project.refresh_project(&mut client)).unwrap();
+
+        assert_eq!(
+            sent_kinds(&sent),
+            vec!["project_read", "overlay_read", "project_read"],
+            "a quiet-but-dirty project must not issue an overlay read"
+        );
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(sync.overlay_revision(), Revision::new(5));
+        assert_eq!(sync.overlay_slot_edits().count(), 1);
+    }
+
+    #[test]
+    fn overlay_fetch_failure_keeps_mirror_and_retries_next_refresh() {
+        let (mut project, mut client, sent) = ready_project_with_scripted_client(vec![
+            runtime_read_response(1, 10, 5),
+            error_response(2, "overlay read exploded"),
+            runtime_read_response(3, 11, 5),
+            overlay_read_response(4, overlay_with_rate_edit(), 5),
+        ]);
+
+        let run = block_on_ready(project.refresh_project(&mut client)).unwrap();
+
+        assert!(!run.synced, "a failed ride-along fetch fails the sync run");
+        let sync = project.sync.as_ref().unwrap();
+        assert!(sync.is_failed());
+        assert!(
+            sync.summary().issue.is_some(),
+            "fetch failure surfaces on ProjectSync.issue like other read failures"
+        );
+        assert_eq!(
+            sync.overlay_revision(),
+            Revision::default(),
+            "mirror revision is unchanged on fetch failure"
+        );
+        assert!(sync.overlay().is_empty(), "mirror is unchanged on failure");
+
+        // The next tick retries the fetch naturally (the revision gap is
+        // still observed) and succeeds.
+        let run = block_on_ready(project.refresh_project(&mut client)).unwrap();
+
+        assert!(run.synced);
+        assert_eq!(
+            sent_kinds(&sent),
+            vec![
+                "project_read",
+                "overlay_read",
+                "project_read",
+                "overlay_read"
+            ]
+        );
+        let sync = project.sync.as_ref().unwrap();
+        assert!(sync.is_ready());
+        assert_eq!(sync.overlay_revision(), Revision::new(5));
+        assert_eq!(sync.overlay_slot_edits().count(), 1);
+    }
+
+    #[test]
+    fn own_acked_edits_do_not_trigger_ride_along_fetch() {
+        let (mut project, mut client, sent) =
+            ready_project_with_scripted_client(vec![runtime_read_response(1, 10, 5)]);
+        // The client's own mutation acked at revision 5 (P5 drives this); the
+        // mirror is stamped locally, with no follow-up fetch expected.
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[MutationCmd {
+                id: MutationCmdId::new(1),
+                mutation: MutationOp::PutSlotEdit {
+                    artifact: overlay_artifact(),
+                    edit: SlotEdit::assign_value(overlay_slot_path(), LpValue::F32(0.5)),
+                },
+            }],
+            Revision::new(5),
+        );
+
+        block_on_ready(project.refresh_project(&mut client)).unwrap();
+
+        assert_eq!(
+            sent_kinds(&sent),
+            vec!["project_read"],
+            "acked local edits at the reported revision must not fetch"
+        );
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(sync.overlay_revision(), Revision::new(5));
+        assert_eq!(
+            sync.overlay_edit_at(&overlay_artifact(), &overlay_slot_path()),
+            Some(&SlotEditOp::AssignValue(LpValue::F32(0.5)))
+        );
+    }
+
+    struct OverlayScriptedClientIo {
+        sent: Rc<RefCell<Vec<ClientMessage>>>,
+        responses: RefCell<VecDeque<WireServerMessage>>,
+    }
+
+    impl ClientIo for OverlayScriptedClientIo {
+        fn send<'life0, 'async_trait>(
+            &'life0 mut self,
+            msg: ClientMessage,
+        ) -> Pin<Box<dyn Future<Output = Result<(), TransportError>> + 'async_trait>>
+        where
+            'life0: 'async_trait,
+            Self: 'async_trait,
+        {
+            self.sent.borrow_mut().push(msg);
+            Box::pin(async { Ok(()) })
+        }
+
+        fn receive<'life0, 'async_trait>(
+            &'life0 mut self,
+        ) -> Pin<Box<dyn Future<Output = Result<WireServerMessage, TransportError>> + 'async_trait>>
+        where
+            'life0: 'async_trait,
+            Self: 'async_trait,
+        {
+            let response =
+                self.responses.borrow_mut().pop_front().ok_or_else(|| {
+                    TransportError::Other("scripted client io exhausted".to_string())
+                });
+            Box::pin(async move { response })
+        }
+
+        fn close<'life0, 'async_trait>(
+            &'life0 mut self,
+        ) -> Pin<Box<dyn Future<Output = Result<(), TransportError>> + 'async_trait>>
+        where
+            'life0: 'async_trait,
+            Self: 'async_trait,
+        {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    fn block_on_ready<F>(future: F) -> F::Output
+    where
+        F: Future,
+    {
+        let waker = Waker::from(Arc::new(NoopWake));
+        let mut context = Context::from_waker(&waker);
+        let mut future = Box::pin(future);
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(output) => output,
+            Poll::Pending => panic!("test future unexpectedly yielded"),
+        }
+    }
+
+    struct NoopWake;
+
+    impl Wake for NoopWake {
+        fn wake(self: Arc<Self>) {}
     }
 }

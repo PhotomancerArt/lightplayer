@@ -7,6 +7,7 @@ use lpa_client::{
     CancelSignal, ClientError, ClientEvent, ClientIo, LpClient, ProgressDeadline, PullOutcome,
 };
 use lpa_link::{LinkConnection, LinkConnectionKind};
+use lpc_model::{ProjectOverlay, Revision};
 use lpc_wire::{ProjectReadEvent, ProjectReadRequest, WireProjectHandle};
 
 use crate::app::project::demo_project::{
@@ -109,6 +110,14 @@ pub struct StudioProjectRead {
     pub logs: Vec<UiLogEntry>,
 }
 
+/// Full pending-edit overlay pulled from the server, with the revision at
+/// which it last changed (for stamping the client mirror).
+pub struct StudioOverlayRead {
+    pub overlay: ProjectOverlay,
+    pub revision: Revision,
+    pub logs: Vec<UiLogEntry>,
+}
+
 impl StudioServerClient {
     pub async fn list_loaded_projects(&mut self) -> Result<LoadedProjectCatalog, UiError> {
         let loaded = self
@@ -161,6 +170,26 @@ impl StudioServerClient {
         logs.extend(self.take_pending_logs());
         Ok(StudioProjectRead {
             events: read.value,
+            logs,
+        })
+    }
+
+    /// Read the full pending-edit overlay (a sequential command on the same
+    /// connection, issued after a streamed project read completes).
+    pub async fn project_overlay_read(
+        &mut self,
+        handle_id: u32,
+    ) -> Result<StudioOverlayRead, UiError> {
+        let read = self
+            .client
+            .project_overlay_read(WireProjectHandle::new(handle_id))
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(read.events);
+        logs.extend(self.take_pending_logs());
+        Ok(StudioOverlayRead {
+            overlay: read.value.overlay,
+            revision: read.value.revision,
             logs,
         })
     }

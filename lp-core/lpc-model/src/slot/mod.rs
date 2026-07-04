@@ -20,6 +20,7 @@ mod slot_owner;
 mod slot_path;
 mod slot_persistence;
 mod slot_policy;
+mod slot_policy_lookup;
 mod slot_reader;
 mod slot_record_shape;
 mod slot_ref;
@@ -62,15 +63,18 @@ pub use slot_mut_access::{
     SlotValueMutAccess as SlotValueMut,
 };
 pub use slot_mutation::{
-    ensure_slot_present, insert_slot_map_entry_default, remove_slot_map_entry,
-    set_slot_option_none, set_slot_option_some_default, set_slot_value, set_slot_variant_default,
-    slot_data_revision,
+    ensure_slot_present, insert_slot_map_entry_default, lp_value_matches_type,
+    remove_slot_map_entry, set_slot_option_none, set_slot_option_some_default, set_slot_value,
+    set_slot_variant_default, slot_data_revision,
 };
 pub use slot_name::{SlotName, SlotNameError};
 pub use slot_owner::SlotOwner;
 pub use slot_path::{SlotPath, SlotPathError, SlotPathSegment};
 pub use slot_persistence::SlotPersistence;
 pub use slot_policy::SlotPolicy;
+pub use slot_policy_lookup::{
+    SlotPolicyResolution, resolve_slot_policy, resolve_slot_policy_and_leaf,
+};
 pub use slot_reader::{SlotFieldReader, SlotOptionReader, SlotReadContext};
 pub use slot_record_shape::SlotRecordShape;
 pub use slot_ref::SlotRef;

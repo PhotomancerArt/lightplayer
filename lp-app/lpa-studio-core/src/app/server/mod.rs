@@ -15,6 +15,6 @@ pub use server_op::ServerOp;
 pub use server_snapshot::ServerSnapshot;
 pub use server_state::{ServerFailureKind, ServerState};
 pub use studio_server_client::{
-    LoadedDemoProject, LoadedProjectCatalog, LoadedRunningProject, StudioProjectRead,
-    StudioProjectReadOutcome, StudioServerClient,
+    LoadedDemoProject, LoadedProjectCatalog, LoadedRunningProject, StudioOverlayRead,
+    StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
 };
