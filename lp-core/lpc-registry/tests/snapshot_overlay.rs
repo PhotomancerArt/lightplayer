@@ -19,11 +19,18 @@ fn snapshot_overlay_can_bootstrap_project_files() {
   "kind": "Project",
   "nodes": {
     "clock": {
-      "def": {
-        "kind": "Clock"
-      }
+      "ref": "./clock.json"
     }
   }
+}
+"#
+        .to_vec(),
+    );
+    target.insert(
+        LpPathBuf::from("/clock.json"),
+        br#"
+{
+  "kind": "Clock"
 }
 "#
         .to_vec(),

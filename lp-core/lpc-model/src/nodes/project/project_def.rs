@@ -70,22 +70,15 @@ mod tests {
     }
 
     #[test]
-    fn project_def_deserializes_inline_node() {
+    fn project_def_rejects_inline_node_definition() {
         let json = r#"{
             "kind": "Project",
             "nodes": {
                 "clock": { "def": { "kind": "Clock" } }
             }
         }"#;
-        let def = NodeDef::read_json(&registry(), json).unwrap();
-        let NodeDef::Project(def) = def else {
-            panic!("expected project def");
-        };
-        let clock = def.nodes.entries.get("clock").expect("clock");
-        assert!(matches!(
-            clock.value().inline_def(),
-            Some(NodeDef::Clock(_))
-        ));
+        let err = NodeDef::read_json(&registry(), json).unwrap_err();
+        assert!(err.to_string().contains("def"), "{err}");
     }
 
     fn registry() -> SlotShapeRegistry {

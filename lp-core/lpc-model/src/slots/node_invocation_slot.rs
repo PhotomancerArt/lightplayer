@@ -1,8 +1,8 @@
 //! Parent-owned child node invocation.
 //!
 //! A [`NodeInvocation`] is the authored value stored by a parent when it owns a
-//! child node position. It can be unset, reference another node artifact, or
-//! carry an inline [`NodeDef`].
+//! child node position. It can be unset or reference another node artifact —
+//! strictly one node definition per artifact file.
 //!
 //! A [`NodeInvocationSlot`] is the slot wrapper used by slotted node
 //! definitions. Prefer the slot alias for fields in authored model structs, and
@@ -11,11 +11,7 @@
 use alloc::string::ToString;
 
 use crate::artifact::artifact_spec::ArtifactSpec;
-use crate::nodes::node_def::{NodeArtifact, NodeDef};
-use crate::{
-    ArtifactPath, ArtifactPathSlot, EnumSlot, FieldSlot, FieldSlotMut, SlotDataAccess,
-    SlotDataMutAccess, SlotShape, Slotted, StaticSlotShape, StaticSlotShapeDescriptor,
-};
+use crate::{ArtifactPath, ArtifactPathSlot, EnumSlot, Slotted};
 
 /// Slot wrapper for an authored child node invocation.
 pub type NodeInvocationSlot = EnumSlot<NodeInvocation>;
@@ -28,42 +24,6 @@ pub enum NodeInvocation {
     #[default]
     Unset,
     Ref(ArtifactPathSlot),
-    Def(NodeInvocationBody),
-}
-
-/// Inline node definition body referenced by shape id to avoid static descriptor cycles.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct NodeInvocationBody(pub NodeArtifact);
-
-impl NodeInvocationBody {
-    pub fn new(def: NodeDef) -> Self {
-        Self(NodeArtifact::new(def))
-    }
-
-    pub fn value(&self) -> &NodeDef {
-        self.0.node_def()
-    }
-}
-
-impl FieldSlot for NodeInvocationBody {
-    const STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR: Option<&'static StaticSlotShapeDescriptor> =
-        Some(&StaticSlotShapeDescriptor::Ref {
-            id: NodeArtifact::SHAPE_ID,
-        });
-
-    fn slot_field_shape() -> SlotShape {
-        SlotShape::reference(<NodeArtifact as StaticSlotShape>::SHAPE_ID)
-    }
-
-    fn slot_field_data(&self) -> SlotDataAccess<'_> {
-        self.0.slot_field_data()
-    }
-}
-
-impl FieldSlotMut for NodeInvocationBody {
-    fn slot_field_data_mut(&mut self) -> SlotDataMutAccess<'_> {
-        self.0.slot_field_data_mut()
-    }
 }
 
 impl NodeInvocation {
@@ -78,14 +38,9 @@ impl NodeInvocation {
         Self::Ref(ArtifactPathSlot::new(ArtifactPath(specifier.to_string())))
     }
 
-    #[must_use]
-    pub fn inline(def: NodeDef) -> Self {
-        Self::Def(NodeInvocationBody::new(def))
-    }
-
     pub fn ref_specifier(&self) -> Option<ArtifactSpec> {
         match self {
-            Self::Unset | Self::Def(_) => None,
+            Self::Unset => None,
             Self::Ref(path) => {
                 let text = path.value().as_str();
                 if text.is_empty() {
@@ -94,13 +49,6 @@ impl NodeInvocation {
                     ArtifactSpec::parse(text).ok()
                 }
             }
-        }
-    }
-
-    pub fn inline_def(&self) -> Option<&NodeDef> {
-        match self {
-            Self::Unset | Self::Ref(_) => None,
-            Self::Def(body) => Some(body.value()),
         }
     }
 
@@ -150,22 +98,10 @@ mod tests {
     }
 
     #[test]
-    fn node_invocation_json_inline_def_form_loads() {
-        let invocation = read_invocation(r#"{ "def": { "kind": "Clock" } }"#);
+    fn node_invocation_rejects_inline_def_form() {
+        let err = read_invocation_err(r#"{ "def": { "kind": "Clock" } }"#);
 
-        assert!(matches!(invocation.inline_def(), Some(NodeDef::Clock(_))));
-    }
-
-    #[test]
-    fn node_invocation_rejects_ref_plus_inline_def() {
-        let err = read_invocation_err(
-            r#"{
-  "ref": "./clock.json",
-  "def": { "kind": "Clock" }
-}"#,
-        );
-
-        assert!(err.to_string().contains("def") || err.to_string().contains("unknown"));
+        assert!(err.to_string().contains("def"), "{err}");
     }
 
     #[test]
@@ -185,17 +121,6 @@ mod tests {
   "kind": "Project",
   "nodes": {
     "shader": { "ref": "./shader.json" }
-  }
-}"#;
-        round_trip_project_fragment(text);
-    }
-
-    #[test]
-    fn node_invocation_round_trips_inline_def_form() {
-        let text = r#"{
-  "kind": "Project",
-  "nodes": {
-    "clock": { "def": { "kind": "Clock" } }
   }
 }"#;
         round_trip_project_fragment(text);

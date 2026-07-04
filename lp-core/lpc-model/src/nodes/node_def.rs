@@ -24,7 +24,7 @@ use crate::nodes::shader::{ComputeShaderDef, ShaderDef};
 use crate::nodes::texture::TextureDef;
 use crate::{
     ArtifactLocation, AssetContentType, AssetLocation, AssetSlot, AssetSlotValue, EnumSlot, LpPath,
-    LpPathBuf, NodeDefLocation, NodeInvocation, ProjectNodePlacement, ReferencedAsset, SlotAccess,
+    LpPathBuf, NodeInvocation, ProjectNodePlacement, ReferencedAsset, SlotAccess,
     SlotDataAccess, SlotDataMutAccess, SlotMapKey, SlotMutAccess, SlotName, SlotPath, SlotShapeId,
     SlotShapeRegistry, Slotted, StaticSlotShape,
 };
@@ -89,20 +89,6 @@ pub struct InvocationSite {
     pub path: SlotPath,
     pub invocation: NodeInvocation,
     pub role: ProjectNodePlacement,
-}
-
-/// Borrowed inline text asset body owned by a node definition.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct InlineAssetText<'a> {
-    pub extension: &'a str,
-    pub text: &'a str,
-}
-
-/// Borrowed inline byte asset body owned by a node definition.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct InlineAssetBytes<'a> {
-    pub extension: Option<&'a str>,
-    pub bytes: &'a [u8],
 }
 
 /// Failure resolving model-authored artifact path references.
@@ -248,8 +234,13 @@ impl NodeDef {
         NODE_DEF_VARIANT_NAMES.contains(&name)
     }
 
-    /// Child invocation slots reachable directly from this definition under `base`.
-    pub fn invocation_sites(&self, base: &SlotPath) -> Vec<InvocationSite> {
+    /// Child invocation slots reachable directly from this definition.
+    ///
+    /// Definitions live one-per-artifact, so site paths are rooted at the
+    /// artifact root.
+    pub fn invocation_sites(&self) -> Vec<InvocationSite> {
+        let base = SlotPath::root();
+        let base = &base;
         match self {
             Self::Project(project) => project
                 .nodes
@@ -287,13 +278,10 @@ impl NodeDef {
         &self,
         containing_file: &LpPath,
     ) -> Result<Vec<LpPathBuf>, ArtifactPathResolutionError> {
-        let owner =
-            NodeDefLocation::artifact_root(ArtifactLocation::location_for_path(containing_file));
         let mut paths = Vec::new();
-        for asset in self.referenced_assets(containing_file, &owner, &SlotPath::root())? {
-            if let AssetLocation::Artifact { location } = asset.location {
-                paths.push(location.file_path().clone());
-            }
+        for asset in self.referenced_assets(containing_file)? {
+            let AssetLocation::Artifact { location } = asset.location;
+            paths.push(location.file_path().clone());
         }
         Ok(paths)
     }
@@ -302,76 +290,20 @@ impl NodeDef {
     pub fn referenced_assets(
         &self,
         containing_file: &LpPath,
-        owner: &NodeDefLocation,
-        base: &SlotPath,
     ) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
         match self {
-            Self::Shader(shader) => assets_for_shader(
+            Self::Shader(shader) => assets_for_slot(
                 shader.shader_source(),
                 containing_file,
-                owner,
-                base,
                 AssetContentType::ShaderSource,
             ),
-            Self::ComputeShader(shader) => assets_for_shader(
+            Self::ComputeShader(shader) => assets_for_slot(
                 shader.shader_source(),
                 containing_file,
-                owner,
-                base,
                 AssetContentType::ComputeShaderSource,
             ),
-            Self::Fixture(fixture) => assets_for_fixture(fixture, containing_file, owner, base),
+            Self::Fixture(fixture) => assets_for_fixture(fixture, containing_file),
             _ => Ok(Vec::new()),
-        }
-    }
-
-    /// Inline UTF-8 asset text at `asset_path`, when this definition owns one.
-    pub fn inline_asset_text(
-        &self,
-        owner_path: &SlotPath,
-        asset_path: &SlotPath,
-    ) -> Option<InlineAssetText<'_>> {
-        match self {
-            Self::Shader(shader) if asset_path == &source_slot_path(owner_path) => {
-                inline_text_from_slot(shader.shader_source(), "glsl")
-            }
-            Self::ComputeShader(shader) if asset_path == &source_slot_path(owner_path) => {
-                inline_text_from_slot(shader.shader_source(), "glsl")
-            }
-            Self::Fixture(fixture)
-                if asset_path == &fixture_mapping_source_slot_path(owner_path) =>
-            {
-                let MappingConfig::SvgPath { source, .. } = fixture.mapping.value() else {
-                    return None;
-                };
-                inline_text_from_slot(source, "svg")
-            }
-            _ => None,
-        }
-    }
-
-    /// Inline binary asset bytes at `asset_path`, when this definition owns one.
-    pub fn inline_asset_bytes(
-        &self,
-        owner_path: &SlotPath,
-        asset_path: &SlotPath,
-    ) -> Option<InlineAssetBytes<'_>> {
-        match self {
-            Self::Shader(shader) if asset_path == &source_slot_path(owner_path) => {
-                inline_bytes_from_slot(shader.shader_source())
-            }
-            Self::ComputeShader(shader) if asset_path == &source_slot_path(owner_path) => {
-                inline_bytes_from_slot(shader.shader_source())
-            }
-            Self::Fixture(fixture)
-                if asset_path == &fixture_mapping_source_slot_path(owner_path) =>
-            {
-                let MappingConfig::SvgPath { source, .. } = fixture.mapping.value() else {
-                    return None;
-                };
-                inline_bytes_from_slot(source)
-            }
-            _ => None,
         }
     }
 
@@ -382,11 +314,11 @@ impl NodeDef {
 
     /// True when parent-facing shell views differ.
     ///
-    /// Inline child definition bodies are reduced to kind-only stubs so parent
-    /// containers only report a shell change when child presence, references,
-    /// ordering, or child kind changes.
+    /// With strictly one node definition per artifact (no inline child
+    /// bodies), the parent-facing shell is the full authored body, so this is
+    /// equivalent to [`Self::body_changed`].
     pub fn shell_changed(before: &Self, after: &Self) -> bool {
-        def_shell(before) != def_shell(after)
+        Self::body_changed(before, after)
     }
 
     pub fn as_project(&self) -> Option<&ProjectDef> {
@@ -499,45 +431,19 @@ fn playlist_entry_node_path(base: &SlotPath, key: u32) -> Option<SlotPath> {
     )
 }
 
-fn assets_for_shader(
-    source: &AssetSlot,
-    containing_file: &LpPath,
-    owner: &NodeDefLocation,
-    base: &SlotPath,
-    content_type: AssetContentType,
-) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
-    assets_for_slot(
-        source,
-        containing_file,
-        owner,
-        source_slot_path(base),
-        content_type,
-    )
-}
-
 fn assets_for_fixture(
     fixture: &FixtureDef,
     containing_file: &LpPath,
-    owner: &NodeDefLocation,
-    base: &SlotPath,
 ) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
     let MappingConfig::SvgPath { source, .. } = fixture.mapping.value() else {
         return Ok(Vec::new());
     };
-    assets_for_slot(
-        source,
-        containing_file,
-        owner,
-        fixture_mapping_source_slot_path(base),
-        AssetContentType::FixtureSvg,
-    )
+    assets_for_slot(source, containing_file, AssetContentType::FixtureSvg)
 }
 
 fn assets_for_slot(
     slot: &AssetSlot,
     containing_file: &LpPath,
-    owner: &NodeDefLocation,
-    asset_path: SlotPath,
     content_type: AssetContentType,
 ) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
     match slot.value() {
@@ -549,38 +455,7 @@ fn assets_for_slot(
                 content_type,
             )])
         }
-        AssetSlotValue::InlineText { .. } | AssetSlotValue::InlineBytes { .. } => {
-            Ok(vec![ReferencedAsset::new(
-                AssetLocation::inline(owner.clone(), asset_path),
-                content_type,
-            )])
-        }
     }
-}
-
-fn source_slot_path(base: &SlotPath) -> SlotPath {
-    base.child(SlotName::parse("source").expect("source is a valid slot name"))
-}
-
-fn fixture_mapping_source_slot_path(base: &SlotPath) -> SlotPath {
-    base.child(SlotName::parse("mapping").expect("mapping is a valid slot name"))
-        .child(SlotName::parse("source").expect("source is a valid slot name"))
-}
-
-fn inline_text_from_slot<'a>(
-    slot: &'a AssetSlot,
-    default_extension: &'static str,
-) -> Option<InlineAssetText<'a>> {
-    let (extension, text) = slot.inline_text_value()?;
-    Some(InlineAssetText {
-        extension: extension.unwrap_or(default_extension),
-        text,
-    })
-}
-
-fn inline_bytes_from_slot(slot: &AssetSlot) -> Option<InlineAssetBytes<'_>> {
-    let (extension, bytes) = slot.inline_bytes_value()?;
-    Some(InlineAssetBytes { extension, bytes })
 }
 
 pub fn resolve_artifact_specifier(
@@ -605,35 +480,6 @@ pub fn resolve_artifact_specifier(
         ArtifactSpec::Lib(lib) => Err(ArtifactPathResolutionError::LibUnsupported {
             specifier: lib.to_string(),
         }),
-    }
-}
-
-fn def_shell(def: &NodeDef) -> NodeDef {
-    match def {
-        NodeDef::Project(project) => {
-            let mut shell = project.clone();
-            for invocation in shell.nodes.entries.values_mut() {
-                *invocation = EnumSlot::new(invocation_shell(invocation.value()));
-            }
-            NodeDef::Project(shell)
-        }
-        NodeDef::Playlist(playlist) => {
-            let mut shell = playlist.clone();
-            for entry in shell.entries.entries.values_mut() {
-                entry.node = EnumSlot::new(invocation_shell(entry.node.value()));
-            }
-            NodeDef::Playlist(shell)
-        }
-        other => other.clone(),
-    }
-}
-
-fn invocation_shell(invocation: &NodeInvocation) -> NodeInvocation {
-    match invocation {
-        NodeInvocation::Unset | NodeInvocation::Ref(_) => invocation.clone(),
-        NodeInvocation::Def(body) => {
-            NodeInvocation::inline(NodeDef::default_for_kind(body.value().kind()))
-        }
     }
 }
 
@@ -1136,7 +982,7 @@ mod tests {
 }"#,
         )
         .expect("project");
-        let sites = project.invocation_sites(&SlotPath::root());
+        let sites = project.invocation_sites();
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].path.to_string(), "nodes[clock]");
         assert!(matches!(sites[0].invocation, NodeInvocation::Ref(_)));
@@ -1147,18 +993,16 @@ mod tests {
   "entries": {
     "2": {
       "name": "active",
-      "node": {
-        "def": { "kind": "Shader", "source": { "path": "active.glsl" } }
-      }
+      "node": { "ref": "./active.json" }
     }
   }
 }"#,
         )
         .expect("playlist");
-        let sites = playlist.invocation_sites(&SlotPath::root());
+        let sites = playlist.invocation_sites();
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].path.to_string(), "entries[2].node");
-        assert!(matches!(sites[0].invocation, NodeInvocation::Def(_)));
+        assert!(matches!(sites[0].invocation, NodeInvocation::Ref(_)));
     }
 
     #[test]
@@ -1206,26 +1050,16 @@ mod tests {
     }
 
     #[test]
-    fn node_def_referenced_assets_include_source_identity_and_kind() {
-        let owner = NodeDefLocation {
-            artifact: ArtifactLocation::file("/project.json"),
-            path: SlotPath::parse("nodes[shader]").unwrap(),
-        };
-        let shader = NodeDef::from_json_str(
+    fn node_def_rejects_inline_asset_bodies() {
+        let err = NodeDef::from_json_str(
             r#"{ "kind": "Shader", "source": { "glsl": "void main() {}" } }"#,
         )
-        .expect("shader");
+        .expect_err("inline asset body must be rejected");
+        assert!(err.to_string().contains("inline asset"), "{err}");
+    }
 
-        assert_eq!(
-            shader
-                .referenced_assets(LpPath::new("/project.json"), &owner, &owner.path)
-                .unwrap(),
-            vec![ReferencedAsset::new(
-                AssetLocation::inline(owner, SlotPath::parse("nodes[shader].source").unwrap()),
-                AssetContentType::ShaderSource,
-            )]
-        );
-
+    #[test]
+    fn node_def_referenced_assets_include_source_identity_and_kind() {
         let fixture = NodeDef::from_json_str(
             r#"{
   "kind": "Fixture",
@@ -1238,11 +1072,10 @@ mod tests {
 }"#,
         )
         .expect("fixture");
-        let owner = NodeDefLocation::artifact_root(ArtifactLocation::file("/fixtures/f.json"));
 
         assert_eq!(
             fixture
-                .referenced_assets(LpPath::new("/fixtures/f.json"), &owner, &owner.path)
+                .referenced_assets(LpPath::new("/fixtures/f.json"))
                 .unwrap(),
             vec![ReferencedAsset::new(
                 AssetLocation::artifact(ArtifactLocation::file("/fixtures/fixture.svg")),
@@ -1252,26 +1085,8 @@ mod tests {
     }
 
     #[test]
-    fn node_def_shell_change_ignores_inline_body_but_tracks_inline_kind() {
-        let before = NodeDef::from_json_str(
-            r#"{
-  "kind": "Playlist",
-  "entries": {
-    "2": { "node": { "def": { "kind": "Shader", "source": { "path": "a.glsl" } } } }
-  }
-}"#,
-        )
-        .expect("before");
-        let body_changed = NodeDef::from_json_str(
-            r#"{
-  "kind": "Playlist",
-  "entries": {
-    "2": { "node": { "def": { "kind": "Shader", "source": { "path": "b.glsl" } } } }
-  }
-}"#,
-        )
-        .expect("body changed");
-        let kind_changed = NodeDef::from_json_str(
+    fn node_def_rejects_inline_child_definitions() {
+        let err = NodeDef::from_json_str(
             r#"{
   "kind": "Playlist",
   "entries": {
@@ -1279,11 +1094,24 @@ mod tests {
   }
 }"#,
         )
-        .expect("kind changed");
+        .expect_err("inline child definition must be rejected");
+        assert!(err.to_string().contains("def"), "{err}");
+    }
 
-        assert!(NodeDef::body_changed(&before, &body_changed));
-        assert!(!NodeDef::shell_changed(&before, &body_changed));
-        assert!(NodeDef::shell_changed(&before, &kind_changed));
+    #[test]
+    fn node_def_shell_change_tracks_child_ref_changes() {
+        let before = NodeDef::from_json_str(
+            r#"{ "kind": "Project", "nodes": { "a": { "ref": "./a.json" } } }"#,
+        )
+        .expect("before");
+        let ref_changed = NodeDef::from_json_str(
+            r#"{ "kind": "Project", "nodes": { "a": { "ref": "./b.json" } } }"#,
+        )
+        .expect("ref changed");
+
+        assert!(NodeDef::body_changed(&before, &ref_changed));
+        assert!(NodeDef::shell_changed(&before, &ref_changed));
+        assert!(!NodeDef::shell_changed(&before, &before.clone()));
     }
 
     #[test]

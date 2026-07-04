@@ -1007,15 +1007,7 @@ fn node_label(node: &ProjectedNode) -> String {
 }
 
 fn def_location_label(location: &NodeDefLocation) -> String {
-    if location.path.is_root() {
-        location.artifact.file_path().as_str().to_string()
-    } else {
-        format!(
-            "{}#{}",
-            location.artifact.file_path().as_str(),
-            location.path
-        )
-    }
+    location.artifact.file_path().as_str().to_string()
 }
 
 fn artifact_specifier_label(specifier: &ArtifactSpec) -> String {
@@ -2175,7 +2167,7 @@ mod tests {
     }
 
     #[test]
-    fn project_loader_loads_inline_shader_def_and_source() {
+    fn project_loader_rejects_inline_child_def() {
         let fs = LpFsMemory::new();
         fs.write_file(
             "/project.json".as_path(),
@@ -2186,9 +2178,7 @@ mod tests {
     "shader": {
       "def": {
         "kind": "Shader",
-        "source": {
-          "glsl": "vec4 render(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }"
-        }
+        "source": "shader.glsl"
       }
     }
   }
@@ -2198,52 +2188,12 @@ mod tests {
         .expect("project.json");
 
         let services = EngineServices::new(TreePath::parse("/inline.show").expect("path"));
-        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load");
-        rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
-        let root = rt.tree().root();
-        let shader = rt
-            .tree()
-            .lookup_sibling(root, NodeName::parse("shader").unwrap())
-            .expect("shader node");
-
-        rt.tick(16).expect("tick");
-        let production = rt
-            .resolve_with_engine_host(
-                QueryKey::ProducedSlot {
-                    node: shader,
-                    slot: crate::nodes::shader_output_path(),
-                },
-                ResolveLogLevel::Off,
-            )
-            .expect("resolve shader output")
-            .0;
-        let LpValue::Product(ProductRef::Visual(product)) =
-            production.value_leaf().expect("visual product").value()
-        else {
-            panic!("shader output should be a visual product");
+        let err = match ProjectLoader::load_from_root(&fs, services) {
+            Err(err) => err,
+            Ok(_) => panic!("inline child definitions are not supported"),
         };
-
-        let texture = rt
-            .render_texture_for_test(
-                *product,
-                &RenderTextureRequest {
-                    width: 2,
-                    height: 2,
-                    format: TextureStorageFormat::Rgba16Unorm,
-                    time_seconds: 0.0,
-                },
-            )
-            .expect("render inline shader");
-        assert!(
-            texture
-                .try_raw_bytes()
-                .expect("bytes")
-                .chunks_exact(8)
-                .any(|px| px[0] != 0 || px[1] != 0),
-            "inline shader should produce nonzero red output"
-        );
+        assert!(format!("{err:?}").contains("def"), "{err:?}");
     }
-
     #[test]
     fn top_level_shader_gets_default_visual_output_binding() {
         let fs = LpFsMemory::new();

@@ -82,8 +82,8 @@ mod tests {
     }
 
     #[test]
-    fn playlist_entry_parses_inline_child() {
-        let def = NodeDef::from_json_str(
+    fn playlist_entry_rejects_inline_child() {
+        let err = NodeDef::from_json_str(
             r#"{
   "kind": "Playlist",
   "entries": {
@@ -91,22 +91,14 @@ mod tests {
       "name": "active",
       "duration": 4.0,
       "node": {
-        "def": { "kind": "Shader", "source": { "path": "active.glsl" } }
+        "def": { "kind": "Shader", "source": "active.glsl" }
       }
     }
   }
 }"#,
         )
-        .expect("playlist");
-
-        let NodeDef::Playlist(def) = def else {
-            panic!("playlist def");
-        };
-        let entry = def.entries.entries.get(&2).expect("entry");
-        assert!(matches!(
-            entry.node.value().inline_def(),
-            Some(NodeDef::Shader(_))
-        ));
+        .expect_err("inline child definitions are not supported");
+        assert!(alloc::format!("{err}").contains("def"), "{err}");
     }
 
     #[test]

@@ -23,28 +23,17 @@ const ASSET_SLOT_SNAPSHOT_SHAPE_ID: SlotShapeId =
 
 const PATH_KEY: &str = "path";
 const LEGACY_PATH_KEY: &str = "$path";
-const BYTES_KEY: &str = "bytes";
-const EXTENSION_KEY: &str = "extension";
 
 /// Authored asset slot value.
 ///
 /// An artifact reference round-trips as a bare authored path string
-/// (`"shader.glsl"`); inline bodies are tables keyed by `text`/`bytes`.
+/// (`"shader.glsl"`). Asset bodies always live in separate files; inline
+/// bodies are not supported.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub enum AssetSlotValue {
     /// Asset body lives in another artifact.
     Artifact(ArtifactSpec),
-    /// UTF-8 asset body embedded in the owning artifact.
-    InlineText {
-        extension: Option<String>,
-        text: String,
-    },
-    /// Raw asset bytes embedded in the owning artifact.
-    InlineBytes {
-        extension: Option<String>,
-        bytes: Vec<u8>,
-    },
 }
 
 // Hand-written, streaming serde for the compact authored form. This is
@@ -55,25 +44,8 @@ pub enum AssetSlotValue {
 // dispatches on the input shape (string vs map) in a single streaming pass.
 impl serde::Serialize for AssetSlotValue {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        use serde::ser::SerializeMap;
         match self {
             Self::Artifact(spec) => spec.serialize(serializer),
-            Self::InlineText { extension, text } => {
-                let mut map = serializer.serialize_map(None)?;
-                if let Some(extension) = extension {
-                    map.serialize_entry(EXTENSION_KEY, extension)?;
-                }
-                map.serialize_entry("text", text)?;
-                map.end()
-            }
-            Self::InlineBytes { extension, bytes } => {
-                let mut map = serializer.serialize_map(None)?;
-                if let Some(extension) = extension {
-                    map.serialize_entry(EXTENSION_KEY, extension)?;
-                }
-                map.serialize_entry(BYTES_KEY, bytes)?;
-                map.end()
-            }
         }
     }
 }
@@ -86,7 +58,7 @@ impl<'de> serde::Deserialize<'de> for AssetSlotValue {
             type Value = AssetSlotValue;
 
             fn expecting(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-                f.write_str("an artifact path string or an inline asset table")
+                f.write_str("an artifact path string")
             }
 
             fn visit_str<E: serde::de::Error>(self, value: &str) -> Result<Self::Value, E> {
@@ -101,32 +73,11 @@ impl<'de> serde::Deserialize<'de> for AssetSlotValue {
 
             fn visit_map<M: serde::de::MapAccess<'de>>(
                 self,
-                mut map: M,
+                _map: M,
             ) -> Result<Self::Value, M::Error> {
-                let mut extension: Option<Option<String>> = None;
-                let mut text: Option<String> = None;
-                let mut bytes: Option<Vec<u8>> = None;
-                while let Some(key) = map.next_key::<String>()? {
-                    match key.as_str() {
-                        EXTENSION_KEY => extension = Some(map.next_value()?),
-                        "text" => text = Some(map.next_value()?),
-                        BYTES_KEY => bytes = Some(map.next_value()?),
-                        _ => {
-                            map.next_value::<serde::de::IgnoredAny>()?;
-                        }
-                    }
-                }
-                let extension = extension.unwrap_or(None);
-                match (text, bytes) {
-                    (Some(text), None) => Ok(AssetSlotValue::InlineText { extension, text }),
-                    (None, Some(bytes)) => Ok(AssetSlotValue::InlineBytes { extension, bytes }),
-                    (None, None) => Err(serde::de::Error::custom(
-                        "inline asset table requires a `text` or `bytes` field",
-                    )),
-                    (Some(_), Some(_)) => Err(serde::de::Error::custom(
-                        "inline asset table has both `text` and `bytes`",
-                    )),
-                }
+                Err(serde::de::Error::custom(
+                    "inline asset bodies are not supported; reference a separate asset file",
+                ))
             }
         }
 
@@ -181,23 +132,6 @@ impl AssetSlot {
         Self::artifact(ArtifactSpec::path(path))
     }
 
-    pub fn inline_text(extension: impl Into<String>, text: impl Into<String>) -> Self {
-        Self {
-            value: AssetSlotValue::InlineText {
-                extension: Some(extension.into()),
-                text: text.into(),
-            },
-            revision: current_revision(),
-        }
-    }
-
-    pub fn inline_bytes(extension: Option<String>, bytes: Vec<u8>) -> Self {
-        Self {
-            value: AssetSlotValue::InlineBytes { extension, bytes },
-            revision: current_revision(),
-        }
-    }
-
     pub fn revision(&self) -> Revision {
         self.revision
     }
@@ -209,39 +143,12 @@ impl AssetSlot {
     pub fn artifact_value(&self) -> Option<&ArtifactSpec> {
         match &self.value {
             AssetSlotValue::Artifact(spec) => Some(spec),
-            AssetSlotValue::InlineText { .. } | AssetSlotValue::InlineBytes { .. } => None,
-        }
-    }
-
-    pub fn inline_text_value(&self) -> Option<(Option<&str>, &str)> {
-        match &self.value {
-            AssetSlotValue::InlineText { extension, text } => {
-                Some((extension.as_deref(), text.as_str()))
-            }
-            AssetSlotValue::Artifact(_) | AssetSlotValue::InlineBytes { .. } => None,
-        }
-    }
-
-    pub fn inline_bytes_value(&self) -> Option<(Option<&str>, &[u8])> {
-        match &self.value {
-            AssetSlotValue::InlineBytes { extension, bytes } => {
-                Some((extension.as_deref(), bytes.as_slice()))
-            }
-            AssetSlotValue::Artifact(_) | AssetSlotValue::InlineText { .. } => None,
         }
     }
 
     fn snapshot_text(&self) -> String {
         match &self.value {
             AssetSlotValue::Artifact(spec) => spec.to_string(),
-            AssetSlotValue::InlineText { extension, text } => match extension {
-                Some(extension) => format!("inline text .{extension}: {text}"),
-                None => format!("inline text: {text}"),
-            },
-            AssetSlotValue::InlineBytes { extension, bytes } => match extension {
-                Some(extension) => format!("inline bytes .{extension}: {} bytes", bytes.len()),
-                None => format!("inline bytes: {} bytes", bytes.len()),
-            },
         }
     }
 
@@ -312,80 +219,17 @@ where
         return read_artifact_spec(spec);
     }
 
-    if first == BYTES_KEY || first == EXTENSION_KEY {
-        return read_inline_bytes(object);
-    }
-
-    let mut inline_key = None;
-    let mut inline_text = None;
-    while let Some(mut prop) = object.next_prop()? {
-        let name = prop.name().to_string();
-        if name == PATH_KEY || name == LEGACY_PATH_KEY || name == BYTES_KEY || name == EXTENSION_KEY
-        {
-            return Err(prop.unknown_field(&name, &["inline text extension key"]));
-        }
-        if inline_key.is_some() {
-            return Err(prop.unknown_field(&name, &[inline_key.as_deref().unwrap_or("inline")]));
-        }
-        inline_key = Some(name);
-        inline_text = Some(prop.value().string()?);
-    }
-
-    let Some(extension) = inline_key else {
-        return Err(object.missing_required_field("inline extension key"));
-    };
-    Ok(AssetSlotValue::InlineText {
-        extension: Some(extension),
-        text: inline_text.unwrap_or_default(),
-    })
+    Err(SyntaxError::new(
+        "",
+        None,
+        "inline asset bodies are not supported; reference a separate asset file",
+    ))
 }
 
 fn read_artifact_spec(value: String) -> Result<AssetSlotValue, SyntaxError> {
     ArtifactSpec::parse(&value)
         .map(AssetSlotValue::Artifact)
         .map_err(|err| SyntaxError::new("", None, format!("invalid artifact spec: {err}")))
-}
-
-fn read_inline_bytes<S>(
-    mut object: crate::slot_codec::ObjectReader<'_, '_, S>,
-) -> Result<AssetSlotValue, SyntaxError>
-where
-    S: SyntaxEventSource,
-{
-    let mut extension = None;
-    let mut bytes = None;
-    while let Some(mut prop) = object.next_prop()? {
-        match prop.name() {
-            BYTES_KEY => bytes = Some(read_byte_array(prop.value())?),
-            EXTENSION_KEY => extension = Some(prop.value().string()?),
-            name => return Err(prop.unknown_field(name, &[BYTES_KEY, EXTENSION_KEY])),
-        }
-    }
-
-    Ok(AssetSlotValue::InlineBytes {
-        extension,
-        bytes: bytes.unwrap_or_default(),
-    })
-}
-
-fn read_byte_array<S>(value: ValueReader<'_, '_, S>) -> Result<Vec<u8>, SyntaxError>
-where
-    S: SyntaxEventSource,
-{
-    let mut bytes = Vec::new();
-    let mut array = value.array()?;
-    while let Some(item) = array.next_item()? {
-        let byte = item.u32()?;
-        let Ok(byte) = u8::try_from(byte) else {
-            return Err(SyntaxError::new(
-                "",
-                None,
-                "expected byte value in range 0..=255",
-            ));
-        };
-        bytes.push(byte);
-    }
-    Ok(bytes)
 }
 
 fn write_value_json<W>(
@@ -397,37 +241,7 @@ where
 {
     match slot_value {
         AssetSlotValue::Artifact(spec) => writer.string(&spec.to_string()),
-        AssetSlotValue::InlineText { extension, text } => {
-            let mut object = writer.object()?;
-            object
-                .prop(extension.as_deref().unwrap_or("text"))?
-                .string(text)?;
-            object.finish()
-        }
-        AssetSlotValue::InlineBytes { extension, bytes } => {
-            write_inline_bytes_json(writer, extension.as_deref(), bytes.as_slice())
-        }
     }
-}
-
-fn write_inline_bytes_json<W>(
-    value: SlotValueWriter<'_, W>,
-    extension: Option<&str>,
-    bytes: &[u8],
-) -> Result<(), SlotWriteError<W::Error>>
-where
-    W: SlotWrite,
-{
-    let mut object = value.object()?;
-    if let Some(extension) = extension {
-        object.prop(EXTENSION_KEY)?.string(extension)?;
-    }
-    let mut array = object.prop(BYTES_KEY)?.array()?;
-    for byte in bytes {
-        array.item()?.u32(u32::from(*byte))?;
-    }
-    array.finish()?;
-    object.finish()
 }
 
 impl FieldSlot for AssetSlot {
@@ -541,6 +355,10 @@ mod tests {
     use crate::slot_codec::{JsonSyntaxSource, SlotReader, SlotWriter, apply_reader_to_slot};
 
     fn read_asset(text: &str) -> AssetSlot {
+        try_read_asset(text).expect("read asset")
+    }
+
+    fn try_read_asset(text: &str) -> Result<AssetSlot, crate::slot_codec::SyntaxError> {
         let registry = SlotShapeRegistry::default();
         let mut reader = SlotReader::new(JsonSyntaxSource::new(text).expect("syntax"), &registry);
         let mut slot = AssetSlot::default();
@@ -549,9 +367,8 @@ mod tests {
             &AssetSlot::slot_field_shape(),
             &registry,
             reader.value(),
-        )
-        .expect("read asset");
-        slot
+        )?;
+        Ok(slot)
     }
 
     #[test]
@@ -573,27 +390,17 @@ mod tests {
     }
 
     #[test]
-    fn parses_inline_glsl_object() {
-        let slot = read_asset(r#"{ "glsl": "void main() {}" }"#);
-        let (ext, text) = slot.inline_text_value().unwrap();
-        assert_eq!(ext, Some("glsl"));
-        assert!(text.contains("main"));
+    fn rejects_inline_text_object() {
+        let err = try_read_asset(r#"{ "glsl": "void main() {}" }"#)
+            .expect_err("inline text bodies are not supported");
+        assert!(err.to_string().contains("inline asset"), "{err}");
     }
 
     #[test]
-    fn parses_inline_svg_object() {
-        let slot = read_asset(r#"{ "svg": "<svg/>" }"#);
-        let (ext, text) = slot.inline_text_value().unwrap();
-        assert_eq!(ext, Some("svg"));
-        assert_eq!(text, "<svg/>");
-    }
-
-    #[test]
-    fn parses_inline_bytes_object() {
-        let slot = read_asset(r#"{ "extension": "png", "bytes": [137, 80, 78, 71] }"#);
-        let (ext, bytes) = slot.inline_bytes_value().unwrap();
-        assert_eq!(ext, Some("png"));
-        assert_eq!(bytes, &[137, 80, 78, 71]);
+    fn rejects_inline_bytes_object() {
+        let err = try_read_asset(r#"{ "extension": "png", "bytes": [137, 80, 78, 71] }"#)
+            .expect_err("inline byte bodies are not supported");
+        assert!(err.to_string().contains("inline asset"), "{err}");
     }
 
     #[test]

@@ -110,17 +110,12 @@ fn duplicate_external_refs_share_def_entry_but_create_distinct_graph_nodes() {
 }
 
 #[test]
-fn inline_and_missing_children_are_graph_nodes() {
+fn missing_children_are_graph_nodes() {
     let (registry, _) = load_inline_project(
         r#"
 {
   "kind": "Project",
   "nodes": {
-    "clock": {
-      "def": {
-        "kind": "Clock"
-      }
-    },
     "missing": {
       "ref": "./missing.json"
     }
@@ -131,13 +126,8 @@ fn inline_and_missing_children_are_graph_nodes() {
         &[],
     );
     let graph = &registry.inventory().tree;
-    let inline_clock = NodeDefLocation {
-        artifact: artifact("/project.json"),
-        path: SlotPath::parse("nodes[clock]").unwrap(),
-    };
     let missing = root_def("/missing.json");
 
-    assert!(graph.def_instances.contains_key(&inline_clock));
     assert!(graph.def_instances.contains_key(&missing));
     assert_eq!(
         registry.def(&missing).map(|entry| &entry.state),

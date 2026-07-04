@@ -47,47 +47,6 @@ fn materialization_uses_overlay_replacement_and_reports_delete() {
 }
 
 #[test]
-fn materializes_inline_glsl_from_effective_owner_def() {
-    let mut scenario = RegistryScenario::empty();
-    scenario.write_file(
-        "/project.json",
-        r#"
-{
-  "kind": "Project",
-  "nodes": {
-    "shader": {
-      "def": {
-        "kind": "Shader",
-        "source": {
-          "glsl": "vec4 render(vec2 pos) { return vec4(1.0); }"
-        }
-      }
-    }
-  }
-}
-"#,
-    );
-    scenario.load_root("/project.json");
-
-    let source = AssetLocation::inline(
-        NodeDefLocation {
-            artifact: artifact("/project.json"),
-            path: SlotPath::parse("nodes[shader]").unwrap(),
-        },
-        SlotPath::parse("nodes[shader].source").unwrap(),
-    );
-    let materialized = scenario
-        .materialize_asset_text(&source)
-        .expect("inline source");
-
-    assert!(materialized.text.contains("vec4 render"));
-    assert_eq!(
-        materialized.diagnostic_name,
-        "/project.json:nodes[shader].source.glsl"
-    );
-}
-
-#[test]
 fn materialization_rejects_unref_and_invalid_utf8_text() {
     let (mut scenario, _) = RegistryScenario::load_fixture("fyeah-sign");
     let unreferenced = artifact_asset("/not-referenced.glsl");
