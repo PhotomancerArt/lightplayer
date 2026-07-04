@@ -1131,6 +1131,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "convert-toml-artifacts"
+version = "0.0.0"
+dependencies = [
+ "lpc-model",
+]
+
+[[package]]
 name = "convert_case"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5211,7 +5218,7 @@ dependencies = [
  "lp-collection 1.0.0",
  "lpc-model",
  "serde",
- "toml",
+ "serde_json",
 ]
 
 [[package]]

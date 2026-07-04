@@ -20,26 +20,26 @@ fn can_create_fyeah_sign_project_from_empty_fs_with_artifact_body_mutations() {
     assert!(
         scenario
             .fs()
-            .file_exists(LpPath::new("/project.toml"))
+            .file_exists(LpPath::new("/project.json"))
             .unwrap()
     );
 
-    let load = scenario.load_root("/project.toml");
+    let load = scenario.load_root("/project.json");
     assert_eq!(load.changes.defs.added.len(), 9);
     assert_eq!(load.changes.assets.added.len(), 3);
 
     assert_loaded_def_kinds(
         scenario.registry(),
         &[
-            ("/project.toml", NodeKind::Project),
-            ("/blast.toml", NodeKind::Shader),
-            ("/button.toml", NodeKind::Button),
-            ("/clock.toml", NodeKind::Clock),
-            ("/fixture.toml", NodeKind::Fixture),
-            ("/idle.toml", NodeKind::Shader),
-            ("/output.toml", NodeKind::Output),
-            ("/playlist.toml", NodeKind::Playlist),
-            ("/radio.toml", NodeKind::ControlRadio),
+            ("/project.json", NodeKind::Project),
+            ("/blast.json", NodeKind::Shader),
+            ("/button.json", NodeKind::Button),
+            ("/clock.json", NodeKind::Clock),
+            ("/fixture.json", NodeKind::Fixture),
+            ("/idle.json", NodeKind::Shader),
+            ("/output.json", NodeKind::Output),
+            ("/playlist.json", NodeKind::Playlist),
+            ("/radio.json", NodeKind::ControlRadio),
         ],
     );
     assert_artifact_asset_content_types(

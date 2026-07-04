@@ -1,7 +1,0 @@
-kind = "Button"
-endpoint = "button:gpio:D9"
-id = 1
-stable_ms = 30
-
-[bindings.down]
-target = "bus#trigger"

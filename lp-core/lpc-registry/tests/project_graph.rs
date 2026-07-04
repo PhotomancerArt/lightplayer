@@ -21,23 +21,23 @@ fn fyeah_sign_graph_contains_project_children_playlist_entries_and_asset_consume
 
     assert_eq!(graph.root, root);
     assert_eq!(graph.nodes.len(), 9);
-    assert_eq!(graph.nodes[&root].def_location, root_def("/project.toml"));
+    assert_eq!(graph.nodes[&root].def_location, root_def("/project.json"));
     assert_project_child(
         graph.nodes.get(&playlist).unwrap(),
         "playlist",
-        "/playlist.toml",
+        "/playlist.json",
     );
     assert_playlist_entry(
         graph.nodes.get(&idle).unwrap(),
         1,
         Some("idle"),
-        "/idle.toml",
+        "/idle.json",
     );
     assert_playlist_entry(
         graph.nodes.get(&blast).unwrap(),
         2,
         Some("blast"),
-        "/blast.toml",
+        "/blast.json",
     );
 
     assert_eq!(
@@ -67,25 +67,33 @@ fn fyeah_sign_graph_contains_project_children_playlist_entries_and_asset_consume
 fn duplicate_external_refs_share_def_entry_but_create_distinct_graph_nodes() {
     let (registry, _) = load_inline_project(
         r#"
-kind = "Project"
-
-[nodes.a]
-ref = "./shader.toml"
-
-[nodes.b]
-ref = "./shader.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "a": {
+      "ref": "./shader.json"
+    },
+    "b": {
+      "ref": "./shader.json"
+    }
+  }
+}
 "#,
         &[(
-            "/shader.toml",
+            "/shader.json",
             r#"
-kind = "Shader"
-source = { path = "shader.glsl" }
+{
+  "kind": "Shader",
+  "source": {
+    "path": "shader.glsl"
+  }
+}
 "#,
         )],
         &[("/shader.glsl", b"void main() {}".as_slice())],
     );
     let graph = &registry.inventory().tree;
-    let shader = root_def("/shader.toml");
+    let shader = root_def("/shader.json");
     let a = NodeUseLocation::root().child(SlotPath::parse("nodes[a]").unwrap());
     let b = NodeUseLocation::root().child(SlotPath::parse("nodes[b]").unwrap());
 
@@ -105,23 +113,29 @@ source = { path = "shader.glsl" }
 fn inline_and_missing_children_are_graph_nodes() {
     let (registry, _) = load_inline_project(
         r#"
-kind = "Project"
-
-[nodes.clock.def]
-kind = "Clock"
-
-[nodes.missing]
-ref = "./missing.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "clock": {
+      "def": {
+        "kind": "Clock"
+      }
+    },
+    "missing": {
+      "ref": "./missing.json"
+    }
+  }
+}
 "#,
         &[],
         &[],
     );
     let graph = &registry.inventory().tree;
     let inline_clock = NodeDefLocation {
-        artifact: artifact("/project.toml"),
+        artifact: artifact("/project.json"),
         path: SlotPath::parse("nodes[clock]").unwrap(),
     };
-    let missing = root_def("/missing.toml");
+    let missing = root_def("/missing.json");
 
     assert!(graph.def_instances.contains_key(&inline_clock));
     assert!(graph.def_instances.contains_key(&missing));
@@ -165,15 +179,15 @@ fn assert_playlist_entry(
 
 fn load_inline_project(
     project: &str,
-    toml_files: &[(&str, &str)],
+    json_files: &[(&str, &str)],
     byte_files: &[(&str, &[u8])],
 ) -> (ProjectRegistry, LpFsMemory) {
     let shapes = lpc_model::SlotShapeRegistry::default();
     let ctx = ParseCtx { shapes: &shapes };
     let mut fs = LpFsMemory::new();
-    fs.write_file_mut(LpPath::new("/project.toml"), project.as_bytes())
+    fs.write_file_mut(LpPath::new("/project.json"), project.as_bytes())
         .unwrap();
-    for (path, contents) in toml_files {
+    for (path, contents) in json_files {
         fs.write_file_mut(LpPath::new(path), contents.as_bytes())
             .unwrap();
     }
@@ -185,7 +199,7 @@ fn load_inline_project(
     registry
         .load_root(
             &fs,
-            LpPath::new("/project.toml"),
+            LpPath::new("/project.json"),
             lpc_model::Revision::new(1),
             &ctx,
         )

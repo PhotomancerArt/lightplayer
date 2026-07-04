@@ -1,0 +1,24 @@
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "bindings": {
+    "output": {
+      "target": "bus#visual.out"
+    }
+  },
+  "glsl_opts": {
+    "add_sub": "saturating",
+    "mul": "saturating",
+    "div": "saturating"
+  },
+  "consumed": {
+    "time": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0,
+      "label": "Time",
+      "description": "Project clock time in seconds"
+    }
+  }
+}

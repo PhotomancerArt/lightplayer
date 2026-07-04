@@ -34,10 +34,10 @@ fn test_stop_all_projects() {
 
     let project_toml = temp_fs
         .borrow()
-        .read_file("/project.toml".as_path())
+        .read_file("/project.json".as_path())
         .unwrap();
     base_fs
-        .write_file(project_prefix.join("project.toml").as_path(), &project_toml)
+        .write_file(project_prefix.join("project.json").as_path(), &project_toml)
         .unwrap();
 
     let node_paths = vec![
@@ -60,7 +60,7 @@ fn test_stop_all_projects() {
 
         if node_path.as_str().contains("shader") {
             let glsl_path =
-                lpc_model::LpPathBuf::from(node_path.as_str().replace(".toml", ".glsl"));
+                lpc_model::LpPathBuf::from(node_path.as_str().replace(".json", ".glsl"));
             if let Ok(data) = temp_fs.borrow().read_file(glsl_path.as_path()) {
                 let relative_path = glsl_path
                     .as_str()

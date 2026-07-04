@@ -56,6 +56,8 @@ members = [
     "lp-shader/lps-filetests-app",
     "lp-app/web-demo",
     "spikes/naga-wasm-poc", "lp-shader/lps-q32",
+    # Throwaway TOML→JSON migration tool — removed in remove-toml P8.
+    "scripts/convert-toml-artifacts",
 ]
 resolver = "2"
 

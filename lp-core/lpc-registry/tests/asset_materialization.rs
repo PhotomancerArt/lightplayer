@@ -50,20 +50,28 @@ fn materialization_uses_overlay_replacement_and_reports_delete() {
 fn materializes_inline_glsl_from_effective_owner_def() {
     let mut scenario = RegistryScenario::empty();
     scenario.write_file(
-        "/project.toml",
+        "/project.json",
         r#"
-kind = "Project"
-
-[nodes.shader.def]
-kind = "Shader"
-source = { glsl = "vec4 render(vec2 pos) { return vec4(1.0); }" }
+{
+  "kind": "Project",
+  "nodes": {
+    "shader": {
+      "def": {
+        "kind": "Shader",
+        "source": {
+          "glsl": "vec4 render(vec2 pos) { return vec4(1.0); }"
+        }
+      }
+    }
+  }
+}
 "#,
     );
-    scenario.load_root("/project.toml");
+    scenario.load_root("/project.json");
 
     let source = AssetLocation::inline(
         NodeDefLocation {
-            artifact: artifact("/project.toml"),
+            artifact: artifact("/project.json"),
             path: SlotPath::parse("nodes[shader]").unwrap(),
         },
         SlotPath::parse("nodes[shader].source").unwrap(),
@@ -75,7 +83,7 @@ source = { glsl = "vec4 render(vec2 pos) { return vec4(1.0); }" }
     assert!(materialized.text.contains("vec4 render"));
     assert_eq!(
         materialized.diagnostic_name,
-        "/project.toml:nodes[shader].source.glsl"
+        "/project.json:nodes[shader].source.glsl"
     );
 }
 

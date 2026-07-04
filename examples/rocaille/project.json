@@ -1,0 +1,21 @@
+{
+  "kind": "Project",
+  "name": "rocaille",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "fixture": {
+      "ref": "./fixture.json"
+    },
+    "output": {
+      "ref": "./output.json"
+    },
+    "shader": {
+      "ref": "./shader.json"
+    },
+    "texture": {
+      "ref": "./texture.json"
+    }
+  }
+}

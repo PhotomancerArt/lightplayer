@@ -86,27 +86,35 @@ fn fake_runtime_consumes_load_apply_and_commit_change_summaries() {
     let mut fs = LpFsMemory::new();
     write_file(
         &mut fs,
-        "/project.toml",
+        "/project.json",
         r#"
-kind = "Project"
-
-[nodes.shader]
-ref = "./shader.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "shader": {
+      "ref": "./shader.json"
+    }
+  }
+}
 "#,
     );
     write_file(
         &mut fs,
-        "/shader.toml",
+        "/shader.json",
         r#"
-kind = "Shader"
-source = { path = "shader.glsl" }
+{
+  "kind": "Shader",
+  "source": {
+    "path": "shader.glsl"
+  }
+}
 "#,
     );
     write_file(&mut fs, "/shader.glsl", "void main() {}");
 
     let mut registry = ProjectRegistry::new();
     let load = registry
-        .load_root(&fs, LpPath::new("/project.toml"), Revision::new(1), &ctx)
+        .load_root(&fs, LpPath::new("/project.json"), Revision::new(1), &ctx)
         .unwrap();
     let mut runtime = FakeRuntime::default();
     runtime.apply(&registry, &load.changes);

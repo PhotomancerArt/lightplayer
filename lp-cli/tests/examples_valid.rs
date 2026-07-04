@@ -53,7 +53,7 @@ fn collect_project_dirs(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
         let entry = entry.with_context(|| format!("read entry in {}", dir.display()))?;
         let path = entry.path();
         if path.is_dir() {
-            if path.join("project.toml").is_file() {
+            if path.join("project.json").is_file() {
                 out.push(path);
             } else {
                 collect_project_dirs(&path, out)?;

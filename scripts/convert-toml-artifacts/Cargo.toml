@@ -1,0 +1,12 @@
+[package]
+name = "convert-toml-artifacts"
+version = "0.0.0"
+edition = "2021"
+publish = false
+description = "Throwaway TOML→JSON artifact converter for the 2026-07-03 remove-toml migration. Deleted in P8."
+
+[dependencies]
+lpc-model = { path = "../../lp-core/lpc-model" }
+
+[lints]
+workspace = true

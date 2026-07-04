@@ -21,37 +21,47 @@ fn load_root_discovers_root_external_inline_and_asset_entries() {
     let mut fs = LpFsMemory::new();
     write_file(
         &mut fs,
-        "/project.toml",
+        "/project.json",
         r#"
-kind = "Project"
-
-[nodes.shader]
-ref = "./shader.toml"
-
-[nodes.clock.def]
-kind = "Clock"
+{
+  "kind": "Project",
+  "nodes": {
+    "shader": {
+      "ref": "./shader.json"
+    },
+    "clock": {
+      "def": {
+        "kind": "Clock"
+      }
+    }
+  }
+}
 "#,
     );
     write_file(
         &mut fs,
-        "/shader.toml",
+        "/shader.json",
         r#"
-kind = "Shader"
-source = { path = "shader.glsl" }
-render_order = 0
+{
+  "kind": "Shader",
+  "source": {
+    "path": "shader.glsl"
+  },
+  "render_order": 0
+}
 "#,
     );
     write_file(&mut fs, "/shader.glsl", "void main() {}");
 
     let mut registry = ProjectRegistry::new();
     let result = registry
-        .load_root(&fs, LpPath::new("/project.toml"), Revision::new(1), &ctx)
+        .load_root(&fs, LpPath::new("/project.json"), Revision::new(1), &ctx)
         .unwrap();
 
-    let root = NodeDefLocation::artifact_root(ArtifactLocation::file("/project.toml"));
-    let shader = NodeDefLocation::artifact_root(ArtifactLocation::file("/shader.toml"));
+    let root = NodeDefLocation::artifact_root(ArtifactLocation::file("/project.json"));
+    let shader = NodeDefLocation::artifact_root(ArtifactLocation::file("/shader.json"));
     let inline_clock = NodeDefLocation {
-        artifact: ArtifactLocation::file("/project.toml"),
+        artifact: ArtifactLocation::file("/project.json"),
         path: SlotPath::parse("nodes[clock]").unwrap(),
     };
     let shader_asset = AssetLocation::artifact(ArtifactLocation::file("/shader.glsl"));
@@ -89,24 +99,32 @@ fn load_root_discovers_inline_source_asset() {
     let mut fs = LpFsMemory::new();
     write_file(
         &mut fs,
-        "/project.toml",
+        "/project.json",
         r#"
-kind = "Project"
-
-[nodes.shader.def]
-kind = "Shader"
-source = { glsl = "void main() {}" }
+{
+  "kind": "Project",
+  "nodes": {
+    "shader": {
+      "def": {
+        "kind": "Shader",
+        "source": {
+          "glsl": "void main() {}"
+        }
+      }
+    }
+  }
+}
 "#,
     );
 
     let mut registry = ProjectRegistry::new();
     registry
-        .load_root(&fs, LpPath::new("/project.toml"), Revision::new(1), &ctx)
+        .load_root(&fs, LpPath::new("/project.json"), Revision::new(1), &ctx)
         .unwrap();
 
     let source = AssetLocation::inline(
         NodeDefLocation {
-            artifact: ArtifactLocation::file("/project.toml"),
+            artifact: ArtifactLocation::file("/project.json"),
             path: SlotPath::parse("nodes[shader]").unwrap(),
         },
         SlotPath::parse("nodes[shader].source").unwrap(),
@@ -129,21 +147,25 @@ fn load_root_keeps_missing_referenced_def_as_error_entry() {
     let mut fs = LpFsMemory::new();
     write_file(
         &mut fs,
-        "/project.toml",
+        "/project.json",
         r#"
-kind = "Project"
-
-[nodes.shader]
-ref = "./missing.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "shader": {
+      "ref": "./missing.json"
+    }
+  }
+}
 "#,
     );
 
     let mut registry = ProjectRegistry::new();
     registry
-        .load_root(&fs, LpPath::new("/project.toml"), Revision::new(1), &ctx)
+        .load_root(&fs, LpPath::new("/project.json"), Revision::new(1), &ctx)
         .unwrap();
 
-    let missing = NodeDefLocation::artifact_root(ArtifactLocation::file("/missing.toml"));
+    let missing = NodeDefLocation::artifact_root(ArtifactLocation::file("/missing.json"));
     assert_eq!(
         registry.def(&missing).map(|entry| &entry.state),
         Some(&NodeDefState::NotFound)
@@ -157,26 +179,34 @@ fn load_root_keeps_missing_referenced_asset_as_error_entry() {
     let mut fs = LpFsMemory::new();
     write_file(
         &mut fs,
-        "/project.toml",
+        "/project.json",
         r#"
-kind = "Project"
-
-[nodes.shader]
-ref = "./shader.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "shader": {
+      "ref": "./shader.json"
+    }
+  }
+}
 "#,
     );
     write_file(
         &mut fs,
-        "/shader.toml",
+        "/shader.json",
         r#"
-kind = "Shader"
-source = { path = "missing.glsl" }
+{
+  "kind": "Shader",
+  "source": {
+    "path": "missing.glsl"
+  }
+}
 "#,
     );
 
     let mut registry = ProjectRegistry::new();
     registry
-        .load_root(&fs, LpPath::new("/project.toml"), Revision::new(1), &ctx)
+        .load_root(&fs, LpPath::new("/project.json"), Revision::new(1), &ctx)
         .unwrap();
 
     let missing = AssetLocation::artifact(ArtifactLocation::file("/missing.glsl"));

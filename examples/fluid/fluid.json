@@ -1,0 +1,20 @@
+{
+  "kind": "Fluid",
+  "bindings": {
+    "emitters": {
+      "source": "bus#fluid.emitters"
+    },
+    "output": {
+      "target": "bus#visual.out"
+    }
+  },
+  "size": {
+    "width": 16,
+    "height": 16
+  },
+  "solver_iterations": 3,
+  "step_hz": 25,
+  "fade_speed": 0.08,
+  "viscosity": 0.00003,
+  "time": 0
+}

@@ -27,12 +27,12 @@ fn test_fs_changes_not_repeated() {
     let project_name = "test-project";
     let project_path = "/projects".as_path_buf().join(project_name);
 
-    // Create project.toml
+    // Create project.json
     server
         .base_fs_mut()
         .write_file(
-            project_path.join("project.toml").as_path(),
-            b"kind = \"Project\"\nname = \"test\"\n",
+            project_path.join("project.json").as_path(),
+            b"{ \"kind\": \"Project\", \"name\": \"test\" }\n",
         )
         .unwrap();
 

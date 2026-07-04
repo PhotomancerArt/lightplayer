@@ -15,7 +15,7 @@ use lpc_model::SlotEdit;
 use super::EditApplyError;
 
 pub fn serialize_slot_draft(def: &NodeDef, ctx: &ParseCtx<'_>) -> Result<Vec<u8>, EditApplyError> {
-    let text = NodeDef::write_toml(def, ctx.shapes).map_err(|err| EditApplyError::Serialize {
+    let text = NodeDef::write_json(def, ctx.shapes).map_err(|err| EditApplyError::Serialize {
         message: err.to_string(),
     })?;
     Ok(text.into_bytes())
@@ -25,7 +25,7 @@ pub(crate) fn parse_def_bytes(bytes: &[u8], ctx: &ParseCtx<'_>) -> Result<NodeDe
     let text = core::str::from_utf8(bytes).map_err(|err| EditApplyError::Parse {
         message: err.to_string(),
     })?;
-    NodeDef::read_toml(ctx.shapes, text).map_err(|err| EditApplyError::Parse {
+    NodeDef::read_json(ctx.shapes, text).map_err(|err| EditApplyError::Parse {
         message: err.to_string(),
     })
 }
