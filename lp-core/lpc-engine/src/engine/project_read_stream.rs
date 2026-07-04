@@ -451,6 +451,280 @@ mod tests {
         assert!(chunk_events > 1);
     }
 
+    // ---- Cross-family revision-gating contract (M5 P5) --------------------------------------
+    //
+    // These exercise the whole `default_debug` query set (shapes + nodes/slots +
+    // resources + runtime) in one read, proving the per-family gates compose:
+    // a read at the current revision transfers no mirrorable payload, a fresh
+    // read transfers everything, and probes run regardless of `since`.
+
+    #[test]
+    fn read_at_since_r_sends_no_payload_items() {
+        // Project fully settled at revision `R`: shape entry, two slot-bearing
+        // nodes, and a runtime buffer, all last changed at `R`. A read with
+        // `since == R` must carry the revision (Begin/End/Runtime) but zero
+        // mirrorable payload for every family (G1).
+        let mut h = build_all_families_project();
+        let r = h.engine.revision();
+
+        let (_, events) = collect_event_response(
+            &mut h.engine,
+            &h.registry,
+            full_debug_with_probe(Some(r), None),
+        );
+
+        // No payload events for any gated family.
+        assert_eq!(count_shape_entries(&events), 0, "zero shape entries");
+        assert_eq!(count_shape_membership(&events), 0, "zero shape membership");
+        assert_eq!(
+            count_resource_summaries(&events),
+            0,
+            "zero resource summaries"
+        );
+        assert_eq!(
+            count_resource_membership(&events),
+            0,
+            "zero resource membership"
+        );
+        assert_eq!(count_slot_roots(&events), 0, "zero slot roots");
+        assert_eq!(
+            count_nonempty_tree_deltas(&events),
+            0,
+            "zero non-empty tree deltas"
+        );
+
+        // The revision-carrying spine is still present at `R`.
+        assert!(
+            has_begin_end_with_revision(&events, r),
+            "Begin and End carry R"
+        );
+        assert_eq!(
+            runtime_revisions(&events),
+            vec![r],
+            "Runtime status carries R"
+        );
+    }
+
+    #[test]
+    fn fresh_client_receives_everything() {
+        // `since == None` (≡ 0) is a bulk sync: every family sends its full set
+        // regardless of per-item `changed_at` (G2 bulk-sync guard).
+        let mut h = build_all_families_project();
+
+        let (_, events) = collect_event_response(
+            &mut h.engine,
+            &h.registry,
+            full_debug_with_probe(None, None),
+        );
+
+        assert!(count_shape_entries(&events) > 0, "shapes streamed in full");
+        assert_eq!(
+            count_resource_summaries(&events),
+            1,
+            "the runtime buffer summary is streamed"
+        );
+        // Both nodes' `.state` slot roots plus their tree entries arrive.
+        assert_eq!(count_slot_roots(&events), 2, "both slot roots streamed");
+        assert!(
+            count_nonempty_tree_deltas(&events) > 0,
+            "tree deltas streamed"
+        );
+    }
+
+    #[test]
+    fn probes_run_regardless_of_since() {
+        // Probes are live work, not mirror state: a read at `since == R` (which
+        // gates out every family) must still execute and return the probe result
+        // (G9).
+        let mut h = build_all_families_project();
+        let r = h.engine.revision();
+        let node_a = h.node("a");
+
+        let (_, events) = collect_event_response(
+            &mut h.engine,
+            &h.registry,
+            full_debug_with_probe(Some(r), Some(node_a)),
+        );
+
+        let probe_results = events
+            .iter()
+            .filter(|event| matches!(event, ProjectReadEvent::Probe { .. }))
+            .count();
+        assert_eq!(probe_results, 1, "probe result present at since == R");
+        // And gating still held: the probe rode alongside an otherwise-empty read.
+        assert_eq!(count_shape_entries(&events), 0);
+        assert_eq!(count_resource_summaries(&events), 0);
+        assert_eq!(count_slot_roots(&events), 0);
+    }
+
+    fn count_shape_entries(events: &[ProjectReadEvent]) -> usize {
+        events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    ProjectReadEvent::Query {
+                        event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Entry { .. }),
+                        ..
+                    }
+                )
+            })
+            .count()
+    }
+
+    fn count_shape_membership(events: &[ProjectReadEvent]) -> usize {
+        events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    ProjectReadEvent::Query {
+                        event: ProjectReadQueryEvent::Shapes(
+                            ProjectReadShapeEvent::Membership { .. }
+                        ),
+                        ..
+                    }
+                )
+            })
+            .count()
+    }
+
+    fn count_resource_summaries(events: &[ProjectReadEvent]) -> usize {
+        events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    ProjectReadEvent::Query {
+                        event: ProjectReadQueryEvent::Resources(ProjectReadResourceEvent::Summary(
+                            _
+                        )),
+                        ..
+                    }
+                )
+            })
+            .count()
+    }
+
+    fn count_resource_membership(events: &[ProjectReadEvent]) -> usize {
+        events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    ProjectReadEvent::Query {
+                        event: ProjectReadQueryEvent::Resources(
+                            ProjectReadResourceEvent::Membership { .. }
+                        ),
+                        ..
+                    }
+                )
+            })
+            .count()
+    }
+
+    fn count_slot_roots(events: &[ProjectReadEvent]) -> usize {
+        events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    ProjectReadEvent::Query {
+                        event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::SlotRoot(_)),
+                        ..
+                    }
+                )
+            })
+            .count()
+    }
+
+    /// Count tree-delta events that actually carry deltas. The stream only emits
+    /// a `TreeDeltas` event when the delta set is non-empty, so any present event
+    /// is a real payload; this guards that invariant explicitly.
+    fn count_nonempty_tree_deltas(events: &[ProjectReadEvent]) -> usize {
+        events
+            .iter()
+            .filter(|event| match event {
+                ProjectReadEvent::Query {
+                    event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::TreeDeltas { deltas }),
+                    ..
+                } => !deltas.is_empty(),
+                _ => false,
+            })
+            .count()
+    }
+
+    fn has_begin_end_with_revision(events: &[ProjectReadEvent], revision: Revision) -> bool {
+        let begin = events.iter().any(
+            |event| matches!(event, ProjectReadEvent::Begin { revision: r } if *r == revision),
+        );
+        let end = events
+            .iter()
+            .any(|event| matches!(event, ProjectReadEvent::End { revision: r } if *r == revision));
+        begin && end
+    }
+
+    fn runtime_revisions(events: &[ProjectReadEvent]) -> Vec<Revision> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                ProjectReadEvent::Query {
+                    event: ProjectReadQueryEvent::Runtime(result),
+                    ..
+                } => Some(result.project.revision),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Build a project exercising every mirrorable family: a shape entry, two
+    /// state-bearing nodes (tree + slots), and a runtime buffer resource — all
+    /// stamped at revision 1 — then tick once so the engine's project revision
+    /// equals the revision at which everything last changed.
+    fn build_all_families_project() -> crate::engine::test_support::EngineTestHarness {
+        let mut h = EngineTestBuilder::new()
+            .shader("a", output("outputs[0]", 0.5))
+            .shader("b", output("outputs[0]", 0.5))
+            .build();
+        h.engine
+            .slot_shapes_mut()
+            .register_shape_with_version(
+                Revision::new(1),
+                SlotShapeId::new(0x7000_0001),
+                SlotShape::value(LpType::Bool),
+            )
+            .expect("register shape");
+        h.engine.runtime_buffers_mut().insert(WithRevision::new(
+            Revision::new(1),
+            RuntimeBuffer::raw(vec![1, 2, 3]),
+        ));
+        h.tick(10).expect("tick to advance project revision");
+        h
+    }
+
+    /// A full debug read plus an optional explain-slot probe, at the given
+    /// `since`.
+    fn full_debug_with_probe(
+        since: Option<Revision>,
+        probe_node: Option<lpc_model::NodeId>,
+    ) -> ProjectReadRequest {
+        let probes = match probe_node {
+            Some(node) => vec![lpc_wire::ProjectProbeRequest::ExplainSlot(
+                lpc_wire::ExplainSlotProbeRequest {
+                    node,
+                    slot: lpc_model::SlotPath::parse("in").expect("slot path"),
+                    include_trace: false,
+                },
+            )],
+            None => Vec::new(),
+        };
+        ProjectReadRequest {
+            since,
+            queries: ProjectReadQuery::default_debug(),
+            probes,
+        }
+    }
+
     // ---- Shapes revision-gating contract (M5 P1) ----
 
     use lpc_model::{LpType, SlotShape, SlotShapeEntry, SlotShapeId};
