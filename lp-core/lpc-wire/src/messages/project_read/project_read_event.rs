@@ -2,8 +2,8 @@
 //!
 //! A single [`ProjectReadRequest`](super::ProjectReadRequest) can produce many
 //! ordered [`ProjectReadEvent`] values. Transports batch those events into
-//! [`ProjectReadFrame`](super::ProjectReadFrame) messages so project reads stay
-//! bounded across serial, browser, and socket transports.
+//! `ServerMsgBody::ProjectRead` messages sequenced by the envelope (`seq`/`fin`)
+//! so project reads stay bounded across serial, browser, and socket transports.
 //!
 //! Events are the semantic stream. Frame boundaries are deliberately invisible
 //! at this layer: a resource payload, shape registry, or node tree may be split

@@ -4,8 +4,8 @@
 //! Messages are consumed (moved) on send, and receive is non-blocking.
 //!
 //! The transport handles serialization/deserialization internally.
-//! Project reads use [`ProjectReadFrameSink`] so every transport shares the
-//! same bounded `ProjectReadFrame` batching policy.
+//! Project reads use [`ProjectReadStreamSink`] so every transport shares the
+//! same bounded batching policy and the same envelope sequencing (`seq`/`fin`).
 
 extern crate alloc;
 
@@ -14,8 +14,8 @@ use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use lpc_wire::{
-    PROJECT_READ_FRAME_MAX_BYTES, ProjectReadEvent, ProjectReadFrame, TransportError,
-    WireServerMessage, messages::ClientMessage,
+    PROJECT_READ_FRAME_MAX_BYTES, ProjectReadEvent, TransportError, WireServerMessage,
+    messages::ClientMessage,
 };
 
 /// Sink for semantic project-read events.
@@ -96,11 +96,28 @@ pub trait ServerTransport {
     async fn close(&mut self) -> Result<(), TransportError>;
 }
 
-/// Shared project-read event batcher used by all server transports.
+/// Shared bounded project-read stream sink used by all server transports.
+///
+/// It batches [`ProjectReadEvent`] values to a byte budget and sequences the
+/// batches through the envelope: each emitted message carries `seq` (the
+/// monotonic frame number, from an internal counter) and `fin` (finality).
+/// Project reads are its first user, but the batching + envelope-sequencing
+/// policy is generic over the event body.
+///
+/// # Finality (`fin`) stamping
+///
+/// - A budget-triggered flush (the current batch is full and another event
+///   needs a fresh frame) sends `fin = false` — more frames follow.
+/// - [`finish`](Self::finish) sends the trailing partial batch with
+///   `fin = true`. If nothing is pending at `finish` (the previous flush drained
+///   everything), it still emits an **empty** `ProjectRead { events: [] }` frame
+///   with `fin = true`, so a stream always terminates with an explicit final
+///   message the client can key finality off — never a silent stall.
+/// - [`send_terminal_error`](Self::send_terminal_error) sends `fin = true`.
 ///
 /// # Measurement and batching
 ///
-/// The batcher measures frames with the **wire serializer** (`ser-write-json`,
+/// The sink measures frames with the **wire serializer** (`ser-write-json`,
 /// the same one the ESP32 firmware writes with) rather than `serde_json`. The
 /// two diverge on float formatting, so budgeting with `serde_json` can
 /// under-count the real on-wire bytes; measuring with the wire serializer keeps
@@ -108,13 +125,14 @@ pub trait ServerTransport {
 ///
 /// Batching is O(events), not O(frame): each event is measured once on push and
 /// its encoded length accumulated. The full frame is only serialized by the
-/// transport at send time. A `ProjectReadFrame` body encodes as
-/// `{"id":..,"msg":{"projectReadFrame":{"sequence":..,"events":[e0,e1,..]}}}`,
+/// transport at send time. A non-final `ProjectRead` body encodes as
+/// `{"id":..,"seq":..,"fin":false,"msg":{"projectRead":{"events":[e0,e1,..]}}}`,
 /// so the total encoded length is
-/// `empty_frame_len(sequence) + sum(event_len) + (n - 1)` commas — the empty
-/// frame already contains the two `[]` brackets, and each additional event adds
-/// one comma separator.
-pub struct ProjectReadFrameSink<'a, T> {
+/// `empty_frame_len(seq) + sum(event_len) + (n - 1)` commas — the empty frame
+/// already contains the two `[]` brackets, and each additional event adds one
+/// comma separator. The empty-frame envelope is measured with `fin = false` (the
+/// worst case: both `seq` and `fin` present), so the budget is never optimistic.
+pub struct ProjectReadStreamSink<'a, T> {
     transport: &'a mut T,
     id: u64,
     sequence: u32,
@@ -123,13 +141,13 @@ pub struct ProjectReadFrameSink<'a, T> {
     /// `events` array: `sum(event_len)` plus one comma between adjacent events.
     /// Zero when `pending_events` is empty.
     pending_events_len: usize,
-    /// Encoded length of an empty frame at the current `sequence` (envelope +
-    /// `[]`). Recomputed whenever `sequence` changes.
+    /// Encoded length of an empty non-final frame at the current `sequence`
+    /// (envelope + `[]`). Recomputed whenever `sequence` changes.
     empty_frame_len: usize,
     max_bytes: usize,
 }
 
-impl<'a, T> ProjectReadFrameSink<'a, T>
+impl<'a, T> ProjectReadStreamSink<'a, T>
 where
     T: ServerTransport,
 {
@@ -150,30 +168,39 @@ where
         }
     }
 
+    /// Emit the trailing batch as the final (`fin = true`) frame.
+    ///
+    /// If the batch is empty (a previous budget flush drained everything), an
+    /// empty final frame is still sent so finality is always signaled on the
+    /// wire.
     pub async fn finish(&mut self) -> Result<(), TransportError> {
-        self.flush().await
+        self.flush(true).await
     }
 
-    /// Best-effort emit a terminal [`ProjectReadEvent::Error`] frame.
+    /// Best-effort emit a terminal, final [`ProjectReadEvent::Error`] frame.
     ///
     /// Called when the event stream failed with a *signalable* error (an event
     /// too large for an empty frame, or another serialization/budget failure).
     /// Any partially batched events are discarded — the stream is already
     /// broken — and a standalone `Error` frame is sent at the current sequence
-    /// so the client sees a terminal failure for this request id instead of a
-    /// silent stall. A transport-write failure while emitting this frame is
-    /// returned to the caller but is expected to be logged and ignored.
+    /// with `fin = true` so the client sees a terminal failure for this request
+    /// id instead of a silent stall. A transport-write failure while emitting
+    /// this frame is returned to the caller but is expected to be logged and
+    /// ignored.
     pub async fn send_terminal_error(&mut self, message: String) -> Result<(), TransportError> {
         // Drop any pending batch; those events could not be delivered anyway.
         self.pending_events.clear();
         self.pending_events_len = 0;
         let sequence = self.sequence;
-        let frame = ProjectReadFrame::new(sequence, vec![ProjectReadEvent::Error { message }]);
         self.transport
-            .send(WireServerMessage {
-                id: self.id,
-                msg: lpc_wire::server::ServerMsgBody::ProjectReadFrame { frame },
-            })
+            .send(WireServerMessage::stream_frame(
+                self.id,
+                sequence,
+                true,
+                lpc_wire::server::ServerMsgBody::ProjectRead {
+                    events: vec![ProjectReadEvent::Error { message }],
+                },
+            ))
             .await?;
         self.advance_sequence();
         Ok(())
@@ -196,10 +223,11 @@ where
             return Ok(());
         }
 
-        // The event does not fit alongside the current batch. Flush it, then
-        // this event becomes the sole occupant of a fresh frame.
+        // The event does not fit alongside the current batch. Flush the current
+        // batch as a non-final frame, then this event becomes the sole occupant
+        // of a fresh frame.
         if !self.pending_events.is_empty() {
-            self.flush().await?;
+            self.flush(false).await?;
         }
 
         // Empty frame length may have changed with the new sequence.
@@ -215,8 +243,14 @@ where
         Ok(())
     }
 
-    async fn flush(&mut self) -> Result<(), TransportError> {
-        if self.pending_events.is_empty() {
+    /// Send the pending batch as one frame stamped `fin`.
+    ///
+    /// A non-final flush (`fin == false`) with an empty batch is a no-op. A final
+    /// flush (`fin == true`) always sends, emitting an empty
+    /// `ProjectRead { events: [] }` frame if the batch is empty so finality is
+    /// signaled even when the previous flush drained everything.
+    async fn flush(&mut self, fin: bool) -> Result<(), TransportError> {
+        if self.pending_events.is_empty() && !fin {
             return Ok(());
         }
 
@@ -224,12 +258,15 @@ where
         // The frame owns its events (one clone into the message), but we keep
         // `pending_events` intact so a send failure leaves the batch pending
         // without a second up-front clone-to-restore.
-        let frame = ProjectReadFrame::new(sequence, self.pending_events.clone());
         self.transport
-            .send(WireServerMessage {
-                id: self.id,
-                msg: lpc_wire::server::ServerMsgBody::ProjectReadFrame { frame },
-            })
+            .send(WireServerMessage::stream_frame(
+                self.id,
+                sequence,
+                fin,
+                lpc_wire::server::ServerMsgBody::ProjectRead {
+                    events: self.pending_events.clone(),
+                },
+            ))
             .await?;
         // Confirmed send: clear the batch and advance.
         self.pending_events.clear();
@@ -245,20 +282,21 @@ where
         self.empty_frame_len = Self::measure_empty_frame_len(self.id, self.sequence);
     }
 
-    /// Encoded length of an empty frame (`events: []`) at `sequence`, measured
-    /// with the wire serializer. Used as the fixed envelope cost that per-event
-    /// lengths are added to.
+    /// Encoded length of an empty non-final frame (`events: []`, `fin = false`)
+    /// at `sequence`, measured with the wire serializer. Used as the fixed
+    /// envelope cost that per-event lengths are added to. Non-final is the worst
+    /// case (`fin:false` is present), so budgeting against it never overshoots.
     fn measure_empty_frame_len(id: u64, sequence: u32) -> usize {
-        lpc_wire::ser_write_json_len(&WireServerMessage {
+        lpc_wire::ser_write_json_len(&WireServerMessage::stream_frame(
             id,
-            msg: lpc_wire::server::ServerMsgBody::ProjectReadFrame {
-                frame: ProjectReadFrame::new(sequence, Vec::new()),
-            },
-        })
+            sequence,
+            false,
+            lpc_wire::server::ServerMsgBody::ProjectRead { events: Vec::new() },
+        ))
     }
 }
 
-impl<T> ProjectReadEventSink for ProjectReadFrameSink<'_, T>
+impl<T> ProjectReadEventSink for ProjectReadStreamSink<'_, T>
 where
     T: ServerTransport,
 {
@@ -306,7 +344,7 @@ mod tests {
         let mut transport = CollectingTransport::default();
 
         block_on(async {
-            let mut sink = ProjectReadFrameSink::with_max_bytes(&mut transport, 9, max_bytes);
+            let mut sink = ProjectReadStreamSink::with_max_bytes(&mut transport, 9, max_bytes);
             sink.send_project_read_event(event).await.unwrap();
             sink.finish().await.unwrap();
         });
@@ -323,11 +361,15 @@ mod tests {
         let end = ProjectReadEvent::End {
             revision: Revision::new(7),
         };
-        let max_bytes = encoded_project_read_frame_len(9, 0, &[begin.clone()]);
+        // Budget = one event in a seq-1 envelope. seq 0 skips the `"seq"` key so
+        // its envelope is smaller and comfortably fits; seq 1+ is the worst case
+        // these tests exercise, so deriving the budget there keeps it stable
+        // across every frame the sink emits.
+        let max_bytes = encoded_project_read_frame_len(9, 1, &[begin.clone()]);
         let mut transport = CollectingTransport::default();
 
         block_on(async {
-            let mut sink = ProjectReadFrameSink::with_max_bytes(&mut transport, 9, max_bytes);
+            let mut sink = ProjectReadStreamSink::with_max_bytes(&mut transport, 9, max_bytes);
             sink.send_project_read_event(begin).await.unwrap();
             sink.send_project_read_event(end).await.unwrap();
             sink.finish().await.unwrap();
@@ -336,6 +378,10 @@ mod tests {
         assert_eq!(transport.sent.len(), 2);
         assert_frame(&transport.sent[0], 9, 0, 1);
         assert_frame(&transport.sent[1], 9, 1, 1);
+        // A budget-triggered flush is non-final; the trailing `finish` frame is
+        // final.
+        assert_fin(&transport.sent[0], false);
+        assert_fin(&transport.sent[1], true);
     }
 
     #[test]
@@ -347,7 +393,7 @@ mod tests {
         let mut transport = CollectingTransport::default();
 
         block_on(async {
-            let mut sink = ProjectReadFrameSink::with_max_bytes(&mut transport, 9, max_bytes);
+            let mut sink = ProjectReadStreamSink::with_max_bytes(&mut transport, 9, max_bytes);
             sink.send_project_read_event(event).await.unwrap();
             assert!(sink.transport.sent.is_empty());
             sink.finish().await.unwrap();
@@ -355,18 +401,26 @@ mod tests {
 
         assert_eq!(transport.sent.len(), 1);
         assert_frame(&transport.sent[0], 9, 0, 1);
+        assert_fin(&transport.sent[0], true);
     }
 
     #[test]
-    fn frame_sink_finish_does_not_emit_empty_frame() {
+    fn frame_sink_finish_emits_empty_final_frame_when_nothing_pending() {
+        // The rare empty-final case: `finish` is called with nothing pending
+        // (here, a read that produced no events at all — the previous flush, if
+        // any, drained everything). `finish` still emits an explicit empty final
+        // frame so finality is always signaled on the wire — never a silent
+        // stall. (New contract in M6/P1: the envelope owns finality.)
         let mut transport = CollectingTransport::default();
 
         block_on(async {
-            let mut sink = ProjectReadFrameSink::with_max_bytes(&mut transport, 9, usize::MAX);
+            let mut sink = ProjectReadStreamSink::with_max_bytes(&mut transport, 9, usize::MAX);
             sink.finish().await.unwrap();
         });
 
-        assert!(transport.sent.is_empty());
+        assert_eq!(transport.sent.len(), 1);
+        assert_frame(&transport.sent[0], 9, 0, 0);
+        assert_fin(&transport.sent[0], true);
     }
 
     #[test]
@@ -378,7 +432,7 @@ mod tests {
         let mut transport = CollectingTransport::default();
 
         let error = block_on(async {
-            let mut sink = ProjectReadFrameSink::with_max_bytes(&mut transport, 9, max_bytes);
+            let mut sink = ProjectReadStreamSink::with_max_bytes(&mut transport, 9, max_bytes);
             sink.send_project_read_event(event).await.unwrap_err()
         });
 
@@ -400,7 +454,7 @@ mod tests {
         let mut transport = CollectingTransport::default();
 
         block_on(async {
-            let mut sink = ProjectReadFrameSink::with_max_bytes(&mut transport, 9, max_bytes);
+            let mut sink = ProjectReadStreamSink::with_max_bytes(&mut transport, 9, max_bytes);
             // The oversized event cannot fit an empty frame: signalable failure.
             let error = sink.send_project_read_event(event).await.unwrap_err();
             assert!(transport_error_is_signalable(&error));
@@ -410,16 +464,17 @@ mod tests {
                 .unwrap();
         });
 
-        // The only thing the client receives is the terminal error frame.
+        // The only thing the client receives is the terminal error frame, and it
+        // is stamped final (`fin = true`).
         assert_eq!(transport.sent.len(), 1);
         assert_eq!(transport.sent[0].id, 9);
-        let lpc_wire::server::ServerMsgBody::ProjectReadFrame { frame } = &transport.sent[0].msg
-        else {
-            panic!("expected project-read frame");
+        assert_fin(&transport.sent[0], true);
+        let lpc_wire::server::ServerMsgBody::ProjectRead { events } = &transport.sent[0].msg else {
+            panic!("expected project-read events body");
         };
-        assert_eq!(frame.sequence, 0);
-        assert_eq!(frame.events.len(), 1);
-        assert!(matches!(frame.events[0], ProjectReadEvent::Error { .. }));
+        assert_eq!(transport.sent[0].seq, 0);
+        assert_eq!(events.len(), 1);
+        assert!(matches!(events[0], ProjectReadEvent::Error { .. }));
     }
 
     #[test]
@@ -443,11 +498,12 @@ mod tests {
         let end = ProjectReadEvent::End {
             revision: Revision::new(7),
         };
-        let max_bytes = encoded_project_read_frame_len(9, 0, &[begin.clone()]);
+        // seq-1 worst-case budget: stable across the seq 0/1 frames emitted here.
+        let max_bytes = encoded_project_read_frame_len(9, 1, &[begin.clone()]);
         let mut transport = FailingOnceTransport::default();
 
         block_on(async {
-            let mut sink = ProjectReadFrameSink::with_max_bytes(&mut transport, 9, max_bytes);
+            let mut sink = ProjectReadStreamSink::with_max_bytes(&mut transport, 9, max_bytes);
             sink.send_project_read_event(begin).await.unwrap();
             sink.send_project_read_event(end.clone()).await.unwrap_err();
             sink.send_project_read_event(end).await.unwrap();
@@ -464,11 +520,12 @@ mod tests {
         let event = ProjectReadEvent::Begin {
             revision: Revision::new(7),
         };
-        let max_bytes = encoded_project_read_frame_len(9, 0, &[event.clone()]);
+        // seq-1 worst-case budget so every seq 0..3 frame fits identically.
+        let max_bytes = encoded_project_read_frame_len(9, 1, &[event.clone()]);
         let mut transport = FailingSequenceTransport::new(3);
 
         block_on(async {
-            let mut sink = ProjectReadFrameSink::with_max_bytes(&mut transport, 9, max_bytes);
+            let mut sink = ProjectReadStreamSink::with_max_bytes(&mut transport, 9, max_bytes);
             sink.send_project_read_event(event.clone()).await.unwrap();
             sink.send_project_read_event(event.clone()).await.unwrap();
             sink.send_project_read_event(event.clone()).await.unwrap();
@@ -550,10 +607,10 @@ mod tests {
 
     impl ServerTransport for FailingSequenceTransport {
         async fn send(&mut self, msg: WireServerMessage) -> Result<(), TransportError> {
-            let lpc_wire::server::ServerMsgBody::ProjectReadFrame { frame } = &msg.msg else {
+            if !matches!(msg.msg, lpc_wire::server::ServerMsgBody::ProjectRead { .. }) {
                 return self.inner.send(msg).await;
-            };
-            if frame.sequence == self.fail_sequence {
+            }
+            if msg.seq == self.fail_sequence {
                 return Err(TransportError::Other("synthetic sequence failure".into()));
             }
             self.inner.send(msg).await
@@ -572,28 +629,43 @@ mod tests {
         }
     }
 
+    /// Assert envelope id/seq and event count. Sequencing and finality now live
+    /// on the envelope (`msg.seq`/`msg.fin`), not inside the body.
     fn assert_frame(message: &WireServerMessage, id: u64, sequence: u32, events: usize) {
         assert_eq!(message.id, id);
-        let lpc_wire::server::ServerMsgBody::ProjectReadFrame { frame } = &message.msg else {
-            panic!("expected project-read frame");
+        assert_eq!(message.seq, sequence);
+        let lpc_wire::server::ServerMsgBody::ProjectRead { events: sent } = &message.msg else {
+            panic!("expected project-read events body");
         };
-        assert_eq!(frame.sequence, sequence);
-        assert_eq!(frame.events.len(), events);
+        assert_eq!(sent.len(), events);
+    }
+
+    /// Assert the envelope's finality flag on a sent frame.
+    fn assert_fin(message: &WireServerMessage, fin: bool) {
+        assert_eq!(
+            message.fin, fin,
+            "unexpected finality on frame {}",
+            message.seq
+        );
     }
 
     /// Measure with the same wire serializer the sink budgets against so the
     /// computed budgets in these tests match the sink's internal measurement.
+    /// Non-final (`fin = false`) is the worst-case envelope the sink budgets
+    /// against, so budget-derived test sizes must use it too.
     fn encoded_project_read_frame_len(
         id: u64,
         sequence: u32,
         events: &[ProjectReadEvent],
     ) -> usize {
-        lpc_wire::ser_write_json_len(&WireServerMessage {
+        lpc_wire::ser_write_json_len(&WireServerMessage::stream_frame(
             id,
-            msg: lpc_wire::server::ServerMsgBody::ProjectReadFrame {
-                frame: ProjectReadFrame::new(sequence, events.to_vec()),
+            sequence,
+            false,
+            lpc_wire::server::ServerMsgBody::ProjectRead {
+                events: events.to_vec(),
             },
-        })
+        ))
     }
 
     fn block_on<F: Future>(future: F) -> F::Output {

@@ -7,6 +7,7 @@ extern crate alloc;
 #[cfg(feature = "std")]
 extern crate std;
 
+pub mod budget;
 pub mod json;
 pub mod message;
 pub mod messages;
@@ -30,12 +31,12 @@ pub use messages::{
     PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES, PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES,
     PROJECT_READ_RUNTIME_CHUNK_BYTES, ProjectProbeRequest, ProjectProbeResult,
     ProjectReadCollectError, ProjectReadCollectStatus, ProjectReadCollector, ProjectReadEvent,
-    ProjectReadFrame, ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQuery,
-    ProjectReadQueryEvent, ProjectReadRequest, ProjectReadResourceEvent, ProjectReadResponse,
-    ProjectReadResult, ProjectReadShapeEvent, ProjectRuntimeStatus, ReadLevel,
-    RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery,
-    ResourceReadResult, RuntimeReadQuery, RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery,
-    ShapeReadResult, SlotExplanation,
+    ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQuery, ProjectReadQueryEvent,
+    ProjectReadRequest, ProjectReadResourceEvent, ProjectReadResponse, ProjectReadResult,
+    ProjectReadShapeEvent, ProjectRuntimeStatus, ReadLevel, RenderProductProbeRequest,
+    RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery, ResourceReadResult,
+    RuntimeReadQuery, RuntimeReadResult, ServerRuntimeStatus, ShapeReadQuery, ShapeReadResult,
+    SlotExplanation,
 };
 pub use project::{
     NodeRuntimeStatus, WireChannelSampleFormat, WireColorLayout, WireProjectHandle,

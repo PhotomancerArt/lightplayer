@@ -79,7 +79,7 @@ mod tests {
     };
 
     use crate::{
-        PROJECT_READ_FRAME_MAX_BYTES, ProjectReadEvent, ProjectReadFrame, ProjectReadProbeEvent,
+        PROJECT_READ_FRAME_MAX_BYTES, ProjectReadEvent, ProjectReadProbeEvent,
         server::ServerMsgBody,
     };
 
@@ -148,19 +148,16 @@ mod tests {
             ),
             bytes: vec![0; 723 * 2],
         };
-        let frame = ProjectReadFrame::new(
+        let events = Vec::from([ProjectReadEvent::Probe {
+            index: 0,
+            event: ProjectReadProbeEvent::Result(crate::ProjectProbeResult::ControlProduct(result)),
+        }]);
+        let message = crate::WireServerMessage::stream_frame(
+            7,
             0,
-            Vec::from([ProjectReadEvent::Probe {
-                index: 0,
-                event: ProjectReadProbeEvent::Result(crate::ProjectProbeResult::ControlProduct(
-                    result,
-                )),
-            }]),
+            false,
+            ServerMsgBody::ProjectRead { events },
         );
-        let message = crate::WireServerMessage {
-            id: 7,
-            msg: ServerMsgBody::ProjectReadFrame { frame },
-        };
 
         let json = crate::json::to_string(&message).unwrap();
 

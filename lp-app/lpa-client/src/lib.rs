@@ -11,6 +11,7 @@ pub mod client_io;
 #[cfg(feature = "host")]
 pub mod local;
 pub mod project_deploy;
+pub mod project_read_stream;
 pub mod protocol_session;
 #[cfg(feature = "host")]
 pub mod specifier;

@@ -12,12 +12,12 @@ use anyhow::{Error, Result};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_wire::server::api::LogLevel;
 use lpc_wire::{
-    ClientMessage, ClientRequest, FsRequest, ProjectReadCollectError, ProjectReadCollectStatus,
-    ProjectReadCollector, ProjectReadRequest, ProjectReadResponse, WireOverlayCommitRequest,
-    WireOverlayCommitResponse, WireOverlayMutationRequest, WireOverlayMutationResponse,
-    WireOverlayReadRequest, WireOverlayReadResponse, WireProjectCommand,
-    WireProjectCommandResponse, WireProjectHandle, WireProjectInventoryReadRequest,
-    WireProjectInventoryReadResponse, WireServerMessage, WireServerMsgBody,
+    ClientMessage, ClientRequest, FsRequest, ProjectReadRequest, ProjectReadResponse,
+    WireOverlayCommitRequest, WireOverlayCommitResponse, WireOverlayMutationRequest,
+    WireOverlayMutationResponse, WireOverlayReadRequest, WireOverlayReadResponse,
+    WireProjectCommand, WireProjectCommandResponse, WireProjectHandle,
+    WireProjectInventoryReadRequest, WireProjectInventoryReadResponse, WireServerMessage,
+    WireServerMsgBody,
     server::{AvailableProject, FsResponse, LoadedProject},
 };
 use tokio::sync::Mutex;
@@ -29,6 +29,9 @@ use crate::client_io::ClientIo;
 use crate::project_deploy::{
     ProjectDeployFile, project_deploy_requests, project_write_requests,
     validate_project_deploy_response,
+};
+use crate::project_read_stream::{
+    ProjectReadStream, ProjectReadStreamError, ProjectReadStreamStep,
 };
 use crate::protocol_session::{ProtocolSession, ResponseDisposition};
 use crate::transport::ClientTransport;
@@ -302,43 +305,22 @@ impl TokioLpClient {
             .await
             .map_err(|error| Error::msg(format!("Transport error: {error}")))?;
 
-        let mut collector = ProjectReadCollector::new();
+        let mut stream = ProjectReadStream::new(request_id);
         let mut events = Vec::new();
         loop {
             let response = transport
                 .receive()
                 .await
                 .map_err(|error| Error::msg(format!("Transport error: {error}")))?;
-            match state.protocol.response_disposition(&response, request_id) {
-                ResponseDisposition::Matched => match response.msg {
-                    WireServerMsgBody::Error { error } => {
-                        return Err(Error::msg(error));
-                    }
-                    WireServerMsgBody::ProjectReadFrame { frame } => {
-                        match collector
-                            .accept_frame(frame)
-                            .map_err(project_read_collect_error)?
-                        {
-                            ProjectReadCollectStatus::Continue => {}
-                            ProjectReadCollectStatus::Complete(response) => {
-                                return Ok(ClientOutcome::new(response, events));
-                            }
-                        }
-                    }
-                    other => return Err(unexpected_response("project_read", other)),
-                },
-                ResponseDisposition::Unsolicited => {
-                    if let Some(event) = ClientEvent::from_unsolicited_message(response) {
-                        events.push(event);
-                    }
+            match stream
+                .accept(&state.protocol, response)
+                .map_err(project_read_stream_error)?
+            {
+                ProjectReadStreamStep::Continue => {}
+                ProjectReadStreamStep::Event(event) => events.push(event),
+                ProjectReadStreamStep::Complete(response) => {
+                    return Ok(ClientOutcome::new(response, events));
                 }
-                ResponseDisposition::Uncorrelated {
-                    response_id,
-                    expected_id,
-                } => events.push(ClientEvent::UncorrelatedResponse {
-                    response_id,
-                    expected_id,
-                }),
             }
         }
     }
@@ -537,12 +519,15 @@ fn unexpected_response(operation: &'static str, response: impl std::fmt::Debug) 
     ))
 }
 
-fn project_read_collect_error(error: ProjectReadCollectError) -> Error {
+fn project_read_stream_error(error: ProjectReadStreamError) -> Error {
     match error {
-        ProjectReadCollectError::Remote(message) => Error::msg(message),
-        ProjectReadCollectError::Protocol(message) => {
+        ProjectReadStreamError::Server(message) => Error::msg(message),
+        ProjectReadStreamError::Protocol(message) => {
             Error::msg(format!("Project read protocol error: {message}"))
         }
+        ProjectReadStreamError::Unexpected(response) => Error::msg(format!(
+            "Unexpected response type for project_read: {response}"
+        )),
     }
 }
 

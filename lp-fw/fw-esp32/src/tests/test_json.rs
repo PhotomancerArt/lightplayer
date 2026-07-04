@@ -43,9 +43,9 @@ pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
     loop {
         let now = embassy_time::Instant::now();
         if now.duration_since(last_send).as_millis() >= 1000 {
-            let msg = WireServerMessage {
-                id: 0,
-                msg: ServerMsgBody::Heartbeat {
+            let msg = WireServerMessage::new(
+                0,
+                ServerMsgBody::Heartbeat {
                     fps: SampleStats {
                         avg: 60.0,
                         sdev: 0.5,
@@ -64,7 +64,7 @@ pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
                         total_bytes: (esp_alloc::HEAP.free() + esp_alloc::HEAP.used()) as u32,
                     }),
                 },
-            };
+            );
 
             let (server_write_request, server_write_result) = io_task::get_server_write_channels();
             server_write_request.sender().send((0, msg)).await;

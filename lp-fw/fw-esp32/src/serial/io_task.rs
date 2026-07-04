@@ -308,11 +308,12 @@ fn server_message_detail(msg: &lpc_wire::WireServerMessage) -> String {
         lpc_wire::server::ServerMsgBody::Filesystem(_) => "Filesystem".into(),
         lpc_wire::server::ServerMsgBody::LoadProject { .. } => "LoadProject".into(),
         lpc_wire::server::ServerMsgBody::UnloadProject => "UnloadProject".into(),
-        lpc_wire::server::ServerMsgBody::ProjectReadFrame { frame } => format!(
-            "ProjectReadFrame sequence={} events={} [{}]",
-            frame.sequence,
-            frame.events.len(),
-            project_read_event_summary(&frame.events)
+        lpc_wire::server::ServerMsgBody::ProjectRead { events } => format!(
+            "ProjectRead seq={} fin={} events={} [{}]",
+            msg.seq,
+            msg.fin,
+            events.len(),
+            project_read_event_summary(events)
         ),
         lpc_wire::server::ServerMsgBody::ProjectCommand { .. } => "ProjectCommand".into(),
         lpc_wire::server::ServerMsgBody::ListAvailableProjects { projects } => {

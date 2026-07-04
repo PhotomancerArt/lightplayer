@@ -1,4 +1,4 @@
-use crate::messages::{ProjectReadFrame, ProjectReadRequest};
+use crate::messages::{ProjectReadEvent, ProjectReadRequest};
 use crate::project::WireProjectHandle;
 use crate::project_command::{WireProjectCommand, WireProjectCommandResponse};
 use crate::server::fs_api::{FsRequest, FsResponse};
@@ -43,9 +43,14 @@ pub enum ServerMsgBody {
     },
     /// Response to UnloadProject
     UnloadProject,
-    /// Bounded project-read continuation frame.
-    ProjectReadFrame {
-        frame: ProjectReadFrame,
+    /// One batch of ordered project-read events.
+    ///
+    /// The transport batches events to a budget and the envelope sequences the
+    /// batches (`seq`/`fin`). A read may span several `ProjectRead` messages
+    /// under the same request id; the final one carries `fin == true` and (for a
+    /// successful read) the `End`/`Error` event.
+    ProjectRead {
+        events: Vec<ProjectReadEvent>,
     },
     /// Response to ProjectCommand
     ProjectCommand {

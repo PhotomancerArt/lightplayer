@@ -87,7 +87,7 @@ pub fn handle_client_message(
         }
     };
 
-    Ok(WireServerMessage { id, msg: response })
+    Ok(WireServerMessage::new(id, response))
 }
 
 fn handle_project_command(

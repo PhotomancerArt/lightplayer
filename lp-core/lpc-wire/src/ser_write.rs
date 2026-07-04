@@ -83,8 +83,8 @@ pub fn ser_write_json_len<T: Serialize>(value: &T) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ServerMessage;
     use crate::server::ServerMsgBody;
-    use crate::{ServerMessage, messages::ProjectReadFrame};
     use alloc::string::ToString;
     use alloc::vec;
     use lpc_model::Revision;
@@ -102,17 +102,16 @@ mod tests {
 
     #[test]
     fn ser_write_json_len_matches_serialized_bytes() {
-        let msg = ServerMessage {
-            id: 42,
-            msg: ServerMsgBody::ProjectReadFrame {
-                frame: ProjectReadFrame::new(
-                    3,
-                    vec![crate::ProjectReadEvent::Begin {
-                        revision: Revision::new(7),
-                    }],
-                ),
+        let msg = ServerMessage::stream_frame(
+            42,
+            3,
+            false,
+            ServerMsgBody::ProjectRead {
+                events: vec![crate::ProjectReadEvent::Begin {
+                    revision: Revision::new(7),
+                }],
             },
-        };
+        );
 
         // Serialize into an actual buffer with the same serializer and compare.
         struct VecWriter<'a>(&'a mut alloc::vec::Vec<u8>);
@@ -146,7 +145,7 @@ mod tests {
 /// 1. [`ser_write_json_len`] equals the real `ser-write-json` byte length.
 /// 2. The sink's O(n) size model — `empty_frame_len(seq) + sum(event_len) +
 ///    (n - 1)` commas — equals the real encoded frame length. This is the exact
-///    formula `ProjectReadFrameSink` uses, so it proves per-push measurement
+///    formula `ProjectReadStreamSink` uses, so it proves per-push measurement
 ///    predicts the whole-frame size.
 /// 3. Documents the `serde_json` delta (bytes it under/over-counts vs the wire
 ///    serializer) so future float-format drift is caught rather than silently
@@ -157,8 +156,8 @@ mod cross_serializer_tests {
     use crate::server::ServerMsgBody;
     use crate::slot::{WireSlotData, WireSlotRootSnapshot};
     use crate::{
-        ProjectReadEvent, ProjectReadFrame, ProjectReadProbeEvent, ProjectReadQueryEvent,
-        ProjectReadResourceEvent, ProjectReadShapeEvent, WireServerMessage,
+        ProjectReadEvent, ProjectReadProbeEvent, ProjectReadQueryEvent, ProjectReadResourceEvent,
+        ProjectReadShapeEvent, WireServerMessage,
     };
     use alloc::string::{String, ToString};
     use alloc::vec;
@@ -293,12 +292,16 @@ mod cross_serializer_tests {
     }
 
     fn frame_message(id: u64, sequence: u32, events: &[ProjectReadEvent]) -> WireServerMessage {
-        WireServerMessage {
+        // Non-final stream frame: both `seq` and `fin:false` are encoded, which is
+        // the worst-case envelope the sink budgets against.
+        WireServerMessage::stream_frame(
             id,
-            msg: ServerMsgBody::ProjectReadFrame {
-                frame: ProjectReadFrame::new(sequence, events.to_vec()),
+            sequence,
+            false,
+            ServerMsgBody::ProjectRead {
+                events: events.to_vec(),
             },
-        }
+        )
     }
 
     #[test]
@@ -319,7 +322,7 @@ mod cross_serializer_tests {
 
     #[test]
     fn sink_size_model_predicts_ser_write_json_frame_length() {
-        // Replicate exactly what `ProjectReadFrameSink` accumulates: the empty
+        // Replicate exactly what `ProjectReadStreamSink` accumulates: the empty
         // frame envelope plus each event's own measured length plus one comma per
         // adjacent pair.
         let events = corpus();

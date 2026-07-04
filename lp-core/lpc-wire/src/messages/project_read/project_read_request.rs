@@ -15,8 +15,8 @@ use lpc_model::Revision;
 ///
 /// This request is semantic and transport independent. A server answers it by
 /// streaming [`ProjectReadEvent`](super::ProjectReadEvent) values inside
-/// [`ProjectReadFrame`](super::ProjectReadFrame) messages rather than by
-/// returning one large aggregate response.
+/// `ServerMsgBody::ProjectRead` messages rather than by returning one large
+/// aggregate response.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ProjectReadRequest {

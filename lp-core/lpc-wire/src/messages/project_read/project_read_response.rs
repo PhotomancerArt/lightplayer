@@ -11,7 +11,7 @@ use lpc_model::Revision;
 /// This is no longer the transport-level server response. It is the convenient
 /// compatibility shape rebuilt by
 /// [`ProjectReadCollector`](super::ProjectReadCollector) after the final
-/// [`ProjectReadFrame`](super::ProjectReadFrame) arrives.
+/// project-read frame arrives.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ProjectReadResponse {

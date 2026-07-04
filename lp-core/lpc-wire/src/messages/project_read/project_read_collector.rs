@@ -5,9 +5,10 @@
 //! and other clients still consume aggregate project reads.
 //!
 //! New low-memory servers should stream [`ProjectReadEvent`] values and let the
-//! transport batch them into frames. Client-side code can use this collector as
-//! a compatibility adapter, preserving the old "await one project read response"
-//! ergonomics without requiring firmware to allocate that response.
+//! transport batch them into `ServerMsgBody::ProjectRead` messages. Client-side
+//! code can use this collector as a compatibility adapter, preserving the old
+//! "await one project read response" ergonomics without requiring firmware to
+//! allocate that response.
 
 use alloc::collections::BTreeMap;
 use alloc::format;
@@ -24,16 +25,15 @@ use crate::slot::{WireSlotRootSnapshot, WireSlotRootsSnapshot};
 use crate::tree::WireTreeDelta;
 
 use super::{
-    ProjectProbeResult, ProjectReadEvent, ProjectReadFrame, ProjectReadNodeEvent,
-    ProjectReadProbeEvent, ProjectReadQueryEvent, ProjectReadResourceEvent, ProjectReadResponse,
-    ProjectReadResult, ProjectReadShapeEvent, ReadLevel, ResourceReadResult, RuntimeReadResult,
-    ShapeReadResult,
+    ProjectProbeResult, ProjectReadEvent, ProjectReadNodeEvent, ProjectReadProbeEvent,
+    ProjectReadQueryEvent, ProjectReadResourceEvent, ProjectReadResponse, ProjectReadResult,
+    ProjectReadShapeEvent, ReadLevel, ResourceReadResult, RuntimeReadResult, ShapeReadResult,
 };
 
-/// Result of applying one project-read frame to a collector.
+/// Result of applying one project-read event to a collector.
 ///
-/// `Complete` is returned exactly once, when an accepted frame carries the
-/// stream-ending event and the aggregate response can be built.
+/// `Complete` is returned exactly once, when an accepted event ends the stream
+/// (`End`) and the aggregate response can be built.
 #[derive(Debug, Clone, PartialEq)]
 pub enum ProjectReadCollectStatus {
     Continue,
@@ -44,7 +44,7 @@ pub enum ProjectReadCollectStatus {
 ///
 /// `Remote` is a server-side read failure carried by
 /// [`ProjectReadEvent::Error`]. `Protocol` means the event stream itself was
-/// malformed, such as skipped frame sequences or events before `Begin`.
+/// malformed, such as events before `Begin` or events after the stream ended.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ProjectReadCollectError {
     Remote(String),
@@ -62,14 +62,18 @@ impl core::fmt::Display for ProjectReadCollectError {
 
 impl core::error::Error for ProjectReadCollectError {}
 
-/// Collects project-read frames into one compatibility response.
+/// Collects project-read events into one compatibility response.
 ///
-/// The collector enforces frame sequence order and basic stream structure. It
-/// does not know the original request shape; query and probe indexes are
-/// collected sparsely and then compacted in index order when the stream ends.
+/// The collector enforces basic stream structure (Begin-once, per-query
+/// state, chunk reassembly). Envelope-level ordering (`seq`/`fin` contiguity and
+/// finality) is now enforced by the client correlation layer, so the collector
+/// only sees the ordered events it feeds through [`accept_event`]. It does not
+/// know the original request shape; query and probe indexes are collected
+/// sparsely and then compacted in index order when the stream ends.
+///
+/// [`accept_event`]: ProjectReadCollector::accept_event
 #[derive(Debug, Default)]
 pub struct ProjectReadCollector {
-    next_sequence: u32,
     revision: Option<Revision>,
     queries: BTreeMap<u32, QueryCollectState>,
     probes: BTreeMap<u32, ProjectProbeResult>,
@@ -82,27 +86,17 @@ impl ProjectReadCollector {
         Self::default()
     }
 
-    pub fn accept_frame(
+    /// Feed one batch of events, returning `Complete` once the stream `End`
+    /// event is seen (or an error for a remote/protocol failure).
+    pub fn accept_events(
         &mut self,
-        frame: ProjectReadFrame,
+        events: impl IntoIterator<Item = ProjectReadEvent>,
     ) -> Result<ProjectReadCollectStatus, ProjectReadCollectError> {
-        if self.complete {
-            return Err(protocol("project read stream is already complete"));
-        }
-        if frame.sequence != self.next_sequence {
-            return Err(protocol(format!(
-                "expected project read frame {}, got {}",
-                self.next_sequence, frame.sequence
-            )));
-        }
-        self.next_sequence = self.next_sequence.saturating_add(1);
-
-        for event in frame.events {
+        for event in events {
             if let Some(response) = self.accept_event(event)? {
                 return Ok(ProjectReadCollectStatus::Complete(response));
             }
         }
-
         Ok(ProjectReadCollectStatus::Continue)
     }
 
@@ -110,6 +104,9 @@ impl ProjectReadCollector {
         &mut self,
         event: ProjectReadEvent,
     ) -> Result<Option<ProjectReadResponse>, ProjectReadCollectError> {
+        if self.complete {
+            return Err(protocol("project read stream is already complete"));
+        }
         match event {
             ProjectReadEvent::Begin { revision } => {
                 if self.revision.replace(revision).is_some() {
@@ -636,42 +633,36 @@ mod tests {
     #[test]
     fn collects_complete_project_read_response() {
         let shape_id = SlotShapeId::from_static_name("TestShape");
-        let response = collect(vec![ProjectReadFrame::new(
-            0,
-            vec![
-                ProjectReadEvent::Begin {
-                    revision: Revision::new(7),
-                },
-                ProjectReadEvent::Query {
-                    index: 0,
-                    event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Begin {
-                        level: ReadLevel::Detail,
-                        ids_revision: Revision::new(3),
-                    }),
-                },
-                ProjectReadEvent::Query {
-                    index: 0,
-                    event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Entry {
-                        id: shape_id,
-                        entry: SlotShapeEntry::new(
-                            Revision::new(3),
-                            SlotShape::value(LpType::Bool),
-                        ),
-                    }),
-                },
-                ProjectReadEvent::Query {
-                    index: 0,
-                    event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::End),
-                },
-                ProjectReadEvent::Query {
-                    index: 1,
-                    event: ProjectReadQueryEvent::Runtime(runtime_result()),
-                },
-                ProjectReadEvent::End {
-                    revision: Revision::new(7),
-                },
-            ],
-        )])
+        let response = collect(vec![
+            ProjectReadEvent::Begin {
+                revision: Revision::new(7),
+            },
+            ProjectReadEvent::Query {
+                index: 0,
+                event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Begin {
+                    level: ReadLevel::Detail,
+                    ids_revision: Revision::new(3),
+                }),
+            },
+            ProjectReadEvent::Query {
+                index: 0,
+                event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Entry {
+                    id: shape_id,
+                    entry: SlotShapeEntry::new(Revision::new(3), SlotShape::value(LpType::Bool)),
+                }),
+            },
+            ProjectReadEvent::Query {
+                index: 0,
+                event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::End),
+            },
+            ProjectReadEvent::Query {
+                index: 1,
+                event: ProjectReadQueryEvent::Runtime(runtime_result()),
+            },
+            ProjectReadEvent::End {
+                revision: Revision::new(7),
+            },
+        ])
         .unwrap();
 
         assert_eq!(response.revision, Revision::new(7));
@@ -702,44 +693,38 @@ mod tests {
         // entry, so the aggregate keeps the same identity a full stream would.
         let kept = SlotShapeId::from_static_name("Kept");
         let membership = vec![kept, SlotShapeId::from_static_name("AnotherLive")];
-        let response = collect(vec![ProjectReadFrame::new(
-            0,
-            vec![
-                ProjectReadEvent::Begin {
-                    revision: Revision::new(9),
-                },
-                ProjectReadEvent::Query {
-                    index: 0,
-                    event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Begin {
-                        level: ReadLevel::Detail,
-                        ids_revision: Revision::new(9),
-                    }),
-                },
-                ProjectReadEvent::Query {
-                    index: 0,
-                    event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Entry {
-                        id: kept,
-                        entry: SlotShapeEntry::new(
-                            Revision::new(9),
-                            SlotShape::value(LpType::Bool),
-                        ),
-                    }),
-                },
-                ProjectReadEvent::Query {
-                    index: 0,
-                    event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Membership {
-                        ids: membership.clone(),
-                    }),
-                },
-                ProjectReadEvent::Query {
-                    index: 0,
-                    event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::End),
-                },
-                ProjectReadEvent::End {
-                    revision: Revision::new(9),
-                },
-            ],
-        )])
+        let response = collect(vec![
+            ProjectReadEvent::Begin {
+                revision: Revision::new(9),
+            },
+            ProjectReadEvent::Query {
+                index: 0,
+                event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Begin {
+                    level: ReadLevel::Detail,
+                    ids_revision: Revision::new(9),
+                }),
+            },
+            ProjectReadEvent::Query {
+                index: 0,
+                event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Entry {
+                    id: kept,
+                    entry: SlotShapeEntry::new(Revision::new(9), SlotShape::value(LpType::Bool)),
+                }),
+            },
+            ProjectReadEvent::Query {
+                index: 0,
+                event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Membership {
+                    ids: membership.clone(),
+                }),
+            },
+            ProjectReadEvent::Query {
+                index: 0,
+                event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::End),
+            },
+            ProjectReadEvent::End {
+                revision: Revision::new(9),
+            },
+        ])
         .unwrap();
 
         let ProjectReadResult::Shapes(shapes) = &response.results[0] else {
@@ -759,14 +744,27 @@ mod tests {
     }
 
     #[test]
-    fn sequence_mismatch_errors() {
+    fn events_after_completion_error() {
         let mut collector = ProjectReadCollector::new();
+        collector
+            .accept_event(ProjectReadEvent::Begin {
+                revision: Revision::new(7),
+            })
+            .unwrap();
+        collector
+            .accept_event(ProjectReadEvent::End {
+                revision: Revision::new(7),
+            })
+            .unwrap()
+            .expect("stream completes on End");
 
         let error = collector
-            .accept_frame(ProjectReadFrame::new(1, Vec::new()))
+            .accept_event(ProjectReadEvent::Begin {
+                revision: Revision::new(7),
+            })
             .unwrap_err();
 
-        assert!(error.to_string().contains("expected project read frame 0"));
+        assert!(error.to_string().contains("already complete"));
     }
 
     #[test]
@@ -774,12 +772,9 @@ mod tests {
         let mut collector = ProjectReadCollector::new();
 
         let error = collector
-            .accept_frame(ProjectReadFrame::new(
-                0,
-                vec![ProjectReadEvent::Error {
-                    message: "bad read".into(),
-                }],
-            ))
+            .accept_event(ProjectReadEvent::Error {
+                message: "bad read".into(),
+            })
             .unwrap_err();
 
         assert_eq!(error, ProjectReadCollectError::Remote("bad read".into()));
@@ -788,64 +783,61 @@ mod tests {
     #[test]
     fn collects_runtime_buffer_payload_chunks() {
         let resource_ref = ResourceRef::runtime_buffer(RuntimeBufferId::new(9));
-        let response = collect(vec![ProjectReadFrame::new(
-            0,
-            vec![
-                ProjectReadEvent::Begin {
-                    revision: Revision::new(7),
-                },
-                ProjectReadEvent::Query {
-                    index: 0,
-                    event: ProjectReadQueryEvent::Resources(ProjectReadResourceEvent::Begin {
-                        level: ReadLevel::Detail,
-                    }),
-                },
-                ProjectReadEvent::Query {
-                    index: 0,
-                    event: ProjectReadQueryEvent::Resources(
-                        ProjectReadResourceEvent::RuntimeBufferPayloadBegin {
-                            resource_ref,
-                            revision: Revision::new(5),
-                            metadata: WireRuntimeBufferMetadataPayload::Raw,
-                            byte_length: 4,
-                        },
-                    ),
-                },
-                ProjectReadEvent::Query {
-                    index: 0,
-                    event: ProjectReadQueryEvent::Resources(
-                        ProjectReadResourceEvent::RuntimeBufferPayloadBytes {
-                            resource_ref,
-                            offset: 0,
-                            bytes: vec![1, 2],
-                        },
-                    ),
-                },
-                ProjectReadEvent::Query {
-                    index: 0,
-                    event: ProjectReadQueryEvent::Resources(
-                        ProjectReadResourceEvent::RuntimeBufferPayloadBytes {
-                            resource_ref,
-                            offset: 2,
-                            bytes: vec![3, 4],
-                        },
-                    ),
-                },
-                ProjectReadEvent::Query {
-                    index: 0,
-                    event: ProjectReadQueryEvent::Resources(
-                        ProjectReadResourceEvent::RuntimeBufferPayloadEnd { resource_ref },
-                    ),
-                },
-                ProjectReadEvent::Query {
-                    index: 0,
-                    event: ProjectReadQueryEvent::Resources(ProjectReadResourceEvent::End),
-                },
-                ProjectReadEvent::End {
-                    revision: Revision::new(7),
-                },
-            ],
-        )])
+        let response = collect(vec![
+            ProjectReadEvent::Begin {
+                revision: Revision::new(7),
+            },
+            ProjectReadEvent::Query {
+                index: 0,
+                event: ProjectReadQueryEvent::Resources(ProjectReadResourceEvent::Begin {
+                    level: ReadLevel::Detail,
+                }),
+            },
+            ProjectReadEvent::Query {
+                index: 0,
+                event: ProjectReadQueryEvent::Resources(
+                    ProjectReadResourceEvent::RuntimeBufferPayloadBegin {
+                        resource_ref,
+                        revision: Revision::new(5),
+                        metadata: WireRuntimeBufferMetadataPayload::Raw,
+                        byte_length: 4,
+                    },
+                ),
+            },
+            ProjectReadEvent::Query {
+                index: 0,
+                event: ProjectReadQueryEvent::Resources(
+                    ProjectReadResourceEvent::RuntimeBufferPayloadBytes {
+                        resource_ref,
+                        offset: 0,
+                        bytes: vec![1, 2],
+                    },
+                ),
+            },
+            ProjectReadEvent::Query {
+                index: 0,
+                event: ProjectReadQueryEvent::Resources(
+                    ProjectReadResourceEvent::RuntimeBufferPayloadBytes {
+                        resource_ref,
+                        offset: 2,
+                        bytes: vec![3, 4],
+                    },
+                ),
+            },
+            ProjectReadEvent::Query {
+                index: 0,
+                event: ProjectReadQueryEvent::Resources(
+                    ProjectReadResourceEvent::RuntimeBufferPayloadEnd { resource_ref },
+                ),
+            },
+            ProjectReadEvent::Query {
+                index: 0,
+                event: ProjectReadQueryEvent::Resources(ProjectReadResourceEvent::End),
+            },
+            ProjectReadEvent::End {
+                revision: Revision::new(7),
+            },
+        ])
         .unwrap();
 
         let ProjectReadResult::Resources(resources) = &response.results[0] else {
@@ -855,34 +847,12 @@ mod tests {
         assert_eq!(resources.runtime_buffer_payloads[0].bytes, vec![1, 2, 3, 4]);
     }
 
-    #[test]
-    fn frame_round_trips() {
-        let frame = ProjectReadFrame::new(
-            3,
-            vec![
-                ProjectReadEvent::Begin {
-                    revision: Revision::new(7),
-                },
-                ProjectReadEvent::End {
-                    revision: Revision::new(7),
-                },
-            ],
-        );
-
-        let json = serde_json::to_string(&frame).unwrap();
-        let decoded: ProjectReadFrame = serde_json::from_str(&json).unwrap();
-
-        assert_eq!(decoded, frame);
-    }
-
     fn collect(
-        frames: Vec<ProjectReadFrame>,
+        events: Vec<ProjectReadEvent>,
     ) -> Result<ProjectReadResponse, ProjectReadCollectError> {
         let mut collector = ProjectReadCollector::new();
-        for frame in frames {
-            if let ProjectReadCollectStatus::Complete(response) = collector.accept_frame(frame)? {
-                return Ok(response);
-            }
+        if let ProjectReadCollectStatus::Complete(response) = collector.accept_events(events)? {
+            return Ok(response);
         }
         Err(ProjectReadCollectError::Protocol(
             "test stream did not complete".into(),

@@ -176,17 +176,17 @@ pub async fn run_server_loop<T: ServerTransport>(
                 total_bytes: used_bytes.saturating_add(free_bytes),
             });
 
-            // Create heartbeat message
-            let heartbeat_msg = WireServerMessage {
-                id: HEARTBEAT_MESSAGE_ID,
-                msg: lpc_wire::server::ServerMsgBody::Heartbeat {
+            // Create heartbeat message (unsolicited: id 0, single/final message).
+            let heartbeat_msg = WireServerMessage::new(
+                HEARTBEAT_MESSAGE_ID,
+                lpc_wire::server::ServerMsgBody::Heartbeat {
                     fps: fps_stats,
                     frame_count: frame_count as u64,
                     loaded_projects,
                     uptime_ms: current_time.saturating_sub(startup_time),
                     memory,
                 },
-            };
+            );
 
             // Send heartbeat (non-blocking, ignore errors)
             if let Err(e) = transport.send(heartbeat_msg).await {

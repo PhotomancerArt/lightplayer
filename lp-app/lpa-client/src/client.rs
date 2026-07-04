@@ -2,12 +2,12 @@
 
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_wire::{
-    ClientMessage, ClientRequest, FsRequest, ProjectReadCollectError, ProjectReadCollectStatus,
-    ProjectReadCollector, ProjectReadRequest, ProjectReadResponse, WireOverlayCommitRequest,
-    WireOverlayCommitResponse, WireOverlayMutationRequest, WireOverlayMutationResponse,
-    WireOverlayReadRequest, WireOverlayReadResponse, WireProjectCommand,
-    WireProjectCommandResponse, WireProjectHandle, WireProjectInventoryReadRequest,
-    WireProjectInventoryReadResponse, WireServerMessage, WireServerMsgBody,
+    ClientMessage, ClientRequest, FsRequest, ProjectReadRequest, ProjectReadResponse,
+    WireOverlayCommitRequest, WireOverlayCommitResponse, WireOverlayMutationRequest,
+    WireOverlayMutationResponse, WireOverlayReadRequest, WireOverlayReadResponse,
+    WireProjectCommand, WireProjectCommandResponse, WireProjectHandle,
+    WireProjectInventoryReadRequest, WireProjectInventoryReadResponse, WireServerMessage,
+    WireServerMsgBody,
     server::{AvailableProject, FsResponse, LoadedProject},
 };
 
@@ -17,6 +17,9 @@ use crate::client_io::ClientIo;
 use crate::project_deploy::{
     ProjectDeployFile, project_deploy_requests, project_write_requests,
     validate_project_deploy_response,
+};
+use crate::project_read_stream::{
+    ProjectReadStream, ProjectReadStreamError, ProjectReadStreamStep,
 };
 use crate::protocol_session::{ProtocolSession, ResponseDisposition};
 
@@ -244,42 +247,19 @@ where
             .await
             .map_err(ClientError::from)?;
 
-        let mut collector = ProjectReadCollector::new();
+        let mut stream = ProjectReadStream::new(request_id);
         let mut events = Vec::new();
         loop {
             let response = self.io.receive().await.map_err(ClientError::from)?;
-            match self.protocol.response_disposition(&response, request_id) {
-                ResponseDisposition::Matched => match response.msg {
-                    WireServerMsgBody::Error { error } => {
-                        return Err(ClientError::Server(error));
-                    }
-                    WireServerMsgBody::ProjectReadFrame { frame } => {
-                        match collector
-                            .accept_frame(frame)
-                            .map_err(project_read_collect_error)?
-                        {
-                            ProjectReadCollectStatus::Continue => {}
-                            ProjectReadCollectStatus::Complete(response) => {
-                                return Ok(ClientOutcome::new(response, events));
-                            }
-                        }
-                    }
-                    other => {
-                        return Err(ClientError::unexpected_response("project.read", other));
-                    }
-                },
-                ResponseDisposition::Unsolicited => {
-                    if let Some(event) = ClientEvent::from_unsolicited_message(response) {
-                        events.push(event);
-                    }
+            match stream
+                .accept(&self.protocol, response)
+                .map_err(project_read_stream_error)?
+            {
+                ProjectReadStreamStep::Continue => {}
+                ProjectReadStreamStep::Event(event) => events.push(event),
+                ProjectReadStreamStep::Complete(response) => {
+                    return Ok(ClientOutcome::new(response, events));
                 }
-                ResponseDisposition::Uncorrelated {
-                    response_id,
-                    expected_id,
-                } => events.push(ClientEvent::UncorrelatedResponse {
-                    response_id,
-                    expected_id,
-                }),
             }
         }
     }
@@ -470,10 +450,14 @@ where
     }
 }
 
-fn project_read_collect_error(error: ProjectReadCollectError) -> ClientError {
+fn project_read_stream_error(error: ProjectReadStreamError) -> ClientError {
     match error {
-        ProjectReadCollectError::Remote(message) => ClientError::Server(message),
-        ProjectReadCollectError::Protocol(message) => ClientError::Protocol(message),
+        ProjectReadStreamError::Server(message) => ClientError::Server(message),
+        ProjectReadStreamError::Protocol(message) => ClientError::Protocol(message),
+        ProjectReadStreamError::Unexpected(response) => ClientError::UnexpectedResponse {
+            operation: "project.read",
+            response,
+        },
     }
 }
 
@@ -484,8 +468,7 @@ mod tests {
     use async_trait::async_trait;
     use lpc_model::Revision;
     use lpc_wire::{
-        ProjectReadEvent, ProjectReadFrame, ProjectReadRequest, TransportError, WireProjectHandle,
-        WireServerMessage,
+        ProjectReadEvent, ProjectReadRequest, TransportError, WireProjectHandle, WireServerMessage,
     };
 
     use super::*;
@@ -496,6 +479,7 @@ mod tests {
             project_read_frame(
                 1,
                 0,
+                false,
                 [ProjectReadEvent::Begin {
                     revision: Revision::new(7),
                 }],
@@ -503,6 +487,7 @@ mod tests {
             project_read_frame(
                 1,
                 1,
+                true,
                 [ProjectReadEvent::End {
                     revision: Revision::new(7),
                 }],
@@ -529,12 +514,12 @@ mod tests {
 
     #[tokio::test]
     async fn project_read_top_level_server_error_is_terminal() {
-        let io = ScriptedClientIo::new([WireServerMessage {
-            id: 1,
-            msg: WireServerMsgBody::Error {
+        let io = ScriptedClientIo::new([WireServerMessage::new(
+            1,
+            WireServerMsgBody::Error {
                 error: "bad read".into(),
             },
-        }]);
+        )]);
         let mut client = LpClient::new(io);
 
         let error = client
@@ -547,10 +532,10 @@ mod tests {
 
     #[tokio::test]
     async fn project_read_unexpected_same_id_message_is_protocol_error() {
-        let io = ScriptedClientIo::new([WireServerMessage {
-            id: 1,
-            msg: WireServerMsgBody::StopAllProjects,
-        }]);
+        let io = ScriptedClientIo::new([WireServerMessage::new(
+            1,
+            WireServerMsgBody::StopAllProjects,
+        )]);
         let mut client = LpClient::new(io);
 
         let error = client
@@ -602,14 +587,17 @@ mod tests {
     fn project_read_frame(
         id: u64,
         sequence: u32,
+        fin: bool,
         events: impl IntoIterator<Item = ProjectReadEvent>,
     ) -> WireServerMessage {
-        WireServerMessage {
+        WireServerMessage::stream_frame(
             id,
-            msg: WireServerMsgBody::ProjectReadFrame {
-                frame: ProjectReadFrame::new(sequence, events.into_iter().collect()),
+            sequence,
+            fin,
+            WireServerMsgBody::ProjectRead {
+                events: events.into_iter().collect(),
             },
-        }
+        )
     }
 
     fn empty_project_read_request() -> ProjectReadRequest {

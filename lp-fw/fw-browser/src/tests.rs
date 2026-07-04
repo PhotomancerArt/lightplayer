@@ -269,13 +269,16 @@ fn collect_project_read_response(messages: Vec<WireServerMessage>) -> ProjectRea
     let mut collector = ProjectReadCollector::new();
     for message in messages {
         match message.msg {
-            WireServerMsgBody::ProjectReadFrame { frame } => {
-                match collector.accept_frame(frame).expect("collect project read") {
+            WireServerMsgBody::ProjectRead { events } => {
+                match collector
+                    .accept_events(events)
+                    .expect("collect project read")
+                {
                     ProjectReadCollectStatus::Continue => {}
                     ProjectReadCollectStatus::Complete(response) => return response,
                 }
             }
-            other => panic!("unexpected project-read frame response: {other:?}"),
+            other => panic!("unexpected project-read response: {other:?}"),
         }
     }
 

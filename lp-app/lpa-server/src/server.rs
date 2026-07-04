@@ -14,7 +14,9 @@ use lpc_engine::{ButtonService, LpGraphics, RadioService};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_shared::output::OutputProvider;
 use lpc_shared::time::TimeProvider;
-use lpc_shared::transport::{ProjectReadFrameSink, ServerTransport, transport_error_is_signalable};
+use lpc_shared::transport::{
+    ProjectReadStreamSink, ServerTransport, transport_error_is_signalable,
+};
 use lpc_wire::{ClientRequest, WireMessage, WireServerMessage};
 use lpfs::{FsEvent, LpFs};
 
@@ -289,9 +291,9 @@ impl LpServer {
                             let server_status = self.runtime_status();
                             let Some(project) = self.project_manager.get_project_mut(handle) else {
                                 transport
-                                    .send(WireServerMessage {
-                                        id: msg_id,
-                                        msg: lpc_wire::server::ServerMsgBody::Error {
+                                    .send(WireServerMessage::new(
+                                        msg_id,
+                                        lpc_wire::server::ServerMsgBody::Error {
                                             error: format!(
                                                 "{}",
                                                 ServerError::ProjectNotFound(format!(
@@ -300,7 +302,7 @@ impl LpServer {
                                                 ))
                                             ),
                                         },
-                                    })
+                                    ))
                                     .await
                                     .map_err(|error| ServerError::Core(format!("{error}")))?;
                                 response_count += 1;
@@ -308,7 +310,7 @@ impl LpServer {
                             };
                             let mut source =
                                 ServerProjectReadSource::new(project, Some(server_status));
-                            let mut sink = ProjectReadFrameSink::new(transport, msg_id);
+                            let mut sink = ProjectReadStreamSink::new(transport, msg_id);
                             let stream_result =
                                 source.stream_project_read_events(request, &mut sink).await;
                             match stream_result {

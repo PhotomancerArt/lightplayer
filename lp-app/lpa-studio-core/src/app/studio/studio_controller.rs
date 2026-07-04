@@ -959,9 +959,9 @@ mod tests {
     use lpc_view::{ProjectView, TreeEntryView};
     use lpc_wire::{
         ClientMessage, ClientRequest, MemoryStats, NodeRuntimeStatus, ProjectProbeRequest,
-        ProjectReadEvent, ProjectReadFrame, ProjectReadQueryEvent, ProjectRuntimeStatus,
-        RenderProductProbeRequest, RuntimeReadResult, ServerRuntimeStatus, TransportError,
-        WireEntryState, WireServerMessage, WireServerMsgBody, WireTextureFormat,
+        ProjectReadEvent, ProjectReadQueryEvent, ProjectRuntimeStatus, RenderProductProbeRequest,
+        RuntimeReadResult, ServerRuntimeStatus, TransportError, WireEntryState, WireServerMessage,
+        WireServerMsgBody, WireTextureFormat,
     };
 
     use super::*;
@@ -1791,40 +1791,37 @@ mod tests {
     }
 
     fn project_read_response_with_runtime(id: u64, revision: Revision) -> WireServerMessage {
-        WireServerMessage {
+        WireServerMessage::new(
             id,
-            msg: WireServerMsgBody::ProjectReadFrame {
-                frame: ProjectReadFrame::new(
-                    0,
-                    vec![
-                        ProjectReadEvent::Begin { revision },
-                        ProjectReadEvent::Query {
-                            index: 0,
-                            event: ProjectReadQueryEvent::Runtime(RuntimeReadResult {
-                                project: ProjectRuntimeStatus {
-                                    revision,
-                                    frame_num: 77,
-                                    frame_delta_ms: 16,
-                                    frame_total_ms: 17,
-                                    demand_root_count: 2,
-                                    runtime_buffer_count: 3,
-                                },
-                                server: Some(ServerRuntimeStatus {
-                                    theoretical_fps: Some(60.0),
-                                    last_frame_time_us: Some(16_000),
-                                    memory: Some(MemoryStats {
-                                        free_bytes: 4096,
-                                        used_bytes: 2048,
-                                        total_bytes: 6144,
-                                    }),
+            WireServerMsgBody::ProjectRead {
+                events: vec![
+                    ProjectReadEvent::Begin { revision },
+                    ProjectReadEvent::Query {
+                        index: 0,
+                        event: ProjectReadQueryEvent::Runtime(RuntimeReadResult {
+                            project: ProjectRuntimeStatus {
+                                revision,
+                                frame_num: 77,
+                                frame_delta_ms: 16,
+                                frame_total_ms: 17,
+                                demand_root_count: 2,
+                                runtime_buffer_count: 3,
+                            },
+                            server: Some(ServerRuntimeStatus {
+                                theoretical_fps: Some(60.0),
+                                last_frame_time_us: Some(16_000),
+                                memory: Some(MemoryStats {
+                                    free_bytes: 4096,
+                                    used_bytes: 2048,
+                                    total_bytes: 6144,
                                 }),
                             }),
-                        },
-                        ProjectReadEvent::End { revision },
-                    ],
-                ),
+                        }),
+                    },
+                    ProjectReadEvent::End { revision },
+                ],
             },
-        }
+        )
     }
 
     struct ScriptedClientIo {
