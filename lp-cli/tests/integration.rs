@@ -70,18 +70,17 @@ fn process_messages(
 
 /// Create a test project on a filesystem
 ///
-/// Creates a minimal project with project.toml.
+/// Creates a minimal project with project.json.
 #[allow(
     dead_code,
     reason = "async client integration tests are being rewritten"
 )]
 fn create_test_project(fs: &mut LpFsMemory, name: &str) -> Result<(), ClientError> {
-    let project_toml = format!(
-        r#"kind = "Project"
-name = "{name}"
+    let project_json = format!(
+        r#"{{ "kind": "Project", "name": "{name}" }}
 "#
     );
-    fs.write_file_mut("/project.toml".as_path(), project_toml.as_bytes())
+    fs.write_file_mut("/project.json".as_path(), project_json.as_bytes())
         .map_err(|_| todo!())?;
 
     Ok(())

@@ -34,7 +34,7 @@ use super::{Engine, EngineServices, LoadedProjectRuntime};
 #[derive(Debug)]
 pub enum ProjectLoadError {
     Io { path: String, details: String },
-    ProjectToml { file: String, error: String },
+    ProjectParse { file: String, error: String },
     UnknownKind { path: String, suffix: String },
     InvalidProjectReference { path: String, reason: String },
     TomlParse { path: String, error: String },
@@ -46,7 +46,7 @@ impl core::fmt::Display for ProjectLoadError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Io { path, details } => write!(f, "io error at {path}: {details}"),
-            Self::ProjectToml { file, error } => write!(f, "parse {file}: {error}"),
+            Self::ProjectParse { file, error } => write!(f, "parse {file}: {error}"),
             Self::UnknownKind { path, suffix } => write!(f, "{path}: unknown node kind `{suffix}`"),
             Self::InvalidProjectReference { path, reason } => {
                 write!(f, "project reference {path}: {reason}")
@@ -111,7 +111,7 @@ impl ProjectLoader {
 
         let load_result = registry
             .load_root(root, project_path.as_path(), frame, &ctx)
-            .map_err(|e| ProjectLoadError::ProjectToml {
+            .map_err(|e| ProjectLoadError::ProjectParse {
                 file: project_path.as_str().to_string(),
                 error: format!("{e:?}"),
             })?;
@@ -131,14 +131,14 @@ impl ProjectLoader {
     ) -> Result<(), ProjectLoadError> {
         let entry = registry
             .def(root)
-            .ok_or_else(|| ProjectLoadError::ProjectToml {
+            .ok_or_else(|| ProjectLoadError::ProjectParse {
                 file: path.as_str().to_string(),
                 error: String::from("registry did not load the project root"),
             })?;
 
         match &entry.state {
             NodeDefState::Loaded(NodeDef::Project(_)) => Ok(()),
-            NodeDefState::Loaded(other) => Err(ProjectLoadError::ProjectToml {
+            NodeDefState::Loaded(other) => Err(ProjectLoadError::ProjectParse {
                 file: path.as_str().to_string(),
                 error: format!("root artifact must be Project, got {:?}", other.kind()),
             }),
@@ -902,15 +902,15 @@ fn project_load_error_for_root_state(path: &LpPath, state: &NodeDefState) -> Pro
                 suffix: kind.clone(),
             }
         }
-        NodeDefState::ParseError(err) => ProjectLoadError::ProjectToml {
+        NodeDefState::ParseError(err) => ProjectLoadError::ProjectParse {
             file: path.as_str().to_string(),
             error: err.to_string(),
         },
-        NodeDefState::ValidationError(err) => ProjectLoadError::ProjectToml {
+        NodeDefState::ValidationError(err) => ProjectLoadError::ProjectParse {
             file: path.as_str().to_string(),
             error: err.message.clone(),
         },
-        NodeDefState::Loaded(_) => ProjectLoadError::ProjectToml {
+        NodeDefState::Loaded(_) => ProjectLoadError::ProjectParse {
             file: path.as_str().to_string(),
             error: String::from("root artifact is not a Project"),
         },

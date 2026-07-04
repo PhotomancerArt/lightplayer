@@ -1,89 +1,89 @@
 # Source Artifacts
 
-LightPlayer project files now separate a node invocation from the node
-definition it uses. The child node namespace is reserved for invocation-level
-properties, and the node definition lives under `def`.
+LightPlayer projects are authored as JSON node artifacts: **one node
+definition per file, assets always in separate files**. There is exactly one
+authoring format and one layout — no inline child definitions, no embedded
+asset bodies, no TOML. (See ADR `docs/adr/2026-07-04-json-only-artifacts.md`
+for the decision record.)
 
-Split-file node definitions use a path:
+## Layout
 
-```toml
-[nodes.shader]
-def = { path = "./shader.toml" }
+```text
+example/
+├── project.json      (root artifact, kind = "Project")
+├── clock.json        (child node artifact)
+├── shader.json       (child node artifact)
+├── fixture.json      (child node artifact)
+├── output.json       (child node artifact)
+├── shader.glsl       (asset file)
+└── mapping.svg       (asset file)
 ```
 
-Inline node definitions put the authored node TOML under the same `def`
-namespace:
+The device loads `/project.json` as the artifact root. A node artifact is a
+JSON object whose **first field is `kind`** (the codec streams, so the kind
+tag must precede the variant's fields — canonical writer output always
+satisfies this):
 
-```toml
-[nodes.clock.def]
-kind = "Clock"
-```
-
-The old `[nodes.x] artifact = "..."` shape is intentionally not accepted.
-
-Shader node definitions use a first-class shader source spec. GLSL file sources
-use `source.path`, resolved relative to the containing node definition:
-
-```toml
-kind = "Shader"
-source = { path = "shader.glsl" }
-```
-
-Inline GLSL uses `source.glsl`:
-
-```toml
-kind = "Shader"
-
-[source]
-glsl = """
-vec4 render(vec2 pos) {
-    return vec4(pos, 0.0, 1.0);
+```json
+{
+  "kind": "Project",
+  "name": "example",
+  "nodes": {
+    "clock": { "ref": "./clock.json" },
+    "shader": { "ref": "./shader.json" }
+  }
 }
-"""
 ```
 
-The old `glsl_path = "..."` field is intentionally not accepted.
+Child node positions hold an invocation: either `{ "ref": "./child.json" }`
+or the editing placeholder `{ "unset": {} }`. Inline definitions
+(`{ "def": ... }`) and the legacy `artifact = "..."` shape are rejected at
+parse time.
 
-`source` is GLSL-specific by design. That leaves room for future sibling source
-forms such as `wgsl` without overloading an anonymous `inline` value.
+## Asset references
 
-## One-File Projects
+Asset slots hold a bare path string, resolved relative to the containing
+artifact:
 
-A simple project can now put node definitions and GLSL directly in
-`project.toml`:
-
-```toml
-kind = "Project"
-name = "one-file"
-
-[nodes.clock.def]
-kind = "Clock"
-
-[nodes.shader.def]
-kind = "Shader"
-source = { glsl = "vec4 render(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }" }
+```json
+{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0
+}
 ```
 
-Use split files when the source is large or shared. Use inline definitions when
-the example or project is clearer as one artifact.
+The object form `{ "path": "shader.glsl" }` is accepted on read for
+compatibility; the canonical written form is the bare string. Inline bodies
+(`{ "glsl": "..." }`, `{ "bytes": [...] }`) are rejected with an explicit
+error. `source` is GLSL-specific by design — future sibling source forms
+such as `wgsl` get their own field rather than overloading an anonymous
+inline value.
+
+## Canonical form
+
+`NodeDef::write_json` emits the canonical file form: pretty-printed with
+2-space indentation, fields in slot-shape declaration order (`kind` first),
+map keys in model order, and a trailing newline. Output is deterministic —
+identical models serialize byte-identically, so files diff cleanly in git
+and device pulls match host source byte-for-byte. Overlay commits on the
+device write the same canonical form.
 
 ## Loading And Reloading
 
-The project loader resolves both forms transparently:
+The project loader resolves everything through one path:
 
-- `def.path` loads a child node definition artifact from the filesystem.
-- inline `def` is parsed as a node definition owned by the project TOML.
-- `source.path` reads UTF-8 GLSL relative to the owning node definition.
-- `source.glsl` materializes the inline string directly.
+- `/project.json` is the artifact root; `ref` invocations load child node
+  artifacts from the filesystem, one definition per file.
+- Asset paths read files relative to the owning node artifact.
 
 The server project wrapper stores the project filesystem and service handles.
 When the filesystem reports a change inside a loaded project, the wrapper
-rebuilds the engine through `ProjectLoader::load_from_root`. That restores live
-updates for split-file node definitions, inline node definitions, split-file
-GLSL, and inline GLSL because all four cases re-enter the canonical loader.
+rebuilds the engine through `ProjectLoader::load_from_root`; because there is
+a single artifact form, every change re-enters the canonical loader.
 
-The next finer-grained step is a versioned source resolver owned by the engine:
-shader nodes would hold a source identity, ask the context for
-`resolve_shader_source(source, last_seen_version)`, and only materialize bytes
-when the source version changes. That keeps file knowledge out of nodes while
-avoiding whole-project reloads for small source edits.
+The next finer-grained step is a versioned source resolver owned by the
+engine: shader nodes would hold a source identity, ask the context for
+`resolve_shader_source(source, last_seen_version)`, and only materialize
+bytes when the source version changes. That keeps file knowledge out of
+nodes while avoiding whole-project reloads for small source edits.
