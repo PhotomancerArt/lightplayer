@@ -138,10 +138,10 @@ mod tests {
     fn serde_omits_unset_endpoint_slots() {
         let binding = BindingDef::target(BindingRef::parse("bus#visual.out").unwrap());
 
-        let toml = toml::to_string(&binding).unwrap();
+        let json = serde_json::to_string(&binding).unwrap();
 
-        assert!(!toml.contains("source"));
-        assert!(!toml.contains("value"));
-        assert!(toml.contains("target = \"bus#visual.out\""));
+        assert!(!json.contains("source"));
+        assert!(!json.contains("value"));
+        assert!(json.contains(r#""target":"bus#visual.out""#));
     }
 }

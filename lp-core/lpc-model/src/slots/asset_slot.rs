@@ -576,13 +576,11 @@ impl SlotValueAccess for AssetSlot {
 mod tests {
     use super::*;
     use crate::SlotShapeRegistry;
-    use crate::slot_codec::{SlotReader, TomlSyntaxSource, apply_reader_to_slot};
+    use crate::slot_codec::{JsonSyntaxSource, SlotReader, SlotWriter, apply_reader_to_slot};
 
     fn read_asset(text: &str) -> AssetSlot {
         let registry = SlotShapeRegistry::default();
-        let wrapper = toml::from_str::<toml::Value>(text).expect("toml");
-        let value = wrapper.get("source").unwrap_or(&wrapper);
-        let mut reader = SlotReader::new(TomlSyntaxSource::new(value).expect("syntax"), &registry);
+        let mut reader = SlotReader::new(JsonSyntaxSource::new(text).expect("syntax"), &registry);
         let mut slot = AssetSlot::default();
         apply_reader_to_slot(
             slot.slot_field_data_mut(),
@@ -596,75 +594,52 @@ mod tests {
 
     #[test]
     fn parses_path_shorthand() {
-        let slot = read_asset(
-            r#"
-source = "./shader.glsl"
-"#,
-        );
+        let slot = read_asset(r#""./shader.glsl""#);
         assert_eq!(slot.artifact_value().unwrap().to_string(), "shader.glsl");
     }
 
     #[test]
-    fn parses_path_table() {
-        let slot = read_asset(
-            r#"
-path = "./shader.glsl"
-"#,
-        );
+    fn parses_path_object() {
+        let slot = read_asset(r#"{ "path": "./shader.glsl" }"#);
         assert_eq!(slot.artifact_value().unwrap().to_string(), "shader.glsl");
     }
 
     #[test]
-    fn parses_legacy_dollar_path_table() {
-        let slot = read_asset(
-            r#"
-"$path" = "./shader.glsl"
-"#,
-        );
+    fn parses_legacy_dollar_path_object() {
+        let slot = read_asset(r#"{ "$path": "./shader.glsl" }"#);
         assert_eq!(slot.artifact_value().unwrap().to_string(), "shader.glsl");
     }
 
     #[test]
-    fn parses_inline_glsl_table() {
-        let slot = read_asset(
-            r#"
-glsl = "void main() {}"
-"#,
-        );
+    fn parses_inline_glsl_object() {
+        let slot = read_asset(r#"{ "glsl": "void main() {}" }"#);
         let (ext, text) = slot.inline_text_value().unwrap();
         assert_eq!(ext, Some("glsl"));
         assert!(text.contains("main"));
     }
 
     #[test]
-    fn parses_inline_svg_table() {
-        let slot = read_asset(
-            r#"
-svg = "<svg/>"
-"#,
-        );
+    fn parses_inline_svg_object() {
+        let slot = read_asset(r#"{ "svg": "<svg/>" }"#);
         let (ext, text) = slot.inline_text_value().unwrap();
         assert_eq!(ext, Some("svg"));
         assert_eq!(text, "<svg/>");
     }
 
     #[test]
-    fn parses_inline_bytes_table() {
-        let slot = read_asset(
-            r#"
-extension = "png"
-bytes = [137, 80, 78, 71]
-"#,
-        );
+    fn parses_inline_bytes_object() {
+        let slot = read_asset(r#"{ "extension": "png", "bytes": [137, 80, 78, 71] }"#);
         let (ext, bytes) = slot.inline_bytes_value().unwrap();
         assert_eq!(ext, Some("png"));
         assert_eq!(bytes, &[137, 80, 78, 71]);
     }
 
     #[test]
-    fn round_trips_artifact_shorthand_toml() {
+    fn round_trips_artifact_shorthand_json() {
         let slot = AssetSlot::path("./a.glsl");
-        let value = slot.write_slot_toml().expect("write");
-        assert_eq!(value.as_str(), Some("a.glsl"));
+        let mut writer = SlotWriter::new(alloc::vec::Vec::new());
+        slot.write_slot_json(writer.value()).expect("write");
+        let out = writer.into_inner();
+        assert_eq!(core::str::from_utf8(&out).unwrap(), r#""a.glsl""#);
     }
 }

@@ -120,59 +120,38 @@ mod tests {
     }
 
     #[test]
-    fn node_invocation_toml_unset_form_loads() {
-        let invocation = read_invocation(
-            r#"
-unset = {}
-"#,
-        );
+    fn node_invocation_json_unset_form_loads() {
+        let invocation = read_invocation(r#"{ "unset": {} }"#);
         assert!(invocation.is_unset());
     }
 
     #[test]
-    fn node_invocation_toml_ref_form_loads() {
-        let invocation = read_invocation(
-            r#"
-ref = "./texture.toml"
-"#,
-        );
+    fn node_invocation_json_ref_form_loads() {
+        let invocation = read_invocation(r#"{ "ref": "./texture.json" }"#);
 
         assert_eq!(
             invocation.ref_specifier().unwrap(),
-            ArtifactSpec::path("./texture.toml")
+            ArtifactSpec::path("./texture.json")
         );
     }
 
     #[test]
     fn node_invocation_rejects_legacy_def_path_form() {
-        let err = read_invocation_err(
-            r#"
-def = { path = "./texture.toml" }
-"#,
-        );
+        let err = read_invocation_err(r#"{ "def": { "path": "./texture.json" } }"#);
 
         assert!(err.to_string().contains("def") || err.to_string().contains("unknown"));
     }
 
     #[test]
     fn node_invocation_rejects_legacy_artifact_field() {
-        let err = read_invocation_err(
-            r#"
-artifact = "./texture.toml"
-"#,
-        );
+        let err = read_invocation_err(r#"{ "artifact": "./texture.json" }"#);
 
         assert!(err.to_string().contains("artifact") || err.to_string().contains("unknown"));
     }
 
     #[test]
-    fn node_invocation_toml_inline_def_form_loads() {
-        let invocation = read_invocation(
-            r#"
-[def]
-kind = "Clock"
-"#,
-        );
+    fn node_invocation_json_inline_def_form_loads() {
+        let invocation = read_invocation(r#"{ "def": { "kind": "Clock" } }"#);
 
         assert!(matches!(invocation.inline_def(), Some(NodeDef::Clock(_))));
     }
@@ -180,12 +159,10 @@ kind = "Clock"
     #[test]
     fn node_invocation_rejects_ref_plus_inline_def() {
         let err = read_invocation_err(
-            r#"
-ref = "./clock.toml"
-
-[def]
-kind = "Clock"
-"#,
+            r#"{
+  "ref": "./clock.json",
+  "def": { "kind": "Clock" }
+}"#,
         );
 
         assert!(err.to_string().contains("def") || err.to_string().contains("unknown"));
@@ -193,42 +170,42 @@ kind = "Clock"
 
     #[test]
     fn node_invocation_round_trips_unset_form() {
-        let text = r#"
-kind = "Project"
-
-[nodes.placeholder]
-unset = {}
-"#;
+        let text = r#"{
+  "kind": "Project",
+  "nodes": {
+    "placeholder": { "unset": {} }
+  }
+}"#;
         round_trip_project_fragment(text);
     }
 
     #[test]
     fn node_invocation_round_trips_ref_form() {
-        let text = r#"
-kind = "Project"
-
-[nodes.shader]
-ref = "./shader.toml"
-"#;
+        let text = r#"{
+  "kind": "Project",
+  "nodes": {
+    "shader": { "ref": "./shader.json" }
+  }
+}"#;
         round_trip_project_fragment(text);
     }
 
     #[test]
     fn node_invocation_round_trips_inline_def_form() {
-        let text = r#"
-kind = "Project"
-
-[nodes.clock.def]
-kind = "Clock"
-"#;
+        let text = r#"{
+  "kind": "Project",
+  "nodes": {
+    "clock": { "def": { "kind": "Clock" } }
+  }
+}"#;
         round_trip_project_fragment(text);
     }
 
     fn round_trip_project_fragment(text: &str) {
         let registry = SlotShapeRegistry::default();
-        let def = NodeDef::read_toml(&registry, text).unwrap();
-        let written = NodeDef::write_toml(&def, &registry).unwrap();
-        let again = NodeDef::read_toml(&registry, &written).unwrap();
+        let def = NodeDef::read_json(&registry, text).unwrap();
+        let written = NodeDef::write_json(&def, &registry).unwrap();
+        let again = NodeDef::read_json(&registry, &written).unwrap();
         assert_eq!(def, again);
     }
 
@@ -244,9 +221,8 @@ kind = "Clock"
         text: &str,
     ) -> Result<NodeInvocation, crate::slot_codec::SyntaxError> {
         let registry = SlotShapeRegistry::default();
-        let value = toml::from_str::<toml::Value>(text).unwrap();
         let mut reader = crate::slot_codec::SlotReader::new(
-            crate::slot_codec::TomlSyntaxSource::new(&value).unwrap(),
+            crate::slot_codec::JsonSyntaxSource::new(text).unwrap(),
             &registry,
         );
         let mut invocation = EnumSlot::new(NodeInvocation::default());

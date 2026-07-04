@@ -60,12 +60,7 @@ mod tests {
 
     #[test]
     fn playlist_def_parses_minimal_defaults() {
-        let def = NodeDef::from_toml_str(
-            r#"
-kind = "Playlist"
-"#,
-        )
-        .expect("playlist");
+        let def = NodeDef::from_json_str(r#"{ "kind": "Playlist" }"#).expect("playlist");
 
         let NodeDef::Playlist(def) = def else {
             panic!("playlist def");

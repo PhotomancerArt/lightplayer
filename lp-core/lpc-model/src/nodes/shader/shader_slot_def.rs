@@ -315,13 +315,14 @@ mod tests {
     #[test]
     fn value_shader_slot_parses_old_param_shape() {
         let slot = read_slot_def(
-            r#"kind = "value"
-value = "f32"
-default = 1.0
-min = 0.0
-label = "Exposure"
-description = "Output exposure multiplier"
-"#,
+            r#"{
+  "kind": "value",
+  "value": "f32",
+  "default": 1.0,
+  "min": 0.0,
+  "label": "Exposure",
+  "description": "Output exposure multiplier"
+}"#,
         );
 
         assert_eq!(*slot.kind.value(), ShaderSlotKind::Value);
@@ -332,11 +333,12 @@ description = "Output exposure multiplier"
     #[test]
     fn map_shader_slot_parses_native_value_mapping() {
         let slot = read_slot_def(
-            r#"kind = "map"
-key = "u32"
-value = "lp::fluid::Emitter"
-mapping = { kind = "sentinel", len = 4, key = "id", empty_key = 0 }
-"#,
+            r#"{
+  "kind": "map",
+  "key": "u32",
+  "value": "lp::fluid::Emitter",
+  "mapping": { "kind": "sentinel", "len": 4, "key": "id", "empty_key": 0 }
+}"#,
         );
 
         assert_eq!(*slot.kind.value(), ShaderSlotKind::Map);
@@ -347,9 +349,8 @@ mapping = { kind = "sentinel", len = 4, key = "id", empty_key = 0 }
 
     fn read_slot_def(text: &str) -> ShaderSlotDef {
         let registry = SlotShapeRegistry::default();
-        let value = toml::from_str::<toml::Value>(text).unwrap();
         registry
-            .read_slot_toml(ShaderSlotDef::SHAPE_ID, &value)
+            .read_slot_json(ShaderSlotDef::SHAPE_ID, text)
             .expect("slot")
             .into_any()
             .downcast::<ShaderSlotDef>()

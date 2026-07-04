@@ -918,70 +918,27 @@ mod tests {
     }
 
     #[test]
-    fn node_def_parses_project_and_texture_toml() {
-        let registry = registry();
-        let project = NodeDef::read_toml(
-            &registry,
-            r#"
-kind = "Project"
-
-[nodes.texture]
-ref = "./texture.toml"
-"#,
-        )
-        .expect("project");
-        assert!(matches!(project, NodeDef::Project(_)));
-
-        let texture = NodeDef::read_toml(
-            &registry,
-            r#"
-kind = "Texture"
-size = { width = 64, height = 48 }
-"#,
-        )
-        .expect("texture");
-        assert!(matches!(texture, NodeDef::Texture(_)));
-    }
-
-    #[test]
-    fn node_def_parses_shader_output_and_fixture_toml() {
+    fn node_def_parses_output_and_fixture_json() {
         let registry = registry();
 
-        let shader = NodeDef::read_toml(
+        let output = NodeDef::read_json(
             &registry,
-            r#"
-kind = "Shader"
-render_order = 2
-
-source = { path = "shader.glsl" }
-
-[bindings.visual]
-target = "bus#visual.out"
-"#,
-        )
-        .expect("shader");
-        assert!(matches!(shader, NodeDef::Shader(_)));
-
-        let output = NodeDef::read_toml(
-            &registry,
-            r#"
-kind = "Output"
-endpoint = "ws281x:rmt:D10"
-
-[options]
-brightness = 0.5
-"#,
+            r#"{
+  "kind": "Output",
+  "endpoint": "ws281x:rmt:D10",
+  "options": { "brightness": 0.5 }
+}"#,
         )
         .expect("output");
         assert!(matches!(output, NodeDef::Output(_)));
 
-        let fixture = NodeDef::read_toml(
+        let fixture = NodeDef::read_json(
             &registry,
-            r#"
-kind = "Fixture"
-render_size = { width = 8, height = 8 }
-mapping = { kind = "PathPoints" }
-"#,
+            r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 8, "height": 8 },
+  "mapping": { "kind": "PathPoints" }
+}"#,
         )
         .expect("fixture");
         let NodeDef::Fixture(fixture) = fixture else {
@@ -992,17 +949,17 @@ mapping = { kind = "PathPoints" }
             MappingConfig::PathPoints { .. }
         ));
 
-        let fixture = NodeDef::read_toml(
+        let fixture = NodeDef::read_json(
             &registry,
-            r#"
-kind = "Fixture"
-render_size = { width = 64, height = 16 }
-
-[mapping]
-kind = "SvgPath"
-source = "./fyeah-mapping.svg"
-sample_diameter = 2.0
-"#,
+            r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 64, "height": 16 },
+  "mapping": {
+    "kind": "SvgPath",
+    "source": "./fyeah-mapping.svg",
+    "sample_diameter": 2.0
+  }
+}"#,
         )
         .expect("svg path fixture");
         let NodeDef::Fixture(fixture) = fixture else {
@@ -1023,7 +980,7 @@ sample_diameter = 2.0
     }
 
     #[test]
-    fn node_def_round_trips_point_list_fixture_toml() {
+    fn node_def_round_trips_point_list_fixture_json() {
         let registry = registry();
         let fixture = crate::FixtureDef {
             mapping: EnumSlot::new(MappingConfig::path_points_vec(
@@ -1036,9 +993,9 @@ sample_diameter = 2.0
             ..crate::FixtureDef::default()
         };
         let text = NodeDef::Fixture(fixture)
-            .write_toml(&registry)
+            .write_json(&registry)
             .expect("write fixture");
-        let read = NodeDef::read_toml(&registry, &text).expect("read fixture");
+        let read = NodeDef::read_json(&registry, &text).expect("read fixture");
         let NodeDef::Fixture(read) = read else {
             panic!("expected fixture");
         };
@@ -1064,38 +1021,14 @@ sample_diameter = 2.0
     }
 
     #[test]
-    fn node_def_rejects_missing_invalid_and_unknown_kind() {
-        let registry = registry();
-
-        let missing =
-            NodeDef::read_toml(&registry, "name = \"missing\"").expect_err("missing kind");
-        assert!(missing.to_string().contains("kind"));
-
-        let invalid = NodeDef::read_toml(&registry, "kind = 7").expect_err("invalid kind");
-        assert!(invalid.to_string().contains("string"));
-
-        let unknown = NodeDef::read_toml(&registry, "kind = \"bogus\"").expect_err("unknown kind");
-        assert_eq!(
-            unknown,
-            NodeDefParseError::UnknownKind {
-                kind: String::from("bogus")
-            }
-        );
-    }
-
-    #[test]
     fn node_artifact_root_loads_through_wrapper_shape() {
         let registry = registry();
-        let payload = toml::from_str::<toml::Value>(
-            r#"
-kind = "Texture"
-size = { width = 1, height = 2 }
-"#,
-        )
-        .unwrap();
 
         let artifact = registry
-            .read_slot_toml(NodeArtifact::SHAPE_ID, &payload)
+            .read_slot_json(
+                NodeArtifact::SHAPE_ID,
+                r#"{ "kind": "Texture", "size": { "width": 1, "height": 2 } }"#,
+            )
             .expect("artifact slot load")
             .into_any()
             .downcast::<NodeArtifact>()
@@ -1111,45 +1044,6 @@ size = { width = 1, height = 2 }
         };
         assert_eq!(def.size.value().width, 1);
         assert_eq!(def.size.value().height, 2);
-    }
-
-    #[test]
-    fn node_def_from_toml_uses_artifact_wrapper_loader() {
-        let registry = registry();
-
-        let def = NodeDef::read_toml(
-            &registry,
-            r#"
-kind = "Texture"
-size = { width = 1, height = 2 }
-"#,
-        )
-        .expect("texture");
-
-        let NodeDef::Texture(def) = def else {
-            panic!("expected texture");
-        };
-        assert_eq!(def.size.value().width, 1);
-        assert_eq!(def.size.value().height, 2);
-    }
-
-    #[test]
-    fn node_def_writes_authored_toml_through_artifact_wrapper() {
-        let write_registry = registry();
-        let text = NodeDef::Texture(TextureDef::new(3, 4))
-            .write_toml(&write_registry)
-            .expect("write texture");
-
-        assert!(text.contains("kind = \"Texture\""));
-        assert!(text.contains("width = 3"));
-        assert!(text.contains("height = 4"));
-
-        let read = NodeDef::read_toml(&registry(), &text).expect("read texture");
-        let NodeDef::Texture(def) = read else {
-            panic!("expected texture");
-        };
-        assert_eq!(def.size.value().width, 3);
-        assert_eq!(def.size.value().height, 4);
     }
 
     #[test]
@@ -1287,15 +1181,13 @@ size = { width = 1, height = 2 }
     fn node_def_reads_binding_values_and_refs() {
         let registry = registry();
 
-        let def = NodeDef::read_toml(
+        let def = NodeDef::read_json(
             &registry,
-            r##"
-kind = "Output"
-endpoint = "ws281x:rmt:D10"
-
-[bindings.main]
-value = 0.25
-"##,
+            r##"{
+  "kind": "Output",
+  "endpoint": "ws281x:rmt:D10",
+  "bindings": { "main": { "value": 0.25 } }
+}"##,
         )
         .expect("output");
         let NodeDef::Output(def) = def else {
@@ -1304,15 +1196,13 @@ value = 0.25
         let binding = def.bindings.0.entries.get("main").expect("binding");
         assert_eq!(binding.value_literal(), Some(&LpValue::F32(0.25)));
 
-        let def = NodeDef::read_toml(
+        let def = NodeDef::read_json(
             &registry,
-            r##"
-kind = "Output"
-endpoint = "ws281x:rmt:D10"
-
-[bindings.main]
-target = "bus#control.out"
-"##,
+            r##"{
+  "kind": "Output",
+  "endpoint": "ws281x:rmt:D10",
+  "bindings": { "main": { "target": "bus#control.out" } }
+}"##,
         )
         .expect("output target");
         let NodeDef::Output(def) = def else {
@@ -1324,13 +1214,13 @@ target = "bus#control.out"
 
     #[test]
     fn node_def_invocation_sites_cover_project_and_playlist() {
-        let project = NodeDef::from_toml_str(
-            r#"
-kind = "Project"
-
-[nodes.clock]
-ref = "./clock.toml"
-"#,
+        let project = NodeDef::from_json_str(
+            r#"{
+  "kind": "Project",
+  "nodes": {
+    "clock": { "ref": "./clock.json" }
+  }
+}"#,
         )
         .expect("project");
         let sites = project.invocation_sites(&SlotPath::root());
@@ -1338,17 +1228,18 @@ ref = "./clock.toml"
         assert_eq!(sites[0].path.to_string(), "nodes[clock]");
         assert!(matches!(sites[0].invocation, NodeInvocation::Ref(_)));
 
-        let playlist = NodeDef::from_toml_str(
-            r#"
-kind = "Playlist"
-
-[entries.2]
-name = "active"
-
-[entries.2.node.def]
-kind = "Shader"
-source = { path = "active.glsl" }
-"#,
+        let playlist = NodeDef::from_json_str(
+            r#"{
+  "kind": "Playlist",
+  "entries": {
+    "2": {
+      "name": "active",
+      "node": {
+        "def": { "kind": "Shader", "source": { "path": "active.glsl" } }
+      }
+    }
+  }
+}"#,
         )
         .expect("playlist");
         let sites = playlist.invocation_sites(&SlotPath::root());
@@ -1359,49 +1250,43 @@ source = { path = "active.glsl" }
 
     #[test]
     fn node_def_referenced_asset_paths_resolve_relative_shader_compute_and_fixture_paths() {
-        let shader = NodeDef::from_toml_str(
-            r#"
-kind = "Shader"
-source = { path = "shader.glsl" }
-"#,
+        let shader = NodeDef::from_json_str(
+            r#"{ "kind": "Shader", "source": { "path": "shader.glsl" } }"#,
         )
         .expect("shader");
         assert_eq!(
             shader
-                .referenced_asset_paths(LpPath::new("/nodes/shader.toml"))
+                .referenced_asset_paths(LpPath::new("/nodes/shader.json"))
                 .unwrap(),
             vec![LpPathBuf::from("/nodes/shader.glsl")]
         );
 
-        let compute = NodeDef::from_toml_str(
-            r#"
-kind = "ComputeShader"
-source = { path = "../compute.glsl" }
-"#,
+        let compute = NodeDef::from_json_str(
+            r#"{ "kind": "ComputeShader", "source": { "path": "../compute.glsl" } }"#,
         )
         .expect("compute");
         assert_eq!(
             compute
-                .referenced_asset_paths(LpPath::new("/nodes/compute.toml"))
+                .referenced_asset_paths(LpPath::new("/nodes/compute.json"))
                 .unwrap(),
             vec![LpPathBuf::from("/compute.glsl")]
         );
 
-        let fixture = NodeDef::from_toml_str(
-            r#"
-kind = "Fixture"
-render_size = { width = 64, height = 16 }
-
-[mapping]
-kind = "SvgPath"
-source = "fixture.svg"
-sample_diameter = 2.0
-"#,
+        let fixture = NodeDef::from_json_str(
+            r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 64, "height": 16 },
+  "mapping": {
+    "kind": "SvgPath",
+    "source": "fixture.svg",
+    "sample_diameter": 2.0
+  }
+}"#,
         )
         .expect("fixture");
         assert_eq!(
             fixture
-                .referenced_asset_paths(LpPath::new("/fixtures/fixture.toml"))
+                .referenced_asset_paths(LpPath::new("/fixtures/fixture.json"))
                 .unwrap(),
             vec![LpPathBuf::from("/fixtures/fixture.svg")]
         );
@@ -1410,20 +1295,17 @@ sample_diameter = 2.0
     #[test]
     fn node_def_referenced_assets_include_source_identity_and_kind() {
         let owner = NodeDefLocation {
-            artifact: ArtifactLocation::file("/project.toml"),
+            artifact: ArtifactLocation::file("/project.json"),
             path: SlotPath::parse("nodes[shader]").unwrap(),
         };
-        let shader = NodeDef::from_toml_str(
-            r#"
-kind = "Shader"
-source = { glsl = "void main() {}" }
-"#,
+        let shader = NodeDef::from_json_str(
+            r#"{ "kind": "Shader", "source": { "glsl": "void main() {}" } }"#,
         )
         .expect("shader");
 
         assert_eq!(
             shader
-                .referenced_assets(LpPath::new("/project.toml"), &owner, &owner.path)
+                .referenced_assets(LpPath::new("/project.json"), &owner, &owner.path)
                 .unwrap(),
             vec![ReferencedAsset::new(
                 AssetLocation::inline(owner, SlotPath::parse("nodes[shader].source").unwrap()),
@@ -1431,23 +1313,23 @@ source = { glsl = "void main() {}" }
             )]
         );
 
-        let fixture = NodeDef::from_toml_str(
-            r#"
-kind = "Fixture"
-render_size = { width = 64, height = 16 }
-
-[mapping]
-kind = "SvgPath"
-source = "fixture.svg"
-sample_diameter = 2.0
-"#,
+        let fixture = NodeDef::from_json_str(
+            r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 64, "height": 16 },
+  "mapping": {
+    "kind": "SvgPath",
+    "source": "fixture.svg",
+    "sample_diameter": 2.0
+  }
+}"#,
         )
         .expect("fixture");
-        let owner = NodeDefLocation::artifact_root(ArtifactLocation::file("/fixtures/f.toml"));
+        let owner = NodeDefLocation::artifact_root(ArtifactLocation::file("/fixtures/f.json"));
 
         assert_eq!(
             fixture
-                .referenced_assets(LpPath::new("/fixtures/f.toml"), &owner, &owner.path)
+                .referenced_assets(LpPath::new("/fixtures/f.json"), &owner, &owner.path)
                 .unwrap(),
             vec![ReferencedAsset::new(
                 AssetLocation::artifact(ArtifactLocation::file("/fixtures/fixture.svg")),
@@ -1458,33 +1340,31 @@ sample_diameter = 2.0
 
     #[test]
     fn node_def_shell_change_ignores_inline_body_but_tracks_inline_kind() {
-        let before = NodeDef::from_toml_str(
-            r#"
-kind = "Playlist"
-
-[entries.2.node.def]
-kind = "Shader"
-source = { path = "a.glsl" }
-"#,
+        let before = NodeDef::from_json_str(
+            r#"{
+  "kind": "Playlist",
+  "entries": {
+    "2": { "node": { "def": { "kind": "Shader", "source": { "path": "a.glsl" } } } }
+  }
+}"#,
         )
         .expect("before");
-        let body_changed = NodeDef::from_toml_str(
-            r#"
-kind = "Playlist"
-
-[entries.2.node.def]
-kind = "Shader"
-source = { path = "b.glsl" }
-"#,
+        let body_changed = NodeDef::from_json_str(
+            r#"{
+  "kind": "Playlist",
+  "entries": {
+    "2": { "node": { "def": { "kind": "Shader", "source": { "path": "b.glsl" } } } }
+  }
+}"#,
         )
         .expect("body changed");
-        let kind_changed = NodeDef::from_toml_str(
-            r#"
-kind = "Playlist"
-
-[entries.2.node.def]
-kind = "Clock"
-"#,
+        let kind_changed = NodeDef::from_json_str(
+            r#"{
+  "kind": "Playlist",
+  "entries": {
+    "2": { "node": { "def": { "kind": "Clock" } } }
+  }
+}"#,
         )
         .expect("kind changed");
 

@@ -884,11 +884,10 @@ fn write_custom_slot_toml(
 mod tests {
     use super::*;
     use crate::{
-        LpType, LpValue, ModelEnumVariant, ProductKind, ProductRef, Revision, SlotData, SlotMapDyn,
-        SlotName, SlotOptionDyn, SlotRecord, SlotVariantShape, WithRevision,
+        LpType, LpValue, Revision, SlotData, SlotMapDyn, SlotName, SlotOptionDyn, SlotRecord,
+        SlotVariantShape, WithRevision,
         slot::shape::{enum_external, field, map, option, record, unit, value},
     };
-    use alloc::boxed::Box;
     use alloc::vec;
     use lp_collection::VecMap;
 
@@ -1033,129 +1032,6 @@ mod tests {
         let mut writer = SlotWriter::new(&mut out);
         let error = write_slot_data_json_value(&registry, shape_id, data.access(), writer.value())
             .unwrap_err();
-
-        assert!(error.to_string().contains("expected value data"));
-    }
-
-    #[test]
-    fn dynamic_slot_writer_writes_records_to_toml() {
-        let (registry, shape_id, data) = record_fixture();
-        let toml = write_slot_data_toml_value(&registry, shape_id, data.access()).unwrap();
-
-        assert_eq!(toml["pin"].as_integer(), Some(18));
-        assert_eq!(toml["name"].as_str(), Some("main"));
-    }
-
-    #[test]
-    fn dynamic_slot_writer_writes_enums_to_toml() {
-        let (registry, shape_id, data) = enum_fixture();
-        let toml = write_slot_data_toml_value(&registry, shape_id, data.access()).unwrap();
-
-        assert_eq!(toml["kind"].as_str(), Some("square"));
-        assert_eq!(toml["size"].as_float(), Some(0.5));
-    }
-
-    #[test]
-    fn dynamic_slot_writer_writes_external_value_enums_to_toml() {
-        let (registry, shape_id, data) = external_value_enum_fixture();
-        let toml = write_slot_data_toml_value(&registry, shape_id, data.access()).unwrap();
-
-        assert_eq!(toml["file"].as_str(), Some("compute.glsl"));
-    }
-
-    #[test]
-    fn dynamic_slot_writer_writes_external_record_enums_to_toml() {
-        let (registry, shape_id, data) = external_record_enum_fixture();
-        let toml = write_slot_data_toml_value(&registry, shape_id, data.access()).unwrap();
-
-        assert_eq!(toml["point"]["x"].as_integer(), Some(10));
-        assert_eq!(toml["point"]["y"].as_integer(), Some(11));
-    }
-
-    #[test]
-    fn dynamic_slot_writer_omits_none_toml_fields() {
-        let shape_id = SlotShapeId::from_static_name("test.WriterTomlNone");
-        let mut registry = SlotShapeRegistry::default();
-        registry
-            .register_dynamic_shape(
-                shape_id,
-                record(vec![field("name", option(value(LpType::String)))]),
-            )
-            .unwrap();
-        let data = SlotData::Record(SlotRecord::new(vec![SlotData::Option(
-            SlotOptionDyn::none_with_version(Revision::default()),
-        )]));
-
-        let toml = write_slot_data_toml_value(&registry, shape_id, data.access()).unwrap();
-
-        assert!(toml.as_table().unwrap().is_empty());
-    }
-
-    #[test]
-    fn dynamic_slot_writer_writes_root_none_toml() {
-        let shape_id = SlotShapeId::from_static_name("test.WriterTomlRootNone");
-        let mut registry = SlotShapeRegistry::default();
-        registry
-            .register_dynamic_shape(shape_id, option(value(LpType::String)))
-            .unwrap();
-        let data = SlotData::Option(SlotOptionDyn::none_with_version(Revision::default()));
-
-        let toml = write_slot_data_toml_value(&registry, shape_id, data.access()).unwrap();
-
-        assert!(toml.as_table().unwrap().is_empty());
-    }
-
-    #[test]
-    fn dynamic_slot_writer_writes_product_toml_leaves() {
-        let value = LpValue::Product(ProductRef::visual(VisualProduct::new(
-            crate::NodeId::new(3),
-            2,
-        )));
-        let toml = write_lp_value_toml(&LpType::Product(ProductKind::Visual), &value).unwrap();
-
-        assert_eq!(toml["kind"].as_str(), Some("visual"));
-        assert_eq!(toml["node"].as_integer(), Some(3));
-        assert_eq!(toml["output"].as_integer(), Some(2));
-    }
-
-    #[test]
-    fn dynamic_slot_writer_writes_enum_toml_leaves() {
-        let ty = LpType::Enum {
-            name: Some("Endpoint".to_string()),
-            variants: vec![
-                ModelEnumVariant {
-                    name: "Unset".to_string(),
-                    payload: None,
-                },
-                ModelEnumVariant {
-                    name: "Value".to_string(),
-                    payload: Some(LpType::F32),
-                },
-            ],
-        };
-        let value = LpValue::Enum {
-            variant: 1,
-            payload: Some(Box::new(LpValue::F32(0.75))),
-        };
-
-        let toml = write_lp_value_toml(&ty, &value).unwrap();
-
-        assert_eq!(toml["kind"].as_str(), Some("Value"));
-        assert_eq!(toml["payload"].as_float(), Some(0.75));
-    }
-
-    #[test]
-    fn dynamic_slot_writer_reports_shape_data_mismatch_toml() {
-        let shape_id = SlotShapeId::from_static_name("test.WriterTomlMismatch");
-        let mut registry = SlotShapeRegistry::default();
-        registry
-            .register_dynamic_shape(shape_id, value(LpType::Bool))
-            .unwrap();
-        let data = SlotData::Unit {
-            revision: Revision::default(),
-        };
-
-        let error = write_slot_data_toml_value(&registry, shape_id, data.access()).unwrap_err();
 
         assert!(error.to_string().contains("expected value data"));
     }

@@ -61,21 +61,22 @@ mod tests {
 
     #[test]
     fn compute_shader_def_parses_consumed_and_produced_slots() {
-        let def = NodeDef::from_toml_str(
-            r#"
-kind = "ComputeShader"
-source = { path = "emitters.glsl" }
-
-[consumed.time]
-kind = "value"
-value = "f32"
-
-[produced.emitters]
-kind = "map"
-key = "u32"
-value = "lp::fluid::Emitter"
-mapping = { kind = "sentinel", len = 4, key = "id", empty_key = 0 }
-"#,
+        let def = NodeDef::from_json_str(
+            r#"{
+  "kind": "ComputeShader",
+  "source": { "path": "emitters.glsl" },
+  "consumed": {
+    "time": { "kind": "value", "value": "f32" }
+  },
+  "produced": {
+    "emitters": {
+      "kind": "map",
+      "key": "u32",
+      "value": "lp::fluid::Emitter",
+      "mapping": { "kind": "sentinel", "len": 4, "key": "id", "empty_key": 0 }
+    }
+  }
+}"#,
         )
         .expect("compute shader");
         let NodeDef::ComputeShader(def) = def else {
@@ -95,12 +96,8 @@ mapping = { kind = "sentinel", len = 4, key = "id", empty_key = 0 }
 
     #[test]
     fn node_def_parses_compute_shader_variant() {
-        let def = NodeDef::from_toml_str(
-            r#"
-kind = "ComputeShader"
-
-source = { path = "emitters.glsl" }
-"#,
+        let def = NodeDef::from_json_str(
+            r#"{ "kind": "ComputeShader", "source": { "path": "emitters.glsl" } }"#,
         )
         .expect("node def");
 
@@ -109,11 +106,8 @@ source = { path = "emitters.glsl" }
 
     #[test]
     fn compute_shader_def_rejects_glsl_path() {
-        let err = NodeDef::from_toml_str(
-            r#"
-kind = "ComputeShader"
-glsl_path = "emitters.glsl"
-"#,
+        let err = NodeDef::from_json_str(
+            r#"{ "kind": "ComputeShader", "glsl_path": "emitters.glsl" }"#,
         )
         .expect_err("glsl_path should be rejected");
 

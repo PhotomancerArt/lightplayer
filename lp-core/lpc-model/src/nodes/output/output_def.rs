@@ -100,16 +100,13 @@ mod tests {
     }
 
     #[test]
-    fn test_output_def_endpoint_toml_deserialize() {
-        let toml = r#"
-kind = "Output"
-endpoint = "ws281x:rmt:D10"
-
-[options]
-brightness = 0.25
-dithering_enabled = false
-"#;
-        let def = NodeDef::read_toml(&registry(), toml).unwrap();
+    fn test_output_def_endpoint_json_deserialize() {
+        let json = r#"{
+  "kind": "Output",
+  "endpoint": "ws281x:rmt:D10",
+  "options": { "brightness": 0.25, "dithering_enabled": false }
+}"#;
+        let def = NodeDef::read_json(&registry(), json).unwrap();
         let NodeDef::Output(def) = def else {
             panic!("expected output def");
         };
@@ -121,13 +118,10 @@ dithering_enabled = false
     }
 
     #[test]
-    fn output_def_rejects_legacy_pin_toml() {
-        let toml = r#"
-kind = "Output"
-pin = 18
-"#;
+    fn output_def_rejects_legacy_pin_json() {
+        let json = r#"{ "kind": "Output", "pin": 18 }"#;
 
-        let err = NodeDef::read_toml(&registry(), toml).unwrap_err();
+        let err = NodeDef::read_json(&registry(), json).unwrap_err();
 
         assert!(format!("{err}").contains("pin"));
     }

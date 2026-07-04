@@ -120,8 +120,8 @@ mod tests {
     }
 
     #[test]
-    fn range_loads_from_toml() {
-        let c: Constraint = toml::from_str("range = [0, 5]\nstep = 1\n").unwrap();
+    fn range_loads_from_json() {
+        let c: Constraint = serde_json::from_str(r#"{"range":[0, 5],"step":1}"#).unwrap();
         match c {
             Constraint::Range(ConstraintRange { range, step }) => {
                 assert_eq!(range, [0.0, 5.0]);

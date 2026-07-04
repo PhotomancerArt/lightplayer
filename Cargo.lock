@@ -5302,7 +5302,6 @@ dependencies = [
  "ser-write-json",
  "serde",
  "serde_json",
- "toml",
 ]
 
 [[package]]

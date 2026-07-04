@@ -201,12 +201,8 @@ mod tests {
 
     #[test]
     fn shader_def_parses_source_path() {
-        let def = NodeDef::from_toml_str(
-            r#"
-kind = "Shader"
-
-source = { path = "main.glsl" }
-"#,
+        let def = NodeDef::from_json_str(
+            r#"{ "kind": "Shader", "source": { "path": "main.glsl" } }"#,
         )
         .expect("shader");
 
@@ -221,13 +217,11 @@ source = { path = "main.glsl" }
 
     #[test]
     fn shader_def_parses_inline_glsl() {
-        let def = NodeDef::from_toml_str(
-            r#"
-kind = "Shader"
-
-[source]
-glsl = "vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }"
-"#,
+        let def = NodeDef::from_json_str(
+            r#"{
+  "kind": "Shader",
+  "source": { "glsl": "vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }" }
+}"#,
         )
         .expect("shader");
 
@@ -245,13 +239,8 @@ glsl = "vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }"
 
     #[test]
     fn shader_def_rejects_glsl_path() {
-        let err = NodeDef::from_toml_str(
-            r#"
-kind = "Shader"
-glsl_path = "main.glsl"
-"#,
-        )
-        .expect_err("glsl_path should be rejected");
+        let err = NodeDef::from_json_str(r#"{ "kind": "Shader", "glsl_path": "main.glsl" }"#)
+            .expect_err("glsl_path should be rejected");
 
         assert!(err.to_string().contains("glsl_path"));
     }

@@ -138,3 +138,63 @@ impl<'a> TomlSyntaxSource<'a> {
         first
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::vec;
+
+    use crate::SlotShapeRegistry;
+    use crate::slot_codec::SlotReader;
+
+    #[test]
+    fn toml_source_uses_same_reader_semantics() {
+        let value: Value = toml::from_str(
+            r#"
+brightness = 0.5
+pin = 19
+name = "aux"
+"#,
+        )
+        .unwrap();
+        let registry = SlotShapeRegistry::default();
+        let mut reader = SlotReader::new(TomlSyntaxSource::new(&value).unwrap(), &registry);
+        let mut object = reader.object().unwrap();
+        let mut seen = Vec::new();
+
+        while let Some(mut prop) = object.next_prop().unwrap() {
+            seen.push(prop.name().to_string());
+            prop.value().skip_value().unwrap();
+        }
+
+        assert_eq!(seen, vec!["brightness", "pin", "name"]);
+    }
+
+    #[test]
+    fn toml_source_emits_kind_before_payload_fields() {
+        let mut table = toml::Table::new();
+        table.insert("bindings".to_string(), Value::Table(toml::Table::new()));
+        table.insert(
+            "kind".to_string(),
+            Value::String("ComputeShader".to_string()),
+        );
+        let mut source = toml::Table::new();
+        source.insert(
+            "path".to_string(),
+            Value::String("compute.glsl".to_string()),
+        );
+        table.insert("source".to_string(), Value::Table(source));
+        let value = Value::Table(table);
+        let registry = SlotShapeRegistry::default();
+        let mut reader = SlotReader::new(TomlSyntaxSource::new(&value).unwrap(), &registry);
+        let mut object = reader.object().unwrap();
+        let mut seen = Vec::new();
+
+        while let Some(mut prop) = object.next_prop().unwrap() {
+            seen.push(prop.name().to_string());
+            prop.value().skip_value().unwrap();
+        }
+
+        assert_eq!(seen[0], "kind");
+    }
+}
