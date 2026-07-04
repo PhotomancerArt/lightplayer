@@ -10,4 +10,6 @@ pub mod server;
 
 // Re-export TransportError from lp-model for convenience
 pub use lpc_wire::TransportError;
-pub use server::{ProjectReadJsonSource, ServerTransport};
+pub use server::{
+    ProjectReadEventSink, ProjectReadStreamSink, ServerTransport, transport_error_is_signalable,
+};

@@ -48,8 +48,9 @@ just studio-dev
 ```
 
 `studio-dev` builds debug wasm artifacts for `lpa-studio-web` and `fw-browser`,
-packages `fw-browser` with wasm-bindgen, prepares the wasm sidecar assets, and
-serves `http://127.0.0.1:2820/` through `dx serve`.
+packages `fw-browser` with wasm-bindgen, packages the ESP32-C6 firmware assets
+used by browser flashing, mirrors those generated assets into Dioxus' dev
+public directory, and serves `http://127.0.0.1:2820/` through `dx serve`.
 
 Use `just studio-web-build` or `just studio-web` for the release/static build
 path. `dx build` writes Studio app assets under
@@ -119,10 +120,11 @@ ESP32-C6 firmware assets are generated under
 provisioning imports a pinned browser ESM `esptool-js` module from
 `https://cdn.jsdelivr.net/npm/esptool-js@0.6.0/+esm` by default; deployments can
 override the `BrowserSerialEsp32Options` path if they want to serve that module
-themselves. The CDN ESM endpoint avoids raw package bare imports such as `pako`,
-which browsers cannot resolve directly, and it decodes the ESP32-C6 flasher
-stub used by reset/provisioning. Firmware flashing and device wipe both
-require a browser with Web Serial support and a user-granted serial port.
+themselves. The jsDelivr ESM transform avoids raw package bare imports such as
+`pako`, which browsers cannot resolve directly, and exposes the ESP32-C6
+flasher stub JSON with the named exports expected by `esptool-js`. Firmware
+flashing and device wipe both require a browser with Web Serial support and a
+user-granted serial port.
 
 ## Hardware Flow
 
@@ -147,6 +149,11 @@ workflow. The Device pane also offers `Wipe device` as a destructive
 tertiary action when the provider advertises whole-device erase. Confirming it
 erases the device flash, clears server/project state, and returns the device to a
 provisionable state. Wipe uses the same live activity renderer.
+
+Project refresh is passive background work in the web shell. Device recovery
+actions such as disconnect, reset, flash, and wipe preempt passive refresh so
+older firmware or a stuck project read cannot trap the user away from firmware
+recovery controls.
 
 For low-level browser serial debugging, open:
 

@@ -16,6 +16,7 @@ std = [
     "lpc-hardware/std",
     "lpc-shared/std",
     "lpfs/std",
+    "lp-recovery/std",
 ]
 
 [dependencies]
@@ -36,6 +37,7 @@ lpc-hardware = { path = "../lpc-hardware", default-features = false }
 lpc-registry = { path = "../lpc-registry", default-features = false }
 lpc-wire = { path = "../lpc-wire", default-features = false }
 lp-perf = { path = "../../lp-base/lp-perf", default-features = false }
+lp-recovery = { workspace = true }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 lpc-shared = { path = "../lpc-shared", default-features = false }
 lps-shared = { path = "../../lp-shader/lps-shared", default-features = false }
@@ -54,6 +56,9 @@ lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false }
 lpvm-wasm = { path = "../../lp-shader/lpvm-wasm", default-features = false }
 
 [dev-dependencies]
+# Per-thread ambient revision so parallel engine tests that tick/stamp
+# revisions cannot race each other through the process-wide clock.
+lpc-model = { path = "../lpc-model", features = ["test-support"] }
 lpc-hardware = { path = "../lpc-hardware", default-features = false, features = ["std"] }
 lpc-shared = { path = "../lpc-shared", default-features = false, features = ["std"] }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, features = ["std"] }

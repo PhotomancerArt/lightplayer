@@ -517,6 +517,113 @@ fn channel_name(name: &str) -> ChannelName {
     ChannelName(String::from(name))
 }
 
+// ---- Project-read streaming test helpers ----
+//
+// The aggregate `ProjectReadResponse`/`ProjectReadCollector` were deleted in
+// M6/P5. Tests that need the answer to a project read now drive the engine's
+// event stream through `lpc-view`'s `ProjectReadApplier` and read state back
+// from the resulting `ProjectView` — the same progressive-apply path the live
+// clients use.
+
+use alloc::vec::Vec;
+use core::future::Future;
+use core::pin::Pin;
+use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+use lpc_shared::transport::ProjectReadEventSink;
+use lpc_wire::{ProjectReadEvent, ProjectReadRequest};
+
+use super::EngineProjectReadSource;
+
+/// A sink that records every emitted [`ProjectReadEvent`] in order.
+#[derive(Default)]
+pub(crate) struct CollectingEventSink {
+    pub(crate) events: Vec<ProjectReadEvent>,
+}
+
+impl ProjectReadEventSink for CollectingEventSink {
+    type Error = core::convert::Infallible;
+
+    async fn send_project_read_event(
+        &mut self,
+        event: ProjectReadEvent,
+    ) -> Result<(), Self::Error> {
+        self.events.push(event);
+        Ok(())
+    }
+}
+
+/// Stream a project read from the engine, returning the ordered event vector.
+pub(crate) fn collect_read_events(
+    engine: &mut Engine,
+    registry: &ProjectRegistry,
+    request: ProjectReadRequest,
+) -> Vec<ProjectReadEvent> {
+    let mut sink = CollectingEventSink::default();
+    block_on(async {
+        EngineProjectReadSource::new(engine, registry)
+            .stream_project_read_events(request, &mut sink)
+            .await
+            .expect("project read stream");
+    });
+    sink.events
+}
+
+/// Stream a project read and apply it progressively into a fresh
+/// [`lpc_view::ProjectView`], returning the view and the raw event vector.
+pub(crate) fn read_into_view(
+    engine: &mut Engine,
+    registry: &ProjectRegistry,
+    request: ProjectReadRequest,
+) -> (lpc_view::ProjectView, Vec<ProjectReadEvent>) {
+    let events = collect_read_events(engine, registry, request);
+    let mut view = lpc_view::ProjectView::new();
+    let mut applier = lpc_view::ProjectReadApplier::new(&mut view);
+    for event in events.clone() {
+        applier.apply(event).expect("apply project read event");
+    }
+    (view, events)
+}
+
+/// Stream a project read and return the completed probe results the applier
+/// reassembles, in probe-index order.
+pub(crate) fn read_probe_results(
+    engine: &mut Engine,
+    registry: &ProjectRegistry,
+    request: ProjectReadRequest,
+) -> alloc::vec::Vec<lpc_wire::ProjectProbeResult> {
+    let events = collect_read_events(engine, registry, request);
+    let mut view = lpc_view::ProjectView::new();
+    let mut applier = lpc_view::ProjectReadApplier::new(&mut view);
+    for event in events {
+        applier.apply(event).expect("apply project read event");
+    }
+    applier.take_completed_probe_results()
+}
+
+pub(crate) fn block_on<F: Future>(future: F) -> F::Output {
+    let waker = noop_waker();
+    let mut cx = Context::from_waker(&waker);
+    let mut future = Box::pin(future);
+    loop {
+        match Future::poll(Pin::as_mut(&mut future), &mut cx) {
+            Poll::Ready(output) => return output,
+            Poll::Pending => {}
+        }
+    }
+}
+
+fn noop_waker() -> Waker {
+    unsafe fn clone(_: *const ()) -> RawWaker {
+        RawWaker::new(core::ptr::null(), &VTABLE)
+    }
+    unsafe fn wake(_: *const ()) {}
+    unsafe fn wake_by_ref(_: *const ()) {}
+    unsafe fn drop(_: *const ()) {}
+    static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop);
+
+    unsafe { Waker::from_raw(RawWaker::new(core::ptr::null(), &VTABLE)) }
+}
+
 fn f32_value(value: LpsValueF32) -> f32 {
     match value {
         LpsValueF32::F32(v) => v,

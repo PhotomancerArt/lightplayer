@@ -99,6 +99,24 @@ impl ShaderNode {
             self.node_id,
             self.glsl_source.len()
         );
+        // Recovery frame around the compile: crashes/hangs here are blamed
+        // on shader compilation for this node (nested under its NodeRender
+        // frame), and a path gated red after repeated crashes surfaces as a
+        // sticky compile error instead of executing again.
+        let _compile_frame = match lp_recovery::enter(lp_recovery::FrameKind::ShaderCompile, "glsl")
+        {
+            Ok(guard) => guard,
+            Err(denied) => {
+                log::warn!(
+                    "[shader-node] compilation blocked (node={:?}): {denied}",
+                    self.node_id
+                );
+                self.compilation_error = Some(format!("shader compile: {denied}"));
+                self.shader = None;
+                return Ok(false);
+            }
+        };
+
         lp_perf::emit_begin!(lp_perf::EVENT_SHADER_COMPILE);
         self.compilation_error = None;
         let compile_opts = ShaderCompileOptions {

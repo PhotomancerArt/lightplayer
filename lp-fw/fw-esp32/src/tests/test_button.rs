@@ -14,8 +14,18 @@ use crate::hardware::button::Esp32GpioButtonDriver;
 const POLL_INTERVAL: Duration = Duration::from_millis(5);
 
 pub async fn run_button_test(_: embassy_executor::Spawner) -> ! {
-    let (sw_int, timg0, _rmt_peripheral, _usb_device, _gpio18, _flash, _gpio4, _gpio20, _wifi) =
-        init_board();
+    let (
+        sw_int,
+        timg0,
+        _rmt_peripheral,
+        _usb_device,
+        _gpio18,
+        _flash,
+        _gpio4,
+        _gpio20,
+        _wifi,
+        _rwdt,
+    ) = init_board();
     start_runtime(timg0, sw_int);
 
     let hardware_registry = Rc::new(HwRegistry::new(default_esp32c6_hardware_manifest()));

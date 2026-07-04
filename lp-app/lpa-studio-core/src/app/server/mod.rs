@@ -3,6 +3,7 @@ mod browser_serial_client_io;
 mod browser_serial_readiness;
 #[cfg(all(feature = "browser-worker", target_arch = "wasm32"))]
 mod browser_worker_client_io;
+mod pending_server_messages;
 pub mod server_controller;
 pub mod server_op;
 pub mod server_snapshot;
@@ -15,5 +16,5 @@ pub use server_snapshot::ServerSnapshot;
 pub use server_state::{ServerFailureKind, ServerState};
 pub use studio_server_client::{
     LoadedDemoProject, LoadedProjectCatalog, LoadedRunningProject, StudioProjectRead,
-    StudioServerClient,
+    StudioProjectReadOutcome, StudioServerClient,
 };

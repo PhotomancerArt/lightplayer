@@ -1,6 +1,6 @@
 use core::any::Any;
 
-use crate::{ActionMeta, ActionPriority, ControllerOp};
+use crate::{ActionClass, ActionMeta, ActionPriority, ControllerOp};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ServerOp {
@@ -18,6 +18,15 @@ impl ControllerOp for ServerOp {
         }
     }
 
+    fn action_class(&self) -> ActionClass {
+        // `DisconnectServer` is in the retired web policy's preemption set, so
+        // it is recovery-class: it preempts an in-flight refresh / foreground
+        // action and carries no deadline.
+        match self {
+            Self::DisconnectServer => ActionClass::Recovery,
+        }
+    }
+
     fn clone_box(&self) -> Box<dyn ControllerOp> {
         Box::new(self.clone())
     }
@@ -32,5 +41,18 @@ impl ControllerOp for ServerOp {
 
     fn into_any(self: Box<Self>) -> Box<dyn Any> {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{ActionClass, ControllerOp, ServerOp};
+
+    #[test]
+    fn disconnect_server_is_recovery_class() {
+        assert_eq!(
+            ServerOp::DisconnectServer.action_class(),
+            ActionClass::Recovery
+        );
     }
 }

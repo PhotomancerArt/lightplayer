@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 
 #[derive(Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(transparent)]
 pub struct WireSlotData(
     #[cfg_attr(feature = "schema-gen", schemars(with = "serde_json::Value"))]
@@ -43,8 +44,8 @@ pub struct WireSlotFullSync {
 
 /// Slot root snapshots without a registry payload.
 ///
-/// Used when a response already carries shape registry data through another
-/// domain, such as `ProjectReadResult::Shapes`.
+/// Used when a read already carries shape registry data through another
+/// domain, such as the shapes query family of a project read.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct WireSlotRootsSnapshot {
@@ -113,5 +114,41 @@ mod tests {
         let back: WireSlotFullSync = serde_json::from_str(&json).unwrap();
 
         assert_eq!(back, sync);
+    }
+
+    #[cfg(feature = "ser-write-json")]
+    #[test]
+    fn slot_data_serializes_as_json_value_with_ser_write_json() {
+        use core::convert::Infallible;
+        use ser_write_json::SerWrite;
+
+        struct VecWriter(Vec<u8>);
+
+        impl SerWrite for VecWriter {
+            type Error = Infallible;
+
+            fn write(&mut self, buf: &[u8]) -> Result<(), Self::Error> {
+                self.0.extend_from_slice(buf);
+                Ok(())
+            }
+        }
+
+        let root = WireSlotRootSnapshot {
+            name: String::from("node.0.def"),
+            shape: SlotShapeId::new(7),
+            data: WireSlotData::from_json_string(String::from(
+                r#"{"kind":"value","changed_at":7,"value":2.0}"#,
+            ))
+            .unwrap(),
+        };
+
+        let mut writer = VecWriter(Vec::new());
+        ser_write_json::ser::to_writer(&mut writer, &root).unwrap();
+        let json = core::str::from_utf8(&writer.0).unwrap();
+
+        assert!(json.contains(r#""data":{"kind":"value""#), "{json}");
+        assert!(!json.contains("$serde_json::private::RawValue"), "{json}");
+        let back: WireSlotRootSnapshot = serde_json::from_str(json).unwrap();
+        assert_eq!(back, root);
     }
 }

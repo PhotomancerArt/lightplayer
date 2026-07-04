@@ -98,6 +98,12 @@ impl ProjectManager {
                 .join(&name)
         };
 
+        // Recovery frame: crashes/hangs during load are blamed on this
+        // project; a project gated red after repeated crashes is refused
+        // with a legible error through the normal LoadProject error path.
+        let _load_frame = lp_recovery::enter(lp_recovery::FrameKind::ProjectLoad, name.as_str())
+            .map_err(|denied| ServerError::Core(format!("{denied}")))?;
+
         lp_perf::emit_begin!(lp_perf::EVENT_PROJECT_LOAD);
         let result = (|| {
             backtrace::set_oom_context("project manager: chroot project fs");

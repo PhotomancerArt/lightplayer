@@ -201,10 +201,9 @@ mod tests {
 
     #[test]
     fn shader_def_parses_source_path() {
-        let def = NodeDef::from_json_str(
-            r#"{ "kind": "Shader", "source": { "path": "main.glsl" } }"#,
-        )
-        .expect("shader");
+        let def =
+            NodeDef::from_json_str(r#"{ "kind": "Shader", "source": { "path": "main.glsl" } }"#)
+                .expect("shader");
 
         let NodeDef::Shader(def) = def else {
             panic!("expected shader");

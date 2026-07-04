@@ -370,13 +370,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::vec::Vec;
     use crate::{
         LpType, LpValue, Revision, SlotData, SlotMapDyn, SlotName, SlotOptionDyn, SlotRecord,
         SlotVariantShape, WithRevision,
         slot::shape::{enum_external, field, map, option, record, unit, value},
     };
     use alloc::vec;
+    use alloc::vec::Vec;
     use lp_collection::VecMap;
 
     #[test]

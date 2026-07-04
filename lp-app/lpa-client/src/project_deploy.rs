@@ -116,7 +116,7 @@ pub fn request_label(request: &ClientRequest) -> &'static str {
         ClientRequest::Filesystem(FsRequest::ListDir { .. }) => "fs.list_dir",
         ClientRequest::LoadProject { .. } => "project.load",
         ClientRequest::UnloadProject { .. } => "project.unload",
-        ClientRequest::ProjectRequest { .. } => "project.read",
+        ClientRequest::ProjectRead { .. } => "project.read",
         ClientRequest::ProjectCommand { .. } => "project.command",
         ClientRequest::ListAvailableProjects => "project.list_available",
         ClientRequest::ListLoadedProjects => "project.list_loaded",

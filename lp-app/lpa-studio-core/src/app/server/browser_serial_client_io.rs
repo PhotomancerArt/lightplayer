@@ -15,6 +15,7 @@ use wasm_bindgen_futures::JsFuture;
 use super::browser_serial_readiness::{
     BrowserSerialReadinessClassifier, BrowserSerialReadinessFailure,
 };
+use super::pending_server_messages::{BatchItem, PendingServerMessages};
 use crate::core::view::activity_view::{UiActivityStep, UiActivityStepState};
 use crate::{
     ControllerId, ServerController, SharedLinkRegistry, UiActivityView, UiLogEntry, UiLogLevel,
@@ -33,6 +34,7 @@ const STEP_PROTOCOL: &str = "server-protocol";
 
 pub struct BrowserSerialClientIo {
     state: Rc<RefCell<BrowserSerialClientState>>,
+    pending: PendingServerMessages<WireServerMessage>,
 }
 
 impl BrowserSerialClientIo {
@@ -61,6 +63,7 @@ impl BrowserSerialClientIo {
                 last_protocol_issue: None,
                 protocol_ready: false,
             })),
+            pending: PendingServerMessages::new(),
         }
     }
 
@@ -132,6 +135,9 @@ impl BrowserSerialClientIo {
         self.state
             .borrow_mut()
             .mark_protocol_failed(&message, no_firmware);
+        self.state
+            .borrow()
+            .push_log(UiLogLevel::Warn, "browser-serial", message.clone());
         Err(TransportError::Other(message))
     }
 
@@ -247,6 +253,14 @@ impl ClientIo for BrowserSerialClientIo {
             "[browser-serial] tx request id={request_id} kind={label} json_bytes={}",
             frame.len()
         ));
+        self.state.borrow().push_log(
+            UiLogLevel::Debug,
+            "browser-serial",
+            format!(
+                "tx request id={request_id} kind={label} json_bytes={}",
+                frame.len()
+            ),
+        );
 
         let (registry, session_id) = {
             let state = self.state.borrow();
@@ -261,6 +275,10 @@ impl ClientIo for BrowserSerialClientIo {
     }
 
     async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
+        if let Some(response) = self.pending.pop() {
+            return Ok(response);
+        }
+
         for _ in 0..RESPONSE_POLL_LIMIT {
             let (registry, session_id) = {
                 let state = self.state.borrow();
@@ -291,10 +309,24 @@ impl ClientIo for BrowserSerialClientIo {
                 return Err(TransportError::Other(message));
             }
 
-            for line in lines {
-                if let Some(response) = self.handle_line(line)? {
-                    return Ok(response);
-                }
+            // Decode the whole drained batch: every `M!` frame is queued in
+            // order (a single `take_lines()` window can carry several 16 KiB
+            // project-read frames back to back), while device/log lines keep
+            // their existing handling inside `handle_line`. `pending` is moved
+            // out so the classifier can borrow `self` (for `handle_line`)
+            // without overlapping the `&mut self.pending` borrow.
+            let mut pending = std::mem::take(&mut self.pending);
+            let outcome = pending.ingest(lines, |line| {
+                self.handle_line(line).map(|decoded| match decoded {
+                    Some(response) => BatchItem::Protocol(response),
+                    None => BatchItem::Other,
+                })
+            });
+            self.pending = pending;
+            outcome?;
+
+            if let Some(response) = self.pending.pop() {
+                return Ok(response);
             }
 
             sleep_ms(RESPONSE_POLL_DELAY_MS).await?;
@@ -308,6 +340,9 @@ impl ClientIo for BrowserSerialClientIo {
             message.push_str("; last malformed protocol frame: ");
             message.push_str(&issue);
         }
+        self.state
+            .borrow()
+            .push_log(UiLogLevel::Warn, "browser-serial", message.clone());
         Err(TransportError::Other(message))
     }
 
@@ -339,9 +374,9 @@ struct BrowserSerialClientState {
 
 impl BrowserSerialClientState {
     fn push_log(&self, level: UiLogLevel, source: impl Into<String>, message: impl Into<String>) {
-        self.logs
-            .borrow_mut()
-            .push(UiLogEntry::new(level, source, message));
+        let entry = UiLogEntry::new(level, source, message);
+        self.logs.borrow_mut().push(entry.clone());
+        self.updates.emit(UxUpdate::Log(entry));
     }
 
     fn record_readiness_device_line(&mut self, level: UiLogLevel, message: String) {

@@ -245,15 +245,15 @@ studio-web-copy-sidecars profile out_dir include_firmware="false":
         cp "${firmware_dir}"/*.bin "{{ out_dir }}/firmware/esp32c6/"
     fi
 
-studio-web-dev-build: install-wasm32-target
+studio-web-dev-build: install-wasm32-target studio-firmware-package-esp32c6
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar debug
     echo "Building lpa-studio-web with dx for wasm32 debug with stories..."
     rm -rf target/dx/lpa-studio-web/debug/web/public
     dx build --web -p lpa-studio-web --features stories --debug-symbols false
-    just studio-web-copy-sidecars debug target/dx/lpa-studio-web/debug/web/public false
-    echo "Artifacts: target/dx/lpa-studio-web/debug/web/public/ (debug build)"
+    just studio-web-copy-sidecars debug target/dx/lpa-studio-web/debug/web/public true
+    echo "Artifacts: target/dx/lpa-studio-web/debug/web/public/ (debug build with firmware assets)"
 
 studio-web-story-build: install-wasm32-target
     #!/usr/bin/env bash
@@ -303,22 +303,26 @@ studio-story-baselines-if-needed:
     printf '%s\n' "$changed" | sed 's/^/  /'
     just studio-story-baselines
 
-studio-dev: install-wasm32-target
+studio-dev: install-wasm32-target studio-firmware-package-esp32c6
     #!/usr/bin/env bash
     set -euo pipefail
     just studio-fw-browser-sidecar debug
     port="${STUDIO_WEB_PORT:-2820}"
     public_dir="target/dx/lpa-studio-web/debug/web/public"
     sidecar_dir="{{ studio_assets_dir }}/debug/pkg"
-    sync_sidecars() {
+    firmware_dir="{{ studio_assets_dir }}/firmware/esp32c6"
+    sync_generated_assets() {
         [[ -d "${public_dir}" ]] || return 0
         mkdir -p "${public_dir}/pkg"
         cp "${sidecar_dir}/fw_browser.js" "${public_dir}/pkg/fw_browser.js"
         cp "${sidecar_dir}/fw_browser_bg.wasm" "${public_dir}/pkg/fw_browser_bg.wasm"
+        mkdir -p "${public_dir}/firmware/esp32c6"
+        cp "${firmware_dir}/manifest.json" "${public_dir}/firmware/esp32c6/manifest.json"
+        cp "${firmware_dir}"/*.bin "${public_dir}/firmware/esp32c6/"
     }
     (
         while true; do
-            sync_sidecars || true
+            sync_generated_assets || true
             sleep 1
         done
     ) &
@@ -611,6 +615,11 @@ test-rust:
 
 test-filetests:
     scripts/filetests.sh
+
+# Crash-recovery emulator suite (slow: builds fw-emu with build-std/unwind
+# and simulates multiple reboots). Marked #[ignore]; run explicitly.
+test-recovery-emu:
+    cargo test -p fw-tests --test recovery_emu -- --include-ignored
 
 # ============================================================================
 # Testing - lp-app only

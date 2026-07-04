@@ -94,9 +94,6 @@ mod tests {
     }
 
     fn message(id: u64) -> WireServerMessage {
-        WireServerMessage {
-            id,
-            msg: ServerMsgBody::StopAllProjects,
-        }
+        WireServerMessage::new(id, ServerMsgBody::StopAllProjects)
     }
 }

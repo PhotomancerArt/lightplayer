@@ -1214,6 +1214,7 @@ mod tests {
     };
 
     use crate::dataflow::binding::{BindingDraft, BindingPriority, BindingSource, BindingTarget};
+    use crate::engine::test_support::read_probe_results;
     use crate::engine::{Engine, default_demand_input_path};
     use crate::node::{RenderContext, RenderNode, RuntimeStateShape, test_placeholder_spine};
     use crate::nodes::TextureNode;
@@ -2123,7 +2124,8 @@ mod tests {
 
         let extent = ControlExtent::new(1, 3);
         let product = ControlProduct::new(fix_id, 0, extent);
-        let first = engine.read_project(
+        let first = read_probe_results(
+            &mut engine,
             &registry,
             ProjectReadRequest {
                 since: None,
@@ -2146,7 +2148,7 @@ mod tests {
                 ControlDisplayLayoutProbeResult::Layout(ControlDisplayLayout::Layout2d(layout)),
             bytes,
             ..
-        }) = &first.probes[0]
+        }) = &first[0]
         else {
             panic!("expected fixture control preview with layout");
         };
@@ -2161,7 +2163,8 @@ mod tests {
         assert_eq!(layout.lamps[0].sample_start, 0);
 
         let known_revision = layout.revision;
-        let second = engine.read_project(
+        let second = read_probe_results(
+            &mut engine,
             &registry,
             ProjectReadRequest {
                 since: None,
@@ -2181,7 +2184,7 @@ mod tests {
             display_layout: ControlDisplayLayoutProbeResult::Unchanged { revision },
             bytes,
             ..
-        }) = &second.probes[0]
+        }) = &second[0]
         else {
             panic!("expected unchanged fixture display layout");
         };

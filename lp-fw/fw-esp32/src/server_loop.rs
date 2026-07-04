@@ -59,6 +59,7 @@ pub async fn run_server_loop<T: ServerTransport>(
     mut server: LpServer,
     mut transport: T,
     time_provider: Esp32TimeProvider,
+    mut watchdog: crate::recovery::watchdog::WatchdogFeeder,
 ) -> ! {
     let mut last_tick = time_provider.now_ms();
     let mut frame_count = 0u32;
@@ -66,6 +67,21 @@ pub async fn run_server_loop<T: ServerTransport>(
     let mut heartbeat_last_sent = time_provider.now_ms();
     let startup_time = time_provider.now_ms();
     let mut fps_collector = WindowedStatsCollector::new();
+    let mut boot_completed = false;
+
+    // One legible error line if the previous run ended in a crash; flows to
+    // the client through the normal log transport.
+    if let Some(snapshot) = lp_recovery::snapshot()
+        && let Some(crash) = snapshot.last_crash
+        && crash.boots_ago == 1
+    {
+        log::error!(
+            "[RECOVERY] previous run crashed ({}): at {}: {}",
+            crash.cause.as_str(),
+            crash.path_display(),
+            crash.msg.as_str()
+        );
+    }
 
     loop {
         let frame_start = time_provider.now_ms();
@@ -105,6 +121,13 @@ pub async fn run_server_loop<T: ServerTransport>(
                 let tick_done = time_provider.now_ms();
                 let send_done = time_provider.now_ms();
                 server.set_last_frame_time(send_done.saturating_sub(frame_start) * 1000);
+                if !boot_completed {
+                    // First successful frame: the boot survived. Recovery's
+                    // boot-loop counter resets at the next boot.
+                    boot_completed = true;
+                    lp_recovery::mark_boot_complete();
+                    log::info!("[RECOVERY] boot complete (first frame served)");
+                }
                 (
                     tick_done.saturating_sub(tick_start),
                     send_done.saturating_sub(tick_done),
@@ -176,17 +199,18 @@ pub async fn run_server_loop<T: ServerTransport>(
                 total_bytes: used_bytes.saturating_add(free_bytes),
             });
 
-            // Create heartbeat message
-            let heartbeat_msg = WireServerMessage {
-                id: HEARTBEAT_MESSAGE_ID,
-                msg: lpc_wire::server::ServerMsgBody::Heartbeat {
+            // Create heartbeat message (unsolicited: id 0, single/final message).
+            let heartbeat_msg = WireServerMessage::new(
+                HEARTBEAT_MESSAGE_ID,
+                lpc_wire::server::ServerMsgBody::Heartbeat {
                     fps: fps_stats,
                     frame_count: frame_count as u64,
                     loaded_projects,
                     uptime_ms: current_time.saturating_sub(startup_time),
                     memory,
+                    recovery: lpa_server::recovery_report::current_recovery_status(),
                 },
-            };
+            );
 
             // Send heartbeat (non-blocking, ignore errors)
             if let Err(e) = transport.send(heartbeat_msg).await {
@@ -195,6 +219,11 @@ pub async fn run_server_loop<T: ServerTransport>(
 
             heartbeat_last_sent = current_time;
         }
+
+        // Feed the RWDT while the loop and the I/O task are both alive; a
+        // hang anywhere stops the feeding and the watchdog resets us with
+        // the recovery frame stack as the blame record.
+        watchdog.feed(current_time);
 
         // Yield to Embassy runtime (allows other tasks to run)
         // Use embassy_time::Timer to delay slightly

@@ -310,10 +310,7 @@ mod tests {
         let mock_io = MockSerialIo::new();
         let mut transport = SerialTransport::new(mock_io);
 
-        let msg = WireServerMessage {
-            id: 1,
-            msg: lpc_wire::server::ServerMsgBody::UnloadProject,
-        };
+        let msg = WireServerMessage::new(1, lpc_wire::server::ServerMsgBody::UnloadProject);
         pollster::block_on(transport.send(msg)).unwrap();
 
         let written = transport.io.take_written();

@@ -55,6 +55,18 @@ pub fn apply_tree_delta(
     delta: &WireTreeDelta,
     frame: Revision,
 ) -> Result<(), ApplyError> {
+    let mut removed = Vec::new();
+    apply_tree_delta_collecting_removed(tree, delta, frame, &mut removed)
+}
+
+/// Like [`apply_tree_delta`], but appends the ids of any nodes removed by an
+/// inferred `ChildrenChanged` removal into `removed`.
+pub fn apply_tree_delta_collecting_removed(
+    tree: &mut NodeTreeView,
+    delta: &WireTreeDelta,
+    frame: Revision,
+    removed: &mut Vec<NodeId>,
+) -> Result<(), ApplyError> {
     match delta {
         WireTreeDelta::Created {
             id,
@@ -117,7 +129,7 @@ pub fn apply_tree_delta(
             for old_child in old_children {
                 if !new_children_set.contains(&old_child) {
                     // Recursively remove this child and its descendants
-                    tree.remove_subtree(old_child);
+                    tree.remove_subtree_collecting(old_child, removed);
                 }
             }
         }
@@ -135,8 +147,20 @@ pub fn apply_tree_deltas(
     deltas: &[WireTreeDelta],
     frame: Revision,
 ) -> Result<(), ApplyError> {
+    let mut removed = Vec::new();
+    apply_tree_deltas_collecting_removed(tree, deltas, frame, &mut removed)
+}
+
+/// Like [`apply_tree_deltas`], but appends the ids of every node removed by an
+/// inferred `ChildrenChanged` removal into `removed`, in application order.
+pub fn apply_tree_deltas_collecting_removed(
+    tree: &mut NodeTreeView,
+    deltas: &[WireTreeDelta],
+    frame: Revision,
+    removed: &mut Vec<NodeId>,
+) -> Result<(), ApplyError> {
     for delta in deltas {
-        apply_tree_delta(tree, delta, frame)?;
+        apply_tree_delta_collecting_removed(tree, delta, frame, removed)?;
     }
     Ok(())
 }

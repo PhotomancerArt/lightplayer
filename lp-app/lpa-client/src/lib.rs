@@ -11,7 +11,9 @@ pub mod client_io;
 #[cfg(feature = "host")]
 pub mod local;
 pub mod project_deploy;
+pub mod project_read_stream;
 pub mod protocol_session;
+pub mod pull_loop;
 #[cfg(feature = "host")]
 pub mod specifier;
 #[cfg(feature = "host")]
@@ -35,6 +37,9 @@ pub use local::{
     AsyncLocalClientTransport, AsyncLocalServerTransport, create_local_transport_pair,
 };
 pub use project_deploy::ProjectDeployFile;
+pub use pull_loop::{
+    BackoffPolicy, CancelSignal, NeverCancel, ProgressDeadline, PullOutcome, run_project_read,
+};
 #[cfg(feature = "host")]
 pub use specifier::HostSpecifier;
 #[cfg(feature = "host")]

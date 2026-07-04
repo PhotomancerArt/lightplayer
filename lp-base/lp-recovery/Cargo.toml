@@ -1,0 +1,23 @@
+[package]
+name = "lp-recovery"
+version = "1.0.0"
+authors.workspace = true
+edition.workspace = true
+license = "Apache-2.0 WITH LLVM-exception"
+rust-version.workspace = true
+description = "Crash-recovery bookkeeping: persistent breadcrumb region, recovery frame stack, blame ledger"
+
+[features]
+default = []
+# Host-only conveniences (enables a critical-section implementation for tests
+# and host runtimes). Firmware targets provide their own critical-section impl.
+std = ["critical-section/std"]
+
+[dependencies]
+critical-section = { workspace = true }
+
+[dev-dependencies]
+critical-section = { workspace = true, features = ["std"] }
+
+[lints]
+workspace = true

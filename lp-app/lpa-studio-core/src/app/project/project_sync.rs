@@ -1,14 +1,14 @@
 use std::collections::BTreeMap;
+use std::rc::Rc;
 
-use lpc_model::{ControlDisplayLayout, Revision, SlotShapeId};
-use lpc_view::{ProjectView, apply_project_read_response};
+use lpc_model::{ControlDisplayLayout, Revision};
+use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
 use lpc_wire::{
     ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
     ControlProductProbeResult, NodeReadQuery, NodeReadSelection, ProjectProbeRequest,
-    ProjectProbeResult, ProjectReadQuery, ProjectReadRequest, ProjectReadResponse,
-    ProjectReadResult, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
-    ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, ShapeReadQuery,
-    WireChannelSampleFormat, WireTextureFormat,
+    ProjectProbeResult, ProjectReadEvent, ProjectReadQuery, ProjectReadRequest, ReadLevel,
+    RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery,
+    RuntimeReadQuery, ShapeReadQuery, WireChannelSampleFormat, WireTextureFormat,
 };
 
 use crate::{
@@ -16,22 +16,12 @@ use crate::{
     UiControlSampleFormat, UiError, UiIssue, UiProductPreview, UiProductPreviewFrame, UiProductRef,
 };
 
-// Keep shape pages small. Some shape definitions include other shapes and can
-// overflow the firmware's 16KB internal JSON buffer, which has caused project
-// sync parse errors/crashes. Raise this only after the server buffer/streaming
-// limitation is fixed.
-const SHAPE_SYNC_PAGE_LIMIT: u32 = 4;
-const SHAPE_SYNC_MAX_PAGES: u32 = 256;
 const VISUAL_PRODUCT_PREVIEW_FRAME: UiProductPreviewFrame = UiProductPreviewFrame::VISUAL_DEFAULT;
 
 pub struct ProjectSync {
     view: ProjectView,
     phase: ProjectSyncPhase,
-    shape_cursor: Option<SlotShapeId>,
-    shape_page_count: u32,
-    shapes_complete: bool,
     product_previews: BTreeMap<UiProductRef, UiProductPreview>,
-    requested_product_previews: Vec<UiProductRef>,
     issue: Option<UiIssue>,
 }
 
@@ -40,18 +30,14 @@ impl ProjectSync {
         Self {
             view: ProjectView::new(),
             phase: ProjectSyncPhase::Empty,
-            shape_cursor: None,
-            shape_page_count: 0,
-            shapes_complete: false,
             product_previews: BTreeMap::new(),
-            requested_product_previews: Vec::new(),
             issue: None,
         }
     }
 
     pub fn begin_initial_sync(&mut self) {
         *self = Self {
-            phase: ProjectSyncPhase::SyncingShapes,
+            phase: ProjectSyncPhase::SyncingProject,
             ..Self::new()
         };
     }
@@ -59,6 +45,16 @@ impl ProjectSync {
     pub fn begin_refresh(&mut self) {
         self.phase = ProjectSyncPhase::SyncingProject;
         self.issue = None;
+    }
+
+    /// Roll a [`Self::begin_refresh`] back to `Ready` when a gated refresh ends
+    /// without applying (cancelled or timed out). The mirror is untouched, so
+    /// the prior revision is still valid and the summary should reflect it
+    /// rather than lingering in `SyncingProject`.
+    pub fn abort_refresh(&mut self) {
+        if self.phase == ProjectSyncPhase::SyncingProject {
+            self.phase = ProjectSyncPhase::Ready;
+        }
     }
 
     pub fn summary(&self) -> ProjectSyncSummary {
@@ -76,7 +72,7 @@ impl ProjectSync {
             slot_root_count: self.view.slots.roots.len(),
             resource_count: self.view.resource_cache.summary_count(),
             shape_count: self.view.slots.registry.iter().count(),
-            shapes_complete: self.shapes_complete,
+            shapes_complete: self.phase == ProjectSyncPhase::Ready,
             runtime: self.view.runtime.as_ref().map(ProjectRuntimeSummary::from),
             issue: self.issue.clone(),
         }
@@ -101,23 +97,7 @@ impl ProjectSync {
     }
 
     pub fn is_syncing(&self) -> bool {
-        matches!(
-            self.phase,
-            ProjectSyncPhase::SyncingShapes | ProjectSyncPhase::SyncingProject
-        )
-    }
-
-    pub fn needs_shape_sync(&self) -> bool {
-        !self.shapes_complete
-    }
-
-    pub fn shape_sync_request(&self) -> Result<ProjectReadRequest, UiError> {
-        if self.shape_page_count >= SHAPE_SYNC_MAX_PAGES {
-            return Err(UiError::Protocol(format!(
-                "shape sync exceeded {SHAPE_SYNC_MAX_PAGES} pages"
-            )));
-        }
-        Ok(shape_sync_request(self.shape_cursor))
+        self.phase == ProjectSyncPhase::SyncingProject
     }
 
     pub fn initial_project_read_request(
@@ -140,37 +120,29 @@ impl ProjectSync {
         project_read_request(since, include_slots, self.product_probe_requests(products))
     }
 
-    pub fn apply_shape_sync_response(
+    pub fn apply_project_read_events(
         &mut self,
-        response: ProjectReadResponse,
+        events: Vec<ProjectReadEvent>,
     ) -> Result<(), UiError> {
-        let mut saw_shapes = false;
-        for result in response.results {
-            if let ProjectReadResult::Shapes(shapes) = result {
-                saw_shapes = true;
-                if let Some(registry) = shapes.registry {
-                    self.view.slots.apply_registry_page(registry);
+        // Probes are read-time diagnostics and are not retained on the view;
+        // the applier collects them — reassembling chunked results — and
+        // exposes them once the stream completes.
+        let probes = {
+            let mut applier = ProjectReadApplier::new(&mut self.view);
+            let mut probes = Vec::new();
+            for event in events {
+                if let ApplyStatus::Complete { .. } = applier
+                    .apply(event)
+                    .map_err(|error| UiError::Protocol(error.to_string()))?
+                {
+                    probes = applier.take_completed_probe_results();
+                    break;
                 }
-                self.shapes_complete = shapes.complete;
-                self.shape_cursor = shapes.next;
             }
-        }
-        if !saw_shapes {
-            return Err(UiError::Protocol(
-                "shape sync response did not include shapes".to_string(),
-            ));
-        }
-        self.shape_page_count = self.shape_page_count.saturating_add(1);
-        Ok(())
-    }
-
-    pub fn apply_project_read_response(
-        &mut self,
-        response: ProjectReadResponse,
-    ) -> Result<(), UiError> {
-        self.apply_product_probe_results(&response.probes);
-        apply_project_read_response(&mut self.view, response)
-            .map_err(|error| UiError::Protocol(error.to_string()))?;
+            probes
+        };
+        let probe_refs: Vec<&ProjectProbeResult> = probes.iter().collect();
+        self.apply_product_probe_results(&probe_refs);
         self.phase = ProjectSyncPhase::Ready;
         self.issue = None;
         Ok(())
@@ -181,41 +153,61 @@ impl ProjectSync {
         self.issue = Some(UiIssue::new(issue));
     }
 
-    fn product_probe_requests(&mut self, products: Vec<UiProductRef>) -> Vec<ProjectProbeRequest> {
-        self.requested_product_previews = products;
-        for product in &self.requested_product_previews {
-            self.product_previews
-                .entry(*product)
-                .or_insert(UiProductPreview::Pending);
-        }
-        self.requested_product_previews
-            .iter()
-            .copied()
-            .filter_map(|product| match product {
-                UiProductRef::Visual { .. } => product.visual_product().map(|product| {
-                    ProjectProbeRequest::RenderProduct(RenderProductProbeRequest {
-                        product,
-                        width: VISUAL_PRODUCT_PREVIEW_FRAME.width,
-                        height: VISUAL_PRODUCT_PREVIEW_FRAME.height,
-                        format: WireTextureFormat::Srgb8,
-                    })
-                }),
-                UiProductRef::Control { .. } => product.control_product().map(|control| {
-                    ProjectProbeRequest::ControlProduct(ControlProductProbeRequest {
-                        product: control,
-                        sample_format: WireChannelSampleFormat::U16,
-                        display_layout: self.display_layout_read_for(product),
-                    })
-                }),
-            })
-            .collect()
+    /// Drop the accumulated mirror so the next request re-reads from
+    /// `since = 0`.
+    ///
+    /// Gated refreshes assume the local mirror is a faithful prefix of the
+    /// server's revision history. If the applier rejects a stream as
+    /// malformed, that assumption is broken and further deltas cannot be
+    /// trusted, so we discard the mirror (resetting `view.revision` to `0`)
+    /// and let the caller resync with a full read. Product-preview caches are
+    /// cleared with it, since they are keyed off the same read cycle.
+    pub fn reset_view(&mut self) {
+        self.view = ProjectView::new();
+        self.product_previews.clear();
     }
 
-    fn apply_product_probe_results(&mut self, probes: &[ProjectProbeResult]) {
-        let requested = core::mem::take(&mut self.requested_product_previews);
-        for (index, probe) in probes.iter().enumerate() {
-            let fallback_key = requested.get(index).copied();
-            if let Some((product, preview)) = self.product_preview_from_probe(probe, fallback_key) {
+    fn product_probe_requests(&mut self, products: Vec<UiProductRef>) -> Vec<ProjectProbeRequest> {
+        let mut probes = Vec::new();
+        for product in products {
+            match product {
+                UiProductRef::Visual { .. } => {
+                    self.product_previews
+                        .entry(product)
+                        .or_insert(UiProductPreview::Pending);
+                    if let Some(visual) = product.visual_product() {
+                        probes.push(ProjectProbeRequest::RenderProduct(
+                            RenderProductProbeRequest {
+                                product: visual,
+                                width: VISUAL_PRODUCT_PREVIEW_FRAME.width,
+                                height: VISUAL_PRODUCT_PREVIEW_FRAME.height,
+                                format: WireTextureFormat::Srgb8,
+                            },
+                        ));
+                    }
+                }
+                UiProductRef::Control { .. } => {
+                    self.product_previews
+                        .entry(product)
+                        .or_insert(UiProductPreview::Pending);
+                    if let Some(control) = product.control_product() {
+                        probes.push(ProjectProbeRequest::ControlProduct(
+                            ControlProductProbeRequest {
+                                product: control,
+                                sample_format: WireChannelSampleFormat::U16,
+                                display_layout: self.display_layout_read_for(product),
+                            },
+                        ));
+                    }
+                }
+            }
+        }
+        probes
+    }
+
+    fn apply_product_probe_results(&mut self, probes: &[&ProjectProbeResult]) {
+        for probe in probes {
+            if let Some((product, preview)) = self.product_preview_from_probe(probe) {
                 self.product_previews.insert(product, preview);
             }
         }
@@ -238,7 +230,6 @@ impl ProjectSync {
     fn product_preview_from_probe(
         &self,
         probe: &ProjectProbeResult,
-        fallback_key: Option<UiProductRef>,
     ) -> Option<(UiProductRef, UiProductPreview)> {
         match probe {
             ProjectProbeResult::ControlProduct(ControlProductProbeResult::Preview {
@@ -262,7 +253,7 @@ impl ProjectSync {
                         sample_format: UiControlSampleFormat::U16,
                         sample_layout: sample_layout.clone(),
                         display_layout,
-                        bytes: bytes.clone(),
+                        bytes: Rc::from(bytes.as_slice()),
                     }),
                 ))
             }
@@ -296,7 +287,7 @@ impl ProjectSync {
                     message: message.clone(),
                 },
             )),
-            _ => product_preview_from_probe(probe, fallback_key),
+            _ => product_preview_from_probe(probe),
         }
     }
 }
@@ -304,18 +295,6 @@ impl ProjectSync {
 impl Default for ProjectSync {
     fn default() -> Self {
         Self::new()
-    }
-}
-
-pub fn shape_sync_request(after: Option<SlotShapeId>) -> ProjectReadRequest {
-    ProjectReadRequest {
-        since: None,
-        queries: Vec::from([ProjectReadQuery::Shapes(ShapeReadQuery {
-            level: ReadLevel::Detail,
-            after,
-            limit: Some(SHAPE_SYNC_PAGE_LIMIT),
-        })]),
-        probes: Vec::new(),
     }
 }
 
@@ -327,6 +306,9 @@ pub fn project_read_request(
     ProjectReadRequest {
         since,
         queries: Vec::from([
+            ProjectReadQuery::Shapes(ShapeReadQuery {
+                level: ReadLevel::Detail,
+            }),
             ProjectReadQuery::Nodes(NodeReadQuery {
                 level: ReadLevel::Detail,
                 nodes: NodeReadSelection::All,
@@ -344,7 +326,6 @@ pub fn project_read_request(
 
 fn product_preview_from_probe(
     probe: &ProjectProbeResult,
-    fallback_key: Option<UiProductRef>,
 ) -> Option<(UiProductRef, UiProductPreview)> {
     match probe {
         ProjectProbeResult::RenderProduct(RenderProductProbeResult::Texture {
@@ -360,7 +341,7 @@ fn product_preview_from_probe(
                 width: *width,
                 height: *height,
                 revision: revision.0,
-                bytes: bytes.clone(),
+                bytes: Rc::from(bytes.as_slice()),
             },
         )),
         ProjectProbeResult::RenderProduct(RenderProductProbeResult::Texture {
@@ -373,25 +354,22 @@ fn product_preview_from_probe(
                 reason: format!("visual preview format {format:?} is not supported by Studio"),
             },
         )),
-        ProjectProbeResult::RenderProduct(RenderProductProbeResult::Unsupported { reason }) => {
-            fallback_key.map(|product| {
-                (
-                    product,
-                    UiProductPreview::Unsupported {
-                        reason: reason.clone(),
-                    },
-                )
-            })
-        }
-        ProjectProbeResult::RenderProduct(RenderProductProbeResult::Error { message }) => {
-            fallback_key.map(|product| {
-                (
-                    product,
-                    UiProductPreview::Error {
-                        message: message.clone(),
-                    },
-                )
-            })
+        ProjectProbeResult::RenderProduct(RenderProductProbeResult::Unsupported {
+            product,
+            reason,
+        }) => Some((
+            UiProductRef::from_visual_product(*product),
+            UiProductPreview::Unsupported {
+                reason: reason.clone(),
+            },
+        )),
+        ProjectProbeResult::RenderProduct(RenderProductProbeResult::Error { product, message }) => {
+            Some((
+                UiProductRef::from_visual_product(*product),
+                UiProductPreview::Error {
+                    message: message.clone(),
+                },
+            ))
         }
         ProjectProbeResult::ControlProduct(_) => None,
         ProjectProbeResult::ExplainSlot(_) => None,
@@ -426,33 +404,40 @@ mod tests {
         ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlProduct,
         ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, NodeId, VisualProduct,
     };
+    use lpc_wire::ProjectReadProbeEvent;
+
+    /// Build a probe-only project-read event stream at `revision`.
+    fn probe_events(revision: i64, probes: Vec<ProjectProbeResult>) -> Vec<ProjectReadEvent> {
+        let mut events = Vec::with_capacity(probes.len() + 2);
+        events.push(ProjectReadEvent::Begin {
+            revision: Revision::new(revision),
+        });
+        for (index, probe) in probes.into_iter().enumerate() {
+            events.push(ProjectReadEvent::Probe {
+                index: index as u32,
+                event: ProjectReadProbeEvent::Result(probe),
+            });
+        }
+        events.push(ProjectReadEvent::End {
+            revision: Revision::new(revision),
+        });
+        events
+    }
 
     #[test]
-    fn shape_sync_request_uses_safe_page_limit_and_cursor() {
-        let after = SlotShapeId::new(7);
-        let request = shape_sync_request(Some(after));
+    fn project_read_request_includes_shapes_nodes_resources_and_runtime() {
+        let request = project_read_request(Some(Revision::new(12)), true, Vec::new());
 
-        assert_eq!(request.since, None);
-        assert!(request.probes.is_empty());
-        assert_eq!(request.queries.len(), 1);
+        assert_eq!(request.since, Some(Revision::new(12)));
+        assert_eq!(request.queries.len(), 4);
         assert_eq!(
             request.queries[0],
             ProjectReadQuery::Shapes(ShapeReadQuery {
                 level: ReadLevel::Detail,
-                after: Some(after),
-                limit: Some(4),
             })
         );
-    }
-
-    #[test]
-    fn project_read_request_includes_nodes_resources_and_runtime() {
-        let request = project_read_request(Some(Revision::new(12)), true, Vec::new());
-
-        assert_eq!(request.since, Some(Revision::new(12)));
-        assert_eq!(request.queries.len(), 3);
         assert_eq!(
-            request.queries[0],
+            request.queries[1],
             ProjectReadQuery::Nodes(NodeReadQuery {
                 level: ReadLevel::Detail,
                 nodes: NodeReadSelection::All,
@@ -460,17 +445,69 @@ mod tests {
             })
         );
         assert_eq!(
-            request.queries[1],
+            request.queries[2],
             ProjectReadQuery::Resources(ResourceReadQuery {
                 level: ReadLevel::Summary,
                 payloads: ResourcePayloadRead::None,
             })
         );
         assert_eq!(
-            request.queries[2],
+            request.queries[3],
             ProjectReadQuery::Runtime(RuntimeReadQuery)
         );
         assert!(request.probes.is_empty());
+    }
+
+    #[test]
+    fn initial_request_reads_from_scratch() {
+        // A fresh/reconnected session has no mirror to trust, so the initial
+        // read is a full snapshot (`since == None`), the un-gated bulk sync.
+        let mut sync = ProjectSync::new();
+        sync.view.revision = Revision::new(9);
+
+        let request = sync.initial_project_read_request(Vec::new());
+
+        assert_eq!(request.since, None);
+    }
+
+    #[test]
+    fn reset_view_forces_full_resync() {
+        // The applier-error recovery path resets the mirror; the next request
+        // must therefore fall back to a full (`since == None`) read even though
+        // a stale revision was previously applied.
+        let mut sync = ProjectSync::new();
+        sync.view.revision = Revision::new(9);
+        sync.view.slots.roots.insert(
+            "node.1.state".to_string(),
+            lpc_model::SlotData::Unit {
+                revision: Revision::new(9),
+            },
+        );
+
+        sync.reset_view();
+
+        assert_eq!(sync.view.revision, Revision::default());
+        assert!(sync.view.slots.roots.is_empty());
+        let request = sync.refresh_project_read_request(Vec::new());
+        assert_eq!(request.since, None, "reset mirror re-reads from since=0");
+    }
+
+    #[test]
+    fn malformed_stream_surfaces_protocol_error() {
+        // A stream whose End revision disagrees with its Begin is a protocol
+        // violation. Surfacing it as `UiError::Protocol` is what triggers the
+        // controller's reset-and-resync-from-since=0 recovery.
+        let mut sync = ProjectSync::new();
+        let result = sync.apply_project_read_events(vec![
+            ProjectReadEvent::Begin {
+                revision: Revision::new(4),
+            },
+            ProjectReadEvent::End {
+                revision: Revision::new(5),
+            },
+        ]);
+
+        assert!(matches!(result, Err(UiError::Protocol(_))));
     }
 
     #[test]
@@ -482,7 +519,7 @@ mod tests {
 
         assert_eq!(request.since, Some(Revision::new(9)));
         assert_eq!(
-            request.queries[0],
+            request.queries[1],
             ProjectReadQuery::Nodes(NodeReadQuery {
                 level: ReadLevel::Detail,
                 nodes: NodeReadSelection::All,
@@ -505,7 +542,7 @@ mod tests {
         let request = sync.refresh_project_read_request(Vec::new());
 
         assert_eq!(
-            request.queries[0],
+            request.queries[1],
             ProjectReadQuery::Nodes(NodeReadQuery {
                 level: ReadLevel::Detail,
                 nodes: NodeReadSelection::All,
@@ -545,10 +582,9 @@ mod tests {
         let _ = sync.refresh_project_read_request(vec![UiProductRef::from_visual_product(product)]);
         let bytes = vec![1, 2, 3, 4, 5, 6];
 
-        sync.apply_project_read_response(ProjectReadResponse {
-            revision: Revision::new(9),
-            results: Vec::new(),
-            probes: vec![ProjectProbeResult::RenderProduct(
+        sync.apply_project_read_events(probe_events(
+            9,
+            vec![ProjectProbeResult::RenderProduct(
                 RenderProductProbeResult::Texture {
                     product,
                     revision: Revision::new(8),
@@ -558,7 +594,7 @@ mod tests {
                     bytes: bytes.clone(),
                 },
             )],
-        })
+        ))
         .unwrap();
 
         assert_eq!(
@@ -567,7 +603,49 @@ mod tests {
                 width: 1,
                 height: 2,
                 revision: 8,
-                bytes,
+                bytes: Rc::from(bytes.as_slice()),
+            })
+        );
+    }
+
+    #[test]
+    fn unsupported_and_error_probe_results_attribute_by_identity_out_of_order() {
+        let mut sync = ProjectSync::new();
+        let first = VisualProduct::new(NodeId::new(1), 0);
+        let second = VisualProduct::new(NodeId::new(2), 0);
+        let first_ref = UiProductRef::from_visual_product(first);
+        let second_ref = UiProductRef::from_visual_product(second);
+
+        let _ = sync.refresh_project_read_request(vec![first_ref, second_ref]);
+
+        // Results arrive in the reverse order of the requests: the probe for the
+        // second product comes first. Identity on each result must drive
+        // attribution — positional matching would have mislabeled these.
+        sync.apply_project_read_events(probe_events(
+            9,
+            vec![
+                ProjectProbeResult::RenderProduct(RenderProductProbeResult::Error {
+                    product: second,
+                    message: "second failed".to_string(),
+                }),
+                ProjectProbeResult::RenderProduct(RenderProductProbeResult::Unsupported {
+                    product: first,
+                    reason: "first unsupported".to_string(),
+                }),
+            ],
+        ))
+        .unwrap();
+
+        assert_eq!(
+            sync.product_preview(&first_ref),
+            Some(&UiProductPreview::Unsupported {
+                reason: "first unsupported".to_string(),
+            })
+        );
+        assert_eq!(
+            sync.product_preview(&second_ref),
+            Some(&UiProductPreview::Error {
+                message: "second failed".to_string(),
             })
         );
     }
@@ -626,10 +704,9 @@ mod tests {
         let first_bytes = vec![0, 0, 255, 255, 0, 0];
         let _ = sync.refresh_project_read_request(vec![product_ref]);
 
-        sync.apply_project_read_response(ProjectReadResponse {
-            revision: Revision::new(9),
-            results: Vec::new(),
-            probes: vec![ProjectProbeResult::ControlProduct(
+        sync.apply_project_read_events(probe_events(
+            9,
+            vec![ProjectProbeResult::ControlProduct(
                 ControlProductProbeResult::Preview {
                     product,
                     revision: Revision::new(9),
@@ -640,7 +717,7 @@ mod tests {
                     bytes: first_bytes,
                 },
             )],
-        })
+        ))
         .unwrap();
 
         let request = sync.refresh_project_read_request(vec![product_ref]);
@@ -659,10 +736,9 @@ mod tests {
         );
 
         let second_bytes = vec![255, 255, 0, 0, 0, 0];
-        sync.apply_project_read_response(ProjectReadResponse {
-            revision: Revision::new(10),
-            results: Vec::new(),
-            probes: vec![ProjectProbeResult::ControlProduct(
+        sync.apply_project_read_events(probe_events(
+            10,
+            vec![ProjectProbeResult::ControlProduct(
                 ControlProductProbeResult::Preview {
                     product,
                     revision: Revision::new(10),
@@ -675,7 +751,7 @@ mod tests {
                     bytes: second_bytes.clone(),
                 },
             )],
-        })
+        ))
         .unwrap();
 
         assert_eq!(
@@ -686,7 +762,7 @@ mod tests {
                 sample_format: UiControlSampleFormat::U16,
                 sample_layout,
                 display_layout: Some(display_layout),
-                bytes: second_bytes,
+                bytes: Rc::from(second_bytes.as_slice()),
             }))
         );
     }

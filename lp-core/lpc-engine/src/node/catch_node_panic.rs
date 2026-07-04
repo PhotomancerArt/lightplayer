@@ -18,6 +18,27 @@ pub fn catch_node_panic<T>(f: impl FnOnce() -> Result<T, NodeError>) -> Result<T
     }
 }
 
+/// [`catch_node_panic`] inside a recovery frame.
+///
+/// Enters a crash-recovery frame for the duration of `f`: the persistent
+/// frame stack then blames this work if the device panics hard or hangs
+/// (watchdog), and paths gated red after repeated crashes are denied up
+/// front with a user-legible [`NodeError`] instead of executing.
+///
+/// On targets without an installed recovery global this is exactly
+/// `catch_node_panic` (inert frame guard).
+pub fn catch_node_panic_framed<T>(
+    kind: lp_recovery::FrameKind,
+    name: &str,
+    f: impl FnOnce() -> Result<T, NodeError>,
+) -> Result<T, NodeError> {
+    let _guard = match lp_recovery::enter(kind, name) {
+        Ok(guard) => guard,
+        Err(denied) => return Err(NodeError::msg(alloc::format!("{denied}"))),
+    };
+    catch_node_panic(f)
+}
+
 #[cfg(not(feature = "panic-recovery"))]
 pub fn catch_node_panic<T>(f: impl FnOnce() -> Result<T, NodeError>) -> Result<T, NodeError> {
     f()
@@ -31,7 +52,13 @@ pub fn catch_panic<T>(
 ) -> Result<T, alloc::string::String> {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(result) => Ok(result),
-        Err(payload) => Err(format_panic_payload(&payload, fallback)),
+        Err(payload) => {
+            // Layer-1 recovery caught this panic: void the staged breadcrumb
+            // (no reboot will happen) and feed the crash into the blame
+            // ledger so repeat offenders get gated.
+            lp_recovery::record_recovered_crash();
+            Err(format_panic_payload(&payload, fallback))
+        }
     }
 }
 

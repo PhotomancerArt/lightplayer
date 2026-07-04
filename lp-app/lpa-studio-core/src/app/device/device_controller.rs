@@ -385,12 +385,12 @@ impl DeviceController {
     }
 
     fn connected_lightplayer_actions(&self) -> Vec<UiAction> {
-        let mut actions = self
-            .lightplayer_actions(false)
-            .into_iter()
-            .filter(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetDevice)))
-            .collect::<Vec<_>>();
-        actions.push(self.action(DeviceOp::DisconnectLightPlayer));
+        let mut actions = self.lightplayer_actions(true);
+        actions.push(
+            self.action(DeviceOp::DisconnectLightPlayer)
+                .with_label("Disconnect LightPlayer")
+                .with_summary("Detach Studio from LightPlayer while keeping the device connected."),
+        );
         actions
     }
 
@@ -437,8 +437,8 @@ impl Default for DeviceController {
 fn provider_actions(providers: &[ProviderChoice], node_id: ControllerId) -> Vec<UiAction> {
     providers
         .iter()
-        .map(|provider| {
-            UiAction::from_op(
+        .flat_map(|provider| {
+            let mut actions = Vec::from([UiAction::from_op(
                 node_id.clone(),
                 DeviceOp::OpenProvider {
                     provider_id: provider.id,
@@ -448,7 +448,23 @@ fn provider_actions(providers: &[ProviderChoice], node_id: ControllerId) -> Vec<
             .with_summary(provider.summary.clone())
             .with_short_label(provider_action_short_label(provider.id))
             .with_icon(provider_action_icon(provider.id))
-            .with_priority(provider_action_priority(provider.id))
+            .with_priority(provider_action_priority(provider.id))]);
+            if provider.id == lpa_link::LinkProviderKind::BrowserSerialEsp32 {
+                actions.push(
+                    UiAction::from_op(
+                        node_id.clone(),
+                        DeviceOp::OpenProviderForRecovery {
+                            provider_id: provider.id,
+                        },
+                    )
+                    .with_label("Open for flashing")
+                    .with_summary("Open the ESP32 connection without attaching LightPlayer.")
+                    .with_short_label("Flash")
+                    .with_icon("usb")
+                    .with_priority(crate::ActionPriority::Secondary),
+                );
+            }
+            actions
         })
         .collect()
 }

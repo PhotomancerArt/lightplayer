@@ -1,5 +1,7 @@
 //! Leaf presentation for a produced product.
 
+use std::rc::Rc;
+
 use dioxus::prelude::*;
 use lpa_studio_core::{
     ColorOrder, ControlDisplayLayout, ControlSampleEncoding, UiAction, UiControlProductPreview,
@@ -197,7 +199,7 @@ fn ControlProductPreview(preview: UiControlProductPreview) -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn ProductPixelGrid(width: u32, height: u32, bytes: Vec<u8>) -> Element {
+fn ProductPixelGrid(width: u32, height: u32, bytes: Rc<[u8]>) -> Element {
     let columns = width.max(1);
     let rows = height.max(1);
     let grid_style = format!(

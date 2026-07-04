@@ -1,7 +1,9 @@
 //! Manual browser time source.
 //!
-//! Browser firmware tests and Studio previews need deterministic ticks, so time
-//! advances only when the embedding code sends a `tick` envelope.
+//! The runtime clock advances only via [`ManualTimeProvider::advance`], driven by
+//! `tick` envelopes. The worker JS owns the timer: in self-ticking mode it feeds
+//! real measured deltas; in explicit mode (tests/stories) it feeds fixed deltas
+//! for deterministic advancement.
 
 use std::cell::RefCell;
 use std::rc::Rc;

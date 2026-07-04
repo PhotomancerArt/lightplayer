@@ -1,5 +1,7 @@
 //! Produced product data for primary node output surfaces.
 
+use std::rc::Rc;
+
 use lpc_model::{
     ControlDisplayLayout, ControlExtent, ControlProduct, ControlSampleLayout, NodeId, ProductRef,
     VisualProduct,
@@ -155,7 +157,11 @@ pub struct UiControlProductPreview {
     /// Optional human-facing display layout for the sample data.
     pub display_layout: Option<ControlDisplayLayout>,
     /// Native sample bytes, little-endian for `U16`.
-    pub bytes: Vec<u8>,
+    ///
+    /// Shared (`Rc<[u8]>`) so cloning a preview into a view is a refcount bump,
+    /// not a deep copy of the payload — the DTO tree is rebuilt often and these
+    /// bytes dominate the per-tick cost.
+    pub bytes: Rc<[u8]>,
 }
 
 /// Small, serializable-enough preview state for a produced product.
@@ -169,11 +175,14 @@ pub enum UiProductPreview {
     /// A probe has been requested or the product is waiting for its first probe.
     Pending,
     /// RGB8 visual preview bytes in row-major order.
+    ///
+    /// `bytes` is shared (`Rc<[u8]>`) so cloning the preview into a rebuilt view
+    /// is a refcount bump rather than a copy of the (often large) RGB8 buffer.
     VisualSrgb8 {
         width: u32,
         height: u32,
         revision: i64,
-        bytes: Vec<u8>,
+        bytes: Rc<[u8]>,
     },
     /// Native control samples plus optional display layout.
     ControlNative(UiControlProductPreview),

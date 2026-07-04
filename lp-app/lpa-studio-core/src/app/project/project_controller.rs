@@ -1,4 +1,8 @@
+use core::future::Future;
+use core::time::Duration;
 use std::collections::{BTreeMap, BTreeSet};
+
+use lpa_client::{CancelSignal, ProgressDeadline};
 
 use crate::core::notice::UiNotices;
 use crate::{
@@ -6,8 +10,9 @@ use crate::{
     ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
     ProjectNodeAddress, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp, ProjectSnapshot,
     ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary,
-    StudioServerClient, UiAction, UiError, UiIssue, UiLogEntry, UiLogLevel, UiMetric, UiNodeView,
-    UiPaneView, UiProductRef, UiResult, UiStatus, UiViewContent, UxUpdateSink,
+    StudioProjectReadOutcome, StudioServerClient, UiAction, UiError, UiIssue, UiLogEntry,
+    UiLogLevel, UiMetric, UiNodeView, UiPaneView, UiProductRef, UiResult, UiStatus, UiViewContent,
+    UxUpdateSink,
 };
 use lpc_model::{NodeId, TreePath};
 use lpc_view::ProjectView;
@@ -87,8 +92,18 @@ impl ProjectController {
     }
 
     /// Apply the latest project mirror into the owned controller tree.
+    ///
+    /// This is the single reconcile path shared by production sync and tests:
+    /// it reconciles the root-node controllers against `view`, restores the
+    /// `active_editor_target` focus (a no-op when no target is focused), then
+    /// falls back to a default focus if nothing is focused. Production drives it
+    /// through [`Self::apply_synced_project_view`] with the synced mirror; tests
+    /// call it directly with a fixture view.
     pub fn apply_project_view(&mut self, view: &ProjectView) -> Result<(), UiError> {
         reconcile_root_nodes(&mut self.root_nodes, view);
+        if let Some(target) = self.active_editor_target.clone() {
+            self.focus_editor_target(&target);
+        }
         ensure_default_node_focus(&mut self.root_nodes);
         Ok(())
     }
@@ -222,6 +237,12 @@ impl ProjectController {
         self.clear_loaded_project_state();
     }
 
+    pub fn mark_project_sync_failed(&mut self, message: impl Into<String>) {
+        if let Some(sync) = &mut self.sync {
+            sync.fail(message.into());
+        }
+    }
+
     pub fn mark_no_running_project(&mut self) {
         self.running_project_status = RunningProjectStatus::NoneKnown;
         self.state = ProjectState::NotLoaded;
@@ -295,6 +316,70 @@ impl ProjectController {
         match self.run_refresh(server, handle_id).await {
             Ok(logs) => Ok(ProjectSyncRun::synced(logs)),
             Err(error) => Ok(self.record_sync_failure(server, error)),
+        }
+    }
+
+    /// Refresh under a progress deadline and cancel signal (the actor's passive
+    /// tick path).
+    ///
+    /// Unlike [`Self::refresh_project`], this can end without applying anything:
+    /// a preempting command flips `cancel` (→ [`ProjectRefreshOutcome::Cancelled`])
+    /// or a stalled stream trips the deadline (→ [`ProjectRefreshOutcome::TimedOut`]).
+    /// In both cases the local mirror is left untouched — no partial apply — so
+    /// the next tick simply re-reads. A completed read applies exactly as the
+    /// ungated path does.
+    pub async fn refresh_project_gated<MakeTimer, Timer, Cancel>(
+        &mut self,
+        server: &mut StudioServerClient,
+        deadline: ProgressDeadline<MakeTimer, Timer>,
+        cancel: &Cancel,
+    ) -> Result<ProjectRefreshOutcome, UiError>
+    where
+        MakeTimer: FnMut(Duration) -> Timer,
+        Timer: Future<Output = ()>,
+        Cancel: CancelSignal + ?Sized,
+    {
+        let handle_id = self.ready_handle_id()?;
+        self.sync
+            .get_or_insert_with(ProjectSync::new)
+            .begin_refresh();
+        let products = self.subscribed_products();
+        let request = self.sync_mut()?.refresh_project_read_request(products);
+        let outcome = server
+            .project_read_gated(handle_id, request, deadline, cancel)
+            .await;
+        let read = match outcome {
+            Ok(StudioProjectReadOutcome::Completed(read)) => read,
+            // Cancel/timeout are non-failing: the begun refresh is rolled back to
+            // idle so the sync summary does not linger in a "refreshing" state,
+            // and nothing is applied.
+            Ok(StudioProjectReadOutcome::Cancelled) => {
+                self.abort_begun_refresh();
+                return Ok(ProjectRefreshOutcome::Cancelled);
+            }
+            Ok(StudioProjectReadOutcome::TimedOut) => {
+                self.abort_begun_refresh();
+                return Ok(ProjectRefreshOutcome::TimedOut);
+            }
+            Err(error) => {
+                return Ok(ProjectRefreshOutcome::Synced(
+                    self.record_sync_failure(server, error),
+                ));
+            }
+        };
+        match self.apply_refresh_read(server, handle_id, read).await {
+            Ok(logs) => Ok(ProjectRefreshOutcome::Synced(ProjectSyncRun::synced(logs))),
+            Err(error) => Ok(ProjectRefreshOutcome::Synced(
+                self.record_sync_failure(server, error),
+            )),
+        }
+    }
+
+    /// Roll a `begin_refresh` back to the prior ready summary when a gated pull
+    /// ends without applying (cancelled or timed out).
+    fn abort_begun_refresh(&mut self) {
+        if let Some(sync) = &mut self.sync {
+            sync.abort_refresh();
         }
     }
 
@@ -498,26 +583,11 @@ impl ProjectController {
         server: &mut StudioServerClient,
         handle_id: u32,
     ) -> Result<Vec<UiLogEntry>, UiError> {
-        let mut logs = Vec::new();
-        loop {
-            let request = {
-                let sync = self.sync_mut()?;
-                if !sync.needs_shape_sync() {
-                    break;
-                }
-                sync.shape_sync_request()?
-            };
-            let read = server.project_read(handle_id, request).await?;
-            logs.extend(read.logs);
-            self.sync_mut()?.apply_shape_sync_response(read.response)?;
-        }
-
         let products = self.subscribed_products();
         let request = self.sync_mut()?.initial_project_read_request(products);
         let read = server.project_read(handle_id, request).await?;
-        logs.extend(read.logs);
-        self.sync_mut()?
-            .apply_project_read_response(read.response)?;
+        let logs = read.logs;
+        self.sync_mut()?.apply_project_read_events(read.events)?;
         self.apply_synced_project_view()?;
         Ok(logs)
     }
@@ -530,9 +600,44 @@ impl ProjectController {
         let products = self.subscribed_products();
         let request = self.sync_mut()?.refresh_project_read_request(products);
         let read = server.project_read(handle_id, request).await?;
-        let logs = read.logs;
-        self.sync_mut()?
-            .apply_project_read_response(read.response)?;
+        self.apply_refresh_read(server, handle_id, read).await
+    }
+
+    /// Apply a completed refresh read into the mirror, resyncing from `since=0`
+    /// if the gated delta is rejected as malformed. Shared by the ungated
+    /// ([`Self::run_refresh`]) and gated ([`Self::refresh_project_gated`]) paths.
+    async fn apply_refresh_read(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+        read: crate::StudioProjectRead,
+    ) -> Result<Vec<UiLogEntry>, UiError> {
+        let mut logs = read.logs;
+        match self.sync_mut()?.apply_project_read_events(read.events) {
+            Ok(()) => {}
+            // A gated refresh trusts the local mirror to be a faithful prefix
+            // of the server's revision history. If the applier rejects the
+            // stream as malformed, that trust is broken; discard the mirror
+            // and resync with a full (`since = 0`) read so we self-correct
+            // rather than wedge on a corrupt delta.
+            Err(UiError::Protocol(message)) => {
+                logs.extend(server.take_pending_logs());
+                logs.push(UiLogEntry::new(
+                    UiLogLevel::Warn,
+                    "lpa-studio-core",
+                    format!(
+                        "gated project read failed to apply ({message}); resyncing from since=0"
+                    ),
+                ));
+                self.sync_mut()?.reset_view();
+                let products = self.subscribed_products();
+                let request = self.sync_mut()?.initial_project_read_request(products);
+                let resync = server.project_read(handle_id, request).await?;
+                logs.extend(resync.logs);
+                self.sync_mut()?.apply_project_read_events(resync.events)?;
+            }
+            Err(error) => return Err(error),
+        }
         self.apply_synced_project_view()?;
         Ok(logs)
     }
@@ -549,16 +654,16 @@ impl ProjectController {
     }
 
     fn apply_synced_project_view(&mut self) -> Result<(), UiError> {
+        // Drive the shared reconcile path with the synced mirror. `sync` is
+        // moved out so the mirror borrow does not alias the `&mut self` that
+        // `apply_project_view` needs; it is restored before returning.
         let sync = self
             .sync
-            .as_ref()
+            .take()
             .ok_or_else(|| UiError::Project("project sync is not initialized".to_string()))?;
-        reconcile_root_nodes(&mut self.root_nodes, sync.project_view());
-        if let Some(target) = self.active_editor_target.clone() {
-            self.focus_editor_target(&target);
-        }
-        ensure_default_node_focus(&mut self.root_nodes);
-        Ok(())
+        let result = self.apply_project_view(sync.project_view());
+        self.sync = Some(sync);
+        result
     }
 
     fn record_sync_failure(
@@ -591,6 +696,18 @@ impl Default for ProjectController {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Result of a gated passive refresh ([`ProjectController::refresh_project_gated`]).
+pub enum ProjectRefreshOutcome {
+    /// The read completed (successfully or with a recorded sync failure); the
+    /// run summarizes what happened.
+    Synced(ProjectSyncRun),
+    /// A preempting command cancelled the pull at a frame boundary; nothing was
+    /// applied and the prior mirror is intact.
+    Cancelled,
+    /// The progress deadline fired on a stalled stream; nothing was applied.
+    TimedOut,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -765,7 +882,7 @@ fn project_editor_stats(
 fn sync_phase_label(phase: ProjectSyncPhase) -> &'static str {
     match phase {
         ProjectSyncPhase::Empty => "Not synced",
-        ProjectSyncPhase::SyncingShapes | ProjectSyncPhase::SyncingProject => "Syncing",
+        ProjectSyncPhase::SyncingProject => "Syncing",
         ProjectSyncPhase::Ready => "Synced",
         ProjectSyncPhase::Failed => "Needs attention",
     }
@@ -789,9 +906,9 @@ mod tests {
     };
     use lpc_view::{ProjectView, TreeEntryView};
     use lpc_wire::{
-        NodeRuntimeStatus, ProjectProbeRequest, ProjectProbeResult, ProjectReadResponse,
-        ProjectReadResult, RenderProductProbeRequest, RenderProductProbeResult, WireEntryState,
-        WireTextureFormat,
+        NodeRuntimeStatus, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent,
+        ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQueryEvent,
+        RenderProductProbeRequest, RenderProductProbeResult, WireEntryState, WireTextureFormat,
     };
 
     use crate::{
@@ -1084,26 +1201,41 @@ mod tests {
         project
             .sync_mut()
             .unwrap()
-            .apply_project_read_response(ProjectReadResponse {
-                revision: Revision::new(12),
-                results: vec![ProjectReadResult::Nodes(lpc_wire::NodeReadResult {
-                    level: lpc_wire::ReadLevel::Detail,
-                    tree_deltas: vec![lpc_wire::WireTreeDelta::Created {
-                        id: NodeId::new(1),
-                        path: TreePath::parse("/demo.project").unwrap(),
-                        parent: None,
-                        child_kind: None,
-                        children: Vec::new(),
-                        status: NodeRuntimeStatus::Ok,
-                        state: WireEntryState::Alive,
-                        created_frame: Revision::new(1),
-                        change_frame: Revision::new(1),
-                        children_ver: Revision::new(1),
-                    }],
-                    slots: None,
-                })],
-                probes: Vec::new(),
-            })
+            .apply_project_read_events(vec![
+                ProjectReadEvent::Begin {
+                    revision: Revision::new(12),
+                },
+                ProjectReadEvent::Query {
+                    index: 0,
+                    event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::Begin {
+                        level: lpc_wire::ReadLevel::Detail,
+                    }),
+                },
+                ProjectReadEvent::Query {
+                    index: 0,
+                    event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::TreeDeltas {
+                        deltas: vec![lpc_wire::WireTreeDelta::Created {
+                            id: NodeId::new(1),
+                            path: TreePath::parse("/demo.project").unwrap(),
+                            parent: None,
+                            child_kind: None,
+                            children: Vec::new(),
+                            status: NodeRuntimeStatus::Ok,
+                            state: WireEntryState::Alive,
+                            created_frame: Revision::new(1),
+                            change_frame: Revision::new(1),
+                            children_ver: Revision::new(1),
+                        }],
+                    }),
+                },
+                ProjectReadEvent::Query {
+                    index: 0,
+                    event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::End),
+                },
+                ProjectReadEvent::End {
+                    revision: Revision::new(12),
+                },
+            ])
             .unwrap();
 
         project.apply_synced_project_view().unwrap();
@@ -1463,20 +1595,27 @@ mod tests {
         project
             .sync_mut()
             .unwrap()
-            .apply_project_read_response(ProjectReadResponse {
-                revision: Revision::new(8),
-                results: Vec::new(),
-                probes: vec![ProjectProbeResult::RenderProduct(
-                    RenderProductProbeResult::Texture {
-                        product,
-                        revision: Revision::new(8),
-                        width: 1,
-                        height: 2,
-                        format: WireTextureFormat::Srgb8,
-                        bytes: bytes.clone(),
-                    },
-                )],
-            })
+            .apply_project_read_events(vec![
+                ProjectReadEvent::Begin {
+                    revision: Revision::new(8),
+                },
+                ProjectReadEvent::Probe {
+                    index: 0,
+                    event: ProjectReadProbeEvent::Result(ProjectProbeResult::RenderProduct(
+                        RenderProductProbeResult::Texture {
+                            product,
+                            revision: Revision::new(8),
+                            width: 1,
+                            height: 2,
+                            format: WireTextureFormat::Srgb8,
+                            bytes: bytes.clone(),
+                        },
+                    )),
+                },
+                ProjectReadEvent::End {
+                    revision: Revision::new(8),
+                },
+            ])
             .unwrap();
 
         let nodes = project.ui_nodes();
@@ -1488,7 +1627,7 @@ mod tests {
                 width: 1,
                 height: 2,
                 revision: 8,
-                bytes,
+                bytes: bytes.into(),
             }
         );
     }

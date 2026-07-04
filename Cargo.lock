@@ -3583,6 +3583,7 @@ dependencies = [
  "lpc-hardware",
  "lpc-model",
  "lpc-shared",
+ "lpc-view",
  "lpc-wire",
  "lpfs",
  "lpvm-wasm",
@@ -3625,11 +3626,14 @@ dependencies = [
  "hashbrown 0.15.5",
  "log",
  "lp-perf",
+ "lp-recovery",
  "lp-riscv-elf",
  "lp-riscv-emu",
  "lp-riscv-emu-guest",
+ "lp-riscv-emu-shared",
  "lpa-client",
  "lpa-server",
+ "lpc-engine",
  "lpc-hardware",
  "lpc-model",
  "lpc-shared",
@@ -3668,6 +3672,7 @@ dependencies = [
  "log",
  "lp-collection 1.0.0",
  "lp-perf",
+ "lp-recovery",
  "lp-shader",
  "lpa-server",
  "lpc-hardware",
@@ -3710,8 +3715,10 @@ dependencies = [
  "hashbrown 0.15.5",
  "log",
  "lp-cli",
+ "lp-recovery",
  "lp-riscv-elf",
  "lp-riscv-emu",
+ "lp-riscv-emu-shared",
  "lp-riscv-inst",
  "lpa-client",
  "lpc-model",
@@ -4970,6 +4977,7 @@ name = "lp-collection"
 version = "1.0.0"
 dependencies = [
  "rustc-hash 2.1.1",
+ "schemars",
  "serde",
  "serde_json",
 ]
@@ -4988,6 +4996,13 @@ version = "40.0.0"
 dependencies = [
  "log",
  "lp-riscv-emu-shared",
+]
+
+[[package]]
+name = "lp-recovery"
+version = "1.0.0"
+dependencies = [
+ "critical-section",
 ]
 
 [[package]]
@@ -5032,8 +5047,10 @@ dependencies = [
 name = "lp-riscv-emu-guest"
 version = "40.0.0"
 dependencies = [
+ "critical-section",
  "linked_list_allocator",
  "log",
+ "lp-recovery",
  "lp-riscv-emu-shared",
  "lpc-shared",
  "unwinding",
@@ -5122,6 +5139,7 @@ dependencies = [
  "hashbrown 0.15.5",
  "log",
  "lp-perf",
+ "lp-recovery",
  "lpc-engine",
  "lpc-hardware",
  "lpc-model",
@@ -5154,6 +5172,7 @@ version = "40.0.0"
 dependencies = [
  "dioxus",
  "dioxus-icons",
+ "futures-util",
  "gloo-net",
  "gloo-timers",
  "lpa-studio-core",
@@ -5183,6 +5202,7 @@ dependencies = [
  "log",
  "lp-collection 1.0.0",
  "lp-perf",
+ "lp-recovery",
  "lp-shader",
  "lpc-hardware",
  "lpc-model",
@@ -5279,6 +5299,7 @@ name = "lpc-view"
 version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
+ "lp-collection 1.0.0",
  "lpc-model",
  "lpc-wire",
 ]
@@ -7484,8 +7505,6 @@ dependencies = [
 [[package]]
 name = "ser-write-json"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b968997189e9b92e0d7f5ce4f2df3d94efa6534a331511137b1083b9b77d532"
 dependencies = [
  "ryu-js",
  "ser-write",

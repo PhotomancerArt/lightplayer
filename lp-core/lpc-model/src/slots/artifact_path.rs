@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 
 /// Path to an authored artifact file.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, SlotValue)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[slot_value(editor = path)]
 pub struct ArtifactPath(pub String);
 

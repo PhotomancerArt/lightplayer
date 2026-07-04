@@ -398,7 +398,6 @@ mod tests {
     /// Full round-trip test: server tree → deltas → client mirror
     #[test]
     fn tree_round_trip_server_to_client() {
-        use lp_collection::VecSet;
         use lpc_view::{NodeTreeView, apply_tree_deltas};
 
         // Build server tree

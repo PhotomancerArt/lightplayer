@@ -39,46 +39,30 @@ impl ClientResourceCache {
         self.summaries.values()
     }
 
-    /// Apply store summaries; when non-empty, membership is authoritative per domain present.
+    /// Additively upsert store summaries.
+    ///
+    /// A gated (revision-filtered) read carries only the summaries whose buffer
+    /// changed since the client's `since`, so this must merge rather than treat
+    /// the batch as authoritative membership. Removed resources are pruned
+    /// separately via [`Self::prune_to_membership`], driven by the read's
+    /// membership list (G4/G7).
     pub fn apply_summaries(&mut self, summaries: &[WireResourceSummary]) {
-        if summaries.is_empty() {
-            return;
-        }
-
-        let mut domains: BTreeSet<ResourceDomain> = BTreeSet::new();
-        let mut refs: BTreeSet<ResourceRef> = BTreeSet::new();
-
         for s in summaries {
-            domains.insert(s.resource_ref.domain);
-            refs.insert(s.resource_ref);
             self.summaries.insert(s.resource_ref, s.clone());
         }
+    }
 
-        self.summaries.retain(|r, _| {
-            if !domains.contains(&r.domain) {
-                return true;
-            }
-            refs.contains(r)
-        });
-
-        self.runtime_buffer_bytes.retain(|r, _| {
-            if r.domain != ResourceDomain::RuntimeBuffer {
-                return true;
-            }
-            if !domains.contains(&ResourceDomain::RuntimeBuffer) {
-                return true;
-            }
-            refs.contains(r)
-        });
-        self.runtime_buffer_metadata.retain(|r, _| {
-            if r.domain != ResourceDomain::RuntimeBuffer {
-                return true;
-            }
-            if !domains.contains(&ResourceDomain::RuntimeBuffer) {
-                return true;
-            }
-            refs.contains(r)
-        });
+    /// Prune cached resources whose ref is not in `membership`.
+    ///
+    /// A gated read includes the full current resource-ref set only when the
+    /// store's `ids_revision` moved past the client's `since`; the client then
+    /// drops any locally-cached summary and payload for a ref absent from that
+    /// list.
+    pub fn prune_to_membership(&mut self, membership: &[ResourceRef]) {
+        let keep: BTreeSet<ResourceRef> = membership.iter().copied().collect();
+        self.summaries.retain(|r, _| keep.contains(r));
+        self.runtime_buffer_bytes.retain(|r, _| keep.contains(r));
+        self.runtime_buffer_metadata.retain(|r, _| keep.contains(r));
     }
 
     pub fn apply_runtime_buffer_payloads(&mut self, payloads: &[WireRuntimeBufferPayload]) {
@@ -210,10 +194,14 @@ mod tests {
     }
 
     #[test]
-    fn project_resource_cache_prunes_payload_bytes_when_buffer_summaries_shrink() {
+    fn project_resource_cache_apply_summaries_is_additive() {
+        // A gated read carries only the changed summary; unchanged entries and their
+        // payloads must survive (apply_summaries no longer treats the batch as
+        // authoritative membership).
         let mut cache = ClientResourceCache::new();
         let a = sample_buffer_summary(1, 1);
         let b = sample_buffer_summary(2, 1);
+        let ref_a = a.resource_ref;
         let ref_b = b.resource_ref;
         cache.apply_summaries(&[a, b]);
         cache.apply_runtime_buffer_payloads(&[WireRuntimeBufferPayload {
@@ -223,12 +211,40 @@ mod tests {
             bytes: Vec::from([7u8, 8]),
         }]);
 
+        // Re-apply only the changed summary for ref_a.
+        cache.apply_summaries(&[sample_buffer_summary(1, 2)]);
+
+        assert_eq!(
+            cache.summary(ref_a).map(|s| s.revision),
+            Some(Revision::new(2))
+        );
+        assert!(cache.summary(ref_b).is_some());
         assert_eq!(
             cache.runtime_buffer_bytes(ref_b),
             Some(Vec::from([7u8, 8]).as_slice())
         );
+    }
 
-        cache.apply_summaries(&[sample_buffer_summary(1, 2)]);
+    #[test]
+    fn project_resource_cache_prune_to_membership_drops_absent_refs() {
+        let mut cache = ClientResourceCache::new();
+        let a = sample_buffer_summary(1, 1);
+        let b = sample_buffer_summary(2, 1);
+        let ref_a = a.resource_ref;
+        let ref_b = b.resource_ref;
+        cache.apply_summaries(&[a, b]);
+        cache.apply_runtime_buffer_payloads(&[WireRuntimeBufferPayload {
+            resource_ref: ref_b,
+            revision: Revision::new(1),
+            metadata: WireRuntimeBufferMetadataPayload::Raw,
+            bytes: Vec::from([7u8, 8]),
+        }]);
+
+        // Membership lists only ref_a; ref_b was removed and must be pruned.
+        cache.prune_to_membership(&[ref_a]);
+
+        assert!(cache.summary(ref_a).is_some());
+        assert!(cache.summary(ref_b).is_none());
         assert!(cache.runtime_buffer_bytes(ref_b).is_none());
     }
 

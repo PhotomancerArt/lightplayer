@@ -81,6 +81,7 @@ impl BrowserWorkerHandle {
             label: label.to_string(),
             fw_browser_module_path,
             fw_browser_wasm_path,
+            tick_mode: options.tick_mode,
         })?;
         let mut outputs = Vec::new();
         for _ in 0..200 {

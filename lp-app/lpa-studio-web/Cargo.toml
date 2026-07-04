@@ -14,6 +14,7 @@ stories = ["dep:lpa-studio-web-story-macros"]
 [dependencies]
 dioxus = { version = "0.7", features = ["web"] }
 dioxus-icons = "0.1"
+futures-util = "0.3"
 gloo-net = { version = "0.6", features = ["http"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
 lpa-studio-core = { path = "../lpa-studio-core", features = ["browser-worker", "browser-serial-esp32"] }

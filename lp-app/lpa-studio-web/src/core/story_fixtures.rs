@@ -3,9 +3,9 @@ use core::any::Any;
 use lpa_studio_core::core::view::activity_view::{UiActivityStep, UiActivityStepState};
 use lpa_studio_core::core::view::steps_view::{UiStepState, UiStepView};
 use lpa_studio_core::{
-    ActionConfirmation, ActionMeta, ActionPriority, ControllerId, ControllerOp, UiAction,
-    UiActivityView, UiIssue, UiLogEntry, UiLogLevel, UiMetric, UiPaneView, UiProgress, UiStatus,
-    UiStepsView, UiTerminalLine, UiViewContent,
+    ActionClass, ActionConfirmation, ActionMeta, ActionPriority, ControllerId, ControllerOp,
+    PROJECT_ACTION_DEADLINE, UiAction, UiActivityView, UiIssue, UiLogEntry, UiLogLevel, UiMetric,
+    UiPaneView, UiProgress, UiStatus, UiStepsView, UiTerminalLine, UiViewContent,
 };
 
 pub(crate) fn story_actions() -> Vec<UiAction> {
@@ -148,6 +148,15 @@ impl ControllerOp for StoryOp {
                 "Retry the failed project sync.",
                 ActionPriority::Primary,
             ),
+        }
+    }
+
+    fn action_class(&self) -> ActionClass {
+        // Story fixtures are display-only and never dispatched through the sync
+        // engine; a plain foreground class with the standard project-action
+        // deadline satisfies the compile-forced contract.
+        ActionClass::Foreground {
+            deadline: PROJECT_ACTION_DEADLINE,
         }
     }
 

@@ -5,6 +5,7 @@
 //! metadata without needing to know the operation type.
 
 pub mod action;
+pub mod action_class;
 pub mod action_confirmation;
 pub mod action_enablement;
 pub mod action_meta;

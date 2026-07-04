@@ -16,7 +16,11 @@ libm = "0.2"
 log = { workspace = true, default-features = false }
 lpc-hardware = { path = "../lpc-hardware", default-features = false }
 lpc-model = { path = "../lpc-model", default-features = false }
-lpc-wire = { path = "../lpc-wire", default-features = false }
+# `ser-write-json` gives the frame batcher the same serializer the ESP32 writes
+# with, so it budgets frames against real on-wire byte counts (not serde_json).
+lpc-wire = { path = "../lpc-wire", default-features = false, features = [
+    "ser-write-json",
+] }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
 lps-shared = { path = "../../lp-shader/lps-shared", default-features = false }
 serde = { workspace = true, features = ["derive"] }

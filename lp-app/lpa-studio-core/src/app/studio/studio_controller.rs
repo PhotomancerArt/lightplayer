@@ -1,24 +1,40 @@
 use core::future::Future;
+use core::time::Duration;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use lpa_client::{CancelSignal, ProgressDeadline};
 use lpa_link::{
     LinkConnection, LinkConnectionKind, LinkManagementRequest, LinkManagementResult,
     LinkProviderKind,
 };
 
+use crate::app::studio::refresh_cadence::RefreshCadence;
+use crate::core::log::LogRing;
 use crate::core::notice::UiNotices;
 use crate::{
     ConnectedLink, Controller, ControllerContext, DeviceController, DeviceOp, LinkOpenOutcome,
-    ProjectConnectResult, ProjectController, ProjectOp, ProjectState, ProjectSyncRun,
-    StudioSnapshot, UiAction, UiActions, UiActivityView, UiError, UiLogEntry, UiLogLevel, UiNotice,
-    UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
+    ProjectConnectResult, ProjectController, ProjectOp, ProjectRefreshOutcome, ProjectState,
+    ProjectSyncRun, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError, UiLogEntry,
+    UiLogLevel, UiNotice, UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget,
+    UxUpdate, UxUpdateSink,
 };
 
 pub struct StudioController {
     device: DeviceController,
     project: ProjectController,
-    logs: Vec<UiLogEntry>,
+    /// Bounded, chronological log buffer. Capped in core (P3/Q5) rather than in
+    /// the web crate's retired 80-entry mirror.
+    logs: LogRing,
+    /// The project revision reflected in the last emitted view. `view()` is
+    /// change-gated via [`Self::view_if_changed`]: a snapshot is only rebuilt
+    /// and emitted when an applied read advanced this revision or a local
+    /// mutation set [`Self::dirty`].
+    applied_revision: Option<i64>,
+    /// Set when local (non-network) state changed since the last emitted view —
+    /// a dispatched action, focus change, or log — so the next gate emits even
+    /// though the project revision did not move.
+    dirty: bool,
 }
 
 impl StudioController {
@@ -26,7 +42,10 @@ impl StudioController {
         Self {
             device: DeviceController::new(),
             project: ProjectController::new(),
-            logs: Vec::new(),
+            logs: LogRing::new(),
+            applied_revision: None,
+            // The first view is always new to the UI, so start dirty.
+            dirty: true,
         }
     }
 
@@ -35,8 +54,16 @@ impl StudioController {
             self.device.snapshot().link,
             self.device.snapshot().server,
             self.project.snapshot(),
-            self.logs.clone(),
+            self.logs.to_vec(),
         )
+    }
+
+    /// The passive-refresh cadence for the current connection, as data (P4/Q3).
+    ///
+    /// The actor publishes this to the UI timer so the interval policy lives in
+    /// core, not as a `LinkProviderKind` match in the view layer.
+    pub fn refresh_cadence(&self) -> RefreshCadence {
+        RefreshCadence::for_link_state(&self.device.snapshot().link.state)
     }
 
     pub fn actions(&self) -> UiActions {
@@ -55,7 +82,51 @@ impl StudioController {
         } else {
             vec![device_view]
         };
-        UiStudioView::new(panes, self.logs.clone())
+        UiStudioView::new(panes, self.logs.to_vec())
+    }
+
+    /// The current project revision, or `None` before any sync.
+    fn current_revision(&self) -> Option<i64> {
+        self.project.snapshot().sync.map(|sync| sync.revision)
+    }
+
+    /// Rebuild and return a view **only if something changed** since the last
+    /// gate. Returns `None` when neither the applied revision advanced nor a
+    /// local mutation is pending, so the actor skips a redundant snapshot after
+    /// a quiet (empty / unchanged) pull.
+    ///
+    /// Calling this records the observed revision and clears the dirty flag, so
+    /// the next quiet tick gates out.
+    pub fn view_if_changed(&mut self) -> Option<UiStudioView> {
+        let revision = self.current_revision();
+        let advanced = revision != self.applied_revision;
+        if !self.dirty && !advanced {
+            return None;
+        }
+        self.applied_revision = revision;
+        self.dirty = false;
+        Some(self.view())
+    }
+
+    /// Mark local (non-network) state as changed so the next
+    /// [`Self::view_if_changed`] emits.
+    fn mark_dirty(&mut self) {
+        self.dirty = true;
+    }
+
+    /// Append one entry to the bounded log ring and mark the view dirty.
+    ///
+    /// The actor routes action-outcome and error logs here so the cap lives in
+    /// core (Q5). The web crate's JS-console sink is fed separately in P4.
+    pub fn push_log(&mut self, entry: UiLogEntry) {
+        self.logs.push(entry);
+        self.mark_dirty();
+    }
+
+    /// The current bounded log entries, oldest-first. Exposed for the actor and
+    /// tests; the view already carries a copy.
+    pub fn logs(&self) -> Vec<UiLogEntry> {
+        self.logs.to_vec()
     }
 
     pub async fn dispatch(&mut self, action: UiAction) -> UiResult {
@@ -70,25 +141,51 @@ impl StudioController {
     ) -> UiResult {
         updates.emit(UxUpdate::View(self.view()));
         let result = self.dispatch_inner(action, updates.clone()).await;
+        // A dispatched action changes local state (project/device state, focus,
+        // logs, or an error to surface), so the actor's next gate must emit.
+        self.mark_dirty();
         updates.emit(UxUpdate::View(self.view()));
         result
     }
 
-    /// Refresh a loaded project for passive UI updates.
+    /// A passive refresh tick driven under a progress deadline and cancel signal
+    /// (the actor's passive-pull path).
     ///
-    /// This bypasses the generic action activity/notice path so the web shell can
-    /// keep selected visual-product previews fresh without showing a user action
-    /// as running.
-    pub async fn refresh_loaded_project_tick(&mut self) -> Result<Option<ProjectSyncRun>, UiError> {
+    /// `Ok(None)` when there is nothing to refresh (no loaded project / no
+    /// LightPlayer). Otherwise the [`ProjectRefreshOutcome`] tells the actor
+    /// whether the read completed, was cancelled by a preempting command, or hit
+    /// the quiet-gap deadline — so the actor can apply backoff or resume ticking
+    /// without treating a clean cancel as a failure.
+    pub async fn refresh_loaded_project_tick_gated<MakeTimer, Timer, Cancel>(
+        &mut self,
+        deadline: ProgressDeadline<MakeTimer, Timer>,
+        cancel: &Cancel,
+    ) -> Result<Option<ProjectRefreshOutcome>, UiError>
+    where
+        MakeTimer: FnMut(Duration) -> Timer,
+        Timer: Future<Output = ()>,
+        Cancel: CancelSignal + ?Sized,
+    {
         if !self.project_is_loaded() || !self.device.has_lightplayer_state() {
             return Ok(None);
         }
-        let sync = {
+        let outcome = {
             let server = self.device.server.client_mut()?;
-            self.project.refresh_project(server).await?
+            self.project
+                .refresh_project_gated(server, deadline, cancel)
+                .await?
         };
-        self.record_project_sync_run(&sync);
-        Ok(Some(sync))
+        if let ProjectRefreshOutcome::Synced(sync) = &outcome {
+            self.record_project_sync_run(sync);
+        }
+        Ok(Some(outcome))
+    }
+
+    pub fn mark_passive_project_refresh_failed(&mut self, message: impl Into<String>) {
+        self.project.mark_project_sync_failed(message);
+        // A sync failure changes the project pane's status even if the revision
+        // did not move, so the next change gate must emit it.
+        self.mark_dirty();
     }
 
     async fn dispatch_inner(&mut self, action: UiAction, updates: UxUpdateSink) -> UiResult {
@@ -105,19 +202,17 @@ impl StudioController {
             return self.execute_project_op(op, updates).await;
         }
         if node_id.is_descendant_of(&project_node_id) {
+            // Editor actions (currently only `Focus`) are local-only: they
+            // complete synchronously in the controller. The old bolt-on
+            // `refresh_project` network round-trip after every editor action is
+            // gone (P3); the next passive `RefreshTick` picks up the changed
+            // probe set, which is already focus-scoped via
+            // `node_subscribes_products`. This keeps focus off the network path.
             let outcome = self
                 .project
                 .dispatch_editor_action(action, updates.clone())
                 .await?;
             updates.emit(UxUpdate::View(self.view()));
-            if self.project_is_loaded() && self.device.is_lightplayer_connected() {
-                let sync = {
-                    let server = self.device.server.client_mut()?;
-                    self.project.refresh_project(server).await?
-                };
-                self.record_project_sync_run(&sync);
-                updates.emit(UxUpdate::View(self.view()));
-            }
             return Ok(outcome);
         }
         Err(crate::UiError::UnsupportedAction(format!(
@@ -138,6 +233,9 @@ impl StudioController {
                 self.device.server.disconnect();
                 self.project.reset();
                 Ok(UiNotices::new().with_notice(UiNotice::info("Connection catalog refreshed")))
+            }
+            DeviceOp::OpenProviderForRecovery { provider_id } => {
+                self.open_provider_link_only(provider_id, updates).await
             }
             DeviceOp::OpenProvider { provider_id } => {
                 if provider_id != LinkProviderKind::BrowserSerialEsp32 {
@@ -200,6 +298,35 @@ impl StudioController {
         self.logs.extend(connected.logs);
         self.connect_server_connection(&connected.connection, updates)
             .await
+    }
+
+    async fn open_provider_link_only(
+        &mut self,
+        provider_id: LinkProviderKind,
+        updates: UxUpdateSink,
+    ) -> UiResult {
+        self.project.reset();
+        self.device.server.disconnect();
+        emit_activity(
+            &updates,
+            device_section_target(DeviceController::SECTION_CONNECT_DEVICE),
+            "Opening device for flashing",
+            "Opening",
+            "Opening device without attaching LightPlayer",
+        );
+        match self.device.link.open_provider(provider_id).await? {
+            LinkOpenOutcome::Opened => Ok(UiNotices::new().with_notice(UiNotice::info(
+                "Choose the device endpoint to open for flashing",
+            ))),
+            LinkOpenOutcome::Cancelled { message } => {
+                Ok(UiNotices::new().with_notice(UiNotice::info(message)))
+            }
+            LinkOpenOutcome::Connected(connected) => {
+                self.logs.extend(connected.logs);
+                updates.emit(UxUpdate::View(self.view()));
+                Ok(UiNotices::new().with_notice(UiNotice::info("Device opened for flashing")))
+            }
+        }
     }
 
     async fn connect_server_from_link(&mut self, updates: UxUpdateSink) -> UiResult {
@@ -505,7 +632,12 @@ impl StudioController {
     }
 
     fn record_project_sync_run(&mut self, sync: &ProjectSyncRun) {
-        self.logs.extend(sync.logs.clone());
+        if !sync.logs.is_empty() {
+            self.logs.extend(sync.logs.clone());
+            // New log lines are a local change the next gate should surface even
+            // if the project revision did not move.
+            self.mark_dirty();
+        }
     }
 
     async fn disconnect_device(&mut self) -> UiResult {
@@ -739,6 +871,39 @@ impl StudioController {
     }
 }
 
+/// Cross-module test builders. The actor tests live in a sibling module and
+/// cannot reach the private `device`/`project` fields, so these `pub(crate)`
+/// helpers assemble a connected controller for them.
+#[cfg(test)]
+impl StudioController {
+    /// A controller whose link + server are connected and whose project is
+    /// `Ready`, with `client` wired as the server IO so a refresh sends reads.
+    pub(crate) fn connected_with_client_for_test(client: crate::StudioServerClient) -> Self {
+        use crate::{ConnectedDeviceSummary, LinkState, ProjectInventorySummary};
+        use lpa_link::LinkProviderKind;
+
+        let mut studio = Self::new();
+        studio.device.link.set_state(LinkState::Connected {
+            device: ConnectedDeviceSummary::new(
+                LinkProviderKind::Fake,
+                "fake-runtime",
+                "fake-session",
+                "Fake runtime",
+            ),
+        });
+        studio.device.server.set_client_for_test(client);
+        studio
+            .project
+            .mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        studio
+    }
+
+    /// Apply a project view into the owned tree (drives probe scoping).
+    pub(crate) fn apply_project_view_for_test(&mut self, view: &lpc_view::ProjectView) {
+        self.project.apply_project_view(view).unwrap();
+    }
+}
+
 impl Default for StudioController {
     fn default() -> Self {
         Self::new()
@@ -910,10 +1075,9 @@ mod tests {
     };
     use lpc_view::{ProjectView, TreeEntryView};
     use lpc_wire::{
-        ClientMessage, ClientRequest, MemoryStats, NodeRuntimeStatus, ProjectProbeRequest,
-        ProjectReadResponse, ProjectReadResult, ProjectRuntimeStatus, RenderProductProbeRequest,
-        RuntimeReadResult, ServerRuntimeStatus, TransportError, WireEntryState, WireServerMessage,
-        WireServerMsgBody, WireTextureFormat,
+        ClientMessage, ClientRequest, MemoryStats, NodeRuntimeStatus, ProjectReadEvent,
+        ProjectReadQueryEvent, ProjectRuntimeStatus, RuntimeReadResult, ServerRuntimeStatus,
+        TransportError, WireEntryState, WireServerMessage, WireServerMsgBody,
     };
 
     use super::*;
@@ -923,7 +1087,7 @@ mod tests {
         ConnectedDeviceSummary, ControllerId, LinkController, LinkState, ProjectController,
         ProjectEditorOp, ProjectEditorTarget, ProjectInventorySummary, ProjectNodeAddress,
         ProjectNodeTarget, ProjectState, ProjectSyncPhase, ServerController, ServerFailureKind,
-        ServerState, StudioServerClient, UiIssue, UiProductPreviewFrame,
+        ServerState, StudioServerClient, UiIssue,
     };
 
     #[test]
@@ -993,10 +1157,17 @@ mod tests {
             action.op_as::<DeviceOp>(),
             Some(DeviceOp::DisconnectLightPlayer)
         )));
-        assert!(!actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ResetToBlank | DeviceOp::DisconnectDevice)
-        )));
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
+        );
+        assert!(
+            actions.iter().any(|action| matches!(
+                action.op_as::<DeviceOp>(),
+                Some(DeviceOp::DisconnectDevice)
+            ))
+        );
     }
 
     #[test]
@@ -1110,10 +1281,17 @@ mod tests {
             action.op_as::<DeviceOp>(),
             Some(DeviceOp::DisconnectLightPlayer)
         )));
-        assert!(!actions.iter().any(|action| matches!(
-            action.op_as::<DeviceOp>(),
-            Some(DeviceOp::ResetToBlank | DeviceOp::DisconnectDevice)
-        )));
+        assert!(
+            !actions
+                .iter()
+                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
+        );
+        assert!(
+            actions.iter().any(|action| matches!(
+                action.op_as::<DeviceOp>(),
+                Some(DeviceOp::DisconnectDevice)
+            ))
+        );
     }
 
     #[test]
@@ -1135,6 +1313,99 @@ mod tests {
             action.op_as::<DeviceOp>(),
             Some(DeviceOp::DisconnectLightPlayer)
         )));
+        assert!(actions.iter().any(|action| matches!(
+            action.op_as::<DeviceOp>(),
+            Some(DeviceOp::ProvisionFirmware)
+        )));
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
+        );
+        assert!(
+            actions.iter().any(|action| matches!(
+                action.op_as::<DeviceOp>(),
+                Some(DeviceOp::DisconnectDevice)
+            ))
+        );
+        assert!(!actions.iter().any(|action| matches!(
+            action.op_as::<DeviceOp>(),
+            Some(DeviceOp::ConnectLightPlayer)
+        )));
+    }
+
+    #[test]
+    fn loaded_project_keeps_management_recovery_actions_visible() {
+        let mut studio = connected_studio();
+        studio
+            .device
+            .link
+            .set_active_session_for_test(management_capable_session());
+
+        let actions = view_actions(&studio.view());
+
+        assert!(actions.iter().any(|action| matches!(
+            action.op_as::<ProjectOp>(),
+            Some(ProjectOp::DisconnectProject)
+        )));
+        assert!(actions.iter().any(|action| matches!(
+            action.op_as::<DeviceOp>(),
+            Some(DeviceOp::DisconnectLightPlayer)
+        )));
+        assert!(actions.iter().any(|action| matches!(
+            action.op_as::<DeviceOp>(),
+            Some(DeviceOp::ProvisionFirmware)
+        )));
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetDevice)))
+        );
+        assert!(
+            actions
+                .iter()
+                .any(|action| matches!(action.op_as::<DeviceOp>(), Some(DeviceOp::ResetToBlank)))
+        );
+        assert!(
+            actions.iter().any(|action| matches!(
+                action.op_as::<DeviceOp>(),
+                Some(DeviceOp::DisconnectDevice)
+            ))
+        );
+        assert!(!actions.iter().any(|action| matches!(
+            action.op_as::<DeviceOp>(),
+            Some(DeviceOp::ConnectLightPlayer)
+        )));
+    }
+
+    #[test]
+    fn open_provider_for_recovery_skips_server_attach() {
+        let mut studio = StudioController::new();
+        studio.device.link = LinkController::with_registry(registry_with_fake_endpoint());
+
+        let outcome = block_on_ready(
+            studio.open_provider_link_only(LinkProviderKind::Fake, UxUpdateSink::noop()),
+        )
+        .unwrap();
+
+        assert!(
+            outcome
+                .notices
+                .iter()
+                .any(|notice| notice.message == "Choose the device endpoint to open for flashing")
+        );
+        assert!(matches!(
+            studio.project.snapshot().state,
+            ProjectState::NotLoaded
+        ));
+        assert!(matches!(
+            studio.device.server.snapshot().state,
+            ServerState::Disconnected
+        ));
+        assert!(matches!(
+            studio.device.link.snapshot().state,
+            LinkState::SelectingEndpoint { .. }
+        ));
     }
 
     #[test]
@@ -1279,13 +1550,13 @@ mod tests {
         );
         let sent = sent.borrow();
         assert_eq!(sent.len(), 1);
-        let ClientRequest::ProjectRequest { handle, request } = &sent[0].msg else {
+        let ClientRequest::ProjectRead { handle, request } = &sent[0].msg else {
             panic!("refresh should send a project read request");
         };
         assert_eq!(sent[0].id, 1);
         assert_eq!(handle.id(), 7);
         assert_eq!(request.since, None);
-        assert_eq!(request.queries.len(), 3);
+        assert_eq!(request.queries.len(), 4);
 
         let sync = studio
             .project
@@ -1336,22 +1607,14 @@ mod tests {
 
         block_on_ready(studio.dispatch(action)).unwrap();
 
-        let sent = sent.borrow();
-        assert_eq!(sent.len(), 1);
-        let ClientRequest::ProjectRequest { request, .. } = &sent[0].msg else {
-            panic!("node focus should send a project read request");
-        };
-        assert_eq!(
-            request.probes,
-            vec![ProjectProbeRequest::RenderProduct(
-                RenderProductProbeRequest {
-                    product,
-                    width: UiProductPreviewFrame::VISUAL_DEFAULT.width,
-                    height: UiProductPreviewFrame::VISUAL_DEFAULT.height,
-                    format: WireTextureFormat::Srgb8,
-                },
-            )]
-        );
+        // Focus is local-only (P3): it updates the active editor target and the
+        // focus-scoped probe set but does NOT send a project read. The changed
+        // probe set is picked up by the next passive refresh tick.
+        assert_eq!(sent.borrow().len(), 0, "Focus must not send a project read");
+        assert_eq!(studio.project.active_editor_target(), Some(&target));
+        // The now-focused node subscribes to its visual product, so the next
+        // refresh request will carry the render probe.
+        let _ = product;
     }
 
     #[test]
@@ -1613,6 +1876,16 @@ mod tests {
         registry
     }
 
+    fn registry_with_fake_endpoint() -> LinkProviderRegistry {
+        let mut registry = LinkProviderRegistry::new();
+        registry.insert(FakeProvider::new().with_endpoint(LinkEndpoint::new(
+            "fake-runtime",
+            LinkProviderKind::Fake,
+            "Fake runtime",
+        )));
+        registry
+    }
+
     fn management_capable_session() -> LinkSession {
         LinkSession::new(
             "fake-session",
@@ -1626,34 +1899,37 @@ mod tests {
     }
 
     fn project_read_response_with_runtime(id: u64, revision: Revision) -> WireServerMessage {
-        WireServerMessage {
+        WireServerMessage::new(
             id,
-            msg: WireServerMsgBody::ProjectRequest {
-                response: ProjectReadResponse {
-                    revision,
-                    results: vec![ProjectReadResult::Runtime(RuntimeReadResult {
-                        project: ProjectRuntimeStatus {
-                            revision,
-                            frame_num: 77,
-                            frame_delta_ms: 16,
-                            frame_total_ms: 17,
-                            demand_root_count: 2,
-                            runtime_buffer_count: 3,
-                        },
-                        server: Some(ServerRuntimeStatus {
-                            theoretical_fps: Some(60.0),
-                            last_frame_time_us: Some(16_000),
-                            memory: Some(MemoryStats {
-                                free_bytes: 4096,
-                                used_bytes: 2048,
-                                total_bytes: 6144,
+            WireServerMsgBody::ProjectRead {
+                events: vec![
+                    ProjectReadEvent::Begin { revision },
+                    ProjectReadEvent::Query {
+                        index: 0,
+                        event: ProjectReadQueryEvent::Runtime(RuntimeReadResult {
+                            project: ProjectRuntimeStatus {
+                                revision,
+                                frame_num: 77,
+                                frame_delta_ms: 16,
+                                frame_total_ms: 17,
+                                demand_root_count: 2,
+                                runtime_buffer_count: 3,
+                            },
+                            server: Some(ServerRuntimeStatus {
+                                theoretical_fps: Some(60.0),
+                                last_frame_time_us: Some(16_000),
+                                memory: Some(MemoryStats {
+                                    free_bytes: 4096,
+                                    used_bytes: 2048,
+                                    total_bytes: 6144,
+                                }),
                             }),
                         }),
-                    })],
-                    probes: Vec::new(),
-                },
+                    },
+                    ProjectReadEvent::End { revision },
+                ],
             },
-        }
+        )
     }
 
     struct ScriptedClientIo {

@@ -54,6 +54,9 @@ pub mod resources;
 pub mod server;
 pub mod slots;
 pub mod sync;
+
+#[cfg(feature = "schema-gen")]
+mod schema_gen_smoke;
 // --- Foundation re-exports ------------------------------------------------------------------
 
 pub use value::constraint;
@@ -101,14 +104,14 @@ pub use nodes::{
     ControlRadioState, ControlRadioStateView, DivMode, FixtureDef, FixtureDefView,
     FixtureDiagnosticMode, FixtureSamplingConfig, FixtureState, FixtureStateView, FluidDef,
     FluidDefView, FluidEmitter, FluidState, GlslOpts, GlslOptsView, InvocationSite, MappingConfig,
-    MulMode, NodeDefParseError, OutputDef,
-    OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView, PathSpec, PlaylistDef,
-    PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState, PlaylistStateView,
-    ProjectDef, ProjectDefView, RingOrder, ScalarHint, ScalarHintView, ShaderDef, ShaderDefView,
-    ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef, ShaderParamDefView, ShaderSlotDef,
-    ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderState, ShaderStateView,
-    ShaderValueShapeRef, TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView,
-    generate_compute_shader_header, resolve_artifact_specifier,
+    MulMode, NodeDefParseError, OutputDef, OutputDefView, OutputDriverOptionsConfig,
+    OutputDriverOptionsConfigView, PathSpec, PlaylistDef, PlaylistDefView, PlaylistEntry,
+    PlaylistEntryView, PlaylistState, PlaylistStateView, ProjectDef, ProjectDefView, RingOrder,
+    ScalarHint, ScalarHintView, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,
+    ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
+    ShaderSlotMappingKind, ShaderState, ShaderStateView, ShaderValueShapeRef, TextureDef,
+    TextureDefView, TextureFormat, TextureState, TextureStateView, generate_compute_shader_header,
+    resolve_artifact_specifier,
 };
 pub use product::{
     ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlProduct,

@@ -35,6 +35,7 @@ impl Engine {
             Ok(texture) => {
                 let Some(bytes) = texture.try_raw_bytes() else {
                     return RenderProductProbeResult::Error {
+                        product,
                         message: format!("render product probe returned non-resident texture"),
                     };
                 };
@@ -52,6 +53,7 @@ impl Engine {
                 }
             }
             Err(error) => RenderProductProbeResult::Error {
+                product,
                 message: format!("{error}"),
             },
         }
@@ -66,6 +68,8 @@ impl Engine {
             trace: alloc::vec::Vec::new(),
         };
         ExplainSlotProbeResult::Unsupported {
+            node: request.node,
+            slot: request.slot.clone(),
             reason: format!(
                 "explain slot probe execution is not implemented yet for node {:?} slot {:?}",
                 request.node, request.slot

@@ -16,6 +16,53 @@ The crate is split into two layers:
 This keeps Studio web, CLI, host runtimes, and future agents on one protocol
 model while allowing each runtime to bind its own I/O.
 
+Project reads are streaming operations: one `ProjectReadRequest` can produce
+several same-id server messages carrying `ProjectReadEvent` batches, completed
+by the envelope's `fin` flag. The public client API returns the flattened
+`Vec<ProjectReadEvent>`; callers apply them to a `ProjectView` via
+`lpc-view`'s `ProjectReadApplier` rather than reconstructing an aggregate
+response.
+
+## Pull Loop (`pull_loop`)
+
+Driving one streamed project read — send, receive frames until `fin`, feed each
+to `ProjectReadStream`, and stop on completion, timeout, or cancellation — is
+this crate's single responsibility, owned by `pull_loop::run_project_read`.
+Both `LpClient::project_read` and `TokioLpClient`'s native read call into it, so
+the send/receive/collect state machine exists exactly once.
+
+The pull loop is the **single timeout owner** for a read. Its contract is three
+runtime-neutral pieces:
+
+- **`ProgressDeadline`** — a *quiet-gap* deadline, not a total-duration one. It
+  is reset on every received frame and fires only when no frame arrives within
+  its `budget`, so a slow but progressing multi-frame stream never trips it. It
+  carries a caller-supplied **timer factory** (`FnMut(Duration) -> impl Future`)
+  instead of a concrete timer, keeping the module free of Tokio and `web-sys`:
+  native callers back it with `tokio::time::sleep`, wasm callers with a
+  `setTimeout` future. The loop races `io.receive()` against that timer with a
+  hand-rolled poll (no executor `select!`), so it compiles and runs on both
+  native and `wasm32-unknown-unknown` under `ClientIo`'s `?Send` contract.
+- **`CancelSignal`** — explicit, not drop-based. The loop observes it between
+  receives and returns `PullOutcome::Cancelled` at a frame boundary, leaving the
+  transport consistent (the receive adapters discard any stale frames on the
+  next request) rather than abandoning a half-consumed stream mid-`receive`. A
+  bare `Fn() -> bool` and the `NeverCancel` marker both implement it.
+- **`BackoffPolicy`** — exponential-with-cap failure backoff, reset on success.
+  The loop itself never sleeps; this is the retry-cadence *policy* a caller
+  applies between reads based on the `PullOutcome`. The type lives here so the
+  whole timing contract of a read is one place (the old flat 3s passive-refresh
+  backoff becomes `BackoffPolicy::new(base, max)`).
+
+`run_project_read` returns a `PullOutcome`: `Completed { events, observed }`
+(the ordered read events plus the unsolicited `ClientEvent`s seen en route,
+preserving the buffering the open-coded loops had), `Cancelled`, `TimedOut`, or
+`Failed(ClientError)`. The two existing clients apply no deadline of their own —
+`LpClient` has no runtime and `TokioLpClient` keeps its outer `tokio::time::timeout`
+as the native timeout owner — so both pass a never-firing deadline into the
+shared loop today; the actor layer (M7/P3) is where a real `ProgressDeadline`,
+`CancelSignal`, and `BackoffPolicy` get wired in.
+
 ## Feature Model
 
 | Feature | Purpose |
@@ -50,6 +97,12 @@ cargo check -p lpa-client --target wasm32-unknown-unknown --no-default-features
   helpers.
 - `TokioLpClient`: host wrapper that preserves the CLI/native shared-client API.
 - `ClientTransport`: host-only Tokio transport trait used by native providers.
+- `run_project_read` / `PullOutcome`: the shared streamed-read driver and its
+  result (`Completed`/`Cancelled`/`TimedOut`/`Failed`).
+- `ProgressDeadline`: quiet-gap deadline built from a caller-supplied timer
+  factory (runtime-neutral).
+- `CancelSignal` / `NeverCancel`: explicit between-frame cancellation.
+- `BackoffPolicy`: exponential-with-cap retry cadence applied by callers.
 
 ## Project Deploy Semantics
 

@@ -2,11 +2,14 @@ use core::any::Any;
 
 use lpa_link::{LinkEndpointId, LinkProviderKind};
 
-use crate::{ActionConfirmation, ActionMeta, ActionPriority, ControllerOp};
+use crate::{ActionClass, ActionConfirmation, ActionMeta, ActionPriority, ControllerOp};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DeviceOp {
     OpenProvider {
+        provider_id: LinkProviderKind,
+    },
+    OpenProviderForRecovery {
         provider_id: LinkProviderKind,
     },
     ConnectEndpoint {
@@ -29,6 +32,11 @@ impl ControllerOp for DeviceOp {
                 "Choose connection",
                 "Select this way to connect a LightPlayer device.",
                 ActionPriority::Primary,
+            ),
+            Self::OpenProviderForRecovery { .. } => ActionMeta::new(
+                "Open for flashing",
+                "Open the ESP32 connection without attaching LightPlayer.",
+                ActionPriority::Secondary,
             ),
             Self::ConnectEndpoint { .. } => ActionMeta::new(
                 "Connect device",
@@ -83,6 +91,27 @@ impl ControllerOp for DeviceOp {
         }
     }
 
+    fn action_class(&self) -> ActionClass {
+        // Every device flow is a recovery-class op: it preempts an in-flight
+        // passive refresh and any foreground action, and owns the connection
+        // with no deadline. Mirrors the retired web policy, whose preemption
+        // set was every `DeviceOp` variant (`ConnectLightPlayer` also had a
+        // 12 s foreground timeout there, but recovery-class ownership of the
+        // connection supersedes a deadline).
+        match self {
+            Self::OpenProvider { .. }
+            | Self::OpenProviderForRecovery { .. }
+            | Self::ConnectEndpoint { .. }
+            | Self::ConnectLightPlayer
+            | Self::DisconnectLightPlayer
+            | Self::ResetDevice
+            | Self::ProvisionFirmware
+            | Self::ResetToBlank
+            | Self::DisconnectDevice
+            | Self::RefreshConnections => ActionClass::Recovery,
+        }
+    }
+
     fn clone_box(&self) -> Box<dyn ControllerOp> {
         Box::new(self.clone())
     }
@@ -97,5 +126,39 @@ impl ControllerOp for DeviceOp {
 
     fn into_any(self: Box<Self>) -> Box<dyn Any> {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lpa_link::{LinkEndpointId, LinkProviderKind};
+
+    use crate::{ActionClass, ControllerOp, DeviceOp};
+
+    #[test]
+    fn every_device_op_is_recovery_class() {
+        let ops = [
+            DeviceOp::OpenProvider {
+                provider_id: LinkProviderKind::BrowserWorker,
+            },
+            DeviceOp::OpenProviderForRecovery {
+                provider_id: LinkProviderKind::BrowserWorker,
+            },
+            DeviceOp::ConnectEndpoint {
+                provider_id: LinkProviderKind::BrowserWorker,
+                endpoint_id: LinkEndpointId::new("endpoint"),
+            },
+            DeviceOp::ConnectLightPlayer,
+            DeviceOp::DisconnectLightPlayer,
+            DeviceOp::ResetDevice,
+            DeviceOp::ProvisionFirmware,
+            DeviceOp::ResetToBlank,
+            DeviceOp::DisconnectDevice,
+            DeviceOp::RefreshConnections,
+        ];
+
+        for op in ops {
+            assert_eq!(op.action_class(), ActionClass::Recovery, "{op:?}");
+        }
     }
 }
