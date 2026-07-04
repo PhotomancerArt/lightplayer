@@ -163,8 +163,7 @@ async fn read_large_render_probe_crossing_frame_boundary(
     let mut applier = ProjectReadApplier::new(&mut view);
     let mut probes = Vec::new();
     for event in events {
-        if let ApplyStatus::Complete { .. } =
-            applier.apply(event).expect("apply probe read event")
+        if let ApplyStatus::Complete { .. } = applier.apply(event).expect("apply probe read event")
         {
             probes = applier.take_completed_probe_results();
         }

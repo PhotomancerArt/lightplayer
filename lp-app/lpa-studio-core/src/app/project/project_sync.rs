@@ -1,7 +1,7 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{ControlDisplayLayout, Revision};
-use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView, probe_results};
+use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
 use lpc_wire::{
     ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
     ControlProductProbeResult, NodeReadQuery, NodeReadSelection, ProjectProbeRequest,
@@ -113,19 +113,25 @@ impl ProjectSync {
         &mut self,
         events: Vec<ProjectReadEvent>,
     ) -> Result<(), UiError> {
-        // Probes are read-time diagnostics and are not retained on the view, so
-        // extract them from the stream before applying (the single shared seam
-        // that P6 extends for chunked probes).
-        self.apply_product_probe_results(&probe_results(&events));
-        let mut applier = ProjectReadApplier::new(&mut self.view);
-        for event in events {
-            if let ApplyStatus::Complete { .. } = applier
-                .apply(event)
-                .map_err(|error| UiError::Protocol(error.to_string()))?
-            {
-                break;
+        // Probes are read-time diagnostics and are not retained on the view;
+        // the applier collects them — reassembling chunked results — and
+        // exposes them once the stream completes.
+        let probes = {
+            let mut applier = ProjectReadApplier::new(&mut self.view);
+            let mut probes = Vec::new();
+            for event in events {
+                if let ApplyStatus::Complete { .. } = applier
+                    .apply(event)
+                    .map_err(|error| UiError::Protocol(error.to_string()))?
+                {
+                    probes = applier.take_completed_probe_results();
+                    break;
+                }
             }
-        }
+            probes
+        };
+        let probe_refs: Vec<&ProjectProbeResult> = probes.iter().collect();
+        self.apply_product_probe_results(&probe_refs);
         self.phase = ProjectSyncPhase::Ready;
         self.issue = None;
         Ok(())

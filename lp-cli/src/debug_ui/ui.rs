@@ -9,7 +9,7 @@ use eframe::egui;
 use lpc_model::{
     MutationCmd, MutationCmdBatch, MutationCmdId, MutationOp, NodeId, Revision, SlotEdit, SlotPath,
 };
-use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView, probe_results};
+use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
 use lpc_wire::{
     NodeReadQuery, NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent,
     ProjectReadQuery, ProjectReadQueryEvent, ProjectReadRequest, ReadLevel,
@@ -91,11 +91,6 @@ impl DebugUiState {
             match result {
                 Ok(DebugUiMessage::ProjectRead(events)) => {
                     let paged_shape_sync_in_progress = !self.shapes_synced;
-                    for probe in probe_results(&events) {
-                        if let Some(probe) = render_product_probe(probe) {
-                            self.last_render_product_probe = Some(probe.clone());
-                        }
-                    }
                     if events.iter().any(stream_carries_shapes) {
                         self.shapes_synced = true;
                     }
@@ -105,7 +100,12 @@ impl DebugUiState {
                             events,
                             paged_shape_sync_in_progress,
                         ) {
-                            Ok(()) => {
+                            Ok(probes) => {
+                                for probe in &probes {
+                                    if let Some(probe) = render_product_probe(probe) {
+                                        self.last_render_product_probe = Some(probe.clone());
+                                    }
+                                }
                                 self.last_runtime_status =
                                     view.runtime.clone().or(self.last_runtime_status.take());
                                 self.last_error = None;
@@ -361,18 +361,20 @@ fn apply_debug_ui_project_read_events(
     view: &mut ProjectView,
     events: Vec<ProjectReadEvent>,
     paged_shape_sync_in_progress: bool,
-) -> Result<(), lpc_view::ProjectReadApplyStreamError> {
+) -> Result<Vec<ProjectProbeResult>, lpc_view::ProjectReadApplyStreamError> {
     let preserved_revision = paged_shape_sync_in_progress.then_some(view.revision);
     let mut applier = ProjectReadApplier::new(view);
+    let mut probes = Vec::new();
     for event in events {
         if let ApplyStatus::Complete { .. } = applier.apply(event)? {
+            probes = applier.take_completed_probe_results();
             break;
         }
     }
     if let Some(revision) = preserved_revision {
         view.revision = revision;
     }
-    Ok(())
+    Ok(probes)
 }
 
 fn debug_ui_project_read(
