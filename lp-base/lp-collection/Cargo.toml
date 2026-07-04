@@ -10,10 +10,13 @@ description = "Embedded/low-memory friendly collections: chunked structures plus
 [features]
 default = []
 serde = ["dep:serde"]
+# JSON Schema for the sorted-vec collections (host-side tooling).
+schemars = ["dep:schemars"]
 
 [dependencies]
 rustc-hash = { version = "2.0.0", default-features = false }
 serde = { version = "1", default-features = false, features = ["alloc"], optional = true }
+schemars = { workspace = true, optional = true }
 
 [dev-dependencies]
 serde_json = { version = "1", default-features = false, features = ["alloc"] }

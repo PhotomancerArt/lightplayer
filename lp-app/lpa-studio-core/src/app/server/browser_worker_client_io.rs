@@ -13,12 +13,14 @@ use lpc_wire::{ClientMessage, TransportError, WireServerMessage, json};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 
+use super::pending_server_messages::{BatchItem, PendingServerMessages};
 use crate::{SharedLinkRegistry, UiLogEntry, UiLogLevel};
 
 const RESPONSE_POLL_LIMIT: usize = 240;
 
 pub struct BrowserWorkerClientIo {
     state: Rc<RefCell<BrowserWorkerClientState>>,
+    pending: PendingServerMessages<WireServerMessage>,
 }
 
 impl BrowserWorkerClientIo {
@@ -33,6 +35,7 @@ impl BrowserWorkerClientIo {
                 session_id,
                 logs,
             })),
+            pending: PendingServerMessages::new(),
         }
     }
 }
@@ -48,22 +51,30 @@ impl ClientIo for BrowserWorkerClientIo {
     }
 
     async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
+        if let Some(message) = self.pending.pop() {
+            return Ok(message);
+        }
+
+        // The worker owns its own clock (self-ticking with real deltas), so this
+        // loop is a pure consumer: it polls for worker outputs and never advances
+        // simulation time. Event-driven receive is future work (M7).
         for _ in 0..RESPONSE_POLL_LIMIT {
-            self.state
-                .borrow()
-                .post(&BrowserInputEnvelope::Tick { delta_ms: Some(16) })?;
             sleep_ms(4).await?;
 
             let outputs = self.state.borrow().take_outputs()?;
-            for output in outputs {
-                match output {
-                    BrowserOutputEnvelope::ProtocolOut { frame } => {
-                        let response = json::from_str(&frame)
-                            .map_err(|error| TransportError::Deserialization(error.to_string()))?;
-                        return Ok(response);
-                    }
-                    output => self.state.borrow().record_output(output),
+            let state = &self.state;
+            self.pending.ingest(outputs, |output| match output {
+                BrowserOutputEnvelope::ProtocolOut { frame } => json::from_str(&frame)
+                    .map(BatchItem::Protocol)
+                    .map_err(|error| TransportError::Deserialization(error.to_string())),
+                output => {
+                    state.borrow().record_output(output);
+                    Ok(BatchItem::Other)
                 }
+            })?;
+
+            if let Some(message) = self.pending.pop() {
+                return Ok(message);
             }
         }
         Err(TransportError::Other(

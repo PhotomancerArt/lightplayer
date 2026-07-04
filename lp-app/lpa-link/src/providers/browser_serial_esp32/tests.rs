@@ -42,7 +42,7 @@ async fn browser_serial_connection_reports_protocol() {
 }
 
 #[test]
-fn default_esptool_module_path_uses_bundled_browser_esm() {
+fn default_esptool_module_path_uses_browser_esm_with_json_named_exports() {
     assert_eq!(
         BrowserSerialEsp32Provider::new()
             .options()

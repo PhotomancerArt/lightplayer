@@ -3583,6 +3583,7 @@ dependencies = [
  "lpc-hardware",
  "lpc-model",
  "lpc-shared",
+ "lpc-view",
  "lpc-wire",
  "lpfs",
  "lpvm-wasm",
@@ -4976,6 +4977,7 @@ name = "lp-collection"
 version = "1.0.0"
 dependencies = [
  "rustc-hash 2.1.1",
+ "schemars",
  "serde",
  "serde_json",
 ]
@@ -5170,6 +5172,7 @@ version = "40.0.0"
 dependencies = [
  "dioxus",
  "dioxus-icons",
+ "futures-util",
  "gloo-timers",
  "lpa-studio-core",
  "lpa-studio-web-story-macros",
@@ -5294,6 +5297,7 @@ name = "lpc-view"
 version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
+ "lp-collection 1.0.0",
  "lpc-model",
  "lpc-wire",
 ]
@@ -7499,8 +7503,6 @@ dependencies = [
 [[package]]
 name = "ser-write-json"
 version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b968997189e9b92e0d7f5ce4f2df3d94efa6534a331511137b1083b9b77d532"
 dependencies = [
  "ryu-js",
  "ser-write",

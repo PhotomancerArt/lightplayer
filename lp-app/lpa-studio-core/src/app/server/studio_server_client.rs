@@ -1,9 +1,13 @@
+use core::future::Future;
+use core::time::Duration;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use lpa_client::{ClientError, ClientEvent, ClientIo, LpClient};
+use lpa_client::{
+    CancelSignal, ClientError, ClientEvent, ClientIo, LpClient, ProgressDeadline, PullOutcome,
+};
 use lpa_link::{LinkConnection, LinkConnectionKind};
-use lpc_wire::{ProjectReadRequest, ProjectReadResponse, WireProjectHandle};
+use lpc_wire::{ProjectReadEvent, ProjectReadRequest, WireProjectHandle};
 
 use crate::app::project::demo_project::{
     DEMO_PROJECT_ID, DEMO_PROJECT_STORAGE_ID, demo_project_deploy_files,
@@ -101,7 +105,7 @@ pub struct LoadedRunningProject {
 }
 
 pub struct StudioProjectRead {
-    pub response: ProjectReadResponse,
+    pub events: Vec<ProjectReadEvent>,
     pub logs: Vec<UiLogEntry>,
 }
 
@@ -156,10 +160,58 @@ impl StudioServerClient {
         let mut logs = map_client_events(read.events);
         logs.extend(self.take_pending_logs());
         Ok(StudioProjectRead {
-            response: read.value,
+            events: read.value,
             logs,
         })
     }
+
+    /// A project read driven under a progress deadline and cancel signal.
+    ///
+    /// The studio actor uses this for passive refresh ticks so it can cancel an
+    /// in-flight pull cleanly (a preempting command flips `cancel`) and bound a
+    /// stalled stream by the class's quiet-gap deadline. Cancel/timeout are
+    /// surfaced as [`StudioProjectReadOutcome`] variants rather than errors so
+    /// the caller can treat them as ordinary, non-failing control flow.
+    pub async fn project_read_gated<MakeTimer, Timer, Cancel>(
+        &mut self,
+        handle_id: u32,
+        request: ProjectReadRequest,
+        deadline: ProgressDeadline<MakeTimer, Timer>,
+        cancel: &Cancel,
+    ) -> Result<StudioProjectReadOutcome, UiError>
+    where
+        MakeTimer: FnMut(Duration) -> Timer,
+        Timer: Future<Output = ()>,
+        Cancel: CancelSignal + ?Sized,
+    {
+        match self
+            .client
+            .project_read_gated(WireProjectHandle::new(handle_id), request, deadline, cancel)
+            .await
+        {
+            PullOutcome::Completed { events, observed } => {
+                let mut logs = map_client_events(observed);
+                logs.extend(self.take_pending_logs());
+                Ok(StudioProjectReadOutcome::Completed(StudioProjectRead {
+                    events,
+                    logs,
+                }))
+            }
+            PullOutcome::Cancelled => Ok(StudioProjectReadOutcome::Cancelled),
+            PullOutcome::TimedOut => Ok(StudioProjectReadOutcome::TimedOut),
+            PullOutcome::Failed(error) => Err(map_client_error(error)),
+        }
+    }
+}
+
+/// Outcome of a [`StudioServerClient::project_read_gated`] pull.
+pub enum StudioProjectReadOutcome {
+    /// The stream reached `fin`; the read events and logs are collected.
+    Completed(StudioProjectRead),
+    /// The caller's cancel signal was observed at a frame boundary.
+    Cancelled,
+    /// The progress deadline fired: no frame arrived within the quiet-gap budget.
+    TimedOut,
 }
 
 fn server_io_from_link_connection(

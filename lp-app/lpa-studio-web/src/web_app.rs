@@ -1,20 +1,34 @@
-use std::cell::Cell;
+//! The Studio web shell: Dioxus wiring over the core `StudioActor`.
+//!
+//! All update logic (the pull loop, command queue, preemption, timeouts,
+//! backoff, log cap, change-gating) lives in `lpa-client` / `lpa-studio-core`
+//! after M7. This module keeps only browser concerns: spawn the actor, drive a
+//! `Signal<UiStudioView>` from its change-gated view channel, run a timer that
+//! enqueues `RefreshTick` commands at the core-owned cadence, forward UI actions
+//! as `Action` commands, render, and mirror new logs to the JS console.
+
+use core::cell::Cell;
+use core::time::Duration;
 use std::rc::Rc;
 
 use crate::app::StudioShell;
 use crate::studio_url;
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
-use lpa_studio_core::core::view::steps_view::UiStepState;
+use lpa_studio_core::app::studio::studio_view_channel::CommandSender;
 use lpa_studio_core::{
-    LinkProviderKind, LinkState, StudioController, UiAction, UiActivityView, UiError, UiLogEntry,
-    UiLogLevel, UiNotice, UiNoticeLevel, UiStatus, UiStudioView, UiViewContent, UxActivityTarget,
-    UxUpdate, UxUpdateSink,
+    StudioActor, StudioCommand, StudioController, UiAction, UiLogEntry, UiLogLevel, UiStudioView,
 };
 
 const STYLE: &str = include_str!("style.css");
-const DEVICE_PROJECT_REFRESH_INTERVAL_MS: u32 = 750;
-const SIMULATOR_PROJECT_REFRESH_INTERVAL_MS: u32 = 16;
+
+/// The command surface the render body keeps: enqueue commands and read the
+/// core-owned next-tick delay (cadence + backoff).
+#[derive(Clone)]
+struct StudioBridge {
+    tx: CommandSender,
+    delay: Rc<Cell<Duration>>,
+}
 
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn App() -> Element {
@@ -27,347 +41,167 @@ pub fn App() -> Element {
         };
     }
 
-    let model = use_signal(StudioWebModel::new);
-    let startup_intent = use_hook(studio_url::read_connection_intent);
-    let startup_model = model;
-    let _startup_task = use_future(move || async move {
-        if let Some(action) = startup_intent.and_then(|intent| intent.startup_action()) {
-            execute_action(startup_model, action).await;
-        }
-    });
-    let refresh_model = model;
-    let _refresh_task = use_future(move || async move {
-        loop {
-            wait_for_next_project_refresh(refresh_model).await;
-            execute_refresh_tick(refresh_model).await;
-        }
-    });
-    let view = model.read().view.clone();
-    let running = model.read().running;
-    let on_action = move |action: UiAction| {
+    let mut view = use_signal(UiStudioView::empty);
+    // Spawn the actor once and drive the view signal from its change-gated
+    // channel, mirroring newly-arrived logs to the JS console.
+    let bridge = use_hook(|| {
+        let (actor, handle) = StudioActor::new(StudioController::new(), make_pull_timer);
+        let mut view_rx = handle.view;
         spawn(async move {
-            execute_action(model, action).await;
+            while let Some(next) = view_rx.recv().await {
+                for log in new_logs(&view.peek(), &next) {
+                    log_to_js_console(&log);
+                }
+                view.set(next);
+            }
         });
+        spawn(actor.run());
+        StudioBridge {
+            tx: handle.tx,
+            delay: handle.delay,
+        }
+    });
+
+    let startup_intent = use_hook(studio_url::read_connection_intent);
+    let startup_bridge = bridge.clone();
+    let _startup_task = use_future(move || {
+        let startup_bridge = startup_bridge.clone();
+        async move {
+            if let Some(action) = startup_intent.and_then(|intent| intent.startup_action()) {
+                startup_bridge.tx.send(StudioCommand::Action(action));
+            }
+        }
+    });
+
+    let refresh_bridge = bridge.clone();
+    let _refresh_task = use_future(move || {
+        let refresh_bridge = refresh_bridge.clone();
+        async move {
+            loop {
+                let delay = refresh_bridge.delay.get();
+                TimeoutFuture::new(delay.as_millis() as u32).await;
+                refresh_bridge.tx.send(StudioCommand::RefreshTick);
+            }
+        }
+    });
+
+    let action_bridge = bridge.clone();
+    let on_action = move |action: UiAction| {
+        studio_url::update_for_action(&action);
+        action_bridge.tx.send(StudioCommand::Action(action));
     };
 
     rsx! {
         style { "{STYLE}" }
         document::Stylesheet { href: asset!("/assets/tailwind.css") }
         StudioShell {
-            view,
-            running,
+            view: view.read().clone(),
+            running: false,
             on_action,
         }
     }
 }
 
-struct StudioWebModel {
-    ux: Option<StudioController>,
-    view: UiStudioView,
-    running: bool,
-    refreshing: bool,
-    console_logs: Vec<UiLogEntry>,
+/// The pull loop's per-request progress-deadline timer on wasm: a `setTimeout`
+/// via `gloo_timers`. The actor calls this to build each pull's quiet-gap
+/// deadline; native callers would pass a `sleep`-backed factory instead.
+fn make_pull_timer(delay: Duration) -> TimeoutFuture {
+    TimeoutFuture::new(delay.as_millis() as u32)
 }
 
-impl StudioWebModel {
-    fn new() -> Self {
-        let ux = StudioController::new();
-        let view = ux.view();
-        Self {
-            ux: Some(ux),
-            view,
-            running: false,
-            refreshing: false,
-            console_logs: Vec::new(),
-        }
-    }
-
-    fn refresh_from_ux(&mut self) {
-        if let Some(ux) = &self.ux {
-            self.view = ux.view();
-            self.append_console_logs_to_view();
-        }
-    }
-
-    fn apply_update(&mut self, update: UxUpdate) {
-        match update {
-            UxUpdate::View(mut view) => {
-                view.logs.extend(self.console_logs.clone());
-                self.view = view;
-            }
-            UxUpdate::Activity {
-                target,
-                status,
-                activity,
-            } => {
-                self.apply_activity_update(target, status, activity);
-            }
-            UxUpdate::Log(log) => {
-                self.view.logs.push(log);
-            }
-        }
-    }
-
-    fn push_console_log(&mut self, log: UiLogEntry) {
-        self.console_logs.push(log.clone());
-        if self.console_logs.len() > 80 {
-            let remove_count = self.console_logs.len() - 80;
-            self.console_logs.drain(0..remove_count);
-        }
-        self.view.logs.push(log);
-    }
-
-    fn append_console_logs_to_view(&mut self) {
-        self.view.logs.extend(self.console_logs.clone());
-    }
-
-    fn project_refresh_cadence(&self) -> ProjectRefreshCadence {
-        self.ux
-            .as_ref()
-            .map(StudioController::snapshot)
-            .map(|snapshot| project_refresh_cadence_for_link_state(&snapshot.link.state))
-            .unwrap_or(ProjectRefreshCadence::Device)
-    }
-
-    fn apply_activity_update(
-        &mut self,
-        target: UxActivityTarget,
-        status: UiStatus,
-        activity: UiActivityView,
-    ) {
-        let Some(pane) = self
-            .view
-            .panes
-            .iter_mut()
-            .find(|pane| pane.node_id.as_str() == target.pane_node_id().as_str())
-        else {
-            return;
-        };
-        pane.status = status;
-
-        match target {
-            UxActivityTarget::Pane { .. } => {
-                pane.body = UiViewContent::Activity(activity);
-            }
-            UxActivityTarget::StackSection { section_id, .. } => {
-                if let UiViewContent::Stack(stack) = &mut pane.body {
-                    if let Some(section) = stack
-                        .sections
-                        .iter_mut()
-                        .find(|section| section.id == section_id)
-                    {
-                        section.state = UiStepState::Active;
-                        section.body = UiViewContent::Activity(activity);
-                        section.actions.clear();
-                        return;
-                    }
-                }
-                pane.body = UiViewContent::Activity(activity);
-            }
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ProjectRefreshCadence {
-    Simulator,
-    Device,
-}
-
-async fn wait_for_next_project_refresh(model: Signal<StudioWebModel>) {
-    let cadence = {
-        let state = model.read();
-        state.project_refresh_cadence()
+/// The log entries in `next` that arrived since `previous`, so the shell mirrors
+/// only newly-appended logs to the JS console. Logs are appended into a bounded
+/// core ring; the new entries are the suffix of `next.logs` after the last entry
+/// shared with `previous.logs` (found by scanning back), which stays correct even
+/// when the ring wraps.
+fn new_logs(previous: &UiStudioView, next: &UiStudioView) -> Vec<UiLogEntry> {
+    let Some(last_seen) = previous.logs.last() else {
+        return next.logs.clone();
     };
-    match cadence {
-        ProjectRefreshCadence::Simulator => {
-            TimeoutFuture::new(SIMULATOR_PROJECT_REFRESH_INTERVAL_MS).await;
-        }
-        ProjectRefreshCadence::Device => {
-            TimeoutFuture::new(DEVICE_PROJECT_REFRESH_INTERVAL_MS).await;
-        }
+    match next.logs.iter().rposition(|log| log == last_seen) {
+        Some(index) => next.logs[index + 1..].to_vec(),
+        None => next.logs.clone(),
     }
 }
 
-fn project_refresh_cadence_for_link_state(state: &LinkState) -> ProjectRefreshCadence {
-    match state {
-        LinkState::Connected { device } | LinkState::Managing { device, .. }
-            if device.provider_id == LinkProviderKind::BrowserWorker =>
-        {
-            ProjectRefreshCadence::Simulator
-        }
-        _ => ProjectRefreshCadence::Device,
+fn log_to_js_console(log: &UiLogEntry) {
+    let message = format!("[{}] {}", log.source, log.message);
+    match log.level {
+        UiLogLevel::Debug => console_debug(&message),
+        UiLogLevel::Info => console_info(&message),
+        UiLogLevel::Warn => console_warn(&message),
+        UiLogLevel::Error => console_error(&message),
     }
 }
 
-async fn execute_action(mut model: Signal<StudioWebModel>, action: UiAction) {
-    let mut ux = loop {
-        let acquire = {
-            let mut state = model.write();
-            if state.running {
-                return;
-            }
-            if state.refreshing {
-                ActionAcquire::Wait
-            } else if let Some(ux) = state.ux.take() {
-                state.running = true;
-                ActionAcquire::Ready(ux)
-            } else {
-                ActionAcquire::MissingUx
-            }
-        };
-        match acquire {
-            ActionAcquire::Ready(ux) => break ux,
-            ActionAcquire::Wait => TimeoutFuture::new(25).await,
-            ActionAcquire::MissingUx => {
-                model.write().push_console_log(UiLogEntry::new(
-                    UiLogLevel::Error,
-                    "studio",
-                    "Studio UX is already busy.",
-                ));
-                return;
-            }
-        }
-    };
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen::prelude::wasm_bindgen]
+extern "C" {
+    #[wasm_bindgen::prelude::wasm_bindgen(js_namespace = console, js_name = debug)]
+    fn console_debug(message: &str);
 
-    studio_url::update_for_action(&action);
-    let accepting_updates = Rc::new(Cell::new(true));
-    let mut update_model = model;
-    let update_gate = Rc::clone(&accepting_updates);
-    let updates = UxUpdateSink::new(move |update| {
-        if update_gate.get() {
-            update_model.write().apply_update(update);
-        }
-    });
-    let result = ux.dispatch_with_updates(action, updates).await;
-    accepting_updates.set(false);
-    let mut state = model.write();
-    state.ux = Some(ux);
-    state.refresh_from_ux();
-    match result {
-        Ok(outcome) => {
-            for notice in outcome.notices {
-                state.push_console_log(log_from_notice(notice));
-            }
-        }
-        Err(error) => {
-            state.push_console_log(log_from_error(error));
-        }
-    }
-    state.running = false;
+    #[wasm_bindgen::prelude::wasm_bindgen(js_namespace = console, js_name = info)]
+    fn console_info(message: &str);
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_namespace = console, js_name = warn)]
+    fn console_warn(message: &str);
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_namespace = console, js_name = error)]
+    fn console_error(message: &str);
 }
 
-enum ActionAcquire {
-    Ready(StudioController),
-    Wait,
-    MissingUx,
-}
+#[cfg(not(target_arch = "wasm32"))]
+fn console_debug(_message: &str) {}
 
-async fn execute_refresh_tick(mut model: Signal<StudioWebModel>) {
-    let Some(mut ux) = ({
-        let mut state = model.write();
-        if state.running || state.refreshing {
-            return;
-        }
-        let ux = state.ux.take();
-        if ux.is_some() {
-            state.refreshing = true;
-        }
-        ux
-    }) else {
-        return;
-    };
+#[cfg(not(target_arch = "wasm32"))]
+fn console_info(_message: &str) {}
 
-    let result = ux.refresh_loaded_project_tick().await;
-    let mut state = model.write();
-    state.ux = Some(ux);
-    state.refresh_from_ux();
-    if let Err(error) = result {
-        state.push_console_log(log_from_error(error));
-    }
-    state.refreshing = false;
-}
+#[cfg(not(target_arch = "wasm32"))]
+fn console_warn(_message: &str) {}
 
-fn log_from_notice(notice: UiNotice) -> UiLogEntry {
-    UiLogEntry::new(
-        log_level_from_notice(notice.level),
-        "studio",
-        notice.message,
-    )
-}
-
-fn log_level_from_notice(level: UiNoticeLevel) -> UiLogLevel {
-    match level {
-        UiNoticeLevel::Info => UiLogLevel::Info,
-        UiNoticeLevel::Warning => UiLogLevel::Warn,
-        UiNoticeLevel::Error => UiLogLevel::Error,
-    }
-}
-
-fn log_from_error(error: UiError) -> UiLogEntry {
-    let level = if matches!(&error, UiError::Cancelled(_)) {
-        UiLogLevel::Info
-    } else {
-        UiLogLevel::Error
-    };
-    UiLogEntry::new(level, "studio", error.to_string())
-}
+#[cfg(not(target_arch = "wasm32"))]
+fn console_error(_message: &str) {}
 
 #[cfg(test)]
 mod tests {
-    use lpa_studio_core::{ConnectedDeviceSummary, LinkState, ProgressState};
-
     use super::*;
+    use lpa_studio_core::UiLogLevel;
 
-    #[test]
-    fn browser_worker_link_uses_simulator_refresh_cadence() {
-        let state = LinkState::Connected {
-            device: ConnectedDeviceSummary::new(
-                LinkProviderKind::BrowserWorker,
-                "browser-worker",
-                "session",
-                "Simulator",
-            ),
-        };
-
-        assert_eq!(
-            project_refresh_cadence_for_link_state(&state),
-            ProjectRefreshCadence::Simulator
-        );
+    fn view_with_logs(messages: &[&str]) -> UiStudioView {
+        let logs = messages
+            .iter()
+            .map(|message| UiLogEntry::new(UiLogLevel::Info, "studio", *message))
+            .collect();
+        UiStudioView::new(Vec::new(), logs)
     }
 
     #[test]
-    fn serial_link_keeps_device_refresh_cadence() {
-        let state = LinkState::Connected {
-            device: ConnectedDeviceSummary::new(
-                LinkProviderKind::BrowserSerialEsp32,
-                "serial",
-                "session",
-                "ESP32",
-            ),
-        };
+    fn new_logs_returns_appended_tail() {
+        let previous = view_with_logs(&["a", "b"]);
+        let next = view_with_logs(&["a", "b", "c", "d"]);
 
-        assert_eq!(
-            project_refresh_cadence_for_link_state(&state),
-            ProjectRefreshCadence::Device
-        );
+        let new = new_logs(&previous, &next);
+        assert_eq!(new.len(), 2);
+        assert_eq!(new[0].message, "c");
+        assert_eq!(new[1].message, "d");
     }
 
     #[test]
-    fn managing_browser_worker_keeps_simulator_refresh_cadence() {
-        let state = LinkState::Managing {
-            device: ConnectedDeviceSummary::new(
-                LinkProviderKind::BrowserWorker,
-                "browser-worker",
-                "session",
-                "Simulator",
-            ),
-            progress: ProgressState::new("Resetting simulator"),
-        };
+    fn new_logs_handles_ring_wrap_by_anchoring_on_last_seen() {
+        // The ring dropped "a"; the shared anchor "c" still locates the new tail.
+        let previous = view_with_logs(&["a", "b", "c"]);
+        let next = view_with_logs(&["b", "c", "d"]);
 
-        assert_eq!(
-            project_refresh_cadence_for_link_state(&state),
-            ProjectRefreshCadence::Simulator
-        );
+        let new = new_logs(&previous, &next);
+        assert_eq!(new.len(), 1);
+        assert_eq!(new[0].message, "d");
+    }
+
+    #[test]
+    fn new_logs_returns_all_when_previous_empty() {
+        let previous = view_with_logs(&[]);
+        let next = view_with_logs(&["a", "b"]);
+
+        assert_eq!(new_logs(&previous, &next).len(), 2);
     }
 }

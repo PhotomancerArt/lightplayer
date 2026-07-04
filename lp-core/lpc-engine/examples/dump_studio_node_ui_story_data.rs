@@ -10,14 +10,18 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
-use lpc_engine::{ButtonService, EngineServices, Graphics, ProjectLoader, RadioService};
+use lpc_engine::{
+    ButtonService, EngineProjectReadSource, EngineServices, Graphics, ProjectLoader, RadioService,
+};
 use lpc_hardware::{HardwareSystem, HwRegistry, default_esp32c6_hardware_manifest};
 use lpc_model::{
     NodeId, Revision, SlotShapeEntry, SlotShapeId, SlotShapeRegistrySnapshot, TreePath,
 };
+use lpc_shared::transport::ProjectReadEventSink;
+use lpc_view::{ProjectReadApplier, ProjectView};
 use lpc_wire::{
-    ProjectReadRequest, ProjectReadResult, WireSlotRootSnapshot, WireSlotRootsSnapshot,
-    WireTreeDelta,
+    ProjectReadEvent, ProjectReadNodeEvent, ProjectReadQueryEvent, ProjectReadRequest,
+    WireSlotRootSnapshot, WireSlotRootsSnapshot,
 };
 use lpfs::{LpFsMemory, LpPath};
 use serde::Serialize;
@@ -64,35 +68,47 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         runtime.tick(33)?;
     }
 
-    let response = runtime.read_project(ProjectReadRequest::default_debug(None));
-    let mut shape_registry = None;
-    let mut roots = Vec::new();
-    let mut node_refs = BTreeMap::new();
+    // Stream a full project read and apply it progressively to a client-side
+    // `ProjectView` (the same path the live clients use since M6/P5 deleted the
+    // aggregate response). The raw `SlotRoot` events carry the wire snapshots we
+    // dump verbatim; the applied view gives the shape registry and node lookups.
+    let (mut engine, registry) = runtime.into_parts();
+    let events = block_on(async {
+        let mut sink = CollectingEventSink::default();
+        EngineProjectReadSource::new(&mut engine, &registry)
+            .stream_project_read_events(ProjectReadRequest::default_debug(None), &mut sink)
+            .await
+            .map_err(|error| format!("project read stream: {error:?}"))?;
+        Ok::<_, String>(sink.events)
+    })?;
 
-    for result in response.results {
-        match result {
-            ProjectReadResult::Shapes(result) => {
-                shape_registry = result.registry;
-            }
-            ProjectReadResult::Nodes(result) => {
-                if let Some(snapshot) = result.slots {
-                    roots = snapshot.roots;
-                }
-                for delta in result.tree_deltas {
-                    if let WireTreeDelta::Created { id, path, .. } = delta {
-                        node_refs.insert(path.to_string(), id);
-                    }
-                }
-            }
-            ProjectReadResult::Resources(_) | ProjectReadResult::Runtime(_) => {}
-        }
+    let mut view = ProjectView::new();
+    let mut applier = ProjectReadApplier::new(&mut view);
+    for event in &events {
+        applier
+            .apply(event.clone())
+            .map_err(|error| format!("apply project read event: {error}"))?;
     }
+    let revision = view.revision.as_i64();
 
-    let shape_registry = shape_registry.ok_or("project read did not include shape registry")?;
+    let roots: Vec<WireSlotRootSnapshot> = events
+        .into_iter()
+        .filter_map(|event| match event {
+            ProjectReadEvent::Query {
+                event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::SlotRoot(root)),
+                ..
+            } => Some(root),
+            _ => None,
+        })
+        .collect();
+    let shape_registry = view.slots.registry.snapshot();
 
     for spec in STORY_NODES {
-        let node_id = *node_refs
-            .get(spec.path)
+        let node_path = TreePath::parse(spec.path)
+            .map_err(|error| format!("story node path {}: {error}", spec.path))?;
+        let node_id = view
+            .tree
+            .lookup_path(&node_path)
             .ok_or_else(|| format!("project read did not include node {}", spec.path))?;
         let node_roots = roots_for_node(&roots, node_id);
         if node_roots.is_empty() {
@@ -100,7 +116,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         let shape_json = StoryShapeJson {
-            source: StorySource::new(&args.project, response.revision.as_i64()),
+            source: StorySource::new(&args.project, revision),
             node: StoryNodeRef::new(spec, node_id),
             root_shapes: root_shape_refs(&node_roots),
             registry: shape_registry_for_roots(&shape_registry, &node_roots),
@@ -111,7 +127,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
 
         let slot_json = StorySlotJson {
-            source: StorySource::new(&args.project, response.revision.as_i64()),
+            source: StorySource::new(&args.project, revision),
             node: StoryNodeRef::new(spec, node_id),
             roots: WireSlotRootsSnapshot {
                 roots: node_roots.into_iter().cloned().collect(),
@@ -212,6 +228,49 @@ fn shape_registry_for_roots<'a>(
         ids_revision: registry.ids_revision,
         shapes,
         missing_refs,
+    }
+}
+
+/// A sink that records every emitted project-read event in order.
+#[derive(Default)]
+struct CollectingEventSink {
+    events: Vec<ProjectReadEvent>,
+}
+
+impl ProjectReadEventSink for CollectingEventSink {
+    type Error = std::convert::Infallible;
+
+    async fn send_project_read_event(
+        &mut self,
+        event: ProjectReadEvent,
+    ) -> Result<(), Self::Error> {
+        self.events.push(event);
+        Ok(())
+    }
+}
+
+/// Minimal synchronous executor: the project-read stream never yields `Pending`
+/// against an in-memory sink, so a busy-poll block_on is sufficient here.
+fn block_on<F: std::future::Future>(future: F) -> F::Output {
+    use std::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
+
+    fn noop_waker() -> Waker {
+        unsafe fn clone(_: *const ()) -> RawWaker {
+            RawWaker::new(std::ptr::null(), &VTABLE)
+        }
+        unsafe fn noop(_: *const ()) {}
+        static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, noop, noop, noop);
+        unsafe { Waker::from_raw(RawWaker::new(std::ptr::null(), &VTABLE)) }
+    }
+
+    let waker = noop_waker();
+    let mut cx = Context::from_waker(&waker);
+    let mut future = Box::pin(future);
+    loop {
+        match std::future::Future::poll(std::pin::Pin::as_mut(&mut future), &mut cx) {
+            Poll::Ready(output) => return output,
+            Poll::Pending => {}
+        }
     }
 }
 

@@ -1,30 +1,46 @@
-//! Stateless project read request/response vocabulary.
+//! Project-read request and event-frame vocabulary.
+//!
+//! A project read is intentionally split into two layers:
+//!
+//! - [`ProjectReadRequest`] describes the semantic data the client wants.
+//! - [`ProjectReadEvent`] describes ordered pieces of the answer.
+//!
+//! This exists because firmware transports cannot safely hold one large JSON
+//! response for a full project mirror. Servers stream those events directly in
+//! `ServerMsgBody::ProjectRead` messages, batched to a transport budget and
+//! sequenced by the envelope (`seq`/`fin`). Clients apply the events
+//! progressively (see `lpc-view`'s `ProjectReadApplier`); there is no aggregate
+//! response shape.
 
 mod node_read;
 mod probe;
+mod project_read_event;
 mod project_read_request;
-mod project_read_response;
 mod read_level;
 mod resource_read;
 mod runtime_read;
 mod shape_read;
-mod stream_response;
 
+pub use crate::budget::{
+    PROJECT_READ_FRAME_MAX_BYTES, PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES,
+    PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES, PROJECT_READ_RUNTIME_CHUNK_BYTES,
+};
 pub use node_read::{NodeReadQuery, NodeReadResult, NodeReadSelection};
 pub use probe::{
     ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
-    ControlProductProbeResult, ExplainSlotProbeRequest, ExplainSlotProbeResult,
-    ProjectProbeRequest, ProjectProbeResult, RenderProductProbeRequest, RenderProductProbeResult,
+    ControlProductProbeResult, ControlProductProbeResultHeader, ExplainSlotProbeRequest,
+    ExplainSlotProbeResult, ProjectProbeRequest, ProjectProbeResult, ProjectProbeResultHeader,
+    RenderProductProbeRequest, RenderProductProbeResult, RenderProductProbeResultHeader,
     SlotExplanation,
 };
+pub use project_read_event::{
+    ProjectReadEvent, ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQueryEvent,
+    ProjectReadResourceEvent, ProjectReadShapeEvent,
+};
 pub use project_read_request::{ProjectReadQuery, ProjectReadRequest};
-pub use project_read_response::{ProjectReadResponse, ProjectReadResult};
 pub use read_level::ReadLevel;
 pub use resource_read::{ResourcePayloadRead, ResourceReadQuery, ResourceReadResult};
 pub use runtime_read::{
     ProjectRuntimeStatus, RuntimeReadQuery, RuntimeReadResult, ServerRuntimeStatus,
 };
 pub use shape_read::{ShapeReadQuery, ShapeReadResult};
-pub use stream_response::{
-    ProjectReadResponseWriter, write_project_read_response, write_project_read_result_json,
-};

@@ -54,6 +54,9 @@ pub mod resources;
 pub mod server;
 pub mod slots;
 pub mod sync;
+
+#[cfg(feature = "schema-gen")]
+mod schema_gen_smoke;
 // --- Foundation re-exports ------------------------------------------------------------------
 
 pub use value::constraint;

@@ -1,8 +1,10 @@
 //! Portable LightPlayer server protocol client.
 
+use core::time::Duration;
+
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_wire::{
-    ClientMessage, ClientRequest, FsRequest, ProjectReadRequest, ProjectReadResponse,
+    ClientMessage, ClientRequest, FsRequest, ProjectReadEvent, ProjectReadRequest,
     WireOverlayCommitRequest, WireOverlayCommitResponse, WireOverlayMutationRequest,
     WireOverlayMutationResponse, WireOverlayReadRequest, WireOverlayReadResponse,
     WireProjectCommand, WireProjectCommandResponse, WireProjectHandle,
@@ -19,6 +21,9 @@ use crate::project_deploy::{
     validate_project_deploy_response,
 };
 use crate::protocol_session::{ProtocolSession, ResponseDisposition};
+use crate::pull_loop::{
+    CancelSignal, NeverCancel, ProgressDeadline, PullOutcome, run_project_read,
+};
 
 /// Result value plus protocol events observed while waiting for it.
 #[derive(Debug)]
@@ -231,26 +236,63 @@ where
         &mut self,
         handle: WireProjectHandle,
         read: ProjectReadRequest,
-    ) -> ClientResult<ClientOutcome<ProjectReadResponse>> {
-        let response = self
-            .send_request(ClientRequest::ProjectRequest {
-                handle,
-                request: read,
-            })
-            .await?;
-        let events = response.events;
-        match response.value.msg {
-            WireServerMsgBody::ProjectRequest { response } => {
-                Ok(ClientOutcome::new(response, events))
-            }
-            other => Err(ClientError::unexpected_response("project.read", other)),
+    ) -> ClientResult<ClientOutcome<Vec<ProjectReadEvent>>> {
+        // The portable client owns no runtime, so it carries no deadline: the
+        // deadline's timer never resolves and cancellation is never requested.
+        // Host wrappers (`TokioLpClient`) and the studio actor add those
+        // conveniences around the same shared pull loop via
+        // `project_read_gated`. Unsolicited events are preserved on the outcome.
+        let deadline =
+            ProgressDeadline::new(Duration::MAX, |_budget| core::future::pending::<()>());
+        match self
+            .project_read_gated(handle, read, deadline, &NeverCancel)
+            .await
+        {
+            PullOutcome::Completed { events, observed } => Ok(ClientOutcome::new(events, observed)),
+            PullOutcome::Failed(error) => Err(error),
+            // A never-resolving deadline cannot fire and cancellation is never
+            // requested for the portable client.
+            PullOutcome::TimedOut | PullOutcome::Cancelled => Err(ClientError::Protocol(
+                "project read ended without completing".to_string(),
+            )),
         }
+    }
+
+    /// Drive one project read under a caller-supplied progress deadline and
+    /// cancel signal, returning the raw [`PullOutcome`].
+    ///
+    /// This is the seam the studio actor uses to own the pull-loop timing at the
+    /// app level: it hands in a platform timer factory (wasm `setTimeout` /
+    /// native `sleep`) for the deadline and a shared cancel signal it flips when
+    /// a preempting command arrives, so a passive refresh returns
+    /// [`PullOutcome::Cancelled`] cleanly instead of being dropped mid-stream.
+    pub async fn project_read_gated<MakeTimer, Timer, Cancel>(
+        &mut self,
+        handle: WireProjectHandle,
+        read: ProjectReadRequest,
+        deadline: ProgressDeadline<MakeTimer, Timer>,
+        cancel: &Cancel,
+    ) -> PullOutcome
+    where
+        MakeTimer: FnMut(Duration) -> Timer,
+        Timer: core::future::Future<Output = ()>,
+        Cancel: CancelSignal + ?Sized,
+    {
+        run_project_read(
+            &mut self.io,
+            &mut self.protocol,
+            handle,
+            read,
+            deadline,
+            cancel,
+        )
+        .await
     }
 
     pub async fn project_read_default_debug(
         &mut self,
         handle: WireProjectHandle,
-    ) -> ClientResult<ClientOutcome<ProjectReadResponse>> {
+    ) -> ClientResult<ClientOutcome<Vec<ProjectReadEvent>>> {
         self.project_read(handle, ProjectReadRequest::default_debug(None))
             .await
     }
@@ -430,5 +472,162 @@ where
         handle
             .map(|handle| ClientOutcome::new(handle, events))
             .ok_or_else(|| ClientError::Protocol("project deploy did not load project".into()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::VecDeque;
+
+    use async_trait::async_trait;
+    use lpc_model::Revision;
+    use lpc_wire::{
+        ProjectReadEvent, ProjectReadRequest, TransportError, WireProjectHandle, WireServerMessage,
+    };
+
+    use super::*;
+
+    #[tokio::test]
+    async fn project_read_collects_multiframe_response() {
+        let io = ScriptedClientIo::new([
+            project_read_frame(
+                1,
+                0,
+                false,
+                [ProjectReadEvent::Begin {
+                    revision: Revision::new(7),
+                }],
+            ),
+            project_read_frame(
+                1,
+                1,
+                true,
+                [ProjectReadEvent::End {
+                    revision: Revision::new(7),
+                }],
+            ),
+        ]);
+        let mut client = LpClient::new(io);
+
+        let outcome = client
+            .project_read(WireProjectHandle::new(3), empty_project_read_request())
+            .await
+            .expect("project read");
+
+        // The ordered events are returned across both frames.
+        assert_eq!(
+            outcome.value,
+            vec![
+                ProjectReadEvent::Begin {
+                    revision: Revision::new(7),
+                },
+                ProjectReadEvent::End {
+                    revision: Revision::new(7),
+                },
+            ]
+        );
+
+        let io = client.into_io();
+        assert_eq!(io.sent.len(), 1);
+        let ClientRequest::ProjectRead { handle, .. } = &io.sent[0].msg else {
+            panic!("project read should use frame-backed request variant");
+        };
+        assert_eq!(handle.id(), 3);
+    }
+
+    #[tokio::test]
+    async fn project_read_top_level_server_error_is_terminal() {
+        let io = ScriptedClientIo::new([WireServerMessage::new(
+            1,
+            WireServerMsgBody::Error {
+                error: "bad read".into(),
+            },
+        )]);
+        let mut client = LpClient::new(io);
+
+        let error = client
+            .project_read(WireProjectHandle::new(3), empty_project_read_request())
+            .await
+            .unwrap_err();
+
+        assert_eq!(error, ClientError::Server("bad read".into()));
+    }
+
+    #[tokio::test]
+    async fn project_read_unexpected_same_id_message_is_protocol_error() {
+        let io = ScriptedClientIo::new([WireServerMessage::new(
+            1,
+            WireServerMsgBody::StopAllProjects,
+        )]);
+        let mut client = LpClient::new(io);
+
+        let error = client
+            .project_read(WireProjectHandle::new(3), empty_project_read_request())
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ClientError::UnexpectedResponse {
+                operation: "project.read",
+                ..
+            }
+        ));
+    }
+
+    struct ScriptedClientIo {
+        sent: Vec<ClientMessage>,
+        responses: VecDeque<WireServerMessage>,
+    }
+
+    impl ScriptedClientIo {
+        fn new(responses: impl IntoIterator<Item = WireServerMessage>) -> Self {
+            Self {
+                sent: Vec::new(),
+                responses: responses.into_iter().collect(),
+            }
+        }
+    }
+
+    #[async_trait(?Send)]
+    impl ClientIo for ScriptedClientIo {
+        async fn send(&mut self, msg: ClientMessage) -> Result<(), TransportError> {
+            self.sent.push(msg);
+            Ok(())
+        }
+
+        async fn receive(&mut self) -> Result<WireServerMessage, TransportError> {
+            self.responses
+                .pop_front()
+                .ok_or(TransportError::ConnectionLost)
+        }
+
+        async fn close(&mut self) -> Result<(), TransportError> {
+            Ok(())
+        }
+    }
+
+    fn project_read_frame(
+        id: u64,
+        sequence: u32,
+        fin: bool,
+        events: impl IntoIterator<Item = ProjectReadEvent>,
+    ) -> WireServerMessage {
+        WireServerMessage::stream_frame(
+            id,
+            sequence,
+            fin,
+            WireServerMsgBody::ProjectRead {
+                events: events.into_iter().collect(),
+            },
+        )
+    }
+
+    fn empty_project_read_request() -> ProjectReadRequest {
+        ProjectReadRequest {
+            since: None,
+            queries: Vec::new(),
+            probes: Vec::new(),
+        }
     }
 }

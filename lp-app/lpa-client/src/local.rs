@@ -204,10 +204,10 @@ mod tests {
         assert_eq!(received_msg.id, 1);
 
         // Send response from server
-        let server_msg = WireServerMessage {
-            id: 1,
-            msg: lpc_wire::server::ServerMsgBody::ListAvailableProjects { projects: vec![] },
-        };
+        let server_msg = WireServerMessage::new(
+            1,
+            lpc_wire::server::ServerMsgBody::ListAvailableProjects { projects: vec![] },
+        );
         server_transport.send(server_msg).await.unwrap();
 
         // Receive on client

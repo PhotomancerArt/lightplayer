@@ -19,5 +19,6 @@ buffers, and server memory without owning protocol response details themselves.
 
 **Naming:** Structures that mirror engine state locally use natural `*View`
 suffixes (`ProjectView`, `NodeTreeView`, `PropAccessView`, `PropsMapView`, …).
-Reserve `Client*` for genuine client API types (for example `ClientApi`), not
-for cached tree/property mirrors.
+Reserve `Client*` for genuine client-side types (for example `lpa-client`'s
+`LpClient` or this crate's `ClientResourceCache`), not for cached
+tree/property mirrors.

@@ -161,14 +161,10 @@ mod ser_write_json_tests {
 
     #[test]
     fn ser_write_json_server_message_round_trips() {
-        let msg = ServerMessage::<()> {
-            id: 1,
-            msg: ServerMsgBody::UnloadProject,
-        };
+        let msg = ServerMessage::new(1, ServerMsgBody::UnloadProject);
 
         let json = serialize_with_ser_write_json(&msg).expect("ser-write-json serialize");
-        let deserialized: ServerMessage<()> =
-            from_str(&json).expect("from_str(ser-write-json output)");
+        let deserialized: ServerMessage = from_str(&json).expect("from_str(ser-write-json output)");
 
         assert_eq!(msg.id, deserialized.id);
         assert!(matches!(deserialized.msg, ServerMsgBody::UnloadProject));
@@ -204,9 +200,9 @@ mod ser_write_json_tests {
 
     #[test]
     fn ser_write_json_heartbeat_round_trips() {
-        let msg = ServerMessage::<()> {
-            id: 0,
-            msg: ServerMsgBody::Heartbeat {
+        let msg = ServerMessage::new(
+            0,
+            ServerMsgBody::Heartbeat {
                 fps: SampleStats {
                     avg: 60.0,
                     sdev: 1.0,
@@ -242,11 +238,10 @@ mod ser_write_json_tests {
                     }],
                 }),
             },
-        };
+        );
 
         let json = serialize_with_ser_write_json(&msg).expect("ser-write-json serialize");
-        let deserialized: ServerMessage<()> =
-            from_str(&json).expect("from_str(ser-write-json output)");
+        let deserialized: ServerMessage = from_str(&json).expect("from_str(ser-write-json output)");
 
         assert_eq!(msg.id, deserialized.id);
         match (&msg.msg, &deserialized.msg) {

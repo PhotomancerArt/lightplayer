@@ -14,9 +14,8 @@ use lpc_shared::backtrace;
 use lpc_shared::output::{OutputChannelHandle, OutputDriverOptions, OutputFormat, OutputProvider};
 use lpc_shared::time::TimeProvider;
 use lpc_wire::{
-    ProjectReadRequest, ProjectReadResponse, WireOverlayCommitRequest, WireOverlayCommitResponse,
-    WireOverlayMutationRequest, WireOverlayMutationResponse, WireOverlayReadResponse,
-    WireProjectInventoryReadResponse,
+    WireOverlayCommitRequest, WireOverlayCommitResponse, WireOverlayMutationRequest,
+    WireOverlayMutationResponse, WireOverlayReadResponse, WireProjectInventoryReadResponse,
 };
 use lpfs::{FsEvent, FsVersion, LpFs};
 
@@ -160,15 +159,6 @@ impl Project {
         runtime
             .tick(registry, delta_ms)
             .map_err(|e| ServerError::Core(format!("{e}")))
-    }
-
-    pub fn read_project(&mut self, request: ProjectReadRequest) -> ProjectReadResponse {
-        let registry = &self.registry;
-        let runtime = self
-            .runtime
-            .as_mut()
-            .expect("project runtime is only absent while reloading");
-        runtime.read_project(registry, request)
     }
 
     pub fn read_overlay(&self) -> WireOverlayReadResponse {

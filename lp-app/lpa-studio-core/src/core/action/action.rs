@@ -1,4 +1,7 @@
-use crate::{ActionConfirmation, ActionMeta, ActionPriority, ControllerId, ControllerOp, UiError};
+use crate::{
+    ActionClass, ActionConfirmation, ActionMeta, ActionPriority, ControllerId, ControllerOp,
+    UiError,
+};
 
 /// A user-invokable controller operation with render metadata.
 ///
@@ -43,6 +46,14 @@ impl UiAction {
     /// Return the render metadata for this action.
     pub fn meta(&self) -> &ActionMeta {
         &self.meta
+    }
+
+    /// Return the sync-engine scheduling class for this action's operation.
+    ///
+    /// Delegates to the operation's [`ControllerOp::action_class`], so the class
+    /// is always sourced from the op declaration beside its definition.
+    pub fn class(&self) -> ActionClass {
+        self.op.action_class()
     }
 
     /// Return whether this action targets the given controller id string.
@@ -138,7 +149,9 @@ impl UiAction {
 mod tests {
     use core::any::Any;
 
-    use crate::{ActionMeta, ActionPriority, ControllerId, ControllerOp, UiAction};
+    use core::time::Duration;
+
+    use crate::{ActionClass, ActionMeta, ActionPriority, ControllerId, ControllerOp, UiAction};
 
     #[test]
     fn cloned_action_clones_boxed_op() {
@@ -180,6 +193,20 @@ mod tests {
         assert!(matches!(action.op_as::<TestOp>(), Some(TestOp::Run)));
     }
 
+    #[test]
+    fn class_delegates_to_the_operation() {
+        let foreground = UiAction::from_op(ControllerId::new("test|node"), TestOp::Run);
+        let recovery = UiAction::from_op(ControllerId::new("test|node"), OtherOp);
+
+        assert_eq!(
+            foreground.class(),
+            ActionClass::Foreground {
+                deadline: Duration::from_secs(8),
+            }
+        );
+        assert_eq!(recovery.class(), ActionClass::Recovery);
+    }
+
     #[derive(Clone, Debug, Eq, PartialEq)]
     enum TestOp {
         Run,
@@ -188,6 +215,12 @@ mod tests {
     impl ControllerOp for TestOp {
         fn default_action_meta(&self) -> ActionMeta {
             ActionMeta::new("Run", "Run the test operation.", ActionPriority::Primary)
+        }
+
+        fn action_class(&self) -> ActionClass {
+            ActionClass::Foreground {
+                deadline: Duration::from_secs(8),
+            }
         }
 
         fn clone_box(&self) -> Box<dyn ControllerOp> {
@@ -213,6 +246,10 @@ mod tests {
     impl ControllerOp for OtherOp {
         fn default_action_meta(&self) -> ActionMeta {
             ActionMeta::new("Other", "Run the other operation.", ActionPriority::Primary)
+        }
+
+        fn action_class(&self) -> ActionClass {
+            ActionClass::Recovery
         }
 
         fn clone_box(&self) -> Box<dyn ControllerOp> {

@@ -10,8 +10,11 @@ rust-version.workspace = true
 default = ["std"]
 std = ["lpfs/std"]
 derive = []
+# Thread-local ambient revision for downstream test binaries (dev-dependencies
+# only): isolates parallel tests that set/advance the revision clock.
+test-support = ["std"]
 # JSON Schema for model types (host-side tooling)
-schema-gen = ["std", "dep:schemars"]
+schema-gen = ["std", "dep:schemars", "lp-collection/schemars"]
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }

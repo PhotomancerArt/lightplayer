@@ -124,10 +124,7 @@ mod tests {
         let (router, _, outgoing) = create_test_router();
         let mut transport = MessageRouterTransport::new(router);
 
-        let msg = WireServerMessage {
-            id: 1,
-            msg: lpc_wire::server::ServerMsgBody::UnloadProject,
-        };
+        let msg = WireServerMessage::new(1, lpc_wire::server::ServerMsgBody::UnloadProject);
         pollster::block_on(transport.send(msg)).unwrap();
 
         // Check message was sent to router

@@ -26,6 +26,39 @@ pub enum NodeInvocation {
     Ref(ArtifactPathSlot),
 }
 
+// `NodeInvocation` is not a serde type; it is read/written through the slot
+// codec as an externally-tagged enum (`enum_encoding = "external"`,
+// `rename_all = "snake_case"`). Since the JSON artifact cutover (one node per
+// artifact file), its authored wire form is one of:
+//   `{ "unset": {} }` or `{ "ref": <artifact path string> }`.
+#[cfg(feature = "schema-gen")]
+impl schemars::JsonSchema for NodeInvocation {
+    fn schema_name() -> alloc::borrow::Cow<'static, str> {
+        "NodeInvocation".into()
+    }
+
+    fn json_schema(generator: &mut schemars::SchemaGenerator) -> schemars::Schema {
+        let ref_schema = <ArtifactPathSlot as schemars::JsonSchema>::json_schema(generator);
+        schemars::json_schema!({
+            "description": "Parent-owned child node invocation (externally tagged).",
+            "oneOf": [
+                {
+                    "type": "object",
+                    "properties": { "unset": { "type": "object", "additionalProperties": false } },
+                    "required": ["unset"],
+                    "additionalProperties": false,
+                },
+                {
+                    "type": "object",
+                    "properties": { "ref": ref_schema },
+                    "required": ["ref"],
+                    "additionalProperties": false,
+                },
+            ],
+        })
+    }
+}
+
 impl NodeInvocation {
     /// Construct a path-backed invocation.
     #[must_use]

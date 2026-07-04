@@ -1,4 +1,4 @@
-use crate::messages::ProjectReadRequest;
+use crate::messages::{ProjectReadEvent, ProjectReadRequest};
 use crate::project::WireProjectHandle;
 use crate::project_command::{WireProjectCommand, WireProjectCommandResponse};
 use crate::server::fs_api::{FsRequest, FsResponse};
@@ -16,8 +16,8 @@ pub enum ClientMsgBody {
     LoadProject { path: LpPathBuf },
     /// Unload a project
     UnloadProject { handle: WireProjectHandle },
-    /// Project-specific request
-    ProjectRequest {
+    /// Project read request that expects project-read frames.
+    ProjectRead {
         handle: WireProjectHandle,
         request: ProjectReadRequest,
     },
@@ -34,7 +34,7 @@ pub enum ClientMsgBody {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub enum ServerMsgBody<R> {
+pub enum ServerMsgBody {
     /// Filesystem operation response
     Filesystem(FsResponse),
     /// Response to LoadProject
@@ -43,9 +43,14 @@ pub enum ServerMsgBody<R> {
     },
     /// Response to UnloadProject
     UnloadProject,
-    /// Response to ProjectRequest
-    ProjectRequest {
-        response: R,
+    /// One batch of ordered project-read events.
+    ///
+    /// The transport batches events to a budget and the envelope sequences the
+    /// batches (`seq`/`fin`). A read may span several `ProjectRead` messages
+    /// under the same request id; the final one carries `fin == true` and (for a
+    /// successful read) the `End`/`Error` event.
+    ProjectRead {
+        events: Vec<ProjectReadEvent>,
     },
     /// Response to ProjectCommand
     ProjectCommand {
@@ -144,6 +149,7 @@ pub struct LoadedProject {
 
 /// Optional memory statistics (platform-dependent; ESP32 reports heap).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "camelCase")]
 pub struct MemoryStats {
     pub free_bytes: u32,

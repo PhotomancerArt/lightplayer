@@ -114,13 +114,14 @@ impl LinkController {
             LinkState::DiscoveringEndpoints { .. }
             | LinkState::Connecting { .. }
             | LinkState::Managing { .. } => Vec::new(),
-            LinkState::Connected { .. } if server_connected => Vec::new(),
             LinkState::Connected { .. } => {
                 let mut actions = Vec::new();
                 if self.active_supports(LinkOperation::FlashFirmware) {
                     actions.push(self.action(LinkOp::ProvisionFirmware));
                 }
-                actions.push(self.action(LinkOp::ConnectServer));
+                if !server_connected {
+                    actions.push(self.action(LinkOp::ConnectServer));
+                }
                 if self.active_supports(LinkOperation::Reset) {
                     actions.push(self.action(LinkOp::ResetDevice));
                 }
@@ -912,7 +913,7 @@ mod tests {
     }
 
     #[test]
-    fn connected_link_with_server_hides_link_level_actions() {
+    fn connected_link_with_server_keeps_recovery_actions() {
         let mut link = LinkController::with_registry(registry_with_fake_endpoint());
         link.set_state(LinkState::Connected {
             device: ConnectedDeviceSummary::new(
@@ -925,7 +926,8 @@ mod tests {
 
         let actions = link.actions(true);
 
-        assert!(actions.is_empty());
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].op_as::<LinkOp>(), Some(&LinkOp::DisconnectLink));
     }
 
     #[test]
@@ -955,7 +957,7 @@ mod tests {
     }
 
     #[test]
-    fn connected_management_capable_link_hides_management_actions_with_server() {
+    fn connected_management_capable_link_keeps_management_actions_with_server() {
         let mut link = LinkController::with_registry(registry_with_fake_endpoint());
         link.active_session = Some(management_capable_session());
         link.set_state(LinkState::Connected {
@@ -969,7 +971,14 @@ mod tests {
 
         let actions = link.actions(true);
 
-        assert!(actions.is_empty());
+        assert_eq!(actions.len(), 4);
+        assert_eq!(
+            actions[0].op_as::<LinkOp>(),
+            Some(&LinkOp::ProvisionFirmware)
+        );
+        assert_eq!(actions[1].op_as::<LinkOp>(), Some(&LinkOp::ResetDevice));
+        assert_eq!(actions[2].op_as::<LinkOp>(), Some(&LinkOp::ResetToBlank));
+        assert_eq!(actions[3].op_as::<LinkOp>(), Some(&LinkOp::DisconnectLink));
     }
 
     #[test]

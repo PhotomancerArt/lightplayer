@@ -12,7 +12,7 @@ use anyhow::{Error, Result};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_wire::server::api::LogLevel;
 use lpc_wire::{
-    ClientMessage, ClientRequest, FsRequest, ProjectReadRequest, ProjectReadResponse,
+    ClientMessage, ClientRequest, FsRequest, ProjectReadEvent, ProjectReadRequest,
     WireOverlayCommitRequest, WireOverlayCommitResponse, WireOverlayMutationRequest,
     WireOverlayMutationResponse, WireOverlayReadRequest, WireOverlayReadResponse,
     WireProjectCommand, WireProjectCommandResponse, WireProjectHandle,
@@ -24,6 +24,7 @@ use tokio::sync::Mutex;
 use tokio::time::timeout;
 
 use crate::client::ClientOutcome;
+use crate::client_error::ClientError;
 use crate::client_event::ClientEvent;
 use crate::client_io::ClientIo;
 use crate::project_deploy::{
@@ -31,6 +32,7 @@ use crate::project_deploy::{
     validate_project_deploy_response,
 };
 use crate::protocol_session::{ProtocolSession, ResponseDisposition};
+use crate::pull_loop::{NeverCancel, ProgressDeadline, PullIo, PullOutcome, run_project_read};
 use crate::transport::ClientTransport;
 
 pub type SharedClientTransport = Arc<Mutex<Box<dyn ClientTransport>>>;
@@ -268,23 +270,64 @@ impl TokioLpClient {
         &self,
         handle: WireProjectHandle,
         read: ProjectReadRequest,
-    ) -> Result<ProjectReadResponse> {
-        let response = self
-            .send_request(ClientRequest::ProjectRequest {
-                handle,
-                request: read,
-            })
-            .await?;
-        match response.value.msg {
-            WireServerMsgBody::ProjectRequest { response } => Ok(response),
-            other => Err(unexpected_response("project_read", other)),
+    ) -> Result<Vec<ProjectReadEvent>> {
+        let run = self.project_read_inner(handle, read);
+        let outcome = match timeout(self.request_timeout, run).await {
+            Ok(Ok(outcome)) => outcome,
+            Ok(Err(error)) => return Err(error),
+            Err(_) => {
+                return Err(Error::msg(
+                    "Request timed out - server may not be receiving messages (check host->device serial)",
+                ));
+            }
+        };
+        self.handle_events(&outcome.events);
+        Ok(outcome.value)
+    }
+
+    async fn project_read_inner(
+        &self,
+        handle: WireProjectHandle,
+        read: ProjectReadRequest,
+    ) -> Result<ClientOutcome<Vec<ProjectReadEvent>>> {
+        let mut state = self.state.lock().await;
+        let state = &mut *state;
+        let mut transport = state.transport.lock().await;
+
+        // The shared pull loop owns the send/receive/collect state machine; the
+        // Tokio wrapper only supplies the locked transport (wrapped as a
+        // `ClientIo`) and its protocol session. The native request timeout is
+        // still applied by the outer `timeout(...)` in `project_read`, so the
+        // pull loop's own deadline never fires here and cancellation is never
+        // requested — a single timeout owner on the native path.
+        let mut io = LockedTransportIo {
+            transport: &mut **transport,
+        };
+        let deadline =
+            ProgressDeadline::new(Duration::MAX, |_budget| core::future::pending::<()>());
+
+        match run_project_read(
+            &mut io,
+            &mut state.protocol,
+            handle,
+            read,
+            deadline,
+            &NeverCancel,
+        )
+        .await
+        {
+            PullOutcome::Completed { events, observed } => Ok(ClientOutcome::new(events, observed)),
+            PullOutcome::Failed(error) => Err(client_error_to_anyhow(error)),
+            PullOutcome::TimedOut | PullOutcome::Cancelled => {
+                Err(Error::msg("project read ended without completing"))
+            }
         }
     }
 
     pub async fn project_read_default_debug(
         &self,
         handle: WireProjectHandle,
-    ) -> Result<ProjectReadResponse> {
+    ) -> Result<Vec<ProjectReadEvent>> {
         self.project_read(handle, ProjectReadRequest::default_debug(None))
             .await
     }
@@ -475,6 +518,40 @@ fn unexpected_response(operation: &'static str, response: impl std::fmt::Debug) 
     Error::msg(format!(
         "Unexpected response type for {operation}: {response:?}"
     ))
+}
+
+/// Render a pull-loop [`ClientError`] into the anyhow surface the Tokio wrapper
+/// exposes, preserving the message shapes the open-coded loop produced.
+fn client_error_to_anyhow(error: ClientError) -> Error {
+    match error {
+        ClientError::Transport(message) => Error::msg(format!("Transport error: {message}")),
+        ClientError::Server(message) => Error::msg(message),
+        ClientError::Protocol(message) => {
+            Error::msg(format!("Project read protocol error: {message}"))
+        }
+        ClientError::UnexpectedResponse { response, .. } => Error::msg(format!(
+            "Unexpected response type for project_read: {response}"
+        )),
+    }
+}
+
+/// Adapts a locked [`ClientTransport`] guard so the shared pull loop can drive
+/// it. It implements [`PullIo`] directly (not the boxed `?Send` `ClientIo`):
+/// `ClientTransport`'s futures are `Send`, and native-async forwarding
+/// preserves that, so the composed `run_project_read` future stays `Send` and
+/// callers may `tokio::spawn` it.
+struct LockedTransportIo<'a> {
+    transport: &'a mut dyn ClientTransport,
+}
+
+impl PullIo for LockedTransportIo<'_> {
+    async fn send(&mut self, msg: ClientMessage) -> Result<(), lpc_wire::TransportError> {
+        self.transport.send(msg).await
+    }
+
+    async fn receive(&mut self) -> Result<WireServerMessage, lpc_wire::TransportError> {
+        self.transport.receive().await
+    }
 }
 
 fn server_log_level(level: &LogLevel) -> log::Level {

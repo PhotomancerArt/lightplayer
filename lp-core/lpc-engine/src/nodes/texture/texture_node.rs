@@ -221,15 +221,15 @@ mod tests {
             ResolveLogLevel::Off,
         )
         .expect("resolve texture width");
-        let response =
-            engine.read_project(&registry, lpc_wire::ProjectReadRequest::default_debug(None));
+        let (view, _) = crate::engine::test_support::read_into_view(
+            &mut engine,
+            &registry,
+            lpc_wire::ProjectReadRequest::default_debug(None),
+        );
 
-        let lpc_wire::ProjectReadResult::Resources(resources) = &response.results[2] else {
-            panic!("third result should be resources");
-        };
-        let texture = resources
-            .summaries
-            .iter()
+        let texture = view
+            .resource_cache
+            .summaries()
             .find(|summary| {
                 matches!(
                     summary.metadata,

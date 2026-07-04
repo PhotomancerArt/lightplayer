@@ -124,6 +124,59 @@ anything reaches a UI. Sync failures are treated as project-pane issues rather
 than generic action failures so the attached project can stay visible while
 Studio explains what needs attention.
 
+## Client Sync Engine
+
+Since M7 the client update logic lives here, not in the UI crate. A renderer no
+longer owns the controller, drives timeouts, or holds preemption/timeout policy;
+it enqueues commands and renders change-gated snapshots. The pieces:
+
+- **`StudioActor` owns the `StudioController`.** One task owns the controller;
+  every input — user gestures and the UI's refresh timer — arrives as a
+  `StudioCommand { Action, RefreshTick, Shutdown }` on an ordered queue.
+  `StudioActor::new(controller, make_timer)` returns the actor plus a
+  `StudioHandle`; the caller drives `StudioActor::run` (wasm: under
+  `spawn_local`; native: a future tokio helper). This retires the web crate's
+  `Option<StudioController>` take/put, generation counters, cancel flags, and
+  25 ms spin loops — preemption is now queue priority.
+- **`StudioHandle` is the entire UI boundary:** `tx` to enqueue commands, `view`
+  (a change-gated `UiStudioView` channel the UI drives into a signal), and a
+  shared next-tick `delay`. The actor coalesces redundant `RefreshTick`s to one
+  pull, runs pending actions ahead of ticks, and emits **one** snapshot per
+  batch only when the view actually changed (revision advanced or a local
+  mutation set the dirty flag).
+- **Op policy is data (`ActionClass`).** Each op maps to `ActionClass {
+  Recovery, Foreground { deadline }, Passive { deadline } }` beside its
+  definition (`ControllerOp::action_class` / `UiAction::class`). The actor reads
+  it to decide whether an incoming action preempts an in-flight passive pull and
+  to build the pull loop's quiet-gap `ProgressDeadline`. A new op must declare a
+  class — a compile error, not a silent default. The retired web match-table
+  functions and their per-transport wall-clock constants are gone.
+- **Passive pulls are cancellable and deadline-bounded.** `run_refresh_tick`
+  drives one gated read through `lpa-client`'s pull loop under a `ProgressDeadline`
+  (quiet-gap budget, reset per frame) and a `CancelSignal` the actor flips when a
+  preempting command arrives; a clean cancel is not a failure, a timeout/error
+  applies `BackoffPolicy`. Progressive `UxUpdate` activity/log deltas during a
+  long action are applied to the live view (`UiStudioView::apply_activity`) and
+  republished through the same channel.
+- **Cadence is data (`RefreshCadence`).** The refresh interval the UI timer waits
+  is derived in core from the connection's `LinkState` (`RefreshCadence::for_link_state`)
+  and surfaced through `StudioHandle::next_refresh_delay` (interval + backoff), so
+  no `LinkProviderKind` transport-sniffing lives in the view layer. The simulator
+  keeps a faster interval only because it self-ticks and the UI re-reads previews
+  at that rate.
+- **Request scoping** stays core-owned: the focus-scoped probe set
+  (`node_subscribes_products`) is picked up by the next pull; `Focus` completes
+  synchronously with no bolt-on network refresh.
+
+The client's single timeout/cancel/retry owner and the actor model are recorded
+in `docs/adr/2026-07-04-client-pull-loop-and-actor.md`.
+
+The client treats passive project refresh as lower priority than foreground
+device/server recovery. If a browser refresh is interrupted or times out, Studio
+marks the project sync as needing attention so device actions can run.
+Control-product probes can also be disabled for the current sync when a timeout
+suggests older firmware does not understand the newer probe request shape.
+
 The first editor view renders every synced node in stable tree order rather
 than requiring a selected-node detail view. Node bodies show headers, status,
 prominent `input`/`output` slots, config/state slot rows, compact bindings when

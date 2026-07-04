@@ -136,7 +136,7 @@ pub(crate) fn visual_preview_product(name: &str) -> UiProducedProduct {
             width: 32,
             height: 32,
             revision: 104,
-            bytes: visual_preview_bytes(32, 32),
+            bytes: visual_preview_bytes(32, 32).into(),
         })
 }
 
@@ -169,7 +169,7 @@ pub(crate) fn control_preview_product(name: &str) -> UiProducedProduct {
                 }],
             },
             display_layout: Some(control_layout_2d_fixture()),
-            bytes: control_preview_bytes(16),
+            bytes: control_preview_bytes(16).into(),
         }))
 }
 

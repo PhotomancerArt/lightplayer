@@ -1626,8 +1626,8 @@ mod tests {
     };
     use lpc_shared::time::TimeProvider;
     use lpc_wire::{
-        ProjectProbeRequest, ProjectProbeResult, ProjectReadRequest, ProjectReadResult,
-        RenderProductProbeRequest, RenderProductProbeResult, WireTextureFormat,
+        ProjectProbeRequest, ProjectProbeResult, ProjectReadRequest, RenderProductProbeRequest,
+        RenderProductProbeResult, WireTextureFormat,
     };
     use lpfs::lp_path::AsLpPath;
     use lpfs::{LpFs, LpFsMemory, LpFsStd};
@@ -1636,6 +1636,7 @@ mod tests {
     use super::*;
     use crate::dataflow::binding::{BindingPriority, BindingSource, BindingTarget};
     use crate::dataflow::resolver::{Production, QueryKey, ResolveLogLevel};
+    use crate::engine::test_support::{read_into_view, read_probe_results};
     use crate::engine::{ButtonService, RadioService};
     use crate::products::visual::RenderTextureRequest;
 
@@ -2825,23 +2826,31 @@ mod tests {
             "fluid visual should contain nonzero RGB data"
         );
 
-        let probe_response = rt.read_project(ProjectReadRequest {
-            since: None,
-            queries: alloc::vec::Vec::new(),
-            probes: alloc::vec![ProjectProbeRequest::RenderProduct(
-                RenderProductProbeRequest {
-                    product: *product,
-                    width: 16,
-                    height: 16,
-                    format: WireTextureFormat::Srgb8,
-                },
-            )],
-        });
+        // Read state through the same event-stream + progressive-apply path the
+        // live clients use (the aggregate response was deleted in M6/P5).
+        let (mut engine, registry) = rt.into_parts();
+
+        let probe_results = read_probe_results(
+            &mut engine,
+            &registry,
+            ProjectReadRequest {
+                since: None,
+                queries: alloc::vec::Vec::new(),
+                probes: alloc::vec![ProjectProbeRequest::RenderProduct(
+                    RenderProductProbeRequest {
+                        product: *product,
+                        width: 16,
+                        height: 16,
+                        format: WireTextureFormat::Srgb8,
+                    },
+                )],
+            },
+        );
         let Some(ProjectProbeResult::RenderProduct(RenderProductProbeResult::Texture {
             format,
             bytes,
             ..
-        })) = probe_response.probes.first()
+        })) = probe_results.first()
         else {
             panic!("fluid visual probe should return a texture");
         };
@@ -2852,23 +2861,21 @@ mod tests {
             "fluid visual probe should contain nonzero display bytes"
         );
 
-        let response = rt.read_project(ProjectReadRequest::default_debug(None));
-        let ProjectReadResult::Nodes(nodes) = &response.results[1] else {
-            panic!("node read result");
-        };
-        let slots = nodes.slots.as_ref().expect("slot roots");
+        let (view, _) = read_into_view(
+            &mut engine,
+            &registry,
+            ProjectReadRequest::default_debug(None),
+        );
         assert!(
-            slots
+            view.slots
                 .roots
-                .iter()
-                .any(|root| root.name == format!("node.{}.state", compute.0)),
+                .contains_key(&format!("node.{}.state", compute.0)),
             "compute state should be visible in debug read"
         );
         assert!(
-            slots
+            view.slots
                 .roots
-                .iter()
-                .any(|root| root.name == format!("node.{}.state", fluid.0)),
+                .contains_key(&format!("node.{}.state", fluid.0)),
             "fluid state should be visible in debug read"
         );
     }

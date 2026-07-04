@@ -2,14 +2,14 @@
 //!
 //! Responsibilities:
 //! - Drain outgoing queue and send via serial (with M! prefix)
-//! - Drain OUTGOING_SERVER_MSG and write JSON to serial (server feature)
+//! - Drain accountable server write requests and write JSON to serial (server feature)
 //! - Read from serial and push to incoming queue (filter M! prefix)
 //! - Monitor USB host connection; skip writes when disconnected to prevent blocking
 //! - All serial writes use timeouts to prevent blocking if host disconnects mid-write
 
 extern crate alloc;
 
-use alloc::{string::String, vec::Vec};
+use alloc::{format, string::String, vec::Vec};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::channel::Channel;
 use embassy_time::{Duration, Timer};
@@ -26,62 +26,30 @@ use crate::board::esp32c6::usb_connection::UsbConnectionMonitor;
 static INCOMING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
 static OUTGOING_MSG: Channel<CriticalSectionRawMutex, String, 32> = Channel::new();
 
-/// Server messages for transport serialization (capacity 1 = backpressure).
+/// Accountable server write requests.
 ///
-/// Large project-read responses use [`OUTGOING_SERVER_JSON_CHUNK`] instead.
-/// This channel is only for small responses such as heartbeat, load/unload, and
-/// filesystem acknowledgements.
-#[cfg(feature = "server")]
-static OUTGOING_SERVER_MSG: Channel<CriticalSectionRawMutex, lpc_wire::WireServerMessage, 1> =
-    Channel::new();
-
-/// Raw server JSON frame chunks for large responses.
+/// The server transport submits one message here, then waits on
+/// `SERVER_WRITE_RESULT`. This keeps `ServerTransport::send().await` aligned
+/// with actual USB write completion instead of a best-effort task handoff.
 ///
-/// Project-read responses use this path so the firmware does not need to
-/// materialize a full `WireServerMessage` or a full JSON frame on the heap.
+/// Each request carries a wrapping `u32` generation token that `io_task` echoes
+/// back on the result channel. Pairing was previously purely positional: if the
+/// sending future were ever cancelled between submit and await, the orphaned
+/// result would be consumed by the next send and misattributed. The generation
+/// lets `transport.send()` discard any stale result instead of trusting order.
 #[cfg(feature = "server")]
-pub const SERVER_JSON_CHUNK_SIZE: usize = 1024;
-
-/// Number of queued project-read JSON chunks.
-///
-/// Project-read serialization is synchronous, so this queue must hold the
-/// largest frame the server can produce before the I/O task gets scheduled to
-/// drain it.
-#[cfg(feature = "server")]
-pub const SERVER_JSON_CHUNK_CAPACITY: usize = 16;
-
-#[cfg(feature = "server")]
-static OUTGOING_SERVER_JSON_CHUNK: Channel<
+static SERVER_WRITE_REQUEST: Channel<
     CriticalSectionRawMutex,
-    ServerJsonChunk,
-    SERVER_JSON_CHUNK_CAPACITY,
+    (u32, lpc_wire::WireServerMessage),
+    1,
 > = Channel::new();
 
 #[cfg(feature = "server")]
-#[derive(Debug, Clone, Copy)]
-pub struct ServerJsonChunk {
-    len: u16,
-    bytes: [u8; SERVER_JSON_CHUNK_SIZE],
-}
-
-#[cfg(feature = "server")]
-impl ServerJsonChunk {
-    pub fn from_slice(bytes: &[u8]) -> Option<Self> {
-        if bytes.len() > SERVER_JSON_CHUNK_SIZE || bytes.len() > u16::MAX as usize {
-            return None;
-        }
-        let mut chunk = Self {
-            len: bytes.len() as u16,
-            bytes: [0; SERVER_JSON_CHUNK_SIZE],
-        };
-        chunk.bytes[..bytes.len()].copy_from_slice(bytes);
-        Some(chunk)
-    }
-
-    fn bytes(&self) -> &[u8] {
-        &self.bytes[..self.len as usize]
-    }
-}
+static SERVER_WRITE_RESULT: Channel<
+    CriticalSectionRawMutex,
+    (u32, Result<(), lpc_wire::TransportError>),
+    1,
+> = Channel::new();
 
 /// Write timeout per chunk: if a chunk doesn't complete in this time, the host
 /// is likely gone. Short enough to detect disconnects, long enough for USB.
@@ -187,10 +155,7 @@ pub async fn io_task(usb_device: esp_hal::peripherals::USB_DEVICE<'static>) {
         let connected = conn.is_connected();
 
         #[cfg(feature = "server")]
-        drain_outgoing_server_json_chunks(&mut tx, connected).await;
-
-        #[cfg(feature = "server")]
-        drain_outgoing_server_msg(&mut tx, connected).await;
+        drain_server_write_request(&mut tx, connected).await;
 
         drain_outgoing_messages(&router, &mut tx, connected).await;
 
@@ -199,24 +164,6 @@ pub async fn io_task(usb_device: esp_hal::peripherals::USB_DEVICE<'static>) {
         }
 
         Timer::after(Duration::from_millis(1)).await;
-    }
-}
-
-/// Drain raw server JSON chunks. Always consumes; only writes if connected.
-#[cfg(feature = "server")]
-async fn drain_outgoing_server_json_chunks<W: Write>(tx: &mut W, connected: bool) {
-    let receiver = OUTGOING_SERVER_JSON_CHUNK.receiver();
-    loop {
-        match receiver.try_receive() {
-            Ok(chunk) if connected => {
-                if !timed_write_all(tx, chunk.bytes()).await {
-                    let _ = timed_write_all(tx, b"\n").await;
-                    break;
-                }
-            }
-            Ok(_) => {}
-            Err(_) => break,
-        }
     }
 }
 
@@ -256,98 +203,178 @@ async fn read_serial<R: Read>(rx: &mut R, read_buffer: &mut Vec<u8>, router: &Me
     }
 }
 
-/// Drain OUTGOING_SERVER_MSG. Always consumes the message (so the server loop
-/// never blocks on a full channel); only serializes to serial if connected.
+/// Drain accountable server write requests.
 #[cfg(feature = "server")]
-async fn drain_outgoing_server_msg<W: Write>(tx: &mut W, connected: bool) {
-    let receiver = OUTGOING_SERVER_MSG.receiver();
-    let Ok(msg) = receiver.try_receive() else {
+async fn drain_server_write_request<W: Write>(tx: &mut W, connected: bool) {
+    let receiver = SERVER_WRITE_REQUEST.receiver();
+    let Ok((generation, msg)) = receiver.try_receive() else {
         return;
     };
 
-    if !connected {
-        return;
-    }
-
-    if timed_write_server_msg(tx, msg).await {
-        return;
-    }
-
-    // If a timeout interrupts a JSON frame before the trailing newline, separate the
-    // next frame so host parsers can recover instead of concatenating two `M!` messages.
-    let _ = timed_write_all(tx, b"\n").await;
+    let result = timed_write_server_msg(tx, msg, connected).await;
+    // Echo the request generation so `transport.send()` can discard any stale
+    // result left over from a cancelled send.
+    SERVER_WRITE_RESULT
+        .sender()
+        .send((generation, result))
+        .await;
 }
 
 #[cfg(feature = "server")]
-async fn timed_write_server_msg<W: Write>(tx: &mut W, msg: lpc_wire::WireServerMessage) -> bool {
-    let Some(msg) = into_small_server_msg(msg) else {
-        log::error!(
-            "project-read response reached small serial message path; use streaming JSON chunks"
-        );
-        return false;
-    };
-    timed_write_full_server_msg(tx, msg).await
+async fn timed_write_server_msg<W: Write>(
+    tx: &mut W,
+    msg: lpc_wire::WireServerMessage,
+    connected: bool,
+) -> Result<(), lpc_wire::TransportError> {
+    if !connected {
+        return Err(lpc_wire::TransportError::ConnectionLost);
+    }
+
+    let result = timed_write_full_server_msg(tx, msg).await;
+    if result.is_err() {
+        // If a timeout interrupts a JSON frame before the trailing newline, separate the
+        // next frame so host parsers can recover instead of concatenating two `M!` messages.
+        let _ = timed_write_all(tx, b"\n").await;
+    }
+    result
 }
 
 #[cfg(feature = "server")]
 async fn timed_write_full_server_msg<W: Write>(
     tx: &mut W,
-    msg: lpc_wire::ServerMessage<lpc_wire::NoDomain>,
-) -> bool {
-    let mut buf = [0u8; 4 * 1024];
+    msg: lpc_wire::WireServerMessage,
+) -> Result<(), lpc_wire::TransportError> {
+    // TODO(M3 stretch): this ~16.7 KiB stack buffer lives as async-fn state and
+    // is paid even for tiny acks. The preferred fix — a `SerWrite` that streams
+    // straight to the chunked+timeout USB writer — is blocked because
+    // `SerWrite::write` is synchronous while `timed_write_all` is `async`, so the
+    // streaming impl cannot `.await` the USB write without an internal buffer.
+    // The StaticCell fallback needs an aliasing/RAM measurement first (io_task is
+    // the sole writer, but drain paths interleave), so it is deferred rather than
+    // forced here. Revisit once an async-capable streaming writer exists.
+    //
+    // Derived from the shared budget: the serial buffer already reserves the
+    // frame budget plus `PROJECT_READ_FRAME_SERIAL_MARGIN_BYTES`; this only adds
+    // room for the `\nM!` framing prefix and trailing `\n` written around the
+    // message (4 bytes, padded to 16 for alignment slack).
+    const SERVER_MSG_FRAMING_BYTES: usize = 16;
+    const SERVER_MSG_JSON_BUFFER_SIZE: usize =
+        lpc_wire::PROJECT_READ_FRAME_SERIAL_BUFFER_BYTES + SERVER_MSG_FRAMING_BYTES;
+    let mut buf = [0u8; SERVER_MSG_JSON_BUFFER_SIZE];
     let mut writer = StackJsonWriter::new(&mut buf);
     if writer.write(b"\nM!").is_err() {
-        return false;
+        log::warn!("[io_task] server message prefix exceeded JSON buffer");
+        return Err(lpc_wire::TransportError::Serialization(
+            "server message prefix exceeded JSON buffer".into(),
+        ));
     }
     if ser_write_json::ser::to_writer(&mut writer, &msg).is_err() {
-        return false;
+        let detail = server_message_detail(&msg);
+        log::warn!(
+            "[io_task] server message id={} {} exceeded JSON buffer size={} frame_budget={}; write failed",
+            msg.id,
+            detail,
+            SERVER_MSG_JSON_BUFFER_SIZE,
+            lpc_wire::PROJECT_READ_FRAME_MAX_BYTES
+        );
+        return Err(lpc_wire::TransportError::Serialization(format!(
+            "server message id={} {} exceeded JSON buffer",
+            msg.id, detail
+        )));
     }
     if writer.write(b"\n").is_err() {
-        return false;
+        let detail = server_message_detail(&msg);
+        log::warn!(
+            "[io_task] server message id={} {} suffix exceeded JSON buffer size={}; write failed",
+            msg.id,
+            detail,
+            SERVER_MSG_JSON_BUFFER_SIZE
+        );
+        return Err(lpc_wire::TransportError::Serialization(format!(
+            "server message id={} {} suffix exceeded JSON buffer",
+            msg.id, detail
+        )));
     }
-    timed_write_all(tx, writer.bytes()).await
+    if timed_write_all(tx, writer.bytes()).await {
+        Ok(())
+    } else {
+        Err(lpc_wire::TransportError::Other(format!(
+            "server message id={} USB write timed out or failed",
+            msg.id
+        )))
+    }
 }
 
 #[cfg(feature = "server")]
-fn into_small_server_msg(
-    msg: lpc_wire::WireServerMessage,
-) -> Option<lpc_wire::ServerMessage<lpc_wire::NoDomain>> {
-    use lpc_wire::ServerMsgBody;
+fn server_message_detail(msg: &lpc_wire::WireServerMessage) -> String {
+    match &msg.msg {
+        lpc_wire::server::ServerMsgBody::Filesystem(_) => "Filesystem".into(),
+        lpc_wire::server::ServerMsgBody::LoadProject { .. } => "LoadProject".into(),
+        lpc_wire::server::ServerMsgBody::UnloadProject => "UnloadProject".into(),
+        lpc_wire::server::ServerMsgBody::ProjectRead { events } => format!(
+            "ProjectRead seq={} fin={} events={} [{}]",
+            msg.seq,
+            msg.fin,
+            events.len(),
+            project_read_event_summary(events)
+        ),
+        lpc_wire::server::ServerMsgBody::ProjectCommand { .. } => "ProjectCommand".into(),
+        lpc_wire::server::ServerMsgBody::ListAvailableProjects { projects } => {
+            format!("ListAvailableProjects projects={}", projects.len())
+        }
+        lpc_wire::server::ServerMsgBody::ListLoadedProjects { projects } => {
+            format!("ListLoadedProjects projects={}", projects.len())
+        }
+        lpc_wire::server::ServerMsgBody::StopAllProjects => "StopAllProjects".into(),
+        lpc_wire::server::ServerMsgBody::Log { level, .. } => {
+            format!("Log level={level:?}")
+        }
+        lpc_wire::server::ServerMsgBody::Heartbeat {
+            frame_count,
+            loaded_projects,
+            ..
+        } => format!(
+            "Heartbeat frame_count={frame_count} loaded_projects={}",
+            loaded_projects.len()
+        ),
+        lpc_wire::server::ServerMsgBody::Error { .. } => "Error".into(),
+    }
+}
 
-    let id = msg.id;
-    let msg = match msg.msg {
-        ServerMsgBody::Filesystem(response) => ServerMsgBody::Filesystem(response),
-        ServerMsgBody::LoadProject { handle } => ServerMsgBody::LoadProject { handle },
-        ServerMsgBody::UnloadProject => ServerMsgBody::UnloadProject,
-        ServerMsgBody::ProjectRequest { .. } => return None,
-        ServerMsgBody::ProjectCommand { response } => ServerMsgBody::ProjectCommand { response },
-        ServerMsgBody::ListAvailableProjects { projects } => {
-            ServerMsgBody::ListAvailableProjects { projects }
+#[cfg(feature = "server")]
+fn project_read_event_summary(events: &[lpc_wire::ProjectReadEvent]) -> String {
+    let mut summary = String::new();
+    for (index, event) in events.iter().take(8).enumerate() {
+        if index > 0 {
+            summary.push_str(", ");
         }
-        ServerMsgBody::ListLoadedProjects { projects } => {
-            ServerMsgBody::ListLoadedProjects { projects }
-        }
-        ServerMsgBody::StopAllProjects => ServerMsgBody::StopAllProjects,
-        ServerMsgBody::Log { level, message } => ServerMsgBody::Log { level, message },
-        ServerMsgBody::Heartbeat {
-            fps,
-            frame_count,
-            loaded_projects,
-            uptime_ms,
-            memory,
-            recovery,
-        } => ServerMsgBody::Heartbeat {
-            fps,
-            frame_count,
-            loaded_projects,
-            uptime_ms,
-            memory,
-            recovery,
+        summary.push_str(project_read_event_kind(event));
+    }
+    if events.len() > 8 {
+        summary.push_str(", ...");
+    }
+    summary
+}
+
+#[cfg(feature = "server")]
+fn project_read_event_kind(event: &lpc_wire::ProjectReadEvent) -> &'static str {
+    match event {
+        lpc_wire::ProjectReadEvent::Begin { .. } => "begin",
+        lpc_wire::ProjectReadEvent::Query { event, .. } => match event {
+            lpc_wire::ProjectReadQueryEvent::Shapes(_) => "query.shapes",
+            lpc_wire::ProjectReadQueryEvent::Nodes(_) => "query.nodes",
+            lpc_wire::ProjectReadQueryEvent::Resources(_) => "query.resources",
+            lpc_wire::ProjectReadQueryEvent::Runtime(_) => "query.runtime",
         },
-        ServerMsgBody::Error { error } => ServerMsgBody::Error { error },
-    };
-
-    Some(lpc_wire::ServerMessage { id, msg })
+        lpc_wire::ProjectReadEvent::Probe { event, .. } => match event {
+            lpc_wire::ProjectReadProbeEvent::Result(_) => "probe.result",
+            lpc_wire::ProjectReadProbeEvent::ResultBegin { .. } => "probe.result_begin",
+            lpc_wire::ProjectReadProbeEvent::ResultBytes { .. } => "probe.result_bytes",
+            lpc_wire::ProjectReadProbeEvent::ResultEnd => "probe.result_end",
+        },
+        lpc_wire::ProjectReadEvent::End { .. } => "end",
+        lpc_wire::ProjectReadEvent::Error { .. } => "error",
+    }
 }
 
 /// Process read buffer and extract complete lines
@@ -395,25 +422,20 @@ pub fn get_message_channels() -> (
     (&INCOMING_MSG, &OUTGOING_MSG)
 }
 
-/// Get reference to OUTGOING_SERVER_MSG channel for StreamingMessageRouterTransport
+/// Get accountable server write channels for StreamingMessageRouterTransport.
 #[cfg(feature = "server")]
-pub fn get_server_msg_channel()
--> &'static Channel<CriticalSectionRawMutex, lpc_wire::WireServerMessage, 1> {
-    &OUTGOING_SERVER_MSG
-}
-
-/// Get reference to raw server JSON chunk channel.
-#[cfg(feature = "server")]
-pub fn get_server_json_chunk_channel()
--> &'static Channel<CriticalSectionRawMutex, ServerJsonChunk, SERVER_JSON_CHUNK_CAPACITY> {
-    &OUTGOING_SERVER_JSON_CHUNK
+pub fn get_server_write_channels() -> (
+    &'static Channel<CriticalSectionRawMutex, (u32, lpc_wire::WireServerMessage), 1>,
+    &'static Channel<CriticalSectionRawMutex, (u32, Result<(), lpc_wire::TransportError>), 1>,
+) {
+    (&SERVER_WRITE_REQUEST, &SERVER_WRITE_RESULT)
 }
 
 /// Write log output to the outgoing channel (serial to host).
 ///
 /// Used by the logger so log::info!, log::debug!, etc. appear on the host.
 /// Lines are written without M! prefix so the client prints them.
-/// Shares the channel with server responses; when channel is full, log lines are dropped.
+/// When the log channel is full, log lines are dropped.
 /// (Cannot log the drop - would recurse into logger.)
 #[cfg(not(any(
     feature = "test_rmt",

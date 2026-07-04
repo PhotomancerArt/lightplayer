@@ -31,17 +31,21 @@ pub use app::project::{
     ProjectController, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
     ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
     ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
-    ProjectProductSubscriptionIntent, ProjectRuntimeSummary, ProjectSlotAddress, ProjectSlotRoot,
-    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
-    ProjectSyncSummary, SlotController, SlotControllerState, SlotKind,
+    ProjectProductSubscriptionIntent, ProjectRefreshOutcome, ProjectRuntimeSummary,
+    ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState, ProjectSync,
+    ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotController, SlotControllerState,
+    SlotKind,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerController, ServerFailureKind, ServerOp,
-    ServerSnapshot, ServerState, StudioProjectRead, StudioServerClient,
+    ServerSnapshot, ServerState, StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
 };
 pub use app::studio::{
-    StudioController, StudioSnapshot, UiError, UiLogEntry, UiLogLevel, UiNotice, UiNoticeLevel,
-    UiResult, UxActivityTarget, UxUpdate, UxUpdateSink,
+    DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY, LogRing, RefreshCadence,
+    SIMULATOR_REFRESH_INTERVAL, StudioActor, StudioCommand, StudioController, StudioHandle,
+    StudioSnapshot, StudioViewReceiver, StudioViewSender, UiError, UiLogEntry, UiLogLevel,
+    UiNotice, UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink, ViewPublisher,
+    studio_view_channel,
 };
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;
@@ -49,10 +53,11 @@ pub use core::view::activity_view::UiActivityStepState;
 pub use core::view::steps_view::UiStepState;
 pub use core::view::steps_view::UiStepView;
 pub use core::{
-    ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, Controller,
-    ControllerContext, ControllerId, ControllerOp, UiAction, UiActions, UiActivityView, UiMetric,
-    UiPaneView, UiProgress, UiStatus, UiStepsView, UiStudioView, UiTerminalLine, UiViewContent,
-    UxNodePath,
+    ActionClass, ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, Controller,
+    ControllerContext, ControllerId, ControllerOp, PASSIVE_REFRESH_DEADLINE,
+    PROJECT_ACTION_DEADLINE, PROJECT_EDITOR_ACTION_DEADLINE, PROJECT_LOAD_DEADLINE, UiAction,
+    UiActions, UiActivityView, UiMetric, UiPaneView, UiProgress, UiStatus, UiStepsView,
+    UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,
 };
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/basic";

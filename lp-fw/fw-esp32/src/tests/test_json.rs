@@ -5,7 +5,8 @@
 //! - ServerMessage serializes correctly with ser-write-json (in io_task)
 //! - Output is valid JSON parseable by our deserializer
 //!
-//! Uses shared serial::io_task which drains OUTGOING_SERVER_MSG and streams to serial.
+//! Uses shared serial::io_task which drains accountable server write requests
+//! and streams to serial.
 //! Run with: just fwtest-json-esp32c6
 //! Flash and connect with screen/minicom to see M! prefixed JSON every second.
 
@@ -22,8 +23,9 @@ use crate::serial::io_task;
 
 /// Run JSON streaming validation test
 ///
-/// Sends Heartbeat ServerMessage to OUTGOING_SERVER_MSG every second.
-/// serial::io_task receives and serializes with ser-write-json directly to USB serial.
+/// Sends Heartbeat ServerMessage through the accountable server write channel
+/// every second. serial::io_task receives and serializes with ser-write-json
+/// directly to USB serial.
 pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
     let (_sw_int, timg0, rmt_peripheral, usb_device, gpio18, _flash, _gpio4, _gpio20, _wifi, _rwdt) =
         init_board();
@@ -41,9 +43,9 @@ pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
     loop {
         let now = embassy_time::Instant::now();
         if now.duration_since(last_send).as_millis() >= 1000 {
-            let msg = WireServerMessage {
-                id: 0,
-                msg: ServerMsgBody::Heartbeat {
+            let msg = WireServerMessage::new(
+                0,
+                ServerMsgBody::Heartbeat {
                     fps: SampleStats {
                         avg: 60.0,
                         sdev: 0.5,
@@ -62,11 +64,11 @@ pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
                         total_bytes: (esp_alloc::HEAP.free() + esp_alloc::HEAP.used()) as u32,
                     }),
                 },
-            };
+            );
 
-            // Send to OUTGOING_SERVER_MSG - io_task will serialize with ser-write-json
-            let server_channel = io_task::get_server_msg_channel();
-            let _ = server_channel.sender().try_send(msg);
+            let (server_write_request, server_write_result) = io_task::get_server_write_channels();
+            server_write_request.sender().send((0, msg)).await;
+            let _ = server_write_result.receiver().receive().await;
 
             frame_count += 1;
             last_send = now;

@@ -85,7 +85,8 @@ pub(crate) fn update_for_action(action: &UiAction) {
             }
         }
         DeviceOp::DisconnectDevice => write_connection_intent(None),
-        DeviceOp::ConnectEndpoint { .. }
+        DeviceOp::OpenProviderForRecovery { .. }
+        | DeviceOp::ConnectEndpoint { .. }
         | DeviceOp::ConnectLightPlayer
         | DeviceOp::DisconnectLightPlayer
         | DeviceOp::ResetDevice

@@ -2,7 +2,6 @@
 pub enum ProjectSyncPhase {
     #[default]
     Empty,
-    SyncingShapes,
     SyncingProject,
     Ready,
     Failed,
