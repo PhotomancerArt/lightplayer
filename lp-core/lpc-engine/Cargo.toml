@@ -54,6 +54,9 @@ lpvm-native = { path = "../../lp-shader/lpvm-native", default-features = false }
 lpvm-wasm = { path = "../../lp-shader/lpvm-wasm", default-features = false }
 
 [dev-dependencies]
+# Per-thread ambient revision so parallel engine tests that tick/stamp
+# revisions cannot race each other through the process-wide clock.
+lpc-model = { path = "../lpc-model", features = ["test-support"] }
 lpc-hardware = { path = "../lpc-hardware", default-features = false, features = ["std"] }
 lpc-shared = { path = "../lpc-shared", default-features = false, features = ["std"] }
 lpfs = { path = "../../lp-base/lpfs", default-features = false, features = ["std"] }
