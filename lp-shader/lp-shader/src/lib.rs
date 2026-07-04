@@ -5,7 +5,7 @@
 //!
 //! Helpers [`texture_binding`], [`CompilePxDesc::with_texture_spec`], and
 //! [`LpsTextureBuf::to_named_texture_uniform`] pair compile-time [`TextureBindingSpec`] maps with
-//! runtime uniform structs for [`LpsPxShader::render_frame`]. Higher layers (lpfx/domain and similar)
+//! runtime uniform structs for [`LpsPxShader::render_frame`]. Higher layers (engine/domain code)
 //! own baking palette or gradient texels into a buffer (typically height `== 1`) and must pass a
 //! matching spec—for example [`texture_binding::height_one`] when sampling ignores the vertical axis.
 

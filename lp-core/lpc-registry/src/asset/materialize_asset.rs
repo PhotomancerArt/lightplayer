@@ -4,7 +4,7 @@ use alloc::format;
 use alloc::string::{String, ToString};
 
 use lpc_model::{
-    ArtifactLocation, ArtifactOverlay, AssetBodyOverlay, AssetEntry, AssetLocation, NodeDefState,
+    ArtifactLocation, ArtifactOverlay, AssetBodyOverlay, AssetEntry, AssetLocation,
     ProjectInventory, ProjectOverlay, WithRevision,
 };
 use lpfs::LpFs;
@@ -30,9 +30,6 @@ pub fn materialize_asset(
     match source {
         AssetLocation::Artifact { location } => {
             materialize_artifact_asset(artifacts, overlay, fs, source, location, entry)
-        }
-        AssetLocation::Inline { owner, path } => {
-            materialize_inline_asset(inventory, source, owner, path, entry)
         }
     }
 }
@@ -105,68 +102,6 @@ fn materialize_artifact_asset(
             diagnostic_name: artifact_diagnostic_name(location),
         }),
         Err(err) => Err(error_from_artifact(source, err)),
-    }
-}
-
-fn materialize_inline_asset(
-    inventory: &ProjectInventory,
-    source: &AssetLocation,
-    owner: &lpc_model::NodeDefLocation,
-    path: &lpc_model::SlotPath,
-    entry: &AssetEntry,
-) -> Result<AssetBytes, AssetReadError> {
-    let Some(owner_entry) = inventory.defs.get(owner) else {
-        return Err(AssetReadError::OwnerDefUnavailable {
-            location: source.clone(),
-            owner: owner.clone(),
-        });
-    };
-    let NodeDefState::Loaded(def) = &owner_entry.state else {
-        return Err(AssetReadError::OwnerDefUnavailable {
-            location: source.clone(),
-            owner: owner.clone(),
-        });
-    };
-
-    if let Some(text) = def.inline_asset_text(&owner.path, path) {
-        return Ok(AssetBytes {
-            location: source.clone(),
-            content_type: entry.content_type,
-            revision: entry.revision,
-            bytes: text.text.as_bytes().to_vec(),
-            diagnostic_name: inline_asset_diagnostic_name(owner, path, Some(text.extension)),
-        });
-    }
-
-    if let Some(bytes) = def.inline_asset_bytes(&owner.path, path) {
-        return Ok(AssetBytes {
-            location: source.clone(),
-            content_type: entry.content_type,
-            revision: entry.revision,
-            bytes: bytes.bytes.to_vec(),
-            diagnostic_name: inline_asset_diagnostic_name(owner, path, bytes.extension),
-        });
-    }
-
-    Err(AssetReadError::Unsupported {
-        location: source.clone(),
-        message: String::from("inline asset body is not supported by this node definition"),
-    })
-}
-
-fn inline_asset_diagnostic_name(
-    owner: &lpc_model::NodeDefLocation,
-    path: &lpc_model::SlotPath,
-    extension: Option<&str>,
-) -> String {
-    match extension {
-        Some(extension) => format!(
-            "{}:{}.{}",
-            owner.artifact.file_path().as_str(),
-            path,
-            extension
-        ),
-        None => format!("{}:{}", owner.artifact.file_path().as_str(), path),
     }
 }
 

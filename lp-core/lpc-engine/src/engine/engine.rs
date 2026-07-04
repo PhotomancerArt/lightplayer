@@ -310,29 +310,35 @@ impl Engine {
         use lpfs::{LpFs, LpFsMemory};
 
         let fs = LpFsMemory::new();
-        let mut project = String::from("kind = \"Project\"\n");
+        let mut node_lines = String::new();
         for (index, (_, def)) in defs.iter().enumerate() {
-            let node_path = format!("/test-node-{index}.toml");
-            project.push_str(&format!("\n[nodes.node{index}]\nref = \".{node_path}\"\n"));
+            let node_path = format!("/test-node-{index}.json");
+            if index > 0 {
+                node_lines.push(',');
+            }
+            node_lines.push_str(&format!(
+                "\"node{index}\": {{ \"ref\": \".{node_path}\" }}"
+            ));
             let text = def
-                .write_toml(&self.slot_shapes)
+                .write_json(&self.slot_shapes)
                 .map_err(|e| e.to_string())?;
             fs.write_file(node_path.as_path(), text.as_bytes())
                 .map_err(|e| e.to_string())?;
         }
-        fs.write_file("/project.toml".as_path(), project.as_bytes())
+        let project = format!("{{ \"kind\": \"Project\", \"nodes\": {{ {node_lines} }} }}");
+        fs.write_file("/project.json".as_path(), project.as_bytes())
             .map_err(|e| e.to_string())?;
 
         let ctx = ParseCtx {
             shapes: &self.slot_shapes,
         };
         registry
-            .load_root(&fs, "/project.toml".as_path(), frame, &ctx)
+            .load_root(&fs, "/project.json".as_path(), frame, &ctx)
             .map_err(|e| format!("{e:?}"))?;
 
         for (index, (node_id, _)) in defs.iter().enumerate() {
             let location = NodeDefLocation::artifact_root(ArtifactLocation::file(format!(
-                "/test-node-{index}.toml"
+                "/test-node-{index}.json"
             )));
             let entry = self
                 .tree

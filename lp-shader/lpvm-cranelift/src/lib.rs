@@ -11,8 +11,8 @@
 //! backend** for `lp-shader`. Use [`lpvm-wasm`](../lpvm_wasm/index.html)'s
 //! `WasmLpvmEngine` (wasmtime) instead. The crate is intentionally kept in the tree:
 //!
-//! - `lp-engine` and `lpfx-cpu` still depend on it; consumer migration to wasmtime
-//!   lands in M4b (see `docs/roadmaps/2026-04-16-lp-shader-textures/m4b-host-backend-swap.md`).
+//! - Consumer migration to wasmtime lands in M4b (see
+//!   `docs/roadmaps/2026-04-16-lp-shader-textures/m4b-host-backend-swap.md`).
 //! - The `riscv32-object` path (RV32 object emission via `cranelift-object`) remains
 //!   in active use independent of the host JIT.
 //!

@@ -53,8 +53,8 @@ mod tests {
             include_str!("../../../examples/basic/shader.glsl"),
         ),
         (
-            "examples/noise.fx/main.glsl",
-            include_str!("../../../examples/noise.fx/main.glsl"),
+            "testdata/noise-fx.glsl",
+            include_str!("../testdata/noise-fx.glsl"),
         ),
         (
             "examples/perf/baseline/shader.glsl",

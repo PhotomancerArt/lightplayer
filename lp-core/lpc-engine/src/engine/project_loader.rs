@@ -1,4 +1,4 @@
-//! Load authored `project.toml` node-artifact trees into [`super::Engine`].
+//! Load authored `project.json` node-artifact trees into [`super::Engine`].
 
 use alloc::boxed::Box;
 use alloc::format;
@@ -34,7 +34,7 @@ use super::{Engine, EngineServices, LoadedProjectRuntime};
 #[derive(Debug)]
 pub enum ProjectLoadError {
     Io { path: String, details: String },
-    ProjectToml { file: String, error: String },
+    ProjectParse { file: String, error: String },
     UnknownKind { path: String, suffix: String },
     InvalidProjectReference { path: String, reason: String },
     TomlParse { path: String, error: String },
@@ -46,7 +46,7 @@ impl core::fmt::Display for ProjectLoadError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::Io { path, details } => write!(f, "io error at {path}: {details}"),
-            Self::ProjectToml { file, error } => write!(f, "parse {file}: {error}"),
+            Self::ProjectParse { file, error } => write!(f, "parse {file}: {error}"),
             Self::UnknownKind { path, suffix } => write!(f, "{path}: unknown node kind `{suffix}`"),
             Self::InvalidProjectReference { path, reason } => {
                 write!(f, "project reference {path}: {reason}")
@@ -93,7 +93,7 @@ impl ProjectLoader {
         root: &dyn LpFs,
         services: EngineServices,
     ) -> Result<LoadedProjectRuntime, ProjectLoadError> {
-        Self::load_project_artifact(root, services, ArtifactSpec::path("/project.toml"))
+        Self::load_project_artifact(root, services, ArtifactSpec::path("/project.json"))
     }
 
     pub fn load_project_artifact(
@@ -111,7 +111,7 @@ impl ProjectLoader {
 
         let load_result = registry
             .load_root(root, project_path.as_path(), frame, &ctx)
-            .map_err(|e| ProjectLoadError::ProjectToml {
+            .map_err(|e| ProjectLoadError::ProjectParse {
                 file: project_path.as_str().to_string(),
                 error: format!("{e:?}"),
             })?;
@@ -131,14 +131,14 @@ impl ProjectLoader {
     ) -> Result<(), ProjectLoadError> {
         let entry = registry
             .def(root)
-            .ok_or_else(|| ProjectLoadError::ProjectToml {
+            .ok_or_else(|| ProjectLoadError::ProjectParse {
                 file: path.as_str().to_string(),
                 error: String::from("registry did not load the project root"),
             })?;
 
         match &entry.state {
             NodeDefState::Loaded(NodeDef::Project(_)) => Ok(()),
-            NodeDefState::Loaded(other) => Err(ProjectLoadError::ProjectToml {
+            NodeDefState::Loaded(other) => Err(ProjectLoadError::ProjectParse {
                 file: path.as_str().to_string(),
                 error: format!("root artifact must be Project, got {:?}", other.kind()),
             }),
@@ -902,15 +902,15 @@ fn project_load_error_for_root_state(path: &LpPath, state: &NodeDefState) -> Pro
                 suffix: kind.clone(),
             }
         }
-        NodeDefState::ParseError(err) => ProjectLoadError::ProjectToml {
+        NodeDefState::ParseError(err) => ProjectLoadError::ProjectParse {
             file: path.as_str().to_string(),
             error: err.to_string(),
         },
-        NodeDefState::ValidationError(err) => ProjectLoadError::ProjectToml {
+        NodeDefState::ValidationError(err) => ProjectLoadError::ProjectParse {
             file: path.as_str().to_string(),
             error: err.message.clone(),
         },
-        NodeDefState::Loaded(_) => ProjectLoadError::ProjectToml {
+        NodeDefState::Loaded(_) => ProjectLoadError::ProjectParse {
             file: path.as_str().to_string(),
             error: String::from("root artifact is not a Project"),
         },
@@ -1007,15 +1007,7 @@ fn node_label(node: &ProjectedNode) -> String {
 }
 
 fn def_location_label(location: &NodeDefLocation) -> String {
-    if location.path.is_root() {
-        location.artifact.file_path().as_str().to_string()
-    } else {
-        format!(
-            "{}#{}",
-            location.artifact.file_path().as_str(),
-            location.path
-        )
-    }
+    location.artifact.file_path().as_str().to_string()
 }
 
 fn artifact_specifier_label(specifier: &ArtifactSpec) -> String {
@@ -1664,35 +1656,46 @@ mod tests {
     fn svg_fixture_project(svg: &[u8]) -> LpFsMemory {
         let fs = LpFsMemory::new();
         fs.write_file(
-            "/project.toml".as_path(),
+            "/project.json".as_path(),
             br#"
-kind = "Project"
-
-[nodes.fixture]
-ref = "./fixture.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "fixture": {
+      "ref": "./fixture.json"
+    }
+  }
+}
 "#,
         )
-        .expect("project.toml");
+        .expect("project.json");
         fs.write_file(
-            "/fixture.toml".as_path(),
+            "/fixture.json".as_path(),
             br#"
-kind = "Fixture"
-render_size = { width = 20, height = 10 }
-sampling = "direct"
-
-[bindings.input]
-source = "bus#visual.out"
-
-[bindings.output]
-target = "bus#control.out"
-
-[mapping]
-kind = "SvgPath"
-source = "./mapping.svg"
-sample_diameter = 2.0
+{
+  "kind": "Fixture",
+  "render_size": {
+    "width": 20,
+    "height": 10
+  },
+  "sampling": "direct",
+  "bindings": {
+    "input": {
+      "source": "bus#visual.out"
+    },
+    "output": {
+      "target": "bus#control.out"
+    }
+  },
+  "mapping": {
+    "kind": "SvgPath",
+    "source": "./mapping.svg",
+    "sample_diameter": 2.0
+  }
+}
 "#,
         )
-        .expect("fixture.toml");
+        .expect("fixture.json");
         fs.write_file("/mapping.svg".as_path(), svg)
             .expect("mapping.svg");
         fs
@@ -1711,7 +1714,7 @@ sample_diameter = 2.0
 
         let services = EngineServices::new(TreePath::parse("/svg_fixture.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load svg fixture project");
-        assert!(node_for_def_path(&rt, "/fixture.toml").is_some());
+        assert!(node_for_def_path(&rt, "/fixture.json").is_some());
     }
 
     #[test]
@@ -1746,7 +1749,7 @@ sample_diameter = 2.0
     }
 
     fn assert_fixture_node_error(rt: &Engine, expected: &str) {
-        assert_node_for_def_error(rt, "/fixture.toml", expected);
+        assert_node_for_def_error(rt, "/fixture.json", expected);
     }
 
     fn assert_node_for_def_error(rt: &Engine, path: &str, expected: &str) {
@@ -1765,59 +1768,85 @@ sample_diameter = 2.0
     fn playlist_project_fs() -> LpFsMemory {
         let fs = LpFsMemory::new();
         fs.write_file(
-            "/project.toml".as_path(),
+            "/project.json".as_path(),
             br#"
-kind = "Project"
-
-[nodes.playlist]
-ref = "./playlist.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "playlist": {
+      "ref": "./playlist.json"
+    }
+  }
+}
 "#,
         )
-        .expect("project.toml");
+        .expect("project.json");
         fs.write_file(
-            "/playlist.toml".as_path(),
+            "/playlist.json".as_path(),
             br#"
-kind = "Playlist"
-default_fade = 0.35
-
-[entries.1]
-name = "idle"
-node = { ref = "./idle.toml" }
-
-[entries.2]
-name = "active"
-duration = 4.0
-node = { ref = "./active.toml" }
-
-[entries.2.bindings.trigger]
-source = "bus#trigger"
+{
+  "kind": "Playlist",
+  "default_fade": 0.35,
+  "entries": {
+    "1": {
+      "name": "idle",
+      "node": {
+        "ref": "./idle.json"
+      }
+    },
+    "2": {
+      "name": "active",
+      "duration": 4.0,
+      "node": {
+        "ref": "./active.json"
+      },
+      "bindings": {
+        "trigger": {
+          "source": "bus#trigger"
+        }
+      }
+    }
+  }
+}
 "#,
         )
-        .expect("playlist.toml");
+        .expect("playlist.json");
         fs.write_file(
-            "/idle.toml".as_path(),
+            "/idle.json".as_path(),
             br#"
-kind = "Shader"
-source = { path = "idle.glsl" }
+{
+  "kind": "Shader",
+  "source": {
+    "path": "idle.glsl"
+  }
+}
 "#,
         )
-        .expect("idle.toml");
+        .expect("idle.json");
         fs.write_file(
-            "/active.toml".as_path(),
+            "/active.json".as_path(),
             br#"
-kind = "Shader"
-source = { path = "active.glsl" }
-
-[bindings.time]
-source = "..#entry_time"
-
-[consumed.time]
-kind = "value"
-value = "f32"
-default = 0.0
+{
+  "kind": "Shader",
+  "source": {
+    "path": "active.glsl"
+  },
+  "bindings": {
+    "time": {
+      "source": "..#entry_time"
+    }
+  },
+  "consumed": {
+    "time": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0.0
+    }
+  }
+}
 "#,
         )
-        .expect("active.toml");
+        .expect("active.json");
         fs.write_file(
             "/idle.glsl".as_path(),
             b"vec4 render(vec2 pos) { return vec4(0.0, pos, 1.0); }",
@@ -1834,58 +1863,83 @@ default = 0.0
     fn button_playlist_project_fs() -> LpFsMemory {
         let fs = playlist_project_fs();
         fs.write_file(
-            "/project.toml".as_path(),
+            "/project.json".as_path(),
             br#"
-kind = "Project"
-
-[nodes.clock]
-ref = "./clock.toml"
-
-[nodes.button]
-ref = "./button.toml"
-
-[nodes.playlist]
-ref = "./playlist.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "button": {
+      "ref": "./button.json"
+    },
+    "playlist": {
+      "ref": "./playlist.json"
+    }
+  }
+}
 "#,
         )
-        .expect("project.toml");
-        fs.write_file("/clock.toml".as_path(), br#"kind = "Clock""#)
-            .expect("clock.toml");
+        .expect("project.json");
         fs.write_file(
-            "/button.toml".as_path(),
-            br#"
-kind = "Button"
-endpoint = "button:gpio:D9"
-stable_ms = 1
-
-[bindings.down]
-target = "bus#trigger"
-"#,
+            "/clock.json".as_path(),
+            br#"{
+  "kind": "Clock"
+}"#,
         )
-        .expect("button.toml");
+        .expect("clock.json");
         fs.write_file(
-            "/playlist.toml".as_path(),
+            "/button.json".as_path(),
             br#"
-kind = "Playlist"
-default_fade = 0.35
-
-[bindings.time]
-source = "bus#time.seconds"
-
-[entries.1]
-name = "idle"
-node = { ref = "./idle.toml" }
-
-[entries.2]
-name = "active"
-duration = 4.0
-node = { ref = "./active.toml" }
-
-[entries.2.bindings.trigger]
-source = "bus#trigger"
+{
+  "kind": "Button",
+  "endpoint": "button:gpio:D9",
+  "stable_ms": 1,
+  "bindings": {
+    "down": {
+      "target": "bus#trigger"
+    }
+  }
+}
 "#,
         )
-        .expect("playlist.toml");
+        .expect("button.json");
+        fs.write_file(
+            "/playlist.json".as_path(),
+            br#"
+{
+  "kind": "Playlist",
+  "default_fade": 0.35,
+  "bindings": {
+    "time": {
+      "source": "bus#time.seconds"
+    }
+  },
+  "entries": {
+    "1": {
+      "name": "idle",
+      "node": {
+        "ref": "./idle.json"
+      }
+    },
+    "2": {
+      "name": "active",
+      "duration": 4.0,
+      "node": {
+        "ref": "./active.json"
+      },
+      "bindings": {
+        "trigger": {
+          "source": "bus#trigger"
+        }
+      }
+    }
+  }
+}
+"#,
+        )
+        .expect("playlist.json");
         fs
     }
 
@@ -1922,7 +1976,7 @@ source = "bus#trigger"
     }
 
     #[test]
-    fn project_toml_loads_into_runtime_with_expected_nodes() {
+    fn project_json_loads_into_runtime_with_expected_nodes() {
         let fs = flat_project();
         let root_path = TreePath::parse("/demo.show").expect("path");
         let services = EngineServices::new(root_path.clone());
@@ -1946,7 +2000,7 @@ source = "bus#trigger"
             .lookup_sibling(root, NodeName::parse("fixture").unwrap())
             .expect("fixture id");
 
-        assert_eq!(node_for_def_path(&rt, "/texture.toml"), Some(tex_id));
+        assert_eq!(node_for_def_path(&rt, "/texture.json"), Some(tex_id));
 
         for id in [tex_id, sh_id, out_id, fix_id] {
             let entry = rt.tree().get(id).expect("entry");
@@ -1988,38 +2042,49 @@ source = "bus#trigger"
     fn project_loader_loads_inline_clock_and_default_time_bus() {
         let fs = LpFsMemory::new();
         fs.write_file(
-            "/project.toml".as_path(),
+            "/project.json".as_path(),
             br#"
-kind = "Project"
-
-[nodes.clock]
-ref = "./clock.toml"
-
-[nodes.shader]
-ref = "./shader.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "shader": {
+      "ref": "./shader.json"
+    }
+  }
+}
 "#,
         )
-        .expect("project.toml");
+        .expect("project.json");
         fs.write_file(
-            "/clock.toml".as_path(),
-            br#"kind = "Clock"
-"#,
+            "/clock.json".as_path(),
+            br#"{
+  "kind": "Clock"
+}"#,
         )
-        .expect("clock.toml");
+        .expect("clock.json");
         fs.write_file(
-            "/shader.toml".as_path(),
+            "/shader.json".as_path(),
             br#"
-kind = "Shader"
-source = { path = "shader.glsl" }
-render_order = 0
-
-[consumed.time]
-kind = "value"
-value = "f32"
-default = 0.0
+{
+  "kind": "Shader",
+  "source": {
+    "path": "shader.glsl"
+  },
+  "render_order": 0,
+  "consumed": {
+    "time": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0.0
+    }
+  }
+}
 "#,
         )
-        .expect("shader.toml");
+        .expect("shader.json");
         fs.write_file(
             "/shader.glsl".as_path(),
             b"vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }",
@@ -2102,88 +2167,62 @@ default = 0.0
     }
 
     #[test]
-    fn project_loader_loads_inline_shader_def_and_source() {
+    fn project_loader_rejects_inline_child_def() {
         let fs = LpFsMemory::new();
         fs.write_file(
-            "/project.toml".as_path(),
+            "/project.json".as_path(),
             br#"
-kind = "Project"
-
-[nodes.shader.def]
-kind = "Shader"
-source = { glsl = "vec4 render(vec2 pos) { return vec4(1.0, 0.0, 0.0, 1.0); }" }
+{
+  "kind": "Project",
+  "nodes": {
+    "shader": {
+      "def": {
+        "kind": "Shader",
+        "source": "shader.glsl"
+      }
+    }
+  }
+}
 "#,
         )
-        .expect("project.toml");
+        .expect("project.json");
 
         let services = EngineServices::new(TreePath::parse("/inline.show").expect("path"));
-        let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load");
-        rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
-        let root = rt.tree().root();
-        let shader = rt
-            .tree()
-            .lookup_sibling(root, NodeName::parse("shader").unwrap())
-            .expect("shader node");
-
-        rt.tick(16).expect("tick");
-        let production = rt
-            .resolve_with_engine_host(
-                QueryKey::ProducedSlot {
-                    node: shader,
-                    slot: crate::nodes::shader_output_path(),
-                },
-                ResolveLogLevel::Off,
-            )
-            .expect("resolve shader output")
-            .0;
-        let LpValue::Product(ProductRef::Visual(product)) =
-            production.value_leaf().expect("visual product").value()
-        else {
-            panic!("shader output should be a visual product");
+        let err = match ProjectLoader::load_from_root(&fs, services) {
+            Err(err) => err,
+            Ok(_) => panic!("inline child definitions are not supported"),
         };
-
-        let texture = rt
-            .render_texture_for_test(
-                *product,
-                &RenderTextureRequest {
-                    width: 2,
-                    height: 2,
-                    format: TextureStorageFormat::Rgba16Unorm,
-                    time_seconds: 0.0,
-                },
-            )
-            .expect("render inline shader");
-        assert!(
-            texture
-                .try_raw_bytes()
-                .expect("bytes")
-                .chunks_exact(8)
-                .any(|px| px[0] != 0 || px[1] != 0),
-            "inline shader should produce nonzero red output"
-        );
+        assert!(format!("{err:?}").contains("def"), "{err:?}");
     }
-
     #[test]
     fn top_level_shader_gets_default_visual_output_binding() {
         let fs = LpFsMemory::new();
         fs.write_file(
-            "/project.toml".as_path(),
+            "/project.json".as_path(),
             br#"
-kind = "Project"
-
-[nodes.shader]
-ref = "./shader.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "shader": {
+      "ref": "./shader.json"
+    }
+  }
+}
 "#,
         )
-        .expect("project.toml");
+        .expect("project.json");
         fs.write_file(
-            "/shader.toml".as_path(),
+            "/shader.json".as_path(),
             br#"
-kind = "Shader"
-source = { path = "shader.glsl" }
+{
+  "kind": "Shader",
+  "source": {
+    "path": "shader.glsl"
+  }
+}
 "#,
         )
-        .expect("shader.toml");
+        .expect("shader.json");
         fs.write_file(
             "/shader.glsl".as_path(),
             b"vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }",
@@ -2192,7 +2231,7 @@ source = { path = "shader.glsl" }
 
         let services = EngineServices::new(TreePath::parse("/default_visual.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load");
-        let shader = node_for_def_path(&rt, "/shader.toml").expect("shader node");
+        let shader = node_for_def_path(&rt, "/shader.json").expect("shader node");
 
         assert!(rt.tree().bindings().any(|binding| {
             matches!(
@@ -2212,43 +2251,68 @@ source = { path = "shader.glsl" }
     fn top_level_sibling_node_refs_resolve_through_root() {
         let fs = flat_project();
         fs.write_file(
-            "/fixture.toml".as_path(),
+            "/fixture.json".as_path(),
             br#"
-kind = "Fixture"
-color_order = "rgb"
-brightness = 255
-gamma_correction = false
-transform = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
-
-[bindings.input]
-source = "..texture#output"
-
-[bindings.output]
-target = "bus#control.out"
-
-[mapping]
-kind = "PathPoints"
-sample_diameter = 2.0
-
-[mapping.paths.0]
-kind = "RingArray"
-center = [0.5, 0.5]
-diameter = 1.0
-start_ring_inclusive = 0
-end_ring_exclusive = 1
-offset_angle = 0.0
-order = "inner_first"
-
-[mapping.paths.0.ring_lamp_counts]
-0 = 1
+{
+  "kind": "Fixture",
+  "color_order": "rgb",
+  "brightness": 255,
+  "gamma_correction": false,
+  "transform": [
+    [
+      1.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      1.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "bindings": {
+    "input": {
+      "source": "..texture#output"
+    },
+    "output": {
+      "target": "bus#control.out"
+    }
+  },
+  "mapping": {
+    "kind": "PathPoints",
+    "sample_diameter": 2.0,
+    "paths": {
+      "0": {
+        "kind": "RingArray",
+        "center": [
+          0.5,
+          0.5
+        ],
+        "diameter": 1.0,
+        "start_ring_inclusive": 0,
+        "end_ring_exclusive": 1,
+        "offset_angle": 0.0,
+        "order": "inner_first",
+        "ring_lamp_counts": {
+          "0": 1
+        }
+      }
+    }
+  }
+}
 "#,
         )
-        .expect("fixture.toml");
+        .expect("fixture.json");
 
         let services = EngineServices::new(TreePath::parse("/sibling_ref.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load");
-        let texture = node_for_def_path(&rt, "/texture.toml").expect("texture node");
-        let fixture = node_for_def_path(&rt, "/fixture.toml").expect("fixture node");
+        let texture = node_for_def_path(&rt, "/texture.json").expect("texture node");
+        let fixture = node_for_def_path(&rt, "/fixture.json").expect("fixture node");
 
         assert!(rt.tree().bindings().any(|binding| {
             matches!(
@@ -2391,30 +2455,34 @@ order = "inner_first"
     }
 
     #[test]
-    fn malformed_child_node_toml_projects_error_node() {
+    fn malformed_child_node_json_projects_error_node() {
         let fs = LpFsMemory::new();
         fs.write_file(
-            "/project.toml".as_path(),
+            "/project.json".as_path(),
             br#"
-kind = "Project"
-
-[nodes.broken]
-ref = "./broken.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "broken": {
+      "ref": "./broken.json"
+    }
+  }
+}
 "#,
         )
-        .expect("project.toml");
-        fs.write_file("/broken.toml".as_path(), b"not valid toml {{{")
-            .expect("broken.toml");
+        .expect("project.json");
+        fs.write_file("/broken.json".as_path(), b"not valid json {{{")
+            .expect("broken.json");
 
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load project");
 
-        assert_node_for_def_error(&rt, "/broken.toml", "parse error");
+        assert_node_for_def_error(&rt, "/broken.json", "parse error");
     }
 
     #[test]
-    fn missing_project_toml_returns_io_error() {
+    fn missing_project_json_returns_io_error() {
         let fs = LpFsMemory::new();
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
@@ -2432,61 +2500,95 @@ ref = "./broken.toml"
     fn unknown_child_kind_projects_error_node() {
         let fs = LpFsMemory::new();
         fs.write_file(
-            "/project.toml".as_path(),
+            "/project.json".as_path(),
             br#"
-kind = "Project"
-
-[nodes.weird]
-ref = "./weird.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "weird": {
+      "ref": "./weird.json"
+    }
+  }
+}
 "#,
         )
-        .expect("project.toml");
-        fs.write_file("/weird.toml".as_path(), br#"kind = "banana""#)
-            .expect("weird.toml");
+        .expect("project.json");
+        fs.write_file(
+            "/weird.json".as_path(),
+            br#"{
+  "kind": "banana"
+}"#,
+        )
+        .expect("weird.json");
 
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load project");
 
-        assert_node_for_def_error(&rt, "/weird.toml", "unknown node kind");
+        assert_node_for_def_error(&rt, "/weird.json", "unknown node kind");
     }
 
     #[test]
     fn missing_sibling_node_loc_names_missing_ref() {
         let fs = flat_project();
         fs.write_file(
-            "/fixture.toml".as_path(),
+            "/fixture.json".as_path(),
             br#"
-kind = "Fixture"
-color_order = "rgb"
-brightness = 255
-gamma_correction = false
-transform = [[1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
-
-[bindings.input]
-source = "..missing#output"
-
-[bindings.output]
-target = "bus#control.out"
-
-[mapping]
-kind = "PathPoints"
-sample_diameter = 2.0
-
-[mapping.paths.0]
-kind = "RingArray"
-center = [0.5, 0.5]
-diameter = 1.0
-start_ring_inclusive = 0
-end_ring_exclusive = 1
-offset_angle = 0.0
-order = "inner_first"
-
-[mapping.paths.0.ring_lamp_counts]
-0 = 1
+{
+  "kind": "Fixture",
+  "color_order": "rgb",
+  "brightness": 255,
+  "gamma_correction": false,
+  "transform": [
+    [
+      1.0,
+      0.0,
+      0.0
+    ],
+    [
+      1.0,
+      1.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "bindings": {
+    "input": {
+      "source": "..missing#output"
+    },
+    "output": {
+      "target": "bus#control.out"
+    }
+  },
+  "mapping": {
+    "kind": "PathPoints",
+    "sample_diameter": 2.0,
+    "paths": {
+      "0": {
+        "kind": "RingArray",
+        "center": [
+          0.5,
+          0.5
+        ],
+        "diameter": 1.0,
+        "start_ring_inclusive": 0,
+        "end_ring_exclusive": 1,
+        "offset_angle": 0.0,
+        "order": "inner_first",
+        "ring_lamp_counts": {
+          "0": 1
+        }
+      }
+    }
+  }
+}
 "#,
         )
-        .expect("fixture.toml");
+        .expect("fixture.json");
 
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
@@ -2508,76 +2610,113 @@ order = "inner_first"
     fn slash_node_ref_projects_error_node() {
         let fs = flat_project();
         fs.write_file(
-            "/fixture.toml".as_path(),
+            "/fixture.json".as_path(),
             br#"
-kind = "Fixture"
-color_order = "rgb"
-brightness = 255
-gamma_correction = false
-transform = [[1.0, 0.0, 0.0], [1.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
-
-[bindings.input]
-source = "/texture#output"
-
-[bindings.output]
-target = "bus#control.out"
-
-[mapping]
-kind = "PathPoints"
-sample_diameter = 2.0
-
-[mapping.paths.0]
-kind = "RingArray"
-center = [0.5, 0.5]
-diameter = 1.0
-start_ring_inclusive = 0
-end_ring_exclusive = 1
-offset_angle = 0.0
-order = "inner_first"
-
-[mapping.paths.0.ring_lamp_counts]
-0 = 1
+{
+  "kind": "Fixture",
+  "color_order": "rgb",
+  "brightness": 255,
+  "gamma_correction": false,
+  "transform": [
+    [
+      1.0,
+      0.0,
+      0.0
+    ],
+    [
+      1.0,
+      1.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "bindings": {
+    "input": {
+      "source": "/texture#output"
+    },
+    "output": {
+      "target": "bus#control.out"
+    }
+  },
+  "mapping": {
+    "kind": "PathPoints",
+    "sample_diameter": 2.0,
+    "paths": {
+      "0": {
+        "kind": "RingArray",
+        "center": [
+          0.5,
+          0.5
+        ],
+        "diameter": 1.0,
+        "start_ring_inclusive": 0,
+        "end_ring_exclusive": 1,
+        "offset_angle": 0.0,
+        "order": "inner_first",
+        "ring_lamp_counts": {
+          "0": 1
+        }
+      }
+    }
+  }
+}
 "#,
         )
-        .expect("fixture.toml");
+        .expect("fixture.json");
 
         let root_path = TreePath::parse("/p.show").expect("path");
         let services = EngineServices::new(root_path);
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load project");
 
-        assert_node_for_def_error(&rt, "/fixture.toml", "node locations use dot syntax");
+        assert_node_for_def_error(&rt, "/fixture.json", "node locations use dot syntax");
     }
 
     #[test]
     fn project_loader_attaches_compute_shader_node() {
         let fs = LpFsMemory::new();
         fs.write_file(
-            "/project.toml".as_path(),
+            "/project.json".as_path(),
             br#"
-kind = "Project"
-
-[nodes.compute]
-ref = "./compute.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "compute": {
+      "ref": "./compute.json"
+    }
+  }
+}
 "#,
         )
-        .expect("project.toml");
+        .expect("project.json");
         fs.write_file(
-            "/compute.toml".as_path(),
+            "/compute.json".as_path(),
             br#"
-kind = "ComputeShader"
-source = { path = "compute.glsl" }
-
-[consumed.time]
-kind = "value"
-value = "f32"
-default = 0.25
-
-[produced.phase]
-kind = "value"
-value = "f32"
+{
+  "kind": "ComputeShader",
+  "source": {
+    "path": "compute.glsl"
+  },
+  "consumed": {
+    "time": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0.25
+    }
+  },
+  "produced": {
+    "phase": {
+      "kind": "value",
+      "value": "f32"
+    }
+  }
+}
 "#,
         )
-        .expect("compute.toml");
+        .expect("compute.json");
         fs.write_file(
             "/compute.glsl".as_path(),
             b"void tick() { phase = time + 2.0; }",
@@ -2588,7 +2727,7 @@ value = "f32"
         let services = EngineServices::new(root_path);
         let mut rt = ProjectLoader::load_from_root(&fs, services).expect("load");
         rt.set_graphics(Some(Arc::new(crate::Graphics::new())));
-        let node = node_for_def_path(&rt, "/compute.toml").expect("compute node");
+        let node = node_for_def_path(&rt, "/compute.json").expect("compute node");
 
         let production = rt
             .resolve_with_engine_host(
@@ -2967,21 +3106,27 @@ value = "f32"
     fn button_node_publishes_held_and_up_from_virtual_d9() {
         let fs = LpFsMemory::new();
         fs.write_file(
-            "/project.toml".as_path(),
+            "/project.json".as_path(),
             br#"
-kind = "Project"
-
-[nodes.button]
-ref = "./button.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "button": {
+      "ref": "./button.json"
+    }
+  }
+}
 "#,
         )
         .expect("project");
         fs.write_file(
-            "/button.toml".as_path(),
+            "/button.json".as_path(),
             br#"
-kind = "Button"
-endpoint = "button:gpio:D9"
-stable_ms = 1
+{
+  "kind": "Button",
+  "endpoint": "button:gpio:D9",
+  "stable_ms": 1
+}
 "#,
         )
         .expect("button");
@@ -3030,43 +3175,55 @@ stable_ms = 1
     fn control_radio_bidirectional_bus_binding_broadcasts_button_event() {
         let fs = LpFsMemory::new();
         fs.write_file(
-            "/project.toml".as_path(),
+            "/project.json".as_path(),
             br#"
-kind = "Project"
-
-[nodes.button]
-ref = "./button.toml"
-
-[nodes.radio]
-ref = "./radio.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "button": {
+      "ref": "./button.json"
+    },
+    "radio": {
+      "ref": "./radio.json"
+    }
+  }
+}
 "#,
         )
         .expect("project");
         fs.write_file(
-            "/button.toml".as_path(),
+            "/button.json".as_path(),
             br#"
-kind = "Button"
-endpoint = "button:gpio:D9"
-stable_ms = 1
-
-[bindings.down]
-target = "bus#trigger"
+{
+  "kind": "Button",
+  "endpoint": "button:gpio:D9",
+  "stable_ms": 1,
+  "bindings": {
+    "down": {
+      "target": "bus#trigger"
+    }
+  }
+}
 "#,
         )
         .expect("button");
         fs.write_file(
-            "/radio.toml".as_path(),
+            "/radio.json".as_path(),
             br#"
-kind = "ControlRadio"
-endpoint = "radio:virtual:0"
-channel = 1
-repeat_count = 2
-
-[bindings.input]
-source = "bus#trigger"
-
-[bindings.output]
-target = "bus#trigger"
+{
+  "kind": "ControlRadio",
+  "endpoint": "radio:virtual:0",
+  "channel": 1,
+  "repeat_count": 2,
+  "bindings": {
+    "input": {
+      "source": "bus#trigger"
+    },
+    "output": {
+      "target": "bus#trigger"
+    }
+  }
+}
 "#,
         )
         .expect("radio");
@@ -3290,98 +3447,142 @@ target = "bus#trigger"
 
     fn write_flat_basic_files(fs: &LpFsMemory) {
         fs.write_file(
-            "/project.toml".as_path(),
+            "/project.json".as_path(),
             br#"
-kind = "Project"
-name = "basic"
-
-[nodes.output]
-ref = "./output.toml"
-
-[nodes.texture]
-ref = "./texture.toml"
-
-[nodes.shader]
-ref = "./shader.toml"
-
-[nodes.fixture]
-ref = "./fixture.toml"
+{
+  "kind": "Project",
+  "name": "basic",
+  "nodes": {
+    "output": {
+      "ref": "./output.json"
+    },
+    "texture": {
+      "ref": "./texture.json"
+    },
+    "shader": {
+      "ref": "./shader.json"
+    },
+    "fixture": {
+      "ref": "./fixture.json"
+    }
+  }
+}
 "#,
         )
-        .expect("project.toml");
+        .expect("project.json");
         fs.write_file(
-            "/texture.toml".as_path(),
+            "/texture.json".as_path(),
             br#"
-kind = "Texture"
-[size]
-width = 16
-height = 16
-
-[bindings.input]
-source = "bus#visual.out"
+{
+  "kind": "Texture",
+  "size": {
+    "width": 16,
+    "height": 16
+  },
+  "bindings": {
+    "input": {
+      "source": "bus#visual.out"
+    }
+  }
+}
 "#,
         )
-        .expect("texture.toml");
+        .expect("texture.json");
         fs.write_file(
-            "/shader.toml".as_path(),
+            "/shader.json".as_path(),
             br#"
-kind = "Shader"
-source = { path = "shader.glsl" }
-render_order = 0
-
-[bindings.output]
-target = "bus#visual.out"
+{
+  "kind": "Shader",
+  "source": {
+    "path": "shader.glsl"
+  },
+  "render_order": 0,
+  "bindings": {
+    "output": {
+      "target": "bus#visual.out"
+    }
+  }
+}
 "#,
         )
-        .expect("shader.toml");
+        .expect("shader.json");
         fs.write_file(
             "/shader.glsl".as_path(),
             b"vec4 render(vec2 pos) { return vec4(pos, 0.0, 1.0); }",
         )
         .expect("shader.glsl");
         fs.write_file(
-            "/output.toml".as_path(),
+            "/output.json".as_path(),
             br#"
-kind = "Output"
-endpoint = "ws281x:rmt:D10"
-
-[bindings.input]
-source = "bus#control.out"
+{
+  "kind": "Output",
+  "endpoint": "ws281x:rmt:D10",
+  "bindings": {
+    "input": {
+      "source": "bus#control.out"
+    }
+  }
+}
 "#,
         )
-        .expect("output.toml");
+        .expect("output.json");
         fs.write_file(
-            "/fixture.toml".as_path(),
+            "/fixture.json".as_path(),
             br#"
-kind = "Fixture"
-color_order = "rgb"
-brightness = 255
-gamma_correction = false
-transform = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
-
-[bindings.input]
-source = "bus#visual.out"
-
-[bindings.output]
-target = "bus#control.out"
-
-[mapping]
-kind = "PathPoints"
-sample_diameter = 2.0
-
-[mapping.paths.0]
-kind = "RingArray"
-center = [0.5, 0.5]
-diameter = 1.0
-start_ring_inclusive = 0
-end_ring_exclusive = 1
-offset_angle = 0.0
-order = "inner_first"
-
-[mapping.paths.0.ring_lamp_counts]
-0 = 1
+{
+  "kind": "Fixture",
+  "color_order": "rgb",
+  "brightness": 255,
+  "gamma_correction": false,
+  "transform": [
+    [
+      1.0,
+      0.0,
+      0.0
+    ],
+    [
+      0.0,
+      1.0,
+      0.0
+    ],
+    [
+      0.0,
+      0.0,
+      1.0
+    ]
+  ],
+  "bindings": {
+    "input": {
+      "source": "bus#visual.out"
+    },
+    "output": {
+      "target": "bus#control.out"
+    }
+  },
+  "mapping": {
+    "kind": "PathPoints",
+    "sample_diameter": 2.0,
+    "paths": {
+      "0": {
+        "kind": "RingArray",
+        "center": [
+          0.5,
+          0.5
+        ],
+        "diameter": 1.0,
+        "start_ring_inclusive": 0,
+        "end_ring_exclusive": 1,
+        "offset_angle": 0.0,
+        "order": "inner_first",
+        "ring_lamp_counts": {
+          "0": 1
+        }
+      }
+    }
+  }
+}
 "#,
         )
-        .expect("fixture.toml");
+        .expect("fixture.json");
     }
 }

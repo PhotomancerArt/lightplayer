@@ -100,19 +100,21 @@ mod tests {
 
     #[test]
     fn fluid_def_parses_inline_emitters() {
-        let def = NodeDef::from_toml_str(
-            r#"
-kind = "Fluid"
-
-[emitters.1]
-id = 1
-pos = [0.5, 0.5]
-dir = [1.0, 0.0]
-radius = 0.05
-color = [1.0, 0.25, 0.0]
-velocity = 0.4
-intensity = 1.0
-"#,
+        let def = NodeDef::from_json_str(
+            r#"{
+  "kind": "Fluid",
+  "emitters": {
+    "1": {
+      "id": 1,
+      "pos": [0.5, 0.5],
+      "dir": [1.0, 0.0],
+      "radius": 0.05,
+      "color": [1.0, 0.25, 0.0],
+      "velocity": 0.4,
+      "intensity": 1.0
+    }
+  }
+}"#,
         )
         .expect("fluid");
 

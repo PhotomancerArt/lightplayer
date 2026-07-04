@@ -70,18 +70,17 @@ fn process_messages(
 
 /// Create a test project on a filesystem
 ///
-/// Creates a minimal project with project.toml.
+/// Creates a minimal project with project.json.
 #[allow(
     dead_code,
     reason = "async client integration tests are being rewritten"
 )]
 fn create_test_project(fs: &mut LpFsMemory, name: &str) -> Result<(), ClientError> {
-    let project_toml = format!(
-        r#"kind = "Project"
-name = "{name}"
+    let project_json = format!(
+        r#"{{ "kind": "Project", "name": "{name}" }}
 "#
     );
-    fs.write_file_mut("/project.toml".as_path(), project_toml.as_bytes())
+    fs.write_file_mut("/project.json".as_path(), project_json.as_bytes())
         .map_err(|_| todo!())?;
 
     Ok(())
@@ -128,19 +127,21 @@ fn test_create_command_structure() {
     let mut fs = LpFsMemory::new();
     let project_name = "my-project";
 
-    let project_toml = format!(
-        r#"kind = "Project"
-name = "{project_name}"
+    let project_json = format!(
+        r#"{{
+  "kind": "Project",
+  "name": "{project_name}"
+}}
 "#
     );
-    fs.write_file_mut("/project.toml".as_path(), project_toml.as_bytes())
+    fs.write_file_mut("/project.json".as_path(), project_json.as_bytes())
         .unwrap();
 
-    // Verify project.toml exists and is valid
-    let content = fs.read_file("/project.toml".as_path()).unwrap();
-    let config: toml::Value = toml::from_slice(&content).unwrap();
+    // Verify project.json exists and is valid
+    let content = fs.read_file("/project.json".as_path()).unwrap();
+    let config: serde_json::Value = serde_json::from_slice(&content).unwrap();
     assert_eq!(
-        config.get("name").and_then(toml::Value::as_str),
+        config.get("name").and_then(serde_json::Value::as_str),
         Some(project_name)
     );
 }

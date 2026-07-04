@@ -12,8 +12,6 @@ use alloc::string::String;
 pub enum AssetBodyOrigin {
     /// Body comes from committed artifact storage.
     Committed,
-    /// Body is embedded inside the owning node definition.
-    Inline,
     /// Body is supplied by a pending overlay replacement.
     OverlayReplace,
 }

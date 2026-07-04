@@ -183,7 +183,7 @@ fn enum_derive_variant_name_overrides_rename_all() {
 }
 
 #[test]
-fn external_enum_derive_round_trips_through_toml_slot_codec() {
+fn external_enum_derive_round_trips_through_json_slot_codec() {
     let shape_id = SlotShapeId::from_static_name("test.ExternalMode");
     let mut registry = SlotShapeRegistry::default();
     registry
@@ -197,12 +197,19 @@ fn external_enum_derive_round_trips_through_toml_slot_codec() {
         )),
     ));
 
-    let toml = registry
-        .write_slot_toml_data(shape_id, data.access())
-        .unwrap();
-    assert_eq!(toml["option_a"].as_integer(), Some(7));
+    let mut out = Vec::new();
+    let mut writer = lpc_model::slot_codec::SlotWriter::new(&mut out);
+    lpc_model::slot_codec::write_slot_data_json_value(
+        &registry,
+        shape_id,
+        data.access(),
+        writer.value(),
+    )
+    .unwrap();
+    let json = String::from_utf8(out).unwrap();
+    assert_eq!(json, r#"{"option_a":7}"#);
 
-    let read = registry.read_slot_toml(shape_id, &toml).unwrap();
+    let read = registry.read_slot_json(shape_id, &json).unwrap();
     let SlotDataAccess::Enum(en) = read.data() else {
         panic!("expected enum");
     };

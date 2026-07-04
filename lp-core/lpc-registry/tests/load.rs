@@ -15,45 +15,59 @@ fn write_file(fs: &mut LpFsMemory, path: &str, contents: &str) {
 }
 
 #[test]
-fn load_root_discovers_root_external_inline_and_asset_entries() {
+fn load_root_discovers_root_external_and_asset_entries() {
     let shapes = SlotShapeRegistry::default();
     let ctx = parse_ctx(&shapes);
     let mut fs = LpFsMemory::new();
     write_file(
         &mut fs,
-        "/project.toml",
+        "/project.json",
         r#"
-kind = "Project"
-
-[nodes.shader]
-ref = "./shader.toml"
-
-[nodes.clock.def]
-kind = "Clock"
+{
+  "kind": "Project",
+  "nodes": {
+    "shader": {
+      "ref": "./shader.json"
+    },
+    "clock": {
+      "ref": "./clock.json"
+    }
+  }
+}
 "#,
     );
     write_file(
         &mut fs,
-        "/shader.toml",
+        "/clock.json",
         r#"
-kind = "Shader"
-source = { path = "shader.glsl" }
-render_order = 0
+{
+  "kind": "Clock"
+}
+"#,
+    );
+    write_file(
+        &mut fs,
+        "/shader.json",
+        r#"
+{
+  "kind": "Shader",
+  "source": {
+    "path": "shader.glsl"
+  },
+  "render_order": 0
+}
 "#,
     );
     write_file(&mut fs, "/shader.glsl", "void main() {}");
 
     let mut registry = ProjectRegistry::new();
     let result = registry
-        .load_root(&fs, LpPath::new("/project.toml"), Revision::new(1), &ctx)
+        .load_root(&fs, LpPath::new("/project.json"), Revision::new(1), &ctx)
         .unwrap();
 
-    let root = NodeDefLocation::artifact_root(ArtifactLocation::file("/project.toml"));
-    let shader = NodeDefLocation::artifact_root(ArtifactLocation::file("/shader.toml"));
-    let inline_clock = NodeDefLocation {
-        artifact: ArtifactLocation::file("/project.toml"),
-        path: SlotPath::parse("nodes[clock]").unwrap(),
-    };
+    let root = NodeDefLocation::artifact_root(ArtifactLocation::file("/project.json"));
+    let shader = NodeDefLocation::artifact_root(ArtifactLocation::file("/shader.json"));
+    let clock = NodeDefLocation::artifact_root(ArtifactLocation::file("/clock.json"));
     let shader_asset = AssetLocation::artifact(ArtifactLocation::file("/shader.glsl"));
 
     assert_eq!(result.root, root);
@@ -69,7 +83,7 @@ render_order = 0
         NodeDefState::Loaded(lpc_model::NodeDef::Shader(_))
     ));
     assert!(matches!(
-        registry.def(&inline_clock).unwrap().state,
+        registry.def(&clock).unwrap().state,
         NodeDefState::Loaded(lpc_model::NodeDef::Clock(_))
     ));
     assert_eq!(
@@ -83,45 +97,41 @@ render_order = 0
 }
 
 #[test]
-fn load_root_discovers_inline_source_asset() {
+fn load_root_reports_parse_error_for_inline_child_def() {
     let shapes = SlotShapeRegistry::default();
     let ctx = parse_ctx(&shapes);
     let mut fs = LpFsMemory::new();
     write_file(
         &mut fs,
-        "/project.toml",
+        "/project.json",
         r#"
-kind = "Project"
-
-[nodes.shader.def]
-kind = "Shader"
-source = { glsl = "void main() {}" }
+{
+  "kind": "Project",
+  "nodes": {
+    "shader": {
+      "def": {
+        "kind": "Shader",
+        "source": "shader.glsl"
+      }
+    }
+  }
+}
 "#,
     );
 
     let mut registry = ProjectRegistry::new();
-    registry
-        .load_root(&fs, LpPath::new("/project.toml"), Revision::new(1), &ctx)
-        .unwrap();
+    let result = registry
+        .load_root(&fs, LpPath::new("/project.json"), Revision::new(1), &ctx)
+        .expect("load records the parse error as a def entry");
 
-    let source = AssetLocation::inline(
-        NodeDefLocation {
-            artifact: ArtifactLocation::file("/project.toml"),
-            path: SlotPath::parse("nodes[shader]").unwrap(),
-        },
-        SlotPath::parse("nodes[shader].source").unwrap(),
-    );
-    let entry = registry.asset(&source).expect("inline source asset");
-
-    assert_eq!(entry.content_type, AssetContentType::ShaderSource);
-    assert_eq!(
-        entry.state,
-        AssetState::Available {
-            origin: AssetBodyOrigin::Inline
-        }
-    );
+    let root = NodeDefLocation::artifact_root(ArtifactLocation::file("/project.json"));
+    assert_eq!(result.root, root);
+    let state = &registry.def(&root).unwrap().state;
+    let NodeDefState::ParseError(err) = state else {
+        panic!("expected parse error for inline child def, got {state:?}");
+    };
+    assert!(format!("{err}").contains("def"), "{err}");
 }
-
 #[test]
 fn load_root_keeps_missing_referenced_def_as_error_entry() {
     let shapes = SlotShapeRegistry::default();
@@ -129,21 +139,25 @@ fn load_root_keeps_missing_referenced_def_as_error_entry() {
     let mut fs = LpFsMemory::new();
     write_file(
         &mut fs,
-        "/project.toml",
+        "/project.json",
         r#"
-kind = "Project"
-
-[nodes.shader]
-ref = "./missing.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "shader": {
+      "ref": "./missing.json"
+    }
+  }
+}
 "#,
     );
 
     let mut registry = ProjectRegistry::new();
     registry
-        .load_root(&fs, LpPath::new("/project.toml"), Revision::new(1), &ctx)
+        .load_root(&fs, LpPath::new("/project.json"), Revision::new(1), &ctx)
         .unwrap();
 
-    let missing = NodeDefLocation::artifact_root(ArtifactLocation::file("/missing.toml"));
+    let missing = NodeDefLocation::artifact_root(ArtifactLocation::file("/missing.json"));
     assert_eq!(
         registry.def(&missing).map(|entry| &entry.state),
         Some(&NodeDefState::NotFound)
@@ -157,26 +171,34 @@ fn load_root_keeps_missing_referenced_asset_as_error_entry() {
     let mut fs = LpFsMemory::new();
     write_file(
         &mut fs,
-        "/project.toml",
+        "/project.json",
         r#"
-kind = "Project"
-
-[nodes.shader]
-ref = "./shader.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "shader": {
+      "ref": "./shader.json"
+    }
+  }
+}
 "#,
     );
     write_file(
         &mut fs,
-        "/shader.toml",
+        "/shader.json",
         r#"
-kind = "Shader"
-source = { path = "missing.glsl" }
+{
+  "kind": "Shader",
+  "source": {
+    "path": "missing.glsl"
+  }
+}
 "#,
     );
 
     let mut registry = ProjectRegistry::new();
     registry
-        .load_root(&fs, LpPath::new("/project.toml"), Revision::new(1), &ctx)
+        .load_root(&fs, LpPath::new("/project.json"), Revision::new(1), &ctx)
         .unwrap();
 
     let missing = AssetLocation::artifact(ArtifactLocation::file("/missing.glsl"));

@@ -138,13 +138,13 @@ pub enum Kind {
     Color,
     /// Fixed-max palette: [`MAX_PALETTE_LEN`], `count`, and `entries` (`quantity.md` §3, `color.md`).
     ///
-    /// Note: This is the **authoring/storage** recipe. At runtime, lpfx bakes the palette
-    /// to a height-one texture and binds it as a shader field like `params.palette`.
+    /// Note: This is the **authoring/storage** recipe. At runtime the engine bakes the
+    /// palette to a height-one texture and binds it as a shader field like `params.palette`.
     ColorPalette,
     /// Gradient with stops; [`MAX_GRADIENT_STOPS`] and [`InterpMethod`] (`quantity.md` §3).
     ///
-    /// Note: This is the **authoring/storage** recipe. At runtime, lpfx bakes the gradient
-    /// to a height-one texture and binds it as a shader field like `params.gradient`.
+    /// Note: This is the **authoring/storage** recipe. At runtime the engine bakes the
+    /// gradient to a height-one texture and binds it as a shader field like `params.gradient`.
     Gradient,
     /// 2D position as `LpType::Vec2` (`quantity.md` §3).
     Position2d,

@@ -78,7 +78,7 @@ pub(crate) fn error_node_view() -> UiNodeView {
 
 pub(crate) fn playlist_header() -> UiNodeHeader {
     UiNodeHeader::new("Playlist", "Playlist", "/fyeah_sign.show/playlist.playlist")
-        .with_source("playlist.toml")
+        .with_source("playlist.json")
         .with_status(UiStatus::good("Running"))
         .with_summary("entry 1")
         .with_detail("Node has run recently with no reported errors.")
@@ -300,7 +300,7 @@ pub(crate) fn asset_slots_fixture() -> Vec<UiConfigSlot> {
 
 pub(crate) fn children_fixture() -> Vec<UiNodeChild> {
     vec![
-        UiNodeChild::new("idle", "Shader", "./idle.toml")
+        UiNodeChild::new("idle", "Shader", "./idle.json")
             .active("active, fade_after 0.12 s")
             .with_sections(vec![
                 UiNodeSection::ProducedProducts(vec![
@@ -318,7 +318,7 @@ pub(crate) fn children_fixture() -> Vec<UiNodeChild> {
                     UiConfigSlot::value("shader", "Shader", UiSlotValue::string("idle.glsl")),
                 ]),
             ]),
-        UiNodeChild::new("blast", "Shader", "./blast.toml").with_sections(vec![
+        UiNodeChild::new("blast", "Shader", "./blast.json").with_sections(vec![
             UiNodeSection::ConfigSlots(vec![
                 UiConfigSlot::value(
                     "time",

@@ -65,7 +65,7 @@ mod tests {
             render_order: RenderOrderSlot::new(RenderOrder(10)),
             xy: XySlot::new(Xy([1.0, 2.0])),
             asset: AssetSlot::path("shader.glsl"),
-            artifact_path: ArtifactPathSlot::new(ArtifactPath(String::from("./shader.toml"))),
+            artifact_path: ArtifactPathSlot::new(ArtifactPath(String::from("./shader.json"))),
             dim: Dim2uSlot::new(Dim2u {
                 width: 64,
                 height: 32,
@@ -76,13 +76,13 @@ mod tests {
             resource: ResourceRefSlot::new(ResourceRef::runtime_buffer(RuntimeBufferId::new(4))),
         };
 
-        let authored = toml::to_string_pretty(&slots).unwrap();
-        assert!(authored.contains("ratio = 0.75"));
-        assert!(authored.contains("asset = \"shader.glsl\""));
-        assert!(authored.contains("color_order = \"grb\""));
-        assert!(authored.contains("texture_loc = \"..texture\""));
+        let authored = serde_json::to_string_pretty(&slots).unwrap();
+        assert!(authored.contains("\"ratio\": 0.75"));
+        assert!(authored.contains("\"asset\": \"shader.glsl\""));
+        assert!(authored.contains("\"color_order\": \"grb\""));
+        assert!(authored.contains("\"texture_loc\": \"..texture\""));
 
-        let decoded: SemanticSlots = toml::from_str(&authored).unwrap();
+        let decoded: SemanticSlots = serde_json::from_str(&authored).unwrap();
 
         let stamped_revision = decoded.ratio.revision();
         assert_eq!(decoded.dim.revision(), stamped_revision);

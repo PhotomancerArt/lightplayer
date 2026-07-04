@@ -487,7 +487,7 @@ mod tests {
     use crate::{
         LpType, LpValue, SlotDataAccess, SlotMapKeyShape, SlotShapeRegistry, SlotVariantShape,
         slot::shape,
-        slot_codec::{JsonSyntaxSource, SlotReader, TomlSyntaxSource},
+        slot_codec::{JsonSyntaxSource, SlotReader},
     };
     use alloc::vec;
 
@@ -636,7 +636,7 @@ mod tests {
     }
 
     #[test]
-    fn dynamic_slot_reader_reads_external_record_enums_from_toml() {
+    fn dynamic_slot_reader_reads_external_record_enums_from_json() {
         let shape_id = crate::SlotShapeId::from_static_name("test.DynamicExternalRecordEnum");
         let mut registry = SlotShapeRegistry::default();
         registry
@@ -654,16 +654,7 @@ mod tests {
                 ]),
             )
             .unwrap();
-        let value = toml::from_str::<toml::Value>(
-            r#"
-[point]
-x = 10
-y = 11
-"#,
-        )
-        .unwrap();
-
-        let object = read_toml(&registry, shape_id, &value);
+        let object = read_json(&registry, shape_id, r#"{"point":{"x":10,"y":11}}"#);
 
         let SlotDataAccess::Enum(en) = object.data() else {
             panic!("expected enum");
@@ -748,15 +739,6 @@ y = 11
         json: &str,
     ) -> Box<dyn SlotMutAccess> {
         let mut reader = SlotReader::new(JsonSyntaxSource::new(json).unwrap(), registry);
-        read_dynamic_slot(registry, shape_id, reader.value()).unwrap()
-    }
-
-    fn read_toml(
-        registry: &SlotShapeRegistry,
-        shape_id: crate::SlotShapeId,
-        value: &toml::Value,
-    ) -> Box<dyn SlotMutAccess> {
-        let mut reader = SlotReader::new(TomlSyntaxSource::new(value).unwrap(), registry);
         read_dynamic_slot(registry, shape_id, reader.value()).unwrap()
     }
 

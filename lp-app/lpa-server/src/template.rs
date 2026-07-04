@@ -2,9 +2,9 @@
 //!
 //! Provides functions to create default project templates that work with any LpFs implementation.
 //!
-//! Node definitions are authored as static SlotCodec TOML. `toml` is not used
-//! here so `lpa-server` stays compatible with `no_std` firmware builds where
-//! unified `toml` features can pull `std`.
+//! Node definitions are authored as canonical slot-codec JSON (the same form
+//! `NodeDef::write_json` emits), so `lpa-server` needs no parser here and
+//! stays compatible with `no_std` firmware builds.
 
 extern crate alloc;
 
@@ -13,81 +13,120 @@ use alloc::format;
 use lpc_model::AsLpPath;
 use lpfs::LpFs;
 
-const PROJECT_TOML: &[u8] = br#"kind = "Project"
-
-[nodes.output]
-ref = "./output.toml"
-
-[nodes.clock]
-ref = "./clock.toml"
-
-[nodes.texture]
-ref = "./texture.toml"
-
-[nodes.shader]
-ref = "./shader.toml"
-
-[nodes.fixture]
-ref = "./fixture.toml"
+const PROJECT_JSON: &[u8] = br#"{
+  "kind": "Project",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "fixture": {
+      "ref": "./fixture.json"
+    },
+    "output": {
+      "ref": "./output.json"
+    },
+    "shader": {
+      "ref": "./shader.json"
+    },
+    "texture": {
+      "ref": "./texture.json"
+    }
+  }
+}
 "#;
 
-/// TOML for the default clock node.
-const CLOCK_NODE_TOML: &[u8] = br#"kind = "Clock"
+/// JSON for the default clock node.
+const CLOCK_NODE_JSON: &[u8] = br#"{
+  "kind": "Clock",
+  "controls": {
+    "running": true,
+    "rate": 1,
+    "scrub_offset_seconds": 0
+  }
+}
 "#;
 
-/// TOML for a 64×64 texture node.
-const TEXTURE_NODE_TOML: &[u8] = br#"kind = "Texture"
-
-[size]
-width = 64
-height = 64
+/// JSON for a 64×64 texture node.
+const TEXTURE_NODE_JSON: &[u8] = br#"{
+  "kind": "Texture",
+  "size": {
+    "width": 64,
+    "height": 64
+  }
+}
 "#;
 
-/// TOML for the default shader node.
-const SHADER_NODE_TOML: &[u8] = br#"kind = "Shader"
-source = { path = "shader.glsl" }
-render_order = 0
-
-[glsl_opts]
-add_sub = "saturating"
-mul = "saturating"
-div = "saturating"
-
-[consumed.time]
-kind = "value"
-value = "f32"
-default = 0.0
-label = "Time"
-description = "Project clock time in seconds"
+/// JSON for the default shader node.
+const SHADER_NODE_JSON: &[u8] = br#"{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "render_order": 0,
+  "glsl_opts": {
+    "add_sub": "saturating",
+    "mul": "saturating",
+    "div": "saturating"
+  },
+  "consumed": {
+    "time": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0,
+      "label": "Time",
+      "description": "Project clock time in seconds"
+    }
+  }
+}
 "#;
 
-/// TOML for GPIO strip output.
-const OUTPUT_NODE_TOML: &[u8] = br#"kind = "Output"
-endpoint = "ws281x:rmt:D10"
+/// JSON for GPIO strip output.
+const OUTPUT_NODE_JSON: &[u8] = br#"{
+  "kind": "Output",
+  "endpoint": "ws281x:rmt:D10"
+}
 "#;
 
-/// TOML for the default fixture.
-const FIXTURE_NODE_TOML: &[u8] = br#"kind = "Fixture"
-color_order = "rgb"
-brightness = 64
-gamma_correction = true
-sampling = "direct"
-transform = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]
-
-[bindings.input]
-source = "bus#visual.out"
-
-[bindings.output]
-target = "bus#control.out"
-
-[render_size]
-width = 16
-height = 16
-
-[mapping]
-kind = "PathPoints"
-paths = {}
-sample_diameter = 2.0
+/// JSON for the default fixture.
+const FIXTURE_NODE_JSON: &[u8] = br#"{
+  "kind": "Fixture",
+  "render_size": {
+    "width": 16,
+    "height": 16
+  },
+  "bindings": {
+    "input": {
+      "source": "bus#visual.out"
+    },
+    "output": {
+      "target": "bus#control.out"
+    }
+  },
+  "sampling": "direct",
+  "diagnostic_mode": "off",
+  "mapping": {
+    "kind": "PathPoints",
+    "sample_diameter": 2
+  },
+  "color_order": "rgb",
+  "transform": [
+    [
+      1,
+      0,
+      0
+    ],
+    [
+      0,
+      1,
+      0
+    ],
+    [
+      0,
+      0,
+      1
+    ]
+  ],
+  "brightness": 64,
+  "gamma_correction": true
+}
 "#;
 
 /// Create a default project template
@@ -95,17 +134,17 @@ sample_diameter = 2.0
 /// Creates the default project structure with a rainbow rotating color wheel shader.
 /// The filesystem should already be chrooted to the project directory.
 pub fn create_default_project_template(fs: &dyn LpFs) -> Result<(), ServerError> {
-    fs.write_file("/project.toml".as_path(), PROJECT_TOML)
-        .map_err(|e| ServerError::Filesystem(format!("Failed to write project.toml: {e}")))?;
+    fs.write_file("/project.json".as_path(), PROJECT_JSON)
+        .map_err(|e| ServerError::Filesystem(format!("Failed to write project.json: {e}")))?;
 
-    fs.write_file("/clock.toml".as_path(), CLOCK_NODE_TOML)
-        .map_err(|e| ServerError::Filesystem(format!("Failed to write clock.toml: {e}")))?;
+    fs.write_file("/clock.json".as_path(), CLOCK_NODE_JSON)
+        .map_err(|e| ServerError::Filesystem(format!("Failed to write clock.json: {e}")))?;
 
-    fs.write_file("/texture.toml".as_path(), TEXTURE_NODE_TOML)
-        .map_err(|e| ServerError::Filesystem(format!("Failed to write texture.toml: {e}")))?;
+    fs.write_file("/texture.json".as_path(), TEXTURE_NODE_JSON)
+        .map_err(|e| ServerError::Filesystem(format!("Failed to write texture.json: {e}")))?;
 
-    fs.write_file("/shader.toml".as_path(), SHADER_NODE_TOML)
-        .map_err(|e| ServerError::Filesystem(format!("Failed to write shader.toml: {e}")))?;
+    fs.write_file("/shader.json".as_path(), SHADER_NODE_JSON)
+        .map_err(|e| ServerError::Filesystem(format!("Failed to write shader.json: {e}")))?;
 
     fs.write_file(
         "/shader.glsl".as_path(),
@@ -174,11 +213,11 @@ vec4 render(vec2 pos) {
     )
     .map_err(|e| ServerError::Filesystem(format!("Failed to write shader.glsl: {e}")))?;
 
-    fs.write_file("/output.toml".as_path(), OUTPUT_NODE_TOML)
-        .map_err(|e| ServerError::Filesystem(format!("Failed to write output.toml: {e}")))?;
+    fs.write_file("/output.json".as_path(), OUTPUT_NODE_JSON)
+        .map_err(|e| ServerError::Filesystem(format!("Failed to write output.json: {e}")))?;
 
-    fs.write_file("/fixture.toml".as_path(), FIXTURE_NODE_TOML)
-        .map_err(|e| ServerError::Filesystem(format!("Failed to write fixture.toml: {e}")))?;
+    fs.write_file("/fixture.json".as_path(), FIXTURE_NODE_JSON)
+        .map_err(|e| ServerError::Filesystem(format!("Failed to write fixture.json: {e}")))?;
 
     Ok(())
 }

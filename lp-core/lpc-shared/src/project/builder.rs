@@ -160,9 +160,9 @@ impl ProjectBuilder {
 
         let node_name = numbered_node_name("clock", id);
         let path = artifact_path_for_node(&node_name);
-        let toml = authored_node_toml(&slot_shape_registry(), &NodeDef::Clock(ClockDef::default()));
+        let json = authored_node_json(&slot_shape_registry(), &NodeDef::Clock(ClockDef::default()));
 
-        self.write_file_helper(path.as_str(), toml.as_bytes())
+        self.write_file_helper(path.as_str(), json.as_bytes())
             .expect("Failed to write clock artifact");
         self.register_node(node_name, path.clone());
 
@@ -193,7 +193,7 @@ impl ProjectBuilder {
         self.fixture(output_path, texture_path).add(self)
     }
 
-    /// Build completes - writes project.toml and all node artifact files.
+    /// Build completes - writes project.json and all node artifact files.
     pub fn build(self) {
         let registry = slot_shape_registry();
         let mut nodes = VecMap::new();
@@ -210,9 +210,9 @@ impl ProjectBuilder {
             name: OptionSlot::some(ValueSlot::new(self.name.clone())),
             nodes: MapSlot::new(nodes),
         };
-        let project_toml = authored_node_toml(&registry, &NodeDef::Project(project));
-        self.write_file_helper("/project.toml", project_toml.as_bytes())
-            .expect("Failed to write project.toml");
+        let project_json = authored_node_json(&registry, &NodeDef::Project(project));
+        self.write_file_helper("/project.json", project_json.as_bytes())
+            .expect("Failed to write project.json");
     }
 
     fn register_node(&mut self, name: String, path: LpPathBuf) {
@@ -221,7 +221,7 @@ impl ProjectBuilder {
 }
 
 fn artifact_path_for_node(name: &str) -> LpPathBuf {
-    LpPathBuf::from(format!("/{name}.toml"))
+    LpPathBuf::from(format!("/{name}.json"))
 }
 
 fn numbered_node_name(kind: &str, id: u32) -> String {
@@ -232,9 +232,9 @@ fn numbered_node_name(kind: &str, id: u32) -> String {
     }
 }
 
-fn authored_node_toml(registry: &SlotShapeRegistry, node: &NodeDef) -> String {
-    node.write_toml(registry)
-        .expect("Failed to serialize authored node TOML")
+fn authored_node_json(registry: &SlotShapeRegistry, node: &NodeDef) -> String {
+    node.write_json(registry)
+        .expect("Failed to serialize authored node JSON")
 }
 
 fn slot_shape_registry() -> SlotShapeRegistry {
@@ -258,10 +258,10 @@ impl TextureBuilder {
             bindings: bus_input_binding_defs("visual.out"),
         };
 
-        let toml = authored_node_toml(&slot_shape_registry(), &NodeDef::Texture(config));
+        let json = authored_node_json(&slot_shape_registry(), &NodeDef::Texture(config));
 
         builder
-            .write_file_helper(path.as_str(), toml.as_bytes())
+            .write_file_helper(path.as_str(), json.as_bytes())
             .expect("Failed to write texture artifact");
         builder.register_node(node_name, path.clone());
 
@@ -301,10 +301,10 @@ impl ShaderBuilder {
             consumed_slots: default_visual_consumed_slots(),
         };
 
-        let toml = authored_node_toml(&slot_shape_registry(), &NodeDef::Shader(config));
+        let json = authored_node_json(&slot_shape_registry(), &NodeDef::Shader(config));
 
         builder
-            .write_file_helper(path.as_str(), toml.as_bytes())
+            .write_file_helper(path.as_str(), json.as_bytes())
             .expect("Failed to write shader artifact");
 
         builder
@@ -343,10 +343,10 @@ impl OutputBuilder {
             options: OptionSlot::some(self.options),
         };
 
-        let toml = authored_node_toml(&slot_shape_registry(), &NodeDef::Output(config));
+        let json = authored_node_json(&slot_shape_registry(), &NodeDef::Output(config));
 
         builder
-            .write_file_helper(path.as_str(), toml.as_bytes())
+            .write_file_helper(path.as_str(), json.as_bytes())
             .expect("Failed to write output artifact");
         builder.register_node(node_name, path.clone());
 
@@ -415,10 +415,10 @@ impl FixtureBuilder {
                 }),
         };
 
-        let toml = authored_node_toml(&slot_shape_registry(), &NodeDef::Fixture(config));
+        let json = authored_node_json(&slot_shape_registry(), &NodeDef::Fixture(config));
 
         builder
-            .write_file_helper(path.as_str(), toml.as_bytes())
+            .write_file_helper(path.as_str(), json.as_bytes())
             .expect("Failed to write fixture artifact");
         builder.register_node(node_name, path.clone());
 
@@ -512,16 +512,16 @@ mod tests {
     use lpfs::LpFsMemory;
 
     #[test]
-    fn test_project_builder_creates_valid_project_toml() {
+    fn test_project_builder_creates_valid_project_json() {
         let fs = Rc::new(RefCell::new(LpFsMemory::new()));
         let mut builder = ProjectBuilder::new(fs.clone());
         builder.texture_basic();
         builder.build();
 
-        let project_toml_bytes = fs.borrow().read_file("/project.toml".as_path()).unwrap();
-        let project_toml_str = core::str::from_utf8(&project_toml_bytes).unwrap();
+        let project_json_bytes = fs.borrow().read_file("/project.json".as_path()).unwrap();
+        let project_json_str = core::str::from_utf8(&project_json_bytes).unwrap();
 
-        let def = NodeDef::read_toml(&slot_shape_registry(), project_toml_str).unwrap();
+        let def = NodeDef::read_json(&slot_shape_registry(), project_json_str).unwrap();
         let NodeDef::Project(def) = def else {
             panic!("expected project def");
         };

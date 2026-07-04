@@ -32,7 +32,7 @@ impl RegistryScenario {
             shapes: SlotShapeRegistry::default(),
             next_revision: 1,
         };
-        let load = scenario.load_root("/project.toml");
+        let load = scenario.load_root("/project.json");
         (scenario, load)
     }
 

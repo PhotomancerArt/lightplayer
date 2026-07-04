@@ -10,10 +10,10 @@ use lpc_wire::build_slot_full_sync;
 
 #[test]
 fn real_source_defs_sync_as_slot_roots() {
-    let project = read_basic_project("project.toml");
-    let shader = read_basic_shader("shader.toml");
-    let output = read_basic_output("output.toml");
-    let fixture = read_basic_fixture("fixture.toml");
+    let project = read_basic_project("project.json");
+    let shader = read_basic_shader("shader.json");
+    let output = read_basic_output("output.json");
+    let fixture = read_basic_fixture("fixture.json");
 
     let registry = SlotShapeRegistry::default();
     let shape_registry = paged_static_shape_registry_for_test();
@@ -55,7 +55,7 @@ fn real_source_defs_sync_as_slot_roots() {
             &shape_registry,
             "nodes[shader].ref",
         ),
-        LpValue::String(String::from("./shader.toml")),
+        LpValue::String(String::from("./shader.json")),
     );
 
     let shader_data = root_data(&sync, &registry, "shader");
@@ -89,24 +89,25 @@ fn real_source_defs_sync_as_slot_roots() {
         LpValue::String(String::from("wrapping")),
     );
 
-    let shader_with_params = match NodeDef::from_toml_str(
-        r#"
-kind = "Shader"
-render_order = 0
-
-source = { path = "shader.glsl" }
-
-[bindings.output]
-target = "bus#visual.out"
-
-[consumed.speed]
-kind = "value"
-label = "Speed"
-description = "Animation speed"
-value = "f32"
-default = 0.25
-min = 0.0
-"#,
+    let shader_with_params = match NodeDef::from_json_str(
+        r#"{
+  "kind": "Shader",
+  "render_order": 0,
+  "source": { "path": "shader.glsl" },
+  "bindings": {
+    "output": { "target": "bus#visual.out" }
+  },
+  "consumed": {
+    "speed": {
+      "kind": "value",
+      "label": "Speed",
+      "description": "Animation speed",
+      "value": "f32",
+      "default": 0.25,
+      "min": 0.0
+    }
+  }
+}"#,
     )
     .unwrap()
     {
@@ -165,7 +166,7 @@ fn read_basic_node_def(name: &str) -> NodeDef {
         .join(name);
     let text = std::fs::read_to_string(path).unwrap();
     let registry = SlotShapeRegistry::default();
-    NodeDef::read_toml(&registry, &text).unwrap()
+    NodeDef::read_json(&registry, &text).unwrap()
 }
 
 fn paged_static_shape_registry_for_test() -> SlotShapeRegistry {

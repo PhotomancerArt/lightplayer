@@ -562,7 +562,7 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
         .expect("Failed to initialize RMT");
     esp_println::println!("[INIT] RMT peripheral initialized");
 
-    // Create filesystem before hardware providers so /hardware.toml can override board policy.
+    // Create filesystem before hardware providers so /hardware.json can override board policy.
     let base_fs: Box<dyn lpfs::LpFs> = {
         #[cfg(not(feature = "memory_fs"))]
         {
