@@ -24,7 +24,6 @@ ser-write-json = { version = "0.3", optional = true, default-features = false, f
 
 [dev-dependencies]
 lpc-model = { path = "../lpc-model", default-features = false }
-toml = { workspace = true }
 
 [lints]
 workspace = true

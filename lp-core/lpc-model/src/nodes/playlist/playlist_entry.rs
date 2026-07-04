@@ -52,20 +52,19 @@ mod tests {
 
     #[test]
     fn playlist_entry_parses_path_child_and_trigger_binding() {
-        let def = NodeDef::from_toml_str(
-            r#"
-kind = "Playlist"
-
-[entries.2]
-name = "active"
-duration = 4.0
-fade_after = 0.8
-[entries.2.node]
-ref = "./active.toml"
-
-[entries.2.bindings.trigger]
-source = "bus#trigger"
-"#,
+        let def = NodeDef::from_json_str(
+            r#"{
+  "kind": "Playlist",
+  "entries": {
+    "2": {
+      "name": "active",
+      "duration": 4.0,
+      "fade_after": 0.8,
+      "node": { "ref": "./active.json" },
+      "bindings": { "trigger": { "source": "bus#trigger" } }
+    }
+  }
+}"#,
         )
         .expect("playlist");
 
@@ -83,30 +82,23 @@ source = "bus#trigger"
     }
 
     #[test]
-    fn playlist_entry_parses_inline_child() {
-        let def = NodeDef::from_toml_str(
-            r#"
-kind = "Playlist"
-
-[entries.2]
-name = "active"
-duration = 4.0
-
-[entries.2.node.def]
-kind = "Shader"
-source = { path = "active.glsl" }
-"#,
+    fn playlist_entry_rejects_inline_child() {
+        let err = NodeDef::from_json_str(
+            r#"{
+  "kind": "Playlist",
+  "entries": {
+    "2": {
+      "name": "active",
+      "duration": 4.0,
+      "node": {
+        "def": { "kind": "Shader", "source": "active.glsl" }
+      }
+    }
+  }
+}"#,
         )
-        .expect("playlist");
-
-        let NodeDef::Playlist(def) = def else {
-            panic!("playlist def");
-        };
-        let entry = def.entries.entries.get(&2).expect("entry");
-        assert!(matches!(
-            entry.node.value().inline_def(),
-            Some(NodeDef::Shader(_))
-        ));
+        .expect_err("inline child definitions are not supported");
+        assert!(alloc::format!("{err}").contains("def"), "{err}");
     }
 
     #[test]

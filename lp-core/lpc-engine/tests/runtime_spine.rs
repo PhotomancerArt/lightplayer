@@ -117,12 +117,14 @@ fn project_apply_body_change_does_not_recreate_runtime_node() {
         .expect("clock runtime node");
 
     fs.write_file_mut(
-        LpPath::new("/clock.toml"),
+        LpPath::new("/clock.json"),
         br#"
-kind = "Clock"
-
-[controls]
-rate = 2.0
+{
+  "kind": "Clock",
+  "controls": {
+    "rate": 2.0
+  }
+}
 "#,
     )
     .expect("write clock");
@@ -130,7 +132,7 @@ rate = 2.0
     let changes = registry.refresh_artifacts(
         &fs,
         &[FsEvent {
-            path: LpPathBuf::from("/clock.toml"),
+            path: LpPathBuf::from("/clock.json"),
             kind: FsEventKind::Modify,
         }],
         Revision::new(2),
@@ -140,7 +142,7 @@ rate = 2.0
     assert_eq!(
         changes.defs.changed,
         vec![NodeDefChange::new(
-            lpc_model::NodeDefLocation::artifact_root(ArtifactLocation::file("/clock.toml")),
+            lpc_model::NodeDefLocation::artifact_root(ArtifactLocation::file("/clock.json")),
             NodeDefChangeKind::Body,
         )]
     );
@@ -170,23 +172,31 @@ fn project_apply_added_node_use_preserves_existing_runtime_node() {
         .expect("clock runtime node");
 
     fs.write_file_mut(
-        LpPath::new("/project.toml"),
+        LpPath::new("/project.json"),
         br#"
-kind = "Project"
-
-[nodes.clock]
-ref = "./clock.toml"
-
-[nodes.shader]
-ref = "./shader.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "shader": {
+      "ref": "./shader.json"
+    }
+  }
+}
 "#,
     )
     .expect("write project");
     fs.write_file_mut(
-        LpPath::new("/shader.toml"),
+        LpPath::new("/shader.json"),
         br#"
-kind = "Shader"
-source = { path = "shader.glsl" }
+{
+  "kind": "Shader",
+  "source": {
+    "path": "shader.glsl"
+  }
+}
 "#,
     )
     .expect("write shader def");
@@ -197,7 +207,7 @@ source = { path = "shader.glsl" }
     let changes = registry.refresh_artifacts(
         &fs,
         &[FsEvent {
-            path: LpPathBuf::from("/project.toml"),
+            path: LpPathBuf::from("/project.json"),
             kind: FsEventKind::Modify,
         }],
         Revision::new(2),
@@ -280,22 +290,28 @@ fn project_apply_asset_body_change_refreshes_existing_shader_node() {
 fn clock_project_fs() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
     fs.write_file_mut(
-        LpPath::new("/project.toml"),
+        LpPath::new("/project.json"),
         br#"
-kind = "Project"
-
-[nodes.clock]
-ref = "./clock.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    }
+  }
+}
 "#,
     )
     .expect("write project");
     fs.write_file_mut(
-        LpPath::new("/clock.toml"),
+        LpPath::new("/clock.json"),
         br#"
-kind = "Clock"
-
-[controls]
-rate = 1.0
+{
+  "kind": "Clock",
+  "controls": {
+    "rate": 1.0
+  }
+}
 "#,
     )
     .expect("write clock");
@@ -305,20 +321,26 @@ rate = 1.0
 fn shader_project_fs() -> LpFsMemory {
     let mut fs = LpFsMemory::new();
     fs.write_file_mut(
-        LpPath::new("/project.toml"),
+        LpPath::new("/project.json"),
         br#"
-kind = "Project"
-
-[nodes.shader]
-ref = "./shader.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "shader": {
+      "ref": "./shader.json"
+    }
+  }
+}
 "#,
     )
     .expect("write project");
     fs.write_file_mut(
-        LpPath::new("/shader.toml"),
+        LpPath::new("/shader.json"),
         br#"
-kind = "Shader"
-source = "shader.glsl"
+{
+  "kind": "Shader",
+  "source": "shader.glsl"
+}
 "#,
     )
     .expect("write shader def");

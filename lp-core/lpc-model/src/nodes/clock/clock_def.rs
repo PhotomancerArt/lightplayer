@@ -24,12 +24,7 @@ mod tests {
 
     #[test]
     fn clock_def_parses_minimal_inline_node() {
-        let def = NodeDef::from_toml_str(
-            r#"
-kind = "Clock"
-"#,
-        )
-        .expect("clock def");
+        let def = NodeDef::from_json_str(r#"{ "kind": "Clock" }"#).expect("clock def");
 
         let NodeDef::Clock(def) = def else {
             panic!("clock def");

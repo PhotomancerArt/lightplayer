@@ -324,33 +324,54 @@ mod tests {
     fn fluid_node_loaded_from_project_produces_sampleable_visual_product() {
         let fs = LpFsMemory::new();
         fs.write_file(
-            "/project.toml".as_path(),
+            "/project.json".as_path(),
             br#"
-kind = "Project"
-
-[nodes.fluid]
-ref = "./fluid.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "fluid": {
+      "ref": "./fluid.json"
+    }
+  }
+}
 "#,
         )
         .expect("project");
         fs.write_file(
-            "/fluid.toml".as_path(),
+            "/fluid.json".as_path(),
             br#"
-kind = "Fluid"
-size = { width = 8, height = 8 }
-solver_iterations = 1
-step_hz = 25.0
-fade_speed = 0.0
-viscosity = 0.00003
-
-[emitters.1]
-id = 1
-pos = [0.5, 0.5]
-dir = [1.0, 0.0]
-radius = 0.2
-color = [1.0, 0.0, 0.0]
-velocity = 0.0
-intensity = 2.0
+{
+  "kind": "Fluid",
+  "size": {
+    "width": 8,
+    "height": 8
+  },
+  "solver_iterations": 1,
+  "step_hz": 25.0,
+  "fade_speed": 0.0,
+  "viscosity": 3e-05,
+  "emitters": {
+    "1": {
+      "id": 1,
+      "pos": [
+        0.5,
+        0.5
+      ],
+      "dir": [
+        1.0,
+        0.0
+      ],
+      "radius": 0.2,
+      "color": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "velocity": 0.0,
+      "intensity": 2.0
+    }
+  }
+}
 "#,
         )
         .expect("fluid");
@@ -404,37 +425,56 @@ intensity = 2.0
     fn fluid_node_consumes_compute_emitter_map_through_bus() {
         let fs = LpFsMemory::new();
         fs.write_file(
-            "/project.toml".as_path(),
+            "/project.json".as_path(),
             br#"
-kind = "Project"
-
-[nodes.compute]
-ref = "./compute.toml"
-
-[nodes.fluid]
-ref = "./fluid.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "compute": {
+      "ref": "./compute.json"
+    },
+    "fluid": {
+      "ref": "./fluid.json"
+    }
+  }
+}
 "#,
         )
         .expect("project");
         fs.write_file(
-            "/compute.toml".as_path(),
+            "/compute.json".as_path(),
             br#"
-kind = "ComputeShader"
-source = { path = "compute.glsl" }
-
-[bindings.emitters]
-target = "bus#fluid.emitters"
-
-[consumed.time]
-kind = "value"
-value = "f32"
-default = 0.5
-
-[produced.emitters]
-kind = "map"
-key = "u32"
-value = "lp::fluid::Emitter"
-mapping = { kind = "sentinel", len = 4, key = "id", empty_key = 0 }
+{
+  "kind": "ComputeShader",
+  "source": {
+    "path": "compute.glsl"
+  },
+  "bindings": {
+    "emitters": {
+      "target": "bus#fluid.emitters"
+    }
+  },
+  "consumed": {
+    "time": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0.5
+    }
+  },
+  "produced": {
+    "emitters": {
+      "kind": "map",
+      "key": "u32",
+      "value": "lp::fluid::Emitter",
+      "mapping": {
+        "kind": "sentinel",
+        "len": 4,
+        "key": "id",
+        "empty_key": 0
+      }
+    }
+  }
+}
 "#,
         )
         .expect("compute");
@@ -454,17 +494,24 @@ void tick() {
         )
         .expect("compute glsl");
         fs.write_file(
-            "/fluid.toml".as_path(),
+            "/fluid.json".as_path(),
             br#"
-kind = "Fluid"
-size = { width = 8, height = 8 }
-solver_iterations = 1
-step_hz = 25.0
-fade_speed = 0.0
-viscosity = 0.00003
-
-[bindings.emitters]
-source = "bus#fluid.emitters"
+{
+  "kind": "Fluid",
+  "size": {
+    "width": 8,
+    "height": 8
+  },
+  "solver_iterations": 1,
+  "step_hz": 25.0,
+  "fade_speed": 0.0,
+  "viscosity": 3e-05,
+  "bindings": {
+    "emitters": {
+      "source": "bus#fluid.emitters"
+    }
+  }
+}
 "#,
         )
         .expect("fluid");

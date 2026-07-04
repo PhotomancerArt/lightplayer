@@ -1,8 +1,8 @@
 //! Parent-owned child node invocation.
 //!
 //! A [`NodeInvocation`] is the authored value stored by a parent when it owns a
-//! child node position. It can be unset, reference another node artifact, or
-//! carry an inline [`NodeDef`].
+//! child node position. It can be unset or reference another node artifact —
+//! strictly one node definition per artifact file.
 //!
 //! A [`NodeInvocationSlot`] is the slot wrapper used by slotted node
 //! definitions. Prefer the slot alias for fields in authored model structs, and
@@ -11,11 +11,7 @@
 use alloc::string::ToString;
 
 use crate::artifact::artifact_spec::ArtifactSpec;
-use crate::nodes::node_def::{NodeArtifact, NodeDef};
-use crate::{
-    ArtifactPath, ArtifactPathSlot, EnumSlot, FieldSlot, FieldSlotMut, SlotDataAccess,
-    SlotDataMutAccess, SlotShape, Slotted, StaticSlotShape, StaticSlotShapeDescriptor,
-};
+use crate::{ArtifactPath, ArtifactPathSlot, EnumSlot, Slotted};
 
 /// Slot wrapper for an authored child node invocation.
 pub type NodeInvocationSlot = EnumSlot<NodeInvocation>;
@@ -28,30 +24,13 @@ pub enum NodeInvocation {
     #[default]
     Unset,
     Ref(ArtifactPathSlot),
-    Def(NodeInvocationBody),
-}
-
-/// Inline node definition body referenced by shape id to avoid static descriptor cycles.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct NodeInvocationBody(pub NodeArtifact);
-
-impl NodeInvocationBody {
-    pub fn new(def: NodeDef) -> Self {
-        Self(NodeArtifact::new(def))
-    }
-
-    pub fn value(&self) -> &NodeDef {
-        self.0.node_def()
-    }
 }
 
 // `NodeInvocation` is not a serde type; it is read/written through the slot
 // codec as an externally-tagged enum (`enum_encoding = "external"`,
-// `rename_all = "snake_case"`). Its authored wire form is one of:
-//   `{ "unset": {} }`, `{ "ref": <artifact path string> }`, or
-//   `{ "def": <inline node definition object> }`.
-// The inline `def` body is an arbitrary node definition; `NodeDef` deliberately
-// has no `JsonSchema`, so it is described as an open object here.
+// `rename_all = "snake_case"`). Since the JSON artifact cutover (one node per
+// artifact file), its authored wire form is one of:
+//   `{ "unset": {} }` or `{ "ref": <artifact path string> }`.
 #[cfg(feature = "schema-gen")]
 impl schemars::JsonSchema for NodeInvocation {
     fn schema_name() -> alloc::borrow::Cow<'static, str> {
@@ -75,35 +54,8 @@ impl schemars::JsonSchema for NodeInvocation {
                     "required": ["ref"],
                     "additionalProperties": false,
                 },
-                {
-                    "type": "object",
-                    "properties": { "def": { "type": "object", "additionalProperties": true } },
-                    "required": ["def"],
-                    "additionalProperties": false,
-                },
             ],
         })
-    }
-}
-
-impl FieldSlot for NodeInvocationBody {
-    const STATIC_SLOT_FIELD_SHAPE_DESCRIPTOR: Option<&'static StaticSlotShapeDescriptor> =
-        Some(&StaticSlotShapeDescriptor::Ref {
-            id: NodeArtifact::SHAPE_ID,
-        });
-
-    fn slot_field_shape() -> SlotShape {
-        SlotShape::reference(<NodeArtifact as StaticSlotShape>::SHAPE_ID)
-    }
-
-    fn slot_field_data(&self) -> SlotDataAccess<'_> {
-        self.0.slot_field_data()
-    }
-}
-
-impl FieldSlotMut for NodeInvocationBody {
-    fn slot_field_data_mut(&mut self) -> SlotDataMutAccess<'_> {
-        self.0.slot_field_data_mut()
     }
 }
 
@@ -119,14 +71,9 @@ impl NodeInvocation {
         Self::Ref(ArtifactPathSlot::new(ArtifactPath(specifier.to_string())))
     }
 
-    #[must_use]
-    pub fn inline(def: NodeDef) -> Self {
-        Self::Def(NodeInvocationBody::new(def))
-    }
-
     pub fn ref_specifier(&self) -> Option<ArtifactSpec> {
         match self {
-            Self::Unset | Self::Def(_) => None,
+            Self::Unset => None,
             Self::Ref(path) => {
                 let text = path.value().as_str();
                 if text.is_empty() {
@@ -135,13 +82,6 @@ impl NodeInvocation {
                     ArtifactSpec::parse(text).ok()
                 }
             }
-        }
-    }
-
-    pub fn inline_def(&self) -> Option<&NodeDef> {
-        match self {
-            Self::Unset | Self::Ref(_) => None,
-            Self::Def(body) => Some(body.value()),
         }
     }
 
@@ -161,115 +101,69 @@ mod tests {
     }
 
     #[test]
-    fn node_invocation_toml_unset_form_loads() {
-        let invocation = read_invocation(
-            r#"
-unset = {}
-"#,
-        );
+    fn node_invocation_json_unset_form_loads() {
+        let invocation = read_invocation(r#"{ "unset": {} }"#);
         assert!(invocation.is_unset());
     }
 
     #[test]
-    fn node_invocation_toml_ref_form_loads() {
-        let invocation = read_invocation(
-            r#"
-ref = "./texture.toml"
-"#,
-        );
+    fn node_invocation_json_ref_form_loads() {
+        let invocation = read_invocation(r#"{ "ref": "./texture.json" }"#);
 
         assert_eq!(
             invocation.ref_specifier().unwrap(),
-            ArtifactSpec::path("./texture.toml")
+            ArtifactSpec::path("./texture.json")
         );
     }
 
     #[test]
     fn node_invocation_rejects_legacy_def_path_form() {
-        let err = read_invocation_err(
-            r#"
-def = { path = "./texture.toml" }
-"#,
-        );
+        let err = read_invocation_err(r#"{ "def": { "path": "./texture.json" } }"#);
 
         assert!(err.to_string().contains("def") || err.to_string().contains("unknown"));
     }
 
     #[test]
     fn node_invocation_rejects_legacy_artifact_field() {
-        let err = read_invocation_err(
-            r#"
-artifact = "./texture.toml"
-"#,
-        );
+        let err = read_invocation_err(r#"{ "artifact": "./texture.json" }"#);
 
         assert!(err.to_string().contains("artifact") || err.to_string().contains("unknown"));
     }
 
     #[test]
-    fn node_invocation_toml_inline_def_form_loads() {
-        let invocation = read_invocation(
-            r#"
-[def]
-kind = "Clock"
-"#,
-        );
+    fn node_invocation_rejects_inline_def_form() {
+        let err = read_invocation_err(r#"{ "def": { "kind": "Clock" } }"#);
 
-        assert!(matches!(invocation.inline_def(), Some(NodeDef::Clock(_))));
-    }
-
-    #[test]
-    fn node_invocation_rejects_ref_plus_inline_def() {
-        let err = read_invocation_err(
-            r#"
-ref = "./clock.toml"
-
-[def]
-kind = "Clock"
-"#,
-        );
-
-        assert!(err.to_string().contains("def") || err.to_string().contains("unknown"));
+        assert!(err.to_string().contains("def"), "{err}");
     }
 
     #[test]
     fn node_invocation_round_trips_unset_form() {
-        let text = r#"
-kind = "Project"
-
-[nodes.placeholder]
-unset = {}
-"#;
+        let text = r#"{
+  "kind": "Project",
+  "nodes": {
+    "placeholder": { "unset": {} }
+  }
+}"#;
         round_trip_project_fragment(text);
     }
 
     #[test]
     fn node_invocation_round_trips_ref_form() {
-        let text = r#"
-kind = "Project"
-
-[nodes.shader]
-ref = "./shader.toml"
-"#;
-        round_trip_project_fragment(text);
-    }
-
-    #[test]
-    fn node_invocation_round_trips_inline_def_form() {
-        let text = r#"
-kind = "Project"
-
-[nodes.clock.def]
-kind = "Clock"
-"#;
+        let text = r#"{
+  "kind": "Project",
+  "nodes": {
+    "shader": { "ref": "./shader.json" }
+  }
+}"#;
         round_trip_project_fragment(text);
     }
 
     fn round_trip_project_fragment(text: &str) {
         let registry = SlotShapeRegistry::default();
-        let def = NodeDef::read_toml(&registry, text).unwrap();
-        let written = NodeDef::write_toml(&def, &registry).unwrap();
-        let again = NodeDef::read_toml(&registry, &written).unwrap();
+        let def = NodeDef::read_json(&registry, text).unwrap();
+        let written = NodeDef::write_json(&def, &registry).unwrap();
+        let again = NodeDef::read_json(&registry, &written).unwrap();
         assert_eq!(def, again);
     }
 
@@ -285,9 +179,8 @@ kind = "Clock"
         text: &str,
     ) -> Result<NodeInvocation, crate::slot_codec::SyntaxError> {
         let registry = SlotShapeRegistry::default();
-        let value = toml::from_str::<toml::Value>(text).unwrap();
         let mut reader = crate::slot_codec::SlotReader::new(
-            crate::slot_codec::TomlSyntaxSource::new(&value).unwrap(),
+            crate::slot_codec::JsonSyntaxSource::new(text).unwrap(),
             &registry,
         );
         let mut invocation = EnumSlot::new(NodeInvocation::default());

@@ -1,0 +1,33 @@
+{
+  "kind": "Playlist",
+  "bindings": {
+    "time": {
+      "source": "bus#time.seconds"
+    }
+  },
+  "time": 0,
+  "idle_entry": 1,
+  "default_fade": 0.35,
+  "entries": {
+    "1": {
+      "name": "attract",
+      "fade_after": 0.12,
+      "node": {
+        "ref": "./attract.json"
+      }
+    },
+    "2": {
+      "bindings": {
+        "trigger": {
+          "source": "bus#trigger"
+        }
+      },
+      "name": "blast",
+      "duration": 6,
+      "fade_after": 2,
+      "node": {
+        "ref": "./blast.json"
+      }
+    }
+  }
+}

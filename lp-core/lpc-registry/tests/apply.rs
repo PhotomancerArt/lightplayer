@@ -20,20 +20,28 @@ fn shader_project() -> (LpFsMemory, SlotShapeRegistry, ProjectRegistry) {
     let mut fs = LpFsMemory::new();
     write_file(
         &mut fs,
-        "/project.toml",
+        "/project.json",
         r#"
-kind = "Project"
-
-[nodes.shader]
-ref = "./shader.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "shader": {
+      "ref": "./shader.json"
+    }
+  }
+}
 "#,
     );
     write_file(
         &mut fs,
-        "/shader.toml",
+        "/shader.json",
         r#"
-kind = "Shader"
-source = { path = "shader.glsl" }
+{
+  "kind": "Shader",
+  "source": {
+    "path": "shader.glsl"
+  }
+}
 "#,
     );
     write_file(&mut fs, "/shader.glsl", "void main() {}");
@@ -42,7 +50,7 @@ source = { path = "shader.glsl" }
     registry
         .load_root(
             &fs,
-            LpPath::new("/project.toml"),
+            LpPath::new("/project.json"),
             Revision::new(1),
             &parse_ctx(&shapes),
         )
@@ -55,22 +63,28 @@ fn clock_project() -> (LpFsMemory, SlotShapeRegistry, ProjectRegistry) {
     let mut fs = LpFsMemory::new();
     write_file(
         &mut fs,
-        "/project.toml",
+        "/project.json",
         r#"
-kind = "Project"
-
-[nodes.clock]
-ref = "./clock.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    }
+  }
+}
 "#,
     );
     write_file(
         &mut fs,
-        "/clock.toml",
+        "/clock.json",
         r#"
-kind = "Clock"
-
-[controls]
-rate = 1.0
+{
+  "kind": "Clock",
+  "controls": {
+    "rate": 1.0
+  }
+}
 "#,
     );
 
@@ -78,7 +92,7 @@ rate = 1.0
     registry
         .load_root(
             &fs,
-            LpPath::new("/project.toml"),
+            LpPath::new("/project.json"),
             Revision::new(1),
             &parse_ctx(&shapes),
         )
@@ -90,14 +104,19 @@ rate = 1.0
 fn apply_body_overlay_changes_referenced_node_def_and_assets() {
     let (fs, shapes, mut registry) = shader_project();
     let ctx = parse_ctx(&shapes);
-    let shader_location = ArtifactLocation::file("/shader.toml");
+    let shader_location = ArtifactLocation::file("/shader.json");
 
     let result = registry
         .mutate(
             &fs,
             MutationOp::SetArtifactBody {
                 artifact: shader_location.clone(),
-                edit: AssetBodyOverlay::ReplaceBody(br#"kind = "Clock""#.to_vec()),
+                edit: AssetBodyOverlay::ReplaceBody(
+                    br#"{
+  "kind": "Clock"
+}"#
+                    .to_vec(),
+                ),
             },
             Revision::new(2),
             &ctx,
@@ -241,7 +260,7 @@ fn commit_overlay_writes_artifact_without_runtime_project_change() {
 fn commit_slot_overlay_writes_effective_node_def() {
     let (fs, shapes, mut registry) = clock_project();
     let ctx = parse_ctx(&shapes);
-    let clock = ArtifactLocation::file("/clock.toml");
+    let clock = ArtifactLocation::file("/clock.json");
 
     registry
         .mutate(
@@ -262,9 +281,9 @@ fn commit_slot_overlay_writes_effective_node_def() {
         .commit_overlay(&fs, Revision::new(3), &ctx)
         .unwrap();
 
-    let text = String::from_utf8(fs.read_file(LpPath::new("/clock.toml")).unwrap()).unwrap();
+    let text = String::from_utf8(fs.read_file(LpPath::new("/clock.json")).unwrap()).unwrap();
     assert_eq!(result.artifact_changes.changed, vec![clock]);
-    assert!(text.contains("rate = 2"));
+    assert!(text.contains("\"rate\": 2"));
 }
 
 #[test]

@@ -119,13 +119,9 @@ mod tests {
     use crate::{SlotShapeRegistry, StaticSlotShape};
 
     #[test]
-    fn sentinel_mapping_round_trips_from_inline_toml() {
+    fn sentinel_mapping_round_trips_from_inline_json() {
         let mapping = read_mapping(
-            r#"kind = "sentinel"
-len = 4
-key = "id"
-empty_key = 0
-"#,
+            r#"{ "kind": "sentinel", "len": 4, "key": "id", "empty_key": 0 }"#,
         );
 
         assert_eq!(*mapping.kind.value(), ShaderSlotMappingKind::Sentinel);
@@ -136,9 +132,8 @@ empty_key = 0
 
     fn read_mapping(text: &str) -> ShaderSlotMappingDef {
         let registry = SlotShapeRegistry::default();
-        let value = toml::from_str::<toml::Value>(text).unwrap();
         registry
-            .read_slot_toml(ShaderSlotMappingDef::SHAPE_ID, &value)
+            .read_slot_json(ShaderSlotMappingDef::SHAPE_ID, text)
             .expect("mapping")
             .into_any()
             .downcast::<ShaderSlotMappingDef>()

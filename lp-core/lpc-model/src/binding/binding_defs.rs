@@ -105,20 +105,17 @@ mod tests {
     }
 
     #[test]
-    fn toml_round_trips_binding_defs_as_nested_tables() {
-        let toml = r#"
-[bindings.output]
-target = "bus#visual.out"
-"#;
-        let decoded: Wrapper = toml::from_str(toml).unwrap();
+    fn json_round_trips_binding_defs_as_nested_objects() {
+        let json = r#"{ "bindings": { "output": { "target": "bus#visual.out" } } }"#;
+        let decoded: Wrapper = serde_json::from_str(json).unwrap();
         assert!(matches!(
             decoded.bindings.entries()["output"].target_ref(),
             Some(BindingRef::Bus(_))
         ));
 
-        let encoded = toml::to_string(&decoded).unwrap();
-        assert!(encoded.contains("[bindings.output]"));
-        assert!(encoded.contains("target = \"bus#visual.out\""));
+        let encoded = serde_json::to_string(&decoded).unwrap();
+        assert!(encoded.contains(r#""bindings":{"output""#));
+        assert!(encoded.contains(r#""target":"bus#visual.out""#));
     }
 
     #[test]

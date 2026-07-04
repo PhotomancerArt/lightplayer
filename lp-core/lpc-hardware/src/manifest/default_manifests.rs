@@ -5,10 +5,10 @@ use crate::{
     HwResource,
 };
 
-const XIAO_ESP32_C6_TOML: &str = include_str!("../../boards/seeed/xiao-esp32-c6.toml");
+const XIAO_ESP32_C6_JSON: &str = include_str!("../../boards/seeed/xiao-esp32-c6.json");
 
 pub fn default_esp32c6_hardware_manifest() -> HwManifest {
-    HardwareManifestFile::read_toml(XIAO_ESP32_C6_TOML)
+    HardwareManifestFile::read_json(XIAO_ESP32_C6_JSON)
         .and_then(|manifest| manifest.to_manifest())
         .expect("checked-in seeed/xiao-esp32-c6 hardware manifest must parse")
 }
@@ -16,7 +16,7 @@ pub fn default_esp32c6_hardware_manifest() -> HwManifest {
 /// Emulator manifest: XIAO ESP32-C6 pin map, board D-labels for endpoint specs,
 /// and no reserved GPIOs so projects like fyeah-sign load without hardware errors.
 pub fn permissive_emu_hardware_manifest() -> HwManifest {
-    let file = HardwareManifestFile::read_toml(XIAO_ESP32_C6_TOML)
+    let file = HardwareManifestFile::read_json(XIAO_ESP32_C6_JSON)
         .expect("checked-in seeed/xiao-esp32-c6 hardware manifest must parse");
     let board_labels = assigned_board_label_by_gpio(&file);
 

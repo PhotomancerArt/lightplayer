@@ -318,12 +318,7 @@ fn overlay_target_for_slot_edit(
         .nodes
         .iter()
         .find(|node| node.runtime_id == Some(node_id))?;
-    let mut segments = node.def_location.path.segments().to_vec();
-    segments.extend(intent.path.segments().iter().cloned());
-    Some((
-        node.def_location.artifact.clone(),
-        SlotPath::from_segments(segments),
-    ))
+    Some((node.def_location.artifact.clone(), intent.path.clone()))
 }
 
 fn node_id_from_def_root(root: &str) -> Option<NodeId> {

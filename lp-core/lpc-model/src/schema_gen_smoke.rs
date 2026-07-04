@@ -84,7 +84,7 @@ mod tests {
             json.contains(r#""oneOf""#),
             "NodeInvocation should be a oneOf: {json}"
         );
-        for tag in [r#""unset""#, r#""ref""#, r#""def""#] {
+        for tag in [r#""unset""#, r#""ref""#] {
             assert!(
                 json.contains(tag),
                 "NodeInvocation schema missing variant {tag}: {json}"

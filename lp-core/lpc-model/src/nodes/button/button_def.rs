@@ -81,13 +81,8 @@ mod tests {
 
     #[test]
     fn button_def_parses_defaults() {
-        let def = NodeDef::from_toml_str(
-            r#"
-kind = "Button"
-endpoint = "button:gpio:D9"
-"#,
-        )
-        .expect("button");
+        let def = NodeDef::from_json_str(r#"{ "kind": "Button", "endpoint": "button:gpio:D9" }"#)
+            .expect("button");
 
         let NodeDef::Button(def) = def else {
             panic!("button def");

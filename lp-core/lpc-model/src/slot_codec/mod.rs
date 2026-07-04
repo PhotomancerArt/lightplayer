@@ -11,7 +11,6 @@ mod slot_reader;
 mod slot_value_codec;
 mod slot_writer;
 mod syntax;
-mod toml_syntax_source;
 
 pub use json_syntax_source::JsonSyntaxSource;
 pub use slot_reader::{ArrayReader, ObjectReader, PropReader, SlotReader, ValueReader};
@@ -20,7 +19,6 @@ pub use slot_writer::{
     SlotArrayWriter, SlotObjectWriter, SlotValueWriter, SlotWrite, SlotWriteError, SlotWriter,
 };
 pub use syntax::{SourceSpan, SyntaxError, SyntaxEvent, SyntaxEventSource};
-pub use toml_syntax_source::TomlSyntaxSource;
 
 #[cfg(test)]
 mod tests {
@@ -29,7 +27,6 @@ mod tests {
     use alloc::string::ToString;
     use alloc::vec;
     use alloc::vec::Vec;
-    use toml::Value;
 
     use crate::SlotShapeRegistry;
 
@@ -86,57 +83,6 @@ mod tests {
         assert_eq!(pin, Some(18));
         assert_eq!(order, Some(-1));
         assert_eq!(name.as_deref(), Some("main"));
-    }
-
-    #[test]
-    fn toml_source_uses_same_reader_semantics() {
-        let value: Value = toml::from_str(
-            r#"
-brightness = 0.5
-pin = 19
-name = "aux"
-"#,
-        )
-        .unwrap();
-        let registry = SlotShapeRegistry::default();
-        let mut reader = SlotReader::new(TomlSyntaxSource::new(&value).unwrap(), &registry);
-        let mut object = reader.object().unwrap();
-        let mut seen = Vec::new();
-
-        while let Some(mut prop) = object.next_prop().unwrap() {
-            seen.push(prop.name().to_string());
-            prop.value().skip_value().unwrap();
-        }
-
-        assert_eq!(seen, vec!["brightness", "pin", "name"]);
-    }
-
-    #[test]
-    fn toml_source_emits_kind_before_payload_fields() {
-        let mut table = toml::Table::new();
-        table.insert("bindings".to_string(), Value::Table(toml::Table::new()));
-        table.insert(
-            "kind".to_string(),
-            Value::String("ComputeShader".to_string()),
-        );
-        let mut source = toml::Table::new();
-        source.insert(
-            "path".to_string(),
-            Value::String("compute.glsl".to_string()),
-        );
-        table.insert("source".to_string(), Value::Table(source));
-        let value = Value::Table(table);
-        let registry = SlotShapeRegistry::default();
-        let mut reader = SlotReader::new(TomlSyntaxSource::new(&value).unwrap(), &registry);
-        let mut object = reader.object().unwrap();
-        let mut seen = Vec::new();
-
-        while let Some(mut prop) = object.next_prop().unwrap() {
-            seen.push(prop.name().to_string());
-            prop.value().skip_value().unwrap();
-        }
-
-        assert_eq!(seen[0], "kind");
     }
 
     #[test]
@@ -337,6 +283,6 @@ pub use dynamic_slot_reader::{
     apply_reader_to_slot, read_dynamic_slot, read_dynamic_slot_data, read_dynamic_slot_from_object,
 };
 pub use dynamic_slot_writer::{
-    SlotDataWriteError, write_dynamic_slot_json, write_dynamic_slot_toml,
-    write_slot_data_json_value, write_slot_data_toml_value,
+    SlotDataWriteError, write_dynamic_slot_json, write_dynamic_slot_json_pretty,
+    write_slot_data_json_value,
 };

@@ -1,0 +1,15 @@
+{
+  "kind": "ControlRadio",
+  "bindings": {
+    "input": {
+      "source": "bus#trigger"
+    },
+    "output": {
+      "target": "bus#trigger"
+    }
+  },
+  "endpoint": "radio:espnow:0",
+  "channel": 1,
+  "repeat_count": 3,
+  "wifi_channel": 0
+}

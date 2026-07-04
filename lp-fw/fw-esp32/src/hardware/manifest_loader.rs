@@ -7,7 +7,7 @@ use lpc_hardware::{HardwareManifestFile, HwManifest, default_esp32c6_hardware_ma
 use lpfs::LpFs;
 use lpfs::lp_path::AsLpPath;
 
-const HARDWARE_MANIFEST_PATH: &str = "/hardware.toml";
+const HARDWARE_MANIFEST_PATH: &str = "/hardware.json";
 
 pub fn load_hardware_manifest(fs: &dyn LpFs) -> HwManifest {
     match fs.read_file(HARDWARE_MANIFEST_PATH.as_path()) {
@@ -29,7 +29,7 @@ pub fn load_hardware_manifest(fs: &dyn LpFs) -> HwManifest {
 
 fn parse_override(bytes: &[u8]) -> Result<HwManifest, String> {
     let text = str::from_utf8(bytes).map_err(|error| error.to_string())?;
-    HardwareManifestFile::read_toml(text)
+    HardwareManifestFile::read_json(text)
         .and_then(|manifest| manifest.to_manifest())
         .map_err(|error| error.to_string())
 }

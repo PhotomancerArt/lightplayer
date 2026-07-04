@@ -649,14 +649,6 @@ impl SlotShapeRegistry {
         crate::slot_codec::read_dynamic_slot_data(self, id, reader.value())
     }
 
-    pub fn read_slot_toml(
-        &self,
-        id: SlotShapeId,
-        value: &toml::Value,
-    ) -> Result<Box<dyn SlotMutAccess>, crate::slot_codec::SyntaxError> {
-        self.read_slot_from(id, crate::slot_codec::TomlSyntaxSource::new(value)?)
-    }
-
     pub fn read_slot_from<S>(
         &self,
         id: SlotShapeId,
@@ -680,6 +672,18 @@ impl SlotShapeRegistry {
         crate::slot_codec::write_dynamic_slot_json(self, root, out)
     }
 
+    /// Pretty-printed [`Self::write_slot_json`] for authored files.
+    pub fn write_slot_json_pretty<W>(
+        &self,
+        root: &dyn crate::SlotAccess,
+        out: W,
+    ) -> Result<W, crate::slot_codec::SlotWriteError<W::Error>>
+    where
+        W: crate::slot_codec::SlotWrite,
+    {
+        crate::slot_codec::write_dynamic_slot_json_pretty(self, root, out)
+    }
+
     pub fn write_slot_json_value<W>(
         &self,
         id: SlotShapeId,
@@ -692,20 +696,6 @@ impl SlotShapeRegistry {
         crate::slot_codec::write_slot_data_json_value(self, id, data, value)
     }
 
-    pub fn write_slot_toml(
-        &self,
-        root: &dyn crate::SlotAccess,
-    ) -> Result<toml::Value, crate::slot_codec::SlotDataWriteError> {
-        crate::slot_codec::write_dynamic_slot_toml(self, root)
-    }
-
-    pub fn write_slot_toml_data(
-        &self,
-        id: SlotShapeId,
-        data: crate::SlotDataAccess<'_>,
-    ) -> Result<toml::Value, crate::slot_codec::SlotDataWriteError> {
-        crate::slot_codec::write_slot_data_toml_value(self, id, data)
-    }
 }
 
 impl PartialEq for SlotShapeRegistry {

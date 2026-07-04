@@ -6,8 +6,7 @@ use crate::{
 };
 
 use super::{
-    SlotDataWriteError, SlotValueWriter, SlotWrite, SlotWriteError, SyntaxError, SyntaxEventSource,
-    ValueReader,
+    SlotValueWriter, SlotWrite, SlotWriteError, SyntaxError, SyntaxEventSource, ValueReader,
 };
 
 pub(crate) fn read_custom_slot<S>(
@@ -60,25 +59,6 @@ where
     Err(SlotWriteError::InvalidSlotData(format!(
         "unknown custom slot codec {codec}"
     )))
-}
-
-pub(crate) fn write_custom_slot_toml(
-    codec: SlotShapeId,
-    data: &dyn SlotCustomAccess,
-    _registry: &SlotShapeRegistry,
-) -> Result<toml::Value, SlotDataWriteError> {
-    if codec == crate::slots::ASSET_SLOT_CODEC_ID {
-        let Some(slot) = data.as_any().downcast_ref::<crate::slots::AssetSlot>() else {
-            return Err(SlotDataWriteError::ShapeDataMismatch {
-                message: "asset slot codec expected AssetSlot data".into(),
-            });
-        };
-        return slot.write_slot_toml();
-    }
-
-    Err(SlotDataWriteError::ShapeDataMismatch {
-        message: format!("unknown custom slot codec {codec}"),
-    })
 }
 
 pub(crate) fn snapshot_custom_slot_data<'a>(

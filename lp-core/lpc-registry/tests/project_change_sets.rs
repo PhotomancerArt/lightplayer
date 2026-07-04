@@ -30,9 +30,11 @@ fn unreferenced_file_refresh_does_not_change_effective_project() {
     let (mut scenario, _) = RegistryScenario::load_fixture("fyeah-sign");
 
     let changes = scenario.replace_file_and_refresh(
-        "/not-referenced.toml",
+        "/not-referenced.json",
         br#"
-kind = "Clock"
+{
+  "kind": "Clock"
+}
 "#,
     );
 
@@ -40,7 +42,7 @@ kind = "Clock"
     assert!(
         scenario
             .registry()
-            .def(&root_def("/not-referenced.toml"))
+            .def(&root_def("/not-referenced.json"))
             .is_none()
     );
     assert!(
@@ -55,34 +57,42 @@ kind = "Clock"
 fn changed_registered_def_discovers_newly_referenced_file() {
     let mut scenario = RegistryScenario::empty();
     scenario.write_file(
-        "/project.toml",
+        "/project.json",
         br#"
-kind = "Project"
+{
+  "kind": "Project"
+}
 "#,
     );
     scenario.write_file(
-        "/clock.toml",
+        "/clock.json",
         br#"
-kind = "Clock"
+{
+  "kind": "Clock"
+}
 "#,
     );
-    scenario.load_root("/project.toml");
+    scenario.load_root("/project.json");
 
     let changes = scenario.replace_file_and_refresh(
-        "/project.toml",
+        "/project.json",
         br#"
-kind = "Project"
-
-[nodes.clock]
-ref = "./clock.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    }
+  }
+}
 "#,
     );
 
-    assert_eq!(changes.defs.added, vec![root_def("/clock.toml")]);
+    assert_eq!(changes.defs.added, vec![root_def("/clock.json")]);
     assert_eq!(
         changes.defs.changed,
         vec![NodeDefChange::new(
-            root_def("/project.toml"),
+            root_def("/project.json"),
             NodeDefChangeKind::Body,
         )]
     );
@@ -96,35 +106,41 @@ ref = "./clock.toml"
 fn missing_referenced_def_recovers_when_file_is_created() {
     let mut scenario = RegistryScenario::empty();
     scenario.write_file(
-        "/project.toml",
+        "/project.json",
         br#"
-kind = "Project"
-
-[nodes.clock]
-ref = "./clock.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    }
+  }
+}
 "#,
     );
-    scenario.load_root("/project.toml");
+    scenario.load_root("/project.json");
 
     assert_eq!(
         scenario
             .registry()
-            .def(&root_def("/clock.toml"))
+            .def(&root_def("/clock.json"))
             .map(|entry| &entry.state),
         Some(&NodeDefState::NotFound)
     );
 
     let changes = scenario.replace_file_and_refresh(
-        "/clock.toml",
+        "/clock.json",
         br#"
-kind = "Clock"
+{
+  "kind": "Clock"
+}
 "#,
     );
 
     assert_eq!(
         changes.defs.changed,
         vec![NodeDefChange::new(
-            root_def("/clock.toml"),
+            root_def("/clock.json"),
             NodeDefChangeKind::LeftError,
         )]
     );
@@ -132,7 +148,7 @@ kind = "Clock"
     assert!(matches!(
         scenario
             .registry()
-            .def(&root_def("/clock.toml"))
+            .def(&root_def("/clock.json"))
             .map(|entry| &entry.state),
         Some(NodeDefState::Loaded(_))
     ));
@@ -143,14 +159,19 @@ fn changing_shader_def_kind_removes_its_referenced_source_asset() {
     let (mut scenario, _) = RegistryScenario::load_fixture("fyeah-sign");
 
     let result = scenario.apply(MutationOp::SetArtifactBody {
-        artifact: artifact("/idle.toml"),
-        edit: AssetBodyOverlay::ReplaceBody(br#"kind = "Clock""#.to_vec()),
+        artifact: artifact("/idle.json"),
+        edit: AssetBodyOverlay::ReplaceBody(
+            br#"{
+  "kind": "Clock"
+}"#
+            .to_vec(),
+        ),
     });
 
     assert_eq!(
         result.changes.defs.changed,
         vec![NodeDefChange::new(
-            root_def("/idle.toml"),
+            root_def("/idle.json"),
             NodeDefChangeKind::KindChanged {
                 from: NodeKind::Shader,
                 to: NodeKind::Clock,
@@ -187,27 +208,35 @@ fn removing_playlist_reference_removes_child_def_and_its_asset() {
     let (mut scenario, _) = RegistryScenario::load_fixture("fyeah-sign");
 
     let changes = scenario.replace_file_and_refresh(
-        "/playlist.toml",
+        "/playlist.json",
         br#"
-kind = "Playlist"
-idle_entry = 1
-default_fade = 0.35
-
-[bindings.time]
-source = "bus#time.seconds"
-
-[entries.1]
-name = "idle"
-fade_after = 0.12
-node = { ref = "./idle.toml" }
+{
+  "kind": "Playlist",
+  "idle_entry": 1,
+  "default_fade": 0.35,
+  "bindings": {
+    "time": {
+      "source": "bus#time.seconds"
+    }
+  },
+  "entries": {
+    "1": {
+      "name": "idle",
+      "fade_after": 0.12,
+      "node": {
+        "ref": "./idle.json"
+      }
+    }
+  }
+}
 "#,
     );
 
-    assert_eq!(changes.defs.removed, vec![root_def("/blast.toml")]);
+    assert_eq!(changes.defs.removed, vec![root_def("/blast.json")]);
     assert_eq!(
         changes.defs.changed,
         vec![NodeDefChange::new(
-            root_def("/playlist.toml"),
+            root_def("/playlist.json"),
             NodeDefChangeKind::Body,
         )]
     );
@@ -229,28 +258,32 @@ fn changing_project_child_ref_reports_node_use_definition_change() {
     let (mut scenario, _) = RegistryScenario::load_fixture("fyeah-sign");
 
     let changes = scenario.replace_file_and_refresh(
-        "/project.toml",
+        "/project.json",
         br#"
-kind = "Project"
-name = "fyeah-sign"
-
-[nodes.output]
-ref = "./output.toml"
-
-[nodes.clock]
-ref = "./idle.toml"
-
-[nodes.button]
-ref = "./button.toml"
-
-[nodes.radio]
-ref = "./radio.toml"
-
-[nodes.playlist]
-ref = "./playlist.toml"
-
-[nodes.fixture]
-ref = "./fixture.toml"
+{
+  "kind": "Project",
+  "name": "fyeah-sign",
+  "nodes": {
+    "output": {
+      "ref": "./output.json"
+    },
+    "clock": {
+      "ref": "./idle.json"
+    },
+    "button": {
+      "ref": "./button.json"
+    },
+    "radio": {
+      "ref": "./radio.json"
+    },
+    "playlist": {
+      "ref": "./playlist.json"
+    },
+    "fixture": {
+      "ref": "./fixture.json"
+    }
+  }
+}
 "#,
     );
 
@@ -259,8 +292,8 @@ ref = "./fixture.toml"
         vec![NodeUseChange::new(
             NodeUseLocation::root().child(SlotPath::parse("nodes[clock]").unwrap()),
             NodeUseChangeKind::DefinitionChanged {
-                from: root_def("/clock.toml"),
-                to: root_def("/idle.toml"),
+                from: root_def("/clock.json"),
+                to: root_def("/idle.json"),
             },
         )]
     );
@@ -271,27 +304,35 @@ fn same_kind_body_value_edit_does_not_report_node_use_change() {
     let (mut scenario, _) = RegistryScenario::load_fixture("fyeah-sign");
 
     let changes = scenario.replace_file_and_refresh(
-        "/output.toml",
+        "/output.json",
         br#"
-kind = "Output"
-endpoint = "ws281x:rmt:D10"
-
-[bindings.input]
-source = "bus#control.out"
-
-[options]
-white_point = [0.9, 1.0, 1.0]
-brightness = 0.25
-interpolation_enabled = true
-dithering_enabled = false
-lut_enabled = true
+{
+  "kind": "Output",
+  "endpoint": "ws281x:rmt:D10",
+  "bindings": {
+    "input": {
+      "source": "bus#control.out"
+    }
+  },
+  "options": {
+    "white_point": [
+      0.9,
+      1.0,
+      1.0
+    ],
+    "brightness": 0.25,
+    "interpolation_enabled": true,
+    "dithering_enabled": false,
+    "lut_enabled": true
+  }
+}
 "#,
     );
 
     assert_eq!(
         changes.defs.changed,
         vec![NodeDefChange::new(
-            root_def("/output.toml"),
+            root_def("/output.json"),
             NodeDefChangeKind::Body,
         )]
     );

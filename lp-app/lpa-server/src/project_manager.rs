@@ -232,9 +232,9 @@ impl ProjectManager {
 
         let mut projects = Vec::new();
         for entry in entries {
-            // Check if this entry is a project directory (has project.toml)
-            let project_toml_path = entry.join("project.toml");
-            if fs.file_exists(project_toml_path.as_path()).unwrap_or(false) {
+            // Check if this entry is a project directory (has project.json)
+            let project_json_path = entry.join("project.json");
+            if fs.file_exists(project_json_path.as_path()).unwrap_or(false) {
                 // Extract project name from path
                 // Entry format: "/base/project-name" or "/base/project-name/"
                 let entry_str = entry.as_str();
