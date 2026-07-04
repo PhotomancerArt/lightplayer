@@ -684,7 +684,6 @@ impl SlotShapeRegistry {
     {
         crate::slot_codec::write_slot_data_json_value(self, id, data, value)
     }
-
 }
 
 impl PartialEq for SlotShapeRegistry {

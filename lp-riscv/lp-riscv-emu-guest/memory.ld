@@ -83,6 +83,14 @@ SECTIONS {
     } > RAM AT > ROM
     __data_source_start = LOADADDR(.data);
 
+    /* Persistent scratch (crash-recovery region): NOT zeroed or copied by
+       the entry code, so host-written contents survive guest startup —
+       the emulator analog of RTC fast RAM. */
+    .noinit (NOLOAD) : ALIGN(8) {
+        *(.noinit .noinit.*);
+        . = ALIGN(8);
+    } > RAM
+
     /* Heap section - reserve space for dynamic allocation */
     /* NOLOAD means this section won't be loaded from the ELF, but space is reserved */
     .heap (NOLOAD) : ALIGN(16) {

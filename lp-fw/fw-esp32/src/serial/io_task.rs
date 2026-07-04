@@ -180,6 +180,9 @@ pub async fn io_task(usb_device: esp_hal::peripherals::USB_DEVICE<'static>) {
     let mut conn = UsbConnectionMonitor::new();
 
     loop {
+        // Prove liveness to the watchdog feeder in the server loop.
+        crate::recovery::watchdog::note_io_alive();
+
         conn.poll();
         let connected = conn.is_connected();
 
@@ -332,12 +335,14 @@ fn into_small_server_msg(
             loaded_projects,
             uptime_ms,
             memory,
+            recovery,
         } => ServerMsgBody::Heartbeat {
             fps,
             frame_count,
             loaded_projects,
             uptime_ms,
             memory,
+            recovery,
         },
         ServerMsgBody::Error { error } => ServerMsgBody::Error { error },
     };

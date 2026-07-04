@@ -26,7 +26,8 @@ const TICKS_PER_SEND: u32 = 10;
 
 pub async fn run_espnow_test(_: embassy_executor::Spawner) -> ! {
     println!("[test_espnow] initializing board");
-    let (sw_int, timg0, _rmt, _usb_device, _gpio18, _flash, _gpio4, _gpio20, wifi) = init_board();
+    let (sw_int, timg0, _rmt, _usb_device, _gpio18, _flash, _gpio4, _gpio20, wifi, _rwdt) =
+        init_board();
     start_runtime(timg0, sw_int);
 
     let registry = Rc::new(HwRegistry::new(default_esp32c6_hardware_manifest()));

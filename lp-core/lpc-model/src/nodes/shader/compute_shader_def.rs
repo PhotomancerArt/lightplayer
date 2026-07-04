@@ -106,10 +106,9 @@ mod tests {
 
     #[test]
     fn compute_shader_def_rejects_glsl_path() {
-        let err = NodeDef::from_json_str(
-            r#"{ "kind": "ComputeShader", "glsl_path": "emitters.glsl" }"#,
-        )
-        .expect_err("glsl_path should be rejected");
+        let err =
+            NodeDef::from_json_str(r#"{ "kind": "ComputeShader", "glsl_path": "emitters.glsl" }"#)
+                .expect_err("glsl_path should be rejected");
 
         assert!(err.to_string().contains("glsl_path"));
     }

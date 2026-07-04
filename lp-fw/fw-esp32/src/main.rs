@@ -39,7 +39,11 @@ static OOM_USED_BYTES: AtomicUsize = AtomicUsize::new(0);
 /// unwinding step. We must explicitly call `begin_panic` to start unwinding so that
 /// `catch_unwind` (used for panic recovery in node render) can catch panics.
 ///
-/// If no `catch_unwind` exists on the call stack, the unwinder reaches the top and aborts.
+/// Before unwinding, a crash breadcrumb is staged into the `lp-recovery` persistent
+/// region (zero-alloc). If no `catch_unwind` catches the panic, the breadcrumb is
+/// committed and the device reboots via `software_reset` (see `fatal_reset_or_hang`);
+/// the next boot reads the region and reports what crashed. See the crate `recovery`
+/// module and `docs/adr/2026-07-04-crash-recovery-model.md`.
 #[panic_handler]
 fn panic_handler(info: &PanicInfo) -> ! {
     esp_println::println!("\n\n====================== PANIC ======================");
@@ -47,11 +51,16 @@ fn panic_handler(info: &PanicInfo) -> ! {
     print_panic_frames();
     esp_println::println!();
 
+    // Stage a breadcrumb in the persistent recovery region NOW (zero-alloc):
+    // if unwinding fails or the device hangs mid-unwind, the next boot can
+    // still report what happened. Layer-1 recovery voids it on catch.
+    stage_recovery_crash(info);
+
     if is_esp_sync_reentrant_lock_panic(info) {
         esp_println::println!(
             "fatal: esp-sync lock reentry while panicking; aborting without heap allocation"
         );
-        loop {}
+        fatal_reset_or_hang();
     }
 
     let payload: alloc::boxed::Box<dyn core::any::Any + Send> = {
@@ -94,6 +103,38 @@ fn panic_handler(info: &PanicInfo) -> ! {
 
     // begin_panic returns if no catch_unwind was found on the stack.
     esp_println::println!("unwinding failed: code={}", code.0);
+    fatal_reset_or_hang();
+}
+
+/// Stage the panic into the recovery breadcrumb region. Zero-alloc; a no-op
+/// when no recovery global is installed (test builds, pre-init panics).
+fn stage_recovery_crash(info: &PanicInfo) {
+    let is_oom = OOM_STATE.load(Ordering::Relaxed) == OOM_STATE_UNWINDING;
+    let cause = if is_oom {
+        lp_recovery::CrashCause::Oom
+    } else {
+        lp_recovery::CrashCause::Panic
+    };
+    let oom = is_oom.then(|| lp_recovery::OomStats {
+        requested: OOM_ALLOC_SIZE.load(Ordering::Relaxed) as u32,
+        align: OOM_ALLOC_ALIGN.load(Ordering::Relaxed) as u32,
+        free: OOM_FREE_BYTES.load(Ordering::Relaxed) as u32,
+        used: OOM_USED_BYTES.load(Ordering::Relaxed) as u32,
+    });
+    let location = info.location().map(|loc| (loc.file(), loc.line()));
+    let mut frames = [0u32; lpc_shared::backtrace::MAX_FRAMES];
+    let count = lpc_shared::backtrace::capture_frames(&mut frames);
+    let message = info.message();
+    lp_recovery::stage_crash(cause, &message, location, &frames[..count], oom);
+}
+
+/// Dead-end failure: commit the staged breadcrumb and reset. When a
+/// recovery global is installed (real firmware boots), this diverges via
+/// `software_reset`; otherwise (test features, panics before recovery
+/// init) it preserves the old hang-in-place behavior so dev boards don't
+/// boot-loop.
+fn fatal_reset_or_hang() -> ! {
+    let _ = lp_recovery::finalize_crash_and_reset();
     loop {}
 }
 
@@ -144,7 +185,19 @@ fn on_alloc_error(layout: Layout) -> ! {
             OOM_FREE_BYTES.load(Ordering::Relaxed),
             OOM_USED_BYTES.load(Ordering::Relaxed),
         );
-        loop {}
+        lp_recovery::stage_crash(
+            lp_recovery::CrashCause::Oom,
+            &"recursive OOM while building panic payload",
+            None,
+            &[],
+            Some(lp_recovery::OomStats {
+                requested: layout.size() as u32,
+                align: layout.align() as u32,
+                free: OOM_FREE_BYTES.load(Ordering::Relaxed) as u32,
+                used: OOM_USED_BYTES.load(Ordering::Relaxed) as u32,
+            }),
+        );
+        fatal_reset_or_hang();
     }
 
     let free = esp_alloc::HEAP.free();
@@ -224,6 +277,7 @@ mod logger;
     feature = "test_fluid_demo",
 ))]
 mod output;
+mod recovery;
 mod serial;
 #[cfg(not(any(
     feature = "test_rmt",
@@ -476,6 +530,7 @@ struct FirmwareApp {
     server: LpServer,
     transport: transport::StreamingMessageRouterTransport,
     time_provider: Esp32TimeProvider,
+    watchdog: recovery::watchdog::WatchdogFeeder,
 }
 
 #[cfg(not(any(
@@ -500,9 +555,23 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
 
     // Initialize board (clock, heap, runtime) and get hardware peripherals
     esp_println::println!("[INIT] Initializing board...");
-    let (sw_int, timg0, rmt_peripheral, usb_device, _gpio18, flash, _gpio4, _gpio20, wifi) =
+    let (sw_int, timg0, rmt_peripheral, usb_device, _gpio18, flash, _gpio4, _gpio20, wifi, rwdt) =
         init_board();
     esp_println::println!("[INIT] Board initialized, starting runtime...");
+
+    // Crash recovery: analyze the previous run (reset reason + persistent
+    // breadcrumb region) before anything crash-prone runs, then arm the
+    // hardware watchdog so hangs from here on are attributable.
+    let reset_cause = recovery::current_reset_cause();
+    let (recovery_inst, boot_assessment) =
+        lp_recovery::Recovery::init(recovery::Esp32RecoveryBackend::take(), reset_cause);
+    lp_recovery::set_global(Box::leak(Box::new(recovery_inst)));
+    recovery::log_boot_assessment(&boot_assessment);
+    // Baseline 0 matches the server loop's time provider, which also starts
+    // at ~0; the first io_task tick re-baselines within milliseconds.
+    let watchdog = recovery::watchdog::WatchdogFeeder::start(rwdt, 0);
+    let boot_guard = lp_recovery::enter(lp_recovery::FrameKind::Boot, "boot").ok();
+
     start_runtime(timg0, sw_int);
     esp_println::println!("[INIT] Runtime started");
 
@@ -643,18 +712,34 @@ fn boot_firmware(spawner: embassy_executor::Spawner) -> FirmwareApp {
     );
     esp_println::println!("[INIT] LpServer created");
 
-    // Auto-load project at boot (from config or lexical-first)
-    boot::auto_load_project(&mut server);
+    // Auto-load project at boot (from config or lexical-first) — unless
+    // repeated incomplete boots put us in safe mode: then the server comes
+    // up reachable but nothing crash-prone is loaded.
+    if boot_assessment.safe_mode {
+        let incomplete_boots = lp_recovery::snapshot()
+            .map(|s| s.consecutive_incomplete_boots)
+            .unwrap_or(0);
+        log::error!(
+            "[RECOVERY] SAFE MODE: {incomplete_boots} consecutive incomplete boots — skipping project auto-load"
+        );
+    } else {
+        boot::auto_load_project(&mut server);
+    }
 
     // Create time provider
     esp_println::println!("[INIT] Creating time provider...");
     let time_provider = Esp32TimeProvider::new();
     esp_println::println!("[INIT] Time provider created");
 
+    // Boot frame ends here; the boot-complete milestone is marked by the
+    // server loop after the first successful frame.
+    drop(boot_guard);
+
     FirmwareApp {
         server,
         transport,
         time_provider,
+        watchdog,
     }
 }
 
@@ -751,6 +836,6 @@ async fn main(spawner: embassy_executor::Spawner) {
         esp_println::println!("[INIT] fw-esp32 initialized, starting server loop...");
 
         // Run server loop (never returns)
-        run_server_loop(app.server, app.transport, app.time_provider).await;
+        run_server_loop(app.server, app.transport, app.time_provider, app.watchdog).await;
     }
 }

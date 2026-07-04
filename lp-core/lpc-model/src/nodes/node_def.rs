@@ -24,8 +24,8 @@ use crate::nodes::shader::{ComputeShaderDef, ShaderDef};
 use crate::nodes::texture::TextureDef;
 use crate::{
     ArtifactLocation, AssetContentType, AssetLocation, AssetSlot, AssetSlotValue, EnumSlot, LpPath,
-    LpPathBuf, NodeInvocation, ProjectNodePlacement, ReferencedAsset, SlotAccess,
-    SlotDataAccess, SlotDataMutAccess, SlotMapKey, SlotMutAccess, SlotName, SlotPath, SlotShapeId,
+    LpPathBuf, NodeInvocation, ProjectNodePlacement, ReferencedAsset, SlotAccess, SlotDataAccess,
+    SlotDataMutAccess, SlotMapKey, SlotMutAccess, SlotName, SlotPath, SlotShapeId,
     SlotShapeRegistry, Slotted, StaticSlotShape,
 };
 
@@ -1007,10 +1007,9 @@ mod tests {
 
     #[test]
     fn node_def_referenced_asset_paths_resolve_relative_shader_compute_and_fixture_paths() {
-        let shader = NodeDef::from_json_str(
-            r#"{ "kind": "Shader", "source": { "path": "shader.glsl" } }"#,
-        )
-        .expect("shader");
+        let shader =
+            NodeDef::from_json_str(r#"{ "kind": "Shader", "source": { "path": "shader.glsl" } }"#)
+                .expect("shader");
         assert_eq!(
             shader
                 .referenced_asset_paths(LpPath::new("/nodes/shader.json"))

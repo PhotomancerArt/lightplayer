@@ -6,11 +6,11 @@ use anyhow::{Context, Result};
 use lp_collection::VecMap;
 use std::path::Path;
 
+use lpc_model::nodes::clock::ClockDef;
 use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig};
 use lpc_model::nodes::output::OutputDef;
 use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
 use lpc_model::nodes::texture::TextureDef;
-use lpc_model::nodes::clock::ClockDef;
 use lpc_model::{
     Affine2d, Affine2dSlot, ArtifactSpec, AsLpPath, AssetSlot, BindingDef, BindingDefs, BindingRef,
     BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode, FixtureSamplingConfig,
