@@ -2,9 +2,9 @@ name: CI
 
 on:
   pull_request:
-    branches: ["feature/*"]
+    branches: ["main", "feature/*"]
   push:
-    branches: ["feature/*"]
+    branches: ["main", "feature/*"]
 
 env:
   RUST_BACKTRACE: 1
