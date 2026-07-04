@@ -1,3 +1,4 @@
+pub mod refresh_cadence;
 pub mod studio_actor;
 pub mod studio_command;
 pub mod studio_controller;
@@ -11,6 +12,7 @@ pub use crate::core::error::{UiError, UiResult};
 pub use crate::core::log::{LOG_RING_CAPACITY, LogRing, UiLogEntry, UiLogLevel};
 pub use crate::core::notice::UiNotices;
 pub use crate::core::notice::{UiNotice, UiNoticeLevel};
+pub use refresh_cadence::{DEVICE_REFRESH_INTERVAL, RefreshCadence, SIMULATOR_REFRESH_INTERVAL};
 pub use studio_actor::{StudioActor, StudioHandle};
 pub use studio_command::StudioCommand;
 pub use studio_controller::StudioController;

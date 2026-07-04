@@ -28,7 +28,7 @@ use core::future::Future;
 use core::pin::pin;
 use core::task::{Context, Poll};
 use core::time::Duration;
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use lpa_client::{BackoffPolicy, CancelSignal, ProgressDeadline};
@@ -39,7 +39,8 @@ use crate::app::studio::studio_view_channel::{
     studio_view_channel,
 };
 use crate::{
-    ProjectRefreshOutcome, StudioController, UiAction, UiLogEntry, UxUpdate, UxUpdateSink,
+    ProjectRefreshOutcome, StudioController, UiAction, UiLogEntry, UiStudioView, UxUpdate,
+    UxUpdateSink,
 };
 
 /// The default passive-refresh backoff: start at 3 s (the retired flat
@@ -49,14 +50,29 @@ pub const PASSIVE_REFRESH_BACKOFF_BASE: Duration = Duration::from_secs(3);
 /// Cap for [`PASSIVE_REFRESH_BACKOFF_BASE`] exponential backoff.
 pub const PASSIVE_REFRESH_BACKOFF_MAX: Duration = Duration::from_secs(30);
 
-/// The surface the UI holds after spawning the actor: a sender for commands and
-/// a receiver for change-gated view snapshots. This is the *entire* boundary the
-/// web crate sees — no controller handle, no take/put.
+/// The surface the UI holds after spawning the actor: a sender for commands, a
+/// receiver for change-gated view snapshots, and a read-only cell carrying the
+/// delay the UI timer should wait before the next `RefreshTick`. This is the
+/// *entire* boundary the web crate sees — no controller handle, no take/put.
 pub struct StudioHandle {
     /// Enqueue commands (user actions and refresh ticks).
     pub tx: CommandSender,
     /// Receive change-gated `UiStudioView` snapshots.
     pub view: StudioViewReceiver,
+    /// Shared next-tick delay (cadence + backoff), maintained by the actor. The
+    /// UI timer reads it each tick via [`StudioHandle::next_refresh_delay`], so
+    /// no cadence policy lives in the view layer (Q3).
+    pub delay: Rc<Cell<Duration>>,
+}
+
+impl StudioHandle {
+    /// The delay the UI timer should wait before enqueuing the next
+    /// [`StudioCommand::RefreshTick`]: the connection's cadence interval
+    /// (data in core, per Q3) plus any active passive-refresh backoff. The web
+    /// shell reads this each tick, so no cadence policy lives in the view layer.
+    pub fn next_refresh_delay(&self) -> Duration {
+        self.delay.get()
+    }
 }
 
 /// A shared, single-threaded cancel flag handed to the pull loop.
@@ -98,6 +114,9 @@ pub struct StudioActor<MakeTimer> {
     /// Builds a fresh quiet-gap timer for a pull's [`ProgressDeadline`]. Native
     /// callers pass a `sleep`-backed factory; wasm callers a `setTimeout` one.
     make_timer: MakeTimer,
+    /// Shared with the [`StudioHandle`]: the delay the UI timer waits before the
+    /// next tick (cadence interval + current backoff), refreshed each batch.
+    delay: Rc<Cell<Duration>>,
 }
 
 impl<MakeTimer, Timer> StudioActor<MakeTimer>
@@ -113,14 +132,18 @@ where
     pub fn new(controller: StudioController, make_timer: MakeTimer) -> (Self, StudioHandle) {
         let (tx, commands) = command_channel();
         let (view_out, view) = studio_view_channel();
+        // Seed the shared delay from the controller's initial cadence so the UI
+        // timer has a sane first interval before the first batch runs.
+        let delay = Rc::new(Cell::new(controller.refresh_cadence().interval()));
         let actor = Self {
             controller,
             commands,
             view_out,
             backoff: BackoffPolicy::new(PASSIVE_REFRESH_BACKOFF_BASE, PASSIVE_REFRESH_BACKOFF_MAX),
             make_timer,
+            delay: Rc::clone(&delay),
         };
-        (actor, StudioHandle { tx, view })
+        (actor, StudioHandle { tx, view, delay })
     }
 
     /// Run the command loop until all senders drop or a
@@ -155,20 +178,58 @@ where
         }
 
         self.emit_if_changed();
+        self.publish_refresh_delay();
         !plan.shutdown
+    }
+
+    /// Refresh the shared next-tick delay the UI timer reads: the connection's
+    /// cadence interval (core policy) plus any active backoff. Called after each
+    /// processed batch so a cadence change (e.g. simulator connects) or a backoff
+    /// bump takes effect on the next tick.
+    fn publish_refresh_delay(&self) {
+        let interval = self.controller.refresh_cadence().interval();
+        self.delay
+            .set(interval.saturating_add(self.backoff.current_delay()));
     }
 
     /// Dispatch a user action through the controller.
     ///
-    /// Progressive `UxUpdate::View` snapshots emitted while a long action runs
-    /// are forwarded to the view channel, so intermediate activity state reaches
-    /// the UI mid-op (matching the retired web `apply_update` view path). The
-    /// final change-gated snapshot is still emitted by `process_batch`.
+    /// Progressive updates emitted while a long action runs are forwarded to the
+    /// view channel so intermediate state reaches the UI mid-op (matching the
+    /// retired web `apply_update` path). A `View` snapshot replaces the live
+    /// view; an `Activity` update mutates the latest live view in place (via
+    /// [`UiStudioView::apply_activity`]) and republishes it; a `Log` is appended
+    /// to that live view. The final change-gated snapshot is still emitted by
+    /// `process_batch`.
     async fn run_action(&mut self, action: UiAction) {
         let publisher = self.view_out.publisher();
-        let updates = UxUpdateSink::new(move |update| {
-            if let UxUpdate::View(view) = update {
-                publisher.send(view);
+        // The live view the progressive updates mutate. `Activity`/`Log` updates
+        // are deltas against the most recent full `View` snapshot.
+        let live: Rc<RefCell<Option<UiStudioView>>> = Rc::new(RefCell::new(None));
+        let updates = UxUpdateSink::new({
+            let live = Rc::clone(&live);
+            move |update| match update {
+                UxUpdate::View(view) => {
+                    *live.borrow_mut() = Some(view.clone());
+                    publisher.send(view);
+                }
+                UxUpdate::Activity {
+                    target,
+                    status,
+                    activity,
+                } => {
+                    let mut live = live.borrow_mut();
+                    if let Some(view) = live.as_mut() {
+                        view.apply_activity(&target, status, activity);
+                        publisher.send(view.clone());
+                    }
+                }
+                UxUpdate::Log(log) => {
+                    if let Some(view) = live.borrow_mut().as_mut() {
+                        view.logs.push(log.clone());
+                        publisher.send(view.clone());
+                    }
+                }
             }
         });
         let result = self.controller.dispatch_with_updates(action, updates).await;

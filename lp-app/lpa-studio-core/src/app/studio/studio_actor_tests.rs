@@ -321,7 +321,7 @@ fn recovery_action() -> UiAction {
 fn queued_ticks_coalesce_to_a_single_pull() {
     let (controller, handle) = connected_controller();
     let (actor, studio_handle) = StudioActor::new(controller, immediate_timer());
-    let StudioHandle { tx, view: _view } = studio_handle;
+    let StudioHandle { tx, view: _view, .. } = studio_handle;
 
     // Queue several ticks, then shutdown, all before the loop runs. The loop
     // drains them as one batch and coalesces the ticks.
@@ -348,7 +348,7 @@ fn unchanged_pull_emits_no_new_snapshot_but_revision_advance_does() {
     let (controller, handle) = connected_controller();
     handle.set_revision(20);
     let (actor, studio_handle) = StudioActor::new(controller, immediate_timer());
-    let StudioHandle { tx, mut view } = studio_handle;
+    let StudioHandle { tx, mut view, .. } = studio_handle;
 
     // First tick applies revision 20 -> a snapshot. A second tick at the same
     // revision changes nothing -> no snapshot. Then bump the revision -> snapshot.
@@ -386,7 +386,7 @@ fn failed_passive_pull_applies_backoff_then_success_clears_it() {
     let (controller, handle) = connected_controller();
     handle.set_fail(true);
     let (mut actor, studio_handle) = StudioActor::new(controller, never_timer());
-    let StudioHandle { tx, view: _view } = studio_handle;
+    let StudioHandle { tx, view: _view, .. } = studio_handle;
 
     // We drive one refresh tick directly (bypassing run's loop) to inspect the
     // backoff after a single failure.
@@ -419,7 +419,7 @@ fn action_preempts_in_flight_passive_refresh() {
     // and re-checks its cancel signal at every frame boundary.
     handle.set_endless_frames(true);
     let (actor, studio_handle) = StudioActor::new(controller, never_timer());
-    let StudioHandle { tx, mut view } = studio_handle;
+    let StudioHandle { tx, mut view, .. } = studio_handle;
 
     // Start a tick alone. Drive the loop so the pull becomes in-flight.
     tx.send(StudioCommand::RefreshTick);
@@ -479,7 +479,7 @@ fn recovery_class_preempts_foreground_and_passive() {
 fn focus_action_issues_no_read() {
     let (controller, handle) = connected_controller();
     let (actor, studio_handle) = StudioActor::new(controller, immediate_timer());
-    let StudioHandle { tx, view: _view } = studio_handle;
+    let StudioHandle { tx, view: _view, .. } = studio_handle;
 
     let target = ProjectEditorTarget::node_tree();
     let focus = UiAction::from_op(target.node_id(), ProjectEditorOp::Focus);

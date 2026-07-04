@@ -9,6 +9,7 @@ use lpa_link::{
     LinkProviderKind,
 };
 
+use crate::app::studio::refresh_cadence::RefreshCadence;
 use crate::core::log::LogRing;
 use crate::core::notice::UiNotices;
 use crate::{
@@ -55,6 +56,14 @@ impl StudioController {
             self.project.snapshot(),
             self.logs.to_vec(),
         )
+    }
+
+    /// The passive-refresh cadence for the current connection, as data (P4/Q3).
+    ///
+    /// The actor publishes this to the UI timer so the interval policy lives in
+    /// core, not as a `LinkProviderKind` match in the view layer.
+    pub fn refresh_cadence(&self) -> RefreshCadence {
+        RefreshCadence::for_link_state(&self.device.snapshot().link.state)
     }
 
     pub fn actions(&self) -> UiActions {
@@ -139,23 +148,6 @@ impl StudioController {
         result
     }
 
-    /// Refresh a loaded project for passive UI updates.
-    ///
-    /// This bypasses the generic action activity/notice path so the web shell can
-    /// keep selected visual-product previews fresh without showing a user action
-    /// as running.
-    pub async fn refresh_loaded_project_tick(&mut self) -> Result<Option<ProjectSyncRun>, UiError> {
-        if !self.project_is_loaded() || !self.device.has_lightplayer_state() {
-            return Ok(None);
-        }
-        let sync = {
-            let server = self.device.server.client_mut()?;
-            self.project.refresh_project(server).await?
-        };
-        self.record_project_sync_run(&sync);
-        Ok(Some(sync))
-    }
-
     /// A passive refresh tick driven under a progress deadline and cancel signal
     /// (the actor's passive-pull path).
     ///
@@ -193,19 +185,6 @@ impl StudioController {
         self.project.mark_project_sync_failed(message);
         // A sync failure changes the project pane's status even if the revision
         // did not move, so the next change gate must emit it.
-        self.mark_dirty();
-    }
-
-    pub fn recover_from_foreground_action_timeout(
-        &mut self,
-        message: impl Into<String>,
-        fail_server: bool,
-    ) {
-        let message = message.into();
-        self.project.mark_project_sync_failed(message.clone());
-        if fail_server {
-            self.device.server.fail(message);
-        }
         self.mark_dirty();
     }
 

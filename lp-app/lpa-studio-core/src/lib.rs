@@ -41,7 +41,8 @@ pub use app::server::{
     ServerSnapshot, ServerState, StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
 };
 pub use app::studio::{
-    LOG_RING_CAPACITY, LogRing, StudioActor, StudioCommand, StudioController, StudioHandle,
+    DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY, LogRing, RefreshCadence,
+    SIMULATOR_REFRESH_INTERVAL, StudioActor, StudioCommand, StudioController, StudioHandle,
     StudioSnapshot, StudioViewReceiver, StudioViewSender, UiError, UiLogEntry, UiLogLevel,
     UiNotice, UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink, ViewPublisher,
     studio_view_channel,
