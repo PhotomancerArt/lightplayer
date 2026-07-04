@@ -21,7 +21,6 @@ pub struct ProjectSync {
     view: ProjectView,
     phase: ProjectSyncPhase,
     product_previews: BTreeMap<UiProductRef, UiProductPreview>,
-    requested_product_previews: Vec<UiProductRef>,
     issue: Option<UiIssue>,
 }
 
@@ -31,7 +30,6 @@ impl ProjectSync {
             view: ProjectView::new(),
             phase: ProjectSyncPhase::Empty,
             product_previews: BTreeMap::new(),
-            requested_product_previews: Vec::new(),
             issue: None,
         }
     }
@@ -130,7 +128,6 @@ impl ProjectSync {
 
     fn product_probe_requests(&mut self, products: Vec<UiProductRef>) -> Vec<ProjectProbeRequest> {
         let mut probes = Vec::new();
-        self.requested_product_previews.clear();
         for product in products {
             match product {
                 UiProductRef::Visual { .. } => {
@@ -138,7 +135,6 @@ impl ProjectSync {
                         .entry(product)
                         .or_insert(UiProductPreview::Pending);
                     if let Some(visual) = product.visual_product() {
-                        self.requested_product_previews.push(product);
                         probes.push(ProjectProbeRequest::RenderProduct(
                             RenderProductProbeRequest {
                                 product: visual,
@@ -154,7 +150,6 @@ impl ProjectSync {
                         .entry(product)
                         .or_insert(UiProductPreview::Pending);
                     if let Some(control) = product.control_product() {
-                        self.requested_product_previews.push(product);
                         probes.push(ProjectProbeRequest::ControlProduct(
                             ControlProductProbeRequest {
                                 product: control,
@@ -170,10 +165,8 @@ impl ProjectSync {
     }
 
     fn apply_product_probe_results(&mut self, probes: &[ProjectProbeResult]) {
-        let requested = core::mem::take(&mut self.requested_product_previews);
-        for (index, probe) in probes.iter().enumerate() {
-            let fallback_key = requested.get(index).copied();
-            if let Some((product, preview)) = self.product_preview_from_probe(probe, fallback_key) {
+        for probe in probes {
+            if let Some((product, preview)) = self.product_preview_from_probe(probe) {
                 self.product_previews.insert(product, preview);
             }
         }
@@ -196,7 +189,6 @@ impl ProjectSync {
     fn product_preview_from_probe(
         &self,
         probe: &ProjectProbeResult,
-        fallback_key: Option<UiProductRef>,
     ) -> Option<(UiProductRef, UiProductPreview)> {
         match probe {
             ProjectProbeResult::ControlProduct(ControlProductProbeResult::Preview {
@@ -254,7 +246,7 @@ impl ProjectSync {
                     message: message.clone(),
                 },
             )),
-            _ => product_preview_from_probe(probe, fallback_key),
+            _ => product_preview_from_probe(probe),
         }
     }
 }
@@ -293,7 +285,6 @@ pub fn project_read_request(
 
 fn product_preview_from_probe(
     probe: &ProjectProbeResult,
-    fallback_key: Option<UiProductRef>,
 ) -> Option<(UiProductRef, UiProductPreview)> {
     match probe {
         ProjectProbeResult::RenderProduct(RenderProductProbeResult::Texture {
@@ -322,25 +313,22 @@ fn product_preview_from_probe(
                 reason: format!("visual preview format {format:?} is not supported by Studio"),
             },
         )),
-        ProjectProbeResult::RenderProduct(RenderProductProbeResult::Unsupported { reason }) => {
-            fallback_key.map(|product| {
-                (
-                    product,
-                    UiProductPreview::Unsupported {
-                        reason: reason.clone(),
-                    },
-                )
-            })
-        }
-        ProjectProbeResult::RenderProduct(RenderProductProbeResult::Error { message }) => {
-            fallback_key.map(|product| {
-                (
-                    product,
-                    UiProductPreview::Error {
-                        message: message.clone(),
-                    },
-                )
-            })
+        ProjectProbeResult::RenderProduct(RenderProductProbeResult::Unsupported {
+            product,
+            reason,
+        }) => Some((
+            UiProductRef::from_visual_product(*product),
+            UiProductPreview::Unsupported {
+                reason: reason.clone(),
+            },
+        )),
+        ProjectProbeResult::RenderProduct(RenderProductProbeResult::Error { product, message }) => {
+            Some((
+                UiProductRef::from_visual_product(*product),
+                UiProductPreview::Error {
+                    message: message.clone(),
+                },
+            ))
         }
         ProjectProbeResult::ControlProduct(_) => None,
         ProjectProbeResult::ExplainSlot(_) => None,
@@ -505,6 +493,49 @@ mod tests {
                 height: 2,
                 revision: 8,
                 bytes,
+            })
+        );
+    }
+
+    #[test]
+    fn unsupported_and_error_probe_results_attribute_by_identity_out_of_order() {
+        let mut sync = ProjectSync::new();
+        let first = VisualProduct::new(NodeId::new(1), 0);
+        let second = VisualProduct::new(NodeId::new(2), 0);
+        let first_ref = UiProductRef::from_visual_product(first);
+        let second_ref = UiProductRef::from_visual_product(second);
+
+        let _ = sync.refresh_project_read_request(vec![first_ref, second_ref]);
+
+        // Results arrive in the reverse order of the requests: the probe for the
+        // second product comes first. Identity on each result must drive
+        // attribution — positional matching would have mislabeled these.
+        sync.apply_project_read_response(ProjectReadResponse {
+            revision: Revision::new(9),
+            results: Vec::new(),
+            probes: vec![
+                ProjectProbeResult::RenderProduct(RenderProductProbeResult::Error {
+                    product: second,
+                    message: "second failed".to_string(),
+                }),
+                ProjectProbeResult::RenderProduct(RenderProductProbeResult::Unsupported {
+                    product: first,
+                    reason: "first unsupported".to_string(),
+                }),
+            ],
+        })
+        .unwrap();
+
+        assert_eq!(
+            sync.product_preview(&first_ref),
+            Some(&UiProductPreview::Unsupported {
+                reason: "first unsupported".to_string(),
+            })
+        );
+        assert_eq!(
+            sync.product_preview(&second_ref),
+            Some(&UiProductPreview::Error {
+                message: "second failed".to_string(),
             })
         );
     }

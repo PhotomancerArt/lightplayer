@@ -31,9 +31,38 @@ pub enum RenderProductProbeResult {
         bytes: Vec<u8>,
     },
     Unsupported {
+        product: VisualProduct,
         reason: String,
     },
     Error {
+        product: VisualProduct,
         message: String,
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lpc_model::NodeId;
+
+    #[test]
+    fn render_product_probe_unsupported_and_error_carry_product() {
+        let product = VisualProduct::new(NodeId::new(3), 1);
+
+        let unsupported = RenderProductProbeResult::Unsupported {
+            product,
+            reason: String::from("no renderer"),
+        };
+        let json = serde_json::to_string(&unsupported).unwrap();
+        let back: RenderProductProbeResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, unsupported);
+
+        let error = RenderProductProbeResult::Error {
+            product,
+            message: String::from("boom"),
+        };
+        let json = serde_json::to_string(&error).unwrap();
+        let back: RenderProductProbeResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, error);
+    }
 }

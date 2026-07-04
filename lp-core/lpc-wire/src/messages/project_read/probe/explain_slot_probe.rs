@@ -35,9 +35,13 @@ pub enum ExplainSlotProbeResult {
         explanation: SlotExplanation,
     },
     Unsupported {
+        node: NodeId,
+        slot: SlotPath,
         reason: String,
     },
     Error {
+        node: NodeId,
+        slot: SlotPath,
         message: String,
     },
 }
@@ -63,5 +67,29 @@ mod tests {
         let back: ExplainSlotProbeResult = serde_json::from_str(&json).unwrap();
 
         assert_eq!(back, result);
+    }
+
+    #[test]
+    fn explain_slot_probe_unsupported_and_error_carry_subject() {
+        let node = NodeId::new(5);
+        let slot = SlotPath::parse("input").unwrap();
+
+        let unsupported = ExplainSlotProbeResult::Unsupported {
+            node,
+            slot: slot.clone(),
+            reason: String::from("not implemented"),
+        };
+        let json = serde_json::to_string(&unsupported).unwrap();
+        let back: ExplainSlotProbeResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, unsupported);
+
+        let error = ExplainSlotProbeResult::Error {
+            node,
+            slot,
+            message: String::from("boom"),
+        };
+        let json = serde_json::to_string(&error).unwrap();
+        let back: ExplainSlotProbeResult = serde_json::from_str(&json).unwrap();
+        assert_eq!(back, error);
     }
 }

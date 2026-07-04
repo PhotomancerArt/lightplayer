@@ -236,10 +236,10 @@ fn render_visual_product_detail(
                 bytes,
             );
         }
-        Some(RenderProductProbeResult::Unsupported { reason }) => {
+        Some(RenderProductProbeResult::Unsupported { reason, .. }) => {
             ui.colored_label(egui::Color32::YELLOW, reason);
         }
-        Some(RenderProductProbeResult::Error { message }) => {
+        Some(RenderProductProbeResult::Error { message, .. }) => {
             ui.colored_label(egui::Color32::LIGHT_RED, message);
         }
         _ => {
