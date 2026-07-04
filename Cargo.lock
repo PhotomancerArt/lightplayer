@@ -5318,29 +5318,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "lpfx"
-version = "40.0.0"
-dependencies = [
- "lps-frontend",
- "serde",
- "toml",
-]
-
-[[package]]
-name = "lpfx-cpu"
-version = "40.0.0"
-dependencies = [
- "lp-shader",
- "lpfx",
- "lpir",
- "lps-builtins",
- "lps-shared",
- "lpvm",
- "lpvm-native",
- "lpvm-wasm",
-]
-
-[[package]]
 name = "lpir"
 version = "40.0.0"
 dependencies = [
