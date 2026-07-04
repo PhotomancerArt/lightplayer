@@ -77,7 +77,7 @@ jobs:
         run: cargo install wasm-bindgen-cli --version 0.2.114 --locked --force
 
       - name: Install dioxus-cli
-        run: cargo install dioxus-cli --version 0.7.9 --locked
+        run: cargo install dioxus-cli --version 0.7.9 --locked --force
 
       - name: Install espflash
         if: inputs.channel == 'beta'
