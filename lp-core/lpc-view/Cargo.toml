@@ -10,6 +10,7 @@ default = ["std"]
 std = []
 
 [dependencies]
+lp-collection = { workspace = true }
 lpc-model = { path = "../lpc-model", default-features = false }
 lpc-wire = { path = "../lpc-wire", default-features = false }
 hashbrown = { workspace = true }

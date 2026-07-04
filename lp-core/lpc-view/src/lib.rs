@@ -16,8 +16,8 @@ pub mod tree;
 
 pub use api::ClientApi;
 pub use project::{
-    ClientResourceCache, NodeEntryView, ProjectReadApplyError, ProjectView, StatusChangeView,
-    apply_project_read_response,
+    ApplyStatus, ClientResourceCache, NodeEntryView, ProjectReadApplier, ProjectReadApplyError,
+    ProjectReadApplyStreamError, ProjectView, StatusChangeView, apply_project_read_response,
 };
 pub use slot::{SlotMirrorError, SlotMirrorView};
 pub use tree::{ApplyError, NodeTreeView, TreeEntryView, apply_tree_delta, apply_tree_deltas};

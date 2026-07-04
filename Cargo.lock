@@ -5282,6 +5282,7 @@ name = "lpc-view"
 version = "40.0.0"
 dependencies = [
  "hashbrown 0.15.5",
+ "lp-collection 1.0.0",
  "lpc-model",
  "lpc-wire",
 ]
