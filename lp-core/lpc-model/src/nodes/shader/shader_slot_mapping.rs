@@ -120,9 +120,8 @@ mod tests {
 
     #[test]
     fn sentinel_mapping_round_trips_from_inline_json() {
-        let mapping = read_mapping(
-            r#"{ "kind": "sentinel", "len": 4, "key": "id", "empty_key": 0 }"#,
-        );
+        let mapping =
+            read_mapping(r#"{ "kind": "sentinel", "len": 4, "key": "id", "empty_key": 0 }"#);
 
         assert_eq!(*mapping.kind.value(), ShaderSlotMappingKind::Sentinel);
         assert_eq!(*mapping.len.value(), 4);

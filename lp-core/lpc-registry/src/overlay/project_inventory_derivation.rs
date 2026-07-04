@@ -331,8 +331,5 @@ fn error_ref_path(containing_file: &LpPath, specifier: &lpc_model::ArtifactSpec)
 }
 
 fn error_asset_path(artifact: &ArtifactLocation) -> String {
-    format!(
-        "{}#asset-resolution-error",
-        artifact.file_path().as_str()
-    )
+    format!("{}#asset-resolution-error", artifact.file_path().as_str())
 }
