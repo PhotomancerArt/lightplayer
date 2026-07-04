@@ -349,13 +349,17 @@ mod tests {
     use core::future::Future;
     use core::pin::Pin;
     use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
-    use lpc_model::{Revision, TreePath, WithRevision};
+    use lpc_model::{NodeDef, NodeName, Revision, TextureDef, TreePath, WithRevision};
     use lpc_wire::{
-        ProjectReadCollector, ProjectReadEvent, ProjectReadResourceEvent, ProjectReadResponse,
-        ProjectReadResult, ResourcePayloadRead, ResourceReadQuery,
+        NodeReadQuery, ProjectReadCollector, ProjectReadEvent, ProjectReadNodeEvent,
+        ProjectReadResourceEvent, ProjectReadResponse, ProjectReadResult, ResourcePayloadRead,
+        ResourceReadQuery, WireChildKind, WireSlotIndex,
     };
 
+    use crate::engine::project_read_nodes::{node_def_root_name, node_state_root_name};
     use crate::engine::test_support::{EngineTestBuilder, output};
+    use crate::node::test_placeholder_spine;
+    use crate::nodes::TextureNode;
     use crate::resource::RuntimeBuffer;
 
     #[test]
@@ -475,6 +479,136 @@ mod tests {
                     event: ProjectReadQueryEvent::Shapes(shape_event),
                     ..
                 } => Some(shape_event),
+                _ => None,
+            })
+            .collect()
+    }
+
+    // ---- M5 G6a: per-root slot revision gating ----
+
+    #[test]
+    fn fresh_read_includes_all_roots() {
+        // Two state-bearing nodes attached at revision 1. A fresh read
+        // (since == 0, the bulk-sync guard) must include both `.state` roots.
+        let mut h = EngineTestBuilder::new()
+            .shader("a", output("outputs[0]", 0.5))
+            .shader("b", output("outputs[0]", 0.5))
+            .build();
+        let a = h.node("a");
+        let b = h.node("b");
+
+        let roots = slot_root_names(&mut h.engine, &h.registry, None);
+
+        assert!(roots.contains(&node_state_root_name(a)), "roots: {roots:?}");
+        assert!(roots.contains(&node_state_root_name(b)), "roots: {roots:?}");
+    }
+
+    #[test]
+    fn unchanged_slots_send_no_roots() {
+        // Both nodes last changed at revision 1. A read with since == 1 (>= every
+        // root revision, strict `>` gate) must send zero slot-root snapshots.
+        let mut h = EngineTestBuilder::new()
+            .shader("a", output("outputs[0]", 0.5))
+            .shader("b", output("outputs[0]", 0.5))
+            .build();
+
+        let roots = slot_root_names(&mut h.engine, &h.registry, Some(Revision::new(1)));
+
+        assert!(roots.is_empty(), "expected no slot roots, got {roots:?}");
+    }
+
+    #[test]
+    fn mutating_one_slot_sends_exactly_that_root() {
+        // Snapshot at R_before == 1, then bump only node "a"'s runtime entry to
+        // revision 2. Reading since == 1 must send exactly a's `.state` root and
+        // no other node's root.
+        let mut h = EngineTestBuilder::new()
+            .shader("a", output("outputs[0]", 0.5))
+            .shader("b", output("outputs[0]", 0.5))
+            .build();
+        let a = h.node("a");
+        let b = h.node("b");
+
+        // Bump a's runtime `changed_at` to revision 2 (state root gate source).
+        h.engine
+            .tree_mut()
+            .get_mut(a)
+            .expect("node a entry")
+            .set_status(lpc_wire::NodeRuntimeStatus::Ok, Revision::new(2));
+
+        let roots = slot_root_names(&mut h.engine, &h.registry, Some(Revision::new(1)));
+
+        assert_eq!(
+            roots,
+            Vec::from([node_state_root_name(a)]),
+            "expected only a's state root; b={:?}",
+            node_state_root_name(b)
+        );
+    }
+
+    #[test]
+    fn def_change_resends_def_root() {
+        // A def-backed node whose `.def` root revision (3) is newer than its
+        // runtime `.state` revision (1). Reading with since == 2 re-sends the
+        // `.def` root (3 > 2) but not the `.state` root (1 is not > 2).
+        let mut engine = Engine::new(TreePath::parse("/t.show").expect("path"));
+        let mut registry = ProjectRegistry::new();
+        let root = engine.tree().root();
+        let tid = engine
+            .tree_mut()
+            .add_child(
+                root,
+                NodeName::parse("tex").expect("name"),
+                NodeName::parse("texture").expect("ty"),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                test_placeholder_spine(),
+                Revision::new(1),
+            )
+            .expect("add texture node");
+        // Runtime state stamped at revision 1.
+        engine
+            .attach_runtime_node(tid, Box::new(TextureNode::new(tid)), Revision::new(1))
+            .expect("attach texture node");
+        // Def entry revision stamped at revision 3 (newer than state).
+        engine
+            .load_test_node_defs(
+                &mut registry,
+                &[(tid, NodeDef::Texture(TextureDef::new(16, 16)))],
+                Revision::new(3),
+            )
+            .expect("load texture def");
+
+        let roots = slot_root_names(&mut engine, &registry, Some(Revision::new(2)));
+
+        assert_eq!(
+            roots,
+            Vec::from([node_def_root_name(tid)]),
+            "expected only the def root re-sent"
+        );
+    }
+
+    /// Collect the `name`s of every `SlotRoot` event from a nodes-detail read at
+    /// the given `since`.
+    fn slot_root_names(
+        engine: &mut Engine,
+        registry: &ProjectRegistry,
+        since: Option<Revision>,
+    ) -> Vec<String> {
+        let request = ProjectReadRequest {
+            since,
+            queries: Vec::from([ProjectReadQuery::Nodes(NodeReadQuery::detail_all())]),
+            probes: Vec::new(),
+        };
+        let (_, events) = collect_event_response(engine, registry, request);
+        events
+            .into_iter()
+            .filter_map(|event| match event {
+                ProjectReadEvent::Query {
+                    event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::SlotRoot(root)),
+                    ..
+                } => Some(root.name),
                 _ => None,
             })
             .collect()
@@ -610,6 +744,8 @@ mod tests {
         let ids = shape_entry_ids(&events);
         assert!(ids.contains(&first), "fresh read includes first shape");
         assert!(ids.contains(&second), "fresh read includes second shape");
+    }
+
     // ---- Revision-gated resource read contract (M5 P2) --------------------------------------
 
     #[test]
