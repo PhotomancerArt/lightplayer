@@ -1,0 +1,24 @@
+{
+  "kind": "Project",
+  "name": "events",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "event_a": {
+      "ref": "./event_a.json"
+    },
+    "event_b": {
+      "ref": "./event_b.json"
+    },
+    "fixture": {
+      "ref": "./fixture.json"
+    },
+    "output": {
+      "ref": "./output.json"
+    },
+    "shader": {
+      "ref": "./shader.json"
+    }
+  }
+}

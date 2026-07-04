@@ -10,16 +10,15 @@ use std::fs;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
-/// Create a test project directory with project.toml
+/// Create a test project directory with project.json
 fn create_test_project_dir() -> (TempDir, PathBuf) {
     let temp_dir = TempDir::new().unwrap();
     let project_dir = temp_dir.path().join("test-project");
     fs::create_dir_all(&project_dir).unwrap();
 
-    let project_toml = r#"kind = "Project"
-name = "test-project"
+    let project_json = r#"{ "kind": "Project", "name": "test-project" }
 "#;
-    fs::write(project_dir.join("project.toml"), project_toml).unwrap();
+    fs::write(project_dir.join("project.json"), project_json).unwrap();
 
     (temp_dir, project_dir)
 }
@@ -50,7 +49,7 @@ async fn test_dev_command_resolves_relative_paths() {
 }
 
 #[tokio::test]
-async fn test_dev_command_validates_project_toml() {
+async fn test_dev_command_validates_project_json() {
     // Create a test project
     let (_temp_dir, _) = create_test_project_dir();
 
@@ -58,12 +57,12 @@ async fn test_dev_command_validates_project_toml() {
 
     // We can't directly test validate_local_project since it's private,
     // but we can test that handle_dev validates correctly by checking
-    // that it fails with invalid project.toml
+    // that it fails with invalid project.json
 
-    // Create an invalid project.toml
+    // Create an invalid project.json
     let invalid_project_dir = TempDir::new().unwrap().path().to_path_buf();
     fs::create_dir_all(&invalid_project_dir).unwrap();
-    fs::write(invalid_project_dir.join("project.toml"), "invalid toml").unwrap();
+    fs::write(invalid_project_dir.join("project.json"), "invalid json {{{").unwrap();
 
     // Try to run dev command with invalid project
     let _args = DevArgs {

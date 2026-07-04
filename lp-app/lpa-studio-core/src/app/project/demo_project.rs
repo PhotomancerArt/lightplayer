@@ -13,28 +13,28 @@ pub struct DemoProjectFile {
 pub fn demo_project_files() -> &'static [DemoProjectFile] {
     &[
         DemoProjectFile {
-            relative_path: "clock.toml",
-            bytes: include_bytes!("../../../../../examples/basic/clock.toml"),
+            relative_path: "clock.json",
+            bytes: include_bytes!("../../../../../examples/basic/clock.json"),
         },
         DemoProjectFile {
-            relative_path: "fixture.toml",
-            bytes: include_bytes!("../../../../../examples/basic/fixture.toml"),
+            relative_path: "fixture.json",
+            bytes: include_bytes!("../../../../../examples/basic/fixture.json"),
         },
         DemoProjectFile {
-            relative_path: "output.toml",
-            bytes: include_bytes!("../../../../../examples/basic/output.toml"),
+            relative_path: "output.json",
+            bytes: include_bytes!("../../../../../examples/basic/output.json"),
         },
         DemoProjectFile {
-            relative_path: "project.toml",
-            bytes: include_bytes!("../../../../../examples/basic/project.toml"),
+            relative_path: "project.json",
+            bytes: include_bytes!("../../../../../examples/basic/project.json"),
         },
         DemoProjectFile {
             relative_path: "shader.glsl",
             bytes: include_bytes!("../../../../../examples/basic/shader.glsl"),
         },
         DemoProjectFile {
-            relative_path: "shader.toml",
-            bytes: include_bytes!("../../../../../examples/basic/shader.toml"),
+            relative_path: "shader.json",
+            bytes: include_bytes!("../../../../../examples/basic/shader.json"),
         },
     ]
 }
@@ -66,21 +66,21 @@ mod tests {
                 .map(|file| file.relative_path)
                 .collect::<Vec<_>>(),
             vec![
-                "clock.toml",
-                "fixture.toml",
-                "output.toml",
-                "project.toml",
+                "clock.json",
+                "fixture.json",
+                "output.json",
+                "project.json",
                 "shader.glsl",
-                "shader.toml",
+                "shader.json",
             ]
         );
         assert_eq!(
             files
                 .iter()
-                .find(|file| file.relative_path == "project.toml")
+                .find(|file| file.relative_path == "project.json")
                 .unwrap()
                 .bytes,
-            include_bytes!("../../../../../examples/basic/project.toml")
+            include_bytes!("../../../../../examples/basic/project.json")
         );
     }
 }

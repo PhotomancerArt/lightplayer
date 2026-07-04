@@ -10,11 +10,12 @@ use lpc_model::nodes::fixture::{ColorOrder, FixtureDef, MappingConfig};
 use lpc_model::nodes::output::OutputDef;
 use lpc_model::nodes::shader::{ShaderDef, ShaderSlotDef};
 use lpc_model::nodes::texture::TextureDef;
+use lpc_model::nodes::clock::ClockDef;
 use lpc_model::{
-    Affine2d, Affine2dSlot, AsLpPath, AssetSlot, BindingDef, BindingDefs, BindingRef, BusSlotRef,
-    Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode, FixtureSamplingConfig, HwEndpointSpec,
-    MapSlot, NodeDef, OptionSlot, RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry,
-    ValueSlot,
+    Affine2d, Affine2dSlot, ArtifactSpec, AsLpPath, AssetSlot, BindingDef, BindingDefs, BindingRef,
+    BusSlotRef, Dim2u, Dim2uSlot, EnumSlot, FixtureDiagnosticMode, FixtureSamplingConfig,
+    HwEndpointSpec, MapSlot, NodeDef, NodeInvocation, NodeInvocationSlot, OptionSlot, ProjectDef,
+    RenderOrder, RenderOrderSlot, SlotPath, SlotShapeRegistry, ValueSlot,
 };
 use lpfs::LpFs;
 
@@ -32,7 +33,7 @@ pub fn derive_project_name(dir: &Path) -> String {
 
 /// Create project directory structure
 ///
-/// Creates the project directory, project.toml, and default node artifacts.
+/// Creates the project directory, project.json, and default node artifacts.
 pub fn create_project_structure(dir: &Path, name: Option<&str>) -> Result<()> {
     // Create directory if doesn't exist
     std::fs::create_dir_all(dir)
@@ -50,7 +51,7 @@ pub fn create_project_structure(dir: &Path, name: Option<&str>) -> Result<()> {
 
     // Create default template
     create_default_template(&fs)?;
-    write_project_toml(&fs, &project_name)?;
+    write_project_json(&fs, &project_name)?;
 
     Ok(())
 }
@@ -60,12 +61,10 @@ pub fn create_project_structure(dir: &Path, name: Option<&str>) -> Result<()> {
 /// Creates the default project structure with a rainbow rotating color wheel shader.
 /// The filesystem should already be chrooted to the project directory.
 pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
-    fs.write_file(
-        "/clock.toml".as_path(),
-        br#"kind = "Clock"
-"#,
-    )
-    .map_err(|e| anyhow::anyhow!("Failed to write clock.toml: {e}"))?;
+    let clock_json = authored_node_json(&NodeDef::Clock(ClockDef::default()))
+        .context("Failed to serialize clock def to JSON")?;
+    fs.write_file("/clock.json".as_path(), clock_json.as_bytes())
+        .map_err(|e| anyhow::anyhow!("Failed to write clock.json: {e}"))?;
 
     // Create texture node
     let texture_config = TextureDef {
@@ -75,10 +74,10 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
         }),
         bindings: bus_input_binding_defs("visual.out"),
     };
-    let texture_toml = authored_node_toml(&NodeDef::Texture(texture_config))
-        .context("Failed to serialize texture def to TOML")?;
-    fs.write_file("/texture.toml".as_path(), texture_toml.as_bytes())
-        .map_err(|e| anyhow::anyhow!("Failed to write texture.toml: {e}"))?;
+    let texture_json = authored_node_json(&NodeDef::Texture(texture_config))
+        .context("Failed to serialize texture def to JSON")?;
+    fs.write_file("/texture.json".as_path(), texture_json.as_bytes())
+        .map_err(|e| anyhow::anyhow!("Failed to write texture.json: {e}"))?;
 
     // Create shader node
     let shader_config = ShaderDef {
@@ -89,10 +88,10 @@ pub fn create_default_template(fs: &dyn LpFs) -> Result<()> {
         param_defs: lpc_model::MapSlot::default(),
         consumed_slots: default_visual_consumed_slots(),
     };
-    let shader_toml = authored_node_toml(&NodeDef::Shader(shader_config))
-        .context("Failed to serialize shader def to TOML")?;
-    fs.write_file("/shader.toml".as_path(), shader_toml.as_bytes())
-        .map_err(|e| anyhow::anyhow!("Failed to write shader.toml: {e}"))?;
+    let shader_json = authored_node_json(&NodeDef::Shader(shader_config))
+        .context("Failed to serialize shader def to JSON")?;
+    fs.write_file("/shader.json".as_path(), shader_json.as_bytes())
+        .map_err(|e| anyhow::anyhow!("Failed to write shader.json: {e}"))?;
 
     // Create shader GLSL
     fs.write_file(
@@ -168,10 +167,10 @@ vec4 render(vec2 pos) {
         bindings: bus_input_binding_defs("control.out"),
         options: OptionSlot::none(),
     };
-    let output_toml = authored_node_toml(&NodeDef::Output(output_config))
-        .context("Failed to serialize output def to TOML")?;
-    fs.write_file("/output.toml".as_path(), output_toml.as_bytes())
-        .map_err(|e| anyhow::anyhow!("Failed to write output.toml: {e}"))?;
+    let output_json = authored_node_json(&NodeDef::Output(output_config))
+        .context("Failed to serialize output def to JSON")?;
+    fs.write_file("/output.json".as_path(), output_json.as_bytes())
+        .map_err(|e| anyhow::anyhow!("Failed to write output.json: {e}"))?;
 
     // Create fixture node
     let fixture_config = FixtureDef {
@@ -188,42 +187,37 @@ vec4 render(vec2 pos) {
         brightness: OptionSlot::none(),
         gamma_correction: OptionSlot::none(),
     };
-    let fixture_toml = authored_node_toml(&NodeDef::Fixture(fixture_config))
-        .context("Failed to serialize fixture def to TOML")?;
-    fs.write_file("/fixture.toml".as_path(), fixture_toml.as_bytes())
-        .map_err(|e| anyhow::anyhow!("Failed to write fixture.toml: {e}"))?;
+    let fixture_json = authored_node_json(&NodeDef::Fixture(fixture_config))
+        .context("Failed to serialize fixture def to JSON")?;
+    fs.write_file("/fixture.json".as_path(), fixture_json.as_bytes())
+        .map_err(|e| anyhow::anyhow!("Failed to write fixture.json: {e}"))?;
 
     Ok(())
 }
 
-fn write_project_toml(fs: &dyn LpFs, name: &str) -> Result<()> {
-    let project_toml = format!(
-        r#"kind = "Project"
-name = "{name}"
-
-[nodes.output]
-def = {{ path = "./output.toml" }}
-
-[nodes.clock]
-def = {{ path = "./clock.toml" }}
-
-[nodes.texture]
-def = {{ path = "./texture.toml" }}
-
-[nodes.shader]
-def = {{ path = "./shader.toml" }}
-
-[nodes.fixture]
-def = {{ path = "./fixture.toml" }}
-"#
-    );
-    fs.write_file("/project.toml".as_path(), project_toml.as_bytes())
-        .map_err(|e| anyhow::anyhow!("Failed to write project.toml: {e}"))?;
+fn write_project_json(fs: &dyn LpFs, name: &str) -> Result<()> {
+    let mut nodes = VecMap::new();
+    for node in ["output", "clock", "texture", "shader", "fixture"] {
+        nodes.insert(
+            String::from(node),
+            NodeInvocationSlot::new(NodeInvocation::path(ArtifactSpec::path(format!(
+                "./{node}.json"
+            )))),
+        );
+    }
+    let project = ProjectDef {
+        name: OptionSlot::some(ValueSlot::new(String::from(name))),
+        nodes: MapSlot::new(nodes),
+    };
+    let project_json = authored_node_json(&NodeDef::Project(project))
+        .context("Failed to serialize project def to JSON")?;
+    fs.write_file("/project.json".as_path(), project_json.as_bytes())
+        .map_err(|e| anyhow::anyhow!("Failed to write project.json: {e}"))?;
     Ok(())
 }
 
-fn authored_node_toml(node: &NodeDef) -> Result<String> {
-    node.write_toml(&slot_shape_registry())
+fn authored_node_json(node: &NodeDef) -> Result<String> {
+    node.write_json(&slot_shape_registry())
         .map_err(|e| anyhow::anyhow!("{e}"))
 }
 
@@ -315,11 +309,14 @@ mod tests {
 
         create_project_structure(&project_dir, None).unwrap();
 
-        assert!(project_dir.join("project.toml").exists());
-        let project_toml = std::fs::read_to_string(project_dir.join("project.toml")).unwrap();
-        let project_value: toml::Value = toml::from_str(&project_toml).unwrap();
-        assert_eq!(project_value["name"].as_str(), Some("my-project"));
-        assert!(project_value.get("uid").is_none());
+        assert!(project_dir.join("project.json").exists());
+        let project_json = std::fs::read_to_string(project_dir.join("project.json")).unwrap();
+        let def = NodeDef::from_json_str(&project_json).unwrap();
+        let NodeDef::Project(project) = def else {
+            panic!("expected project def");
+        };
+        assert_eq!(project.name(), Some("my-project"));
+        assert!(!project_json.contains("\"uid\""));
         assert!(project_dir.join("shader.glsl").exists());
     }
 
@@ -330,10 +327,13 @@ mod tests {
 
         create_project_structure(&project_dir, Some("Custom Name")).unwrap();
 
-        let project_toml = std::fs::read_to_string(project_dir.join("project.toml")).unwrap();
-        let project_value: toml::Value = toml::from_str(&project_toml).unwrap();
-        assert_eq!(project_value["name"].as_str(), Some("Custom Name"));
-        assert!(project_value.get("uid").is_none());
+        let project_json = std::fs::read_to_string(project_dir.join("project.json")).unwrap();
+        let def = NodeDef::from_json_str(&project_json).unwrap();
+        let NodeDef::Project(project) = def else {
+            panic!("expected project def");
+        };
+        assert_eq!(project.name(), Some("Custom Name"));
+        assert!(!project_json.contains("\"uid\""));
     }
 
     #[test]
@@ -344,11 +344,11 @@ mod tests {
         // In production, LpFsStd works with write_file
         create_default_template_mut(&mut fs).unwrap();
 
-        assert!(fs.file_exists("/texture.toml".as_path()).unwrap());
-        assert!(fs.file_exists("/shader.toml".as_path()).unwrap());
+        assert!(fs.file_exists("/texture.json".as_path()).unwrap());
+        assert!(fs.file_exists("/shader.json".as_path()).unwrap());
         assert!(fs.file_exists("/shader.glsl".as_path()).unwrap());
-        assert!(fs.file_exists("/output.toml".as_path()).unwrap());
-        assert!(fs.file_exists("/fixture.toml".as_path()).unwrap());
+        assert!(fs.file_exists("/output.json".as_path()).unwrap());
+        assert!(fs.file_exists("/fixture.json".as_path()).unwrap());
     }
 
     #[test]
@@ -358,12 +358,12 @@ mod tests {
         create_default_template_mut(&mut fs).unwrap();
 
         // Verify texture node content
-        let texture_toml = fs.read_file("/texture.toml".as_path()).unwrap();
+        let texture_json = fs.read_file("/texture.json".as_path()).unwrap();
         let texture_config =
-            NodeDef::from_toml_str(std::str::from_utf8(&texture_toml).expect("UTF-8"))
-                .expect("texture node TOML");
+            NodeDef::from_json_str(std::str::from_utf8(&texture_json).expect("UTF-8"))
+                .expect("texture node JSON");
         let NodeDef::Texture(texture_config) = texture_config else {
-            panic!("expected texture node TOML");
+            panic!("expected texture node JSON");
         };
         assert_eq!(texture_config.width(), 64);
         assert_eq!(texture_config.height(), 64);
@@ -373,12 +373,12 @@ mod tests {
         ));
 
         // Verify shader node content
-        let shader_toml = fs.read_file("/shader.toml".as_path()).unwrap();
+        let shader_json = fs.read_file("/shader.json".as_path()).unwrap();
         let shader_config =
-            NodeDef::from_toml_str(std::str::from_utf8(&shader_toml).expect("UTF-8"))
-                .expect("shader node TOML");
+            NodeDef::from_json_str(std::str::from_utf8(&shader_json).expect("UTF-8"))
+                .expect("shader node JSON");
         let NodeDef::Shader(shader_config) = shader_config else {
-            panic!("expected shader node TOML");
+            panic!("expected shader node JSON");
         };
         assert_eq!(
             shader_config

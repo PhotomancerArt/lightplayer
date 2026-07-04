@@ -77,7 +77,7 @@ mod tests {
                 )]),
             ])],
         )
-        .with_children(vec![UiNodeChild::new("blast", "Shader", "./blast.toml")]);
+        .with_children(vec![UiNodeChild::new("blast", "Shader", "./blast.json")]);
 
         assert!(view.has_sections());
         assert!(view.has_children());

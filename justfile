@@ -641,7 +641,12 @@ test-glsl-filetests:
 # ============================================================================
 
 [parallel]
-check: fmt-check clippy
+check: fmt-check clippy lint-serde-content
+
+# Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
+# See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.
+lint-serde-content:
+    ./scripts/check-serde-content.sh
 
 # Build RV32 builtins before check/build/test so host crates that embed the
 # builtins ELF do not compile a stale "builtins missing" artifact.

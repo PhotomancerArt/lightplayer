@@ -8,7 +8,7 @@ use lpc_model::{
     ArtifactLocation, AssetBodyOrigin, AssetBodyOverlay, AssetContentType, AssetEntry,
     AssetLocation, AssetState, NodeDefEntry, NodeDefLocation, NodeDefState, NodeInvocation,
     NodeUseLocation, ProjectInventory, ProjectNode, ProjectNodeOrigin, ProjectOverlay,
-    ReferencedAsset, Revision, SlotPath, WithRevision, resolve_artifact_specifier,
+    ReferencedAsset, Revision, WithRevision, resolve_artifact_specifier,
 };
 use lpfs::{LpFs, LpPath};
 
@@ -110,11 +110,7 @@ impl InventoryDerivation<'_, '_> {
         revision: Revision,
         ancestry: &mut Vec<NodeDefLocation>,
     ) {
-        match def.referenced_assets(
-            location.artifact.file_path().as_path(),
-            location,
-            &location.path,
-        ) {
+        match def.referenced_assets(location.artifact.file_path().as_path()) {
             Ok(assets) => {
                 for asset in assets {
                     self.walk_asset(asset, revision, key);
@@ -123,7 +119,6 @@ impl InventoryDerivation<'_, '_> {
             Err(err) => {
                 let source = AssetLocation::artifact(ArtifactLocation::file(error_asset_path(
                     &location.artifact,
-                    &location.path,
                 )));
                 let state = AssetState::ReadError {
                     message: err.to_string(),
@@ -140,35 +135,9 @@ impl InventoryDerivation<'_, '_> {
             }
         }
 
-        for site in def.invocation_sites(&location.path) {
+        for site in def.invocation_sites() {
             match &site.invocation {
                 NodeInvocation::Unset => {}
-                NodeInvocation::Def(body) => {
-                    let child_location = NodeDefLocation {
-                        artifact: location.artifact.clone(),
-                        path: site.path.clone(),
-                    };
-                    let child_def = body.value().clone();
-                    self.inventory.defs.insert(
-                        child_location.clone(),
-                        NodeDefEntry::new(
-                            child_location.clone(),
-                            NodeDefState::Loaded(child_def.clone()),
-                            revision,
-                        ),
-                    );
-                    self.walk_graph_node(
-                        key.child(site.path.clone()),
-                        Some(key.clone()),
-                        child_location,
-                        ProjectNodeOrigin::Invocation {
-                            slot: site.path,
-                            role: site.role,
-                            invocation: site.invocation,
-                        },
-                        ancestry,
-                    );
-                }
                 NodeInvocation::Ref(_) => {
                     let child_location = self.resolve_ref_invocation(
                         location.artifact.file_path().as_path(),
@@ -270,14 +239,7 @@ impl InventoryDerivation<'_, '_> {
     }
 
     fn read_effective_asset(&mut self, source: &AssetLocation) -> AssetState {
-        let location = match source {
-            AssetLocation::Artifact { location } => location,
-            AssetLocation::Inline { .. } => {
-                return AssetState::Available {
-                    origin: AssetBodyOrigin::Inline,
-                };
-            }
-        };
+        let AssetLocation::Artifact { location } = source;
 
         self.artifacts
             .register_location(location.clone(), self.frame);
@@ -329,11 +291,9 @@ impl InventoryDerivation<'_, '_> {
         }
     }
 
-    fn revision_for_asset(&self, source: &AssetLocation, owner_revision: Revision) -> Revision {
-        match source {
-            AssetLocation::Artifact { location } => self.revision_for_artifact(location),
-            AssetLocation::Inline { .. } => owner_revision,
-        }
+    fn revision_for_asset(&self, source: &AssetLocation, _owner_revision: Revision) -> Revision {
+        let AssetLocation::Artifact { location } = source;
+        self.revision_for_artifact(location)
     }
 }
 
@@ -348,7 +308,7 @@ fn node_def_state_for_read_error(err: ArtifactError) -> NodeDefState {
 }
 
 fn parse_error(err: EditApplyError) -> lpc_model::NodeDefParseError {
-    lpc_model::NodeDefParseError::Toml {
+    lpc_model::NodeDefParseError::Syntax {
         error: err.to_string(),
     }
 }
@@ -370,10 +330,9 @@ fn error_ref_path(containing_file: &LpPath, specifier: &lpc_model::ArtifactSpec)
     format!("{}#unresolved-ref:{specifier}", containing_file.as_str())
 }
 
-fn error_asset_path(artifact: &ArtifactLocation, base_path: &SlotPath) -> String {
+fn error_asset_path(artifact: &ArtifactLocation) -> String {
     format!(
-        "{}#asset-resolution-error:{}",
-        artifact.file_path().as_str(),
-        base_path
+        "{}#asset-resolution-error",
+        artifact.file_path().as_str()
     )
 }

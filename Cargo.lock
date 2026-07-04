@@ -4967,7 +4967,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite",
- "toml",
  "tungstenite 0.21.0",
  "unicode-width 0.2.2",
 ]
@@ -5217,7 +5216,6 @@ dependencies = [
  "serde",
  "serde_json",
  "spin",
- "toml",
  "unwinding",
 ]
 
@@ -5228,7 +5226,7 @@ dependencies = [
  "lp-collection 1.0.0",
  "lpc-model",
  "serde",
- "toml",
+ "serde_json",
 ]
 
 [[package]]
@@ -5245,7 +5243,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "toml",
 ]
 
 [[package]]
@@ -5312,7 +5309,6 @@ dependencies = [
  "ser-write-json",
  "serde",
  "serde_json",
- "toml",
 ]
 
 [[package]]
@@ -5332,29 +5328,6 @@ dependencies = [
  "log",
  "serde",
  "tempfile",
-]
-
-[[package]]
-name = "lpfx"
-version = "40.0.0"
-dependencies = [
- "lps-frontend",
- "serde",
- "toml",
-]
-
-[[package]]
-name = "lpfx-cpu"
-version = "40.0.0"
-dependencies = [
- "lp-shader",
- "lpfx",
- "lpir",
- "lps-builtins",
- "lps-shared",
- "lpvm",
- "lpvm-native",
- "lpvm-wasm",
 ]
 
 [[package]]

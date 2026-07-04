@@ -23,8 +23,8 @@ fn server_tick_refreshes_referenced_artifact_without_recreating_runtime_node() {
     server
         .base_fs_mut()
         .write_file(
-            project_file("fs-refresh", "clock.toml").as_path(),
-            clock_toml_with_rate(2.0).as_bytes(),
+            project_file("fs-refresh", "clock.json").as_path(),
+            clock_json_with_rate(2.0).as_bytes(),
         )
         .expect("write clock");
 
@@ -51,7 +51,7 @@ fn overlay_commit_does_not_echo_as_external_fs_change() {
                 vec![MutationCmd {
                     id: MutationCmdId::new(1),
                     mutation: MutationOp::PutSlotEdit {
-                        artifact: ArtifactLocation::file("/clock.toml"),
+                        artifact: ArtifactLocation::file("/clock.json"),
                         edit: SlotEdit::assign_value(
                             SlotPath::parse("controls.rate").expect("rate path"),
                             LpValue::F32(3.0),
@@ -100,20 +100,24 @@ fn server_with_clock_project(name: &str) -> (LpServer, LpPathBuf) {
     server
         .base_fs_mut()
         .write_file(
-            project_file(name, "project.toml").as_path(),
+            project_file(name, "project.json").as_path(),
             br#"
-kind = "Project"
-
-[nodes.clock]
-ref = "./clock.toml"
+{
+  "kind": "Project",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    }
+  }
+}
 "#,
         )
         .expect("write project");
     server
         .base_fs_mut()
         .write_file(
-            project_file(name, "clock.toml").as_path(),
-            clock_toml_with_rate(1.0).as_bytes(),
+            project_file(name, "clock.json").as_path(),
+            clock_json_with_rate(1.0).as_bytes(),
         )
         .expect("write clock");
 
@@ -139,7 +143,7 @@ fn clock_rate(project: &Project) -> f32 {
     let entry = project
         .registry()
         .def(&NodeDefLocation::artifact_root(ArtifactLocation::file(
-            "/clock.toml",
+            "/clock.json",
         )))
         .expect("clock definition");
     let NodeDef::Clock(def) = entry.state.loaded_def().expect("loaded clock") else {
@@ -156,13 +160,15 @@ fn project_file(project: &str, file: &str) -> LpPathBuf {
     LpPathBuf::from("/projects").join(project).join(file)
 }
 
-fn clock_toml_with_rate(rate: f32) -> alloc::string::String {
+fn clock_json_with_rate(rate: f32) -> alloc::string::String {
     format!(
         r#"
-kind = "Clock"
-
-[controls]
-rate = {rate}
+{{
+  "kind": "Clock",
+  "controls": {{
+    "rate": {rate}
+  }}
+}}
 "#
     )
 }

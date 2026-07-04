@@ -13,12 +13,25 @@ fn snapshot_overlay_can_bootstrap_project_files() {
     let base = ProjectSnapshot::empty();
     let mut target = ProjectSnapshot::empty();
     target.insert(
-        LpPathBuf::from("/project.toml"),
+        LpPathBuf::from("/project.json"),
         br#"
-kind = "Project"
-
-[nodes.clock.def]
-kind = "Clock"
+{
+  "kind": "Project",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    }
+  }
+}
+"#
+        .to_vec(),
+    );
+    target.insert(
+        LpPathBuf::from("/clock.json"),
+        br#"
+{
+  "kind": "Clock"
+}
 "#
         .to_vec(),
     );
@@ -48,7 +61,7 @@ kind = "Clock"
 
     let mut loaded = ProjectRegistry::new();
     loaded
-        .load_root(&fs, LpPath::new("/project.toml"), Revision::new(3), &ctx)
+        .load_root(&fs, LpPath::new("/project.json"), Revision::new(3), &ctx)
         .unwrap();
     assert_eq!(loaded.inventory().defs.len(), 2);
 }

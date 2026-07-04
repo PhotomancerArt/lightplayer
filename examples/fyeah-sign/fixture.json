@@ -1,0 +1,42 @@
+{
+  "kind": "Fixture",
+  "render_size": {
+    "width": 16,
+    "height": 16
+  },
+  "bindings": {
+    "input": {
+      "source": "bus#visual.out"
+    },
+    "output": {
+      "target": "bus#control.out"
+    }
+  },
+  "sampling": "direct",
+  "diagnostic_mode": "off",
+  "mapping": {
+    "kind": "SvgPath",
+    "source": "fyeah-mapping.svg",
+    "sample_diameter": 2
+  },
+  "color_order": "rgb",
+  "transform": [
+    [
+      1,
+      0,
+      0
+    ],
+    [
+      0,
+      1,
+      0
+    ],
+    [
+      0,
+      0,
+      1
+    ]
+  ],
+  "brightness": 255,
+  "gamma_correction": false
+}

@@ -1,0 +1,8 @@
+{
+  "kind": "Clock",
+  "controls": {
+    "running": true,
+    "rate": 1,
+    "scrub_offset_seconds": 0
+  }
+}

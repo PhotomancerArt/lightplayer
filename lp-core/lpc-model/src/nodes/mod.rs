@@ -18,7 +18,7 @@ pub use fixture::{
 };
 pub use fluid::{FluidDef, FluidDefView, FluidEmitter, FluidState};
 pub use node_def::{
-    ArtifactPathResolutionError, InlineAssetBytes, InlineAssetText, InvocationSite, NodeArtifact,
+    ArtifactPathResolutionError, InvocationSite, NodeArtifact,
     NodeDef, NodeDefParseError, NodeDefWriteError, resolve_artifact_specifier,
 };
 pub use output::{

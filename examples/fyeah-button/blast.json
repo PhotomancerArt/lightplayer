@@ -1,0 +1,34 @@
+{
+  "kind": "Shader",
+  "source": "blast.glsl",
+  "render_order": 0,
+  "bindings": {
+    "progress": {
+      "source": "..#entry_progress"
+    },
+    "time": {
+      "source": "..#entry_time"
+    }
+  },
+  "glsl_opts": {
+    "add_sub": "wrapping",
+    "mul": "wrapping",
+    "div": "reciprocal"
+  },
+  "consumed": {
+    "progress": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0,
+      "label": "",
+      "description": ""
+    },
+    "time": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0,
+      "label": "",
+      "description": ""
+    }
+  }
+}

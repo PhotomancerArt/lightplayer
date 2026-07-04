@@ -24,7 +24,7 @@ use crate::nodes::shader::{ComputeShaderDef, ShaderDef};
 use crate::nodes::texture::TextureDef;
 use crate::{
     ArtifactLocation, AssetContentType, AssetLocation, AssetSlot, AssetSlotValue, EnumSlot, LpPath,
-    LpPathBuf, NodeDefLocation, NodeInvocation, ProjectNodePlacement, ReferencedAsset, SlotAccess,
+    LpPathBuf, NodeInvocation, ProjectNodePlacement, ReferencedAsset, SlotAccess,
     SlotDataAccess, SlotDataMutAccess, SlotMapKey, SlotMutAccess, SlotName, SlotPath, SlotShapeId,
     SlotShapeRegistry, Slotted, StaticSlotShape,
 };
@@ -56,7 +56,7 @@ const NODE_DEF_VARIANT_NAMES: &[&str] = &[
 
 /// Authored body of a node artifact.
 ///
-/// A `NodeDef` is source data: it is what a TOML artifact defines before the
+/// A `NodeDef` is source data: it is what a JSON artifact defines before the
 /// engine instantiates a runtime node. Project artifacts are included because
 /// a project defines the root project node and its child node invocations.
 #[derive(Clone, Debug, PartialEq, Slotted)]
@@ -89,20 +89,6 @@ pub struct InvocationSite {
     pub path: SlotPath,
     pub invocation: NodeInvocation,
     pub role: ProjectNodePlacement,
-}
-
-/// Borrowed inline text asset body owned by a node definition.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct InlineAssetText<'a> {
-    pub extension: &'a str,
-    pub text: &'a str,
-}
-
-/// Borrowed inline byte asset body owned by a node definition.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct InlineAssetBytes<'a> {
-    pub extension: Option<&'a str>,
-    pub bytes: &'a [u8],
 }
 
 /// Failure resolving model-authored artifact path references.
@@ -144,16 +130,34 @@ impl NodeArtifact {
         self.0.into_inner()
     }
 
-    /// Read an authored TOML node artifact through the slot registry.
-    pub fn read_toml(registry: &SlotShapeRegistry, text: &str) -> Result<Self, NodeDefParseError> {
-        let payload = toml::from_str::<toml::Value>(text).map_err(toml_parse_error)?;
-        reject_unknown_kind(&payload)?;
-        read_node_artifact(registry, payload)
+    /// Read an authored JSON node artifact through the slot registry.
+    ///
+    /// The codec streams, so the top-level `"kind"` field must precede the
+    /// variant's other fields — canonical [`Self::write_json`] output always
+    /// satisfies this.
+    pub fn read_json(registry: &SlotShapeRegistry, text: &str) -> Result<Self, NodeDefParseError> {
+        reject_unknown_kind_json(text)?;
+        let object = registry
+            .read_slot_json(NodeArtifact::SHAPE_ID, text)
+            .map_err(|error| NodeDefParseError::Syntax {
+                error: error.to_string(),
+            })?;
+        downcast_node_artifact(object)
     }
 
-    /// Write an authored TOML node artifact through the slot registry.
-    pub fn write_toml(&self, registry: &SlotShapeRegistry) -> Result<String, NodeDefWriteError> {
-        write_node_artifact(registry, self)
+    /// Write this artifact as authored JSON: pretty-printed, slot-shape
+    /// declaration order, trailing newline. Output is deterministic so
+    /// identical models produce byte-identical files.
+    pub fn write_json(&self, registry: &SlotShapeRegistry) -> Result<String, NodeDefWriteError> {
+        let mut out = registry
+            .write_slot_json_pretty(self, alloc::vec::Vec::new())
+            .map_err(|error| NodeDefWriteError {
+                error: error.to_string(),
+            })?;
+        out.push(b'\n');
+        String::from_utf8(out).map_err(|_| NodeDefWriteError {
+            error: String::from("slot JSON writer produced invalid UTF-8"),
+        })
     }
 }
 
@@ -230,8 +234,13 @@ impl NodeDef {
         NODE_DEF_VARIANT_NAMES.contains(&name)
     }
 
-    /// Child invocation slots reachable directly from this definition under `base`.
-    pub fn invocation_sites(&self, base: &SlotPath) -> Vec<InvocationSite> {
+    /// Child invocation slots reachable directly from this definition.
+    ///
+    /// Definitions live one-per-artifact, so site paths are rooted at the
+    /// artifact root.
+    pub fn invocation_sites(&self) -> Vec<InvocationSite> {
+        let base = SlotPath::root();
+        let base = &base;
         match self {
             Self::Project(project) => project
                 .nodes
@@ -269,13 +278,10 @@ impl NodeDef {
         &self,
         containing_file: &LpPath,
     ) -> Result<Vec<LpPathBuf>, ArtifactPathResolutionError> {
-        let owner =
-            NodeDefLocation::artifact_root(ArtifactLocation::location_for_path(containing_file));
         let mut paths = Vec::new();
-        for asset in self.referenced_assets(containing_file, &owner, &SlotPath::root())? {
-            if let AssetLocation::Artifact { location } = asset.location {
-                paths.push(location.file_path().clone());
-            }
+        for asset in self.referenced_assets(containing_file)? {
+            let AssetLocation::Artifact { location } = asset.location;
+            paths.push(location.file_path().clone());
         }
         Ok(paths)
     }
@@ -284,76 +290,20 @@ impl NodeDef {
     pub fn referenced_assets(
         &self,
         containing_file: &LpPath,
-        owner: &NodeDefLocation,
-        base: &SlotPath,
     ) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
         match self {
-            Self::Shader(shader) => assets_for_shader(
+            Self::Shader(shader) => assets_for_slot(
                 shader.shader_source(),
                 containing_file,
-                owner,
-                base,
                 AssetContentType::ShaderSource,
             ),
-            Self::ComputeShader(shader) => assets_for_shader(
+            Self::ComputeShader(shader) => assets_for_slot(
                 shader.shader_source(),
                 containing_file,
-                owner,
-                base,
                 AssetContentType::ComputeShaderSource,
             ),
-            Self::Fixture(fixture) => assets_for_fixture(fixture, containing_file, owner, base),
+            Self::Fixture(fixture) => assets_for_fixture(fixture, containing_file),
             _ => Ok(Vec::new()),
-        }
-    }
-
-    /// Inline UTF-8 asset text at `asset_path`, when this definition owns one.
-    pub fn inline_asset_text(
-        &self,
-        owner_path: &SlotPath,
-        asset_path: &SlotPath,
-    ) -> Option<InlineAssetText<'_>> {
-        match self {
-            Self::Shader(shader) if asset_path == &source_slot_path(owner_path) => {
-                inline_text_from_slot(shader.shader_source(), "glsl")
-            }
-            Self::ComputeShader(shader) if asset_path == &source_slot_path(owner_path) => {
-                inline_text_from_slot(shader.shader_source(), "glsl")
-            }
-            Self::Fixture(fixture)
-                if asset_path == &fixture_mapping_source_slot_path(owner_path) =>
-            {
-                let MappingConfig::SvgPath { source, .. } = fixture.mapping.value() else {
-                    return None;
-                };
-                inline_text_from_slot(source, "svg")
-            }
-            _ => None,
-        }
-    }
-
-    /// Inline binary asset bytes at `asset_path`, when this definition owns one.
-    pub fn inline_asset_bytes(
-        &self,
-        owner_path: &SlotPath,
-        asset_path: &SlotPath,
-    ) -> Option<InlineAssetBytes<'_>> {
-        match self {
-            Self::Shader(shader) if asset_path == &source_slot_path(owner_path) => {
-                inline_bytes_from_slot(shader.shader_source())
-            }
-            Self::ComputeShader(shader) if asset_path == &source_slot_path(owner_path) => {
-                inline_bytes_from_slot(shader.shader_source())
-            }
-            Self::Fixture(fixture)
-                if asset_path == &fixture_mapping_source_slot_path(owner_path) =>
-            {
-                let MappingConfig::SvgPath { source, .. } = fixture.mapping.value() else {
-                    return None;
-                };
-                inline_bytes_from_slot(source)
-            }
-            _ => None,
         }
     }
 
@@ -364,11 +314,11 @@ impl NodeDef {
 
     /// True when parent-facing shell views differ.
     ///
-    /// Inline child definition bodies are reduced to kind-only stubs so parent
-    /// containers only report a shell change when child presence, references,
-    /// ordering, or child kind changes.
+    /// With strictly one node definition per artifact (no inline child
+    /// bodies), the parent-facing shell is the full authored body, so this is
+    /// equivalent to [`Self::body_changed`].
     pub fn shell_changed(before: &Self, after: &Self) -> bool {
-        def_shell(before) != def_shell(after)
+        Self::body_changed(before, after)
     }
 
     pub fn as_project(&self) -> Option<&ProjectDef> {
@@ -448,20 +398,20 @@ impl NodeDef {
         }
     }
 
-    /// Read an authored TOML node artifact through the slot registry.
-    pub fn read_toml(registry: &SlotShapeRegistry, text: &str) -> Result<Self, NodeDefParseError> {
-        NodeArtifact::read_toml(registry, text).map(NodeArtifact::into_node_def)
+    /// Read an authored JSON node artifact through the slot registry.
+    pub fn read_json(registry: &SlotShapeRegistry, text: &str) -> Result<Self, NodeDefParseError> {
+        NodeArtifact::read_json(registry, text).map(NodeArtifact::into_node_def)
     }
 
-    /// Read authored TOML using the model crate's generated static shape registry.
-    pub fn from_toml_str(text: &str) -> Result<Self, NodeDefParseError> {
+    /// Read authored JSON using the model crate's generated static shape registry.
+    pub fn from_json_str(text: &str) -> Result<Self, NodeDefParseError> {
         let registry = SlotShapeRegistry::default();
-        Self::read_toml(&registry, text)
+        Self::read_json(&registry, text)
     }
 
-    /// Write this node definition as authored TOML through the slot registry.
-    pub fn write_toml(&self, registry: &SlotShapeRegistry) -> Result<String, NodeDefWriteError> {
-        NodeArtifact::new(self.clone()).write_toml(registry)
+    /// Write this node definition as authored JSON through the slot registry.
+    pub fn write_json(&self, registry: &SlotShapeRegistry) -> Result<String, NodeDefWriteError> {
+        NodeArtifact::new(self.clone()).write_json(registry)
     }
 }
 
@@ -481,45 +431,19 @@ fn playlist_entry_node_path(base: &SlotPath, key: u32) -> Option<SlotPath> {
     )
 }
 
-fn assets_for_shader(
-    source: &AssetSlot,
-    containing_file: &LpPath,
-    owner: &NodeDefLocation,
-    base: &SlotPath,
-    content_type: AssetContentType,
-) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
-    assets_for_slot(
-        source,
-        containing_file,
-        owner,
-        source_slot_path(base),
-        content_type,
-    )
-}
-
 fn assets_for_fixture(
     fixture: &FixtureDef,
     containing_file: &LpPath,
-    owner: &NodeDefLocation,
-    base: &SlotPath,
 ) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
     let MappingConfig::SvgPath { source, .. } = fixture.mapping.value() else {
         return Ok(Vec::new());
     };
-    assets_for_slot(
-        source,
-        containing_file,
-        owner,
-        fixture_mapping_source_slot_path(base),
-        AssetContentType::FixtureSvg,
-    )
+    assets_for_slot(source, containing_file, AssetContentType::FixtureSvg)
 }
 
 fn assets_for_slot(
     slot: &AssetSlot,
     containing_file: &LpPath,
-    owner: &NodeDefLocation,
-    asset_path: SlotPath,
     content_type: AssetContentType,
 ) -> Result<Vec<ReferencedAsset>, ArtifactPathResolutionError> {
     match slot.value() {
@@ -531,38 +455,7 @@ fn assets_for_slot(
                 content_type,
             )])
         }
-        AssetSlotValue::InlineText { .. } | AssetSlotValue::InlineBytes { .. } => {
-            Ok(vec![ReferencedAsset::new(
-                AssetLocation::inline(owner.clone(), asset_path),
-                content_type,
-            )])
-        }
     }
-}
-
-fn source_slot_path(base: &SlotPath) -> SlotPath {
-    base.child(SlotName::parse("source").expect("source is a valid slot name"))
-}
-
-fn fixture_mapping_source_slot_path(base: &SlotPath) -> SlotPath {
-    base.child(SlotName::parse("mapping").expect("mapping is a valid slot name"))
-        .child(SlotName::parse("source").expect("source is a valid slot name"))
-}
-
-fn inline_text_from_slot<'a>(
-    slot: &'a AssetSlot,
-    default_extension: &'static str,
-) -> Option<InlineAssetText<'a>> {
-    let (extension, text) = slot.inline_text_value()?;
-    Some(InlineAssetText {
-        extension: extension.unwrap_or(default_extension),
-        text,
-    })
-}
-
-fn inline_bytes_from_slot(slot: &AssetSlot) -> Option<InlineAssetBytes<'_>> {
-    let (extension, bytes) = slot.inline_bytes_value()?;
-    Some(InlineAssetBytes { extension, bytes })
 }
 
 pub fn resolve_artifact_specifier(
@@ -587,35 +480,6 @@ pub fn resolve_artifact_specifier(
         ArtifactSpec::Lib(lib) => Err(ArtifactPathResolutionError::LibUnsupported {
             specifier: lib.to_string(),
         }),
-    }
-}
-
-fn def_shell(def: &NodeDef) -> NodeDef {
-    match def {
-        NodeDef::Project(project) => {
-            let mut shell = project.clone();
-            for invocation in shell.nodes.entries.values_mut() {
-                *invocation = EnumSlot::new(invocation_shell(invocation.value()));
-            }
-            NodeDef::Project(shell)
-        }
-        NodeDef::Playlist(playlist) => {
-            let mut shell = playlist.clone();
-            for entry in shell.entries.entries.values_mut() {
-                entry.node = EnumSlot::new(invocation_shell(entry.node.value()));
-            }
-            NodeDef::Playlist(shell)
-        }
-        other => other.clone(),
-    }
-}
-
-fn invocation_shell(invocation: &NodeInvocation) -> NodeInvocation {
-    match invocation {
-        NodeInvocation::Unset | NodeInvocation::Ref(_) => invocation.clone(),
-        NodeInvocation::Def(body) => {
-            NodeInvocation::inline(NodeDef::default_for_kind(body.value().kind()))
-        }
     }
 }
 
@@ -683,14 +547,14 @@ impl SlotMutAccess for NodeDef {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NodeDefParseError {
     UnknownKind { kind: String },
-    Toml { error: String },
+    Syntax { error: String },
 }
 
 impl core::fmt::Display for NodeDefParseError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::UnknownKind { kind } => write!(f, "unknown node kind `{kind}`"),
-            Self::Toml { error } => f.write_str(error),
+            Self::Syntax { error } => f.write_str(error),
         }
     }
 }
@@ -709,47 +573,14 @@ impl core::fmt::Display for NodeDefWriteError {
 
 impl core::error::Error for NodeDefWriteError {}
 
-fn reject_unknown_kind(payload: &toml::Value) -> Result<(), NodeDefParseError> {
-    let kind = read_kind(payload)?;
-    if NODE_DEF_VARIANT_NAMES.contains(&kind.as_str()) {
-        Ok(())
-    } else {
-        Err(NodeDefParseError::UnknownKind { kind })
-    }
-}
-
-fn read_kind(payload: &toml::Value) -> Result<String, NodeDefParseError> {
-    let Some(table) = payload.as_table() else {
-        return Err(NodeDefParseError::Toml {
-            error: String::from("node definition TOML root must be a table"),
-        });
-    };
-    let Some(kind) = table.get("kind") else {
-        return Err(NodeDefParseError::Toml {
-            error: String::from("missing required field `kind`"),
-        });
-    };
-    kind.as_str()
-        .map(String::from)
-        .ok_or_else(|| NodeDefParseError::Toml {
-            error: String::from("field `kind` must be a string"),
-        })
-}
-
-fn read_node_artifact(
-    registry: &SlotShapeRegistry,
-    payload: toml::Value,
+fn downcast_node_artifact(
+    object: alloc::boxed::Box<dyn crate::SlotMutAccess>,
 ) -> Result<NodeArtifact, NodeDefParseError> {
-    let object = registry
-        .read_slot_toml(NodeArtifact::SHAPE_ID, &payload)
-        .map_err(|error| NodeDefParseError::Toml {
-            error: error.to_string(),
-        })?;
     object
         .into_any()
         .downcast::<NodeArtifact>()
         .map(|artifact| *artifact)
-        .map_err(|_| NodeDefParseError::Toml {
+        .map_err(|_| NodeDefParseError::Syntax {
             error: format!(
                 "slot reader returned unexpected type for shape {}",
                 NodeArtifact::SHAPE_ID
@@ -757,23 +588,74 @@ fn read_node_artifact(
         })
 }
 
-fn write_node_artifact(
-    registry: &SlotShapeRegistry,
-    artifact: &NodeArtifact,
-) -> Result<String, NodeDefWriteError> {
-    let value = registry
-        .write_slot_toml(artifact)
-        .map_err(|error| NodeDefWriteError {
-            error: error.to_string(),
-        })?;
-    toml::to_string(&value).map_err(|error| NodeDefWriteError {
-        error: error.to_string(),
-    })
+fn reject_unknown_kind_json(text: &str) -> Result<(), NodeDefParseError> {
+    let kind = read_kind_json(text)?;
+    if NODE_DEF_VARIANT_NAMES.contains(&kind.as_str()) {
+        Ok(())
+    } else {
+        Err(NodeDefParseError::UnknownKind { kind })
+    }
 }
 
-fn toml_parse_error(error: toml::de::Error) -> NodeDefParseError {
-    NodeDefParseError::Toml {
-        error: format!("{error}"),
+/// Streaming probe for the top-level `"kind"` string in an authored JSON
+/// artifact. Uses syntax events so device loads never materialize a value
+/// tree just to pre-check the kind.
+fn read_kind_json(text: &str) -> Result<String, NodeDefParseError> {
+    use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
+
+    let syntax_error = |error: crate::slot_codec::SyntaxError| NodeDefParseError::Syntax {
+        error: error.to_string(),
+    };
+
+    let mut source = JsonSyntaxSource::new(text).map_err(syntax_error)?;
+    match source.next_event().map_err(syntax_error)? {
+        Some(SyntaxEvent::StartObject { .. }) => {}
+        _ => {
+            return Err(NodeDefParseError::Syntax {
+                error: String::from("node definition JSON root must be an object"),
+            });
+        }
+    }
+
+    // Scan top-level props, skipping nested values by depth.
+    let mut depth = 0usize;
+    loop {
+        let Some(event) = source.next_event().map_err(syntax_error)? else {
+            return Err(NodeDefParseError::Syntax {
+                error: String::from("missing required field `kind`"),
+            });
+        };
+        match event {
+            SyntaxEvent::Prop { name, .. } if depth == 0 && name == "kind" => {
+                let mut kind = String::new();
+                loop {
+                    match source.next_event().map_err(syntax_error)? {
+                        Some(SyntaxEvent::StringChunk { text, is_last, .. }) => {
+                            kind.push_str(&text);
+                            if is_last {
+                                return Ok(kind);
+                            }
+                        }
+                        _ => {
+                            return Err(NodeDefParseError::Syntax {
+                                error: String::from("field `kind` must be a string"),
+                            });
+                        }
+                    }
+                }
+            }
+            SyntaxEvent::StartObject { .. } | SyntaxEvent::StartArray { .. } => depth += 1,
+            SyntaxEvent::EndArray { .. } => depth = depth.saturating_sub(1),
+            SyntaxEvent::EndObject { .. } => {
+                if depth == 0 {
+                    return Err(NodeDefParseError::Syntax {
+                        error: String::from("missing required field `kind`"),
+                    });
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
     }
 }
 
@@ -795,70 +677,27 @@ mod tests {
     }
 
     #[test]
-    fn node_def_parses_project_and_texture_toml() {
-        let registry = registry();
-        let project = NodeDef::read_toml(
-            &registry,
-            r#"
-kind = "Project"
-
-[nodes.texture]
-ref = "./texture.toml"
-"#,
-        )
-        .expect("project");
-        assert!(matches!(project, NodeDef::Project(_)));
-
-        let texture = NodeDef::read_toml(
-            &registry,
-            r#"
-kind = "Texture"
-size = { width = 64, height = 48 }
-"#,
-        )
-        .expect("texture");
-        assert!(matches!(texture, NodeDef::Texture(_)));
-    }
-
-    #[test]
-    fn node_def_parses_shader_output_and_fixture_toml() {
+    fn node_def_parses_output_and_fixture_json() {
         let registry = registry();
 
-        let shader = NodeDef::read_toml(
+        let output = NodeDef::read_json(
             &registry,
-            r#"
-kind = "Shader"
-render_order = 2
-
-source = { path = "shader.glsl" }
-
-[bindings.visual]
-target = "bus#visual.out"
-"#,
-        )
-        .expect("shader");
-        assert!(matches!(shader, NodeDef::Shader(_)));
-
-        let output = NodeDef::read_toml(
-            &registry,
-            r#"
-kind = "Output"
-endpoint = "ws281x:rmt:D10"
-
-[options]
-brightness = 0.5
-"#,
+            r#"{
+  "kind": "Output",
+  "endpoint": "ws281x:rmt:D10",
+  "options": { "brightness": 0.5 }
+}"#,
         )
         .expect("output");
         assert!(matches!(output, NodeDef::Output(_)));
 
-        let fixture = NodeDef::read_toml(
+        let fixture = NodeDef::read_json(
             &registry,
-            r#"
-kind = "Fixture"
-render_size = { width = 8, height = 8 }
-mapping = { kind = "PathPoints" }
-"#,
+            r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 8, "height": 8 },
+  "mapping": { "kind": "PathPoints" }
+}"#,
         )
         .expect("fixture");
         let NodeDef::Fixture(fixture) = fixture else {
@@ -869,17 +708,17 @@ mapping = { kind = "PathPoints" }
             MappingConfig::PathPoints { .. }
         ));
 
-        let fixture = NodeDef::read_toml(
+        let fixture = NodeDef::read_json(
             &registry,
-            r#"
-kind = "Fixture"
-render_size = { width = 64, height = 16 }
-
-[mapping]
-kind = "SvgPath"
-source = "./fyeah-mapping.svg"
-sample_diameter = 2.0
-"#,
+            r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 64, "height": 16 },
+  "mapping": {
+    "kind": "SvgPath",
+    "source": "./fyeah-mapping.svg",
+    "sample_diameter": 2.0
+  }
+}"#,
         )
         .expect("svg path fixture");
         let NodeDef::Fixture(fixture) = fixture else {
@@ -900,7 +739,7 @@ sample_diameter = 2.0
     }
 
     #[test]
-    fn node_def_round_trips_point_list_fixture_toml() {
+    fn node_def_round_trips_point_list_fixture_json() {
         let registry = registry();
         let fixture = crate::FixtureDef {
             mapping: EnumSlot::new(MappingConfig::path_points_vec(
@@ -913,9 +752,9 @@ sample_diameter = 2.0
             ..crate::FixtureDef::default()
         };
         let text = NodeDef::Fixture(fixture)
-            .write_toml(&registry)
+            .write_json(&registry)
             .expect("write fixture");
-        let read = NodeDef::read_toml(&registry, &text).expect("read fixture");
+        let read = NodeDef::read_json(&registry, &text).expect("read fixture");
         let NodeDef::Fixture(read) = read else {
             panic!("expected fixture");
         };
@@ -941,38 +780,14 @@ sample_diameter = 2.0
     }
 
     #[test]
-    fn node_def_rejects_missing_invalid_and_unknown_kind() {
-        let registry = registry();
-
-        let missing =
-            NodeDef::read_toml(&registry, "name = \"missing\"").expect_err("missing kind");
-        assert!(missing.to_string().contains("kind"));
-
-        let invalid = NodeDef::read_toml(&registry, "kind = 7").expect_err("invalid kind");
-        assert!(invalid.to_string().contains("string"));
-
-        let unknown = NodeDef::read_toml(&registry, "kind = \"bogus\"").expect_err("unknown kind");
-        assert_eq!(
-            unknown,
-            NodeDefParseError::UnknownKind {
-                kind: String::from("bogus")
-            }
-        );
-    }
-
-    #[test]
     fn node_artifact_root_loads_through_wrapper_shape() {
         let registry = registry();
-        let payload = toml::from_str::<toml::Value>(
-            r#"
-kind = "Texture"
-size = { width = 1, height = 2 }
-"#,
-        )
-        .unwrap();
 
         let artifact = registry
-            .read_slot_toml(NodeArtifact::SHAPE_ID, &payload)
+            .read_slot_json(
+                NodeArtifact::SHAPE_ID,
+                r#"{ "kind": "Texture", "size": { "width": 1, "height": 2 } }"#,
+            )
             .expect("artifact slot load")
             .into_any()
             .downcast::<NodeArtifact>()
@@ -991,37 +806,108 @@ size = { width = 1, height = 2 }
     }
 
     #[test]
-    fn node_def_from_toml_uses_artifact_wrapper_loader() {
+    fn node_def_parses_project_and_texture_json() {
         let registry = registry();
-
-        let def = NodeDef::read_toml(
+        let project = NodeDef::read_json(
             &registry,
-            r#"
-kind = "Texture"
-size = { width = 1, height = 2 }
-"#,
+            r#"{
+  "kind": "Project",
+  "nodes": {
+    "texture": { "ref": "./texture.json" }
+  }
+}"#,
+        )
+        .expect("project");
+        assert!(matches!(project, NodeDef::Project(_)));
+
+        let texture = NodeDef::read_json(
+            &registry,
+            r#"{ "kind": "Texture", "size": { "width": 64, "height": 48 } }"#,
         )
         .expect("texture");
-
-        let NodeDef::Texture(def) = def else {
+        let NodeDef::Texture(def) = texture else {
             panic!("expected texture");
         };
-        assert_eq!(def.size.value().width, 1);
-        assert_eq!(def.size.value().height, 2);
+        assert_eq!(def.size.value().width, 64);
+        assert_eq!(def.size.value().height, 48);
     }
 
     #[test]
-    fn node_def_writes_authored_toml_through_artifact_wrapper() {
-        let write_registry = registry();
+    fn node_def_parses_shader_json_with_bindings() {
+        let registry = registry();
+        let shader = NodeDef::read_json(
+            &registry,
+            r#"{
+  "kind": "Shader",
+  "render_order": 2,
+  "source": { "path": "shader.glsl" },
+  "bindings": { "visual": { "target": "bus#visual.out" } }
+}"#,
+        )
+        .expect("shader");
+        assert!(matches!(shader, NodeDef::Shader(_)));
+    }
+
+    #[test]
+    fn node_def_json_rejects_missing_invalid_and_unknown_kind() {
+        let registry = registry();
+
+        let missing =
+            NodeDef::read_json(&registry, r#"{ "name": "missing" }"#).expect_err("missing kind");
+        assert!(missing.to_string().contains("kind"));
+
+        let invalid = NodeDef::read_json(&registry, r#"{ "kind": 7 }"#).expect_err("invalid kind");
+        assert!(invalid.to_string().contains("string"));
+
+        let not_object = NodeDef::read_json(&registry, r#"[1, 2]"#).expect_err("array root");
+        assert!(not_object.to_string().contains("object"));
+
+        let unknown =
+            NodeDef::read_json(&registry, r#"{ "kind": "bogus" }"#).expect_err("unknown kind");
+        assert_eq!(
+            unknown,
+            NodeDefParseError::UnknownKind {
+                kind: String::from("bogus")
+            }
+        );
+    }
+
+    #[test]
+    fn node_def_json_kind_probe_skips_nested_objects() {
+        let registry = registry();
+
+        // A nested "kind" key must not satisfy the top-level probe: this
+        // should report the missing top-level kind, not UnknownKind(Bogus).
+        let err = NodeDef::read_json(&registry, r#"{ "mapping": { "kind": "Bogus" } }"#)
+            .expect_err("missing top-level kind");
+        assert!(err.to_string().contains("missing required field"), "{err}");
+
+        // Nested kinds after the top-level one are fine.
+        let fixture = NodeDef::read_json(
+            &registry,
+            r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 8, "height": 8 },
+  "mapping": { "kind": "PathPoints" }
+}"#,
+        )
+        .expect("fixture");
+        assert!(matches!(fixture, NodeDef::Fixture(_)));
+    }
+
+    #[test]
+    fn node_def_writes_pretty_authored_json() {
+        let registry = registry();
         let text = NodeDef::Texture(TextureDef::new(3, 4))
-            .write_toml(&write_registry)
+            .write_json(&registry)
             .expect("write texture");
 
-        assert!(text.contains("kind = \"Texture\""));
-        assert!(text.contains("width = 3"));
-        assert!(text.contains("height = 4"));
+        assert!(text.starts_with("{\n  \"kind\": \"Texture\""), "{text}");
+        assert!(text.ends_with("}\n"), "{text}");
+        assert!(text.contains("\"width\": 3"), "{text}");
+        assert!(text.contains("\"height\": 4"), "{text}");
 
-        let read = NodeDef::read_toml(&registry(), &text).expect("read texture");
+        let read = NodeDef::read_json(&registry, &text).expect("read texture");
         let NodeDef::Texture(def) = read else {
             panic!("expected texture");
         };
@@ -1030,18 +916,37 @@ size = { width = 1, height = 2 }
     }
 
     #[test]
+    fn node_def_json_round_trip_is_byte_stable() {
+        let registry = registry();
+        let fixture = crate::FixtureDef {
+            mapping: EnumSlot::new(MappingConfig::path_points_vec(
+                alloc::vec![PathSpec::point_list(
+                    3,
+                    alloc::vec![[0.0, 0.25], [1.0, 0.75]],
+                )],
+                2.0,
+            )),
+            ..crate::FixtureDef::default()
+        };
+        let first = NodeDef::Fixture(fixture)
+            .write_json(&registry)
+            .expect("write fixture");
+        let read = NodeDef::read_json(&registry, &first).expect("read fixture");
+        let second = read.write_json(&registry).expect("re-write fixture");
+        assert_eq!(first, second);
+    }
+
+    #[test]
     fn node_def_reads_binding_values_and_refs() {
         let registry = registry();
 
-        let def = NodeDef::read_toml(
+        let def = NodeDef::read_json(
             &registry,
-            r##"
-kind = "Output"
-endpoint = "ws281x:rmt:D10"
-
-[bindings.main]
-value = 0.25
-"##,
+            r##"{
+  "kind": "Output",
+  "endpoint": "ws281x:rmt:D10",
+  "bindings": { "main": { "value": 0.25 } }
+}"##,
         )
         .expect("output");
         let NodeDef::Output(def) = def else {
@@ -1050,15 +955,13 @@ value = 0.25
         let binding = def.bindings.0.entries.get("main").expect("binding");
         assert_eq!(binding.value_literal(), Some(&LpValue::F32(0.25)));
 
-        let def = NodeDef::read_toml(
+        let def = NodeDef::read_json(
             &registry,
-            r##"
-kind = "Output"
-endpoint = "ws281x:rmt:D10"
-
-[bindings.main]
-target = "bus#control.out"
-"##,
+            r##"{
+  "kind": "Output",
+  "endpoint": "ws281x:rmt:D10",
+  "bindings": { "main": { "target": "bus#control.out" } }
+}"##,
         )
         .expect("output target");
         let NodeDef::Output(def) = def else {
@@ -1070,130 +973,109 @@ target = "bus#control.out"
 
     #[test]
     fn node_def_invocation_sites_cover_project_and_playlist() {
-        let project = NodeDef::from_toml_str(
-            r#"
-kind = "Project"
-
-[nodes.clock]
-ref = "./clock.toml"
-"#,
+        let project = NodeDef::from_json_str(
+            r#"{
+  "kind": "Project",
+  "nodes": {
+    "clock": { "ref": "./clock.json" }
+  }
+}"#,
         )
         .expect("project");
-        let sites = project.invocation_sites(&SlotPath::root());
+        let sites = project.invocation_sites();
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].path.to_string(), "nodes[clock]");
         assert!(matches!(sites[0].invocation, NodeInvocation::Ref(_)));
 
-        let playlist = NodeDef::from_toml_str(
-            r#"
-kind = "Playlist"
-
-[entries.2]
-name = "active"
-
-[entries.2.node.def]
-kind = "Shader"
-source = { path = "active.glsl" }
-"#,
+        let playlist = NodeDef::from_json_str(
+            r#"{
+  "kind": "Playlist",
+  "entries": {
+    "2": {
+      "name": "active",
+      "node": { "ref": "./active.json" }
+    }
+  }
+}"#,
         )
         .expect("playlist");
-        let sites = playlist.invocation_sites(&SlotPath::root());
+        let sites = playlist.invocation_sites();
         assert_eq!(sites.len(), 1);
         assert_eq!(sites[0].path.to_string(), "entries[2].node");
-        assert!(matches!(sites[0].invocation, NodeInvocation::Def(_)));
+        assert!(matches!(sites[0].invocation, NodeInvocation::Ref(_)));
     }
 
     #[test]
     fn node_def_referenced_asset_paths_resolve_relative_shader_compute_and_fixture_paths() {
-        let shader = NodeDef::from_toml_str(
-            r#"
-kind = "Shader"
-source = { path = "shader.glsl" }
-"#,
+        let shader = NodeDef::from_json_str(
+            r#"{ "kind": "Shader", "source": { "path": "shader.glsl" } }"#,
         )
         .expect("shader");
         assert_eq!(
             shader
-                .referenced_asset_paths(LpPath::new("/nodes/shader.toml"))
+                .referenced_asset_paths(LpPath::new("/nodes/shader.json"))
                 .unwrap(),
             vec![LpPathBuf::from("/nodes/shader.glsl")]
         );
 
-        let compute = NodeDef::from_toml_str(
-            r#"
-kind = "ComputeShader"
-source = { path = "../compute.glsl" }
-"#,
+        let compute = NodeDef::from_json_str(
+            r#"{ "kind": "ComputeShader", "source": { "path": "../compute.glsl" } }"#,
         )
         .expect("compute");
         assert_eq!(
             compute
-                .referenced_asset_paths(LpPath::new("/nodes/compute.toml"))
+                .referenced_asset_paths(LpPath::new("/nodes/compute.json"))
                 .unwrap(),
             vec![LpPathBuf::from("/compute.glsl")]
         );
 
-        let fixture = NodeDef::from_toml_str(
-            r#"
-kind = "Fixture"
-render_size = { width = 64, height = 16 }
-
-[mapping]
-kind = "SvgPath"
-source = "fixture.svg"
-sample_diameter = 2.0
-"#,
+        let fixture = NodeDef::from_json_str(
+            r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 64, "height": 16 },
+  "mapping": {
+    "kind": "SvgPath",
+    "source": "fixture.svg",
+    "sample_diameter": 2.0
+  }
+}"#,
         )
         .expect("fixture");
         assert_eq!(
             fixture
-                .referenced_asset_paths(LpPath::new("/fixtures/fixture.toml"))
+                .referenced_asset_paths(LpPath::new("/fixtures/fixture.json"))
                 .unwrap(),
             vec![LpPathBuf::from("/fixtures/fixture.svg")]
         );
     }
 
     #[test]
-    fn node_def_referenced_assets_include_source_identity_and_kind() {
-        let owner = NodeDefLocation {
-            artifact: ArtifactLocation::file("/project.toml"),
-            path: SlotPath::parse("nodes[shader]").unwrap(),
-        };
-        let shader = NodeDef::from_toml_str(
-            r#"
-kind = "Shader"
-source = { glsl = "void main() {}" }
-"#,
+    fn node_def_rejects_inline_asset_bodies() {
+        let err = NodeDef::from_json_str(
+            r#"{ "kind": "Shader", "source": { "glsl": "void main() {}" } }"#,
         )
-        .expect("shader");
+        .expect_err("inline asset body must be rejected");
+        assert!(err.to_string().contains("inline asset"), "{err}");
+    }
 
-        assert_eq!(
-            shader
-                .referenced_assets(LpPath::new("/project.toml"), &owner, &owner.path)
-                .unwrap(),
-            vec![ReferencedAsset::new(
-                AssetLocation::inline(owner, SlotPath::parse("nodes[shader].source").unwrap()),
-                AssetContentType::ShaderSource,
-            )]
-        );
-
-        let fixture = NodeDef::from_toml_str(
-            r#"
-kind = "Fixture"
-render_size = { width = 64, height = 16 }
-
-[mapping]
-kind = "SvgPath"
-source = "fixture.svg"
-sample_diameter = 2.0
-"#,
+    #[test]
+    fn node_def_referenced_assets_include_source_identity_and_kind() {
+        let fixture = NodeDef::from_json_str(
+            r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 64, "height": 16 },
+  "mapping": {
+    "kind": "SvgPath",
+    "source": "fixture.svg",
+    "sample_diameter": 2.0
+  }
+}"#,
         )
         .expect("fixture");
-        let owner = NodeDefLocation::artifact_root(ArtifactLocation::file("/fixtures/f.toml"));
 
         assert_eq!(
             fixture
-                .referenced_assets(LpPath::new("/fixtures/f.toml"), &owner, &owner.path)
+                .referenced_assets(LpPath::new("/fixtures/f.json"))
                 .unwrap(),
             vec![ReferencedAsset::new(
                 AssetLocation::artifact(ArtifactLocation::file("/fixtures/fixture.svg")),
@@ -1203,40 +1085,33 @@ sample_diameter = 2.0
     }
 
     #[test]
-    fn node_def_shell_change_ignores_inline_body_but_tracks_inline_kind() {
-        let before = NodeDef::from_toml_str(
-            r#"
-kind = "Playlist"
+    fn node_def_rejects_inline_child_definitions() {
+        let err = NodeDef::from_json_str(
+            r#"{
+  "kind": "Playlist",
+  "entries": {
+    "2": { "node": { "def": { "kind": "Clock" } } }
+  }
+}"#,
+        )
+        .expect_err("inline child definition must be rejected");
+        assert!(err.to_string().contains("def"), "{err}");
+    }
 
-[entries.2.node.def]
-kind = "Shader"
-source = { path = "a.glsl" }
-"#,
+    #[test]
+    fn node_def_shell_change_tracks_child_ref_changes() {
+        let before = NodeDef::from_json_str(
+            r#"{ "kind": "Project", "nodes": { "a": { "ref": "./a.json" } } }"#,
         )
         .expect("before");
-        let body_changed = NodeDef::from_toml_str(
-            r#"
-kind = "Playlist"
-
-[entries.2.node.def]
-kind = "Shader"
-source = { path = "b.glsl" }
-"#,
+        let ref_changed = NodeDef::from_json_str(
+            r#"{ "kind": "Project", "nodes": { "a": { "ref": "./b.json" } } }"#,
         )
-        .expect("body changed");
-        let kind_changed = NodeDef::from_toml_str(
-            r#"
-kind = "Playlist"
+        .expect("ref changed");
 
-[entries.2.node.def]
-kind = "Clock"
-"#,
-        )
-        .expect("kind changed");
-
-        assert!(NodeDef::body_changed(&before, &body_changed));
-        assert!(!NodeDef::shell_changed(&before, &body_changed));
-        assert!(NodeDef::shell_changed(&before, &kind_changed));
+        assert!(NodeDef::body_changed(&before, &ref_changed));
+        assert!(NodeDef::shell_changed(&before, &ref_changed));
+        assert!(!NodeDef::shell_changed(&before, &before.clone()));
     }
 
     #[test]

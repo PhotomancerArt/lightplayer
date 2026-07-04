@@ -691,7 +691,7 @@ mod tests {
     use super::*;
     use crate::{
         ModelEnumVariant, RuntimeBufferId, VisualProduct,
-        slot_codec::{JsonSyntaxSource, SlotReader, SlotWriter, TomlSyntaxSource},
+        slot_codec::{JsonSyntaxSource, SlotReader, SlotWriter},
     };
     use alloc::boxed::Box;
     use alloc::string::String;
@@ -766,31 +766,6 @@ mod tests {
 
         assert!(error.message().contains("control"));
         assert!(error.message().contains("visual"));
-    }
-
-    #[test]
-    fn slot_value_codec_reads_product_from_toml_source() {
-        let toml = toml::toml! {
-            kind = "control"
-            node = 3
-            output = 2
-
-            [preferred_extent]
-            rows = 4
-            samples_per_row = 12
-        };
-        let toml = toml::Value::Table(toml);
-        let registry = crate::SlotShapeRegistry::default();
-        let mut reader = SlotReader::new(TomlSyntaxSource::new(&toml).unwrap(), &registry);
-
-        assert_eq!(
-            read_lp_value(&LpType::Product(ProductKind::Control), reader.value()).unwrap(),
-            LpValue::Product(ProductRef::control(ControlProduct::new(
-                NodeId::new(3),
-                2,
-                ControlExtent::new(4, 12)
-            )))
-        );
     }
 
     #[test]

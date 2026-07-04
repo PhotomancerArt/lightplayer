@@ -144,7 +144,7 @@ fn NodeUiStatusStory() -> Element {
         status_demo_node(
             "Running node",
             "Clock",
-            Some("clock.toml"),
+            Some("clock.json"),
             NodeUiStatus::running(),
             Some("0.34 ms frame"),
             true,
@@ -152,7 +152,7 @@ fn NodeUiStatusStory() -> Element {
         status_demo_node(
             "Idle node",
             "Fixture",
-            Some("fixture.toml"),
+            Some("fixture.json"),
             NodeUiStatus::idle(Some("Last ran at frame 96")),
             None,
             true,
@@ -807,7 +807,7 @@ fn clock_node() -> NodeUiNode {
     NodeUiNode {
         title: "Clock",
         kind: "Clock",
-        source: Some("clock.toml"),
+        source: Some("clock.json"),
         path: "/fyeah_sign.show/clock.clock",
         status: NodeUiStatus::running(),
         status_details_open: false,
@@ -884,7 +884,7 @@ fn fixture_node() -> NodeUiNode {
     NodeUiNode {
         title: "Fixture",
         kind: "Fixture",
-        source: Some("fixture.toml"),
+        source: Some("fixture.json"),
         path: "/fyeah_sign.show/fixture.fixture",
         status: NodeUiStatus::running(),
         status_details_open: false,
@@ -943,7 +943,7 @@ fn playlist_node() -> NodeUiNode {
     NodeUiNode {
         title: "Playlist",
         kind: "Playlist",
-        source: Some("playlist.toml"),
+        source: Some("playlist.json"),
         path: "/fyeah_sign.show/playlist.playlist",
         status: NodeUiStatus::running(),
         status_details_open: false,
@@ -994,7 +994,7 @@ fn playlist_node() -> NodeUiNode {
             NodeUiChild {
                 label: "idle",
                 kind: "Shader",
-                detail: "./idle.toml",
+                detail: "./idle.json",
                 state: "active, fade_after 0.12 s",
                 active: true,
                 presentation: vec![NodeUiPresentationItem::Product(NodeUiProduct {
@@ -1015,7 +1015,7 @@ fn playlist_node() -> NodeUiNode {
             NodeUiChild {
                 label: "blast",
                 kind: "Shader",
-                detail: "./blast.toml",
+                detail: "./blast.json",
                 state: "duration 10 s, trigger bus#trigger",
                 active: false,
                 presentation: vec![NodeUiPresentationItem::Product(NodeUiProduct {

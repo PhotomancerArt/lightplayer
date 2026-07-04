@@ -9,7 +9,7 @@ fn fyeah_sign_discovers_referenced_node_defs_and_assets() {
     let (scenario, load) = RegistryScenario::load_fixture("fyeah-sign");
     let registry = scenario.registry();
 
-    assert_eq!(registry.root(), Some(&support::root_def("/project.toml")));
+    assert_eq!(registry.root(), Some(&support::root_def("/project.json")));
     assert!(load.changes.defs.changed.is_empty());
     assert!(load.changes.defs.removed.is_empty());
     assert!(load.changes.assets.changed.is_empty());
@@ -18,15 +18,15 @@ fn fyeah_sign_discovers_referenced_node_defs_and_assets() {
     assert_loaded_def_kinds(
         registry,
         &[
-            ("/project.toml", NodeKind::Project),
-            ("/blast.toml", NodeKind::Shader),
-            ("/button.toml", NodeKind::Button),
-            ("/clock.toml", NodeKind::Clock),
-            ("/fixture.toml", NodeKind::Fixture),
-            ("/idle.toml", NodeKind::Shader),
-            ("/output.toml", NodeKind::Output),
-            ("/playlist.toml", NodeKind::Playlist),
-            ("/radio.toml", NodeKind::ControlRadio),
+            ("/project.json", NodeKind::Project),
+            ("/blast.json", NodeKind::Shader),
+            ("/button.json", NodeKind::Button),
+            ("/clock.json", NodeKind::Clock),
+            ("/fixture.json", NodeKind::Fixture),
+            ("/idle.json", NodeKind::Shader),
+            ("/output.json", NodeKind::Output),
+            ("/playlist.json", NodeKind::Playlist),
+            ("/radio.json", NodeKind::ControlRadio),
         ],
     );
 

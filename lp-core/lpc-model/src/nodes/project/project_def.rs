@@ -38,17 +38,15 @@ mod tests {
 
     #[test]
     fn project_def_deserializes_named_nodes() {
-        let toml = r#"
-            kind = "Project"
-            name = "basic"
-
-            [nodes.texture]
-            ref = "./texture.toml"
-
-            [nodes.shader]
-            ref = "./shader.toml"
-        "#;
-        let def = NodeDef::read_toml(&registry(), toml).unwrap();
+        let json = r#"{
+            "kind": "Project",
+            "name": "basic",
+            "nodes": {
+                "texture": { "ref": "./texture.json" },
+                "shader": { "ref": "./shader.json" }
+            }
+        }"#;
+        let def = NodeDef::read_json(&registry(), json).unwrap();
         let NodeDef::Project(def) = def else {
             panic!("expected project def");
         };
@@ -61,33 +59,26 @@ mod tests {
 
     #[test]
     fn project_def_rejects_legacy_artifact_field() {
-        let toml = r#"
-            kind = "Project"
-
-            [nodes.texture]
-            artifact = "./texture.toml"
-        "#;
-        let err = NodeDef::read_toml(&registry(), toml).unwrap_err();
+        let json = r#"{
+            "kind": "Project",
+            "nodes": {
+                "texture": { "artifact": "./texture.json" }
+            }
+        }"#;
+        let err = NodeDef::read_json(&registry(), json).unwrap_err();
         assert!(err.to_string().contains("ref"));
     }
 
     #[test]
-    fn project_def_deserializes_inline_node() {
-        let toml = r#"
-            kind = "Project"
-
-            [nodes.clock.def]
-            kind = "Clock"
-        "#;
-        let def = NodeDef::read_toml(&registry(), toml).unwrap();
-        let NodeDef::Project(def) = def else {
-            panic!("expected project def");
-        };
-        let clock = def.nodes.entries.get("clock").expect("clock");
-        assert!(matches!(
-            clock.value().inline_def(),
-            Some(NodeDef::Clock(_))
-        ));
+    fn project_def_rejects_inline_node_definition() {
+        let json = r#"{
+            "kind": "Project",
+            "nodes": {
+                "clock": { "def": { "kind": "Clock" } }
+            }
+        }"#;
+        let err = NodeDef::read_json(&registry(), json).unwrap_err();
+        assert!(err.to_string().contains("def"), "{err}");
     }
 
     fn registry() -> SlotShapeRegistry {

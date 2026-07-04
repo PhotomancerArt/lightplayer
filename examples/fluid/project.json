@@ -1,0 +1,21 @@
+{
+  "kind": "Project",
+  "name": "fluid",
+  "nodes": {
+    "clock": {
+      "ref": "./clock.json"
+    },
+    "compute": {
+      "ref": "./compute.json"
+    },
+    "fixture": {
+      "ref": "./fixture.json"
+    },
+    "fluid": {
+      "ref": "./fluid.json"
+    },
+    "output": {
+      "ref": "./output.json"
+    }
+  }
+}

@@ -645,10 +645,10 @@ mod tests {
         entries.insert(7_u32, ValueSlot::new(String::from("seven")));
         let map = MapSlot::new(entries);
 
-        let encoded = toml::to_string(&map).unwrap();
-        assert!(encoded.contains("7 = \"seven\""));
+        let encoded = serde_json::to_string(&map).unwrap();
+        assert!(encoded.contains(r#""7":"seven""#));
 
-        let decoded: MapSlot<u32, ValueSlot<String>> = toml::from_str(&encoded).unwrap();
+        let decoded: MapSlot<u32, ValueSlot<String>> = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded.entries[&7].value(), "seven");
     }
 

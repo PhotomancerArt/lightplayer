@@ -1,8 +1,8 @@
 //! Filesystem abstraction trait
 //!
 //! All paths in this trait are relative to the project root. The project root is the directory
-//! containing `project.toml`. Leading slashes indicate paths from the project root
-//! (e.g., `/project.toml`, `/shader.glsl`).
+//! containing `project.json`. Leading slashes indicate paths from the project root
+//! (e.g., `/project.json`, `/shader.glsl`).
 //!
 //! Filesystem instances have a root path (especially for real filesystem implementations) to
 //! provide security by preventing access outside the project directory.
@@ -13,12 +13,12 @@ use crate::{LpPath, LpPathBuf};
 
 /// Platform-agnostic filesystem trait
 ///
-/// All paths are relative to the project root. `/project.toml` is always the project
+/// All paths are relative to the project root. `/project.json` is always the project
 /// configuration file. Filesystem instances have a root path for security.
 pub trait LpFs {
     /// Read a file from the filesystem
     ///
-    /// Path is relative to project root (e.g., `/project.toml`, `/shader.glsl`).
+    /// Path is relative to project root (e.g., `/project.json`, `/shader.glsl`).
     ///
     /// Returns the file contents as a byte vector, or an error if the file doesn't exist
     /// or cannot be read.
@@ -79,7 +79,7 @@ pub trait LpFs {
     /// The subdirectory path is relative to the current root.
     ///
     /// For example, if the current root is `/projects` and you chroot to `my-project`,
-    /// then paths like `/project.toml` in the new view will resolve to `/projects/my-project/project.toml`
+    /// then paths like `/project.json` in the new view will resolve to `/projects/my-project/project.json`
     /// in the original filesystem.
     ///
     /// Returns `Rc<RefCell<dyn LpFs>>` to allow sharing and mutation of the filesystem view.

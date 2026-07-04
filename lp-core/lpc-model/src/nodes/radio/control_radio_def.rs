@@ -91,12 +91,8 @@ mod tests {
 
     #[test]
     fn control_radio_def_parses_defaults() {
-        let def = NodeDef::from_toml_str(
-            r#"
-kind = "ControlRadio"
-"#,
-        )
-        .expect("control radio");
+        let def =
+            NodeDef::from_json_str(r#"{ "kind": "ControlRadio" }"#).expect("control radio");
 
         let NodeDef::ControlRadio(def) = def else {
             panic!("control radio def");

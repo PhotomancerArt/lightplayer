@@ -253,16 +253,17 @@ fn validate_collectors(names: &[String]) -> Result<()> {
 }
 
 fn read_project_uid(dir: &std::path::Path) -> Result<String> {
-    let project_toml = dir.join("project.toml");
-    let content = std::fs::read_to_string(&project_toml)
-        .with_context(|| format!("Failed to read {}", project_toml.display()))?;
-    let value: toml::Value = toml::from_str(&content).context("Failed to parse project.toml")?;
+    let project_json = dir.join("project.json");
+    let content = std::fs::read_to_string(&project_json)
+        .with_context(|| format!("Failed to read {}", project_json.display()))?;
+    let value: serde_json::Value =
+        serde_json::from_str(&content).context("Failed to parse project.json")?;
     let project_key = value
         .get("uid")
-        .and_then(toml::Value::as_str)
-        .or_else(|| value.get("name").and_then(toml::Value::as_str))
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| value.get("name").and_then(serde_json::Value::as_str))
         .or_else(|| dir.file_name().and_then(std::ffi::OsStr::to_str))
-        .context("project.toml missing 'name' field")?;
+        .context("project.json missing 'name' field")?;
     Ok(project_key.to_string())
 }
 
