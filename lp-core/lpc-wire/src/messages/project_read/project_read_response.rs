@@ -46,6 +46,7 @@ mod tests {
             results: vec![ProjectReadResult::Shapes(ShapeReadResult {
                 level: ReadLevel::Ids,
                 registry: None,
+                membership: None,
             })],
             probes: Vec::new(),
         };

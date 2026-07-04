@@ -453,6 +453,17 @@ impl SlotShapeRegistry {
         }
     }
 
+    /// Retain only the shapes whose id satisfies `keep`, dropping the rest.
+    ///
+    /// Used by the client mirror to prune shapes absent from a gated read's
+    /// membership list (G3/G7). Does not touch `ids_revision`: on the client the
+    /// server's `ids_revision` is authoritative and already arrives with the
+    /// snapshot, so pruning must not bump it.
+    pub fn retain_shapes(&mut self, mut keep: impl FnMut(&SlotShapeId) -> bool) {
+        self.shapes.retain(|id, _| keep(id));
+        self.factories.retain(|id, _| keep(id));
+    }
+
     pub fn contains(&self, id: &SlotShapeId) -> bool {
         self.shapes.contains_key(id)
     }

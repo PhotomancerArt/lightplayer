@@ -319,6 +319,7 @@ struct ShapeCollectState {
     level: Option<ReadLevel>,
     ids_revision: Option<Revision>,
     shapes: VecMap<SlotShapeId, SlotShapeEntry>,
+    membership: Option<Vec<SlotShapeId>>,
     ended: bool,
 }
 
@@ -340,12 +341,13 @@ impl ShapeCollectState {
             }
             ProjectReadShapeEvent::Membership { ids } => {
                 self.ensure_open("shape membership")?;
-                // Prune any collected entry whose id is not in the current
-                // membership list. Harmless on a full stream (the list names
-                // every id already collected); on a gated stream it drops shapes
-                // that were removed since `since`. The collector is deleted in
-                // M6; this is the minimal tolerance the contract requires.
-                self.shapes.retain(|id, _| ids.contains(id));
+                // Record the current id set without pruning collected entries, so the
+                // aggregate preserves the same identity a full stream would (all ids
+                // present) and the client-apply layer does the pruning. Mirrors the
+                // resource collector. The collector is deleted in M6.
+                if self.membership.replace(ids).is_some() {
+                    return Err(protocol("shape membership sent twice"));
+                }
             }
             ProjectReadShapeEvent::End => {
                 self.ensure_open("shape end")?;
@@ -369,6 +371,7 @@ impl ShapeCollectState {
                     .ok_or_else(|| protocol("shape query missing ids revision"))?,
                 shapes: self.shapes.clone(),
             }),
+            membership: self.membership.clone(),
         })
     }
 
@@ -689,6 +692,70 @@ mod tests {
             Revision::new(3)
         );
         assert!(matches!(response.results[1], ProjectReadResult::Runtime(_)));
+    }
+
+    #[test]
+    fn shape_membership_is_recorded_without_pruning_entries() {
+        // A gated stream carries the changed entry plus a membership list that
+        // omits a removed id. The collector must record the membership on the
+        // aggregate (for the client to prune) WITHOUT dropping the collected
+        // entry, so the aggregate keeps the same identity a full stream would.
+        let kept = SlotShapeId::from_static_name("Kept");
+        let membership = vec![kept, SlotShapeId::from_static_name("AnotherLive")];
+        let response = collect(vec![ProjectReadFrame::new(
+            0,
+            vec![
+                ProjectReadEvent::Begin {
+                    revision: Revision::new(9),
+                },
+                ProjectReadEvent::Query {
+                    index: 0,
+                    event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Begin {
+                        level: ReadLevel::Detail,
+                        ids_revision: Revision::new(9),
+                    }),
+                },
+                ProjectReadEvent::Query {
+                    index: 0,
+                    event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Entry {
+                        id: kept,
+                        entry: SlotShapeEntry::new(
+                            Revision::new(9),
+                            SlotShape::value(LpType::Bool),
+                        ),
+                    }),
+                },
+                ProjectReadEvent::Query {
+                    index: 0,
+                    event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Membership {
+                        ids: membership.clone(),
+                    }),
+                },
+                ProjectReadEvent::Query {
+                    index: 0,
+                    event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::End),
+                },
+                ProjectReadEvent::End {
+                    revision: Revision::new(9),
+                },
+            ],
+        )])
+        .unwrap();
+
+        let ProjectReadResult::Shapes(shapes) = &response.results[0] else {
+            panic!("first result should be shapes");
+        };
+        assert_eq!(shapes.membership.as_deref(), Some(membership.as_slice()));
+        // The collected entry is retained (not pruned by membership).
+        assert!(
+            shapes
+                .registry
+                .as_ref()
+                .expect("shape registry")
+                .shapes
+                .get(&kept)
+                .is_some()
+        );
     }
 
     #[test]

@@ -2,7 +2,7 @@ use alloc::collections::BTreeMap;
 use alloc::format;
 use alloc::string::String;
 use lpc_model::{
-    LpValue, SlotData, SlotPath, SlotShapeId, SlotShapeRegistry, SlotShapeRegistrySnapshot,
+    LpValue, NodeId, SlotData, SlotPath, SlotShapeId, SlotShapeRegistry, SlotShapeRegistrySnapshot,
     slot_sync_codec::read_slot_snapshot_json,
 };
 use lpc_wire::{WireSlotFullSync, WireSlotPatch, WireSlotRootSnapshot, WireSlotRootsSnapshot};
@@ -24,15 +24,23 @@ impl SlotMirrorView {
 
     pub fn apply_full_sync(&mut self, sync: WireSlotFullSync) -> Result<(), SlotMirrorError> {
         self.registry.apply_snapshot(sync.registry);
+        // A full sync replaces the whole root set, so clear before upserting.
+        self.root_shapes.clear();
+        self.roots.clear();
         self.apply_roots_snapshot(WireSlotRootsSnapshot { roots: sync.roots })
     }
 
+    /// Upsert the roots present in `sync`, retaining any root not named in the
+    /// payload.
+    ///
+    /// A gated (revision-filtered) read sends only the roots whose content
+    /// changed since the client's `since`, so this must merge rather than
+    /// clear-and-rebuild. Roots of nodes removed by tree deltas are dropped
+    /// separately (see [`Self::drop_roots_for_nodes`]).
     pub fn apply_roots_snapshot(
         &mut self,
         sync: WireSlotRootsSnapshot,
     ) -> Result<(), SlotMirrorError> {
-        self.root_shapes.clear();
-        self.roots.clear();
         for root in sync.roots {
             let data = self.read_wire_slot_root(&root)?;
             self.root_shapes.insert(root.name.clone(), root.shape);
@@ -41,12 +49,36 @@ impl SlotMirrorView {
         Ok(())
     }
 
+    /// Drop the slot roots owned by the given nodes.
+    ///
+    /// Node-owned roots are keyed `node.{id}.def` and `node.{id}.state`. When a
+    /// node is removed (via a tree `ChildrenChanged` delta) its roots are not
+    /// re-sent, so the client drops them here to avoid retaining stale roots for
+    /// nodes that no longer exist.
+    pub fn drop_roots_for_nodes(&mut self, removed: &[NodeId]) {
+        for id in removed {
+            for name in [format!("node.{}.def", id.0), format!("node.{}.state", id.0)] {
+                self.root_shapes.remove(&name);
+                self.roots.remove(&name);
+            }
+        }
+    }
+
     pub fn apply_registry_snapshot(&mut self, snapshot: SlotShapeRegistrySnapshot) {
         self.registry.apply_snapshot(snapshot);
     }
 
     pub fn apply_registry_page(&mut self, snapshot: SlotShapeRegistrySnapshot) {
         self.registry.apply_partial_snapshot(snapshot);
+    }
+
+    /// Prune shapes whose id is not in `membership`.
+    ///
+    /// A gated read carries the full current shape id set (membership sync,
+    /// G3/G7) only when the id set changed since the client's `since`; the
+    /// client drops any locally-known shape absent from that list.
+    pub fn prune_shapes(&mut self, membership: &[SlotShapeId]) {
+        self.registry.retain_shapes(|id| membership.contains(id));
     }
 
     pub fn apply_patches(&mut self, patches: &[WireSlotPatch]) -> Result<(), SlotMirrorError> {

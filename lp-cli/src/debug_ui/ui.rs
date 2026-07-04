@@ -513,6 +513,7 @@ mod tests {
             results: vec![WireProjectReadResult::Shapes(ShapeReadResult {
                 level: ReadLevel::Detail,
                 registry: Some(final_page_registry.snapshot()),
+                membership: None,
             })],
             probes: vec![],
         };

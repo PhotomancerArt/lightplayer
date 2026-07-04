@@ -53,23 +53,30 @@ impl NodeTreeView {
     ///
     /// Returns the number of entries removed.
     pub fn remove_subtree(&mut self, id: NodeId) -> usize {
-        let mut count = 0;
+        let mut removed = Vec::new();
+        self.remove_subtree_collecting(id, &mut removed);
+        removed.len()
+    }
 
+    /// Remove an entry and its descendants, pushing every removed node id into
+    /// `removed` (depth-first).
+    ///
+    /// Used by the project-read apply path so slot roots owned by removed nodes
+    /// can be dropped from the slot mirror.
+    pub fn remove_subtree_collecting(&mut self, id: NodeId, removed: &mut Vec<NodeId>) {
         // Collect descendants to remove (depth-first)
         if let Some(entry) = self.nodes.get(&id) {
             let descendants: Vec<NodeId> = entry.children.clone();
             for child_id in descendants {
-                count += self.remove_subtree(child_id);
+                self.remove_subtree_collecting(child_id, removed);
             }
         }
 
         // Remove this entry
         if let Some(entry) = self.nodes.remove(&id) {
             self.by_path.remove(&entry.path);
-            count += 1;
+            removed.push(id);
         }
-
-        count
     }
 
     /// Returns true if the tree has no entries.

@@ -9,6 +9,9 @@ pub mod apply;
 pub mod node_tree_view;
 pub mod tree_entry_view;
 
-pub use apply::{ApplyError, apply_tree_delta, apply_tree_deltas};
+pub use apply::{
+    ApplyError, apply_tree_delta, apply_tree_delta_collecting_removed, apply_tree_deltas,
+    apply_tree_deltas_collecting_removed,
+};
 pub use node_tree_view::NodeTreeView;
 pub use tree_entry_view::TreeEntryView;
