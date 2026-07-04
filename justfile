@@ -616,6 +616,11 @@ test-rust:
 test-filetests:
     scripts/filetests.sh
 
+# Crash-recovery emulator suite (slow: builds fw-emu with build-std/unwind
+# and simulates multiple reboots). Marked #[ignore]; run explicitly.
+test-recovery-emu:
+    cargo test -p fw-tests --test recovery_emu -- --include-ignored
+
 # ============================================================================
 # Testing - lp-app only
 # ============================================================================

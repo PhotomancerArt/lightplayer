@@ -159,7 +159,7 @@ fn process_read_buffer(read_buffer: &mut Vec<u8>, router: &MessageRouter) {
 /// - I/O task (handles serial communication)
 pub async fn run_usb_test(spawner: embassy_executor::Spawner) -> ! {
     // Initialize board (clock, heap, runtime) and get hardware peripherals
-    let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, _flash, _gpio4, _gpio20, _wifi) =
+    let (sw_int, timg0, rmt_peripheral, usb_device, gpio18, _flash, _gpio4, _gpio20, _wifi, _rwdt) =
         init_board();
     start_runtime(timg0, sw_int);
 

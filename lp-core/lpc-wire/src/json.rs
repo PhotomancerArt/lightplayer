@@ -220,6 +220,23 @@ mod ser_write_json_tests {
                     used_bytes: 200000,
                     total_bytes: 300000,
                 }),
+                recovery: Some(crate::server::RecoveryStatus {
+                    level: crate::server::RecoveryLevelWire::Yellow,
+                    reset_reason: "watchdog-reset".to_string(),
+                    boot_count: 4,
+                    safe_mode: false,
+                    last_crash: Some(crate::server::CrashSummaryWire {
+                        cause: "watchdog".to_string(),
+                        path: "boot/node:nodes/fire".to_string(),
+                        message: String::new(),
+                        boots_ago: 1,
+                    }),
+                    paths: vec![crate::server::RecoveryPathWire {
+                        path: "node:nodes/fire".to_string(),
+                        state: "yellow".to_string(),
+                        crash_count: 1,
+                    }],
+                }),
             },
         );
 

@@ -148,6 +148,9 @@ pub async fn io_task(usb_device: esp_hal::peripherals::USB_DEVICE<'static>) {
     let mut conn = UsbConnectionMonitor::new();
 
     loop {
+        // Prove liveness to the watchdog feeder in the server loop.
+        crate::recovery::watchdog::note_io_alive();
+
         conn.poll();
         let connected = conn.is_connected();
 

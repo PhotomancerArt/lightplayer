@@ -9,6 +9,7 @@ extern crate alloc;
 
 pub mod guest_serial;
 pub mod jit_symbol_entry;
+pub mod recovery_handshake;
 mod simple_elf;
 mod syscall;
 

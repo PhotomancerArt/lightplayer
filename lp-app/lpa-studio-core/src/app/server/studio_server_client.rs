@@ -276,12 +276,38 @@ fn map_client_events(events: Vec<ClientEvent>) -> Vec<UiLogEntry> {
             ClientEvent::Heartbeat {
                 frame_count,
                 uptime_ms,
+                recovery,
                 ..
-            } => UiLogEntry::new(
-                UiLogLevel::Debug,
-                "lp-server",
-                format!("heartbeat frame={frame_count} uptime_ms={uptime_ms}"),
-            ),
+            } => match recovery {
+                Some(recovery)
+                    if recovery.safe_mode
+                        || recovery.level != lpc_wire::server::RecoveryLevelWire::Green =>
+                {
+                    let ui_level = match recovery.level {
+                        lpc_wire::server::RecoveryLevelWire::Red => UiLogLevel::Error,
+                        _ => UiLogLevel::Warn,
+                    };
+                    let mut message = format!(
+                        "recovery level {:?}{}",
+                        recovery.level,
+                        if recovery.safe_mode {
+                            " (SAFE MODE)"
+                        } else {
+                            ""
+                        }
+                    );
+                    if let Some(crash) = &recovery.last_crash {
+                        message
+                            .push_str(&format!("; last crash: {} at {}", crash.cause, crash.path));
+                    }
+                    UiLogEntry::new(ui_level, "lp-server", message)
+                }
+                _ => UiLogEntry::new(
+                    UiLogLevel::Debug,
+                    "lp-server",
+                    format!("heartbeat frame={frame_count} uptime_ms={uptime_ms}"),
+                ),
+            },
             ClientEvent::Log { level, message } => {
                 UiLogEntry::new(map_server_log_level(level), "lp-server", message)
             }

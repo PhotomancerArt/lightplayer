@@ -47,7 +47,8 @@ struct RunResult {
 }
 
 pub async fn run_msafluid_test(_: embassy_executor::Spawner) -> ! {
-    let (sw_int, timg0, _rmt, usb_device, _gpio18, _flash, _gpio4, _gpio20, _wifi) = init_board();
+    let (sw_int, timg0, _rmt, usb_device, _gpio18, _flash, _gpio4, _gpio20, _wifi, _rwdt) =
+        init_board();
     start_runtime(timg0, sw_int);
 
     let usb_serial = UsbSerialJtag::new(usb_device);

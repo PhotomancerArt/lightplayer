@@ -11,7 +11,9 @@ extern crate alloc;
 #[cfg(feature = "test_unwind")]
 extern crate unwinding;
 
+mod fault_injection;
 mod output;
+mod recovery_area;
 mod serial;
 mod server_loop;
 mod time;
@@ -49,6 +51,27 @@ pub extern "C" fn _lp_main() -> ! {
     init_emu_logger();
 
     host_debug!("[fw-emu] Starting firmware emulator...");
+
+    // Crash recovery: analyze the previous (simulated) run before anything
+    // crash-prone. The host harness preserves the region and sets the
+    // reset cause across simulated reboots.
+    let reset_cause = recovery_area::boot_reset_cause();
+    let (recovery_inst, boot_assessment) =
+        lp_recovery::Recovery::init(recovery_area::EmuRecoveryBackend, reset_cause);
+    lp_recovery::set_global(alloc::boxed::Box::leak(alloc::boxed::Box::new(
+        recovery_inst,
+    )));
+    log::info!(
+        "[fw-emu][RECOVERY] boot: cause={} level={} safe_mode={} prior_boot_complete={}",
+        boot_assessment.cause.as_str(),
+        boot_assessment.level.as_str(),
+        boot_assessment.safe_mode,
+        boot_assessment.prior_boot_complete,
+    );
+    let boot_guard = lp_recovery::enter(lp_recovery::FrameKind::Boot, "boot").ok();
+    // Host-injected boot faults fire here, inside the Boot frame and
+    // before the boot-complete milestone.
+    fault_injection::check_boot_fault();
 
     log::info!("[fw-emu] Shader backend: native JIT (lpvm-native rt_jit)");
 
@@ -124,6 +147,10 @@ pub extern "C" fn _lp_main() -> ! {
 
     // Create time provider for server loop frame timing
     let time_provider = SyscallTimeProvider::new();
+
+    // Boot frame ends here; the boot-complete milestone is marked by the
+    // server loop after the first successful frame.
+    drop(boot_guard);
 
     // Run server loop (never returns)
     run_server_loop(server, transport, time_provider);

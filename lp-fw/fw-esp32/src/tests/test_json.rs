@@ -27,7 +27,7 @@ use crate::serial::io_task;
 /// every second. serial::io_task receives and serializes with ser-write-json
 /// directly to USB serial.
 pub async fn run_test_json(spawner: embassy_executor::Spawner) -> ! {
-    let (_sw_int, timg0, rmt_peripheral, usb_device, gpio18, _flash, _gpio4, _gpio20, _wifi) =
+    let (_sw_int, timg0, rmt_peripheral, usb_device, gpio18, _flash, _gpio4, _gpio20, _wifi, _rwdt) =
         init_board();
     start_runtime(timg0, _sw_int);
 

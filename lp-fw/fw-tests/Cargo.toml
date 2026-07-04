@@ -18,6 +18,8 @@ lpc-wire = { path = "../../lp-core/lpc-wire" }
 lp-riscv-elf = { path = "../../lp-riscv/lp-riscv-elf", features = ["std"] }
 lp-riscv-emu = { path = "../../lp-riscv/lp-riscv-emu", features = ["std"] }
 lp-riscv-inst = { path = "../../lp-riscv/lp-riscv-inst" }
+lp-riscv-emu-shared = { path = "../../lp-riscv/lp-riscv-emu-shared" }
+lp-recovery = { workspace = true, features = ["std"] }
 lpc-shared = { path = "../../lp-core/lpc-shared" }
 lpfs = { path = "../../lp-base/lpfs", features = ["std"] }
 tokio = { version = "1", features = ["rt", "macros", "time"] }

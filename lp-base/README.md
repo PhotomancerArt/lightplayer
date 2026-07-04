@@ -8,6 +8,8 @@ not owned by any single domain.
 
 Inhabitants:
 - `lp-perf` — perf-event tracing macros (cfg-gated sinks).
-
-Future inhabitants likely include `lpfs` (filesystem abstraction
-extraction) and similar.
+- `lp-collection` — embedded/low-memory-friendly collections.
+- `lpfs` — filesystem abstraction (`LpFs` trait + backends).
+- `lp-recovery` — crash-recovery bookkeeping: persistent breadcrumb
+  region, recovery frame stack, blame ledger. See
+  `docs/adr/2026-07-04-crash-recovery-model.md`.

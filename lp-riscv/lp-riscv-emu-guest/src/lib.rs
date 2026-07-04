@@ -11,6 +11,7 @@
 #![no_std]
 
 pub mod allocator;
+mod critical_section_impl;
 pub mod entry;
 pub mod host;
 pub mod log;
@@ -27,7 +28,7 @@ pub use syscall::{
 };
 
 // Re-export ebreak function for convenience
-pub use panic::ebreak;
+pub use panic::{ebreak, reset_request_exit};
 
 // Re-export _print function for convenience (macros are already exported at crate root via #[macro_export])
 pub use print::_print;
