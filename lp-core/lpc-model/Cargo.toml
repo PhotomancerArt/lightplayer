@@ -8,7 +8,7 @@ rust-version.workspace = true
 
 [features]
 default = ["std"]
-std = ["lpfs/std", "toml/std", "toml/preserve_order"]
+std = ["lpfs/std"]
 derive = []
 # JSON Schema for model types (host-side tooling)
 schema-gen = ["std", "dep:schemars"]
@@ -18,7 +18,6 @@ lp-collection = { workspace = true, features = ["serde"] }
 base64 = { workspace = true }
 hashbrown = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
-toml = { version = "0.9", default-features = false, features = ["parse", "serde", "display"] }
 schemars = { workspace = true, optional = true }
 lpc-slot-macros = { path = "../lpc-slot-macros" }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
@@ -26,7 +25,6 @@ lpfs = { path = "../../lp-base/lpfs", default-features = false }
 [dev-dependencies]
 serde_json = { workspace = true }
 tempfile = "3"
-toml = { workspace = true, features = ["display"] }
 
 [build-dependencies]
 lpc-slot-codegen = { path = "../lpc-slot-codegen" }

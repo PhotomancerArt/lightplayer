@@ -6,8 +6,7 @@ use alloc::vec::Vec;
 
 use crate::slot::shape;
 use crate::slot_codec::{
-    SlotDataWriteError, SlotValueWriter, SlotWrite, SlotWriteError, SyntaxError, SyntaxEventSource,
-    ValueReader,
+    SlotValueWriter, SlotWrite, SlotWriteError, SyntaxError, SyntaxEventSource, ValueReader,
 };
 use crate::{
     ArtifactSpec, FieldSlot, FieldSlotMut, LpPathBuf, LpType, LpValue, Revision, SlotCustomAccess,
@@ -288,10 +287,6 @@ impl AssetSlot {
     {
         write_value_json(&self.value, value)
     }
-
-    pub(crate) fn write_slot_toml(&self) -> Result<toml::Value, SlotDataWriteError> {
-        write_value_toml(&self.value)
-    }
 }
 
 fn read_value<S>(mut value: ValueReader<'_, '_, S>) -> Result<AssetSlotValue, SyntaxError>
@@ -433,39 +428,6 @@ where
     }
     array.finish()?;
     object.finish()
-}
-
-fn write_value_toml(value: &AssetSlotValue) -> Result<toml::Value, SlotDataWriteError> {
-    match value {
-        AssetSlotValue::Artifact(spec) => Ok(toml::Value::String(spec.to_string())),
-        AssetSlotValue::InlineText { extension, text } => {
-            let mut table = toml::map::Map::new();
-            table.insert(
-                extension.clone().unwrap_or_else(|| String::from("text")),
-                toml::Value::String(text.clone()),
-            );
-            Ok(toml::Value::Table(table))
-        }
-        AssetSlotValue::InlineBytes { extension, bytes } => {
-            let mut table = toml::map::Map::new();
-            if let Some(extension) = extension {
-                table.insert(
-                    String::from(EXTENSION_KEY),
-                    toml::Value::String(extension.clone()),
-                );
-            }
-            table.insert(
-                String::from(BYTES_KEY),
-                toml::Value::Array(
-                    bytes
-                        .iter()
-                        .map(|byte| toml::Value::Integer(i64::from(*byte)))
-                        .collect(),
-                ),
-            );
-            Ok(toml::Value::Table(table))
-        }
-    }
 }
 
 impl FieldSlot for AssetSlot {

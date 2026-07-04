@@ -11,7 +11,6 @@ mod slot_reader;
 mod slot_value_codec;
 mod slot_writer;
 mod syntax;
-mod toml_syntax_source;
 
 pub use json_syntax_source::JsonSyntaxSource;
 pub use slot_reader::{ArrayReader, ObjectReader, PropReader, SlotReader, ValueReader};
@@ -20,7 +19,6 @@ pub use slot_writer::{
     SlotArrayWriter, SlotObjectWriter, SlotValueWriter, SlotWrite, SlotWriteError, SlotWriter,
 };
 pub use syntax::{SourceSpan, SyntaxError, SyntaxEvent, SyntaxEventSource};
-pub use toml_syntax_source::TomlSyntaxSource;
 
 #[cfg(test)]
 mod tests {
@@ -286,5 +284,5 @@ pub use dynamic_slot_reader::{
 };
 pub use dynamic_slot_writer::{
     SlotDataWriteError, write_dynamic_slot_json, write_dynamic_slot_json_pretty,
-    write_dynamic_slot_toml, write_slot_data_json_value, write_slot_data_toml_value,
+    write_slot_data_json_value,
 };

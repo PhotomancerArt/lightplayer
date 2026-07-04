@@ -348,7 +348,7 @@ fn node_def_state_for_read_error(err: ArtifactError) -> NodeDefState {
 }
 
 fn parse_error(err: EditApplyError) -> lpc_model::NodeDefParseError {
-    lpc_model::NodeDefParseError::Toml {
+    lpc_model::NodeDefParseError::Syntax {
         error: err.to_string(),
     }
 }

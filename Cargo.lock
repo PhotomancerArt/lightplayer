@@ -1131,13 +1131,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "convert-toml-artifacts"
-version = "0.0.0"
-dependencies = [
- "lpc-model",
-]
-
-[[package]]
 name = "convert_case"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4968,7 +4961,6 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite",
- "toml",
  "tungstenite 0.21.0",
  "unicode-width 0.2.2",
 ]
@@ -5207,7 +5199,6 @@ dependencies = [
  "serde",
  "serde_json",
  "spin",
- "toml",
  "unwinding",
 ]
 
@@ -5235,7 +5226,6 @@ dependencies = [
  "serde",
  "serde_json",
  "tempfile",
- "toml",
 ]
 
 [[package]]

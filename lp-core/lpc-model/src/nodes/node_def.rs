@@ -56,7 +56,7 @@ const NODE_DEF_VARIANT_NAMES: &[&str] = &[
 
 /// Authored body of a node artifact.
 ///
-/// A `NodeDef` is source data: it is what a TOML artifact defines before the
+/// A `NodeDef` is source data: it is what a JSON artifact defines before the
 /// engine instantiates a runtime node. Project artifacts are included because
 /// a project defines the root project node and its child node invocations.
 #[derive(Clone, Debug, PartialEq, Slotted)]
@@ -144,18 +144,6 @@ impl NodeArtifact {
         self.0.into_inner()
     }
 
-    /// Read an authored TOML node artifact through the slot registry.
-    pub fn read_toml(registry: &SlotShapeRegistry, text: &str) -> Result<Self, NodeDefParseError> {
-        let payload = toml::from_str::<toml::Value>(text).map_err(toml_parse_error)?;
-        reject_unknown_kind(&payload)?;
-        read_node_artifact(registry, payload)
-    }
-
-    /// Write an authored TOML node artifact through the slot registry.
-    pub fn write_toml(&self, registry: &SlotShapeRegistry) -> Result<String, NodeDefWriteError> {
-        write_node_artifact(registry, self)
-    }
-
     /// Read an authored JSON node artifact through the slot registry.
     ///
     /// The codec streams, so the top-level `"kind"` field must precede the
@@ -165,7 +153,7 @@ impl NodeArtifact {
         reject_unknown_kind_json(text)?;
         let object = registry
             .read_slot_json(NodeArtifact::SHAPE_ID, text)
-            .map_err(|error| NodeDefParseError::Toml {
+            .map_err(|error| NodeDefParseError::Syntax {
                 error: error.to_string(),
             })?;
         downcast_node_artifact(object)
@@ -478,22 +466,6 @@ impl NodeDef {
         }
     }
 
-    /// Read an authored TOML node artifact through the slot registry.
-    pub fn read_toml(registry: &SlotShapeRegistry, text: &str) -> Result<Self, NodeDefParseError> {
-        NodeArtifact::read_toml(registry, text).map(NodeArtifact::into_node_def)
-    }
-
-    /// Read authored TOML using the model crate's generated static shape registry.
-    pub fn from_toml_str(text: &str) -> Result<Self, NodeDefParseError> {
-        let registry = SlotShapeRegistry::default();
-        Self::read_toml(&registry, text)
-    }
-
-    /// Write this node definition as authored TOML through the slot registry.
-    pub fn write_toml(&self, registry: &SlotShapeRegistry) -> Result<String, NodeDefWriteError> {
-        NodeArtifact::new(self.clone()).write_toml(registry)
-    }
-
     /// Read an authored JSON node artifact through the slot registry.
     pub fn read_json(registry: &SlotShapeRegistry, text: &str) -> Result<Self, NodeDefParseError> {
         NodeArtifact::read_json(registry, text).map(NodeArtifact::into_node_def)
@@ -729,14 +701,14 @@ impl SlotMutAccess for NodeDef {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NodeDefParseError {
     UnknownKind { kind: String },
-    Toml { error: String },
+    Syntax { error: String },
 }
 
 impl core::fmt::Display for NodeDefParseError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             Self::UnknownKind { kind } => write!(f, "unknown node kind `{kind}`"),
-            Self::Toml { error } => f.write_str(error),
+            Self::Syntax { error } => f.write_str(error),
         }
     }
 }
@@ -755,45 +727,6 @@ impl core::fmt::Display for NodeDefWriteError {
 
 impl core::error::Error for NodeDefWriteError {}
 
-fn reject_unknown_kind(payload: &toml::Value) -> Result<(), NodeDefParseError> {
-    let kind = read_kind(payload)?;
-    if NODE_DEF_VARIANT_NAMES.contains(&kind.as_str()) {
-        Ok(())
-    } else {
-        Err(NodeDefParseError::UnknownKind { kind })
-    }
-}
-
-fn read_kind(payload: &toml::Value) -> Result<String, NodeDefParseError> {
-    let Some(table) = payload.as_table() else {
-        return Err(NodeDefParseError::Toml {
-            error: String::from("node definition TOML root must be a table"),
-        });
-    };
-    let Some(kind) = table.get("kind") else {
-        return Err(NodeDefParseError::Toml {
-            error: String::from("missing required field `kind`"),
-        });
-    };
-    kind.as_str()
-        .map(String::from)
-        .ok_or_else(|| NodeDefParseError::Toml {
-            error: String::from("field `kind` must be a string"),
-        })
-}
-
-fn read_node_artifact(
-    registry: &SlotShapeRegistry,
-    payload: toml::Value,
-) -> Result<NodeArtifact, NodeDefParseError> {
-    let object = registry
-        .read_slot_toml(NodeArtifact::SHAPE_ID, &payload)
-        .map_err(|error| NodeDefParseError::Toml {
-            error: error.to_string(),
-        })?;
-    downcast_node_artifact(object)
-}
-
 fn downcast_node_artifact(
     object: alloc::boxed::Box<dyn crate::SlotMutAccess>,
 ) -> Result<NodeArtifact, NodeDefParseError> {
@@ -801,7 +734,7 @@ fn downcast_node_artifact(
         .into_any()
         .downcast::<NodeArtifact>()
         .map(|artifact| *artifact)
-        .map_err(|_| NodeDefParseError::Toml {
+        .map_err(|_| NodeDefParseError::Syntax {
             error: format!(
                 "slot reader returned unexpected type for shape {}",
                 NodeArtifact::SHAPE_ID
@@ -824,7 +757,7 @@ fn reject_unknown_kind_json(text: &str) -> Result<(), NodeDefParseError> {
 fn read_kind_json(text: &str) -> Result<String, NodeDefParseError> {
     use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
 
-    let syntax_error = |error: crate::slot_codec::SyntaxError| NodeDefParseError::Toml {
+    let syntax_error = |error: crate::slot_codec::SyntaxError| NodeDefParseError::Syntax {
         error: error.to_string(),
     };
 
@@ -832,7 +765,7 @@ fn read_kind_json(text: &str) -> Result<String, NodeDefParseError> {
     match source.next_event().map_err(syntax_error)? {
         Some(SyntaxEvent::StartObject { .. }) => {}
         _ => {
-            return Err(NodeDefParseError::Toml {
+            return Err(NodeDefParseError::Syntax {
                 error: String::from("node definition JSON root must be an object"),
             });
         }
@@ -842,7 +775,7 @@ fn read_kind_json(text: &str) -> Result<String, NodeDefParseError> {
     let mut depth = 0usize;
     loop {
         let Some(event) = source.next_event().map_err(syntax_error)? else {
-            return Err(NodeDefParseError::Toml {
+            return Err(NodeDefParseError::Syntax {
                 error: String::from("missing required field `kind`"),
             });
         };
@@ -858,7 +791,7 @@ fn read_kind_json(text: &str) -> Result<String, NodeDefParseError> {
                             }
                         }
                         _ => {
-                            return Err(NodeDefParseError::Toml {
+                            return Err(NodeDefParseError::Syntax {
                                 error: String::from("field `kind` must be a string"),
                             });
                         }
@@ -869,7 +802,7 @@ fn read_kind_json(text: &str) -> Result<String, NodeDefParseError> {
             SyntaxEvent::EndArray { .. } => depth = depth.saturating_sub(1),
             SyntaxEvent::EndObject { .. } => {
                 if depth == 0 {
-                    return Err(NodeDefParseError::Toml {
+                    return Err(NodeDefParseError::Syntax {
                         error: String::from("missing required field `kind`"),
                     });
                 }
@@ -877,26 +810,6 @@ fn read_kind_json(text: &str) -> Result<String, NodeDefParseError> {
             }
             _ => {}
         }
-    }
-}
-
-fn write_node_artifact(
-    registry: &SlotShapeRegistry,
-    artifact: &NodeArtifact,
-) -> Result<String, NodeDefWriteError> {
-    let value = registry
-        .write_slot_toml(artifact)
-        .map_err(|error| NodeDefWriteError {
-            error: error.to_string(),
-        })?;
-    toml::to_string(&value).map_err(|error| NodeDefWriteError {
-        error: error.to_string(),
-    })
-}
-
-fn toml_parse_error(error: toml::de::Error) -> NodeDefParseError {
-    NodeDefParseError::Toml {
-        error: format!("{error}"),
     }
 }
 
