@@ -13,6 +13,14 @@ const outDir = path.resolve(repoRoot, requiredArg(args, "out"));
 const channel = args.channel ?? "local";
 const domain = args.domain ?? "";
 
+// Changelog derivation config. Declared before the top-level artifact writes
+// below so `changelogInfo()` (invoked during that write) does not hit these
+// `const`s while they are still in the temporal dead zone.
+const CHANGELOG_ENTRY_LIMIT = 8;
+const CHANGELOG_SUMMARY_MAX = 120;
+const VERSION_TAG_PATTERN = /^v[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[0-9]+$/;
+const MERGE_SUBJECT_PATTERN = /^Merge pull request #(\d+) from /;
+
 const configs = {
   studio: {
     app: "lightplayer-studio",
@@ -65,6 +73,7 @@ if (domain) {
   await writeFile(path.join(outDir, "CNAME"), `${domain}\n`);
 }
 await writeFile(path.join(outDir, "version.json"), `${JSON.stringify(versionInfo(config.app), null, 2)}\n`);
+await writeFile(path.join(outDir, "changelog.json"), `${JSON.stringify(changelogInfo(), null, 2)}\n`);
 
 const files = await listFiles(outDir);
 const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
@@ -96,6 +105,66 @@ function versionInfo(app) {
       runAttempt: process.env.GITHUB_RUN_ATTEMPT ?? null,
     },
   };
+}
+
+// Best-effort "Recent updates" list built from git version tags. Requires the
+// checkout to have tags/history (both Pages workflows use `fetch-depth: 0`); on
+// a shallow clone or a tagless tree this simply yields `entries: []`. It must
+// never throw — a missing changelog must not fail the deploy.
+function changelogInfo() {
+  return {
+    schemaVersion: 1,
+    generatedAt: new Date().toISOString(),
+    entries: versionTags()
+      .slice(0, CHANGELOG_ENTRY_LIMIT)
+      .map(changelogEntry)
+      .filter((entry) => entry !== null),
+  };
+}
+
+function versionTags() {
+  const output = commandOrEmpty("git", ["tag", "--sort=-creatordate", "--list", "v*"]);
+  return output
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => VERSION_TAG_PATTERN.test(line));
+}
+
+// Each version tag is treated as a single unit and summarized best-effort from
+// the commit it points at: a GitHub merge commit contributes the PR number and
+// its body (the human PR title); any other commit contributes its subject.
+function changelogEntry(tag) {
+  const subject = commandOrEmpty("git", ["log", "-1", "--pretty=%s", tag]);
+  const version = tag.replace(/^v/, "");
+  if (!version) {
+    return null;
+  }
+
+  const merge = subject.match(MERGE_SUBJECT_PATTERN);
+  let summary = subject;
+  let pr = null;
+  if (merge) {
+    pr = Number(merge[1]);
+    const body = commandOrEmpty("git", ["log", "-1", "--pretty=%b", tag]);
+    summary = firstNonEmptyLine(body) ?? subject;
+  }
+
+  return {
+    version,
+    date: commandOrEmpty("git", ["log", "-1", "--pretty=%cs", tag]) || null,
+    summary: summary.trim().slice(0, CHANGELOG_SUMMARY_MAX),
+    pr,
+  };
+}
+
+function firstNonEmptyLine(text) {
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed) {
+      return trimmed;
+    }
+  }
+  return null;
 }
 
 async function listFiles(directory) {
@@ -163,6 +232,18 @@ function commandOrUnknown(command, args = []) {
     }).trim();
   } catch {
     return "unknown";
+  }
+}
+
+function commandOrEmpty(command, args = []) {
+  try {
+    return execFileSync(command, args, {
+      cwd: repoRoot,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return "";
   }
 }
 

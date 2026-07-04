@@ -5154,9 +5154,11 @@ version = "40.0.0"
 dependencies = [
  "dioxus",
  "dioxus-icons",
+ "gloo-net",
  "gloo-timers",
  "lpa-studio-core",
  "lpa-studio-web-story-macros",
+ "serde",
  "syn 2.0.117",
  "wasm-bindgen",
  "web-sys",
