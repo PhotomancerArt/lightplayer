@@ -4,7 +4,7 @@ use lpc_model::{
     EnumSlot, LpValue, PositiveF32, PositiveF32Slot, Revision, SlotDataAccess, SlotDataMutAccess,
     SlotEnumAccess, SlotEnumDefaultVariant, SlotEnumEncoding, SlotEnumShape, SlotName,
     SlotRecordMutAccess, SlotShape, SlotShapeId, SlotShapeRegistry, Slotted, SlottedEnum,
-    ValueSlot,
+    StaticSlotShape, ValueSlot,
 };
 
 #[derive(Clone, Debug, PartialEq, Slotted)]
@@ -84,7 +84,14 @@ fn enum_derive_supports_single_tuple_wrappers() {
         panic!("enum shape");
     };
     assert_eq!(variants[0].name.as_str(), "Wrapped");
-    assert!(matches!(variants[0].shape, SlotShape::Record { .. }));
+    // Nested Slotted records embed as a reference to their own catalog entry
+    // rather than inlining the full record shape.
+    assert_eq!(
+        variants[0].shape,
+        SlotShape::Ref {
+            id: <NestedPayload as StaticSlotShape>::SHAPE_ID,
+        }
+    );
 
     let SlotDataAccess::Record(record) = mode.data() else {
         panic!("tuple wrapper payload should expose wrapped record");
