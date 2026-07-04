@@ -3583,6 +3583,7 @@ dependencies = [
  "lpc-hardware",
  "lpc-model",
  "lpc-shared",
+ "lpc-view",
  "lpc-wire",
  "lpfs",
  "lpvm-wasm",

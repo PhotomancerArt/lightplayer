@@ -16,21 +16,20 @@
 //! - accumulate the body's events while the envelope `fin == false`;
 //! - complete the request when a message with `fin == true` arrives.
 //!
-//! # Temporary collector shim (removed in M6/P5)
+//! # Event surface (M6/P4)
 //!
-//! To keep every downstream consumer compiling while `lpc-view` grows a
-//! progressive applier, this routine still feeds each `ProjectRead { events }`
-//! body into a [`ProjectReadCollector`] via
-//! [`accept_events`](ProjectReadCollector::accept_events) and returns the
-//! rebuilt aggregate [`ProjectReadResponse`]. Envelope-level ordering now lives
-//! here, so the collector's own frame-sequence check is bypassed; the collector
-//! only sees the ordered events. When P5 deletes the collector, this routine
-//! will surface events directly and the shim disappears.
+//! This routine accumulates the ordered [`ProjectReadEvent`] values across
+//! frames and returns them directly; `lpc-view`'s
+//! [`ProjectReadApplier`](lpc_view::ProjectReadApplier) applies them
+//! progressively at each consumer. The event grammar's own invariants
+//! (`Begin`-once, family pairing, chunk reassembly, …) are validated by the
+//! applier; this layer only owns envelope framing (E2) plus the E3 finality
+//! agreement between the envelope `fin` and the terminal `End`/`Error` event.
+//!
+//! The aggregate [`ProjectReadCollector`] shim from M6/P1 is no longer on this
+//! live path (it is left compiling for M6/P5 to delete).
 
-use lpc_wire::{
-    ProjectReadCollectError, ProjectReadCollectStatus, ProjectReadCollector, ProjectReadResponse,
-    WireServerMessage, WireServerMsgBody,
-};
+use lpc_wire::{ProjectReadEvent, WireServerMessage, WireServerMsgBody};
 
 use crate::client_event::ClientEvent;
 use crate::protocol_session::{ProtocolSession, ResponseDisposition};
@@ -59,8 +58,8 @@ pub enum ProjectReadStreamStep {
     Continue,
     /// Record this side-channel event, then keep receiving.
     Event(ClientEvent),
-    /// The stream completed; stop receiving and return this aggregate.
-    Complete(ProjectReadResponse),
+    /// The stream completed; stop receiving and return the ordered events.
+    Complete(Vec<ProjectReadEvent>),
 }
 
 /// Correlation + collect state for one in-flight project read.
@@ -72,9 +71,8 @@ pub struct ProjectReadStream {
     request_id: u64,
     /// Next envelope `seq` we require from the matched id (contiguous from 0).
     next_seq: u32,
-    collector: ProjectReadCollector,
-    /// Set once a `fin == true` frame is seen, to detect fin/End disagreement.
-    saw_fin: bool,
+    /// Ordered events accumulated across frames.
+    events: Vec<ProjectReadEvent>,
 }
 
 impl ProjectReadStream {
@@ -83,8 +81,7 @@ impl ProjectReadStream {
         Self {
             request_id,
             next_seq: 0,
-            collector: ProjectReadCollector::new(),
-            saw_fin: false,
+            events: Vec::new(),
         }
     }
 
@@ -127,39 +124,35 @@ impl ProjectReadStream {
         }
         self.next_seq = self.next_seq.saturating_add(1);
         let fin = message.fin;
-        if fin {
-            self.saw_fin = true;
-        }
 
         match message.msg {
             WireServerMsgBody::Error { error } => Err(ProjectReadStreamError::Server(error)),
             WireServerMsgBody::ProjectRead { events } => {
-                let status = self
-                    .collector
-                    .accept_events(events)
-                    .map_err(collect_error)?;
-                match status {
-                    ProjectReadCollectStatus::Complete(response) => {
-                        // The collector completed (saw the `End` event). E3: the
-                        // frame carrying `End` must be the final frame.
-                        if !fin {
-                            return Err(ProjectReadStreamError::Protocol(
-                                "project read completed on a non-final frame (End without fin)"
-                                    .into(),
-                            ));
-                        }
-                        Ok(ProjectReadStreamStep::Complete(response))
+                // E3: the envelope `fin` owns finality; the terminal `End`/`Error`
+                // event must land in exactly the final frame. The full event
+                // grammar is validated downstream by the applier — here we only
+                // check the fin/terminal agreement and accumulate.
+                let saw_terminal = events.iter().any(is_terminal_event);
+                self.events.extend(events);
+                if fin {
+                    if !saw_terminal {
+                        // `fin` arrived but the event grammar did not end the
+                        // stream (no `End`/`Error` event).
+                        return Err(ProjectReadStreamError::Protocol(
+                            "project read stream ended (fin) before an End event".into(),
+                        ));
                     }
-                    ProjectReadCollectStatus::Continue => {
-                        if fin {
-                            // E3: `fin` arrived but the event grammar did not end
-                            // the stream (no `End`/`Error` event).
-                            return Err(ProjectReadStreamError::Protocol(
-                                "project read stream ended (fin) before an End event".into(),
-                            ));
-                        }
-                        Ok(ProjectReadStreamStep::Continue)
+                    Ok(ProjectReadStreamStep::Complete(core::mem::take(
+                        &mut self.events,
+                    )))
+                } else {
+                    if saw_terminal {
+                        // A terminal event arrived on a non-final frame.
+                        return Err(ProjectReadStreamError::Protocol(
+                            "project read completed on a non-final frame (End without fin)".into(),
+                        ));
                     }
+                    Ok(ProjectReadStreamStep::Continue)
                 }
             }
             other => Err(ProjectReadStreamError::Unexpected(format!("{other:?}"))),
@@ -167,11 +160,11 @@ impl ProjectReadStream {
     }
 }
 
-fn collect_error(error: ProjectReadCollectError) -> ProjectReadStreamError {
-    match error {
-        ProjectReadCollectError::Remote(message) => ProjectReadStreamError::Server(message),
-        ProjectReadCollectError::Protocol(message) => ProjectReadStreamError::Protocol(message),
-    }
+fn is_terminal_event(event: &ProjectReadEvent) -> bool {
+    matches!(
+        event,
+        ProjectReadEvent::End { .. } | ProjectReadEvent::Error { .. }
+    )
 }
 
 #[cfg(test)]
@@ -187,13 +180,13 @@ mod tests {
 
     fn drive(
         messages: Vec<WireServerMessage>,
-    ) -> Result<ProjectReadResponse, ProjectReadStreamError> {
+    ) -> Result<Vec<ProjectReadEvent>, ProjectReadStreamError> {
         let protocol = ProtocolSession::new();
         let mut stream = ProjectReadStream::new(1);
         for message in messages {
             match stream.accept(&protocol, message)? {
                 ProjectReadStreamStep::Continue | ProjectReadStreamStep::Event(_) => {}
-                ProjectReadStreamStep::Complete(response) => return Ok(response),
+                ProjectReadStreamStep::Complete(events) => return Ok(events),
             }
         }
         Err(ProjectReadStreamError::Protocol(
@@ -201,9 +194,16 @@ mod tests {
         ))
     }
 
+    fn end_revision(events: &[ProjectReadEvent]) -> Revision {
+        match events.last() {
+            Some(ProjectReadEvent::End { revision }) => *revision,
+            other => panic!("expected terminal End event, got {other:?}"),
+        }
+    }
+
     #[test]
     fn multi_frame_stream_completes_on_fin() {
-        let response = drive(vec![
+        let events = drive(vec![
             frame(
                 1,
                 0,
@@ -222,12 +222,14 @@ mod tests {
             ),
         ])
         .expect("stream completes");
-        assert_eq!(response.revision, Revision::new(7));
+        // Ordered events collected across both frames.
+        assert_eq!(events.len(), 2);
+        assert_eq!(end_revision(&events), Revision::new(7));
     }
 
     #[test]
     fn single_final_frame_completes() {
-        let response = drive(vec![frame(
+        let events = drive(vec![frame(
             1,
             0,
             true,
@@ -241,7 +243,7 @@ mod tests {
             ],
         )])
         .expect("stream completes");
-        assert_eq!(response.revision, Revision::new(3));
+        assert_eq!(end_revision(&events), Revision::new(3));
     }
 
     #[test]

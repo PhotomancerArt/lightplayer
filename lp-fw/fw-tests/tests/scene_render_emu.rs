@@ -19,11 +19,12 @@ use lp_riscv_inst::Gpr;
 use lpa_client::TokioLpClient;
 use lpc_model::{AsLpPath, NodeId};
 use lpc_shared::ProjectBuilder;
+use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
 use lpc_wire::{
-    NodeReadQuery, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery, ProjectReadRequest,
-    ProjectReadResult, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
+    NodeReadQuery, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent, ProjectReadQuery,
+    ProjectReadRequest, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
     ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, WireChannelSampleFormat,
-    WireRuntimeBufferMetadataPayload, WireTextureFormat, WireTreeDelta,
+    WireRuntimeBufferMetadataPayload, WireTextureFormat,
 };
 use lpfs::{LpFs, LpFsMemory};
 
@@ -137,7 +138,7 @@ async fn read_large_render_probe_crossing_frame_boundary(
     const WIDTH: u32 = 64;
     const HEIGHT: u32 = 64;
 
-    let response = client
+    let events = client
         .project_read(
             handle,
             ProjectReadRequest {
@@ -156,10 +157,19 @@ async fn read_large_render_probe_crossing_frame_boundary(
         .await
         .expect("large render-product probe read should complete");
 
-    let probe = response
-        .probes
-        .first()
-        .expect("probe result should be present");
+    // Reassemble the chunked probe result through the progressive applier —
+    // the same path production consumers use.
+    let mut view = ProjectView::new();
+    let mut applier = ProjectReadApplier::new(&mut view);
+    let mut probes = Vec::new();
+    for event in events {
+        if let ApplyStatus::Complete { .. } =
+            applier.apply(event).expect("apply probe read event")
+        {
+            probes = applier.take_completed_probe_results();
+        }
+    }
+    let probe = probes.first().expect("probe result should be present");
     let ProjectProbeResult::RenderProduct(render) = probe else {
         panic!("expected a render-product probe result, got {probe:?}");
     };
@@ -189,12 +199,28 @@ async fn read_large_render_probe_crossing_frame_boundary(
     }
 }
 
+/// Apply a project-read event stream onto a fresh [`ProjectView`] via the
+/// progressive applier — the same path production consumers use.
+fn view_from_events(events: Vec<ProjectReadEvent>) -> ProjectView {
+    let mut view = ProjectView::new();
+    let mut applier = ProjectReadApplier::new(&mut view);
+    let mut completed = false;
+    for event in events {
+        match applier.apply(event).expect("apply project read event") {
+            ApplyStatus::Continue => {}
+            ApplyStatus::Complete { .. } => completed = true,
+        }
+    }
+    assert!(completed, "project read stream did not complete");
+    view
+}
+
 async fn read_node_id_for_suffix(
     client: &TokioLpClient,
     handle: lpc_wire::WireProjectHandle,
     suffix: &str,
 ) -> NodeId {
-    let response = client
+    let events = client
         .project_read(
             handle,
             ProjectReadRequest {
@@ -210,30 +236,14 @@ async fn read_node_id_for_suffix(
         .await
         .expect("Failed to read project nodes");
 
-    let ProjectReadResult::Nodes(nodes) = response
-        .results
-        .first()
-        .expect("project read should include node result")
-    else {
-        panic!(
-            "project read returned non-node result: {:?}",
-            response.results
-        );
-    };
+    let view = view_from_events(events);
 
     let mut available_paths = Vec::new();
-    for delta in &nodes.tree_deltas {
-        if let WireTreeDelta::Created {
-            id,
-            path: node_path,
-            ..
-        } = delta
-        {
-            let node_path = node_path.to_string();
-            available_paths.push(node_path.clone());
-            if node_path.ends_with(suffix) {
-                return *id;
-            }
+    for (id, entry) in &view.tree.nodes {
+        let node_path = entry.path.to_string();
+        available_paths.push(node_path.clone());
+        if node_path.ends_with(suffix) {
+            return *id;
         }
     }
 
@@ -245,7 +255,7 @@ async fn read_output_sample(
     handle: lpc_wire::WireProjectHandle,
     output_id: NodeId,
 ) -> OutputSample {
-    let response = client
+    let events = client
         .project_read(
             handle,
             ProjectReadRequest {
@@ -263,62 +273,60 @@ async fn read_output_sample(
         .await
         .expect("Failed to read output resources");
 
-    let runtime_frame_num = match response.results.first() {
-        Some(ProjectReadResult::Runtime(runtime)) => runtime.project.frame_num,
-        other => panic!("project read returned non-runtime result: {other:?}"),
-    };
+    let view = view_from_events(events);
 
-    let ProjectReadResult::Resources(resources) = response
-        .results
-        .get(1)
-        .expect("project read should include resource result")
-    else {
-        panic!(
-            "project read returned non-resource result: {:?}",
-            response.results
-        );
-    };
+    let runtime_frame_num = view
+        .runtime
+        .as_ref()
+        .expect("project read should include runtime status")
+        .project
+        .frame_num;
 
-    let payload = resources
-        .runtime_buffer_payloads
-        .iter()
-        .find(|payload| {
-            resources
-                .summaries
-                .iter()
-                .any(|summary| {
-                    summary.resource_ref == payload.resource_ref && summary.owner == Some(output_id)
-                })
-                && matches!(
-                    payload.metadata,
-                    WireRuntimeBufferMetadataPayload::OutputChannels {
-                        sample_format: WireChannelSampleFormat::U16,
-                        ..
-                    }
-                )
+    // Find the output-owned U16 channel buffer for this node, then read its
+    // reassembled bytes from the view's resource cache.
+    let resource_ref = view
+        .resource_cache
+        .summaries()
+        .find(|summary| {
+            summary.owner == Some(output_id)
+                && view
+                    .resource_cache
+                    .runtime_buffer_payload(summary.resource_ref)
+                    .is_some_and(|(_, metadata)| {
+                        matches!(
+                            metadata,
+                            WireRuntimeBufferMetadataPayload::OutputChannels {
+                                sample_format: WireChannelSampleFormat::U16,
+                                ..
+                            }
+                        )
+                    })
         })
+        .map(|summary| summary.resource_ref)
         .unwrap_or_else(|| {
-            panic!(
-                "output channel payload for {output_id:?} not found; summaries: {:?}; payloads: {:?}",
-                resources.summaries, resources.runtime_buffer_payloads
-            )
+            panic!("output channel payload for {output_id:?} not found");
         });
 
+    let bytes = view
+        .resource_cache
+        .runtime_buffer_bytes(resource_ref)
+        .expect("output channel bytes should be cached");
+
     assert_eq!(
-        payload.bytes.len() % 2,
+        bytes.len() % 2,
         0,
         "U16 output payload should contain whole samples"
     );
     assert!(
-        payload.bytes.len() >= 6,
+        bytes.len() >= 6,
         "output payload should contain at least one RGB pixel; got {} bytes",
-        payload.bytes.len()
+        bytes.len()
     );
 
     OutputSample {
-        red: u16::from_le_bytes([payload.bytes[0], payload.bytes[1]]),
-        green: u16::from_le_bytes([payload.bytes[2], payload.bytes[3]]),
-        blue: u16::from_le_bytes([payload.bytes[4], payload.bytes[5]]),
+        red: u16::from_le_bytes([bytes[0], bytes[1]]),
+        green: u16::from_le_bytes([bytes[2], bytes[3]]),
+        blue: u16::from_le_bytes([bytes[4], bytes[5]]),
         runtime_frame_num,
     }
 }

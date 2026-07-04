@@ -2,7 +2,7 @@
 
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_wire::{
-    ClientMessage, ClientRequest, FsRequest, ProjectReadRequest, ProjectReadResponse,
+    ClientMessage, ClientRequest, FsRequest, ProjectReadEvent, ProjectReadRequest,
     WireOverlayCommitRequest, WireOverlayCommitResponse, WireOverlayMutationRequest,
     WireOverlayMutationResponse, WireOverlayReadRequest, WireOverlayReadResponse,
     WireProjectCommand, WireProjectCommandResponse, WireProjectHandle,
@@ -234,7 +234,7 @@ where
         &mut self,
         handle: WireProjectHandle,
         read: ProjectReadRequest,
-    ) -> ClientResult<ClientOutcome<ProjectReadResponse>> {
+    ) -> ClientResult<ClientOutcome<Vec<ProjectReadEvent>>> {
         let request_id = self.protocol.next_request_id();
         self.io
             .send(ClientMessage {
@@ -257,8 +257,8 @@ where
             {
                 ProjectReadStreamStep::Continue => {}
                 ProjectReadStreamStep::Event(event) => events.push(event),
-                ProjectReadStreamStep::Complete(response) => {
-                    return Ok(ClientOutcome::new(response, events));
+                ProjectReadStreamStep::Complete(read_events) => {
+                    return Ok(ClientOutcome::new(read_events, events));
                 }
             }
         }
@@ -267,7 +267,7 @@ where
     pub async fn project_read_default_debug(
         &mut self,
         handle: WireProjectHandle,
-    ) -> ClientResult<ClientOutcome<ProjectReadResponse>> {
+    ) -> ClientResult<ClientOutcome<Vec<ProjectReadEvent>>> {
         self.project_read(handle, ProjectReadRequest::default_debug(None))
             .await
     }
@@ -500,9 +500,18 @@ mod tests {
             .await
             .expect("project read");
 
-        assert_eq!(outcome.value.revision, Revision::new(7));
-        assert!(outcome.value.results.is_empty());
-        assert!(outcome.value.probes.is_empty());
+        // The ordered events are returned across both frames.
+        assert_eq!(
+            outcome.value,
+            vec![
+                ProjectReadEvent::Begin {
+                    revision: Revision::new(7),
+                },
+                ProjectReadEvent::End {
+                    revision: Revision::new(7),
+                },
+            ]
+        );
 
         let io = client.into_io();
         assert_eq!(io.sent.len(), 1);

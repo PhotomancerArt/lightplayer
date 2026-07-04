@@ -9,14 +9,13 @@ use eframe::egui;
 use lpc_model::{
     MutationCmd, MutationCmdBatch, MutationCmdId, MutationOp, NodeId, Revision, SlotEdit, SlotPath,
 };
-use lpc_view::{ProjectView, apply_project_read_response};
+use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView, probe_results};
 use lpc_wire::{
-    NodeReadQuery, NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery,
-    ProjectReadRequest, ProjectReadResponse, ProjectReadResult as WireProjectReadResult, ReadLevel,
+    NodeReadQuery, NodeReadSelection, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent,
+    ProjectReadQuery, ProjectReadQueryEvent, ProjectReadRequest, ReadLevel,
     RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery,
-    RuntimeReadQuery, RuntimeReadResult, ShapeReadQuery, ShapeReadResult,
-    WireOverlayMutationRequest, WireProjectHandle as ProjectHandle,
-    WireProjectInventoryReadResponse, WireTextureFormat,
+    RuntimeReadQuery, RuntimeReadResult, ShapeReadQuery, WireOverlayMutationRequest,
+    WireProjectHandle as ProjectHandle, WireProjectInventoryReadResponse, WireTextureFormat,
 };
 
 use super::inspector::{InspectorSelection, render_debug_inspector};
@@ -26,7 +25,7 @@ use super::slot_edit::{SlotEditIntent, SlotEditKey, SlotEditStatusContext};
 type DebugUiResult = Result<DebugUiMessage, String>;
 
 enum DebugUiMessage {
-    ProjectRead(ProjectReadResponse),
+    ProjectRead(Vec<ProjectReadEvent>),
     Inventory(WireProjectInventoryReadResponse),
 }
 
@@ -90,30 +89,30 @@ impl DebugUiState {
         while let Ok(result) = self.response_rx.try_recv() {
             self.poll_in_flight = false;
             match result {
-                Ok(DebugUiMessage::ProjectRead(response)) => {
+                Ok(DebugUiMessage::ProjectRead(events)) => {
                     let paged_shape_sync_in_progress = !self.shapes_synced;
-                    if let Some(probe) = response.probes.iter().find_map(render_product_probe) {
-                        self.last_render_product_probe = Some(probe.clone());
+                    for probe in probe_results(&events) {
+                        if let Some(probe) = render_product_probe(probe) {
+                            self.last_render_product_probe = Some(probe.clone());
+                        }
                     }
-                    if let Some(runtime) = response.results.iter().find_map(runtime_result) {
-                        self.last_runtime_status = Some(runtime.clone());
-                    }
-                    if response
-                        .results
-                        .iter()
-                        .any(|result| shape_result(result).is_some())
-                    {
+                    if events.iter().any(stream_carries_shapes) {
                         self.shapes_synced = true;
                     }
                     if let Ok(mut view) = self.project_view.lock() {
-                        if let Err(error) = apply_debug_ui_project_read_response(
+                        match apply_debug_ui_project_read_events(
                             &mut view,
-                            response,
+                            events,
                             paged_shape_sync_in_progress,
                         ) {
-                            self.last_error = Some(error.to_string());
-                        } else {
-                            self.last_error = None;
+                            Ok(()) => {
+                                self.last_runtime_status =
+                                    view.runtime.clone().or(self.last_runtime_status.take());
+                                self.last_error = None;
+                            }
+                            Err(error) => {
+                                self.last_error = Some(error.to_string());
+                            }
                         }
                     }
                 }
@@ -340,49 +339,40 @@ fn render_product_probe(probe: &ProjectProbeResult) -> Option<&RenderProductProb
     }
 }
 
-fn runtime_result(result: &lpc_wire::ProjectReadResult) -> Option<&RuntimeReadResult> {
-    match result {
-        lpc_wire::ProjectReadResult::Runtime(runtime) => Some(runtime),
-        _ => None,
-    }
+/// Whether a project-read event belongs to a shapes query family (used to flip
+/// `shapes_synced` once the initial paged shape sync produces shape entries).
+fn stream_carries_shapes(event: &ProjectReadEvent) -> bool {
+    matches!(
+        event,
+        ProjectReadEvent::Query {
+            event: ProjectReadQueryEvent::Shapes(_),
+            ..
+        }
+    )
 }
 
-fn shape_result(result: &lpc_wire::ProjectReadResult) -> Option<&lpc_wire::ShapeReadResult> {
-    match result {
-        lpc_wire::ProjectReadResult::Shapes(shapes) => Some(shapes),
-        _ => None,
-    }
-}
-
-fn apply_debug_ui_project_read_response(
+/// Apply a project-read event stream to the view via the progressive applier.
+///
+/// During the initial paged shape sync the incremental shape reads must not
+/// advance the project revision (the first full read is still ungated at
+/// `since=None`), so the view revision is preserved across the apply — the
+/// applier upserts shape entries additively regardless.
+fn apply_debug_ui_project_read_events(
     view: &mut ProjectView,
-    mut response: ProjectReadResponse,
+    events: Vec<ProjectReadEvent>,
     paged_shape_sync_in_progress: bool,
-) -> Result<(), lpc_view::ProjectReadApplyError> {
-    if paged_shape_sync_in_progress {
-        for shapes in take_shape_results(&mut response) {
-            if let Some(registry) = shapes.registry {
-                view.slots.apply_registry_page(registry);
-            }
-        }
-        if response.results.is_empty() && response.probes.is_empty() {
-            return Ok(());
+) -> Result<(), lpc_view::ProjectReadApplyStreamError> {
+    let preserved_revision = paged_shape_sync_in_progress.then_some(view.revision);
+    let mut applier = ProjectReadApplier::new(view);
+    for event in events {
+        if let ApplyStatus::Complete { .. } = applier.apply(event)? {
+            break;
         }
     }
-    apply_project_read_response(view, response)
-}
-
-fn take_shape_results(response: &mut ProjectReadResponse) -> Vec<ShapeReadResult> {
-    let mut results = Vec::with_capacity(response.results.len());
-    let mut remaining = Vec::with_capacity(response.results.len());
-    for result in response.results.drain(..) {
-        match result {
-            WireProjectReadResult::Shapes(shapes) => results.push(shapes),
-            other => remaining.push(other),
-        }
+    if let Some(revision) = preserved_revision {
+        view.revision = revision;
     }
-    response.results = remaining;
-    results
+    Ok(())
 }
 
 fn debug_ui_project_read(
@@ -488,6 +478,41 @@ impl eframe::App for DebugUiState {
 mod tests {
     use super::*;
     use lpc_model::{LpType, Revision, SlotShape, SlotShapeId, SlotShapeRegistry};
+    use lpc_wire::ProjectReadShapeEvent;
+
+    /// Build a shapes-only project-read event stream from a registry snapshot,
+    /// mirroring the initial paged shape sync stream.
+    fn shape_sync_events(
+        revision: i64,
+        snapshot: lpc_model::SlotShapeRegistrySnapshot,
+    ) -> Vec<ProjectReadEvent> {
+        let mut events = vec![
+            ProjectReadEvent::Begin {
+                revision: Revision::new(revision),
+            },
+            ProjectReadEvent::Query {
+                index: 0,
+                event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Begin {
+                    level: ReadLevel::Detail,
+                    ids_revision: snapshot.ids_revision,
+                }),
+            },
+        ];
+        for (id, entry) in snapshot.shapes {
+            events.push(ProjectReadEvent::Query {
+                index: 0,
+                event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::Entry { id, entry }),
+            });
+        }
+        events.push(ProjectReadEvent::Query {
+            index: 0,
+            event: ProjectReadQueryEvent::Shapes(ProjectReadShapeEvent::End),
+        });
+        events.push(ProjectReadEvent::End {
+            revision: Revision::new(revision),
+        });
+        events
+    }
 
     #[test]
     fn paged_shape_sync_keeps_prior_pages_without_advancing_project_revision() {
@@ -508,17 +533,9 @@ mod tests {
         view.slots
             .apply_registry_page(first_page_registry.snapshot());
 
-        let response = ProjectReadResponse {
-            revision: Revision::new(7),
-            results: vec![WireProjectReadResult::Shapes(ShapeReadResult {
-                level: ReadLevel::Detail,
-                registry: Some(final_page_registry.snapshot()),
-                membership: None,
-            })],
-            probes: vec![],
-        };
+        let events = shape_sync_events(7, final_page_registry.snapshot());
 
-        apply_debug_ui_project_read_response(&mut view, response, true).unwrap();
+        apply_debug_ui_project_read_events(&mut view, events, true).unwrap();
 
         assert!(view.slots.registry.get(&first_id).is_some());
         assert!(view.slots.registry.get(&second_id).is_some());

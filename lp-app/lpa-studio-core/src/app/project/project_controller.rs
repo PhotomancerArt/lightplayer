@@ -508,8 +508,7 @@ impl ProjectController {
         let request = self.sync_mut()?.initial_project_read_request(products);
         let read = server.project_read(handle_id, request).await?;
         let logs = read.logs;
-        self.sync_mut()?
-            .apply_project_read_response(read.response)?;
+        self.sync_mut()?.apply_project_read_events(read.events)?;
         self.apply_synced_project_view()?;
         Ok(logs)
     }
@@ -523,8 +522,7 @@ impl ProjectController {
         let request = self.sync_mut()?.refresh_project_read_request(products);
         let read = server.project_read(handle_id, request).await?;
         let logs = read.logs;
-        self.sync_mut()?
-            .apply_project_read_response(read.response)?;
+        self.sync_mut()?.apply_project_read_events(read.events)?;
         self.apply_synced_project_view()?;
         Ok(logs)
     }
@@ -781,9 +779,9 @@ mod tests {
     };
     use lpc_view::{ProjectView, TreeEntryView};
     use lpc_wire::{
-        NodeRuntimeStatus, ProjectProbeRequest, ProjectProbeResult, ProjectReadResponse,
-        ProjectReadResult, RenderProductProbeRequest, RenderProductProbeResult, WireEntryState,
-        WireTextureFormat,
+        NodeRuntimeStatus, ProjectProbeRequest, ProjectProbeResult, ProjectReadEvent,
+        ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQueryEvent,
+        RenderProductProbeRequest, RenderProductProbeResult, WireEntryState, WireTextureFormat,
     };
 
     use crate::{
@@ -1076,26 +1074,41 @@ mod tests {
         project
             .sync_mut()
             .unwrap()
-            .apply_project_read_response(ProjectReadResponse {
-                revision: Revision::new(12),
-                results: vec![ProjectReadResult::Nodes(lpc_wire::NodeReadResult {
-                    level: lpc_wire::ReadLevel::Detail,
-                    tree_deltas: vec![lpc_wire::WireTreeDelta::Created {
-                        id: NodeId::new(1),
-                        path: TreePath::parse("/demo.project").unwrap(),
-                        parent: None,
-                        child_kind: None,
-                        children: Vec::new(),
-                        status: NodeRuntimeStatus::Ok,
-                        state: WireEntryState::Alive,
-                        created_frame: Revision::new(1),
-                        change_frame: Revision::new(1),
-                        children_ver: Revision::new(1),
-                    }],
-                    slots: None,
-                })],
-                probes: Vec::new(),
-            })
+            .apply_project_read_events(vec![
+                ProjectReadEvent::Begin {
+                    revision: Revision::new(12),
+                },
+                ProjectReadEvent::Query {
+                    index: 0,
+                    event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::Begin {
+                        level: lpc_wire::ReadLevel::Detail,
+                    }),
+                },
+                ProjectReadEvent::Query {
+                    index: 0,
+                    event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::TreeDeltas {
+                        deltas: vec![lpc_wire::WireTreeDelta::Created {
+                            id: NodeId::new(1),
+                            path: TreePath::parse("/demo.project").unwrap(),
+                            parent: None,
+                            child_kind: None,
+                            children: Vec::new(),
+                            status: NodeRuntimeStatus::Ok,
+                            state: WireEntryState::Alive,
+                            created_frame: Revision::new(1),
+                            change_frame: Revision::new(1),
+                            children_ver: Revision::new(1),
+                        }],
+                    }),
+                },
+                ProjectReadEvent::Query {
+                    index: 0,
+                    event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::End),
+                },
+                ProjectReadEvent::End {
+                    revision: Revision::new(12),
+                },
+            ])
             .unwrap();
 
         project.apply_synced_project_view().unwrap();
@@ -1455,20 +1468,27 @@ mod tests {
         project
             .sync_mut()
             .unwrap()
-            .apply_project_read_response(ProjectReadResponse {
-                revision: Revision::new(8),
-                results: Vec::new(),
-                probes: vec![ProjectProbeResult::RenderProduct(
-                    RenderProductProbeResult::Texture {
-                        product,
-                        revision: Revision::new(8),
-                        width: 1,
-                        height: 2,
-                        format: WireTextureFormat::Srgb8,
-                        bytes: bytes.clone(),
-                    },
-                )],
-            })
+            .apply_project_read_events(vec![
+                ProjectReadEvent::Begin {
+                    revision: Revision::new(8),
+                },
+                ProjectReadEvent::Probe {
+                    index: 0,
+                    event: ProjectReadProbeEvent::Result(ProjectProbeResult::RenderProduct(
+                        RenderProductProbeResult::Texture {
+                            product,
+                            revision: Revision::new(8),
+                            width: 1,
+                            height: 2,
+                            format: WireTextureFormat::Srgb8,
+                            bytes: bytes.clone(),
+                        },
+                    )),
+                },
+                ProjectReadEvent::End {
+                    revision: Revision::new(8),
+                },
+            ])
             .unwrap();
 
         let nodes = project.ui_nodes();

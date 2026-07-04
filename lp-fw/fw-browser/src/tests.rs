@@ -3,11 +3,11 @@ use std::rc::Rc;
 
 use lpc_model::{AsLpPath, AsLpPathBuf, NodeId};
 use lpc_shared::ProjectBuilder;
+use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
 use lpc_wire::{
-    ClientRequest, FsRequest, NodeReadQuery, ProjectReadCollectStatus, ProjectReadCollector,
-    ProjectReadQuery, ProjectReadRequest, ProjectReadResponse, ProjectReadResult, ReadLevel,
+    ClientRequest, FsRequest, NodeReadQuery, ProjectReadQuery, ProjectReadRequest, ReadLevel,
     ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, WireChannelSampleFormat,
-    WireRuntimeBufferMetadataPayload, WireServerMessage, WireServerMsgBody, WireTreeDelta, json,
+    WireRuntimeBufferMetadataPayload, WireServerMessage, WireServerMsgBody, json,
     messages::ClientMessage,
 };
 use lpfs::{LpFs, LpFsMemory};
@@ -101,10 +101,12 @@ fn explicit_ticks_advance_the_clock_deterministically() {
             },
             0,
         );
-        match collect_project_read_response(response).results.first() {
-            Some(ProjectReadResult::Runtime(runtime)) => runtime.project.frame_num,
-            other => panic!("expected runtime result: {other:?}"),
-        }
+        view_from_project_read(response)
+            .runtime
+            .as_ref()
+            .expect("runtime result should be present")
+            .project
+            .frame_num
     };
 
     let deltas = [40_u32, 40, 40, 40];
@@ -189,9 +191,9 @@ fn runtime_loads_project_and_renders_output_after_ticks() {
         },
         16,
     );
-    let nodes_response = collect_project_read_response(nodes_response);
+    let nodes_view = view_from_project_read(nodes_response);
 
-    let output_id = output_node_id(nodes_response);
+    let output_id = output_node_id(&nodes_view);
 
     let mut red_values = Vec::new();
     for _ in 0..3 {
@@ -214,9 +216,9 @@ fn runtime_loads_project_and_renders_output_after_ticks() {
             },
             40,
         );
-        let response = collect_project_read_response(response);
+        let view = view_from_project_read(response);
 
-        let sample = read_output_sample(response, output_id);
+        let sample = read_output_sample(&view, output_id);
         assert!(sample.runtime_frame_num > 0);
         assert_eq!(sample.green, 0);
         assert_eq!(sample.blue, 0);
@@ -265,24 +267,28 @@ fn collect_protocol_out(envelopes_json: &str) -> Vec<WireServerMessage> {
         .collect()
 }
 
-fn collect_project_read_response(messages: Vec<WireServerMessage>) -> ProjectReadResponse {
-    let mut collector = ProjectReadCollector::new();
+/// Apply a project-read response (delivered as envelope frames) onto a fresh
+/// [`ProjectView`] via the progressive applier — the client consumer path.
+fn view_from_project_read(messages: Vec<WireServerMessage>) -> ProjectView {
+    let mut view = ProjectView::new();
+    let mut applier = ProjectReadApplier::new(&mut view);
+    let mut completed = false;
     for message in messages {
         match message.msg {
             WireServerMsgBody::ProjectRead { events } => {
-                match collector
-                    .accept_events(events)
-                    .expect("collect project read")
-                {
-                    ProjectReadCollectStatus::Continue => {}
-                    ProjectReadCollectStatus::Complete(response) => return response,
+                for event in events {
+                    match applier.apply(event).expect("apply project read event") {
+                        ApplyStatus::Continue => {}
+                        ApplyStatus::Complete { .. } => completed = true,
+                    }
                 }
             }
             other => panic!("unexpected project-read response: {other:?}"),
         }
     }
 
-    panic!("project read did not complete");
+    assert!(completed, "project read did not complete");
+    view
 }
 
 fn build_smoke_project() -> Rc<RefCell<LpFsMemory>> {
@@ -315,68 +321,60 @@ fn collect_project_files(fs: &LpFsMemory) -> Vec<(String, Vec<u8>)> {
     files
 }
 
-fn output_node_id(response: ProjectReadResponse) -> NodeId {
-    let ProjectReadResult::Nodes(nodes) = response
-        .results
-        .first()
-        .expect("node result should be present")
-    else {
-        panic!("first project-read result should be nodes");
-    };
-
+fn output_node_id(view: &ProjectView) -> NodeId {
     let mut available_paths = Vec::new();
-    for delta in &nodes.tree_deltas {
-        if let WireTreeDelta::Created { id, path, .. } = delta {
-            let path = path.to_string();
-            available_paths.push(path.clone());
-            if path.ends_with("/output.output") {
-                return *id;
-            }
+    for (id, entry) in &view.tree.nodes {
+        let path = entry.path.to_string();
+        available_paths.push(path.clone());
+        if path.ends_with("/output.output") {
+            return *id;
         }
     }
 
     panic!("output node not found; available paths: {available_paths:?}");
 }
 
-fn read_output_sample(response: ProjectReadResponse, output_id: NodeId) -> OutputSample {
-    let runtime_frame_num = match response.results.first() {
-        Some(ProjectReadResult::Runtime(runtime)) => runtime.project.frame_num,
-        other => panic!("first project-read result should be runtime: {other:?}"),
-    };
-    let ProjectReadResult::Resources(resources) = response
-        .results
-        .get(1)
-        .expect("resource result should be present")
-    else {
-        panic!("second project-read result should be resources");
-    };
+fn read_output_sample(view: &ProjectView, output_id: NodeId) -> OutputSample {
+    let runtime_frame_num = view
+        .runtime
+        .as_ref()
+        .expect("runtime status should be present")
+        .project
+        .frame_num;
 
-    let payload = resources
-        .runtime_buffer_payloads
-        .iter()
-        .find(|payload| {
-            resources.summaries.iter().any(|summary| {
-                summary.resource_ref == payload.resource_ref && summary.owner == Some(output_id)
-            }) && matches!(
-                payload.metadata,
-                WireRuntimeBufferMetadataPayload::OutputChannels {
-                    sample_format: WireChannelSampleFormat::U16,
-                    ..
-                }
-            )
+    // Locate the output-owned U16 channel buffer, then read its reassembled
+    // bytes from the view's resource cache.
+    let resource_ref = view
+        .resource_cache
+        .summaries()
+        .find(|summary| {
+            summary.owner == Some(output_id)
+                && view
+                    .resource_cache
+                    .runtime_buffer_payload(summary.resource_ref)
+                    .is_some_and(|(_, metadata)| {
+                        matches!(
+                            metadata,
+                            WireRuntimeBufferMetadataPayload::OutputChannels {
+                                sample_format: WireChannelSampleFormat::U16,
+                                ..
+                            }
+                        )
+                    })
         })
-        .unwrap_or_else(|| {
-            panic!(
-                "output payload not found; summaries: {:?}; payloads: {:?}",
-                resources.summaries, resources.runtime_buffer_payloads
-            )
-        });
+        .map(|summary| summary.resource_ref)
+        .unwrap_or_else(|| panic!("output payload not found for {output_id:?}"));
 
-    assert!(payload.bytes.len() >= 6);
+    let bytes = view
+        .resource_cache
+        .runtime_buffer_bytes(resource_ref)
+        .expect("output channel bytes should be cached");
+
+    assert!(bytes.len() >= 6);
     OutputSample {
-        red: u16::from_le_bytes([payload.bytes[0], payload.bytes[1]]),
-        green: u16::from_le_bytes([payload.bytes[2], payload.bytes[3]]),
-        blue: u16::from_le_bytes([payload.bytes[4], payload.bytes[5]]),
+        red: u16::from_le_bytes([bytes[0], bytes[1]]),
+        green: u16::from_le_bytes([bytes[2], bytes[3]]),
+        blue: u16::from_le_bytes([bytes[4], bytes[5]]),
         runtime_frame_num,
     }
 }

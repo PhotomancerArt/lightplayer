@@ -18,6 +18,7 @@ pub use api::ClientApi;
 pub use project::{
     ApplyStatus, ClientResourceCache, NodeEntryView, ProjectReadApplier, ProjectReadApplyError,
     ProjectReadApplyStreamError, ProjectView, StatusChangeView, apply_project_read_response,
+    probe_results,
 };
 pub use slot::{SlotMirrorError, SlotMirrorView};
 pub use tree::{ApplyError, NodeTreeView, TreeEntryView, apply_tree_delta, apply_tree_deltas};

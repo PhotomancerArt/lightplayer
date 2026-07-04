@@ -12,7 +12,7 @@ use anyhow::{Error, Result};
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_wire::server::api::LogLevel;
 use lpc_wire::{
-    ClientMessage, ClientRequest, FsRequest, ProjectReadRequest, ProjectReadResponse,
+    ClientMessage, ClientRequest, FsRequest, ProjectReadEvent, ProjectReadRequest,
     WireOverlayCommitRequest, WireOverlayCommitResponse, WireOverlayMutationRequest,
     WireOverlayMutationResponse, WireOverlayReadRequest, WireOverlayReadResponse,
     WireProjectCommand, WireProjectCommandResponse, WireProjectHandle,
@@ -271,7 +271,7 @@ impl TokioLpClient {
         &self,
         handle: WireProjectHandle,
         read: ProjectReadRequest,
-    ) -> Result<ProjectReadResponse> {
+    ) -> Result<Vec<ProjectReadEvent>> {
         let run = self.project_read_inner(handle, read);
         let outcome = match timeout(self.request_timeout, run).await {
             Ok(Ok(outcome)) => outcome,
@@ -290,7 +290,7 @@ impl TokioLpClient {
         &self,
         handle: WireProjectHandle,
         read: ProjectReadRequest,
-    ) -> Result<ClientOutcome<ProjectReadResponse>> {
+    ) -> Result<ClientOutcome<Vec<ProjectReadEvent>>> {
         let mut state = self.state.lock().await;
         let request_id = state.protocol.next_request_id();
         let mut transport = state.transport.lock().await;
@@ -318,8 +318,8 @@ impl TokioLpClient {
             {
                 ProjectReadStreamStep::Continue => {}
                 ProjectReadStreamStep::Event(event) => events.push(event),
-                ProjectReadStreamStep::Complete(response) => {
-                    return Ok(ClientOutcome::new(response, events));
+                ProjectReadStreamStep::Complete(read_events) => {
+                    return Ok(ClientOutcome::new(read_events, events));
                 }
             }
         }
@@ -328,7 +328,7 @@ impl TokioLpClient {
     pub async fn project_read_default_debug(
         &self,
         handle: WireProjectHandle,
-    ) -> Result<ProjectReadResponse> {
+    ) -> Result<Vec<ProjectReadEvent>> {
         self.project_read(handle, ProjectReadRequest::default_debug(None))
             .await
     }

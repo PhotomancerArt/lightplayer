@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use lpa_client::{ClientError, ClientEvent, ClientIo, LpClient};
 use lpa_link::{LinkConnection, LinkConnectionKind};
-use lpc_wire::{ProjectReadRequest, ProjectReadResponse, WireProjectHandle};
+use lpc_wire::{ProjectReadEvent, ProjectReadRequest, WireProjectHandle};
 
 use crate::app::project::demo_project::{
     DEMO_PROJECT_ID, DEMO_PROJECT_STORAGE_ID, demo_project_deploy_files,
@@ -101,7 +101,7 @@ pub struct LoadedRunningProject {
 }
 
 pub struct StudioProjectRead {
-    pub response: ProjectReadResponse,
+    pub events: Vec<ProjectReadEvent>,
     pub logs: Vec<UiLogEntry>,
 }
 
@@ -156,7 +156,7 @@ impl StudioServerClient {
         let mut logs = map_client_events(read.events);
         logs.extend(self.take_pending_logs());
         Ok(StudioProjectRead {
-            response: read.value,
+            events: read.value,
             logs,
         })
     }

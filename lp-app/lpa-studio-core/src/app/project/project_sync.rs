@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 
 use lpc_model::{ControlDisplayLayout, Revision};
-use lpc_view::{ProjectView, apply_project_read_response};
+use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView, probe_results};
 use lpc_wire::{
     ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
     ControlProductProbeResult, NodeReadQuery, NodeReadSelection, ProjectProbeRequest,
-    ProjectProbeResult, ProjectReadQuery, ProjectReadRequest, ProjectReadResponse, ReadLevel,
+    ProjectProbeResult, ProjectReadEvent, ProjectReadQuery, ProjectReadRequest, ReadLevel,
     RenderProductProbeRequest, RenderProductProbeResult, ResourcePayloadRead, ResourceReadQuery,
     RuntimeReadQuery, ShapeReadQuery, WireChannelSampleFormat, WireTextureFormat,
 };
@@ -109,13 +109,23 @@ impl ProjectSync {
         project_read_request(since, include_slots, self.product_probe_requests(products))
     }
 
-    pub fn apply_project_read_response(
+    pub fn apply_project_read_events(
         &mut self,
-        response: ProjectReadResponse,
+        events: Vec<ProjectReadEvent>,
     ) -> Result<(), UiError> {
-        self.apply_product_probe_results(&response.probes);
-        apply_project_read_response(&mut self.view, response)
-            .map_err(|error| UiError::Protocol(error.to_string()))?;
+        // Probes are read-time diagnostics and are not retained on the view, so
+        // extract them from the stream before applying (the single shared seam
+        // that P6 extends for chunked probes).
+        self.apply_product_probe_results(&probe_results(&events));
+        let mut applier = ProjectReadApplier::new(&mut self.view);
+        for event in events {
+            if let ApplyStatus::Complete { .. } = applier
+                .apply(event)
+                .map_err(|error| UiError::Protocol(error.to_string()))?
+            {
+                break;
+            }
+        }
         self.phase = ProjectSyncPhase::Ready;
         self.issue = None;
         Ok(())
@@ -164,7 +174,7 @@ impl ProjectSync {
         probes
     }
 
-    fn apply_product_probe_results(&mut self, probes: &[ProjectProbeResult]) {
+    fn apply_product_probe_results(&mut self, probes: &[&ProjectProbeResult]) {
         for probe in probes {
             if let Some((product, preview)) = self.product_preview_from_probe(probe) {
                 self.product_previews.insert(product, preview);
@@ -363,6 +373,25 @@ mod tests {
         ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlProduct,
         ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, NodeId, VisualProduct,
     };
+    use lpc_wire::ProjectReadProbeEvent;
+
+    /// Build a probe-only project-read event stream at `revision`.
+    fn probe_events(revision: i64, probes: Vec<ProjectProbeResult>) -> Vec<ProjectReadEvent> {
+        let mut events = Vec::with_capacity(probes.len() + 2);
+        events.push(ProjectReadEvent::Begin {
+            revision: Revision::new(revision),
+        });
+        for (index, probe) in probes.into_iter().enumerate() {
+            events.push(ProjectReadEvent::Probe {
+                index: index as u32,
+                event: ProjectReadProbeEvent::Result(probe),
+            });
+        }
+        events.push(ProjectReadEvent::End {
+            revision: Revision::new(revision),
+        });
+        events
+    }
 
     #[test]
     fn project_read_request_includes_shapes_nodes_resources_and_runtime() {
@@ -470,10 +499,9 @@ mod tests {
         let _ = sync.refresh_project_read_request(vec![UiProductRef::from_visual_product(product)]);
         let bytes = vec![1, 2, 3, 4, 5, 6];
 
-        sync.apply_project_read_response(ProjectReadResponse {
-            revision: Revision::new(9),
-            results: Vec::new(),
-            probes: vec![ProjectProbeResult::RenderProduct(
+        sync.apply_project_read_events(probe_events(
+            9,
+            vec![ProjectProbeResult::RenderProduct(
                 RenderProductProbeResult::Texture {
                     product,
                     revision: Revision::new(8),
@@ -483,7 +511,7 @@ mod tests {
                     bytes: bytes.clone(),
                 },
             )],
-        })
+        ))
         .unwrap();
 
         assert_eq!(
@@ -510,10 +538,9 @@ mod tests {
         // Results arrive in the reverse order of the requests: the probe for the
         // second product comes first. Identity on each result must drive
         // attribution — positional matching would have mislabeled these.
-        sync.apply_project_read_response(ProjectReadResponse {
-            revision: Revision::new(9),
-            results: Vec::new(),
-            probes: vec![
+        sync.apply_project_read_events(probe_events(
+            9,
+            vec![
                 ProjectProbeResult::RenderProduct(RenderProductProbeResult::Error {
                     product: second,
                     message: "second failed".to_string(),
@@ -523,7 +550,7 @@ mod tests {
                     reason: "first unsupported".to_string(),
                 }),
             ],
-        })
+        ))
         .unwrap();
 
         assert_eq!(
@@ -594,10 +621,9 @@ mod tests {
         let first_bytes = vec![0, 0, 255, 255, 0, 0];
         let _ = sync.refresh_project_read_request(vec![product_ref]);
 
-        sync.apply_project_read_response(ProjectReadResponse {
-            revision: Revision::new(9),
-            results: Vec::new(),
-            probes: vec![ProjectProbeResult::ControlProduct(
+        sync.apply_project_read_events(probe_events(
+            9,
+            vec![ProjectProbeResult::ControlProduct(
                 ControlProductProbeResult::Preview {
                     product,
                     revision: Revision::new(9),
@@ -608,7 +634,7 @@ mod tests {
                     bytes: first_bytes,
                 },
             )],
-        })
+        ))
         .unwrap();
 
         let request = sync.refresh_project_read_request(vec![product_ref]);
@@ -627,10 +653,9 @@ mod tests {
         );
 
         let second_bytes = vec![255, 255, 0, 0, 0, 0];
-        sync.apply_project_read_response(ProjectReadResponse {
-            revision: Revision::new(10),
-            results: Vec::new(),
-            probes: vec![ProjectProbeResult::ControlProduct(
+        sync.apply_project_read_events(probe_events(
+            10,
+            vec![ProjectProbeResult::ControlProduct(
                 ControlProductProbeResult::Preview {
                     product,
                     revision: Revision::new(10),
@@ -643,7 +668,7 @@ mod tests {
                     bytes: second_bytes.clone(),
                 },
             )],
-        })
+        ))
         .unwrap();
 
         assert_eq!(
