@@ -419,18 +419,17 @@ mod tests {
     use alloc::boxed::Box;
     use alloc::vec;
     use alloc::vec::Vec;
-    use core::future::Future;
-    use core::pin::Pin;
-    use core::task::{Context, Poll, RawWaker, RawWakerVTable, Waker};
     use lpc_model::{NodeDef, NodeName, Revision, TextureDef, TreePath, WithRevision};
     use lpc_wire::{
-        NodeReadQuery, ProjectReadCollector, ProjectReadEvent, ProjectReadNodeEvent,
-        ProjectReadResourceEvent, ProjectReadResponse, ProjectReadResult, ResourcePayloadRead,
-        ResourceReadQuery, WireChildKind, WireSlotIndex,
+        NodeReadQuery, ProjectReadEvent, ProjectReadNodeEvent, ProjectReadResourceEvent,
+        ResourcePayloadRead, ResourceReadQuery, WireChildKind, WireSlotIndex,
     };
 
     use crate::engine::project_read_nodes::{node_def_root_name, node_state_root_name};
-    use crate::engine::test_support::{EngineTestBuilder, output};
+    use crate::engine::test_support::{
+        CollectingEventSink, EngineTestBuilder, block_on, collect_read_events, output,
+        read_into_view,
+    };
     use crate::node::test_placeholder_spine;
     use crate::nodes::TextureNode;
     use crate::resource::RuntimeBuffer;
@@ -443,7 +442,7 @@ mod tests {
     };
 
     /// Drive `stream_probe_result` for one probe result and return the emitted
-    /// events plus the aggregate the compatibility collector rebuilds from them.
+    /// events plus the result the progressive applier reassembles from them.
     fn stream_one_probe(result: ProjectProbeResult) -> (Vec<ProjectReadEvent>, ProjectProbeResult) {
         let mut sink = CollectingEventSink::default();
         block_on(async {
@@ -451,22 +450,29 @@ mod tests {
         });
         let events = sink.events;
 
-        let mut collector = ProjectReadCollector::new();
-        collector
-            .accept_event(ProjectReadEvent::Begin {
+        // Wrap the probe events in a minimal Begin/End stream and drive them
+        // through the applier, which reassembles chunked probe results identically
+        // to the whole-result path.
+        let mut view = lpc_view::ProjectView::new();
+        let mut applier = lpc_view::ProjectReadApplier::new(&mut view);
+        applier
+            .apply(ProjectReadEvent::Begin {
                 revision: Revision::new(1),
             })
             .unwrap();
         for event in events.clone() {
-            assert!(collector.accept_event(event).unwrap().is_none());
+            applier.apply(event).unwrap();
         }
-        let response = collector
-            .accept_event(ProjectReadEvent::End {
+        applier
+            .apply(ProjectReadEvent::End {
                 revision: Revision::new(1),
             })
-            .unwrap()
-            .expect("stream completes on End");
-        let probe = response.probes.into_iter().next().expect("one probe");
+            .unwrap();
+        let probe = applier
+            .take_completed_probe_results()
+            .into_iter()
+            .next()
+            .expect("one probe");
         (events, probe)
     }
 
@@ -558,30 +564,12 @@ mod tests {
         assert_eq!(probe, result);
     }
 
-    #[test]
-    fn event_stream_matches_full_debug_response() {
-        let mut h = EngineTestBuilder::new().output_node("output").build();
-        let request = ProjectReadRequest::default_debug(None);
-
-        assert_events_collect_to_full_response(&mut h.engine, &h.registry, request);
-    }
-
-    #[test]
-    fn event_stream_matches_resource_payload_response() {
-        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
-        engine.runtime_buffers_mut().insert(WithRevision::new(
-            Revision::new(1),
-            RuntimeBuffer::raw(vec![1, 2, 3, 253, 254, 255]),
-        ));
-        let registry = ProjectRegistry::new();
-        let mut request = ProjectReadRequest::default_debug(None);
-        request.queries[2] = ProjectReadQuery::Resources(ResourceReadQuery {
-            level: lpc_wire::ReadLevel::Detail,
-            payloads: ResourcePayloadRead::All,
-        });
-
-        assert_events_collect_to_full_response(&mut engine, &registry, request);
-    }
+    // The engine-side identity tests (`event_stream_matches_full_debug_response`,
+    // `event_stream_matches_resource_payload_response`) that compared the stream
+    // against the aggregate `ProjectReadResponse` were retired in M6/P5 when the
+    // aggregate was deleted. `lpc-view`'s `ProjectReadApplier` equivalence tests
+    // now guard that events apply to the same view state, and the tests below
+    // assert directly on the streamed events / applied view.
 
     #[test]
     fn event_stream_slot_payloads_read_through_sync_codec() {
@@ -599,10 +587,7 @@ mod tests {
             .shader("shader", output("outputs[0]", 0.75))
             .build();
         let request = ProjectReadRequest::default_debug(None);
-        let (decoded, _) = collect_event_response(&mut h.engine, &h.registry, request);
-        let mut view = lpc_view::ProjectView::new();
-
-        lpc_view::apply_project_read_response(&mut view, decoded).expect("apply project read");
+        let (view, _) = read_into_view(&mut h.engine, &h.registry, request);
 
         assert!(!view.slots.roots.is_empty());
         assert!(
@@ -616,10 +601,11 @@ mod tests {
     #[test]
     fn event_stream_chunks_runtime_buffer_payloads() {
         let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
-        engine.runtime_buffers_mut().insert(WithRevision::new(
+        let buffer_id = engine.runtime_buffers_mut().insert(WithRevision::new(
             Revision::new(1),
             RuntimeBuffer::raw(vec![42; 5 * 1024]),
         ));
+        let buffer_ref = lpc_model::ResourceRef::runtime_buffer(buffer_id);
         let registry = ProjectRegistry::new();
         let mut request = ProjectReadRequest::default_debug(None);
         request.queries[2] = ProjectReadQuery::Resources(ResourceReadQuery {
@@ -627,7 +613,7 @@ mod tests {
             payloads: ResourcePayloadRead::All,
         });
 
-        let (decoded, events) = collect_event_response(&mut engine, &registry, request);
+        let (view, events) = read_into_view(&mut engine, &registry, request);
         let chunk_events = events
             .iter()
             .filter(|event| {
@@ -643,8 +629,13 @@ mod tests {
             })
             .count();
 
-        assert_eq!(decoded.results.len(), 4);
+        // The payload streamed as multiple chunk events and the applier
+        // reassembled it byte-completely into the view.
         assert!(chunk_events > 1);
+        assert_eq!(
+            view.resource_cache.runtime_buffer_bytes(buffer_ref),
+            Some(&[42u8; 5 * 1024][..])
+        );
     }
 
     // ---- Cross-family revision-gating contract (M5 P5) --------------------------------------
@@ -663,7 +654,7 @@ mod tests {
         let mut h = build_all_families_project();
         let r = h.engine.revision();
 
-        let (_, events) = collect_event_response(
+        let events = collect_read_events(
             &mut h.engine,
             &h.registry,
             full_debug_with_probe(Some(r), None),
@@ -707,7 +698,7 @@ mod tests {
         // regardless of per-item `changed_at` (G2 bulk-sync guard).
         let mut h = build_all_families_project();
 
-        let (_, events) = collect_event_response(
+        let events = collect_read_events(
             &mut h.engine,
             &h.registry,
             full_debug_with_probe(None, None),
@@ -736,7 +727,7 @@ mod tests {
         let r = h.engine.revision();
         let node_a = h.node("a");
 
-        let (_, events) = collect_event_response(
+        let events = collect_read_events(
             &mut h.engine,
             &h.registry,
             full_debug_with_probe(Some(r), Some(node_a)),
@@ -941,7 +932,7 @@ mod tests {
         registry: &ProjectRegistry,
         since: Option<Revision>,
     ) -> Vec<ProjectReadShapeEvent> {
-        let (_, events) = collect_event_response(engine, registry, shapes_request(since));
+        let events = collect_read_events(engine, registry, shapes_request(since));
         events
             .into_iter()
             .filter_map(|event| match event {
@@ -1071,7 +1062,7 @@ mod tests {
             queries: Vec::from([ProjectReadQuery::Nodes(NodeReadQuery::detail_all())]),
             probes: Vec::new(),
         };
-        let (_, events) = collect_event_response(engine, registry, request);
+        let events = collect_read_events(engine, registry, request);
         events
             .into_iter()
             .filter_map(|event| match event {
@@ -1354,17 +1345,16 @@ mod tests {
                 ]),
             },
         );
-        let (decoded, _) = collect_event_response(&mut engine, &registry, request);
-        let resources = decoded_resources(&decoded);
+        let (view, events) = read_into_view(&mut engine, &registry, request);
 
-        assert_eq!(resources.runtime_buffer_payloads.len(), 1);
+        // The targeted payload was delivered and reassembled into the view.
         assert_eq!(
-            resources.runtime_buffer_payloads[0].resource_ref,
-            lpc_model::ResourceRef::runtime_buffer(id)
+            view.resource_cache
+                .runtime_buffer_bytes(lpc_model::ResourceRef::runtime_buffer(id)),
+            Some(&[7u8, 8, 9][..])
         );
-        assert_eq!(resources.runtime_buffer_payloads[0].bytes, vec![7, 8, 9]);
         // Summaries are still gated: none at since == R.
-        assert!(resources.summaries.is_empty());
+        assert_eq!(resource_summary_events(&events).count(), 0);
     }
 
     #[test]
@@ -1399,17 +1389,20 @@ mod tests {
         }
     }
 
-    fn decoded_resources(response: &ProjectReadResponse) -> &lpc_wire::ResourceReadResult {
-        response
-            .results
-            .iter()
-            .find_map(|result| match result {
-                ProjectReadResult::Resources(resources) => Some(resources),
-                _ => None,
-            })
-            .expect("resources result")
+    /// The resource `Summary` events carried by a streamed read.
+    fn resource_summary_events(
+        events: &[ProjectReadEvent],
+    ) -> impl Iterator<Item = &lpc_wire::WireResourceSummary> {
+        events.iter().filter_map(|event| match event {
+            ProjectReadEvent::Query {
+                event: ProjectReadQueryEvent::Resources(ProjectReadResourceEvent::Summary(summary)),
+                ..
+            } => Some(summary),
+            _ => None,
+        })
     }
 
+    /// The summaries a summary-level resource read streams for `since`.
     fn resource_summaries(
         engine: &mut Engine,
         registry: &ProjectRegistry,
@@ -1422,10 +1415,12 @@ mod tests {
                 payloads: ResourcePayloadRead::None,
             },
         );
-        let (decoded, _) = collect_event_response(engine, registry, request);
-        decoded_resources(&decoded).summaries.clone()
+        let events = collect_read_events(engine, registry, request);
+        resource_summary_events(&events).cloned().collect()
     }
 
+    /// The resource membership list a read streams for `since`, or `None` when
+    /// the read carries no `Membership` event (bulk sync / unchanged id set).
     fn resource_membership(
         engine: &mut Engine,
         registry: &ProjectRegistry,
@@ -1438,31 +1433,15 @@ mod tests {
                 payloads: ResourcePayloadRead::None,
             },
         );
-        let (decoded, _) = collect_event_response(engine, registry, request);
-        decoded_resources(&decoded).membership.clone()
-    }
-
-    fn assert_events_collect_to_full_response(
-        engine: &mut Engine,
-        registry: &ProjectRegistry,
-        request: ProjectReadRequest,
-    ) {
-        let full = engine.read_project(registry, request.clone());
-        let (decoded, _) = collect_event_response(engine, registry, request);
-
-        assert_eq!(decoded, full);
-
-        let resources = decoded
-            .results
-            .iter()
-            .find_map(|result| match result {
-                ProjectReadResult::Resources(resources) => Some(resources),
-                _ => None,
-            })
-            .expect("resources result");
-        for payload in &resources.runtime_buffer_payloads {
-            assert!(!payload.bytes.is_empty());
-        }
+        let events = collect_read_events(engine, registry, request);
+        events.into_iter().find_map(|event| match event {
+            ProjectReadEvent::Query {
+                event:
+                    ProjectReadQueryEvent::Resources(ProjectReadResourceEvent::Membership { refs }),
+                ..
+            } => Some(refs),
+            _ => None,
+        })
     }
 
     fn assert_detailed_slot_roots_read_through_sync_codec(
@@ -1470,8 +1449,17 @@ mod tests {
         registry: &ProjectRegistry,
         request: ProjectReadRequest,
     ) {
-        let (decoded, _) = collect_event_response(engine, registry, request);
-        let roots = detailed_node_slot_roots(&decoded);
+        let events = collect_read_events(engine, registry, request);
+        let roots: Vec<&lpc_wire::WireSlotRootSnapshot> = events
+            .iter()
+            .filter_map(|event| match event {
+                ProjectReadEvent::Query {
+                    event: ProjectReadQueryEvent::Nodes(ProjectReadNodeEvent::SlotRoot(root)),
+                    ..
+                } => Some(root),
+                _ => None,
+            })
+            .collect();
 
         assert!(!roots.is_empty(), "expected detailed node slot roots");
 
@@ -1483,82 +1471,5 @@ mod tests {
             )
             .expect("slot root data should read through slot sync codec");
         }
-    }
-
-    fn detailed_node_slot_roots(
-        response: &ProjectReadResponse,
-    ) -> &[lpc_wire::WireSlotRootSnapshot] {
-        response
-            .results
-            .iter()
-            .find_map(|result| match result {
-                ProjectReadResult::Nodes(nodes) => nodes.slots.as_ref(),
-                _ => None,
-            })
-            .map(|slots| slots.roots.as_slice())
-            .expect("detailed node slot roots")
-    }
-
-    fn collect_event_response(
-        engine: &mut Engine,
-        registry: &ProjectRegistry,
-        request: ProjectReadRequest,
-    ) -> (ProjectReadResponse, Vec<ProjectReadEvent>) {
-        let mut sink = CollectingEventSink::default();
-        block_on(async {
-            EngineProjectReadSource::new(engine, registry)
-                .stream_project_read_events(request, &mut sink)
-                .await
-                .unwrap();
-        });
-        let mut collector = ProjectReadCollector::new();
-        let events = sink.events;
-        for event in events.clone() {
-            if let Some(response) = collector.accept_event(event).unwrap() {
-                return (response, events);
-            }
-        }
-        panic!("event stream did not complete");
-    }
-
-    #[derive(Default)]
-    struct CollectingEventSink {
-        events: Vec<ProjectReadEvent>,
-    }
-
-    impl ProjectReadEventSink for CollectingEventSink {
-        type Error = core::convert::Infallible;
-
-        async fn send_project_read_event(
-            &mut self,
-            event: ProjectReadEvent,
-        ) -> Result<(), Self::Error> {
-            self.events.push(event);
-            Ok(())
-        }
-    }
-
-    fn block_on<F: Future>(future: F) -> F::Output {
-        let waker = noop_waker();
-        let mut cx = Context::from_waker(&waker);
-        let mut future = Box::pin(future);
-        loop {
-            match Future::poll(Pin::as_mut(&mut future), &mut cx) {
-                Poll::Ready(output) => return output,
-                Poll::Pending => {}
-            }
-        }
-    }
-
-    fn noop_waker() -> Waker {
-        unsafe fn clone(_: *const ()) -> RawWaker {
-            RawWaker::new(core::ptr::null(), &VTABLE)
-        }
-        unsafe fn wake(_: *const ()) {}
-        unsafe fn wake_by_ref(_: *const ()) {}
-        unsafe fn drop(_: *const ()) {}
-        static VTABLE: RawWakerVTable = RawWakerVTable::new(clone, wake, wake_by_ref, drop);
-
-        unsafe { Waker::from_raw(RawWaker::new(core::ptr::null(), &VTABLE)) }
     }
 }

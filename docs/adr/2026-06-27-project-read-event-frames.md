@@ -36,6 +36,15 @@ larger buffer.
 tests. Clients reconstruct it with `ProjectReadCollector` until the UI consumes
 events directly.
 
+> **Update (M6, 2026-07):** superseded. The aggregate `ProjectReadResponse`,
+> `ProjectReadResult`, and `ProjectReadCollector` were deleted in milestone M6
+> (protocol consolidation, phase P5). `lpc-view`'s `ProjectReadApplier` now
+> applies the event stream progressively straight onto `ProjectView`, and every
+> consumer reads state from the view instead of an aggregate DTO. The M6 ADR
+> (`2026-07-0X-envelope-streaming.md`) carries the current design. The
+> paragraph above and the "compatibility aggregate" consequence below are
+> retained only as the historical record of the intermediate step.
+
 ## Consequences
 
 - Project reads are now an operation-specific streaming protocol, not a normal

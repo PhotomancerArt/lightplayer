@@ -12,7 +12,6 @@ pub mod memory_pressure;
 mod output_flush_tests;
 mod project_apply;
 mod project_loader;
-mod project_read;
 mod project_read_nodes;
 mod project_read_probes;
 mod project_read_resources;

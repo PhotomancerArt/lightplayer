@@ -25,9 +25,6 @@
 //! (`Begin`-once, family pairing, chunk reassembly, …) are validated by the
 //! applier; this layer only owns envelope framing (E2) plus the E3 finality
 //! agreement between the envelope `fin` and the terminal `End`/`Error` event.
-//!
-//! The aggregate [`ProjectReadCollector`] shim from M6/P1 is no longer on this
-//! live path (it is left compiling for M6/P5 to delete).
 
 use lpc_wire::{ProjectReadEvent, WireServerMessage, WireServerMsgBody};
 

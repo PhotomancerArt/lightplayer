@@ -3,10 +3,11 @@
 //! The wire protocol delivers a project read as an ordered stream of
 //! [`ProjectReadEvent`] values (batched into frames by the transport). This
 //! module applies those events directly to the client-side [`ProjectView`] as
-//! they arrive, without first rebuilding the aggregate `ProjectReadResponse`.
+//! they arrive. There is no aggregate response shape — the applier is the only
+//! consumer of the event stream.
 //!
-//! [`ProjectReadApplier`] owns the stream invariants the compatibility
-//! `ProjectReadCollector` enforces today (see the M6 discovery notes §5):
+//! [`ProjectReadApplier`] owns the full set of stream invariants (see the M6
+//! discovery notes §5):
 //!
 //! - `Begin` arrives exactly once and captures the stream revision; every other
 //!   event must arrive after `Begin`.
@@ -67,8 +68,38 @@ use lpc_wire::{
 };
 
 use super::ProjectView;
-use super::apply_project_read::ProjectReadApplyError;
-use crate::tree::apply_tree_deltas_collecting_removed;
+use crate::slot::SlotMirrorError;
+use crate::tree::{ApplyError, apply_tree_deltas_collecting_removed};
+
+/// Error applying project-read family payloads to a [`ProjectView`].
+#[derive(Clone, Debug, PartialEq)]
+pub enum ProjectReadApplyError {
+    Tree(ApplyError),
+    Slot(SlotMirrorError),
+}
+
+impl core::fmt::Display for ProjectReadApplyError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Self::Tree(error) => write!(f, "tree apply error: {error}"),
+            Self::Slot(error) => write!(f, "slot apply error: {error}"),
+        }
+    }
+}
+
+impl core::error::Error for ProjectReadApplyError {}
+
+impl From<ApplyError> for ProjectReadApplyError {
+    fn from(value: ApplyError) -> Self {
+        Self::Tree(value)
+    }
+}
+
+impl From<SlotMirrorError> for ProjectReadApplyError {
+    fn from(value: SlotMirrorError) -> Self {
+        Self::Slot(value)
+    }
+}
 
 /// Outcome of applying one [`ProjectReadEvent`] to a [`ProjectReadApplier`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -532,7 +563,7 @@ impl ShapeState {
     fn apply_to(self, view: &mut ProjectView) {
         // Merge (upsert) the shape entries via the additive registry page path,
         // then prune to membership when present (a gated read includes it only
-        // when the id set changed). Mirrors `apply_project_read_response`.
+        // when the id set changed).
         let ids_revision = self.ids_revision.unwrap_or_default();
         view.slots.apply_registry_page(SlotShapeRegistrySnapshot {
             ids_revision,
@@ -747,7 +778,6 @@ impl ResourceState {
 
     fn apply_to(self, view: &mut ProjectView) {
         // Additively upsert summaries + payloads, then prune to membership.
-        // Mirrors `apply_project_read_response`.
         view.resource_cache.apply_summaries(&self.summaries);
         view.resource_cache
             .apply_runtime_buffer_payloads(&self.payloads);
@@ -778,7 +808,6 @@ struct PendingRuntimeBufferPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::project::apply_project_read_response;
     use alloc::string::{String, ToString};
     use alloc::vec;
     use lpc_model::{
@@ -786,15 +815,13 @@ mod tests {
         SlotShapeRegistry, TreePath, WithRevision,
     };
     use lpc_wire::{
-        NodeReadResult, NodeRuntimeStatus, ProjectReadResponse, ProjectReadResult,
-        ResourceReadResult, ShapeReadResult, WireChannelSampleFormat, WireChildKind,
-        WireEntryState, WireResourceAvailability, WireResourceKindSummary,
-        WireResourceMetadataSummary, WireResourceSummary, WireRuntimeBufferKind,
-        WireRuntimeBufferMetadataPayload, WireSlotIndex, WireSlotRootSnapshot,
-        wire_slot_data_from_slot_access,
+        NodeRuntimeStatus, WireChannelSampleFormat, WireChildKind, WireEntryState,
+        WireResourceAvailability, WireResourceKindSummary, WireResourceMetadataSummary,
+        WireResourceSummary, WireRuntimeBufferKind, WireRuntimeBufferMetadataPayload,
+        WireSlotIndex, WireSlotRootSnapshot, wire_slot_data_from_slot_access,
     };
 
-    // ---- shared fixture builders (mirroring apply_project_read.rs) ----
+    // ---- shared fixture builders ----
 
     fn value_shape_id(name: &str) -> SlotShapeId {
         SlotShapeId::from_static_name(name)
@@ -917,11 +944,12 @@ mod tests {
         ProjectReadQueryEvent::Resources(event)
     }
 
-    // ---- Equivalence: stream-applied view == aggregate-applied view ----
+    // ---- Baseline: a full read applied progressively to a fresh view ----
 
-    /// Build the events for the same content the aggregate baseline applies, so
-    /// the two paths can be compared directly. Returns (events, aggregate).
-    fn baseline_events_and_aggregate() -> (Vec<ProjectReadEvent>, ProjectReadResponse) {
+    /// Build the event stream for one full read (shapes + nodes/slots +
+    /// resources) so tests can drive it through the applier and assert on the
+    /// resulting [`ProjectView`].
+    fn baseline_events() -> Vec<ProjectReadEvent> {
         let registry = value_registry(&["shape.a", "shape.b"], 1);
         let shape_a = value_shape_id("shape.a");
         let entry_a = registry.entry(&shape_a).unwrap().clone();
@@ -1021,77 +1049,43 @@ mod tests {
             end(1),
         ];
 
-        let aggregate = ProjectReadResponse {
-            revision: Revision::new(1),
-            results: vec![
-                ProjectReadResult::Shapes(ShapeReadResult {
-                    level: ReadLevel::Detail,
-                    registry: Some(registry.snapshot()),
-                    membership: Some(vec![value_shape_id("shape.a"), value_shape_id("shape.b")]),
-                }),
-                ProjectReadResult::Nodes(NodeReadResult {
-                    level: ReadLevel::Detail,
-                    tree_deltas: vec![
-                        created_node(0, None, "/root.show", vec![NodeId::new(1)]),
-                        created_node(1, Some(NodeId::new(0)), "/root.show/child.vis", vec![]),
-                    ],
-                    slots: Some(WireSlotRootsSnapshot {
-                        roots: vec![
-                            value_root(&registry, "node.1.def", shape_a, 1.0),
-                            value_root(&registry, "node.1.state", shape_a, 2.0),
-                        ],
-                    }),
-                }),
-                ProjectReadResult::Resources(ResourceReadResult {
-                    level: ReadLevel::Summary,
-                    summaries: vec![buffer_summary(1, 1), buffer_summary(2, 1)],
-                    runtime_buffer_payloads: vec![],
-                    membership: Some(vec![
-                        ResourceRef::runtime_buffer(RuntimeBufferId::new(1)),
-                        ResourceRef::runtime_buffer(RuntimeBufferId::new(2)),
-                    ]),
-                }),
-            ],
-            probes: vec![],
-        };
-
-        (events, aggregate)
+        events
     }
 
     #[test]
-    fn full_stream_matches_aggregate_applied_view() {
-        let (events, aggregate) = baseline_events_and_aggregate();
+    fn full_stream_applies_to_view() {
+        let events = baseline_events();
 
         let mut streamed = ProjectView::new();
         let revision = apply_stream(&mut streamed, events).unwrap();
         assert_eq!(revision, Revision::new(1));
 
-        let mut aggregated = ProjectView::new();
-        apply_project_read_response(&mut aggregated, aggregate).unwrap();
-
-        // The migration safety net: both paths converge to the same view state.
-        assert_eq!(streamed.revision, aggregated.revision);
-        assert_eq!(streamed.slots, aggregated.slots);
-        assert_eq!(
-            streamed.resource_cache.summary_count(),
-            aggregated.resource_cache.summary_count()
-        );
-        assert_eq!(
-            f32_root_value(&streamed, "node.1.def"),
-            f32_root_value(&aggregated, "node.1.def")
-        );
-        assert_eq!(
-            f32_root_value(&streamed, "node.1.state"),
-            f32_root_value(&aggregated, "node.1.state")
-        );
+        // Progressive apply reaches the expected concrete view state.
+        assert_eq!(streamed.revision, Revision::new(1));
+        assert_eq!(streamed.resource_cache.summary_count(), 2);
+        assert_eq!(f32_root_value(&streamed, "node.1.def"), 1.0);
+        assert_eq!(f32_root_value(&streamed, "node.1.state"), 2.0);
         assert!(streamed.tree.get(NodeId::new(1)).is_some());
-        assert!(aggregated.tree.get(NodeId::new(1)).is_some());
+        assert!(
+            streamed
+                .slots
+                .registry
+                .entry(&value_shape_id("shape.a"))
+                .is_some()
+        );
+        assert!(
+            streamed
+                .slots
+                .registry
+                .entry(&value_shape_id("shape.b"))
+                .is_some()
+        );
     }
 
     // ---- Gated stream onto a populated view (M5 vocabulary) ----
 
     fn populated_view() -> ProjectView {
-        let (events, _) = baseline_events_and_aggregate();
+        let events = baseline_events();
         let mut view = ProjectView::new();
         apply_stream(&mut view, events).unwrap();
         view

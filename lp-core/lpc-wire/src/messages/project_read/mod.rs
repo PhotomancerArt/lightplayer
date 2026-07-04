@@ -1,6 +1,6 @@
-//! Project-read request, event-frame, and compatibility response vocabulary.
+//! Project-read request and event-frame vocabulary.
 //!
-//! A project read is intentionally split into three layers:
+//! A project read is intentionally split into two layers:
 //!
 //! - [`ProjectReadRequest`] describes the semantic data the client wants.
 //! - [`ProjectReadEvent`] describes ordered pieces of the answer.
@@ -8,16 +8,14 @@
 //! This exists because firmware transports cannot safely hold one large JSON
 //! response for a full project mirror. Servers stream those events directly in
 //! `ServerMsgBody::ProjectRead` messages, batched to a transport budget and
-//! sequenced by the envelope (`seq`/`fin`). Clients that still want the older
-//! aggregate shape can rebuild it with [`ProjectReadCollector`] and receive a
-//! [`ProjectReadResponse`] once the stream ends.
+//! sequenced by the envelope (`seq`/`fin`). Clients apply the events
+//! progressively (see `lpc-view`'s `ProjectReadApplier`); there is no aggregate
+//! response shape.
 
 mod node_read;
 mod probe;
-mod project_read_collector;
 mod project_read_event;
 mod project_read_request;
-mod project_read_response;
 mod read_level;
 mod resource_read;
 mod runtime_read;
@@ -35,15 +33,11 @@ pub use probe::{
     RenderProductProbeRequest, RenderProductProbeResult, RenderProductProbeResultHeader,
     SlotExplanation,
 };
-pub use project_read_collector::{
-    ProjectReadCollectError, ProjectReadCollectStatus, ProjectReadCollector,
-};
 pub use project_read_event::{
     ProjectReadEvent, ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQueryEvent,
     ProjectReadResourceEvent, ProjectReadShapeEvent,
 };
 pub use project_read_request::{ProjectReadQuery, ProjectReadRequest};
-pub use project_read_response::{ProjectReadResponse, ProjectReadResult};
 pub use read_level::ReadLevel;
 pub use resource_read::{ResourcePayloadRead, ResourceReadQuery, ResourceReadResult};
 pub use runtime_read::{

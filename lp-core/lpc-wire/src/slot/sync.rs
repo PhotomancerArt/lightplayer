@@ -44,8 +44,8 @@ pub struct WireSlotFullSync {
 
 /// Slot root snapshots without a registry payload.
 ///
-/// Used when a response already carries shape registry data through another
-/// domain, such as `ProjectReadResult::Shapes`.
+/// Used when a read already carries shape registry data through another
+/// domain, such as the shapes query family of a project read.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct WireSlotRootsSnapshot {

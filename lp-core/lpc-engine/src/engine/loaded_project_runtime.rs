@@ -3,7 +3,6 @@
 use core::ops::{Deref, DerefMut};
 
 use lpc_registry::ProjectRegistry;
-use lpc_wire::{ProjectReadRequest, ProjectReadResponse};
 
 use super::{Engine, EngineError};
 
@@ -44,10 +43,6 @@ impl LoadedProjectRuntime {
 
     pub fn tick(&mut self, delta_ms: u32) -> Result<(), EngineError> {
         self.engine.tick(&self.registry, delta_ms)
-    }
-
-    pub fn read_project(&mut self, request: ProjectReadRequest) -> ProjectReadResponse {
-        self.engine.read_project(&self.registry, request)
     }
 
     #[cfg(test)]
