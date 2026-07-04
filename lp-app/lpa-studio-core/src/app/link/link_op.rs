@@ -2,7 +2,7 @@ use core::any::Any;
 
 use lpa_link::{LinkEndpointId, LinkProviderKind};
 
-use crate::{ActionConfirmation, ActionMeta, ActionPriority, ControllerOp};
+use crate::{ActionClass, ActionConfirmation, ActionMeta, ActionPriority, ControllerOp};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LinkOp {
@@ -77,6 +77,23 @@ impl ControllerOp for LinkOp {
         }
     }
 
+    fn action_class(&self) -> ActionClass {
+        // Every `LinkOp` translates to a `DeviceOp` before dispatch
+        // (`device_controller.rs`), so its class mirrors that of the resulting
+        // device op: all recovery-class (preempts refresh + foreground, owns
+        // the connection, no deadline).
+        match self {
+            Self::RefreshProviders
+            | Self::ConnectServer
+            | Self::ResetDevice
+            | Self::ProvisionFirmware
+            | Self::ResetToBlank
+            | Self::DisconnectLink
+            | Self::OpenProvider { .. }
+            | Self::ConnectEndpoint { .. } => ActionClass::Recovery,
+        }
+    }
+
     fn clone_box(&self) -> Box<dyn ControllerOp> {
         Box::new(self.clone())
     }
@@ -91,5 +108,35 @@ impl ControllerOp for LinkOp {
 
     fn into_any(self: Box<Self>) -> Box<dyn Any> {
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lpa_link::{LinkEndpointId, LinkProviderKind};
+
+    use crate::{ActionClass, ControllerOp, LinkOp};
+
+    #[test]
+    fn every_link_op_is_recovery_class() {
+        let ops = [
+            LinkOp::RefreshProviders,
+            LinkOp::ConnectServer,
+            LinkOp::ResetDevice,
+            LinkOp::ProvisionFirmware,
+            LinkOp::ResetToBlank,
+            LinkOp::DisconnectLink,
+            LinkOp::OpenProvider {
+                provider_id: LinkProviderKind::BrowserWorker,
+            },
+            LinkOp::ConnectEndpoint {
+                provider_id: LinkProviderKind::BrowserWorker,
+                endpoint_id: LinkEndpointId::new("endpoint"),
+            },
+        ];
+
+        for op in ops {
+            assert_eq!(op.action_class(), ActionClass::Recovery, "{op:?}");
+        }
     }
 }

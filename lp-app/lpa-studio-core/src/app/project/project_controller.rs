@@ -87,8 +87,18 @@ impl ProjectController {
     }
 
     /// Apply the latest project mirror into the owned controller tree.
+    ///
+    /// This is the single reconcile path shared by production sync and tests:
+    /// it reconciles the root-node controllers against `view`, restores the
+    /// `active_editor_target` focus (a no-op when no target is focused), then
+    /// falls back to a default focus if nothing is focused. Production drives it
+    /// through [`Self::apply_synced_project_view`] with the synced mirror; tests
+    /// call it directly with a fixture view.
     pub fn apply_project_view(&mut self, view: &ProjectView) -> Result<(), UiError> {
         reconcile_root_nodes(&mut self.root_nodes, view);
+        if let Some(target) = self.active_editor_target.clone() {
+            self.focus_editor_target(&target);
+        }
         ensure_default_node_focus(&mut self.root_nodes);
         Ok(())
     }
@@ -564,16 +574,16 @@ impl ProjectController {
     }
 
     fn apply_synced_project_view(&mut self) -> Result<(), UiError> {
+        // Drive the shared reconcile path with the synced mirror. `sync` is
+        // moved out so the mirror borrow does not alias the `&mut self` that
+        // `apply_project_view` needs; it is restored before returning.
         let sync = self
             .sync
-            .as_ref()
+            .take()
             .ok_or_else(|| UiError::Project("project sync is not initialized".to_string()))?;
-        reconcile_root_nodes(&mut self.root_nodes, sync.project_view());
-        if let Some(target) = self.active_editor_target.clone() {
-            self.focus_editor_target(&target);
-        }
-        ensure_default_node_focus(&mut self.root_nodes);
-        Ok(())
+        let result = self.apply_project_view(sync.project_view());
+        self.sync = Some(sync);
+        result
     }
 
     fn record_sync_failure(
