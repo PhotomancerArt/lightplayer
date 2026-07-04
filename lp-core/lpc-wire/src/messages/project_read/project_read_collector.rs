@@ -446,6 +446,7 @@ struct ResourceCollectState {
     level: Option<ReadLevel>,
     summaries: Vec<WireResourceSummary>,
     payloads: Vec<WireRuntimeBufferPayload>,
+    membership: Option<Vec<ResourceRef>>,
     pending_payloads: BTreeMap<ResourceRef, PendingRuntimeBufferPayload>,
     ended: bool,
 }
@@ -537,6 +538,12 @@ impl ResourceCollectState {
                     bytes: pending.bytes,
                 });
             }
+            ProjectReadResourceEvent::Membership { refs } => {
+                self.ensure_open("resource membership")?;
+                if self.membership.replace(refs).is_some() {
+                    return Err(protocol("resource membership sent twice"));
+                }
+            }
             ProjectReadResourceEvent::End => {
                 self.ensure_open("resource end")?;
                 self.ended = true;
@@ -558,6 +565,7 @@ impl ResourceCollectState {
                 .ok_or_else(|| protocol("resource query missing begin"))?,
             summaries: self.summaries.clone(),
             runtime_buffer_payloads: self.payloads.clone(),
+            membership: self.membership.clone(),
         })
     }
 

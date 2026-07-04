@@ -118,6 +118,7 @@ mod tests {
                 level: ReadLevel::Summary,
                 summaries: vec![],
                 runtime_buffer_payloads: vec![],
+                membership: None,
             })],
             probes: vec![],
         };

@@ -27,7 +27,7 @@ impl Engine {
                     self.read_project_nodes(registry, request.since, query),
                 ),
                 ProjectReadQuery::Resources(query) => {
-                    ProjectReadResult::Resources(self.read_project_resources(query))
+                    ProjectReadResult::Resources(self.read_project_resources(request.since, query))
                 }
                 ProjectReadQuery::Runtime(query) => {
                     ProjectReadResult::Runtime(self.read_project_runtime(query, None))

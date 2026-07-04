@@ -2,7 +2,7 @@
 
 use lp_collection::VecMap;
 
-use lpc_model::{NodeId, Revision, WithRevision};
+use lpc_model::{NodeId, Revision, WithRevision, current_revision};
 
 use super::{RuntimeBuffer, RuntimeBufferId};
 
@@ -23,8 +23,14 @@ impl RuntimeBufferError {
 ///
 /// [`insert`](RuntimeBufferStore::insert) allocates ids monotonically; ids are not reused for
 /// the lifetime of this store.
+///
+/// `ids_revision` tracks the revision at which the id set last changed (any insert or removal),
+/// mirroring [`SlotShapeRegistry::ids_revision`](lpc_model::SlotShapeRegistry). A revision-gated
+/// read sends the current membership ref list only when `since < ids_revision` so a client can
+/// prune buffers that were removed since it last synced.
 pub struct RuntimeBufferStore {
     next_id: u32,
+    ids_revision: Revision,
     buffers: VecMap<RuntimeBufferId, WithRevision<RuntimeBuffer>>,
     owners: VecMap<RuntimeBufferId, NodeId>,
 }
@@ -34,9 +40,18 @@ impl RuntimeBufferStore {
     pub fn new() -> Self {
         Self {
             next_id: 0,
+            ids_revision: Revision::default(),
             buffers: VecMap::new(),
             owners: VecMap::new(),
         }
+    }
+
+    /// Revision at which the id set (membership) last changed.
+    ///
+    /// Bumped to the ambient [`current_revision`] on any insert of a new id or any removal.
+    #[must_use]
+    pub fn ids_revision(&self) -> Revision {
+        self.ids_revision
     }
 
     /// Allocates a new id. Ids increase monotonically and are never reused after allocation.
@@ -63,6 +78,7 @@ impl RuntimeBufferStore {
         if let Some(owner) = owner {
             self.owners.insert(id, owner);
         }
+        self.ids_revision = current_revision();
         id
     }
 
@@ -79,6 +95,9 @@ impl RuntimeBufferStore {
         for id in &ids {
             self.buffers.remove(id);
             self.owners.remove(id);
+        }
+        if !ids.is_empty() {
+            self.ids_revision = current_revision();
         }
         ids
     }
@@ -218,6 +237,44 @@ mod tests {
             )
             .expect_err("unknown id");
         assert_eq!(err, RuntimeBufferError::UnknownBuffer { id: missing });
+    }
+
+    #[test]
+    fn store_ids_revision_bumps_on_insert_and_remove_not_replace() {
+        use lpc_model::{current_revision, set_current_revision};
+
+        let mut store = RuntimeBufferStore::new();
+        assert_eq!(store.ids_revision(), Revision::default());
+
+        set_current_revision(Revision::new(5));
+        let owner = lpc_model::NodeId::new(3);
+        let id = store.insert_owned(
+            owner,
+            WithRevision::new(current_revision(), RuntimeBuffer::raw(vec![1])),
+        );
+        assert_eq!(store.ids_revision(), Revision::new(5));
+
+        // Replacing an existing id is not a membership change: ids_revision holds.
+        set_current_revision(Revision::new(9));
+        store
+            .replace(
+                id,
+                WithRevision::new(Revision::new(9), RuntimeBuffer::raw(vec![2])),
+            )
+            .expect("replace existing");
+        assert_eq!(store.ids_revision(), Revision::new(5));
+
+        // Removal bumps to the ambient revision.
+        set_current_revision(Revision::new(12));
+        let removed = store.remove_owned_by(owner);
+        assert_eq!(removed, vec![id]);
+        assert_eq!(store.ids_revision(), Revision::new(12));
+
+        // Removing nothing does not bump.
+        set_current_revision(Revision::new(20));
+        let removed = store.remove_owned_by(owner);
+        assert!(removed.is_empty());
+        assert_eq!(store.ids_revision(), Revision::new(12));
     }
 
     #[test]

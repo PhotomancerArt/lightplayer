@@ -145,6 +145,12 @@ pub enum ProjectReadResourceEvent {
         #[serde(rename = "ref")]
         resource_ref: ResourceRef,
     },
+    /// Full current set of resource refs, emitted before [`ProjectReadResourceEvent::End`] only
+    /// when the store's `ids_revision` moved past the request `since` (G4/G7). The client prunes
+    /// any locally-held resource whose ref is absent from `refs`.
+    Membership {
+        refs: Vec<ResourceRef>,
+    },
     End,
 }
 

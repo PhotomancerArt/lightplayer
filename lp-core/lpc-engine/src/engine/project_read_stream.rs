@@ -169,7 +169,7 @@ impl<'a> EngineProjectReadSource<'a> {
                 .await
             }
             ProjectReadQuery::Resources(query) => {
-                let result = self.engine.read_project_resources(query);
+                let result = self.engine.read_project_resources(since, query);
                 send_query_event(
                     sink,
                     index,
@@ -190,6 +190,18 @@ impl<'a> EngineProjectReadSource<'a> {
                 }
                 for payload in result.runtime_buffer_payloads {
                     stream_runtime_buffer_payload(index, payload, sink).await?;
+                }
+                // Membership rides after summaries/payloads and before `End`, only when the store's
+                // id set changed since `since` (the engine returns `Some` exactly then).
+                if let Some(refs) = result.membership {
+                    send_query_event(
+                        sink,
+                        index,
+                        ProjectReadQueryEvent::Resources(ProjectReadResourceEvent::Membership {
+                            refs,
+                        }),
+                    )
+                    .await?;
                 }
                 send_query_event(
                     sink,
@@ -598,6 +610,230 @@ mod tests {
         let ids = shape_entry_ids(&events);
         assert!(ids.contains(&first), "fresh read includes first shape");
         assert!(ids.contains(&second), "fresh read includes second shape");
+    // ---- Revision-gated resource read contract (M5 P2) --------------------------------------
+
+    #[test]
+    fn mutating_one_resource_sends_exactly_that_resource() {
+        use lpc_model::set_current_revision;
+
+        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let registry = ProjectRegistry::new();
+
+        set_current_revision(Revision::new(5));
+        let stable = engine.runtime_buffers_mut().insert(WithRevision::new(
+            Revision::new(5),
+            RuntimeBuffer::raw(vec![1]),
+        ));
+        let changed = engine.runtime_buffers_mut().insert(WithRevision::new(
+            Revision::new(5),
+            RuntimeBuffer::raw(vec![2]),
+        ));
+
+        // A later mutation bumps only `changed`'s revision; `stable` stays at 5.
+        set_current_revision(Revision::new(9));
+        engine
+            .runtime_buffers_mut()
+            .replace(
+                changed,
+                WithRevision::new(Revision::new(9), RuntimeBuffer::raw(vec![3])),
+            )
+            .expect("replace changed buffer");
+
+        let summaries = resource_summaries(&mut engine, &registry, Some(Revision::new(5)));
+
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(
+            summaries[0].resource_ref,
+            lpc_model::ResourceRef::runtime_buffer(changed)
+        );
+        // No summary for the unchanged buffer; no membership (id set unchanged since 5).
+        assert!(
+            summaries
+                .iter()
+                .all(|s| s.resource_ref != lpc_model::ResourceRef::runtime_buffer(stable))
+        );
+        assert!(resource_membership(&mut engine, &registry, Some(Revision::new(5))).is_none());
+    }
+
+    #[test]
+    fn removing_a_resource_emits_membership_without_it() {
+        use lpc_model::set_current_revision;
+
+        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let registry = ProjectRegistry::new();
+
+        set_current_revision(Revision::new(5));
+        let owner_a = lpc_model::NodeId::new(1);
+        let owner_b = lpc_model::NodeId::new(2);
+        let kept = engine.runtime_buffers_mut().insert_owned(
+            owner_a,
+            WithRevision::new(Revision::new(5), RuntimeBuffer::raw(vec![1])),
+        );
+        let removed = engine.runtime_buffers_mut().insert_owned(
+            owner_b,
+            WithRevision::new(Revision::new(5), RuntimeBuffer::raw(vec![2])),
+        );
+
+        // Remove `removed` at a later revision: bumps the store's ids_revision to 8.
+        set_current_revision(Revision::new(8));
+        engine.runtime_buffers_mut().remove_owned_by(owner_b);
+
+        let since = Some(Revision::new(5));
+        let membership =
+            resource_membership(&mut engine, &registry, since).expect("membership present");
+        assert!(
+            membership
+                .iter()
+                .any(|r| *r == lpc_model::ResourceRef::runtime_buffer(kept))
+        );
+        assert!(
+            membership
+                .iter()
+                .all(|r| *r != lpc_model::ResourceRef::runtime_buffer(removed)),
+            "removed ref must be absent from membership"
+        );
+        // No summary is sent for the removed buffer (it no longer exists).
+        let summaries = resource_summaries(&mut engine, &registry, since);
+        assert!(
+            summaries
+                .iter()
+                .all(|s| s.resource_ref != lpc_model::ResourceRef::runtime_buffer(removed))
+        );
+    }
+
+    #[test]
+    fn unchanged_resources_send_no_summaries_or_membership() {
+        use lpc_model::set_current_revision;
+
+        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let registry = ProjectRegistry::new();
+
+        set_current_revision(Revision::new(5));
+        engine.runtime_buffers_mut().insert(WithRevision::new(
+            Revision::new(5),
+            RuntimeBuffer::raw(vec![1]),
+        ));
+        engine.runtime_buffers_mut().insert(WithRevision::new(
+            Revision::new(5),
+            RuntimeBuffer::raw(vec![2]),
+        ));
+
+        // Read at since == R (the revision everything was stamped at): nothing to send.
+        let since = Some(Revision::new(5));
+        assert!(resource_summaries(&mut engine, &registry, since).is_empty());
+        assert!(resource_membership(&mut engine, &registry, since).is_none());
+    }
+
+    #[test]
+    fn by_refs_payload_bypasses_since() {
+        use lpc_model::set_current_revision;
+
+        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let registry = ProjectRegistry::new();
+
+        set_current_revision(Revision::new(5));
+        let id = engine.runtime_buffers_mut().insert(WithRevision::new(
+            Revision::new(5),
+            RuntimeBuffer::raw(vec![7, 8, 9]),
+        ));
+
+        // since == R so the buffer's revision (5) is NOT > since; a gated read sends no payload,
+        // but an explicit ByRefs request is a targeted fetch and delivers it anyway.
+        let request = resources_request(
+            Some(Revision::new(5)),
+            ResourceReadQuery {
+                level: lpc_wire::ReadLevel::Detail,
+                payloads: ResourcePayloadRead::ByRefs(vec![
+                    lpc_model::ResourceRef::runtime_buffer(id),
+                ]),
+            },
+        );
+        let (decoded, _) = collect_event_response(&mut engine, &registry, request);
+        let resources = decoded_resources(&decoded);
+
+        assert_eq!(resources.runtime_buffer_payloads.len(), 1);
+        assert_eq!(
+            resources.runtime_buffer_payloads[0].resource_ref,
+            lpc_model::ResourceRef::runtime_buffer(id)
+        );
+        assert_eq!(resources.runtime_buffer_payloads[0].bytes, vec![7, 8, 9]);
+        // Summaries are still gated: none at since == R.
+        assert!(resources.summaries.is_empty());
+    }
+
+    #[test]
+    fn fresh_read_includes_all_resources() {
+        use lpc_model::set_current_revision;
+
+        let mut engine = Engine::new(TreePath::parse("/basic.project").unwrap());
+        let registry = ProjectRegistry::new();
+
+        set_current_revision(Revision::new(5));
+        engine.runtime_buffers_mut().insert(WithRevision::new(
+            Revision::new(5),
+            RuntimeBuffer::raw(vec![1]),
+        ));
+        engine.runtime_buffers_mut().insert(WithRevision::new(
+            Revision::new(5),
+            RuntimeBuffer::raw(vec![2]),
+        ));
+
+        // Fresh read (since == None ⇒ 0): bulk-sync guard sends every live summary and, being a
+        // full sync, no membership list is needed.
+        let summaries = resource_summaries(&mut engine, &registry, None);
+        assert_eq!(summaries.len(), 2);
+        assert!(resource_membership(&mut engine, &registry, None).is_none());
+    }
+
+    fn resources_request(since: Option<Revision>, query: ResourceReadQuery) -> ProjectReadRequest {
+        ProjectReadRequest {
+            since,
+            queries: vec![ProjectReadQuery::Resources(query)],
+            probes: vec![],
+        }
+    }
+
+    fn decoded_resources(response: &ProjectReadResponse) -> &lpc_wire::ResourceReadResult {
+        response
+            .results
+            .iter()
+            .find_map(|result| match result {
+                ProjectReadResult::Resources(resources) => Some(resources),
+                _ => None,
+            })
+            .expect("resources result")
+    }
+
+    fn resource_summaries(
+        engine: &mut Engine,
+        registry: &ProjectRegistry,
+        since: Option<Revision>,
+    ) -> Vec<lpc_wire::WireResourceSummary> {
+        let request = resources_request(
+            since,
+            ResourceReadQuery {
+                level: lpc_wire::ReadLevel::Summary,
+                payloads: ResourcePayloadRead::None,
+            },
+        );
+        let (decoded, _) = collect_event_response(engine, registry, request);
+        decoded_resources(&decoded).summaries.clone()
+    }
+
+    fn resource_membership(
+        engine: &mut Engine,
+        registry: &ProjectRegistry,
+        since: Option<Revision>,
+    ) -> Option<Vec<lpc_model::ResourceRef>> {
+        let request = resources_request(
+            since,
+            ResourceReadQuery {
+                level: lpc_wire::ReadLevel::Summary,
+                payloads: ResourcePayloadRead::None,
+            },
+        );
+        let (decoded, _) = collect_event_response(engine, registry, request);
+        decoded_resources(&decoded).membership.clone()
     }
 
     fn assert_events_collect_to_full_response(
