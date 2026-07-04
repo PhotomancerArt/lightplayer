@@ -1,5 +1,7 @@
 //! Portable LightPlayer server protocol client.
 
+use core::time::Duration;
+
 use lpc_model::{LpPath, LpPathBuf};
 use lpc_wire::{
     ClientMessage, ClientRequest, FsRequest, ProjectReadEvent, ProjectReadRequest,
@@ -18,10 +20,8 @@ use crate::project_deploy::{
     ProjectDeployFile, project_deploy_requests, project_write_requests,
     validate_project_deploy_response,
 };
-use crate::project_read_stream::{
-    ProjectReadStream, ProjectReadStreamError, ProjectReadStreamStep,
-};
 use crate::protocol_session::{ProtocolSession, ResponseDisposition};
+use crate::pull_loop::{NeverCancel, ProgressDeadline, PullOutcome, run_project_read};
 
 /// Result value plus protocol events observed while waiting for it.
 #[derive(Debug)]
@@ -235,32 +235,30 @@ where
         handle: WireProjectHandle,
         read: ProjectReadRequest,
     ) -> ClientResult<ClientOutcome<Vec<ProjectReadEvent>>> {
-        let request_id = self.protocol.next_request_id();
-        self.io
-            .send(ClientMessage {
-                id: request_id,
-                msg: ClientRequest::ProjectRead {
-                    handle,
-                    request: read,
-                },
-            })
-            .await
-            .map_err(ClientError::from)?;
-
-        let mut stream = ProjectReadStream::new(request_id);
-        let mut events = Vec::new();
-        loop {
-            let response = self.io.receive().await.map_err(ClientError::from)?;
-            match stream
-                .accept(&self.protocol, response)
-                .map_err(project_read_stream_error)?
-            {
-                ProjectReadStreamStep::Continue => {}
-                ProjectReadStreamStep::Event(event) => events.push(event),
-                ProjectReadStreamStep::Complete(read_events) => {
-                    return Ok(ClientOutcome::new(read_events, events));
-                }
-            }
+        // The portable client owns no runtime, so it carries no deadline: the
+        // deadline's timer never resolves and cancellation is never requested.
+        // Host wrappers (`TokioLpClient`) add those conveniences around the same
+        // shared pull loop. Unsolicited events observed while reading are
+        // preserved on the outcome.
+        let deadline =
+            ProgressDeadline::new(Duration::MAX, |_budget| core::future::pending::<()>());
+        match run_project_read(
+            &mut self.io,
+            &mut self.protocol,
+            handle,
+            read,
+            deadline,
+            &NeverCancel,
+        )
+        .await
+        {
+            PullOutcome::Completed { events, observed } => Ok(ClientOutcome::new(events, observed)),
+            PullOutcome::Failed(error) => Err(error),
+            // A never-resolving deadline cannot fire and cancellation is never
+            // requested for the portable client.
+            PullOutcome::TimedOut | PullOutcome::Cancelled => Err(ClientError::Protocol(
+                "project read ended without completing".to_string(),
+            )),
         }
     }
 
@@ -447,17 +445,6 @@ where
         handle
             .map(|handle| ClientOutcome::new(handle, events))
             .ok_or_else(|| ClientError::Protocol("project deploy did not load project".into()))
-    }
-}
-
-fn project_read_stream_error(error: ProjectReadStreamError) -> ClientError {
-    match error {
-        ProjectReadStreamError::Server(message) => ClientError::Server(message),
-        ProjectReadStreamError::Protocol(message) => ClientError::Protocol(message),
-        ProjectReadStreamError::Unexpected(response) => ClientError::UnexpectedResponse {
-            operation: "project.read",
-            response,
-        },
     }
 }
 

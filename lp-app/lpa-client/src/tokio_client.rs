@@ -24,16 +24,15 @@ use tokio::sync::Mutex;
 use tokio::time::timeout;
 
 use crate::client::ClientOutcome;
+use crate::client_error::ClientError;
 use crate::client_event::ClientEvent;
 use crate::client_io::ClientIo;
 use crate::project_deploy::{
     ProjectDeployFile, project_deploy_requests, project_write_requests,
     validate_project_deploy_response,
 };
-use crate::project_read_stream::{
-    ProjectReadStream, ProjectReadStreamError, ProjectReadStreamStep,
-};
 use crate::protocol_session::{ProtocolSession, ResponseDisposition};
+use crate::pull_loop::{NeverCancel, ProgressDeadline, PullOutcome, run_project_read};
 use crate::transport::ClientTransport;
 
 pub type SharedClientTransport = Arc<Mutex<Box<dyn ClientTransport>>>;
@@ -292,35 +291,35 @@ impl TokioLpClient {
         read: ProjectReadRequest,
     ) -> Result<ClientOutcome<Vec<ProjectReadEvent>>> {
         let mut state = self.state.lock().await;
-        let request_id = state.protocol.next_request_id();
+        let state = &mut *state;
         let mut transport = state.transport.lock().await;
-        transport
-            .send(ClientMessage {
-                id: request_id,
-                msg: ClientRequest::ProjectRead {
-                    handle,
-                    request: read,
-                },
-            })
-            .await
-            .map_err(|error| Error::msg(format!("Transport error: {error}")))?;
 
-        let mut stream = ProjectReadStream::new(request_id);
-        let mut events = Vec::new();
-        loop {
-            let response = transport
-                .receive()
-                .await
-                .map_err(|error| Error::msg(format!("Transport error: {error}")))?;
-            match stream
-                .accept(&state.protocol, response)
-                .map_err(project_read_stream_error)?
-            {
-                ProjectReadStreamStep::Continue => {}
-                ProjectReadStreamStep::Event(event) => events.push(event),
-                ProjectReadStreamStep::Complete(read_events) => {
-                    return Ok(ClientOutcome::new(read_events, events));
-                }
+        // The shared pull loop owns the send/receive/collect state machine; the
+        // Tokio wrapper only supplies the locked transport (wrapped as a
+        // `ClientIo`) and its protocol session. The native request timeout is
+        // still applied by the outer `timeout(...)` in `project_read`, so the
+        // pull loop's own deadline never fires here and cancellation is never
+        // requested — a single timeout owner on the native path.
+        let mut io = LockedTransportIo {
+            transport: &mut **transport,
+        };
+        let deadline =
+            ProgressDeadline::new(Duration::MAX, |_budget| core::future::pending::<()>());
+
+        match run_project_read(
+            &mut io,
+            &mut state.protocol,
+            handle,
+            read,
+            deadline,
+            &NeverCancel,
+        )
+        .await
+        {
+            PullOutcome::Completed { events, observed } => Ok(ClientOutcome::new(events, observed)),
+            PullOutcome::Failed(error) => Err(client_error_to_anyhow(error)),
+            PullOutcome::TimedOut | PullOutcome::Cancelled => {
+                Err(Error::msg("project read ended without completing"))
             }
         }
     }
@@ -519,15 +518,40 @@ fn unexpected_response(operation: &'static str, response: impl std::fmt::Debug) 
     ))
 }
 
-fn project_read_stream_error(error: ProjectReadStreamError) -> Error {
+/// Render a pull-loop [`ClientError`] into the anyhow surface the Tokio wrapper
+/// exposes, preserving the message shapes the open-coded loop produced.
+fn client_error_to_anyhow(error: ClientError) -> Error {
     match error {
-        ProjectReadStreamError::Server(message) => Error::msg(message),
-        ProjectReadStreamError::Protocol(message) => {
+        ClientError::Transport(message) => Error::msg(format!("Transport error: {message}")),
+        ClientError::Server(message) => Error::msg(message),
+        ClientError::Protocol(message) => {
             Error::msg(format!("Project read protocol error: {message}"))
         }
-        ProjectReadStreamError::Unexpected(response) => Error::msg(format!(
+        ClientError::UnexpectedResponse { response, .. } => Error::msg(format!(
             "Unexpected response type for project_read: {response}"
         )),
+    }
+}
+
+/// Adapts a locked [`ClientTransport`] guard into a [`ClientIo`] so the shared
+/// pull loop can drive it. Native transports are `Send`, but the pull loop only
+/// needs `?Send`, so this stays a thin forwarder over the borrowed transport.
+struct LockedTransportIo<'a> {
+    transport: &'a mut dyn ClientTransport,
+}
+
+#[async_trait::async_trait(?Send)]
+impl ClientIo for LockedTransportIo<'_> {
+    async fn send(&mut self, msg: ClientMessage) -> Result<(), lpc_wire::TransportError> {
+        self.transport.send(msg).await
+    }
+
+    async fn receive(&mut self) -> Result<WireServerMessage, lpc_wire::TransportError> {
+        self.transport.receive().await
+    }
+
+    async fn close(&mut self) -> Result<(), lpc_wire::TransportError> {
+        self.transport.close().await
     }
 }
 
