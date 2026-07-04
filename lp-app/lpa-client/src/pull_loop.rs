@@ -205,6 +205,35 @@ pub enum PullOutcome {
     Failed(ClientError),
 }
 
+/// The IO surface the pull loop drives.
+///
+/// This is a native-async (RPITIT) trait rather than the boxed [`ClientIo`],
+/// so auto traits propagate per instantiation: driven by an IO whose futures
+/// are `Send` (the tokio transport adapter), [`run_project_read`]'s future is
+/// `Send` and may be `tokio::spawn`ed; driven by a `?Send` wasm [`ClientIo`],
+/// it stays single-threaded. Every `ClientIo` is a `PullIo` via the blanket
+/// impl.
+pub trait PullIo {
+    fn send(
+        &mut self,
+        msg: ClientMessage,
+    ) -> impl Future<Output = Result<(), lpc_wire::TransportError>>;
+
+    fn receive(
+        &mut self,
+    ) -> impl Future<Output = Result<lpc_wire::WireServerMessage, lpc_wire::TransportError>>;
+}
+
+impl<T: ClientIo + ?Sized> PullIo for T {
+    async fn send(&mut self, msg: ClientMessage) -> Result<(), lpc_wire::TransportError> {
+        ClientIo::send(self, msg).await
+    }
+
+    async fn receive(&mut self) -> Result<lpc_wire::WireServerMessage, lpc_wire::TransportError> {
+        ClientIo::receive(self).await
+    }
+}
+
 /// Send one `ProjectRead` and drive it to completion, a deadline, or a cancel.
 ///
 /// This is the single owner of the streamed-read state machine. It:
@@ -227,7 +256,7 @@ pub async fn run_project_read<Io, MakeTimer, Timer, Cancel>(
     cancel: &Cancel,
 ) -> PullOutcome
 where
-    Io: ClientIo,
+    Io: PullIo + ?Sized,
     MakeTimer: FnMut(Duration) -> Timer,
     Timer: Future<Output = ()>,
     Cancel: CancelSignal + ?Sized,
@@ -284,7 +313,7 @@ enum ReceiveOutcome {
 /// deadline is a quiet-gap, not a hard cut-off).
 async fn receive_before_deadline<Io, Timer>(io: &mut Io, timer: Timer) -> ReceiveOutcome
 where
-    Io: ClientIo,
+    Io: PullIo + ?Sized,
     Timer: Future<Output = ()>,
 {
     let mut receive = pin!(io.receive());

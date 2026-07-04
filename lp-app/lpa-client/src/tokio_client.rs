@@ -32,7 +32,7 @@ use crate::project_deploy::{
     validate_project_deploy_response,
 };
 use crate::protocol_session::{ProtocolSession, ResponseDisposition};
-use crate::pull_loop::{NeverCancel, ProgressDeadline, PullOutcome, run_project_read};
+use crate::pull_loop::{NeverCancel, ProgressDeadline, PullIo, PullOutcome, run_project_read};
 use crate::transport::ClientTransport;
 
 pub type SharedClientTransport = Arc<Mutex<Box<dyn ClientTransport>>>;
@@ -533,25 +533,22 @@ fn client_error_to_anyhow(error: ClientError) -> Error {
     }
 }
 
-/// Adapts a locked [`ClientTransport`] guard into a [`ClientIo`] so the shared
-/// pull loop can drive it. Native transports are `Send`, but the pull loop only
-/// needs `?Send`, so this stays a thin forwarder over the borrowed transport.
+/// Adapts a locked [`ClientTransport`] guard so the shared pull loop can drive
+/// it. It implements [`PullIo`] directly (not the boxed `?Send` `ClientIo`):
+/// `ClientTransport`'s futures are `Send`, and native-async forwarding
+/// preserves that, so the composed `run_project_read` future stays `Send` and
+/// callers may `tokio::spawn` it.
 struct LockedTransportIo<'a> {
     transport: &'a mut dyn ClientTransport,
 }
 
-#[async_trait::async_trait(?Send)]
-impl ClientIo for LockedTransportIo<'_> {
+impl PullIo for LockedTransportIo<'_> {
     async fn send(&mut self, msg: ClientMessage) -> Result<(), lpc_wire::TransportError> {
         self.transport.send(msg).await
     }
 
     async fn receive(&mut self) -> Result<WireServerMessage, lpc_wire::TransportError> {
         self.transport.receive().await
-    }
-
-    async fn close(&mut self) -> Result<(), lpc_wire::TransportError> {
-        self.transport.close().await
     }
 }
 
