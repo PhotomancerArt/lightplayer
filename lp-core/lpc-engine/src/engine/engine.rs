@@ -316,9 +316,7 @@ impl Engine {
             if index > 0 {
                 node_lines.push(',');
             }
-            node_lines.push_str(&format!(
-                "\"node{index}\": {{ \"ref\": \".{node_path}\" }}"
-            ));
+            node_lines.push_str(&format!("\"node{index}\": {{ \"ref\": \".{node_path}\" }}"));
             let text = def
                 .write_json(&self.slot_shapes)
                 .map_err(|e| e.to_string())?;
