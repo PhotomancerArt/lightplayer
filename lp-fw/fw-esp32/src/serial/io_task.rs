@@ -365,6 +365,9 @@ fn project_read_event_kind(event: &lpc_wire::ProjectReadEvent) -> &'static str {
         },
         lpc_wire::ProjectReadEvent::Probe { event, .. } => match event {
             lpc_wire::ProjectReadProbeEvent::Result(_) => "probe.result",
+            lpc_wire::ProjectReadProbeEvent::ResultBegin { .. } => "probe.result_begin",
+            lpc_wire::ProjectReadProbeEvent::ResultBytes { .. } => "probe.result_bytes",
+            lpc_wire::ProjectReadProbeEvent::ResultEnd => "probe.result_end",
         },
         lpc_wire::ProjectReadEvent::End { .. } => "end",
         lpc_wire::ProjectReadEvent::Error { .. } => "error",

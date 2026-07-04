@@ -14,11 +14,25 @@
 //!   family's `Begin`/`End` are paired; runtime is emitted at most once.
 //! - Runtime-buffer payload chunk reassembly validates offsets and total
 //!   length; each `Probe`/query result index appears at most once.
+//! - Chunked *probe* results (`ResultBegin`/`ResultBytes`/`ResultEnd`) reassemble
+//!   with the same offset/length strictness as runtime-buffer chunks and deliver
+//!   a completed [`ProjectProbeResult`] identical to the whole-result path.
 //! - `End`'s revision must equal `Begin`'s revision.
 //! - Completion happens exactly once; nothing may follow the terminal event.
 //! - An `Error { message }` event is surfaced as [`ProjectReadApplyStreamError::Remote`].
 //! - Query and probe result indexes must be contiguous from 0 (the same
 //!   strictness the collector applies at finish).
+//!
+//! # Probe results
+//!
+//! Probe results are read-time diagnostics, not part of the persistent mirror,
+//! so they are *not* written onto the [`ProjectView`]. Instead the applier
+//! collects completed results (whole or reassembled from chunks), keyed by probe
+//! index, and exposes them after the stream completes via
+//! [`ProjectReadApplier::completed_probe_results`] /
+//! [`ProjectReadApplier::take_completed_probe_results`]. This is the seam a
+//! caller's single probe-extraction helper points at: drive the stream to
+//! [`ApplyStatus::Complete`], then read the probes back in index order.
 //!
 //! Frame `sequence` / envelope framing is deliberately *not* this type's
 //! concern: the applier consumes [`ProjectReadEvent`] values and is
@@ -46,10 +60,10 @@ use lpc_model::{
     NodeId, ResourceRef, Revision, SlotShapeEntry, SlotShapeId, SlotShapeRegistrySnapshot,
 };
 use lpc_wire::{
-    ProjectReadEvent, ProjectReadNodeEvent, ProjectReadProbeEvent, ProjectReadQueryEvent,
-    ProjectReadResourceEvent, ProjectReadShapeEvent, ReadLevel, WireResourceSummary,
-    WireRuntimeBufferMetadataPayload, WireRuntimeBufferPayload, WireSlotRootSnapshot,
-    WireSlotRootsSnapshot, WireTreeDelta,
+    ProjectProbeResult, ProjectProbeResultHeader, ProjectReadEvent, ProjectReadNodeEvent,
+    ProjectReadProbeEvent, ProjectReadQueryEvent, ProjectReadResourceEvent, ProjectReadShapeEvent,
+    ReadLevel, WireResourceSummary, WireRuntimeBufferMetadataPayload, WireRuntimeBufferPayload,
+    WireSlotRootSnapshot, WireSlotRootsSnapshot, WireTreeDelta,
 };
 
 use super::ProjectView;
@@ -115,7 +129,12 @@ pub struct ProjectReadApplier<'view> {
     /// Set of query indexes whose family `End` has been applied, so contiguity
     /// (from 0) can be checked at stream end.
     completed_queries: BTreeSet<u32>,
-    completed_probes: BTreeSet<u32>,
+    /// Completed probe results keyed by probe index (whole or reassembled from
+    /// chunks). Exposed to callers after the stream completes; contiguity from 0
+    /// is checked at finish.
+    completed_probes: VecMap<u32, ProjectProbeResult>,
+    /// Per-probe-index in-flight chunk accumulation for a chunked result.
+    pending_probes: VecMap<u32, PendingProbeResult>,
     /// Per-query in-flight accumulation, keyed by query index.
     queries: VecMap<u32, QueryState>,
     /// Set once the terminal event (`End`/`Error`) has been applied.
@@ -130,10 +149,39 @@ impl<'view> ProjectReadApplier<'view> {
             view,
             revision: None,
             completed_queries: BTreeSet::new(),
-            completed_probes: BTreeSet::new(),
+            completed_probes: VecMap::new(),
+            pending_probes: VecMap::new(),
             queries: VecMap::new(),
             complete: false,
         }
+    }
+
+    /// Completed probe results in probe-index order.
+    ///
+    /// Meaningful only after the stream reaches [`ApplyStatus::Complete`]; while
+    /// the stream is open the set may be incomplete or (for chunked results)
+    /// mid-reassembly. Each entry corresponds to one
+    /// [`ProjectReadEvent::Probe`] index and is byte-identical to what the whole
+    /// `Result` path would have produced.
+    #[must_use]
+    pub fn completed_probe_results(&self) -> impl Iterator<Item = (u32, &ProjectProbeResult)> {
+        self.completed_probes
+            .iter()
+            .map(|(index, result)| (*index, result))
+    }
+
+    /// Take the completed probe results, in probe-index order, leaving the
+    /// applier's probe set empty.
+    ///
+    /// The single probe-extraction seam callers use after driving the stream to
+    /// completion: the results come out ordered by probe index (contiguity from
+    /// 0 was validated at stream end).
+    #[must_use]
+    pub fn take_completed_probe_results(&mut self) -> Vec<ProjectProbeResult> {
+        core::mem::take(&mut self.completed_probes)
+            .into_iter()
+            .map(|(_, result)| result)
+            .collect()
     }
 
     /// Apply one event, mutating the view for family-closing events.
@@ -262,18 +310,71 @@ impl<'view> ProjectReadApplier<'view> {
         event: ProjectReadProbeEvent,
     ) -> Result<(), ProjectReadApplyStreamError> {
         match event {
-            ProjectReadProbeEvent::Result(result) => {
-                if !self.completed_probes.insert(index) {
-                    return Err(protocol(format!("probe {index} emitted twice")));
+            ProjectReadProbeEvent::Result(result) => self.complete_probe(index, result),
+            ProjectReadProbeEvent::ResultBegin {
+                byte_length,
+                header,
+            } => {
+                if self.completed_probes.contains_key(&index) {
+                    return Err(protocol(format!("probe {index} emitted after its result")));
                 }
-                // The view does not retain probe results today (they are
-                // read-time diagnostics, not part of the persistent mirror),
-                // matching the aggregate path. P6 extends this for chunked
-                // probes.
-                let _ = result;
+                if self
+                    .pending_probes
+                    .insert(
+                        index,
+                        PendingProbeResult {
+                            header,
+                            byte_length,
+                            bytes: Vec::new(),
+                        },
+                    )
+                    .is_some()
+                {
+                    return Err(protocol(format!("probe {index} result began twice")));
+                }
                 Ok(())
             }
+            ProjectReadProbeEvent::ResultBytes { offset, bytes } => {
+                let pending = self.pending_probes.get_mut(&index).ok_or_else(|| {
+                    protocol(format!("probe {index} result bytes arrived before begin"))
+                })?;
+                if usize::try_from(offset).ok() != Some(pending.bytes.len()) {
+                    return Err(protocol(format!(
+                        "probe {index} result expected offset {}, got {offset}",
+                        pending.bytes.len()
+                    )));
+                }
+                pending.bytes.extend(bytes);
+                Ok(())
+            }
+            ProjectReadProbeEvent::ResultEnd => {
+                let pending = self.pending_probes.remove(&index).ok_or_else(|| {
+                    protocol(format!("probe {index} result end arrived before begin"))
+                })?;
+                if usize::try_from(pending.byte_length).ok() != Some(pending.bytes.len()) {
+                    return Err(protocol(format!(
+                        "probe {index} result expected {} bytes, got {}",
+                        pending.byte_length,
+                        pending.bytes.len()
+                    )));
+                }
+                let result = pending.header.into_result(pending.bytes);
+                self.complete_probe(index, result)
+            }
         }
+    }
+
+    /// Record a finished probe result (whole or reassembled), rejecting a second
+    /// result at the same index.
+    fn complete_probe(
+        &mut self,
+        index: u32,
+        result: ProjectProbeResult,
+    ) -> Result<(), ProjectReadApplyStreamError> {
+        if self.completed_probes.insert(index, result).is_some() {
+            return Err(protocol(format!("probe {index} emitted twice")));
+        }
+        Ok(())
     }
 
     fn query_state(
@@ -311,25 +412,36 @@ impl<'view> ProjectReadApplier<'view> {
         if let Some((index, _)) = self.queries.iter().next() {
             return Err(protocol(format!("query {index} did not end")));
         }
-        ensure_contiguous(&self.completed_queries, "query")?;
-        ensure_contiguous(&self.completed_probes, "probe")?;
+        if let Some((index, _)) = self.pending_probes.iter().next() {
+            return Err(protocol(format!("probe {index} result did not end")));
+        }
+        ensure_contiguous(self.completed_queries.iter().copied(), "query")?;
+        ensure_contiguous(self.completed_probes.keys().copied(), "probe")?;
         Ok(())
     }
 }
 
-/// Contiguity check: the set must be exactly `{0, 1, .., n-1}`.
+/// Contiguity check: the ascending indexes must be exactly `{0, 1, .., n-1}`.
 fn ensure_contiguous(
-    indexes: &BTreeSet<u32>,
+    indexes: impl IntoIterator<Item = u32>,
     label: &str,
 ) -> Result<(), ProjectReadApplyStreamError> {
-    for (expected, index) in (0_u32..).zip(indexes.iter()) {
-        if *index != expected {
+    for (expected, index) in (0_u32..).zip(indexes) {
+        if index != expected {
             return Err(protocol(format!(
                 "missing {label} result index {expected}; next index was {index}"
             )));
         }
     }
     Ok(())
+}
+
+/// In-flight reassembly state for a chunked probe result.
+#[derive(Debug)]
+struct PendingProbeResult {
+    header: ProjectProbeResultHeader,
+    byte_length: u32,
+    bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -1517,5 +1629,180 @@ mod tests {
             })
             .unwrap_err();
         assert!(err.to_string().contains("probe 0 emitted twice"));
+    }
+
+    // ---- Probe result exposure + chunk reassembly ----
+
+    fn render_header() -> ProjectProbeResultHeader {
+        use lpc_wire::RenderProductProbeResultHeader;
+        ProjectProbeResultHeader::RenderProduct(RenderProductProbeResultHeader {
+            product: lpc_model::VisualProduct::new(lpc_model::NodeId::new(3), 1),
+            revision: Revision::new(2),
+            width: 2,
+            height: 1,
+            format: lpc_wire::WireTextureFormat::Rgba16,
+        })
+    }
+
+    #[test]
+    fn whole_probe_result_is_exposed_after_complete() {
+        use lpc_wire::{ProjectProbeResult, RenderProductProbeResult};
+        let result = ProjectProbeResult::RenderProduct(RenderProductProbeResult::Unsupported {
+            product: lpc_model::VisualProduct::new(lpc_model::NodeId::new(1), 0),
+            reason: String::from("nope"),
+        });
+        let mut view = ProjectView::new();
+        let mut applier = ProjectReadApplier::new(&mut view);
+        applier.apply(begin(1)).unwrap();
+        applier
+            .apply(ProjectReadEvent::Probe {
+                index: 0,
+                event: ProjectReadProbeEvent::Result(result.clone()),
+            })
+            .unwrap();
+        assert_eq!(
+            applier.apply(end(1)).unwrap(),
+            ApplyStatus::Complete {
+                revision: Revision::new(1)
+            }
+        );
+        assert_eq!(applier.take_completed_probe_results(), vec![result]);
+    }
+
+    #[test]
+    fn chunked_probe_result_reassembles_to_whole_result() {
+        // A chunked texture probe reassembles byte-identically to what the
+        // whole-`Result` path would have carried.
+        let bytes = vec![10u8, 20, 30, 40];
+        let expected = render_header().into_result(bytes.clone());
+
+        let mut view = ProjectView::new();
+        let mut applier = ProjectReadApplier::new(&mut view);
+        applier.apply(begin(9)).unwrap();
+        applier
+            .apply(ProjectReadEvent::Probe {
+                index: 0,
+                event: ProjectReadProbeEvent::ResultBegin {
+                    byte_length: 4,
+                    header: render_header(),
+                },
+            })
+            .unwrap();
+        applier
+            .apply(ProjectReadEvent::Probe {
+                index: 0,
+                event: ProjectReadProbeEvent::ResultBytes {
+                    offset: 0,
+                    bytes: vec![10, 20],
+                },
+            })
+            .unwrap();
+        applier
+            .apply(ProjectReadEvent::Probe {
+                index: 0,
+                event: ProjectReadProbeEvent::ResultBytes {
+                    offset: 2,
+                    bytes: vec![30, 40],
+                },
+            })
+            .unwrap();
+        applier
+            .apply(ProjectReadEvent::Probe {
+                index: 0,
+                event: ProjectReadProbeEvent::ResultEnd,
+            })
+            .unwrap();
+        applier.apply(end(9)).unwrap();
+
+        assert_eq!(applier.take_completed_probe_results(), vec![expected]);
+    }
+
+    #[test]
+    fn chunked_probe_offset_gap_errors() {
+        let mut view = ProjectView::new();
+        let mut applier = ProjectReadApplier::new(&mut view);
+        applier.apply(begin(1)).unwrap();
+        applier
+            .apply(ProjectReadEvent::Probe {
+                index: 0,
+                event: ProjectReadProbeEvent::ResultBegin {
+                    byte_length: 4,
+                    header: render_header(),
+                },
+            })
+            .unwrap();
+        applier
+            .apply(ProjectReadEvent::Probe {
+                index: 0,
+                event: ProjectReadProbeEvent::ResultBytes {
+                    offset: 0,
+                    bytes: vec![1, 2],
+                },
+            })
+            .unwrap();
+        // Gap: expected offset 2, send 3.
+        let err = applier
+            .apply(ProjectReadEvent::Probe {
+                index: 0,
+                event: ProjectReadProbeEvent::ResultBytes {
+                    offset: 3,
+                    bytes: vec![4],
+                },
+            })
+            .unwrap_err();
+        assert!(matches!(err, ProjectReadApplyStreamError::Protocol(_)));
+        assert!(err.to_string().contains("expected offset 2"));
+    }
+
+    #[test]
+    fn chunked_probe_length_mismatch_errors() {
+        let mut view = ProjectView::new();
+        let mut applier = ProjectReadApplier::new(&mut view);
+        applier.apply(begin(1)).unwrap();
+        applier
+            .apply(ProjectReadEvent::Probe {
+                index: 0,
+                event: ProjectReadProbeEvent::ResultBegin {
+                    byte_length: 4,
+                    header: render_header(),
+                },
+            })
+            .unwrap();
+        applier
+            .apply(ProjectReadEvent::Probe {
+                index: 0,
+                event: ProjectReadProbeEvent::ResultBytes {
+                    offset: 0,
+                    bytes: vec![1, 2],
+                },
+            })
+            .unwrap();
+        // End early: only 2 of 4 bytes received.
+        let err = applier
+            .apply(ProjectReadEvent::Probe {
+                index: 0,
+                event: ProjectReadProbeEvent::ResultEnd,
+            })
+            .unwrap_err();
+        assert!(err.to_string().contains("expected 4 bytes, got 2"));
+    }
+
+    #[test]
+    fn unended_chunked_probe_errors_at_finish() {
+        let mut view = ProjectView::new();
+        let mut applier = ProjectReadApplier::new(&mut view);
+        applier.apply(begin(1)).unwrap();
+        applier
+            .apply(ProjectReadEvent::Probe {
+                index: 0,
+                event: ProjectReadProbeEvent::ResultBegin {
+                    byte_length: 0,
+                    header: render_header(),
+                },
+            })
+            .unwrap();
+        // Stream ends without ResultEnd for probe 0.
+        let err = applier.apply(end(1)).unwrap_err();
+        assert!(err.to_string().contains("probe 0 result did not end"));
     }
 }

@@ -7,8 +7,10 @@ mod render_product_probe;
 
 pub use control_product_probe::{
     ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
-    ControlProductProbeResult,
+    ControlProductProbeResult, ControlProductProbeResultHeader,
 };
 pub use explain_slot_probe::{ExplainSlotProbeRequest, ExplainSlotProbeResult, SlotExplanation};
-pub use project_probe::{ProjectProbeRequest, ProjectProbeResult};
-pub use render_product_probe::{RenderProductProbeRequest, RenderProductProbeResult};
+pub use project_probe::{ProjectProbeRequest, ProjectProbeResult, ProjectProbeResultHeader};
+pub use render_product_probe::{
+    RenderProductProbeRequest, RenderProductProbeResult, RenderProductProbeResultHeader,
+};

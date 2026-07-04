@@ -25,9 +25,10 @@ use crate::slot::{WireSlotRootSnapshot, WireSlotRootsSnapshot};
 use crate::tree::WireTreeDelta;
 
 use super::{
-    ProjectProbeResult, ProjectReadEvent, ProjectReadNodeEvent, ProjectReadProbeEvent,
-    ProjectReadQueryEvent, ProjectReadResourceEvent, ProjectReadResponse, ProjectReadResult,
-    ProjectReadShapeEvent, ReadLevel, ResourceReadResult, RuntimeReadResult, ShapeReadResult,
+    ProjectProbeResult, ProjectProbeResultHeader, ProjectReadEvent, ProjectReadNodeEvent,
+    ProjectReadProbeEvent, ProjectReadQueryEvent, ProjectReadResourceEvent, ProjectReadResponse,
+    ProjectReadResult, ProjectReadShapeEvent, ReadLevel, ResourceReadResult, RuntimeReadResult,
+    ShapeReadResult,
 };
 
 /// Result of applying one project-read event to a collector.
@@ -77,7 +78,20 @@ pub struct ProjectReadCollector {
     revision: Option<Revision>,
     queries: BTreeMap<u32, QueryCollectState>,
     probes: BTreeMap<u32, ProjectProbeResult>,
+    /// P5-deletable: in-flight chunked-probe reassembly, keyed by probe index.
+    /// This whole collector is removed in M6/P5; this field only keeps it
+    /// compiling and functional against the P6 chunked probe events.
+    pending_probes: BTreeMap<u32, CollectorPendingProbe>,
     complete: bool,
+}
+
+/// P5-deletable: reassembly state for one chunked probe result in the
+/// compatibility collector. Delete with the collector in M6/P5.
+#[derive(Debug)]
+struct CollectorPendingProbe {
+    header: ProjectProbeResultHeader,
+    byte_length: u32,
+    bytes: Vec<u8>,
 }
 
 impl ProjectReadCollector {
@@ -170,14 +184,73 @@ impl ProjectReadCollector {
         index: u32,
         event: ProjectReadProbeEvent,
     ) -> Result<(), ProjectReadCollectError> {
+        // P5-deletable: this collector is a compatibility shim removed in M6/P5.
+        // The chunked-probe arms below only reassemble the P6 chunk events into
+        // the same aggregate the whole-`Result` arm produces.
         match event {
-            ProjectReadProbeEvent::Result(result) => {
-                if self.probes.insert(index, result).is_some() {
-                    return Err(protocol(format!("probe {index} emitted twice")));
+            ProjectReadProbeEvent::Result(result) => self.complete_probe(index, result),
+            ProjectReadProbeEvent::ResultBegin {
+                byte_length,
+                header,
+            } => {
+                if self.probes.contains_key(&index) {
+                    return Err(protocol(format!("probe {index} emitted after its result")));
+                }
+                if self
+                    .pending_probes
+                    .insert(
+                        index,
+                        CollectorPendingProbe {
+                            header,
+                            byte_length,
+                            bytes: Vec::new(),
+                        },
+                    )
+                    .is_some()
+                {
+                    return Err(protocol(format!("probe {index} result began twice")));
                 }
                 Ok(())
             }
+            ProjectReadProbeEvent::ResultBytes { offset, bytes } => {
+                let pending = self.pending_probes.get_mut(&index).ok_or_else(|| {
+                    protocol(format!("probe {index} result bytes arrived before begin"))
+                })?;
+                if usize::try_from(offset).ok() != Some(pending.bytes.len()) {
+                    return Err(protocol(format!(
+                        "probe {index} result expected offset {}, got {offset}",
+                        pending.bytes.len()
+                    )));
+                }
+                pending.bytes.extend(bytes);
+                Ok(())
+            }
+            ProjectReadProbeEvent::ResultEnd => {
+                let pending = self.pending_probes.remove(&index).ok_or_else(|| {
+                    protocol(format!("probe {index} result end arrived before begin"))
+                })?;
+                if usize::try_from(pending.byte_length).ok() != Some(pending.bytes.len()) {
+                    return Err(protocol(format!(
+                        "probe {index} result expected {} bytes, got {}",
+                        pending.byte_length,
+                        pending.bytes.len()
+                    )));
+                }
+                let result = pending.header.into_result(pending.bytes);
+                self.complete_probe(index, result)
+            }
         }
+    }
+
+    fn complete_probe(
+        &mut self,
+        index: u32,
+        result: ProjectProbeResult,
+    ) -> Result<(), ProjectReadCollectError> {
+        if self.probes.insert(index, result).is_some() {
+            return Err(protocol(format!("probe {index} emitted twice")));
+        }
+        Ok(())
     }
 
     fn query_state(
@@ -221,6 +294,9 @@ impl ProjectReadCollector {
             )));
         }
 
+        if let Some((index, _)) = self.pending_probes.iter().next() {
+            return Err(protocol(format!("probe {index} result did not end")));
+        }
         let results = collect_indexed_results(&self.queries)?;
         let probes = collect_indexed_probes(&self.probes)?;
         Ok(ProjectReadResponse {

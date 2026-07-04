@@ -241,15 +241,88 @@ impl<'a> EngineProjectReadSource<'a> {
                 self.engine.read_project_explain_slot_probe(request),
             ),
         };
-        send_project_read_event(
-            sink,
-            ProjectReadEvent::Probe {
+        stream_probe_result(index, result, sink).await
+    }
+}
+
+/// Emit one probe result under the enclosing probe `index`, chunking its bulk
+/// bytes when they are large enough that a single `Result` event could exceed
+/// the frame budget.
+///
+/// The split threshold and chunk size both come from
+/// [`lpc_wire::PROJECT_READ_RUNTIME_CHUNK_BYTES`]: a result carrying no more raw
+/// bytes than one chunk is proven (by that constant's compile-time budget
+/// assertion) to fit an empty frame once base64-encoded, so it travels whole as
+/// `Result`. A larger payload streams as `ResultBegin` → N × `ResultBytes` →
+/// `ResultEnd`, each `ResultBytes` bounded to one chunk. Mirrors
+/// [`stream_runtime_buffer_payload`].
+async fn stream_probe_result<S>(
+    index: u32,
+    result: ProjectProbeResult,
+    sink: &mut S,
+) -> Result<(), ProjectReadEventStreamError<S::Error>>
+where
+    S: ProjectReadEventSink,
+{
+    const PROBE_RESULT_CHUNK_BYTES: usize = lpc_wire::PROJECT_READ_RUNTIME_CHUNK_BYTES;
+
+    // Only the two bulk-bearing result variants (render texture / control
+    // samples) are splittable; everything else is small and always sent whole.
+    // A splittable result whose payload still fits one chunk also travels whole,
+    // so the small-result path is byte-identical to before for the common case.
+    let (header, bytes) = match result.into_chunked_parts() {
+        Ok((header, bytes)) if bytes.len() > PROBE_RESULT_CHUNK_BYTES => (header, bytes),
+        Ok((header, bytes)) => {
+            return send_probe_event(
+                sink,
                 index,
-                event: ProjectReadProbeEvent::Result(result),
+                ProjectReadProbeEvent::Result(header.into_result(bytes)),
+            )
+            .await;
+        }
+        Err(result) => {
+            return send_probe_event(sink, index, ProjectReadProbeEvent::Result(result)).await;
+        }
+    };
+
+    let byte_length = u32::try_from(bytes.len()).map_err(|_| {
+        ProjectReadEventStreamError::Protocol("probe result payload is too large".into())
+    })?;
+    send_probe_event(
+        sink,
+        index,
+        ProjectReadProbeEvent::ResultBegin {
+            byte_length,
+            header,
+        },
+    )
+    .await?;
+    for (chunk_index, chunk) in bytes.chunks(PROBE_RESULT_CHUNK_BYTES).enumerate() {
+        let offset = u32::try_from(chunk_index * PROBE_RESULT_CHUNK_BYTES).map_err(|_| {
+            ProjectReadEventStreamError::Protocol("probe result offset overflow".into())
+        })?;
+        send_probe_event(
+            sink,
+            index,
+            ProjectReadProbeEvent::ResultBytes {
+                offset,
+                bytes: chunk.to_vec(),
             },
         )
-        .await
+        .await?;
     }
+    send_probe_event(sink, index, ProjectReadProbeEvent::ResultEnd).await
+}
+
+async fn send_probe_event<S>(
+    sink: &mut S,
+    index: u32,
+    event: ProjectReadProbeEvent,
+) -> Result<(), ProjectReadEventStreamError<S::Error>>
+where
+    S: ProjectReadEventSink,
+{
+    send_project_read_event(sink, ProjectReadEvent::Probe { index, event }).await
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -361,6 +434,129 @@ mod tests {
     use crate::node::test_placeholder_spine;
     use crate::nodes::TextureNode;
     use crate::resource::RuntimeBuffer;
+
+    // ---- Probe result chunking (M6 P6) ----
+
+    use lpc_wire::{
+        ControlProductProbeResult, ProjectProbeResult, ProjectReadProbeEvent,
+        RenderProductProbeResult,
+    };
+
+    /// Drive `stream_probe_result` for one probe result and return the emitted
+    /// events plus the aggregate the compatibility collector rebuilds from them.
+    fn stream_one_probe(result: ProjectProbeResult) -> (Vec<ProjectReadEvent>, ProjectProbeResult) {
+        let mut sink = CollectingEventSink::default();
+        block_on(async {
+            stream_probe_result(0, result, &mut sink).await.unwrap();
+        });
+        let events = sink.events;
+
+        let mut collector = ProjectReadCollector::new();
+        collector
+            .accept_event(ProjectReadEvent::Begin {
+                revision: Revision::new(1),
+            })
+            .unwrap();
+        for event in events.clone() {
+            assert!(collector.accept_event(event).unwrap().is_none());
+        }
+        let response = collector
+            .accept_event(ProjectReadEvent::End {
+                revision: Revision::new(1),
+            })
+            .unwrap()
+            .expect("stream completes on End");
+        let probe = response.probes.into_iter().next().expect("one probe");
+        (events, probe)
+    }
+
+    fn probe_result_bytes_count(events: &[ProjectReadEvent]) -> usize {
+        events
+            .iter()
+            .filter(|event| {
+                matches!(
+                    event,
+                    ProjectReadEvent::Probe {
+                        event: ProjectReadProbeEvent::ResultBytes { .. },
+                        ..
+                    }
+                )
+            })
+            .count()
+    }
+
+    fn render_texture_result(byte_len: usize) -> ProjectProbeResult {
+        ProjectProbeResult::RenderProduct(RenderProductProbeResult::Texture {
+            product: lpc_model::VisualProduct::new(lpc_model::NodeId::new(1), 0),
+            revision: Revision::new(1),
+            width: 4,
+            height: 4,
+            format: lpc_wire::WireTextureFormat::Rgba16,
+            bytes: vec![7u8; byte_len],
+        })
+    }
+
+    #[test]
+    fn small_probe_result_uses_single_result_event() {
+        // A payload no larger than one chunk travels whole as `Result`.
+        let (events, probe) = stream_one_probe(render_texture_result(64));
+
+        assert_eq!(events.len(), 1);
+        assert!(matches!(
+            events[0],
+            ProjectReadEvent::Probe {
+                event: ProjectReadProbeEvent::Result(_),
+                ..
+            }
+        ));
+        assert_eq!(probe, render_texture_result(64));
+    }
+
+    #[test]
+    fn large_probe_result_chunks_and_reassembles_byte_identically() {
+        // A payload several chunks large is split; the collector reassembles the
+        // exact original result.
+        let byte_len = 3 * lpc_wire::PROJECT_READ_RUNTIME_CHUNK_BYTES + 17;
+        let original = render_texture_result(byte_len);
+        let (events, probe) = stream_one_probe(original.clone());
+
+        // ResultBegin + N ResultBytes + ResultEnd, all under probe index 0.
+        assert!(matches!(
+            events.first(),
+            Some(ProjectReadEvent::Probe {
+                event: ProjectReadProbeEvent::ResultBegin { .. },
+                ..
+            })
+        ));
+        assert!(matches!(
+            events.last(),
+            Some(ProjectReadEvent::Probe {
+                event: ProjectReadProbeEvent::ResultEnd,
+                ..
+            })
+        ));
+        assert!(
+            probe_result_bytes_count(&events) > 1,
+            "expected multiple chunk events, events: {events:?}"
+        );
+        assert_eq!(probe, original);
+    }
+
+    #[test]
+    fn unsupported_probe_result_never_chunks() {
+        // Non-bulk variants have no bytes to split and always go whole.
+        let result = ProjectProbeResult::ControlProduct(ControlProductProbeResult::Unsupported {
+            product: lpc_model::ControlProduct::new(
+                lpc_model::NodeId::new(1),
+                0,
+                lpc_model::ControlExtent::new(1, 1),
+            ),
+            reason: alloc::string::String::from("nope"),
+        });
+        let (events, probe) = stream_one_probe(result.clone());
+        assert_eq!(events.len(), 1);
+        assert_eq!(probe, result);
+    }
 
     #[test]
     fn event_stream_matches_full_debug_response() {

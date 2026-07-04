@@ -20,9 +20,10 @@ use lpa_client::TokioLpClient;
 use lpc_model::{AsLpPath, NodeId};
 use lpc_shared::ProjectBuilder;
 use lpc_wire::{
-    NodeReadQuery, ProjectReadQuery, ProjectReadRequest, ProjectReadResult, ReadLevel,
+    NodeReadQuery, ProjectProbeRequest, ProjectProbeResult, ProjectReadQuery, ProjectReadRequest,
+    ProjectReadResult, ReadLevel, RenderProductProbeRequest, RenderProductProbeResult,
     ResourcePayloadRead, ResourceReadQuery, RuntimeReadQuery, WireChannelSampleFormat,
-    WireRuntimeBufferMetadataPayload, WireTreeDelta,
+    WireRuntimeBufferMetadataPayload, WireTextureFormat, WireTreeDelta,
 };
 use lpfs::{LpFs, LpFsMemory};
 
@@ -116,6 +117,76 @@ async fn test_scene_render_fw_emu() {
         red_values.windows(2).all(|pair| pair[1] > pair[0]),
         "output red channel should increase as simulated time advances; values: {red_values:?}"
     );
+
+    // Multi-frame probe read: request a render-product probe large enough that
+    // its encoded response must cross the 16 KiB project-read frame boundary.
+    // This exercises probe chunking (M6 P6) end-to-end over the real serial
+    // serialization path — the producer splits the texture into bounded
+    // `ResultBytes` chunks and the client collector reassembles them.
+    read_large_render_probe_crossing_frame_boundary(&client, project_handle, shader_id).await;
+}
+
+/// A render-product probe whose RGBA16 bytes (64·64·8 = 32 KiB) far exceed one
+/// 16 KiB project-read frame, forcing multi-frame chunked streaming. The read
+/// must complete without error and reassemble to the full texture.
+async fn read_large_render_probe_crossing_frame_boundary(
+    client: &TokioLpClient,
+    handle: lpc_wire::WireProjectHandle,
+    shader_id: NodeId,
+) {
+    const WIDTH: u32 = 64;
+    const HEIGHT: u32 = 64;
+
+    let response = client
+        .project_read(
+            handle,
+            ProjectReadRequest {
+                since: None,
+                queries: Vec::new(),
+                probes: vec![ProjectProbeRequest::RenderProduct(
+                    RenderProductProbeRequest {
+                        product: lpc_model::VisualProduct::new(shader_id, 0),
+                        width: WIDTH,
+                        height: HEIGHT,
+                        format: WireTextureFormat::Rgba16,
+                    },
+                )],
+            },
+        )
+        .await
+        .expect("large render-product probe read should complete");
+
+    let probe = response
+        .probes
+        .first()
+        .expect("probe result should be present");
+    let ProjectProbeResult::RenderProduct(render) = probe else {
+        panic!("expected a render-product probe result, got {probe:?}");
+    };
+    match render {
+        RenderProductProbeResult::Texture {
+            width,
+            height,
+            bytes,
+            ..
+        } => {
+            // Reassembled byte-for-byte from the chunk stream: RGBA16 is 8 bytes
+            // per pixel, so the payload is 32 KiB — two frames' worth of budget.
+            let expected_len = (*width as usize) * (*height as usize) * 8;
+            assert_eq!(
+                bytes.len(),
+                expected_len,
+                "reassembled texture byte length mismatch"
+            );
+            assert!(
+                bytes.len() > lpc_wire::PROJECT_READ_FRAME_MAX_BYTES,
+                "probe payload ({} bytes) must exceed one frame ({} bytes) to prove multi-frame crossing",
+                bytes.len(),
+                lpc_wire::PROJECT_READ_FRAME_MAX_BYTES
+            );
+        }
+        other => panic!("render probe did not return a texture: {other:?}"),
+    }
 }
 
 async fn read_node_id_for_suffix(

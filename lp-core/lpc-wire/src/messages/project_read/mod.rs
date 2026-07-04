@@ -30,8 +30,9 @@ pub use crate::budget::{
 pub use node_read::{NodeReadQuery, NodeReadResult, NodeReadSelection};
 pub use probe::{
     ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
-    ControlProductProbeResult, ExplainSlotProbeRequest, ExplainSlotProbeResult,
-    ProjectProbeRequest, ProjectProbeResult, RenderProductProbeRequest, RenderProductProbeResult,
+    ControlProductProbeResult, ControlProductProbeResultHeader, ExplainSlotProbeRequest,
+    ExplainSlotProbeResult, ProjectProbeRequest, ProjectProbeResult, ProjectProbeResultHeader,
+    RenderProductProbeRequest, RenderProductProbeResult, RenderProductProbeResultHeader,
     SlotExplanation,
 };
 pub use project_read_collector::{

@@ -20,7 +20,7 @@ use crate::project::{
 use crate::slot::WireSlotRootSnapshot;
 use crate::tree::WireTreeDelta;
 
-use super::{ProjectProbeResult, ReadLevel, RuntimeReadResult};
+use super::{ProjectProbeResult, ProjectProbeResultHeader, ReadLevel, RuntimeReadResult};
 
 /// One ordered event in a project-read stream.
 ///
@@ -158,9 +158,38 @@ pub enum ProjectReadResourceEvent {
 ///
 /// Probes are read-time diagnostics or render/sample requests that are not part
 /// of the persistent project mirror. They are indexed separately from queries.
+///
+/// Small probe results travel whole in [`Result`](Self::Result). A result whose
+/// bulk byte payload (render texture, control samples) would push the encoded
+/// event past the streaming budget is instead split into a header plus its bytes
+/// and streamed as bounded chunks — [`ResultBegin`](Self::ResultBegin) then N ×
+/// [`ResultBytes`](Self::ResultBytes) then [`ResultEnd`](Self::ResultEnd) — all
+/// keyed by the enclosing [`ProjectReadEvent::Probe`] `index` (no per-chunk ref
+/// is needed, since a probe index yields exactly one result). This mirrors the
+/// runtime-buffer payload chunking and uses the same M3 budget-derived chunk
+/// size (`PROJECT_READ_RUNTIME_CHUNK_BYTES`).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectReadProbeEvent {
+    /// A whole probe result, small enough to fit one frame.
     Result(ProjectProbeResult),
+    /// Opens a chunked probe result: the structured `header` (the result minus
+    /// its bulk bytes) plus the total `byte_length` to expect across
+    /// [`ResultBytes`](Self::ResultBytes) events.
+    ResultBegin {
+        byte_length: u32,
+        header: ProjectProbeResultHeader,
+    },
+    /// One contiguous chunk of the chunked probe result's bulk bytes. `offset`
+    /// is the running byte position (gaps are a protocol error).
+    ResultBytes {
+        offset: u32,
+        #[cfg_attr(feature = "schema-gen", schemars(with = "String"))]
+        #[serde(with = "crate::serde_base64")]
+        bytes: Vec<u8>,
+    },
+    /// Closes a chunked probe result; the reassembled bytes are reattached to the
+    /// header to recover the full [`ProjectProbeResult`].
+    ResultEnd,
 }
