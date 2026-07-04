@@ -16,9 +16,12 @@ The crate is split into two layers:
 This keeps Studio web, CLI, host runtimes, and future agents on one protocol
 model while allowing each runtime to bind its own I/O.
 
-Project reads are multi-frame operations: one `ProjectReadRequest` can produce
-several same-id `ProjectReadFrame` messages before a terminal event. The public
-client API still returns `ProjectReadResponse` by collecting those frames.
+Project reads are streaming operations: one `ProjectReadRequest` can produce
+several same-id server messages carrying `ProjectReadEvent` batches, completed
+by the envelope's `fin` flag. The public client API returns the flattened
+`Vec<ProjectReadEvent>`; callers apply them to a `ProjectView` via
+`lpc-view`'s `ProjectReadApplier` rather than reconstructing an aggregate
+response.
 
 ## Feature Model
 

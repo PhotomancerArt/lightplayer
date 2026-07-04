@@ -693,6 +693,50 @@ mod tests {
     }
 
     #[test]
+    fn studio_steady_state_read_carries_no_payload() {
+        // The M6 payoff: Studio's live refresh sends `since = view.revision`
+        // with the default-debug query set (shapes/nodes+slots/resources/
+        // runtime) — byte-identical to `lpa-studio-core`'s
+        // `project_read_request`. When the project has not advanced since the
+        // last read, an idle refresh must transfer *no* mirrorable payload:
+        // zero shape entries/membership, zero resource summaries/membership,
+        // zero slot roots, zero tree deltas. Only the revision-carrying spine
+        // (Begin/Runtime/End at R) rides the wire. This is the studio-request
+        // analogue of `read_at_since_r_sends_no_payload_items` and stands in
+        // for a studio-core integration test (studio-core has no engine dep).
+        let mut h = build_all_families_project();
+        let r = h.engine.revision();
+
+        // Exactly the request `lpa-studio-core` builds for a gated refresh.
+        let request = ProjectReadRequest {
+            since: Some(r),
+            queries: ProjectReadQuery::default_debug(),
+            probes: Vec::new(),
+        };
+        let events = collect_read_events(&mut h.engine, &h.registry, request);
+
+        assert_eq!(count_shape_entries(&events), 0, "zero shape entries");
+        assert_eq!(count_shape_membership(&events), 0, "zero shape membership");
+        assert_eq!(count_resource_summaries(&events), 0, "zero summaries");
+        assert_eq!(
+            count_resource_membership(&events),
+            0,
+            "zero resource membership"
+        );
+        assert_eq!(count_slot_roots(&events), 0, "zero slot roots");
+        assert_eq!(
+            count_nonempty_tree_deltas(&events),
+            0,
+            "zero non-empty tree deltas"
+        );
+        assert!(
+            has_begin_end_with_revision(&events, r),
+            "Begin and End carry R"
+        );
+        assert_eq!(runtime_revisions(&events), vec![r], "Runtime carries R");
+    }
+
+    #[test]
     fn fresh_client_receives_everything() {
         // `since == None` (≡ 0) is a bulk sync: every family sends its full set
         // regardless of per-item `changed_at` (G2 bulk-sync guard).

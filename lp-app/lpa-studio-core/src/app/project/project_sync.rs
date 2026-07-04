@@ -142,6 +142,20 @@ impl ProjectSync {
         self.issue = Some(UiIssue::new(issue));
     }
 
+    /// Drop the accumulated mirror so the next request re-reads from
+    /// `since = 0`.
+    ///
+    /// Gated refreshes assume the local mirror is a faithful prefix of the
+    /// server's revision history. If the applier rejects a stream as
+    /// malformed, that assumption is broken and further deltas cannot be
+    /// trusted, so we discard the mirror (resetting `view.revision` to `0`)
+    /// and let the caller resync with a full read. Product-preview caches are
+    /// cleared with it, since they are keyed off the same read cycle.
+    pub fn reset_view(&mut self) {
+        self.view = ProjectView::new();
+        self.product_previews.clear();
+    }
+
     fn product_probe_requests(&mut self, products: Vec<UiProductRef>) -> Vec<ProjectProbeRequest> {
         let mut probes = Vec::new();
         for product in products {
@@ -431,6 +445,58 @@ mod tests {
             ProjectReadQuery::Runtime(RuntimeReadQuery)
         );
         assert!(request.probes.is_empty());
+    }
+
+    #[test]
+    fn initial_request_reads_from_scratch() {
+        // A fresh/reconnected session has no mirror to trust, so the initial
+        // read is a full snapshot (`since == None`), the un-gated bulk sync.
+        let mut sync = ProjectSync::new();
+        sync.view.revision = Revision::new(9);
+
+        let request = sync.initial_project_read_request(Vec::new());
+
+        assert_eq!(request.since, None);
+    }
+
+    #[test]
+    fn reset_view_forces_full_resync() {
+        // The applier-error recovery path resets the mirror; the next request
+        // must therefore fall back to a full (`since == None`) read even though
+        // a stale revision was previously applied.
+        let mut sync = ProjectSync::new();
+        sync.view.revision = Revision::new(9);
+        sync.view.slots.roots.insert(
+            "node.1.state".to_string(),
+            lpc_model::SlotData::Unit {
+                revision: Revision::new(9),
+            },
+        );
+
+        sync.reset_view();
+
+        assert_eq!(sync.view.revision, Revision::default());
+        assert!(sync.view.slots.roots.is_empty());
+        let request = sync.refresh_project_read_request(Vec::new());
+        assert_eq!(request.since, None, "reset mirror re-reads from since=0");
+    }
+
+    #[test]
+    fn malformed_stream_surfaces_protocol_error() {
+        // A stream whose End revision disagrees with its Begin is a protocol
+        // violation. Surfacing it as `UiError::Protocol` is what triggers the
+        // controller's reset-and-resync-from-since=0 recovery.
+        let mut sync = ProjectSync::new();
+        let result = sync.apply_project_read_events(vec![
+            ProjectReadEvent::Begin {
+                revision: Revision::new(4),
+            },
+            ProjectReadEvent::End {
+                revision: Revision::new(5),
+            },
+        ]);
+
+        assert!(matches!(result, Err(UiError::Protocol(_))));
     }
 
     #[test]

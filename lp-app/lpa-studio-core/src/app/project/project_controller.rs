@@ -519,10 +519,35 @@ impl ProjectController {
         handle_id: u32,
     ) -> Result<Vec<UiLogEntry>, UiError> {
         let products = self.subscribed_products();
-        let request = self.sync_mut()?.refresh_project_read_request(products);
+        let request = self
+            .sync_mut()?
+            .refresh_project_read_request(products.clone());
         let read = server.project_read(handle_id, request).await?;
-        let logs = read.logs;
-        self.sync_mut()?.apply_project_read_events(read.events)?;
+        let mut logs = read.logs;
+        match self.sync_mut()?.apply_project_read_events(read.events) {
+            Ok(()) => {}
+            // A gated refresh trusts the local mirror to be a faithful prefix
+            // of the server's revision history. If the applier rejects the
+            // stream as malformed, that trust is broken; discard the mirror
+            // and resync with a full (`since = 0`) read so we self-correct
+            // rather than wedge on a corrupt delta.
+            Err(UiError::Protocol(message)) => {
+                logs.extend(server.take_pending_logs());
+                logs.push(UiLogEntry::new(
+                    UiLogLevel::Warn,
+                    "lpa-studio-core",
+                    format!(
+                        "gated project read failed to apply ({message}); resyncing from since=0"
+                    ),
+                ));
+                self.sync_mut()?.reset_view();
+                let request = self.sync_mut()?.initial_project_read_request(products);
+                let resync = server.project_read(handle_id, request).await?;
+                logs.extend(resync.logs);
+                self.sync_mut()?.apply_project_read_events(resync.events)?;
+            }
+            Err(error) => return Err(error),
+        }
         self.apply_synced_project_view()?;
         Ok(logs)
     }

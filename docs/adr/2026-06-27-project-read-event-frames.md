@@ -1,10 +1,10 @@
 # ADR: Project Read Event Frames
 
-- **Status:** Accepted
+- **Status:** Superseded
 - **Date:** 2026-06-27
 - **Deciders:** Photomancer
 - **Supersedes:** None
-- **Superseded by:** None
+- **Superseded by:** [2026-07-04-envelope-streaming.md](2026-07-04-envelope-streaming.md)
 
 ## Context
 
@@ -41,7 +41,7 @@ events directly.
 > (protocol consolidation, phase P5). `lpc-view`'s `ProjectReadApplier` now
 > applies the event stream progressively straight onto `ProjectView`, and every
 > consumer reads state from the view instead of an aggregate DTO. The M6 ADR
-> (`2026-07-0X-envelope-streaming.md`) carries the current design. The
+> (`2026-07-04-envelope-streaming.md`) carries the current design. The
 > paragraph above and the "compatibility aggregate" consequence below are
 > retained only as the historical record of the intermediate step.
 
