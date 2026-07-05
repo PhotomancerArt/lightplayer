@@ -14,10 +14,10 @@ use crate::core::log::LogRing;
 use crate::core::notice::UiNotices;
 use crate::{
     ConnectedLink, Controller, ControllerContext, DeviceController, DeviceOp, LinkOpenOutcome,
-    ProjectConnectResult, ProjectController, ProjectOp, ProjectRefreshOutcome, ProjectState,
-    ProjectSyncRun, StudioSnapshot, UiAction, UiActions, UiActivityView, UiError, UiLogEntry,
-    UiLogLevel, UiNotice, UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget,
-    UxUpdate, UxUpdateSink,
+    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome,
+    ProjectState, ProjectSyncRun, SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView,
+    UiError, UiLogEntry, UiLogLevel, UiNotice, UiResult, UiStatus, UiStudioView, UiViewContent,
+    UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 pub struct StudioController {
@@ -198,6 +198,12 @@ impl StudioController {
             return self.execute_device_op(op, updates).await;
         }
         if node_id == project_node_id {
+            // Slot edits target the project node too (the op carries the full
+            // slot address), so route by op type before the ProjectOp downcast.
+            if action.op_as::<SlotEditOp>().is_some() {
+                let op = action.into_op::<SlotEditOp>()?;
+                return self.execute_slot_edit_op(op).await;
+            }
             let op = action.into_op::<ProjectOp>()?;
             return self.execute_project_op(op, updates).await;
         }
@@ -287,7 +293,37 @@ impl StudioController {
             ProjectOp::LoadDemoProject => self.load_demo_project(updates).await,
             ProjectOp::RefreshProject => self.refresh_project(updates).await,
             ProjectOp::DisconnectProject => self.disconnect_project().await,
+            ProjectOp::SaveOverlay => {
+                let run = {
+                    let server = self.device.server.client_mut()?;
+                    self.project.save_overlay(server).await
+                };
+                self.record_project_edit_run(run)
+            }
+            ProjectOp::RevertAllEdits => {
+                let run = {
+                    let server = self.device.server.client_mut()?;
+                    self.project.revert_all_edits(server).await
+                };
+                self.record_project_edit_run(run)
+            }
         }
+    }
+
+    async fn execute_slot_edit_op(&mut self, op: SlotEditOp) -> UiResult {
+        let run = {
+            let server = self.device.server.client_mut()?;
+            self.project.apply_slot_edit(server, op).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    /// Fold an edit run's server log lines into the bounded ring and surface
+    /// its notices as the dispatch outcome.
+    fn record_project_edit_run(&mut self, run: Result<ProjectEditRun, UiError>) -> UiResult {
+        let run = run?;
+        self.record_logs(run.logs);
+        Ok(run.notices)
     }
 
     async fn attach_connected_link(

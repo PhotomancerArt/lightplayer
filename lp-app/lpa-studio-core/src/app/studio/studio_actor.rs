@@ -39,8 +39,8 @@ use crate::app::studio::studio_view_channel::{
     studio_view_channel,
 };
 use crate::{
-    ProjectRefreshOutcome, StudioController, UiAction, UiLogEntry, UiStudioView, UxUpdate,
-    UxUpdateSink,
+    ProjectRefreshOutcome, SlotEditOp, StudioController, UiAction, UiLogEntry, UiStudioView,
+    UxUpdate, UxUpdateSink,
 };
 
 /// The default passive-refresh backoff: start at 3 s (the retired flat
@@ -310,7 +310,7 @@ where
     /// Drive exactly one coalesced batch (test-only), so a test can inspect
     /// state — e.g. backoff — after a single tick without ending the loop.
     #[cfg(test)]
-    async fn run_one_batch_for_test(&mut self) {
+    pub(crate) async fn run_one_batch_for_test(&mut self) {
         if let Some(batch) = self.commands.recv_coalesced().await {
             let _ = self.process_batch(batch).await;
         }
@@ -332,7 +332,7 @@ impl CommandPlan {
         let mut shutdown = false;
         for command in batch {
             match command {
-                StudioCommand::Action(action) => actions.push(action),
+                StudioCommand::Action(action) => push_action_coalesced(&mut actions, action),
                 // Coalesce: many queued ticks collapse to one pull.
                 StudioCommand::RefreshTick => tick = true,
                 StudioCommand::Shutdown => shutdown = true,
@@ -344,6 +344,38 @@ impl CommandPlan {
             shutdown,
         }
     }
+}
+
+/// Queue an action into the plan, coalescing `SlotEditOp::SetValue` per slot
+/// address so an `oninput` flood collapses to one mutation.
+///
+/// The rule is deliberately dumb: scanning back from the tail, while the
+/// queued actions are still `SetValue`s, a queued `SetValue` for the **same
+/// address** is replaced in place by the newer one (latest value wins, order
+/// otherwise preserved). Any other action — a `Revert`, `SaveOverlay`, or an
+/// unrelated op — is a barrier: nothing coalesces across it.
+fn push_action_coalesced(actions: &mut Vec<UiAction>, action: UiAction) {
+    let Some(SlotEditOp::SetValue { address, .. }) = action.op_as::<SlotEditOp>() else {
+        actions.push(action);
+        return;
+    };
+    let address = address.clone();
+    for queued in actions.iter_mut().rev() {
+        match queued.op_as::<SlotEditOp>() {
+            Some(SlotEditOp::SetValue {
+                address: queued_address,
+                ..
+            }) => {
+                if *queued_address == address {
+                    *queued = action;
+                    return;
+                }
+            }
+            // A Revert (or any non-SetValue action) is a barrier.
+            _ => break,
+        }
+    }
+    actions.push(action);
 }
 
 /// Peek the command queue (without consuming) for a command whose class

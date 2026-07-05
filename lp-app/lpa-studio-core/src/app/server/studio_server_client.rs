@@ -3,12 +3,20 @@ use core::time::Duration;
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use std::collections::BTreeMap;
+
 use lpa_client::{
     CancelSignal, ClientError, ClientEvent, ClientIo, LpClient, ProgressDeadline, PullOutcome,
 };
 use lpa_link::{LinkConnection, LinkConnectionKind};
-use lpc_model::{ProjectOverlay, Revision};
-use lpc_wire::{ProjectReadEvent, ProjectReadRequest, WireProjectHandle};
+use lpc_model::{
+    ArtifactLocation, CommitResult, MutationCmdBatch, MutationCmdBatchResult, NodeId,
+    ProjectOverlay, Revision,
+};
+use lpc_wire::{
+    ProjectReadEvent, ProjectReadRequest, WireOverlayMutationRequest, WireProjectHandle,
+    WireProjectInventoryReadResponse,
+};
 
 use crate::app::project::demo_project::{
     DEMO_PROJECT_ID, DEMO_PROJECT_STORAGE_ID, demo_project_deploy_files,
@@ -78,6 +86,7 @@ impl StudioServerClient {
             project_id: DEMO_PROJECT_ID.to_string(),
             handle_id: handle.id(),
             inventory: ProjectInventorySummary::from(&inventory.value),
+            node_def_artifacts: node_def_artifacts(&inventory.value),
             logs,
         })
     }
@@ -91,6 +100,10 @@ pub struct LoadedDemoProject {
     pub project_id: String,
     pub handle_id: u32,
     pub inventory: ProjectInventorySummary,
+    /// Runtime node id → containing def artifact, from the connect-time
+    /// inventory read. Wire mutations target `(ArtifactLocation, SlotPath)`,
+    /// so slot edits resolve their artifact through this map.
+    pub node_def_artifacts: BTreeMap<NodeId, ArtifactLocation>,
     pub logs: Vec<UiLogEntry>,
 }
 
@@ -103,6 +116,9 @@ pub struct LoadedRunningProject {
     pub project_id: String,
     pub handle_id: u32,
     pub inventory: ProjectInventorySummary,
+    /// Runtime node id → containing def artifact (see
+    /// [`LoadedDemoProject::node_def_artifacts`]).
+    pub node_def_artifacts: BTreeMap<NodeId, ArtifactLocation>,
 }
 
 pub struct StudioProjectRead {
@@ -115,6 +131,21 @@ pub struct StudioProjectRead {
 pub struct StudioOverlayRead {
     pub overlay: ProjectOverlay,
     pub revision: Revision,
+    pub logs: Vec<UiLogEntry>,
+}
+
+/// Per-command results of an overlay mutation batch, with the post-mutation
+/// overlay revision (for `ProjectSync::apply_acked_edits`).
+pub struct StudioOverlayMutation {
+    pub result: MutationCmdBatchResult,
+    pub overlay_revision: Revision,
+    pub logs: Vec<UiLogEntry>,
+}
+
+/// Result of an overlay commit, with the post-commit overlay revision.
+pub struct StudioOverlayCommit {
+    pub result: CommitResult,
+    pub overlay_revision: Revision,
     pub logs: Vec<UiLogEntry>,
 }
 
@@ -153,6 +184,7 @@ impl StudioServerClient {
             project_id: choice.project_id,
             handle_id: choice.handle_id,
             inventory: ProjectInventorySummary::from(&inventory.value),
+            node_def_artifacts: node_def_artifacts(&inventory.value),
         })
     }
 
@@ -190,6 +222,50 @@ impl StudioServerClient {
         Ok(StudioOverlayRead {
             overlay: read.value.overlay,
             revision: read.value.revision,
+            logs,
+        })
+    }
+
+    /// Send an ordered overlay mutation batch and collect the per-command
+    /// results (accepted/rejected by `MutationCmdId`).
+    pub async fn project_overlay_mutate(
+        &mut self,
+        handle_id: u32,
+        batch: MutationCmdBatch,
+    ) -> Result<StudioOverlayMutation, UiError> {
+        let response = self
+            .client
+            .project_overlay_mutate(
+                WireProjectHandle::new(handle_id),
+                WireOverlayMutationRequest::new(batch),
+            )
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(response.events);
+        logs.extend(self.take_pending_logs());
+        Ok(StudioOverlayMutation {
+            result: response.value.result,
+            overlay_revision: response.value.overlay_revision,
+            logs,
+        })
+    }
+
+    /// Commit the pending-edit overlay to artifact storage. Post-P2, transient
+    /// entries survive the commit as pending overlay edits.
+    pub async fn project_overlay_commit(
+        &mut self,
+        handle_id: u32,
+    ) -> Result<StudioOverlayCommit, UiError> {
+        let response = self
+            .client
+            .project_overlay_commit(WireProjectHandle::new(handle_id))
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(response.events);
+        logs.extend(self.take_pending_logs());
+        Ok(StudioOverlayCommit {
+            result: response.value.result,
+            overlay_revision: response.value.overlay_revision,
             logs,
         })
     }
@@ -241,6 +317,23 @@ pub enum StudioProjectReadOutcome {
     Cancelled,
     /// The progress deadline fired: no frame arrived within the quiet-gap budget.
     TimedOut,
+}
+
+/// Build the runtime-node-id → def-artifact map from an inventory read.
+///
+/// Only node uses the runtime currently instantiates carry a `runtime_id`;
+/// those are exactly the nodes slot edits can address.
+fn node_def_artifacts(
+    inventory: &WireProjectInventoryReadResponse,
+) -> BTreeMap<NodeId, ArtifactLocation> {
+    inventory
+        .nodes
+        .iter()
+        .filter_map(|node| {
+            node.runtime_id
+                .map(|id| (id, node.def_location.artifact.clone()))
+        })
+        .collect()
 }
 
 fn server_io_from_link_connection(

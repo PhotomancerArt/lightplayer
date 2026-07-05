@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use lpc_model::slot::SlotFieldShapeView;
+use lpc_model::slot::{SlotFieldShapeView, SlotPersistence};
 use lpc_model::{
     LpType, LpValue, ProductRef, Revision, SlotData, SlotDirection, SlotMapKey, SlotName,
     SlotPathSegment, SlotPolicy, SlotSemantics, SlotShapeLookup, SlotShapeRegistry, SlotShapeView,
@@ -8,11 +8,13 @@ use lpc_model::{
 };
 
 use crate::{
-    ProjectSlotAddress, ProjectSlotRoot, UiAssetEditorKind, UiConfigSlot, UiConfigSlotBody,
-    UiProducedProduct, UiProducedValue, UiProductRef, UiSlotAsset, UiSlotEditorHint,
-    UiSlotFieldState, UiSlotOptionality, UiSlotRecord, UiSlotSourceState, UiSlotUnit, UiSlotValue,
-    app::project::format_slot_map_key,
+    PendingEditPhase, ProjectDirtyCounts, ProjectSlotAddress, ProjectSlotRoot, UiAssetEditorKind,
+    UiConfigSlot, UiConfigSlotBody, UiNodeDirtyState, UiProducedProduct, UiProducedValue,
+    UiProductRef, UiSlotAsset, UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality, UiSlotRecord,
+    UiSlotSourceState, UiSlotUnit, UiSlotValue, app::project::format_slot_map_key,
 };
+
+use super::SlotEditJoin;
 
 /// Compact structural family for a project slot controller.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -190,14 +192,15 @@ impl SlotController {
     }
 
     /// Project this slot and its descendants as a config slot row.
-    pub(in crate::app::project) fn ui_config_slot(&self) -> UiConfigSlot {
+    pub(in crate::app::project) fn ui_config_slot(&self, edits: &SlotEditJoin<'_>) -> UiConfigSlot {
         let mut slot = UiConfigSlot::new(
             self.ui_key(),
             self.label.clone(),
-            self.ui_config_slot_body(),
+            self.ui_config_slot_body(edits),
         )
+        .with_address(self.address.clone())
         .with_source(self.ui_source())
-        .with_state(self.ui_field_state());
+        .with_state(self.ui_field_state(edits));
 
         if let Some(detail) = self.ui_detail() {
             slot = slot.with_detail(detail);
@@ -212,11 +215,15 @@ impl SlotController {
     }
 
     /// Project this slot as an asset row if it looks asset-like.
-    pub(in crate::app::project) fn ui_asset_slot(&self) -> Option<UiConfigSlot> {
+    pub(in crate::app::project) fn ui_asset_slot(
+        &self,
+        edits: &SlotEditJoin<'_>,
+    ) -> Option<UiConfigSlot> {
         let asset = self.ui_slot_asset()?;
         let mut slot = UiConfigSlot::asset(self.ui_key(), self.label.clone(), asset)
+            .with_address(self.address.clone())
             .with_source(self.ui_source())
-            .with_state(self.ui_field_state());
+            .with_state(self.ui_field_state(edits));
         if let Some(detail) = self.ui_detail() {
             slot = slot.with_detail(detail);
         }
@@ -324,23 +331,45 @@ impl SlotController {
     /// Collect config and asset rows under this slot.
     pub(in crate::app::project) fn collect_config(
         &self,
+        edits: &SlotEditJoin<'_>,
         config_slots: &mut Vec<UiConfigSlot>,
         asset_slots: &mut Vec<UiConfigSlot>,
     ) {
         if self.is_internal_config_slot() {
             return;
         }
-        if let Some(asset) = self.ui_asset_slot() {
+        if let Some(asset) = self.ui_asset_slot(edits) {
             asset_slots.push(asset);
             return;
         }
         if self.address.is_root() && self.children_are_top_level_rows() {
             for child in &self.children {
-                child.collect_config(config_slots, asset_slots);
+                child.collect_config(edits, config_slots, asset_slots);
             }
             return;
         }
-        config_slots.push(self.ui_config_slot());
+        config_slots.push(self.ui_config_slot(edits));
+    }
+
+    /// Tally this slot and its descendants into the aggregate dirty counts,
+    /// classified by each slot's own `policy.persistence`. Uses the same
+    /// [`SlotEditJoin`] the DTO build consults, so the counts always agree
+    /// with the per-field dirty affordances.
+    pub(in crate::app::project) fn collect_dirty_counts(
+        &self,
+        edits: &SlotEditJoin<'_>,
+        counts: &mut ProjectDirtyCounts,
+    ) {
+        let dirty = edits.pending(&self.address).is_some() || edits.overlay_dirty(&self.address);
+        if dirty {
+            match self.policy.persistence {
+                SlotPersistence::Persisted => counts.persisted += 1,
+                SlotPersistence::Transient => counts.transient += 1,
+            }
+        }
+        for child in &self.children {
+            child.collect_dirty_counts(edits, counts);
+        }
     }
 
     /// Find a mutable descendant slot controller by address.
@@ -692,10 +721,14 @@ impl SlotController {
         context
     }
 
-    fn ui_config_slot_body(&self) -> UiConfigSlotBody {
+    fn ui_config_slot_body(&self, edits: &SlotEditJoin<'_>) -> UiConfigSlotBody {
         match &self.body {
             SlotControllerBody::Empty => UiConfigSlotBody::Empty,
             SlotControllerBody::Value { value } => {
+                // A buffered or overlay-pending edit shadows the synced value
+                // (rubber-band protection: an older pulled value must not
+                // fight the value the user asked for).
+                let value = edits.value_shadow(&self.address).unwrap_or(value);
                 UiConfigSlotBody::Value(self.ui_slot_value(value))
             }
             SlotControllerBody::Record
@@ -704,24 +737,26 @@ impl SlotController {
                 self.children
                     .iter()
                     .filter(|child| !child.is_internal_config_slot())
-                    .map(Self::ui_config_slot)
+                    .map(|child| child.ui_config_slot(edits))
                     .collect(),
             )),
-            SlotControllerBody::Option { present } if *present => self.ui_present_option_body(),
+            SlotControllerBody::Option { present } if *present => {
+                self.ui_present_option_body(edits)
+            }
             SlotControllerBody::Option { .. } | SlotControllerBody::Issue => {
                 UiConfigSlotBody::Empty
             }
         }
     }
 
-    fn ui_present_option_body(&self) -> UiConfigSlotBody {
+    fn ui_present_option_body(&self, edits: &SlotEditJoin<'_>) -> UiConfigSlotBody {
         let Some(child) = self.children.first() else {
             return UiConfigSlotBody::Empty;
         };
         if let Some(asset) = child.ui_slot_asset() {
             return UiConfigSlotBody::Asset(asset);
         }
-        child.ui_config_slot_body()
+        child.ui_config_slot_body(edits)
     }
 
     fn ui_slot_value(&self, value: &LpValue) -> UiSlotValue {
@@ -795,17 +830,35 @@ impl SlotController {
         UiSlotUnit::from_known_label(&self.label)
     }
 
-    fn ui_field_state(&self) -> UiSlotFieldState {
-        let state = if self.policy.writable {
+    fn ui_field_state(&self, edits: &SlotEditJoin<'_>) -> UiSlotFieldState {
+        let mut state = if self.policy.writable {
             UiSlotFieldState::editable()
         } else {
             UiSlotFieldState::readonly()
         };
-        if let Some(issue) = self.issues.first() {
-            state.with_invalid(issue.clone())
-        } else {
-            state
+        state = state.with_live(self.policy.persistence == SlotPersistence::Transient);
+
+        // Join order: edit buffer (Saving/Error + invalid reason), then the
+        // overlay mirror (Dirty), else Clean.
+        if let Some(edit) = edits.pending(&self.address) {
+            state = match &edit.phase {
+                PendingEditPhase::Pending | PendingEditPhase::InFlight { .. } => {
+                    state.with_dirty(UiNodeDirtyState::Saving)
+                }
+                PendingEditPhase::Failed { reason } => state
+                    .with_dirty(UiNodeDirtyState::Error)
+                    .with_invalid(reason.clone()),
+            };
+        } else if edits.overlay_dirty(&self.address) {
+            state = state.with_dirty(UiNodeDirtyState::Dirty);
         }
+
+        if state.invalid.is_none()
+            && let Some(issue) = self.issues.first()
+        {
+            state = state.with_invalid(issue.clone());
+        }
+        state
     }
 
     fn ui_detail(&self) -> Option<String> {

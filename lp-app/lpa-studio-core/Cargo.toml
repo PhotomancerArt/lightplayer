@@ -20,6 +20,13 @@ wasm-bindgen = { version = "0.2", optional = true }
 wasm-bindgen-futures = { version = "0.4", optional = true }
 web-sys = { version = "0.3", optional = true, features = ["Window"] }
 
+[dev-dependencies]
+# Host-only: the studio edit end-to-end tests run against an in-process
+# LightPlayer server (simulator session, no UI). Never built for wasm.
+lpa-server = { path = "../lpa-server" }
+lpc-shared = { path = "../../lp-core/lpc-shared", features = ["std"] }
+lpfs = { path = "../../lp-base/lpfs", features = ["std"] }
+
 [features]
 default = []
 browser-worker = [
