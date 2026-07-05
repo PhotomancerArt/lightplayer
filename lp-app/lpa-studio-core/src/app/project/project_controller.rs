@@ -109,6 +109,20 @@ impl ProjectController {
         counts
     }
 
+    /// Buffered edits still awaiting a server acknowledgement
+    /// (`Pending`/`InFlight`); `Failed` entries are parked, not in flight.
+    pub fn edits_in_flight(&self) -> usize {
+        self.edit_buffer
+            .values()
+            .filter(|edit| {
+                matches!(
+                    edit.phase,
+                    PendingEditPhase::Pending | PendingEditPhase::InFlight { .. }
+                )
+            })
+            .count()
+    }
+
     /// Build the per-snapshot edit-state join: the local edit buffer plus the
     /// overlay mirror's pending edits, reverse-mapped from
     /// `(artifact, path)` to slot addresses through the def-artifact map (an
@@ -257,6 +271,7 @@ impl ProjectController {
             self.ui_nodes(),
         )
         .with_dirty(self.dirty_counts())
+        .with_edits_in_flight(self.edits_in_flight())
     }
 
     pub fn mark_connecting_running(&mut self) {
@@ -3223,6 +3238,40 @@ mod tests {
         let slot = config_slot(&nodes, "Brightness");
         assert_eq!(slot_display(slot), "0.9", "buffer shadows the pulled value");
         assert_eq!(slot.state.dirty, UiNodeDirtyState::Saving);
+    }
+
+    #[test]
+    fn edits_in_flight_counts_pending_and_in_flight_but_not_failed() {
+        let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
+        assert_eq!(project.edits_in_flight(), 0);
+
+        project.insert_pending_edit_for_test(
+            brightness_address(),
+            PendingEdit::pending(LpValue::F32(0.9)),
+        );
+        project.insert_pending_edit_for_test(
+            rate_address(),
+            PendingEdit {
+                value: LpValue::F32(2.0),
+                phase: PendingEditPhase::InFlight {
+                    cmd_id: MutationCmdId::new(7),
+                },
+            },
+        );
+
+        assert_eq!(project.edits_in_flight(), 2);
+
+        project.insert_pending_edit_for_test(
+            rate_address(),
+            PendingEdit {
+                value: LpValue::F32(2.0),
+                phase: PendingEditPhase::Failed {
+                    reason: "not writable".to_string(),
+                },
+            },
+        );
+
+        assert_eq!(project.edits_in_flight(), 1, "failed edits are parked");
     }
 
     #[test]

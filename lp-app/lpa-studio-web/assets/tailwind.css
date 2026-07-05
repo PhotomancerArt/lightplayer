@@ -307,6 +307,9 @@
   .tw\:min-w-0 {
     min-width: calc(var(--tw-spacing) * 0);
   }
+  .tw\:min-w-10 {
+    min-width: calc(var(--tw-spacing) * 10);
+  }
   .tw\:min-w-\[2ch\] {
     min-width: 2ch;
   }
@@ -335,6 +338,9 @@
   }
   .tw\:rotate-90 {
     rotate: 90deg;
+  }
+  .tw\:cursor-pointer {
+    cursor: pointer;
   }
   .tw\:list-none {
     list-style-type: none;
@@ -788,6 +794,9 @@
   .tw\:p-\[22px\] {
     padding: 22px;
   }
+  .tw\:px-1\.5 {
+    padding-inline: calc(var(--tw-spacing) * 1.5);
+  }
   .tw\:px-2 {
     padding-inline: calc(var(--tw-spacing) * 2);
   }
@@ -806,6 +815,9 @@
   .tw\:px-\[18px\] {
     padding-inline: 18px;
   }
+  .tw\:py-0\.5 {
+    padding-block: calc(var(--tw-spacing) * 0.5);
+  }
   .tw\:py-1 {
     padding-block: calc(var(--tw-spacing) * 1);
   }
@@ -823,6 +835,9 @@
   }
   .tw\:pt-0\.5 {
     padding-top: calc(var(--tw-spacing) * 0.5);
+  }
+  .tw\:pt-1 {
+    padding-top: calc(var(--tw-spacing) * 1);
   }
   .tw\:pt-1\.5 {
     padding-top: calc(var(--tw-spacing) * 1.5);
@@ -1183,6 +1198,11 @@
   .tw\:disabled\:cursor-not-allowed {
     &:disabled {
       cursor: not-allowed;
+    }
+  }
+  .tw\:disabled\:opacity-50 {
+    &:disabled {
+      opacity: 50%;
     }
   }
   .tw\:disabled\:opacity-60 {

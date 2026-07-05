@@ -12,6 +12,10 @@ pub struct ProjectEditorView {
     /// affordances M2 builds; derived from the same edit-state join as the
     /// per-field dirty affordances.
     pub dirty: ProjectDirtyCounts,
+    /// Buffered edits still awaiting a server acknowledgement
+    /// (`Pending`/`InFlight` phases). Non-zero only in mid-op progressive
+    /// snapshots; drives the save strip's "in progress" state.
+    pub edits_in_flight: usize,
 }
 
 impl ProjectEditorView {
@@ -31,12 +35,19 @@ impl ProjectEditorView {
             tree,
             nodes,
             dirty: ProjectDirtyCounts::default(),
+            edits_in_flight: 0,
         }
     }
 
     /// Attach the aggregate dirty-slot counts.
     pub fn with_dirty(mut self, dirty: ProjectDirtyCounts) -> Self {
         self.dirty = dirty;
+        self
+    }
+
+    /// Attach the count of buffered edits awaiting acknowledgement.
+    pub fn with_edits_in_flight(mut self, edits_in_flight: usize) -> Self {
+        self.edits_in_flight = edits_in_flight;
         self
     }
 

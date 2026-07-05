@@ -159,6 +159,7 @@ pub fn NodeSection(
             section { class: section_class("tw:bg-card tw:p-0", first),
                 SlotRecordEditor {
                     record: UiSlotRecord::new(slots),
+                    on_action,
                 }
             }
         },
@@ -166,12 +167,13 @@ pub fn NodeSection(
             section { class: section_class("tw:bg-card tw:p-0", first),
                 SlotRecordEditor {
                     record: UiSlotRecord::new(assets),
+                    on_action,
                 }
             }
         },
         UiNodeSection::Children(children) => rsx! {
             section { class: section_class("tw:bg-card tw:px-4 tw:py-4", first),
-                NodeChildren { items: children, on_action: None }
+                NodeChildren { items: children, on_action }
             }
         },
     }

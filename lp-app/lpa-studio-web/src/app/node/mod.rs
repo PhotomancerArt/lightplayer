@@ -19,6 +19,7 @@ pub(crate) mod produced_value_stories;
 mod produced_value_view;
 mod produced_values;
 mod slot_detail_button;
+mod slot_edit_actions;
 mod slot_fields;
 mod slot_issue_list;
 mod slot_record_editor;
@@ -44,8 +45,8 @@ pub use produced_value_view::ProducedValueView;
 pub use produced_values::ProducedValues;
 pub(crate) use slot_detail_button::{SlotDetailButton, primary_affordance, slot_row_class};
 pub use slot_fields::{
-    BoolSlotField, DropdownSlotField, FloatSlotField, IntSlotField, StringSlotField, UIntSlotField,
-    Vec2SlotField, Vec3SlotField, XySlotField,
+    BoolSlotField, DropdownSlotField, FloatSlotField, IntSlotField, SliderSlotField,
+    StringSlotField, UIntSlotField, Vec2SlotField, Vec3SlotField, XySlotField,
 };
 pub use slot_issue_list::SlotIssueList;
 pub use slot_record_editor::SlotRecordEditor;

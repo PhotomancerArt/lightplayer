@@ -71,6 +71,7 @@ impl ProjectSync {
         ProjectSyncSummary {
             phase: self.phase,
             revision: self.view.revision.0,
+            overlay_revision: self.overlay_revision.0,
             node_count: self.view.tree.nodes.len(),
             root_node_count: self
                 .view
@@ -930,6 +931,16 @@ mod tests {
         sync.apply_overlay_read(overlay, Revision::new(4));
         assert!(!sync.overlay_fetch_needed());
         assert_eq!(sync.overlay_slot_edits().count(), 1, "dirty but quiet");
+    }
+
+    #[test]
+    fn summary_reports_the_overlay_mirror_revision() {
+        let mut sync = ProjectSync::new();
+        assert_eq!(sync.summary().overlay_revision, 0);
+
+        sync.apply_acked_edits(&[put_cmd(1, 1.0)], Revision::new(6));
+
+        assert_eq!(sync.summary().overlay_revision, 6);
     }
 
     #[test]
