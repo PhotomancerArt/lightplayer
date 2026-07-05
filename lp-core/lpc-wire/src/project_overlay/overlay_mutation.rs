@@ -1,6 +1,6 @@
 //! Project overlay mutation envelopes.
 
-use lpc_model::{MutationCmdBatch, MutationCmdBatchResult};
+use lpc_model::{MutationCmdBatch, MutationCmdBatchResult, Revision};
 
 /// Wire request for an ordered overlay mutation batch.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -18,11 +18,16 @@ impl WireOverlayMutationRequest {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct WireOverlayMutationResponse {
     pub result: MutationCmdBatchResult,
+    /// Revision at which the overlay last changed, after applying the batch.
+    pub overlay_revision: Revision,
 }
 
 impl WireOverlayMutationResponse {
-    pub fn new(result: MutationCmdBatchResult) -> Self {
-        Self { result }
+    pub fn new(result: MutationCmdBatchResult, overlay_revision: Revision) -> Self {
+        Self {
+            result,
+            overlay_revision,
+        }
     }
 }
 
@@ -64,17 +69,20 @@ mod tests {
 
     #[test]
     fn overlay_mutation_response_round_trips() {
-        let response = WireOverlayMutationResponse::new(MutationCmdBatchResult::new(vec![
-            MutationCmdResult::accepted(
+        let response = WireOverlayMutationResponse::new(
+            MutationCmdBatchResult::new(vec![MutationCmdResult::accepted(
                 MutationCmdId::new(1),
                 MutationEffect::OverlayChanged { changed: true },
-            ),
-        ]));
+            )]),
+            Revision::new(11),
+        );
 
         let json = serde_json::to_string(&response).unwrap();
         let decoded: WireOverlayMutationResponse = serde_json::from_str(&json).unwrap();
 
         assert_eq!(decoded, response);
+        assert_eq!(decoded.overlay_revision, Revision::new(11));
         assert!(json.contains("overlay_changed"));
+        assert!(json.contains("overlay_revision"));
     }
 }

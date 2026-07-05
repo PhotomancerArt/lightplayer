@@ -46,7 +46,7 @@ pub enum WireProjectCommandResponse {
 mod tests {
     use super::*;
     use alloc::vec::Vec;
-    use lpc_model::{MutationCmdBatch, ProjectInventory, ProjectOverlay};
+    use lpc_model::{MutationCmdBatch, ProjectInventory, ProjectOverlay, Revision};
 
     #[test]
     fn project_command_round_trips() {
@@ -74,7 +74,7 @@ mod tests {
         assert!(json.contains("read_inventory"));
 
         let overlay = WireProjectCommandResponse::ReadOverlay {
-            response: WireOverlayReadResponse::new(ProjectOverlay::new()),
+            response: WireOverlayReadResponse::new(ProjectOverlay::new(), Revision::default()),
         };
         let json = serde_json::to_string(&overlay).unwrap();
         let decoded: WireProjectCommandResponse = serde_json::from_str(&json).unwrap();

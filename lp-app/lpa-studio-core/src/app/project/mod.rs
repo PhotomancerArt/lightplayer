@@ -26,6 +26,7 @@ pub mod loaded_project_choice;
 pub mod node;
 pub mod project_connect_result;
 pub mod project_controller;
+pub mod project_dirty_counts;
 pub mod project_editor_op;
 pub mod project_editor_target;
 pub mod project_editor_view;
@@ -49,7 +50,8 @@ pub use node::{
     ProjectProductSubscriptionIntent,
 };
 pub use project_connect_result::ProjectConnectResult;
-pub use project_controller::{ProjectController, ProjectRefreshOutcome};
+pub use project_controller::{ProjectController, ProjectEditRun, ProjectRefreshOutcome};
+pub use project_dirty_counts::ProjectDirtyCounts;
 pub use project_editor_op::ProjectEditorOp;
 pub use project_editor_target::ProjectEditorTarget;
 pub use project_editor_view::ProjectEditorView;
@@ -67,5 +69,6 @@ pub use project_sync_run::ProjectSyncRun;
 pub use project_sync_summary::ProjectSyncSummary;
 pub use project_value_format::{format_lp_value, format_slot_map_key};
 pub use slot::{
-    ProjectSlotAddress, ProjectSlotRoot, SlotController, SlotControllerState, SlotKind,
+    PendingEdit, PendingEditPhase, ProjectSlotAddress, ProjectSlotRoot, SlotController,
+    SlotControllerState, SlotEditOp, SlotKind,
 };

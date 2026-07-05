@@ -857,7 +857,12 @@ fn display_key(key: &SlotMapKey) -> String {
     }
 }
 
-fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
+/// True when `value` is assignable to a value leaf of type `ty`.
+///
+/// This is the single source of truth for value/type compatibility: value
+/// assignment ([`set_slot_value`]) and mutate-time validation both use it.
+/// `LpType::Any` accepts every value.
+pub fn lp_value_matches_type(value: &LpValue, ty: &LpType) -> bool {
     match (value, ty) {
         (_, LpType::Any) => true,
         (LpValue::String(_), LpType::String)

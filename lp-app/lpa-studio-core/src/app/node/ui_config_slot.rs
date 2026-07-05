@@ -1,9 +1,9 @@
 //! Typed config slot rows for the Studio node editor.
 
 use crate::{
-    UiBindingEndpoint, UiNodeDirtyState, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind,
-    UiSlotAspectRow, UiSlotAsset, UiSlotFieldState, UiSlotRecord, UiSlotShape, UiSlotShapeField,
-    UiSlotSourceState, UiSlotValue,
+    ProjectSlotAddress, UiBindingEndpoint, UiNodeDirtyState, UiSlotAffordance, UiSlotAspect,
+    UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotFieldState, UiSlotRecord, UiSlotShape,
+    UiSlotShapeField, UiSlotSourceState, UiSlotValue,
 };
 
 /// The renderable body of a config slot row.
@@ -51,6 +51,9 @@ impl UiSlotOptionality {
 pub struct UiConfigSlot {
     /// Stable controller-owned field key.
     pub key: String,
+    /// Stable slot address for dispatching edits (`SlotEditOp`) from field
+    /// components. `None` for synthetic rows not backed by a project slot.
+    pub address: Option<ProjectSlotAddress>,
     /// Human-readable field label.
     pub label: String,
     /// Optional explanatory copy for info popovers and docs.
@@ -104,6 +107,7 @@ impl UiConfigSlot {
     pub fn new(key: impl Into<String>, label: impl Into<String>, body: UiConfigSlotBody) -> Self {
         Self {
             key: key.into(),
+            address: None,
             label: label.into(),
             description: None,
             detail: None,
@@ -114,6 +118,12 @@ impl UiConfigSlot {
             issues: Vec::new(),
             aspects: Vec::new(),
         }
+    }
+
+    /// Attach the stable slot address edits should target.
+    pub fn with_address(mut self, address: ProjectSlotAddress) -> Self {
+        self.address = Some(address);
+        self
     }
 
     /// Add an explanatory description.

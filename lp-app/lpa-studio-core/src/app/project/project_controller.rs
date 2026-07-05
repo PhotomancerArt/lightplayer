@@ -4,17 +4,22 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lpa_client::{CancelSignal, ProgressDeadline};
 
+use crate::app::project::slot::SlotEditJoin;
 use crate::core::notice::UiNotices;
 use crate::{
-    Controller, ControllerId, LoadedProjectChoice, ProgressState, ProjectConnectResult,
-    ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
-    ProjectNodeAddress, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp, ProjectSnapshot,
-    ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary,
-    StudioProjectReadOutcome, StudioServerClient, UiAction, UiError, UiIssue, UiLogEntry,
-    UiLogLevel, UiMetric, UiNodeView, UiPaneView, UiProductRef, UiResult, UiStatus, UiViewContent,
-    UxUpdateSink,
+    Controller, ControllerId, LoadedProjectChoice, PendingEdit, PendingEditPhase, ProgressState,
+    ProjectConnectResult, ProjectDirtyCounts, ProjectEditorOp, ProjectEditorTarget,
+    ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeTreeItem,
+    ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot,
+    ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp,
+    StudioOverlayMutation, StudioProjectReadOutcome, StudioServerClient, UiAction, UiError,
+    UiIssue, UiLogEntry, UiLogLevel, UiMetric, UiNodeView, UiNotice, UiPaneView, UiProductRef,
+    UiResult, UiStatus, UiViewContent, UxUpdateSink,
 };
-use lpc_model::{NodeId, TreePath};
+use lpc_model::{
+    ArtifactLocation, LpValue, MutationCmd, MutationCmdBatch, MutationCmdId, MutationCmdStatus,
+    MutationOp, MutationRejection, NodeId, SlotEdit, TreePath,
+};
 use lpc_view::ProjectView;
 
 use super::{NodeController, ProjectProductSubscriptionIntent};
@@ -30,6 +35,15 @@ pub struct ProjectController {
     active_editor_target: Option<ProjectEditorTarget>,
     sync: Option<ProjectSync>,
     root_nodes: Vec<NodeController>,
+    /// Un-acked local slot edits, keyed by address and held until the server
+    /// acknowledges them (state machine on [`PendingEdit`]).
+    edit_buffer: BTreeMap<ProjectSlotAddress, PendingEdit>,
+    /// Runtime node id → containing def artifact, installed from the
+    /// connect-time inventory read. Wire mutations target
+    /// `(ArtifactLocation, SlotPath)`, so slot edits resolve through this map.
+    def_artifacts: BTreeMap<NodeId, ArtifactLocation>,
+    /// Monotonic correlation-id source for overlay mutation commands.
+    next_mutation_cmd_id: u64,
 }
 
 impl ProjectController {
@@ -42,6 +56,9 @@ impl ProjectController {
             active_editor_target: None,
             sync: None,
             root_nodes: Vec::new(),
+            edit_buffer: BTreeMap::new(),
+            def_artifacts: BTreeMap::new(),
+            next_mutation_cmd_id: 1,
         }
     }
 
@@ -73,10 +90,76 @@ impl ProjectController {
     pub fn ui_nodes(&self) -> Vec<UiNodeView> {
         let product_preview =
             |product: &UiProductRef| self.sync.as_ref()?.product_preview(product).cloned();
+        let edits = self.slot_edit_join();
         self.root_nodes
             .iter()
-            .map(|node| node.ui_node_with_product_previews(&product_preview))
+            .map(|node| node.ui_node_with_product_previews(&product_preview, &edits))
             .collect()
+    }
+
+    /// Aggregate dirty-slot counts (persisted vs transient), derived by
+    /// walking the slot controllers with the same [`SlotEditJoin`] the DTOs
+    /// consult — one source of truth for field affordances and counts.
+    pub fn dirty_counts(&self) -> ProjectDirtyCounts {
+        let edits = self.slot_edit_join();
+        let mut counts = ProjectDirtyCounts::default();
+        for node in &self.root_nodes {
+            node.collect_dirty_counts(&edits, &mut counts);
+        }
+        counts
+    }
+
+    /// Build the per-snapshot edit-state join: the local edit buffer plus the
+    /// overlay mirror's pending edits, reverse-mapped from
+    /// `(artifact, path)` to slot addresses through the def-artifact map (an
+    /// artifact shared by several node uses marks each of them dirty).
+    fn slot_edit_join(&self) -> SlotEditJoin<'_> {
+        let mut overlay = BTreeMap::new();
+        if let Some(sync) = &self.sync {
+            let nodes_by_artifact = self.nodes_by_def_artifact();
+            for (artifact, path, op) in sync.overlay_slot_edits() {
+                let Some(nodes) = nodes_by_artifact.get(artifact) else {
+                    continue;
+                };
+                let value = match op {
+                    lpc_model::SlotEditOp::AssignValue(value) => Some(value.clone()),
+                    lpc_model::SlotEditOp::EnsurePresent | lpc_model::SlotEditOp::Remove => None,
+                };
+                for node in nodes {
+                    overlay.insert(
+                        ProjectSlotAddress::new(node.clone(), ProjectSlotRoot::def(), path.clone()),
+                        value.clone(),
+                    );
+                }
+            }
+        }
+        SlotEditJoin::new(&self.edit_buffer, overlay)
+    }
+
+    /// Reverse index from def artifact to the node addresses currently using
+    /// it, built from the synced controller tree plus the connect-time
+    /// def-artifact map.
+    fn nodes_by_def_artifact(&self) -> BTreeMap<&ArtifactLocation, Vec<ProjectNodeAddress>> {
+        fn collect<'a>(
+            node: &NodeController,
+            def_artifacts: &'a BTreeMap<NodeId, ArtifactLocation>,
+            map: &mut BTreeMap<&'a ArtifactLocation, Vec<ProjectNodeAddress>>,
+        ) {
+            if let Some(artifact) = def_artifacts.get(&node.target().node_id) {
+                map.entry(artifact)
+                    .or_default()
+                    .push(node.address().clone());
+            }
+            for child in node.children() {
+                collect(child, def_artifacts, map);
+            }
+        }
+
+        let mut map = BTreeMap::new();
+        for node in &self.root_nodes {
+            collect(node, &self.def_artifacts, &mut map);
+        }
+        map
     }
 
     /// Find a node controller by stable address.
@@ -173,6 +256,7 @@ impl ProjectController {
             self.node_tree_view(),
             self.ui_nodes(),
         )
+        .with_dirty(self.dirty_counts())
     }
 
     pub fn mark_connecting_running(&mut self) {
@@ -256,6 +340,7 @@ impl ProjectController {
         self.mark_loading_demo();
         let loaded = server.load_demo_project().await?;
         self.mark_ready(loaded.project_id, loaded.handle_id, loaded.inventory);
+        self.def_artifacts = loaded.node_def_artifacts;
         Ok(loaded.logs)
     }
 
@@ -288,6 +373,7 @@ impl ProjectController {
         let project = server.connect_loaded_project(choice).await?;
         let logs = server.take_pending_logs();
         self.mark_ready(project.project_id, project.handle_id, project.inventory);
+        self.def_artifacts = project.node_def_artifacts;
         Ok(logs)
     }
 
@@ -408,6 +494,7 @@ impl ProjectController {
                 let loaded = server.connect_loaded_project(project.clone()).await?;
                 logs.extend(server.take_pending_logs());
                 self.mark_ready(loaded.project_id, loaded.handle_id, loaded.inventory);
+                self.def_artifacts = loaded.node_def_artifacts;
                 Ok(ProjectConnectResult::Connected { logs })
             }
             _ => {
@@ -586,9 +673,10 @@ impl ProjectController {
         let products = self.subscribed_products();
         let request = self.sync_mut()?.initial_project_read_request(products);
         let read = server.project_read(handle_id, request).await?;
-        let logs = read.logs;
+        let mut logs = read.logs;
         self.sync_mut()?.apply_project_read_events(read.events)?;
         self.apply_synced_project_view()?;
+        logs.extend(self.sync_overlay_mirror(server, handle_id).await?);
         Ok(logs)
     }
 
@@ -639,7 +727,31 @@ impl ProjectController {
             Err(error) => return Err(error),
         }
         self.apply_synced_project_view()?;
+        logs.extend(self.sync_overlay_mirror(server, handle_id).await?);
         Ok(logs)
+    }
+
+    /// Ride-along overlay fetch after a completed project read is applied.
+    ///
+    /// Compares the read's runtime `overlay_changed_at` against the mirror's
+    /// stamped revision and pulls the full overlay only when it advanced — a
+    /// sequential command on the same connection that just finished the
+    /// streamed read. A quiet-but-dirty project issues no overlay read. On
+    /// fetch failure the mirror and its revision are left unchanged (the next
+    /// tick retries naturally) and the error propagates to the caller, which
+    /// surfaces it on `ProjectSync.issue` exactly like other read failures.
+    async fn sync_overlay_mirror(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+    ) -> Result<Vec<UiLogEntry>, UiError> {
+        if !self.sync_mut()?.overlay_fetch_needed() {
+            return Ok(Vec::new());
+        }
+        let read = server.project_overlay_read(handle_id).await?;
+        self.sync_mut()?
+            .apply_overlay_read(read.overlay, read.revision);
+        Ok(read.logs)
     }
 
     fn sync_mut(&mut self) -> Result<&mut ProjectSync, UiError> {
@@ -651,6 +763,16 @@ impl ProjectController {
     fn clear_loaded_project_state(&mut self) {
         self.sync = None;
         self.root_nodes.clear();
+        self.edit_buffer.clear();
+        self.def_artifacts.clear();
+    }
+
+    /// Install the runtime-node-id → def-artifact map.
+    ///
+    /// Production installs it from the connect-time inventory read (the
+    /// connect paths do this automatically); tests inject fixture maps.
+    pub fn set_node_def_artifacts(&mut self, map: BTreeMap<NodeId, ArtifactLocation>) {
+        self.def_artifacts = map;
     }
 
     fn apply_synced_project_view(&mut self) -> Result<(), UiError> {
@@ -682,6 +804,313 @@ impl ProjectController {
         }
         ProjectSyncRun::failed(logs)
     }
+
+    // --- Slot edit ops (P5): buffer, mutate, save, revert --------------------
+
+    /// Execute a [`SlotEditOp`] against the loaded project's overlay.
+    pub async fn apply_slot_edit(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: SlotEditOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        match op {
+            SlotEditOp::SetValue { address, value } => {
+                self.apply_set_value(server, handle_id, address, value)
+                    .await
+            }
+            SlotEditOp::Revert { address } => self.apply_revert(server, handle_id, address).await,
+        }
+    }
+
+    /// Commit the pending-edit overlay (persisted edits are written back to
+    /// def artifacts; transient edits stay pending) and re-sync the overlay
+    /// mirror from a follow-up read.
+    ///
+    /// The full read (rather than trusting the commit response's revision
+    /// alone) is deliberate: commit drops persisted entries but retains
+    /// transient ones (P2), and an only-transient commit does not bump the
+    /// overlay revision, so a wholesale re-read is the reliable way for the
+    /// mirror to converge immediately instead of waiting for the next tick's
+    /// fetch-on-advance.
+    pub async fn save_overlay(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let commit = server.project_overlay_commit(handle_id).await?;
+        let mut logs = commit.logs;
+        let read = server.project_overlay_read(handle_id).await?;
+        logs.extend(read.logs);
+        self.sync_mut()?
+            .apply_overlay_read(read.overlay, read.revision);
+
+        let changes = &commit.result.artifact_changes;
+        let written = changes.added.len() + changes.changed.len() + changes.removed.len();
+        let notice = if written == 0 {
+            UiNotice::info("Save found no persisted edits to write")
+        } else {
+            UiNotice::info(format!("Saved {written} project file(s)"))
+        };
+        Ok(ProjectEditRun {
+            notices: UiNotices::new().with_notice(notice),
+            logs,
+        })
+    }
+
+    /// Discard every pending edit: the local edit buffer clears immediately
+    /// and a `Clear` mutation empties the server overlay (mirrored on ack).
+    pub async fn revert_all_edits(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        self.edit_buffer.clear();
+        let batch = MutationCmdBatch::new(vec![MutationCmd {
+            id: self.allocate_mutation_cmd_id(),
+            mutation: MutationOp::Clear,
+        }]);
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        let rejections = self.apply_mutation_acks(&batch, &mutation, &[]);
+        let notices = if rejections.is_empty() {
+            UiNotices::new().with_notice(UiNotice::info("All pending edits reverted"))
+        } else {
+            rejection_notices(&rejections)
+        };
+        Ok(ProjectEditRun {
+            notices,
+            logs: mutation.logs,
+        })
+    }
+
+    async fn apply_set_value(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+        address: ProjectSlotAddress,
+        value: LpValue,
+    ) -> Result<ProjectEditRun, UiError> {
+        // (field input) → Pending: stage the value so DTOs shadow it (and a
+        // stale Failed entry from an earlier attempt is replaced).
+        self.edit_buffer
+            .insert(address.clone(), PendingEdit::pending(value.clone()));
+
+        let artifact = match self.resolve_def_artifact(&address) {
+            Ok(artifact) => artifact,
+            Err(reason) => {
+                self.fail_pending_edit(&address, reason.clone());
+                return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                    "Edit on {} was not sent: {reason}",
+                    address.path
+                ))));
+            }
+        };
+
+        let cmd_id = self.allocate_mutation_cmd_id();
+        if let Some(edit) = self.edit_buffer.get_mut(&address) {
+            // op sends → InFlight { cmd_id }.
+            edit.phase = PendingEditPhase::InFlight { cmd_id };
+        }
+        let batch = MutationCmdBatch::new(vec![MutationCmd {
+            id: cmd_id,
+            mutation: MutationOp::PutSlotEdit {
+                artifact,
+                edit: SlotEdit::assign_value(address.path.clone(), value),
+            },
+        }]);
+        let mutation = match server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await
+        {
+            Ok(mutation) => mutation,
+            Err(error) => {
+                // op error/timeout → Failed { transport reason }; the edited
+                // value stays visible with the Error affordance.
+                self.fail_pending_edit(&address, error.to_string());
+                return Err(error);
+            }
+        };
+        let rejections = self.apply_mutation_acks(&batch, &mutation, &[(cmd_id, address)]);
+        Ok(ProjectEditRun {
+            notices: rejection_notices(&rejections),
+            logs: mutation.logs,
+        })
+    }
+
+    async fn apply_revert(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+        address: ProjectSlotAddress,
+    ) -> Result<ProjectEditRun, UiError> {
+        // A revert always clears the local entry (typically a parked Failed
+        // value); the server overlay is cleaned up with a RemoveSlotEdit.
+        self.edit_buffer.remove(&address);
+        let artifact = match self.resolve_def_artifact(&address) {
+            Ok(artifact) => artifact,
+            Err(reason) => {
+                return Ok(ProjectEditRun::notice(UiNotice::warning(format!(
+                    "Revert on {} could not reach the server overlay: {reason}",
+                    address.path
+                ))));
+            }
+        };
+        let batch = MutationCmdBatch::new(vec![MutationCmd {
+            id: self.allocate_mutation_cmd_id(),
+            mutation: MutationOp::RemoveSlotEdit {
+                artifact,
+                path: address.path.clone(),
+            },
+        }]);
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        let rejections = self.apply_mutation_acks(&batch, &mutation, &[]);
+        Ok(ProjectEditRun {
+            notices: rejection_notices(&rejections),
+            logs: mutation.logs,
+        })
+    }
+
+    /// Apply a mutation response to the edit buffer and the overlay mirror.
+    ///
+    /// Accepted commands are folded into the mirror via
+    /// [`ProjectSync::apply_acked_edits`] (stamping the response's
+    /// `overlay_revision`) and release their staged buffer entries; rejected
+    /// commands park their entries in `Failed` with the rejection reason.
+    /// `staged` maps command ids to the buffer addresses they carry.
+    fn apply_mutation_acks(
+        &mut self,
+        batch: &MutationCmdBatch,
+        mutation: &StudioOverlayMutation,
+        staged: &[(MutationCmdId, ProjectSlotAddress)],
+    ) -> Vec<MutationRejection> {
+        let mut accepted = Vec::new();
+        let mut rejections = Vec::new();
+        for result in &mutation.result.results {
+            let command = batch
+                .commands
+                .iter()
+                .find(|command| command.id == result.id);
+            let address = staged
+                .iter()
+                .find(|(id, _)| *id == result.id)
+                .map(|(_, address)| address);
+            match &result.status {
+                MutationCmdStatus::Accepted { .. } => {
+                    if let Some(command) = command {
+                        accepted.push(command.clone());
+                    }
+                    // ack accepted → entry removed; the slot now reads dirty
+                    // from the overlay mirror.
+                    if let Some(address) = address {
+                        self.edit_buffer.remove(address);
+                    }
+                }
+                MutationCmdStatus::Rejected { rejection } => {
+                    // ack rejected → Failed { reason }; feeds `invalid`.
+                    if let Some(address) = address {
+                        self.fail_pending_edit(address, rejection_text(rejection));
+                    }
+                    rejections.push(rejection.clone());
+                }
+            }
+        }
+        if !accepted.is_empty()
+            && let Some(sync) = &mut self.sync
+        {
+            sync.apply_acked_edits(&accepted, mutation.overlay_revision);
+        }
+        rejections
+    }
+
+    /// Resolve the def artifact wire mutations for `address` must target.
+    fn resolve_def_artifact(
+        &self,
+        address: &ProjectSlotAddress,
+    ) -> Result<ArtifactLocation, String> {
+        if address.root != ProjectSlotRoot::Def {
+            return Err(format!(
+                "slot root '{}' is not editable (only 'def' slots accept edits)",
+                address.root.name()
+            ));
+        }
+        let node = self
+            .node(&address.node)
+            .ok_or_else(|| format!("node {} is not in the synced project", address.node))?;
+        self.def_artifacts
+            .get(&node.target().node_id)
+            .cloned()
+            .ok_or_else(|| format!("no def artifact is known for node {}", address.node))
+    }
+
+    fn fail_pending_edit(&mut self, address: &ProjectSlotAddress, reason: String) {
+        if let Some(edit) = self.edit_buffer.get_mut(address) {
+            edit.phase = PendingEditPhase::Failed { reason };
+        }
+    }
+
+    fn allocate_mutation_cmd_id(&mut self) -> MutationCmdId {
+        let id = MutationCmdId::new(self.next_mutation_cmd_id);
+        self.next_mutation_cmd_id += 1;
+        id
+    }
+}
+
+/// Cross-module test hooks for the edit buffer (contract tests drive the DTO
+/// join without a scripted server round-trip).
+#[cfg(test)]
+impl ProjectController {
+    pub(crate) fn edit_buffer_for_test(&self) -> &BTreeMap<ProjectSlotAddress, PendingEdit> {
+        &self.edit_buffer
+    }
+
+    pub(crate) fn insert_pending_edit_for_test(
+        &mut self,
+        address: ProjectSlotAddress,
+        edit: PendingEdit,
+    ) {
+        self.edit_buffer.insert(address, edit);
+    }
+}
+
+/// Outcome of one edit op: user-facing notices plus server log lines for the
+/// bounded log ring (mirrors the `ProjectSyncRun` pattern).
+pub struct ProjectEditRun {
+    pub notices: UiNotices,
+    pub logs: Vec<UiLogEntry>,
+}
+
+impl ProjectEditRun {
+    fn notice(notice: UiNotice) -> Self {
+        Self {
+            notices: UiNotices::new().with_notice(notice),
+            logs: Vec::new(),
+        }
+    }
+}
+
+/// Human-readable text for a rejection: the server message when present,
+/// else the stable reason category.
+fn rejection_text(rejection: &MutationRejection) -> String {
+    if rejection.message.is_empty() {
+        format!("{:?}", rejection.reason)
+    } else {
+        rejection.message.clone()
+    }
+}
+
+fn rejection_notices(rejections: &[MutationRejection]) -> UiNotices {
+    let mut notices = UiNotices::new();
+    for rejection in rejections {
+        notices = notices.with_notice(UiNotice::warning(format!(
+            "Edit rejected: {}",
+            rejection_text(rejection)
+        )));
+    }
+    notices
 }
 
 impl Controller for ProjectController {
@@ -2247,5 +2676,803 @@ mod tests {
 
     fn node_address(path: &str) -> ProjectNodeAddress {
         ProjectNodeAddress::parse(path).unwrap()
+    }
+
+    // --- Overlay mirror ride-along fetch contract tests ---------------------
+
+    use std::cell::RefCell;
+    use std::collections::VecDeque;
+    use std::pin::Pin;
+    use std::rc::Rc;
+    use std::sync::Arc;
+    use std::task::{Context, Poll, Wake, Waker};
+
+    use lpa_client::ClientIo;
+    use lpc_model::{
+        ArtifactLocation, MutationCmd, MutationCmdId, MutationOp, ProjectOverlay, SlotEdit,
+        SlotEditOp,
+    };
+    use lpc_wire::{
+        ClientMessage, ClientRequest, ProjectRuntimeStatus, RuntimeReadResult, TransportError,
+        WireOverlayReadResponse, WireProjectCommand, WireProjectCommandResponse, WireServerMessage,
+        WireServerMsgBody,
+    };
+
+    fn overlay_artifact() -> ArtifactLocation {
+        ArtifactLocation::file("/orbit.shader.toml")
+    }
+
+    fn overlay_slot_path() -> SlotPath {
+        SlotPath::parse("controls.rate").unwrap()
+    }
+
+    fn overlay_with_rate_edit() -> ProjectOverlay {
+        let mut overlay = ProjectOverlay::new();
+        overlay.put_slot_edit(
+            overlay_artifact(),
+            SlotEdit::assign_value(overlay_slot_path(), LpValue::F32(0.5)),
+        );
+        overlay
+    }
+
+    /// A minimal project-read response whose runtime status carries
+    /// `overlay_changed_at` — the signal the ride-along fetch gates on.
+    fn runtime_read_response(id: u64, revision: i64, overlay_changed_at: i64) -> WireServerMessage {
+        let revision = Revision::new(revision);
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::ProjectRead {
+                events: vec![
+                    ProjectReadEvent::Begin { revision },
+                    ProjectReadEvent::Query {
+                        index: 0,
+                        event: ProjectReadQueryEvent::Runtime(RuntimeReadResult {
+                            project: ProjectRuntimeStatus {
+                                revision,
+                                overlay_changed_at: Revision::new(overlay_changed_at),
+                                frame_num: 1,
+                                frame_delta_ms: 16,
+                                frame_total_ms: 16,
+                                demand_root_count: 0,
+                                runtime_buffer_count: 0,
+                            },
+                            server: None,
+                        }),
+                    },
+                    ProjectReadEvent::End { revision },
+                ],
+            },
+        )
+    }
+
+    fn overlay_read_response(id: u64, overlay: ProjectOverlay, revision: i64) -> WireServerMessage {
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::ProjectCommand {
+                response: WireProjectCommandResponse::ReadOverlay {
+                    response: WireOverlayReadResponse::new(overlay, Revision::new(revision)),
+                },
+            },
+        )
+    }
+
+    fn error_response(id: u64, error: &str) -> WireServerMessage {
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::Error {
+                error: error.to_string(),
+            },
+        )
+    }
+
+    fn ready_project_with_scripted_client(
+        responses: Vec<WireServerMessage>,
+    ) -> (
+        ProjectController,
+        StudioServerClient,
+        Rc<RefCell<Vec<ClientMessage>>>,
+    ) {
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        let client = StudioServerClient::from_io_for_test(
+            "fake-protocol",
+            Box::new(OverlayScriptedClientIo {
+                sent: Rc::clone(&sent),
+                responses: RefCell::new(responses.into()),
+            }),
+        );
+        let mut project = ProjectController::new();
+        project.mark_ready("loaded-project", 7, ProjectInventorySummary::default());
+        (project, client, sent)
+    }
+
+    fn sent_kinds(sent: &Rc<RefCell<Vec<ClientMessage>>>) -> Vec<&'static str> {
+        sent.borrow()
+            .iter()
+            .map(|message| match &message.msg {
+                ClientRequest::ProjectRead { .. } => "project_read",
+                ClientRequest::ProjectCommand {
+                    command: WireProjectCommand::ReadOverlay { .. },
+                    ..
+                } => "overlay_read",
+                _ => "other",
+            })
+            .collect()
+    }
+
+    #[test]
+    fn refresh_fetches_overlay_only_when_revision_advances() {
+        let (mut project, mut client, sent) = ready_project_with_scripted_client(vec![
+            runtime_read_response(1, 10, 5),
+            overlay_read_response(2, overlay_with_rate_edit(), 5),
+            runtime_read_response(3, 11, 5),
+        ]);
+
+        // First refresh: the runtime status reports an overlay revision the
+        // zero-stamped mirror has never seen, so exactly one ride-along fetch
+        // replaces the mirror.
+        block_on_ready(project.refresh_project(&mut client)).unwrap();
+
+        assert_eq!(sent_kinds(&sent), vec!["project_read", "overlay_read"]);
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(sync.overlay_revision(), Revision::new(5));
+        assert_eq!(
+            sync.overlay_edit_at(&overlay_artifact(), &overlay_slot_path()),
+            Some(&SlotEditOp::AssignValue(LpValue::F32(0.5)))
+        );
+
+        // Second refresh: quiet but dirty — the overlay revision is unchanged
+        // across ticks, so no overlay read is issued and the dirty mirror is
+        // retained as-is.
+        block_on_ready(project.refresh_project(&mut client)).unwrap();
+
+        assert_eq!(
+            sent_kinds(&sent),
+            vec!["project_read", "overlay_read", "project_read"],
+            "a quiet-but-dirty project must not issue an overlay read"
+        );
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(sync.overlay_revision(), Revision::new(5));
+        assert_eq!(sync.overlay_slot_edits().count(), 1);
+    }
+
+    #[test]
+    fn overlay_fetch_failure_keeps_mirror_and_retries_next_refresh() {
+        let (mut project, mut client, sent) = ready_project_with_scripted_client(vec![
+            runtime_read_response(1, 10, 5),
+            error_response(2, "overlay read exploded"),
+            runtime_read_response(3, 11, 5),
+            overlay_read_response(4, overlay_with_rate_edit(), 5),
+        ]);
+
+        let run = block_on_ready(project.refresh_project(&mut client)).unwrap();
+
+        assert!(!run.synced, "a failed ride-along fetch fails the sync run");
+        let sync = project.sync.as_ref().unwrap();
+        assert!(sync.is_failed());
+        assert!(
+            sync.summary().issue.is_some(),
+            "fetch failure surfaces on ProjectSync.issue like other read failures"
+        );
+        assert_eq!(
+            sync.overlay_revision(),
+            Revision::default(),
+            "mirror revision is unchanged on fetch failure"
+        );
+        assert!(sync.overlay().is_empty(), "mirror is unchanged on failure");
+
+        // The next tick retries the fetch naturally (the revision gap is
+        // still observed) and succeeds.
+        let run = block_on_ready(project.refresh_project(&mut client)).unwrap();
+
+        assert!(run.synced);
+        assert_eq!(
+            sent_kinds(&sent),
+            vec![
+                "project_read",
+                "overlay_read",
+                "project_read",
+                "overlay_read"
+            ]
+        );
+        let sync = project.sync.as_ref().unwrap();
+        assert!(sync.is_ready());
+        assert_eq!(sync.overlay_revision(), Revision::new(5));
+        assert_eq!(sync.overlay_slot_edits().count(), 1);
+    }
+
+    #[test]
+    fn own_acked_edits_do_not_trigger_ride_along_fetch() {
+        let (mut project, mut client, sent) =
+            ready_project_with_scripted_client(vec![runtime_read_response(1, 10, 5)]);
+        // The client's own mutation acked at revision 5 (P5 drives this); the
+        // mirror is stamped locally, with no follow-up fetch expected.
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[MutationCmd {
+                id: MutationCmdId::new(1),
+                mutation: MutationOp::PutSlotEdit {
+                    artifact: overlay_artifact(),
+                    edit: SlotEdit::assign_value(overlay_slot_path(), LpValue::F32(0.5)),
+                },
+            }],
+            Revision::new(5),
+        );
+
+        block_on_ready(project.refresh_project(&mut client)).unwrap();
+
+        assert_eq!(
+            sent_kinds(&sent),
+            vec!["project_read"],
+            "acked local edits at the reported revision must not fetch"
+        );
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(sync.overlay_revision(), Revision::new(5));
+        assert_eq!(
+            sync.overlay_edit_at(&overlay_artifact(), &overlay_slot_path()),
+            Some(&SlotEditOp::AssignValue(LpValue::F32(0.5)))
+        );
+    }
+
+    // --- Edit buffer / slot edit op contract tests ---------------------------
+
+    use crate::{PendingEdit, PendingEditPhase, UiNodeDirtyState, UiNoticeLevel};
+    use lpc_model::{
+        MutationCmdBatchResult, MutationCmdResult, MutationEffect, MutationRejection,
+        MutationRejectionReason,
+    };
+    use lpc_wire::{WireOverlayCommitResponse, WireOverlayMutationResponse};
+
+    fn edit_artifact() -> ArtifactLocation {
+        ArtifactLocation::file("/orbit.shader.json")
+    }
+
+    fn brightness_address() -> crate::ProjectSlotAddress {
+        crate::ProjectSlotAddress::new(
+            node_address("/demo.project/orbit.shader"),
+            ProjectSlotRoot::def(),
+            SlotPath::parse("brightness").unwrap(),
+        )
+    }
+
+    fn rate_address() -> crate::ProjectSlotAddress {
+        crate::ProjectSlotAddress::new(
+            node_address("/demo.project/orbit.shader"),
+            ProjectSlotRoot::def(),
+            SlotPath::parse("rate").unwrap(),
+        )
+    }
+
+    /// A ready project with an applied view whose def root has a persisted
+    /// `brightness` (default policy) and a transient `rate` control, plus the
+    /// def-artifact map a connect-time inventory read would have installed.
+    fn editable_project_with_scripted_client(
+        responses: Vec<WireServerMessage>,
+    ) -> (
+        ProjectController,
+        StudioServerClient,
+        Rc<RefCell<Vec<ClientMessage>>>,
+    ) {
+        let (mut project, client, sent) = ready_project_with_scripted_client(responses);
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_mixed_policy_slots(&mut view, 1, Revision::new(2));
+        project.apply_project_view(&view).unwrap();
+        project.set_node_def_artifacts(BTreeMap::from([(NodeId::new(1), edit_artifact())]));
+        (project, client, sent)
+    }
+
+    fn install_mixed_policy_slots(view: &mut ProjectView, node_id: u32, revision: Revision) {
+        view.slots.root_shapes.clear();
+        view.slots.roots.clear();
+        view.slots.registry = Default::default();
+        let def_shape = SlotShapeId::new(500);
+        let mut rate = SlotFieldShape::new("rate", SlotShape::value(LpType::F32)).unwrap();
+        rate.policy = lpc_model::SlotPolicy::writable_transient();
+        view.slots
+            .registry
+            .register_dynamic_shape(
+                def_shape,
+                SlotShape::Record {
+                    meta: SlotMeta::empty(),
+                    fields: vec![
+                        SlotFieldShape::new("brightness", SlotShape::value(LpType::F32)).unwrap(),
+                        rate,
+                    ],
+                },
+            )
+            .unwrap();
+        view.slots
+            .root_shapes
+            .insert(format!("node.{node_id}.def"), def_shape);
+        view.slots.roots.insert(
+            format!("node.{node_id}.def"),
+            SlotData::Record(SlotRecord::with_revision(
+                revision,
+                vec![
+                    SlotData::Value(WithRevision::new(revision, LpValue::F32(0.75))),
+                    SlotData::Value(WithRevision::new(revision, LpValue::F32(1.0))),
+                ],
+            )),
+        );
+    }
+
+    fn mutation_response(
+        id: u64,
+        results: Vec<MutationCmdResult>,
+        revision: i64,
+    ) -> WireServerMessage {
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::ProjectCommand {
+                response: WireProjectCommandResponse::MutateOverlay {
+                    response: WireOverlayMutationResponse::new(
+                        MutationCmdBatchResult::new(results),
+                        Revision::new(revision),
+                    ),
+                },
+            },
+        )
+    }
+
+    fn commit_response(
+        id: u64,
+        changed: Vec<ArtifactLocation>,
+        revision: i64,
+    ) -> WireServerMessage {
+        let mut result = lpc_model::CommitResult::default();
+        result.artifact_changes.changed = changed;
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::ProjectCommand {
+                response: WireProjectCommandResponse::CommitOverlay {
+                    response: WireOverlayCommitResponse::new(result, Revision::new(revision)),
+                },
+            },
+        )
+    }
+
+    fn accepted(id: u64) -> MutationCmdResult {
+        MutationCmdResult::accepted(
+            MutationCmdId::new(id),
+            MutationEffect::OverlayChanged { changed: true },
+        )
+    }
+
+    fn config_slot<'a>(nodes: &'a [crate::UiNodeView], label: &str) -> &'a crate::UiConfigSlot {
+        section_config_slots(node_sections(&nodes[0]))
+            .iter()
+            .find(|slot| slot.label == label)
+            .unwrap_or_else(|| panic!("config slot {label} should exist"))
+    }
+
+    fn slot_display(slot: &crate::UiConfigSlot) -> &str {
+        let UiConfigSlotBody::Value(value) = &slot.body else {
+            panic!("expected value body");
+        };
+        &value.display
+    }
+
+    #[test]
+    fn accepted_set_value_releases_buffer_and_reads_dirty_from_mirror() {
+        let (mut project, mut client, sent) =
+            editable_project_with_scripted_client(vec![mutation_response(1, vec![accepted(1)], 3)]);
+
+        let run = block_on_ready(project.apply_slot_edit(
+            &mut client,
+            crate::SlotEditOp::SetValue {
+                address: brightness_address(),
+                value: LpValue::F32(0.9),
+            },
+        ))
+        .unwrap();
+
+        assert!(
+            run.notices.notices.is_empty(),
+            "accepted edit needs no notice"
+        );
+        // Entry gone: dirty now derives from the overlay mirror.
+        assert!(project.edit_buffer_for_test().is_empty());
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(sync.overlay_revision(), Revision::new(3));
+        assert_eq!(
+            sync.overlay_edit_at(&edit_artifact(), &SlotPath::parse("brightness").unwrap()),
+            Some(&SlotEditOp::AssignValue(LpValue::F32(0.9)))
+        );
+
+        // The wire mutation targeted (def artifact, path).
+        let sent = sent.borrow();
+        let ClientRequest::ProjectCommand {
+            command: WireProjectCommand::MutateOverlay { request },
+            ..
+        } = &sent[0].msg
+        else {
+            panic!("expected an overlay mutation");
+        };
+        assert_eq!(request.batch.commands.len(), 1);
+        assert!(matches!(
+            &request.batch.commands[0].mutation,
+            MutationOp::PutSlotEdit { artifact, edit }
+                if *artifact == edit_artifact() && edit.path().to_string() == "brightness"
+        ));
+        drop(sent);
+
+        // DTO join: Dirty from the mirror, value shadowed by the acked edit,
+        // persisted (not live), and the address rides along for dispatch.
+        let nodes = project.ui_nodes();
+        let slot = config_slot(&nodes, "Brightness");
+        assert_eq!(slot.state.dirty, UiNodeDirtyState::Dirty);
+        assert!(!slot.state.live);
+        assert_eq!(slot_display(slot), "0.9");
+        assert_eq!(slot.address, Some(brightness_address()));
+        assert_eq!(
+            project.dirty_counts(),
+            ProjectDirtyCounts {
+                persisted: 1,
+                transient: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn rejected_set_value_parks_failed_entry_and_feeds_invalid() {
+        let (mut project, mut client, _sent) =
+            editable_project_with_scripted_client(vec![mutation_response(
+                1,
+                vec![MutationCmdResult::rejected(
+                    MutationCmdId::new(1),
+                    MutationRejection::new(
+                        MutationRejectionReason::TypeMismatch,
+                        "expected f32".to_string(),
+                    ),
+                )],
+                0,
+            )]);
+
+        let run = block_on_ready(project.apply_slot_edit(
+            &mut client,
+            crate::SlotEditOp::SetValue {
+                address: brightness_address(),
+                value: LpValue::F32(0.9),
+            },
+        ))
+        .unwrap();
+
+        assert_eq!(run.notices.notices.len(), 1);
+        assert_eq!(run.notices.notices[0].level, UiNoticeLevel::Warning);
+
+        // Buffer preserves the failed value for display.
+        let edit = project
+            .edit_buffer_for_test()
+            .get(&brightness_address())
+            .expect("failed entry parked");
+        assert_eq!(edit.value, LpValue::F32(0.9));
+        assert_eq!(edit.failure_reason(), Some("expected f32"));
+        assert!(project.sync.as_ref().unwrap().overlay().is_empty());
+
+        let nodes = project.ui_nodes();
+        let slot = config_slot(&nodes, "Brightness");
+        assert_eq!(slot.state.dirty, UiNodeDirtyState::Error);
+        assert_eq!(slot.state.invalid.as_deref(), Some("expected f32"));
+        assert_eq!(slot_display(slot), "0.9", "failed value stays visible");
+    }
+
+    #[test]
+    fn transport_failure_parks_failed_entry_with_transport_reason() {
+        // No scripted responses: the mutate send errors out.
+        let (mut project, mut client, _sent) = editable_project_with_scripted_client(Vec::new());
+
+        let result = block_on_ready(project.apply_slot_edit(
+            &mut client,
+            crate::SlotEditOp::SetValue {
+                address: brightness_address(),
+                value: LpValue::F32(0.9),
+            },
+        ));
+
+        assert!(result.is_err(), "transport failure propagates as an error");
+        let edit = project
+            .edit_buffer_for_test()
+            .get(&brightness_address())
+            .expect("failed entry parked");
+        assert!(edit.is_failed());
+        assert_eq!(edit.value, LpValue::F32(0.9));
+    }
+
+    #[test]
+    fn set_value_outside_def_root_fails_client_side() {
+        let (mut project, mut client, sent) = editable_project_with_scripted_client(Vec::new());
+        let state_address = crate::ProjectSlotAddress::new(
+            node_address("/demo.project/orbit.shader"),
+            ProjectSlotRoot::state(),
+            SlotPath::parse("output").unwrap(),
+        );
+
+        let run = block_on_ready(project.apply_slot_edit(
+            &mut client,
+            crate::SlotEditOp::SetValue {
+                address: state_address.clone(),
+                value: LpValue::F32(0.9),
+            },
+        ))
+        .unwrap();
+
+        assert_eq!(run.notices.notices.len(), 1);
+        assert!(sent.borrow().is_empty(), "no mutation is sent");
+        let edit = project.edit_buffer_for_test().get(&state_address).unwrap();
+        assert!(edit.is_failed());
+    }
+
+    #[test]
+    fn pulled_older_value_does_not_regress_dto_while_edit_in_flight() {
+        let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
+        project.insert_pending_edit_for_test(
+            brightness_address(),
+            PendingEdit {
+                value: LpValue::F32(0.9),
+                phase: PendingEditPhase::InFlight {
+                    cmd_id: MutationCmdId::new(7),
+                },
+            },
+        );
+
+        // A refresh pull applies an older brightness while the edit is
+        // in flight; the DTO must keep showing the buffered value.
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_mixed_policy_slots(&mut view, 1, Revision::new(3));
+        project.apply_project_view(&view).unwrap();
+
+        let nodes = project.ui_nodes();
+        let slot = config_slot(&nodes, "Brightness");
+        assert_eq!(slot_display(slot), "0.9", "buffer shadows the pulled value");
+        assert_eq!(slot.state.dirty, UiNodeDirtyState::Saving);
+    }
+
+    #[test]
+    fn revert_clears_local_entry_and_server_edit() {
+        let (mut project, mut client, sent) =
+            editable_project_with_scripted_client(vec![mutation_response(1, vec![accepted(1)], 4)]);
+        // A parked failed edit plus a mirrored server edit for the address.
+        project.insert_pending_edit_for_test(
+            brightness_address(),
+            PendingEdit {
+                value: LpValue::F32(0.9),
+                phase: PendingEditPhase::Failed {
+                    reason: "expected f32".to_string(),
+                },
+            },
+        );
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[MutationCmd {
+                id: MutationCmdId::new(9),
+                mutation: MutationOp::PutSlotEdit {
+                    artifact: edit_artifact(),
+                    edit: SlotEdit::assign_value(
+                        SlotPath::parse("brightness").unwrap(),
+                        LpValue::F32(0.9),
+                    ),
+                },
+            }],
+            Revision::new(3),
+        );
+
+        block_on_ready(project.apply_slot_edit(
+            &mut client,
+            crate::SlotEditOp::Revert {
+                address: brightness_address(),
+            },
+        ))
+        .unwrap();
+
+        assert!(project.edit_buffer_for_test().is_empty());
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(
+            sync.overlay_edit_at(&edit_artifact(), &SlotPath::parse("brightness").unwrap()),
+            None
+        );
+        assert_eq!(sync.overlay_revision(), Revision::new(4));
+        assert!(matches!(
+            &sent.borrow()[0].msg,
+            ClientRequest::ProjectCommand {
+                command: WireProjectCommand::MutateOverlay { request },
+                ..
+            } if matches!(&request.batch.commands[0].mutation, MutationOp::RemoveSlotEdit { .. })
+        ));
+
+        let nodes = project.ui_nodes();
+        let slot = config_slot(&nodes, "Brightness");
+        assert_eq!(slot.state.dirty, UiNodeDirtyState::Clean);
+        assert_eq!(slot_display(slot), "0.75", "synced value shows again");
+    }
+
+    #[test]
+    fn save_overlay_commits_persisted_edits_and_keeps_transient_dirty() {
+        // Post-commit overlay retains only the transient rate edit (P2).
+        let mut post_commit_overlay = ProjectOverlay::new();
+        post_commit_overlay.put_slot_edit(
+            edit_artifact(),
+            SlotEdit::assign_value(SlotPath::parse("rate").unwrap(), LpValue::F32(2.0)),
+        );
+        let (mut project, mut client, sent) = editable_project_with_scripted_client(vec![
+            commit_response(1, vec![edit_artifact()], 5),
+            overlay_read_response(2, post_commit_overlay, 5),
+        ]);
+        // Mirror holds one persisted (brightness) and one transient (rate)
+        // acked edit before the save.
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[
+                MutationCmd {
+                    id: MutationCmdId::new(1),
+                    mutation: MutationOp::PutSlotEdit {
+                        artifact: edit_artifact(),
+                        edit: SlotEdit::assign_value(
+                            SlotPath::parse("brightness").unwrap(),
+                            LpValue::F32(0.9),
+                        ),
+                    },
+                },
+                MutationCmd {
+                    id: MutationCmdId::new(2),
+                    mutation: MutationOp::PutSlotEdit {
+                        artifact: edit_artifact(),
+                        edit: SlotEdit::assign_value(
+                            SlotPath::parse("rate").unwrap(),
+                            LpValue::F32(2.0),
+                        ),
+                    },
+                },
+            ],
+            Revision::new(3),
+        );
+        assert_eq!(
+            project.dirty_counts(),
+            ProjectDirtyCounts {
+                persisted: 1,
+                transient: 1,
+            }
+        );
+
+        let run = block_on_ready(project.save_overlay(&mut client)).unwrap();
+
+        assert_eq!(run.notices.notices.len(), 1);
+        assert!(run.notices.notices[0].message.contains("Saved 1"));
+        assert_eq!(
+            sent.borrow().len(),
+            2,
+            "save issues a commit and a mirror re-sync read"
+        );
+
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(
+            sync.overlay_edit_at(&edit_artifact(), &SlotPath::parse("brightness").unwrap()),
+            None,
+            "persisted edit committed out of the overlay"
+        );
+        assert_eq!(
+            sync.overlay_edit_at(&edit_artifact(), &SlotPath::parse("rate").unwrap()),
+            Some(&SlotEditOp::AssignValue(LpValue::F32(2.0))),
+            "transient edit stays pending (dirty-live)"
+        );
+        assert_eq!(
+            project.dirty_counts(),
+            ProjectDirtyCounts {
+                persisted: 0,
+                transient: 1,
+            }
+        );
+        let nodes = project.ui_nodes();
+        let rate = config_slot(&nodes, "Rate");
+        assert_eq!(rate.state.dirty, UiNodeDirtyState::Dirty);
+        assert!(rate.state.live, "transient dirty is distinguishable");
+        assert_eq!(
+            config_slot(&nodes, "Brightness").state.dirty,
+            UiNodeDirtyState::Clean
+        );
+    }
+
+    #[test]
+    fn revert_all_edits_clears_overlay_and_dtos_return_clean() {
+        let (mut project, mut client, _sent) =
+            editable_project_with_scripted_client(vec![mutation_response(1, vec![accepted(1)], 6)]);
+        project.insert_pending_edit_for_test(
+            rate_address(),
+            PendingEdit {
+                value: LpValue::F32(3.0),
+                phase: PendingEditPhase::Failed {
+                    reason: "boom".to_string(),
+                },
+            },
+        );
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[MutationCmd {
+                id: MutationCmdId::new(1),
+                mutation: MutationOp::PutSlotEdit {
+                    artifact: edit_artifact(),
+                    edit: SlotEdit::assign_value(
+                        SlotPath::parse("brightness").unwrap(),
+                        LpValue::F32(0.9),
+                    ),
+                },
+            }],
+            Revision::new(3),
+        );
+
+        let run = block_on_ready(project.revert_all_edits(&mut client)).unwrap();
+
+        assert_eq!(run.notices.notices.len(), 1);
+        assert!(project.edit_buffer_for_test().is_empty());
+        let sync = project.sync.as_ref().unwrap();
+        assert!(sync.overlay().is_empty());
+        assert_eq!(sync.overlay_revision(), Revision::new(6));
+        assert!(project.dirty_counts().is_clean());
+
+        let nodes = project.ui_nodes();
+        assert_eq!(
+            config_slot(&nodes, "Brightness").state.dirty,
+            UiNodeDirtyState::Clean
+        );
+        assert_eq!(
+            config_slot(&nodes, "Rate").state.dirty,
+            UiNodeDirtyState::Clean
+        );
+    }
+
+    struct OverlayScriptedClientIo {
+        sent: Rc<RefCell<Vec<ClientMessage>>>,
+        responses: RefCell<VecDeque<WireServerMessage>>,
+    }
+
+    impl ClientIo for OverlayScriptedClientIo {
+        fn send<'life0, 'async_trait>(
+            &'life0 mut self,
+            msg: ClientMessage,
+        ) -> Pin<Box<dyn Future<Output = Result<(), TransportError>> + 'async_trait>>
+        where
+            'life0: 'async_trait,
+            Self: 'async_trait,
+        {
+            self.sent.borrow_mut().push(msg);
+            Box::pin(async { Ok(()) })
+        }
+
+        fn receive<'life0, 'async_trait>(
+            &'life0 mut self,
+        ) -> Pin<Box<dyn Future<Output = Result<WireServerMessage, TransportError>> + 'async_trait>>
+        where
+            'life0: 'async_trait,
+            Self: 'async_trait,
+        {
+            let response =
+                self.responses.borrow_mut().pop_front().ok_or_else(|| {
+                    TransportError::Other("scripted client io exhausted".to_string())
+                });
+            Box::pin(async move { response })
+        }
+
+        fn close<'life0, 'async_trait>(
+            &'life0 mut self,
+        ) -> Pin<Box<dyn Future<Output = Result<(), TransportError>> + 'async_trait>>
+        where
+            'life0: 'async_trait,
+            Self: 'async_trait,
+        {
+            Box::pin(async { Ok(()) })
+        }
+    }
+
+    fn block_on_ready<F>(future: F) -> F::Output
+    where
+        F: Future,
+    {
+        let waker = Waker::from(Arc::new(NoopWake));
+        let mut context = Context::from_waker(&waker);
+        let mut future = Box::pin(future);
+        match future.as_mut().poll(&mut context) {
+            Poll::Ready(output) => output,
+            Poll::Pending => panic!("test future unexpectedly yielded"),
+        }
+    }
+
+    struct NoopWake;
+
+    impl Wake for NoopWake {
+        fn wake(self: Arc<Self>) {}
     }
 }

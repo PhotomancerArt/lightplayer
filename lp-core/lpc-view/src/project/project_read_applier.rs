@@ -1295,6 +1295,7 @@ mod tests {
         let runtime = lpc_wire::RuntimeReadResult {
             project: lpc_wire::ProjectRuntimeStatus {
                 revision: Revision::new(5),
+                overlay_changed_at: Revision::default(),
                 frame_num: 42,
                 frame_delta_ms: 16,
                 frame_total_ms: 17,
@@ -1571,6 +1572,7 @@ mod tests {
         let runtime = || lpc_wire::RuntimeReadResult {
             project: lpc_wire::ProjectRuntimeStatus {
                 revision: Revision::new(1),
+                overlay_changed_at: Revision::default(),
                 frame_num: 1,
                 frame_delta_ms: 1,
                 frame_total_ms: 1,

@@ -1,7 +1,10 @@
 use std::collections::BTreeMap;
 use std::rc::Rc;
 
-use lpc_model::{ControlDisplayLayout, Revision};
+use lpc_model::{
+    ArtifactLocation, ArtifactOverlay, ControlDisplayLayout, MutationCmd, ProjectOverlay, Revision,
+    SlotEditOp, SlotPath,
+};
 use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
 use lpc_wire::{
     ControlDisplayLayoutProbeResult, ControlDisplayLayoutRead, ControlProductProbeRequest,
@@ -23,6 +26,11 @@ pub struct ProjectSync {
     phase: ProjectSyncPhase,
     product_previews: BTreeMap<UiProductRef, UiProductPreview>,
     issue: Option<UiIssue>,
+    /// Client mirror of the server's pending-edit overlay.
+    overlay: ProjectOverlay,
+    /// Revision at which `overlay` was last known to match the server
+    /// (`Revision` zero means "never mirrored / no overlay mutation ever").
+    overlay_revision: Revision,
 }
 
 impl ProjectSync {
@@ -32,6 +40,8 @@ impl ProjectSync {
             phase: ProjectSyncPhase::Empty,
             product_previews: BTreeMap::new(),
             issue: None,
+            overlay: ProjectOverlay::new(),
+            overlay_revision: Revision::default(),
         }
     }
 
@@ -81,6 +91,77 @@ impl ProjectSync {
     /// Latest protocol/client project mirror.
     pub fn project_view(&self) -> &ProjectView {
         &self.view
+    }
+
+    /// Latest mirror of the server's pending-edit overlay.
+    pub fn overlay(&self) -> &ProjectOverlay {
+        &self.overlay
+    }
+
+    /// Revision at which the overlay mirror was last stamped from a server
+    /// response (zero: never mirrored).
+    pub fn overlay_revision(&self) -> Revision {
+        self.overlay_revision
+    }
+
+    /// Mirrored pending slot edit for `path` in `artifact`, if any.
+    pub fn overlay_edit_at(
+        &self,
+        artifact: &ArtifactLocation,
+        path: &SlotPath,
+    ) -> Option<&SlotEditOp> {
+        match self.overlay.artifact(artifact)? {
+            ArtifactOverlay::Slot { overlay } => overlay.edits.get(path),
+            ArtifactOverlay::Asset { .. } => None,
+        }
+    }
+
+    /// Iterate every mirrored pending slot edit as `(artifact, path, op)`.
+    pub fn overlay_slot_edits(
+        &self,
+    ) -> impl Iterator<Item = (&ArtifactLocation, &SlotPath, &SlotEditOp)> + '_ {
+        self.overlay
+            .iter()
+            .filter_map(|(artifact, overlay)| overlay.as_slot().map(|slot| (artifact, slot)))
+            .flat_map(|(artifact, slot)| {
+                slot.edits
+                    .iter()
+                    .map(move |(path, op)| (artifact, path, op))
+            })
+    }
+
+    /// True when the last applied runtime status reports an overlay revision
+    /// the mirror has not caught up with, i.e. a ride-along overlay fetch is
+    /// due. A quiet-but-dirty project (revision unchanged since the mirror was
+    /// stamped) reports `false`, so no overlay read is issued for it.
+    pub fn overlay_fetch_needed(&self) -> bool {
+        self.view
+            .runtime
+            .as_ref()
+            .is_some_and(|runtime| runtime.project.overlay_changed_at != self.overlay_revision)
+    }
+
+    /// Replace the overlay mirror with a freshly fetched server overlay and
+    /// stamp the revision the server reported for it.
+    pub fn apply_overlay_read(&mut self, overlay: ProjectOverlay, revision: Revision) {
+        self.overlay = overlay;
+        self.overlay_revision = revision;
+    }
+
+    /// Apply the client's own **accepted** mutation commands to the mirror
+    /// when their batch acks, stamping the post-mutation revision from the
+    /// mutation response. Per the editing model there is no follow-up fetch
+    /// for the client's own edits: the ack is authoritative for them.
+    ///
+    /// If a foreign client mutated concurrently, the acked revision may skip
+    /// states the mirror never saw; that is fine — the next pull's
+    /// `overlay_changed_at` comparison self-corrects with a full fetch once
+    /// the revision moves past our stamp.
+    pub fn apply_acked_edits(&mut self, batch: &[MutationCmd], overlay_revision: Revision) {
+        for command in batch {
+            self.overlay.apply_mutation(command.mutation.clone());
+        }
+        self.overlay_revision = overlay_revision;
     }
 
     /// Latest cached preview state for a produced product.
@@ -765,5 +846,150 @@ mod tests {
                 bytes: Rc::from(second_bytes.as_slice()),
             }))
         );
+    }
+
+    fn overlay_test_artifact() -> lpc_model::ArtifactLocation {
+        lpc_model::ArtifactLocation::file("/orbit.shader.toml")
+    }
+
+    fn overlay_test_path() -> SlotPath {
+        SlotPath::parse("controls.rate").unwrap()
+    }
+
+    fn put_cmd(id: u64, value: f32) -> MutationCmd {
+        MutationCmd {
+            id: lpc_model::MutationCmdId::new(id),
+            mutation: lpc_model::MutationOp::PutSlotEdit {
+                artifact: overlay_test_artifact(),
+                edit: lpc_model::SlotEdit::assign_value(
+                    overlay_test_path(),
+                    lpc_model::LpValue::F32(value),
+                ),
+            },
+        }
+    }
+
+    fn remove_cmd(id: u64) -> MutationCmd {
+        MutationCmd {
+            id: lpc_model::MutationCmdId::new(id),
+            mutation: lpc_model::MutationOp::RemoveSlotEdit {
+                artifact: overlay_test_artifact(),
+                path: overlay_test_path(),
+            },
+        }
+    }
+
+    /// Install a runtime status reporting `overlay_changed_at` on the view, as
+    /// an applied project read would.
+    fn set_runtime_overlay_changed_at(sync: &mut ProjectSync, changed_at: i64) {
+        sync.view.runtime = Some(lpc_wire::RuntimeReadResult {
+            project: lpc_wire::ProjectRuntimeStatus {
+                revision: Revision::new(1),
+                overlay_changed_at: Revision::new(changed_at),
+                frame_num: 1,
+                frame_delta_ms: 16,
+                frame_total_ms: 16,
+                demand_root_count: 0,
+                runtime_buffer_count: 0,
+            },
+            server: None,
+        });
+    }
+
+    #[test]
+    fn overlay_mirror_starts_empty_at_revision_zero() {
+        let sync = ProjectSync::new();
+
+        assert!(sync.overlay().is_empty());
+        assert_eq!(sync.overlay_revision(), Revision::default());
+        assert_eq!(sync.overlay_slot_edits().count(), 0);
+        assert!(
+            !sync.overlay_fetch_needed(),
+            "no runtime status yet, so no fetch is due"
+        );
+    }
+
+    #[test]
+    fn overlay_fetch_needed_only_when_runtime_revision_advances() {
+        let mut sync = ProjectSync::new();
+
+        // Zero changed_at (no overlay mutation ever) matches the fresh mirror.
+        set_runtime_overlay_changed_at(&mut sync, 0);
+        assert!(!sync.overlay_fetch_needed());
+
+        // The server's overlay changed past the mirror: a fetch is due.
+        set_runtime_overlay_changed_at(&mut sync, 4);
+        assert!(sync.overlay_fetch_needed());
+
+        // Fetch applied at the reported revision: quiet-but-dirty from here on.
+        let mut overlay = ProjectOverlay::new();
+        overlay.put_slot_edit(
+            overlay_test_artifact(),
+            lpc_model::SlotEdit::assign_value(overlay_test_path(), lpc_model::LpValue::F32(1.0)),
+        );
+        sync.apply_overlay_read(overlay, Revision::new(4));
+        assert!(!sync.overlay_fetch_needed());
+        assert_eq!(sync.overlay_slot_edits().count(), 1, "dirty but quiet");
+    }
+
+    #[test]
+    fn apply_overlay_read_replaces_mirror_and_revision() {
+        let mut sync = ProjectSync::new();
+        sync.apply_acked_edits(&[put_cmd(1, 1.0)], Revision::new(2));
+
+        let mut replacement = ProjectOverlay::new();
+        let other_path = SlotPath::parse("controls.hue").unwrap();
+        replacement.put_slot_edit(
+            overlay_test_artifact(),
+            lpc_model::SlotEdit::ensure_present(other_path.clone()),
+        );
+        sync.apply_overlay_read(replacement, Revision::new(7));
+
+        assert_eq!(sync.overlay_revision(), Revision::new(7));
+        assert_eq!(
+            sync.overlay_edit_at(&overlay_test_artifact(), &overlay_test_path()),
+            None,
+            "replacement is wholesale, not merged"
+        );
+        assert_eq!(
+            sync.overlay_edit_at(&overlay_test_artifact(), &other_path),
+            Some(&SlotEditOp::EnsurePresent)
+        );
+    }
+
+    #[test]
+    fn acked_put_and_remove_round_trip_through_mirror() {
+        let mut sync = ProjectSync::new();
+
+        sync.apply_acked_edits(&[put_cmd(1, 2.5)], Revision::new(3));
+
+        assert_eq!(
+            sync.overlay_edit_at(&overlay_test_artifact(), &overlay_test_path()),
+            Some(&SlotEditOp::AssignValue(lpc_model::LpValue::F32(2.5)))
+        );
+        assert_eq!(sync.overlay_revision(), Revision::new(3));
+
+        sync.apply_acked_edits(&[remove_cmd(2)], Revision::new(4));
+
+        assert_eq!(
+            sync.overlay_edit_at(&overlay_test_artifact(), &overlay_test_path()),
+            None
+        );
+        assert!(sync.overlay().is_empty());
+        assert_eq!(sync.overlay_revision(), Revision::new(4));
+    }
+
+    #[test]
+    fn acked_edits_at_reported_revision_need_no_fetch() {
+        // Plan Q2: the client's own acked edits are applied locally and never
+        // trigger a follow-up overlay read; the ack revision keeps the mirror
+        // aligned with what the next pull's runtime status reports.
+        let mut sync = ProjectSync::new();
+
+        sync.apply_acked_edits(&[put_cmd(1, 1.0)], Revision::new(5));
+        set_runtime_overlay_changed_at(&mut sync, 5);
+
+        assert!(!sync.overlay_fetch_needed());
+        assert_eq!(sync.overlay_slot_edits().count(), 1);
     }
 }

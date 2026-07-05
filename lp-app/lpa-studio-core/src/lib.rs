@@ -27,18 +27,19 @@ pub use app::node::{
     UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
 };
 pub use app::project::{
-    LoadedProjectChoice, NodeController, NodeControllerState, ProjectConnectResult,
-    ProjectController, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
-    ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
-    ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
-    ProjectProductSubscriptionIntent, ProjectRefreshOutcome, ProjectRuntimeSummary,
-    ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState, ProjectSync,
-    ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotController, SlotControllerState,
-    SlotKind,
+    LoadedProjectChoice, NodeController, NodeControllerState, PendingEdit, PendingEditPhase,
+    ProjectConnectResult, ProjectController, ProjectDirtyCounts, ProjectEditRun, ProjectEditorOp,
+    ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress,
+    ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTarget, ProjectNodeTreeItem,
+    ProjectNodeTreeView, ProjectOp, ProjectProductSubscriptionIntent, ProjectRefreshOutcome,
+    ProjectRuntimeSummary, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState,
+    ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotController,
+    SlotControllerState, SlotEditOp, SlotKind,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerController, ServerFailureKind, ServerOp,
-    ServerSnapshot, ServerState, StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
+    ServerSnapshot, ServerState, StudioOverlayCommit, StudioOverlayMutation, StudioOverlayRead,
+    StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
 };
 pub use app::studio::{
     DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY, LogRing, RefreshCadence,

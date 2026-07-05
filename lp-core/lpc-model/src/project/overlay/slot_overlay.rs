@@ -74,6 +74,22 @@ impl SlotOverlay {
         self.edits.remove(path).is_some()
     }
 
+    /// Copy of this overlay keeping only the edits `keep` accepts.
+    ///
+    /// Filtering an already-canonical overlay preserves canonicality: dropping
+    /// edits cannot introduce the stale-descendant states that
+    /// [`Self::put_edit`] guards against.
+    pub fn filtered(&self, mut keep: impl FnMut(&SlotPath, &SlotEditOp) -> bool) -> Self {
+        Self {
+            edits: self
+                .edits
+                .iter()
+                .filter(|(path, op)| keep(path, op))
+                .map(|(path, op)| (path.clone(), op.clone()))
+                .collect(),
+        }
+    }
+
     pub fn to_apply_plan(&self) -> Vec<SlotEdit> {
         let mut edits: Vec<_> = self
             .edits

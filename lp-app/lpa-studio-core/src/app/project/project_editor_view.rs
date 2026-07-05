@@ -1,4 +1,4 @@
-use crate::{ProjectNodeTreeView, ProjectSyncSummary, UiMetric, UiNodeView};
+use crate::{ProjectDirtyCounts, ProjectNodeTreeView, ProjectSyncSummary, UiMetric, UiNodeView};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProjectEditorView {
@@ -8,6 +8,10 @@ pub struct ProjectEditorView {
     pub stats: Vec<UiMetric>,
     pub tree: ProjectNodeTreeView,
     pub nodes: Vec<UiNodeView>,
+    /// Aggregate dirty-slot counts (persisted vs transient) for the save
+    /// affordances M2 builds; derived from the same edit-state join as the
+    /// per-field dirty affordances.
+    pub dirty: ProjectDirtyCounts,
 }
 
 impl ProjectEditorView {
@@ -26,7 +30,14 @@ impl ProjectEditorView {
             stats,
             tree,
             nodes,
+            dirty: ProjectDirtyCounts::default(),
         }
+    }
+
+    /// Attach the aggregate dirty-slot counts.
+    pub fn with_dirty(mut self, dirty: ProjectDirtyCounts) -> Self {
+        self.dirty = dirty;
+        self
     }
 
     pub fn is_empty(&self) -> bool {

@@ -2,16 +2,24 @@ use core::any::Any;
 
 use crate::{
     ActionClass, ActionMeta, ActionPriority, ControllerOp, PROJECT_ACTION_DEADLINE,
-    PROJECT_LOAD_DEADLINE,
+    PROJECT_EDITOR_ACTION_DEADLINE, PROJECT_LOAD_DEADLINE,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ProjectOp {
     ConnectRunningProject,
-    ConnectLoadedProject { handle_id: u32 },
+    ConnectLoadedProject {
+        handle_id: u32,
+    },
     LoadDemoProject,
     RefreshProject,
     DisconnectProject,
+    /// Commit the pending-edit overlay: persisted edits are written back to
+    /// def artifacts; transient edits stay pending (live-only).
+    SaveOverlay,
+    /// Discard every pending edit — the local edit buffer and the server
+    /// overlay both clear.
+    RevertAllEdits,
 }
 
 impl ControllerOp for ProjectOp {
@@ -42,6 +50,16 @@ impl ControllerOp for ProjectOp {
                 "Detach Studio from the current project without stopping it on the device.",
                 ActionPriority::Tertiary,
             ),
+            Self::SaveOverlay => ActionMeta::new(
+                "Save",
+                "Write pending persisted edits back to the project files.",
+                ActionPriority::Primary,
+            ),
+            Self::RevertAllEdits => ActionMeta::new(
+                "Revert all",
+                "Discard every pending edit on this project.",
+                ActionPriority::Secondary,
+            ),
         }
     }
 
@@ -64,6 +82,11 @@ impl ControllerOp for ProjectOp {
             },
             Self::LoadDemoProject => ActionClass::Foreground {
                 deadline: PROJECT_LOAD_DEADLINE,
+            },
+            // Editing ops share the project-editor quiet-gap budget (D5:
+            // all edit ops are Foreground/6 s).
+            Self::SaveOverlay | Self::RevertAllEdits => ActionClass::Foreground {
+                deadline: PROJECT_EDITOR_ACTION_DEADLINE,
             },
         }
     }
@@ -117,5 +140,18 @@ mod tests {
                 deadline: PROJECT_LOAD_DEADLINE,
             }
         );
+    }
+
+    #[test]
+    fn overlay_edit_ops_use_the_editor_deadline() {
+        for op in [ProjectOp::SaveOverlay, ProjectOp::RevertAllEdits] {
+            assert_eq!(
+                op.action_class(),
+                ActionClass::Foreground {
+                    deadline: crate::PROJECT_EDITOR_ACTION_DEADLINE,
+                },
+                "{op:?}"
+            );
+        }
     }
 }

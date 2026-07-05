@@ -162,7 +162,8 @@ impl Project {
     }
 
     pub fn read_overlay(&self) -> WireOverlayReadResponse {
-        WireOverlayReadResponse::new(self.registry.overlay().get().clone())
+        let overlay = self.registry.overlay();
+        WireOverlayReadResponse::new(overlay.get().clone(), overlay.changed_at())
     }
 
     pub fn read_inventory(&self) -> WireProjectInventoryReadResponse {
@@ -193,7 +194,10 @@ impl Project {
                 .apply_project_changes(&*fs_ref, &mut self.registry, &result.changes)
                 .map_err(|e| ServerError::Core(format!("apply project changes: {e}")))?;
         }
-        Ok(WireOverlayMutationResponse::new(result.commands))
+        Ok(WireOverlayMutationResponse::new(
+            result.commands,
+            result.overlay_revision,
+        ))
     }
 
     pub fn commit_overlay(
@@ -212,7 +216,10 @@ impl Project {
             (result, fs_ref.current_version())
         };
         self.last_fs_version = committed_fs_version.next();
-        Ok(WireOverlayCommitResponse::new(result))
+        Ok(WireOverlayCommitResponse::new(
+            result,
+            self.registry.overlay().changed_at(),
+        ))
     }
 
     pub fn refresh_artifacts(&mut self, events: &[FsEvent]) -> Result<(), ServerError> {

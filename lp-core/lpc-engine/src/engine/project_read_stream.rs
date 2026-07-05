@@ -211,9 +211,15 @@ impl<'a> EngineProjectReadSource<'a> {
                 .await
             }
             ProjectReadQuery::Runtime(query) => {
-                let result = self
-                    .engine
-                    .read_project_runtime(query, self.server_status.clone());
+                // The overlay is registry state; surface its `changed_at` on
+                // every runtime status so clients learn the overlay revision
+                // without fetching the overlay itself.
+                let overlay_changed_at = self.registry.overlay().changed_at();
+                let result = self.engine.read_project_runtime(
+                    query,
+                    overlay_changed_at,
+                    self.server_status.clone(),
+                );
                 send_query_event(sink, index, ProjectReadQueryEvent::Runtime(result)).await
             }
         }
@@ -786,6 +792,64 @@ mod tests {
         assert_eq!(count_shape_entries(&events), 0);
         assert_eq!(count_resource_summaries(&events), 0);
         assert_eq!(count_slot_roots(&events), 0);
+    }
+
+    #[test]
+    fn runtime_status_reports_overlay_changed_at() {
+        // The runtime status surfaces the registry overlay's `changed_at` on
+        // every read: zero while no overlay exists, then the mutation revision
+        // once the overlay changed.
+        let mut h = build_all_families_project();
+
+        let events = collect_read_events(
+            &mut h.engine,
+            &h.registry,
+            full_debug_with_probe(None, None),
+        );
+        assert_eq!(
+            overlay_changed_ats(&events),
+            vec![Revision::default()],
+            "fresh registry overlay reports revision zero"
+        );
+
+        // Mutate the overlay at revision 9; the next read must report it.
+        let fs = lpfs::LpFsMemory::new();
+        let ctx = lpc_registry::ParseCtx {
+            shapes: h.engine.slot_shapes(),
+        };
+        h.registry
+            .mutate(
+                &fs,
+                lpc_model::MutationOp::PutSlotEdit {
+                    artifact: lpc_model::ArtifactLocation::file("/project.json"),
+                    edit: lpc_model::SlotEdit::ensure_present(
+                        lpc_model::SlotPath::parse("nodes[clock]").expect("slot path"),
+                    ),
+                },
+                Revision::new(9),
+                &ctx,
+            )
+            .expect("mutate overlay");
+
+        let events = collect_read_events(
+            &mut h.engine,
+            &h.registry,
+            full_debug_with_probe(None, None),
+        );
+        assert_eq!(overlay_changed_ats(&events), vec![Revision::new(9)]);
+    }
+
+    fn overlay_changed_ats(events: &[ProjectReadEvent]) -> Vec<Revision> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                ProjectReadEvent::Query {
+                    event: ProjectReadQueryEvent::Runtime(result),
+                    ..
+                } => Some(result.project.overlay_changed_at),
+                _ => None,
+            })
+            .collect()
     }
 
     fn count_shape_entries(events: &[ProjectReadEvent]) -> usize {

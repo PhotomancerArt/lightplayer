@@ -63,6 +63,24 @@ as the native timeout owner — so both pass a never-firing deadline into the
 shared loop today; the actor layer (M7/P3) is where a real `ProgressDeadline`,
 `CancelSignal`, and `BackoffPolicy` get wired in.
 
+## Overlay In The Pull Contract
+
+Pending-edit overlay state reaches a client as a **revision-gated
+ride-along** of the normal pull, not as part of the project-read event
+stream. The `ProjectRuntimeStatus` carried by every gated read reports
+`overlay_changed_at`; a caller compares it against its mirrored overlay
+revision and issues a full `ReadOverlay` only when it advanced, so a
+quiet-but-dirty project costs no overlay traffic. Overlay reads have no
+`since` parameter — overlays are small and are fetched whole on change.
+
+The typed overlay operations return the wire responses whole, including
+their revisions (`WireOverlayReadResponse.revision`,
+`WireOverlayMutationResponse.overlay_revision`,
+`WireOverlayCommitResponse.overlay_revision`), so a mutating caller can
+stamp its mirror from its own ack without a follow-up fetch. The mirror,
+edit buffer, and gating policy live above this crate (in
+`lpa-studio-core`); see `docs/adr/2026-07-04-studio-editing-model.md`.
+
 ## Feature Model
 
 | Feature | Purpose |

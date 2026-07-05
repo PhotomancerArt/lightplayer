@@ -4,11 +4,12 @@ use lpc_model::{NodeId, SlotData, SlotShapeLookup, SlotShapeView, TreePath};
 use lpc_view::{ProjectView, SlotMirrorView, TreeEntryView};
 use lpc_wire::{NodeRuntimeStatus, WireEntryState};
 
+use crate::app::project::slot::SlotEditJoin;
 use crate::{
-    ProjectEditorOp, ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone,
-    ProjectNodeStatusView, ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController,
-    UiAction, UiNodeChild, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiProductPreview,
-    UiProductRef, UiProductTrackingState, UiStatus,
+    ProjectDirtyCounts, ProjectEditorOp, ProjectEditorTarget, ProjectNodeAddress,
+    ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTarget, ProjectSlotAddress,
+    ProjectSlotRoot, SlotController, UiAction, UiNodeChild, UiNodeHeader, UiNodeSection, UiNodeTab,
+    UiNodeView, UiProductPreview, UiProductRef, UiProductTrackingState, UiStatus,
 };
 
 /// User/controller intent for product subscriptions owned by a node.
@@ -158,13 +159,14 @@ impl NodeController {
 
     /// Project this controller and its slot controllers into the node-pane DTO.
     pub fn ui_node(&self) -> UiNodeView {
-        self.ui_node_with_product_previews(&|_| None)
+        self.ui_node_with_product_previews(&|_| None, &SlotEditJoin::empty())
     }
 
     /// Project this controller into a node-pane DTO with product preview state.
     pub(in crate::app::project) fn ui_node_with_product_previews(
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
+        edits: &SlotEditJoin<'_>,
     ) -> UiNodeView {
         let header = UiNodeHeader::new(
             self.label.clone(),
@@ -176,11 +178,11 @@ impl NodeController {
         let mut view = UiNodeView::new(
             header,
             vec![UiNodeTab::main(
-                self.ui_sections_with_product_previews(product_preview),
+                self.ui_sections_with_product_previews(product_preview, edits),
             )],
         )
         .with_node_id(self.address.to_string())
-        .with_children(self.ui_children_with_product_previews(product_preview));
+        .with_children(self.ui_children_with_product_previews(product_preview, edits));
         view.focused = self.state.focused;
         view.action = Some(node_focus_action(self));
         view.collapsed = self.state.collapsed;
@@ -299,6 +301,7 @@ impl NodeController {
     fn ui_sections_with_product_previews(
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
+        edits: &SlotEditJoin<'_>,
     ) -> Vec<UiNodeSection> {
         let mut products = Vec::new();
         let mut produced_values = Vec::new();
@@ -311,7 +314,7 @@ impl NodeController {
                     slot.collect_produced(&mut products, &mut produced_values);
                 }
                 ProjectSlotRoot::Def | ProjectSlotRoot::Other(_) => {
-                    slot.collect_config(&mut config_slots, &mut asset_slots);
+                    slot.collect_config(edits, &mut config_slots, &mut asset_slots);
                 }
             }
         }
@@ -351,6 +354,7 @@ impl NodeController {
     fn ui_children_with_product_previews(
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
+        edits: &SlotEditJoin<'_>,
     ) -> Vec<UiNodeChild> {
         self.children
             .iter()
@@ -364,11 +368,25 @@ impl NodeController {
                 view.summary = child.status.detail.clone();
                 view.focused = child.state.focused;
                 view.action = Some(node_focus_action(child));
-                view.sections = child.ui_sections_with_product_previews(product_preview);
-                view.children = child.ui_children_with_product_previews(product_preview);
+                view.sections = child.ui_sections_with_product_previews(product_preview, edits);
+                view.children = child.ui_children_with_product_previews(product_preview, edits);
                 view
             })
             .collect()
+    }
+
+    /// Tally the dirty slots owned by this node and its descendants.
+    pub(in crate::app::project) fn collect_dirty_counts(
+        &self,
+        edits: &SlotEditJoin<'_>,
+        counts: &mut ProjectDirtyCounts,
+    ) {
+        for slot in &self.slots {
+            slot.collect_dirty_counts(edits, counts);
+        }
+        for child in &self.children {
+            child.collect_dirty_counts(edits, counts);
+        }
     }
 
     fn ui_status(&self) -> UiStatus {

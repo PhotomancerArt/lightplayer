@@ -281,9 +281,16 @@ fn commit_slot_overlay_writes_effective_node_def() {
         .commit_overlay(&fs, Revision::new(3), &ctx)
         .unwrap();
 
+    // `controls.rate` is transient: commit still rewrites the def file, but
+    // transient values never serialize, so the authored `rate` is scrubbed
+    // and the pending edit stays in the overlay.
     let text = String::from_utf8(fs.read_file(LpPath::new("/clock.json")).unwrap()).unwrap();
-    assert_eq!(result.artifact_changes.changed, vec![clock]);
-    assert!(text.contains("\"rate\": 2"));
+    assert_eq!(result.artifact_changes.changed, vec![clock.clone()]);
+    assert!(!text.contains("rate"), "{text}");
+    assert!(
+        registry.overlay().get().contains_artifact(&clock),
+        "transient edit is retained across commit"
+    );
 }
 
 #[test]

@@ -112,8 +112,15 @@ pub enum MutationEffect {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MutationRejectionReason {
-    /// Mutation referenced an invalid slot or artifact path.
-    InvalidPath,
+    /// Mutation referenced an artifact with no resolvable node definition.
+    UnknownArtifact,
+    /// Mutation referenced a slot path that does not resolve in the
+    /// artifact's shape.
+    UnknownSlotPath,
+    /// Mutation targeted a slot whose policy is not writable.
+    NotWritable,
+    /// Mutation assigned a value that does not match the slot's value type.
+    TypeMismatch,
     /// Mutation was well-formed but edit application failed.
     EditFailed,
     /// Mutation is not supported by the current registry implementation.

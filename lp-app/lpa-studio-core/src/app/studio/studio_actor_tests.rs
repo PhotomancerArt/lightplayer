@@ -510,3 +510,123 @@ fn controller_log_ring_wraps_at_cap() {
     // Oldest ten evicted; front is m10.
     assert_eq!(logs.first().unwrap().message, "m10");
 }
+
+// ---------------------------------------------------------------------------
+// P5: per-address SetValue coalescing in the batch plan.
+// ---------------------------------------------------------------------------
+
+fn slot_address(path: &str) -> crate::ProjectSlotAddress {
+    crate::ProjectSlotAddress::new(
+        crate::ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap(),
+        crate::ProjectSlotRoot::def(),
+        lpc_model::SlotPath::parse(path).unwrap(),
+    )
+}
+
+fn set_value_action(path: &str, value: f32) -> StudioCommand {
+    StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::SlotEditOp::SetValue {
+            address: slot_address(path),
+            value: LpValue::F32(value),
+        },
+    ))
+}
+
+fn revert_action(path: &str) -> StudioCommand {
+    StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::SlotEditOp::Revert {
+            address: slot_address(path),
+        },
+    ))
+}
+
+fn planned_slot_ops(plan: &CommandPlan) -> Vec<(String, Option<f32>)> {
+    plan.actions
+        .iter()
+        .map(|action| match action.op_as::<crate::SlotEditOp>() {
+            Some(crate::SlotEditOp::SetValue { address, value }) => (
+                address.path.to_string(),
+                match value {
+                    LpValue::F32(value) => Some(*value),
+                    _ => None,
+                },
+            ),
+            Some(crate::SlotEditOp::Revert { address }) => {
+                (format!("revert:{}", address.path), None)
+            }
+            None => ("other".to_string(), None),
+        })
+        .collect()
+}
+
+#[test]
+fn queued_set_values_for_one_address_coalesce_to_the_last() {
+    let plan = CommandPlan::from_batch(vec![
+        set_value_action("controls.rate", 1.0),
+        set_value_action("controls.rate", 2.0),
+        set_value_action("controls.rate", 3.0),
+    ]);
+
+    assert_eq!(
+        planned_slot_ops(&plan),
+        vec![("controls.rate".to_string(), Some(3.0))],
+        "an oninput flood collapses to one mutation with the last value"
+    );
+}
+
+#[test]
+fn set_values_for_different_addresses_keep_their_order() {
+    let plan = CommandPlan::from_batch(vec![
+        set_value_action("controls.rate", 1.0),
+        set_value_action("controls.running", 0.0),
+        set_value_action("controls.rate", 2.0),
+    ]);
+
+    assert_eq!(
+        planned_slot_ops(&plan),
+        vec![
+            ("controls.rate".to_string(), Some(2.0)),
+            ("controls.running".to_string(), Some(0.0)),
+        ],
+        "latest value wins in place; order across addresses is preserved"
+    );
+}
+
+#[test]
+fn revert_between_set_values_is_a_coalescing_barrier() {
+    let plan = CommandPlan::from_batch(vec![
+        set_value_action("controls.rate", 1.0),
+        revert_action("controls.rate"),
+        set_value_action("controls.rate", 2.0),
+    ]);
+
+    assert_eq!(
+        planned_slot_ops(&plan),
+        vec![
+            ("controls.rate".to_string(), Some(1.0)),
+            ("revert:controls.rate".to_string(), None),
+            ("controls.rate".to_string(), Some(2.0)),
+        ],
+        "nothing coalesces across a Revert"
+    );
+}
+
+#[test]
+fn other_project_ops_are_coalescing_barriers() {
+    let plan = CommandPlan::from_batch(vec![
+        set_value_action("controls.rate", 1.0),
+        StudioCommand::Action(UiAction::from_op(
+            ControllerId::new(ProjectController::NODE_ID),
+            ProjectOp::SaveOverlay,
+        )),
+        set_value_action("controls.rate", 2.0),
+    ]);
+
+    assert_eq!(plan.actions.len(), 3, "SaveOverlay is a barrier");
+    assert_eq!(
+        planned_slot_ops(&plan)[0],
+        ("controls.rate".to_string(), Some(1.0))
+    );
+}

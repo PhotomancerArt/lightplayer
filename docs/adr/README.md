@@ -52,6 +52,11 @@ holds the full context.
 
 | Item | Source ADR | Revisit trigger |
 |---|---|---|
+| **Blocking:** revert regresses effective-def revisions, so gated reads skip reverted values (connected client shows stale values after revert until a full resync; e2e works around it by reconnecting) | `2026-07-04-studio-editing-model` (e) | **Before roadmap M2 ships revert UX** |
+| Per-item overlay gating (fetch-full-on-change assumes small overlays) | `2026-07-04-studio-editing-model` (a) | Measured overlay fetch cost matters |
+| Save-panel diff DTOs (before/after values; M1 provides counts only) | `2026-07-04-studio-editing-model` (b) | Roadmap M3 (Save panel) |
+| Composite edit semantics (map add/remove, option some/none, variant switch) — extend the editing-model ADR if precedent is set | `2026-07-04-studio-editing-model` (c) | Roadmap M3 |
+| Singular `ProjectRegistry::mutate` bypasses policy/type validation (only `mutate_batch` enforces) | `2026-07-04-studio-editing-model` (d) | Any new caller of `mutate` |
 | Event-driven (postMessage/waker) receive so the poll-sleep loop retires (~50–100 line bridge across `browser_worker_client_io.rs`, `worker_handle.rs`, JS worker) | `2026-07-04-client-pull-loop-and-actor` (a); `2026-07-03-simulator-clock-ownership` | Poll latency shows up in traces, or battery/CPU cost matters |
 | Probe payload optimization (binary/compressed preview encoding, downscaled extents, delta frames) | `2026-07-04-client-pull-loop-and-actor` (b) | Steady-state tick cost is dominated by raw probe bytes; own design pass with measurements |
 | Native/tokio actor parity: `tokio::spawn`/`LocalSet` spawn helper + native timer factory | `2026-07-04-client-pull-loop-and-actor` (c) | A native Studio shell exists |

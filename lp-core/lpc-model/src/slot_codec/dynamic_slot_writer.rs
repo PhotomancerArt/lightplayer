@@ -1,6 +1,7 @@
 use alloc::format;
 use alloc::string::{String, ToString};
 
+use crate::slot::SlotPersistence;
 use crate::{
     SlotAccess, SlotDataAccess, SlotEnumEncoding, SlotFieldShape, SlotMapKey, SlotShape,
     SlotShapeId, SlotShapeLookup, SlotShapeRegistry, SlotVariantShape,
@@ -200,7 +201,7 @@ where
                 field.name.as_str()
             ))
         })?;
-        if should_omit_field(&field.shape, data, registry) {
+        if omit_record_field(field, data, registry) {
             continue;
         }
         write_shape_json(
@@ -286,6 +287,23 @@ where
     }
 }
 
+/// Whether one record field is omitted from authored JSON.
+///
+/// Transient never serializes: a field whose policy persistence is
+/// [`SlotPersistence::Transient`] is omitted together with its whole subtree
+/// (the field's policy governs everything below it), so transient runtime
+/// controls never reach def files regardless of the write path. Structurally
+/// empty fields (none options, empty maps, unit/empty records) are omitted as
+/// well via [`should_omit_field`].
+fn omit_record_field(
+    field: &SlotFieldShape,
+    data: SlotDataAccess<'_>,
+    registry: &SlotShapeRegistry,
+) -> bool {
+    field.policy.persistence == SlotPersistence::Transient
+        || should_omit_field(&field.shape, data, registry)
+}
+
 fn should_omit_field(
     shape: &SlotShape,
     data: SlotDataAccess<'_>,
@@ -300,7 +318,7 @@ fn should_omit_field(
             fields.iter().enumerate().all(|(index, field)| {
                 record
                     .field(index)
-                    .is_some_and(|data| should_omit_field(&field.shape, data, registry))
+                    .is_some_and(|data| omit_record_field(field, data, registry))
             })
         }
         (SlotShape::Map { .. }, SlotDataAccess::Map(map)) => map.keys().is_empty(),
@@ -373,7 +391,7 @@ mod tests {
     use crate::{
         LpType, LpValue, Revision, SlotData, SlotMapDyn, SlotName, SlotOptionDyn, SlotRecord,
         SlotVariantShape, WithRevision,
-        slot::shape::{enum_external, field, map, option, record, unit, value},
+        slot::shape::{enum_external, field, field_with_policy, map, option, record, unit, value},
     };
     use alloc::vec;
     use alloc::vec::Vec;
@@ -471,6 +489,79 @@ mod tests {
         let json = write_json(&registry, shape_id, data.access());
 
         assert_eq!(json, "{}");
+    }
+
+    #[test]
+    fn dynamic_slot_writer_omits_transient_fields() {
+        let shape_id = SlotShapeId::from_static_name("test.WriterTransient");
+        let mut registry = SlotShapeRegistry::default();
+        registry
+            .register_dynamic_shape(
+                shape_id,
+                record(vec![
+                    field("pin", value(LpType::U32)),
+                    field_with_policy(
+                        "rate",
+                        value(LpType::F32),
+                        crate::SlotPolicy::writable_transient(),
+                    ),
+                ]),
+            )
+            .unwrap();
+        let data = SlotData::Record(SlotRecord::new(vec![
+            SlotData::Value(WithRevision::new(Revision::default(), LpValue::U32(18))),
+            SlotData::Value(WithRevision::new(Revision::default(), LpValue::F32(3.0))),
+        ]));
+
+        let json = write_json(&registry, shape_id, data.access());
+
+        assert_eq!(json, r#"{"pin":18}"#);
+    }
+
+    #[test]
+    fn dynamic_slot_writer_omits_records_left_empty_by_transient_fields() {
+        let shape_id = SlotShapeId::from_static_name("test.WriterTransientRecord");
+        let mut registry = SlotShapeRegistry::default();
+        registry
+            .register_dynamic_shape(
+                shape_id,
+                record(vec![field(
+                    "controls",
+                    record(vec![field_with_policy(
+                        "rate",
+                        value(LpType::F32),
+                        crate::SlotPolicy::writable_transient(),
+                    )]),
+                )]),
+            )
+            .unwrap();
+        let data = SlotData::Record(SlotRecord::new(vec![SlotData::Record(SlotRecord::new(
+            vec![SlotData::Value(WithRevision::new(
+                Revision::default(),
+                LpValue::F32(3.0),
+            ))],
+        ))]));
+
+        let json = write_json(&registry, shape_id, data.access());
+
+        assert_eq!(json, "{}");
+    }
+
+    #[test]
+    fn transient_clock_controls_round_trip_to_defaults() {
+        let registry = SlotShapeRegistry::default();
+        let mut clock = crate::ClockDef::default();
+        clock.controls.rate = crate::ValueSlot::new(3.0);
+        clock.controls.running = crate::ValueSlot::new(false);
+
+        let json = crate::NodeDef::Clock(clock).write_json(&registry).unwrap();
+        assert!(!json.contains("controls"), "{json}");
+        assert!(!json.contains("rate"), "{json}");
+
+        let back = crate::NodeDef::read_json(&registry, &json).unwrap();
+        let back = back.as_clock().expect("clock def");
+        assert_eq!(*back.controls.rate.value(), 1.0);
+        assert!(*back.controls.running.value());
     }
 
     #[test]
