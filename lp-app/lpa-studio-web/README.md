@@ -72,8 +72,29 @@ just studio-web-smoke target/pages/studio
 ```
 
 The deploy artifact is staged under `target/pages/studio` and includes
-`version.json`, `.nojekyll`, and `CNAME`. It is built from the release `dx`
-output so stale debug artifacts left by `studio-dev` are not uploaded.
+`version.json`, `changelog.json`, `.nojekyll`, and `CNAME`. It is built from the
+release `dx` output so stale debug artifacts left by `studio-dev` are not
+uploaded.
+
+### Version badge
+
+The header shows a build-info badge (an `Info` popover next to the title). It
+fetches two static JSON files from the site root at runtime, so it always
+reflects the *deployed artifact* rather than a compile-time constant:
+
+- `version.json` — written by `scripts/pages/prepare-pages-artifact.mjs` on
+  every Pages deploy. The popover shows version, channel, short commit sha
+  (with a `dirty` marker when set), and build time.
+- `changelog.json` — also written by that script, from git version tags
+  (`vYYYY.MM.DD-N`, most recent 8). Each tag becomes one "Recent updates" line:
+  a GitHub merge commit contributes the PR number and its body (the human PR
+  title); any other tagged commit contributes its subject. Building it needs
+  tags/history, so the Pages workflows check out with `fetch-depth: 0`; on a
+  shallow or tagless tree it emits `entries: []` and the section is hidden.
+
+Neither file is emitted by local dev builds (`dx serve`, `just studio-web-build`),
+so the fetch 404s and the badge degrades gracefully to a "dev build" state with
+the popover explaining that version metadata is only present in deployed builds.
 
 Manual beta deployment uses the same artifact recipe with
 `beta.lightplayer.app` and is published by the `Deploy Pages Channel` workflow.
@@ -189,7 +210,8 @@ asset editing belong to later milestones.
 The storybook covers the active Studio shell, connection action strip, Device stack
 states, loaded Project pane state with readonly node workspace,
 browser-serial blank-firmware readiness, provision-ready/provisioning/
-provision-failed, wipe states, and editor-foundation primitives.
+provision-failed, wipe states, the version badge (loaded + dev-build fallback),
+and editor-foundation primitives.
 Run the dev server and open:
 
 ```text

@@ -148,6 +148,9 @@
   .tw\:mb-\[18px\] {
     margin-bottom: 18px;
   }
+  .tw\:ml-auto {
+    margin-left: auto;
+  }
   .tw\:box-content {
     box-sizing: content-box;
   }
@@ -180,6 +183,9 @@
   }
   .tw\:h-6 {
     height: calc(var(--tw-spacing) * 6);
+  }
+  .tw\:h-7 {
+    height: calc(var(--tw-spacing) * 7);
   }
   .tw\:h-8 {
     height: calc(var(--tw-spacing) * 8);
@@ -252,6 +258,9 @@
   }
   .tw\:w-6 {
     width: calc(var(--tw-spacing) * 6);
+  }
+  .tw\:w-7 {
+    width: calc(var(--tw-spacing) * 7);
   }
   .tw\:w-8 {
     width: calc(var(--tw-spacing) * 8);
@@ -356,6 +365,9 @@
   }
   .tw\:grid-cols-\[52px_72px_minmax\(0\,1fr\)\] {
     grid-template-columns: 52px 72px minmax(0,1fr);
+  }
+  .tw\:grid-cols-\[64px_minmax\(0\,1fr\)\] {
+    grid-template-columns: 64px minmax(0,1fr);
   }
   .tw\:grid-cols-\[72px_minmax\(0\,1fr\)\] {
     grid-template-columns: 72px minmax(0,1fr);
@@ -815,6 +827,9 @@
   .tw\:pt-1\.5 {
     padding-top: calc(var(--tw-spacing) * 1.5);
   }
+  .tw\:pt-2\.5 {
+    padding-top: calc(var(--tw-spacing) * 2.5);
+  }
   .tw\:pt-7 {
     padding-top: calc(var(--tw-spacing) * 7);
   }
@@ -882,6 +897,9 @@
   .tw\:text-xs {
     font-size: var(--tw-text-xs);
     line-height: var(--tw-leading, var(--tw-text-xs--line-height));
+  }
+  .tw\:text-\[0\.7rem\] {
+    font-size: 0.7rem;
   }
   .tw\:text-\[0\.64rem\] {
     font-size: 0.64rem;

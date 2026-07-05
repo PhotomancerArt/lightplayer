@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{DeviceController, UiAction, UiPaneView, UiStudioView, UiViewContent};
 
+use crate::app::layout::VersionBadge;
 use crate::app::{ProjectNodeWorkspace, RuntimeLog};
 use crate::core::PaneView;
 
@@ -29,6 +30,7 @@ pub fn StudioShell(
                 div {
                     p { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "LightPlayer Studio" }
                 }
+                VersionBadge {}
             }
 
             section { class: "{layout_class}",
