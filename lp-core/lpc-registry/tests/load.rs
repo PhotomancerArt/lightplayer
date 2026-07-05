@@ -1,6 +1,6 @@
 use lpc_model::{
-    ArtifactLocation, AssetBodyOrigin, AssetContentType, AssetLocation, AssetState,
-    NodeDefLocation, NodeDefState, Revision, SlotPath, SlotShapeRegistry,
+    ArtifactLocation, AssetBodyOrigin, AssetLocation, AssetState, NodeDefLocation, NodeDefState,
+    Revision, SlotShapeRegistry,
 };
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpfs::{LpFsMemory, LpPath};

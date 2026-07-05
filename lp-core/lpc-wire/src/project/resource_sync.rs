@@ -8,10 +8,6 @@ use lpc_model::project::Revision;
 use lpc_model::resource::ResourceRef;
 use serde::{Deserialize, Serialize};
 
-use crate::json::json_write::JsonWrite;
-use crate::json::json_writer::{JsonValue, JsonWriterError};
-use crate::json::streaming_base64::write_base64_value;
-
 /// Classification line in a [`WireResourceSummary`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
@@ -121,26 +117,6 @@ pub struct WireRuntimeBufferPayload {
     pub bytes: Vec<u8>,
 }
 
-/// Write a runtime-buffer payload JSON object without allocating encoded bytes.
-///
-/// The object has the same shape as [`WireRuntimeBufferPayload`]. Metadata and
-/// small scalar fields still use the serde bridge, but `bytes` are base64
-/// encoded directly into the supplied JSON value.
-pub fn write_runtime_buffer_payload_json<W>(
-    value: JsonValue<'_, W>,
-    payload: &WireRuntimeBufferPayload,
-) -> Result<(), JsonWriterError<W::Error>>
-where
-    W: JsonWrite,
-{
-    let mut object = value.object()?;
-    object.prop("ref")?.serde(&payload.resource_ref)?;
-    object.prop("revision")?.serde(&payload.revision)?;
-    object.prop("metadata")?.serde(&payload.metadata)?;
-    write_base64_value(object.prop("bytes")?, &payload.bytes)?;
-    object.finish()
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
@@ -164,10 +140,7 @@ pub enum WireRuntimeBufferMetadataPayload {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::json::json_writer::JsonWriter;
-    use alloc::vec;
     use lpc_model::RuntimeBufferId;
-    use lpc_model::resource::ResourceDomain;
 
     #[test]
     fn runtime_buffer_payload_round_trips_base64_bytes() {
@@ -180,33 +153,5 @@ mod tests {
         let j = serde_json::to_string(&payload).unwrap();
         let back: WireRuntimeBufferPayload = serde_json::from_str(&j).unwrap();
         assert_eq!(back, payload);
-    }
-
-    #[test]
-    fn runtime_buffer_payload_streams_base64_bytes() {
-        let payload = WireRuntimeBufferPayload {
-            resource_ref: ResourceRef {
-                domain: ResourceDomain::RuntimeBuffer,
-                id: 3,
-            },
-            revision: Revision::new(2),
-            metadata: WireRuntimeBufferMetadataPayload::OutputChannels {
-                channels: 3,
-                sample_format: WireChannelSampleFormat::U16,
-            },
-            bytes: vec![0u8, 1, 2, 253, 254, 255],
-        };
-        let mut out = Vec::new();
-        let mut writer = JsonWriter::new(&mut out);
-        let mut object = writer.object().unwrap();
-        write_runtime_buffer_payload_json(object.prop("payload").unwrap(), &payload).unwrap();
-        object.finish().unwrap();
-        let json = core::str::from_utf8(&out).unwrap();
-        let wrapped: serde_json::Value = serde_json::from_str(json).unwrap();
-        let decoded: WireRuntimeBufferPayload =
-            serde_json::from_value(wrapped["payload"].clone()).unwrap();
-
-        assert_eq!(decoded, payload);
-        assert_eq!(wrapped["payload"]["bytes"], "AAEC/f7/");
     }
 }

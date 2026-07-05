@@ -31,13 +31,13 @@ impl ControlDisplayLayout {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct ControlLayout2d {
-    #[serde(rename = "rev", alias = "revision")]
+    #[serde(rename = "rev")]
     pub revision: Revision,
-    #[serde(rename = "w", alias = "width_hint")]
+    #[serde(rename = "w")]
     pub width_hint: u32,
-    #[serde(rename = "h", alias = "height_hint")]
+    #[serde(rename = "h")]
     pub height_hint: u32,
-    #[serde(rename = "l", alias = "lamps")]
+    #[serde(rename = "l")]
     pub lamps: Vec<ControlLamp2d>,
 }
 
@@ -161,8 +161,8 @@ impl<'de> serde::de::Visitor<'de> for ControlLamp2dVisitor {
         let mut center = None;
         let mut radius = None;
 
-        while let Some(key) = map.next_key::<&str>()? {
-            match key {
+        while let Some(key) = map.next_key::<alloc::borrow::Cow<'de, str>>()? {
+            match key.as_ref() {
                 "i" | "lamp_index" => lamp_index = Some(map.next_value()?),
                 "s" | "sample_start" => sample_start = Some(map.next_value()?),
                 "c" | "center" => center = Some(map.next_value()?),
@@ -236,16 +236,31 @@ mod tests {
     }
 
     #[test]
-    fn display_layout_accepts_legacy_field_names() {
-        let json = r#"{"layout2d":{"revision":9,"width_hint":16,"height_hint":9,"lamps":[{"lamp_index":3,"sample_start":9,"center":[0.25,0.75],"radius":0.1}]}}"#;
+    fn display_lamp_deserializes_from_owned_value() {
+        // `serde_json::from_value` hands the visitor owned keys, so `visit_map`
+        // must accept `Cow`/owned strings, not just borrowed `&str`.
+        let value = serde_json::json!([3, 9, 0.25, 0.75, 0.1]);
+        let lamp: ControlLamp2d = serde_json::from_value(value).unwrap();
 
-        let layout: ControlDisplayLayout = serde_json::from_str(json).unwrap();
+        assert_eq!(
+            lamp,
+            ControlLamp2d {
+                lamp_index: 3,
+                sample_start: 9,
+                center: [0.25, 0.75],
+                radius: 0.1,
+            }
+        );
+    }
 
-        let ControlDisplayLayout::Layout2d(layout) = layout;
-        assert_eq!(layout.revision, Revision::new(9));
-        assert_eq!(layout.width_hint, 16);
-        assert_eq!(layout.height_hint, 9);
-        assert_eq!(layout.lamps[0].lamp_index, 3);
-        assert_eq!(layout.lamps[0].sample_start, 9);
+    #[test]
+    fn display_lamp_map_form_deserializes_from_owned_value() {
+        let value = serde_json::json!({"i": 3, "s": 9, "c": [0.25, 0.75], "r": 0.1});
+        let lamp: ControlLamp2d = serde_json::from_value(value).unwrap();
+
+        assert_eq!(lamp.lamp_index, 3);
+        assert_eq!(lamp.sample_start, 9);
+        assert_eq!(lamp.center, [0.25, 0.75]);
+        assert_eq!(lamp.radius, 0.1);
     }
 }
