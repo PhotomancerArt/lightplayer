@@ -62,6 +62,21 @@ Do NOT disable the compiler. The compiler is the product.
   features are for *removing* pieces (e.g. `no-shader-compile` for stripped
   test builds), not for *adding* the compiler.
 
+## Wire/protocol compatibility
+
+- **During heavy development, wire/protocol compatibility is NOT maintained.**
+  Client, server, and firmware are built and deployed together, so there is no
+  older peer to stay compatible with.
+- **Do not add serde field aliases, version shims, dual-format decode paths, or
+  capability fallbacks to preserve an old wire form.** When a wire shape
+  changes, delete the old form outright and update every producer/consumer in
+  the same change. A single canonical encoding is easier to reason about and
+  keeps the serializers honest.
+- This policy will be revisited once devices are fielded and can no longer be
+  upgraded in lockstep. The intended future mechanism is an explicit
+  capability/version handshake negotiated at connect time — **never**
+  error-text sniffing or silent format probing.
+
 ## Architecture Quick Reference
 
 ```

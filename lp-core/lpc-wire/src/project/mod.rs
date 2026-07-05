@@ -8,6 +8,5 @@ pub use resource_sync::{
     WireChannelSampleFormat, WireColorLayout, WireResourceAvailability, WireResourceKindSummary,
     WireResourceMetadataSummary, WireResourceSummary, WireRuntimeBufferKind,
     WireRuntimeBufferMetadataPayload, WireRuntimeBufferPayload, WireTextureFormat,
-    write_runtime_buffer_payload_json,
 };
 pub use wire_project_handle::WireProjectHandle;

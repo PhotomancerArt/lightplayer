@@ -1,8 +1,6 @@
 mod support;
 
-use lpc_model::{
-    ArtifactLocation, AssetBodyOverlay, AssetLocation, MutationOp, NodeDefLocation, SlotPath,
-};
+use lpc_model::{ArtifactLocation, AssetBodyOverlay, MutationOp};
 use lpc_registry::AssetReadError;
 
 use support::{RegistryScenario, artifact, artifact_asset};
