@@ -6,15 +6,17 @@ use lpa_studio_core::{
     UiSlotFieldState, UiSlotOptionality,
 };
 
-use crate::app::node::slot_edit_actions::slot_revert_action;
 use crate::app::node::{
-    SlotDetailButton, SlotRecordEditor, SlotValueEditor, primary_affordance, slot_row_class,
+    SlotDetailButton, SlotDetailRevert, SlotRecordEditor, SlotValueEditor, primary_affordance,
+    slot_row_class,
 };
 use crate::base::{StudioIcon, StudioIconName};
 
 /// Edit chrome for a touched slot row: persisted edits show as "unsaved"
-/// (amber, counts toward Save), transient edits as "live" (green, applied to
-/// the running project and never written by Save).
+/// (amber badge + warning tint, counts toward Save), transient edits as
+/// "live" (blue tint only, applied to the running project and never written
+/// by Save). The per-slot Revert/Reset affordance lives in the slot detail
+/// popup, not on the row.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SlotEditChrome {
     Unsaved,
@@ -78,11 +80,8 @@ pub fn ConfigSlotRow(
                     }
                 }
                 div { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-end tw:gap-2 tw:text-sm tw:leading-tight tw:text-muted-foreground",
-                    if let Some(chrome) = chrome {
-                        SlotEditChromeBadge { chrome }
-                        if let (Some(address), Some(handler)) = (slot.address.clone(), on_action) {
-                            SlotRevertButton { chrome, address, handler }
-                        }
+                    if chrome == Some(SlotEditChrome::Unsaved) {
+                        UnsavedBadge {}
                     }
                     if let Some(optionality) = slot.optionality {
                         OptionalSlotToggle { optionality }
@@ -99,6 +98,7 @@ pub fn ConfigSlotRow(
                     label: slot.label.clone(),
                     aspects,
                     initially_open,
+                    revert: slot_detail_revert(chrome, slot.address.clone(), on_action),
                 }
             }
             if expanded() {
@@ -143,51 +143,37 @@ fn OptionalSlotToggle(optionality: UiSlotOptionality) -> Element {
     }
 }
 
-/// Compact "unsaved" / "live" pill marking a touched slot row.
+/// Compact "unsaved" pill marking a touched persisted slot row. Live rows
+/// carry no badge: their tint plus the detail icon are the whole treatment.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SlotEditChromeBadge(chrome: SlotEditChrome) -> Element {
-    let (class, label, title) = match chrome {
-        SlotEditChrome::Unsaved => (
-            "tw:flex-none tw:rounded-pill tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-1.5 tw:py-0.5 tw:text-[0.64rem] tw:font-bold tw:uppercase tw:text-status-warning-foreground",
-            "unsaved",
-            "Pending edit; Save writes it to the project files",
-        ),
-        SlotEditChrome::Live => (
-            "tw:flex-none tw:rounded-pill tw:border tw:border-status-good-border tw:bg-status-good-bg tw:px-1.5 tw:py-0.5 tw:text-[0.64rem] tw:font-bold tw:uppercase tw:text-status-good-foreground",
-            "live",
-            "Live runtime control; applied now, never written by Save",
-        ),
-    };
+fn UnsavedBadge() -> Element {
     rsx! {
-        span { class, title, "{label}" }
+        span {
+            class: "tw:flex-none tw:rounded-pill tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-1.5 tw:py-0.5 tw:text-[0.64rem] tw:font-bold tw:uppercase tw:text-status-warning-foreground",
+            title: "Pending edit; Save writes it to the project files",
+            "unsaved"
+        }
     }
 }
 
-/// Per-slot revert affordance: "Revert" on unsaved rows, "Reset" on live rows.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SlotRevertButton(
-    chrome: SlotEditChrome,
-    address: ProjectSlotAddress,
-    handler: EventHandler<UiAction>,
-) -> Element {
-    let (label, title) = match chrome {
+/// The detail-popup revert affordance for a touched slot: "Revert" for
+/// unsaved (persisted) edits, "Reset" for live (transient) controls.
+fn slot_detail_revert(
+    chrome: Option<SlotEditChrome>,
+    address: Option<ProjectSlotAddress>,
+    on_action: Option<EventHandler<UiAction>>,
+) -> Option<SlotDetailRevert> {
+    let (label, title) = match chrome? {
         SlotEditChrome::Unsaved => ("Revert", "Discard this pending edit"),
         SlotEditChrome::Live => ("Reset", "Reset this live control to its authored value"),
     };
-    rsx! {
-        button {
-            class: "tw:flex-none tw:cursor-pointer tw:appearance-none tw:rounded-xs tw:border tw:border-border-strong tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:text-xs tw:font-bold tw:text-muted-foreground tw:hover:bg-card-muted tw:hover:text-strong-foreground",
-            r#type: "button",
-            title,
-            onclick: move |event| {
-                event.stop_propagation();
-                handler.call(slot_revert_action(address.clone()));
-            },
-            "{label}"
-        }
-    }
+    Some(SlotDetailRevert {
+        label,
+        title,
+        address: address?,
+        on_action: on_action?,
+    })
 }
 
 #[component]
@@ -259,10 +245,11 @@ fn slot_edit_chrome(state: &UiSlotFieldState) -> Option<SlotEditChrome> {
     })
 }
 
-/// Row treatment for live-dirty rows: the good/accent tint distinguishes a
-/// touched runtime control from the warning-tinted unsaved (persisted) rows.
+/// Row treatment for live-dirty rows: the dedicated live (blue) tint keeps a
+/// touched runtime control distinct from both the warning-tinted unsaved
+/// (persisted) rows and the good/success (green) treatments.
 fn live_row_class() -> &'static str {
-    "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-status-good-bg)_0%,var(--studio-status-good-bg)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
+    "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-status-live-bg)_0%,var(--studio-status-live-bg)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
 }
 
 fn record_summary_class(expanded: bool) -> &'static str {

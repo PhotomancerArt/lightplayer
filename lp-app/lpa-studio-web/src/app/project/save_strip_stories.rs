@@ -52,7 +52,9 @@ pub(crate) fn live_only() -> Element {
     }
 }
 
-#[story(description = "The placeholder detail popup: overlay revision and per-kind counts.")]
+#[story(
+    description = "The placeholder detail popup: overlay revision plus per-kind sections — warning tint for unsaved, live tint for transient."
+)]
 pub(crate) fn detail_popup() -> Element {
     rsx! {
         div { class: "tw:flex tw:min-h-80 tw:justify-end",

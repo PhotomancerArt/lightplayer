@@ -205,12 +205,18 @@ Per the deferred-decision convention, these are indexed in
   `mutate` applies unconditionally. Acceptable today because no wire path
   reaches it. **Revisit when** any new caller of `mutate` appears — route it
   through the same validation or delete it.
-- **(e) BLOCKING for M2 — revert regresses effective-def revisions
-  (pre-existing server-side bug).** Clearing overlay edits (revert) moves
-  effective-def revisions *backwards*, so a `since`-gated project read skips
-  the reverted values: a connected client shows stale values after
-  `RevertAllEdits` until a full (`since = 0`) resync, while the runtime
-  itself reverts correctly. The e2e test works around it by reconnecting
-  (`studio_edit_e2e_tests.rs`). **Must be fixed before roadmap M2 ships
-  revert UX** — that milestone's revert affordance depends on the client
-  seeing the reverted value without a reconnect.
+- **(e) ~~BLOCKING for M2 — revert regresses effective-def revisions
+  (pre-existing server-side bug).~~ Fixed 2026-07-05.** Clearing overlay
+  edits (revert) moved effective-def revisions *backwards*, so a
+  `since`-gated project read skipped the reverted values: a connected client
+  showed stale values after a revert until a full (`since = 0`) resync,
+  while the runtime itself reverted correctly. Fixed by keeping revision
+  stamps monotonic: when an operation removes an artifact's overlay coverage
+  (`RemoveSlotEdit` emptying it, `Clear`, commit dropping persisted
+  entries), the registry stamps that artifact at the current frame
+  (`ProjectRegistry::stamp_artifacts_leaving_overlay` →
+  `ArtifactStore::mark_content_changed`), so the reverted defs' effective
+  revisions advance and gated reads deliver them. Guarded by the engine
+  contract test `reverted_slot_edit_resends_def_root` (M5 G6a suite),
+  registry-level revision tests, and the e2e tests in
+  `studio_edit_e2e_tests.rs`, which no longer reconnect after revert.

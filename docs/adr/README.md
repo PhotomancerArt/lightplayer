@@ -52,7 +52,6 @@ holds the full context.
 
 | Item | Source ADR | Revisit trigger |
 |---|---|---|
-| **Blocking:** revert regresses effective-def revisions, so gated reads skip reverted values (connected client shows stale values after revert until a full resync; e2e works around it by reconnecting) | `2026-07-04-studio-editing-model` (e) | **Before roadmap M2 ships revert UX** |
 | Per-item overlay gating (fetch-full-on-change assumes small overlays) | `2026-07-04-studio-editing-model` (a) | Measured overlay fetch cost matters |
 | Save-panel diff DTOs (before/after values; M1 provides counts only) | `2026-07-04-studio-editing-model` (b) | Roadmap M3 (Save panel) |
 | Composite edit semantics (map add/remove, option some/none, variant switch) — extend the editing-model ADR if precedent is set | `2026-07-04-studio-editing-model` (c) | Roadmap M3 |

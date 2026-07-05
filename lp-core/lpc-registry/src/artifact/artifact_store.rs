@@ -121,6 +121,19 @@ impl ArtifactStore {
         self.entry(location).map(|entry| entry.revision)
     }
 
+    /// Advance `location`'s revision to `frame` without touching its read
+    /// state.
+    ///
+    /// Used when the artifact's *effective* content changed for a reason other
+    /// than a filesystem event — e.g. overlay edits over it were removed, so
+    /// derived readers must observe the transition back to the base content.
+    /// The file itself is unchanged, so the read state stays valid.
+    pub fn mark_content_changed(&mut self, location: &ArtifactLocation, frame: Revision) {
+        if let Some(entry) = self.by_location.get_mut(location) {
+            entry.revision = frame;
+        }
+    }
+
     pub fn entry(&self, location: &ArtifactLocation) -> Option<&ArtifactEntry> {
         self.by_location.get(location)
     }

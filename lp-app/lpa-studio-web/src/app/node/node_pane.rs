@@ -15,8 +15,6 @@ pub fn NodePane(
 ) -> Element {
     let mut active_tab = use_signal(|| 0_usize);
     let mut collapsed = use_signal(|| view.collapsed);
-    let focus_action = view.action.clone();
-    let focus_handler = on_action;
     let focused_class = if view.focused {
         "tw:border-accent-border"
     } else {
@@ -33,11 +31,6 @@ pub fn NodePane(
         div { class: "tw:grid tw:min-w-0 tw:gap-3",
             article {
                 class: "{article_class}",
-                onclick: move |_| {
-                    if let (Some(action), Some(handler)) = (focus_action.clone(), focus_handler) {
-                        handler.call(action);
-                    }
-                },
                 header { class: "{header_class}",
                     button {
                         class: "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-r tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:bg-card-subtle/60",
@@ -54,11 +47,20 @@ pub fn NodePane(
                         }
                     }
                     NodeHeader { header: view.header.clone() }
-                    if view.tabs.len() > 1 {
-                        NodeTabs {
-                            tabs: view.tabs.clone(),
-                            active_index,
-                            on_select: move |index| active_tab.set(index),
+                    div { class: "tw:flex tw:h-full tw:items-stretch",
+                        if view.tabs.len() > 1 {
+                            NodeTabs {
+                                tabs: view.tabs.clone(),
+                                active_index,
+                                on_select: move |index| active_tab.set(index),
+                            }
+                        }
+                        if let Some(action) = view.action.clone() {
+                            NodeSelectButton {
+                                action,
+                                focused: view.focused,
+                                on_action,
+                            }
                         }
                     }
                 }
@@ -102,6 +104,53 @@ pub fn NodePane(
                     items: view.children.clone(),
                     on_action,
                 }
+            }
+        }
+    }
+}
+
+/// Dedicated select control in the node header's upper-right corner.
+///
+/// Selecting a node focuses it (probes ride the focused node), so body
+/// clicks stay inert and only this control dispatches the focus action —
+/// editing another node's slots no longer steals the selection.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn NodeSelectButton(
+    action: UiAction,
+    focused: bool,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
+    let (class, icon, label) = if focused {
+        (
+            "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-accent",
+            StudioIconName::NodeSelected,
+            "Node is selected; probes follow this node",
+        )
+    } else {
+        (
+            "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:bg-card-subtle/60 tw:hover:text-accent",
+            StudioIconName::NodeSelect,
+            "Select this node so probes follow it",
+        )
+    };
+
+    rsx! {
+        button {
+            class,
+            r#type: "button",
+            aria_label: label,
+            aria_pressed: "{focused}",
+            title: label,
+            onclick: move |event| {
+                event.stop_propagation();
+                if let Some(handler) = on_action {
+                    handler.call(action.clone());
+                }
+            },
+            StudioIcon {
+                name: icon,
+                size: 15,
             }
         }
     }

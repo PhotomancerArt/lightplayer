@@ -43,7 +43,9 @@ pub use produced_product_view::ProducedProductView;
 pub use produced_products::ProducedProducts;
 pub use produced_value_view::ProducedValueView;
 pub use produced_values::ProducedValues;
-pub(crate) use slot_detail_button::{SlotDetailButton, primary_affordance, slot_row_class};
+pub(crate) use slot_detail_button::{
+    SlotDetailButton, SlotDetailRevert, primary_affordance, slot_row_class,
+};
 pub use slot_fields::{
     BoolSlotField, DropdownSlotField, FloatSlotField, IntSlotField, SliderSlotField,
     StringSlotField, UIntSlotField, Vec2SlotField, Vec3SlotField, XySlotField,

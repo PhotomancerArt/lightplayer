@@ -69,10 +69,12 @@ impl ProjectRegistry {
         ctx: &ParseCtx<'_>,
     ) -> Result<MutationResult, EditApplyError> {
         let before = self.inventory.clone();
+        let covered_before = self.overlay_covered_artifacts();
         let overlay_changed = self.overlay.get_mut().apply_mutation(mutation);
         if overlay_changed {
             self.overlay.mark_updated(frame);
         }
+        self.stamp_artifacts_leaving_overlay(covered_before, frame);
         let after = self.derive_inventory(fs, frame, ctx);
         let changes = change_summary_between(&before, &after);
         self.inventory = after;
@@ -92,6 +94,7 @@ impl ProjectRegistry {
         ctx: &ParseCtx<'_>,
     ) -> MutationBatchResults {
         let before = self.inventory.clone();
+        let covered_before = self.overlay_covered_artifacts();
         let mut any_changed = false;
         let mut results = Vec::new();
 
@@ -113,6 +116,7 @@ impl ProjectRegistry {
         if any_changed {
             self.overlay.mark_updated(frame);
         }
+        self.stamp_artifacts_leaving_overlay(covered_before, frame);
 
         let after = self.derive_inventory(fs, frame, ctx);
         let changes = change_summary_between(&before, &after);
@@ -132,9 +136,11 @@ impl ProjectRegistry {
         ctx: &ParseCtx<'_>,
     ) -> lpc_model::ProjectChangeSummary {
         let before = self.inventory.clone();
+        let covered_before = self.overlay_covered_artifacts();
         if self.overlay.get_mut().clear() {
             self.overlay.mark_updated(frame);
         }
+        self.stamp_artifacts_leaving_overlay(covered_before, frame);
         let after = self.derive_inventory(fs, frame, ctx);
         let changes = change_summary_between(&before, &after);
         self.inventory = after;
@@ -244,6 +250,11 @@ impl ProjectRegistry {
         if retained != overlay {
             self.overlay.set(frame, retained);
         }
+        let covered_before = overlay
+            .iter()
+            .map(|(location, _)| location.clone())
+            .collect();
+        self.stamp_artifacts_leaving_overlay(covered_before, frame);
         self.artifacts.apply_fs_changes(&fs_events, frame);
         let after = self.derive_inventory(fs, frame, ctx);
         self.inventory = after;
@@ -386,6 +397,41 @@ impl ProjectRegistry {
     ) -> Result<Option<AssetText>, AssetReadError> {
         let asset = self.materialize_asset_text(fs, location)?;
         Ok(asset.changed_since(since).then_some(asset))
+    }
+
+    /// Artifact locations currently carrying overlay edits.
+    fn overlay_covered_artifacts(&self) -> Vec<ArtifactLocation> {
+        self.overlay
+            .get()
+            .iter()
+            .map(|(location, _)| location.clone())
+            .collect()
+    }
+
+    /// Advance the stored revision of every artifact whose overlay coverage
+    /// the enclosing operation removed (revert / clear / commit).
+    ///
+    /// Effective revisions must stay monotonic for the revision-gated read
+    /// contract (`docs/adr/2026-07-03-revision-gated-project-reads.md`): while
+    /// an artifact carries overlay edits its derived entries are stamped with
+    /// the overlay revision, and when the last edit is removed
+    /// `revision_for_artifact` falls back to the base artifact revision —
+    /// which is *older*, so a `since`-gated project read would skip the
+    /// reverted content and leave connected clients stale (studio editing ADR
+    /// follow-up (e)). Removing an edit changes the effective content just
+    /// like editing does, so stamp the artifact entry at the current frame.
+    /// The stamp is stored in the [`ArtifactStore`], making it sticky across
+    /// later derivations without re-stamping.
+    fn stamp_artifacts_leaving_overlay(
+        &mut self,
+        covered_before: Vec<ArtifactLocation>,
+        frame: Revision,
+    ) {
+        for location in covered_before {
+            if !self.overlay.get().contains_artifact(&location) {
+                self.artifacts.mark_content_changed(&location, frame);
+            }
+        }
     }
 
     pub(crate) fn derive_inventory(
@@ -823,6 +869,117 @@ mod tests {
         let def = effective_clock_def(&registry);
         assert_eq!(*def.controls.rate.value(), 2.0);
         assert!(def.bindings.entries().contains_key(&String::from("speed")));
+    }
+
+    #[test]
+    fn removing_a_slot_edit_advances_the_def_revision() {
+        // Gated-read contract: effective def revisions are monotonic. A
+        // revert changes the effective content back to base, so its revision
+        // must advance to the revert frame — never regress to the base
+        // artifact revision, which a `since`-gated read would skip.
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = clock_project(&shapes);
+        let clock = clock_artifact();
+        let clock_def = NodeDefLocation::artifact_root(clock.clone());
+
+        // Edit at frame 10: the effective def rides the overlay revision.
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::PutSlotEdit {
+                artifact: clock.clone(),
+                edit: SlotEdit::assign_value(
+                    SlotPath::parse("controls.rate").unwrap(),
+                    LpValue::F32(2.0),
+                ),
+            }],
+        );
+        assert_accepted(&results[0], true);
+        assert_eq!(
+            registry.def(&clock_def).expect("clock def").revision,
+            Revision::new(10)
+        );
+
+        // Revert at frame 12: content reverts, revision advances.
+        registry.mutate_batch(
+            &fs,
+            MutationCmdBatch::new(vec![MutationCmd {
+                id: MutationCmdId::new(99),
+                mutation: MutationOp::RemoveSlotEdit {
+                    artifact: clock.clone(),
+                    path: SlotPath::parse("controls.rate").unwrap(),
+                },
+            }]),
+            Revision::new(12),
+            &ParseCtx { shapes: &shapes },
+        );
+        assert_eq!(*effective_clock_def(&registry).controls.rate.value(), 1.0);
+        assert_eq!(
+            registry.def(&clock_def).expect("clock def").revision,
+            Revision::new(12),
+            "reverting must advance the def revision, not regress it"
+        );
+
+        // The stamp is sticky, not per-derivation: an unrelated later
+        // mutation must not re-stamp the reverted def.
+        registry
+            .mutate(
+                &fs,
+                MutationOp::PutSlotEdit {
+                    artifact: ArtifactLocation::file("/project.json"),
+                    edit: SlotEdit::ensure_present(SlotPath::parse("nodes[clock]").unwrap()),
+                },
+                Revision::new(14),
+                &ParseCtx { shapes: &shapes },
+            )
+            .unwrap();
+        assert_eq!(
+            registry.def(&clock_def).expect("clock def").revision,
+            Revision::new(12),
+            "an unrelated mutation must not restamp the reverted def"
+        );
+    }
+
+    #[test]
+    fn clearing_the_overlay_advances_every_covered_def_revision() {
+        // `MutationOp::Clear` (RevertAllEdits) removes every overlay entry at
+        // once; each covered def's effective revision must advance to the
+        // clear frame so gated reads deliver the reverted values.
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = clock_project(&shapes);
+        let clock = clock_artifact();
+        let clock_def = NodeDefLocation::artifact_root(clock.clone());
+
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::PutSlotEdit {
+                artifact: clock.clone(),
+                edit: SlotEdit::assign_value(
+                    SlotPath::parse("controls.rate").unwrap(),
+                    LpValue::F32(2.0),
+                ),
+            }],
+        );
+        assert_accepted(&results[0], true);
+
+        registry
+            .mutate(
+                &fs,
+                MutationOp::Clear,
+                Revision::new(13),
+                &ParseCtx { shapes: &shapes },
+            )
+            .unwrap();
+
+        assert_eq!(*effective_clock_def(&registry).controls.rate.value(), 1.0);
+        assert_eq!(
+            registry.def(&clock_def).expect("clock def").revision,
+            Revision::new(13),
+            "clearing the overlay must advance the reverted def revision"
+        );
     }
 
     fn clock_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {

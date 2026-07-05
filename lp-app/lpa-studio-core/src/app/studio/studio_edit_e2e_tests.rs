@@ -136,7 +136,11 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
     );
     assert_eq!(editor_dirty(&snapshot), (0, 1));
 
-    // Revert all: the overlay clears and every slot returns to Clean.
+    // Revert all: the overlay clears, every slot returns to Clean, and the
+    // *gated* refresh (since = last known revision) delivers the reverted
+    // def values directly — no reconnect/full resync. Reverting advances the
+    // effective def revisions monotonically (studio editing ADR follow-up
+    // (e)), so the delta read includes the reverted roots.
     handle.tx.send(project_action(ProjectOp::RevertAllEdits));
     drive(actor.run_one_batch_for_test());
     handle.tx.send(project_action(ProjectOp::RefreshProject));
@@ -145,37 +149,79 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
 
     let rate = find_slot(&snapshot, "controls.rate");
     assert_eq!(rate.state.dirty, UiNodeDirtyState::Clean);
-    let color_order = find_slot(&snapshot, "color_order");
-    assert_eq!(color_order.state.dirty, UiNodeDirtyState::Clean);
-    assert_eq!(editor_dirty(&snapshot), (0, 0));
-
-    // Server truth after the revert: a full (since=0) resync via reconnect
-    // shows the clock rate back at its authored value. (A *gated* delta read
-    // does not deliver the reverted value: clearing the overlay regresses the
-    // effective def's revisions, which a `since`-gated read skips — a known
-    // server-side read-model nuance outside this client change.)
-    handle.tx.send(project_action(ProjectOp::DisconnectProject));
-    drive(actor.run_one_batch_for_test());
-    handle
-        .tx
-        .send(project_action(ProjectOp::ConnectRunningProject));
-    drive(actor.run_one_batch_for_test());
-    let snapshot = view.try_recv().expect("reconnect emits a snapshot");
-
-    let rate = find_slot(&snapshot, "controls.rate");
-    assert_eq!(rate.state.dirty, UiNodeDirtyState::Clean);
     assert_eq!(
         slot_value_display(rate),
         "1",
-        "rate reverted to the authored value"
+        "rate reverted to the authored value through the gated refresh"
     );
     let color_order = find_slot(&snapshot, "color_order");
+    assert_eq!(color_order.state.dirty, UiNodeDirtyState::Clean);
     assert_eq!(
         slot_value_display(color_order),
         "grb",
         "revert does not undo committed file changes"
     );
     assert_eq!(editor_dirty(&snapshot), (0, 0));
+}
+
+#[test]
+fn per_slot_transient_reset_reverts_value_through_gated_refresh() {
+    // The per-slot Reset affordance on a transient control (the clock `rate`
+    // slider): SetValue then `SlotEditOp::Revert` must bring the DTO back to
+    // the authored default through a *gated* refresh, without a reconnect.
+    // The intermediate refresh below syncs the mutated def into the view
+    // first, so the final assertion can only pass if the refresh after the
+    // revert delivers the *reverted* def root (monotonic revisions, studio
+    // editing ADR follow-up (e)) — not because a stale mirror or buffer
+    // entry happened to shadow the right value.
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let rate = find_slot(&snapshot, "controls.rate");
+    assert_eq!(slot_value_display(rate), "1");
+    let rate_address = rate.address.clone().expect("rate slot carries an address");
+
+    // Edit the transient control, then pull a gated refresh so the synced
+    // view itself holds the edited value.
+    handle
+        .tx
+        .send(set_value_action(rate_address.clone(), LpValue::F32(2.0)));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("edit + refresh emit a snapshot");
+    let rate = find_slot(&snapshot, "controls.rate");
+    assert_eq!(rate.state.dirty, UiNodeDirtyState::Dirty);
+    assert_eq!(slot_value_display(rate), "2");
+
+    // Per-slot reset: revert the rate edit, then a gated refresh must show
+    // the authored default again.
+    handle.tx.send(revert_action(rate_address));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("revert + refresh emit a snapshot");
+
+    let rate = find_slot(&snapshot, "controls.rate");
+    assert_eq!(rate.state.dirty, UiNodeDirtyState::Clean);
+    assert_eq!(
+        slot_value_display(rate),
+        "1",
+        "per-slot reset restores the authored default through the gated refresh"
+    );
 }
 
 // --- Harness ---------------------------------------------------------------
@@ -267,6 +313,13 @@ fn set_value_action(address: crate::ProjectSlotAddress, value: LpValue) -> Studi
     StudioCommand::Action(UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
         SlotEditOp::SetValue { address, value },
+    ))
+}
+
+fn revert_action(address: crate::ProjectSlotAddress) -> StudioCommand {
+    StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        SlotEditOp::Revert { address },
     ))
 }
 

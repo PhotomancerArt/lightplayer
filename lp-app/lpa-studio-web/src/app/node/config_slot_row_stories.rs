@@ -121,7 +121,7 @@ pub(crate) fn write_failed() -> Element {
 
 #[story(
     label = "Live Chrome",
-    description = "Touched transient controls: green live chrome with a per-slot Reset affordance."
+    description = "Touched transient controls: the live (blue) row tint and detail icon only — no badge; Reset lives in the detail popup."
 )]
 pub(crate) fn live_chrome() -> Element {
     rsx! {
@@ -163,8 +163,60 @@ pub(crate) fn live_chrome() -> Element {
 }
 
 #[story(
+    label = "Live Detail Popup",
+    description = "The detail popup for a touched live control: edit state sections plus the Reset affordance."
+)]
+pub(crate) fn live_detail_popup() -> Element {
+    rsx! {
+        div { class: "tw:min-h-72",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("controls.running", "Running", UiSlotValue::bool(false))
+                    .with_address(story_slot_address("controls.running"))
+                    .with_state(
+                        UiSlotFieldState::editable()
+                            .with_dirty(UiNodeDirtyState::Dirty)
+                            .with_live(true),
+                    ),
+                depth: 0,
+                index: 0,
+                initially_open: true,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Unsaved Detail Popup",
+    description = "The detail popup for an unsaved persisted edit: edited section plus the Revert affordance."
+)]
+pub(crate) fn unsaved_detail_popup() -> Element {
+    rsx! {
+        div { class: "tw:min-h-72",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "color_order",
+                    "Color order",
+                    UiSlotValue::string("grb").with_editor(UiSlotEditorHint::dropdown([
+                        ("rgb", "RGB"),
+                        ("grb", "GRB"),
+                        ("bgr", "BGR"),
+                    ])),
+                )
+                    .with_address(story_slot_address("color_order"))
+                    .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
+                depth: 0,
+                index: 0,
+                initially_open: true,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
     label = "Unsaved Chrome",
-    description = "A touched persisted slot: amber unsaved chrome with a per-slot Revert affordance."
+    description = "A touched persisted slot: amber unsaved badge and tint; Revert lives in the detail popup."
 )]
 pub(crate) fn unsaved_chrome() -> Element {
     rsx! {
