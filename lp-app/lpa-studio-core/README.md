@@ -180,8 +180,44 @@ suggests older firmware does not understand the newer probe request shape.
 The first editor view renders every synced node in stable tree order rather
 than requiring a selected-node detail view. Node bodies show headers, status,
 prominent `input`/`output` slots, config/state slot rows, compact bindings when
-available, and secondary project/runtime stats. Editing, overlay dirty-state,
-binding authoring, bus views, probes, and asset editing are later milestones.
+available, and secondary project/runtime stats. Binding authoring, bus views,
+and asset editing are later milestones; the editing substrate itself is below.
+
+## Edit Model
+
+Slot editing state is core-owned end to end; UI field components are
+stateless views that dispatch ops and render DTOs. The model (recorded in
+`docs/adr/2026-07-04-studio-editing-model.md`) has four pieces:
+
+- **Ops.** `SlotEditOp { SetValue, Revert }` target one `ProjectSlotAddress`
+  (carried on the op — no per-slot controller ids); `ProjectOp::SaveOverlay`
+  commits the overlay and `ProjectOp::RevertAllEdits` clears it. All are
+  `ActionClass::Foreground` on the 6 s editor quiet-gap deadline. The actor
+  coalesces consecutive queued `SetValue`s per address latest-wins
+  (`push_action_coalesced`), so `oninput` floods collapse to one mutation;
+  any other action is a barrier.
+- **Edit buffer.** `ProjectController` holds a path-keyed buffer of
+  `PendingEdit`s (`slot/pending_edit.rs`, state machine documented on the
+  type). A buffered value shadows the synced value in DTOs from field input
+  until the server **acks** the covering mutation — not merely until blur or
+  the next pull — which is what prevents rubber-banding at device pull
+  cadence. Accept releases the entry into the overlay mirror
+  (`ProjectSync::apply_acked_edits`); reject/transport failure parks it as
+  `Failed`, feeding the field's `invalid` reason until the next edit or a
+  revert.
+- **Overlay mirror.** `ProjectSync` mirrors the server's pending-edit
+  overlay, revision-gated: the runtime status carries `overlay_changed_at`
+  on every pull, and the mirror issues one full `ReadOverlay` ride-along
+  only when it advanced (a quiet-but-dirty project fetches nothing).
+- **Dirty derivation.** A slot is dirty iff the overlay contains an edit at
+  its path — no client-local dirty tracking, so dirty state is
+  cross-client-correct and survives reconnects. The DTO join
+  (`slot/slot_edit_join.rs`): buffer entries map to `Saving`/`Error`,
+  overlay-mirror entries to `Dirty`; `UiSlotFieldState.live` distinguishes
+  transient ("live") from persisted ("unsaved") edits, and
+  `ProjectEditorView.dirty` carries `ProjectDirtyCounts { persisted,
+  transient }` for the Save strip. `UiConfigSlot` carries its
+  `ProjectSlotAddress` so fields can dispatch edits without extra lookup.
 
 Project attach behavior is core-owned:
 
