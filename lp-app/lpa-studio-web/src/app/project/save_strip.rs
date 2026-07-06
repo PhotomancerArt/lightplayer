@@ -8,7 +8,7 @@
 //! minimal; the full "what changed" panel is M3.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{ControllerId, ProjectController, ProjectDirtyCounts, ProjectOp, UiAction};
+use lpa_studio_core::{ControllerId, DirtySummary, ProjectController, ProjectOp, UiAction};
 
 use crate::base::{IconMenuButton, IconMenuTone, PopoverPlacement, StudioIconName};
 
@@ -26,7 +26,7 @@ enum SaveStripState {
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ProjectSaveStrip(
-    dirty: ProjectDirtyCounts,
+    dirty: DirtySummary,
     overlay_revision: i64,
     edits_in_flight: usize,
     on_action: EventHandler<UiAction>,
@@ -109,7 +109,7 @@ fn SaveStripButton(
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn SaveStripStateIcon(
     state: SaveStripState,
-    dirty: ProjectDirtyCounts,
+    dirty: DirtySummary,
     overlay_revision: i64,
     edits_in_flight: usize,
     #[props(default = false)] initially_open: bool,
@@ -168,7 +168,7 @@ fn save_strip_popup_class() -> &'static str {
 
 /// The unsaved section wears the warning (yellow) edited tint whenever
 /// persisted edits are pending — the same treatment as edited slot rows.
-fn unsaved_section_class(dirty: &ProjectDirtyCounts) -> &'static str {
+fn unsaved_section_class(dirty: &DirtySummary) -> &'static str {
     if dirty.persisted > 0 {
         "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-warning-bg)_0%,transparent_72%)] tw:px-3 tw:py-1.5"
     } else {
@@ -179,7 +179,7 @@ fn unsaved_section_class(dirty: &ProjectDirtyCounts) -> &'static str {
 /// The live section wears the dedicated live (blue) tint whenever transient
 /// controls are touched — matching live slot rows, distinct from the yellow
 /// unsaved treatment.
-fn live_section_class(dirty: &ProjectDirtyCounts) -> &'static str {
+fn live_section_class(dirty: &DirtySummary) -> &'static str {
     if dirty.transient > 0 {
         "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-live-bg)_0%,transparent_72%)] tw:px-3 tw:py-1.5"
     } else {
@@ -198,7 +198,7 @@ fn SaveStripDetailRow(label: &'static str, value: String) -> Element {
     }
 }
 
-fn save_strip_state(dirty: &ProjectDirtyCounts, edits_in_flight: usize) -> SaveStripState {
+fn save_strip_state(dirty: &DirtySummary, edits_in_flight: usize) -> SaveStripState {
     if edits_in_flight > 0 {
         SaveStripState::InProgress
     } else if dirty.persisted > 0 {

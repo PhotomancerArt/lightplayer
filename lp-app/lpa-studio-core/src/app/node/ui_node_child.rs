@@ -1,6 +1,6 @@
 //! Child nodes extracted from config slots.
 
-use crate::{UiAction, UiNodeDirtyState, UiNodeSection, UiStatus};
+use crate::{DirtySummary, UiAction, UiNodeSection, UiStatus};
 
 /// A child node rendered outside its parent node pane.
 #[derive(Clone, Debug, PartialEq)]
@@ -25,8 +25,9 @@ pub struct UiNodeChild {
     pub sections: Vec<UiNodeSection>,
     /// Nested child nodes extracted below this child.
     pub children: Vec<UiNodeChild>,
-    /// Edited-state affordance for child invocation metadata.
-    pub dirty: UiNodeDirtyState,
+    /// Aggregate dirty-edit summary for this child's subtree (own slots plus
+    /// nested children), matching the per-field affordances.
+    pub dirty: DirtySummary,
 }
 
 impl UiNodeChild {
@@ -47,7 +48,7 @@ impl UiNodeChild {
             action: None,
             sections: Vec::new(),
             children: Vec::new(),
-            dirty: UiNodeDirtyState::Clean,
+            dirty: DirtySummary::clean(),
         }
     }
 

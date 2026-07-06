@@ -22,11 +22,11 @@
 //! Studio controller state.
 
 pub mod demo_project;
+pub mod dirty_summary;
 pub mod loaded_project_choice;
 pub mod node;
 pub mod project_connect_result;
 pub mod project_controller;
-pub mod project_dirty_counts;
 pub mod project_editor_op;
 pub mod project_editor_target;
 pub mod project_editor_view;
@@ -44,6 +44,7 @@ pub mod project_target_encoding;
 pub mod project_value_format;
 pub mod slot;
 
+pub use dirty_summary::DirtySummary;
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
     NodeController, NodeControllerState, ProjectNodeAddress, ProjectNodeTarget,
@@ -51,7 +52,6 @@ pub use node::{
 };
 pub use project_connect_result::ProjectConnectResult;
 pub use project_controller::{ProjectController, ProjectEditRun, ProjectRefreshOutcome};
-pub use project_dirty_counts::ProjectDirtyCounts;
 pub use project_editor_op::ProjectEditorOp;
 pub use project_editor_target::ProjectEditorTarget;
 pub use project_editor_view::ProjectEditorView;

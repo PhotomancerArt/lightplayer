@@ -27,8 +27,8 @@ pub use app::node::{
     UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
 };
 pub use app::project::{
-    LoadedProjectChoice, NodeController, NodeControllerState, PendingEdit, PendingEditPhase,
-    ProjectConnectResult, ProjectController, ProjectDirtyCounts, ProjectEditRun, ProjectEditorOp,
+    DirtySummary, LoadedProjectChoice, NodeController, NodeControllerState, PendingEdit,
+    PendingEditPhase, ProjectConnectResult, ProjectController, ProjectEditRun, ProjectEditorOp,
     ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress,
     ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTarget, ProjectNodeTreeItem,
     ProjectNodeTreeView, ProjectOp, ProjectProductSubscriptionIntent, ProjectRefreshOutcome,
@@ -57,8 +57,8 @@ pub use core::{
     ActionClass, ActionConfirmation, ActionEnablement, ActionMeta, ActionPriority, Controller,
     ControllerContext, ControllerId, ControllerOp, PASSIVE_REFRESH_DEADLINE,
     PROJECT_ACTION_DEADLINE, PROJECT_EDITOR_ACTION_DEADLINE, PROJECT_LOAD_DEADLINE, UiAction,
-    UiActions, UiActivityView, UiMetric, UiPaneView, UiProgress, UiStatus, UiStepsView,
-    UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,
+    UiActions, UiActivityView, UiMetric, UiPaneAction, UiPaneView, UiProgress, UiStatus,
+    UiStepsView, UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,
 };
 
 pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/basic";

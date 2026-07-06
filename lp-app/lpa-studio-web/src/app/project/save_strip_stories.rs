@@ -1,7 +1,7 @@
 //! Stories for the project save strip states.
 
 use dioxus::prelude::*;
-use lpa_studio_core::ProjectDirtyCounts;
+use lpa_studio_core::DirtySummary;
 use lpa_studio_web_story_macros::story;
 
 use crate::app::project::ProjectSaveStrip;
@@ -10,7 +10,7 @@ use crate::app::project::ProjectSaveStrip;
 pub(crate) fn unchanged() -> Element {
     rsx! {
         ProjectSaveStrip {
-            dirty: ProjectDirtyCounts::default(),
+            dirty: DirtySummary::default(),
             overlay_revision: 0,
             edits_in_flight: 0,
             on_action: move |_| {},
@@ -24,9 +24,10 @@ pub(crate) fn unchanged() -> Element {
 pub(crate) fn uncommitted() -> Element {
     rsx! {
         ProjectSaveStrip {
-            dirty: ProjectDirtyCounts {
+            dirty: DirtySummary {
                 persisted: 2,
                 transient: 1,
+                failed: 0,
             },
             overlay_revision: 7,
             edits_in_flight: 0,
@@ -41,9 +42,10 @@ pub(crate) fn uncommitted() -> Element {
 pub(crate) fn live_only() -> Element {
     rsx! {
         ProjectSaveStrip {
-            dirty: ProjectDirtyCounts {
+            dirty: DirtySummary {
                 persisted: 0,
                 transient: 2,
+                failed: 0,
             },
             overlay_revision: 4,
             edits_in_flight: 0,
@@ -59,9 +61,10 @@ pub(crate) fn detail_popup() -> Element {
     rsx! {
         div { class: "tw:flex tw:min-h-80 tw:justify-end",
             ProjectSaveStrip {
-                dirty: ProjectDirtyCounts {
+                dirty: DirtySummary {
                     persisted: 2,
                     transient: 1,
+                    failed: 0,
                 },
                 overlay_revision: 7,
                 edits_in_flight: 0,
@@ -76,9 +79,10 @@ pub(crate) fn detail_popup() -> Element {
 pub(crate) fn in_progress() -> Element {
     rsx! {
         ProjectSaveStrip {
-            dirty: ProjectDirtyCounts {
+            dirty: DirtySummary {
                 persisted: 1,
                 transient: 0,
+                failed: 0,
             },
             overlay_revision: 7,
             edits_in_flight: 1,

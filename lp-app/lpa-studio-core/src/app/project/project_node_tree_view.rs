@@ -1,4 +1,4 @@
-use crate::UiAction;
+use crate::{DirtySummary, UiAction};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectNodeTreeView {
@@ -25,6 +25,9 @@ pub struct ProjectNodeTreeItem {
     pub focused: bool,
     pub action: UiAction,
     pub children: Vec<ProjectNodeTreeItem>,
+    /// Aggregate dirty-edit summary for this node's subtree (own slots plus
+    /// descendant nodes), matching the node header and per-field affordances.
+    pub dirty: DirtySummary,
 }
 
 impl ProjectNodeTreeItem {
@@ -45,7 +48,14 @@ impl ProjectNodeTreeItem {
             focused,
             action,
             children,
+            dirty: DirtySummary::clean(),
         }
+    }
+
+    /// Set the aggregate dirty-edit summary for the node's subtree.
+    pub fn with_dirty(mut self, dirty: DirtySummary) -> Self {
+        self.dirty = dirty;
+        self
     }
 }
 

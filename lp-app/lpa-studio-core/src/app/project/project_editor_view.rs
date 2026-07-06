@@ -1,4 +1,6 @@
-use crate::{ProjectDirtyCounts, ProjectNodeTreeView, ProjectSyncSummary, UiMetric, UiNodeView};
+use crate::{
+    DirtySummary, ProjectNodeTreeView, ProjectSyncSummary, UiMetric, UiNodeView, UiPaneAction,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProjectEditorView {
@@ -8,13 +10,16 @@ pub struct ProjectEditorView {
     pub stats: Vec<UiMetric>,
     pub tree: ProjectNodeTreeView,
     pub nodes: Vec<UiNodeView>,
-    /// Aggregate dirty-slot counts (persisted vs transient) for the save
-    /// affordances M2 builds; derived from the same edit-state join as the
-    /// per-field dirty affordances.
-    pub dirty: ProjectDirtyCounts,
+    /// Project-level aggregate of the per-node dirty summaries (persisted /
+    /// transient / failed) driving the save affordances; derived from the
+    /// same edit-state join as the per-field dirty affordances.
+    pub dirty: DirtySummary,
+    /// Contextual project-header actions (Save / Revert to saved) produced
+    /// controller-side; empty unless persisted edits are pending.
+    pub header_actions: Vec<UiPaneAction>,
     /// Buffered edits still awaiting a server acknowledgement
     /// (`Pending`/`InFlight` phases). Non-zero only in mid-op progressive
-    /// snapshots; drives the save strip's "in progress" state.
+    /// snapshots; drives the project header's "in progress" state.
     pub edits_in_flight: usize,
 }
 
@@ -34,14 +39,21 @@ impl ProjectEditorView {
             stats,
             tree,
             nodes,
-            dirty: ProjectDirtyCounts::default(),
+            dirty: DirtySummary::clean(),
+            header_actions: Vec::new(),
             edits_in_flight: 0,
         }
     }
 
-    /// Attach the aggregate dirty-slot counts.
-    pub fn with_dirty(mut self, dirty: ProjectDirtyCounts) -> Self {
+    /// Attach the project-level aggregate dirty summary.
+    pub fn with_dirty(mut self, dirty: DirtySummary) -> Self {
         self.dirty = dirty;
+        self
+    }
+
+    /// Attach the contextual project-header actions.
+    pub fn with_header_actions(mut self, header_actions: Vec<UiPaneAction>) -> Self {
+        self.header_actions = header_actions;
         self
     }
 

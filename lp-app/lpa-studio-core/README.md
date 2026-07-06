@@ -214,10 +214,14 @@ stateless views that dispatch ops and render DTOs. The model (recorded in
   cross-client-correct and survives reconnects. The DTO join
   (`slot/slot_edit_join.rs`): buffer entries map to `Saving`/`Error`,
   overlay-mirror entries to `Dirty`; `UiSlotFieldState.live` distinguishes
-  transient ("live") from persisted ("unsaved") edits, and
-  `ProjectEditorView.dirty` carries `ProjectDirtyCounts { persisted,
-  transient }` for the Save strip. `UiConfigSlot` carries its
-  `ProjectSlotAddress` so fields can dispatch edits without extra lookup.
+  transient ("live") from persisted ("unsaved") edits. The same join feeds
+  `DirtySummary { persisted, transient, failed }` (`project/dirty_summary.rs`),
+  aggregated slot → node → project during the DTO build: node headers,
+  child entries, sidebar tree items, and `ProjectEditorView.dirty` all carry
+  it, and the project header's contextual Save/Revert actions surface as
+  controller-produced `UiPaneAction`s on `ProjectEditorView.header_actions`.
+  `UiConfigSlot` carries its `ProjectSlotAddress` so fields can dispatch
+  edits without extra lookup.
 
 Project attach behavior is core-owned:
 

@@ -1,6 +1,6 @@
 //! Header metadata for a node pane.
 
-use crate::UiStatus;
+use crate::{DirtySummary, UiStatus};
 
 /// Identity and runtime summary shown at the top of a node pane.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -19,6 +19,9 @@ pub struct UiNodeHeader {
     pub summary: Option<String>,
     /// Optional expanded status detail or error text.
     pub detail: Option<String>,
+    /// Aggregate dirty-edit summary for this node's subtree (own slots plus
+    /// descendant nodes), matching the per-field affordances.
+    pub dirty: DirtySummary,
 }
 
 impl UiNodeHeader {
@@ -32,12 +35,19 @@ impl UiNodeHeader {
             status: UiStatus::neutral("Idle"),
             summary: None,
             detail: None,
+            dirty: DirtySummary::clean(),
         }
     }
 
     /// Set the compact status.
     pub fn with_status(mut self, status: UiStatus) -> Self {
         self.status = status;
+        self
+    }
+
+    /// Set the aggregate dirty-edit summary for the node's subtree.
+    pub fn with_dirty(mut self, dirty: DirtySummary) -> Self {
+        self.dirty = dirty;
         self
     }
 
