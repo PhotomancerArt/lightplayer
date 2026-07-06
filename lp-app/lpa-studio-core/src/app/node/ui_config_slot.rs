@@ -2,8 +2,8 @@
 
 use crate::{
     ProjectSlotAddress, UiBindingEndpoint, UiNodeDirtyState, UiSlotAffordance, UiSlotAspect,
-    UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotFieldState, UiSlotRecord, UiSlotShape,
-    UiSlotShapeField, UiSlotSourceState, UiSlotValue,
+    UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotComposite, UiSlotFieldState,
+    UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotValue,
 };
 
 /// The renderable body of a config slot row.
@@ -62,6 +62,8 @@ pub struct UiConfigSlot {
     pub detail: Option<String>,
     /// Optional inclusion state when this row represents an `OptionSlot`.
     pub optionality: Option<UiSlotOptionality>,
+    /// Structural gesture facts when this row is a map or enum composite.
+    pub composite: Option<UiSlotComposite>,
     /// Whether the visible value is direct, bound, or unset.
     pub source: UiSlotSourceState,
     /// Value or record body for the row.
@@ -112,6 +114,7 @@ impl UiConfigSlot {
             description: None,
             detail: None,
             optionality: None,
+            composite: None,
             source: UiSlotSourceState::Direct,
             body,
             state: UiSlotFieldState::editable(),
@@ -141,6 +144,12 @@ impl UiConfigSlot {
     /// Set optional inclusion metadata.
     pub fn with_optionality(mut self, optionality: UiSlotOptionality) -> Self {
         self.optionality = Some(optionality);
+        self
+    }
+
+    /// Set structural gesture facts for a map or enum composite row.
+    pub fn with_composite(mut self, composite: UiSlotComposite) -> Self {
+        self.composite = Some(composite);
         self
     }
 

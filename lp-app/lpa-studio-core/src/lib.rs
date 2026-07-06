@@ -3,7 +3,8 @@
 pub use lpa_link::{LinkEndpointId, LinkEndpointStatus, LinkProviderKind};
 pub use lpc_model::{
     ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
-    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, LpValue, Revision, SlotPath,
+    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, LpValue, Revision, SlotMapKey,
+    SlotPath,
 };
 
 pub mod app;
@@ -23,7 +24,8 @@ pub use app::node::{
     UiNodeTabBody, UiNodeView, UiProducedBinding, UiProducedBindings, UiProducedProduct,
     UiProducedValue, UiProductKind, UiProductPreview, UiProductPreviewFrame, UiProductRef,
     UiProductTrackingState, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
-    UiSlotAsset, UiSlotEditorHint, UiSlotFieldState, UiSlotOption, UiSlotOptionality, UiSlotRecord,
+    UiSlotAsset, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState,
+    UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOption, UiSlotOptionality, UiSlotRecord,
     UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
 };
 pub use app::project::{
@@ -35,6 +37,7 @@ pub use app::project::{
     ProjectRefreshOutcome, ProjectRuntimeSummary, ProjectSlotAddress, ProjectSlotRoot,
     ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
     ProjectSyncSummary, SlotController, SlotControllerState, SlotEditOp, SlotKind, UiAffordance,
+    UiPendingEdit, UiPendingEditKind, UiPendingEditPhase,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerController, ServerFailureKind, ServerOp,

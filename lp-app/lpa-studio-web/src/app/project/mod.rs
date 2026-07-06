@@ -1,5 +1,6 @@
 #[cfg(feature = "stories")]
 pub(crate) mod editor_fields_stories;
+pub mod pending_edit_section;
 pub mod project_node_tree;
 pub mod project_pane;
 #[cfg(feature = "stories")]

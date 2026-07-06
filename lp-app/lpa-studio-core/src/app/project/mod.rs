@@ -44,6 +44,7 @@ pub mod project_target_encoding;
 pub mod project_value_format;
 pub mod slot;
 pub mod ui_affordance;
+pub mod ui_pending_edit;
 
 pub use dirty_summary::DirtySummary;
 pub use loaded_project_choice::LoadedProjectChoice;
@@ -74,3 +75,4 @@ pub use slot::{
     SlotController, SlotControllerState, SlotEditOp, SlotKind,
 };
 pub use ui_affordance::UiAffordance;
+pub use ui_pending_edit::{UiPendingEdit, UiPendingEditKind, UiPendingEditPhase};

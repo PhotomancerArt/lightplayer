@@ -1,6 +1,6 @@
 use crate::{
     DirtySummary, ProjectNodeTreeView, ProjectSyncSummary, UiAffordance, UiMetric, UiNodeView,
-    UiPaneAction, UiStatusKind,
+    UiPaneAction, UiPendingEdit, UiStatusKind,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -19,6 +19,12 @@ pub struct ProjectEditorView {
     /// transient / failed) driving the save affordances; derived from the
     /// same edit-state join as the per-field dirty affordances.
     pub dirty: DirtySummary,
+    /// The save panel's labeled change list: one entry per pending edit,
+    /// built from the same edit-state join as [`Self::dirty`], so the list
+    /// length per phase equals the summary's bucket counts by construction.
+    /// Stable order: by node address, then slot path (stale artifact-labeled
+    /// entries appended last).
+    pub pending_edits: Vec<UiPendingEdit>,
     /// Contextual project-header actions (Save / Revert to saved) produced
     /// controller-side; empty unless persisted edits are pending.
     pub header_actions: Vec<UiPaneAction>,
@@ -47,6 +53,7 @@ impl ProjectEditorView {
             tree,
             nodes,
             dirty: DirtySummary::clean(),
+            pending_edits: Vec::new(),
             header_actions: Vec::new(),
             edits_in_flight: 0,
         }
@@ -61,6 +68,12 @@ impl ProjectEditorView {
     /// Attach the project-level aggregate dirty summary.
     pub fn with_dirty(mut self, dirty: DirtySummary) -> Self {
         self.dirty = dirty;
+        self
+    }
+
+    /// Attach the save panel's labeled change list.
+    pub fn with_pending_edits(mut self, pending_edits: Vec<UiPendingEdit>) -> Self {
+        self.pending_edits = pending_edits;
         self
     }
 

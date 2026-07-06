@@ -4,7 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use lpa_client::{CancelSignal, ProgressDeadline};
 
-use crate::app::project::slot::SlotEditJoin;
+use crate::app::project::format_lp_value;
+use crate::app::project::slot::{SlotEditEntry, SlotEditEntrySource, SlotEditJoin};
 use crate::core::notice::UiNotices;
 use crate::{
     Controller, ControllerId, DirtySummary, LoadedProjectChoice, PendingEdit, PendingEditOp,
@@ -14,7 +15,8 @@ use crate::{
     ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp,
     StudioOverlayMutation, StudioProjectReadOutcome, StudioServerClient, UiAction, UiError,
     UiIssue, UiLogEntry, UiLogLevel, UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView,
-    UiProductRef, UiResult, UiStatus, UiViewContent, UxUpdateSink,
+    UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProductRef, UiResult, UiStatus,
+    UiViewContent, UxUpdateSink,
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
@@ -137,6 +139,92 @@ impl ProjectController {
             .count()
     }
 
+    /// The save panel's labeled change list (D5): one [`UiPendingEdit`] per
+    /// edit entry of the same join [`DirtySummary`] counting uses
+    /// (`SlotEditJoin::entries`), so the list length per phase equals the
+    /// summary's bucket counts by construction. Stable order: by node
+    /// address, then slot path. Overlay entries whose artifact no longer
+    /// reverse-maps to a synced node are appended with the artifact path as
+    /// their label rather than being dropped (no revert — there is no node
+    /// address to dispatch through); they are not part of any node's counts.
+    pub fn pending_edits(&self) -> Vec<UiPendingEdit> {
+        let join = self.slot_edit_join();
+        let mut edits: Vec<UiPendingEdit> = join
+            .entries()
+            .into_iter()
+            .map(|entry| self.ui_pending_edit(&entry))
+            .collect();
+        edits.extend(self.stale_pending_edits());
+        edits
+    }
+
+    /// Project one join entry into its change-list DTO. The phase derives
+    /// from the entry's own [`DirtySummary`] classification — the same value
+    /// the counts sum — so list and counts cannot drift.
+    fn ui_pending_edit(&self, entry: &SlotEditEntry<'_>) -> UiPendingEdit {
+        let node_label = self
+            .node(&entry.address.node)
+            .map(|node| node.label().to_string())
+            .unwrap_or_else(|| entry.address.node.to_string());
+        let kind = match &entry.op {
+            SlotEditEntrySource::Buffered(op) => match op {
+                PendingEditOp::SetValue { value } => UiPendingEditKind::Assign {
+                    value_display: format_lp_value(value),
+                },
+                PendingEditOp::EnsurePresent => UiPendingEditKind::Added,
+                PendingEditOp::RemoveValue => UiPendingEditKind::Removed,
+            },
+            SlotEditEntrySource::Acked(op) => acked_edit_kind(op),
+        };
+        let phase = if entry.summary.failed > 0 {
+            UiPendingEditPhase::Failed {
+                reason: entry
+                    .pending
+                    .and_then(PendingEdit::failure_reason)
+                    .unwrap_or_default()
+                    .to_string(),
+            }
+        } else if entry.summary.transient > 0 {
+            UiPendingEditPhase::Live
+        } else {
+            UiPendingEditPhase::Persisted
+        };
+        UiPendingEdit {
+            node_label,
+            slot_path_display: slot_path_display(entry.address),
+            kind,
+            phase,
+            revert: Some(UiAction::from_op(
+                ControllerId::new(Self::NODE_ID),
+                SlotEditOp::Revert {
+                    address: entry.address.clone(),
+                },
+            )),
+        }
+    }
+
+    /// Change-list entries for overlay edits whose artifact does not
+    /// reverse-map to any synced node (the complement of the join's overlay
+    /// entries). Rendered with the artifact path as the label so a stale
+    /// pending edit stays visible; save still writes it, so it lists as
+    /// persisted.
+    fn stale_pending_edits(&self) -> Vec<UiPendingEdit> {
+        let Some(sync) = &self.sync else {
+            return Vec::new();
+        };
+        let nodes_by_artifact = self.nodes_by_def_artifact();
+        sync.overlay_slot_edits()
+            .filter(|(artifact, _, _)| !nodes_by_artifact.contains_key(artifact))
+            .map(|(artifact, path, op)| UiPendingEdit {
+                node_label: artifact.file_path().as_str().to_string(),
+                slot_path_display: path.to_string(),
+                kind: acked_edit_kind(op),
+                phase: UiPendingEditPhase::Persisted,
+                revert: None,
+            })
+            .collect()
+    }
+
     /// Build the per-snapshot edit-state join: the local edit buffer plus the
     /// overlay mirror's pending edits, reverse-mapped from
     /// `(artifact, path)` to slot addresses through the def-artifact map (an
@@ -148,17 +236,15 @@ impl ProjectController {
         if let Some(sync) = &self.sync {
             let nodes_by_artifact = self.nodes_by_def_artifact();
             for (artifact, path, op) in sync.overlay_slot_edits() {
+                // Unmapped (stale) artifacts have no slot address; they stay
+                // out of the join and are listed by `stale_pending_edits`.
                 let Some(nodes) = nodes_by_artifact.get(artifact) else {
                     continue;
-                };
-                let value = match op {
-                    lpc_model::SlotEditOp::AssignValue(value) => Some(value.clone()),
-                    lpc_model::SlotEditOp::EnsurePresent | lpc_model::SlotEditOp::Remove => None,
                 };
                 for node in nodes {
                     overlay.insert(
                         ProjectSlotAddress::new(node.clone(), ProjectSlotRoot::def(), path.clone()),
-                        value.clone(),
+                        op.clone(),
                     );
                 }
             }
@@ -327,6 +413,7 @@ impl ProjectController {
         )
         .with_project_name(self.project_name(project_id))
         .with_dirty(dirty)
+        .with_pending_edits(self.pending_edits())
         .with_header_actions(project_header_actions(&dirty))
         .with_edits_in_flight(self.edits_in_flight())
     }
@@ -1327,6 +1414,27 @@ fn node_focus_action(node: &NodeController) -> UiAction {
     )
     .with_label(format!("Focus {}", node.label()))
     .with_summary(format!("Focus node {}.", node.address()))
+}
+
+/// Display kind for a server-acked overlay op (the mirror's vocabulary).
+fn acked_edit_kind(op: &lpc_model::SlotEditOp) -> UiPendingEditKind {
+    match op {
+        lpc_model::SlotEditOp::AssignValue(value) => UiPendingEditKind::Assign {
+            value_display: format_lp_value(value),
+        },
+        lpc_model::SlotEditOp::EnsurePresent => UiPendingEditKind::Added,
+        lpc_model::SlotEditOp::Remove => UiPendingEditKind::Removed,
+    }
+}
+
+/// Human-readable slot path for a change-list entry: the path display, or
+/// the root's name for root-path edits (an empty path renders nothing).
+fn slot_path_display(address: &ProjectSlotAddress) -> String {
+    if address.is_root() {
+        address.root.name().to_string()
+    } else {
+        address.path.to_string()
+    }
 }
 
 /// Contextual project-header actions (D4/D5): Save and Revert-to-saved as
@@ -3775,6 +3883,240 @@ mod tests {
             UiNodeDirtyState::Saving,
             "an in-flight gesture under an option shows Saving on its row"
         );
+    }
+
+    // --- Save-panel change list (P5) -----------------------------------------
+
+    fn pending_edits_by_phase(edits: &[crate::UiPendingEdit]) -> DirtySummary {
+        edits
+            .iter()
+            .map(|edit| match edit.phase {
+                crate::UiPendingEditPhase::Persisted => DirtySummary {
+                    persisted: 1,
+                    ..DirtySummary::default()
+                },
+                crate::UiPendingEditPhase::Live => DirtySummary {
+                    transient: 1,
+                    ..DirtySummary::default()
+                },
+                crate::UiPendingEditPhase::Failed { .. } => DirtySummary {
+                    failed: 1,
+                    ..DirtySummary::default()
+                },
+            })
+            .sum()
+    }
+
+    /// The P5 consistency requirement: the change list is built from the same
+    /// join enumeration `DirtySummary` counting sums, so the list length per
+    /// phase equals the summary counts — including the rowless removal from
+    /// P2 and a failed buffered gesture.
+    #[test]
+    fn pending_edits_list_agrees_with_dirty_summary_counts_by_construction() {
+        let (mut project, _client, _sent) = structural_project_with_scripted_client(Vec::new());
+        // Acked overlay edits: a value assign at entries[b] plus a removal of
+        // base-present entry `a`...
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[
+                (
+                    MutationCmd {
+                        id: MutationCmdId::new(1),
+                        mutation: MutationOp::PutSlotEdit {
+                            artifact: edit_artifact(),
+                            edit: SlotEdit::remove(SlotPath::parse("entries[a]").unwrap()),
+                        },
+                    },
+                    MutationEffect::OverlayChanged { changed: true },
+                ),
+                (
+                    MutationCmd {
+                        id: MutationCmdId::new(2),
+                        mutation: MutationOp::PutSlotEdit {
+                            artifact: edit_artifact(),
+                            edit: SlotEdit::assign_value(
+                                SlotPath::parse("entries[b]").unwrap(),
+                                LpValue::F32(9.0),
+                            ),
+                        },
+                    },
+                    MutationEffect::OverlayChanged { changed: true },
+                ),
+            ],
+            Revision::new(3),
+        );
+        // ...the refresh applies an effective def without the removed entry
+        // (no surviving row)...
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_structural_config_slots_with_entries(&mut view, 1, Revision::new(3), &["b"]);
+        project.apply_project_view(&view).unwrap();
+        // ...and a failed buffered gesture is parked at a rowless path.
+        project.insert_pending_edit_for_test(
+            structural_address("entries[c]"),
+            PendingEdit {
+                op: PendingEditOp::EnsurePresent,
+                phase: PendingEditPhase::Failed {
+                    reason: "entries[c] does not resolve".to_string(),
+                },
+            },
+        );
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+
+        assert_eq!(
+            editor.dirty,
+            DirtySummary {
+                persisted: 2,
+                transient: 0,
+                failed: 1,
+            }
+        );
+        assert_eq!(
+            pending_edits_by_phase(&editor.pending_edits),
+            editor.dirty,
+            "list length per phase equals the summary counts"
+        );
+        // Stable order (by node, then path) with the op-derived kinds.
+        let rows: Vec<(&str, &crate::UiPendingEditKind)> = editor
+            .pending_edits
+            .iter()
+            .map(|edit| (edit.slot_path_display.as_str(), &edit.kind))
+            .collect();
+        assert_eq!(
+            rows,
+            vec![
+                ("entries[a]", &crate::UiPendingEditKind::Removed),
+                (
+                    "entries[b]",
+                    &crate::UiPendingEditKind::Assign {
+                        value_display: "9.0".to_string()
+                    }
+                ),
+                ("entries[c]", &crate::UiPendingEditKind::Added),
+            ]
+        );
+        let failed = &editor.pending_edits[2];
+        assert_eq!(
+            failed.phase,
+            crate::UiPendingEditPhase::Failed {
+                reason: "entries[c] does not resolve".to_string()
+            }
+        );
+        // Every entry is node-labeled and carries a revert at its address.
+        for edit in &editor.pending_edits {
+            assert_eq!(edit.node_label, "Orbit");
+            let revert = edit.revert.as_ref().expect("mapped entries carry revert");
+            assert!(revert.is_for_node(ProjectController::NODE_ID));
+        }
+        assert_eq!(
+            editor.pending_edits[0].revert.as_ref().unwrap().op_as(),
+            Some(&crate::SlotEditOp::Revert {
+                address: structural_address("entries[a]")
+            })
+        );
+    }
+
+    #[test]
+    fn transient_edits_list_in_the_live_phase() {
+        let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[
+                (
+                    MutationCmd {
+                        id: MutationCmdId::new(1),
+                        mutation: MutationOp::PutSlotEdit {
+                            artifact: edit_artifact(),
+                            edit: SlotEdit::assign_value(
+                                SlotPath::parse("brightness").unwrap(),
+                                LpValue::F32(0.9),
+                            ),
+                        },
+                    },
+                    MutationEffect::OverlayChanged { changed: true },
+                ),
+                (
+                    MutationCmd {
+                        id: MutationCmdId::new(2),
+                        mutation: MutationOp::PutSlotEdit {
+                            artifact: edit_artifact(),
+                            edit: SlotEdit::assign_value(
+                                SlotPath::parse("rate").unwrap(),
+                                LpValue::F32(2.0),
+                            ),
+                        },
+                    },
+                    MutationEffect::OverlayChanged { changed: true },
+                ),
+            ],
+            Revision::new(3),
+        );
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+
+        assert_eq!(
+            editor.dirty,
+            DirtySummary {
+                persisted: 1,
+                transient: 1,
+                failed: 0,
+            }
+        );
+        assert_eq!(pending_edits_by_phase(&editor.pending_edits), editor.dirty);
+        let phases: Vec<(&str, &crate::UiPendingEditPhase)> = editor
+            .pending_edits
+            .iter()
+            .map(|edit| (edit.slot_path_display.as_str(), &edit.phase))
+            .collect();
+        assert_eq!(
+            phases,
+            vec![
+                ("brightness", &crate::UiPendingEditPhase::Persisted),
+                ("rate", &crate::UiPendingEditPhase::Live),
+            ]
+        );
+    }
+
+    /// Overlay entries whose artifact no longer reverse-maps to a synced node
+    /// stay visible: listed with the artifact path as the label, no revert
+    /// (there is no node address to dispatch through), and outside the
+    /// per-node `DirtySummary` counts.
+    #[test]
+    fn stale_overlay_edits_list_with_artifact_label_and_no_revert() {
+        let (mut project, _client, _sent) = structural_project_with_scripted_client(Vec::new());
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[(
+                MutationCmd {
+                    id: MutationCmdId::new(1),
+                    mutation: MutationOp::PutSlotEdit {
+                        artifact: ArtifactLocation::file("/retired.shader.json"),
+                        edit: SlotEdit::assign_value(
+                            SlotPath::parse("brightness").unwrap(),
+                            LpValue::F32(0.5),
+                        ),
+                    },
+                },
+                MutationEffect::OverlayChanged { changed: true },
+            )],
+            Revision::new(3),
+        );
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+
+        assert!(
+            editor.dirty.is_clean(),
+            "stale entries belong to no node, so node-derived counts stay clean"
+        );
+        assert_eq!(editor.pending_edits.len(), 1);
+        let stale = &editor.pending_edits[0];
+        assert_eq!(stale.node_label, "/retired.shader.json");
+        assert_eq!(stale.slot_path_display, "brightness");
+        assert_eq!(
+            stale.kind,
+            crate::UiPendingEditKind::Assign {
+                value_display: "0.5".to_string()
+            }
+        );
+        assert_eq!(stale.phase, crate::UiPendingEditPhase::Persisted);
+        assert!(stale.revert.is_none());
     }
 
     #[test]

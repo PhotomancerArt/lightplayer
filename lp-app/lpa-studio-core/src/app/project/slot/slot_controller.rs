@@ -2,16 +2,17 @@ use std::collections::BTreeMap;
 
 use lpc_model::slot::{SlotFieldShapeView, SlotPersistence};
 use lpc_model::{
-    LpType, LpValue, ProductRef, Revision, SlotData, SlotDirection, SlotMapKey, SlotName,
-    SlotPathSegment, SlotPolicy, SlotSemantics, SlotShapeLookup, SlotShapeRegistry, SlotShapeView,
-    SlotValueShape, SlotValueShapeView, ValueEditorHint,
+    LpType, LpValue, ProductRef, Revision, SlotData, SlotDirection, SlotMapKey, SlotMapKeyShape,
+    SlotName, SlotPathSegment, SlotPolicy, SlotSemantics, SlotShapeLookup, SlotShapeRegistry,
+    SlotShapeView, SlotValueShape, SlotValueShapeView, ValueEditorHint,
 };
 
 use crate::{
     PendingEditPhase, ProjectSlotAddress, ProjectSlotRoot, UiAssetEditorKind, UiConfigSlot,
     UiConfigSlotBody, UiNodeDirtyState, UiProducedProduct, UiProducedValue, UiProductRef,
-    UiSlotAsset, UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality, UiSlotRecord,
-    UiSlotSourceState, UiSlotUnit, UiSlotValue, app::project::format_slot_map_key,
+    UiSlotAsset, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState,
+    UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOptionality, UiSlotRecord, UiSlotSourceState,
+    UiSlotUnit, UiSlotValue, app::project::format_slot_map_key,
 };
 
 use super::{PrefixEditState, SlotEditJoin};
@@ -33,11 +34,21 @@ pub enum SlotKind {
 #[derive(Clone, Debug, PartialEq)]
 enum SlotControllerBody {
     Empty,
-    Value { value: LpValue },
+    Value {
+        value: LpValue,
+    },
     Record,
-    Map,
-    Enum { variant: String },
-    Option { present: bool },
+    Map {
+        key: SlotMapKeyShape,
+    },
+    Enum {
+        variant: String,
+        /// Declared variant idents (raw, in declaration order) from the shape.
+        declared: Vec<String>,
+    },
+    Option {
+        present: bool,
+    },
     Issue,
 }
 
@@ -207,6 +218,9 @@ impl SlotController {
         }
         if let Some(optionality) = self.ui_optionality() {
             slot = slot.with_optionality(optionality);
+        }
+        if let Some(composite) = self.ui_composite() {
+            slot = slot.with_composite(composite);
         }
         for issue in &self.issues {
             slot = slot.with_issue(issue.clone());
@@ -384,7 +398,8 @@ impl SlotController {
         } else if let Some(field_count) = shape.record_fields_len() {
             self.apply_record(data, shape, field_count, registry);
         } else if let Some(value_shape) = shape.map_value() {
-            self.apply_map(data, value_shape, registry);
+            let key = shape.map_key().unwrap_or(SlotMapKeyShape::String);
+            self.apply_map(data, key, value_shape, registry);
         } else if shape.is_enum() {
             self.apply_enum(data, shape, registry);
         } else if let Some(some_shape) = shape.option_some() {
@@ -469,6 +484,7 @@ impl SlotController {
     fn apply_map(
         &mut self,
         data: &SlotData,
+        key: SlotMapKeyShape,
         value_shape: SlotShapeView<'_>,
         registry: &SlotShapeRegistry,
     ) {
@@ -478,7 +494,7 @@ impl SlotController {
         };
 
         self.kind = SlotKind::Map;
-        self.body = SlotControllerBody::Map;
+        self.body = SlotControllerBody::Map { key };
         let children = map
             .entries
             .iter()
@@ -511,6 +527,10 @@ impl SlotController {
         self.kind = SlotKind::Enum;
         self.body = SlotControllerBody::Enum {
             variant: value.variant.as_str().to_string(),
+            declared: (0..)
+                .map_while(|index| shape.enum_variant(index))
+                .map(|variant| variant.name_str().to_string())
+                .collect(),
         };
         let Some(variant_shape) = shape.enum_variant_by_name(&value.variant) else {
             self.apply_issue(format!(
@@ -711,7 +731,7 @@ impl SlotController {
                 UiConfigSlotBody::Value(self.ui_slot_value(value))
             }
             SlotControllerBody::Record
-            | SlotControllerBody::Map
+            | SlotControllerBody::Map { .. }
             | SlotControllerBody::Enum { .. } => UiConfigSlotBody::Record(UiSlotRecord::new(
                 self.children
                     .iter()
@@ -809,6 +829,62 @@ impl SlotController {
         UiSlotUnit::from_known_label(&self.label)
     }
 
+    /// Structural gesture facts for map and enum composite rows (M3 D1).
+    fn ui_composite(&self) -> Option<UiSlotComposite> {
+        match &self.body {
+            SlotControllerBody::Map { key } => {
+                let key_kind = match key {
+                    SlotMapKeyShape::String => UiSlotMapKeyKind::String,
+                    SlotMapKeyShape::I32 => UiSlotMapKeyKind::I32,
+                    SlotMapKeyShape::U32 => UiSlotMapKeyKind::U32,
+                };
+                Some(UiSlotComposite::Map(UiSlotMapComposite {
+                    key_kind,
+                    suggested_key: self.suggested_map_key(key_kind),
+                }))
+            }
+            SlotControllerBody::Enum { variant, declared } => {
+                Some(UiSlotComposite::Enum(UiSlotEnumComposite {
+                    active: variant.clone(),
+                    variants: declared.clone(),
+                }))
+            }
+            _ => None,
+        }
+    }
+
+    /// Prefill for the add-entry key input: the next free index for numeric
+    /// key maps (max existing key + 1), empty for string key maps.
+    fn suggested_map_key(&self, key_kind: UiSlotMapKeyKind) -> String {
+        let entry_keys = || {
+            self.children
+                .iter()
+                .filter_map(|child| match child.address.path.segments().last() {
+                    Some(SlotPathSegment::Key(key)) => Some(key),
+                    _ => None,
+                })
+        };
+        match key_kind {
+            UiSlotMapKeyKind::String => String::new(),
+            UiSlotMapKeyKind::I32 => entry_keys()
+                .filter_map(|key| match key {
+                    SlotMapKey::I32(value) => Some(*value),
+                    _ => None,
+                })
+                .max()
+                .map_or(0, |max| max.saturating_add(1))
+                .to_string(),
+            UiSlotMapKeyKind::U32 => entry_keys()
+                .filter_map(|key| match key {
+                    SlotMapKey::U32(value) => Some(*value),
+                    _ => None,
+                })
+                .max()
+                .map_or(0, |max| max.saturating_add(1))
+                .to_string(),
+        }
+    }
+
     fn ui_field_state(&self, edits: &SlotEditJoin<'_>) -> UiSlotFieldState {
         let mut state = if self.policy.writable {
             UiSlotFieldState::editable()
@@ -872,8 +948,10 @@ impl SlotController {
                     .to_string(),
             ),
             SlotControllerBody::Record => Some(child_count_detail(self.children.len(), "field")),
-            SlotControllerBody::Map => Some(child_count_detail(self.children.len(), "entry")),
-            SlotControllerBody::Enum { variant } => Some(format!("variant {variant}")),
+            SlotControllerBody::Map { .. } => {
+                Some(child_count_detail(self.children.len(), "entry"))
+            }
+            SlotControllerBody::Enum { variant, .. } => Some(format!("variant {variant}")),
             SlotControllerBody::Option { present: true } => {
                 self.children.first().and_then(|child| child.ui_detail())
             }
@@ -947,7 +1025,7 @@ impl SlotController {
         matches!(
             self.body,
             SlotControllerBody::Record
-                | SlotControllerBody::Map
+                | SlotControllerBody::Map { .. }
                 | SlotControllerBody::Enum { .. }
                 | SlotControllerBody::Option { present: true }
         )
@@ -1118,5 +1196,185 @@ fn child_count_detail(count: usize, noun: &str) -> String {
         format!("1 {noun}")
     } else {
         format!("{count} {noun}s")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use lpc_model::{
+        LpType, LpValue, SlotEnumEncoding, SlotMapDyn, SlotMeta, SlotShape, SlotShapeRegistry,
+        SlotVariantShape, WithRevision,
+    };
+
+    use crate::{ProjectNodeAddress, app::project::slot::SlotEditJoin};
+
+    use super::*;
+
+    fn slot_address(path: &str) -> ProjectSlotAddress {
+        ProjectSlotAddress::new(
+            ProjectNodeAddress::parse("/demo.project/pixels.fixture").unwrap(),
+            ProjectSlotRoot::def(),
+            lpc_model::SlotPath::parse(path).unwrap(),
+        )
+    }
+
+    fn u32_map_data(keys: &[u32]) -> SlotData {
+        let mut map = SlotMapDyn::with_revision(Revision::new(1), Default::default());
+        for key in keys {
+            map.entries.insert(
+                SlotMapKey::U32(*key),
+                SlotData::Value(WithRevision::new(Revision::new(1), LpValue::U32(*key))),
+            );
+        }
+        SlotData::Map(map)
+    }
+
+    fn u32_map_shape() -> SlotShape {
+        SlotShape::Map {
+            meta: SlotMeta::empty(),
+            key: SlotMapKeyShape::U32,
+            value: Box::new(SlotShape::value(LpType::U32)),
+        }
+    }
+
+    #[test]
+    fn map_slot_projects_map_composite_with_next_free_key() {
+        let registry = SlotShapeRegistry::default();
+        let shape = u32_map_shape();
+        let controller = SlotController::from_slot_data(
+            slot_address("ring_lamp_counts"),
+            "Ring lamp counts".to_string(),
+            &u32_map_data(&[0, 2]),
+            SlotShapeView::Dynamic(&shape),
+            &registry,
+        );
+
+        let slot = controller.ui_config_slot(&SlotEditJoin::empty());
+
+        assert_eq!(
+            slot.composite,
+            Some(UiSlotComposite::Map(UiSlotMapComposite {
+                key_kind: UiSlotMapKeyKind::U32,
+                suggested_key: "3".to_string(),
+            }))
+        );
+    }
+
+    #[test]
+    fn empty_map_suggests_the_first_index() {
+        let registry = SlotShapeRegistry::default();
+        let shape = u32_map_shape();
+        let controller = SlotController::from_slot_data(
+            slot_address("paths"),
+            "Paths".to_string(),
+            &u32_map_data(&[]),
+            SlotShapeView::Dynamic(&shape),
+            &registry,
+        );
+
+        let slot = controller.ui_config_slot(&SlotEditJoin::empty());
+
+        assert_eq!(
+            slot.composite,
+            Some(UiSlotComposite::Map(UiSlotMapComposite {
+                key_kind: UiSlotMapKeyKind::U32,
+                suggested_key: "0".to_string(),
+            }))
+        );
+    }
+
+    #[test]
+    fn string_map_suggests_no_key() {
+        let registry = SlotShapeRegistry::default();
+        let shape = SlotShape::Map {
+            meta: SlotMeta::empty(),
+            key: SlotMapKeyShape::String,
+            value: Box::new(SlotShape::value(LpType::F32)),
+        };
+        let mut map = SlotMapDyn::with_revision(Revision::new(1), Default::default());
+        map.entries.insert(
+            SlotMapKey::String("warm".to_string()),
+            SlotData::Value(WithRevision::new(Revision::new(1), LpValue::F32(0.5))),
+        );
+        let controller = SlotController::from_slot_data(
+            slot_address("presets"),
+            "Presets".to_string(),
+            &SlotData::Map(map),
+            SlotShapeView::Dynamic(&shape),
+            &registry,
+        );
+
+        let slot = controller.ui_config_slot(&SlotEditJoin::empty());
+
+        assert_eq!(
+            slot.composite,
+            Some(UiSlotComposite::Map(UiSlotMapComposite {
+                key_kind: UiSlotMapKeyKind::String,
+                suggested_key: String::new(),
+            }))
+        );
+    }
+
+    #[test]
+    fn enum_slot_projects_declared_variants_verbatim() {
+        let registry = SlotShapeRegistry::default();
+        let shape = SlotShape::Enum {
+            meta: SlotMeta::empty(),
+            encoding: SlotEnumEncoding::default(),
+            variants: vec![
+                SlotVariantShape::new(
+                    "Unset",
+                    SlotShape::Unit {
+                        meta: SlotMeta::empty(),
+                    },
+                )
+                .unwrap(),
+                SlotVariantShape::new("PathPoints", SlotShape::value(LpType::F32)).unwrap(),
+                SlotVariantShape::new("SvgPath", SlotShape::value(LpType::String)).unwrap(),
+            ],
+        };
+        let data = SlotData::Enum(lpc_model::SlotEnum::with_version(
+            Revision::new(1),
+            SlotName::parse("PathPoints").unwrap(),
+            SlotData::Value(WithRevision::new(Revision::new(1), LpValue::F32(0.0))),
+        ));
+        let controller = SlotController::from_slot_data(
+            slot_address("mapping"),
+            "Mapping".to_string(),
+            &data,
+            SlotShapeView::Dynamic(&shape),
+            &registry,
+        );
+
+        let slot = controller.ui_config_slot(&SlotEditJoin::empty());
+
+        assert_eq!(
+            slot.composite,
+            Some(UiSlotComposite::Enum(UiSlotEnumComposite {
+                active: "PathPoints".to_string(),
+                variants: vec![
+                    "Unset".to_string(),
+                    "PathPoints".to_string(),
+                    "SvgPath".to_string(),
+                ],
+            }))
+        );
+    }
+
+    #[test]
+    fn value_and_record_slots_project_no_composite() {
+        let registry = SlotShapeRegistry::default();
+        let shape = SlotShape::value(LpType::F32);
+        let controller = SlotController::from_slot_data(
+            slot_address("brightness"),
+            "Brightness".to_string(),
+            &SlotData::Value(WithRevision::new(Revision::new(1), LpValue::F32(0.5))),
+            SlotShapeView::Dynamic(&shape),
+            &registry,
+        );
+
+        let slot = controller.ui_config_slot(&SlotEditJoin::empty());
+
+        assert_eq!(slot.composite, None);
     }
 }

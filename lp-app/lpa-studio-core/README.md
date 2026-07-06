@@ -189,13 +189,20 @@ Slot editing state is core-owned end to end; UI field components are
 stateless views that dispatch ops and render DTOs. The model (recorded in
 `docs/adr/2026-07-04-studio-editing-model.md`) has four pieces:
 
-- **Ops.** `SlotEditOp { SetValue, Revert }` target one `ProjectSlotAddress`
-  (carried on the op — no per-slot controller ids); `ProjectOp::SaveOverlay`
-  commits the overlay and `ProjectOp::RevertAllEdits` clears it. All are
-  `ActionClass::Foreground` on the 6 s editor quiet-gap deadline. The actor
-  coalesces consecutive queued `SetValue`s per address latest-wins
-  (`push_action_coalesced`), so `oninput` floods collapse to one mutation;
-  any other action is a barrier.
+- **Ops.** `SlotEditOp { SetValue, EnsurePresent, RemoveValue, Revert }`
+  target one `ProjectSlotAddress` (carried on the op — no per-slot controller
+  ids); `ProjectOp::SaveOverlay` commits the overlay and
+  `ProjectOp::RevertAllEdits` clears it. All are `ActionClass::Foreground` on
+  the 6 s editor quiet-gap deadline. The actor coalesces consecutive queued
+  `SetValue`s per address latest-wins (`push_action_coalesced`), so `oninput`
+  floods collapse to one mutation; any other action — including the
+  structural gestures — is a barrier and never coalesces. Composite gestures
+  ARE the wire ops: map add / option on / enum variant switch dispatch
+  `EnsurePresent`, map entry remove / option off dispatch `RemoveValue`, and
+  the server constructs all defaults. `UiConfigSlot.composite`
+  (`UiSlotComposite::{Map, Enum}`) carries the map key domain + suggested
+  next key and the declared enum variant idents (raw, verbatim) that the
+  gesture affordances render from.
 - **Edit buffer.** `ProjectController` holds a path-keyed buffer of
   `PendingEdit`s (`slot/pending_edit.rs`, state machine documented on the
   type). A buffered value shadows the synced value in DTOs from field input

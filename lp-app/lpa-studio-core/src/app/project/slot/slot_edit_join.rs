@@ -1,8 +1,11 @@
 //! Join inputs for the dirty/edit state of config-slot DTOs.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use lpc_model::LpValue;
+// The overlay mirror's op vocabulary (AssignValue/EnsurePresent/Remove) —
+// distinct from the client's `crate::SlotEditOp` action enum.
+use lpc_model::SlotEditOp;
 use lpc_model::slot::SlotPersistence;
 
 use crate::{DirtySummary, PendingEdit, PendingEditPhase, ProjectNodeAddress, ProjectSlotAddress};
@@ -31,9 +34,10 @@ use crate::{DirtySummary, PendingEdit, PendingEditPhase, ProjectNodeAddress, Pro
 pub(in crate::app::project) struct SlotEditJoin<'a> {
     /// Un-acked local edits keyed by address (`ProjectController` buffer).
     buffer: Option<&'a BTreeMap<ProjectSlotAddress, PendingEdit>>,
-    /// Server-acked pending edits from the overlay mirror. `Some(value)` for
-    /// an assigned value (display shadow), `None` for structural edit ops.
-    overlay: BTreeMap<ProjectSlotAddress, Option<LpValue>>,
+    /// Server-acked pending edits from the overlay mirror, keyed by address
+    /// and carrying the mirrored op (`AssignValue` doubles as the display
+    /// shadow; the structural ops shadow nothing).
+    overlay: BTreeMap<ProjectSlotAddress, SlotEditOp>,
     /// Persistence classification for every buffer/overlay address, resolved
     /// by `ProjectController` through the shape-only policy walk
     /// (`lpc_model::resolve_slot_policy`), which works on data-less paths —
@@ -56,6 +60,30 @@ pub(in crate::app::project) enum PrefixEditState {
     Dirty,
 }
 
+/// One edit entry of the join ([`SlotEditJoin::entries`]): the unit both
+/// [`DirtySummary`] counting and the save panel's change list are built from.
+pub(in crate::app::project) struct SlotEditEntry<'a> {
+    /// The entry's slot address.
+    pub address: &'a ProjectSlotAddress,
+    /// The buffered (un-acked) edit at the address, if any — carries the
+    /// failure reason for `Failed` entries.
+    pub pending: Option<&'a PendingEdit>,
+    /// The entry's op for display, from the source that classifies it.
+    pub op: SlotEditEntrySource<'a>,
+    /// The entry's [`DirtySummary`] classification (exactly one bucket).
+    pub summary: DirtySummary,
+}
+
+/// Where a [`SlotEditEntry`]'s op comes from: the buffered op wins over the
+/// overlay mirror when an address is in both, matching
+/// [`DirtySummary::for_slot`]'s join order.
+pub(in crate::app::project) enum SlotEditEntrySource<'a> {
+    /// An un-acked local edit (`Pending`/`InFlight`/`Failed`).
+    Buffered(&'a crate::PendingEditOp),
+    /// A server-acked edit from the overlay mirror.
+    Acked(&'a SlotEditOp),
+}
+
 impl<'a> SlotEditJoin<'a> {
     /// A join with no edit state: every slot reads `Clean`.
     pub(in crate::app::project) fn empty() -> Self {
@@ -68,7 +96,7 @@ impl<'a> SlotEditJoin<'a> {
 
     pub(in crate::app::project) fn new(
         buffer: &'a BTreeMap<ProjectSlotAddress, PendingEdit>,
-        overlay: BTreeMap<ProjectSlotAddress, Option<LpValue>>,
+        overlay: BTreeMap<ProjectSlotAddress, SlotEditOp>,
         persistence: BTreeMap<ProjectSlotAddress, SlotPersistence>,
     ) -> Self {
         Self {
@@ -101,7 +129,10 @@ impl<'a> SlotEditJoin<'a> {
         if let Some(value) = self.pending(address).and_then(PendingEdit::value) {
             return Some(value);
         }
-        self.overlay.get(address)?.as_ref()
+        match self.overlay.get(address)? {
+            SlotEditOp::AssignValue(value) => Some(value),
+            SlotEditOp::EnsurePresent | SlotEditOp::Remove => None,
+        }
     }
 
     /// Prefix-aware join (D4) for composite slots: the aggregate state of
@@ -137,41 +168,69 @@ impl<'a> SlotEditJoin<'a> {
             .then_some(PrefixEditState::Dirty)
     }
 
+    /// Enumerate every edit entry in the join — the **single enumeration**
+    /// both [`DirtySummary`] counting ([`Self::dirty_summary_for_node`]) and
+    /// the save panel's change list (`ProjectController::pending_edits`)
+    /// consume, so the list agrees with the counts by construction.
+    ///
+    /// One entry per address in the union of buffer and overlay keys, in
+    /// address order (node, then root, then path). Each entry carries its op
+    /// source (the buffered op wins when an address is in both — matching
+    /// [`DirtySummary::for_slot`]'s join order) and its per-entry summary,
+    /// which lands in exactly one bucket.
+    pub(in crate::app::project) fn entries(&self) -> Vec<SlotEditEntry<'_>> {
+        let addresses: BTreeSet<&ProjectSlotAddress> = self
+            .buffer
+            .map(|buffer| buffer.keys())
+            .into_iter()
+            .flatten()
+            .chain(self.overlay.keys())
+            .collect();
+        addresses
+            .into_iter()
+            .map(|address| {
+                let pending = self.pending(address);
+                let op = match pending {
+                    Some(edit) => SlotEditEntrySource::Buffered(&edit.op),
+                    None => SlotEditEntrySource::Acked(
+                        self.overlay
+                            .get(address)
+                            .expect("entry addresses come from the buffer or the overlay"),
+                    ),
+                };
+                SlotEditEntry {
+                    address,
+                    pending,
+                    op,
+                    summary: DirtySummary::for_slot(
+                        pending,
+                        self.overlay_dirty(address),
+                        self.entry_persistence(address),
+                    ),
+                }
+            })
+            .collect()
+    }
+
     /// The [`DirtySummary`] of every edit entry addressed to `node` — the
     /// **single counting rule** for dirty aggregation (node headers, tree
-    /// items, project totals, and P5's save panel all derive from it).
+    /// items, project totals, and the save panel all derive from it).
     ///
-    /// Counts are per edit entry (the union of buffer and overlay addresses),
-    /// classified by [`DirtySummary::for_slot`] exactly like the per-field
-    /// affordances: a failed buffer entry → `failed`, anything else → its
-    /// resolved persistence bucket. Each entry counts **once** regardless of
-    /// whether a slot row survives at its path (a removed map entry still
-    /// counts) — prefix-dirty on ancestor composites is display state, never
-    /// an additional count.
+    /// Counts are per edit entry ([`Self::entries`]), classified by
+    /// [`DirtySummary::for_slot`] exactly like the per-field affordances: a
+    /// failed buffer entry → `failed`, anything else → its resolved
+    /// persistence bucket. Each entry counts **once** regardless of whether
+    /// a slot row survives at its path (a removed map entry still counts) —
+    /// prefix-dirty on ancestor composites is display state, never an
+    /// additional count.
     pub(in crate::app::project) fn dirty_summary_for_node(
         &self,
         node: &ProjectNodeAddress,
     ) -> DirtySummary {
-        let buffer_addresses = self
-            .buffer
-            .map(|buffer| buffer.keys())
+        self.entries()
             .into_iter()
-            .flatten();
-        let overlay_addresses = self.overlay.keys().filter(|address| {
-            !self
-                .buffer
-                .is_some_and(|buffer| buffer.contains_key(address))
-        });
-        buffer_addresses
-            .chain(overlay_addresses)
-            .filter(|address| address.node == *node)
-            .map(|address| {
-                DirtySummary::for_slot(
-                    self.pending(address),
-                    self.overlay_dirty(address),
-                    self.entry_persistence(address),
-                )
-            })
+            .filter(|entry| entry.address.node == *node)
+            .map(|entry| entry.summary)
             .sum()
     }
 
@@ -217,7 +276,7 @@ mod tests {
     #[test]
     fn state_under_sees_only_strict_descendants() {
         let buffer = BTreeMap::new();
-        let overlay = BTreeMap::from([(at("entries[a]"), None)]);
+        let overlay = BTreeMap::from([(at("entries[a]"), SlotEditOp::Remove)]);
         let join = SlotEditJoin::new(&buffer, overlay, BTreeMap::new());
 
         assert_eq!(
@@ -249,7 +308,7 @@ mod tests {
                 failed(PendingEditOp::EnsurePresent, "no such key shape"),
             ),
         ]);
-        let overlay = BTreeMap::from([(at("entries[c]"), None)]);
+        let overlay = BTreeMap::from([(at("entries[c]"), SlotEditOp::EnsurePresent)]);
         let join = SlotEditJoin::new(&buffer, overlay, BTreeMap::new());
 
         assert_eq!(
@@ -269,7 +328,7 @@ mod tests {
                 },
             },
         )]);
-        let overlay = BTreeMap::from([(at("entries[c]"), None)]);
+        let overlay = BTreeMap::from([(at("entries[c]"), SlotEditOp::EnsurePresent)]);
         let join = SlotEditJoin::new(&buffer, overlay, BTreeMap::new());
         assert_eq!(
             join.state_under(&at("entries")),
@@ -291,8 +350,8 @@ mod tests {
             (at("brightness"), PendingEdit::pending(LpValue::F32(0.9))),
         ]);
         let overlay = BTreeMap::from([
-            (at("entries[a]"), None),
-            (at("brightness"), Some(LpValue::F32(0.5))),
+            (at("entries[a]"), SlotEditOp::Remove),
+            (at("brightness"), SlotEditOp::AssignValue(LpValue::F32(0.5))),
         ]);
         let persistence = BTreeMap::from([
             (at("entries[a]"), SlotPersistence::Persisted),

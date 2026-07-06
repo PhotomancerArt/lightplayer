@@ -1,4 +1,4 @@
-use lpc_model::SlotPath;
+use lpc_model::{SlotMapKey, SlotName, SlotPath};
 
 use crate::{ProjectNodeAddress, ProjectSlotRoot};
 
@@ -26,6 +26,27 @@ impl ProjectSlotAddress {
         self.path.is_root()
     }
 
+    /// Address of the named child slot: a record field, an enum variant
+    /// payload (RAW variant ident, e.g. `PathPoints`), or the option
+    /// interior `some`. `None` when `name` is not a valid slot name.
+    pub fn child_field(&self, name: &str) -> Option<Self> {
+        let name = SlotName::parse(name).ok()?;
+        Some(Self::new(
+            self.node.clone(),
+            self.root.clone(),
+            self.path.child(name),
+        ))
+    }
+
+    /// Address of the map entry child at `key`.
+    pub fn child_map_entry(&self, key: SlotMapKey) -> Self {
+        Self::new(
+            self.node.clone(),
+            self.root.clone(),
+            self.path.child_key(key),
+        )
+    }
+
     /// True when this address lies **strictly under** `ancestor`: same node
     /// and slot root, with `ancestor.path` as a proper prefix of this path.
     /// An address is never strictly under itself.
@@ -50,6 +71,32 @@ mod tests {
 
         assert!(address.is_root());
         assert_eq!(address.root.name(), "def");
+    }
+
+    #[test]
+    fn child_addresses_extend_the_path_in_place() {
+        let map = ProjectSlotAddress::new(
+            ProjectNodeAddress::parse("/demo.project/pixels.fixture").unwrap(),
+            ProjectSlotRoot::def(),
+            SlotPath::parse("mapping").unwrap(),
+        );
+
+        let variant = map.child_field("PathPoints").expect("raw variant ident");
+        assert_eq!(variant.path, SlotPath::parse("mapping.PathPoints").unwrap());
+        assert_eq!(variant.node, map.node);
+        assert_eq!(variant.root, map.root);
+
+        let entry = variant
+            .child_field("paths")
+            .unwrap()
+            .child_map_entry(SlotMapKey::U32(0));
+        assert_eq!(
+            entry.path,
+            SlotPath::parse("mapping.PathPoints.paths[0]").unwrap()
+        );
+
+        assert_eq!(map.child_field(""), None, "invalid names never address");
+        assert_eq!(map.child_field("not a name"), None);
     }
 
     #[test]
