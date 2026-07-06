@@ -281,8 +281,14 @@
   .tw\:w-8 {
     width: calc(var(--tw-spacing) * 8);
   }
+  .tw\:w-10 {
+    width: calc(var(--tw-spacing) * 10);
+  }
   .tw\:w-14 {
     width: calc(var(--tw-spacing) * 14);
+  }
+  .tw\:w-16 {
+    width: calc(var(--tw-spacing) * 16);
   }
   .tw\:w-\[15px\] {
     width: 15px;
@@ -378,6 +384,9 @@
   }
   .tw\:grid-cols-3 {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .tw\:grid-cols-4 {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
   .tw\:grid-cols-\[18px_minmax\(0\,1fr\)_auto\] {
     grid-template-columns: 18px minmax(0,1fr) auto;
@@ -1030,6 +1039,9 @@
   .tw\:text-heading {
     color: var(--tw-color-heading);
   }
+  .tw\:text-inherit {
+    color: inherit;
+  }
   .tw\:text-muted-foreground {
     color: var(--tw-color-muted-foreground);
   }
@@ -1097,6 +1109,10 @@
   .tw\:duration-150 {
     --tw-duration: 150ms;
     transition-duration: 150ms;
+  }
+  .tw\:outline-none {
+    --tw-outline-style: none;
+    outline-style: none;
   }
   .tw\:\[--studio-tree-dirty-bg\:var\(--studio-status-error-bg\)\] {
     --studio-tree-dirty-bg: var(--studio-status-error-bg);

@@ -22,6 +22,7 @@ mod slot_detail_button;
 mod slot_edit_actions;
 mod slot_fields;
 mod slot_issue_list;
+mod slot_matrix_field;
 mod slot_record_editor;
 #[cfg(feature = "stories")]
 pub(crate) mod slot_record_editor_stories;
@@ -34,6 +35,7 @@ pub(crate) mod slot_unit_display_stories;
 mod slot_value_editor;
 #[cfg(feature = "stories")]
 pub(crate) mod slot_value_editor_stories;
+mod slot_vector_fields;
 
 pub use config_slot_row::ConfigSlotRow;
 pub use node_children::NodeChildren;
@@ -48,12 +50,14 @@ pub(crate) use slot_detail_button::{
 };
 pub use slot_fields::{
     BoolSlotField, DropdownSlotField, FloatSlotField, IntSlotField, SliderSlotField,
-    StringSlotField, UIntSlotField, Vec2SlotField, Vec3SlotField, XySlotField,
+    StringSlotField, UIntSlotField, XySlotField,
 };
 pub use slot_issue_list::SlotIssueList;
+pub use slot_matrix_field::MatrixSlotField;
 pub use slot_record_editor::SlotRecordEditor;
 pub(crate) use slot_shape_display::{
     SlotShapeDisplay, SlotShapeDisplayMode, legacy_shape_from_parts,
 };
 pub(crate) use slot_unit_display::{SlotUnitDisplay, SlotUnitDisplayMode, SlotUnitSuffix};
 pub use slot_value_editor::SlotValueEditor;
+pub use slot_vector_fields::VectorSlotField;

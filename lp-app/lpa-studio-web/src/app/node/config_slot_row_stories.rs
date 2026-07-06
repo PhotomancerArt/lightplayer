@@ -291,6 +291,216 @@ pub(crate) fn editable_clean_controls() -> Element {
 }
 
 #[story(
+    label = "Editable Scalar Inputs",
+    description = "Untouched editable text and number inputs: string, bounded int, uint, and plain float."
+)]
+pub(crate) fn editable_scalar_inputs() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:divide-y tw:divide-border-muted",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "label",
+                    "Label",
+                    UiSlotValue::string("warm wash").with_editor(UiSlotEditorHint::Text),
+                )
+                    .with_address(story_slot_address("label"))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 0,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "ring_count",
+                    "Ring count",
+                    UiSlotValue::i32(-4).with_editor(UiSlotEditorHint::Number {
+                        min: Some(-8.0),
+                        max: Some(8.0),
+                        step: Some(1.0),
+                    }),
+                )
+                    .with_address(story_slot_address("ring_count"))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 1,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("pixel_count", "Pixel count", UiSlotValue::u32(144))
+                    .with_address(story_slot_address("pixel_count"))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 2,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "fade_after",
+                    "Fade after",
+                    UiSlotValue::f32(0.35).with_unit(UiSlotUnit::seconds()),
+                )
+                    .with_address(story_slot_address("fade_after"))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 3,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Editable Vector Grids",
+    description = "Editable component grids composing whole vector values: Vec3, Vec4, IVec2, UVec2, and BVec3."
+)]
+pub(crate) fn editable_vector_grids() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:divide-y tw:divide-border-muted",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("tint", "Tint", UiSlotValue::vec3([1.0, 0.42, 0.2]))
+                    .with_address(story_slot_address("tint"))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 0,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "color",
+                    "Color",
+                    UiSlotValue::vec4([1.0, 0.42, 0.2, 1.0]),
+                )
+                    .with_address(story_slot_address("color"))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 1,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("offset", "Offset", UiSlotValue::ivec2([-3, 7]))
+                    .with_address(story_slot_address("offset"))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 2,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("extent", "Extent", UiSlotValue::uvec2([32, 48]))
+                    .with_address(story_slot_address("extent"))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 3,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "mirror",
+                    "Mirror",
+                    UiSlotValue::bvec3([true, false, true]),
+                )
+                    .with_address(story_slot_address("mirror"))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 4,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Editable Matrix Cells",
+    description = "Per-cell matrix grids composing whole matrix values: editable Mat3x3 and read-only Mat2x2."
+)]
+pub(crate) fn editable_matrix_cells() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:divide-y tw:divide-border-muted",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "transform",
+                    "Transform",
+                    UiSlotValue::mat3x3([
+                        [1.0, 0.0, 0.5],
+                        [0.0, 1.0, 0.25],
+                        [0.0, 0.0, 1.0],
+                    ]),
+                )
+                    .with_address(story_slot_address("transform"))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 0,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "basis",
+                    "Basis",
+                    UiSlotValue::mat2x2([[0.0, -1.0], [1.0, 0.0]]),
+                )
+                    .with_state(UiSlotFieldState::readonly()),
+                depth: 0,
+                index: 1,
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Scalar Input States",
+    description = "Dirty and invalid chrome on the new text/number inputs and vector grids."
+)]
+pub(crate) fn scalar_input_states() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:divide-y tw:divide-border-muted",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "label",
+                    "Label",
+                    UiSlotValue::string("cool wash").with_editor(UiSlotEditorHint::Text),
+                )
+                    .with_address(story_slot_address("label"))
+                    .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
+                depth: 0,
+                index: 0,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("ring_count", "Ring count", UiSlotValue::i32(-12))
+                    .with_address(story_slot_address("ring_count"))
+                    .with_state(
+                        UiSlotFieldState::editable().with_invalid("value must be at least -8"),
+                    ),
+                depth: 0,
+                index: 1,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("tint", "Tint", UiSlotValue::vec3([1.0, 0.9, 0.2]))
+                    .with_address(story_slot_address("tint"))
+                    .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
+                depth: 0,
+                index: 2,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "transform",
+                    "Transform",
+                    UiSlotValue::mat2x2([[1.0, 0.0], [0.0, 0.0]]),
+                )
+                    .with_address(story_slot_address("transform"))
+                    .with_state(
+                        UiSlotFieldState::editable().with_invalid("matrix must be invertible"),
+                    ),
+                depth: 0,
+                index: 3,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
     label = "Rejected Edit",
     description = "A rejected edit: error chrome preserves the value with the rejection reason."
 )]
