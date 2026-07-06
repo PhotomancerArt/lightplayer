@@ -13,6 +13,7 @@ pub use crate::core::action::action_enablement::ActionEnablement;
 pub use crate::core::action::action_meta::ActionMeta;
 pub use crate::core::action::action_priority::ActionPriority;
 pub use crate::core::action::actions::UiActions;
+pub use crate::core::action::pane_action::UiPaneAction;
 pub use context::ControllerContext;
 pub use controller_id::{ControllerId, UxNodePath};
 pub use controller_op::Controller;

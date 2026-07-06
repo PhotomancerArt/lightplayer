@@ -966,6 +966,7 @@ pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorVi
         ProjectNodeTreeView::new(vec![project], 5),
         vec![project_root_node()],
     )
+    .with_project_name("Demo")
 }
 
 pub(crate) fn project_editor_empty_fixture(phase: ProjectSyncPhase) -> ProjectEditorView {

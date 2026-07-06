@@ -6,10 +6,10 @@ use lpc_wire::{NodeRuntimeStatus, WireEntryState};
 
 use crate::app::project::slot::SlotEditJoin;
 use crate::{
-    ProjectDirtyCounts, ProjectEditorOp, ProjectEditorTarget, ProjectNodeAddress,
-    ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTarget, ProjectSlotAddress,
-    ProjectSlotRoot, SlotController, UiAction, UiNodeChild, UiNodeHeader, UiNodeSection, UiNodeTab,
-    UiNodeView, UiProductPreview, UiProductRef, UiProductTrackingState, UiStatus,
+    DirtySummary, ProjectEditorOp, ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone,
+    ProjectNodeStatusView, ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController,
+    UiAction, UiNodeChild, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiProductPreview,
+    UiProductRef, UiProductTrackingState, UiStatus,
 };
 
 /// User/controller intent for product subscriptions owned by a node.
@@ -163,17 +163,28 @@ impl NodeController {
     }
 
     /// Project this controller into a node-pane DTO with product preview state.
+    ///
+    /// The dirty aggregation rides the same walk: child DTOs are built first
+    /// (each carrying its subtree summary), and the header summary merges the
+    /// node's own slot summaries with the children's — no second traversal.
     pub(in crate::app::project) fn ui_node_with_product_previews(
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
         edits: &SlotEditJoin<'_>,
     ) -> UiNodeView {
+        let children = self.ui_children_with_product_previews(product_preview, edits);
+        let dirty = self.own_slots_dirty_summary(edits)
+            + children
+                .iter()
+                .map(|child| child.dirty)
+                .sum::<DirtySummary>();
         let header = UiNodeHeader::new(
             self.label.clone(),
             self.kind.clone(),
             self.address.to_string(),
         )
-        .with_status(self.ui_status());
+        .with_status(self.ui_status())
+        .with_dirty(dirty);
 
         let mut view = UiNodeView::new(
             header,
@@ -182,7 +193,7 @@ impl NodeController {
             )],
         )
         .with_node_id(self.address.to_string())
-        .with_children(self.ui_children_with_product_previews(product_preview, edits));
+        .with_children(children);
         view.focused = self.state.focused;
         view.action = Some(node_focus_action(self));
         view.collapsed = self.state.collapsed;
@@ -370,32 +381,43 @@ impl NodeController {
                 view.action = Some(node_focus_action(child));
                 view.sections = child.ui_sections_with_product_previews(product_preview, edits);
                 view.children = child.ui_children_with_product_previews(product_preview, edits);
+                view.dirty = child.own_slots_dirty_summary(edits)
+                    + view
+                        .children
+                        .iter()
+                        .map(|nested| nested.dirty)
+                        .sum::<DirtySummary>();
                 view
             })
             .collect()
     }
 
-    /// Tally the dirty slots owned by this node and its descendants.
-    pub(in crate::app::project) fn collect_dirty_counts(
+    /// Aggregate dirty-edit summary for this node's subtree: own slots plus
+    /// every descendant node, per-slot classification shared with the DTO
+    /// build ([`SlotController::dirty_summary`]).
+    pub(in crate::app::project) fn dirty_summary(&self, edits: &SlotEditJoin<'_>) -> DirtySummary {
+        let mut summary = self.own_slots_dirty_summary(edits);
+        for child in &self.children {
+            summary += child.dirty_summary(edits);
+        }
+        summary
+    }
+
+    /// Aggregate dirty-edit summary for the slots this node owns directly
+    /// (children excluded). Callers merging bottom-up (DTO and tree-item
+    /// walks) combine this with already-computed child summaries.
+    pub(in crate::app::project) fn own_slots_dirty_summary(
         &self,
         edits: &SlotEditJoin<'_>,
-        counts: &mut ProjectDirtyCounts,
-    ) {
-        for slot in &self.slots {
-            slot.collect_dirty_counts(edits, counts);
-        }
-        for child in &self.children {
-            child.collect_dirty_counts(edits, counts);
-        }
+    ) -> DirtySummary {
+        self.slots
+            .iter()
+            .map(|slot| slot.dirty_summary(edits))
+            .sum()
     }
 
     fn ui_status(&self) -> UiStatus {
-        match self.status.tone {
-            ProjectNodeStatusTone::Neutral => UiStatus::neutral(self.status.label.clone()),
-            ProjectNodeStatusTone::Good => UiStatus::good(self.status.label.clone()),
-            ProjectNodeStatusTone::Warning => UiStatus::warning(self.status.label.clone()),
-            ProjectNodeStatusTone::Error => UiStatus::error(self.status.label.clone()),
-        }
+        UiStatus::new(self.status.label.clone(), self.status.tone.ui_status_kind())
     }
 
     fn product_tracking_state(&self) -> UiProductTrackingState {

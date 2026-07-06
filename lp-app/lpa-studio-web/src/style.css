@@ -33,6 +33,13 @@
     --studio-color-accent-hover: #6fc39f;
     --studio-color-accent-text-on-fill: #08130d;
 
+    /* Selection is its own concept — a neutral white-ish outline, kept
+       distinct from the teal brand accent and from semantic status colors so
+       a selected node never reads as "OK" (green) beside an edited (yellow)
+       one. `-bg` is the low-alpha fill the tree row mixes the dirty tone into. */
+    --studio-color-selection-border: #d6dae0;
+    --studio-color-selection-bg: rgba(214, 218, 224, 0.12);
+
     --studio-status-neutral-bg: #12171c;
     --studio-status-neutral-border: #3a444c;
     --studio-status-neutral-text: #d9e2df;
@@ -1395,6 +1402,14 @@ select {
     --ux-popover-border-color: var(--studio-status-working-border);
     --ux-popover-icon-color: var(--studio-status-working-text);
     --ux-popover-trigger-fill-top: var(--studio-status-working-bg);
+    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
+    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+}
+
+.ux-popover-chrome-live {
+    --ux-popover-border-color: var(--studio-status-live-border);
+    --ux-popover-icon-color: var(--studio-status-live-text);
+    --ux-popover-trigger-fill-top: var(--studio-status-live-bg);
     --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
     --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
 }

@@ -1,4 +1,4 @@
-use crate::UiAction;
+use crate::{DirtySummary, UiAction, UiAffordance, UiStatusKind};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProjectNodeTreeView {
@@ -25,6 +25,9 @@ pub struct ProjectNodeTreeItem {
     pub focused: bool,
     pub action: UiAction,
     pub children: Vec<ProjectNodeTreeItem>,
+    /// Aggregate dirty-edit summary for this node's subtree (own slots plus
+    /// descendant nodes), matching the node header and per-field affordances.
+    pub dirty: DirtySummary,
 }
 
 impl ProjectNodeTreeItem {
@@ -45,7 +48,21 @@ impl ProjectNodeTreeItem {
             focused,
             action,
             children,
+            dirty: DirtySummary::clean(),
         }
+    }
+
+    /// Set the aggregate dirty-edit summary for the node's subtree.
+    pub fn with_dirty(mut self, dirty: DirtySummary) -> Self {
+        self.dirty = dirty;
+        self
+    }
+
+    /// The row's one chrome affordance: the priority merge of its own status
+    /// and its subtree dirty summary — the same projection node headers use,
+    /// so the tree can never disagree with the panes.
+    pub fn affordance(&self) -> UiAffordance {
+        UiAffordance::merged(self.status.tone.ui_status_kind(), &self.dirty)
     }
 }
 
@@ -76,4 +93,17 @@ pub enum ProjectNodeStatusTone {
     Good,
     Warning,
     Error,
+}
+
+impl ProjectNodeStatusTone {
+    /// The `UiStatusKind` this tree tone corresponds to (tree statuses never
+    /// carry an in-flight `Working` state).
+    pub fn ui_status_kind(self) -> UiStatusKind {
+        match self {
+            Self::Neutral => UiStatusKind::Neutral,
+            Self::Good => UiStatusKind::Good,
+            Self::Warning => UiStatusKind::Warning,
+            Self::Error => UiStatusKind::Error,
+        }
+    }
 }

@@ -7,14 +7,14 @@ use lpa_client::{CancelSignal, ProgressDeadline};
 use crate::app::project::slot::SlotEditJoin;
 use crate::core::notice::UiNotices;
 use crate::{
-    Controller, ControllerId, LoadedProjectChoice, PendingEdit, PendingEditPhase, ProgressState,
-    ProjectConnectResult, ProjectDirtyCounts, ProjectEditorOp, ProjectEditorTarget,
-    ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeTreeItem,
-    ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot,
-    ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp,
-    StudioOverlayMutation, StudioProjectReadOutcome, StudioServerClient, UiAction, UiError,
-    UiIssue, UiLogEntry, UiLogLevel, UiMetric, UiNodeView, UiNotice, UiPaneView, UiProductRef,
-    UiResult, UiStatus, UiViewContent, UxUpdateSink,
+    Controller, ControllerId, DirtySummary, LoadedProjectChoice, PendingEdit, PendingEditPhase,
+    ProgressState, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
+    ProjectInventorySummary, ProjectNodeAddress, ProjectNodeTreeItem, ProjectNodeTreeView,
+    ProjectOp, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState, ProjectSync,
+    ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp, StudioOverlayMutation,
+    StudioProjectReadOutcome, StudioServerClient, UiAction, UiError, UiIssue, UiLogEntry,
+    UiLogLevel, UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView, UiProductRef, UiResult,
+    UiStatus, UiViewContent, UxUpdateSink,
 };
 use lpc_model::{
     ArtifactLocation, LpValue, MutationCmd, MutationCmdBatch, MutationCmdId, MutationCmdStatus,
@@ -97,16 +97,18 @@ impl ProjectController {
             .collect()
     }
 
-    /// Aggregate dirty-slot counts (persisted vs transient), derived by
-    /// walking the slot controllers with the same [`SlotEditJoin`] the DTOs
-    /// consult — one source of truth for field affordances and counts.
-    pub fn dirty_counts(&self) -> ProjectDirtyCounts {
+    /// Project-level aggregate [`DirtySummary`], derived by walking the slot
+    /// controllers with the same [`SlotEditJoin`] the DTOs consult — one
+    /// source of truth for field affordances and bubbled summaries. The DTO
+    /// build computes the same numbers in its own walk
+    /// ([`NodeController::ui_node_with_product_previews`]); this entry point
+    /// serves callers that need only the aggregate.
+    pub fn dirty_summary(&self) -> DirtySummary {
         let edits = self.slot_edit_join();
-        let mut counts = ProjectDirtyCounts::default();
-        for node in &self.root_nodes {
-            node.collect_dirty_counts(&edits, &mut counts);
-        }
-        counts
+        self.root_nodes
+            .iter()
+            .map(|node| node.dirty_summary(&edits))
+            .sum()
     }
 
     /// Buffered edits still awaiting a server acknowledgement
@@ -255,6 +257,10 @@ impl ProjectController {
     }
 
     /// Project the synced controller tree into the project editor shell DTO.
+    ///
+    /// The project-level [`DirtySummary`] is the merge of the root node
+    /// summaries the DTO walks just computed (node panes and tree items) —
+    /// no dedicated aggregation pass.
     pub fn editor_view(
         &self,
         project_id: &str,
@@ -262,16 +268,35 @@ impl ProjectController {
         inventory: &ProjectInventorySummary,
     ) -> ProjectEditorView {
         let summary = self.sync_summary().unwrap_or_default();
+        let nodes = self.ui_nodes();
+        let dirty = nodes
+            .iter()
+            .map(|node| node.header.dirty)
+            .sum::<DirtySummary>();
         ProjectEditorView::new(
             project_id,
             handle_id,
             summary.clone(),
             project_editor_stats(project_id, handle_id, inventory, &summary),
             self.node_tree_view(),
-            self.ui_nodes(),
+            nodes,
         )
-        .with_dirty(self.dirty_counts())
+        .with_project_name(self.project_name(project_id))
+        .with_dirty(dirty)
+        .with_header_actions(project_header_actions(&dirty))
         .with_edits_in_flight(self.edits_in_flight())
+    }
+
+    /// Human-readable project name for the project pane title: the synced
+    /// root node's label, falling back to the project id until the tree has
+    /// synced (the pane's kind label already says "Project", so the title
+    /// carries the name).
+    fn project_name(&self, project_id: &str) -> String {
+        self.root_nodes
+            .first()
+            .map(|node| node.label().to_string())
+            .filter(|label| !label.is_empty())
+            .unwrap_or_else(|| project_id.to_string())
     }
 
     pub fn mark_connecting_running(&mut self) {
@@ -571,16 +596,33 @@ impl ProjectController {
     }
 
     fn node_tree_view(&self) -> ProjectNodeTreeView {
+        let edits = self.slot_edit_join();
         ProjectNodeTreeView::new(
             self.root_nodes
                 .iter()
-                .map(|node| self.node_tree_item(node))
+                .map(|node| self.node_tree_item(node, &edits))
                 .collect(),
             self.root_nodes.iter().map(count_nodes).sum(),
         )
     }
 
-    fn node_tree_item(&self, node: &NodeController) -> ProjectNodeTreeItem {
+    /// Build one sidebar tree item; child items are built first so the dirty
+    /// summary merges bottom-up during this walk (own slots + child items).
+    fn node_tree_item(
+        &self,
+        node: &NodeController,
+        edits: &SlotEditJoin<'_>,
+    ) -> ProjectNodeTreeItem {
+        let children: Vec<ProjectNodeTreeItem> = node
+            .children()
+            .iter()
+            .map(|child| self.node_tree_item(child, edits))
+            .collect();
+        let dirty = node.own_slots_dirty_summary(edits)
+            + children
+                .iter()
+                .map(|child| child.dirty)
+                .sum::<DirtySummary>();
         ProjectNodeTreeItem::new(
             node.address().to_string(),
             node.label(),
@@ -588,11 +630,9 @@ impl ProjectController {
             node.status().clone(),
             self.is_focused_node(node),
             node_focus_action(node),
-            node.children()
-                .iter()
-                .map(|child| self.node_tree_item(child))
-                .collect(),
+            children,
         )
+        .with_dirty(dirty)
     }
 
     fn is_focused_node(&self, node: &NodeController) -> bool {
@@ -1208,6 +1248,27 @@ fn node_focus_action(node: &NodeController) -> UiAction {
     )
     .with_label(format!("Focus {}", node.label()))
     .with_summary(format!("Focus node {}.", node.address()))
+}
+
+/// Contextual project-header actions (D4/D5): Save and Revert-to-saved as
+/// controller-produced [`UiPaneAction`] data, present only while persisted
+/// edits are pending — a clean or live-only project shows no actions.
+fn project_header_actions(dirty: &DirtySummary) -> Vec<UiPaneAction> {
+    if dirty.persisted == 0 {
+        return Vec::new();
+    }
+    vec![
+        UiPaneAction::new("save", project_action(ProjectOp::SaveOverlay)),
+        UiPaneAction::new(
+            "revert",
+            project_action(ProjectOp::RevertAllEdits).with_label("Revert to saved"),
+        ),
+    ]
+}
+
+/// An action dispatched to the project controller itself.
+fn project_action(op: ProjectOp) -> UiAction {
+    UiAction::from_op(ControllerId::new(ProjectController::NODE_ID), op)
 }
 
 fn clear_node_focus(nodes: &mut [NodeController]) {
@@ -1874,6 +1935,9 @@ mod tests {
         let view = project.editor_view("studio-demo", 7, &inventory);
 
         assert_eq!(view.project_id, "studio-demo");
+        // The pane title carries the project name (the root node's label),
+        // never the literal project id or the word "project".
+        assert_eq!(view.project_name, "Demo");
         assert_eq!(view.handle_id, 7);
         assert_eq!(view.tree.total_count, 3);
         assert_eq!(view.tree.roots[0].label, "Demo");
@@ -1890,6 +1954,17 @@ mod tests {
                 NodeId::new(3),
             ))
         );
+    }
+
+    #[test]
+    fn editor_view_project_name_falls_back_to_the_id_before_the_tree_syncs() {
+        let mut project = ProjectController::new();
+        let inventory = ProjectInventorySummary::default();
+        project.mark_ready("studio-demo", 7, inventory.clone());
+
+        let view = project.editor_view("studio-demo", 7, &inventory);
+
+        assert_eq!(view.project_name, "studio-demo");
     }
 
     #[test]
@@ -3124,10 +3199,11 @@ mod tests {
         assert_eq!(slot_display(slot), "0.9");
         assert_eq!(slot.address, Some(brightness_address()));
         assert_eq!(
-            project.dirty_counts(),
-            ProjectDirtyCounts {
+            project.dirty_summary(),
+            DirtySummary {
                 persisted: 1,
                 transient: 0,
+                failed: 0,
             }
         );
     }
@@ -3386,10 +3462,11 @@ mod tests {
             Revision::new(3),
         );
         assert_eq!(
-            project.dirty_counts(),
-            ProjectDirtyCounts {
+            project.dirty_summary(),
+            DirtySummary {
                 persisted: 1,
                 transient: 1,
+                failed: 0,
             }
         );
 
@@ -3415,10 +3492,11 @@ mod tests {
             "transient edit stays pending (dirty-live)"
         );
         assert_eq!(
-            project.dirty_counts(),
-            ProjectDirtyCounts {
+            project.dirty_summary(),
+            DirtySummary {
                 persisted: 0,
                 transient: 1,
+                failed: 0,
             }
         );
         let nodes = project.ui_nodes();
@@ -3468,7 +3546,7 @@ mod tests {
         let sync = project.sync.as_ref().unwrap();
         assert!(sync.overlay().is_empty());
         assert_eq!(sync.overlay_revision(), Revision::new(6));
-        assert!(project.dirty_counts().is_clean());
+        assert!(project.dirty_summary().is_clean());
 
         let nodes = project.ui_nodes();
         assert_eq!(
@@ -3479,6 +3557,211 @@ mod tests {
             config_slot(&nodes, "Rate").state.dirty,
             UiNodeDirtyState::Clean
         );
+    }
+
+    // --- Dirty summary aggregation + header action contract tests -----------
+
+    #[test]
+    fn dirty_grandchild_bubbles_summary_to_every_ancestor() {
+        let mut project = ProjectController::new();
+        let mut view = three_level_tree_view();
+        install_mixed_policy_slots(&mut view, 3, Revision::new(2));
+        project.apply_project_view(&view).unwrap();
+        project.insert_pending_edit_for_test(
+            crate::ProjectSlotAddress::new(
+                node_address("/demo.project/group.playlist/leaf.shader"),
+                ProjectSlotRoot::def(),
+                SlotPath::parse("brightness").unwrap(),
+            ),
+            PendingEdit::pending(LpValue::F32(0.9)),
+        );
+        let one_persisted = DirtySummary {
+            persisted: 1,
+            transient: 0,
+            failed: 0,
+        };
+
+        let nodes = project.ui_nodes();
+        assert_eq!(
+            nodes[0].header.dirty, one_persisted,
+            "root header aggregates the grandchild edit"
+        );
+        let group = &nodes[0].children[0];
+        assert_eq!(
+            group.dirty, one_persisted,
+            "intermediate child bubbles the edit"
+        );
+        assert_eq!(
+            group.children[0].dirty, one_persisted,
+            "grandchild carries its own edit"
+        );
+        assert!(
+            nodes[0].children[1].dirty.is_clean(),
+            "sibling branch stays clean"
+        );
+
+        let editor = project.editor_view("demo", 1, &ProjectInventorySummary::default());
+        let root_item = &editor.tree.roots[0];
+        assert_eq!(root_item.dirty, one_persisted);
+        assert_eq!(root_item.children[0].dirty, one_persisted);
+        assert_eq!(root_item.children[0].children[0].dirty, one_persisted);
+        assert!(root_item.children[1].dirty.is_clean());
+        assert_eq!(editor.dirty, one_persisted);
+        assert_eq!(project.dirty_summary(), one_persisted);
+    }
+
+    #[test]
+    fn failed_edit_counts_in_failed_bucket_without_enabling_save() {
+        let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
+        project.insert_pending_edit_for_test(
+            brightness_address(),
+            PendingEdit {
+                value: LpValue::F32(0.9),
+                phase: PendingEditPhase::Failed {
+                    reason: "expected f32".to_string(),
+                },
+            },
+        );
+
+        let expected = DirtySummary {
+            persisted: 0,
+            transient: 0,
+            failed: 1,
+        };
+        assert_eq!(project.dirty_summary(), expected);
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        assert_eq!(editor.dirty, expected);
+        assert!(!editor.dirty.is_clean(), "failed edits need attention");
+        assert_eq!(editor.nodes[0].header.dirty, expected);
+        assert_eq!(editor.tree.roots[0].dirty, expected);
+        assert!(
+            editor.header_actions.is_empty(),
+            "failed edits alone do not surface Save/Revert"
+        );
+    }
+
+    #[test]
+    fn clean_tree_yields_clean_summaries_and_no_header_actions() {
+        let (project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
+
+        assert!(project.dirty_summary().is_clean());
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        assert!(editor.dirty.is_clean());
+        assert!(editor.nodes[0].header.dirty.is_clean());
+        assert!(editor.tree.roots[0].dirty.is_clean());
+        assert!(editor.header_actions.is_empty());
+    }
+
+    #[test]
+    fn header_actions_present_iff_persisted_dirty() {
+        let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
+        project.insert_pending_edit_for_test(
+            brightness_address(),
+            PendingEdit::pending(LpValue::F32(0.9)),
+        );
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+
+        assert_eq!(editor.header_actions.len(), 2);
+        let save = &editor.header_actions[0];
+        assert_eq!(save.icon, "save");
+        assert_eq!(save.label(), "Save");
+        assert!(save.is_primary());
+        assert!(save.is_enabled());
+        assert_eq!(
+            save.action.op_as::<ProjectOp>(),
+            Some(&ProjectOp::SaveOverlay)
+        );
+        assert!(save.action.is_for_node(ProjectController::NODE_ID));
+        let revert = &editor.header_actions[1];
+        assert_eq!(revert.icon, "revert");
+        assert_eq!(revert.label(), "Revert to saved");
+        assert!(!revert.is_primary());
+        assert_eq!(
+            revert.action.op_as::<ProjectOp>(),
+            Some(&ProjectOp::RevertAllEdits)
+        );
+        assert!(revert.action.is_for_node(ProjectController::NODE_ID));
+    }
+
+    #[test]
+    fn transient_only_dirty_shows_no_header_actions() {
+        let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
+        project
+            .insert_pending_edit_for_test(rate_address(), PendingEdit::pending(LpValue::F32(2.0)));
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+
+        assert_eq!(
+            editor.dirty,
+            DirtySummary {
+                persisted: 0,
+                transient: 1,
+                failed: 0,
+            }
+        );
+        assert!(
+            editor.header_actions.is_empty(),
+            "live-only edits do not surface Save/Revert"
+        );
+    }
+
+    /// Regression parity: the project-level summary surfaced on the editor
+    /// DTO equals the standalone walk and the sums of the per-node DTO
+    /// summaries (node headers and tree roots) — one aggregation everywhere.
+    #[test]
+    fn editor_view_dirty_agrees_with_walk_and_dto_sums() {
+        let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
+        project.insert_pending_edit_for_test(
+            brightness_address(),
+            PendingEdit::pending(LpValue::F32(0.9)),
+        );
+        project
+            .insert_pending_edit_for_test(rate_address(), PendingEdit::pending(LpValue::F32(2.0)));
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+
+        let expected = DirtySummary {
+            persisted: 1,
+            transient: 1,
+            failed: 0,
+        };
+        let header_sum: DirtySummary = editor.nodes.iter().map(|node| node.header.dirty).sum();
+        let tree_sum: DirtySummary = editor.tree.roots.iter().map(|root| root.dirty).sum();
+        assert_eq!(editor.dirty, expected);
+        assert_eq!(project.dirty_summary(), expected);
+        assert_eq!(header_sum, expected);
+        assert_eq!(tree_sum, expected);
+    }
+
+    /// Root (1) → group (2) + clock sibling (4), group → leaf shader (3).
+    fn three_level_tree_view() -> ProjectView {
+        let mut view = ProjectView::new();
+        let mut root = node_entry(1, "/demo.project", None, NodeRuntimeStatus::Ok);
+        root.children = vec![NodeId::new(2), NodeId::new(4)];
+        view.tree.insert(root);
+        let mut group = node_entry(
+            2,
+            "/demo.project/group.playlist",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        );
+        group.children = vec![NodeId::new(3)];
+        view.tree.insert(group);
+        view.tree.insert(node_entry(
+            3,
+            "/demo.project/group.playlist/leaf.shader",
+            Some(2),
+            NodeRuntimeStatus::Ok,
+        ));
+        view.tree.insert(node_entry(
+            4,
+            "/demo.project/clock.clock",
+            Some(1),
+            NodeRuntimeStatus::Ok,
+        ));
+        view
     }
 
     struct OverlayScriptedClientIo {

@@ -8,7 +8,7 @@ use lpc_model::{
 };
 
 use crate::{
-    PendingEditPhase, ProjectDirtyCounts, ProjectSlotAddress, ProjectSlotRoot, UiAssetEditorKind,
+    DirtySummary, PendingEditPhase, ProjectSlotAddress, ProjectSlotRoot, UiAssetEditorKind,
     UiConfigSlot, UiConfigSlotBody, UiNodeDirtyState, UiProducedProduct, UiProducedValue,
     UiProductRef, UiSlotAsset, UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality, UiSlotRecord,
     UiSlotSourceState, UiSlotUnit, UiSlotValue, app::project::format_slot_map_key,
@@ -351,25 +351,21 @@ impl SlotController {
         config_slots.push(self.ui_config_slot(edits));
     }
 
-    /// Tally this slot and its descendants into the aggregate dirty counts,
-    /// classified by each slot's own `policy.persistence`. Uses the same
-    /// [`SlotEditJoin`] the DTO build consults, so the counts always agree
-    /// with the per-field dirty affordances.
-    pub(in crate::app::project) fn collect_dirty_counts(
-        &self,
-        edits: &SlotEditJoin<'_>,
-        counts: &mut ProjectDirtyCounts,
-    ) {
-        let dirty = edits.pending(&self.address).is_some() || edits.overlay_dirty(&self.address);
-        if dirty {
-            match self.policy.persistence {
-                SlotPersistence::Persisted => counts.persisted += 1,
-                SlotPersistence::Transient => counts.transient += 1,
-            }
-        }
+    /// Aggregate dirty-edit summary for this slot and its descendants,
+    /// classified per slot by [`DirtySummary::for_slot`] with each slot's own
+    /// `policy.persistence`. Uses the same [`SlotEditJoin`] the DTO build
+    /// consults, so the summary always agrees with the per-field dirty
+    /// affordances.
+    pub(in crate::app::project) fn dirty_summary(&self, edits: &SlotEditJoin<'_>) -> DirtySummary {
+        let mut summary = DirtySummary::for_slot(
+            edits.pending(&self.address),
+            edits.overlay_dirty(&self.address),
+            self.policy.persistence,
+        );
         for child in &self.children {
-            child.collect_dirty_counts(edits, counts);
+            summary += child.dirty_summary(edits);
         }
+        summary
     }
 
     /// Find a mutable descendant slot controller by address.

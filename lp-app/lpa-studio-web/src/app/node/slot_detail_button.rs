@@ -10,7 +10,10 @@ use crate::app::node::{
     SlotShapeDisplay, SlotShapeDisplayMode, SlotUnitDisplay, SlotUnitDisplayMode,
     legacy_shape_from_parts,
 };
-use crate::base::{IconMenuButton, IconMenuTone, PopoverPlacement, StudioIcon, StudioIconName};
+use crate::base::{
+    DetailPopover, DetailSectionTint, IconMenuTone, PopoverPlacement, StudioIcon, StudioIconName,
+    detail_popover_section_class,
+};
 
 /// Footer revert/reset affordance shown inside the slot detail popup for a
 /// touched editable slot. Lives in the popup rather than on the row so the
@@ -42,7 +45,7 @@ pub fn SlotDetailButton(
 
     rsx! {
         span { class: "tw:inline-flex tw:w-8 tw:justify-end",
-            IconMenuButton {
+            DetailPopover {
                 icon: style.icon,
                 label: menu_label.clone(),
                 title: menu_label,
@@ -50,7 +53,6 @@ pub fn SlotDetailButton(
                 placement: PopoverPlacement::BottomEnd,
                 active: style.active,
                 initially_open,
-                popup_class: slot_detail_popup_class().to_string(),
                 for aspect in aspects {
                     SlotDetailSection { aspect }
                 }
@@ -124,7 +126,7 @@ pub(crate) fn primary_affordance(aspects: &[UiSlotAspect]) -> UiSlotAffordance {
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn SlotDetailSection(aspect: UiSlotAspect) -> Element {
     let summary = aspect_summary(&aspect);
-    let section_class = aspect_section_class(summary.highlight);
+    let section_class = detail_popover_section_class(aspect_section_tint(summary.highlight));
     let heading_class = aspect_heading_class(summary.tone);
     let icon_class = aspect_icon_class(summary.tone);
     let details = aspect_detail_rows(&aspect);
@@ -234,10 +236,6 @@ fn slot_affordance_style(affordance: UiSlotAffordance) -> SlotAffordanceStyle {
             active: true,
         },
     }
-}
-
-fn slot_detail_popup_class() -> &'static str {
-    "tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:gap-0 tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:text-sm tw:text-muted-foreground tw:shadow-lg"
 }
 
 fn aspect_summary(aspect: &UiSlotAspect) -> AspectSummary {
@@ -506,23 +504,15 @@ fn SlotDetailRow(row: UiSlotAspectRow) -> Element {
     }
 }
 
-fn aspect_section_class(highlight: Option<UiSlotAffordance>) -> &'static str {
+/// Map a slot aspect's highlight affordance onto the shared detail-card
+/// section tints.
+fn aspect_section_tint(highlight: Option<UiSlotAffordance>) -> DetailSectionTint {
     match highlight {
-        Some(UiSlotAffordance::Error | UiSlotAffordance::Invalid) => {
-            "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-error-bg)_0%,transparent_72%)] tw:px-3 tw:py-1.5 tw:first:border-t-0"
-        }
-        Some(UiSlotAffordance::Edited) => {
-            "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-warning-bg)_0%,transparent_72%)] tw:px-3 tw:py-1.5 tw:first:border-t-0"
-        }
-        Some(UiSlotAffordance::Saving) => {
-            "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-working-bg)_0%,transparent_72%)] tw:px-3 tw:py-1.5 tw:first:border-t-0"
-        }
-        Some(UiSlotAffordance::Bound) => {
-            "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-good-bg)_0%,transparent_72%)] tw:px-3 tw:py-1.5 tw:first:border-t-0"
-        }
-        Some(UiSlotAffordance::Info) | None => {
-            "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:px-3 tw:py-1.5 tw:first:border-t-0"
-        }
+        Some(UiSlotAffordance::Error | UiSlotAffordance::Invalid) => DetailSectionTint::Error,
+        Some(UiSlotAffordance::Edited) => DetailSectionTint::Warning,
+        Some(UiSlotAffordance::Saving) => DetailSectionTint::Working,
+        Some(UiSlotAffordance::Bound) => DetailSectionTint::Good,
+        Some(UiSlotAffordance::Info) | None => DetailSectionTint::None,
     }
 }
 

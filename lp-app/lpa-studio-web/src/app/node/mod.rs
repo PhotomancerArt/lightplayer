@@ -4,7 +4,7 @@ mod config_slot_row;
 #[cfg(feature = "stories")]
 pub(crate) mod config_slot_row_stories;
 mod node_children;
-mod node_header;
+mod node_detail_popover;
 mod node_pane;
 #[cfg(feature = "stories")]
 pub(crate) mod node_stories;
@@ -37,8 +37,8 @@ pub(crate) mod slot_value_editor_stories;
 
 pub use config_slot_row::ConfigSlotRow;
 pub use node_children::NodeChildren;
-pub use node_header::NodeHeader;
-pub use node_pane::{NodePane, NodeSection};
+pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};
+pub use node_pane::{NodeDirtyTint, NodePane, NodeSection};
 pub use produced_product_view::ProducedProductView;
 pub use produced_products::ProducedProducts;
 pub use produced_value_view::ProducedValueView;

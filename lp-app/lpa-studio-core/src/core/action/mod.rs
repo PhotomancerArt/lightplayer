@@ -11,3 +11,4 @@ pub mod action_enablement;
 pub mod action_meta;
 pub mod action_priority;
 pub mod actions;
+pub mod pane_action;

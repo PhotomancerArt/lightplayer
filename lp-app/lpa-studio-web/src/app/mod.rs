@@ -4,6 +4,7 @@
 //! projects, nodes, and the overall Studio shell. They compose `core`
 //! controls and `base` primitives into app-specific workflows.
 
+pub(crate) mod affordance;
 pub mod device;
 pub mod layout;
 pub mod node;
@@ -14,4 +15,4 @@ pub(crate) mod story_fixtures;
 pub use device::RuntimeLog;
 pub use layout::{PaneFrame, StudioShell};
 pub use node::NodePane;
-pub use project::{ProjectNodeWorkspace, ProjectSidebar, ProjectWorkspace};
+pub use project::{ProjectNodeWorkspace, ProjectPane};
