@@ -136,6 +136,9 @@ pub fn ConfigSlotRow(
                     }
                 }
                 div { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-end tw:gap-2 tw:text-sm tw:leading-tight tw:text-muted-foreground",
+                    if let Some(revert) = row_revert {
+                        SlotRowRevertButton { revert }
+                    }
                     if let Some(optionality) = slot.optionality {
                         OptionToggleField {
                             optionality,
@@ -154,9 +157,6 @@ pub fn ConfigSlotRow(
                     }
                     if let Some((address, handler)) = remove_entry {
                         MapEntryRemoveButton { address, on_action: handler }
-                    }
-                    if let Some(revert) = row_revert {
-                        SlotRowRevertButton { revert }
                     }
                 }
                 SlotDetailButton {
@@ -195,6 +195,21 @@ fn chrome_revert_labels(chrome: SlotEditChrome) -> (&'static str, &'static str) 
     }
 }
 
+/// Tone for the inline revert button, from the same status token families as
+/// the row tint and the edited affordance icon: warning (amber) for unsaved
+/// persisted edits, live (blue) for transient controls — so the button reads
+/// as part of the row's unsaved/live chrome rather than a neutral control.
+fn chrome_revert_button_class(chrome: SlotEditChrome) -> &'static str {
+    match chrome {
+        SlotEditChrome::Unsaved => {
+            "tw:inline-flex tw:h-6 tw:w-6 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:p-0 tw:text-status-warning-foreground tw:transition-colors tw:hover:border-status-warning-foreground"
+        }
+        SlotEditChrome::Live => {
+            "tw:inline-flex tw:h-6 tw:w-6 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-live-border tw:bg-status-live-bg tw:p-0 tw:text-status-live-foreground tw:transition-colors tw:hover:border-status-live-foreground"
+        }
+    }
+}
+
 /// Inline revert affordance data for a touched row with an own edit entry.
 #[derive(Clone, PartialEq)]
 struct RowRevert {
@@ -205,7 +220,10 @@ struct RowRevert {
 
 /// Compact revert icon button on a touched slot row: the same revert icon
 /// token as the node/project headers, dispatching `SlotEditOp::Revert` at the
-/// row's own edit entry. Tooltip verb per [`chrome_revert_labels`].
+/// row's own edit entry. Tooltip verb per [`chrome_revert_labels`], tone per
+/// [`chrome_revert_button_class`]. It renders at the LEADING edge of the
+/// end-aligned value area: the value controls stay right-anchored, so the
+/// button appearing/disappearing on the first edit never shifts the input.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn SlotRowRevertButton(revert: RowRevert) -> Element {
@@ -218,7 +236,7 @@ fn SlotRowRevertButton(revert: RowRevert) -> Element {
 
     rsx! {
         button {
-            class: "tw:inline-flex tw:h-6 tw:w-6 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-subtle tw:bg-transparent tw:p-0 tw:text-muted-foreground tw:hover:text-strong-foreground",
+            class: chrome_revert_button_class(chrome),
             r#type: "button",
             aria_label: label,
             title: "{label}: {title}",
@@ -371,5 +389,32 @@ fn expand_chevron_class(expanded: bool) -> &'static str {
         "tw:inline-flex tw:rotate-90 tw:transition-transform"
     } else {
         "tw:inline-flex tw:transition-transform"
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn revert_button_wears_the_row_chrome_status_tokens() {
+        // Unsaved: the warning (amber) family shared with the row tint and
+        // the edited affordance icon.
+        let unsaved = chrome_revert_button_class(SlotEditChrome::Unsaved);
+        assert!(unsaved.contains("tw:border-status-warning-border"));
+        assert!(unsaved.contains("tw:bg-status-warning-bg"));
+        assert!(unsaved.contains("tw:text-status-warning-foreground"));
+
+        // Live: the live (blue) family, same position and shape.
+        let live = chrome_revert_button_class(SlotEditChrome::Live);
+        assert!(live.contains("tw:border-status-live-border"));
+        assert!(live.contains("tw:bg-status-live-bg"));
+        assert!(live.contains("tw:text-status-live-foreground"));
+    }
+
+    #[test]
+    fn revert_verbs_stay_per_chrome() {
+        assert_eq!(chrome_revert_labels(SlotEditChrome::Unsaved).0, "Revert");
+        assert_eq!(chrome_revert_labels(SlotEditChrome::Live).0, "Reset");
     }
 }

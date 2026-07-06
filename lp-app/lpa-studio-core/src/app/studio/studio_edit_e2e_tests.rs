@@ -472,6 +472,87 @@ fn composite_gesture_cycle_ends_clean_end_to_end() {
 }
 
 #[test]
+fn variant_dropdown_switch_away_and_back_ends_clean_from_acks_alone() {
+    // The dropdown repro: switch the mapping enum away from its base variant
+    // (EnsurePresent mapping.PathPoints), then re-select the base variant
+    // (EnsurePresent mapping.Unset). The switch-back normalizes away on the
+    // server *and* clears the pending sibling switch; the Materialized ack
+    // is the mirror's only source — no ReadOverlay may fire. Without the
+    // sibling clearing, the stored mapping.PathPoints entry would survive
+    // and the dropdown would stay stuck on PathPoints forever.
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let sent = Rc::new(RefCell::new(Vec::new()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::clone(&sent),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let mapping = find_slot(&snapshot, "mapping");
+    assert_eq!(mapping.detail.as_deref(), Some("variant Unset"));
+    assert_eq!(mapping.state.dirty, UiNodeDirtyState::Clean);
+    let mapping_address = mapping
+        .address
+        .clone()
+        .expect("mapping slot carries an address");
+    let overlay_reads_before = count_overlay_reads(&sent);
+
+    // Switch away, then refresh so the user-visible dropdown really shows
+    // the pending variant before switching back.
+    handle.tx.send(ensure_present_action(child_address(
+        &mapping_address,
+        "mapping.PathPoints",
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("switch + refresh emit a snapshot");
+    let mapping = find_slot(&snapshot, "mapping");
+    assert_eq!(mapping.detail.as_deref(), Some("variant PathPoints"));
+    assert_eq!(mapping.state.dirty, UiNodeDirtyState::Dirty);
+    assert_eq!(editor_dirty(&snapshot), (1, 0));
+
+    // Re-select the base variant from the dropdown: the pending switch must
+    // go away entirely, not normalize into a stuck sibling entry.
+    handle.tx.send(ensure_present_action(child_address(
+        &mapping_address,
+        "mapping.Unset",
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view
+        .try_recv()
+        .expect("switch-back + refresh emit a snapshot");
+    let mapping = find_slot(&snapshot, "mapping");
+    assert_eq!(
+        mapping.detail.as_deref(),
+        Some("variant Unset"),
+        "the effective def is back on the base variant"
+    );
+    assert_eq!(
+        mapping.state.dirty,
+        UiNodeDirtyState::Clean,
+        "no pending sibling switch survives the switch-back"
+    );
+    assert_eq!(editor_dirty(&snapshot), (0, 0), "the cycle ends clean");
+    assert_eq!(
+        count_overlay_reads(&sent) - overlay_reads_before,
+        0,
+        "the mirror is corrected by the ack effects alone, not a ReadOverlay"
+    );
+}
+
+#[test]
 fn removing_an_added_and_edited_entry_ends_clean_from_the_ack_alone() {
     // Mirror fidelity for the subtree-clearing structural remove: add a map
     // entry, edit a leaf under it, remove the entry again. The remove

@@ -11,9 +11,10 @@ use lpc_model::{
     MutationEffect, MutationOp, MutationRejection, MutationRejectionReason, MutationResult,
     NodeArtifact, NodeDef, NodeDefEntry, NodeDefLocation, NodeDefState, PROJECT_FORMAT_VERSION,
     ProjectFormatProbe, ProjectInventory, ProjectOverlay, Revision, SlotAccess, SlotDataAccess,
-    SlotEditOp, SlotMapKey, SlotPath, SlotPathSegment, SlotPolicyResolution, SlotShapeLookup,
-    StaticSlotShape, StoredSlotEdit, WithRevision, lookup_slot_data, lp_value_matches_type,
-    read_project_format_json, resolve_slot_policy_and_leaf,
+    SlotEditOp, SlotMapKey, SlotName, SlotPath, SlotPathSegment, SlotPolicyResolution,
+    SlotShapeLookup, SlotShapeView, StaticSlotShape, StoredSlotEdit, WithRevision,
+    lookup_slot_data, lp_value_matches_type, read_project_format_json,
+    resolve_slot_policy_and_leaf,
 };
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath};
 
@@ -120,6 +121,7 @@ impl ProjectRegistry {
             }
             mutation => {
                 let structural_remove = is_structural_remove(&mutation);
+                let variant_siblings = self.variant_switch_sibling_paths(&mutation, ctx);
                 let (mutation, normalized) = self.normalize_edit_to_base(fs, mutation, ctx);
                 match mutation {
                     // A structural `Remove` that normalized away must also
@@ -131,6 +133,30 @@ impl ProjectRegistry {
                         if normalized && structural_remove =>
                     {
                         self.remove_slot_edit_subtree(&artifact, &path).1
+                    }
+                    // A variant-selecting `EnsurePresent` that normalized
+                    // away (switch back to the base variant) still clears
+                    // the pending switches at sibling variant paths (see
+                    // `Self::variant_switch_sibling_paths`).
+                    MutationOp::RemoveSlotEdit { artifact, path }
+                        if normalized && !variant_siblings.is_empty() =>
+                    {
+                        let changed = self.overlay.get_mut().remove_slot_edit(&artifact, &path);
+                        changed
+                            | self
+                                .clear_variant_sibling_subtrees(&artifact, &variant_siblings)
+                                .1
+                    }
+                    // A variant-selecting `EnsurePresent` that stores (switch
+                    // away from base) replaces any previous pending switch
+                    // (mostly via `SlotOverlay::put_edit`'s parent-scope
+                    // canonicalization; the sibling sweep is the backstop).
+                    MutationOp::PutSlotEdit { artifact, edit } if !variant_siblings.is_empty() => {
+                        let changed = self.overlay.get_mut().put_slot_edit(artifact.clone(), edit);
+                        changed
+                            | self
+                                .clear_variant_sibling_subtrees(&artifact, &variant_siblings)
+                                .1
                     }
                     mutation => self.overlay.get_mut().apply_mutation(mutation),
                 }
@@ -184,6 +210,8 @@ impl ProjectRegistry {
                 }
                 Ok(()) => {
                     let structural_remove = is_structural_remove(&command.mutation);
+                    let variant_siblings =
+                        self.variant_switch_sibling_paths(&command.mutation, ctx);
                     let (mutation, normalized) =
                         self.normalize_edit_to_base(fs, command.mutation, ctx);
                     let effect = match mutation {
@@ -213,6 +241,67 @@ impl ProjectRegistry {
                                 }
                             } else {
                                 MutationEffect::NormalizedToRemoval { changed }
+                            }
+                        }
+                        // A variant-selecting `EnsurePresent` that normalized
+                        // away (switch back to the base variant) still clears
+                        // the pending switches at sibling variant paths (see
+                        // `Self::variant_switch_sibling_paths`); when it did,
+                        // the ack must say so via `Materialized`.
+                        MutationOp::RemoveSlotEdit { artifact, path }
+                            if normalized && !variant_siblings.is_empty() =>
+                        {
+                            let mut changed =
+                                self.overlay.get_mut().remove_slot_edit(&artifact, &path);
+                            let (cleared, siblings_changed) =
+                                self.clear_variant_sibling_subtrees(&artifact, &variant_siblings);
+                            changed |= siblings_changed;
+                            any_changed |= changed;
+                            if cleared.is_empty() {
+                                MutationEffect::NormalizedToRemoval { changed }
+                            } else {
+                                MutationEffect::Materialized {
+                                    edits: core::iter::once(path)
+                                        .chain(cleared)
+                                        .map(|path| StoredSlotEdit::Removed { path })
+                                        .collect(),
+                                    changed,
+                                }
+                            }
+                        }
+                        // A variant-selecting `EnsurePresent` that stores
+                        // (switch away from base) replaces any previous
+                        // pending switch. `SlotOverlay::put_edit`'s
+                        // parent-scope canonicalization already clears the
+                        // sibling subtrees on server and mirror alike, so
+                        // this normally acks the plain `OverlayChanged`;
+                        // the explicit sibling sweep is the fidelity
+                        // backstop — anything it still finds is reported
+                        // via `Materialized`.
+                        MutationOp::PutSlotEdit { artifact, edit }
+                            if !variant_siblings.is_empty() =>
+                        {
+                            let mut changed = self
+                                .overlay
+                                .get_mut()
+                                .put_slot_edit(artifact.clone(), edit.clone());
+                            let (cleared, siblings_changed) =
+                                self.clear_variant_sibling_subtrees(&artifact, &variant_siblings);
+                            changed |= siblings_changed;
+                            any_changed |= changed;
+                            if cleared.is_empty() {
+                                MutationEffect::OverlayChanged { changed }
+                            } else {
+                                MutationEffect::Materialized {
+                                    edits: core::iter::once(StoredSlotEdit::Put { edit })
+                                        .chain(
+                                            cleared
+                                                .into_iter()
+                                                .map(|path| StoredSlotEdit::Removed { path }),
+                                        )
+                                        .collect(),
+                                    changed,
+                                }
                             }
                         }
                         mutation => {
@@ -846,6 +935,68 @@ impl ProjectRegistry {
             .unwrap_or_default()
     }
 
+    /// Sibling variant paths a structural `EnsurePresent` selecting an enum
+    /// variant must clear, or empty when the mutation is no such edit.
+    ///
+    /// Detection is a shape-only walk (the same resolution family as
+    /// [`resolve_edit_policy`] / [`resolve_slot_policy_and_leaf`], so it works
+    /// regardless of which variant is currently active): the edit's terminal
+    /// segment must name a declared variant of the enum its parent path
+    /// resolves to in the effective definition's shape. Returns the paths of
+    /// the *other* declared variants of that enum; empty when the edit is not
+    /// an `EnsurePresent`, the artifact has no loaded definition, or the path
+    /// does not terminate at an enum variant.
+    ///
+    /// The rule (user gesture: the variant dropdown): selecting a variant
+    /// replaces any pending switch to another variant, so processing the
+    /// `EnsurePresent` clears the overlay subtrees at all sibling variant
+    /// paths — both when the edit stores (switch away from base; normally
+    /// already covered by [`lpc_model::SlotOverlay::put_edit`]'s parent-scope
+    /// canonicalization, kept here as a fidelity backstop) and when it
+    /// normalizes away (switch back to the base variant), where no stored
+    /// edit ever reaches `put_edit`. Without the normalized-case sweep,
+    /// re-selecting the base variant would normalize to a no-op while the
+    /// stored sibling switch survived, leaving the effective def stuck on the
+    /// pending variant (`docs/adr/2026-07-04-studio-editing-model.md`, D7).
+    fn variant_switch_sibling_paths(
+        &self,
+        mutation: &MutationOp,
+        ctx: &ParseCtx<'_>,
+    ) -> Vec<SlotPath> {
+        let MutationOp::PutSlotEdit { artifact, edit } = mutation else {
+            return Vec::new();
+        };
+        if !matches!(edit.op, SlotEditOp::EnsurePresent) {
+            return Vec::new();
+        }
+        let Ok(def) = self.loaded_def_for_mutation(artifact) else {
+            return Vec::new();
+        };
+        enum_variant_sibling_paths(def, &edit.path, ctx)
+    }
+
+    /// Clear the overlay subtree ([`Self::remove_slot_edit_subtree`]) at each
+    /// sibling variant path that actually carries overlay entries, returning
+    /// the removed paths (per sibling: entry first, then descendants) and
+    /// whether anything was removed. Siblings without entries contribute
+    /// nothing, so the ack never lists no-op removals.
+    fn clear_variant_sibling_subtrees(
+        &mut self,
+        artifact: &ArtifactLocation,
+        siblings: &[SlotPath],
+    ) -> (Vec<SlotPath>, bool) {
+        let mut removed = Vec::new();
+        let mut changed = false;
+        for sibling in siblings {
+            let (paths, sibling_changed) = self.remove_slot_edit_subtree(artifact, sibling);
+            if sibling_changed {
+                changed = true;
+                removed.extend(paths);
+            }
+        }
+        (removed, changed)
+    }
+
     /// Minimal-diff overlay normalization: a `PutSlotEdit` that would leave
     /// the effective state identical to the base (unoverlaid) artifact stores
     /// nothing — it is rewritten to a removal of the overlay entry at the
@@ -872,7 +1023,10 @@ impl ProjectRegistry {
     ///
     /// Callers applying a normalized structural `Remove` must clear the
     /// whole overlay subtree at its path, not just the entry
-    /// ([`Self::remove_slot_edit_subtree`]).
+    /// ([`Self::remove_slot_edit_subtree`]); callers processing a
+    /// variant-selecting `EnsurePresent` must clear the sibling variant
+    /// subtrees whether or not it normalized
+    /// ([`Self::variant_switch_sibling_paths`]).
     fn normalize_edit_to_base(
         &mut self,
         fs: &dyn LpFs,
@@ -1060,6 +1214,101 @@ fn resolve_edit_policy(
     };
     let shape = ctx.shapes.get_shape(root_shape_id)?;
     resolve_slot_policy_and_leaf(shape, ctx.shapes, path)
+}
+
+/// Paths of the other declared variants when `path` terminates at an enum
+/// variant per the shape walk, or empty otherwise.
+///
+/// The root shape follows [`resolve_edit_policy`]'s rule (a leading artifact
+/// root variant segment resolves against the artifact wrapper shape), and the
+/// walk to the parent path is shape-only ([`shape_at_path`]) — enum variant
+/// segments resolve against any declared variant, matching how the edits are
+/// validated and applied. The terminal segment must be a `Field` naming a
+/// declared variant of the parent enum; map-key terminals, record fields,
+/// option `some`, and unresolvable paths all yield no siblings.
+fn enum_variant_sibling_paths(def: &NodeDef, path: &SlotPath, ctx: &ParseCtx<'_>) -> Vec<SlotPath> {
+    let Some((SlotPathSegment::Field(terminal), parent)) = path.segments().split_last() else {
+        return Vec::new();
+    };
+    let root_shape_id = match path.segments().first() {
+        Some(SlotPathSegment::Field(name)) if NodeDef::is_variant_name(name.as_str()) => {
+            NodeArtifact::SHAPE_ID
+        }
+        _ => def.shape_id(),
+    };
+    let Some(root) = ctx.shapes.get_shape(root_shape_id) else {
+        return Vec::new();
+    };
+    let Some(parent_shape) = shape_at_path(root, ctx, parent) else {
+        return Vec::new();
+    };
+    if parent_shape.enum_variant_by_name(terminal).is_none() {
+        return Vec::new();
+    }
+    let parent_path = SlotPath::from_segments(parent.to_vec());
+    let mut siblings = Vec::new();
+    let mut index = 0;
+    while let Some(variant) = parent_shape.enum_variant(index) {
+        index += 1;
+        if variant.name_str() == terminal.as_str() {
+            continue;
+        }
+        let Ok(name) = SlotName::parse(variant.name_str()) else {
+            continue;
+        };
+        siblings.push(parent_path.child(name));
+    }
+    siblings
+}
+
+/// Shape at `segments` under `shape`: the same shape-only walk as
+/// [`resolve_slot_policy_and_leaf`] (chasing `Ref` indirections and `Custom`
+/// projections, resolving enum variant segments against any declared
+/// variant), returning the shape view instead of a policy. `None` when the
+/// path does not resolve in the shape.
+fn shape_at_path<'s>(
+    shape: SlotShapeView<'s>,
+    ctx: &ParseCtx<'s>,
+    segments: &[SlotPathSegment],
+) -> Option<SlotShapeView<'s>> {
+    let shape = resolve_projected_shape(shape, ctx)?;
+    let Some((head, tail)) = segments.split_first() else {
+        return Some(shape);
+    };
+    let next = match head {
+        SlotPathSegment::Field(name) => {
+            if let Some((_, field)) = shape.record_field_by_name(name) {
+                field.shape()
+            } else if name.as_str() == "some"
+                && let Some(some) = shape.option_some()
+            {
+                some
+            } else if let Some(variant) = shape.enum_variant_by_name(name) {
+                variant.shape()
+            } else {
+                return None;
+            }
+        }
+        SlotPathSegment::Key(_) => shape.map_value()?,
+    };
+    shape_at_path(next, ctx, tail)
+}
+
+/// Chase `Ref` indirections and `Custom` projections to a concrete shape
+/// (the local counterpart of the policy walk's projection step).
+fn resolve_projected_shape<'s>(
+    mut shape: SlotShapeView<'s>,
+    ctx: &ParseCtx<'s>,
+) -> Option<SlotShapeView<'s>> {
+    loop {
+        if let Some(id) = shape.ref_id() {
+            shape = ctx.shapes.get_shape(id)?;
+        } else if let Some(projected) = shape.custom_shape() {
+            shape = projected;
+        } else {
+            return Some(shape);
+        }
+    }
 }
 
 /// Split a map-entry path into its parent map path and terminal key.
@@ -2068,6 +2317,214 @@ mod tests {
             }],
         );
         assert_accepted(&results[0], true);
+        assert!(matches!(
+            effective_fixture_def(&registry).mapping.value(),
+            lpc_model::MappingConfig::PathPoints { .. }
+        ));
+    }
+
+    #[test]
+    fn switching_back_to_the_base_variant_clears_the_pending_switch_subtree() {
+        // The dropdown repro: base authors PathPoints. Switch to SvgPath
+        // (stores at mapping.SvgPath, plus an edit under it), then switch
+        // BACK to PathPoints. The EnsurePresent at mapping.PathPoints
+        // normalizes away (base is already PathPoints) — but it must also
+        // clear the sibling variant subtree, or the stored mapping.SvgPath
+        // entry survives and the effective def stays stuck on SvgPath.
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = path_points_fixture_project(&shapes);
+        let fixture = fixture_artifact();
+        let svg_path = SlotPath::parse("mapping.SvgPath").unwrap();
+        let svg_leaf = SlotPath::parse("mapping.SvgPath.sample_diameter").unwrap();
+
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![
+                MutationOp::PutSlotEdit {
+                    artifact: fixture.clone(),
+                    edit: SlotEdit::ensure_present(svg_path.clone()),
+                },
+                MutationOp::PutSlotEdit {
+                    artifact: fixture.clone(),
+                    edit: SlotEdit::assign_value(svg_leaf.clone(), LpValue::F32(2.5)),
+                },
+            ],
+        );
+        assert_accepted(&results[0], true);
+        assert_accepted(&results[1], true);
+        assert!(matches!(
+            effective_fixture_def(&registry).mapping.value(),
+            lpc_model::MappingConfig::SvgPath { .. }
+        ));
+
+        // Switch back: normalized away AND the sibling subtree clears; the
+        // ack lists every removed entry for ack-mirroring clients.
+        let results = mutate_batch_at(
+            &fs,
+            &mut registry,
+            &shapes,
+            Revision::new(12),
+            vec![MutationOp::PutSlotEdit {
+                artifact: fixture.clone(),
+                edit: SlotEdit::ensure_present(SlotPath::parse("mapping.PathPoints").unwrap()),
+            }],
+        );
+        let edits = assert_materialized(&results[0], true);
+        assert_eq!(
+            edits,
+            &[
+                StoredSlotEdit::Removed {
+                    path: SlotPath::parse("mapping.PathPoints").unwrap(),
+                },
+                StoredSlotEdit::Removed { path: svg_path },
+                StoredSlotEdit::Removed { path: svg_leaf },
+            ],
+            "the ack lists the normalized target and the cleared sibling subtree"
+        );
+        assert!(
+            registry.overlay().get().is_empty(),
+            "switch-away then switch-back ends with an empty overlay"
+        );
+        assert_eq!(registry.overlay().changed_at(), Revision::new(12));
+        assert!(
+            matches!(
+                effective_fixture_def(&registry).mapping.value(),
+                lpc_model::MappingConfig::PathPoints { .. }
+            ),
+            "the effective def is back on the base variant"
+        );
+    }
+
+    #[test]
+    fn switching_through_a_third_variant_leaves_exactly_one_pending_switch() {
+        // A → B → C on the mapping enum (base PathPoints): selecting a new
+        // variant replaces the previous pending switch, so after SvgPath
+        // then Unset exactly one entry remains — at mapping.Unset.
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = path_points_fixture_project(&shapes);
+        let fixture = fixture_artifact();
+        let unset = SlotPath::parse("mapping.Unset").unwrap();
+
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::PutSlotEdit {
+                artifact: fixture.clone(),
+                edit: SlotEdit::ensure_present(SlotPath::parse("mapping.SvgPath").unwrap()),
+            }],
+        );
+        assert_accepted(&results[0], true);
+
+        let results = mutate_batch_at(
+            &fs,
+            &mut registry,
+            &shapes,
+            Revision::new(12),
+            vec![MutationOp::PutSlotEdit {
+                artifact: fixture.clone(),
+                edit: SlotEdit::ensure_present(unset.clone()),
+            }],
+        );
+        // The stored switch replaces the pending SvgPath switch through
+        // `SlotOverlay::put_edit`'s parent-scope canonicalization (which the
+        // mirror shares, so the plain ack keeps both sides aligned).
+        assert_accepted(&results[0], true);
+        let overlay = registry
+            .overlay()
+            .get()
+            .artifact(&fixture)
+            .and_then(ArtifactOverlay::as_slot)
+            .expect("slot overlay");
+        assert_eq!(overlay.edits.len(), 1, "exactly one pending switch");
+        assert!(overlay.contains_path(&unset));
+        assert!(matches!(
+            effective_fixture_def(&registry).mapping.value(),
+            lpc_model::MappingConfig::Unset
+        ));
+    }
+
+    #[test]
+    fn non_variant_ensure_present_leaves_sibling_entries_alone() {
+        // The sibling-clearing rule is scoped to enum variant paths: a map
+        // entry add (`EnsurePresent` terminating at a key segment) must not
+        // clear pending edits at sibling entries — the stored removal of
+        // `speed` survives adding its sibling `boost`, and the ack stays the
+        // plain `OverlayChanged` (no `Materialized` widening).
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = bound_clock_project(&shapes);
+        let clock = clock_artifact();
+        let speed = SlotPath::parse("bindings[speed]").unwrap();
+        let boost = SlotPath::parse("bindings[boost]").unwrap();
+
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![
+                MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: SlotEdit::remove(speed.clone()),
+                },
+                MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: SlotEdit::ensure_present(boost.clone()),
+                },
+            ],
+        );
+        assert_accepted(&results[0], true);
+        assert_accepted(&results[1], true);
+
+        let overlay = registry
+            .overlay()
+            .get()
+            .artifact(&clock)
+            .and_then(ArtifactOverlay::as_slot)
+            .expect("slot overlay");
+        assert_eq!(overlay.edits.len(), 2, "no sibling logic ran");
+        assert!(overlay.contains_path(&speed));
+        assert!(overlay.contains_path(&boost));
+    }
+
+    #[test]
+    fn singular_mutate_clears_sibling_variant_entries_like_the_batch_path() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = path_points_fixture_project(&shapes);
+        let fixture = fixture_artifact();
+        let ctx = ParseCtx { shapes: &shapes };
+
+        registry
+            .mutate(
+                &fs,
+                MutationOp::PutSlotEdit {
+                    artifact: fixture.clone(),
+                    edit: SlotEdit::ensure_present(SlotPath::parse("mapping.SvgPath").unwrap()),
+                },
+                Revision::new(10),
+                &ctx,
+            )
+            .unwrap();
+        assert!(!registry.overlay().get().is_empty());
+
+        let result = registry
+            .mutate(
+                &fs,
+                MutationOp::PutSlotEdit {
+                    artifact: fixture,
+                    edit: SlotEdit::ensure_present(SlotPath::parse("mapping.PathPoints").unwrap()),
+                },
+                Revision::new(12),
+                &ctx,
+            )
+            .unwrap();
+
+        assert!(result.overlay_changed);
+        assert!(
+            registry.overlay().get().is_empty(),
+            "the singular path must clear the sibling switch like the batch path"
+        );
         assert!(matches!(
             effective_fixture_def(&registry).mapping.value(),
             lpc_model::MappingConfig::PathPoints { .. }

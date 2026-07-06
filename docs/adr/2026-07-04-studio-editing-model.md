@@ -279,20 +279,29 @@ path. Toggling a base-present option **off** stores `Remove opt` (a real
 diff); toggling it back **on** dispatches `EnsurePresent opt.some`, which
 normalizes away against the base (`.some` is base-present) *at a different
 path* — the stored `Remove opt` survives, so off-then-on does **not**
-restore the value or any prior interior edits. The same shape applies to
-switching an enum back to its base variant while a variant switch is
-pending: the `EnsurePresent enum.BaseVariant` normalizes away and the
-stored entry at the *other* variant's path survives, so re-selecting the
-original variant is not an undo. Recovery is explicit and always available:
-**Revert** on the row — the stored entry is at the option row's own path,
-and for the enum case the row-revert ownership rule above matches the
-surviving variant-path entry to the enum row — or the save panel's
-per-entry revert. This is the deliberate
-consequence of "the overlay is a minimal diff against saved state" — the
-gesture pair is not an undo stack. The UI keeps honest through it: the
-option toggle is a controlled control whose visual state only follows the
-DTO's effective presence, so a normalized no-op gesture leaves the toggle
-visibly unchanged rather than desynced.
+restore the value or any prior interior edits. Recovery is explicit and
+always available: **Revert** on the row — the stored entry is at the option
+row's own path — or the save panel's per-entry revert. This is the
+deliberate consequence of "the overlay is a minimal diff against saved
+state" — the gesture pair is not an undo stack. The UI keeps honest through
+it: the option toggle is a controlled control whose visual state only
+follows the DTO's effective presence, so a normalized no-op gesture leaves
+the toggle visibly unchanged rather than desynced.
+
+Enum variant switches do **not** share this edge: a structural
+`EnsurePresent` whose terminal segment names a declared variant of the
+parent enum (a shape-walk check in
+`ProjectRegistry::variant_switch_sibling_paths`) clears the overlay entries
+at every *sibling* variant path and their subtrees as it is processed —
+selecting a variant replaces any pending switch to another variant. When
+the switch stores, `SlotOverlay::put_edit`'s parent-scope canonicalization
+already does this on server and mirror alike; the load-bearing case is the
+switch **back to the base variant**, where the `EnsurePresent` normalizes
+away (no stored edit ever reaches `put_edit`) and the registry sweeps the
+sibling subtrees explicitly, reporting the cleared entries through
+`MutationEffect::Materialized` so ack-mirroring clients follow without a
+fetch. Re-selecting the base variant therefore *is* a clean cancel of a
+pending switch.
 
 **Known limitation (recorded, no code).** An optional-*wrapped* map or enum
 (`Option<Map<…>>`, `Option<Enum<…>>`) would flatten its interior body into
