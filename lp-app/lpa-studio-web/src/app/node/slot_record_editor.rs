@@ -1,7 +1,7 @@
 //! Recursive record editor for config slot fields.
 
 use dioxus::prelude::*;
-use lpa_studio_core::UiSlotRecord;
+use lpa_studio_core::{UiAction, UiSlotRecord};
 
 use crate::app::node::ConfigSlotRow;
 
@@ -11,6 +11,7 @@ pub fn SlotRecordEditor(
     record: UiSlotRecord,
     #[props(default = 0)] depth: usize,
     #[props(default = false)] separated: bool,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let class = if separated {
         "tw:grid tw:min-w-0 tw:overflow-hidden tw:border-t tw:border-border-muted tw:divide-y tw:divide-border-muted"
@@ -26,6 +27,7 @@ pub fn SlotRecordEditor(
                     slot,
                     depth,
                     index,
+                    on_action,
                 }
             }
         }

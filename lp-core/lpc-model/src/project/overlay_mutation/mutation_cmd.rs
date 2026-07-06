@@ -101,11 +101,23 @@ pub enum MutationCmdStatus {
 }
 
 /// Observable effect of an accepted overlay mutation.
+///
+/// The effect is what the server actually stored, which may differ from the
+/// sent command: minimal-diff normalization rewrites a `PutSlotEdit` assigning
+/// the base (unoverlaid) value into a removal of the overlay entry at that
+/// path. Clients that mirror the overlay from their own acks must apply the
+/// effect, not the sent command, or their mirror diverges from the server
+/// without a revision bump to correct it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MutationEffect {
-    /// Whether the accepted mutation changed canonical overlay state.
+    /// The mutation was applied as sent; `changed` reports whether it changed
+    /// canonical overlay state.
     OverlayChanged { changed: bool },
+    /// A `PutSlotEdit` assigning the base value was normalized to removing the
+    /// overlay entry at its path; `changed` reports whether an entry existed
+    /// to remove (`false`: the command was a complete no-op).
+    NormalizedToRemoval { changed: bool },
 }
 
 /// Stable reason for a rejected overlay mutation command.

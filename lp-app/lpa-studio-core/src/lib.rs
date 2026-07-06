@@ -3,7 +3,7 @@
 pub use lpa_link::{LinkEndpointId, LinkEndpointStatus, LinkProviderKind};
 pub use lpc_model::{
     ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
-    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, Revision,
+    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, LpValue, Revision, SlotPath,
 };
 
 pub mod app;

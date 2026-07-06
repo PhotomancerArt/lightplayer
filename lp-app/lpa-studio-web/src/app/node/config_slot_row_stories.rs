@@ -2,13 +2,22 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    UiBindingEndpoint, UiConfigSlot, UiNodeDirtyState, UiSlotFieldState, UiSlotOptionality,
+    ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, SlotPath, UiBindingEndpoint,
+    UiConfigSlot, UiNodeDirtyState, UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality,
     UiSlotSourceState, UiSlotUnit, UiSlotValue,
 };
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::ConfigSlotRow;
 use crate::app::node::node_story_fixtures::config_row_states_fixture;
+
+fn story_slot_address(path: &str) -> ProjectSlotAddress {
+    ProjectSlotAddress::new(
+        ProjectNodeAddress::parse("/demo.project/clock.clock").expect("valid story node address"),
+        ProjectSlotRoot::def(),
+        SlotPath::parse(path).expect("valid story slot path"),
+    )
+}
 
 #[story(
     label = "All States",
@@ -106,6 +115,207 @@ pub(crate) fn write_failed() -> Element {
                 .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Error)),
             depth: 0,
             index: 0,
+        }
+    }
+}
+
+#[story(
+    label = "Live Chrome",
+    description = "Touched transient controls: the live (blue) row tint and detail icon only — no badge; Reset lives in the detail popup."
+)]
+pub(crate) fn live_chrome() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:divide-y tw:divide-border-muted",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("controls.running", "Running", UiSlotValue::bool(true))
+                    .with_address(story_slot_address("controls.running"))
+                    .with_state(
+                        UiSlotFieldState::editable()
+                            .with_dirty(UiNodeDirtyState::Dirty)
+                            .with_live(true),
+                    ),
+                depth: 0,
+                index: 0,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "controls.rate",
+                    "Rate",
+                    UiSlotValue::f32(2.0).with_editor(UiSlotEditorHint::Slider {
+                        min: 0.0,
+                        max: 4.0,
+                        step: Some(0.05),
+                    }),
+                )
+                    .with_address(story_slot_address("controls.rate"))
+                    .with_state(
+                        UiSlotFieldState::editable()
+                            .with_dirty(UiNodeDirtyState::Dirty)
+                            .with_live(true),
+                    ),
+                depth: 0,
+                index: 1,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Live Detail Popup",
+    description = "The detail popup for a touched live control: edit state sections plus the Reset affordance."
+)]
+pub(crate) fn live_detail_popup() -> Element {
+    rsx! {
+        div { class: "tw:min-h-72",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("controls.running", "Running", UiSlotValue::bool(false))
+                    .with_address(story_slot_address("controls.running"))
+                    .with_state(
+                        UiSlotFieldState::editable()
+                            .with_dirty(UiNodeDirtyState::Dirty)
+                            .with_live(true),
+                    ),
+                depth: 0,
+                index: 0,
+                initially_open: true,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Unsaved Detail Popup",
+    description = "The detail popup for an unsaved persisted edit: edited section plus the Revert affordance."
+)]
+pub(crate) fn unsaved_detail_popup() -> Element {
+    rsx! {
+        div { class: "tw:min-h-72",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "color_order",
+                    "Color order",
+                    UiSlotValue::string("grb").with_editor(UiSlotEditorHint::dropdown([
+                        ("rgb", "RGB"),
+                        ("grb", "GRB"),
+                        ("bgr", "BGR"),
+                    ])),
+                )
+                    .with_address(story_slot_address("color_order"))
+                    .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
+                depth: 0,
+                index: 0,
+                initially_open: true,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Unsaved Chrome",
+    description = "A touched persisted slot: amber unsaved badge and tint; Revert lives in the detail popup."
+)]
+pub(crate) fn unsaved_chrome() -> Element {
+    rsx! {
+        ConfigSlotRow {
+            slot: UiConfigSlot::value(
+                "color_order",
+                "Color order",
+                UiSlotValue::string("grb").with_editor(UiSlotEditorHint::dropdown([
+                    ("rgb", "RGB"),
+                    ("grb", "GRB"),
+                    ("bgr", "BGR"),
+                ])),
+            )
+                .with_address(story_slot_address("color_order"))
+                .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
+            depth: 0,
+            index: 0,
+            on_action: move |_| {},
+        }
+    }
+}
+
+#[story(
+    label = "Editable Clean Controls",
+    description = "Untouched editable toggle, slider, and dropdown fields (no edit chrome)."
+)]
+pub(crate) fn editable_clean_controls() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:divide-y tw:divide-border-muted",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("controls.running", "Running", UiSlotValue::bool(true))
+                    .with_address(story_slot_address("controls.running"))
+                    .with_state(UiSlotFieldState::editable().with_live(true)),
+                depth: 0,
+                index: 0,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "controls.rate",
+                    "Rate",
+                    UiSlotValue::f32(1.0).with_editor(UiSlotEditorHint::Slider {
+                        min: 0.0,
+                        max: 4.0,
+                        step: Some(0.05),
+                    }),
+                )
+                    .with_address(story_slot_address("controls.rate"))
+                    .with_state(UiSlotFieldState::editable().with_live(true)),
+                depth: 0,
+                index: 1,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "color_order",
+                    "Color order",
+                    UiSlotValue::string("grb").with_editor(UiSlotEditorHint::dropdown([
+                        ("rgb", "RGB"),
+                        ("grb", "GRB"),
+                        ("bgr", "BGR"),
+                    ])),
+                )
+                    .with_address(story_slot_address("color_order"))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 2,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Rejected Edit",
+    description = "A rejected edit: error chrome preserves the value with the rejection reason."
+)]
+pub(crate) fn rejected_edit() -> Element {
+    rsx! {
+        ConfigSlotRow {
+            slot: UiConfigSlot::value(
+                "controls.rate",
+                "Rate",
+                UiSlotValue::f32(9.0).with_editor(UiSlotEditorHint::Slider {
+                    min: 0.0,
+                    max: 4.0,
+                    step: Some(0.05),
+                }),
+            )
+                .with_address(story_slot_address("controls.rate"))
+                .with_state(
+                    UiSlotFieldState::editable()
+                        .with_dirty(UiNodeDirtyState::Error)
+                        .with_invalid("target slot is not writable")
+                        .with_live(true),
+                ),
+            depth: 0,
+            index: 0,
+            on_action: move |_| {},
         }
     }
 }

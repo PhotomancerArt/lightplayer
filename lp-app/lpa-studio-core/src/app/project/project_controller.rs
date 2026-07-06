@@ -109,6 +109,20 @@ impl ProjectController {
         counts
     }
 
+    /// Buffered edits still awaiting a server acknowledgement
+    /// (`Pending`/`InFlight`); `Failed` entries are parked, not in flight.
+    pub fn edits_in_flight(&self) -> usize {
+        self.edit_buffer
+            .values()
+            .filter(|edit| {
+                matches!(
+                    edit.phase,
+                    PendingEditPhase::Pending | PendingEditPhase::InFlight { .. }
+                )
+            })
+            .count()
+    }
+
     /// Build the per-snapshot edit-state join: the local edit buffer plus the
     /// overlay mirror's pending edits, reverse-mapped from
     /// `(artifact, path)` to slot addresses through the def-artifact map (an
@@ -257,6 +271,7 @@ impl ProjectController {
             self.ui_nodes(),
         )
         .with_dirty(self.dirty_counts())
+        .with_edits_in_flight(self.edits_in_flight())
     }
 
     pub fn mark_connecting_running(&mut self) {
@@ -977,10 +992,13 @@ impl ProjectController {
     /// Apply a mutation response to the edit buffer and the overlay mirror.
     ///
     /// Accepted commands are folded into the mirror via
-    /// [`ProjectSync::apply_acked_edits`] (stamping the response's
-    /// `overlay_revision`) and release their staged buffer entries; rejected
-    /// commands park their entries in `Failed` with the rejection reason.
-    /// `staged` maps command ids to the buffer addresses they carry.
+    /// [`ProjectSync::apply_acked_edits`], paired with their server-reported
+    /// [`lpc_model::MutationEffect`] (the server may have normalized a Put into a
+    /// removal, and the mirror must reflect what was stored) and stamping the
+    /// response's `overlay_revision`; they release their staged buffer
+    /// entries. Rejected commands park their entries in `Failed` with the
+    /// rejection reason. `staged` maps command ids to the buffer addresses
+    /// they carry.
     fn apply_mutation_acks(
         &mut self,
         batch: &MutationCmdBatch,
@@ -999,9 +1017,9 @@ impl ProjectController {
                 .find(|(id, _)| *id == result.id)
                 .map(|(_, address)| address);
             match &result.status {
-                MutationCmdStatus::Accepted { .. } => {
+                MutationCmdStatus::Accepted { effect } => {
                     if let Some(command) = command {
-                        accepted.push(command.clone());
+                        accepted.push((command.clone(), effect.clone()));
                     }
                     // ack accepted → entry removed; the slot now reads dirty
                     // from the overlay mirror.
@@ -2887,13 +2905,16 @@ mod tests {
         // The client's own mutation acked at revision 5 (P5 drives this); the
         // mirror is stamped locally, with no follow-up fetch expected.
         project.sync_mut().unwrap().apply_acked_edits(
-            &[MutationCmd {
-                id: MutationCmdId::new(1),
-                mutation: MutationOp::PutSlotEdit {
-                    artifact: overlay_artifact(),
-                    edit: SlotEdit::assign_value(overlay_slot_path(), LpValue::F32(0.5)),
+            &[(
+                MutationCmd {
+                    id: MutationCmdId::new(1),
+                    mutation: MutationOp::PutSlotEdit {
+                        artifact: overlay_artifact(),
+                        edit: SlotEdit::assign_value(overlay_slot_path(), LpValue::F32(0.5)),
+                    },
                 },
-            }],
+                lpc_model::MutationEffect::OverlayChanged { changed: true },
+            )],
             Revision::new(5),
         );
 
@@ -3226,6 +3247,40 @@ mod tests {
     }
 
     #[test]
+    fn edits_in_flight_counts_pending_and_in_flight_but_not_failed() {
+        let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
+        assert_eq!(project.edits_in_flight(), 0);
+
+        project.insert_pending_edit_for_test(
+            brightness_address(),
+            PendingEdit::pending(LpValue::F32(0.9)),
+        );
+        project.insert_pending_edit_for_test(
+            rate_address(),
+            PendingEdit {
+                value: LpValue::F32(2.0),
+                phase: PendingEditPhase::InFlight {
+                    cmd_id: MutationCmdId::new(7),
+                },
+            },
+        );
+
+        assert_eq!(project.edits_in_flight(), 2);
+
+        project.insert_pending_edit_for_test(
+            rate_address(),
+            PendingEdit {
+                value: LpValue::F32(2.0),
+                phase: PendingEditPhase::Failed {
+                    reason: "not writable".to_string(),
+                },
+            },
+        );
+
+        assert_eq!(project.edits_in_flight(), 1, "failed edits are parked");
+    }
+
+    #[test]
     fn revert_clears_local_entry_and_server_edit() {
         let (mut project, mut client, sent) =
             editable_project_with_scripted_client(vec![mutation_response(1, vec![accepted(1)], 4)]);
@@ -3240,16 +3295,19 @@ mod tests {
             },
         );
         project.sync_mut().unwrap().apply_acked_edits(
-            &[MutationCmd {
-                id: MutationCmdId::new(9),
-                mutation: MutationOp::PutSlotEdit {
-                    artifact: edit_artifact(),
-                    edit: SlotEdit::assign_value(
-                        SlotPath::parse("brightness").unwrap(),
-                        LpValue::F32(0.9),
-                    ),
+            &[(
+                MutationCmd {
+                    id: MutationCmdId::new(9),
+                    mutation: MutationOp::PutSlotEdit {
+                        artifact: edit_artifact(),
+                        edit: SlotEdit::assign_value(
+                            SlotPath::parse("brightness").unwrap(),
+                            LpValue::F32(0.9),
+                        ),
+                    },
                 },
-            }],
+                MutationEffect::OverlayChanged { changed: true },
+            )],
             Revision::new(3),
         );
 
@@ -3298,26 +3356,32 @@ mod tests {
         // acked edit before the save.
         project.sync_mut().unwrap().apply_acked_edits(
             &[
-                MutationCmd {
-                    id: MutationCmdId::new(1),
-                    mutation: MutationOp::PutSlotEdit {
-                        artifact: edit_artifact(),
-                        edit: SlotEdit::assign_value(
-                            SlotPath::parse("brightness").unwrap(),
-                            LpValue::F32(0.9),
-                        ),
+                (
+                    MutationCmd {
+                        id: MutationCmdId::new(1),
+                        mutation: MutationOp::PutSlotEdit {
+                            artifact: edit_artifact(),
+                            edit: SlotEdit::assign_value(
+                                SlotPath::parse("brightness").unwrap(),
+                                LpValue::F32(0.9),
+                            ),
+                        },
                     },
-                },
-                MutationCmd {
-                    id: MutationCmdId::new(2),
-                    mutation: MutationOp::PutSlotEdit {
-                        artifact: edit_artifact(),
-                        edit: SlotEdit::assign_value(
-                            SlotPath::parse("rate").unwrap(),
-                            LpValue::F32(2.0),
-                        ),
+                    MutationEffect::OverlayChanged { changed: true },
+                ),
+                (
+                    MutationCmd {
+                        id: MutationCmdId::new(2),
+                        mutation: MutationOp::PutSlotEdit {
+                            artifact: edit_artifact(),
+                            edit: SlotEdit::assign_value(
+                                SlotPath::parse("rate").unwrap(),
+                                LpValue::F32(2.0),
+                            ),
+                        },
                     },
-                },
+                    MutationEffect::OverlayChanged { changed: true },
+                ),
             ],
             Revision::new(3),
         );
@@ -3381,16 +3445,19 @@ mod tests {
             },
         );
         project.sync_mut().unwrap().apply_acked_edits(
-            &[MutationCmd {
-                id: MutationCmdId::new(1),
-                mutation: MutationOp::PutSlotEdit {
-                    artifact: edit_artifact(),
-                    edit: SlotEdit::assign_value(
-                        SlotPath::parse("brightness").unwrap(),
-                        LpValue::F32(0.9),
-                    ),
+            &[(
+                MutationCmd {
+                    id: MutationCmdId::new(1),
+                    mutation: MutationOp::PutSlotEdit {
+                        artifact: edit_artifact(),
+                        edit: SlotEdit::assign_value(
+                            SlotPath::parse("brightness").unwrap(),
+                            LpValue::F32(0.9),
+                        ),
+                    },
                 },
-            }],
+                MutationEffect::OverlayChanged { changed: true },
+            )],
             Revision::new(3),
         );
 
