@@ -255,6 +255,22 @@ impl NodeController {
             root_slot_applies(entry, &self.address, &view.slots),
             &view.slots,
         );
+        self.apply_binding_facts();
+    }
+
+    /// Distribute authored binding facts from the def root onto the slots
+    /// they name: consumed/config slots on the def root and produced slots
+    /// on the state root (bindings live at node-def roots since M0).
+    fn apply_binding_facts(&mut self) {
+        let facts = self
+            .slots
+            .iter()
+            .find(|slot| matches!(slot.address().root, ProjectSlotRoot::Def))
+            .map(SlotController::binding_facts)
+            .unwrap_or_default();
+        for slot in &mut self.slots {
+            slot.apply_binding_facts(&facts);
+        }
     }
 
     fn reconcile_children(&mut self, children: Vec<&TreeEntryView>, view: &ProjectView) {

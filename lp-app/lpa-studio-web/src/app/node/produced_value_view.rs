@@ -3,7 +3,9 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{UiProducedValue, UiSlotUnit};
 
-use crate::app::node::{SlotDetailButton, SlotUnitDisplay, SlotUnitDisplayMode};
+use crate::app::node::{
+    BindingChip, BindingChipDirection, SlotDetailButton, SlotUnitDisplay, SlotUnitDisplayMode,
+};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -32,7 +34,13 @@ pub fn ProducedValueView(
                 }
             }
             dt { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-between tw:gap-1.5 tw:text-xs tw:font-semibold tw:leading-tight tw:text-subtle-foreground",
-                span { class: "tw:min-w-0 tw:break-words", "{value.label}" }
+                span { class: "tw:min-w-0 tw:flex-none tw:whitespace-nowrap", "{value.label}" }
+                if let Some(endpoint) = value.binding.bindings.bus_target.clone() {
+                    BindingChip {
+                        endpoint,
+                        direction: BindingChipDirection::Publishes,
+                    }
+                }
                 SlotDetailButton {
                     label: value.label.clone(),
                     aspects,

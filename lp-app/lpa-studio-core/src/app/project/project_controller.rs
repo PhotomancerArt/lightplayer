@@ -2394,6 +2394,78 @@ mod tests {
     }
 
     #[test]
+    fn authored_bindings_populate_source_and_publish() {
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_bound_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+
+        project.apply_project_view(&view).unwrap();
+
+        let nodes = project.ui_nodes();
+        let sections = node_sections(&nodes[0]);
+
+        // Consumed slot with an authored source binding reads as bound; the
+        // internal `bindings` map itself stays hidden from config rows.
+        let config = section_config_slots(sections);
+        assert_eq!(
+            config
+                .iter()
+                .map(|slot| slot.label.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Time"]
+        );
+        let UiSlotSourceState::Bound(endpoint) = &config[0].source else {
+            panic!("expected time slot to be bound, got {:?}", config[0].source);
+        };
+        assert_eq!(endpoint.label, "bus#time.seconds");
+        let binding_aspect = config[0]
+            .visible_aspects()
+            .into_iter()
+            .find(|aspect| aspect.kind == crate::UiSlotAspectKind::Binding)
+            .expect("binding aspect");
+        assert_eq!(binding_aspect.rows[0].label, "Bound");
+        assert_eq!(binding_aspect.rows[0].value, "bus#time.seconds");
+
+        // Produced slot with an authored target binding publishes to the bus.
+        let produced = section_produced_values(sections);
+        assert_eq!(produced.len(), 1);
+        assert_eq!(produced[0].label, "Seconds");
+        let bus_target = produced[0]
+            .binding
+            .bindings
+            .bus_target
+            .as_ref()
+            .expect("seconds should publish to the bus");
+        assert_eq!(bus_target.label, "bus#time.seconds");
+    }
+
+    #[test]
+    fn binding_removal_clears_bound_state_on_refresh() {
+        let node = node_address("/demo.project/orbit.shader");
+        let time = ProjectSlotAddress::new(
+            node.clone(),
+            ProjectSlotRoot::def(),
+            SlotPath::parse("time").unwrap(),
+        );
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_bound_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.apply_project_view(&view).unwrap();
+        let _ = time;
+
+        // Re-sync with the bindings map emptied: bound state must clear.
+        install_bound_slots_without_bindings(&mut view, 1, Revision::new(5));
+        project.apply_project_view(&view).unwrap();
+
+        let nodes = project.ui_nodes();
+        let config = section_config_slots(node_sections(&nodes[0]));
+        assert_eq!(config[0].label, "Time");
+        assert_eq!(config[0].source, UiSlotSourceState::Direct);
+        let produced = section_produced_values(node_sections(&nodes[0]));
+        assert!(produced[0].binding.bindings.bus_target.is_none());
+    }
+
+    #[test]
     fn focused_default_node_subscribes_product_preview_probes() {
         let node = node_address("/demo.project/orbit.shader");
         let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
@@ -2863,6 +2935,148 @@ mod tests {
                 vec![SlotData::Value(WithRevision::new(
                     revision,
                     LpValue::F32(1.0),
+                ))],
+            )),
+        );
+    }
+
+    /// Def root with a consumed `time` slot bound from the bus, a `bindings`
+    /// map (BindingDefs-shaped), and a state root whose `seconds` produced
+    /// slot publishes to the bus.
+    fn install_bound_slots(view: &mut ProjectView, node_id: u32, revision: Revision) {
+        install_bound_slots_with(view, node_id, revision, true);
+    }
+
+    /// Same shape as [`install_bound_slots`] but with an empty bindings map.
+    fn install_bound_slots_without_bindings(
+        view: &mut ProjectView,
+        node_id: u32,
+        revision: Revision,
+    ) {
+        install_bound_slots_with(view, node_id, revision, false);
+    }
+
+    fn install_bound_slots_with(
+        view: &mut ProjectView,
+        node_id: u32,
+        revision: Revision,
+        with_bindings: bool,
+    ) {
+        view.slots.root_shapes.clear();
+        view.slots.roots.clear();
+        view.slots.registry = Default::default();
+        let def_shape = SlotShapeId::new(400);
+        let state_shape = SlotShapeId::new(401);
+
+        let endpoint_option = || SlotShape::Option {
+            meta: SlotMeta::empty(),
+            some: Box::new(SlotShape::value(LpType::String)),
+        };
+        let binding_def_shape = SlotShape::Record {
+            meta: SlotMeta::empty(),
+            fields: vec![
+                SlotFieldShape::new(
+                    "value",
+                    SlotShape::Option {
+                        meta: SlotMeta::empty(),
+                        some: Box::new(SlotShape::value(LpType::F32)),
+                    },
+                )
+                .unwrap(),
+                SlotFieldShape::new("source", endpoint_option()).unwrap(),
+                SlotFieldShape::new("target", endpoint_option()).unwrap(),
+            ],
+        };
+        view.slots
+            .registry
+            .register_dynamic_shape(
+                def_shape,
+                SlotShape::Record {
+                    meta: SlotMeta::empty(),
+                    fields: vec![
+                        SlotFieldShape::new("time", SlotShape::value(LpType::F32)).unwrap(),
+                        SlotFieldShape::new(
+                            "bindings",
+                            SlotShape::Map {
+                                meta: SlotMeta::empty(),
+                                key: SlotMapKeyShape::String,
+                                value: Box::new(binding_def_shape),
+                            },
+                        )
+                        .unwrap(),
+                    ],
+                },
+            )
+            .unwrap();
+        view.slots
+            .registry
+            .register_dynamic_shape(
+                state_shape,
+                SlotShape::Record {
+                    meta: SlotMeta::empty(),
+                    fields: vec![
+                        SlotFieldShape::new("seconds", SlotShape::value(LpType::F32)).unwrap(),
+                    ],
+                },
+            )
+            .unwrap();
+
+        let endpoint_some = |endpoint: &str| {
+            SlotData::Option(SlotOptionDyn::some_with_version(
+                revision,
+                SlotData::Value(WithRevision::new(
+                    revision,
+                    LpValue::String(endpoint.to_string()),
+                )),
+            ))
+        };
+        let option_none = || SlotData::Option(SlotOptionDyn::none_with_version(revision));
+        let binding_entry = |source: Option<&str>, target: Option<&str>| {
+            SlotData::Record(SlotRecord::with_revision(
+                revision,
+                vec![
+                    option_none(),
+                    source.map(endpoint_some).unwrap_or_else(option_none),
+                    target.map(endpoint_some).unwrap_or_else(option_none),
+                ],
+            ))
+        };
+
+        let mut bindings = SlotMapDyn::with_revision(revision, Default::default());
+        if with_bindings {
+            bindings.entries.insert(
+                SlotMapKey::String("time".to_string()),
+                binding_entry(Some("bus#time.seconds"), None),
+            );
+            bindings.entries.insert(
+                SlotMapKey::String("seconds".to_string()),
+                binding_entry(None, Some("bus#time.seconds")),
+            );
+        }
+
+        view.slots
+            .root_shapes
+            .insert(format!("node.{node_id}.def"), def_shape);
+        view.slots.roots.insert(
+            format!("node.{node_id}.def"),
+            SlotData::Record(SlotRecord::with_revision(
+                revision,
+                vec![
+                    SlotData::Value(WithRevision::new(revision, LpValue::F32(0.0))),
+                    SlotData::Map(bindings),
+                ],
+            )),
+        );
+        view.slots
+            .root_shapes
+            .insert(format!("node.{node_id}.state"), state_shape);
+        view.slots.roots.insert(
+            format!("node.{node_id}.state"),
+            SlotData::Record(SlotRecord::with_revision(
+                revision,
+                vec![SlotData::Value(WithRevision::new(
+                    revision,
+                    LpValue::F32(3.25),
                 ))],
             )),
         );

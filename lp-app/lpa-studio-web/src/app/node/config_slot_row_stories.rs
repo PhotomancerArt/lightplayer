@@ -63,6 +63,37 @@ pub(crate) fn bound_value() -> Element {
     }
 }
 
+#[story(description = "A row publishing its value to a bus channel via a target binding.")]
+pub(crate) fn published_value() -> Element {
+    rsx! {
+        ConfigSlotRow {
+            slot: UiConfigSlot::value(
+                "output",
+                "Output",
+                UiSlotValue::f32(1.0),
+            )
+            .with_publish(UiBindingEndpoint::new("bus#visual.out")),
+            depth: 0,
+            index: 0,
+        }
+    }
+}
+
+#[story(description = "An open popup for a publishing slot showing the Published as wording.")]
+pub(crate) fn published_popup() -> Element {
+    rsx! {
+        div { class: "tw:min-h-56",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("output", "Output", UiSlotValue::f32(1.0))
+                    .with_publish(UiBindingEndpoint::new("bus#visual.out")),
+                depth: 0,
+                index: 0,
+                initially_open: true,
+            }
+        }
+    }
+}
+
 #[story(description = "An open slot info popup showing the compact aspect rows.")]
 pub(crate) fn info_popup() -> Element {
     rsx! {

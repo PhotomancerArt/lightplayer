@@ -72,7 +72,8 @@ pub use project_sync_summary::ProjectSyncSummary;
 pub use project_value_format::{format_lp_value, format_slot_map_key};
 pub use slot::{
     PendingEdit, PendingEditOp, PendingEditPhase, ProjectSlotAddress, ProjectSlotRoot,
-    SlotController, SlotControllerState, SlotEditOp, SlotKind,
+    SlotBindingFact, SlotBindingFactKind, SlotController, SlotControllerState, SlotEditOp,
+    SlotKind,
 };
 pub use ui_affordance::UiAffordance;
 pub use ui_pending_edit::{UiPendingEdit, UiPendingEditKind, UiPendingEditPhase};

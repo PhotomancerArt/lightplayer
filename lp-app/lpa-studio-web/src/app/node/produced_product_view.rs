@@ -9,7 +9,7 @@ use lpa_studio_core::{
     UiProductTrackingState,
 };
 
-use crate::app::node::SlotDetailButton;
+use crate::app::node::{BindingChip, BindingChipDirection, SlotDetailButton};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -52,6 +52,12 @@ pub fn ProducedProductView(
                 }
                 if let Some(detail) = product.detail.as_ref() {
                     span { "{detail}" }
+                }
+                if let Some(endpoint) = product.binding.bindings.bus_target.clone() {
+                    BindingChip {
+                        endpoint,
+                        direction: BindingChipDirection::Publishes,
+                    }
                 }
                 SlotDetailButton {
                     label: product.name.clone(),

@@ -8,14 +8,14 @@ use lpc_model::{
 };
 
 use crate::{
-    PendingEditPhase, ProjectSlotAddress, ProjectSlotRoot, UiAssetEditorKind, UiConfigSlot,
-    UiConfigSlotBody, UiNodeDirtyState, UiProducedProduct, UiProducedValue, UiProductRef,
-    UiSlotAsset, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite, UiSlotFieldState,
-    UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOptionality, UiSlotRecord, UiSlotSourceState,
-    UiSlotUnit, UiSlotValue, app::project::format_slot_map_key,
+    PendingEditPhase, ProjectSlotAddress, ProjectSlotRoot, UiAssetEditorKind, UiBindingEndpoint,
+    UiConfigSlot, UiConfigSlotBody, UiNodeDirtyState, UiProducedBinding, UiProducedProduct,
+    UiProducedValue, UiProductRef, UiSlotAsset, UiSlotComposite, UiSlotEditorHint,
+    UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOptionality,
+    UiSlotRecord, UiSlotSourceState, UiSlotUnit, UiSlotValue, app::project::format_slot_map_key,
 };
 
-use super::{PrefixEditState, SlotEditJoin};
+use super::{PrefixEditState, SlotBindingFact, SlotBindingFactKind, SlotEditJoin};
 
 /// Compact structural family for a project slot controller.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -89,6 +89,7 @@ pub struct SlotController {
     policy: SlotPolicy,
     value_shape: Option<SlotValueShape>,
     source: UiSlotSourceState,
+    publish: Option<UiBindingEndpoint>,
     issues: Vec<String>,
     state: SlotControllerState,
     children: Vec<SlotController>,
@@ -156,10 +157,112 @@ impl SlotController {
             policy: context.policy,
             value_shape: None,
             source: UiSlotSourceState::Direct,
+            publish: None,
             issues: Vec::new(),
             state: SlotControllerState::new(),
             children: Vec::new(),
         }
+    }
+
+    /// Extract authored binding facts from this root's `bindings` child.
+    ///
+    /// Meaningful on the def root: since bindings live at node-def roots
+    /// (M0), the `bindings` field is a map keyed by local slot name whose
+    /// entries carry exactly one of `value`/`source`/`target`.
+    pub(in crate::app::project) fn binding_facts(&self) -> Vec<SlotBindingFact> {
+        let Some(bindings) = self
+            .children
+            .iter()
+            .find(|child| child.root_field_name() == Some("bindings"))
+        else {
+            return Vec::new();
+        };
+        let mut facts = Vec::new();
+        for entry in &bindings.children {
+            let Some(slot) = entry.last_key_string() else {
+                continue;
+            };
+            for field in &entry.children {
+                let Some(endpoint) = field.binding_endpoint() else {
+                    continue;
+                };
+                let kind = match field.last_field_name() {
+                    Some("source") => SlotBindingFactKind::Source(endpoint),
+                    Some("target") => SlotBindingFactKind::Target(endpoint),
+                    Some("value") => SlotBindingFactKind::Literal(endpoint),
+                    _ => continue,
+                };
+                facts.push(SlotBindingFact {
+                    slot: slot.clone(),
+                    kind,
+                });
+            }
+        }
+        facts
+    }
+
+    /// Apply authored binding facts to this root's top-level field slots.
+    ///
+    /// Resets binding state on every field first so removed bindings clear.
+    /// `source`/`value` facts mark the named slot's value as bound; `target`
+    /// facts mark it as publishing to the endpoint.
+    pub(in crate::app::project) fn apply_binding_facts(&mut self, facts: &[SlotBindingFact]) {
+        for child in &mut self.children {
+            let Some(name) = child.root_field_name().map(str::to_string) else {
+                continue;
+            };
+            child.source = UiSlotSourceState::Direct;
+            child.publish = None;
+            for fact in facts.iter().filter(|fact| fact.slot == name) {
+                match &fact.kind {
+                    SlotBindingFactKind::Source(endpoint)
+                    | SlotBindingFactKind::Literal(endpoint) => {
+                        child.source = UiSlotSourceState::Bound(endpoint.clone());
+                    }
+                    SlotBindingFactKind::Target(endpoint) => {
+                        child.publish = Some(endpoint.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    /// This slot's field name when it is a root-level field (`def.time`).
+    fn root_field_name(&self) -> Option<&str> {
+        match self.address.path.segments() {
+            [SlotPathSegment::Field(name)] => Some(name.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Trailing field-segment name, regardless of depth.
+    fn last_field_name(&self) -> Option<&str> {
+        match self.address.path.segments().last() {
+            Some(SlotPathSegment::Field(name)) => Some(name.as_str()),
+            _ => None,
+        }
+    }
+
+    /// Trailing map-key segment as a display string.
+    fn last_key_string(&self) -> Option<String> {
+        match self.address.path.segments().last() {
+            Some(SlotPathSegment::Key(key)) => Some(format_slot_map_key(key)),
+            _ => None,
+        }
+    }
+
+    /// Endpoint carried by a present binding option field (`source`/`target`
+    /// hold an endpoint string; `value` holds an arbitrary literal).
+    fn binding_endpoint(&self) -> Option<UiBindingEndpoint> {
+        if !matches!(&self.body, SlotControllerBody::Option { present: true }) {
+            return None;
+        }
+        let value = self.children.first()?.value()?;
+        Some(match value {
+            LpValue::String(endpoint) => UiBindingEndpoint::new(endpoint.clone()),
+            other => UiBindingEndpoint::new(UiSlotValue::from_lp_value(other).display)
+                .with_detail("literal value"),
+        })
     }
 
     /// Stable slot address used as the controller key.
@@ -213,6 +316,9 @@ impl SlotController {
         .with_source(self.ui_source())
         .with_state(self.ui_field_state(edits));
 
+        if let Some(publish) = &self.publish {
+            slot = slot.with_publish(publish.clone());
+        }
         if let Some(address) = self.edit_entry_address(edits) {
             slot = slot.with_edit_entry_address(address);
         }
@@ -256,6 +362,20 @@ impl SlotController {
         Some(slot)
     }
 
+    /// Binding metadata for a produced slot (populated by the node's
+    /// binding-facts pass).
+    fn ui_produced_binding(&self) -> UiProducedBinding {
+        let mut binding = UiProducedBinding::none();
+        if let Some(endpoint) = &self.publish {
+            if endpoint.label.starts_with("bus#") {
+                binding.bindings.bus_target = Some(endpoint.clone());
+            } else {
+                binding.bindings.target_bindings.push(endpoint.clone());
+            }
+        }
+        binding
+    }
+
     /// Project this slot as a produced product if it carries product output.
     pub(in crate::app::project) fn ui_produced_product(&self) -> Option<UiProducedProduct> {
         if !self.is_produced_slot() {
@@ -297,6 +417,10 @@ impl SlotController {
             }
             _ => None,
         }
+        .map(|mut product| {
+            product.binding = self.ui_produced_binding();
+            product
+        })
     }
 
     /// Collect concrete produced products under this slot.
@@ -326,6 +450,7 @@ impl SlotController {
         let mut produced = UiProducedValue::new(self.label.clone(), ui_value.display);
         produced.detail = Some(ui_value.kind.type_label().to_string());
         produced.unit = self.ui_unit();
+        produced.binding = self.ui_produced_binding();
         Some(produced)
     }
 
@@ -811,6 +936,11 @@ impl SlotController {
     }
 
     fn ui_source(&self) -> UiSlotSourceState {
+        // A binding supplies the value, so bound wins over an unset or
+        // absent authored fallback.
+        if self.source.is_bound() {
+            return self.source.clone();
+        }
         if matches!(&self.body, SlotControllerBody::Option { present: false }) {
             return UiSlotSourceState::Unset;
         }

@@ -76,6 +76,8 @@ pub struct UiConfigSlot {
     pub composite: Option<UiSlotComposite>,
     /// Whether the visible value is direct, bound, or unset.
     pub source: UiSlotSourceState,
+    /// Endpoint this slot publishes to via an authored target binding.
+    pub publish: Option<UiBindingEndpoint>,
     /// Value or record body for the row.
     pub body: UiConfigSlotBody,
     /// Interaction, dirty, and validation state for the field.
@@ -127,6 +129,7 @@ impl UiConfigSlot {
             optionality: None,
             composite: None,
             source: UiSlotSourceState::Direct,
+            publish: None,
             body,
             state: UiSlotFieldState::editable(),
             issues: Vec::new(),
@@ -174,6 +177,12 @@ impl UiConfigSlot {
     /// Set the visible value source state.
     pub fn with_source(mut self, source: UiSlotSourceState) -> Self {
         self.source = source;
+        self
+    }
+
+    /// Set the endpoint this slot publishes to via a target binding.
+    pub fn with_publish(mut self, publish: UiBindingEndpoint) -> Self {
+        self.publish = Some(publish);
         self
     }
 
@@ -228,7 +237,7 @@ fn default_aspects(slot: &UiConfigSlot) -> Vec<UiSlotAspect> {
     aspects.extend([
         validation_aspect(slot),
         edit_state_aspect(&slot.state),
-        binding_aspect(&slot.source),
+        binding_aspect(&slot.source, slot.publish.as_ref()),
     ]);
     aspects
 }
@@ -281,18 +290,27 @@ fn edit_state_aspect(state: &UiSlotFieldState) -> UiSlotAspect {
     }
 }
 
-fn binding_aspect(source: &UiSlotSourceState) -> UiSlotAspect {
-    match source {
-        UiSlotSourceState::Direct => UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
-            .with_row(UiSlotAspectRow::new("Unbound", "")),
-        UiSlotSourceState::Bound(endpoint) => bound_binding_aspect(endpoint),
-        UiSlotSourceState::Unset => UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
+fn binding_aspect(source: &UiSlotSourceState, publish: Option<&UiBindingEndpoint>) -> UiSlotAspect {
+    match (source, publish) {
+        (UiSlotSourceState::Bound(endpoint), _) => bound_binding_aspect(endpoint),
+        (_, Some(endpoint)) => published_binding_aspect(endpoint),
+        _ => UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
             .with_row(UiSlotAspectRow::new("Unbound", "")),
     }
 }
 
 fn bound_binding_aspect(endpoint: &UiBindingEndpoint) -> UiSlotAspect {
     let mut row = UiSlotAspectRow::new("Bound", endpoint.label.clone());
+    if let Some(detail) = endpoint.detail.as_ref() {
+        row = row.with_detail(detail.clone());
+    }
+    UiSlotAspect::new(UiSlotAspectKind::Binding, "Binding")
+        .with_row(row)
+        .with_affordance(UiSlotAffordance::Bound)
+}
+
+fn published_binding_aspect(endpoint: &UiBindingEndpoint) -> UiSlotAspect {
+    let mut row = UiSlotAspectRow::new("Published", endpoint.label.clone());
     if let Some(detail) = endpoint.detail.as_ref() {
         row = row.with_detail(detail.clone());
     }

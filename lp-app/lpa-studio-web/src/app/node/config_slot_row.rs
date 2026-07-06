@@ -3,14 +3,14 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     ProjectSlotAddress, UiAction, UiConfigSlot, UiConfigSlotBody, UiNodeDirtyState,
-    UiSlotComposite, UiSlotFieldState, UiSlotMapKeyKind,
+    UiSlotComposite, UiSlotFieldState, UiSlotMapKeyKind, UiSlotSourceState,
 };
 
 use crate::app::node::slot_edit_actions::slot_revert_action;
 use crate::app::node::{
-    EnumVariantField, MapAddEntry, MapEntryKeyField, MapEntryRemoveButton, OptionToggleField,
-    SlotDetailButton, SlotDetailRevert, SlotRecordEditor, SlotValueEditor, primary_affordance,
-    slot_row_class,
+    BindingChip, BindingChipDirection, EnumVariantField, MapAddEntry, MapEntryKeyField,
+    MapEntryRemoveButton, OptionToggleField, SlotDetailButton, SlotDetailRevert, SlotRecordEditor,
+    SlotValueEditor, primary_affordance, slot_row_class,
 };
 use crate::base::{StudioIcon, StudioIconName};
 
@@ -136,6 +136,18 @@ pub fn ConfigSlotRow(
                     }
                 }
                 div { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-end tw:gap-2 tw:text-sm tw:leading-tight tw:text-muted-foreground",
+                    if let UiSlotSourceState::Bound(endpoint) = &slot.source {
+                        BindingChip {
+                            endpoint: endpoint.clone(),
+                            direction: BindingChipDirection::Consumes,
+                        }
+                    }
+                    if let Some(endpoint) = &slot.publish {
+                        BindingChip {
+                            endpoint: endpoint.clone(),
+                            direction: BindingChipDirection::Publishes,
+                        }
+                    }
                     if let Some(revert) = row_revert {
                         SlotRowRevertButton { revert }
                     }
