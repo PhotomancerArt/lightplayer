@@ -119,8 +119,21 @@ impl ProjectRegistry {
                 changed
             }
             mutation => {
-                let (mutation, _) = self.normalize_edit_to_base(fs, mutation, ctx);
-                self.overlay.get_mut().apply_mutation(mutation)
+                let structural_remove = is_structural_remove(&mutation);
+                let (mutation, normalized) = self.normalize_edit_to_base(fs, mutation, ctx);
+                match mutation {
+                    // A structural `Remove` that normalized away must also
+                    // clear the overlay entries stranded under it (see
+                    // `Self::remove_slot_edit_subtree`); a client-sent
+                    // `RemoveSlotEdit` (an explicit single-entry revert) is
+                    // never widened.
+                    MutationOp::RemoveSlotEdit { artifact, path }
+                        if normalized && structural_remove =>
+                    {
+                        self.remove_slot_edit_subtree(&artifact, &path).1
+                    }
+                    mutation => self.overlay.get_mut().apply_mutation(mutation),
+                }
             }
         };
         if overlay_changed {
@@ -170,14 +183,47 @@ impl ProjectRegistry {
                     }
                 }
                 Ok(()) => {
+                    let structural_remove = is_structural_remove(&command.mutation);
                     let (mutation, normalized) =
                         self.normalize_edit_to_base(fs, command.mutation, ctx);
-                    let changed = self.overlay.get_mut().apply_mutation(mutation);
-                    any_changed |= changed;
-                    let effect = if normalized {
-                        MutationEffect::NormalizedToRemoval { changed }
-                    } else {
-                        MutationEffect::OverlayChanged { changed }
+                    let effect = match mutation {
+                        // A structural `Remove` that normalized away must
+                        // also clear the overlay entries stranded under it
+                        // (see `Self::remove_slot_edit_subtree`). When
+                        // descendants were cleared, the ack must say so —
+                        // `Materialized` lists every removed entry so
+                        // ack-mirroring clients replay the exact stored
+                        // state; with nothing under the path the effect
+                        // stays the plain `NormalizedToRemoval`. A
+                        // client-sent `RemoveSlotEdit` (an explicit
+                        // single-entry revert) is never widened.
+                        MutationOp::RemoveSlotEdit { artifact, path }
+                            if normalized && structural_remove =>
+                        {
+                            let (removed, changed) =
+                                self.remove_slot_edit_subtree(&artifact, &path);
+                            any_changed |= changed;
+                            if removed.len() > 1 {
+                                MutationEffect::Materialized {
+                                    edits: removed
+                                        .into_iter()
+                                        .map(|path| StoredSlotEdit::Removed { path })
+                                        .collect(),
+                                    changed,
+                                }
+                            } else {
+                                MutationEffect::NormalizedToRemoval { changed }
+                            }
+                        }
+                        mutation => {
+                            let changed = self.overlay.get_mut().apply_mutation(mutation);
+                            any_changed |= changed;
+                            if normalized {
+                                MutationEffect::NormalizedToRemoval { changed }
+                            } else {
+                                MutationEffect::OverlayChanged { changed }
+                            }
+                        }
                     };
                     results.push(MutationCmdResult::accepted(command.id, effect));
                 }
@@ -671,10 +717,9 @@ impl ProjectRegistry {
     /// them verbatim).
     ///
     /// One extra rule beyond per-edit normalization: when the trailing
-    /// `Remove from` normalizes away (base-absent source key), removing the
-    /// overlay entry at `from` alone would strand the pending edits *under*
-    /// it (an added-then-edited entry), and their re-application would
-    /// resurrect the entry — so those descendants are removed explicitly and
+    /// `Remove from` normalizes away (base-absent source key), it takes the
+    /// same subtree-clearing path every normalized structural `Remove` takes
+    /// ([`Self::remove_slot_edit_subtree`]), with the cleared descendants
     /// reported. A stored (non-normalized) `Remove` clears descendants
     /// through [`ProjectOverlay::put_slot_edit`]'s canonicalization on both
     /// server and mirror already.
@@ -732,13 +777,18 @@ impl ProjectRegistry {
                     stored.push(StoredSlotEdit::Put { edit });
                 }
                 MutationOp::RemoveSlotEdit { path, .. } => {
-                    changed |= self.overlay.get_mut().remove_slot_edit(artifact, &path);
-                    stored.push(StoredSlotEdit::Removed { path: path.clone() });
                     if normalized && path == *from {
-                        for stale in self.overlay_paths_strictly_under(artifact, from) {
-                            changed |= self.overlay.get_mut().remove_slot_edit(artifact, &stale);
-                            stored.push(StoredSlotEdit::Removed { path: stale });
-                        }
+                        let (removed, subtree_changed) =
+                            self.remove_slot_edit_subtree(artifact, &path);
+                        changed |= subtree_changed;
+                        stored.extend(
+                            removed
+                                .into_iter()
+                                .map(|path| StoredSlotEdit::Removed { path }),
+                        );
+                    } else {
+                        changed |= self.overlay.get_mut().remove_slot_edit(artifact, &path);
+                        stored.push(StoredSlotEdit::Removed { path });
                     }
                 }
                 other => unreachable!(
@@ -747,6 +797,33 @@ impl ProjectRegistry {
             }
         }
         Ok((stored, changed))
+    }
+
+    /// Remove the overlay entry at `path` **and** every entry strictly under
+    /// it for `artifact`, returning the removed paths (target first, then
+    /// descendants in overlay order) and whether any entry actually existed.
+    ///
+    /// This is how a structural `Remove` that normalizes away against the
+    /// base (base-absent target — an added-then-edited map entry being
+    /// removed again) must land: dropping only the entry at the path would
+    /// strand the pending edits *under* it, and re-applying a stranded
+    /// descendant re-creates the entry via ensure-then-set semantics
+    /// ([`crate::overlay`]'s `AssignValue` application) — the removed entry
+    /// would resurrect. A stored (non-normalized) `Remove` needs none of
+    /// this: [`lpc_model::SlotOverlay::put_edit`]'s canonicalization clears
+    /// descendants when the `Remove` is inserted.
+    fn remove_slot_edit_subtree(
+        &mut self,
+        artifact: &ArtifactLocation,
+        path: &SlotPath,
+    ) -> (Vec<SlotPath>, bool) {
+        let mut changed = self.overlay.get_mut().remove_slot_edit(artifact, path);
+        let mut removed = Vec::from([path.clone()]);
+        for stale in self.overlay_paths_strictly_under(artifact, path) {
+            changed |= self.overlay.get_mut().remove_slot_edit(artifact, &stale);
+            removed.push(stale);
+        }
+        (removed, changed)
     }
 
     /// Overlay slot-edit paths strictly under `ancestor` for `artifact`.
@@ -792,6 +869,10 @@ impl ProjectRegistry {
     /// ack-mirroring clients apply what was stored rather than what was sent.
     /// Whole-artifact ops pass through unchanged, and nothing normalizes when
     /// the base bytes cannot be read or parsed (conservative: keep the edit).
+    ///
+    /// Callers applying a normalized structural `Remove` must clear the
+    /// whole overlay subtree at its path, not just the entry
+    /// ([`Self::remove_slot_edit_subtree`]).
     fn normalize_edit_to_base(
         &mut self,
         fs: &dyn LpFs,
@@ -1017,6 +1098,20 @@ fn effective_map_entry_presence(
         return Err(format!("slot {map_path} is not a map"));
     };
     Ok(map.get(key).is_some())
+}
+
+/// True for a `PutSlotEdit` carrying the structural [`SlotEditOp::Remove`].
+///
+/// When such an edit normalizes away against the base, the caller must clear
+/// the overlay entries stranded under its path
+/// ([`ProjectRegistry::remove_slot_edit_subtree`]); no other normalized op
+/// strands descendants (a normalized `EnsurePresent` leaves base-relative
+/// descendant edits fully applicable).
+fn is_structural_remove(mutation: &MutationOp) -> bool {
+    matches!(
+        mutation,
+        MutationOp::PutSlotEdit { edit, .. } if matches!(edit.op, SlotEditOp::Remove)
+    )
 }
 
 /// True when `descendant` is strictly under `ancestor` (proper segment-wise
@@ -1707,6 +1802,111 @@ mod tests {
                 .bindings
                 .entries()
                 .contains_key(&String::from("speed"))
+        );
+    }
+
+    #[test]
+    fn remove_of_an_added_entry_clears_its_stranded_descendant_edits() {
+        // Add a map entry, edit a leaf under it, remove the entry again. The
+        // remove normalizes away (base lacks the key), but dropping only the
+        // overlay entry at the path would strand the descendant assignment —
+        // and re-applying it re-creates the entry via ensure-then-set, so
+        // the removed entry would resurrect. The remove must clear the whole
+        // subtree and the ack must list every cleared entry so ack-mirroring
+        // clients land on the same overlay without a fetch.
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = path_points_fixture_project(&shapes);
+        let fixture = fixture_artifact();
+        let entry = SlotPath::parse("mapping.PathPoints.paths[5]").unwrap();
+        let leaf = SlotPath::parse("mapping.PathPoints.paths[5].PointList.first_channel").unwrap();
+
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![
+                MutationOp::PutSlotEdit {
+                    artifact: fixture.clone(),
+                    edit: SlotEdit::ensure_present(entry.clone()),
+                },
+                MutationOp::PutSlotEdit {
+                    artifact: fixture.clone(),
+                    edit: SlotEdit::assign_value(leaf.clone(), LpValue::U32(7)),
+                },
+                MutationOp::PutSlotEdit {
+                    artifact: fixture.clone(),
+                    edit: SlotEdit::remove(entry.clone()),
+                },
+            ],
+        );
+
+        assert_accepted(&results[0], true);
+        assert_accepted(&results[1], true);
+        let edits = assert_materialized(&results[2], true);
+        assert_eq!(
+            edits,
+            &[
+                StoredSlotEdit::Removed {
+                    path: entry.clone()
+                },
+                StoredSlotEdit::Removed { path: leaf },
+            ],
+            "the ack lists the removed entry and its cleared descendant"
+        );
+        assert!(
+            registry.overlay().get().is_empty(),
+            "the add-edit-remove trio cancels to a clean overlay"
+        );
+
+        // No resurrection: the effective def is back to the authored keys.
+        let def = effective_fixture_def(&registry);
+        let lpc_model::MappingConfig::PathPoints { paths, .. } = def.mapping.value() else {
+            panic!("expected PathPoints mapping");
+        };
+        let keys: Vec<u32> = paths.entries.iter().map(|(key, _)| *key).collect();
+        assert_eq!(keys, vec![0, 3], "the removed entry must not resurrect");
+    }
+
+    #[test]
+    fn singular_mutate_clears_stranded_descendants_of_a_normalized_remove() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = path_points_fixture_project(&shapes);
+        let fixture = fixture_artifact();
+        let entry = SlotPath::parse("mapping.PathPoints.paths[5]").unwrap();
+        let leaf = SlotPath::parse("mapping.PathPoints.paths[5].PointList.first_channel").unwrap();
+        let ctx = ParseCtx { shapes: &shapes };
+        let mut mutate = |mutation: MutationOp, frame: i64| {
+            registry
+                .mutate(&fs, mutation, Revision::new(frame), &ctx)
+                .unwrap()
+        };
+
+        mutate(
+            MutationOp::PutSlotEdit {
+                artifact: fixture.clone(),
+                edit: SlotEdit::ensure_present(entry.clone()),
+            },
+            10,
+        );
+        mutate(
+            MutationOp::PutSlotEdit {
+                artifact: fixture.clone(),
+                edit: SlotEdit::assign_value(leaf, LpValue::U32(7)),
+            },
+            11,
+        );
+        let result = mutate(
+            MutationOp::PutSlotEdit {
+                artifact: fixture,
+                edit: SlotEdit::remove(entry),
+            },
+            12,
+        );
+
+        assert!(result.overlay_changed);
+        assert!(
+            registry.overlay().get().is_empty(),
+            "the singular path must clear the subtree like the batch path"
         );
     }
 

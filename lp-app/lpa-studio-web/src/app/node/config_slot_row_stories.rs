@@ -737,6 +737,45 @@ pub(crate) fn map_removed_entry_parent_dirty() -> Element {
 }
 
 #[story(
+    label = "Map Entry Key Edit Open",
+    description = "A map entry row with its click-to-edit key input open, prefilled with the current key; committing a changed key dispatches MoveEntry on the parent map."
+)]
+pub(crate) fn map_entry_key_edit_open() -> Element {
+    rsx! {
+        ConfigSlotRow {
+            slot: UiConfigSlot::value("ring_lamp_counts[1]", "1", UiSlotValue::u32(24))
+                .with_address(story_slot_address("ring_lamp_counts[1]"))
+                .with_state(UiSlotFieldState::editable()),
+            depth: 1,
+            index: 0,
+            entry_key_kind: Some(UiSlotMapKeyKind::U32),
+            initially_key_editing: true,
+            on_action: move |_| {},
+        }
+    }
+}
+
+#[story(
+    label = "Map Move Rejected Occupied",
+    description = "An occupied-target key move: the rejection parks Failed at the map address, so the map row wears the error chrome with the server's key-already-in-use reason."
+)]
+pub(crate) fn map_move_rejected_occupied() -> Element {
+    let mut slot = u32_map_slot(&[(0, 16), (1, 24)], "2");
+    slot.state = UiSlotFieldState::editable()
+        .with_dirty(UiNodeDirtyState::Error)
+        .with_invalid("map entry ring_lamp_counts[1] already exists in the effective definition");
+    rsx! {
+        ConfigSlotRow {
+            slot,
+            depth: 0,
+            index: 0,
+            initially_expanded: Some(true),
+            on_action: move |_| {},
+        }
+    }
+}
+
+#[story(
     label = "Option Toggle On And Off",
     description = "Wired some/none toggles: on dispatches EnsurePresent at the interior some path, off dispatches RemoveValue at the option path."
 )]

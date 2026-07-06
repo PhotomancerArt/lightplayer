@@ -400,10 +400,12 @@ impl Default for ProjectSync {
 /// A `NormalizedToRemoval` effect on a `PutSlotEdit` means the server dropped
 /// (or never created) the overlay entry at the edit's path, so the mirror
 /// applies the equivalent removal. A `Materialized` effect (a
-/// `MoveSlotEntry`) carries the full ordered list of stored per-path edits,
-/// which the mirror replays verbatim against the command's artifact. Every
-/// other effect applies the command as sent. Removing an absent entry is a
-/// no-op, so the `changed: false` cases need no special handling.
+/// `MoveSlotEntry`'s synthesized per-path edits, or a structural `Remove`
+/// that normalized away and also cleared the overlay entries stranded under
+/// its path) carries the full ordered list of stored per-path edits, which
+/// the mirror replays verbatim against the command's artifact. Every other
+/// effect applies the command as sent. Removing an absent entry is a no-op,
+/// so the `changed: false` cases need no special handling.
 fn effective_mutations(command: &MutationCmd, effect: &MutationEffect) -> Vec<MutationOp> {
     match (effect, &command.mutation) {
         (
@@ -415,7 +417,7 @@ fn effective_mutations(command: &MutationCmd, effect: &MutationEffect) -> Vec<Mu
         }],
         (
             MutationEffect::Materialized { edits, .. },
-            MutationOp::MoveSlotEntry { artifact, .. },
+            MutationOp::MoveSlotEntry { artifact, .. } | MutationOp::PutSlotEdit { artifact, .. },
         ) => edits
             .iter()
             .map(|stored| match stored {

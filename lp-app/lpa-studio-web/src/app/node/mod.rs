@@ -54,7 +54,7 @@ pub use slot_fields::{
     StringSlotField, UIntSlotField, XySlotField,
 };
 pub use slot_gesture_fields::{
-    EnumVariantField, MapAddEntry, MapEntryRemoveButton, OptionToggleField,
+    EnumVariantField, MapAddEntry, MapEntryKeyField, MapEntryRemoveButton, OptionToggleField,
 };
 pub use slot_issue_list::SlotIssueList;
 pub use slot_matrix_field::MatrixSlotField;

@@ -1090,6 +1090,12 @@
   .tw\:no-underline {
     text-decoration-line: none;
   }
+  .tw\:decoration-dotted {
+    text-decoration-style: dotted;
+  }
+  .tw\:underline-offset-2 {
+    text-underline-offset: 2px;
+  }
   .tw\:opacity-0 {
     opacity: 0%;
   }
@@ -1334,6 +1340,13 @@
     &:hover {
       @media (hover: hover) {
         color: var(--tw-color-strong-foreground);
+      }
+    }
+  }
+  .tw\:hover\:underline {
+    &:hover {
+      @media (hover: hover) {
+        text-decoration-line: underline;
       }
     }
   }

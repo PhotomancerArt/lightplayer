@@ -45,6 +45,7 @@ fn kind_display(kind: &UiPendingEditKind) -> String {
         UiPendingEditKind::Assign { value_display } => format!("set \u{2192} {value_display}"),
         UiPendingEditKind::Added => "added".to_string(),
         UiPendingEditKind::Removed => "removed".to_string(),
+        UiPendingEditKind::Moved { from, to } => format!("key {from} \u{2192} {to}"),
     }
 }
 
@@ -169,6 +170,13 @@ mod tests {
         );
         assert_eq!(kind_display(&UiPendingEditKind::Added), "added");
         assert_eq!(kind_display(&UiPendingEditKind::Removed), "removed");
+        assert_eq!(
+            kind_display(&UiPendingEditKind::Moved {
+                from: "[a]".to_string(),
+                to: "[c]".to_string()
+            }),
+            "key [a] \u{2192} [c]"
+        );
     }
 
     #[test]

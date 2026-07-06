@@ -471,6 +471,89 @@ fn composite_gesture_cycle_ends_clean_end_to_end() {
     );
 }
 
+#[test]
+fn removing_an_added_and_edited_entry_ends_clean_from_the_ack_alone() {
+    // Mirror fidelity for the subtree-clearing structural remove: add a map
+    // entry, edit a leaf under it, remove the entry again. The remove
+    // normalizes away on the server and also clears the stranded descendant
+    // assignment; the ack (`MutationEffect::Materialized` listing every
+    // removed overlay entry) is the mirror's only source — no ReadOverlay
+    // may fire. If either side kept the stranded edit, re-applying it would
+    // resurrect the entry and the project could never read clean again.
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let sent = Rc::new(RefCell::new(Vec::new()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::clone(&sent),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let mapping = find_slot(&snapshot, "mapping");
+    let mapping_address = mapping
+        .address
+        .clone()
+        .expect("mapping slot carries an address");
+    assert_eq!(editor_dirty(&snapshot), (0, 0));
+    let overlay_reads_before = count_overlay_reads(&sent);
+
+    // Switch the variant, add an entry, edit a leaf under the added entry.
+    let variant_address = child_address(&mapping_address, "mapping.PathPoints");
+    handle
+        .tx
+        .send(ensure_present_action(variant_address.clone()));
+    drive(actor.run_one_batch_for_test());
+    let entry_address = child_address(&mapping_address, "mapping.PathPoints.paths[0]");
+    handle.tx.send(ensure_present_action(entry_address.clone()));
+    drive(actor.run_one_batch_for_test());
+    let leaf_address = child_address(
+        &mapping_address,
+        "mapping.PathPoints.paths[0].PointList.first_channel",
+    );
+    handle
+        .tx
+        .send(set_value_action(leaf_address, LpValue::U32(7)));
+    drive(actor.run_one_batch_for_test());
+
+    // Remove the entry again: the server clears the entry *and* the
+    // stranded leaf edit, and the mirror follows from the Materialized ack.
+    handle.tx.send(remove_value_action(entry_address));
+    drive(actor.run_one_batch_for_test());
+
+    // Revert the remaining variant switch: with the subtree really gone on
+    // both sides this empties the overlay entirely.
+    handle.tx.send(revert_action(variant_address));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("refresh emits a snapshot");
+    let mapping = find_slot(&snapshot, "mapping");
+    assert_eq!(mapping.detail.as_deref(), Some("variant Unset"));
+    assert_eq!(
+        mapping.state.dirty,
+        UiNodeDirtyState::Clean,
+        "no stranded edit may keep the mapping dirty or resurrect the entry"
+    );
+    assert!(
+        try_find_slot(&snapshot, "mapping.PathPoints.paths[0]").is_none(),
+        "the removed entry has no surviving row"
+    );
+    assert_eq!(editor_dirty(&snapshot), (0, 0), "the cycle ends clean");
+    assert_eq!(
+        count_overlay_reads(&sent) - overlay_reads_before,
+        0,
+        "the mirror is corrected by the ack effects alone, not a ReadOverlay"
+    );
+}
+
 // --- Harness ---------------------------------------------------------------
 
 const PROJECT_DIR: &str = "/projects/edit-e2e";

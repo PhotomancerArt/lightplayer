@@ -47,6 +47,14 @@ pub enum UiPendingEditKind {
     /// A structural removal (`Remove`/`RemoveValue`): map entry or option
     /// body removed from the effective def.
     Removed,
+    /// A map entry key move (`MoveEntry`), visible while buffered (mid-op or
+    /// Failed); an accepted move materializes into per-path add/remove acks.
+    Moved {
+        /// Display string of the entry's current key.
+        from: String,
+        /// Display string of the key the entry moves to.
+        to: String,
+    },
 }
 
 /// Save-panel section for a pending edit — the entry-level mirror of the

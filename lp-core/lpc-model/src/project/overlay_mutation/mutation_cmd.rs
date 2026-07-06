@@ -124,23 +124,27 @@ pub enum MutationEffect {
     /// path; `changed` reports whether an entry existed to remove (`false`:
     /// the command was a complete no-op).
     NormalizedToRemoval { changed: bool },
-    /// A multi-edit mutation (`MoveSlotEntry`) was materialized into per-path
-    /// overlay edits. `edits` lists what was actually stored, in application
-    /// order, against the command's artifact — each synthesized edit was
-    /// individually normalized against the base, so an entry is either a
-    /// stored [`SlotEdit`] or a removal of the overlay entry at a path.
-    /// Ack-mirroring clients replay `edits` verbatim; `changed` reports
-    /// whether any of them changed canonical overlay state.
+    /// The mutation materialized into several per-path overlay changes:
+    /// either a multi-edit mutation (`MoveSlotEntry`) synthesized into
+    /// per-path edits, or a structural `Remove` that normalized away and
+    /// also cleared the overlay entries stranded strictly under its path.
+    /// `edits` lists what was actually stored, in application order, against
+    /// the command's artifact — each edit was individually normalized
+    /// against the base, so an entry is either a stored [`SlotEdit`] or a
+    /// removal of the overlay entry at a path. Ack-mirroring clients replay
+    /// `edits` verbatim; `changed` reports whether any of them changed
+    /// canonical overlay state.
     Materialized {
         edits: Vec<StoredSlotEdit>,
         changed: bool,
     },
 }
 
-/// One stored overlay change from a materialized multi-edit mutation.
+/// One stored overlay change from a materialized mutation.
 ///
-/// The move materialization is the only producer today. The two forms mirror
-/// what the registry does per synthesized edit: store it
+/// Produced by the move materialization and by a normalized structural
+/// `Remove` clearing its stranded descendants. The two forms mirror what the
+/// registry does per edit: store it
 /// ([`crate::ProjectOverlay::put_slot_edit`]) or — when normalization elided
 /// it, or a stale descendant of a normalized removal had to be cleared —
 /// remove the overlay entry at a path

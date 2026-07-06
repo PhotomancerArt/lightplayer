@@ -3,13 +3,14 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     ProjectSlotAddress, UiAction, UiConfigSlot, UiConfigSlotBody, UiNodeDirtyState,
-    UiSlotComposite, UiSlotFieldState,
+    UiSlotComposite, UiSlotFieldState, UiSlotMapKeyKind,
 };
 
 use crate::app::node::slot_edit_actions::slot_revert_action;
 use crate::app::node::{
-    EnumVariantField, MapAddEntry, MapEntryRemoveButton, OptionToggleField, SlotDetailButton,
-    SlotDetailRevert, SlotRecordEditor, SlotValueEditor, primary_affordance, slot_row_class,
+    EnumVariantField, MapAddEntry, MapEntryKeyField, MapEntryRemoveButton, OptionToggleField,
+    SlotDetailButton, SlotDetailRevert, SlotRecordEditor, SlotValueEditor, primary_affordance,
+    slot_row_class,
 };
 use crate::base::{StudioIcon, StudioIconName};
 
@@ -34,13 +35,17 @@ pub fn ConfigSlotRow(
     index: usize,
     #[props(default = false)] initially_open: bool,
     #[props(default = None)] initially_expanded: Option<bool>,
-    /// True when this row is a removable map entry: renders the per-entry
-    /// remove affordance (set by the parent map's record editor).
-    #[props(default = false)]
-    removable: bool,
+    /// Set when this row is a map entry of a map with this key domain
+    /// (threaded by the parent map's record editor): renders the per-entry
+    /// remove affordance and the click-to-edit key label.
+    #[props(default = None)]
+    entry_key_kind: Option<UiSlotMapKeyKind>,
     /// Open the map add-entry key input on first render (stories).
     #[props(default = false)]
     initially_adding: bool,
+    /// Open this map entry row's key input on first render (stories).
+    #[props(default = false)]
+    initially_key_editing: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let child_record = match &slot.body {
@@ -70,10 +75,18 @@ pub fn ConfigSlotRow(
             .and_then(|address| address.child_field("some")),
         _ => slot.address.clone(),
     };
-    let entries_removable = matches!(slot.composite, Some(UiSlotComposite::Map(_)));
-    let remove_entry = (removable && slot.state.editable)
+    // Key domain threaded to child rows when this row is a map composite.
+    let child_entry_key_kind = match &slot.composite {
+        Some(UiSlotComposite::Map(map)) => Some(map.key_kind),
+        _ => None,
+    };
+    let entry_wiring = (entry_key_kind.is_some() && slot.state.editable)
         .then(|| slot.address.clone().zip(on_action))
         .flatten();
+    let remove_entry = entry_wiring.clone();
+    // Click-to-edit key label for map entry rows (dispatches `MoveEntry` on
+    // the parent map); rows without edit wiring keep the static label.
+    let key_edit = entry_key_kind.zip(entry_wiring);
     // Inline revert: only rows with an OWN edit entry offer it (prefix-only
     // dirty composites carry `None`; their per-entry revert is the save
     // panel's). Same action as the popup footer — two access points.
@@ -109,7 +122,17 @@ pub fn ConfigSlotRow(
                         span { class: "tw:h-6 tw:w-6 tw:flex-none" }
                     }
                     div { class: "tw:min-w-0",
-                        strong { class: "tw:block tw:min-w-0 tw:text-sm tw:font-semibold tw:leading-tight tw:text-strong-foreground tw:break-words", "{slot.label}" }
+                        if let Some((key_kind, (address, handler))) = key_edit {
+                            MapEntryKeyField {
+                                label: slot.label.clone(),
+                                key_kind,
+                                address,
+                                on_action: handler,
+                                initially_editing: initially_key_editing,
+                            }
+                        } else {
+                            strong { class: "tw:block tw:min-w-0 tw:text-sm tw:font-semibold tw:leading-tight tw:text-strong-foreground tw:break-words", "{slot.label}" }
+                        }
                     }
                 }
                 div { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-end tw:gap-2 tw:text-sm tw:leading-tight tw:text-muted-foreground",
@@ -149,7 +172,7 @@ pub fn ConfigSlotRow(
                         record,
                         depth: depth + 1,
                         separated: true,
-                        removable_entries: entries_removable,
+                        entry_key_kind: child_entry_key_kind,
                         on_action,
                     }
                 }

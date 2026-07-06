@@ -173,15 +173,10 @@ impl ProjectController {
                 },
                 PendingEditOp::EnsurePresent => UiPendingEditKind::Added,
                 PendingEditOp::RemoveValue => UiPendingEditKind::Removed,
-                // A buffered move is only visible mid-op or when Failed;
-                // reuse the value-display kind until the key-editing UX
-                // (Lane 3) grows a dedicated kind.
-                PendingEditOp::MoveEntry { from_key, to_key } => UiPendingEditKind::Assign {
-                    value_display: format!(
-                        "key {} \u{2192} {}",
-                        map_key_display(from_key),
-                        map_key_display(to_key)
-                    ),
+                // A buffered move is only visible mid-op or when Failed.
+                PendingEditOp::MoveEntry { from_key, to_key } => UiPendingEditKind::Moved {
+                    from: map_key_display(from_key),
+                    to: map_key_display(to_key),
                 },
             },
             SlotEditEntrySource::Acked(op) => acked_edit_kind(op),
@@ -4326,6 +4321,17 @@ mod tests {
         assert_eq!(
             entries.state.invalid.as_deref(),
             Some("map entry entries[b] already exists in the effective definition")
+        );
+        // The change list shows the buffered move with its dedicated kind.
+        let pending = project.pending_edits();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].slot_path_display, "entries");
+        assert_eq!(
+            pending[0].kind,
+            crate::UiPendingEditKind::Moved {
+                from: "[a]".to_string(),
+                to: "[b]".to_string(),
+            }
         );
         assert_eq!(
             project.dirty_summary(),

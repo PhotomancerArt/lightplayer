@@ -6,7 +6,7 @@
 //! plus overlay mirror keep the DTO value stable until the server acks.
 
 use lpa_studio_core::{
-    ControllerId, LpValue, ProjectController, ProjectSlotAddress, SlotEditOp, UiAction,
+    ControllerId, LpValue, ProjectController, ProjectSlotAddress, SlotEditOp, SlotMapKey, UiAction,
 };
 
 /// Build the `SetValue` action a field dispatches on input.
@@ -39,5 +39,23 @@ pub(crate) fn slot_remove_value_action(address: ProjectSlotAddress) -> UiAction 
     UiAction::from_op(
         ControllerId::new(ProjectController::NODE_ID),
         SlotEditOp::RemoveValue { address },
+    )
+}
+
+/// Build the map entry key move gesture: `address` is the **map** slot, and
+/// the server re-keys the `from_key` entry to `to_key` (rejecting an
+/// occupied target).
+pub(crate) fn slot_move_entry_action(
+    address: ProjectSlotAddress,
+    from_key: SlotMapKey,
+    to_key: SlotMapKey,
+) -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        SlotEditOp::MoveEntry {
+            address,
+            from_key,
+            to_key,
+        },
     )
 }

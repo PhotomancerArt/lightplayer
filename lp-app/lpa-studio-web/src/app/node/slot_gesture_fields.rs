@@ -9,11 +9,13 @@
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    ProjectSlotAddress, UiAction, UiSlotEnumComposite, UiSlotFieldState, UiSlotMapComposite,
-    UiSlotMapKeyKind, UiSlotOptionality,
+    ProjectSlotAddress, SlotMapKey, SlotPath, SlotPathSegment, UiAction, UiSlotEnumComposite,
+    UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOptionality,
 };
 
-use crate::app::node::slot_edit_actions::{slot_ensure_present_action, slot_remove_value_action};
+use crate::app::node::slot_edit_actions::{
+    slot_ensure_present_action, slot_move_entry_action, slot_remove_value_action,
+};
 use crate::app::node::slot_fields::{dropdown_field_class, field_class, field_wiring};
 
 /// Variant switcher for an enum composite row. Selecting a variant dispatches
@@ -187,6 +189,94 @@ pub fn MapAddEntry(
     }
 }
 
+/// Click-to-edit key label for a map entry row: the entry's key renders as
+/// the row label, and clicking it opens a compact key input typed per the
+/// map's key domain. Committing a changed, parseable key dispatches
+/// `SlotEditOp::MoveEntry` on the parent map (`from_key` is the entry
+/// address's terminal key segment); unchanged or unparseable input never
+/// dispatches. An occupied target is rejected server-side
+/// (`target_occupied`) and parks Failed on the map row.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub fn MapEntryKeyField(
+    /// The entry's current key text (the row label).
+    label: String,
+    key_kind: UiSlotMapKeyKind,
+    /// Address of the entry row; its terminal path segment is the key.
+    address: ProjectSlotAddress,
+    on_action: EventHandler<UiAction>,
+    /// Open the key input on first render (stories).
+    #[props(default = false)]
+    initially_editing: bool,
+) -> Element {
+    let mut editing = use_signal(|| initially_editing);
+    let mut draft = use_signal(|| label.clone());
+    let Some((map_address, from_key)) = split_map_entry(&address) else {
+        // Not a key-terminated address: fall back to the static label.
+        return rsx! {
+            strong { class: "tw:block tw:min-w-0 tw:text-sm tw:font-semibold tw:leading-tight tw:text-strong-foreground tw:break-words", "{label}" }
+        };
+    };
+
+    if !editing() {
+        let open_draft = label.clone();
+        return rsx! {
+            button {
+                class: entry_key_label_class(),
+                r#type: "button",
+                title: "Edit this entry's key",
+                aria_label: "Edit entry key",
+                onclick: move |event| {
+                    event.stop_propagation();
+                    draft.set(open_draft.clone());
+                    editing.set(true);
+                },
+                "{label}"
+            }
+        };
+    }
+
+    let change_from = from_key.clone();
+    let enter_from = from_key;
+    rsx! {
+        input {
+            class: key_input_class(key_kind),
+            r#type: if key_kind.is_numeric() { "number" } else { "text" },
+            min: if key_kind == UiSlotMapKeyKind::U32 { Some("0".to_string()) } else { None },
+            step: if key_kind.is_numeric() { Some("1".to_string()) } else { None },
+            value: "{draft}",
+            aria_label: "Entry key",
+            oninput: move |event| draft.set(event.value()),
+            onchange: move |_| {
+                if let Some(target) = entry_move_target(key_kind, &draft(), &change_from) {
+                    if let Some(to_key) = target {
+                        on_action
+                            .call(
+                                slot_move_entry_action(
+                                    map_address.clone(),
+                                    change_from.clone(),
+                                    to_key,
+                                ),
+                            );
+                    }
+                    editing.set(false);
+                }
+            },
+            onkeydown: move |event| match event.key() {
+                // A changed key commits through the change event; Enter only
+                // needs to close the unchanged case (which fires no change).
+                Key::Enter => {
+                    if entry_move_target(key_kind, &draft(), &enter_from) == Some(None) {
+                        editing.set(false);
+                    }
+                }
+                Key::Escape => editing.set(false),
+                _ => {}
+            },
+        }
+    }
+}
+
 /// Per-entry remove affordance for map entry rows: dispatches
 /// `RemoveValue entry_path` (add-then-remove normalizes away server-side).
 #[component]
@@ -269,6 +359,36 @@ pub fn OptionToggleField(
     }
 }
 
+/// Split a map entry address into the parent map's address plus the entry
+/// key. `None` when the terminal path segment is not a map key (the root, a
+/// field, or a variant).
+fn split_map_entry(address: &ProjectSlotAddress) -> Option<(ProjectSlotAddress, SlotMapKey)> {
+    let (last, parent) = address.path.segments().split_last()?;
+    let SlotPathSegment::Key(key) = last else {
+        return None;
+    };
+    Some((
+        ProjectSlotAddress::new(
+            address.node.clone(),
+            address.root.clone(),
+            SlotPath::from_segments(parent.to_vec()),
+        ),
+        key.clone(),
+    ))
+}
+
+/// What the drafted key text settles the key edit to: `None` keeps the input
+/// open (unparseable/empty), `Some(None)` closes without dispatch (the key
+/// is unchanged), and `Some(Some(to_key))` is a real move.
+fn entry_move_target(
+    key_kind: UiSlotMapKeyKind,
+    raw: &str,
+    from_key: &SlotMapKey,
+) -> Option<Option<SlotMapKey>> {
+    let to_key = key_kind.parse_key(raw)?;
+    Some((to_key != *from_key).then_some(to_key))
+}
+
 /// Parse the drafted key and dispatch the map add gesture. Returns whether
 /// an op was dispatched (unparseable/empty keys never dispatch).
 fn dispatch_map_add(
@@ -294,5 +414,68 @@ fn key_input_class(key_kind: UiSlotMapKeyKind) -> &'static str {
         "tw:w-16 tw:min-w-0 tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page tw:px-1.5 tw:py-0.5 tw:text-right tw:font-mono tw:text-sm tw:text-muted-foreground tw:outline-none"
     } else {
         "tw:w-24 tw:min-w-0 tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page tw:px-1.5 tw:py-0.5 tw:text-sm tw:text-muted-foreground tw:outline-none"
+    }
+}
+
+/// The closed key-edit label: renders exactly like the plain row label
+/// (block, semibold), with a dotted-underline hover affordance signalling
+/// click-to-edit.
+fn entry_key_label_class() -> &'static str {
+    "tw:block tw:min-w-0 tw:cursor-pointer tw:appearance-none tw:border-0 tw:bg-transparent tw:p-0 tw:text-left tw:text-sm tw:font-semibold tw:leading-tight tw:text-strong-foreground tw:break-words tw:decoration-dotted tw:underline-offset-2 tw:hover:underline"
+}
+
+#[cfg(test)]
+mod tests {
+    use lpa_studio_core::{ProjectNodeAddress, ProjectSlotRoot};
+
+    use super::*;
+
+    fn entry_address(path: &str) -> ProjectSlotAddress {
+        ProjectSlotAddress::new(
+            ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap(),
+            ProjectSlotRoot::def(),
+            SlotPath::parse(path).unwrap(),
+        )
+    }
+
+    #[test]
+    fn split_map_entry_returns_the_map_address_and_terminal_key() {
+        let (map, key) = split_map_entry(&entry_address("mapping.paths[3]")).unwrap();
+        assert_eq!(map.path, SlotPath::parse("mapping.paths").unwrap());
+        assert_eq!(key, SlotMapKey::U32(3));
+
+        let (map, key) = split_map_entry(&entry_address("presets[warm]")).unwrap();
+        assert_eq!(map.path, SlotPath::parse("presets").unwrap());
+        assert_eq!(key, SlotMapKey::String("warm".to_string()));
+    }
+
+    #[test]
+    fn split_map_entry_rejects_non_key_terminals() {
+        assert_eq!(split_map_entry(&entry_address("mapping.paths")), None);
+        assert_eq!(split_map_entry(&entry_address("paths[3].diameter")), None);
+        let root = ProjectSlotAddress::root(
+            ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap(),
+            ProjectSlotRoot::def(),
+        );
+        assert_eq!(split_map_entry(&root), None);
+    }
+
+    #[test]
+    fn entry_move_target_separates_stay_close_and_move() {
+        let from = SlotMapKey::U32(2);
+        assert_eq!(
+            entry_move_target(UiSlotMapKeyKind::U32, "nope", &from),
+            None,
+            "unparseable input keeps editing"
+        );
+        assert_eq!(
+            entry_move_target(UiSlotMapKeyKind::U32, "2", &from),
+            Some(None),
+            "unchanged key closes without dispatch"
+        );
+        assert_eq!(
+            entry_move_target(UiSlotMapKeyKind::U32, "5", &from),
+            Some(Some(SlotMapKey::U32(5))),
+        );
     }
 }
