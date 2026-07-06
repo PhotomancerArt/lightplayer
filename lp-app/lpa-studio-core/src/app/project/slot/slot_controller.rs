@@ -213,6 +213,9 @@ impl SlotController {
         .with_source(self.ui_source())
         .with_state(self.ui_field_state(edits));
 
+        if let Some(address) = self.edit_entry_address(edits) {
+            slot = slot.with_edit_entry_address(address);
+        }
         if let Some(detail) = self.ui_detail() {
             slot = slot.with_detail(detail);
         }
@@ -238,6 +241,9 @@ impl SlotController {
             .with_address(self.address.clone())
             .with_source(self.ui_source())
             .with_state(self.ui_field_state(edits));
+        if let Some(address) = self.edit_entry_address(edits) {
+            slot = slot.with_edit_entry_address(address);
+        }
         if let Some(detail) = self.ui_detail() {
             slot = slot.with_detail(detail);
         }
@@ -930,6 +936,29 @@ impl SlotController {
         state
     }
 
+    /// The address of this row's **own** edit entry, if the buffer or the
+    /// overlay mirror holds one: the row's own address, or — for a present
+    /// option row, whose interior value renders inline on the same row —
+    /// the interior `.some` child address. `None` for rows whose dirty state
+    /// is prefix-only (edits strictly under a composite): their per-entry
+    /// revert lives in the save panel, and a row-level Revert at the
+    /// composite's own path would be a no-op.
+    fn edit_entry_address(&self, edits: &SlotEditJoin<'_>) -> Option<ProjectSlotAddress> {
+        let has_entry = |address: &ProjectSlotAddress| {
+            edits.pending(address).is_some() || edits.overlay_dirty(address)
+        };
+        if has_entry(&self.address) {
+            return Some(self.address.clone());
+        }
+        if matches!(self.body, SlotControllerBody::Option { present: true })
+            && let Some(child) = self.children.first()
+            && has_entry(&child.address)
+        {
+            return Some(child.address.clone());
+        }
+        None
+    }
+
     /// True for slot kinds whose dirty state includes descendant edit paths
     /// through the prefix-aware join. Value leaves stay exact-match only.
     fn is_composite(&self) -> bool {
@@ -1206,7 +1235,7 @@ mod tests {
         SlotVariantShape, WithRevision,
     };
 
-    use crate::{ProjectNodeAddress, app::project::slot::SlotEditJoin};
+    use crate::{PendingEdit, ProjectNodeAddress, app::project::slot::SlotEditJoin};
 
     use super::*;
 
@@ -1358,6 +1387,132 @@ mod tests {
                     "SvgPath".to_string(),
                 ],
             }))
+        );
+    }
+
+    fn overlay_join(
+        entries: &[(&str, lpc_model::SlotEditOp)],
+    ) -> (
+        std::collections::BTreeMap<ProjectSlotAddress, PendingEdit>,
+        std::collections::BTreeMap<ProjectSlotAddress, lpc_model::SlotEditOp>,
+    ) {
+        let overlay = entries
+            .iter()
+            .map(|(path, op)| (slot_address(path), op.clone()))
+            .collect();
+        (std::collections::BTreeMap::new(), overlay)
+    }
+
+    fn option_u32_shape() -> SlotShape {
+        SlotShape::Option {
+            meta: SlotMeta::empty(),
+            some: Box::new(SlotShape::value(LpType::U32)),
+        }
+    }
+
+    #[test]
+    fn own_edit_entry_projects_the_revert_target() {
+        let registry = SlotShapeRegistry::default();
+        let shape = SlotShape::value(LpType::U32);
+        let controller = SlotController::from_slot_data(
+            slot_address("brightness"),
+            "Brightness".to_string(),
+            &SlotData::Value(WithRevision::new(Revision::new(1), LpValue::U32(255))),
+            SlotShapeView::Dynamic(&shape),
+            &registry,
+        );
+        let (buffer, overlay) = overlay_join(&[(
+            "brightness",
+            lpc_model::SlotEditOp::AssignValue(LpValue::U32(64)),
+        )]);
+        let join = SlotEditJoin::new(&buffer, overlay, Default::default());
+
+        let slot = controller.ui_config_slot(&join);
+
+        assert_eq!(slot.edit_entry_address, Some(slot_address("brightness")));
+    }
+
+    #[test]
+    fn prefix_only_dirty_composite_projects_no_revert_target() {
+        let registry = SlotShapeRegistry::default();
+        let shape = u32_map_shape();
+        let controller = SlotController::from_slot_data(
+            slot_address("ring_lamp_counts"),
+            "Ring lamp counts".to_string(),
+            &u32_map_data(&[0]),
+            SlotShapeView::Dynamic(&shape),
+            &registry,
+        );
+        let (buffer, overlay) =
+            overlay_join(&[("ring_lamp_counts[1]", lpc_model::SlotEditOp::Remove)]);
+        let join = SlotEditJoin::new(&buffer, overlay, Default::default());
+
+        let slot = controller.ui_config_slot(&join);
+
+        assert_eq!(
+            slot.state.dirty,
+            crate::UiNodeDirtyState::Dirty,
+            "the removed entry marks the map dirty via the prefix join"
+        );
+        assert_eq!(
+            slot.edit_entry_address, None,
+            "prefix-only dirty rows offer no row-level revert target"
+        );
+    }
+
+    #[test]
+    fn present_option_projects_the_interior_edit_entry() {
+        let registry = SlotShapeRegistry::default();
+        let shape = option_u32_shape();
+        let data = SlotData::Option(lpc_model::SlotOptionDyn::some_with_version(
+            Revision::new(1),
+            SlotData::Value(WithRevision::new(Revision::new(1), LpValue::U32(255))),
+        ));
+        let controller = SlotController::from_slot_data(
+            slot_address("brightness"),
+            "Brightness".to_string(),
+            &data,
+            SlotShapeView::Dynamic(&shape),
+            &registry,
+        );
+        let (buffer, overlay) = overlay_join(&[(
+            "brightness.some",
+            lpc_model::SlotEditOp::AssignValue(LpValue::U32(64)),
+        )]);
+        let join = SlotEditJoin::new(&buffer, overlay, Default::default());
+
+        let slot = controller.ui_config_slot(&join);
+
+        assert_eq!(
+            slot.edit_entry_address,
+            Some(slot_address("brightness.some")),
+            "a present option's inline value edit reverts at the interior address"
+        );
+    }
+
+    #[test]
+    fn absent_option_projects_its_own_removal_entry() {
+        let registry = SlotShapeRegistry::default();
+        let shape = option_u32_shape();
+        let data = SlotData::Option(lpc_model::SlotOptionDyn::none_with_version(Revision::new(
+            1,
+        )));
+        let controller = SlotController::from_slot_data(
+            slot_address("brightness"),
+            "Brightness".to_string(),
+            &data,
+            SlotShapeView::Dynamic(&shape),
+            &registry,
+        );
+        let (buffer, overlay) = overlay_join(&[("brightness", lpc_model::SlotEditOp::Remove)]);
+        let join = SlotEditJoin::new(&buffer, overlay, Default::default());
+
+        let slot = controller.ui_config_slot(&join);
+
+        assert_eq!(
+            slot.edit_entry_address,
+            Some(slot_address("brightness")),
+            "the stored base-present removal reverts at the option's own path"
         );
     }
 

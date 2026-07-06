@@ -54,6 +54,14 @@ pub struct UiConfigSlot {
     /// Stable slot address for dispatching edits (`SlotEditOp`) from field
     /// components. `None` for synthetic rows not backed by a project slot.
     pub address: Option<ProjectSlotAddress>,
+    /// Address of this row's **own** pending/overlay edit entry, when one
+    /// exists. The row-level Revert/Reset affordance targets exactly this
+    /// address; a composite row that is only prefix-dirty (edits strictly
+    /// under it) carries `None` and offers no row revert — per-entry revert
+    /// for those lives in the save panel. For a present option row (whose
+    /// interior value renders inline) this may be the interior `.some`
+    /// address rather than [`Self::address`].
+    pub edit_entry_address: Option<ProjectSlotAddress>,
     /// Human-readable field label.
     pub label: String,
     /// Optional explanatory copy for info popovers and docs.
@@ -110,6 +118,7 @@ impl UiConfigSlot {
         Self {
             key: key.into(),
             address: None,
+            edit_entry_address: None,
             label: label.into(),
             description: None,
             detail: None,
@@ -126,6 +135,13 @@ impl UiConfigSlot {
     /// Attach the stable slot address edits should target.
     pub fn with_address(mut self, address: ProjectSlotAddress) -> Self {
         self.address = Some(address);
+        self
+    }
+
+    /// Attach the address of the row's own edit entry (the row-level
+    /// Revert/Reset target).
+    pub fn with_edit_entry_address(mut self, address: ProjectSlotAddress) -> Self {
+        self.edit_entry_address = Some(address);
         self
     }
 

@@ -232,7 +232,13 @@ stateless views that dispatch ops and render DTOs. The model (recorded in
   Error > Unsaved > Live > Busy > Info) — the glyph/tone every detail
   trigger and tree-row indicator renders.
   `UiConfigSlot` carries its `ProjectSlotAddress` so fields can dispatch
-  edits without extra lookup.
+  edits without extra lookup, plus `edit_entry_address` — the row's **own**
+  edit entry when one exists (the row-level Revert/Reset target; a
+  prefix-only-dirty composite carries none). The project popup's save panel
+  renders `ProjectEditorView.pending_edits`: one `UiPendingEdit` per edit
+  entry (node label, slot path, op/value display string, phase
+  persisted/live/failed, per-entry revert action), built from the same join
+  enumeration the counts sum — list and counts cannot drift.
 
 Project attach behavior is core-owned:
 

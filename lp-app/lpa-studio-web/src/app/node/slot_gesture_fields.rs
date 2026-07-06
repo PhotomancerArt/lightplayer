@@ -177,6 +177,14 @@ pub fn MapEntryRemoveButton(
 /// Some/none toggle for an option row. On dispatches
 /// `EnsurePresent opt_path.some` (server default value); off dispatches
 /// `RemoveValue opt_path`.
+///
+/// The checkbox is **controlled**: the DTO's effective presence is the only
+/// writer of its visual state, so the click handler prevents the browser's
+/// native flip and only dispatches the gesture. Without this, a gesture that
+/// normalizes to a no-op against base (the D2 base-relative edge — e.g.
+/// toggling a base-present option off, then on) leaves the self-flipped DOM
+/// checkbox permanently desynced from the DTO, because Dioxus sees no
+/// attribute change to patch.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn OptionToggleField(
@@ -205,7 +213,8 @@ pub fn OptionToggleField(
                 checked: included,
                 disabled,
                 aria_label: title,
-                onchange: move |_| {
+                onclick: move |event| {
+                    event.prevent_default();
                     let Some((address, handler)) = wired.clone() else {
                         return;
                     };

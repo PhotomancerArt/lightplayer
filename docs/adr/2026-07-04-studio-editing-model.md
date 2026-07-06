@@ -173,6 +173,75 @@ Two load-bearing details:
   step-quantized controls; revisit only if a real near-miss annoyance
   appears.
 
+### D7 — Composite edit semantics: gestures are the wire ops (added 2026-07-06)
+
+M3 (generic editors) resolves follow-up (c). Four coupled decisions:
+
+- **Gestures ARE the wire ops; the server owns all defaults.** Map entry add
+  = `EnsurePresent map[key]`; entry remove = `Remove map[key]`; option on =
+  `EnsurePresent opt.some`; option off = `Remove opt`; enum variant switch =
+  `EnsurePresent enum.variant` (raw declared ident, verbatim). The client
+  never constructs composite values — `EnsurePresent` creates map entries /
+  option `Some` / variant payloads server-side with factory defaults
+  (`slot_factory.rs`), idempotent when already present. Client ops mirror
+  the vocabulary (`SlotEditOp::{EnsurePresent, RemoveValue}` in
+  `lpa-studio-core`); structural ops never coalesce and are coalescing
+  barriers, preserving order against `SetValue` floods.
+- **Structural normalization is base-relative**, extending D6's minimal-diff
+  rule to structure (`normalize_edit_to_base`): an `EnsurePresent` that is a
+  no-op against the **base** (saved) def — the map key present, the option
+  `Some`, the enum already on that variant — and a `Remove` at a path the
+  base does not contain both normalize to removing any overlay entry at that
+  path (`NormalizedToRemoval`). Add-then-remove of a map entry therefore
+  cancels to a clean overlay: no phantom dirty. Presence is resolved by
+  `base_slot_presence` (a `lookup_slot_data` walk over the re-parsed base
+  def); an unreadable base never normalizes in either direction.
+- **Prefix-aware dirty join.** A composite slot (record/map/option/enum) is
+  dirty when any overlay/buffer edit path is at or strictly under its path.
+  This is what makes a *removed* map entry visible: its row is gone from
+  the effective def, but the parent map row reads dirty. Counting stays
+  per **edit entry**, never per row (`SlotEditJoin::entries` is the single
+  enumeration feeding `DirtySummary` and the save panel's `UiPendingEdit`
+  list, so counts and list agree by construction); prefix-dirty ancestors
+  are display state, never additional counts. Only rows with an edit entry
+  at their **own** path (`UiConfigSlot.edit_entry_address`) offer a
+  row-level Revert — a prefix-only-dirty composite does not, since a revert
+  at its own path would remove nothing; its entries revert individually
+  from the save panel.
+- **One address per value leaf.** Vector/matrix component inputs
+  read-modify-write the whole `LpValue` at the leaf's single address;
+  per-address latest-wins coalescing absorbs rapid multi-component edits.
+  No per-component addressing exists. Relatedly, a composite-target
+  `AssignValue` is rejected up front with the distinct
+  `MutationRejectionReason::NotAValueLeaf` (wire `not_a_value_leaf`) rather
+  than a misleading `TypeMismatch` — whole-composite assignment is not part
+  of the model; gestures compose from `EnsurePresent`/`Remove` plus leaf
+  assigns.
+
+**Known base-relative edge (accepted).** Normalization compares against
+base, not against the effective def, and the overlay stores one op per
+path. Toggling a base-present option **off** stores `Remove opt` (a real
+diff); toggling it back **on** dispatches `EnsurePresent opt.some`, which
+normalizes away against the base (`.some` is base-present) *at a different
+path* — the stored `Remove opt` survives, so off-then-on does **not**
+restore the value or any prior interior edits. The same shape applies to
+switching an enum back to its base variant while a variant switch is
+pending. Recovery is explicit and always available: **Revert** on the row
+(the stored entry is at the row's own path, so the row-level revert is
+offered) or the save panel's per-entry revert. This is the deliberate
+consequence of "the overlay is a minimal diff against saved state" — the
+gesture pair is not an undo stack. The UI keeps honest through it: the
+option toggle is a controlled control whose visual state only follows the
+DTO's effective presence, so a normalized no-op gesture leaves the toggle
+visibly unchanged rather than desynced.
+
+**Known limitation (recorded, no code).** An optional-*wrapped* map or enum
+(`Option<Map<…>>`, `Option<Enum<…>>`) would flatten its interior body into
+the option row without projecting the interior's gesture facts
+(`ui_composite` reads the option's own body), losing the add-entry/variant
+affordances. No such shape exists in any demo project today; revisit when
+one appears (tracked in the M3 plan notes as future work).
+
 ## Consequences
 
 - Reconnect and multi-client dirty state are free: one overlay read rebuilds
@@ -223,13 +292,17 @@ Per the deferred-decision convention, these are indexed in
 - **(a) Per-item overlay gating.** Fetch-full-on-change assumes small
   overlays. **Revisit when** measured overlay fetch cost matters (large
   overlays or chatty editing sessions on slow links).
-- **(b) Save-panel diff DTOs.** M1's dirty join provides counts only; a
-  "what changed" panel needs before/after value DTOs. **Revisit in** roadmap
-  M3 (Save panel with change count).
-- **(c) Composite edit semantics.** Type enforcement covers value leaves;
-  map entry add/remove, option some/none, and enum variant switching have
-  real design decisions. **Revisit in** roadmap M3 — extend this ADR or add
-  a note if M3 sets precedent.
+- **(b) Save-panel diff DTOs.** Partially superseded by M3: the save panel
+  now lists labeled per-entry changes (`UiPendingEdit` — node label, slot
+  path, op description, **current** value display string, phase, per-entry
+  revert), built from the same join enumeration as the dirty counts. What
+  remains deferred is before/after value DTOs (old value alongside new).
+  **Revisit when** display strings prove insufficient — e.g. a real "what
+  was it before?" need in the save panel.
+- **(c) ~~Composite edit semantics.~~ Resolved 2026-07-06** by M3 — see
+  **D7** above (gestures-are-wire-ops, base-relative structural
+  normalization, prefix-aware dirty, one-address-per-leaf,
+  `NotAValueLeaf`).
 - **(f) Alternative dirty modes.** Minimal-diff normalization (D6) fixes
   the dirty semantics to "differs from saved". If a use case for
   touched-mode tracking or deliberate value pinning appears (e.g. holding a

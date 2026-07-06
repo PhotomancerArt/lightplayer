@@ -53,8 +53,7 @@ holds the full context.
 | Item | Source ADR | Revisit trigger |
 |---|---|---|
 | Per-item overlay gating (fetch-full-on-change assumes small overlays) | `2026-07-04-studio-editing-model` (a) | Measured overlay fetch cost matters |
-| Save-panel diff DTOs (before/after values; M1 provides counts only) | `2026-07-04-studio-editing-model` (b) | Roadmap M3 (Save panel) |
-| Composite edit semantics (map add/remove, option some/none, variant switch) — extend the editing-model ADR if precedent is set | `2026-07-04-studio-editing-model` (c) | Roadmap M3 |
+| Save-panel before/after value DTOs (M3's `UiPendingEdit` lists labeled entries with current-value display strings only) | `2026-07-04-studio-editing-model` (b) | Display strings prove insufficient in the save panel |
 | Singular `ProjectRegistry::mutate` bypasses policy/type validation (only `mutate_batch` enforces) | `2026-07-04-studio-editing-model` (d) | Any new caller of `mutate` |
 | Alternative dirty modes (touched-mode / deliberate value pinning) — minimal-diff normalization fixed dirty to "differs from saved" | `2026-07-04-studio-editing-model` (f) | A concrete pinning/touched-mode use case appears |
 | Device-pane adoption of the pane grammar (`StudioPane`/`DetailPopover`/`UiPaneAction`) | `2026-07-05-studio-pane-grammar` (a) | Next device-pane UX work |

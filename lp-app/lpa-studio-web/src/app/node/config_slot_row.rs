@@ -127,7 +127,7 @@ pub fn ConfigSlotRow(
                     label: slot.label.clone(),
                     aspects,
                     initially_open,
-                    revert: slot_detail_revert(chrome, slot.address.clone(), on_action),
+                    revert: slot_detail_revert(chrome, slot.edit_entry_address.clone(), on_action),
                 }
             }
             if expanded() {
@@ -163,7 +163,10 @@ fn UnsavedBadge() -> Element {
 }
 
 /// The detail-popup revert affordance for a touched slot: "Revert" for
-/// unsaved (persisted) edits, "Reset" for live (transient) controls.
+/// unsaved (persisted) edits, "Reset" for live (transient) controls. The
+/// target is the row's **own** edit entry (`UiConfigSlot.edit_entry_address`);
+/// composite rows that are only prefix-dirty carry no entry of their own and
+/// offer no row revert — per-entry revert for those lives in the save panel.
 fn slot_detail_revert(
     chrome: Option<SlotEditChrome>,
     address: Option<ProjectSlotAddress>,

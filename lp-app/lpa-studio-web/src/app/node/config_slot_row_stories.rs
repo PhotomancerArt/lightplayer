@@ -173,6 +173,7 @@ pub(crate) fn live_detail_popup() -> Element {
             ConfigSlotRow {
                 slot: UiConfigSlot::value("controls.running", "Running", UiSlotValue::bool(false))
                     .with_address(story_slot_address("controls.running"))
+                    .with_edit_entry_address(story_slot_address("controls.running"))
                     .with_state(
                         UiSlotFieldState::editable()
                             .with_dirty(UiNodeDirtyState::Dirty)
@@ -205,6 +206,7 @@ pub(crate) fn unsaved_detail_popup() -> Element {
                     ])),
                 )
                     .with_address(story_slot_address("color_order"))
+                    .with_edit_entry_address(story_slot_address("color_order"))
                     .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
                 depth: 0,
                 index: 0,
