@@ -59,6 +59,9 @@
     --tw-color-status-good-bg: var(--studio-status-good-bg);
     --tw-color-status-good-border: var(--studio-status-good-border);
     --tw-color-status-good-foreground: var(--studio-status-good-text);
+    --tw-color-status-live-bg: var(--studio-status-live-bg);
+    --tw-color-status-live-border: var(--studio-status-live-border);
+    --tw-color-status-live-foreground: var(--studio-status-live-text);
     --tw-color-status-warning-bg: var(--studio-status-warning-bg);
     --tw-color-status-warning-border: var(--studio-status-warning-border);
     --tw-color-status-warning-foreground: var(--studio-status-warning-text);
@@ -247,6 +250,9 @@
   .tw\:min-h-\[46px\] {
     min-height: 46px;
   }
+  .tw\:min-h-\[620px\] {
+    min-height: 620px;
+  }
   .tw\:min-h-full {
     min-height: 100%;
   }
@@ -342,6 +348,9 @@
   .tw\:rotate-90 {
     rotate: 90deg;
   }
+  .tw\:cursor-not-allowed {
+    cursor: not-allowed;
+  }
   .tw\:cursor-pointer {
     cursor: pointer;
   }
@@ -389,6 +398,9 @@
   }
   .tw\:grid-cols-\[260px_minmax\(0\,1fr\)\] {
     grid-template-columns: 260px minmax(0,1fr);
+  }
+  .tw\:grid-cols-\[minmax\(0\,1fr\)_auto\] {
+    grid-template-columns: minmax(0,1fr) auto;
   }
   .tw\:grid-cols-\[minmax\(0\,1fr\)_minmax\(300px\,380px\)\] {
     grid-template-columns: minmax(0,1fr) minmax(300px,380px);
@@ -635,6 +647,9 @@
   .tw\:border-status-good-foreground {
     border-color: var(--tw-color-status-good-foreground);
   }
+  .tw\:border-status-live-border {
+    border-color: var(--tw-color-status-live-border);
+  }
   .tw\:border-status-neutral-border {
     border-color: var(--tw-color-status-neutral-border);
   }
@@ -692,6 +707,9 @@
   .tw\:bg-status-good-bg {
     background-color: var(--tw-color-status-good-bg);
   }
+  .tw\:bg-status-live-bg {
+    background-color: var(--tw-color-status-live-bg);
+  }
   .tw\:bg-status-neutral-bg {
     background-color: var(--tw-color-status-neutral-bg);
   }
@@ -733,6 +751,9 @@
   }
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-good-bg\)_0\%\,transparent_72\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-good-bg) 0%,transparent 72%);
+  }
+  .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-live-bg\)\,transparent_62\%\)\] {
+    background-image: linear-gradient(90deg,var(--studio-status-live-bg),transparent 62%);
   }
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-live-bg\)_0\%\,transparent_72\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-live-bg) 0%,transparent 72%);
@@ -853,6 +874,9 @@
   }
   .tw\:pt-2\.5 {
     padding-top: calc(var(--tw-spacing) * 2.5);
+  }
+  .tw\:pt-3 {
+    padding-top: calc(var(--tw-spacing) * 3);
   }
   .tw\:pt-7 {
     padding-top: calc(var(--tw-spacing) * 7);
@@ -1005,6 +1029,9 @@
   .tw\:text-status-good-foreground {
     color: var(--tw-color-status-good-foreground);
   }
+  .tw\:text-status-live-foreground {
+    color: var(--tw-color-status-live-foreground);
+  }
   .tw\:text-status-neutral-foreground {
     color: var(--tw-color-status-neutral-foreground);
   }
@@ -1028,6 +1055,9 @@
   }
   .tw\:opacity-0 {
     opacity: 0%;
+  }
+  .tw\:opacity-50 {
+    opacity: 50%;
   }
   .tw\:opacity-100 {
     opacity: 100%;

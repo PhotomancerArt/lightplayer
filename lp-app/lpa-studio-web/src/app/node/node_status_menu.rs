@@ -1,25 +1,30 @@
+//! Node status affordance: the status icon opening the node detail popover.
+//!
+//! Rendered into the node pane's primary slot; the header layout itself is
+//! the shared `StudioPane` component.
+
 use dioxus::prelude::*;
 use lpa_studio_core::UiNodeHeader;
 use lpa_studio_core::core::status::UiStatusKind;
 
+use crate::app::layout::PaneTone;
 use crate::base::{IconPopoverButton, PopoverPlacement, StudioIconName};
 
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn NodeHeader(header: UiNodeHeader) -> Element {
-    rsx! {
-        div { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2 tw:px-3",
-            NodeStatusMenu { header: header.clone() }
-            h3 { class: "tw:m-0 tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-[1.04rem] tw:font-bold tw:leading-tight tw:text-strong-foreground",
-                "{header.title}"
-            }
-        }
+/// Map a node status kind onto the pane's neutral tone vocabulary (the
+/// consumer-side mapping required by the pane's layout-only contract).
+pub(crate) fn status_pane_tone(kind: UiStatusKind) -> PaneTone {
+    match kind {
+        UiStatusKind::Neutral => PaneTone::Neutral,
+        UiStatusKind::Working => PaneTone::Working,
+        UiStatusKind::Good => PaneTone::Good,
+        UiStatusKind::Warning => PaneTone::Warning,
+        UiStatusKind::Error => PaneTone::Error,
     }
 }
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn NodeStatusMenu(header: UiNodeHeader) -> Element {
+pub(crate) fn NodeStatusMenu(header: UiNodeHeader) -> Element {
     let icon = status_icon(header.status.kind);
     let label = format!("{} status details", header.title);
 

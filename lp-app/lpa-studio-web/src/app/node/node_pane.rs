@@ -1,9 +1,10 @@
 use dioxus::prelude::*;
-use lpa_studio_core::core::status::UiStatusKind;
 use lpa_studio_core::{UiAction, UiNodeSection, UiNodeTabBody, UiNodeView, UiSlotRecord};
 
+use crate::app::layout::{PaneChrome, PaneCollapse, StudioPane};
 use crate::app::node::{
-    NodeChildren, NodeHeader, ProducedProducts, ProducedValues, SlotRecordEditor,
+    NodeChildren, NodeStatusMenu, ProducedProducts, ProducedValues, SlotRecordEditor,
+    status_pane_tone,
 };
 use crate::base::{StudioIcon, StudioIconName};
 
@@ -15,59 +16,55 @@ pub fn NodePane(
 ) -> Element {
     let mut active_tab = use_signal(|| 0_usize);
     let mut collapsed = use_signal(|| view.collapsed);
-    let focused_class = if view.focused {
-        "tw:border-accent-border"
-    } else {
-        "tw:border-border"
-    };
-    let article_class = format!(
-        "tw:grid tw:min-w-0 tw:overflow-hidden tw:rounded-md tw:border {focused_class} tw:bg-card tw:p-4"
-    );
     let active_index = active_tab().min(view.tabs.len().saturating_sub(1));
     let active_body = view.tabs.get(active_index).map(|tab| tab.body.clone());
-    let header_class = node_header_class(view.header.status.kind, collapsed());
+    let chrome = PaneChrome {
+        tone: status_pane_tone(view.header.status.kind),
+        accent: view.focused,
+        chips: Vec::new(),
+    };
+    let header = view.header.clone();
+    let title = view.header.title.clone();
+    let tabs = view.tabs.clone();
+    let focused = view.focused;
+    let select_action = view.action.clone();
+    let focus_action = view.action.clone();
+    let issues = view.issues.clone();
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3",
-            article {
-                class: "{article_class}",
-                header { class: "{header_class}",
-                    button {
-                        class: "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-r tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:bg-card-subtle/60",
-                        r#type: "button",
-                        aria_label: if collapsed() { "Expand node" } else { "Collapse node" },
-                        title: if collapsed() { "Expand node" } else { "Collapse node" },
-                        onclick: move |event| {
-                            event.stop_propagation();
-                            collapsed.set(!collapsed());
-                        },
-                        StudioIcon {
-                            name: if collapsed() { StudioIconName::Collapsed } else { StudioIconName::Expanded },
-                            size: 14,
+            StudioPane {
+                collapse: PaneCollapse {
+                    collapsed: collapsed(),
+                    expand_label: "Expand node".to_string(),
+                    collapse_label: "Collapse node".to_string(),
+                    on_toggle: EventHandler::new(move |()| collapsed.set(!collapsed())),
+                },
+                primary: rsx! {
+                    NodeStatusMenu { header }
+                },
+                title,
+                chrome,
+                trailing: rsx! {
+                    if tabs.len() > 1 {
+                        NodeTabs {
+                            tabs: tabs.clone(),
+                            active_index,
+                            on_select: move |index| active_tab.set(index),
                         }
                     }
-                    NodeHeader { header: view.header.clone() }
-                    div { class: "tw:flex tw:h-full tw:items-stretch",
-                        if view.tabs.len() > 1 {
-                            NodeTabs {
-                                tabs: view.tabs.clone(),
-                                active_index,
-                                on_select: move |index| active_tab.set(index),
-                            }
-                        }
-                        if let Some(action) = view.action.clone() {
-                            NodeSelectButton {
-                                action,
-                                focused: view.focused,
-                                on_action,
-                            }
+                    if let Some(action) = select_action {
+                        NodeSelectButton {
+                            action,
+                            focused,
+                            on_action,
                         }
                     }
-                }
-                if !collapsed() {
-                    if !view.issues.is_empty() {
+                },
+                body: rsx! {
+                    if !issues.is_empty() {
                         ul { class: "tw:m-0 tw:grid tw:list-none tw:gap-1 tw:rounded-sm tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-3",
-                            for issue in view.issues.clone() {
+                            for issue in issues.clone() {
                                 li { class: "tw:text-sm tw:text-status-error-foreground", "{issue}" }
                             }
                         }
@@ -79,7 +76,7 @@ pub fn NodePane(
                                     NodeSection {
                                         section,
                                         first: index == 0,
-                                        focus_action: view.action.clone(),
+                                        focus_action: focus_action.clone(),
                                         on_action,
                                     }
                                 }
@@ -97,7 +94,7 @@ pub fn NodePane(
                             p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "No node tabs are available." }
                         },
                     }
-                }
+                },
             }
             if !collapsed() && !view.children.is_empty() {
                 NodeChildren {
@@ -154,35 +151,6 @@ fn NodeSelectButton(
             }
         }
     }
-}
-
-fn node_header_class(kind: UiStatusKind, collapsed: bool) -> String {
-    let shape_class = if collapsed {
-        "tw:-mb-4 tw:rounded-md"
-    } else {
-        "tw:rounded-t-md tw:border-b tw:border-border-muted"
-    };
-    let status_class = match kind {
-        UiStatusKind::Neutral => {
-            "tw:bg-[linear-gradient(90deg,var(--studio-status-neutral-bg),transparent_62%)]"
-        }
-        UiStatusKind::Working => {
-            "tw:bg-[linear-gradient(90deg,var(--studio-status-working-bg),transparent_62%)]"
-        }
-        UiStatusKind::Good => {
-            "tw:bg-[linear-gradient(90deg,var(--studio-status-good-bg),transparent_62%)]"
-        }
-        UiStatusKind::Warning => {
-            "tw:bg-[linear-gradient(90deg,var(--studio-status-warning-bg),transparent_62%)]"
-        }
-        UiStatusKind::Error => {
-            "tw:bg-[linear-gradient(90deg,var(--studio-status-error-bg),transparent_66%)]"
-        }
-    };
-
-    format!(
-        "tw:-mx-4 tw:-mt-4 tw:grid tw:min-h-[46px] tw:min-w-0 tw:grid-cols-[34px_minmax(0,1fr)_auto] tw:items-stretch tw:overflow-hidden {shape_class} tw:bg-card-subtle {status_class}"
-    )
 }
 
 #[component]

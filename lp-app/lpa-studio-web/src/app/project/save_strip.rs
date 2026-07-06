@@ -10,7 +10,10 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{ControllerId, DirtySummary, ProjectController, ProjectOp, UiAction};
 
-use crate::base::{IconMenuButton, IconMenuTone, PopoverPlacement, StudioIconName};
+use crate::base::{
+    DetailPopover, DetailSectionTint, IconMenuTone, PopoverPlacement, StudioIconName,
+    detail_popover_section_class,
+};
 
 /// Overall overlay state conveyed by the strip's state icon.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -133,14 +136,13 @@ fn SaveStripStateIcon(
     };
 
     rsx! {
-        IconMenuButton {
+        DetailPopover {
             icon,
             label: label.to_string(),
             tone,
             placement: PopoverPlacement::BottomEnd,
             active: state != SaveStripState::Unchanged,
             initially_open,
-            popup_class: save_strip_popup_class().to_string(),
             section { class: "tw:grid tw:gap-1 tw:px-3 tw:py-2",
                 h3 { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "Pending edits" }
                 SaveStripDetailRow { label: "State", value: state_label(state).to_string() }
@@ -149,10 +151,10 @@ fn SaveStripStateIcon(
                     SaveStripDetailRow { label: "Awaiting ack", value: edits_in_flight.to_string() }
                 }
             }
-            section { class: unsaved_section_class(&dirty),
+            section { class: detail_popover_section_class(unsaved_section_tint(&dirty)),
                 SaveStripDetailRow { label: "Unsaved (persisted)", value: dirty.persisted.to_string() }
             }
-            section { class: live_section_class(&dirty),
+            section { class: detail_popover_section_class(live_section_tint(&dirty)),
                 SaveStripDetailRow { label: "Live (transient)", value: dirty.transient.to_string() }
                 p { class: "tw:m-0 tw:pt-1 tw:text-[0.68rem] tw:leading-snug tw:text-subtle-foreground",
                     "Live controls apply to the running project and are never written by Save."
@@ -162,28 +164,24 @@ fn SaveStripStateIcon(
     }
 }
 
-fn save_strip_popup_class() -> &'static str {
-    "tw:grid tw:w-[min(320px,calc(100vw-24px))] tw:gap-0 tw:overflow-hidden tw:rounded-md tw:border tw:border-border tw:bg-card tw:text-sm tw:text-muted-foreground tw:shadow-lg"
-}
-
 /// The unsaved section wears the warning (yellow) edited tint whenever
 /// persisted edits are pending — the same treatment as edited slot rows.
-fn unsaved_section_class(dirty: &DirtySummary) -> &'static str {
+fn unsaved_section_tint(dirty: &DirtySummary) -> DetailSectionTint {
     if dirty.persisted > 0 {
-        "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-warning-bg)_0%,transparent_72%)] tw:px-3 tw:py-1.5"
+        DetailSectionTint::Warning
     } else {
-        "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:px-3 tw:py-1.5"
+        DetailSectionTint::None
     }
 }
 
 /// The live section wears the dedicated live (blue) tint whenever transient
 /// controls are touched — matching live slot rows, distinct from the yellow
 /// unsaved treatment.
-fn live_section_class(dirty: &DirtySummary) -> &'static str {
+fn live_section_tint(dirty: &DirtySummary) -> DetailSectionTint {
     if dirty.transient > 0 {
-        "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-live-bg)_0%,transparent_72%)] tw:px-3 tw:py-1.5"
+        DetailSectionTint::Live
     } else {
-        "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:px-3 tw:py-1.5"
+        DetailSectionTint::None
     }
 }
 
