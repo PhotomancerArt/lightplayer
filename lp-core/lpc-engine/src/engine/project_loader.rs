@@ -113,7 +113,7 @@ impl ProjectLoader {
             .load_root(root, project_path.as_path(), frame, &ctx)
             .map_err(|e| ProjectLoadError::ProjectParse {
                 file: project_path.as_str().to_string(),
-                error: format!("{e:?}"),
+                error: e.to_string(),
             })?;
         Self::validate_loaded_root(&registry, &load_result.root, project_path.as_path())?;
 
@@ -1661,6 +1661,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "fixture": {
       "ref": "./fixture.json"
@@ -1773,6 +1774,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "playlist": {
       "ref": "./playlist.json"
@@ -1868,6 +1870,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -2047,6 +2050,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -2175,6 +2179,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "shader": {
       "def": {
@@ -2203,6 +2208,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "shader": {
       "ref": "./shader.json"
@@ -2463,6 +2469,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "broken": {
       "ref": "./broken.json"
@@ -2505,6 +2512,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "weird": {
       "ref": "./weird.json"
@@ -2684,6 +2692,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "compute": {
       "ref": "./compute.json"
@@ -3117,6 +3126,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "button": {
       "ref": "./button.json"
@@ -3186,6 +3196,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "button": {
       "ref": "./button.json"
@@ -3458,6 +3469,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
+  "format": 1,
   "name": "basic",
   "nodes": {
     "output": {

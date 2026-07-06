@@ -77,7 +77,7 @@ fn process_messages(
 )]
 fn create_test_project(fs: &mut LpFsMemory, name: &str) -> Result<(), ClientError> {
     let project_json = format!(
-        r#"{{ "kind": "Project", "name": "{name}" }}
+        r#"{{ "kind": "Project", "format": 1, "name": "{name}" }}
 "#
     );
     fs.write_file_mut("/project.json".as_path(), project_json.as_bytes())
@@ -130,6 +130,7 @@ fn test_create_command_structure() {
     let project_json = format!(
         r#"{{
   "kind": "Project",
+  "format": 1,
   "name": "{project_name}"
 }}
 "#

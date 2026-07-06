@@ -1,0 +1,89 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "output",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "visual_product",
+              "id": 689649576,
+              "meta": {},
+              "ty": {
+                "product": "visual"
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "entry_time",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2605450937,
+              "meta": {},
+              "ty": "f32"
+            }
+          }
+        }
+      },
+      {
+        "name": "entry_progress",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2605450937,
+              "meta": {},
+              "ty": "f32"
+            }
+          }
+        }
+      },
+      {
+        "name": "active_entry",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 3065358156,
+              "meta": {},
+              "ty": "u32"
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

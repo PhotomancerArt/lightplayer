@@ -206,6 +206,7 @@ fn write_project_json(fs: &dyn LpFs, name: &str) -> Result<()> {
         );
     }
     let project = ProjectDef {
+        format: ProjectDef::current_format_slot(),
         name: OptionSlot::some(ValueSlot::new(String::from(name))),
         nodes: MapSlot::new(nodes),
     };

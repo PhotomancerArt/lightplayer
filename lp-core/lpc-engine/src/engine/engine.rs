@@ -323,7 +323,8 @@ impl Engine {
             fs.write_file(node_path.as_path(), text.as_bytes())
                 .map_err(|e| e.to_string())?;
         }
-        let project = format!("{{ \"kind\": \"Project\", \"nodes\": {{ {node_lines} }} }}");
+        let project =
+            format!("{{ \"kind\": \"Project\", \"format\": 1, \"nodes\": {{ {node_lines} }} }}");
         fs.write_file("/project.json".as_path(), project.as_bytes())
             .map_err(|e| e.to_string())?;
 

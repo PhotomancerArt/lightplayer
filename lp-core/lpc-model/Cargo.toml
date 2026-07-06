@@ -14,13 +14,14 @@ derive = []
 # only): isolates parallel tests that set/advance the revision clock.
 test-support = ["std"]
 # JSON Schema for model types (host-side tooling)
-schema-gen = ["std", "dep:schemars", "lp-collection/schemars"]
+schema-gen = ["std", "dep:schemars", "dep:serde_json", "lp-collection/schemars"]
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }
 base64 = { workspace = true }
 hashbrown = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true, optional = true }
 schemars = { workspace = true, optional = true }
 lpc-slot-macros = { path = "../lpc-slot-macros" }
 lpfs = { path = "../../lp-base/lpfs", default-features = false }
@@ -28,6 +29,9 @@ lpfs = { path = "../../lp-base/lpfs", default-features = false }
 [dev-dependencies]
 serde_json = { workspace = true }
 tempfile = "3"
+# Validator for the schema-gen conformance tests only. Default features pull in
+# reqwest/rustls for remote `$ref` resolution, which these tests never need.
+jsonschema = { version = "0.46", default-features = false }
 
 [build-dependencies]
 lpc-slot-codegen = { path = "../lpc-slot-codegen" }

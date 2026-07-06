@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 /// expose multiple capabilities, such as a GPIO that can be used for input or
 /// output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum HwCapability {
     /// GPIO can drive an output level or waveform.

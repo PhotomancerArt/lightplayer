@@ -66,6 +66,7 @@ fn duplicate_external_refs_share_def_entry_but_create_distinct_graph_nodes() {
         r#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "a": {
       "ref": "./shader.json"
@@ -112,6 +113,7 @@ fn missing_children_are_graph_nodes() {
         r#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "missing": {
       "ref": "./missing.json"

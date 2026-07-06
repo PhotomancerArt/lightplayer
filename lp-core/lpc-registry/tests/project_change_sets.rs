@@ -60,7 +60,8 @@ fn changed_registered_def_discovers_newly_referenced_file() {
         "/project.json",
         br#"
 {
-  "kind": "Project"
+  "kind": "Project",
+  "format": 1
 }
 "#,
     );
@@ -79,6 +80,7 @@ fn changed_registered_def_discovers_newly_referenced_file() {
         br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -110,6 +112,7 @@ fn missing_referenced_def_recovers_when_file_is_created() {
         br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -262,6 +265,7 @@ fn changing_project_child_ref_reports_node_use_definition_change() {
         br#"
 {
   "kind": "Project",
+  "format": 1,
   "name": "fyeah-sign",
   "nodes": {
     "output": {

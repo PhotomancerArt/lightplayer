@@ -17,6 +17,7 @@ fn snapshot_overlay_can_bootstrap_project_files() {
         br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "clock": {
       "ref": "./clock.json"

@@ -201,6 +201,7 @@ fn edit_e2e_server() -> LpServer {
             "project.json",
             r#"{
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "clock": { "ref": "./clock.json" },
     "pixels": { "ref": "./fixture.json" }

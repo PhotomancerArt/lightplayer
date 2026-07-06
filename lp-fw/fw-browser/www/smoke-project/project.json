@@ -1,5 +1,6 @@
 {
   "kind": "Project",
+  "format": 1,
   "name": "fw-browser smoke",
   "nodes": {
     "clock": {

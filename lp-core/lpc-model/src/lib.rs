@@ -57,6 +57,9 @@ pub mod sync;
 
 #[cfg(feature = "schema-gen")]
 mod schema_gen_smoke;
+
+#[cfg(feature = "schema-gen")]
+pub mod schema_gen;
 // --- Foundation re-exports ------------------------------------------------------------------
 
 pub use value::constraint;
@@ -105,13 +108,13 @@ pub use nodes::{
     FixtureDiagnosticMode, FixtureSamplingConfig, FixtureState, FixtureStateView, FluidDef,
     FluidDefView, FluidEmitter, FluidState, GlslOpts, GlslOptsView, InvocationSite, MappingConfig,
     MulMode, NodeDefParseError, OutputDef, OutputDefView, OutputDriverOptionsConfig,
-    OutputDriverOptionsConfigView, PathSpec, PlaylistDef, PlaylistDefView, PlaylistEntry,
-    PlaylistEntryView, PlaylistState, PlaylistStateView, ProjectDef, ProjectDefView, RingOrder,
-    ScalarHint, ScalarHintView, ShaderDef, ShaderDefView, ShaderHeaderGenError, ShaderMapKeyDef,
-    ShaderParamDef, ShaderParamDefView, ShaderSlotDef, ShaderSlotKind, ShaderSlotMappingDef,
-    ShaderSlotMappingKind, ShaderState, ShaderStateView, ShaderValueShapeRef, TextureDef,
-    TextureDefView, TextureFormat, TextureState, TextureStateView, generate_compute_shader_header,
-    resolve_artifact_specifier,
+    OutputDriverOptionsConfigView, PROJECT_FORMAT_VERSION, PathSpec, PlaylistDef, PlaylistDefView,
+    PlaylistEntry, PlaylistEntryView, PlaylistState, PlaylistStateView, ProjectDef, ProjectDefView,
+    ProjectFormatProbe, RingOrder, ScalarHint, ScalarHintView, ShaderDef, ShaderDefView,
+    ShaderHeaderGenError, ShaderMapKeyDef, ShaderParamDef, ShaderParamDefView, ShaderSlotDef,
+    ShaderSlotKind, ShaderSlotMappingDef, ShaderSlotMappingKind, ShaderState, ShaderStateView,
+    ShaderValueShapeRef, TextureDef, TextureDefView, TextureFormat, TextureState, TextureStateView,
+    generate_compute_shader_header, read_project_format_json, resolve_artifact_specifier,
 };
 pub use product::{
     ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d, ControlProduct,

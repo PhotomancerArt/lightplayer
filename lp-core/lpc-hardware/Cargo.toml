@@ -9,12 +9,15 @@ rust-version.workspace = true
 [features]
 default = ["std"]
 std = ["serde_json/std"]
+# JSON Schema derives for the authored board manifest types (host-side tooling)
+schema-gen = ["std", "dep:schemars"]
 
 [dependencies]
 lp-collection = { workspace = true, features = ["serde"] }
 lpc-model = { path = "../lpc-model", default-features = false }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
+schemars = { workspace = true, optional = true }
 
 [lints]
 workspace = true

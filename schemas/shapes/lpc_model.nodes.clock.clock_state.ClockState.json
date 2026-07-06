@@ -1,0 +1,47 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "seconds",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2605450937,
+              "meta": {},
+              "ty": "f32"
+            }
+          }
+        }
+      },
+      {
+        "name": "delta_seconds",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2605450937,
+              "meta": {},
+              "ty": "f32"
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}
