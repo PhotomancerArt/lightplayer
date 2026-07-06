@@ -3,8 +3,9 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, SlotPath, UiBindingEndpoint,
-    UiConfigSlot, UiNodeDirtyState, UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality,
-    UiSlotSourceState, UiSlotUnit, UiSlotValue,
+    UiConfigSlot, UiNodeDirtyState, UiSlotComposite, UiSlotEditorHint, UiSlotEnumComposite,
+    UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOptionality, UiSlotSourceState,
+    UiSlotUnit, UiSlotValue,
 };
 use lpa_studio_web_story_macros::story;
 
@@ -587,6 +588,157 @@ pub(crate) fn optional_record_included() -> Element {
             .with_optionality(UiSlotOptionality::included(true)),
             depth: 0,
             index: 0,
+        }
+    }
+}
+
+fn u32_map_slot(entries: &[(u32, u32)], suggested_key: &str) -> UiConfigSlot {
+    UiConfigSlot::record(
+        "ring_lamp_counts",
+        "Ring lamp counts",
+        entries
+            .iter()
+            .map(|(key, count)| {
+                UiConfigSlot::value(
+                    format!("ring_lamp_counts[{key}]"),
+                    key.to_string(),
+                    UiSlotValue::u32(*count),
+                )
+                .with_address(story_slot_address(&format!("ring_lamp_counts[{key}]")))
+                .with_state(UiSlotFieldState::editable())
+            })
+            .collect(),
+    )
+    .with_address(story_slot_address("ring_lamp_counts"))
+    .with_composite(UiSlotComposite::Map(UiSlotMapComposite {
+        key_kind: UiSlotMapKeyKind::U32,
+        suggested_key: suggested_key.to_string(),
+    }))
+    .with_state(UiSlotFieldState::editable())
+}
+
+#[story(
+    label = "Map Add Entry Open",
+    description = "An expanded map row with the add-entry key input open, prefilled with the next free index; entry rows carry remove affordances."
+)]
+pub(crate) fn map_add_entry_open() -> Element {
+    rsx! {
+        ConfigSlotRow {
+            slot: u32_map_slot(&[(0, 16), (1, 24)], "2"),
+            depth: 0,
+            index: 0,
+            initially_expanded: Some(true),
+            initially_adding: true,
+            on_action: move |_| {},
+        }
+    }
+}
+
+#[story(
+    label = "Map Added Entry Dirty",
+    description = "A freshly added map entry: the entry row shows dirty and the parent map rides the prefix join with the unsaved badge."
+)]
+pub(crate) fn map_added_entry_dirty() -> Element {
+    let mut slot = u32_map_slot(&[(0, 16), (1, 24)], "2");
+    slot.state = UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty);
+    if let lpa_studio_core::UiConfigSlotBody::Record(record) = &mut slot.body {
+        record.fields[1].state = UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty);
+    }
+    rsx! {
+        ConfigSlotRow {
+            slot,
+            depth: 0,
+            index: 0,
+            initially_expanded: Some(true),
+            on_action: move |_| {},
+        }
+    }
+}
+
+#[story(
+    label = "Map Removed Entry Parent Dirty",
+    description = "A removed map entry has no surviving row; the parent map row shows the structural edit as dirty via the prefix join."
+)]
+pub(crate) fn map_removed_entry_parent_dirty() -> Element {
+    let mut slot = u32_map_slot(&[(0, 16)], "1");
+    slot.state = UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty);
+    rsx! {
+        ConfigSlotRow {
+            slot,
+            depth: 0,
+            index: 0,
+            initially_expanded: Some(true),
+            on_action: move |_| {},
+        }
+    }
+}
+
+#[story(
+    label = "Option Toggle On And Off",
+    description = "Wired some/none toggles: on dispatches EnsurePresent at the interior some path, off dispatches RemoveValue at the option path."
+)]
+pub(crate) fn option_toggle_on_off() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:divide-y tw:divide-border-muted",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("brightness", "Brightness", UiSlotValue::u32(255))
+                    .with_address(story_slot_address("brightness"))
+                    .with_optionality(UiSlotOptionality::included(true))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 0,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::empty("gamma_correction", "Gamma correction")
+                    .with_address(story_slot_address("gamma_correction"))
+                    .with_optionality(UiSlotOptionality::excluded(true))
+                    .with_source(UiSlotSourceState::Unset)
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 1,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Enum Variant Switched",
+    description = "An enum row after a variant switch: the variant dropdown lists the declared idents verbatim, the row shows the pending structural edit, and the payload renders below."
+)]
+pub(crate) fn enum_variant_switched() -> Element {
+    rsx! {
+        ConfigSlotRow {
+            slot: UiConfigSlot::record(
+                "mapping",
+                "Mapping",
+                vec![
+                    UiConfigSlot::record(
+                        "mapping.PathPoints",
+                        "PathPoints",
+                        vec![
+                            u32_map_slot(&[], "0"),
+                        ],
+                    )
+                    .with_address(story_slot_address("mapping.PathPoints"))
+                    .with_state(UiSlotFieldState::editable()),
+                ],
+            )
+            .with_address(story_slot_address("mapping"))
+            .with_composite(UiSlotComposite::Enum(UiSlotEnumComposite {
+                active: "PathPoints".to_string(),
+                variants: vec![
+                    "Unset".to_string(),
+                    "PathPoints".to_string(),
+                    "SvgPath".to_string(),
+                ],
+            }))
+            .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
+            depth: 0,
+            index: 0,
+            initially_expanded: Some(true),
+            on_action: move |_| {},
         }
     }
 }

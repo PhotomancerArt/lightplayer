@@ -11,6 +11,10 @@ pub fn SlotRecordEditor(
     record: UiSlotRecord,
     #[props(default = 0)] depth: usize,
     #[props(default = false)] separated: bool,
+    /// True when these rows are map entries: each row gets the per-entry
+    /// remove affordance (`RemoveValue` at the entry path).
+    #[props(default = false)]
+    removable_entries: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let class = if separated {
@@ -27,6 +31,7 @@ pub fn SlotRecordEditor(
                     slot,
                     depth,
                     index,
+                    removable: removable_entries,
                     on_action,
                 }
             }

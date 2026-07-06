@@ -391,7 +391,7 @@ fn dropdown_lp_value(kind: Option<&UiSlotValueKind>, key: &str) -> Option<LpValu
     }
 }
 
-fn dropdown_field_class(state: &UiSlotFieldState) -> &'static str {
+pub(crate) fn dropdown_field_class(state: &UiSlotFieldState) -> &'static str {
     if state.invalid.is_some() {
         "tw:inline-flex tw:min-h-7 tw:min-w-0 tw:max-w-full tw:cursor-pointer tw:items-center tw:rounded-xs tw:border tw:border-status-error-border tw:bg-status-error-bg tw:px-2 tw:py-1 tw:text-sm tw:font-medium tw:text-status-error-foreground"
     } else {

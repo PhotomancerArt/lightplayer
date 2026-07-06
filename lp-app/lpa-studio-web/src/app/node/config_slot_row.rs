@@ -3,12 +3,12 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     ProjectSlotAddress, UiAction, UiConfigSlot, UiConfigSlotBody, UiNodeDirtyState,
-    UiSlotFieldState, UiSlotOptionality,
+    UiSlotComposite, UiSlotFieldState,
 };
 
 use crate::app::node::{
-    SlotDetailButton, SlotDetailRevert, SlotRecordEditor, SlotValueEditor, primary_affordance,
-    slot_row_class,
+    EnumVariantField, MapAddEntry, MapEntryRemoveButton, OptionToggleField, SlotDetailButton,
+    SlotDetailRevert, SlotRecordEditor, SlotValueEditor, primary_affordance, slot_row_class,
 };
 use crate::base::{StudioIcon, StudioIconName};
 
@@ -31,6 +31,13 @@ pub fn ConfigSlotRow(
     index: usize,
     #[props(default = false)] initially_open: bool,
     #[props(default = None)] initially_expanded: Option<bool>,
+    /// True when this row is a removable map entry: renders the per-entry
+    /// remove affordance (set by the parent map's record editor).
+    #[props(default = false)]
+    removable: bool,
+    /// Open the map add-entry key input on first render (stories).
+    #[props(default = false)]
+    initially_adding: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let child_record = match &slot.body {
@@ -51,6 +58,19 @@ pub fn ConfigSlotRow(
         _ => slot_row_class(primary, index),
     };
     let indent = depth * 14;
+    // Value edits on a present option row target the interior `some` slot;
+    // the option's own address is the some/none toggle's remove target.
+    let body_address = match &slot.optionality {
+        Some(optionality) if optionality.included => slot
+            .address
+            .as_ref()
+            .and_then(|address| address.child_field("some")),
+        _ => slot.address.clone(),
+    };
+    let entries_removable = matches!(slot.composite, Some(UiSlotComposite::Map(_)));
+    let remove_entry = (removable && slot.state.editable)
+        .then(|| slot.address.clone().zip(on_action))
+        .flatten();
 
     rsx! {
         div { class: "tw:grid tw:min-w-0",
@@ -84,14 +104,23 @@ pub fn ConfigSlotRow(
                         UnsavedBadge {}
                     }
                     if let Some(optionality) = slot.optionality {
-                        OptionalSlotToggle { optionality }
+                        OptionToggleField {
+                            optionality,
+                            address: slot.address.clone(),
+                            on_action,
+                        }
                     }
                     SlotBodyPreview {
                         body: slot.body.clone(),
                         state: slot.state.clone(),
                         expanded: expanded(),
-                        address: slot.address.clone(),
+                        address: body_address,
+                        composite: slot.composite.clone(),
+                        initially_adding,
                         on_action,
+                    }
+                    if let Some((address, handler)) = remove_entry {
+                        MapEntryRemoveButton { address, on_action: handler }
                     }
                 }
                 SlotDetailButton {
@@ -107,6 +136,7 @@ pub fn ConfigSlotRow(
                         record,
                         depth: depth + 1,
                         separated: true,
+                        removable_entries: entries_removable,
                         on_action,
                     }
                 }
@@ -114,31 +144,6 @@ pub fn ConfigSlotRow(
                     AssetSlotEditor { asset }
                 }
             }
-        }
-    }
-}
-
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn OptionalSlotToggle(optionality: UiSlotOptionality) -> Element {
-    let title = if optionality.included {
-        "Optional value enabled"
-    } else {
-        "Optional value disabled"
-    };
-    rsx! {
-        label { class: "ux-slot-optional-toggle", title,
-            input {
-                class: "ux-slot-optional-toggle-input",
-                r#type: "checkbox",
-                checked: optionality.included,
-                disabled: !optionality.can_toggle,
-                aria_label: title,
-            }
-            span { class: "ux-slot-optional-toggle-track",
-                span { class: "ux-slot-optional-toggle-thumb" }
-            }
-            span { class: "ux-slot-optional-toggle-label", "enabled" }
         }
     }
 }
@@ -183,6 +188,8 @@ fn SlotBodyPreview(
     state: UiSlotFieldState,
     expanded: bool,
     #[props(default = None)] address: Option<ProjectSlotAddress>,
+    #[props(default = None)] composite: Option<UiSlotComposite>,
+    #[props(default = false)] initially_adding: bool,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     match body {
@@ -192,19 +199,46 @@ fn SlotBodyPreview(
         UiConfigSlotBody::Value(value) => rsx! {
             SlotValueEditor { value, state, address, on_action }
         },
-        UiConfigSlotBody::Record(record) => {
-            let label = if record.fields.len() == 1 {
-                "1 field".to_string()
-            } else {
-                format!("{} fields", record.fields.len())
-            };
-            rsx! {
-                span { class: record_summary_class(expanded), "{label}" }
+        UiConfigSlotBody::Record(record) => match composite {
+            Some(UiSlotComposite::Enum(composite)) => rsx! {
+                EnumVariantField { composite, state, address, on_action }
+            },
+            Some(UiSlotComposite::Map(composite)) => {
+                let label = summary_label(record.fields.len(), "entry", "entries");
+                // The add affordance shows alongside the expanded entries;
+                // an empty map has no rows to expand, so it shows directly.
+                let adding = expanded || record.fields.is_empty();
+                rsx! {
+                    span { class: record_summary_class(expanded), "{label}" }
+                    if adding {
+                        MapAddEntry {
+                            composite,
+                            state,
+                            address,
+                            initially_open: initially_adding,
+                            on_action,
+                        }
+                    }
+                }
             }
-        }
+            None => {
+                let label = summary_label(record.fields.len(), "field", "fields");
+                rsx! {
+                    span { class: record_summary_class(expanded), "{label}" }
+                }
+            }
+        },
         UiConfigSlotBody::Asset(asset) => rsx! {
             code { class: "tw:min-w-0 tw:truncate tw:font-mono tw:text-xs tw:text-muted-foreground", "{asset.source}" }
         },
+    }
+}
+
+fn summary_label(count: usize, singular: &str, plural: &str) -> String {
+    if count == 1 {
+        format!("1 {singular}")
+    } else {
+        format!("{count} {plural}")
     }
 }
 

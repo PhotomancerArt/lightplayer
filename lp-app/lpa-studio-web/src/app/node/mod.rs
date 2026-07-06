@@ -21,6 +21,7 @@ mod produced_values;
 mod slot_detail_button;
 mod slot_edit_actions;
 mod slot_fields;
+mod slot_gesture_fields;
 mod slot_issue_list;
 mod slot_matrix_field;
 mod slot_record_editor;
@@ -51,6 +52,9 @@ pub(crate) use slot_detail_button::{
 pub use slot_fields::{
     BoolSlotField, DropdownSlotField, FloatSlotField, IntSlotField, SliderSlotField,
     StringSlotField, UIntSlotField, XySlotField,
+};
+pub use slot_gesture_fields::{
+    EnumVariantField, MapAddEntry, MapEntryRemoveButton, OptionToggleField,
 };
 pub use slot_issue_list::SlotIssueList;
 pub use slot_matrix_field::MatrixSlotField;

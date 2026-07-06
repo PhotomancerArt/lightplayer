@@ -24,3 +24,20 @@ pub(crate) fn slot_revert_action(address: ProjectSlotAddress) -> UiAction {
         SlotEditOp::Revert { address },
     )
 }
+
+/// Build the structural add gesture (map entry add, option on, enum variant
+/// switch): the server constructs the defaults at `address` (M3 D1).
+pub(crate) fn slot_ensure_present_action(address: ProjectSlotAddress) -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        SlotEditOp::EnsurePresent { address },
+    )
+}
+
+/// Build the structural remove gesture (map entry remove, option off).
+pub(crate) fn slot_remove_value_action(address: ProjectSlotAddress) -> UiAction {
+    UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        SlotEditOp::RemoveValue { address },
+    )
+}

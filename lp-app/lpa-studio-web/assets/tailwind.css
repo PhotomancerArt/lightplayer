@@ -212,6 +212,9 @@
   .tw\:h-screen {
     height: 100vh;
   }
+  .tw\:max-h-44 {
+    max-height: calc(var(--tw-spacing) * 44);
+  }
   .tw\:max-h-48 {
     max-height: calc(var(--tw-spacing) * 48);
   }
@@ -257,8 +260,14 @@
   .tw\:min-h-\[480px\] {
     min-height: 480px;
   }
+  .tw\:min-h-\[560px\] {
+    min-height: 560px;
+  }
   .tw\:min-h-\[620px\] {
     min-height: 620px;
+  }
+  .tw\:min-h-\[640px\] {
+    min-height: 640px;
   }
   .tw\:min-h-full {
     min-height: 100%;
@@ -289,6 +298,9 @@
   }
   .tw\:w-16 {
     width: calc(var(--tw-spacing) * 16);
+  }
+  .tw\:w-24 {
+    width: calc(var(--tw-spacing) * 24);
   }
   .tw\:w-\[15px\] {
     width: 15px;
