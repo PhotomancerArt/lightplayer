@@ -9,6 +9,7 @@ pub mod node_controller;
 pub mod project_node_address;
 pub mod project_node_target;
 
+pub(in crate::app::project) use node_controller::root_slot_key;
 pub use node_controller::{NodeController, NodeControllerState, ProjectProductSubscriptionIntent};
 pub use project_node_address::ProjectNodeAddress;
 pub use project_node_target::ProjectNodeTarget;

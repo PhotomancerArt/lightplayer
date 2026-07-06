@@ -7,21 +7,23 @@ use lpc_model::slot::SlotPersistence;
 
 use crate::{PendingEdit, PendingEditPhase};
 
-/// Counts of slots that need a dirty affordance, aggregated bottom-up.
+/// Counts of edits that need a dirty affordance, aggregated bottom-up.
 ///
 /// Source of truth: the same `SlotEditJoin` the per-field dirty affordances
-/// are built from, classified per slot by [`DirtySummary::for_slot`] so the
-/// bubbled counts always agree with the field states. Each dirty slot lands
-/// in exactly one bucket:
+/// are built from. Counting is per **edit entry** (buffer/overlay address),
+/// never per slot row — `SlotEditJoin::dirty_summary_for_node` is the single
+/// counting rule — so an edit at a path with no surviving row (a removed map
+/// entry) still counts exactly once, and the prefix-dirty display state on
+/// ancestor composites never double-counts. Each entry, classified by
+/// [`DirtySummary::for_slot`], lands in exactly one bucket:
 ///
 /// - a buffered `Failed` edit → [`failed`](Self::failed) (the overlay may not
 ///   hold the edit, but the slot still needs attention);
 /// - any other buffered edit, or an overlay-mirror edit → persistence bucket
 ///   ([`persisted`](Self::persisted) / [`transient`](Self::transient), from
-///   the slot's `policy.persistence`).
+///   the shape-resolved persistence governing the entry's path).
 ///
-/// Summaries merge upward: slot subtree → node (own slots + child nodes) →
-/// project.
+/// Summaries merge upward: node (own edits + child nodes) → project.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct DirtySummary {
     /// Dirty slots whose edits are written back to def artifacts on save.
@@ -59,7 +61,7 @@ impl DirtySummary {
         }
     }
 
-    /// Classify one slot's edit-join state (mirrors the `UiSlotFieldState`
+    /// Classify one edit entry's join state (mirrors the `UiSlotFieldState`
     /// join order: buffered edit first, then the overlay mirror, else clean).
     pub(in crate::app::project) fn for_slot(
         pending: Option<&PendingEdit>,
@@ -143,7 +145,9 @@ mod tests {
     #[test]
     fn failed_edit_counts_as_failed_regardless_of_persistence_or_overlay() {
         let edit = PendingEdit {
-            value: LpValue::F32(1.0),
+            op: crate::PendingEditOp::SetValue {
+                value: LpValue::F32(1.0),
+            },
             phase: PendingEditPhase::Failed {
                 reason: "rejected".to_string(),
             },

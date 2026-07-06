@@ -28,13 +28,13 @@ pub use app::node::{
 };
 pub use app::project::{
     DirtySummary, LoadedProjectChoice, NodeController, NodeControllerState, PendingEdit,
-    PendingEditPhase, ProjectConnectResult, ProjectController, ProjectEditRun, ProjectEditorOp,
-    ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress,
-    ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTarget, ProjectNodeTreeItem,
-    ProjectNodeTreeView, ProjectOp, ProjectProductSubscriptionIntent, ProjectRefreshOutcome,
-    ProjectRuntimeSummary, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState,
-    ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotController,
-    SlotControllerState, SlotEditOp, SlotKind, UiAffordance,
+    PendingEditOp, PendingEditPhase, ProjectConnectResult, ProjectController, ProjectEditRun,
+    ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
+    ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTarget,
+    ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp, ProjectProductSubscriptionIntent,
+    ProjectRefreshOutcome, ProjectRuntimeSummary, ProjectSlotAddress, ProjectSlotRoot,
+    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
+    ProjectSyncSummary, SlotController, SlotControllerState, SlotEditOp, SlotKind, UiAffordance,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerController, ServerFailureKind, ServerOp,

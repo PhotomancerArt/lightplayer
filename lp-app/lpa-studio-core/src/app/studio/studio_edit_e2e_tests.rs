@@ -17,7 +17,7 @@ use std::task::{Context, Poll, Wake, Waker};
 
 use lpa_client::ClientIo;
 use lpa_server::{Graphics, LpGraphics, LpServer};
-use lpc_model::{AsLpPath, LpValue};
+use lpc_model::{AsLpPath, LpValue, SlotPath};
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_shared::transport::ServerTransport;
 use lpc_wire::{
@@ -292,6 +292,117 @@ fn set_back_to_base_normalizes_to_clean_without_overlay_fetch() {
     );
 }
 
+#[test]
+fn composite_gesture_cycle_ends_clean_end_to_end() {
+    // The M3 composite gesture cycle on the fixture `mapping` slot, driven
+    // through the same actor command path the web shell uses: switch the
+    // enum variant (EnsurePresent mapping.PathPoints), add a map entry
+    // (EnsurePresent mapping.PathPoints.paths[0]), remove it again
+    // (RemoveValue — the server normalizes the add-then-remove away, D2),
+    // then revert the variant switch — the project must end clean.
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let mapping = find_slot(&snapshot, "mapping");
+    assert_eq!(mapping.state.dirty, UiNodeDirtyState::Clean);
+    assert_eq!(mapping.detail.as_deref(), Some("variant Unset"));
+    let mapping_address = mapping
+        .address
+        .clone()
+        .expect("mapping slot carries an address");
+    assert_eq!(editor_dirty(&snapshot), (0, 0));
+
+    // Switch the variant. The overlay edit is stored at a path with no row
+    // yet (the base variant is still Unset until the refresh applies), so
+    // the enum row reads dirty through the prefix join immediately.
+    let variant_address = child_address(&mapping_address, "mapping.PathPoints");
+    handle
+        .tx
+        .send(ensure_present_action(variant_address.clone()));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("variant switch emits a snapshot");
+    let mapping = find_slot(&snapshot, "mapping");
+    assert_eq!(
+        mapping.state.dirty,
+        UiNodeDirtyState::Dirty,
+        "the acked variant switch surfaces on the enum row before any refresh"
+    );
+    assert_eq!(mapping.detail.as_deref(), Some("variant Unset"));
+    assert_eq!(editor_dirty(&snapshot), (1, 0));
+
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("refresh emits a snapshot");
+    let mapping = find_slot(&snapshot, "mapping");
+    assert_eq!(mapping.detail.as_deref(), Some("variant PathPoints"));
+    assert_eq!(mapping.state.dirty, UiNodeDirtyState::Dirty);
+
+    // Add a path entry with server-built defaults, then pull the new row.
+    let entry_address = child_address(&mapping_address, "mapping.PathPoints.paths[0]");
+    handle.tx.send(ensure_present_action(entry_address.clone()));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view
+        .try_recv()
+        .expect("entry add + refresh emit a snapshot");
+    let entry = find_slot(&snapshot, "mapping.PathPoints.paths[0]");
+    assert_eq!(
+        entry.state.dirty,
+        UiNodeDirtyState::Dirty,
+        "the added entry row exists with a server-built default and reads dirty"
+    );
+    assert_eq!(editor_dirty(&snapshot), (2, 0));
+
+    // Remove it again: add-then-remove cancels on the server (D2), so the
+    // entry edit vanishes rather than lingering as a phantom removal.
+    handle.tx.send(remove_value_action(entry_address));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view
+        .try_recv()
+        .expect("entry remove + refresh emit a snapshot");
+    assert!(
+        try_find_slot(&snapshot, "mapping.PathPoints.paths[0]").is_none(),
+        "the removed entry has no surviving row"
+    );
+    assert_eq!(
+        editor_dirty(&snapshot),
+        (1, 0),
+        "only the variant switch remains"
+    );
+
+    // Revert the variant switch: the overlay empties and the project is
+    // clean again, back on the authored Unset variant.
+    handle.tx.send(revert_action(variant_address));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("revert + refresh emit a snapshot");
+    let mapping = find_slot(&snapshot, "mapping");
+    assert_eq!(mapping.state.dirty, UiNodeDirtyState::Clean);
+    assert_eq!(mapping.detail.as_deref(), Some("variant Unset"));
+    assert_eq!(
+        editor_dirty(&snapshot),
+        (0, 0),
+        "the gesture cycle ends clean"
+    );
+}
+
 // --- Harness ---------------------------------------------------------------
 
 const PROJECT_DIR: &str = "/projects/edit-e2e";
@@ -392,6 +503,29 @@ fn revert_action(address: crate::ProjectSlotAddress) -> StudioCommand {
     ))
 }
 
+fn ensure_present_action(address: crate::ProjectSlotAddress) -> StudioCommand {
+    StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        SlotEditOp::EnsurePresent { address },
+    ))
+}
+
+fn remove_value_action(address: crate::ProjectSlotAddress) -> StudioCommand {
+    StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        SlotEditOp::RemoveValue { address },
+    ))
+}
+
+/// An address under the same node and slot root as `base`, at `path`.
+fn child_address(base: &crate::ProjectSlotAddress, path: &str) -> crate::ProjectSlotAddress {
+    crate::ProjectSlotAddress::new(
+        base.node.clone(),
+        base.root.clone(),
+        SlotPath::parse(path).unwrap(),
+    )
+}
+
 fn count_mutations(sent: &Rc<RefCell<Vec<ClientMessage>>>) -> usize {
     sent.borrow()
         .iter()
@@ -436,6 +570,11 @@ fn editor_dirty(view: &UiStudioView) -> (usize, usize) {
 
 /// Find a config slot anywhere in the editor DTO tree by its address path.
 fn find_slot<'a>(view: &'a UiStudioView, path: &str) -> &'a UiConfigSlot {
+    try_find_slot(view, path).unwrap_or_else(|| panic!("config slot with path {path} should exist"))
+}
+
+/// Like [`find_slot`], but `None` when no row carries the address path.
+fn try_find_slot<'a>(view: &'a UiStudioView, path: &str) -> Option<&'a UiConfigSlot> {
     let editor = view
         .panes
         .iter()
@@ -478,19 +617,15 @@ fn find_slot<'a>(view: &'a UiStudioView, path: &str) -> &'a UiConfigSlot {
         })
     }
 
-    editor
-        .nodes
-        .iter()
-        .find_map(|node| {
-            node.tabs
-                .iter()
-                .find_map(|tab| match &tab.body {
-                    UiNodeTabBody::Sections(sections) => in_sections(sections, path),
-                    _ => None,
-                })
-                .or_else(|| in_children(&node.children, path))
-        })
-        .unwrap_or_else(|| panic!("config slot with path {path} should exist"))
+    editor.nodes.iter().find_map(|node| {
+        node.tabs
+            .iter()
+            .find_map(|tab| match &tab.body {
+                UiNodeTabBody::Sections(sections) => in_sections(sections, path),
+                _ => None,
+            })
+            .or_else(|| in_children(&node.children, path))
+    })
 }
 
 fn slot_value_display(slot: &UiConfigSlot) -> &str {

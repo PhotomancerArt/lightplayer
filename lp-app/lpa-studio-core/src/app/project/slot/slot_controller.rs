@@ -8,13 +8,13 @@ use lpc_model::{
 };
 
 use crate::{
-    DirtySummary, PendingEditPhase, ProjectSlotAddress, ProjectSlotRoot, UiAssetEditorKind,
-    UiConfigSlot, UiConfigSlotBody, UiNodeDirtyState, UiProducedProduct, UiProducedValue,
-    UiProductRef, UiSlotAsset, UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality, UiSlotRecord,
+    PendingEditPhase, ProjectSlotAddress, ProjectSlotRoot, UiAssetEditorKind, UiConfigSlot,
+    UiConfigSlotBody, UiNodeDirtyState, UiProducedProduct, UiProducedValue, UiProductRef,
+    UiSlotAsset, UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality, UiSlotRecord,
     UiSlotSourceState, UiSlotUnit, UiSlotValue, app::project::format_slot_map_key,
 };
 
-use super::SlotEditJoin;
+use super::{PrefixEditState, SlotEditJoin};
 
 /// Compact structural family for a project slot controller.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -349,23 +349,6 @@ impl SlotController {
             return;
         }
         config_slots.push(self.ui_config_slot(edits));
-    }
-
-    /// Aggregate dirty-edit summary for this slot and its descendants,
-    /// classified per slot by [`DirtySummary::for_slot`] with each slot's own
-    /// `policy.persistence`. Uses the same [`SlotEditJoin`] the DTO build
-    /// consults, so the summary always agrees with the per-field dirty
-    /// affordances.
-    pub(in crate::app::project) fn dirty_summary(&self, edits: &SlotEditJoin<'_>) -> DirtySummary {
-        let mut summary = DirtySummary::for_slot(
-            edits.pending(&self.address),
-            edits.overlay_dirty(&self.address),
-            self.policy.persistence,
-        );
-        for child in &self.children {
-            summary += child.dirty_summary(edits);
-        }
-        summary
     }
 
     /// Find a mutable descendant slot controller by address.
@@ -835,7 +818,11 @@ impl SlotController {
         state = state.with_live(self.policy.persistence == SlotPersistence::Transient);
 
         // Join order: edit buffer (Saving/Error + invalid reason), then the
-        // overlay mirror (Dirty), else Clean.
+        // overlay mirror (Dirty), then — for composite slots only — the
+        // prefix-aware join over edits strictly under this path (D4), else
+        // Clean. The prefix join is what surfaces a removed map entry (its
+        // row is gone; the parent map reads Dirty) and a rejected gesture on
+        // a not-yet-existing path (the dispatching composite reads Error).
         if let Some(edit) = edits.pending(&self.address) {
             state = match &edit.phase {
                 PendingEditPhase::Pending | PendingEditPhase::InFlight { .. } => {
@@ -847,6 +834,16 @@ impl SlotController {
             };
         } else if edits.overlay_dirty(&self.address) {
             state = state.with_dirty(UiNodeDirtyState::Dirty);
+        } else if self.is_composite()
+            && let Some(under) = edits.state_under(&self.address)
+        {
+            state = match under {
+                PrefixEditState::Failed { reason } => state
+                    .with_dirty(UiNodeDirtyState::Error)
+                    .with_invalid(reason),
+                PrefixEditState::Saving => state.with_dirty(UiNodeDirtyState::Saving),
+                PrefixEditState::Dirty => state.with_dirty(UiNodeDirtyState::Dirty),
+            };
         }
 
         if state.invalid.is_none()
@@ -855,6 +852,15 @@ impl SlotController {
             state = state.with_invalid(issue.clone());
         }
         state
+    }
+
+    /// True for slot kinds whose dirty state includes descendant edit paths
+    /// through the prefix-aware join. Value leaves stay exact-match only.
+    fn is_composite(&self) -> bool {
+        matches!(
+            self.kind,
+            SlotKind::Record | SlotKind::Map | SlotKind::Enum | SlotKind::Option
+        )
     }
 
     fn ui_detail(&self) -> Option<String> {

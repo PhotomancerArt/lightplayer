@@ -7,22 +7,24 @@ use lpa_client::{CancelSignal, ProgressDeadline};
 use crate::app::project::slot::SlotEditJoin;
 use crate::core::notice::UiNotices;
 use crate::{
-    Controller, ControllerId, DirtySummary, LoadedProjectChoice, PendingEdit, PendingEditPhase,
-    ProgressState, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
-    ProjectInventorySummary, ProjectNodeAddress, ProjectNodeTreeItem, ProjectNodeTreeView,
-    ProjectOp, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState, ProjectSync,
-    ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp, StudioOverlayMutation,
-    StudioProjectReadOutcome, StudioServerClient, UiAction, UiError, UiIssue, UiLogEntry,
-    UiLogLevel, UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView, UiProductRef, UiResult,
-    UiStatus, UiViewContent, UxUpdateSink,
+    Controller, ControllerId, DirtySummary, LoadedProjectChoice, PendingEdit, PendingEditOp,
+    PendingEditPhase, ProgressState, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget,
+    ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeTreeItem,
+    ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot,
+    ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp,
+    StudioOverlayMutation, StudioProjectReadOutcome, StudioServerClient, UiAction, UiError,
+    UiIssue, UiLogEntry, UiLogLevel, UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView,
+    UiProductRef, UiResult, UiStatus, UiViewContent, UxUpdateSink,
 };
+use lpc_model::slot::SlotPersistence;
 use lpc_model::{
-    ArtifactLocation, LpValue, MutationCmd, MutationCmdBatch, MutationCmdId, MutationCmdStatus,
-    MutationOp, MutationRejection, NodeId, SlotEdit, TreePath,
+    ArtifactLocation, MutationCmd, MutationCmdBatch, MutationCmdId, MutationCmdStatus, MutationOp,
+    MutationRejection, NodeId, SlotEdit, SlotPolicy, SlotShapeId, SlotShapeLookup,
+    SlotShapeRegistry, TreePath, resolve_slot_policy,
 };
 use lpc_view::ProjectView;
 
-use super::{NodeController, ProjectProductSubscriptionIntent};
+use super::{NodeController, ProjectProductSubscriptionIntent, node::root_slot_key};
 
 /// Project-level Studio controller and synthetic root for node controllers.
 ///
@@ -42,6 +44,13 @@ pub struct ProjectController {
     /// connect-time inventory read. Wire mutations target
     /// `(ArtifactLocation, SlotPath)`, so slot edits resolve through this map.
     def_artifacts: BTreeMap<NodeId, ArtifactLocation>,
+    /// Shape registry retained from the last applied project view, alongside
+    /// the root-key → shape-id map, so edit-entry persistence can be
+    /// classified by the shape-only policy walk even for paths with no
+    /// surviving slot row (removed map entries).
+    slot_shapes: SlotShapeRegistry,
+    /// `node.{id}.{root}` → root shape id from the last applied view.
+    root_shape_ids: BTreeMap<String, SlotShapeId>,
     /// Monotonic correlation-id source for overlay mutation commands.
     next_mutation_cmd_id: u64,
 }
@@ -58,6 +67,8 @@ impl ProjectController {
             root_nodes: Vec::new(),
             edit_buffer: BTreeMap::new(),
             def_artifacts: BTreeMap::new(),
+            slot_shapes: SlotShapeRegistry::default(),
+            root_shape_ids: BTreeMap::new(),
             next_mutation_cmd_id: 1,
         }
     }
@@ -97,10 +108,11 @@ impl ProjectController {
             .collect()
     }
 
-    /// Project-level aggregate [`DirtySummary`], derived by walking the slot
-    /// controllers with the same [`SlotEditJoin`] the DTOs consult — one
-    /// source of truth for field affordances and bubbled summaries. The DTO
-    /// build computes the same numbers in its own walk
+    /// Project-level aggregate [`DirtySummary`], derived per node from the
+    /// same [`SlotEditJoin`] the DTOs consult — one source of truth for field
+    /// affordances and bubbled summaries, counted per edit entry
+    /// (`SlotEditJoin::dirty_summary_for_node`). The DTO build computes the
+    /// same numbers in its own walk
     /// ([`NodeController::ui_node_with_product_previews`]); this entry point
     /// serves callers that need only the aggregate.
     pub fn dirty_summary(&self) -> DirtySummary {
@@ -128,7 +140,9 @@ impl ProjectController {
     /// Build the per-snapshot edit-state join: the local edit buffer plus the
     /// overlay mirror's pending edits, reverse-mapped from
     /// `(artifact, path)` to slot addresses through the def-artifact map (an
-    /// artifact shared by several node uses marks each of them dirty).
+    /// artifact shared by several node uses marks each of them dirty), plus
+    /// each entry's persistence classification for the join's per-entry
+    /// [`DirtySummary`] counting.
     fn slot_edit_join(&self) -> SlotEditJoin<'_> {
         let mut overlay = BTreeMap::new();
         if let Some(sync) = &self.sync {
@@ -149,7 +163,32 @@ impl ProjectController {
                 }
             }
         }
-        SlotEditJoin::new(&self.edit_buffer, overlay)
+        let persistence = self
+            .edit_buffer
+            .keys()
+            .chain(overlay.keys())
+            .map(|address| (address.clone(), self.resolve_edit_persistence(address)))
+            .collect();
+        SlotEditJoin::new(&self.edit_buffer, overlay, persistence)
+    }
+
+    /// Classify the persistence governing an edit entry's path through the
+    /// retained shapes (`lpc_model::resolve_slot_policy`). The walk is
+    /// shape-only, so it classifies paths with no surviving slot row —
+    /// removed map entries — exactly like paths that still have data.
+    /// Unresolvable entries (unknown node/shape/path) classify as the default
+    /// policy's bucket (persisted).
+    fn resolve_edit_persistence(&self, address: &ProjectSlotAddress) -> SlotPersistence {
+        self.node(&address.node)
+            .and_then(|node| {
+                let key = root_slot_key(node.target().node_id, address.root.name());
+                let shape = self
+                    .slot_shapes
+                    .get_shape(*self.root_shape_ids.get(&key)?)?;
+                let policy = resolve_slot_policy(shape, &self.slot_shapes, &address.path)?;
+                Some(policy.persistence)
+            })
+            .unwrap_or(SlotPolicy::default().persistence)
     }
 
     /// Reverse index from def artifact to the node addresses currently using
@@ -199,6 +238,11 @@ impl ProjectController {
     /// through [`Self::apply_synced_project_view`] with the synced mirror; tests
     /// call it directly with a fixture view.
     pub fn apply_project_view(&mut self, view: &ProjectView) -> Result<(), UiError> {
+        // Retain the view's shapes for edit-entry persistence classification
+        // (see `resolve_edit_persistence`), so both the production sync path
+        // and fixture-view tests classify identically.
+        self.slot_shapes = view.slots.registry.clone();
+        self.root_shape_ids = view.slots.root_shapes.clone();
         reconcile_root_nodes(&mut self.root_nodes, view);
         if let Some(target) = self.active_editor_target.clone() {
             self.focus_editor_target(&target);
@@ -820,6 +864,8 @@ impl ProjectController {
         self.root_nodes.clear();
         self.edit_buffer.clear();
         self.def_artifacts.clear();
+        self.slot_shapes = SlotShapeRegistry::default();
+        self.root_shape_ids.clear();
     }
 
     /// Install the runtime-node-id → def-artifact map.
@@ -871,8 +917,37 @@ impl ProjectController {
         let handle_id = self.ready_handle_id()?;
         match op {
             SlotEditOp::SetValue { address, value } => {
-                self.apply_set_value(server, handle_id, address, value)
-                    .await
+                let edit = SlotEdit::assign_value(address.path.clone(), value.clone());
+                self.stage_and_send_edit(
+                    server,
+                    handle_id,
+                    address,
+                    PendingEdit::pending(value),
+                    edit,
+                )
+                .await
+            }
+            SlotEditOp::EnsurePresent { address } => {
+                let edit = SlotEdit::ensure_present(address.path.clone());
+                self.stage_and_send_edit(
+                    server,
+                    handle_id,
+                    address,
+                    PendingEdit::pending_op(PendingEditOp::EnsurePresent),
+                    edit,
+                )
+                .await
+            }
+            SlotEditOp::RemoveValue { address } => {
+                let edit = SlotEdit::remove(address.path.clone());
+                self.stage_and_send_edit(
+                    server,
+                    handle_id,
+                    address,
+                    PendingEdit::pending_op(PendingEditOp::RemoveValue),
+                    edit,
+                )
+                .await
             }
             SlotEditOp::Revert { address } => self.apply_revert(server, handle_id, address).await,
         }
@@ -940,17 +1015,24 @@ impl ProjectController {
         })
     }
 
-    async fn apply_set_value(
+    /// Shared execution path for `SetValue` and the structural gestures
+    /// (`EnsurePresent`/`RemoveValue`): stage `staged` in the edit buffer,
+    /// send `edit` as a one-command `PutSlotEdit` batch, and correlate the
+    /// ack through the [`PendingEdit`] state machine. Rejections park the
+    /// staged entry as `Failed` at the op's address; for gestures on
+    /// not-yet-existing paths (no surviving row) the failure surfaces on the
+    /// dispatching parent composite through the prefix-aware join.
+    async fn stage_and_send_edit(
         &mut self,
         server: &mut StudioServerClient,
         handle_id: u32,
         address: ProjectSlotAddress,
-        value: LpValue,
+        staged: PendingEdit,
+        edit: SlotEdit,
     ) -> Result<ProjectEditRun, UiError> {
-        // (field input) → Pending: stage the value so DTOs shadow it (and a
-        // stale Failed entry from an earlier attempt is replaced).
-        self.edit_buffer
-            .insert(address.clone(), PendingEdit::pending(value.clone()));
+        // (field input / gesture) → Pending: stage the op so DTOs reflect it
+        // (and a stale Failed entry from an earlier attempt is replaced).
+        self.edit_buffer.insert(address.clone(), staged);
 
         let artifact = match self.resolve_def_artifact(&address) {
             Ok(artifact) => artifact,
@@ -970,10 +1052,7 @@ impl ProjectController {
         }
         let batch = MutationCmdBatch::new(vec![MutationCmd {
             id: cmd_id,
-            mutation: MutationOp::PutSlotEdit {
-                artifact,
-                edit: SlotEdit::assign_value(address.path.clone(), value),
-            },
+            mutation: MutationOp::PutSlotEdit { artifact, edit },
         }]);
         let mutation = match server
             .project_overlay_mutate(handle_id, batch.clone())
@@ -2648,6 +2727,17 @@ mod tests {
     }
 
     fn install_structural_config_slots(view: &mut ProjectView, node_id: u32, revision: Revision) {
+        install_structural_config_slots_with_entries(view, node_id, revision, &["a", "b"]);
+    }
+
+    /// Like [`install_structural_config_slots`], with explicit `entries` map
+    /// keys so tests can apply views where an entry has been removed.
+    fn install_structural_config_slots_with_entries(
+        view: &mut ProjectView,
+        node_id: u32,
+        revision: Revision,
+        entry_keys: &[&str],
+    ) {
         view.slots.root_shapes.clear();
         view.slots.roots.clear();
         view.slots.registry = Default::default();
@@ -2697,14 +2787,15 @@ mod tests {
             .insert(format!("node.{node_id}.def"), shape);
 
         let mut map = SlotMapDyn::with_revision(revision, Default::default());
-        map.entries.insert(
-            SlotMapKey::String("a".to_string()),
-            SlotData::Value(WithRevision::new(revision, LpValue::F32(1.0))),
-        );
-        map.entries.insert(
-            SlotMapKey::String("b".to_string()),
-            SlotData::Value(WithRevision::new(revision, LpValue::F32(2.0))),
-        );
+        for (index, key) in entry_keys.iter().enumerate() {
+            map.entries.insert(
+                SlotMapKey::String((*key).to_string()),
+                SlotData::Value(WithRevision::new(
+                    revision,
+                    LpValue::F32(index as f32 + 1.0),
+                )),
+            );
+        }
 
         view.slots.roots.insert(
             format!("node.{node_id}.def"),
@@ -3010,7 +3101,7 @@ mod tests {
 
     // --- Edit buffer / slot edit op contract tests ---------------------------
 
-    use crate::{PendingEdit, PendingEditPhase, UiNodeDirtyState, UiNoticeLevel};
+    use crate::{PendingEdit, PendingEditOp, PendingEditPhase, UiNodeDirtyState, UiNoticeLevel};
     use lpc_model::{
         MutationCmdBatchResult, MutationCmdResult, MutationEffect, MutationRejection,
         MutationRejectionReason,
@@ -3240,7 +3331,7 @@ mod tests {
             .edit_buffer_for_test()
             .get(&brightness_address())
             .expect("failed entry parked");
-        assert_eq!(edit.value, LpValue::F32(0.9));
+        assert_eq!(edit.value(), Some(&LpValue::F32(0.9)));
         assert_eq!(edit.failure_reason(), Some("expected f32"));
         assert!(project.sync.as_ref().unwrap().overlay().is_empty());
 
@@ -3270,7 +3361,7 @@ mod tests {
             .get(&brightness_address())
             .expect("failed entry parked");
         assert!(edit.is_failed());
-        assert_eq!(edit.value, LpValue::F32(0.9));
+        assert_eq!(edit.value(), Some(&LpValue::F32(0.9)));
     }
 
     #[test]
@@ -3303,7 +3394,9 @@ mod tests {
         project.insert_pending_edit_for_test(
             brightness_address(),
             PendingEdit {
-                value: LpValue::F32(0.9),
+                op: PendingEditOp::SetValue {
+                    value: LpValue::F32(0.9),
+                },
                 phase: PendingEditPhase::InFlight {
                     cmd_id: MutationCmdId::new(7),
                 },
@@ -3334,7 +3427,9 @@ mod tests {
         project.insert_pending_edit_for_test(
             rate_address(),
             PendingEdit {
-                value: LpValue::F32(2.0),
+                op: PendingEditOp::SetValue {
+                    value: LpValue::F32(2.0),
+                },
                 phase: PendingEditPhase::InFlight {
                     cmd_id: MutationCmdId::new(7),
                 },
@@ -3346,7 +3441,9 @@ mod tests {
         project.insert_pending_edit_for_test(
             rate_address(),
             PendingEdit {
-                value: LpValue::F32(2.0),
+                op: PendingEditOp::SetValue {
+                    value: LpValue::F32(2.0),
+                },
                 phase: PendingEditPhase::Failed {
                     reason: "not writable".to_string(),
                 },
@@ -3364,7 +3461,9 @@ mod tests {
         project.insert_pending_edit_for_test(
             brightness_address(),
             PendingEdit {
-                value: LpValue::F32(0.9),
+                op: PendingEditOp::SetValue {
+                    value: LpValue::F32(0.9),
+                },
                 phase: PendingEditPhase::Failed {
                     reason: "expected f32".to_string(),
                 },
@@ -3414,6 +3513,268 @@ mod tests {
         let slot = config_slot(&nodes, "Brightness");
         assert_eq!(slot.state.dirty, UiNodeDirtyState::Clean);
         assert_eq!(slot_display(slot), "0.75", "synced value shows again");
+    }
+
+    // --- Structural gesture (EnsurePresent/RemoveValue) contract tests ------
+
+    /// The composite-gesture counterpart of
+    /// [`editable_project_with_scripted_client`]: a ready project whose def
+    /// root is the structural fixture (enum `mode`, option `optional`, map
+    /// `entries` with keys a/b), plus the def-artifact map.
+    fn structural_project_with_scripted_client(
+        responses: Vec<WireServerMessage>,
+    ) -> (
+        ProjectController,
+        StudioServerClient,
+        Rc<RefCell<Vec<ClientMessage>>>,
+    ) {
+        let (mut project, client, sent) = ready_project_with_scripted_client(responses);
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_structural_config_slots(&mut view, 1, Revision::new(2));
+        project.apply_project_view(&view).unwrap();
+        project.set_node_def_artifacts(BTreeMap::from([(NodeId::new(1), edit_artifact())]));
+        (project, client, sent)
+    }
+
+    fn structural_address(path: &str) -> crate::ProjectSlotAddress {
+        crate::ProjectSlotAddress::new(
+            node_address("/demo.project/orbit.shader"),
+            ProjectSlotRoot::def(),
+            SlotPath::parse(path).unwrap(),
+        )
+    }
+
+    #[test]
+    fn accepted_ensure_present_marks_parent_map_dirty_via_prefix_join() {
+        let (mut project, mut client, sent) =
+            structural_project_with_scripted_client(vec![mutation_response(
+                1,
+                vec![accepted(1)],
+                3,
+            )]);
+
+        let run = block_on_ready(project.apply_slot_edit(
+            &mut client,
+            crate::SlotEditOp::EnsurePresent {
+                address: structural_address("entries[c]"),
+            },
+        ))
+        .unwrap();
+
+        assert!(run.notices.notices.is_empty());
+        assert!(
+            project.edit_buffer_for_test().is_empty(),
+            "ack releases the staged entry"
+        );
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(
+            sync.overlay_edit_at(&edit_artifact(), &SlotPath::parse("entries[c]").unwrap()),
+            Some(&SlotEditOp::EnsurePresent)
+        );
+
+        // The wire mutation is the structural op — the client composes no
+        // default value (D1: gestures ARE the wire ops).
+        let sent = sent.borrow();
+        let ClientRequest::ProjectCommand {
+            command: WireProjectCommand::MutateOverlay { request },
+            ..
+        } = &sent[0].msg
+        else {
+            panic!("expected an overlay mutation");
+        };
+        assert!(matches!(
+            &request.batch.commands[0].mutation,
+            MutationOp::PutSlotEdit { artifact, edit }
+                if *artifact == edit_artifact()
+                    && edit.op == SlotEditOp::EnsurePresent
+                    && edit.path().to_string() == "entries[c]"
+        ));
+        drop(sent);
+
+        // No row exists at entries[c] yet (the effective def arrives with
+        // the next refresh), but the parent map reads Dirty through the
+        // prefix join, and the entry counts exactly once.
+        let nodes = project.ui_nodes();
+        let entries = config_slot(&nodes, "Entries");
+        assert_eq!(entries.state.dirty, UiNodeDirtyState::Dirty);
+        assert_eq!(
+            project.dirty_summary(),
+            DirtySummary {
+                persisted: 1,
+                transient: 0,
+                failed: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn rejected_gesture_surfaces_invalid_on_the_dispatching_composite() {
+        let (mut project, mut client, _sent) =
+            structural_project_with_scripted_client(vec![mutation_response(
+                1,
+                vec![MutationCmdResult::rejected(
+                    MutationCmdId::new(1),
+                    MutationRejection::new(
+                        MutationRejectionReason::UnknownSlotPath,
+                        "entries[c] does not resolve".to_string(),
+                    ),
+                )],
+                0,
+            )]);
+
+        let run = block_on_ready(project.apply_slot_edit(
+            &mut client,
+            crate::SlotEditOp::RemoveValue {
+                address: structural_address("entries[c]"),
+            },
+        ))
+        .unwrap();
+
+        assert_eq!(run.notices.notices.len(), 1);
+        let edit = project
+            .edit_buffer_for_test()
+            .get(&structural_address("entries[c]"))
+            .expect("failed entry parked");
+        assert!(edit.is_failed());
+        assert_eq!(edit.value(), None, "structural gestures buffer no value");
+
+        // entries[c] has no row of its own, so the failure surfaces on the
+        // dispatching parent composite through the prefix join.
+        let nodes = project.ui_nodes();
+        let entries = config_slot(&nodes, "Entries");
+        assert_eq!(entries.state.dirty, UiNodeDirtyState::Error);
+        assert_eq!(
+            entries.state.invalid.as_deref(),
+            Some("entries[c] does not resolve")
+        );
+        assert_eq!(
+            project.dirty_summary(),
+            DirtySummary {
+                persisted: 0,
+                transient: 0,
+                failed: 1,
+            }
+        );
+    }
+
+    /// Regression for the D4 hole: a removal of a base-present map entry
+    /// leaves no surviving slot row, but the parent map must read dirty and
+    /// the edit must count exactly once in [`DirtySummary`].
+    #[test]
+    fn removed_entry_edit_marks_parent_map_dirty_and_counts_once() {
+        let (mut project, _client, _sent) = structural_project_with_scripted_client(Vec::new());
+        // The acked removal of base-present entry `a` reaches the mirror...
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[(
+                MutationCmd {
+                    id: MutationCmdId::new(1),
+                    mutation: MutationOp::PutSlotEdit {
+                        artifact: edit_artifact(),
+                        edit: SlotEdit::remove(SlotPath::parse("entries[a]").unwrap()),
+                    },
+                },
+                MutationEffect::OverlayChanged { changed: true },
+            )],
+            Revision::new(3),
+        );
+        // ...and the next refresh applies an effective def without the entry.
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_structural_config_slots_with_entries(&mut view, 1, Revision::new(3), &["b"]);
+        project.apply_project_view(&view).unwrap();
+
+        let nodes = project.ui_nodes();
+        let entries = config_slot(&nodes, "Entries");
+        let UiConfigSlotBody::Record(record) = &entries.body else {
+            panic!("expected map record body");
+        };
+        assert_eq!(
+            record
+                .fields
+                .iter()
+                .map(|field| field.label.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b"],
+            "the removed entry has no surviving row"
+        );
+        assert_eq!(
+            entries.state.dirty,
+            UiNodeDirtyState::Dirty,
+            "the parent map surfaces the removed entry"
+        );
+        let expected = DirtySummary {
+            persisted: 1,
+            transient: 0,
+            failed: 0,
+        };
+        assert_eq!(
+            project.dirty_summary(),
+            expected,
+            "the rowless removal counts exactly once"
+        );
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        assert_eq!(editor.dirty, expected);
+        assert_eq!(editor.nodes[0].header.dirty, expected);
+        assert_eq!(editor.tree.roots[0].dirty, expected);
+    }
+
+    #[test]
+    fn prefix_dirty_on_ancestors_never_double_counts_a_leaf_edit() {
+        let (mut project, _client, _sent) = structural_project_with_scripted_client(Vec::new());
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[(
+                MutationCmd {
+                    id: MutationCmdId::new(1),
+                    mutation: MutationOp::PutSlotEdit {
+                        artifact: edit_artifact(),
+                        edit: SlotEdit::assign_value(
+                            SlotPath::parse("entries[a]").unwrap(),
+                            LpValue::F32(9.0),
+                        ),
+                    },
+                },
+                MutationEffect::OverlayChanged { changed: true },
+            )],
+            Revision::new(3),
+        );
+
+        let nodes = project.ui_nodes();
+        let entries = config_slot(&nodes, "Entries");
+        assert_eq!(
+            entries.state.dirty,
+            UiNodeDirtyState::Dirty,
+            "prefix-dirty display state bubbles to the composite"
+        );
+        let UiConfigSlotBody::Record(record) = &entries.body else {
+            panic!("expected map record body");
+        };
+        let entry = record
+            .fields
+            .iter()
+            .find(|field| field.label == "a")
+            .expect("entry row survives");
+        assert_eq!(entry.state.dirty, UiNodeDirtyState::Dirty);
+        assert_eq!(
+            project.dirty_summary().total(),
+            1,
+            "one edit entry, one count — prefix-dirty ancestors add nothing"
+        );
+    }
+
+    #[test]
+    fn buffered_gesture_shows_saving_on_the_parent_composite() {
+        let (mut project, _client, _sent) = structural_project_with_scripted_client(Vec::new());
+        project.insert_pending_edit_for_test(
+            structural_address("optional.some"),
+            PendingEdit::pending_op(PendingEditOp::EnsurePresent),
+        );
+
+        let nodes = project.ui_nodes();
+        let optional = config_slot(&nodes, "Optional");
+        assert_eq!(
+            optional.state.dirty,
+            UiNodeDirtyState::Saving,
+            "an in-flight gesture under an option shows Saving on its row"
+        );
     }
 
     #[test]
@@ -3516,7 +3877,9 @@ mod tests {
         project.insert_pending_edit_for_test(
             rate_address(),
             PendingEdit {
-                value: LpValue::F32(3.0),
+                op: PendingEditOp::SetValue {
+                    value: LpValue::F32(3.0),
+                },
                 phase: PendingEditPhase::Failed {
                     reason: "boom".to_string(),
                 },
@@ -3616,7 +3979,9 @@ mod tests {
         project.insert_pending_edit_for_test(
             brightness_address(),
             PendingEdit {
-                value: LpValue::F32(0.9),
+                op: PendingEditOp::SetValue {
+                    value: LpValue::F32(0.9),
+                },
                 phase: PendingEditPhase::Failed {
                     reason: "expected f32".to_string(),
                 },
