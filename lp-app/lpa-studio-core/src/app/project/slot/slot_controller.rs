@@ -1237,12 +1237,12 @@ fn ui_editor_hint(editor: &ValueEditorHint) -> UiSlotEditorHint {
         ValueEditorHint::Plain
         | ValueEditorHint::NodeRef
         | ValueEditorHint::Path
-        | ValueEditorHint::Dimensions
-        | ValueEditorHint::Affine2d
         | ValueEditorHint::Resource
         | ValueEditorHint::RuntimeBufferResource
         | ValueEditorHint::VisualProduct
         | ValueEditorHint::ControlProduct => UiSlotEditorHint::Auto,
+        ValueEditorHint::Dimensions => UiSlotEditorHint::Dimensions,
+        ValueEditorHint::Affine2d => UiSlotEditorHint::Affine2d,
         ValueEditorHint::Number { min, max, step } => UiSlotEditorHint::Number {
             min: min.map(|value| value.0),
             max: max.map(|value| value.0),

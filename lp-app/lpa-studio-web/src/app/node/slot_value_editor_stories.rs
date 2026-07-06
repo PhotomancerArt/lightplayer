@@ -1,11 +1,34 @@
 //! Stories for slot value editor field variants.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiSlotEditorHint, UiSlotFieldState, UiSlotUnit, UiSlotValue};
+use lpa_studio_core::{
+    ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, SlotPath, UiSlotEditorHint,
+    UiSlotFieldState, UiSlotUnit, UiSlotValue,
+};
 use lpa_studio_web_story_macros::story;
 
-use crate::app::node::SlotValueEditor;
 use crate::app::node::node_story_fixtures::slot_value_variants_fixture;
+use crate::app::node::{SliderSlotField, SlotValueEditor, XySlotField};
+
+fn story_slot_address(path: &str) -> ProjectSlotAddress {
+    ProjectSlotAddress::new(
+        ProjectNodeAddress::parse("/demo.project/pixels.fixture").expect("valid story address"),
+        ProjectSlotRoot::def(),
+        SlotPath::parse(path).expect("valid story slot path"),
+    )
+}
+
+/// A `Dim2u`-shaped struct value wearing the `Dimensions` editor hint.
+fn dim2u_value(width: u32, height: u32) -> UiSlotValue {
+    UiSlotValue::struct_value(
+        Some("Dim2u".to_string()),
+        vec![
+            ("width".to_string(), UiSlotValue::u32(width)),
+            ("height".to_string(), UiSlotValue::u32(height)),
+        ],
+    )
+    .with_editor(UiSlotEditorHint::Dimensions)
+}
 
 #[story(description = "Slot value editor dispatch across the M1 value types.")]
 pub(crate) fn gallery() -> Element {
@@ -115,12 +138,85 @@ pub(crate) fn dropdown_field() -> Element {
     }
 }
 
-#[story(description = "A minimal XY slot field for Vec2 values.")]
+#[story(
+    description = "The editable XY pad for Vec2 values: drag-to-edit pad, read-only component readouts, and the raw-input popup affordance."
+)]
 pub(crate) fn xy_field() -> Element {
     rsx! {
         SlotValueEditor {
             value: UiSlotValue::vec2([0.42, 0.58]).with_editor(UiSlotEditorHint::Xy),
             state: UiSlotFieldState::editable(),
+            address: story_slot_address("origin"),
+            on_action: move |_| {},
+        }
+    }
+}
+
+#[story(
+    label = "Dimensions Field",
+    description = "The compact width × height editor for Dimensions-hinted Dim2u struct values, composing the whole struct on change."
+)]
+pub(crate) fn dimensions_field() -> Element {
+    rsx! {
+        SlotValueEditor {
+            value: dim2u_value(32, 18),
+            state: UiSlotFieldState::editable(),
+            address: story_slot_address("render_size"),
+            on_action: move |_| {},
+        }
+    }
+}
+
+#[story(
+    label = "Affine2d Field",
+    description = "The labeled six-parameter grid (a b tx / c d ty) for Affine2d-hinted Mat3x3 values, writing the whole matrix with the inactive row fixed."
+)]
+pub(crate) fn affine2d_field() -> Element {
+    rsx! {
+        SlotValueEditor {
+            value: UiSlotValue::mat3x3([[1.0, 0.25, 12.0], [-0.5, 2.0, -8.0], [0.0, 0.0, 1.0]])
+                .with_editor(UiSlotEditorHint::Affine2d),
+            state: UiSlotFieldState::editable(),
+            address: story_slot_address("transform"),
+            on_action: move |_| {},
+        }
+    }
+}
+
+#[story(
+    label = "Slider Raw Input Popup",
+    description = "The slider's raw-input detail popup open: exact numeric entry (onchange) against the same slot path as the slider's oninput drags — two views onto one path-keyed buffer entry."
+)]
+pub(crate) fn slider_raw_input_popup() -> Element {
+    rsx! {
+        div { class: "tw:flex tw:min-h-44 tw:max-w-[420px] tw:justify-end",
+            SliderSlotField {
+                value: 0.72,
+                min: 0.0,
+                max: 1.0,
+                state: UiSlotFieldState::editable(),
+                address: Some(story_slot_address("brightness")),
+                on_action: move |_| {},
+                raw_initially_open: true,
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Xy Raw Input Popup",
+    description = "The XY pad's raw-input detail popup open: exact x/y entry (onchange) against the same slot path as the pad's oninput drags."
+)]
+pub(crate) fn xy_raw_input_popup() -> Element {
+    rsx! {
+        div { class: "tw:flex tw:min-h-52 tw:max-w-[420px] tw:justify-end",
+            XySlotField {
+                value: [0.42, 0.58],
+                state: UiSlotFieldState::editable(),
+                address: Some(story_slot_address("origin")),
+                on_action: move |_| {},
+                raw_initially_open: true,
+            }
         }
     }
 }

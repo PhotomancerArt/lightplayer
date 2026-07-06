@@ -107,5 +107,7 @@ standard `log` macros at all. Firmware verbosity was fixed at flash time
 - Host-process `lpa-server` stdout capture into the console (today those
   logs are terminal-only).
 - Console filter persistence (session-only today) and text search.
-- Pixel-tolerance story-image comparator (byte-equality flaps on ~10–20
-  icon-heavy stories due to sub-pixel AA jitter).
+- ~~Pixel-tolerance story-image comparator (byte-equality flaps on ~10–20
+  icon-heavy stories due to sub-pixel AA jitter).~~ **Resolved 2026-07-06**
+  (PR #59): deterministic story captures plus a pixel-tolerance check — see
+  `2026-06-18-studio-story-png-baselines.md`.

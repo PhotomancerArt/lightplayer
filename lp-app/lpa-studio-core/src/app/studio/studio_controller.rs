@@ -1828,7 +1828,7 @@ mod tests {
 
     #[test]
     fn device_log_level_is_absent_while_disconnected() {
-        let mut studio = StudioController::new(|| 0.0);
+        let studio = StudioController::new(|| 0.0);
         assert_eq!(studio.view().console.device_log_level, None);
     }
 

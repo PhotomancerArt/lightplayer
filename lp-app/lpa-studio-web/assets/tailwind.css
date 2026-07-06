@@ -275,8 +275,14 @@
   .tw\:min-h-32 {
     min-height: calc(var(--tw-spacing) * 32);
   }
+  .tw\:min-h-44 {
+    min-height: calc(var(--tw-spacing) * 44);
+  }
   .tw\:min-h-48 {
     min-height: calc(var(--tw-spacing) * 48);
+  }
+  .tw\:min-h-52 {
+    min-height: calc(var(--tw-spacing) * 52);
   }
   .tw\:min-h-56 {
     min-height: calc(var(--tw-spacing) * 56);
@@ -328,6 +334,9 @@
   }
   .tw\:w-10 {
     width: calc(var(--tw-spacing) * 10);
+  }
+  .tw\:w-12 {
+    width: calc(var(--tw-spacing) * 12);
   }
   .tw\:w-14 {
     width: calc(var(--tw-spacing) * 14);
@@ -1225,6 +1234,9 @@
   }
   .tw\:text-subtle-foreground {
     color: var(--tw-color-subtle-foreground);
+  }
+  .tw\:lowercase {
+    text-transform: lowercase;
   }
   .tw\:uppercase {
     text-transform: uppercase;
