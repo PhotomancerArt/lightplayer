@@ -103,7 +103,7 @@ pub(crate) fn slot_row_class(affordance: UiSlotAffordance, index: usize) -> &'st
             "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-status-working-bg)_0%,var(--studio-status-working-bg)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
         }
         UiSlotAffordance::Bound => {
-            "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-status-good-bg)_0%,var(--studio-status-good-bg)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
+            "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-status-bound-bg)_0%,var(--studio-status-bound-bg)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
         }
         UiSlotAffordance::Info if index % 2 == 0 => {
             "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-color-surface-muted)_0%,var(--studio-color-surface-muted)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
@@ -197,7 +197,7 @@ struct AspectSummary {
 enum AspectTone {
     Quiet,
     Good,
-    Accent,
+    Bound,
     Working,
     Warning,
     Error,
@@ -216,7 +216,7 @@ fn slot_affordance_style(affordance: UiSlotAffordance) -> SlotAffordanceStyle {
             active: true,
         },
         UiSlotAffordance::Bound => SlotAffordanceStyle {
-            tone: IconMenuTone::Accent,
+            tone: IconMenuTone::Bound,
             icon: StudioIconName::BoundValue,
             active: true,
         },
@@ -350,7 +350,7 @@ fn binding_summary(aspect: &UiSlotAspect) -> AspectSummary {
             code: first_row_value(aspect),
             title_is_code: false,
             icon: StudioIconName::BoundValue,
-            tone: AspectTone::Accent,
+            tone: AspectTone::Bound,
             highlight: Some(UiSlotAffordance::Bound),
         },
         _ if first_row_label_is(aspect, "Unbound") => AspectSummary {
@@ -511,7 +511,7 @@ fn aspect_section_tint(highlight: Option<UiSlotAffordance>) -> DetailSectionTint
         Some(UiSlotAffordance::Error | UiSlotAffordance::Invalid) => DetailSectionTint::Error,
         Some(UiSlotAffordance::Edited) => DetailSectionTint::Warning,
         Some(UiSlotAffordance::Saving) => DetailSectionTint::Working,
-        Some(UiSlotAffordance::Bound) => DetailSectionTint::Good,
+        Some(UiSlotAffordance::Bound) => DetailSectionTint::Bound,
         Some(UiSlotAffordance::Info) | None => DetailSectionTint::None,
     }
 }
@@ -530,8 +530,8 @@ fn aspect_icon_class(tone: AspectTone) -> &'static str {
         AspectTone::Good => {
             "tw:inline-flex tw:flex-none tw:items-center tw:justify-center tw:text-status-good-foreground"
         }
-        AspectTone::Accent => {
-            "tw:inline-flex tw:flex-none tw:items-center tw:justify-center tw:text-accent"
+        AspectTone::Bound => {
+            "tw:inline-flex tw:flex-none tw:items-center tw:justify-center tw:text-status-bound-foreground"
         }
         AspectTone::Quiet => {
             "tw:inline-flex tw:flex-none tw:items-center tw:justify-center tw:text-heading"
@@ -545,7 +545,7 @@ fn aspect_heading_class(tone: AspectTone) -> &'static str {
         AspectTone::Warning => "tw:m-0 tw:text-xs tw:font-bold tw:text-status-warning-foreground",
         AspectTone::Working => "tw:m-0 tw:text-xs tw:font-bold tw:text-status-working-foreground",
         AspectTone::Good => "tw:m-0 tw:text-xs tw:font-bold tw:text-status-good-foreground",
-        AspectTone::Accent => "tw:m-0 tw:text-xs tw:font-bold tw:text-accent",
+        AspectTone::Bound => "tw:m-0 tw:text-xs tw:font-bold tw:text-status-bound-foreground",
         AspectTone::Quiet => "tw:m-0 tw:text-xs tw:font-bold tw:text-heading",
     }
 }

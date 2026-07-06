@@ -58,6 +58,11 @@
     --studio-status-error-bg: #301b1d;
     --studio-status-error-border: #874b4b;
     --studio-status-error-text: #ffc7c7;
+    /* Bound/bus-linked (violet): binding is a system concept, distinct from
+       good/valid green. */
+    --studio-status-bound-bg: #241a33;
+    --studio-status-bound-border: #5f4a85;
+    --studio-status-bound-text: #c9b1f5;
 
     --studio-step-marker-bg: #151a1f;
     --studio-step-active-bg: #2a2916;
@@ -1410,6 +1415,14 @@ select {
     --ux-popover-border-color: var(--studio-status-live-border);
     --ux-popover-icon-color: var(--studio-status-live-text);
     --ux-popover-trigger-fill-top: var(--studio-status-live-bg);
+    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
+    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+}
+
+.ux-popover-chrome-bound {
+    --ux-popover-border-color: var(--studio-status-bound-border);
+    --ux-popover-icon-color: var(--studio-status-bound-text);
+    --ux-popover-trigger-fill-top: var(--studio-status-bound-bg);
     --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
     --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
 }

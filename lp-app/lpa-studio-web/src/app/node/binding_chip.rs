@@ -35,7 +35,7 @@ pub fn BindingChip(endpoint: UiBindingEndpoint, direction: BindingChipDirection)
 
     rsx! {
         span {
-            class: "tw:inline-flex tw:min-w-0 tw:max-w-40 tw:shrink tw:items-center tw:gap-1 tw:rounded-xs tw:border tw:border-border-strong tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:leading-none tw:text-accent",
+            class: "tw:inline-flex tw:min-w-0 tw:max-w-40 tw:shrink tw:items-center tw:gap-1 tw:rounded-xs tw:border tw:border-status-bound-border tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:leading-none tw:text-status-bound-foreground",
             title,
             StudioIcon {
                 name: StudioIconName::BoundValue,
