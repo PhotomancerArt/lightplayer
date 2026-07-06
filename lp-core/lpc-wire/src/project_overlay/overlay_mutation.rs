@@ -85,4 +85,30 @@ mod tests {
         assert!(json.contains("overlay_changed"));
         assert!(json.contains("overlay_revision"));
     }
+
+    #[test]
+    fn normalized_to_removal_effect_round_trips() {
+        // Minimal-diff normalization rides the per-command effect: clients
+        // mirror the stored removal from the ack, so the variant must survive
+        // the wire distinctly from `overlay_changed`.
+        let response = WireOverlayMutationResponse::new(
+            MutationCmdBatchResult::new(vec![
+                MutationCmdResult::accepted(
+                    MutationCmdId::new(1),
+                    MutationEffect::NormalizedToRemoval { changed: true },
+                ),
+                MutationCmdResult::accepted(
+                    MutationCmdId::new(2),
+                    MutationEffect::NormalizedToRemoval { changed: false },
+                ),
+            ]),
+            Revision::new(12),
+        );
+
+        let json = serde_json::to_string(&response).unwrap();
+        let decoded: WireOverlayMutationResponse = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded, response);
+        assert!(json.contains("normalized_to_removal"));
+    }
 }
