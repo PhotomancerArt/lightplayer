@@ -17,7 +17,7 @@ use std::task::{Context, Poll, Wake, Waker};
 
 use lpa_client::ClientIo;
 use lpa_server::{Graphics, LpGraphics, LpServer};
-use lpc_model::{AsLpPath, LpValue};
+use lpc_model::{AsLpPath, LpValue, SlotPath};
 use lpc_shared::output::MemoryOutputProvider;
 use lpc_shared::transport::ServerTransport;
 use lpc_wire::{
@@ -232,6 +232,13 @@ fn set_back_to_base_normalizes_to_clean_without_overlay_fetch() {
     // assignment (NormalizedToRemoval) and the mirror must learn that from
     // the ack alone: the overlay revision may not advance, so a corrective
     // ReadOverlay would never fire.
+    //
+    // The refresh between the two edits is load-bearing: it syncs the edited
+    // value into the project view, so the set-back ack opens the stale-view
+    // window (the view still holds the old effective value until the next
+    // gated read). The DTO must keep showing the value the user typed through
+    // that window — the buffer entry parks as `AwaitingRefresh` instead of
+    // releasing — not jitter back to the superseded value.
     let server = Rc::new(RefCell::new(edit_e2e_server()));
     let sent = Rc::new(RefCell::new(Vec::new()));
     let io = InProcessServerIo {
@@ -257,19 +264,28 @@ fn set_back_to_base_normalizes_to_clean_without_overlay_fetch() {
         .clone()
         .expect("color order slot carries an address");
 
-    // Change the choice: dirty, counted.
+    // Change the choice: dirty, counted; the refresh syncs the edited value
+    // into the project view (the stale-window precondition).
     handle.tx.send(set_value_action(
         address.clone(),
         LpValue::String("rgb".to_string()),
     ));
     drive(actor.run_one_batch_for_test());
-    let snapshot = view.try_recv().expect("edit emits a snapshot");
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("edit + refresh emit a snapshot");
     let color_order = find_slot(&snapshot, "color_order");
     assert_eq!(color_order.state.dirty, UiNodeDirtyState::Dirty);
+    assert_eq!(
+        slot_value_display(color_order),
+        "rgb",
+        "the synced view holds the edited effective value"
+    );
     assert_eq!(editor_dirty(&snapshot), (1, 0));
 
-    // Set it back to the authored value: the highlight clears, no overlay
-    // fetch corrects the mirror — the ack effect alone must do it.
+    // Set it back to the authored value. The ack normalizes the edit away,
+    // but the synced view still holds "rgb" until the next gated read: the
+    // DTO must keep showing the typed value ("grb"), not jitter back.
     let overlay_reads_before = count_overlay_reads(&sent);
     handle.tx.send(set_value_action(
         address,
@@ -279,16 +295,435 @@ fn set_back_to_base_normalizes_to_clean_without_overlay_fetch() {
     let snapshot = view.try_recv().expect("set-back emits a snapshot");
     let color_order = find_slot(&snapshot, "color_order");
     assert_eq!(
+        slot_value_display(color_order),
+        "grb",
+        "the typed base value stays visible through the stale-view window"
+    );
+    assert_eq!(
+        color_order.state.dirty,
+        UiNodeDirtyState::Saving,
+        "the normalized edit keeps the Saving treatment until the view catches up"
+    );
+
+    // The next refresh delivers the reverted def: highlight cleared, value
+    // stable, and no overlay fetch corrected the mirror — the ack effect
+    // alone did it.
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("refresh emits a snapshot");
+    let color_order = find_slot(&snapshot, "color_order");
+    assert_eq!(
         color_order.state.dirty,
         UiNodeDirtyState::Clean,
         "setting a slot back to its base value clears the edited state"
     );
-    assert_eq!(slot_value_display(color_order), "grb");
+    assert_eq!(
+        slot_value_display(color_order),
+        "grb",
+        "the value never rubber-bands through the whole set-back"
+    );
     assert_eq!(editor_dirty(&snapshot), (0, 0));
     assert_eq!(
         count_overlay_reads(&sent) - overlay_reads_before,
         0,
         "the mirror is corrected by the ack effect, not a ReadOverlay"
+    );
+}
+
+#[test]
+fn composite_gesture_cycle_ends_clean_end_to_end() {
+    // The M3 composite gesture cycle on the fixture `mapping` slot, driven
+    // through the same actor command path the web shell uses: switch the
+    // enum variant (EnsurePresent mapping.PathPoints), add a map entry
+    // (EnsurePresent mapping.PathPoints.paths[0]), remove it again
+    // (RemoveValue — the server normalizes the add-then-remove away, D2),
+    // then revert the variant switch — the project must end clean.
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let mapping = find_slot(&snapshot, "mapping");
+    assert_eq!(mapping.state.dirty, UiNodeDirtyState::Clean);
+    assert_eq!(mapping.detail.as_deref(), Some("variant Unset"));
+    let mapping_address = mapping
+        .address
+        .clone()
+        .expect("mapping slot carries an address");
+    assert_eq!(editor_dirty(&snapshot), (0, 0));
+
+    // Switch the variant. The overlay edit is stored at a path with no row
+    // yet (the base variant is still Unset until the refresh applies), so
+    // the enum row reads dirty through the prefix join immediately.
+    let variant_address = child_address(&mapping_address, "mapping.PathPoints");
+    handle
+        .tx
+        .send(ensure_present_action(variant_address.clone()));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("variant switch emits a snapshot");
+    let mapping = find_slot(&snapshot, "mapping");
+    assert_eq!(
+        mapping.state.dirty,
+        UiNodeDirtyState::Dirty,
+        "the acked variant switch surfaces on the enum row before any refresh"
+    );
+    assert_eq!(mapping.detail.as_deref(), Some("variant Unset"));
+    assert_eq!(
+        mapping.edit_entry_address,
+        Some(variant_address.clone()),
+        "the enum row offers the variant-switch entry as its revert target \
+         even before the view's active variant catches up"
+    );
+    assert_eq!(editor_dirty(&snapshot), (1, 0));
+
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("refresh emits a snapshot");
+    let mapping = find_slot(&snapshot, "mapping");
+    assert_eq!(mapping.detail.as_deref(), Some("variant PathPoints"));
+    assert_eq!(mapping.state.dirty, UiNodeDirtyState::Dirty);
+    assert_eq!(
+        mapping.edit_entry_address,
+        Some(variant_address.clone()),
+        "after the switch round-trips, the enum row still offers a working \
+         Revert (the entry lives at the variant child path, not the row's own)"
+    );
+
+    // Add a path entry with server-built defaults, then pull the new row.
+    let entry_address = child_address(&mapping_address, "mapping.PathPoints.paths[0]");
+    handle.tx.send(ensure_present_action(entry_address.clone()));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view
+        .try_recv()
+        .expect("entry add + refresh emit a snapshot");
+    let entry = find_slot(&snapshot, "mapping.PathPoints.paths[0]");
+    assert_eq!(
+        entry.state.dirty,
+        UiNodeDirtyState::Dirty,
+        "the added entry row exists with a server-built default and reads dirty"
+    );
+    assert_eq!(editor_dirty(&snapshot), (2, 0));
+
+    // Remove it again: add-then-remove cancels on the server (D2). Between
+    // the normalized ack and the refresh, the stale view still shows the
+    // row — it must read Saving (the AwaitingRefresh bridge), not flash a
+    // clean row that then vanishes.
+    handle.tx.send(remove_value_action(entry_address));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("entry remove emits a snapshot");
+    let entry = find_slot(&snapshot, "mapping.PathPoints.paths[0]");
+    assert_eq!(
+        entry.state.dirty,
+        UiNodeDirtyState::Saving,
+        "the normalized removal keeps the Saving treatment until the view catches up"
+    );
+
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view
+        .try_recv()
+        .expect("entry remove + refresh emit a snapshot");
+    assert!(
+        try_find_slot(&snapshot, "mapping.PathPoints.paths[0]").is_none(),
+        "the removed entry has no surviving row"
+    );
+    assert_eq!(
+        editor_dirty(&snapshot),
+        (1, 0),
+        "only the variant switch remains"
+    );
+
+    // Revert the variant switch from the enum row itself, exactly as the UI
+    // would: dispatch Revert at the row's projected `edit_entry_address`.
+    // The overlay empties and the project is clean again, back on the
+    // authored Unset variant.
+    let mapping = find_slot(&snapshot, "mapping");
+    let row_revert_target = mapping
+        .edit_entry_address
+        .clone()
+        .expect("the enum row offers a revert target for the pending switch");
+    assert_eq!(row_revert_target, variant_address);
+    handle.tx.send(revert_action(row_revert_target));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("revert + refresh emit a snapshot");
+    let mapping = find_slot(&snapshot, "mapping");
+    assert_eq!(mapping.state.dirty, UiNodeDirtyState::Clean);
+    assert_eq!(mapping.detail.as_deref(), Some("variant Unset"));
+    assert_eq!(
+        editor_dirty(&snapshot),
+        (0, 0),
+        "the gesture cycle ends clean"
+    );
+}
+
+#[test]
+fn variant_dropdown_switch_away_and_back_ends_clean_from_acks_alone() {
+    // The dropdown repro: switch the mapping enum away from its base variant
+    // (EnsurePresent mapping.PathPoints), then re-select the base variant
+    // (EnsurePresent mapping.Unset). The switch-back normalizes away on the
+    // server *and* clears the pending sibling switch; the Materialized ack
+    // is the mirror's only source — no ReadOverlay may fire. Without the
+    // sibling clearing, the stored mapping.PathPoints entry would survive
+    // and the dropdown would stay stuck on PathPoints forever.
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let sent = Rc::new(RefCell::new(Vec::new()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::clone(&sent),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let mapping = find_slot(&snapshot, "mapping");
+    assert_eq!(mapping.detail.as_deref(), Some("variant Unset"));
+    assert_eq!(mapping.state.dirty, UiNodeDirtyState::Clean);
+    let mapping_address = mapping
+        .address
+        .clone()
+        .expect("mapping slot carries an address");
+    let overlay_reads_before = count_overlay_reads(&sent);
+
+    // Switch away, then refresh so the user-visible dropdown really shows
+    // the pending variant before switching back.
+    handle.tx.send(ensure_present_action(child_address(
+        &mapping_address,
+        "mapping.PathPoints",
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("switch + refresh emit a snapshot");
+    let mapping = find_slot(&snapshot, "mapping");
+    assert_eq!(mapping.detail.as_deref(), Some("variant PathPoints"));
+    assert_eq!(mapping.state.dirty, UiNodeDirtyState::Dirty);
+    assert_eq!(editor_dirty(&snapshot), (1, 0));
+
+    // Re-select the base variant from the dropdown: the pending switch must
+    // go away entirely, not normalize into a stuck sibling entry.
+    handle.tx.send(ensure_present_action(child_address(
+        &mapping_address,
+        "mapping.Unset",
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view
+        .try_recv()
+        .expect("switch-back + refresh emit a snapshot");
+    let mapping = find_slot(&snapshot, "mapping");
+    assert_eq!(
+        mapping.detail.as_deref(),
+        Some("variant Unset"),
+        "the effective def is back on the base variant"
+    );
+    assert_eq!(
+        mapping.state.dirty,
+        UiNodeDirtyState::Clean,
+        "no pending sibling switch survives the switch-back"
+    );
+    assert_eq!(editor_dirty(&snapshot), (0, 0), "the cycle ends clean");
+    assert_eq!(
+        count_overlay_reads(&sent) - overlay_reads_before,
+        0,
+        "the mirror is corrected by the ack effects alone, not a ReadOverlay"
+    );
+}
+
+#[test]
+fn option_toggle_off_then_on_ends_clean_from_acks_alone() {
+    // The dead-click repro on the fixture `brightness` option (base-present:
+    // the shape default is Some(64)): toggle OFF (RemoveValue brightness —
+    // stores `Remove` at the option path), refresh, toggle back ON
+    // (EnsurePresent brightness.some — normalizes away against base at a
+    // DIFFERENT path). The counteracting-entry sweep clears the stored
+    // Remove and the Materialized ack is the mirror's only source — no
+    // ReadOverlay may fire. Without it, the stored Remove survives and the
+    // toggle-on click does nothing, forever.
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let sent = Rc::new(RefCell::new(Vec::new()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::clone(&sent),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let brightness = find_slot(&snapshot, "brightness");
+    assert_eq!(brightness.state.dirty, UiNodeDirtyState::Clean);
+    assert_eq!(
+        slot_value_display(brightness),
+        "64",
+        "base default is Some(64)"
+    );
+    let brightness_address = brightness
+        .address
+        .clone()
+        .expect("brightness slot carries an address");
+    assert_eq!(editor_dirty(&snapshot), (0, 0));
+    let overlay_reads_before = count_overlay_reads(&sent);
+
+    // Toggle off, then refresh so the user-visible row really shows the
+    // excluded state before toggling back on.
+    handle
+        .tx
+        .send(remove_value_action(brightness_address.clone()));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view
+        .try_recv()
+        .expect("toggle-off + refresh emit a snapshot");
+    let brightness = find_slot(&snapshot, "brightness");
+    assert!(
+        matches!(brightness.body, UiConfigSlotBody::Empty),
+        "the toggled-off option row has no value body"
+    );
+    assert_eq!(brightness.state.dirty, UiNodeDirtyState::Dirty);
+    assert_eq!(editor_dirty(&snapshot), (1, 0));
+
+    // Toggle back on: the EnsurePresent at brightness.some normalizes away
+    // and must clear the stored Remove at the option path — the exact user
+    // symptom was this click doing nothing.
+    handle.tx.send(ensure_present_action(child_address(
+        &brightness_address,
+        "brightness.some",
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view
+        .try_recv()
+        .expect("toggle-on + refresh emit a snapshot");
+    let brightness = find_slot(&snapshot, "brightness");
+    assert_eq!(
+        slot_value_display(brightness),
+        "64",
+        "the effective option is back to the base value"
+    );
+    assert_eq!(
+        brightness.state.dirty,
+        UiNodeDirtyState::Clean,
+        "no counteracting Remove survives the off-then-on cycle"
+    );
+    assert_eq!(editor_dirty(&snapshot), (0, 0), "the cycle ends clean");
+    assert_eq!(
+        count_overlay_reads(&sent) - overlay_reads_before,
+        0,
+        "the mirror is corrected by the ack effects alone, not a ReadOverlay"
+    );
+}
+
+#[test]
+fn removing_an_added_and_edited_entry_ends_clean_from_the_ack_alone() {
+    // Mirror fidelity for the subtree-clearing structural remove: add a map
+    // entry, edit a leaf under it, remove the entry again. The remove
+    // normalizes away on the server and also clears the stranded descendant
+    // assignment; the ack (`MutationEffect::Materialized` listing every
+    // removed overlay entry) is the mirror's only source — no ReadOverlay
+    // may fire. If either side kept the stranded edit, re-applying it would
+    // resurrect the entry and the project could never read clean again.
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let sent = Rc::new(RefCell::new(Vec::new()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::clone(&sent),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let mapping = find_slot(&snapshot, "mapping");
+    let mapping_address = mapping
+        .address
+        .clone()
+        .expect("mapping slot carries an address");
+    assert_eq!(editor_dirty(&snapshot), (0, 0));
+    let overlay_reads_before = count_overlay_reads(&sent);
+
+    // Switch the variant, add an entry, edit a leaf under the added entry.
+    let variant_address = child_address(&mapping_address, "mapping.PathPoints");
+    handle
+        .tx
+        .send(ensure_present_action(variant_address.clone()));
+    drive(actor.run_one_batch_for_test());
+    let entry_address = child_address(&mapping_address, "mapping.PathPoints.paths[0]");
+    handle.tx.send(ensure_present_action(entry_address.clone()));
+    drive(actor.run_one_batch_for_test());
+    let leaf_address = child_address(
+        &mapping_address,
+        "mapping.PathPoints.paths[0].PointList.first_channel",
+    );
+    handle
+        .tx
+        .send(set_value_action(leaf_address, LpValue::U32(7)));
+    drive(actor.run_one_batch_for_test());
+
+    // Remove the entry again: the server clears the entry *and* the
+    // stranded leaf edit, and the mirror follows from the Materialized ack.
+    handle.tx.send(remove_value_action(entry_address));
+    drive(actor.run_one_batch_for_test());
+
+    // Revert the remaining variant switch: with the subtree really gone on
+    // both sides this empties the overlay entirely.
+    handle.tx.send(revert_action(variant_address));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("refresh emits a snapshot");
+    let mapping = find_slot(&snapshot, "mapping");
+    assert_eq!(mapping.detail.as_deref(), Some("variant Unset"));
+    assert_eq!(
+        mapping.state.dirty,
+        UiNodeDirtyState::Clean,
+        "no stranded edit may keep the mapping dirty or resurrect the entry"
+    );
+    assert!(
+        try_find_slot(&snapshot, "mapping.PathPoints.paths[0]").is_none(),
+        "the removed entry has no surviving row"
+    );
+    assert_eq!(editor_dirty(&snapshot), (0, 0), "the cycle ends clean");
+    assert_eq!(
+        count_overlay_reads(&sent) - overlay_reads_before,
+        0,
+        "the mirror is corrected by the ack effects alone, not a ReadOverlay"
     );
 }
 
@@ -392,6 +827,29 @@ fn revert_action(address: crate::ProjectSlotAddress) -> StudioCommand {
     ))
 }
 
+fn ensure_present_action(address: crate::ProjectSlotAddress) -> StudioCommand {
+    StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        SlotEditOp::EnsurePresent { address },
+    ))
+}
+
+fn remove_value_action(address: crate::ProjectSlotAddress) -> StudioCommand {
+    StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        SlotEditOp::RemoveValue { address },
+    ))
+}
+
+/// An address under the same node and slot root as `base`, at `path`.
+fn child_address(base: &crate::ProjectSlotAddress, path: &str) -> crate::ProjectSlotAddress {
+    crate::ProjectSlotAddress::new(
+        base.node.clone(),
+        base.root.clone(),
+        SlotPath::parse(path).unwrap(),
+    )
+}
+
 fn count_mutations(sent: &Rc<RefCell<Vec<ClientMessage>>>) -> usize {
     sent.borrow()
         .iter()
@@ -436,6 +894,11 @@ fn editor_dirty(view: &UiStudioView) -> (usize, usize) {
 
 /// Find a config slot anywhere in the editor DTO tree by its address path.
 fn find_slot<'a>(view: &'a UiStudioView, path: &str) -> &'a UiConfigSlot {
+    try_find_slot(view, path).unwrap_or_else(|| panic!("config slot with path {path} should exist"))
+}
+
+/// Like [`find_slot`], but `None` when no row carries the address path.
+fn try_find_slot<'a>(view: &'a UiStudioView, path: &str) -> Option<&'a UiConfigSlot> {
     let editor = view
         .panes
         .iter()
@@ -478,19 +941,15 @@ fn find_slot<'a>(view: &'a UiStudioView, path: &str) -> &'a UiConfigSlot {
         })
     }
 
-    editor
-        .nodes
-        .iter()
-        .find_map(|node| {
-            node.tabs
-                .iter()
-                .find_map(|tab| match &tab.body {
-                    UiNodeTabBody::Sections(sections) => in_sections(sections, path),
-                    _ => None,
-                })
-                .or_else(|| in_children(&node.children, path))
-        })
-        .unwrap_or_else(|| panic!("config slot with path {path} should exist"))
+    editor.nodes.iter().find_map(|node| {
+        node.tabs
+            .iter()
+            .find_map(|tab| match &tab.body {
+                UiNodeTabBody::Sections(sections) => in_sections(sections, path),
+                _ => None,
+            })
+            .or_else(|| in_children(&node.children, path))
+    })
 }
 
 fn slot_value_display(slot: &UiConfigSlot) -> &str {

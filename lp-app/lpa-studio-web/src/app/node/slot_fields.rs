@@ -1,10 +1,12 @@
-//! Basic field renderers for the first config slot editor slice.
+//! Basic field renderers for scalar config slot values.
 //!
-//! Bool, slider, and dropdown fields are editable (M2): when a slot address
-//! and the `on_action` conduit are present, input dispatches
-//! `SlotEditOp::SetValue` with `oninput` semantics. Fields render the DTO
-//! value only — the edit buffer and overlay mirror already shadow the synced
-//! value, so no field keeps local value state.
+//! All scalar fields are editable (M2/M3): when a slot address and the
+//! `on_action` conduit are present, input dispatches `SlotEditOp::SetValue`.
+//! Sliders (and other rich controls) dispatch with `oninput` semantics;
+//! text/number inputs dispatch with `onchange` semantics (blur/enter, not
+//! per keystroke — roadmap D5). Fields render the DTO value only — the edit
+//! buffer and overlay mirror already shadow the synced value, so no field
+//! keeps local value state.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -12,14 +14,35 @@ use lpa_studio_core::{
     UiSlotValueKind,
 };
 
-use crate::app::node::SlotUnitSuffix;
 use crate::app::node::slot_edit_actions::slot_set_value_action;
+use crate::app::node::{SlotUnitSuffix, VectorSlotField};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn StringSlotField(value: String, state: UiSlotFieldState) -> Element {
+pub fn StringSlotField(
+    value: String,
+    state: UiSlotFieldState,
+    #[props(default = None)] address: Option<ProjectSlotAddress>,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
+    let Some((address, handler)) = field_wiring(&state, &address, on_action) else {
+        return rsx! {
+            span { class: field_class(&state), "{value}" }
+        };
+    };
+    let invalid_title = state.invalid.clone().unwrap_or_default();
+
     rsx! {
-        span { class: field_class(&state), "{value}" }
+        span { class: field_class(&state), title: "{invalid_title}",
+            input {
+                class: "tw:w-full tw:min-w-0 tw:border-0 tw:bg-transparent tw:p-0 tw:text-inherit tw:outline-none",
+                r#type: "text",
+                value: "{value}",
+                onchange: move |event| {
+                    handler.call(slot_set_value_action(address.clone(), LpValue::String(event.value())));
+                },
+            }
+        }
     }
 }
 
@@ -29,10 +52,38 @@ pub fn IntSlotField(
     value: i32,
     state: UiSlotFieldState,
     #[props(default = None)] unit: Option<UiSlotUnit>,
+    #[props(default = None)] min: Option<f32>,
+    #[props(default = None)] max: Option<f32>,
+    #[props(default = None)] step: Option<f32>,
+    #[props(default = None)] address: Option<ProjectSlotAddress>,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
+    let Some((address, handler)) = field_wiring(&state, &address, on_action) else {
+        return rsx! {
+            span { class: numeric_field_class(&state),
+                span { class: "tw:font-mono", "{value}" }
+                SlotUnitSuffix { unit, reserve: true }
+            }
+        };
+    };
+    let invalid_title = state.invalid.clone().unwrap_or_default();
+    let step = step.map_or_else(|| "1".to_string(), |step| step.to_string());
+
     rsx! {
-        span { class: numeric_field_class(&state),
-            span { class: "tw:font-mono", "{value}" }
+        span { class: numeric_field_class(&state), title: "{invalid_title}",
+            input {
+                class: scalar_number_input_class(),
+                r#type: "number",
+                min: min.map(|min| min.to_string()),
+                max: max.map(|max| max.to_string()),
+                step: "{step}",
+                value: "{value}",
+                onchange: move |event| {
+                    if let Some(next) = parse_i32_input(&event.value()) {
+                        handler.call(slot_set_value_action(address.clone(), LpValue::I32(next)));
+                    }
+                },
+            }
             SlotUnitSuffix { unit, reserve: true }
         }
     }
@@ -44,25 +95,82 @@ pub fn UIntSlotField(
     value: u32,
     state: UiSlotFieldState,
     #[props(default = None)] unit: Option<UiSlotUnit>,
+    #[props(default = None)] min: Option<f32>,
+    #[props(default = None)] max: Option<f32>,
+    #[props(default = None)] step: Option<f32>,
+    #[props(default = None)] address: Option<ProjectSlotAddress>,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
+    let Some((address, handler)) = field_wiring(&state, &address, on_action) else {
+        return rsx! {
+            span { class: numeric_field_class(&state),
+                span { class: "tw:font-mono", "{value}" }
+                SlotUnitSuffix { unit, reserve: true }
+            }
+        };
+    };
+    let invalid_title = state.invalid.clone().unwrap_or_default();
+    let step = step.map_or_else(|| "1".to_string(), |step| step.to_string());
+
     rsx! {
-        span { class: numeric_field_class(&state),
-            span { class: "tw:font-mono", "{value}" }
+        span { class: numeric_field_class(&state), title: "{invalid_title}",
+            input {
+                class: scalar_number_input_class(),
+                r#type: "number",
+                min: min.map_or_else(|| "0".to_string(), |min| min.to_string()),
+                max: max.map(|max| max.to_string()),
+                step: "{step}",
+                value: "{value}",
+                onchange: move |event| {
+                    if let Some(next) = parse_u32_input(&event.value()) {
+                        handler.call(slot_set_value_action(address.clone(), LpValue::U32(next)));
+                    }
+                },
+            }
             SlotUnitSuffix { unit, reserve: true }
         }
     }
 }
 
+/// Plain numeric field for `F32` slots without a `Slider` hint.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn FloatSlotField(
     value: f32,
     state: UiSlotFieldState,
     #[props(default = None)] unit: Option<UiSlotUnit>,
+    #[props(default = None)] min: Option<f32>,
+    #[props(default = None)] max: Option<f32>,
+    #[props(default = None)] step: Option<f32>,
+    #[props(default = None)] address: Option<ProjectSlotAddress>,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
+    let Some((address, handler)) = field_wiring(&state, &address, on_action) else {
+        return rsx! {
+            span { class: numeric_field_class(&state),
+                span { class: "tw:font-mono", "{format_float(value)}" }
+                SlotUnitSuffix { unit, reserve: true }
+            }
+        };
+    };
+    let invalid_title = state.invalid.clone().unwrap_or_default();
+    let step = step.map_or_else(|| "any".to_string(), |step| step.to_string());
+
     rsx! {
-        span { class: numeric_field_class(&state),
-            span { class: "tw:font-mono", "{format_float(value)}" }
+        span { class: numeric_field_class(&state), title: "{invalid_title}",
+            input {
+                class: scalar_number_input_class(),
+                r#type: "number",
+                min: min.map(|min| min.to_string()),
+                max: max.map(|max| max.to_string()),
+                step: "{step}",
+                value: "{value}",
+                onchange: move |event| {
+                    if let Some(next) = parse_f32_input(&event.value()) {
+                        handler.call(slot_set_value_action(address.clone(), LpValue::F32(next)));
+                    }
+                },
+            }
             SlotUnitSuffix { unit, reserve: true }
         }
     }
@@ -179,29 +287,6 @@ pub fn SliderSlotField(
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn Vec2SlotField(value: [f32; 2], state: UiSlotFieldState) -> Element {
-    rsx! {
-        span { class: "tw:grid tw:min-w-0 tw:grid-cols-2 tw:gap-1",
-            VectorComponentField { label: "x", value: value[0], state: state.clone() }
-            VectorComponentField { label: "y", value: value[1], state }
-        }
-    }
-}
-
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn Vec3SlotField(value: [f32; 3], state: UiSlotFieldState) -> Element {
-    rsx! {
-        span { class: "tw:grid tw:min-w-0 tw:grid-cols-3 tw:gap-1",
-            VectorComponentField { label: "x", value: value[0], state: state.clone() }
-            VectorComponentField { label: "y", value: value[1], state: state.clone() }
-            VectorComponentField { label: "z", value: value[2], state }
-        }
-    }
-}
-
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn DropdownSlotField(
     value: String,
     options: Vec<UiSlotOption>,
@@ -254,6 +339,8 @@ pub fn DropdownSlotField(
     }
 }
 
+/// Display-only XY pad for `Vec2` slots with an `Xy` editor hint (rich XY
+/// editing is roadmap M4); the component readouts render read-only.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn XySlotField(value: [f32; 2], state: UiSlotFieldState) -> Element {
@@ -269,28 +356,17 @@ pub fn XySlotField(value: [f32; 2], state: UiSlotFieldState) -> Element {
                 span { class: "tw:absolute tw:left-0 tw:top-1/2 tw:h-px tw:w-full tw:bg-border-muted" }
                 span { class: "tw:absolute tw:h-2 tw:w-2 tw:-translate-x-1/2 tw:-translate-y-1/2 tw:rounded-full tw:border tw:border-accent-border tw:bg-accent", style: "{point_style}" }
             }
-            Vec2SlotField {
-                value,
+            VectorSlotField {
+                kind: UiSlotValueKind::Vec2(value),
                 state,
             }
         }
     }
 }
 
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn VectorComponentField(label: &'static str, value: f32, state: UiSlotFieldState) -> Element {
-    rsx! {
-        span { class: numeric_field_class(&state),
-            small { class: "tw:text-[0.64rem] tw:font-bold tw:uppercase tw:text-subtle-foreground", "{label}" }
-            span { class: "tw:font-mono", "{format_float(value)}" }
-        }
-    }
-}
-
 /// The `(address, handler)` pair a field needs to dispatch edits, present
 /// only when the slot is editable, addressed, and the conduit is wired.
-fn field_wiring(
+pub(crate) fn field_wiring(
     state: &UiSlotFieldState,
     address: &Option<ProjectSlotAddress>,
     on_action: Option<EventHandler<UiAction>>,
@@ -315,7 +391,7 @@ fn dropdown_lp_value(kind: Option<&UiSlotValueKind>, key: &str) -> Option<LpValu
     }
 }
 
-fn dropdown_field_class(state: &UiSlotFieldState) -> &'static str {
+pub(crate) fn dropdown_field_class(state: &UiSlotFieldState) -> &'static str {
     if state.invalid.is_some() {
         "tw:inline-flex tw:min-h-7 tw:min-w-0 tw:max-w-full tw:cursor-pointer tw:items-center tw:rounded-xs tw:border tw:border-status-error-border tw:bg-status-error-bg tw:px-2 tw:py-1 tw:text-sm tw:font-medium tw:text-status-error-foreground"
     } else {
@@ -323,7 +399,33 @@ fn dropdown_field_class(state: &UiSlotFieldState) -> &'static str {
     }
 }
 
-fn field_class(state: &UiSlotFieldState) -> &'static str {
+/// Parse a signed integer input, clamping to the `i32` range. `None` means
+/// "do not dispatch".
+pub(crate) fn parse_i32_input(raw: &str) -> Option<i32> {
+    let parsed = raw.trim().parse::<i64>().ok()?;
+    Some(parsed.clamp(i64::from(i32::MIN), i64::from(i32::MAX)) as i32)
+}
+
+/// Parse an unsigned integer input, clamping to the `u32` range. `None`
+/// means "do not dispatch".
+pub(crate) fn parse_u32_input(raw: &str) -> Option<u32> {
+    let parsed = raw.trim().parse::<i64>().ok()?;
+    Some(parsed.clamp(0, i64::from(u32::MAX)) as u32)
+}
+
+/// Parse a finite float input. `None` means "do not dispatch".
+pub(crate) fn parse_f32_input(raw: &str) -> Option<f32> {
+    raw.trim()
+        .parse::<f32>()
+        .ok()
+        .filter(|value| value.is_finite())
+}
+
+fn scalar_number_input_class() -> &'static str {
+    "tw:w-16 tw:min-w-0 tw:border-0 tw:bg-transparent tw:p-0 tw:text-right tw:font-mono tw:text-inherit tw:outline-none"
+}
+
+pub(crate) fn field_class(state: &UiSlotFieldState) -> &'static str {
     if state.invalid.is_some() {
         "tw:inline-flex tw:min-h-7 tw:min-w-0 tw:items-center tw:justify-between tw:gap-2 tw:rounded-xs tw:border tw:border-status-error-border tw:bg-status-error-bg tw:px-2 tw:py-1 tw:text-sm tw:font-medium tw:text-status-error-foreground"
     } else if state.editable {
@@ -333,7 +435,7 @@ fn field_class(state: &UiSlotFieldState) -> &'static str {
     }
 }
 
-fn numeric_field_class(state: &UiSlotFieldState) -> &'static str {
+pub(crate) fn numeric_field_class(state: &UiSlotFieldState) -> &'static str {
     if state.invalid.is_some() {
         "tw:inline-flex tw:min-h-7 tw:min-w-0 tw:items-baseline tw:justify-end tw:gap-1 tw:rounded-xs tw:border tw:border-status-error-border tw:bg-status-error-bg tw:px-2 tw:py-1 tw:text-sm tw:font-medium tw:text-status-error-foreground"
     } else if state.editable {
@@ -360,7 +462,7 @@ fn xy_pad_class(state: &UiSlotFieldState) -> &'static str {
     }
 }
 
-fn format_float(value: f32) -> String {
+pub(crate) fn format_float(value: f32) -> String {
     if value.fract() == 0.0 {
         format!("{value:.0}")
     } else {
@@ -369,5 +471,39 @@ fn format_float(value: f32) -> String {
             .trim_end_matches('0')
             .trim_end_matches('.')
             .to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_f32_input, parse_i32_input, parse_u32_input};
+
+    #[test]
+    fn parses_and_clamps_signed_integer_input() {
+        assert_eq!(parse_i32_input("-4"), Some(-4));
+        assert_eq!(parse_i32_input(" 12 "), Some(12));
+        assert_eq!(parse_i32_input("99999999999"), Some(i32::MAX));
+        assert_eq!(parse_i32_input("-99999999999"), Some(i32::MIN));
+        assert_eq!(parse_i32_input("abc"), None);
+        assert_eq!(parse_i32_input(""), None);
+    }
+
+    #[test]
+    fn parses_and_clamps_unsigned_integer_input() {
+        assert_eq!(parse_u32_input("128"), Some(128));
+        assert_eq!(parse_u32_input("-7"), Some(0));
+        assert_eq!(parse_u32_input("99999999999"), Some(u32::MAX));
+        assert_eq!(parse_u32_input("1.5"), None);
+        assert_eq!(parse_u32_input(""), None);
+    }
+
+    #[test]
+    fn parses_finite_float_input_only() {
+        assert_eq!(parse_f32_input("0.35"), Some(0.35));
+        assert_eq!(parse_f32_input(" -2 "), Some(-2.0));
+        assert_eq!(parse_f32_input("inf"), None);
+        assert_eq!(parse_f32_input("NaN"), None);
+        assert_eq!(parse_f32_input("abc"), None);
+        assert_eq!(parse_f32_input(""), None);
     }
 }

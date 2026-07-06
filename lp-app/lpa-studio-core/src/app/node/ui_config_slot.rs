@@ -2,8 +2,8 @@
 
 use crate::{
     ProjectSlotAddress, UiBindingEndpoint, UiNodeDirtyState, UiSlotAffordance, UiSlotAspect,
-    UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotFieldState, UiSlotRecord, UiSlotShape,
-    UiSlotShapeField, UiSlotSourceState, UiSlotValue,
+    UiSlotAspectKind, UiSlotAspectRow, UiSlotAsset, UiSlotComposite, UiSlotFieldState,
+    UiSlotRecord, UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotValue,
 };
 
 /// The renderable body of a config slot row.
@@ -54,6 +54,16 @@ pub struct UiConfigSlot {
     /// Stable slot address for dispatching edits (`SlotEditOp`) from field
     /// components. `None` for synthetic rows not backed by a project slot.
     pub address: Option<ProjectSlotAddress>,
+    /// Address of this row's **own** pending/overlay edit entry, when one
+    /// exists. The row-level Revert/Reset affordance targets exactly this
+    /// address; a composite row that is only prefix-dirty (edits strictly
+    /// under it) carries `None` and offers no row revert — per-entry revert
+    /// for those lives in the save panel. For a present option row (whose
+    /// interior value renders inline) this may be the interior `.some`
+    /// address, and for an enum row (whose variant-switch entry is stored at
+    /// the variant child path) the entry-carrying variant child address,
+    /// rather than [`Self::address`].
+    pub edit_entry_address: Option<ProjectSlotAddress>,
     /// Human-readable field label.
     pub label: String,
     /// Optional explanatory copy for info popovers and docs.
@@ -62,6 +72,8 @@ pub struct UiConfigSlot {
     pub detail: Option<String>,
     /// Optional inclusion state when this row represents an `OptionSlot`.
     pub optionality: Option<UiSlotOptionality>,
+    /// Structural gesture facts when this row is a map or enum composite.
+    pub composite: Option<UiSlotComposite>,
     /// Whether the visible value is direct, bound, or unset.
     pub source: UiSlotSourceState,
     /// Value or record body for the row.
@@ -108,10 +120,12 @@ impl UiConfigSlot {
         Self {
             key: key.into(),
             address: None,
+            edit_entry_address: None,
             label: label.into(),
             description: None,
             detail: None,
             optionality: None,
+            composite: None,
             source: UiSlotSourceState::Direct,
             body,
             state: UiSlotFieldState::editable(),
@@ -123,6 +137,13 @@ impl UiConfigSlot {
     /// Attach the stable slot address edits should target.
     pub fn with_address(mut self, address: ProjectSlotAddress) -> Self {
         self.address = Some(address);
+        self
+    }
+
+    /// Attach the address of the row's own edit entry (the row-level
+    /// Revert/Reset target).
+    pub fn with_edit_entry_address(mut self, address: ProjectSlotAddress) -> Self {
+        self.edit_entry_address = Some(address);
         self
     }
 
@@ -141,6 +162,12 @@ impl UiConfigSlot {
     /// Set optional inclusion metadata.
     pub fn with_optionality(mut self, optionality: UiSlotOptionality) -> Self {
         self.optionality = Some(optionality);
+        self
+    }
+
+    /// Set structural gesture facts for a map or enum composite row.
+    pub fn with_composite(mut self, composite: UiSlotComposite) -> Self {
+        self.composite = Some(composite);
         self
     }
 

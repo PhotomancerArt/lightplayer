@@ -2016,17 +2016,14 @@ select {
     background-size: 16px 16px;
 }
 
+/* Fixed-width (track-only) some/none switch: state is carried by the thumb
+   position plus the input's aria-label/title — no text label, so the toggle
+   footprint never changes with state. */
 .ux-slot-optional-toggle {
     position: relative;
     display: inline-flex;
-    min-width: 0;
     flex: none;
     align-items: center;
-    gap: 0.4rem;
-    color: var(--studio-color-text-subtle);
-    font-size: 0.68rem;
-    font-weight: 600;
-    line-height: 1;
     cursor: pointer;
     user-select: none;
 }
@@ -2079,8 +2076,7 @@ select {
     outline-offset: 2px;
 }
 
-.ux-slot-optional-toggle-input:disabled + .ux-slot-optional-toggle-track,
-.ux-slot-optional-toggle-input:disabled ~ .ux-slot-optional-toggle-label {
+.ux-slot-optional-toggle-input:disabled + .ux-slot-optional-toggle-track {
     opacity: 0.55;
 }
 
@@ -2163,10 +2159,6 @@ select {
     .ux-node-ui-row-value,
     .ux-node-ui-nested {
         grid-column: 2;
-    }
-
-    .ux-slot-optional-toggle-label {
-        display: none;
     }
 
     .ux-node-ui-header {

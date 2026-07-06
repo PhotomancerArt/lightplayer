@@ -416,8 +416,11 @@ impl CommandPlan {
 /// The rule is deliberately dumb: scanning back from the tail, while the
 /// queued actions are still `SetValue`s, a queued `SetValue` for the **same
 /// address** is replaced in place by the newer one (latest value wins, order
-/// otherwise preserved). Any other action — a `Revert`, `SaveOverlay`, or an
-/// unrelated op — is a barrier: nothing coalesces across it.
+/// otherwise preserved). Any other action — a `Revert`, a structural gesture
+/// (`EnsurePresent`/`RemoveValue`), `SaveOverlay`, or an unrelated op — never
+/// coalesces and is a barrier: nothing coalesces across it. Structural ops
+/// change what a path *means*, so each queued gesture must reach the server
+/// in order.
 fn push_action_coalesced(actions: &mut Vec<UiAction>, action: UiAction) {
     let Some(SlotEditOp::SetValue { address, .. }) = action.op_as::<SlotEditOp>() else {
         actions.push(action);

@@ -12,6 +12,7 @@ mod slot_value_codec;
 mod slot_writer;
 mod syntax;
 
+pub use custom_slot_codec::snapshot_custom_slot_data;
 pub use json_syntax_source::JsonSyntaxSource;
 pub use slot_reader::{ArrayReader, ObjectReader, PropReader, SlotReader, ValueReader};
 pub use slot_value_codec::{read_lp_value, write_lp_value, write_untyped_lp_value};

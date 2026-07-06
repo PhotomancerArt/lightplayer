@@ -44,11 +44,12 @@ pub mod project_target_encoding;
 pub mod project_value_format;
 pub mod slot;
 pub mod ui_affordance;
+pub mod ui_pending_edit;
 
 pub use dirty_summary::DirtySummary;
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
-    NodeController, NodeControllerState, ProjectNodeAddress, ProjectNodeTarget,
+    NodeController, NodeControllerState, NodeRevertOp, ProjectNodeAddress, ProjectNodeTarget,
     ProjectProductSubscriptionIntent,
 };
 pub use project_connect_result::ProjectConnectResult;
@@ -70,7 +71,8 @@ pub use project_sync_run::ProjectSyncRun;
 pub use project_sync_summary::ProjectSyncSummary;
 pub use project_value_format::{format_lp_value, format_slot_map_key};
 pub use slot::{
-    PendingEdit, PendingEditPhase, ProjectSlotAddress, ProjectSlotRoot, SlotController,
-    SlotControllerState, SlotEditOp, SlotKind,
+    PendingEdit, PendingEditOp, PendingEditPhase, ProjectSlotAddress, ProjectSlotRoot,
+    SlotController, SlotControllerState, SlotEditOp, SlotKind,
 };
 pub use ui_affordance::UiAffordance;
+pub use ui_pending_edit::{UiPendingEdit, UiPendingEditKind, UiPendingEditPhase};

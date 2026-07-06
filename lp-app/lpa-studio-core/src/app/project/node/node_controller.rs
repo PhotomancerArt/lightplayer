@@ -6,9 +6,10 @@ use lpc_wire::{NodeRuntimeStatus, WireEntryState};
 
 use crate::app::project::slot::SlotEditJoin;
 use crate::{
-    DirtySummary, ProjectEditorOp, ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone,
-    ProjectNodeStatusView, ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController,
-    UiAction, UiNodeChild, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiProductPreview,
+    ControllerId, DirtySummary, NodeRevertOp, ProjectController, ProjectEditorOp,
+    ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
+    ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController, UiAction, UiNodeChild,
+    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiPaneAction, UiProductPreview,
     UiProductRef, UiProductTrackingState, UiStatus,
 };
 
@@ -193,6 +194,7 @@ impl NodeController {
             )],
         )
         .with_node_id(self.address.to_string())
+        .with_header_actions(node_header_actions(&self.address, &dirty))
         .with_children(children);
         view.focused = self.state.focused;
         view.action = Some(node_focus_action(self));
@@ -387,14 +389,15 @@ impl NodeController {
                         .iter()
                         .map(|nested| nested.dirty)
                         .sum::<DirtySummary>();
+                view.header_actions = node_header_actions(&child.address, &view.dirty);
                 view
             })
             .collect()
     }
 
-    /// Aggregate dirty-edit summary for this node's subtree: own slots plus
-    /// every descendant node, per-slot classification shared with the DTO
-    /// build ([`SlotController::dirty_summary`]).
+    /// Aggregate dirty-edit summary for this node's subtree: own edits plus
+    /// every descendant node's, counted by the join's single per-entry rule
+    /// (`SlotEditJoin::dirty_summary_for_node`).
     pub(in crate::app::project) fn dirty_summary(&self, edits: &SlotEditJoin<'_>) -> DirtySummary {
         let mut summary = self.own_slots_dirty_summary(edits);
         for child in &self.children {
@@ -403,17 +406,17 @@ impl NodeController {
         summary
     }
 
-    /// Aggregate dirty-edit summary for the slots this node owns directly
-    /// (children excluded). Callers merging bottom-up (DTO and tree-item
-    /// walks) combine this with already-computed child summaries.
+    /// Aggregate dirty-edit summary for the edits addressed to this node
+    /// (child nodes excluded). Counted per **edit entry**, not per slot row
+    /// (`SlotEditJoin::dirty_summary_for_node`), so edits at paths with no
+    /// surviving row — removed map entries — still count exactly once.
+    /// Callers merging bottom-up (DTO and tree-item walks) combine this with
+    /// already-computed child summaries.
     pub(in crate::app::project) fn own_slots_dirty_summary(
         &self,
         edits: &SlotEditJoin<'_>,
     ) -> DirtySummary {
-        self.slots
-            .iter()
-            .map(|slot| slot.dirty_summary(edits))
-            .sum()
+        edits.dirty_summary_for_node(&self.address)
     }
 
     fn ui_status(&self) -> UiStatus {
@@ -430,6 +433,23 @@ impl NodeController {
             ProjectProductSubscriptionIntent::Unsubscribed => UiProductTrackingState::Paused,
         }
     }
+}
+
+/// Contextual node-header actions (pane grammar actions slot, M3 UX gate
+/// feedback): the subtree batch revert ([`NodeRevertOp`]) with the same
+/// "revert" icon token as the project header's Revert-to-saved, present only
+/// while the header's subtree [`DirtySummary`] announces pending edits.
+fn node_header_actions(node: &ProjectNodeAddress, dirty: &DirtySummary) -> Vec<UiPaneAction> {
+    if dirty.is_clean() {
+        return Vec::new();
+    }
+    vec![UiPaneAction::new(
+        "revert",
+        UiAction::from_op(
+            ControllerId::new(ProjectController::NODE_ID),
+            NodeRevertOp { node: node.clone() },
+        ),
+    )]
 }
 
 fn node_focus_action(node: &NodeController) -> UiAction {
@@ -574,7 +594,8 @@ fn root_name_sort_key(name: &str) -> (u8, &str) {
     }
 }
 
-fn root_slot_key(node_id: NodeId, root_name: &str) -> String {
+/// Key of a node's slot root in the mirror's `root_shapes`/`roots` maps.
+pub(in crate::app::project) fn root_slot_key(node_id: NodeId, root_name: &str) -> String {
     format!("node.{node_id}.{root_name}")
 }
 

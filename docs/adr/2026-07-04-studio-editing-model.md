@@ -117,9 +117,16 @@ buffer in `ProjectController`, keyed by `ProjectSlotAddress`
 ```text
 (field input) ──► Pending { value }            # op queued/coalescing
 op sends       ──► InFlight { value, cmd_id }
-ack accepted   ──► (entry removed; mirror updated via
+ack accepted,
+  overlay stored ─► (entry removed; mirror updated via
                     ProjectSync::apply_acked_edits — the slot now reads
                     dirty from the overlay mirror)
+ack accepted,
+  normalized to a removal that changed the overlay
+               ──► AwaitingRefresh             # the mirror holds nothing at
+                                               # the path; the entry keeps
+                                               # its shadow until the next
+                                               # project read is applied
 ack rejected   ──► Failed { value, reason }    # feeds UiSlotFieldState
                                                # `invalid`; cleared on the
                                                # next edit or an explicit
@@ -129,11 +136,26 @@ op error/timeout ─► Failed { value, transport reason }
 
 While an entry exists, the DTO shows the buffered value (shadowing the
 synced value) and the phase maps to the dirty affordance:
-`Pending`/`InFlight` → `Saving`, `Failed` → `Error` + `invalid` reason. On
-accept the shadow hands off to the overlay mirror, which keeps supplying the
-assigned value until the next project read catches up — so there is no
-rubber-band window either before the ack or between the ack and the next
-pull.
+`Pending`/`InFlight`/`AwaitingRefresh` → `Saving`, `Failed` → `Error` +
+`invalid` reason. On accept the shadow hands off to the overlay mirror,
+which keeps supplying the assigned value until the next project read catches
+up — so there is no rubber-band window either before the ack or between the
+ack and the next pull.
+
+The `AwaitingRefresh` phase (added 2026-07-06) closes the one gap in that
+hand-off: an accepted ack whose effect is `NormalizedToRemoval { changed:
+true }` (D6/D7 — a value set back to its base, an add-then-remove gesture
+cancelling) leaves the mirror with **no** entry to hand off to, while the
+synced view still holds the superseded effective value until the next gated
+read delivers the reverted def. Releasing the entry at the ack would fall
+back to that stale value for one pull cycle — visible jitter on exactly the
+"changed it back" gesture D6 exists for. Instead the entry parks as
+`AwaitingRefresh` (keeping its shadow and the `Saving` affordance, counted
+like an in-flight edit) and `ProjectController::apply_project_view` releases
+it when the next project read is applied; ops and sync runs are serialized
+on the actor and revision stamps are monotonic, so the first read applied
+after the ack already carries the post-normalization values. A `changed:
+false` normalization altered nothing and releases immediately.
 
 Input floods are absorbed in the actor: consecutive queued
 `SlotEditOp::SetValue`s for the same address collapse latest-wins in the
@@ -172,6 +194,126 @@ Two load-bearing details:
   float (1.0000001 vs 1.0) remains an edit. Predictable, and correct for
   step-quantized controls; revisit only if a real near-miss annoyance
   appears.
+
+### D7 — Composite edit semantics: gestures are the wire ops (added 2026-07-06)
+
+M3 (generic editors) resolves follow-up (c). Four coupled decisions:
+
+- **Gestures ARE the wire ops; the server owns all defaults.** Map entry add
+  = `EnsurePresent map[key]`; entry remove = `Remove map[key]`; option on =
+  `EnsurePresent opt.some`; option off = `Remove opt`; enum variant switch =
+  `EnsurePresent enum.variant` (raw declared ident, verbatim). The client
+  never constructs composite values — `EnsurePresent` creates map entries /
+  option `Some` / variant payloads server-side with factory defaults
+  (`slot_factory.rs`), idempotent when already present. Client ops mirror
+  the vocabulary (`SlotEditOp::{EnsurePresent, RemoveValue}` in
+  `lpa-studio-core`); structural ops never coalesce and are coalescing
+  barriers, preserving order against `SetValue` floods.
+- **Structural normalization is base-relative**, extending D6's minimal-diff
+  rule to structure (`normalize_edit_to_base`): an `EnsurePresent` that is a
+  no-op against the **base** (saved) def — the map key present, the option
+  `Some`, the enum already on that variant — and a `Remove` at a path the
+  base does not contain both normalize to removing any overlay entry at that
+  path (`NormalizedToRemoval`). Add-then-remove of a map entry therefore
+  cancels to a clean overlay: no phantom dirty. Presence is resolved by
+  `base_slot_presence` (a `lookup_slot_data` walk over the re-parsed base
+  def); an unreadable base never normalizes in either direction.
+- **Prefix-aware dirty join.** A composite slot (record/map/option/enum) is
+  dirty when any overlay/buffer edit path is at or strictly under its path.
+  This is what makes a *removed* map entry visible: its row is gone from
+  the effective def, but the parent map row reads dirty. Counting stays
+  per **edit entry**, never per row (`SlotEditJoin::entries` is the single
+  enumeration feeding `DirtySummary` and the save panel's `UiPendingEdit`
+  list, so counts and list agree by construction); prefix-dirty ancestors
+  are display state, never additional counts. Only rows with an **own**
+  edit entry (`UiConfigSlot.edit_entry_address`) offer a row-level Revert:
+  the row's own path, plus two ownership extensions for entries that are
+  semantically the row's own gesture but live one segment deeper — a
+  present option row owns an entry at its interior `.some` address (its
+  value renders inline on the row), and an enum row owns an entry at a
+  declared variant child path (`enum.Variant` — where the variant-switch
+  gesture stores; the active variant is checked first, the other declared
+  variants cover the ack-to-refresh window). A prefix-only-dirty composite
+  offers no row revert, since a revert at its own path would remove
+  nothing; its entries revert individually from the save panel.
+- **One address per value leaf.** Vector/matrix component inputs
+  read-modify-write the whole `LpValue` at the leaf's single address;
+  per-address latest-wins coalescing absorbs rapid multi-component edits.
+  No per-component addressing exists. Relatedly, a composite-target
+  `AssignValue` is rejected up front with the distinct
+  `MutationRejectionReason::NotAValueLeaf` (wire `not_a_value_leaf`) rather
+  than a misleading `TypeMismatch` — whole-composite assignment is not part
+  of the model; gestures compose from `EnsurePresent`/`Remove` plus leaf
+  assigns.
+
+**Map key moves (added 2026-07-06, M3 gate feedback).** Keys are path
+segments, so re-keying a map entry is its own mutation, not a value edit:
+`MutationOp::MoveSlotEntry { artifact, from, to }` (sibling entry paths,
+canonical path-string encoding — no new key wire type). The server
+**materializes** the move into the existing edit vocabulary
+(`lpc-registry/src/overlay/move_slot_entry.rs`): `EnsurePresent to`, then
+edits wherever the moved **effective** value diverges from a *simulated
+future target entry* (base + current overlay + the stored form of the
+leading ensure — so a base-absent key diffs against factory defaults and a
+base-present key with a pending remove diffs against the base entry), then
+`Remove from`. Composite values survive: a non-default variant re-emits its
+`EnsurePresent to.Variant` selection, nested map entries re-add, diverged
+leaves re-assign. Every synthesized edit passes through the same
+base-relative normalization (D6/D7), so a move that reconstructs base state
+at `to` ends with a minimal (possibly empty) overlay; when the trailing
+`Remove from` normalizes away, edits stranded strictly under `from` are
+removed explicitly. Ack fidelity extends the effect vocabulary:
+`MutationEffect::Materialized { edits: Vec<StoredSlotEdit>, changed }`
+lists the stored per-path edits (`Put { edit }` / `Removed { path }`) in
+application order, and the mirror replays them verbatim
+(`ProjectSync::apply_acked_edits` → `effective_mutations`). Rejections:
+absent source / non-map paths → `unknown_slot_path`; occupied target →
+the dedicated `target_occupied`, so the key editor can surface "key already
+in use" on the row. Client op: `SlotEditOp::MoveEntry { address(map),
+from_key, to_key }` — structural (never coalesces, coalescing barrier),
+staged at the map's own address, released by the ack like any gesture.
+
+**Option off-then-on (fixed 2026-07-06).** Normalization compares against
+base and the overlay stores one op per path, which used to leave a
+counteracting entry behind: toggling a base-present option **off** stores
+`Remove opt` (a real diff); toggling it back **on** dispatches
+`EnsurePresent opt.some`, which normalizes away against the base (`.some`
+is base-present) *at a different path* — the stored `Remove opt` survived
+and the toggle-on click did nothing. The **counteracting-entry rule**
+closes this: a structural `EnsurePresent` that normalizes away also clears
+the overlay subtree at its *effective scope*
+(`ProjectRegistry::structural_ensure_scope` — the parent option path when
+the terminal segment is an option's `some` per the shape walk, the ensure
+path itself otherwise, e.g. a map-entry re-add cancelling a stored
+`Remove map[k]`). The sweep covers both the counteracting `Remove` and any
+stale edits under it, and the registry reports the cleared entries through
+`MutationEffect::Materialized` so ack-mirroring clients follow without a
+fetch. Re-enabling a base-present option therefore *is* a clean cancel of
+a pending toggle-off. The option toggle stays a controlled control whose
+visual state only follows the DTO's effective presence, so its rendering
+can never desync from the stored overlay either way.
+
+Enum variant switches follow the same shape of rule via the sibling sweep:
+a structural `EnsurePresent` whose terminal segment names a declared
+variant of the parent enum (a shape-walk check in
+`ProjectRegistry::variant_switch_sibling_paths`) clears the overlay entries
+at every *sibling* variant path and their subtrees as it is processed —
+selecting a variant replaces any pending switch to another variant. When
+the switch stores, `SlotOverlay::put_edit`'s parent-scope canonicalization
+already does this on server and mirror alike; the load-bearing case is the
+switch **back to the base variant**, where the `EnsurePresent` normalizes
+away (no stored edit ever reaches `put_edit`) and the registry sweeps the
+sibling subtrees explicitly, reporting the cleared entries through
+`MutationEffect::Materialized` so ack-mirroring clients follow without a
+fetch. Re-selecting the base variant therefore *is* a clean cancel of a
+pending switch.
+
+**Known limitation (recorded, no code).** An optional-*wrapped* map or enum
+(`Option<Map<…>>`, `Option<Enum<…>>`) would flatten its interior body into
+the option row without projecting the interior's gesture facts
+(`ui_composite` reads the option's own body), losing the add-entry/variant
+affordances. No such shape exists in any demo project today; revisit when
+one appears (tracked in the M3 plan notes as future work).
 
 ## Consequences
 
@@ -223,13 +365,17 @@ Per the deferred-decision convention, these are indexed in
 - **(a) Per-item overlay gating.** Fetch-full-on-change assumes small
   overlays. **Revisit when** measured overlay fetch cost matters (large
   overlays or chatty editing sessions on slow links).
-- **(b) Save-panel diff DTOs.** M1's dirty join provides counts only; a
-  "what changed" panel needs before/after value DTOs. **Revisit in** roadmap
-  M3 (Save panel with change count).
-- **(c) Composite edit semantics.** Type enforcement covers value leaves;
-  map entry add/remove, option some/none, and enum variant switching have
-  real design decisions. **Revisit in** roadmap M3 — extend this ADR or add
-  a note if M3 sets precedent.
+- **(b) Save-panel diff DTOs.** Partially superseded by M3: the save panel
+  now lists labeled per-entry changes (`UiPendingEdit` — node label, slot
+  path, op description, **current** value display string, phase, per-entry
+  revert), built from the same join enumeration as the dirty counts. What
+  remains deferred is before/after value DTOs (old value alongside new).
+  **Revisit when** display strings prove insufficient — e.g. a real "what
+  was it before?" need in the save panel.
+- **(c) ~~Composite edit semantics.~~ Resolved 2026-07-06** by M3 — see
+  **D7** above (gestures-are-wire-ops, base-relative structural
+  normalization, prefix-aware dirty, one-address-per-leaf,
+  `NotAValueLeaf`).
 - **(f) Alternative dirty modes.** Minimal-diff normalization (D6) fixes
   the dirty semantics to "differs from saved". If a use case for
   touched-mode tracking or deliberate value pinning appears (e.g. holding a

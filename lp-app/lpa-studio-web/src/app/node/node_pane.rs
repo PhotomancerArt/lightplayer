@@ -72,6 +72,8 @@ pub fn NodePane(
                     },
                     title,
                     chrome,
+                    actions: view.header_actions.clone(),
+                    on_action,
                     trailing: rsx! {
                         if tabs.len() > 1 {
                             NodeTabs {

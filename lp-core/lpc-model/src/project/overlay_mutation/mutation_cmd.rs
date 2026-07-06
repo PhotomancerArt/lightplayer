@@ -1,6 +1,8 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use crate::{SlotEdit, SlotPath};
+
 use super::MutationOp;
 
 /// Ordered overlay mutation command batch.
@@ -103,21 +105,57 @@ pub enum MutationCmdStatus {
 /// Observable effect of an accepted overlay mutation.
 ///
 /// The effect is what the server actually stored, which may differ from the
-/// sent command: minimal-diff normalization rewrites a `PutSlotEdit` assigning
-/// the base (unoverlaid) value into a removal of the overlay entry at that
-/// path. Clients that mirror the overlay from their own acks must apply the
-/// effect, not the sent command, or their mirror diverges from the server
-/// without a revision bump to correct it.
+/// sent command: minimal-diff normalization rewrites a `PutSlotEdit` that is
+/// a no-op against the base (unoverlaid) artifact — assigning the base value,
+/// `EnsurePresent` of a base-present target, or `Remove` of a base-absent
+/// target — into a removal of the overlay entry at that path. Clients that
+/// mirror the overlay from their own acks must apply the effect, not the sent
+/// command, or their mirror diverges from the server without a revision bump
+/// to correct it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MutationEffect {
     /// The mutation was applied as sent; `changed` reports whether it changed
     /// canonical overlay state.
     OverlayChanged { changed: bool },
-    /// A `PutSlotEdit` assigning the base value was normalized to removing the
-    /// overlay entry at its path; `changed` reports whether an entry existed
-    /// to remove (`false`: the command was a complete no-op).
+    /// A `PutSlotEdit` that was a no-op against the base artifact (assigning
+    /// the base value, ensuring a base-present target, or removing a
+    /// base-absent one) was normalized to removing the overlay entry at its
+    /// path; `changed` reports whether an entry existed to remove (`false`:
+    /// the command was a complete no-op).
     NormalizedToRemoval { changed: bool },
+    /// The mutation materialized into several per-path overlay changes:
+    /// either a multi-edit mutation (`MoveSlotEntry`) synthesized into
+    /// per-path edits, or a structural `Remove` that normalized away and
+    /// also cleared the overlay entries stranded strictly under its path.
+    /// `edits` lists what was actually stored, in application order, against
+    /// the command's artifact — each edit was individually normalized
+    /// against the base, so an entry is either a stored [`SlotEdit`] or a
+    /// removal of the overlay entry at a path. Ack-mirroring clients replay
+    /// `edits` verbatim; `changed` reports whether any of them changed
+    /// canonical overlay state.
+    Materialized {
+        edits: Vec<StoredSlotEdit>,
+        changed: bool,
+    },
+}
+
+/// One stored overlay change from a materialized mutation.
+///
+/// Produced by the move materialization and by a normalized structural
+/// `Remove` clearing its stranded descendants. The two forms mirror what the
+/// registry does per edit: store it
+/// ([`crate::ProjectOverlay::put_slot_edit`]) or — when normalization elided
+/// it, or a stale descendant of a normalized removal had to be cleared —
+/// remove the overlay entry at a path
+/// ([`crate::ProjectOverlay::remove_slot_edit`]).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StoredSlotEdit {
+    /// `edit` was stored in the artifact's slot overlay.
+    Put { edit: SlotEdit },
+    /// The overlay entry at `path` (if any) was removed.
+    Removed { path: SlotPath },
 }
 
 /// Stable reason for a rejected overlay mutation command.
@@ -133,6 +171,12 @@ pub enum MutationRejectionReason {
     NotWritable,
     /// Mutation assigned a value that does not match the slot's value type.
     TypeMismatch,
+    /// Mutation assigned a value to a structural slot (record, map, option,
+    /// enum, unit) instead of a value leaf.
+    NotAValueLeaf,
+    /// Mutation would move or create an entry at a target that already
+    /// exists in the effective definition (occupied map key).
+    TargetOccupied,
     /// Mutation was well-formed but edit application failed.
     EditFailed,
     /// Mutation is not supported by the current registry implementation.

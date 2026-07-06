@@ -11,18 +11,19 @@
 //! the project stats all live in the detail popup.
 //!
 //! Body: the node tree (plus any sync issue and the pane-level
-//! Refresh/Disconnect actions). The popup stays at M2's revision + counts
-//! detail level; the full "what changed" panel is M3.
+//! Refresh/Disconnect actions). The popup is the save panel (M3 P5): the
+//! per-bucket sections list the labeled pending edits with per-entry revert.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, ProjectEditorView, UiAction, UiAffordance, UiMetric, UiStatus,
+    DirtySummary, ProjectEditorView, UiAction, UiAffordance, UiMetric, UiPendingEdit, UiStatus,
 };
 
 use crate::app::affordance::{affordance_pane_tone, affordance_trigger_style};
 use crate::app::layout::{PaneChrome, StudioPane};
 use crate::app::node::node_status_label_class;
 use crate::app::project::ProjectNodeTree;
+use crate::app::project::pending_edit_section::{PendingEditBucket, PendingEditList, entries_in};
 use crate::base::{
     DetailPopover, DetailSectionTint, PopoverPlacement, detail_popover_section_class,
 };
@@ -59,6 +60,7 @@ pub fn ProjectPane(
     let roots = view.tree.roots.clone();
     let header_actions = view.header_actions.clone();
     let project_name = view.project_name.clone();
+    let pending_edits = view.pending_edits.clone();
 
     rsx! {
         StudioPane {
@@ -76,6 +78,8 @@ pub fn ProjectPane(
                     overlay_revision,
                     edits_in_flight,
                     stats,
+                    pending_edits,
+                    on_action,
                     initially_open,
                 }
             },
@@ -104,11 +108,12 @@ pub fn ProjectPane(
     }
 }
 
-/// The detail popup on the shared [`DetailPopover`] base: project identity
-/// with the status word (its only home — headers no longer carry a status
-/// chip), the pending-edit state, overlay revision, per-bucket dirty counts
-/// with their status tints, and the project stats (moved here from the old
-/// sidebar MetricGrid card).
+/// The detail popup on the shared [`DetailPopover`] base — the save panel:
+/// project identity with the status word (its only home — headers no longer
+/// carry a status chip), the pending-edit state, overlay revision, the
+/// per-bucket sections (unsaved / live / failed) as headed change lists with
+/// per-entry revert (counts stay in the section headers), and the project
+/// stats (moved here from the old sidebar MetricGrid card).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ProjectDetailPopover(
@@ -119,11 +124,16 @@ fn ProjectDetailPopover(
     overlay_revision: i64,
     edits_in_flight: usize,
     stats: Vec<UiMetric>,
+    pending_edits: Vec<UiPendingEdit>,
+    on_action: EventHandler<UiAction>,
     #[props(default = false)] initially_open: bool,
 ) -> Element {
     let style = affordance_trigger_style(affordance);
     let label = trigger_label(affordance);
     let status_class = node_status_label_class(status.kind);
+    let unsaved_entries = entries_in(&pending_edits, PendingEditBucket::Persisted);
+    let live_entries = entries_in(&pending_edits, PendingEditBucket::Live);
+    let failed_entries = entries_in(&pending_edits, PendingEditBucket::Failed);
 
     rsx! {
         DetailPopover {
@@ -152,16 +162,19 @@ fn ProjectDetailPopover(
             }
             section { class: detail_popover_section_class(unsaved_section_tint(&dirty)),
                 ProjectDetailRow { label: "Unsaved (persisted)", value: dirty.persisted.to_string() }
+                PendingEditList { entries: unsaved_entries, on_action }
             }
             section { class: detail_popover_section_class(live_section_tint(&dirty)),
                 ProjectDetailRow { label: "Live (transient)", value: dirty.transient.to_string() }
+                PendingEditList { entries: live_entries, on_action }
                 p { class: "tw:m-0 tw:pt-1 tw:text-[0.68rem] tw:leading-snug tw:text-subtle-foreground",
                     "Live controls apply to the running project and are never written by Save."
                 }
             }
-            if dirty.failed > 0 {
+            if dirty.failed > 0 || !failed_entries.is_empty() {
                 section { class: detail_popover_section_class(DetailSectionTint::Error),
                     ProjectDetailRow { label: "Failed edits", value: dirty.failed.to_string() }
+                    PendingEditList { entries: failed_entries, on_action }
                 }
             }
             if !stats.is_empty() {
