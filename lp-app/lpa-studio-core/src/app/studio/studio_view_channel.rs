@@ -274,8 +274,8 @@ mod tests {
     #[test]
     fn view_channel_keeps_only_latest_snapshot() {
         let (tx, mut rx) = studio_view_channel();
-        tx.send(UiStudioView::new(Vec::new(), Vec::new()));
-        tx.send(UiStudioView::new(Vec::new(), Vec::new()));
+        tx.send(UiStudioView::empty());
+        tx.send(UiStudioView::empty());
 
         // Two sends, one retained (the newest), then empty.
         assert!(rx.try_recv().is_some());

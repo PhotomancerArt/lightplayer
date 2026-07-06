@@ -36,6 +36,12 @@ pub enum ClientRequest {
     ListAvailableProjects,
     ListLoadedProjects,
     StopAllProjects,
+    /// Set the server/device global log level at runtime (see
+    /// [`crate::server::ClientMsgBody::SetLogLevel`] for semantics: global,
+    /// non-persistent, no `Off`).
+    SetLogLevel {
+        level: crate::server::api::LogLevel,
+    },
 }
 
 #[cfg(test)]
@@ -151,6 +157,21 @@ mod tests {
         let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
         match deserialized {
             ClientRequest::ListLoadedProjects => {}
+            _ => panic!("Wrong request type"),
+        }
+    }
+
+    #[test]
+    fn test_set_log_level_request() {
+        use crate::server::api::LogLevel;
+        let req = ClientRequest::SetLogLevel {
+            level: LogLevel::Trace,
+        };
+        let json = crate::json::to_string(&req).unwrap();
+        assert!(json.contains("setLogLevel"));
+        let deserialized: ClientRequest = crate::json::from_str(&json).unwrap();
+        match deserialized {
+            ClientRequest::SetLogLevel { level } => assert_eq!(level, LogLevel::Trace),
             _ => panic!("Wrong request type"),
         }
     }

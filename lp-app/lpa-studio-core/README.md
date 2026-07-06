@@ -257,6 +257,36 @@ Generic notices and action failures are expected to flow into recent activity
 logs. Actionable issues that affect the next user choice should live inline in
 the relevant `UiStackSection` body.
 
+## Console Logging
+
+The console model lives in `core/log/` (ADR
+`2026-07-05-studio-logging-model`):
+
+- `UiLogEntry` carries a timestamp (`f64` seconds since Unix epoch, stamped at
+  push time by a clock injected into `StudioController`), a severity
+  (`Trace..Error`, ordered), and a `UiLogSource { origin, detail }` — origin is
+  the closed enum `Studio | Link | Server | Device`; detail is optional free
+  text (module path, endpoint id). Producers hand the controller unstamped
+  `UiLogDraft`s.
+- `LogRing` keeps the last 1000 entries unfiltered. `LogFilter` (min-level
+  threshold, default Info+, plus per-origin toggles) is applied display-side
+  when building `UiConsoleView`, so relaxing the filter reveals captured
+  history. Filter mutations arrive as `StudioCommand::Console(ConsoleCommand)`
+  — synchronous state changes, not `UiAction`s.
+- Healthy server heartbeats are telemetry, not log entries; recovery/safe-mode
+  conditions still log as Warn/Error. Firmware serial lines are parsed from
+  the `[LEVEL] module: message` format into structured entries.
+- Studio-side code logs through the standard `log` macros: a global sink
+  (`core/log/log_sink.rs`) buffers records in a bounded thread-local queue
+  that the studio actor drains into the ring each batch/tick (origin Studio,
+  target as detail). The controller's `on_entry` hook is the single
+  JS-console mirroring point.
+- `DeviceOp::SetLogLevel` sets the connected server's runtime verbosity over
+  the wire (`ClientMsgBody::SetLogLevel` → `log::set_max_level`); the console
+  toolbar sends it as `ConsoleCommand::SetDeviceLogLevel`, converted to the
+  device action at actor intake. Not persisted device-side; tracked
+  optimistically per connection.
+
 ## Device Management UX
 
 Blank-device provisioning and recovery are modeled as Device actions backed by

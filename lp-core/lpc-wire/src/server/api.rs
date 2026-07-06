@@ -30,6 +30,14 @@ pub enum ClientMsgBody {
     ListAvailableProjects,
     /// List loaded projects
     ListLoadedProjects,
+    /// Set the server/device global log level at runtime.
+    ///
+    /// Applies process-globally via the `log` crate on whichever platform
+    /// serves the protocol (ESP32, emulator, browser worker, host). Not
+    /// persisted: the device reverts to its logger-init default (Info) on
+    /// reboot. There is deliberately no `Off` — the client can never turn
+    /// the device fully silent.
+    SetLogLevel { level: LogLevel },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -66,6 +74,8 @@ pub enum ServerMsgBody {
     },
     /// Response to StopAllProjects
     StopAllProjects,
+    /// Ack for SetLogLevel: the level has been applied globally.
+    SetLogLevel,
 
     Log {
         level: LogLevel,
@@ -116,8 +126,14 @@ pub enum ServerMsgBody {
     },
 }
 
-#[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Log severity carried by [`ServerMsgBody::Log`] frames and
+/// [`ClientMsgBody::SetLogLevel`] requests, lowest to highest.
+///
+/// There is deliberately no `Off` variant: the runtime log-level command can
+/// lower output to `Error` but never fully silence the device.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LogLevel {
+    Trace,
     Debug,
     Info,
     Warn,
@@ -155,4 +171,39 @@ pub struct MemoryStats {
     pub free_bytes: u32,
     pub used_bytes: u32,
     pub total_bytes: u32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn log_level_trace_round_trips() {
+        let json = crate::json::to_string(&LogLevel::Trace).unwrap();
+        assert_eq!(json, "\"Trace\"");
+        let level: LogLevel = crate::json::from_str(&json).unwrap();
+        assert_eq!(level, LogLevel::Trace);
+    }
+
+    #[test]
+    fn set_log_level_request_round_trips() {
+        let request = ClientMsgBody::SetLogLevel {
+            level: LogLevel::Debug,
+        };
+        let json = crate::json::to_string(&request).unwrap();
+        let deserialized: ClientMsgBody = crate::json::from_str(&json).unwrap();
+        assert!(matches!(
+            deserialized,
+            ClientMsgBody::SetLogLevel {
+                level: LogLevel::Debug
+            }
+        ));
+    }
+
+    #[test]
+    fn set_log_level_ack_round_trips() {
+        let json = crate::json::to_string(&ServerMsgBody::SetLogLevel).unwrap();
+        let deserialized: ServerMsgBody = crate::json::from_str(&json).unwrap();
+        assert!(matches!(deserialized, ServerMsgBody::SetLogLevel));
+    }
 }

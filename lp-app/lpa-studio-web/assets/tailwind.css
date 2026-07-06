@@ -15,6 +15,7 @@
     --tw-text-lg--line-height: calc(1.75 / 1.125);
     --tw-text-xl: 1.25rem;
     --tw-text-xl--line-height: calc(1.75 / 1.25);
+    --tw-font-weight-normal: 400;
     --tw-font-weight-medium: 500;
     --tw-font-weight-semibold: 600;
     --tw-font-weight-bold: 700;
@@ -391,8 +392,8 @@
   .tw\:grid-cols-\[34px_minmax\(0\,1fr\)_auto\] {
     grid-template-columns: 34px minmax(0,1fr) auto;
   }
-  .tw\:grid-cols-\[52px_72px_minmax\(0\,1fr\)\] {
-    grid-template-columns: 52px 72px minmax(0,1fr);
+  .tw\:grid-cols-\[64px_52px_minmax\(72px\,128px\)_minmax\(0\,1fr\)\] {
+    grid-template-columns: 64px 52px minmax(72px,128px) minmax(0,1fr);
   }
   .tw\:grid-cols-\[64px_minmax\(0\,1fr\)\] {
     grid-template-columns: 64px minmax(0,1fr);
@@ -1005,6 +1006,10 @@
     --tw-font-weight: var(--tw-font-weight-medium);
     font-weight: var(--tw-font-weight-medium);
   }
+  .tw\:font-normal {
+    --tw-font-weight: var(--tw-font-weight-normal);
+    font-weight: var(--tw-font-weight-normal);
+  }
   .tw\:font-semibold {
     --tw-font-weight: var(--tw-font-weight-semibold);
     font-weight: var(--tw-font-weight-semibold);
@@ -1329,6 +1334,11 @@
   .tw\:disabled\:cursor-not-allowed {
     &:disabled {
       cursor: not-allowed;
+    }
+  }
+  .tw\:disabled\:opacity-50 {
+    &:disabled {
+      opacity: 50%;
     }
   }
   .tw\:disabled\:opacity-60 {

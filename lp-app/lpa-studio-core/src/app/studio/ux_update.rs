@@ -1,4 +1,4 @@
-use crate::{ControllerId, UiActivityView, UiLogEntry, UiStatus, UiStudioView};
+use crate::{ControllerId, UiActivityView, UiLogDraft, UiStatus, UiStudioView};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum UxUpdate {
@@ -8,7 +8,10 @@ pub enum UxUpdate {
         status: UiStatus,
         activity: UiActivityView,
     },
-    Log(UiLogEntry),
+    /// A progressive log line emitted mid-action. Carries an unstamped draft
+    /// (producers have no clock); the consumer stamps it — the controller via
+    /// `push_log`, the actor with the controller's shared clock.
+    Log(UiLogDraft),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

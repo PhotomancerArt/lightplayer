@@ -1,8 +1,11 @@
 use core::any::Any;
+use core::time::Duration;
 
 use lpa_link::{LinkEndpointId, LinkProviderKind};
 
-use crate::{ActionClass, ActionConfirmation, ActionMeta, ActionPriority, ControllerOp};
+use crate::{
+    ActionClass, ActionConfirmation, ActionMeta, ActionPriority, ControllerOp, UiLogLevel,
+};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DeviceOp {
@@ -23,6 +26,12 @@ pub enum DeviceOp {
     ResetToBlank,
     DisconnectDevice,
     RefreshConnections,
+    /// Set the connected server's process-global log level at runtime (wire
+    /// `SetLogLevel`). Not persisted device-side: a reboot reverts to the
+    /// logger-init default (Info).
+    SetLogLevel {
+        level: UiLogLevel,
+    },
 }
 
 impl ControllerOp for DeviceOp {
@@ -88,6 +97,11 @@ impl ControllerOp for DeviceOp {
                 "Rebuild the connection catalog from available providers.",
                 ActionPriority::Secondary,
             ),
+            Self::SetLogLevel { level } => ActionMeta::new(
+                format!("Set device log level: {}", level.label()),
+                "Change the connected device's log verbosity until it reboots.",
+                ActionPriority::Tertiary,
+            ),
         }
     }
 
@@ -109,6 +123,11 @@ impl ControllerOp for DeviceOp {
             | Self::ResetToBlank
             | Self::DisconnectDevice
             | Self::RefreshConnections => ActionClass::Recovery,
+            // A quick request/ack on the existing connection — no reason to
+            // preempt other foreground work or own the connection.
+            Self::SetLogLevel { .. } => ActionClass::Foreground {
+                deadline: Duration::from_secs(6),
+            },
         }
     }
 
@@ -133,10 +152,10 @@ impl ControllerOp for DeviceOp {
 mod tests {
     use lpa_link::{LinkEndpointId, LinkProviderKind};
 
-    use crate::{ActionClass, ControllerOp, DeviceOp};
+    use crate::{ActionClass, ControllerOp, DeviceOp, UiLogLevel};
 
     #[test]
-    fn every_device_op_is_recovery_class() {
+    fn every_device_flow_op_is_recovery_class() {
         let ops = [
             DeviceOp::OpenProvider {
                 provider_id: LinkProviderKind::BrowserWorker,
@@ -160,5 +179,13 @@ mod tests {
         for op in ops {
             assert_eq!(op.action_class(), ActionClass::Recovery, "{op:?}");
         }
+    }
+
+    #[test]
+    fn set_log_level_is_a_quick_foreground_op() {
+        let op = DeviceOp::SetLogLevel {
+            level: UiLogLevel::Debug,
+        };
+        assert!(matches!(op.action_class(), ActionClass::Foreground { .. }));
     }
 }

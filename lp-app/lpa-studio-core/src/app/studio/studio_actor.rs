@@ -33,14 +33,16 @@ use std::rc::Rc;
 
 use lpa_client::{BackoffPolicy, CancelSignal, ProgressDeadline};
 
+use crate::app::studio::console_command::ConsoleCommand;
 use crate::app::studio::studio_command::StudioCommand;
 use crate::app::studio::studio_view_channel::{
     CommandReceiver, CommandSender, StudioViewReceiver, StudioViewSender, command_channel,
     studio_view_channel,
 };
+use crate::core::log::take_pending_records;
 use crate::{
-    ProjectRefreshOutcome, SlotEditOp, StudioController, UiAction, UiLogEntry, UiStudioView,
-    UxUpdate, UxUpdateSink,
+    ControllerId, DeviceController, DeviceOp, ProjectRefreshOutcome, SlotEditOp, StudioController,
+    UiAction, UiLogDraft, UiLogLevel, UiLogOrigin, UiStudioView, UxUpdate, UxUpdateSink,
 };
 
 /// The default passive-refresh backoff: start at 3 s (the retired flat
@@ -168,8 +170,14 @@ where
     async fn process_batch(&mut self, batch: Vec<StudioCommand>) -> bool {
         let plan = CommandPlan::from_batch(batch);
 
-        // Actions always run first (preemption-as-priority); the coalesced tick
-        // runs after. Shutdown only ends the loop after the batch is processed.
+        // Console commands are synchronous state mutations with no async work;
+        // apply them first (in queue order, never coalesced) so the batch's
+        // final snapshot reflects the reshaped console. Actions run next
+        // (preemption-as-priority); the coalesced tick runs after. Shutdown
+        // only ends the loop after the batch is processed.
+        for command in plan.console {
+            self.controller.apply_console_command(command);
+        }
         for action in plan.actions {
             self.run_action(action).await;
         }
@@ -203,6 +211,10 @@ where
     /// `process_batch`.
     async fn run_action(&mut self, action: UiAction) {
         let publisher = self.view_out.publisher();
+        // The controller's stamping clock, shared so progressive `Log` drafts
+        // get real timestamps: these entries never pass through `push_log`
+        // (the producer already buffered a copy for the ring).
+        let clock = self.controller.clock();
         // The live view the progressive updates mutate. `Activity`/`Log` updates
         // are deltas against the most recent full `View` snapshot.
         let live: Rc<RefCell<Option<UiStudioView>>> = Rc::new(RefCell::new(None));
@@ -224,9 +236,12 @@ where
                         publisher.send(view.clone());
                     }
                 }
-                UxUpdate::Log(log) => {
+                UxUpdate::Log(draft) => {
                     if let Some(view) = live.borrow_mut().as_mut() {
-                        view.logs.push(log.clone());
+                        // `push_live` applies the view's carried filter state,
+                        // keeping the live view consistent with the change-gated
+                        // snapshot that will replace it.
+                        view.console.push_live(draft.clone().stamp(clock()));
                         publisher.send(view.clone());
                     }
                 }
@@ -236,10 +251,10 @@ where
         match result {
             Ok(outcome) => {
                 for notice in outcome.notices {
-                    self.controller_log(UiLogEntry::from_notice(notice));
+                    self.controller_log(UiLogDraft::from_notice(notice));
                 }
             }
-            Err(error) => self.controller_log(UiLogEntry::from_error(error)),
+            Err(error) => self.controller_log(UiLogDraft::from_error(error)),
         }
     }
 
@@ -283,7 +298,7 @@ where
             Err(error) => {
                 self.controller
                     .mark_passive_project_refresh_failed(error.to_string());
-                self.controller_log(UiLogEntry::from_error(error));
+                self.controller_log(UiLogDraft::from_error(error));
                 self.backoff.record_failure();
             }
         }
@@ -295,15 +310,44 @@ where
         self.backoff.current_delay()
     }
 
-    fn controller_log(&mut self, entry: UiLogEntry) {
+    fn controller_log(&mut self, draft: UiLogDraft) {
         // Route action/error logs through the controller's bounded ring so the
-        // cap lives in core. `push_log` marks the view dirty.
-        self.controller.push_log(entry);
+        // cap lives in core. `push_log` stamps the draft and marks the view
+        // dirty.
+        self.controller.push_log(draft);
     }
 
+    /// Drain the global `log::` sink queue, then emit a change-gated snapshot
+    /// if the controller's view changed.
+    ///
+    /// This is the sink's **single drain point**: `emit_if_changed` runs once
+    /// at loop start and once at the end of every processed batch — which
+    /// covers every command batch and every refresh tick — so records logged
+    /// *during* a batch land in that batch's own snapshot, and records logged
+    /// between batches are picked up by the next one.
     fn emit_if_changed(&mut self) {
+        self.drain_log_sink();
         if let Some(view) = self.controller.view_if_changed() {
             self.view_out.send(view);
+        }
+    }
+
+    /// Move pending [`StudioLogSink`](crate::StudioLogSink) records into the
+    /// controller ring: origin `Studio`, the record target as detail, stamped
+    /// by the controller clock like every other draft. If the sink dropped
+    /// records to overflow since the last drain, one Warn entry reporting the
+    /// count is appended after the retained records.
+    fn drain_log_sink(&mut self) {
+        let (records, dropped) = take_pending_records();
+        for record in records {
+            self.controller.push_log(record.into_draft());
+        }
+        if dropped > 0 {
+            self.controller.push_log(UiLogDraft::new(
+                UiLogLevel::Warn,
+                UiLogOrigin::Studio,
+                format!("log sink dropped {dropped} records"),
+            ));
         }
     }
 
@@ -317,9 +361,11 @@ where
     }
 }
 
-/// A planned batch: the ordered actions to run, whether a tick should run
+/// A planned batch: the console commands to apply (in queue order, never
+/// coalesced), the ordered actions to run, whether a tick should run
 /// (coalesced to at most one), and whether shutdown was requested.
 struct CommandPlan {
+    console: Vec<ConsoleCommand>,
     actions: Vec<UiAction>,
     tick: bool,
     shutdown: bool,
@@ -327,18 +373,36 @@ struct CommandPlan {
 
 impl CommandPlan {
     fn from_batch(batch: Vec<StudioCommand>) -> Self {
+        let mut console = Vec::new();
         let mut actions = Vec::new();
         let mut tick = false;
         let mut shutdown = false;
         for command in batch {
             match command {
                 StudioCommand::Action(action) => push_action_coalesced(&mut actions, action),
+                // Not a local console mutation: a device-level change is a
+                // server round-trip, so convert it into the equivalent device
+                // action here and let it ride the normal async action path.
+                StudioCommand::Console(ConsoleCommand::SetDeviceLogLevel(level)) => {
+                    push_action_coalesced(
+                        &mut actions,
+                        UiAction::from_op(
+                            ControllerId::new(DeviceController::NODE_ID),
+                            DeviceOp::SetLogLevel { level },
+                        ),
+                    );
+                }
+                // Never coalesced: each console command is a distinct user
+                // gesture whose relative order matters (e.g. Clear between
+                // two level changes).
+                StudioCommand::Console(command) => console.push(command),
                 // Coalesce: many queued ticks collapse to one pull.
                 StudioCommand::RefreshTick => tick = true,
                 StudioCommand::Shutdown => shutdown = true,
             }
         }
         Self {
+            console,
             actions,
             tick,
             shutdown,
@@ -421,8 +485,10 @@ where
 fn command_preempts_passive(command: &StudioCommand) -> bool {
     match command {
         StudioCommand::Action(action) => action.class().preempts_passive_refresh(),
-        // A queued tick or shutdown does not preempt an in-flight pull.
-        StudioCommand::RefreshTick | StudioCommand::Shutdown => false,
+        // A queued console command, tick, or shutdown does not preempt an
+        // in-flight pull: console mutations are display-side and can wait for
+        // the batch after the pull completes.
+        StudioCommand::Console(_) | StudioCommand::RefreshTick | StudioCommand::Shutdown => false,
     }
 }
 

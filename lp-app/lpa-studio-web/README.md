@@ -138,6 +138,15 @@ writes the packaged firmware and then attempts to reconnect to the LightPlayer
 server after reset. Flashing renders live progress in the active Device step
 and raw esptool output in the Console below the Device panel.
 
+The Console panel (`app/device/runtime_log.rs`) renders the filtered
+`UiConsoleView` from core: a toolbar with a minimum-level select (default
+Info+), origin toggle chips (studio/link/server/device), a device-level
+select that changes the connected server's runtime verbosity (disabled while
+disconnected), a hidden-entry count, and Clear. Rows show a UTC `HH:MM:SS`
+timestamp, level, origin (with dimmed module/endpoint detail), and message;
+rendering caps at a 250-row tail of the filtered entries while the core ring
+retains 1000.
+
 During the initial browser-serial server attach, the Device pane shows a
 stepped readiness activity while raw boot lines stream into the Console below
 the Device panel. Blank or erased devices are recognized from ESP32 ROM output

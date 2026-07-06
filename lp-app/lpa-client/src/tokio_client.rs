@@ -440,6 +440,18 @@ impl TokioLpClient {
         }
     }
 
+    /// Set the server/device global log level at runtime (not persisted;
+    /// the device reverts to its init default on reboot).
+    pub async fn set_log_level(&self, level: LogLevel) -> Result<()> {
+        let response = self
+            .send_request(ClientRequest::SetLogLevel { level })
+            .await?;
+        match response.value.msg {
+            WireServerMsgBody::SetLogLevel => Ok(()),
+            other => Err(unexpected_response("set_log_level", other)),
+        }
+    }
+
     pub async fn push_project_files(
         &self,
         project_id: &str,
@@ -556,6 +568,7 @@ impl PullIo for LockedTransportIo<'_> {
 
 fn server_log_level(level: &LogLevel) -> log::Level {
     match level {
+        LogLevel::Trace => log::Level::Trace,
         LogLevel::Debug => log::Level::Debug,
         LogLevel::Info => log::Level::Info,
         LogLevel::Warn => log::Level::Warn,
