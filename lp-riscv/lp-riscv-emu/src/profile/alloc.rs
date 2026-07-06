@@ -138,8 +138,7 @@ mod tests {
         }
         drop(f);
 
-        let report =
-            super::analyze_heap_trace(&trace_path, &meta_path, 20).expect("analyze");
+        let report = super::analyze_heap_trace(&trace_path, &meta_path, 20).expect("analyze");
         let compile = report
             .windows
             .iter()
@@ -698,10 +697,7 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
                     }
                     Some("E") => {
                         // Close the innermost open window with this name.
-                        if let Some(pos) = active
-                            .iter()
-                            .rposition(|&w| windows[w].0 == name)
-                        {
+                        if let Some(pos) = active.iter().rposition(|&w| windows[w].0 == name) {
                             active.remove(pos);
                         }
                     }
@@ -716,10 +712,16 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
         }
     }
 
-    Ok(
-        AllocReport::build(heap_size, &stats, live, peak_snapshot, oom, resolver, windows)
-            .with_top(top),
+    Ok(AllocReport::build(
+        heap_size,
+        &stats,
+        live,
+        peak_snapshot,
+        oom,
+        resolver,
+        windows,
     )
+    .with_top(top))
 }
 
 fn clone_live_map(live: &HashMap<u32, LiveAllocation>) -> HashMap<u32, LiveAllocation> {
