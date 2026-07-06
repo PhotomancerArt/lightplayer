@@ -262,6 +262,21 @@ losslessly normalized. Install it with `brew install oxipng` or
 stable baseline/check output; set `STUDIO_STORY_PNGS_CONCURRENCY` for faster
 scratch runs when needed.
 
+Captures disable CSS transitions and animations before the app mounts so
+every screenshot shows the settled end state; without this, captures raced
+150ms transitions and landed at a different phase each run. Check mode also
+compares pixels with a small tolerance for residual jitter (anti-aliasing and
+sub-pixel text layout, which move a handful of glyph-edge pixels between
+captures of the same build). A pixel counts as significantly different when
+its per-channel delta exceeds `STUDIO_STORY_MAX_CHANNEL_DELTA` (default `64`,
+above anti-aliasing noise); an image fails only when the fraction of such
+pixels exceeds `STUDIO_STORY_MAX_DIFF_PIXEL_RATIO` (default `0.0005`, i.e.
+0.05%). This gives the check a small noise floor — changes below the ratio
+don't fail it, but they still show up as a baseline image diff in the PR.
+Dimension changes and undecodable PNGs always fail. Images that differ in
+bytes but stay within tolerance are listed informationally, and the summary
+line reports how many baselines were byte-identical.
+
 The baseline set intentionally reflects the active view-driven UX surface,
 including the semantic project workspace, rather than the old provisioning
 journey fixtures alone.

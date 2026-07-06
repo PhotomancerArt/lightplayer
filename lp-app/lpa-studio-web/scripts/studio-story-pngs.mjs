@@ -14,6 +14,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { inflateSync } from "node:zlib";
 import path from "node:path";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
@@ -27,6 +28,15 @@ const mode = parseMode(process.argv.slice(2));
 const port = process.env.STUDIO_STORY_PNGS_PORT ?? "2822";
 const requestedCaptureConcurrency = parseCaptureConcurrency();
 const captureTimeoutMs = parsePositiveIntegerEnv("STUDIO_STORY_CAPTURE_TIMEOUT_MS", 10_000);
+// Captures of the same build still differ in a few pixels from anti-aliasing and
+// sub-pixel text layout jitter (high per-channel delta, but only along glyph edges).
+// So `check` counts pixels whose per-channel delta exceeds a significance threshold
+// and fails only when that count is more than a small fraction of the image —
+// pixelmatch-style — rather than gating on the single worst pixel. This has a noise
+// floor: changes below the ratio don't fail the check (reviewers still see the
+// baseline image diff in the PR).
+const significanceDelta = parsePositiveIntegerEnv("STUDIO_STORY_MAX_CHANNEL_DELTA", 64);
+const maxSignificantPixelRatio = parseRatioEnv("STUDIO_STORY_MAX_DIFF_PIXEL_RATIO", 0.0005);
 const baseUrl = `http://127.0.0.1:${port}/`;
 const chrome = process.env.CHROME_BIN ?? findChrome();
 const baselineDir = path.resolve(repoRoot, baselineDirFromEnv());
@@ -189,6 +199,19 @@ function parseCaptureConcurrency() {
   return parsePositiveIntegerEnv("STUDIO_STORY_PNGS_CONCURRENCY", 1);
 }
 
+function parseRatioEnv(name, defaultValue) {
+  const value = process.env[name];
+  if (value === undefined) {
+    return defaultValue;
+  }
+  const parsed = Number.parseFloat(value);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1) {
+    console.error(`${name} must be a number between 0 and 1.`);
+    process.exit(2);
+  }
+  return parsed;
+}
+
 function parsePositiveIntegerEnv(name, defaultValue) {
   const value = process.env[name] ?? defaultValue.toString();
   const parsed = Number.parseInt(value, 10);
@@ -326,6 +349,27 @@ async function createCapturePage(cdp) {
   });
   await cdp.send("Page.enable", {}, sessionId);
   await cdp.send("Runtime.enable", {}, sessionId);
+  // CSS transitions/animations race the capture and land at a different phase
+  // each run, so freeze them before the app mounts. Captures always show the
+  // settled end state.
+  await cdp.send(
+    "Page.addScriptToEvaluateOnNewDocument",
+    {
+      source: `
+        document.addEventListener("DOMContentLoaded", () => {
+          const style = document.createElement("style");
+          style.textContent =
+            "*, *::before, *::after {" +
+            " transition: none !important;" +
+            " animation: none !important;" +
+            " caret-color: transparent !important;" +
+            " }";
+          document.head.appendChild(style);
+        });
+      `,
+    },
+    sessionId,
+  );
 
   return {
     async capture(url, storyId, viewport, file) {
@@ -498,6 +542,8 @@ async function compareBaselines(storyIds, expectedDir, actualDir) {
   const unexpected = baselineFiles.filter((file) => !expectedFiles.has(file));
   const missing = [];
   const changed = [];
+  const tolerated = [];
+  let identical = 0;
 
   for (const target of targets) {
     const fileName = storyFileName(target.storyId, target.viewport);
@@ -508,21 +554,269 @@ async function compareBaselines(storyIds, expectedDir, actualDir) {
 
     if (!expected) {
       missing.push(fileName);
-    } else if (!expected.equals(actual)) {
-      changed.push(fileName);
+    } else if (expected.equals(actual)) {
+      identical += 1;
+    } else {
+      const diff = comparePngPixels(expected, actual);
+      if (diff.withinTolerance) {
+        tolerated.push(`${fileName} (${diff.summary})`);
+      } else {
+        changed.push(`${fileName} (${diff.summary})`);
+      }
     }
   }
 
   printComparison("changed", changed);
   printComparison("new", missing);
   printComparison("removed", unexpected);
+  printComparison("within tolerance (informational)", tolerated);
 
   if (changed.length === 0 && missing.length === 0 && unexpected.length === 0) {
-    console.log("Story baselines match.");
+    console.log(
+      `Story baselines match (${identical} byte-identical, ${tolerated.length} within tolerance).`,
+    );
     return true;
   }
   console.log(`Fresh PNGs: ${path.relative(repoRoot, actualDir)}`);
   return false;
+}
+
+function comparePngPixels(expected, actual) {
+  let expectedImage;
+  let actualImage;
+  try {
+    expectedImage = decodePng(expected);
+    actualImage = decodePng(actual);
+  } catch (error) {
+    return {
+      withinTolerance: false,
+      summary: `bytes differ, pixel compare unavailable: ${error.message}`,
+    };
+  }
+
+  if (
+    expectedImage.width !== actualImage.width ||
+    expectedImage.height !== actualImage.height
+  ) {
+    return {
+      withinTolerance: false,
+      summary:
+        `dimensions ${expectedImage.width}x${expectedImage.height}` +
+        ` -> ${actualImage.width}x${actualImage.height}`,
+    };
+  }
+
+  let diffPixels = 0;
+  let significantPixels = 0;
+  let maxDelta = 0;
+  for (let i = 0; i < expectedImage.rgba.length; i += 4) {
+    let pixelDelta = 0;
+    for (let channel = 0; channel < 4; channel += 1) {
+      const delta = Math.abs(expectedImage.rgba[i + channel] - actualImage.rgba[i + channel]);
+      if (delta > pixelDelta) {
+        pixelDelta = delta;
+      }
+    }
+    if (pixelDelta > 0) {
+      diffPixels += 1;
+      if (pixelDelta > maxDelta) {
+        maxDelta = pixelDelta;
+      }
+      if (pixelDelta > significanceDelta) {
+        significantPixels += 1;
+      }
+    }
+  }
+
+  const totalPixels = expectedImage.width * expectedImage.height;
+  const significantRatio = significantPixels / totalPixels;
+  return {
+    withinTolerance: significantRatio <= maxSignificantPixelRatio,
+    summary:
+      `${significantPixels}/${totalPixels} px (${(significantRatio * 100).toFixed(3)}%)` +
+      ` exceed Δ${significanceDelta} [${diffPixels} any-diff, max Δ${maxDelta}]`,
+  };
+}
+
+function decodePng(buffer) {
+  const signature = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+  if (buffer.length < 8 || !buffer.subarray(0, 8).equals(signature)) {
+    throw new Error("not a PNG file");
+  }
+
+  let ihdr = null;
+  let palette = null;
+  let transparency = null;
+  const idat = [];
+  let offset = 8;
+  while (offset + 8 <= buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.toString("latin1", offset + 4, offset + 8);
+    const data = buffer.subarray(offset + 8, offset + 8 + length);
+    if (type === "IHDR") {
+      ihdr = {
+        width: data.readUInt32BE(0),
+        height: data.readUInt32BE(4),
+        bitDepth: data[8],
+        colorType: data[9],
+        interlace: data[12],
+      };
+    } else if (type === "PLTE") {
+      palette = data;
+    } else if (type === "tRNS") {
+      transparency = data;
+    } else if (type === "IDAT") {
+      idat.push(data);
+    } else if (type === "IEND") {
+      break;
+    }
+    offset += 12 + length;
+  }
+
+  if (!ihdr || idat.length === 0) {
+    throw new Error("missing IHDR or IDAT chunk");
+  }
+  if (ihdr.interlace !== 0) {
+    throw new Error("interlaced PNG is not supported");
+  }
+  const channelCounts = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 };
+  const channels = channelCounts[ihdr.colorType];
+  if (!channels || ![1, 2, 4, 8, 16].includes(ihdr.bitDepth)) {
+    throw new Error(`unsupported color type ${ihdr.colorType} / bit depth ${ihdr.bitDepth}`);
+  }
+
+  const raw = inflateSync(Buffer.concat(idat));
+  const rowBytes = Math.ceil((ihdr.width * channels * ihdr.bitDepth) / 8);
+  if (raw.length < (rowBytes + 1) * ihdr.height) {
+    throw new Error("truncated image data");
+  }
+  const filterStep = Math.max(1, Math.ceil((channels * ihdr.bitDepth) / 8));
+  const scanlines = unfilterScanlines(raw, ihdr.height, rowBytes, filterStep);
+  return {
+    width: ihdr.width,
+    height: ihdr.height,
+    rgba: scanlinesToRgba(ihdr, scanlines, rowBytes, palette, transparency),
+  };
+}
+
+function unfilterScanlines(raw, height, rowBytes, filterStep) {
+  const out = Buffer.alloc(rowBytes * height);
+  for (let y = 0; y < height; y += 1) {
+    const filter = raw[y * (rowBytes + 1)];
+    const src = raw.subarray(y * (rowBytes + 1) + 1, (y + 1) * (rowBytes + 1));
+    const row = out.subarray(y * rowBytes, (y + 1) * rowBytes);
+    const prev = y > 0 ? out.subarray((y - 1) * rowBytes, y * rowBytes) : null;
+    for (let x = 0; x < rowBytes; x += 1) {
+      const left = x >= filterStep ? row[x - filterStep] : 0;
+      const up = prev ? prev[x] : 0;
+      const upLeft = prev && x >= filterStep ? prev[x - filterStep] : 0;
+      let value = src[x];
+      if (filter === 1) {
+        value += left;
+      } else if (filter === 2) {
+        value += up;
+      } else if (filter === 3) {
+        value += (left + up) >> 1;
+      } else if (filter === 4) {
+        value += paethPredictor(left, up, upLeft);
+      } else if (filter !== 0) {
+        throw new Error(`unsupported scanline filter ${filter}`);
+      }
+      row[x] = value & 0xff;
+    }
+  }
+  return out;
+}
+
+function paethPredictor(a, b, c) {
+  const p = a + b - c;
+  const pa = Math.abs(p - a);
+  const pb = Math.abs(p - b);
+  const pc = Math.abs(p - c);
+  if (pa <= pb && pa <= pc) {
+    return a;
+  }
+  return pb <= pc ? b : c;
+}
+
+function scanlinesToRgba(ihdr, scanlines, rowBytes, palette, transparency) {
+  const { width, height, bitDepth, colorType } = ihdr;
+  const rgba = new Uint8Array(width * height * 4);
+  // Samples are normalized to 8 bits: 16-bit samples keep their high byte,
+  // sub-8-bit grayscale samples are rescaled to 0..255.
+  const readSample = (row, index) => {
+    if (bitDepth === 8) {
+      return row[index];
+    }
+    if (bitDepth === 16) {
+      return row[index * 2];
+    }
+    const bitOffset = index * bitDepth;
+    return (row[bitOffset >> 3] >> (8 - bitDepth - (bitOffset & 7))) & ((1 << bitDepth) - 1);
+  };
+  const grayScale = bitDepth < 8 ? 255 / ((1 << bitDepth) - 1) : 1;
+  const transparentGray =
+    colorType === 0 && transparency?.length >= 2
+      ? transparency.readUInt16BE(0) >> (bitDepth === 16 ? 8 : 0)
+      : null;
+  const transparentRgb =
+    colorType === 2 && transparency?.length >= 6
+      ? [0, 2, 4].map((i) => transparency.readUInt16BE(i) >> (bitDepth === 16 ? 8 : 0))
+      : null;
+
+  for (let y = 0; y < height; y += 1) {
+    const row = scanlines.subarray(y * rowBytes, (y + 1) * rowBytes);
+    for (let x = 0; x < width; x += 1) {
+      const out = (y * width + x) * 4;
+      let r;
+      let g;
+      let b;
+      let a = 255;
+      if (colorType === 0) {
+        const sample = readSample(row, x);
+        r = g = b = Math.round(sample * grayScale);
+        if (sample === transparentGray) {
+          a = 0;
+        }
+      } else if (colorType === 2) {
+        r = readSample(row, x * 3);
+        g = readSample(row, x * 3 + 1);
+        b = readSample(row, x * 3 + 2);
+        if (
+          transparentRgb &&
+          r === transparentRgb[0] &&
+          g === transparentRgb[1] &&
+          b === transparentRgb[2]
+        ) {
+          a = 0;
+        }
+      } else if (colorType === 3) {
+        const index = readSample(row, x);
+        if (!palette || index * 3 + 2 >= palette.length) {
+          throw new Error(`palette index ${index} out of range`);
+        }
+        r = palette[index * 3];
+        g = palette[index * 3 + 1];
+        b = palette[index * 3 + 2];
+        if (transparency && index < transparency.length) {
+          a = transparency[index];
+        }
+      } else if (colorType === 4) {
+        r = g = b = readSample(row, x * 2);
+        a = readSample(row, x * 2 + 1);
+      } else {
+        r = readSample(row, x * 4);
+        g = readSample(row, x * 4 + 1);
+        b = readSample(row, x * 4 + 2);
+        a = readSample(row, x * 4 + 3);
+      }
+      rgba[out] = r;
+      rgba[out + 1] = g;
+      rgba[out + 2] = b;
+      rgba[out + 3] = a;
+    }
+  }
+  return rgba;
 }
 
 async function listPngFiles(directory) {
