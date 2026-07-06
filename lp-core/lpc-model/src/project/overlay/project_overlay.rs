@@ -94,6 +94,12 @@ impl ProjectOverlay {
             MutationOp::RemoveSlotEdit { artifact, path } => {
                 self.remove_slot_edit(&artifact, &path)
             }
+            // A move needs shape/definition context to materialize into
+            // per-path edits; the registry does that before anything touches
+            // the overlay, and ack-mirroring clients replay the materialized
+            // effect (`MutationEffect::Materialized`), never the raw op.
+            // Applying it directly therefore changes nothing.
+            MutationOp::MoveSlotEntry { .. } => false,
             MutationOp::SetArtifactBody { artifact, edit } => {
                 self.set_artifact_body(artifact, edit)
             }

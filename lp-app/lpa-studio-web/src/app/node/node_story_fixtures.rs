@@ -2,13 +2,13 @@
 
 use lpa_studio_core::{
     ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
-    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, DirtySummary, Revision,
-    UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiControlProductPreview,
-    UiControlSampleFormat, UiNodeChild, UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab,
-    UiNodeTabBody, UiNodeView, UiProducedBinding, UiProducedBindings, UiProducedProduct,
-    UiProducedValue, UiProductPreview, UiProductTrackingState, UiSlotAsset, UiSlotEditorHint,
-    UiSlotFieldState, UiSlotOptionality, UiSlotRecord, UiSlotSourceState, UiSlotUnit, UiSlotValue,
-    UiStatus,
+    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, ControllerId, DirtySummary,
+    NodeRevertOp, ProjectNodeAddress, Revision, UiAction, UiAssetEditorKind, UiBindingEndpoint,
+    UiConfigSlot, UiControlProductPreview, UiControlSampleFormat, UiNodeChild, UiNodeDirtyState,
+    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiPaneAction,
+    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductPreview,
+    UiProductTrackingState, UiSlotAsset, UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality,
+    UiSlotRecord, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus,
 };
 
 const IDLE_GLSL: &str = r#"vec3 palette(float t) {
@@ -77,8 +77,25 @@ pub(crate) fn error_node_view() -> UiNodeView {
     view
 }
 
+/// The node-header batch-revert pane action the controller supplies while a
+/// node's subtree summary is dirty (same "revert" icon token as the project
+/// header's Revert-to-saved).
+pub(crate) fn node_revert_pane_action() -> UiPaneAction {
+    UiPaneAction::new(
+        "revert",
+        UiAction::from_op(
+            ControllerId::new("story.project"),
+            NodeRevertOp {
+                node: ProjectNodeAddress::parse("/fyeah_sign.show/playlist.playlist")
+                    .expect("valid story node address"),
+            },
+        ),
+    )
+}
+
 /// Playlist node whose subtree carries unsaved (persisted) edits — drives the
-/// yellow pencil affordance and D7 tint variants.
+/// yellow pencil affordance, the header batch-revert action, and D7 tint
+/// variants.
 pub(crate) fn unsaved_dirty_node_view() -> UiNodeView {
     let mut view = playlist_node_view();
     view.header.dirty = DirtySummary {
@@ -86,11 +103,13 @@ pub(crate) fn unsaved_dirty_node_view() -> UiNodeView {
         transient: 0,
         failed: 0,
     };
+    view.header_actions = vec![node_revert_pane_action()];
     view
 }
 
 /// Playlist node whose subtree carries live-only (transient) edits — drives
-/// the blue (live) pencil affordance and D7 tint variants.
+/// the blue (live) pencil affordance, the header batch-revert action, and D7
+/// tint variants.
 pub(crate) fn live_dirty_node_view() -> UiNodeView {
     let mut view = playlist_node_view();
     view.header.dirty = DirtySummary {
@@ -98,11 +117,12 @@ pub(crate) fn live_dirty_node_view() -> UiNodeView {
         transient: 1,
         failed: 0,
     };
+    view.header_actions = vec![node_revert_pane_action()];
     view
 }
 
 /// Playlist node whose subtree carries a rejected edit — drives the red
-/// warning affordance and D7 tint variants.
+/// warning affordance, the header batch-revert action, and D7 tint variants.
 pub(crate) fn failed_dirty_node_view() -> UiNodeView {
     let mut view = playlist_node_view();
     view.header.dirty = DirtySummary {
@@ -110,6 +130,7 @@ pub(crate) fn failed_dirty_node_view() -> UiNodeView {
         transient: 0,
         failed: 1,
     };
+    view.header_actions = vec![node_revert_pane_action()];
     view
 }
 
@@ -136,6 +157,7 @@ pub(crate) fn nested_dirty_node_view() -> UiNodeView {
             ]),
         ]);
     grandchild.dirty = bubbled;
+    grandchild.header_actions = vec![node_revert_pane_action()];
 
     let mut child = UiNodeChild::new("idle", "Shader", "./idle.json")
         .active("active, fade_after 0.12 s")
@@ -146,6 +168,7 @@ pub(crate) fn nested_dirty_node_view() -> UiNodeView {
         )])])
         .with_children(vec![grandchild]);
     child.dirty = bubbled;
+    child.header_actions = vec![node_revert_pane_action()];
 
     let mut view = UiNodeView::new(
         playlist_header(),
@@ -163,6 +186,7 @@ pub(crate) fn nested_dirty_node_view() -> UiNodeView {
         transient: 0,
         failed: 0,
     });
+    view.header_actions = vec![node_revert_pane_action()];
     view
 }
 

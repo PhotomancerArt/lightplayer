@@ -122,7 +122,7 @@ pub(crate) fn write_failed() -> Element {
 
 #[story(
     label = "Live Chrome",
-    description = "Touched transient controls: the live (blue) row tint and detail icon only — no badge; Reset lives in the detail popup."
+    description = "Touched transient controls: the live (blue) row tint, the detail icon, and the inline Reset icon on rows with an own edit entry — no text chips."
 )]
 pub(crate) fn live_chrome() -> Element {
     rsx! {
@@ -130,6 +130,7 @@ pub(crate) fn live_chrome() -> Element {
             ConfigSlotRow {
                 slot: UiConfigSlot::value("controls.running", "Running", UiSlotValue::bool(true))
                     .with_address(story_slot_address("controls.running"))
+                    .with_edit_entry_address(story_slot_address("controls.running"))
                     .with_state(
                         UiSlotFieldState::editable()
                             .with_dirty(UiNodeDirtyState::Dirty)
@@ -150,6 +151,7 @@ pub(crate) fn live_chrome() -> Element {
                     }),
                 )
                     .with_address(story_slot_address("controls.rate"))
+                    .with_edit_entry_address(story_slot_address("controls.rate"))
                     .with_state(
                         UiSlotFieldState::editable()
                             .with_dirty(UiNodeDirtyState::Dirty)
@@ -219,7 +221,7 @@ pub(crate) fn unsaved_detail_popup() -> Element {
 
 #[story(
     label = "Unsaved Chrome",
-    description = "A touched persisted slot: amber unsaved badge and tint; Revert lives in the detail popup."
+    description = "A touched persisted slot: amber tint plus the inline Revert icon — no text chip; the detail popup keeps its Revert footer."
 )]
 pub(crate) fn unsaved_chrome() -> Element {
     rsx! {
@@ -234,6 +236,7 @@ pub(crate) fn unsaved_chrome() -> Element {
                 ])),
             )
                 .with_address(story_slot_address("color_order"))
+                .with_edit_entry_address(story_slot_address("color_order"))
                 .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
             depth: 0,
             index: 0,
@@ -619,14 +622,72 @@ fn u32_map_slot(entries: &[(u32, u32)], suggested_key: &str) -> UiConfigSlot {
     .with_state(UiSlotFieldState::editable())
 }
 
+fn string_map_slot(entries: &[(&str, f32)]) -> UiConfigSlot {
+    UiConfigSlot::record(
+        "presets",
+        "Presets",
+        entries
+            .iter()
+            .map(|(key, value)| {
+                UiConfigSlot::value(
+                    format!("presets[\"{key}\"]"),
+                    key.to_string(),
+                    UiSlotValue::f32(*value),
+                )
+                .with_address(story_slot_address(&format!("presets[\"{key}\"]")))
+                .with_state(UiSlotFieldState::editable())
+            })
+            .collect(),
+    )
+    .with_address(story_slot_address("presets"))
+    .with_composite(UiSlotComposite::Map(UiSlotMapComposite {
+        key_kind: UiSlotMapKeyKind::String,
+        suggested_key: String::new(),
+    }))
+    .with_state(UiSlotFieldState::editable())
+}
+
+#[story(
+    label = "Map Add Immediate",
+    description = "A numeric map's closed add affordances: + adds immediately at the first free index (gap-filling: effective keys 0 and 2 suggest 1), # opens the optional key override."
+)]
+pub(crate) fn map_add_immediate() -> Element {
+    rsx! {
+        ConfigSlotRow {
+            slot: u32_map_slot(&[(0, 16), (2, 24)], "1"),
+            depth: 0,
+            index: 0,
+            initially_expanded: Some(true),
+            on_action: move |_| {},
+        }
+    }
+}
+
 #[story(
     label = "Map Add Entry Open",
-    description = "An expanded map row with the add-entry key input open, prefilled with the next free index; entry rows carry remove affordances."
+    description = "An expanded numeric map row with the optional key-override input open, prefilled with the first free index; entry rows carry remove affordances."
 )]
 pub(crate) fn map_add_entry_open() -> Element {
     rsx! {
         ConfigSlotRow {
             slot: u32_map_slot(&[(0, 16), (1, 24)], "2"),
+            depth: 0,
+            index: 0,
+            initially_expanded: Some(true),
+            initially_adding: true,
+            on_action: move |_| {},
+        }
+    }
+}
+
+#[story(
+    label = "Map Add String Key",
+    description = "A string-keyed map keeps the key input as the primary add flow (string keys cannot be guessed): + opens the empty input."
+)]
+pub(crate) fn map_add_string_key() -> Element {
+    rsx! {
+        ConfigSlotRow {
+            slot: string_map_slot(&[("warm", 0.5)]),
             depth: 0,
             index: 0,
             initially_expanded: Some(true),

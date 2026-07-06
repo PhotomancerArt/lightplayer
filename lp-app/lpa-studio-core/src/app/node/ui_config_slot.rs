@@ -60,7 +60,9 @@ pub struct UiConfigSlot {
     /// under it) carries `None` and offers no row revert — per-entry revert
     /// for those lives in the save panel. For a present option row (whose
     /// interior value renders inline) this may be the interior `.some`
-    /// address rather than [`Self::address`].
+    /// address, and for an enum row (whose variant-switch entry is stored at
+    /// the variant child path) the entry-carrying variant child address,
+    /// rather than [`Self::address`].
     pub edit_entry_address: Option<ProjectSlotAddress>,
     /// Human-readable field label.
     pub label: String,

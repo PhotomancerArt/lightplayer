@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use lpc_model::{
     ArtifactLocation, ArtifactOverlay, ControlDisplayLayout, MutationCmd, MutationEffect,
-    MutationOp, ProjectOverlay, Revision, SlotEditOp, SlotPath,
+    MutationOp, ProjectOverlay, Revision, SlotEditOp, SlotPath, StoredSlotEdit,
 };
 use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
 use lpc_wire::{
@@ -157,7 +157,9 @@ impl ProjectSync {
     /// What is applied is each command's server-reported **effect**, not the
     /// command as sent: the server normalizes a `PutSlotEdit` assigning the
     /// base value into a removal (`MutationEffect::NormalizedToRemoval`), and
-    /// since a no-op normalization does not bump the overlay revision, a
+    /// it materializes a `MoveSlotEntry` into several per-path stored edits
+    /// (`MutationEffect::Materialized`), which the mirror replays verbatim.
+    /// Since a no-op normalization does not bump the overlay revision, a
     /// mirror that applied the sent Put would read dirty forever with no
     /// corrective fetch ever due.
     ///
@@ -171,8 +173,9 @@ impl ProjectSync {
         overlay_revision: Revision,
     ) {
         for (command, effect) in batch {
-            self.overlay
-                .apply_mutation(effective_mutation(command, effect));
+            for mutation in effective_mutations(command, effect) {
+                self.overlay.apply_mutation(mutation);
+            }
         }
         self.overlay_revision = overlay_revision;
     }
@@ -392,23 +395,41 @@ impl Default for ProjectSync {
     }
 }
 
-/// The mutation the server actually stored for an acked command.
+/// The mutations the server actually stored for an acked command.
 ///
 /// A `NormalizedToRemoval` effect on a `PutSlotEdit` means the server dropped
 /// (or never created) the overlay entry at the edit's path, so the mirror
-/// applies the equivalent removal. Every other effect applies the command as
-/// sent. Removing an absent entry is a no-op, so the `changed: false` case
-/// needs no special handling.
-fn effective_mutation(command: &MutationCmd, effect: &MutationEffect) -> MutationOp {
+/// applies the equivalent removal. A `Materialized` effect (a
+/// `MoveSlotEntry`) carries the full ordered list of stored per-path edits,
+/// which the mirror replays verbatim against the command's artifact. Every
+/// other effect applies the command as sent. Removing an absent entry is a
+/// no-op, so the `changed: false` cases need no special handling.
+fn effective_mutations(command: &MutationCmd, effect: &MutationEffect) -> Vec<MutationOp> {
     match (effect, &command.mutation) {
         (
             MutationEffect::NormalizedToRemoval { .. },
             MutationOp::PutSlotEdit { artifact, edit },
-        ) => MutationOp::RemoveSlotEdit {
+        ) => vec![MutationOp::RemoveSlotEdit {
             artifact: artifact.clone(),
             path: edit.path.clone(),
-        },
-        _ => command.mutation.clone(),
+        }],
+        (
+            MutationEffect::Materialized { edits, .. },
+            MutationOp::MoveSlotEntry { artifact, .. },
+        ) => edits
+            .iter()
+            .map(|stored| match stored {
+                StoredSlotEdit::Put { edit } => MutationOp::PutSlotEdit {
+                    artifact: artifact.clone(),
+                    edit: edit.clone(),
+                },
+                StoredSlotEdit::Removed { path } => MutationOp::RemoveSlotEdit {
+                    artifact: artifact.clone(),
+                    path: path.clone(),
+                },
+            })
+            .collect(),
+        _ => vec![command.mutation.clone()],
     }
 }
 
@@ -1063,6 +1084,83 @@ mod tests {
             Revision::new(4),
         );
         assert!(sync.overlay().is_empty());
+    }
+
+    #[test]
+    fn materialized_ack_replays_each_stored_edit_into_the_mirror() {
+        // A move's ack carries several per-path stored edits; the mirror must
+        // replay all of them — including removals of pre-existing entries —
+        // without a follow-up fetch.
+        let mut sync = ProjectSync::new();
+        let map = SlotPath::parse("mapping.PathPoints.paths").unwrap();
+        let from = map.child_key(lpc_model::SlotMapKey::U32(0));
+        let to = map.child_key(lpc_model::SlotMapKey::U32(1));
+
+        // Pre-existing mirrored edit under the source entry: the ack's
+        // Removed entries must clear it (stranded-descendant cleanup).
+        let stale = SlotPath::parse("mapping.PathPoints.paths[0].PointList.first_channel").unwrap();
+        sync.apply_acked_edits(
+            &[(
+                MutationCmd {
+                    id: lpc_model::MutationCmdId::new(1),
+                    mutation: lpc_model::MutationOp::PutSlotEdit {
+                        artifact: overlay_test_artifact(),
+                        edit: lpc_model::SlotEdit::assign_value(
+                            stale.clone(),
+                            lpc_model::LpValue::U32(5),
+                        ),
+                    },
+                },
+                MutationEffect::OverlayChanged { changed: true },
+            )],
+            Revision::new(3),
+        );
+
+        let command = MutationCmd {
+            id: lpc_model::MutationCmdId::new(2),
+            mutation: lpc_model::MutationOp::MoveSlotEntry {
+                artifact: overlay_test_artifact(),
+                from: from.clone(),
+                to: to.clone(),
+            },
+        };
+        let effect = MutationEffect::Materialized {
+            edits: vec![
+                lpc_model::StoredSlotEdit::Put {
+                    edit: lpc_model::SlotEdit::ensure_present(to.clone()),
+                },
+                lpc_model::StoredSlotEdit::Put {
+                    edit: lpc_model::SlotEdit::assign_value(
+                        to.child(lpc_model::SlotName::parse("PointList").unwrap())
+                            .child(lpc_model::SlotName::parse("first_channel").unwrap()),
+                        lpc_model::LpValue::U32(5),
+                    ),
+                },
+                lpc_model::StoredSlotEdit::Removed { path: from.clone() },
+                lpc_model::StoredSlotEdit::Removed {
+                    path: stale.clone(),
+                },
+            ],
+            changed: true,
+        };
+        sync.apply_acked_edits(&[(command, effect)], Revision::new(4));
+
+        assert_eq!(
+            sync.overlay_edit_at(&overlay_test_artifact(), &to),
+            Some(&SlotEditOp::EnsurePresent)
+        );
+        assert_eq!(
+            sync.overlay_edit_at(&overlay_test_artifact(), &from),
+            None,
+            "the move's source entry is gone from the mirror"
+        );
+        assert_eq!(
+            sync.overlay_edit_at(&overlay_test_artifact(), &stale),
+            None,
+            "stranded descendant edits are cleared by the ack's Removed entries"
+        );
+        assert_eq!(sync.overlay_slot_edits().count(), 2, "ensure + leaf assign");
+        assert_eq!(sync.overlay_revision(), Revision::new(4));
     }
 
     #[test]

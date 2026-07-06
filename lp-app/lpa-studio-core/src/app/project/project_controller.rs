@@ -20,9 +20,9 @@ use crate::{
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
-    ArtifactLocation, MutationCmd, MutationCmdBatch, MutationCmdId, MutationCmdStatus, MutationOp,
-    MutationRejection, NodeId, SlotEdit, SlotPolicy, SlotShapeId, SlotShapeLookup,
-    SlotShapeRegistry, TreePath, resolve_slot_policy,
+    ArtifactLocation, MutationCmd, MutationCmdBatch, MutationCmdId, MutationCmdStatus,
+    MutationEffect, MutationOp, MutationRejection, NodeId, SlotEdit, SlotPolicy, SlotShapeId,
+    SlotShapeLookup, SlotShapeRegistry, TreePath, resolve_slot_policy,
 };
 use lpc_view::ProjectView;
 
@@ -173,6 +173,16 @@ impl ProjectController {
                 },
                 PendingEditOp::EnsurePresent => UiPendingEditKind::Added,
                 PendingEditOp::RemoveValue => UiPendingEditKind::Removed,
+                // A buffered move is only visible mid-op or when Failed;
+                // reuse the value-display kind until the key-editing UX
+                // (Lane 3) grows a dedicated kind.
+                PendingEditOp::MoveEntry { from_key, to_key } => UiPendingEditKind::Assign {
+                    value_display: format!(
+                        "key {} \u{2192} {}",
+                        map_key_display(from_key),
+                        map_key_display(to_key)
+                    ),
+                },
             },
             SlotEditEntrySource::Acked(op) => acked_edit_kind(op),
         };
@@ -324,6 +334,14 @@ impl ProjectController {
     /// through [`Self::apply_synced_project_view`] with the synced mirror; tests
     /// call it directly with a fixture view.
     pub fn apply_project_view(&mut self, view: &ProjectView) -> Result<(), UiError> {
+        // A newly applied project read supersedes the normalization shadows:
+        // `AwaitingRefresh` entries exist only to bridge the window between a
+        // `NormalizedToRemoval` ack and this read (see `PendingEdit`), so they
+        // release here. Ops and sync runs are serialized on the actor, so the
+        // first read applied after the ack already contains the
+        // post-normalization def values (revision stamps are monotonic).
+        self.edit_buffer
+            .retain(|_, edit| edit.phase != PendingEditPhase::AwaitingRefresh);
         // Retain the view's shapes for edit-entry persistence classification
         // (see `resolve_edit_persistence`), so both the production sync path
         // and fixture-view tests classify identically.
@@ -1036,6 +1054,26 @@ impl ProjectController {
                 )
                 .await
             }
+            SlotEditOp::MoveEntry {
+                address,
+                from_key,
+                to_key,
+            } => {
+                // Keys are path segments: the move is its own wire mutation
+                // (`MoveSlotEntry`), staged at the MAP address; the server
+                // materializes it and the ack replays the stored per-path
+                // edits into the mirror (`MutationEffect::Materialized`).
+                let from = address.path.child_key(from_key.clone());
+                let to = address.path.child_key(to_key.clone());
+                self.stage_and_send_mutation(
+                    server,
+                    handle_id,
+                    address,
+                    PendingEdit::pending_op(PendingEditOp::MoveEntry { from_key, to_key }),
+                    move |artifact| MutationOp::MoveSlotEntry { artifact, from, to },
+                )
+                .await
+            }
             SlotEditOp::Revert { address } => self.apply_revert(server, handle_id, address).await,
         }
     }
@@ -1102,6 +1140,88 @@ impl ProjectController {
         })
     }
 
+    /// Discard every pending edit under `node`'s subtree
+    /// ([`crate::NodeRevertOp`], the node header's batch revert): the
+    /// matching entries are enumerated through the same edit join
+    /// [`DirtySummary`] counting uses, their local buffer entries clear
+    /// immediately, and the controller expands the op into one
+    /// [`MutationCmdBatch`] of per-entry `RemoveSlotEdit` mutations — one
+    /// wire round-trip, one mirror snapshot on ack.
+    pub async fn revert_node_edits(
+        &mut self,
+        server: &mut StudioServerClient,
+        node: &ProjectNodeAddress,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        let addresses: Vec<ProjectSlotAddress> = self
+            .slot_edit_join()
+            .entries()
+            .into_iter()
+            .filter(|entry| entry.address.node.is_self_or_under(node))
+            .map(|entry| entry.address.clone())
+            .collect();
+        if addresses.is_empty() {
+            return Ok(ProjectEditRun::notice(UiNotice::info(format!(
+                "No pending edits under {node}"
+            ))));
+        }
+
+        // Every entry clears locally regardless of whether its artifact still
+        // resolves (matching `apply_revert`); an artifact shared by several
+        // node uses yields one wire removal per distinct `(artifact, path)`.
+        let mut notices = UiNotices::new();
+        let mut wire_targets = BTreeSet::new();
+        for address in addresses {
+            self.edit_buffer.remove(&address);
+            match self.resolve_def_artifact(&address) {
+                Ok(artifact) => {
+                    wire_targets.insert((artifact, address.path.clone()));
+                }
+                Err(reason) => {
+                    notices = notices.with_notice(UiNotice::warning(format!(
+                        "Revert on {} could not reach the server overlay: {reason}",
+                        address.path
+                    )));
+                }
+            }
+        }
+        if wire_targets.is_empty() {
+            return Ok(ProjectEditRun {
+                notices,
+                logs: Vec::new(),
+            });
+        }
+        let commands = wire_targets
+            .into_iter()
+            .map(|(artifact, path)| MutationCmd {
+                id: self.allocate_mutation_cmd_id(),
+                mutation: MutationOp::RemoveSlotEdit { artifact, path },
+            })
+            .collect();
+        let batch = MutationCmdBatch::new(commands);
+        let reverted = batch.commands.len();
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        let rejections = self.apply_mutation_acks(&batch, &mutation, &[]);
+        notices = if rejections.is_empty() {
+            notices.with_notice(UiNotice::info(format!(
+                "Reverted {reverted} pending edit(s) under {node}"
+            )))
+        } else {
+            rejections.iter().fold(notices, |notices, rejection| {
+                notices.with_notice(UiNotice::warning(format!(
+                    "Edit rejected: {}",
+                    rejection_text(rejection)
+                )))
+            })
+        };
+        Ok(ProjectEditRun {
+            notices,
+            logs: mutation.logs,
+        })
+    }
+
     /// Shared execution path for `SetValue` and the structural gestures
     /// (`EnsurePresent`/`RemoveValue`): stage `staged` in the edit buffer,
     /// send `edit` as a one-command `PutSlotEdit` batch, and correlate the
@@ -1116,6 +1236,24 @@ impl ProjectController {
         address: ProjectSlotAddress,
         staged: PendingEdit,
         edit: SlotEdit,
+    ) -> Result<ProjectEditRun, UiError> {
+        self.stage_and_send_mutation(server, handle_id, address, staged, |artifact| {
+            MutationOp::PutSlotEdit { artifact, edit }
+        })
+        .await
+    }
+
+    /// [`Self::stage_and_send_edit`] generalized over the wire mutation:
+    /// `MoveEntry` sends a `MutationOp::MoveSlotEntry` rather than a
+    /// `PutSlotEdit`, but stages, correlates, and releases through the same
+    /// [`PendingEdit`] state machine at the op's address.
+    async fn stage_and_send_mutation(
+        &mut self,
+        server: &mut StudioServerClient,
+        handle_id: u32,
+        address: ProjectSlotAddress,
+        staged: PendingEdit,
+        mutation_for: impl FnOnce(ArtifactLocation) -> MutationOp,
     ) -> Result<ProjectEditRun, UiError> {
         // (field input / gesture) → Pending: stage the op so DTOs reflect it
         // (and a stale Failed entry from an earlier attempt is replaced).
@@ -1139,7 +1277,7 @@ impl ProjectController {
         }
         let batch = MutationCmdBatch::new(vec![MutationCmd {
             id: cmd_id,
-            mutation: MutationOp::PutSlotEdit { artifact, edit },
+            mutation: mutation_for(artifact),
         }]);
         let mutation = match server
             .project_overlay_mutate(handle_id, batch.clone())
@@ -1202,9 +1340,12 @@ impl ProjectController {
     /// [`lpc_model::MutationEffect`] (the server may have normalized a Put into a
     /// removal, and the mirror must reflect what was stored) and stamping the
     /// response's `overlay_revision`; they release their staged buffer
-    /// entries. Rejected commands park their entries in `Failed` with the
-    /// rejection reason. `staged` maps command ids to the buffer addresses
-    /// they carry.
+    /// entries — except a `NormalizedToRemoval { changed: true }` effect,
+    /// which parks the entry as [`PendingEditPhase::AwaitingRefresh`] so its
+    /// shadow bridges the synced view's stale window (released on the next
+    /// applied project read). Rejected commands park their entries in
+    /// `Failed` with the rejection reason. `staged` maps command ids to the
+    /// buffer addresses they carry.
     fn apply_mutation_acks(
         &mut self,
         batch: &MutationCmdBatch,
@@ -1227,10 +1368,28 @@ impl ProjectController {
                     if let Some(command) = command {
                         accepted.push((command.clone(), effect.clone()));
                     }
-                    // ack accepted → entry removed; the slot now reads dirty
-                    // from the overlay mirror.
                     if let Some(address) = address {
-                        self.edit_buffer.remove(address);
+                        match effect {
+                            // ack accepted, normalized to a removal that
+                            // changed the overlay → AwaitingRefresh: the
+                            // mirror ends up with no entry at the path while
+                            // the synced view still holds the stale effective
+                            // value, so the entry keeps shadowing until the
+                            // next project read is applied
+                            // (`apply_project_view` releases it).
+                            MutationEffect::NormalizedToRemoval { changed: true } => {
+                                if let Some(edit) = self.edit_buffer.get_mut(address) {
+                                    edit.phase = PendingEditPhase::AwaitingRefresh;
+                                }
+                            }
+                            // ack accepted → entry removed; the slot now
+                            // reads dirty from the overlay mirror (a
+                            // `changed: false` normalization altered nothing,
+                            // so the synced view is already correct).
+                            _ => {
+                                self.edit_buffer.remove(address);
+                            }
+                        }
                     }
                 }
                 MutationCmdStatus::Rejected { rejection } => {
@@ -1425,6 +1584,14 @@ fn acked_edit_kind(op: &lpc_model::SlotEditOp) -> UiPendingEditKind {
         lpc_model::SlotEditOp::EnsurePresent => UiPendingEditKind::Added,
         lpc_model::SlotEditOp::Remove => UiPendingEditKind::Removed,
     }
+}
+
+/// Canonical display for one map key, matching how keys render inside slot
+/// paths (`[0]`, `[name]`, `["quoted key"]`).
+fn map_key_display(key: &lpc_model::SlotMapKey) -> String {
+    lpc_model::SlotPath::root()
+        .child_key(key.clone())
+        .to_string()
 }
 
 /// Human-readable slot path for a change-list entry: the path display, or
@@ -3407,6 +3574,115 @@ mod tests {
         );
     }
 
+    /// The set-back-to-base stale window: an accepted ack whose effect is
+    /// `NormalizedToRemoval { changed: true }` leaves the mirror with no
+    /// entry at the path while the synced view still holds the superseded
+    /// effective value. The buffer entry must park as `AwaitingRefresh` and
+    /// keep shadowing the typed (base) value — falling back to the view here
+    /// is the visible value jitter of the set-back gesture.
+    #[test]
+    fn normalized_set_value_keeps_its_shadow_until_the_next_applied_view() {
+        let (mut project, mut client, _sent) =
+            editable_project_with_scripted_client(vec![mutation_response(
+                1,
+                vec![MutationCmdResult::accepted(
+                    MutationCmdId::new(1),
+                    MutationEffect::NormalizedToRemoval { changed: true },
+                )],
+                4,
+            )]);
+
+        // The view's 0.75 plays the stale effective value of an earlier
+        // edit; the user types the base value 0.6, which the server
+        // normalizes to removing the stored overlay entry.
+        block_on_ready(project.apply_slot_edit(
+            &mut client,
+            crate::SlotEditOp::SetValue {
+                address: brightness_address(),
+                value: LpValue::F32(0.6),
+            },
+        ))
+        .unwrap();
+
+        let edit = project
+            .edit_buffer_for_test()
+            .get(&brightness_address())
+            .expect("normalized edit parks awaiting the refresh");
+        assert_eq!(edit.phase, PendingEditPhase::AwaitingRefresh);
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(
+            sync.overlay_edit_at(&edit_artifact(), &SlotPath::parse("brightness").unwrap()),
+            None,
+            "the mirror applies the removal effect, not the sent Put"
+        );
+
+        // Window DTO: the typed value stays visible with the Saving
+        // treatment — no fallback to the stale synced 0.75.
+        let nodes = project.ui_nodes();
+        let slot = config_slot(&nodes, "Brightness");
+        assert_eq!(slot_display(slot), "0.6");
+        assert_eq!(slot.state.dirty, UiNodeDirtyState::Saving);
+
+        // The next applied project read delivers the reverted def value and
+        // releases the bridge entry: clean, stable value.
+        let mut refreshed = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_mixed_policy_slots(&mut refreshed, 1, Revision::new(3));
+        refreshed.slots.roots.insert(
+            "node.1.def".to_string(),
+            SlotData::Record(SlotRecord::with_revision(
+                Revision::new(3),
+                vec![
+                    SlotData::Value(WithRevision::new(Revision::new(3), LpValue::F32(0.6))),
+                    SlotData::Value(WithRevision::new(Revision::new(3), LpValue::F32(1.0))),
+                ],
+            )),
+        );
+        project.apply_project_view(&refreshed).unwrap();
+
+        assert!(
+            project.edit_buffer_for_test().is_empty(),
+            "the applied read releases the AwaitingRefresh entry"
+        );
+        let nodes = project.ui_nodes();
+        let slot = config_slot(&nodes, "Brightness");
+        assert_eq!(slot_display(slot), "0.6");
+        assert_eq!(slot.state.dirty, UiNodeDirtyState::Clean);
+        assert!(project.dirty_summary().is_clean());
+    }
+
+    #[test]
+    fn normalized_noop_releases_the_buffer_entry_immediately() {
+        // `NormalizedToRemoval { changed: false }` altered nothing — the
+        // view never reflected any edit at the path — so there is no stale
+        // window and the entry releases at the ack like a stored edit (no
+        // lingering Saving treatment; the P6 option-toggle no-op case).
+        let (mut project, mut client, _sent) =
+            editable_project_with_scripted_client(vec![mutation_response(
+                1,
+                vec![MutationCmdResult::accepted(
+                    MutationCmdId::new(1),
+                    MutationEffect::NormalizedToRemoval { changed: false },
+                )],
+                3,
+            )]);
+
+        block_on_ready(project.apply_slot_edit(
+            &mut client,
+            crate::SlotEditOp::SetValue {
+                address: brightness_address(),
+                value: LpValue::F32(0.75),
+            },
+        ))
+        .unwrap();
+
+        assert!(project.edit_buffer_for_test().is_empty());
+        let nodes = project.ui_nodes();
+        let slot = config_slot(&nodes, "Brightness");
+        assert_eq!(slot.state.dirty, UiNodeDirtyState::Clean);
+        assert_eq!(slot_display(slot), "0.75");
+        assert!(project.dirty_summary().is_clean());
+    }
+
     #[test]
     fn rejected_set_value_parks_failed_entry_and_feeds_invalid() {
         let (mut project, mut client, _sent) =
@@ -3765,6 +4041,307 @@ mod tests {
         );
     }
 
+    // --- Node-level batch revert (NodeRevertOp) contract tests --------------
+
+    #[test]
+    fn node_revert_removes_every_subtree_entry_in_one_batch() {
+        let (mut project, mut client, sent) =
+            structural_project_with_scripted_client(vec![mutation_response(
+                1,
+                vec![accepted(1), accepted(2)],
+                5,
+            )]);
+        // A parked failed buffer entry plus a mirrored (acked) server edit —
+        // both under the node — enumerate through the same join the counts use.
+        project.insert_pending_edit_for_test(
+            structural_address("entries[c]"),
+            PendingEdit {
+                op: PendingEditOp::EnsurePresent,
+                phase: PendingEditPhase::Failed {
+                    reason: "rejected".to_string(),
+                },
+            },
+        );
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[(
+                MutationCmd {
+                    id: MutationCmdId::new(9),
+                    mutation: MutationOp::PutSlotEdit {
+                        artifact: edit_artifact(),
+                        edit: SlotEdit::remove(SlotPath::parse("entries[a]").unwrap()),
+                    },
+                },
+                MutationEffect::OverlayChanged { changed: true },
+            )],
+            Revision::new(3),
+        );
+        assert!(!project.dirty_summary().is_clean());
+
+        let run = block_on_ready(
+            project.revert_node_edits(&mut client, &node_address("/demo.project/orbit.shader")),
+        )
+        .unwrap();
+
+        // ONE wire round-trip: a single MutateOverlay whose batch carries one
+        // RemoveSlotEdit per entry, and one mirror snapshot on its ack.
+        let sent = sent.borrow();
+        assert_eq!(sent.len(), 1, "one batch, one round trip");
+        let ClientRequest::ProjectCommand {
+            command: WireProjectCommand::MutateOverlay { request },
+            ..
+        } = &sent[0].msg
+        else {
+            panic!("expected an overlay mutation");
+        };
+        let paths: Vec<String> = request
+            .batch
+            .commands
+            .iter()
+            .map(|command| match &command.mutation {
+                MutationOp::RemoveSlotEdit { artifact, path } => {
+                    assert_eq!(*artifact, edit_artifact());
+                    path.to_string()
+                }
+                other => panic!("expected RemoveSlotEdit, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(paths, ["entries[a]", "entries[c]"]);
+        drop(sent);
+
+        assert!(project.edit_buffer_for_test().is_empty());
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(
+            sync.overlay_edit_at(&edit_artifact(), &SlotPath::parse("entries[a]").unwrap()),
+            None
+        );
+        assert_eq!(sync.overlay_revision(), Revision::new(5));
+        assert!(project.dirty_summary().is_clean());
+        assert_eq!(run.notices.notices.len(), 1);
+        assert!(
+            run.notices.notices[0]
+                .message
+                .contains("Reverted 2 pending edit(s)")
+        );
+    }
+
+    #[test]
+    fn node_revert_outside_the_subtree_sends_nothing() {
+        let (mut project, mut client, sent) = structural_project_with_scripted_client(Vec::new());
+        project.insert_pending_edit_for_test(
+            structural_address("entries[c]"),
+            PendingEdit::pending_op(PendingEditOp::EnsurePresent),
+        );
+
+        let run = block_on_ready(
+            project.revert_node_edits(&mut client, &node_address("/demo.project/other.clock")),
+        )
+        .unwrap();
+
+        assert!(sent.borrow().is_empty(), "no wire traffic");
+        assert_eq!(
+            project.edit_buffer_for_test().len(),
+            1,
+            "the other node's entry is untouched"
+        );
+        assert!(
+            run.notices.notices[0]
+                .message
+                .contains("No pending edits under")
+        );
+    }
+
+    #[test]
+    fn dirty_node_header_offers_the_batch_revert_pane_action() {
+        let (mut project, _client, _sent) = structural_project_with_scripted_client(Vec::new());
+        assert!(
+            project.ui_nodes()[0].header_actions.is_empty(),
+            "a clean node header offers no actions"
+        );
+
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[(
+                MutationCmd {
+                    id: MutationCmdId::new(1),
+                    mutation: MutationOp::PutSlotEdit {
+                        artifact: edit_artifact(),
+                        edit: SlotEdit::remove(SlotPath::parse("entries[a]").unwrap()),
+                    },
+                },
+                MutationEffect::OverlayChanged { changed: true },
+            )],
+            Revision::new(3),
+        );
+
+        let nodes = project.ui_nodes();
+        let actions = &nodes[0].header_actions;
+        assert_eq!(actions.len(), 1);
+        assert_eq!(
+            actions[0].icon, "revert",
+            "same icon token as the project header"
+        );
+        assert_eq!(
+            actions[0].action.op_as::<crate::NodeRevertOp>(),
+            Some(&crate::NodeRevertOp {
+                node: node_address("/demo.project/orbit.shader"),
+            })
+        );
+    }
+
+    #[test]
+    fn accepted_move_entry_sends_the_move_op_and_mirrors_the_materialized_effect() {
+        // The map's `entries` values are leaves, so a realistic materialized
+        // ack is: ensure the target, assign the moved leaf value at it (the
+        // upsert leaves one AssignValue entry), remove the source.
+        let (mut project, mut client, sent) =
+            structural_project_with_scripted_client(vec![mutation_response(
+                1,
+                vec![MutationCmdResult::accepted(
+                    MutationCmdId::new(1),
+                    MutationEffect::Materialized {
+                        edits: vec![
+                            lpc_model::StoredSlotEdit::Put {
+                                edit: SlotEdit::ensure_present(
+                                    SlotPath::parse("entries[c]").unwrap(),
+                                ),
+                            },
+                            lpc_model::StoredSlotEdit::Put {
+                                edit: SlotEdit::assign_value(
+                                    SlotPath::parse("entries[c]").unwrap(),
+                                    LpValue::F32(0.25),
+                                ),
+                            },
+                            lpc_model::StoredSlotEdit::Put {
+                                edit: SlotEdit::remove(SlotPath::parse("entries[a]").unwrap()),
+                            },
+                        ],
+                        changed: true,
+                    },
+                )],
+                5,
+            )]);
+
+        let run = block_on_ready(project.apply_slot_edit(
+            &mut client,
+            crate::SlotEditOp::MoveEntry {
+                address: structural_address("entries"),
+                from_key: SlotMapKey::String("a".to_string()),
+                to_key: SlotMapKey::String("c".to_string()),
+            },
+        ))
+        .unwrap();
+
+        assert!(run.notices.notices.is_empty());
+        assert!(
+            project.edit_buffer_for_test().is_empty(),
+            "ack releases the staged entry"
+        );
+
+        // The wire mutation is the move op itself, addressed as sibling map
+        // entry paths — the client composes no edits (the server
+        // materializes).
+        let sent = sent.borrow();
+        let ClientRequest::ProjectCommand {
+            command: WireProjectCommand::MutateOverlay { request },
+            ..
+        } = &sent[0].msg
+        else {
+            panic!("expected an overlay mutation");
+        };
+        assert!(matches!(
+            &request.batch.commands[0].mutation,
+            MutationOp::MoveSlotEntry { artifact, from, to }
+                if *artifact == edit_artifact()
+                    && from.to_string() == "entries[a]"
+                    && to.to_string() == "entries[c]"
+        ));
+        drop(sent);
+
+        // The mirror follows the ack alone: the stored per-path edits are
+        // replayed verbatim, no overlay fetch.
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(
+            sync.overlay_edit_at(&edit_artifact(), &SlotPath::parse("entries[c]").unwrap()),
+            Some(&SlotEditOp::AssignValue(LpValue::F32(0.25)))
+        );
+        assert_eq!(
+            sync.overlay_edit_at(&edit_artifact(), &SlotPath::parse("entries[a]").unwrap()),
+            Some(&SlotEditOp::Remove)
+        );
+        assert_eq!(sync.overlay_revision(), Revision::new(5));
+
+        // Both mirrored entries surface on the parent map through the prefix
+        // join and count once each.
+        let nodes = project.ui_nodes();
+        let entries = config_slot(&nodes, "Entries");
+        assert_eq!(entries.state.dirty, UiNodeDirtyState::Dirty);
+        assert_eq!(
+            project.dirty_summary(),
+            DirtySummary {
+                persisted: 2,
+                transient: 0,
+                failed: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn occupied_target_move_parks_failed_on_the_map_row() {
+        let (mut project, mut client, _sent) =
+            structural_project_with_scripted_client(vec![mutation_response(
+                1,
+                vec![MutationCmdResult::rejected(
+                    MutationCmdId::new(1),
+                    MutationRejection::new(
+                        MutationRejectionReason::TargetOccupied,
+                        "map entry entries[b] already exists in the effective definition"
+                            .to_string(),
+                    ),
+                )],
+                0,
+            )]);
+
+        let run = block_on_ready(project.apply_slot_edit(
+            &mut client,
+            crate::SlotEditOp::MoveEntry {
+                address: structural_address("entries"),
+                from_key: SlotMapKey::String("a".to_string()),
+                to_key: SlotMapKey::String("b".to_string()),
+            },
+        ))
+        .unwrap();
+
+        assert_eq!(run.notices.notices.len(), 1);
+        let edit = project
+            .edit_buffer_for_test()
+            .get(&structural_address("entries"))
+            .expect("failed move parked at the map address");
+        assert!(edit.is_failed());
+        assert_eq!(edit.value(), None, "moves buffer no value shadow");
+
+        // The move is staged at the map's own address, so the rejection
+        // surfaces directly on the map row.
+        let nodes = project.ui_nodes();
+        let entries = config_slot(&nodes, "Entries");
+        assert_eq!(entries.state.dirty, UiNodeDirtyState::Error);
+        assert_eq!(
+            entries.state.invalid.as_deref(),
+            Some("map entry entries[b] already exists in the effective definition")
+        );
+        assert_eq!(
+            project.dirty_summary(),
+            DirtySummary {
+                persisted: 0,
+                transient: 0,
+                failed: 1,
+            }
+        );
+        assert_eq!(
+            project.sync.as_ref().unwrap().overlay_slot_edits().count(),
+            0,
+            "a rejected move leaves the mirror untouched"
+        );
+    }
+
     /// Regression for the D4 hole: a removal of a base-present map entry
     /// leaves no surviving slot row, but the parent map must read dirty and
     /// the edit must count exactly once in [`DirtySummary`].
@@ -3883,6 +4460,75 @@ mod tests {
             UiNodeDirtyState::Saving,
             "an in-flight gesture under an option shows Saving on its row"
         );
+    }
+
+    /// The structural flavor of the normalization stale window: a
+    /// `RemoveValue` that cancels a pending add (`NormalizedToRemoval {
+    /// changed: true }`) leaves the stale view still showing the row until
+    /// the next read. The row and its parent must keep the Saving treatment
+    /// through that window instead of flashing a clean row that then
+    /// vanishes.
+    #[test]
+    fn normalized_structural_removal_keeps_saving_until_the_next_applied_view() {
+        let (mut project, mut client, _sent) =
+            structural_project_with_scripted_client(vec![mutation_response(
+                1,
+                vec![MutationCmdResult::accepted(
+                    MutationCmdId::new(1),
+                    MutationEffect::NormalizedToRemoval { changed: true },
+                )],
+                4,
+            )]);
+
+        // Remove the (conceptually just-added) entry `b`: the server cancels
+        // the add-then-remove pair; the applied view still shows the row.
+        block_on_ready(project.apply_slot_edit(
+            &mut client,
+            crate::SlotEditOp::RemoveValue {
+                address: structural_address("entries[b]"),
+            },
+        ))
+        .unwrap();
+
+        let edit = project
+            .edit_buffer_for_test()
+            .get(&structural_address("entries[b]"))
+            .expect("normalized gesture parks awaiting the refresh");
+        assert_eq!(edit.phase, PendingEditPhase::AwaitingRefresh);
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(
+            sync.overlay_edit_at(&edit_artifact(), &SlotPath::parse("entries[b]").unwrap()),
+            None,
+            "the mirror holds nothing at the normalized path"
+        );
+
+        let nodes = project.ui_nodes();
+        let entries = config_slot(&nodes, "Entries");
+        assert_eq!(
+            entries.state.dirty,
+            UiNodeDirtyState::Saving,
+            "the parent map keeps Saving through the stale window"
+        );
+        let UiConfigSlotBody::Record(record) = &entries.body else {
+            panic!("expected map record body");
+        };
+        let row = record
+            .fields
+            .iter()
+            .find(|field| field.label == "b")
+            .expect("the stale row survives until the refresh");
+        assert_eq!(row.state.dirty, UiNodeDirtyState::Saving);
+
+        // The next applied read (entry gone) releases the bridge entry.
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_structural_config_slots_with_entries(&mut view, 1, Revision::new(3), &["a"]);
+        project.apply_project_view(&view).unwrap();
+
+        assert!(project.edit_buffer_for_test().is_empty());
+        let nodes = project.ui_nodes();
+        let entries = config_slot(&nodes, "Entries");
+        assert_eq!(entries.state.dirty, UiNodeDirtyState::Clean);
+        assert!(project.dirty_summary().is_clean());
     }
 
     // --- Save-panel change list (P5) -----------------------------------------

@@ -6,17 +6,20 @@ use lpa_studio_core::{
     UiSlotComposite, UiSlotFieldState,
 };
 
+use crate::app::node::slot_edit_actions::slot_revert_action;
 use crate::app::node::{
     EnumVariantField, MapAddEntry, MapEntryRemoveButton, OptionToggleField, SlotDetailButton,
     SlotDetailRevert, SlotRecordEditor, SlotValueEditor, primary_affordance, slot_row_class,
 };
 use crate::base::{StudioIcon, StudioIconName};
 
-/// Edit chrome for a touched slot row: persisted edits show as "unsaved"
-/// (amber badge + warning tint, counts toward Save), transient edits as
-/// "live" (blue tint only, applied to the running project and never written
-/// by Save). The per-slot Revert/Reset affordance lives in the slot detail
-/// popup, not on the row.
+/// Edit chrome for a touched slot row: persisted edits wear the warning
+/// (amber) tint and count toward Save, transient edits the live (blue) tint
+/// (applied to the running project and never written by Save). The tint plus
+/// the affordance icon carry the whole row treatment — no text chips (M3 UX
+/// gate); text stays in the popups and the save panel. Rows with an own edit
+/// entry additionally get the inline revert icon; the detail popup keeps its
+/// revert footer as the second access point.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum SlotEditChrome {
     Unsaved,
@@ -71,6 +74,16 @@ pub fn ConfigSlotRow(
     let remove_entry = (removable && slot.state.editable)
         .then(|| slot.address.clone().zip(on_action))
         .flatten();
+    // Inline revert: only rows with an OWN edit entry offer it (prefix-only
+    // dirty composites carry `None`; their per-entry revert is the save
+    // panel's). Same action as the popup footer — two access points.
+    let row_revert = chrome.and_then(|chrome| {
+        Some(RowRevert {
+            chrome,
+            address: slot.edit_entry_address.clone()?,
+            on_action: on_action?,
+        })
+    });
 
     rsx! {
         div { class: "tw:grid tw:min-w-0",
@@ -100,9 +113,6 @@ pub fn ConfigSlotRow(
                     }
                 }
                 div { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-end tw:gap-2 tw:text-sm tw:leading-tight tw:text-muted-foreground",
-                    if chrome == Some(SlotEditChrome::Unsaved) {
-                        UnsavedBadge {}
-                    }
                     if let Some(optionality) = slot.optionality {
                         OptionToggleField {
                             optionality,
@@ -121,6 +131,9 @@ pub fn ConfigSlotRow(
                     }
                     if let Some((address, handler)) = remove_entry {
                         MapEntryRemoveButton { address, on_action: handler }
+                    }
+                    if let Some(revert) = row_revert {
+                        SlotRowRevertButton { revert }
                     }
                 }
                 SlotDetailButton {
@@ -148,34 +161,67 @@ pub fn ConfigSlotRow(
     }
 }
 
-/// Compact "unsaved" pill marking a touched persisted slot row. Live rows
-/// carry no badge: their tint plus the detail icon are the whole treatment.
+/// The one revert verb vocabulary (M3 UX gate): "Revert" for unsaved
+/// (persisted) edits, "Reset" for live (transient) controls — shared by the
+/// inline row icon and the detail-popup footer so the two access points can
+/// never diverge.
+fn chrome_revert_labels(chrome: SlotEditChrome) -> (&'static str, &'static str) {
+    match chrome {
+        SlotEditChrome::Unsaved => ("Revert", "Discard this pending edit"),
+        SlotEditChrome::Live => ("Reset", "Reset this live control to its authored value"),
+    }
+}
+
+/// Inline revert affordance data for a touched row with an own edit entry.
+#[derive(Clone, PartialEq)]
+struct RowRevert {
+    chrome: SlotEditChrome,
+    address: ProjectSlotAddress,
+    on_action: EventHandler<UiAction>,
+}
+
+/// Compact revert icon button on a touched slot row: the same revert icon
+/// token as the node/project headers, dispatching `SlotEditOp::Revert` at the
+/// row's own edit entry. Tooltip verb per [`chrome_revert_labels`].
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn UnsavedBadge() -> Element {
+fn SlotRowRevertButton(revert: RowRevert) -> Element {
+    let RowRevert {
+        chrome,
+        address,
+        on_action,
+    } = revert;
+    let (label, title) = chrome_revert_labels(chrome);
+
     rsx! {
-        span {
-            class: "tw:flex-none tw:rounded-pill tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-1.5 tw:py-0.5 tw:text-[0.64rem] tw:font-bold tw:uppercase tw:text-status-warning-foreground",
-            title: "Pending edit; Save writes it to the project files",
-            "unsaved"
+        button {
+            class: "tw:inline-flex tw:h-6 tw:w-6 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-subtle tw:bg-transparent tw:p-0 tw:text-muted-foreground tw:hover:text-strong-foreground",
+            r#type: "button",
+            aria_label: label,
+            title: "{label}: {title}",
+            onclick: move |event| {
+                event.stop_propagation();
+                on_action.call(slot_revert_action(address.clone()));
+            },
+            StudioIcon {
+                name: StudioIconName::Revert,
+                size: 13,
+            }
         }
     }
 }
 
-/// The detail-popup revert affordance for a touched slot: "Revert" for
-/// unsaved (persisted) edits, "Reset" for live (transient) controls. The
-/// target is the row's **own** edit entry (`UiConfigSlot.edit_entry_address`);
-/// composite rows that are only prefix-dirty carry no entry of their own and
-/// offer no row revert — per-entry revert for those lives in the save panel.
+/// The detail-popup revert affordance for a touched slot, using the same
+/// verb vocabulary as the inline row icon. The target is the row's **own**
+/// edit entry (`UiConfigSlot.edit_entry_address`); composite rows that are
+/// only prefix-dirty carry no entry of their own and offer no row revert —
+/// per-entry revert for those lives in the save panel.
 fn slot_detail_revert(
     chrome: Option<SlotEditChrome>,
     address: Option<ProjectSlotAddress>,
     on_action: Option<EventHandler<UiAction>>,
 ) -> Option<SlotDetailRevert> {
-    let (label, title) = match chrome? {
-        SlotEditChrome::Unsaved => ("Revert", "Discard this pending edit"),
-        SlotEditChrome::Live => ("Reset", "Reset this live control to its authored value"),
-    };
+    let (label, title) = chrome_revert_labels(chrome?);
     Some(SlotDetailRevert {
         label,
         title,

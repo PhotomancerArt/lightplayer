@@ -1,6 +1,8 @@
 use alloc::string::String;
 use alloc::vec::Vec;
 
+use crate::{SlotEdit, SlotPath};
+
 use super::MutationOp;
 
 /// Ordered overlay mutation command batch.
@@ -122,6 +124,34 @@ pub enum MutationEffect {
     /// path; `changed` reports whether an entry existed to remove (`false`:
     /// the command was a complete no-op).
     NormalizedToRemoval { changed: bool },
+    /// A multi-edit mutation (`MoveSlotEntry`) was materialized into per-path
+    /// overlay edits. `edits` lists what was actually stored, in application
+    /// order, against the command's artifact — each synthesized edit was
+    /// individually normalized against the base, so an entry is either a
+    /// stored [`SlotEdit`] or a removal of the overlay entry at a path.
+    /// Ack-mirroring clients replay `edits` verbatim; `changed` reports
+    /// whether any of them changed canonical overlay state.
+    Materialized {
+        edits: Vec<StoredSlotEdit>,
+        changed: bool,
+    },
+}
+
+/// One stored overlay change from a materialized multi-edit mutation.
+///
+/// The move materialization is the only producer today. The two forms mirror
+/// what the registry does per synthesized edit: store it
+/// ([`crate::ProjectOverlay::put_slot_edit`]) or — when normalization elided
+/// it, or a stale descendant of a normalized removal had to be cleared —
+/// remove the overlay entry at a path
+/// ([`crate::ProjectOverlay::remove_slot_edit`]).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StoredSlotEdit {
+    /// `edit` was stored in the artifact's slot overlay.
+    Put { edit: SlotEdit },
+    /// The overlay entry at `path` (if any) was removed.
+    Removed { path: SlotPath },
 }
 
 /// Stable reason for a rejected overlay mutation command.
@@ -140,6 +170,9 @@ pub enum MutationRejectionReason {
     /// Mutation assigned a value to a structural slot (record, map, option,
     /// enum, unit) instead of a value leaf.
     NotAValueLeaf,
+    /// Mutation would move or create an entry at a target that already
+    /// exists in the effective definition (occupied map key).
+    TargetOccupied,
     /// Mutation was well-formed but edit application failed.
     EditFailed,
     /// Mutation is not supported by the current registry implementation.

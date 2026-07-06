@@ -11,9 +11,9 @@ use lpc_model::{
     MutationEffect, MutationOp, MutationRejection, MutationRejectionReason, MutationResult,
     NodeArtifact, NodeDef, NodeDefEntry, NodeDefLocation, NodeDefState, PROJECT_FORMAT_VERSION,
     ProjectFormatProbe, ProjectInventory, ProjectOverlay, Revision, SlotAccess, SlotDataAccess,
-    SlotEditOp, SlotPath, SlotPathSegment, SlotPolicyResolution, SlotShapeLookup, StaticSlotShape,
-    WithRevision, lookup_slot_data, lp_value_matches_type, read_project_format_json,
-    resolve_slot_policy_and_leaf,
+    SlotEditOp, SlotMapKey, SlotPath, SlotPathSegment, SlotPolicyResolution, SlotShapeLookup,
+    StaticSlotShape, StoredSlotEdit, WithRevision, lookup_slot_data, lp_value_matches_type,
+    read_project_format_json, resolve_slot_policy_and_leaf,
 };
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath};
 
@@ -22,7 +22,7 @@ use crate::overlay::project_inventory_derivation::derive_effective_inventory;
 use crate::{
     ArtifactStore, CommitError, LoadResult, ParseCtx, RegistryError,
     asset::{AssetBytes, AssetReadError, AssetText},
-    overlay::{EditApplyError, serialize_slot_draft},
+    overlay::{EditApplyError, serialize_slot_draft, synthesize_move_edits},
 };
 
 /// Canonical registry for a loaded project.
@@ -102,8 +102,27 @@ impl ProjectRegistry {
     ) -> Result<MutationResult, EditApplyError> {
         let before = self.inventory.clone();
         let covered_before = self.overlay_covered_artifacts();
-        let (mutation, _) = self.normalize_edit_to_base(fs, mutation, ctx);
-        let overlay_changed = self.overlay.get_mut().apply_mutation(mutation);
+        let overlay_changed = match mutation {
+            // Moves must materialize (and therefore validate) even on this
+            // otherwise-unvalidated path; an invalid move maps to the error
+            // channel rather than silently storing nothing.
+            MutationOp::MoveSlotEntry { artifact, from, to } => {
+                self.validate_move_slot_entry(&artifact, &from, &to, ctx)
+                    .map_err(|rejection| EditApplyError::InvalidPath {
+                        message: rejection.message.clone(),
+                    })?;
+                let (_, changed) = self
+                    .apply_move_slot_entry(fs, &artifact, &from, &to, frame, ctx)
+                    .map_err(|rejection| EditApplyError::InvalidPath {
+                        message: rejection.message,
+                    })?;
+                changed
+            }
+            mutation => {
+                let (mutation, _) = self.normalize_edit_to_base(fs, mutation, ctx);
+                self.overlay.get_mut().apply_mutation(mutation)
+            }
+        };
         if overlay_changed {
             self.overlay.mark_updated(frame);
         }
@@ -133,6 +152,23 @@ impl ProjectRegistry {
 
         for command in batch.commands {
             match self.validate_mutation(&command.mutation, ctx) {
+                Ok(()) if matches!(command.mutation, MutationOp::MoveSlotEntry { .. }) => {
+                    let MutationOp::MoveSlotEntry { artifact, from, to } = command.mutation else {
+                        unreachable!("guarded by the arm's matches!");
+                    };
+                    match self.apply_move_slot_entry(fs, &artifact, &from, &to, frame, ctx) {
+                        Ok((edits, changed)) => {
+                            any_changed |= changed;
+                            results.push(MutationCmdResult::accepted(
+                                command.id,
+                                MutationEffect::Materialized { edits, changed },
+                            ));
+                        }
+                        Err(rejection) => {
+                            results.push(MutationCmdResult::rejected(command.id, rejection));
+                        }
+                    }
+                }
                 Ok(()) => {
                     let (mutation, normalized) =
                         self.normalize_edit_to_base(fs, command.mutation, ctx);
@@ -502,6 +538,9 @@ impl ProjectRegistry {
     ///   pending state must stay possible even when the shape changed under
     ///   the overlay, so a stale path is still allowed (it only shrinks the
     ///   overlay).
+    /// - `MoveSlotEntry` requires sibling map-entry paths under a writable
+    ///   map, a source key present in the **effective** definition, and a
+    ///   target key absent from it ([`Self::validate_move_slot_entry`]).
     /// - Whole-artifact ops (`SetArtifactBody` / `ClearArtifact` / `Clear`)
     ///   carry no slot policy and are accepted unchanged.
     fn validate_mutation(
@@ -551,10 +590,183 @@ impl ProjectRegistry {
             MutationOp::RemoveSlotEdit { artifact, .. } => {
                 self.def_entry_for_mutation(artifact).map(drop)
             }
+            MutationOp::MoveSlotEntry { artifact, from, to } => {
+                self.validate_move_slot_entry(artifact, from, to, ctx)
+            }
             MutationOp::SetArtifactBody { .. }
             | MutationOp::ClearArtifact { .. }
             | MutationOp::Clear => Ok(()),
         }
+    }
+
+    /// Validate a `MoveSlotEntry`'s endpoints against the effective
+    /// definition.
+    ///
+    /// Rejections: `UnknownArtifact` (no loaded def); `UnknownSlotPath` when
+    /// the endpoints are not key-terminated sibling paths, the shared parent
+    /// does not resolve to a map, or the source key is absent from the
+    /// **effective** def (moves act on what the user sees, unlike
+    /// base-relative normalization); `NotWritable` per the map's entry
+    /// policy; [`MutationRejectionReason::TargetOccupied`] when the target
+    /// key is already present in the effective def.
+    fn validate_move_slot_entry(
+        &self,
+        artifact: &ArtifactLocation,
+        from: &SlotPath,
+        to: &SlotPath,
+        ctx: &ParseCtx<'_>,
+    ) -> Result<(), MutationRejection> {
+        let def = self.loaded_def_for_mutation(artifact)?;
+        let unknown_path = |message: String| {
+            MutationRejection::new(MutationRejectionReason::UnknownSlotPath, message)
+        };
+        let Some((from_map, from_key)) = split_map_entry_path(from) else {
+            return Err(unknown_path(format!(
+                "move source {from} is not a map entry path"
+            )));
+        };
+        let Some((to_map, to_key)) = split_map_entry_path(to) else {
+            return Err(unknown_path(format!(
+                "move target {to} is not a map entry path"
+            )));
+        };
+        if from_map != to_map {
+            return Err(unknown_path(format!(
+                "move endpoints must address the same map: {from} vs {to}"
+            )));
+        }
+        let Some(resolution) = resolve_edit_policy(def, to, ctx) else {
+            return Err(unknown_path(format!(
+                "slot path {to} does not resolve in artifact {}",
+                artifact.file_path()
+            )));
+        };
+        if !resolution.policy.writable {
+            return Err(MutationRejection::new(
+                MutationRejectionReason::NotWritable,
+                format!("slot {to} is not writable"),
+            ));
+        }
+        match effective_map_entry_presence(def, ctx, &from_map, from_key) {
+            Err(message) => Err(unknown_path(message)),
+            Ok(false) => Err(unknown_path(format!(
+                "map entry {from} is not present in the effective definition"
+            ))),
+            Ok(true) => match effective_map_entry_presence(def, ctx, &to_map, to_key) {
+                Err(message) => Err(unknown_path(message)),
+                Ok(true) => Err(MutationRejection::new(
+                    MutationRejectionReason::TargetOccupied,
+                    format!("map entry {to} already exists in the effective definition"),
+                )),
+                Ok(false) => Ok(()),
+            },
+        }
+    }
+
+    /// Materialize and store a validated `MoveSlotEntry`: synthesize the
+    /// per-path edits ([`synthesize_move_edits`]), feed each through the same
+    /// base-relative [`Self::normalize_edit_to_base`] ordinary edits take,
+    /// apply the stored form to the overlay, and report the stored edits for
+    /// the [`MutationEffect::Materialized`] ack (ack-mirroring clients replay
+    /// them verbatim).
+    ///
+    /// One extra rule beyond per-edit normalization: when the trailing
+    /// `Remove from` normalizes away (base-absent source key), removing the
+    /// overlay entry at `from` alone would strand the pending edits *under*
+    /// it (an added-then-edited entry), and their re-application would
+    /// resurrect the entry — so those descendants are removed explicitly and
+    /// reported. A stored (non-normalized) `Remove` clears descendants
+    /// through [`ProjectOverlay::put_slot_edit`]'s canonicalization on both
+    /// server and mirror already.
+    ///
+    /// Known base-relative edge (accepted, same family as ADR D7's): a
+    /// synthesized `Remove` under `to` that nulls out a fresh default (a
+    /// typed default with a `Some` option or non-empty map) normalizes away
+    /// against a base-absent target; no such typed default exists today.
+    fn apply_move_slot_entry(
+        &mut self,
+        fs: &dyn LpFs,
+        artifact: &ArtifactLocation,
+        from: &SlotPath,
+        to: &SlotPath,
+        frame: Revision,
+        ctx: &ParseCtx<'_>,
+    ) -> Result<(Vec<StoredSlotEdit>, bool), MutationRejection> {
+        let edit_failed =
+            |message: String| MutationRejection::new(MutationRejectionReason::EditFailed, message);
+        let Some(base) = self.parse_base_def(fs, artifact, ctx) else {
+            return Err(edit_failed(format!(
+                "cannot materialize move: base definition {} is unreadable",
+                artifact.file_path()
+            )));
+        };
+        let overlay = self
+            .overlay
+            .get()
+            .artifact(artifact)
+            .and_then(ArtifactOverlay::as_slot)
+            .cloned()
+            .unwrap_or_default();
+        let to_ensure_normalizes = self.base_slot_presence(fs, artifact, to, ctx) == Some(true);
+        let synthesized =
+            synthesize_move_edits(base, &overlay, to_ensure_normalizes, ctx, frame, from, to)
+                .map_err(|message| edit_failed(format!("cannot materialize move: {message}")))?;
+
+        let mut stored = Vec::with_capacity(synthesized.len());
+        let mut changed = false;
+        for edit in synthesized {
+            let (mutation, normalized) = self.normalize_edit_to_base(
+                fs,
+                MutationOp::PutSlotEdit {
+                    artifact: artifact.clone(),
+                    edit,
+                },
+                ctx,
+            );
+            match mutation {
+                MutationOp::PutSlotEdit { edit, .. } => {
+                    changed |= self
+                        .overlay
+                        .get_mut()
+                        .put_slot_edit(artifact.clone(), edit.clone());
+                    stored.push(StoredSlotEdit::Put { edit });
+                }
+                MutationOp::RemoveSlotEdit { path, .. } => {
+                    changed |= self.overlay.get_mut().remove_slot_edit(artifact, &path);
+                    stored.push(StoredSlotEdit::Removed { path: path.clone() });
+                    if normalized && path == *from {
+                        for stale in self.overlay_paths_strictly_under(artifact, from) {
+                            changed |= self.overlay.get_mut().remove_slot_edit(artifact, &stale);
+                            stored.push(StoredSlotEdit::Removed { path: stale });
+                        }
+                    }
+                }
+                other => unreachable!(
+                    "normalize_edit_to_base only maps PutSlotEdit to RemoveSlotEdit, got {other:?}"
+                ),
+            }
+        }
+        Ok((stored, changed))
+    }
+
+    /// Overlay slot-edit paths strictly under `ancestor` for `artifact`.
+    fn overlay_paths_strictly_under(
+        &self,
+        artifact: &ArtifactLocation,
+        ancestor: &SlotPath,
+    ) -> Vec<SlotPath> {
+        self.overlay
+            .get()
+            .artifact(artifact)
+            .and_then(ArtifactOverlay::as_slot)
+            .map(|slot| {
+                slot.edits
+                    .iter()
+                    .filter(|(path, _)| is_strictly_under(ancestor, path))
+                    .map(|(path, _)| path.clone())
+                    .collect()
+            })
+            .unwrap_or_default()
     }
 
     /// Minimal-diff overlay normalization: a `PutSlotEdit` that would leave
@@ -767,6 +979,52 @@ fn resolve_edit_policy(
     };
     let shape = ctx.shapes.get_shape(root_shape_id)?;
     resolve_slot_policy_and_leaf(shape, ctx.shapes, path)
+}
+
+/// Split a map-entry path into its parent map path and terminal key.
+fn split_map_entry_path(path: &SlotPath) -> Option<(SlotPath, &SlotMapKey)> {
+    match path.segments().split_last()? {
+        (SlotPathSegment::Key(key), parent) => {
+            Some((SlotPath::from_segments(parent.to_vec()), key))
+        }
+        _ => None,
+    }
+}
+
+/// Whether the map at `map_path` in the **effective** definition contains
+/// `key`. `Err` carries a message when the path does not resolve to a map
+/// (including a root-variant prefix that names an inactive variant).
+fn effective_map_entry_presence(
+    def: &NodeDef,
+    ctx: &ParseCtx<'_>,
+    map_path: &SlotPath,
+    key: &SlotMapKey,
+) -> Result<bool, String> {
+    let map_path = match map_path.segments().split_first() {
+        Some((SlotPathSegment::Field(name), tail)) if NodeDef::is_variant_name(name.as_str()) => {
+            if def.variant_name() != name.as_str() {
+                return Err(format!(
+                    "variant prefix {name} does not match the effective variant {}",
+                    def.variant_name()
+                ));
+            }
+            SlotPath::from_segments(tail.to_vec())
+        }
+        _ => map_path.clone(),
+    };
+    let data = lookup_slot_data(def, ctx.shapes, &map_path).map_err(|error| error.to_string())?;
+    let SlotDataAccess::Map(map) = data else {
+        return Err(format!("slot {map_path} is not a map"));
+    };
+    Ok(map.get(key).is_some())
+}
+
+/// True when `descendant` is strictly under `ancestor` (proper segment-wise
+/// prefix).
+fn is_strictly_under(ancestor: &SlotPath, descendant: &SlotPath) -> bool {
+    let ancestor = ancestor.segments();
+    let descendant = descendant.segments();
+    ancestor.len() < descendant.len() && descendant.starts_with(ancestor)
 }
 
 impl Default for ProjectRegistry {
@@ -1694,6 +1952,318 @@ mod tests {
         assert_eq!(*effective_clock_def(&registry).controls.rate.value(), 2.0);
     }
 
+    #[test]
+    fn move_of_a_leaf_valued_map_entry_materializes_ensure_assign_remove() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = path_points_fixture_project(&shapes);
+        let fixture = fixture_artifact();
+        let counts = "mapping.PathPoints.paths[0].RingArray.ring_lamp_counts";
+
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::MoveSlotEntry {
+                artifact: fixture.clone(),
+                from: SlotPath::parse(&format!("{counts}[1]")).unwrap(),
+                to: SlotPath::parse(&format!("{counts}[2]")).unwrap(),
+            }],
+        );
+
+        // The move materializes into the ordinary edit vocabulary: create
+        // the target entry, assign the one leaf where the moved value
+        // diverges from a fresh entry's default (12 vs 0), remove the source.
+        let edits = assert_materialized(&results[0], true);
+        assert_eq!(
+            edits,
+            &[
+                StoredSlotEdit::Put {
+                    edit: SlotEdit::ensure_present(
+                        SlotPath::parse(&format!("{counts}[2]")).unwrap()
+                    ),
+                },
+                StoredSlotEdit::Put {
+                    edit: SlotEdit::assign_value(
+                        SlotPath::parse(&format!("{counts}[2]")).unwrap(),
+                        LpValue::U32(12),
+                    ),
+                },
+                StoredSlotEdit::Put {
+                    edit: SlotEdit::remove(SlotPath::parse(&format!("{counts}[1]")).unwrap()),
+                },
+            ]
+        );
+
+        let def = effective_fixture_def(&registry);
+        let lpc_model::MappingConfig::PathPoints { paths, .. } = def.mapping.value() else {
+            panic!("expected PathPoints mapping");
+        };
+        let lpc_model::PathSpec::RingArray {
+            ring_lamp_counts, ..
+        } = paths.entries.get(&0).expect("path 0").value()
+        else {
+            panic!("expected RingArray at path 0");
+        };
+        let counts_by_key: Vec<(u32, u32)> = ring_lamp_counts
+            .entries
+            .iter()
+            .map(|(key, value)| (*key, *value.value()))
+            .collect();
+        assert_eq!(counts_by_key, vec![(0, 8), (2, 12)]);
+
+        // A move is an overlay change like any other: revision advances.
+        assert_eq!(registry.overlay().changed_at(), Revision::new(10));
+        assert_eq!(
+            registry
+                .def(&NodeDefLocation::artifact_root(fixture))
+                .expect("fixture def")
+                .revision,
+            Revision::new(10)
+        );
+    }
+
+    #[test]
+    fn move_of_a_composite_map_entry_preserves_variant_selection_and_diverged_leaves() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = path_points_fixture_project(&shapes);
+        let paths = "mapping.PathPoints.paths";
+
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::MoveSlotEntry {
+                artifact: fixture_artifact(),
+                from: SlotPath::parse(&format!("{paths}[3]")).unwrap(),
+                to: SlotPath::parse(&format!("{paths}[1]")).unwrap(),
+            }],
+        );
+
+        // The moved entry is a non-default enum variant (PointList; RingArray
+        // is the factory default), so the materialization must carry the
+        // variant selection, the diverged leaves, and the nested map add.
+        let edits = assert_materialized(&results[0], true);
+        let put = |edit: SlotEdit| StoredSlotEdit::Put { edit };
+        assert_eq!(
+            edits.first(),
+            Some(&put(SlotEdit::ensure_present(
+                SlotPath::parse(&format!("{paths}[1]")).unwrap()
+            )))
+        );
+        assert!(
+            edits.contains(&put(SlotEdit::ensure_present(
+                SlotPath::parse(&format!("{paths}[1].PointList")).unwrap()
+            ))),
+            "variant selection must survive the move: {edits:?}"
+        );
+        assert!(
+            edits.contains(&put(SlotEdit::assign_value(
+                SlotPath::parse(&format!("{paths}[1].PointList.first_channel")).unwrap(),
+                LpValue::U32(5),
+            ))),
+            "diverged leaf must be re-assigned: {edits:?}"
+        );
+        assert!(
+            edits.contains(&put(SlotEdit::ensure_present(
+                SlotPath::parse(&format!("{paths}[1].PointList.points[0]")).unwrap()
+            ))),
+            "nested map entries must be re-created: {edits:?}"
+        );
+        assert_eq!(
+            edits.last(),
+            Some(&put(SlotEdit::remove(
+                SlotPath::parse(&format!("{paths}[3]")).unwrap()
+            )))
+        );
+
+        let def = effective_fixture_def(&registry);
+        let lpc_model::MappingConfig::PathPoints { paths, .. } = def.mapping.value() else {
+            panic!("expected PathPoints mapping");
+        };
+        let keys: Vec<u32> = paths.entries.iter().map(|(key, _)| *key).collect();
+        assert_eq!(keys, vec![0, 1], "entry moved from key 3 to key 1");
+        let lpc_model::PathSpec::PointList {
+            first_channel,
+            points,
+        } = paths.entries.get(&1).expect("path 1").value()
+        else {
+            panic!("expected the moved PointList at path 1");
+        };
+        assert_eq!(*first_channel.value(), 5);
+        assert_eq!(
+            points.entries.get(&0).map(|xy| xy.value().0),
+            Some([0.25, 0.75])
+        );
+    }
+
+    #[test]
+    fn move_rejections_cover_absent_source_occupied_target_and_non_map_paths() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = path_points_fixture_project(&shapes);
+        let fixture = fixture_artifact();
+        let counts = "mapping.PathPoints.paths[0].RingArray.ring_lamp_counts";
+        let move_op = |from: &str, to: &str| MutationOp::MoveSlotEntry {
+            artifact: fixture.clone(),
+            from: SlotPath::parse(from).unwrap(),
+            to: SlotPath::parse(to).unwrap(),
+        };
+
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![
+                // Source absent in the effective def.
+                move_op("mapping.PathPoints.paths[9]", "mapping.PathPoints.paths[8]"),
+                // Target occupied in the effective def.
+                move_op(&format!("{counts}[0]"), &format!("{counts}[1]")),
+                // Keyed path under a value leaf: not a map.
+                move_op("color_order[0]", "color_order[1]"),
+                // Endpoints in different maps.
+                move_op(&format!("{counts}[0]"), "mapping.PathPoints.paths[5]"),
+                // Endpoint that is not a map-entry path at all.
+                move_op("mapping", "mapping.PathPoints.paths[5]"),
+            ],
+        );
+
+        assert_eq!(
+            rejection_reason(&results[0]),
+            &MutationRejectionReason::UnknownSlotPath
+        );
+        assert_eq!(
+            rejection_reason(&results[1]),
+            &MutationRejectionReason::TargetOccupied
+        );
+        assert_eq!(
+            rejection_reason(&results[2]),
+            &MutationRejectionReason::UnknownSlotPath
+        );
+        assert_eq!(
+            rejection_reason(&results[3]),
+            &MutationRejectionReason::UnknownSlotPath
+        );
+        assert_eq!(
+            rejection_reason(&results[4]),
+            &MutationRejectionReason::UnknownSlotPath
+        );
+        assert!(registry.overlay().get().is_empty());
+        assert_eq!(
+            registry.overlay().changed_at(),
+            Revision::default(),
+            "rejected moves must not bump the overlay revision"
+        );
+    }
+
+    #[test]
+    fn move_back_to_the_source_key_normalizes_the_overlay_clean() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = path_points_fixture_project(&shapes);
+        let fixture = fixture_artifact();
+        let paths = "mapping.PathPoints.paths";
+        let entry = |key: u32| SlotPath::parse(&format!("{paths}[{key}]")).unwrap();
+
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::MoveSlotEntry {
+                artifact: fixture.clone(),
+                from: entry(3),
+                to: entry(1),
+            }],
+        );
+        assert_materialized(&results[0], true);
+        assert!(!registry.overlay().get().is_empty());
+
+        // Moving back reconstructs base state: the leading ensure normalizes
+        // to cancelling the pending remove, no leaf diverges from the base
+        // entry, and the trailing remove of the base-absent key clears the
+        // added entry *and* its stranded descendant edits — minimal diff.
+        let results = mutate_batch_at(
+            &fs,
+            &mut registry,
+            &shapes,
+            Revision::new(12),
+            vec![MutationOp::MoveSlotEntry {
+                artifact: fixture.clone(),
+                from: entry(1),
+                to: entry(3),
+            }],
+        );
+        let edits = assert_materialized(&results[0], true);
+        assert!(
+            edits
+                .iter()
+                .all(|edit| matches!(edit, StoredSlotEdit::Removed { .. })),
+            "a base-reconstructing move stores nothing: {edits:?}"
+        );
+        assert!(
+            edits.contains(&StoredSlotEdit::Removed {
+                path: SlotPath::parse(&format!("{paths}[1].PointList.first_channel")).unwrap(),
+            }),
+            "stranded descendants of the removed entry are cleared: {edits:?}"
+        );
+        assert!(registry.overlay().get().is_empty(), "overlay ends minimal");
+        assert_eq!(registry.overlay().changed_at(), Revision::new(12));
+        assert_eq!(
+            registry
+                .def(&NodeDefLocation::artifact_root(fixture))
+                .expect("fixture def")
+                .revision,
+            Revision::new(12),
+            "the cancelling move must advance the def revision"
+        );
+
+        let def = effective_fixture_def(&registry);
+        let lpc_model::MappingConfig::PathPoints { paths, .. } = def.mapping.value() else {
+            panic!("expected PathPoints mapping");
+        };
+        let keys: Vec<u32> = paths.entries.iter().map(|(key, _)| *key).collect();
+        assert_eq!(keys, vec![0, 3], "effective def is back to base");
+        assert!(matches!(
+            paths.entries.get(&3).expect("path 3").value(),
+            lpc_model::PathSpec::PointList { .. }
+        ));
+    }
+
+    #[test]
+    fn singular_mutate_applies_moves_and_errors_on_invalid_ones() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = path_points_fixture_project(&shapes);
+        let fixture = fixture_artifact();
+        let counts = "mapping.PathPoints.paths[0].RingArray.ring_lamp_counts";
+        let ctx = ParseCtx { shapes: &shapes };
+
+        let result = registry
+            .mutate(
+                &fs,
+                MutationOp::MoveSlotEntry {
+                    artifact: fixture.clone(),
+                    from: SlotPath::parse(&format!("{counts}[1]")).unwrap(),
+                    to: SlotPath::parse(&format!("{counts}[2]")).unwrap(),
+                },
+                Revision::new(10),
+                &ctx,
+            )
+            .unwrap();
+        assert!(result.overlay_changed);
+        assert!(!registry.overlay().get().is_empty());
+
+        let error = registry
+            .mutate(
+                &fs,
+                MutationOp::MoveSlotEntry {
+                    artifact: fixture,
+                    from: SlotPath::parse(&format!("{counts}[9]")).unwrap(),
+                    to: SlotPath::parse(&format!("{counts}[5]")).unwrap(),
+                },
+                Revision::new(12),
+                &ctx,
+            )
+            .unwrap_err();
+        assert!(matches!(error, EditApplyError::InvalidPath { .. }));
+    }
+
     fn clock_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
         let mut fs = LpFsMemory::new();
         crate::test::fixtures::write_file(
@@ -1810,6 +2380,59 @@ mod tests {
         ArtifactLocation::file("/fixture.json")
     }
 
+    /// Fixture project whose `mapping` authors a `PathPoints` variant with a
+    /// leaf-valued nested map (`paths[0].RingArray.ring_lamp_counts`) and a
+    /// composite non-default-variant entry (`paths[3]`: `PointList` with a
+    /// diverged leaf and a nested map entry) — the move-op fixtures.
+    fn path_points_fixture_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
+        let mut fs = LpFsMemory::new();
+        crate::test::fixtures::write_file(
+            &mut fs,
+            "/project.json",
+            r#"{
+  "kind": "Project",
+  "format": 1,
+  "nodes": {
+    "pixels": { "ref": "./fixture.json" }
+  }
+}"#,
+        );
+        crate::test::fixtures::write_file(
+            &mut fs,
+            "/fixture.json",
+            r#"{
+  "kind": "Fixture",
+  "color_order": "rgb",
+  "mapping": {
+    "kind": "PathPoints",
+    "sample_diameter": 1.5,
+    "paths": {
+      "0": {
+        "kind": "RingArray",
+        "ring_lamp_counts": { "0": 8, "1": 12 }
+      },
+      "3": {
+        "kind": "PointList",
+        "first_channel": 5,
+        "points": { "0": [0.25, 0.75] }
+      }
+    }
+  }
+}"#,
+        );
+
+        let mut registry = ProjectRegistry::new();
+        registry
+            .load_root(
+                &fs,
+                lpfs::LpPath::new("/project.json"),
+                Revision::new(1),
+                &ParseCtx { shapes },
+            )
+            .unwrap();
+        (fs, registry)
+    }
+
     /// Shape registry where `controls.rate` on the clock definition is
     /// read-only. No authored definition declares a non-writable field today,
     /// so the fixture flips one policy in the real clock shape.
@@ -1897,6 +2520,21 @@ mod tests {
                 effect: MutationEffect::OverlayChanged { changed },
             } => assert_eq!(*changed, expected_changed),
             status => panic!("expected accepted command, got {status:?}"),
+        }
+    }
+
+    fn assert_materialized(
+        result: &MutationCmdResult,
+        expected_changed: bool,
+    ) -> &[StoredSlotEdit] {
+        match &result.status {
+            MutationCmdStatus::Accepted {
+                effect: MutationEffect::Materialized { edits, changed },
+            } => {
+                assert_eq!(*changed, expected_changed);
+                edits
+            }
+            status => panic!("expected materialized command, got {status:?}"),
         }
     }
 

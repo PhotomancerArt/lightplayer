@@ -232,6 +232,13 @@ fn set_back_to_base_normalizes_to_clean_without_overlay_fetch() {
     // assignment (NormalizedToRemoval) and the mirror must learn that from
     // the ack alone: the overlay revision may not advance, so a corrective
     // ReadOverlay would never fire.
+    //
+    // The refresh between the two edits is load-bearing: it syncs the edited
+    // value into the project view, so the set-back ack opens the stale-view
+    // window (the view still holds the old effective value until the next
+    // gated read). The DTO must keep showing the value the user typed through
+    // that window — the buffer entry parks as `AwaitingRefresh` instead of
+    // releasing — not jitter back to the superseded value.
     let server = Rc::new(RefCell::new(edit_e2e_server()));
     let sent = Rc::new(RefCell::new(Vec::new()));
     let io = InProcessServerIo {
@@ -257,19 +264,28 @@ fn set_back_to_base_normalizes_to_clean_without_overlay_fetch() {
         .clone()
         .expect("color order slot carries an address");
 
-    // Change the choice: dirty, counted.
+    // Change the choice: dirty, counted; the refresh syncs the edited value
+    // into the project view (the stale-window precondition).
     handle.tx.send(set_value_action(
         address.clone(),
         LpValue::String("rgb".to_string()),
     ));
     drive(actor.run_one_batch_for_test());
-    let snapshot = view.try_recv().expect("edit emits a snapshot");
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("edit + refresh emit a snapshot");
     let color_order = find_slot(&snapshot, "color_order");
     assert_eq!(color_order.state.dirty, UiNodeDirtyState::Dirty);
+    assert_eq!(
+        slot_value_display(color_order),
+        "rgb",
+        "the synced view holds the edited effective value"
+    );
     assert_eq!(editor_dirty(&snapshot), (1, 0));
 
-    // Set it back to the authored value: the highlight clears, no overlay
-    // fetch corrects the mirror — the ack effect alone must do it.
+    // Set it back to the authored value. The ack normalizes the edit away,
+    // but the synced view still holds "rgb" until the next gated read: the
+    // DTO must keep showing the typed value ("grb"), not jitter back.
     let overlay_reads_before = count_overlay_reads(&sent);
     handle.tx.send(set_value_action(
         address,
@@ -279,11 +295,33 @@ fn set_back_to_base_normalizes_to_clean_without_overlay_fetch() {
     let snapshot = view.try_recv().expect("set-back emits a snapshot");
     let color_order = find_slot(&snapshot, "color_order");
     assert_eq!(
+        slot_value_display(color_order),
+        "grb",
+        "the typed base value stays visible through the stale-view window"
+    );
+    assert_eq!(
+        color_order.state.dirty,
+        UiNodeDirtyState::Saving,
+        "the normalized edit keeps the Saving treatment until the view catches up"
+    );
+
+    // The next refresh delivers the reverted def: highlight cleared, value
+    // stable, and no overlay fetch corrected the mirror — the ack effect
+    // alone did it.
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("refresh emits a snapshot");
+    let color_order = find_slot(&snapshot, "color_order");
+    assert_eq!(
         color_order.state.dirty,
         UiNodeDirtyState::Clean,
         "setting a slot back to its base value clears the edited state"
     );
-    assert_eq!(slot_value_display(color_order), "grb");
+    assert_eq!(
+        slot_value_display(color_order),
+        "grb",
+        "the value never rubber-bands through the whole set-back"
+    );
     assert_eq!(editor_dirty(&snapshot), (0, 0));
     assert_eq!(
         count_overlay_reads(&sent) - overlay_reads_before,
@@ -341,6 +379,12 @@ fn composite_gesture_cycle_ends_clean_end_to_end() {
         "the acked variant switch surfaces on the enum row before any refresh"
     );
     assert_eq!(mapping.detail.as_deref(), Some("variant Unset"));
+    assert_eq!(
+        mapping.edit_entry_address,
+        Some(variant_address.clone()),
+        "the enum row offers the variant-switch entry as its revert target \
+         even before the view's active variant catches up"
+    );
     assert_eq!(editor_dirty(&snapshot), (1, 0));
 
     handle.tx.send(project_action(ProjectOp::RefreshProject));
@@ -349,6 +393,12 @@ fn composite_gesture_cycle_ends_clean_end_to_end() {
     let mapping = find_slot(&snapshot, "mapping");
     assert_eq!(mapping.detail.as_deref(), Some("variant PathPoints"));
     assert_eq!(mapping.state.dirty, UiNodeDirtyState::Dirty);
+    assert_eq!(
+        mapping.edit_entry_address,
+        Some(variant_address.clone()),
+        "after the switch round-trips, the enum row still offers a working \
+         Revert (the entry lives at the variant child path, not the row's own)"
+    );
 
     // Add a path entry with server-built defaults, then pull the new row.
     let entry_address = child_address(&mapping_address, "mapping.PathPoints.paths[0]");
@@ -367,10 +417,20 @@ fn composite_gesture_cycle_ends_clean_end_to_end() {
     );
     assert_eq!(editor_dirty(&snapshot), (2, 0));
 
-    // Remove it again: add-then-remove cancels on the server (D2), so the
-    // entry edit vanishes rather than lingering as a phantom removal.
+    // Remove it again: add-then-remove cancels on the server (D2). Between
+    // the normalized ack and the refresh, the stale view still shows the
+    // row — it must read Saving (the AwaitingRefresh bridge), not flash a
+    // clean row that then vanishes.
     handle.tx.send(remove_value_action(entry_address));
     drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("entry remove emits a snapshot");
+    let entry = find_slot(&snapshot, "mapping.PathPoints.paths[0]");
+    assert_eq!(
+        entry.state.dirty,
+        UiNodeDirtyState::Saving,
+        "the normalized removal keeps the Saving treatment until the view catches up"
+    );
+
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());
     let snapshot = view
@@ -386,9 +446,17 @@ fn composite_gesture_cycle_ends_clean_end_to_end() {
         "only the variant switch remains"
     );
 
-    // Revert the variant switch: the overlay empties and the project is
-    // clean again, back on the authored Unset variant.
-    handle.tx.send(revert_action(variant_address));
+    // Revert the variant switch from the enum row itself, exactly as the UI
+    // would: dispatch Revert at the row's projected `edit_entry_address`.
+    // The overlay empties and the project is clean again, back on the
+    // authored Unset variant.
+    let mapping = find_slot(&snapshot, "mapping");
+    let row_revert_target = mapping
+        .edit_entry_address
+        .clone()
+        .expect("the enum row offers a revert target for the pending switch");
+    assert_eq!(row_revert_target, variant_address);
+    handle.tx.send(revert_action(row_revert_target));
     drive(actor.run_one_batch_for_test());
     handle.tx.send(project_action(ProjectOp::RefreshProject));
     drive(actor.run_one_batch_for_test());

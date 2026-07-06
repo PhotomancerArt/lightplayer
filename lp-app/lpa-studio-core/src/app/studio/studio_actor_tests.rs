@@ -577,6 +577,9 @@ fn planned_slot_ops(plan: &CommandPlan) -> Vec<(String, Option<f32>)> {
             Some(crate::SlotEditOp::RemoveValue { address }) => {
                 (format!("remove:{}", address.path), None)
             }
+            Some(crate::SlotEditOp::MoveEntry { address, .. }) => {
+                (format!("move:{}", address.path), None)
+            }
             Some(crate::SlotEditOp::Revert { address }) => {
                 (format!("revert:{}", address.path), None)
             }

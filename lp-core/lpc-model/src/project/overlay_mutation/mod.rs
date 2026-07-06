@@ -21,6 +21,6 @@ pub mod project_change_summary;
 
 pub use mutation_cmd::{
     MutationCmd, MutationCmdBatch, MutationCmdBatchResult, MutationCmdId, MutationCmdResult,
-    MutationCmdStatus, MutationEffect, MutationRejection, MutationRejectionReason,
+    MutationCmdStatus, MutationEffect, MutationRejection, MutationRejectionReason, StoredSlotEdit,
 };
 pub use mutation_op::MutationOp;

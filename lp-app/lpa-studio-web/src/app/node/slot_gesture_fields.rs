@@ -64,10 +64,14 @@ pub fn EnumVariantField(
     }
 }
 
-/// Add-entry affordance for a map composite row: a compact "+" button that
-/// opens an inline key input typed by the map's key domain (numeric maps
-/// prefill the next free index). Confirming dispatches
-/// `EnsurePresent map_path[key]`; the server constructs the entry default.
+/// Add-entry affordance for a map composite row (M3 UX gate rework).
+///
+/// Numeric-keyed maps add **immediately**: "+" dispatches
+/// `EnsurePresent map_path[first free index]` (the gap-filling suggested key
+/// from the DTO — the server constructs the entry default; no inline value
+/// entry), and a compact secondary "#" affordance opens the key input as an
+/// optional override. String-keyed maps keep the key input as the primary
+/// flow ("+" opens it) — string keys cannot be guessed.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn MapAddEntry(
@@ -86,6 +90,38 @@ pub fn MapAddEntry(
 
     if !open() {
         let suggested = composite.suggested_key.clone();
+        if key_kind.is_numeric() {
+            let add_key = suggested.clone();
+            let add_address = address.clone();
+            let add_title = format!("Add entry at key {suggested}");
+            return rsx! {
+                span { class: "tw:inline-flex tw:flex-none tw:items-center tw:gap-1",
+                    button {
+                        class: gesture_button_class(),
+                        r#type: "button",
+                        title: "{add_title}",
+                        aria_label: "{add_title}",
+                        onclick: move |event| {
+                            event.stop_propagation();
+                            dispatch_map_add(key_kind, &add_key, &add_address, &handler);
+                        },
+                        "+"
+                    }
+                    button {
+                        class: gesture_button_class(),
+                        r#type: "button",
+                        title: "Add entry at a chosen key",
+                        aria_label: "Add entry at a chosen key",
+                        onclick: move |event| {
+                            event.stop_propagation();
+                            draft.set(suggested.clone());
+                            open.set(true);
+                        },
+                        "#"
+                    }
+                }
+            };
+        }
         return rsx! {
             button {
                 class: gesture_button_class(),

@@ -117,9 +117,16 @@ buffer in `ProjectController`, keyed by `ProjectSlotAddress`
 ```text
 (field input) ──► Pending { value }            # op queued/coalescing
 op sends       ──► InFlight { value, cmd_id }
-ack accepted   ──► (entry removed; mirror updated via
+ack accepted,
+  overlay stored ─► (entry removed; mirror updated via
                     ProjectSync::apply_acked_edits — the slot now reads
                     dirty from the overlay mirror)
+ack accepted,
+  normalized to a removal that changed the overlay
+               ──► AwaitingRefresh             # the mirror holds nothing at
+                                               # the path; the entry keeps
+                                               # its shadow until the next
+                                               # project read is applied
 ack rejected   ──► Failed { value, reason }    # feeds UiSlotFieldState
                                                # `invalid`; cleared on the
                                                # next edit or an explicit
@@ -129,11 +136,26 @@ op error/timeout ─► Failed { value, transport reason }
 
 While an entry exists, the DTO shows the buffered value (shadowing the
 synced value) and the phase maps to the dirty affordance:
-`Pending`/`InFlight` → `Saving`, `Failed` → `Error` + `invalid` reason. On
-accept the shadow hands off to the overlay mirror, which keeps supplying the
-assigned value until the next project read catches up — so there is no
-rubber-band window either before the ack or between the ack and the next
-pull.
+`Pending`/`InFlight`/`AwaitingRefresh` → `Saving`, `Failed` → `Error` +
+`invalid` reason. On accept the shadow hands off to the overlay mirror,
+which keeps supplying the assigned value until the next project read catches
+up — so there is no rubber-band window either before the ack or between the
+ack and the next pull.
+
+The `AwaitingRefresh` phase (added 2026-07-06) closes the one gap in that
+hand-off: an accepted ack whose effect is `NormalizedToRemoval { changed:
+true }` (D6/D7 — a value set back to its base, an add-then-remove gesture
+cancelling) leaves the mirror with **no** entry to hand off to, while the
+synced view still holds the superseded effective value until the next gated
+read delivers the reverted def. Releasing the entry at the ack would fall
+back to that stale value for one pull cycle — visible jitter on exactly the
+"changed it back" gesture D6 exists for. Instead the entry parks as
+`AwaitingRefresh` (keeping its shadow and the `Saving` affordance, counted
+like an in-flight edit) and `ProjectController::apply_project_view` releases
+it when the next project read is applied; ops and sync runs are serialized
+on the actor and revision stamps are monotonic, so the first read applied
+after the ack already carries the post-normalization values. A `changed:
+false` normalization altered nothing and releases immediately.
 
 Input floods are absorbed in the actor: consecutive queued
 `SlotEditOp::SetValue`s for the same address collapse latest-wins in the
@@ -203,11 +225,17 @@ M3 (generic editors) resolves follow-up (c). Four coupled decisions:
   per **edit entry**, never per row (`SlotEditJoin::entries` is the single
   enumeration feeding `DirtySummary` and the save panel's `UiPendingEdit`
   list, so counts and list agree by construction); prefix-dirty ancestors
-  are display state, never additional counts. Only rows with an edit entry
-  at their **own** path (`UiConfigSlot.edit_entry_address`) offer a
-  row-level Revert — a prefix-only-dirty composite does not, since a revert
-  at its own path would remove nothing; its entries revert individually
-  from the save panel.
+  are display state, never additional counts. Only rows with an **own**
+  edit entry (`UiConfigSlot.edit_entry_address`) offer a row-level Revert:
+  the row's own path, plus two ownership extensions for entries that are
+  semantically the row's own gesture but live one segment deeper — a
+  present option row owns an entry at its interior `.some` address (its
+  value renders inline on the row), and an enum row owns an entry at a
+  declared variant child path (`enum.Variant` — where the variant-switch
+  gesture stores; the active variant is checked first, the other declared
+  variants cover the ack-to-refresh window). A prefix-only-dirty composite
+  offers no row revert, since a revert at its own path would remove
+  nothing; its entries revert individually from the save panel.
 - **One address per value leaf.** Vector/matrix component inputs
   read-modify-write the whole `LpValue` at the leaf's single address;
   per-address latest-wins coalescing absorbs rapid multi-component edits.
@@ -218,6 +246,33 @@ M3 (generic editors) resolves follow-up (c). Four coupled decisions:
   of the model; gestures compose from `EnsurePresent`/`Remove` plus leaf
   assigns.
 
+**Map key moves (added 2026-07-06, M3 gate feedback).** Keys are path
+segments, so re-keying a map entry is its own mutation, not a value edit:
+`MutationOp::MoveSlotEntry { artifact, from, to }` (sibling entry paths,
+canonical path-string encoding — no new key wire type). The server
+**materializes** the move into the existing edit vocabulary
+(`lpc-registry/src/overlay/move_slot_entry.rs`): `EnsurePresent to`, then
+edits wherever the moved **effective** value diverges from a *simulated
+future target entry* (base + current overlay + the stored form of the
+leading ensure — so a base-absent key diffs against factory defaults and a
+base-present key with a pending remove diffs against the base entry), then
+`Remove from`. Composite values survive: a non-default variant re-emits its
+`EnsurePresent to.Variant` selection, nested map entries re-add, diverged
+leaves re-assign. Every synthesized edit passes through the same
+base-relative normalization (D6/D7), so a move that reconstructs base state
+at `to` ends with a minimal (possibly empty) overlay; when the trailing
+`Remove from` normalizes away, edits stranded strictly under `from` are
+removed explicitly. Ack fidelity extends the effect vocabulary:
+`MutationEffect::Materialized { edits: Vec<StoredSlotEdit>, changed }`
+lists the stored per-path edits (`Put { edit }` / `Removed { path }`) in
+application order, and the mirror replays them verbatim
+(`ProjectSync::apply_acked_edits` → `effective_mutations`). Rejections:
+absent source / non-map paths → `unknown_slot_path`; occupied target →
+the dedicated `target_occupied`, so the key editor can surface "key already
+in use" on the row. Client op: `SlotEditOp::MoveEntry { address(map),
+from_key, to_key }` — structural (never coalesces, coalescing barrier),
+staged at the map's own address, released by the ack like any gesture.
+
 **Known base-relative edge (accepted).** Normalization compares against
 base, not against the effective def, and the overlay stores one op per
 path. Toggling a base-present option **off** stores `Remove opt` (a real
@@ -226,9 +281,13 @@ normalizes away against the base (`.some` is base-present) *at a different
 path* — the stored `Remove opt` survives, so off-then-on does **not**
 restore the value or any prior interior edits. The same shape applies to
 switching an enum back to its base variant while a variant switch is
-pending. Recovery is explicit and always available: **Revert** on the row
-(the stored entry is at the row's own path, so the row-level revert is
-offered) or the save panel's per-entry revert. This is the deliberate
+pending: the `EnsurePresent enum.BaseVariant` normalizes away and the
+stored entry at the *other* variant's path survives, so re-selecting the
+original variant is not an undo. Recovery is explicit and always available:
+**Revert** on the row — the stored entry is at the option row's own path,
+and for the enum case the row-revert ownership rule above matches the
+surviving variant-path entry to the enum row — or the save panel's
+per-entry revert. This is the deliberate
 consequence of "the overlay is a minimal diff against saved state" — the
 gesture pair is not an undo stack. The UI keeps honest through it: the
 option toggle is a controlled control whose visual state only follows the

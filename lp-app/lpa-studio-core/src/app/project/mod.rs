@@ -49,7 +49,7 @@ pub mod ui_pending_edit;
 pub use dirty_summary::DirtySummary;
 pub use loaded_project_choice::LoadedProjectChoice;
 pub use node::{
-    NodeController, NodeControllerState, ProjectNodeAddress, ProjectNodeTarget,
+    NodeController, NodeControllerState, NodeRevertOp, ProjectNodeAddress, ProjectNodeTarget,
     ProjectProductSubscriptionIntent,
 };
 pub use project_connect_result::ProjectConnectResult;

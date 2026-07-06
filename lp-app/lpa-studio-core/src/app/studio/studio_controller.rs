@@ -14,10 +14,10 @@ use crate::core::log::LogRing;
 use crate::core::notice::UiNotices;
 use crate::{
     ConnectedLink, Controller, ControllerContext, DeviceController, DeviceOp, LinkOpenOutcome,
-    ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp, ProjectRefreshOutcome,
-    ProjectState, ProjectSyncRun, SlotEditOp, StudioSnapshot, UiAction, UiActions, UiActivityView,
-    UiError, UiLogEntry, UiLogLevel, UiNotice, UiResult, UiStatus, UiStudioView, UiViewContent,
-    UxActivityTarget, UxUpdate, UxUpdateSink,
+    NodeRevertOp, ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp,
+    ProjectRefreshOutcome, ProjectState, ProjectSyncRun, SlotEditOp, StudioSnapshot, UiAction,
+    UiActions, UiActivityView, UiError, UiLogEntry, UiLogLevel, UiNotice, UiResult, UiStatus,
+    UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 pub struct StudioController {
@@ -198,11 +198,16 @@ impl StudioController {
             return self.execute_device_op(op, updates).await;
         }
         if node_id == project_node_id {
-            // Slot edits target the project node too (the op carries the full
-            // slot address), so route by op type before the ProjectOp downcast.
+            // Slot edits and node-level reverts target the project node too
+            // (the op carries the full slot/node address), so route by op
+            // type before the ProjectOp downcast.
             if action.op_as::<SlotEditOp>().is_some() {
                 let op = action.into_op::<SlotEditOp>()?;
                 return self.execute_slot_edit_op(op).await;
+            }
+            if action.op_as::<NodeRevertOp>().is_some() {
+                let op = action.into_op::<NodeRevertOp>()?;
+                return self.execute_node_revert_op(op).await;
             }
             let op = action.into_op::<ProjectOp>()?;
             return self.execute_project_op(op, updates).await;
@@ -314,6 +319,14 @@ impl StudioController {
         let run = {
             let server = self.device.server.client_mut()?;
             self.project.apply_slot_edit(server, op).await
+        };
+        self.record_project_edit_run(run)
+    }
+
+    async fn execute_node_revert_op(&mut self, op: NodeRevertOp) -> UiResult {
+        let run = {
+            let server = self.device.server.client_mut()?;
+            self.project.revert_node_edits(server, &op.node).await
         };
         self.record_project_edit_run(run)
     }

@@ -6,9 +6,10 @@ use lpc_wire::{NodeRuntimeStatus, WireEntryState};
 
 use crate::app::project::slot::SlotEditJoin;
 use crate::{
-    DirtySummary, ProjectEditorOp, ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone,
-    ProjectNodeStatusView, ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController,
-    UiAction, UiNodeChild, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiProductPreview,
+    ControllerId, DirtySummary, NodeRevertOp, ProjectController, ProjectEditorOp,
+    ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
+    ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController, UiAction, UiNodeChild,
+    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiPaneAction, UiProductPreview,
     UiProductRef, UiProductTrackingState, UiStatus,
 };
 
@@ -193,6 +194,7 @@ impl NodeController {
             )],
         )
         .with_node_id(self.address.to_string())
+        .with_header_actions(node_header_actions(&self.address, &dirty))
         .with_children(children);
         view.focused = self.state.focused;
         view.action = Some(node_focus_action(self));
@@ -387,6 +389,7 @@ impl NodeController {
                         .iter()
                         .map(|nested| nested.dirty)
                         .sum::<DirtySummary>();
+                view.header_actions = node_header_actions(&child.address, &view.dirty);
                 view
             })
             .collect()
@@ -430,6 +433,23 @@ impl NodeController {
             ProjectProductSubscriptionIntent::Unsubscribed => UiProductTrackingState::Paused,
         }
     }
+}
+
+/// Contextual node-header actions (pane grammar actions slot, M3 UX gate
+/// feedback): the subtree batch revert ([`NodeRevertOp`]) with the same
+/// "revert" icon token as the project header's Revert-to-saved, present only
+/// while the header's subtree [`DirtySummary`] announces pending edits.
+fn node_header_actions(node: &ProjectNodeAddress, dirty: &DirtySummary) -> Vec<UiPaneAction> {
+    if dirty.is_clean() {
+        return Vec::new();
+    }
+    vec![UiPaneAction::new(
+        "revert",
+        UiAction::from_op(
+            ControllerId::new(ProjectController::NODE_ID),
+            NodeRevertOp { node: node.clone() },
+        ),
+    )]
 }
 
 fn node_focus_action(node: &NodeController) -> UiAction {

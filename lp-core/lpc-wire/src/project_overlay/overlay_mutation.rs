@@ -36,8 +36,9 @@ mod tests {
     use super::*;
     use alloc::vec;
     use lpc_model::{
-        ArtifactLocation, AssetBodyOverlay, MutationCmd, MutationCmdId, MutationCmdResult,
+        ArtifactLocation, AssetBodyOverlay, LpValue, MutationCmd, MutationCmdId, MutationCmdResult,
         MutationEffect, MutationOp, MutationRejection, MutationRejectionReason, SlotEdit, SlotPath,
+        StoredSlotEdit,
     };
 
     #[test]
@@ -110,6 +111,87 @@ mod tests {
 
         assert_eq!(decoded, response);
         assert!(json.contains("normalized_to_removal"));
+    }
+
+    #[test]
+    fn move_slot_entry_request_round_trips() {
+        // Map keys are path segments, so the move endpoints ride the wire as
+        // canonical slot-path strings like every other edit path.
+        let request = WireOverlayMutationRequest::new(MutationCmdBatch::new(vec![MutationCmd {
+            id: MutationCmdId::new(1),
+            mutation: MutationOp::MoveSlotEntry {
+                artifact: ArtifactLocation::file("/fixture.json"),
+                from: SlotPath::parse("mapping.PathPoints.paths[0]").unwrap(),
+                to: SlotPath::parse("mapping.PathPoints.paths[1]").unwrap(),
+            },
+        }]));
+
+        let json = serde_json::to_string(&request).unwrap();
+        let decoded: WireOverlayMutationRequest = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded, request);
+        assert!(json.contains("move_slot_entry"));
+        assert!(json.contains("mapping.PathPoints.paths[0]"));
+    }
+
+    #[test]
+    fn materialized_effect_round_trips() {
+        // A move's ack lists the stored per-path edits so ack-mirroring
+        // clients can replay them without a follow-up fetch; both stored and
+        // removed forms must survive the wire distinctly.
+        let response = WireOverlayMutationResponse::new(
+            MutationCmdBatchResult::new(vec![MutationCmdResult::accepted(
+                MutationCmdId::new(1),
+                MutationEffect::Materialized {
+                    edits: vec![
+                        StoredSlotEdit::Put {
+                            edit: SlotEdit::ensure_present(SlotPath::parse("paths[1]").unwrap()),
+                        },
+                        StoredSlotEdit::Put {
+                            edit: SlotEdit::assign_value(
+                                SlotPath::parse("paths[1].PointList.first_channel").unwrap(),
+                                LpValue::U32(5),
+                            ),
+                        },
+                        StoredSlotEdit::Removed {
+                            path: SlotPath::parse("paths[0]").unwrap(),
+                        },
+                    ],
+                    changed: true,
+                },
+            )]),
+            Revision::new(14),
+        );
+
+        let json = serde_json::to_string(&response).unwrap();
+        let decoded: WireOverlayMutationResponse = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded, response);
+        assert!(json.contains("materialized"));
+        assert!(json.contains("put"));
+        assert!(json.contains("removed"));
+    }
+
+    #[test]
+    fn target_occupied_rejection_round_trips() {
+        // Occupied-target moves reject with a dedicated reason so the key
+        // editor can surface "key already in use" on the row.
+        let response = WireOverlayMutationResponse::new(
+            MutationCmdBatchResult::new(vec![MutationCmdResult::rejected(
+                MutationCmdId::new(1),
+                MutationRejection::new(
+                    MutationRejectionReason::TargetOccupied,
+                    "map entry paths[1] already exists in the effective definition".into(),
+                ),
+            )]),
+            Revision::new(15),
+        );
+
+        let json = serde_json::to_string(&response).unwrap();
+        let decoded: WireOverlayMutationResponse = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded, response);
+        assert!(json.contains("target_occupied"));
     }
 
     #[test]

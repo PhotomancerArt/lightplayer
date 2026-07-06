@@ -29,15 +29,15 @@ pub use app::node::{
     UiSlotShape, UiSlotShapeField, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiSlotValueKind,
 };
 pub use app::project::{
-    DirtySummary, LoadedProjectChoice, NodeController, NodeControllerState, PendingEdit,
-    PendingEditOp, PendingEditPhase, ProjectConnectResult, ProjectController, ProjectEditRun,
-    ProjectEditorOp, ProjectEditorTarget, ProjectEditorView, ProjectInventorySummary,
-    ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTarget,
-    ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp, ProjectProductSubscriptionIntent,
-    ProjectRefreshOutcome, ProjectRuntimeSummary, ProjectSlotAddress, ProjectSlotRoot,
-    ProjectSnapshot, ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun,
-    ProjectSyncSummary, SlotController, SlotControllerState, SlotEditOp, SlotKind, UiAffordance,
-    UiPendingEdit, UiPendingEditKind, UiPendingEditPhase,
+    DirtySummary, LoadedProjectChoice, NodeController, NodeControllerState, NodeRevertOp,
+    PendingEdit, PendingEditOp, PendingEditPhase, ProjectConnectResult, ProjectController,
+    ProjectEditRun, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
+    ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
+    ProjectNodeTarget, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
+    ProjectProductSubscriptionIntent, ProjectRefreshOutcome, ProjectRuntimeSummary,
+    ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState, ProjectSync,
+    ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotController, SlotControllerState,
+    SlotEditOp, SlotKind, UiAffordance, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerController, ServerFailureKind, ServerOp,

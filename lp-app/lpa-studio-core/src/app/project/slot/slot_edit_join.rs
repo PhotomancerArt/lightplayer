@@ -155,7 +155,12 @@ impl<'a> SlotEditJoin<'a> {
                             reason: reason.clone(),
                         });
                     }
-                    PendingEditPhase::Pending | PendingEditPhase::InFlight { .. } => saving = true,
+                    // `AwaitingRefresh` counts as saving: the normalized
+                    // gesture is acked but the synced view (and thus any
+                    // surviving row) lags until the next applied read.
+                    PendingEditPhase::Pending
+                    | PendingEditPhase::InFlight { .. }
+                    | PendingEditPhase::AwaitingRefresh => saving = true,
                 }
             }
         }

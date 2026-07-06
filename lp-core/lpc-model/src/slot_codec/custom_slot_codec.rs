@@ -61,7 +61,11 @@ where
     )))
 }
 
-pub(crate) fn snapshot_custom_slot_data<'a>(
+/// Project a custom slot's data onto the plain slot-data vocabulary its
+/// shape declares (e.g. an `AssetSlot` reads as a value leaf). Registry-side
+/// consumers (overlay materialization, snapshot sync) use this to walk
+/// custom slots generically.
+pub fn snapshot_custom_slot_data<'a>(
     codec: SlotShapeId,
     data: &'a dyn SlotCustomAccess,
 ) -> Result<SlotDataAccess<'a>, String> {
