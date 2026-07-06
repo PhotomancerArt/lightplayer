@@ -163,9 +163,39 @@ pub fn allocate_from_tree(
         trace: trace_sink_new(),
         loop_carried: RegSet::new(),
         passthrough,
+        call_scratch: CallScratch::default(),
     };
     state.walk_region(root)?;
     state.finish()
+}
+
+/// Reusable scratch buffers for [`process_call`], owned by [`WalkState`] and
+/// cleared per call. In Q32 saturating mode nearly every float op lowers to a
+/// call, so fresh per-call `Vec`s were a measurable allocator-churn source;
+/// with reuse the steady state allocates nothing.
+#[derive(Default)]
+struct CallScratch {
+    before_arg_moves: Vec<(EditPoint, Edit)>,
+    after_ret_moves: Vec<(EditPoint, Edit)>,
+    after_restores: Vec<(EditPoint, Edit)>,
+    ret_value_pool_regs: Vec<u8>,
+    clobbered: Vec<(u8, VReg)>,
+    clobbered_pregs: Vec<u8>,
+    reg_pass_args: Vec<(VReg, u8)>,
+    stack_pass_args: Vec<(usize, VReg)>,
+}
+
+impl CallScratch {
+    fn clear(&mut self) {
+        self.before_arg_moves.clear();
+        self.after_ret_moves.clear();
+        self.after_restores.clear();
+        self.ret_value_pool_regs.clear();
+        self.clobbered.clear();
+        self.clobbered_pregs.clear();
+        self.reg_pass_args.clear();
+        self.stack_pass_args.clear();
+    }
 }
 
 struct WalkState<'a> {
@@ -185,6 +215,8 @@ struct WalkState<'a> {
     /// Entry-parameter vregs that stay in their ABI register (never enter pool).
     /// Indexed by vreg index; `Some(hw)` = passthrough to that ABI register.
     passthrough: Vec<Option<u8>>,
+    /// Reused by [`process_call`]; see [`CallScratch`].
+    call_scratch: CallScratch,
 }
 
 impl<'a> WalkState<'a> {
@@ -199,10 +231,12 @@ impl<'a> WalkState<'a> {
                 child_count,
             } => {
                 let s = *children_start as usize;
-                let e = s + *child_count as usize;
-                let children: Vec<RegionId> = self.tree.seq_children[s..e].to_vec();
-                for idx in (0..children.len()).rev() {
-                    let child = children[idx];
+                let count = *child_count as usize;
+                // Copy one child id per iteration instead of collecting the
+                // range into a Vec (self.tree is borrowed shared, so indexing
+                // per-iteration is fine and allocation-free).
+                for idx in (0..count).rev() {
+                    let child = self.tree.seq_children[s + idx];
                     self.walk_region(child)?;
                     if idx > 0 {
                         if let Some(anchor) = region_first_vinst(self.tree, child) {
@@ -318,6 +352,7 @@ impl<'a> WalkState<'a> {
                     &mut self.edits,
                     &mut self.trace,
                     &self.passthrough,
+                    &mut self.call_scratch,
                 );
             } else {
                 process_generic(
@@ -369,8 +404,16 @@ impl<'a> WalkState<'a> {
     /// region's backward walk will see the spill slot and direct its def there;
     /// the reload fills the register expected by the following region.
     fn boundary_reload_before(&mut self, anchor: u16) {
-        let occupied: Vec<(u8, VReg)> = self.pool.iter_occupied().collect();
-        for (preg, vreg) in occupied {
+        // Snapshot into a fixed buffer (pool holds at most 32 hardware regs)
+        // so the loop can mutate pool/spill/edits without a heap allocation
+        // per region boundary.
+        let mut occupied = [(0u8, VReg(0)); 32];
+        let mut n = 0;
+        for entry in self.pool.iter_occupied() {
+            occupied[n] = entry;
+            n += 1;
+        }
+        for &(preg, vreg) in &occupied[..n] {
             let slot = self.spill.get_or_assign(vreg);
             self.edits.push((
                 EditPoint::Before(anchor),
@@ -813,6 +856,7 @@ fn process_call(
     edits: &mut Vec<(EditPoint, Edit)>,
     trace: &mut TraceSink,
     passthrough: &[Option<u8>],
+    scratch: &mut CallScratch,
 ) {
     let isa = func_abi.isa();
     let (args_slice, rets_slice, callee_uses_sret, caller_passes_sret_ptr, caller_sret_vm_abi_swap) =
@@ -838,19 +882,28 @@ fn process_call(
     let rets = rets_slice.vregs(vreg_pool);
 
     // Collect edits in forward order; we'll push in reverse for the backward walk.
-    // All edits go into local vectors — nothing is pushed to the global `edits`
+    // All edits go into scratch vectors — nothing is pushed to the global `edits`
     // until the end, so we have full control over forward-order sequencing.
-    let mut before_arg_moves: Vec<(EditPoint, Edit)> = Vec::new();
-    let mut after_ret_moves: Vec<(EditPoint, Edit)> = Vec::new();
-    let mut after_restores: Vec<(EditPoint, Edit)> = Vec::new();
-
-    // Track pool registers that receive call return values.  After(call)
-    // eviction restores must NOT target these, or they overwrite the return
-    // value (regalloc2 avoids this by removing clobbers from available_pregs
-    // before operand allocation; we filter at restore-emit time). Direct
-    // returns get explicit ret moves; sret returns are loaded by the emitter
-    // from the caller-side sret buffer into these same pool registers.
-    let mut ret_value_pool_regs: Vec<u8> = Vec::new();
+    // The buffers live in `WalkState::call_scratch` and are reused across
+    // calls (Q32 code is call-dense; per-call Vecs were measurable churn).
+    scratch.clear();
+    let CallScratch {
+        before_arg_moves,
+        after_ret_moves,
+        after_restores,
+        // Pool registers that receive call return values.  After(call)
+        // eviction restores must NOT target these, or they overwrite the
+        // return value (regalloc2 avoids this by removing clobbers from
+        // available_pregs before operand allocation; we filter at
+        // restore-emit time). Direct returns get explicit ret moves; sret
+        // returns are loaded by the emitter from the caller-side sret buffer
+        // into these same pool registers.
+        ret_value_pool_regs,
+        clobbered,
+        clobbered_pregs,
+        reg_pass_args,
+        stack_pass_args,
+    } = scratch;
 
     // ── Step 1: Defs (return values) ──
     let mut operand_idx: usize = 0;
@@ -927,17 +980,12 @@ fn process_call(
     // the registers from the LRU so they can't be reused during arg allocation
     // (matches regalloc2's remove_clobbers_from_available_pregs). Emit only
     // post-call reloads, no pre-call saves.
-    let clobbered: Vec<(u8, VReg)> = isa
-        .caller_saved_pool_hw()
-        .iter()
-        .filter_map(|&preg| {
-            pool.iter_occupied()
-                .find(|&(p, _)| p == preg)
-                .map(|(_, v)| (preg, v))
-        })
-        .collect();
-    let mut clobbered_pregs: Vec<u8> = Vec::new();
-    for (preg, vreg) in &clobbered {
+    clobbered.extend(isa.caller_saved_pool_hw().iter().filter_map(|&preg| {
+        pool.iter_occupied()
+            .find(|&(p, _)| p == preg)
+            .map(|(_, v)| (preg, v))
+    }));
+    for (preg, vreg) in clobbered.iter() {
         let slot = spill.get_or_assign(*vreg);
         pool.evict(*preg);
         clobbered_pregs.push(*preg);
@@ -970,13 +1018,13 @@ fn process_call(
     // vector) so they can be filtered against ret_move_pool_regs and
     // sequenced correctly relative to ret_moves.
 
-    // (vreg, target_arg_reg) for register-pass args — Before moves deferred.
-    let mut reg_pass_args: Vec<(VReg, u8)> = Vec::new();
-    // (operand_alloc_index, vreg) for stack-pass args. Stack-pass operands
-    // must be assigned after all argument allocation is done: duplicate args
-    // can be evicted while preparing later operands, and the emitter needs
-    // the final location when it stores to the outgoing stack area.
-    let mut stack_pass_args: Vec<(usize, VReg)> = Vec::new();
+    // `reg_pass_args`: (vreg, target_arg_reg) for register-pass args — Before
+    // moves deferred.
+    // `stack_pass_args`: (operand_alloc_index, vreg) for stack-pass args.
+    // Stack-pass operands must be assigned after all argument allocation is
+    // done: duplicate args can be evicted while preparing later operands, and
+    // the emitter needs the final location when it stores to the outgoing
+    // stack area.
 
     // ── Phase A: allocate every arg vreg into the pool ──
     for (i, &arg_vreg) in args.iter().enumerate() {
@@ -1092,7 +1140,7 @@ fn process_call(
     }
 
     // ── Phase B1: record final locations for stack-pass args ──
-    for &(alloc_idx, arg_vreg) in &stack_pass_args {
+    for &(alloc_idx, arg_vreg) in stack_pass_args.iter() {
         allocs[alloc_idx] = if let Some(pool_reg) = pool.home(arg_vreg) {
             Alloc::Reg(pool_reg)
         } else if let Some(slot) = spill.has_slot(arg_vreg) {
@@ -1104,7 +1152,7 @@ fn process_call(
 
     // ── Phase B: emit Before(call) moves for register-pass args ──
     // The pool now reflects the final allocation state after all evictions.
-    for &(arg_vreg, target) in &reg_pass_args {
+    for &(arg_vreg, target) in reg_pass_args.iter() {
         if let Some(pool_reg) = pool.home(arg_vreg) {
             if pool_reg != target {
                 before_arg_moves.push((
@@ -1139,7 +1187,7 @@ fn process_call(
     }
 
     // Restore clobbered registers to the LRU now that arg allocation is done.
-    pool.restore_evicted(&clobbered_pregs);
+    pool.restore_evicted(clobbered_pregs);
 
     // Push edits in reverse-forward order (global reverse will restore forward order).
     // Desired forward: Before(arg_moves), After(ret_moves), After(restores)
@@ -1149,13 +1197,13 @@ fn process_call(
     // lands in its pool register before any eviction restores run.  Eviction
     // restores that target a ret_move pool register are already filtered out
     // above, but sequencing ret_moves first is an extra safety net.
-    for e in after_restores.into_iter().rev() {
+    for &e in after_restores.iter().rev() {
         edits.push(e);
     }
-    for e in after_ret_moves.into_iter().rev() {
+    for &e in after_ret_moves.iter().rev() {
         edits.push(e);
     }
-    for e in before_arg_moves.into_iter().rev() {
+    for &e in before_arg_moves.iter().rev() {
         edits.push(e);
     }
 }

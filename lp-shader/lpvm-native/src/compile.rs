@@ -200,14 +200,16 @@ pub(crate) fn compile_function_debug_sections(
     ir: &LpirModule,
     session: &CompileSession,
 ) -> Result<(), NativeError> {
-    let Some(emitted) = state.emitted.as_ref() else {
+    // Take ownership: nothing reads `state.emitted` after this stage, so the
+    // machine code and relocs move into the CompiledFunction instead of being
+    // cloned (previously a transient 2x of every function's code).
+    let Some(emitted) = state.emitted.take() else {
         return Err(NativeError::Internal(format!(
             "debug stage missing emitted code for {}",
             state.name
         )));
     };
     let (debug_lines, debug_info) = if session.options.debug_info {
-        let func_opt = func;
         let Some(lowered) = state.lowered.as_ref() else {
             return Err(NativeError::Internal(format!(
                 "debug stage missing lowered function for {}",
@@ -215,7 +217,7 @@ pub(crate) fn compile_function_debug_sections(
             )));
         };
         let sections = crate::debug::sections::build_debug_sections(
-            func_opt,
+            func,
             ir,
             lowered,
             &emitted.code,
@@ -226,14 +228,14 @@ pub(crate) fn compile_function_debug_sections(
         let debug_info = FunctionDebugInfo::new(&state.name)
             .with_inst_count(emitted.code.len() / 4)
             .with_sections(sections);
-        (Some(emitted.debug_lines.clone()), Some(debug_info))
+        (Some(emitted.debug_lines), Some(debug_info))
     } else {
         (None, None)
     };
     state.compiled = Some(CompiledFunction {
         name: state.name.clone(),
-        code: emitted.code.clone(),
-        relocs: emitted.relocs.clone(),
+        code: emitted.code,
+        relocs: emitted.relocs,
         debug_lines,
         debug_info,
     });

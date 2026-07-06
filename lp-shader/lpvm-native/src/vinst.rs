@@ -52,9 +52,11 @@ pub struct ModuleSymbols {
 }
 
 impl ModuleSymbols {
-    pub fn intern(&mut self, name: impl Into<String>) -> SymbolId {
-        let name = name.into();
-        if let Some(i) = self.names.iter().position(|n| *n == name) {
+    /// Intern a symbol name. Takes `&str` so the common hit path (symbols
+    /// repeat heavily — every Q32 float op calls the same few builtins)
+    /// performs no allocation; only a first-time insert copies the name.
+    pub fn intern(&mut self, name: &str) -> SymbolId {
+        if let Some(i) = self.names.iter().position(|n| n == name) {
             return SymbolId(i as u16);
         }
         let id = self.names.len();
@@ -62,7 +64,7 @@ impl ModuleSymbols {
             id < usize::from(u16::MAX),
             "ModuleSymbols::intern: too many symbols"
         );
-        self.names.push(name);
+        self.names.push(String::from(name));
         SymbolId(id as u16)
     }
 
