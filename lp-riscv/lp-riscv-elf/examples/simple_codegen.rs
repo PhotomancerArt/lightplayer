@@ -16,6 +16,11 @@ fn main() {
     // Set up ISA for riscv32
     let mut flag_builder = settings::builder();
     flag_builder.set("opt_level", "none").unwrap();
+    // Fastalloc only: the ION allocator is compiled out of lp-cranelift
+    // unless the `regalloc2-ion` feature is enabled
+    flag_builder
+        .set("regalloc_algorithm", "single_pass")
+        .unwrap();
 
     let triple = "riscv32-unknown-none".parse().unwrap();
     let isa_builder = lookup(triple).unwrap();
