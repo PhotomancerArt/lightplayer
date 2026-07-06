@@ -139,13 +139,6 @@ pub fn ConfigSlotRow(
                     if let Some(revert) = row_revert {
                         SlotRowRevertButton { revert }
                     }
-                    if let Some(optionality) = slot.optionality {
-                        OptionToggleField {
-                            optionality,
-                            address: slot.address.clone(),
-                            on_action,
-                        }
-                    }
                     SlotBodyPreview {
                         body: slot.body.clone(),
                         state: slot.state.clone(),
@@ -154,6 +147,19 @@ pub fn ConfigSlotRow(
                         composite: slot.composite.clone(),
                         initially_adding,
                         on_action,
+                    }
+                    // The some/none toggle renders at the TRAILING edge of
+                    // the end-aligned value area (the SlotRowRevertButton
+                    // stability rule, mirrored): the toggle is right-anchored
+                    // and fixed-width, so the value body appearing or
+                    // disappearing on a toggle grows leftward and the toggle
+                    // itself never jumps.
+                    if let Some(optionality) = slot.optionality {
+                        OptionToggleField {
+                            optionality,
+                            address: slot.address.clone(),
+                            on_action,
+                        }
                     }
                     if let Some((address, handler)) = remove_entry {
                         MapEntryRemoveButton { address, on_action: handler }

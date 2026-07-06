@@ -553,6 +553,98 @@ fn variant_dropdown_switch_away_and_back_ends_clean_from_acks_alone() {
 }
 
 #[test]
+fn option_toggle_off_then_on_ends_clean_from_acks_alone() {
+    // The dead-click repro on the fixture `brightness` option (base-present:
+    // the shape default is Some(64)): toggle OFF (RemoveValue brightness —
+    // stores `Remove` at the option path), refresh, toggle back ON
+    // (EnsurePresent brightness.some — normalizes away against base at a
+    // DIFFERENT path). The counteracting-entry sweep clears the stored
+    // Remove and the Materialized ack is the mirror's only source — no
+    // ReadOverlay may fire. Without it, the stored Remove survives and the
+    // toggle-on click does nothing, forever.
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let sent = Rc::new(RefCell::new(Vec::new()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::clone(&sent),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let brightness = find_slot(&snapshot, "brightness");
+    assert_eq!(brightness.state.dirty, UiNodeDirtyState::Clean);
+    assert_eq!(
+        slot_value_display(brightness),
+        "64",
+        "base default is Some(64)"
+    );
+    let brightness_address = brightness
+        .address
+        .clone()
+        .expect("brightness slot carries an address");
+    assert_eq!(editor_dirty(&snapshot), (0, 0));
+    let overlay_reads_before = count_overlay_reads(&sent);
+
+    // Toggle off, then refresh so the user-visible row really shows the
+    // excluded state before toggling back on.
+    handle
+        .tx
+        .send(remove_value_action(brightness_address.clone()));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view
+        .try_recv()
+        .expect("toggle-off + refresh emit a snapshot");
+    let brightness = find_slot(&snapshot, "brightness");
+    assert!(
+        matches!(brightness.body, UiConfigSlotBody::Empty),
+        "the toggled-off option row has no value body"
+    );
+    assert_eq!(brightness.state.dirty, UiNodeDirtyState::Dirty);
+    assert_eq!(editor_dirty(&snapshot), (1, 0));
+
+    // Toggle back on: the EnsurePresent at brightness.some normalizes away
+    // and must clear the stored Remove at the option path — the exact user
+    // symptom was this click doing nothing.
+    handle.tx.send(ensure_present_action(child_address(
+        &brightness_address,
+        "brightness.some",
+    )));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view
+        .try_recv()
+        .expect("toggle-on + refresh emit a snapshot");
+    let brightness = find_slot(&snapshot, "brightness");
+    assert_eq!(
+        slot_value_display(brightness),
+        "64",
+        "the effective option is back to the base value"
+    );
+    assert_eq!(
+        brightness.state.dirty,
+        UiNodeDirtyState::Clean,
+        "no counteracting Remove survives the off-then-on cycle"
+    );
+    assert_eq!(editor_dirty(&snapshot), (0, 0), "the cycle ends clean");
+    assert_eq!(
+        count_overlay_reads(&sent) - overlay_reads_before,
+        0,
+        "the mirror is corrected by the ack effects alone, not a ReadOverlay"
+    );
+}
+
+#[test]
 fn removing_an_added_and_edited_entry_ends_clean_from_the_ack_alone() {
     // Mirror fidelity for the subtree-clearing structural remove: add a map
     // entry, edit a leaf under it, remove the entry again. The remove

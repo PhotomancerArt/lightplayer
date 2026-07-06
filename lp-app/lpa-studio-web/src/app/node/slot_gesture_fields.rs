@@ -304,13 +304,17 @@ pub fn MapEntryRemoveButton(
 /// `EnsurePresent opt_path.some` (server default value); off dispatches
 /// `RemoveValue opt_path`.
 ///
+/// State is carried by the switch position alone — no enabled/disabled text,
+/// so the toggle's footprint is a fixed-width track that never reflows the
+/// row. The state stays announced for assistive tech and hover through the
+/// dynamic `aria-label`/`title`.
+///
 /// The checkbox is **controlled**: the DTO's effective presence is the only
 /// writer of its visual state, so the click handler prevents the browser's
 /// native flip and only dispatches the gesture. Without this, a gesture that
-/// normalizes to a no-op against base (the D2 base-relative edge — e.g.
-/// toggling a base-present option off, then on) leaves the self-flipped DOM
-/// checkbox permanently desynced from the DTO, because Dioxus sees no
-/// attribute change to patch.
+/// normalizes to a no-op against base (D2/D7 base-relative structural
+/// normalization) leaves the self-flipped DOM checkbox permanently desynced
+/// from the DTO, because Dioxus sees no attribute change to patch.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn OptionToggleField(
@@ -354,7 +358,6 @@ pub fn OptionToggleField(
             span { class: "ux-slot-optional-toggle-track",
                 span { class: "ux-slot-optional-toggle-thumb" }
             }
-            span { class: "ux-slot-optional-toggle-label", "enabled" }
         }
     }
 }

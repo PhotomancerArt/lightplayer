@@ -273,24 +273,29 @@ in use" on the row. Client op: `SlotEditOp::MoveEntry { address(map),
 from_key, to_key }` — structural (never coalesces, coalescing barrier),
 staged at the map's own address, released by the ack like any gesture.
 
-**Known base-relative edge (accepted).** Normalization compares against
-base, not against the effective def, and the overlay stores one op per
-path. Toggling a base-present option **off** stores `Remove opt` (a real
-diff); toggling it back **on** dispatches `EnsurePresent opt.some`, which
-normalizes away against the base (`.some` is base-present) *at a different
-path* — the stored `Remove opt` survives, so off-then-on does **not**
-restore the value or any prior interior edits. Recovery is explicit and
-always available: **Revert** on the row — the stored entry is at the option
-row's own path — or the save panel's per-entry revert. This is the
-deliberate consequence of "the overlay is a minimal diff against saved
-state" — the gesture pair is not an undo stack. The UI keeps honest through
-it: the option toggle is a controlled control whose visual state only
-follows the DTO's effective presence, so a normalized no-op gesture leaves
-the toggle visibly unchanged rather than desynced.
+**Option off-then-on (fixed 2026-07-06).** Normalization compares against
+base and the overlay stores one op per path, which used to leave a
+counteracting entry behind: toggling a base-present option **off** stores
+`Remove opt` (a real diff); toggling it back **on** dispatches
+`EnsurePresent opt.some`, which normalizes away against the base (`.some`
+is base-present) *at a different path* — the stored `Remove opt` survived
+and the toggle-on click did nothing. The **counteracting-entry rule**
+closes this: a structural `EnsurePresent` that normalizes away also clears
+the overlay subtree at its *effective scope*
+(`ProjectRegistry::structural_ensure_scope` — the parent option path when
+the terminal segment is an option's `some` per the shape walk, the ensure
+path itself otherwise, e.g. a map-entry re-add cancelling a stored
+`Remove map[k]`). The sweep covers both the counteracting `Remove` and any
+stale edits under it, and the registry reports the cleared entries through
+`MutationEffect::Materialized` so ack-mirroring clients follow without a
+fetch. Re-enabling a base-present option therefore *is* a clean cancel of
+a pending toggle-off. The option toggle stays a controlled control whose
+visual state only follows the DTO's effective presence, so its rendering
+can never desync from the stored overlay either way.
 
-Enum variant switches do **not** share this edge: a structural
-`EnsurePresent` whose terminal segment names a declared variant of the
-parent enum (a shape-walk check in
+Enum variant switches follow the same shape of rule via the sibling sweep:
+a structural `EnsurePresent` whose terminal segment names a declared
+variant of the parent enum (a shape-walk check in
 `ProjectRegistry::variant_switch_sibling_paths`) clears the overlay entries
 at every *sibling* variant path and their subtrees as it is processed —
 selecting a variant replaces any pending switch to another variant. When

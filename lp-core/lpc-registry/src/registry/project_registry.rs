@@ -122,6 +122,7 @@ impl ProjectRegistry {
             mutation => {
                 let structural_remove = is_structural_remove(&mutation);
                 let variant_siblings = self.variant_switch_sibling_paths(&mutation, ctx);
+                let ensure_scope = self.structural_ensure_scope(&mutation, ctx);
                 let (mutation, normalized) = self.normalize_edit_to_base(fs, mutation, ctx);
                 match mutation {
                     // A structural `Remove` that normalized away must also
@@ -146,6 +147,18 @@ impl ProjectRegistry {
                             | self
                                 .clear_variant_sibling_subtrees(&artifact, &variant_siblings)
                                 .1
+                    }
+                    // A structural `EnsurePresent` that normalized away must
+                    // also clear a pending counteracting `Remove` within its
+                    // scope (see `Self::structural_ensure_scope`): the sweep
+                    // runs at the effective scope, which for an
+                    // `EnsurePresent opt.some` is the option path where the
+                    // toggle-off stored its `Remove`.
+                    MutationOp::RemoveSlotEdit { artifact, path: _ }
+                        if normalized && ensure_scope.is_some() =>
+                    {
+                        let scope = ensure_scope.as_ref().expect("guarded by the arm");
+                        self.remove_slot_edit_subtree(&artifact, scope).1
                     }
                     // A variant-selecting `EnsurePresent` that stores (switch
                     // away from base) replaces any previous pending switch
@@ -212,6 +225,7 @@ impl ProjectRegistry {
                     let structural_remove = is_structural_remove(&command.mutation);
                     let variant_siblings =
                         self.variant_switch_sibling_paths(&command.mutation, ctx);
+                    let ensure_scope = self.structural_ensure_scope(&command.mutation, ctx);
                     let (mutation, normalized) =
                         self.normalize_edit_to_base(fs, command.mutation, ctx);
                     let effect = match mutation {
@@ -267,6 +281,36 @@ impl ProjectRegistry {
                                         .collect(),
                                     changed,
                                 }
+                            }
+                        }
+                        // A structural `EnsurePresent` that normalized away
+                        // must also clear a pending counteracting `Remove`
+                        // within its scope (see
+                        // `Self::structural_ensure_scope`): the sweep runs at
+                        // the effective scope — for `EnsurePresent opt.some`
+                        // the option path where the toggle-off stored its
+                        // `Remove`. When the sweep touched any path other
+                        // than the sent one, the ack must say so via
+                        // `Materialized` (a plain `NormalizedToRemoval` would
+                        // point ack-mirroring clients at the sent path only,
+                        // leaving the counteracting entry in the mirror).
+                        MutationOp::RemoveSlotEdit { artifact, path }
+                            if normalized && ensure_scope.is_some() =>
+                        {
+                            let scope = ensure_scope.as_ref().expect("guarded by the arm");
+                            let (removed, changed) =
+                                self.remove_slot_edit_subtree(&artifact, scope);
+                            any_changed |= changed;
+                            if changed && removed.iter().any(|removed| *removed != path) {
+                                MutationEffect::Materialized {
+                                    edits: removed
+                                        .into_iter()
+                                        .map(|path| StoredSlotEdit::Removed { path })
+                                        .collect(),
+                                    changed,
+                                }
+                            } else {
+                                MutationEffect::NormalizedToRemoval { changed }
                             }
                         }
                         // A variant-selecting `EnsurePresent` that stores
@@ -813,10 +857,10 @@ impl ProjectRegistry {
     /// through [`ProjectOverlay::put_slot_edit`]'s canonicalization on both
     /// server and mirror already.
     ///
-    /// Known base-relative edge (accepted, same family as ADR D7's): a
-    /// synthesized `Remove` under `to` that nulls out a fresh default (a
-    /// typed default with a `Some` option or non-empty map) normalizes away
-    /// against a base-absent target; no such typed default exists today.
+    /// Known base-relative edge (accepted): a synthesized `Remove` under
+    /// `to` that nulls out a fresh default (a typed default with a `Some`
+    /// option or non-empty map) normalizes away against a base-absent
+    /// target; no such typed default exists today.
     fn apply_move_slot_entry(
         &mut self,
         fs: &dyn LpFs,
@@ -975,6 +1019,44 @@ impl ProjectRegistry {
         enum_variant_sibling_paths(def, &edit.path, ctx)
     }
 
+    /// The overlay scope a structural `EnsurePresent` must sweep when it
+    /// normalizes away against the base, or `None` when the mutation is no
+    /// such edit.
+    ///
+    /// A normalized structural `EnsurePresent` can leave a **counteracting**
+    /// overlay entry behind: toggling a base-present option off stores
+    /// `Remove` at the *option* path, while toggling it back on sends
+    /// `EnsurePresent opt.some` — which normalizes away (the base is already
+    /// `Some`) at a *different* path, so removing only the entry at the sent
+    /// path would strand the stored `Remove` and the gesture would do
+    /// nothing. The counteracting-entry rule (the option/map twin of
+    /// [`Self::variant_switch_sibling_paths`]): a structural `EnsurePresent`
+    /// that normalizes away also clears the overlay subtree at its
+    /// *effective scope* — the parent option path when the terminal segment
+    /// is an option's `some` (per the same shape walk that validates and
+    /// applies the edit), the ensure path itself otherwise (map entries,
+    /// options ensured at their own path). Sweeping the subtree covers both
+    /// the counteracting `Remove` and any stale edits under it.
+    fn structural_ensure_scope(
+        &self,
+        mutation: &MutationOp,
+        ctx: &ParseCtx<'_>,
+    ) -> Option<SlotPath> {
+        let MutationOp::PutSlotEdit { artifact, edit } = mutation else {
+            return None;
+        };
+        if !matches!(edit.op, SlotEditOp::EnsurePresent) {
+            return None;
+        }
+        let Ok(def) = self.loaded_def_for_mutation(artifact) else {
+            // No loaded definition to walk: the ensure path itself is the
+            // conservative scope (identical to the pre-rule behavior plus
+            // the subtree sweep).
+            return Some(edit.path.clone());
+        };
+        Some(ensure_effective_scope(def, &edit.path, ctx))
+    }
+
     /// Clear the overlay subtree ([`Self::remove_slot_edit_subtree`]) at each
     /// sibling variant path that actually carries overlay entries, returning
     /// the removed paths (per sibling: entry first, then descendants) and
@@ -1023,7 +1105,11 @@ impl ProjectRegistry {
     ///
     /// Callers applying a normalized structural `Remove` must clear the
     /// whole overlay subtree at its path, not just the entry
-    /// ([`Self::remove_slot_edit_subtree`]); callers processing a
+    /// ([`Self::remove_slot_edit_subtree`]); callers applying a normalized
+    /// structural `EnsurePresent` must clear the overlay subtree at its
+    /// effective scope, which for an `EnsurePresent opt.some` is the *option*
+    /// path holding any counteracting `Remove`
+    /// ([`Self::structural_ensure_scope`]); and callers processing a
     /// variant-selecting `EnsurePresent` must clear the sibling variant
     /// subtrees whether or not it normalized
     /// ([`Self::variant_switch_sibling_paths`]).
@@ -1261,6 +1347,44 @@ fn enum_variant_sibling_paths(def: &NodeDef, path: &SlotPath, ctx: &ParseCtx<'_>
     siblings
 }
 
+/// Effective sweep scope of a structural `EnsurePresent` at `path`
+/// ([`ProjectRegistry::structural_ensure_scope`]): the parent option path
+/// when the terminal segment is an option's `some`, `path` itself otherwise.
+///
+/// The root shape follows [`resolve_edit_policy`]'s rule and the walk to the
+/// parent is shape-only ([`shape_at_path`]), matching how the edit is
+/// validated and applied — including the segment-resolution precedence, so a
+/// record field literally named `some` stays a field terminal, not an option
+/// interior. Unresolvable paths keep `path` as the scope (conservative: the
+/// sweep degrades to the plain entry removal plus its own subtree).
+fn ensure_effective_scope(def: &NodeDef, path: &SlotPath, ctx: &ParseCtx<'_>) -> SlotPath {
+    let Some((SlotPathSegment::Field(terminal), parent)) = path.segments().split_last() else {
+        return path.clone();
+    };
+    if terminal.as_str() != "some" {
+        return path.clone();
+    }
+    let root_shape_id = match path.segments().first() {
+        Some(SlotPathSegment::Field(name)) if NodeDef::is_variant_name(name.as_str()) => {
+            NodeArtifact::SHAPE_ID
+        }
+        _ => def.shape_id(),
+    };
+    let Some(root) = ctx.shapes.get_shape(root_shape_id) else {
+        return path.clone();
+    };
+    let Some(parent_shape) = shape_at_path(root, ctx, parent) else {
+        return path.clone();
+    };
+    let is_option_some = parent_shape.record_field_by_name(terminal).is_none()
+        && parent_shape.option_some().is_some();
+    if is_option_some {
+        SlotPath::from_segments(parent.to_vec())
+    } else {
+        path.clone()
+    }
+}
+
 /// Shape at `segments` under `shape`: the same shape-only walk as
 /// [`resolve_slot_policy_and_leaf`] (chasing `Ref` indirections and `Custom`
 /// projections, resolving enum variant segments against any declared
@@ -1353,9 +1477,10 @@ fn effective_map_entry_presence(
 ///
 /// When such an edit normalizes away against the base, the caller must clear
 /// the overlay entries stranded under its path
-/// ([`ProjectRegistry::remove_slot_edit_subtree`]); no other normalized op
-/// strands descendants (a normalized `EnsurePresent` leaves base-relative
-/// descendant edits fully applicable).
+/// ([`ProjectRegistry::remove_slot_edit_subtree`]). A normalized structural
+/// `EnsurePresent` has its own counterpart rule — the sweep at its effective
+/// scope ([`ProjectRegistry::structural_ensure_scope`]) — and a normalized
+/// `AssignValue` strands nothing.
 fn is_structural_remove(mutation: &MutationOp) -> bool {
     matches!(
         mutation,
@@ -2283,6 +2408,144 @@ mod tests {
             .expect("speed binding");
         assert!(binding.target.data.is_some(), "ensured option is Some");
         assert!(binding.value.data.is_none(), "removed option is None");
+    }
+
+    #[test]
+    fn option_toggled_off_then_on_via_some_ends_clean() {
+        // The dead-click repro: toggling a base-present option OFF stores
+        // `Remove` at the option path; toggling it back ON dispatches
+        // `EnsurePresent opt.some`, which normalizes away against base at a
+        // DIFFERENT path. The counteracting-entry sweep must clear the stored
+        // `Remove` at the option path, and the ack must list it
+        // (`Materialized`) so ack-mirroring clients follow without a fetch.
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = bound_clock_project(&shapes);
+        let clock = clock_artifact();
+        let value = SlotPath::parse("bindings[speed].value").unwrap();
+        let value_some = SlotPath::parse("bindings[speed].value.some").unwrap();
+
+        // Toggle off: removing a base-Some option is a real diff and stores.
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::PutSlotEdit {
+                artifact: clock.clone(),
+                edit: SlotEdit::remove(value.clone()),
+            }],
+        );
+        assert_accepted(&results[0], true);
+        assert!(
+            effective_clock_def(&registry)
+                .bindings
+                .entries()
+                .get(&String::from("speed"))
+                .expect("speed binding")
+                .value
+                .data
+                .is_none(),
+            "the toggle-off removed the option"
+        );
+
+        // Toggle back on via the gesture path.
+        let results = mutate_batch_at(
+            &fs,
+            &mut registry,
+            &shapes,
+            Revision::new(12),
+            vec![MutationOp::PutSlotEdit {
+                artifact: clock.clone(),
+                edit: SlotEdit::ensure_present(value_some),
+            }],
+        );
+        let edits = assert_materialized(&results[0], true);
+        assert_eq!(
+            edits,
+            &[StoredSlotEdit::Removed { path: value }],
+            "the ack lists the cleared counteracting Remove at the option path"
+        );
+        assert!(
+            registry.overlay().get().is_empty(),
+            "off-then-on ends with an empty overlay"
+        );
+        assert_eq!(registry.overlay().changed_at(), Revision::new(12));
+        assert!(
+            effective_clock_def(&registry)
+                .bindings
+                .entries()
+                .get(&String::from("speed"))
+                .expect("speed binding")
+                .value
+                .data
+                .is_some(),
+            "the effective option is back to the base Some"
+        );
+    }
+
+    #[test]
+    fn ensure_via_some_with_no_pending_remove_stays_a_plain_normalized_noop() {
+        // Nothing to counteract: the sweep finds nothing, so the ack stays
+        // the plain `NormalizedToRemoval` (no `Materialized` widening) and
+        // the overlay revision does not bump.
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = bound_clock_project(&shapes);
+
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::PutSlotEdit {
+                artifact: clock_artifact(),
+                edit: SlotEdit::ensure_present(
+                    SlotPath::parse("bindings[speed].value.some").unwrap(),
+                ),
+            }],
+        );
+
+        assert_normalized(&results[0], false);
+        assert!(registry.overlay().get().is_empty());
+        assert_eq!(registry.overlay().changed_at(), Revision::default());
+    }
+
+    #[test]
+    fn singular_mutate_clears_the_counteracting_option_remove() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = bound_clock_project(&shapes);
+        let clock = clock_artifact();
+        let ctx = ParseCtx { shapes: &shapes };
+
+        registry
+            .mutate(
+                &fs,
+                MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: SlotEdit::remove(SlotPath::parse("bindings[speed].value").unwrap()),
+                },
+                Revision::new(10),
+                &ctx,
+            )
+            .unwrap();
+        assert!(!registry.overlay().get().is_empty());
+
+        let result = registry
+            .mutate(
+                &fs,
+                MutationOp::PutSlotEdit {
+                    artifact: clock,
+                    edit: SlotEdit::ensure_present(
+                        SlotPath::parse("bindings[speed].value.some").unwrap(),
+                    ),
+                },
+                Revision::new(12),
+                &ctx,
+            )
+            .unwrap();
+
+        assert!(result.overlay_changed);
+        assert!(
+            registry.overlay().get().is_empty(),
+            "the singular path must clear the counteracting Remove like the batch path"
+        );
     }
 
     #[test]

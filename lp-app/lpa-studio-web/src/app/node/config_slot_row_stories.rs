@@ -777,7 +777,7 @@ pub(crate) fn map_move_rejected_occupied() -> Element {
 
 #[story(
     label = "Option Toggle On And Off",
-    description = "Wired some/none toggles: on dispatches EnsurePresent at the interior some path, off dispatches RemoveValue at the option path."
+    description = "Wired some/none toggles at the trailing (right-anchored) edge of the value area — a fixed-width track with no state text, so toggling never reflows the row: on dispatches EnsurePresent at the interior some path, off dispatches RemoveValue at the option path; the last row's non-toggleable switch renders muted and inert."
 )]
 pub(crate) fn option_toggle_on_off() -> Element {
     rsx! {
@@ -799,6 +799,15 @@ pub(crate) fn option_toggle_on_off() -> Element {
                     .with_state(UiSlotFieldState::editable()),
                 depth: 0,
                 index: 1,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("white_point", "White point", UiSlotValue::u32(128))
+                    .with_address(story_slot_address("white_point"))
+                    .with_optionality(UiSlotOptionality::included(false))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 2,
                 on_action: move |_| {},
             }
         }
