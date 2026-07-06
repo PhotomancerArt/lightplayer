@@ -16,7 +16,7 @@ fn create_test_project_dir() -> (TempDir, PathBuf) {
     let project_dir = temp_dir.path().join("test-project");
     fs::create_dir_all(&project_dir).unwrap();
 
-    let project_json = r#"{ "kind": "Project", "name": "test-project" }
+    let project_json = r#"{ "kind": "Project", "format": 1, "name": "test-project" }
 "#;
     fs::write(project_dir.join("project.json"), project_json).unwrap();
 

@@ -1,0 +1,81 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "format",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 3065358156,
+                  "meta": {},
+                  "ty": "u32"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "name",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 2612013983,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "nodes",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "enum": {
+                "encoding": "external",
+                "meta": {},
+                "variants": [
+                  {
+                    "name": "unset",
+                    "shape": {
+                      "unit": {
+                        "meta": {}
+                      }
+                    }
+                  },
+                  {
+                    "name": "ref",
+                    "shape": {
+                      "value": {
+                        "shape": {
+                          "editor": "path",
+                          "id": 2244609540,
+                          "meta": {},
+                          "ty": "string"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

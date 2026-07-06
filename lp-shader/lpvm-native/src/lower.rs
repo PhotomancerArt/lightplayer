@@ -81,13 +81,10 @@ fn fa_vreg(v: lpir::VReg) -> VReg {
     VReg(v.0 as u16)
 }
 
+/// Map LPIR vregs into the shared operand pool without an intermediate Vec
+/// (one call per Call VInst; Q32 code is call-dense).
 fn push_vregs_slice(pool: &mut Vec<VReg>, ir: &[lpir::VReg]) -> Result<VRegSlice, LowerError> {
-    let regs: Vec<VReg> = ir.iter().map(|v| fa_vreg(*v)).collect();
-    push_native_vregs_slice(pool, &regs)
-}
-
-fn push_native_vregs_slice(pool: &mut Vec<VReg>, regs: &[VReg]) -> Result<VRegSlice, LowerError> {
-    if regs.len() > u8::MAX as usize {
+    if ir.len() > u8::MAX as usize {
         return Err(LowerError::UnsupportedOp {
             description: String::from("vreg slice too long for FA backend"),
         });
@@ -95,12 +92,10 @@ fn push_native_vregs_slice(pool: &mut Vec<VReg>, regs: &[VReg]) -> Result<VRegSl
     let start = u16::try_from(pool.len()).map_err(|_| LowerError::UnsupportedOp {
         description: String::from("vreg pool exhausted (u16)"),
     })?;
-    for v in regs {
-        pool.push(*v);
-    }
+    pool.extend(ir.iter().map(|v| fa_vreg(*v)));
     Ok(VRegSlice {
         start,
-        count: regs.len() as u8,
+        count: ir.len() as u8,
     })
 }
 
@@ -265,24 +260,10 @@ fn sym_call(
     rets: &[lpir::VReg],
     src_op: Option<u32>,
 ) -> Result<(), LowerError> {
-    let args: Vec<VReg> = args.iter().map(|v| fa_vreg(*v)).collect();
-    let rets: Vec<VReg> = rets.iter().map(|v| fa_vreg(*v)).collect();
-    sym_call_vregs(out, symbols, pool, name, &args, &rets, src_op)
-}
-
-fn sym_call_vregs(
-    out: &mut Vec<VInst>,
-    symbols: &mut ModuleSymbols,
-    pool: &mut Vec<VReg>,
-    name: &'static str,
-    args: &[VReg],
-    rets: &[VReg],
-    src_op: Option<u32>,
-) -> Result<(), LowerError> {
     out.push(VInst::Call {
         target: symbols.intern(name),
-        args: push_native_vregs_slice(pool, args)?,
-        rets: push_native_vregs_slice(pool, rets)?,
+        args: push_vregs_slice(pool, args)?,
+        rets: push_vregs_slice(pool, rets)?,
         callee_uses_sret: false,
         caller_passes_sret_ptr: false,
         caller_sret_vm_abi_swap: false,
@@ -1920,17 +1901,20 @@ pub fn lower_ops(
     })
 }
 
-fn resolve_callee_name(ir: &LpirModule, callee: CalleeRef) -> Option<String> {
+/// Resolve a callee to its symbol name, borrowed from the module (or
+/// `'static` for builtins) — no per-call-site String; interning copies only
+/// on first sight of a symbol.
+fn resolve_callee_name(ir: &LpirModule, callee: CalleeRef) -> Option<&str> {
     if let Some(idx) = ir.callee_as_import(callee) {
         ir.imports.get(idx).map(|imp| {
             if let Some(bid) = resolve_import_to_builtin(imp) {
-                String::from(bid.name())
+                bid.name()
             } else {
-                imp.func_name.clone()
+                imp.func_name.as_str()
             }
         })
     } else if let Some(f) = ir.callee_as_function(callee) {
-        Some(f.name.clone())
+        Some(f.name.as_str())
     } else {
         None
     }

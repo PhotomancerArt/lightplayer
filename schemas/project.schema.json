@@ -1,0 +1,53 @@
+{
+  "$id": "https://lightplayer.dev/schemas/project.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": 1
+    },
+    "kind": {
+      "const": "Project"
+    },
+    "name": {
+      "type": "string"
+    },
+    "nodes": {
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "additionalProperties": false,
+            "properties": {
+              "unset": {
+                "description": "Unit slot: any value is accepted and ignored on read; written as {}."
+              }
+            },
+            "required": [
+              "unset"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "ref": {
+                "description": "Path to an authored artifact file.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "ref"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "type": "object"
+    }
+  },
+  "required": [
+    "kind",
+    "format"
+  ],
+  "type": "object"
+}

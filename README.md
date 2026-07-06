@@ -86,6 +86,17 @@ Hardware manifests can be browsed and edited with:
 cargo run -p lp-cli -- hardware manifest
 ```
 
+The checked-in `schemas/` tree (JSON Schemas for authored `project.json` / node artifacts /
+`hardware.json`, plus slot shape dumps) is generated from the model registry with:
+
+```bash
+just schema-gen     # rewrite schemas/ (removes stale generated files)
+just schema-check   # verify schemas/ matches, nonzero exit on drift (part of `just check`)
+```
+
+See [`schemas/README.md`](schemas/README.md) for the format-version bump procedure
+(`just format-bump`) and editor schema-mapping setup.
+
 GPIO label calibration is host-driven. Flash the simple calibration firmware, attach a scope to the
 board label you want to identify, then run the CLI loop:
 

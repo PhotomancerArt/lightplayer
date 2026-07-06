@@ -2,5 +2,34 @@
   // Cursor IDE settings
   // Note: This may help with UI permissions, but the primary control
   // is through Cursor's Auto-Run Mode setting in Preferences
-  "cursor.agent.autoRunMode": "sandbox"
+  "cursor.agent.autoRunMode": "sandbox",
+
+  // Generated artifact schemas (schemas/README.md; regenerate with `just schema-gen`).
+  // Patterns starting with "/" are workspace-relative; "!" patterns exclude, and a
+  // file maps to a schema when its last matching pattern is not an exclusion.
+  "json.schemas": [
+    {
+      "fileMatch": [
+        "/projects/**/project.json",
+        "/examples/**/project.json",
+        "/lp-fw/fw-browser/www/smoke-project/project.json"
+      ],
+      "url": "./schemas/project.schema.json"
+    },
+    {
+      "fileMatch": [
+        "/projects/**/*.json",
+        "!/projects/**/project.json",
+        "/examples/**/*.json",
+        "!/examples/**/project.json",
+        "/lp-fw/fw-browser/www/smoke-project/*.json",
+        "!/lp-fw/fw-browser/www/smoke-project/project.json"
+      ],
+      "url": "./schemas/node.schema.json"
+    },
+    {
+      "fileMatch": ["/lp-core/lpc-hardware/boards/**/*.json"],
+      "url": "./schemas/hardware.schema.json"
+    }
+  ]
 }

@@ -15,6 +15,7 @@ use lpfs::LpFs;
 
 const PROJECT_JSON: &[u8] = br#"{
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "clock": {
       "ref": "./clock.json"

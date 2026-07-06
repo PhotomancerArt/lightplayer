@@ -1,0 +1,1017 @@
+{
+  "$defs": {
+    "LpAnyValue": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "number"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "items": {
+            "$ref": "#/$defs/LpAnyValue"
+          },
+          "type": "array"
+        }
+      ],
+      "description": "Dynamically typed value: string, number, bool, or an array of these (objects and null are rejected by the reader)."
+    },
+    "lp::control::Message": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "seq": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "seq"
+      ],
+      "type": "object"
+    },
+    "lp::fluid::Emitter": {
+      "additionalProperties": false,
+      "properties": {
+        "color": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        },
+        "dir": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "id": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "intensity": {
+          "type": "number"
+        },
+        "pos": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 2,
+          "minItems": 2,
+          "type": "array"
+        },
+        "radius": {
+          "type": "number"
+        },
+        "velocity": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "pos",
+        "dir",
+        "radius",
+        "color",
+        "velocity",
+        "intensity"
+      ],
+      "type": "object"
+    },
+    "lpc_model::binding::binding_def::BindingDef": {
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "target": {
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/$defs/LpAnyValue"
+        }
+      },
+      "type": "object"
+    },
+    "lpc_model::nodes::output::output_def::OutputDriverOptionsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "brightness": {
+          "description": "Ratio in the intended 0.0..=1.0 domain (not enforced on read).",
+          "type": "number"
+        },
+        "dithering_enabled": {
+          "type": "boolean"
+        },
+        "interpolation_enabled": {
+          "type": "boolean"
+        },
+        "lut_enabled": {
+          "type": "boolean"
+        },
+        "white_point": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "lpc_model::nodes::playlist::playlist_entry::PlaylistEntry": {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::binding::binding_def::BindingDef"
+          },
+          "type": "object"
+        },
+        "duration": {
+          "description": "Intended non-negative float (not enforced on read).",
+          "type": "number"
+        },
+        "fade_after": {
+          "description": "Intended non-negative float (not enforced on read).",
+          "type": "number"
+        },
+        "name": {
+          "type": "string"
+        },
+        "node": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "unset": {
+                  "description": "Unit slot: any value is accepted and ignored on read; written as {}."
+                }
+              },
+              "required": [
+                "unset"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "ref": {
+                  "description": "Path to an authored artifact file.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "ref"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "trigger": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lp::control::Message"
+          },
+          "propertyNames": {
+            "pattern": "^\\+?[0-9]+$"
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "lpc_model::nodes::shader::glsl_opts::GlslOpts": {
+      "additionalProperties": false,
+      "properties": {
+        "add_sub": {
+          "type": "string"
+        },
+        "div": {
+          "type": "string"
+        },
+        "mul": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "lpc_model::nodes::shader::shader_param_def::ScalarHint": {
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "description": "Intended non-negative float (not enforced on read).",
+          "type": "number"
+        }
+      },
+      "type": "object"
+    },
+    "lpc_model::nodes::shader::shader_param_def::ShaderParamDef": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "description": "Ratio in the intended 0.0..=1.0 domain (not enforced on read).",
+          "type": "number"
+        },
+        "description": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "min": {
+          "$ref": "#/$defs/lpc_model::nodes::shader::shader_param_def::ScalarHint"
+        },
+        "value_type": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "lpc_model::nodes::shader::shader_slot_def::ShaderSlotDef": {
+      "additionalProperties": false,
+      "properties": {
+        "default": {
+          "type": "number"
+        },
+        "description": {
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "mapping": {
+          "$ref": "#/$defs/lpc_model::nodes::shader::shader_slot_mapping::ShaderSlotMappingDef"
+        },
+        "max": {
+          "type": "number"
+        },
+        "min": {
+          "type": "number"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "lpc_model::nodes::shader::shader_slot_mapping::ShaderSlotMappingDef": {
+      "additionalProperties": false,
+      "properties": {
+        "empty_key": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "key": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "len": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$id": "https://lightplayer.dev/schemas/node.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "oneOf": [
+    {
+      "additionalProperties": false,
+      "properties": {
+        "format": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "Project"
+        },
+        "name": {
+          "type": "string"
+        },
+        "nodes": {
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "unset": {
+                    "description": "Unit slot: any value is accepted and ignored on read; written as {}."
+                  }
+                },
+                "required": [
+                  "unset"
+                ],
+                "type": "object"
+              },
+              {
+                "additionalProperties": false,
+                "properties": {
+                  "ref": {
+                    "description": "Path to an authored artifact file.",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "ref"
+                ],
+                "type": "object"
+              }
+            ]
+          },
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::binding::binding_def::BindingDef"
+          },
+          "type": "object"
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "id": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "Button"
+        },
+        "stable_ms": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::binding::binding_def::BindingDef"
+          },
+          "type": "object"
+        },
+        "controls": {
+          "additionalProperties": false,
+          "properties": {
+            "rate": {
+              "type": "number"
+            },
+            "running": {
+              "type": "boolean"
+            },
+            "scrub_offset_seconds": {
+              "type": "number"
+            }
+          },
+          "type": "object"
+        },
+        "kind": {
+          "const": "Clock"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::binding::binding_def::BindingDef"
+          },
+          "type": "object"
+        },
+        "kind": {
+          "const": "Texture"
+        },
+        "size": {
+          "additionalProperties": false,
+          "description": "Width/height in unsigned integer pixels or cells.",
+          "properties": {
+            "height": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "width",
+            "height"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::binding::binding_def::BindingDef"
+          },
+          "type": "object"
+        },
+        "consumed": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::nodes::shader::shader_slot_def::ShaderSlotDef"
+          },
+          "type": "object"
+        },
+        "glsl_opts": {
+          "$ref": "#/$defs/lpc_model::nodes::shader::glsl_opts::GlslOpts"
+        },
+        "kind": {
+          "const": "Shader"
+        },
+        "param_defs": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::nodes::shader::shader_param_def::ShaderParamDef"
+          },
+          "type": "object"
+        },
+        "render_order": {
+          "description": "Render ordering value.",
+          "maximum": 2147483647,
+          "minimum": -2147483648,
+          "type": "integer"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "$path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "$path"
+              ],
+              "type": "object"
+            }
+          ],
+          "description": "Asset reference: an artifact spec string, or { \"path\": <spec> }."
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::binding::binding_def::BindingDef"
+          },
+          "type": "object"
+        },
+        "consumed": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::nodes::shader::shader_slot_def::ShaderSlotDef"
+          },
+          "type": "object"
+        },
+        "glsl_opts": {
+          "$ref": "#/$defs/lpc_model::nodes::shader::glsl_opts::GlslOpts"
+        },
+        "kind": {
+          "const": "ComputeShader"
+        },
+        "produced": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::nodes::shader::shader_slot_def::ShaderSlotDef"
+          },
+          "type": "object"
+        },
+        "source": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "path"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "$path": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "$path"
+              ],
+              "type": "object"
+            }
+          ],
+          "description": "Asset reference: an artifact spec string, or { \"path\": <spec> }."
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::binding::binding_def::BindingDef"
+          },
+          "type": "object"
+        },
+        "emitters": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lp::fluid::Emitter"
+          },
+          "propertyNames": {
+            "pattern": "^\\+?[0-9]+$"
+          },
+          "type": "object"
+        },
+        "fade_speed": {
+          "description": "Ratio in the intended 0.0..=1.0 domain (not enforced on read).",
+          "type": "number"
+        },
+        "kind": {
+          "const": "Fluid"
+        },
+        "size": {
+          "additionalProperties": false,
+          "description": "Width/height in unsigned integer pixels or cells.",
+          "properties": {
+            "height": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "width",
+            "height"
+          ],
+          "type": "object"
+        },
+        "solver_iterations": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "step_hz": {
+          "description": "Intended non-negative float (not enforced on read).",
+          "type": "number"
+        },
+        "time": {
+          "type": "number"
+        },
+        "viscosity": {
+          "description": "Intended non-negative float (not enforced on read).",
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::binding::binding_def::BindingDef"
+          },
+          "type": "object"
+        },
+        "default_fade": {
+          "description": "Intended non-negative float (not enforced on read).",
+          "type": "number"
+        },
+        "entries": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::nodes::playlist::playlist_entry::PlaylistEntry"
+          },
+          "propertyNames": {
+            "pattern": "^\\+?[0-9]+$"
+          },
+          "type": "object"
+        },
+        "idle_entry": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "kind": {
+          "const": "Playlist"
+        },
+        "time": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::binding::binding_def::BindingDef"
+          },
+          "type": "object"
+        },
+        "channel": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "input": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lp::control::Message"
+          },
+          "propertyNames": {
+            "pattern": "^\\+?[0-9]+$"
+          },
+          "type": "object"
+        },
+        "kind": {
+          "const": "ControlRadio"
+        },
+        "repeat_count": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "wifi_channel": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::binding::binding_def::BindingDef"
+          },
+          "type": "object"
+        },
+        "endpoint": {
+          "type": "string"
+        },
+        "kind": {
+          "const": "Output"
+        },
+        "options": {
+          "$ref": "#/$defs/lpc_model::nodes::output::output_def::OutputDriverOptionsConfig"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": false,
+      "properties": {
+        "bindings": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lpc_model::binding::binding_def::BindingDef"
+          },
+          "type": "object"
+        },
+        "brightness": {
+          "maximum": 4294967295,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "color_order": {
+          "type": "string"
+        },
+        "diagnostic_mode": {
+          "type": "string"
+        },
+        "gamma_correction": {
+          "type": "boolean"
+        },
+        "kind": {
+          "const": "Fixture"
+        },
+        "mapping": {
+          "oneOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "Unset"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "PathPoints"
+                },
+                "paths": {
+                  "additionalProperties": {
+                    "oneOf": [
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "center": {
+                            "description": "2D XY coordinate as [x, y].",
+                            "items": {
+                              "type": "number"
+                            },
+                            "maxItems": 2,
+                            "minItems": 2,
+                            "type": "array"
+                          },
+                          "diameter": {
+                            "description": "Intended non-negative float (not enforced on read).",
+                            "type": "number"
+                          },
+                          "end_ring_exclusive": {
+                            "maximum": 4294967295,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "kind": {
+                            "const": "RingArray"
+                          },
+                          "offset_angle": {
+                            "type": "number"
+                          },
+                          "order": {
+                            "type": "string"
+                          },
+                          "ring_lamp_counts": {
+                            "additionalProperties": {
+                              "maximum": 4294967295,
+                              "minimum": 0,
+                              "type": "integer"
+                            },
+                            "propertyNames": {
+                              "pattern": "^\\+?[0-9]+$"
+                            },
+                            "type": "object"
+                          },
+                          "start_ring_inclusive": {
+                            "maximum": 4294967295,
+                            "minimum": 0,
+                            "type": "integer"
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "first_channel": {
+                            "maximum": 4294967295,
+                            "minimum": 0,
+                            "type": "integer"
+                          },
+                          "kind": {
+                            "const": "PointList"
+                          },
+                          "points": {
+                            "additionalProperties": {
+                              "description": "2D XY coordinate as [x, y].",
+                              "items": {
+                                "type": "number"
+                              },
+                              "maxItems": 2,
+                              "minItems": 2,
+                              "type": "array"
+                            },
+                            "propertyNames": {
+                              "pattern": "^\\+?[0-9]+$"
+                            },
+                            "type": "object"
+                          }
+                        },
+                        "required": [
+                          "kind"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "propertyNames": {
+                    "pattern": "^\\+?[0-9]+$"
+                  },
+                  "type": "object"
+                },
+                "sample_diameter": {
+                  "description": "Intended non-negative float (not enforced on read).",
+                  "type": "number"
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            },
+            {
+              "additionalProperties": false,
+              "properties": {
+                "kind": {
+                  "const": "SvgPath"
+                },
+                "sample_diameter": {
+                  "description": "Intended non-negative float (not enforced on read).",
+                  "type": "number"
+                },
+                "source": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "path": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "path"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "additionalProperties": false,
+                      "properties": {
+                        "$path": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "$path"
+                      ],
+                      "type": "object"
+                    }
+                  ],
+                  "description": "Asset reference: an artifact spec string, or { \"path\": <spec> }."
+                }
+              },
+              "required": [
+                "kind"
+              ],
+              "type": "object"
+            }
+          ]
+        },
+        "render_size": {
+          "additionalProperties": false,
+          "description": "Width/height in unsigned integer pixels or cells.",
+          "properties": {
+            "height": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "width": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "width",
+            "height"
+          ],
+          "type": "object"
+        },
+        "sampling": {
+          "type": "string"
+        },
+        "transform": {
+          "description": "2D affine transform as a row-major 3x3 matrix; the bottom row must be (approximately) [0, 0, 1] — perspective matrices are rejected on read.",
+          "items": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "type": "array"
+          },
+          "maxItems": 3,
+          "minItems": 3,
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    }
+  ]
+}

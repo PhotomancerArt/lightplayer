@@ -1,0 +1,22 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "output",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "control_product",
+              "id": 4213724405,
+              "meta": {},
+              "ty": {
+                "product": "control"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

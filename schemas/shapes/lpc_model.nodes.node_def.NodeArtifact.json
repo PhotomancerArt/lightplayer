@@ -1,0 +1,95 @@
+{
+  "enum": {
+    "meta": {},
+    "variants": [
+      {
+        "name": "Project",
+        "shape": {
+          "ref": {
+            "id": 2328756067
+          }
+        }
+      },
+      {
+        "name": "Button",
+        "shape": {
+          "ref": {
+            "id": 1018556980
+          }
+        }
+      },
+      {
+        "name": "Clock",
+        "shape": {
+          "ref": {
+            "id": 520345680
+          }
+        }
+      },
+      {
+        "name": "Texture",
+        "shape": {
+          "ref": {
+            "id": 2579233885
+          }
+        }
+      },
+      {
+        "name": "Shader",
+        "shape": {
+          "ref": {
+            "id": 3733861171
+          }
+        }
+      },
+      {
+        "name": "ComputeShader",
+        "shape": {
+          "ref": {
+            "id": 3622644300
+          }
+        }
+      },
+      {
+        "name": "Fluid",
+        "shape": {
+          "ref": {
+            "id": 2887292794
+          }
+        }
+      },
+      {
+        "name": "Playlist",
+        "shape": {
+          "ref": {
+            "id": 1520921198
+          }
+        }
+      },
+      {
+        "name": "ControlRadio",
+        "shape": {
+          "ref": {
+            "id": 4099574392
+          }
+        }
+      },
+      {
+        "name": "Output",
+        "shape": {
+          "ref": {
+            "id": 770241759
+          }
+        }
+      },
+      {
+        "name": "Fixture",
+        "shape": {
+          "ref": {
+            "id": 814168903
+          }
+        }
+      }
+    ]
+  }
+}

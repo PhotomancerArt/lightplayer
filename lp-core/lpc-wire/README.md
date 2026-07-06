@@ -4,8 +4,10 @@ Engine-client protocol model for LightPlayer core.
 
 This crate owns the request/response and sync contract exchanged between
 `lpc-engine`/`lpa-server`, firmware transports, clients, and `lpc-view`:
-messages, project reads, tree deltas, slot sync payloads, transport errors,
-and bounded JSON writers for wire emission.
+messages, project reads, tree deltas, slot sync payloads, and transport
+errors. Outbound serialization goes through `serde` (host) or `ser-write-json`
+(the ESP32 streaming writer); the crate carries no bespoke JSON writer of its
+own.
 
 It should not own domain modeling or generic slot serialization. Slot shapes,
 slot access, `SlotCodec`, authored TOML, and generic JSON/TOML slot readers

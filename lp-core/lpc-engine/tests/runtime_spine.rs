@@ -176,6 +176,7 @@ fn project_apply_added_node_use_preserves_existing_runtime_node() {
         br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -294,6 +295,7 @@ fn clock_project_fs() -> LpFsMemory {
         br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "clock": {
       "ref": "./clock.json"
@@ -325,6 +327,7 @@ fn shader_project_fs() -> LpFsMemory {
         br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "shader": {
       "ref": "./shader.json"

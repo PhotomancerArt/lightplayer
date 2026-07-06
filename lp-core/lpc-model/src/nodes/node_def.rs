@@ -573,6 +573,102 @@ impl core::fmt::Display for NodeDefWriteError {
 
 impl core::error::Error for NodeDefWriteError {}
 
+/// Result of probing an authored JSON artifact for the project format version.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ProjectFormatProbe {
+    /// The top-level `kind` is `Project`; carries the top-level `format` key.
+    Project { format: Option<u32> },
+    /// Not a project artifact; format gating does not apply.
+    NotProject,
+}
+
+/// Streaming probe for the top-level `"format"` version in an authored JSON
+/// project root. Uses syntax events like the `kind` probe so loaders can gate
+/// [`crate::PROJECT_FORMAT_VERSION`] without materializing a value tree.
+///
+/// Kinds other than `Project` (or a missing/non-string `kind`) probe as
+/// [`ProjectFormatProbe::NotProject`]: format gating applies only to project
+/// roots, and the real parse owns diagnostics for malformed artifacts. A
+/// present but non-integer `format` is a syntax error.
+pub fn read_project_format_json(text: &str) -> Result<ProjectFormatProbe, NodeDefParseError> {
+    use crate::slot_codec::{JsonSyntaxSource, SyntaxEvent, SyntaxEventSource};
+
+    let syntax_error = |error: crate::slot_codec::SyntaxError| NodeDefParseError::Syntax {
+        error: error.to_string(),
+    };
+
+    let mut source = JsonSyntaxSource::new(text).map_err(syntax_error)?;
+    match source.next_event().map_err(syntax_error)? {
+        Some(SyntaxEvent::StartObject { .. }) => {}
+        _ => {
+            return Err(NodeDefParseError::Syntax {
+                error: String::from("node definition JSON root must be an object"),
+            });
+        }
+    }
+
+    // Scan top-level props, skipping nested values by depth.
+    let mut is_project = false;
+    let mut format = None;
+    let mut depth = 0usize;
+    loop {
+        let Some(event) = source.next_event().map_err(syntax_error)? else {
+            break;
+        };
+        match event {
+            SyntaxEvent::Prop { name, .. } if depth == 0 && name == "kind" => {
+                let mut kind = String::new();
+                loop {
+                    match source.next_event().map_err(syntax_error)? {
+                        Some(SyntaxEvent::StringChunk { text, is_last, .. }) => {
+                            kind.push_str(&text);
+                            if is_last {
+                                break;
+                            }
+                        }
+                        // Non-string kind: the real parse owns that diagnostic.
+                        _ => return Ok(ProjectFormatProbe::NotProject),
+                    }
+                }
+                if kind != PROJECT_VARIANT {
+                    return Ok(ProjectFormatProbe::NotProject);
+                }
+                is_project = true;
+            }
+            SyntaxEvent::Prop { name, .. } if depth == 0 && name == "format" => {
+                let value = match source.next_event().map_err(syntax_error)? {
+                    Some(SyntaxEvent::Number { text, .. }) => text.parse::<u32>().ok(),
+                    _ => None,
+                };
+                let Some(value) = value else {
+                    return Err(NodeDefParseError::Syntax {
+                        error: String::from("field `format` must be an unsigned integer"),
+                    });
+                };
+                format = Some(value);
+            }
+            SyntaxEvent::StartObject { .. } | SyntaxEvent::StartArray { .. } => depth += 1,
+            SyntaxEvent::EndArray { .. } => depth = depth.saturating_sub(1),
+            SyntaxEvent::EndObject { .. } => {
+                if depth == 0 {
+                    break;
+                }
+                depth -= 1;
+            }
+            _ => {}
+        }
+        if is_project && format.is_some() {
+            break;
+        }
+    }
+
+    if is_project {
+        Ok(ProjectFormatProbe::Project { format })
+    } else {
+        Ok(ProjectFormatProbe::NotProject)
+    }
+}
+
 fn downcast_node_artifact(
     object: alloc::boxed::Box<dyn crate::SlotMutAccess>,
 ) -> Result<NodeArtifact, NodeDefParseError> {
@@ -893,6 +989,43 @@ mod tests {
         )
         .expect("fixture");
         assert!(matches!(fixture, NodeDef::Fixture(_)));
+    }
+
+    #[test]
+    fn project_format_probe_reads_top_level_format() {
+        let probe = read_project_format_json(r#"{ "kind": "Project", "format": 1, "nodes": {} }"#)
+            .expect("probe");
+        assert_eq!(probe, ProjectFormatProbe::Project { format: Some(1) });
+
+        let probe = read_project_format_json(r#"{ "kind": "Project", "nodes": {} }"#)
+            .expect("probe missing format");
+        assert_eq!(probe, ProjectFormatProbe::Project { format: None });
+
+        let probe = read_project_format_json(
+            r#"{ "kind": "Texture", "size": { "width": 1, "height": 2 } }"#,
+        )
+        .expect("probe non-project");
+        assert_eq!(probe, ProjectFormatProbe::NotProject);
+    }
+
+    #[test]
+    fn project_format_probe_skips_nested_format_keys() {
+        let probe = read_project_format_json(
+            r#"{ "kind": "Project", "nodes": { "child": { "format": 7 } } }"#,
+        )
+        .expect("probe");
+        assert_eq!(probe, ProjectFormatProbe::Project { format: None });
+    }
+
+    #[test]
+    fn project_format_probe_rejects_non_integer_format() {
+        let err = read_project_format_json(r#"{ "kind": "Project", "format": "one" }"#)
+            .expect_err("string format");
+        assert!(err.to_string().contains("unsigned integer"), "{err}");
+
+        let err = read_project_format_json(r#"{ "kind": "Project", "format": -1 }"#)
+            .expect_err("negative format");
+        assert!(err.to_string().contains("unsigned integer"), "{err}");
     }
 
     #[test]

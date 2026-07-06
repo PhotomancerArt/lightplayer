@@ -1,0 +1,148 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "bindings",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 1885459118
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "size",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "dimensions",
+              "id": 2973013964,
+              "meta": {},
+              "ty": {
+                "struct": {
+                  "fields": [
+                    {
+                      "name": "width",
+                      "ty": "u32"
+                    },
+                    {
+                      "name": "height",
+                      "ty": "u32"
+                    }
+                  ],
+                  "name": "Dim2u"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "solver_iterations",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 3065358156,
+              "meta": {},
+              "ty": "u32"
+            }
+          }
+        }
+      },
+      {
+        "name": "step_hz",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": {
+                "number": {
+                  "min": 0.0
+                }
+              },
+              "id": 2960302901,
+              "meta": {},
+              "ty": "f32"
+            }
+          }
+        }
+      },
+      {
+        "name": "fade_speed",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": {
+                "slider": {
+                  "max": 1.0,
+                  "min": 0.0,
+                  "step": 0.009999999776482582
+                }
+              },
+              "id": 1724747812,
+              "meta": {},
+              "ty": "f32"
+            }
+          }
+        }
+      },
+      {
+        "name": "viscosity",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": {
+                "number": {
+                  "min": 0.0
+                }
+              },
+              "id": 2960302901,
+              "meta": {},
+              "ty": "f32"
+            }
+          }
+        }
+      },
+      {
+        "name": "time",
+        "semantics": {
+          "direction": "consumed"
+        },
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2605450937,
+              "meta": {},
+              "ty": "f32"
+            }
+          }
+        }
+      },
+      {
+        "name": "emitters",
+        "semantics": {
+          "direction": "consumed",
+          "merge": "by_key"
+        },
+        "shape": {
+          "map": {
+            "key": "u32",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 2405894887
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

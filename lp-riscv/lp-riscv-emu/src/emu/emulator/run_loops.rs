@@ -106,6 +106,52 @@ fn dispatch_profile_jit_map_load(
     session.on_jit_map_load(base, &decoded, cycle_count);
 }
 
+impl Riscv32Emulator {
+    /// Guest `SYSCALL_ALLOC_TRACE` ECALL: forward to the profile session's
+    /// alloc collector. Shared by both syscall dispatchers (`handle_syscall`
+    /// for the fueled run loops and `step_inner` for `step()`-driven loops
+    /// such as `run_until_yield_or_stop`) so heap tracing stays live no
+    /// matter which loop drives the guest.
+    pub(super) fn handle_alloc_trace_syscall(
+        &mut self,
+        syscall_info: &SyscallInfo,
+    ) -> Result<StepResult, EmulatorError> {
+        #[cfg(feature = "std")]
+        {
+            use crate::profile::{HaltReason, SyscallAction};
+
+            let args_u32 = syscall_info.args.map(|a| a as u32);
+            match dispatch_profile_alloc_syscall(
+                &mut self.profile_session,
+                self.pc,
+                &self.regs,
+                self.cycle_count,
+                self.instruction_count,
+                &self.memory,
+                SYSCALL_ALLOC_TRACE as u32,
+                &args_u32,
+            ) {
+                SyscallAction::Pass => {}
+                SyscallAction::Handled => {
+                    self.regs[Gpr::A0.num() as usize] = 0;
+                    return Ok(StepResult::Continue);
+                }
+                SyscallAction::Halt(HaltReason::Oom { size }) => {
+                    return Ok(StepResult::Oom(super::types::OomInfo { size, pc: self.pc }));
+                }
+                SyscallAction::Halt(HaltReason::ProfileStop) => {
+                    // Alloc trace syscall does not produce this; perf syscall (phase 5) will.
+                    unreachable!("alloc syscall cannot halt with ProfileStop");
+                }
+            }
+        }
+        #[cfg(not(feature = "std"))]
+        let _ = syscall_info;
+        self.regs[Gpr::A0.num() as usize] = 0;
+        Ok(StepResult::Continue)
+    }
+}
+
 #[cfg(feature = "std")]
 impl Riscv32Emulator {
     /// Guest `SYSCALL_PERF_EVENT` ECALL: parse ABI, dispatch to [`crate::profile::ProfileSession::on_perf_event`].
@@ -568,37 +614,7 @@ impl Riscv32Emulator {
                 Ok(StepResult::Syscall(syscall_info))
             }
         } else if syscall_info.number == SYSCALL_ALLOC_TRACE {
-            #[cfg(feature = "std")]
-            {
-                use crate::profile::{HaltReason, SyscallAction};
-
-                let args_u32 = syscall_info.args.map(|a| a as u32);
-                match dispatch_profile_alloc_syscall(
-                    &mut self.profile_session,
-                    self.pc,
-                    &self.regs,
-                    self.cycle_count,
-                    self.instruction_count,
-                    &self.memory,
-                    SYSCALL_ALLOC_TRACE as u32,
-                    &args_u32,
-                ) {
-                    SyscallAction::Pass => {}
-                    SyscallAction::Handled => {
-                        self.regs[Gpr::A0.num() as usize] = 0;
-                        return Ok(StepResult::Continue);
-                    }
-                    SyscallAction::Halt(HaltReason::Oom { size }) => {
-                        return Ok(StepResult::Oom(super::types::OomInfo { size, pc: self.pc }));
-                    }
-                    SyscallAction::Halt(HaltReason::ProfileStop) => {
-                        // Alloc trace syscall does not produce this; perf syscall (phase 5) will.
-                        unreachable!("alloc syscall cannot halt with ProfileStop");
-                    }
-                }
-            }
-            self.regs[Gpr::A0.num() as usize] = 0;
-            Ok(StepResult::Continue)
+            self.handle_alloc_trace_syscall(&syscall_info)
         } else if syscall_info.number == SYSCALL_JIT_MAP_LOAD {
             #[cfg(feature = "std")]
             {

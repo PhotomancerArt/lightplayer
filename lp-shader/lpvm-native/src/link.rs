@@ -35,8 +35,13 @@ pub fn link_jit<F>(
 where
     F: FnMut(&str) -> Option<u32>,
 {
-    // Concatenate all function code
-    let mut code = Vec::new();
+    // Concatenate all function code. Total size is known up front — sizing
+    // exactly avoids grow-reallocs of the largest buffer in the pipeline AND
+    // is load-bearing for correctness: `image_base` is taken from the
+    // buffer's address below and patched into the code, so the Vec must not
+    // reallocate (and thus move) after this point.
+    let total_code: usize = module.functions.iter().map(|f| f.code.len()).sum();
+    let mut code = Vec::with_capacity(total_code);
     let mut entries = VecMap::new();
     let mut func_offsets = Vec::with_capacity(module.functions.len());
 
@@ -48,6 +53,11 @@ where
     }
 
     let image_base = code.as_ptr() as usize;
+    debug_assert_eq!(
+        code.len(),
+        total_code,
+        "image fully written before patching"
+    );
 
     // Resolve relocations
     for (func_idx, func) in module.functions.iter().enumerate() {

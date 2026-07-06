@@ -27,6 +27,7 @@ satisfies this):
 ```json
 {
   "kind": "Project",
+  "format": 1,
   "name": "example",
   "nodes": {
     "clock": { "ref": "./clock.json" },
@@ -34,6 +35,12 @@ satisfies this):
   }
 }
 ```
+
+The project root also carries a top-level `format` key: the monotonic
+artifact format version (`PROJECT_FORMAT_VERSION` in `lpc-model`). Loaders
+reject a root whose `format` is missing or does not match, with an error
+telling the user to regenerate or upgrade the project. Child node files carry
+no format key — they are versioned transitively through their project root.
 
 Child node positions hold an invocation: either `{ "ref": "./child.json" }`
 or the editing placeholder `{ "unset": {} }`. Inline definitions
@@ -68,6 +75,28 @@ map keys in model order, and a trailing newline. Output is deterministic —
 identical models serialize byte-identically, so files diff cleanly in git
 and device pulls match host source byte-for-byte. Overlay commits on the
 device write the same canonical form.
+
+## Format Version And Generated Schemas
+
+The artifact format itself is described by generated, checked-in files under
+`schemas/`: JSON Schemas for project roots, node artifacts, and hardware
+manifests (editor autocomplete/validation via the checked-in
+`.vscode/settings.json` and `.idea/jsonSchemas.xml` mappings), plus
+slot-shape dumps under `schemas/shapes/` — the exact structures the slot
+codec parses against, and the future offline upgrader's input. `just
+schema-gen` regenerates the tree deterministically; `just schema-check`
+(part of `just check`) fails CI on drift, and a conformance test validates
+every authored artifact against the checked-in schemas. Any change to the
+artifact format therefore lands as a reviewable `schemas/` diff.
+
+Format evolution is a deliberate ritual: `just format-bump` snapshots the
+outgoing schemas, shape dumps, and fixture artifacts into
+`schemas/history/v<N>/` before `PROJECT_FORMAT_VERSION` is bumped by hand.
+Devices never upgrade old artifacts — they only check the version;
+upgrading is future Studio/desktop tooling. See `schemas/README.md` for the
+procedure and ADR
+`docs/adr/2026-07-05-artifact-format-version-and-schema-snapshots.md` for
+the decision record.
 
 ## Loading And Reloading
 

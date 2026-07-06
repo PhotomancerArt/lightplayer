@@ -1,13 +1,10 @@
 mod support;
 
-use lpc_model::{
-    NodeDefLocation, NodeDefState, NodeUseLocation, ProjectNodeOrigin, ProjectNodePlacement,
-    SlotPath,
-};
+use lpc_model::{NodeDefState, NodeUseLocation, ProjectNodeOrigin, ProjectNodePlacement, SlotPath};
 use lpc_registry::{ParseCtx, ProjectRegistry};
 use lpfs::{LpFsMemory, LpPath};
 
-use support::{RegistryScenario, artifact, artifact_asset, root_def};
+use support::{RegistryScenario, artifact_asset, root_def};
 
 #[test]
 fn fyeah_sign_graph_contains_project_children_playlist_entries_and_asset_consumers() {
@@ -69,6 +66,7 @@ fn duplicate_external_refs_share_def_entry_but_create_distinct_graph_nodes() {
         r#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "a": {
       "ref": "./shader.json"
@@ -115,6 +113,7 @@ fn missing_children_are_graph_nodes() {
         r#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "missing": {
       "ref": "./missing.json"

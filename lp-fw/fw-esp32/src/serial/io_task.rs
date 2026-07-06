@@ -404,7 +404,8 @@ fn process_read_buffer(read_buffer: &mut Vec<u8>, router: &MessageRouter) {
 
 /// Get references to the static message channels
 ///
-/// Used by main.rs to create MessageRouter for MessageRouterTransport.
+/// Used by main.rs to create the `MessageRouter` for
+/// `StreamingMessageRouterTransport`.
 #[cfg(not(any(
     feature = "test_rmt",
     feature = "test_dither",

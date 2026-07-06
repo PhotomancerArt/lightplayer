@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 /// Build or runtime target that a board manifest describes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum HardwareTarget {
     Esp32c6,

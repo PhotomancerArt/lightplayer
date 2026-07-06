@@ -13,6 +13,7 @@ use crate::{HardwareTarget, HwAddress, HwCapability, HwError, HwManifest, HwReso
 /// [`HardwareManifestFile::to_manifest`] to validate and convert it into the
 /// runtime [`HwManifest`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct HardwareManifestFile {
     pub id: String,
     pub target: HardwareTarget,
@@ -143,6 +144,7 @@ impl HardwareManifestFile {
 /// Labels are metadata for humans and tooling. They do not create claimable
 /// resources by themselves; resources come from [`HardwareResourceFile`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct HardwareBoardLabelFile {
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -166,6 +168,7 @@ impl HardwareBoardLabelFile {
 
 /// Verification status for a board label in a manifest file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum HardwareBoardLabelStatus {
     Unassigned,
@@ -180,6 +183,7 @@ pub enum HardwareBoardLabelStatus {
 /// GPIO resources are often grouped under `gpio` in TOML for readability, while
 /// non-GPIO resources live under `resource`; both convert to [`HwResource`].
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema-gen", derive(schemars::JsonSchema))]
 pub struct HardwareResourceFile {
     pub address: String,
     pub display_label: String,

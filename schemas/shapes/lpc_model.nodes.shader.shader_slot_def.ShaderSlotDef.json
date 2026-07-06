@@ -1,0 +1,144 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "kind",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2435360456,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "value",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 3864786694,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "key",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 1124041669,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "default",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 2605450937,
+                  "meta": {},
+                  "ty": "f32"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "min",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 2605450937,
+                  "meta": {},
+                  "ty": "f32"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "max",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 2605450937,
+                  "meta": {},
+                  "ty": "f32"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "mapping",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "ref": {
+                "id": 4227971207
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "label",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2612013983,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "description",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2612013983,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

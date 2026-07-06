@@ -1,8 +1,8 @@
 use lpc_model::{
-    ArtifactLocation, AssetBodyOrigin, AssetContentType, AssetLocation, AssetState,
-    NodeDefLocation, NodeDefState, Revision, SlotPath, SlotShapeRegistry,
+    ArtifactLocation, AssetBodyOrigin, AssetLocation, AssetState, NodeDefLocation, NodeDefState,
+    PROJECT_FORMAT_VERSION, Revision, SlotShapeRegistry,
 };
-use lpc_registry::{ParseCtx, ProjectRegistry};
+use lpc_registry::{ParseCtx, ProjectRegistry, RegistryError};
 use lpfs::{LpFsMemory, LpPath};
 
 fn parse_ctx<'a>(shapes: &'a SlotShapeRegistry) -> ParseCtx<'a> {
@@ -25,6 +25,7 @@ fn load_root_discovers_root_external_and_asset_entries() {
         r#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "shader": {
       "ref": "./shader.json"
@@ -107,6 +108,7 @@ fn load_root_reports_parse_error_for_inline_child_def() {
         r#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "shader": {
       "def": {
@@ -143,6 +145,7 @@ fn load_root_keeps_missing_referenced_def_as_error_entry() {
         r#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "shader": {
       "ref": "./missing.json"
@@ -175,6 +178,7 @@ fn load_root_keeps_missing_referenced_asset_as_error_entry() {
         r#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "shader": {
       "ref": "./shader.json"
@@ -206,4 +210,97 @@ fn load_root_keeps_missing_referenced_asset_as_error_entry() {
         registry.asset(&missing).map(|entry| &entry.state),
         Some(&AssetState::NotFound)
     );
+}
+
+#[test]
+fn load_root_accepts_current_project_format() {
+    let shapes = SlotShapeRegistry::default();
+    let ctx = parse_ctx(&shapes);
+    let mut fs = LpFsMemory::new();
+    write_file(
+        &mut fs,
+        "/project.json",
+        r#"
+{
+  "kind": "Project",
+  "format": 1,
+  "nodes": {}
+}
+"#,
+    );
+
+    let mut registry = ProjectRegistry::new();
+    let result = registry
+        .load_root(&fs, LpPath::new("/project.json"), Revision::new(1), &ctx)
+        .expect("current format loads");
+
+    let root = NodeDefLocation::artifact_root(ArtifactLocation::file("/project.json"));
+    assert_eq!(result.root, root);
+    assert!(matches!(
+        registry.def(&root).unwrap().state,
+        NodeDefState::Loaded(lpc_model::NodeDef::Project(_))
+    ));
+}
+
+#[test]
+fn load_root_rejects_missing_project_format() {
+    let shapes = SlotShapeRegistry::default();
+    let ctx = parse_ctx(&shapes);
+    let mut fs = LpFsMemory::new();
+    write_file(
+        &mut fs,
+        "/project.json",
+        r#"
+{
+  "kind": "Project",
+  "nodes": {}
+}
+"#,
+    );
+
+    let mut registry = ProjectRegistry::new();
+    let err = registry
+        .load_root(&fs, LpPath::new("/project.json"), Revision::new(1), &ctx)
+        .expect_err("missing format must be rejected");
+
+    assert_eq!(
+        err,
+        RegistryError::FormatVersion {
+            expected: PROJECT_FORMAT_VERSION,
+            found: None,
+        }
+    );
+    assert!(err.to_string().contains("regenerate"), "{err}");
+}
+
+#[test]
+fn load_root_rejects_mismatched_project_format() {
+    let shapes = SlotShapeRegistry::default();
+    let ctx = parse_ctx(&shapes);
+    let mut fs = LpFsMemory::new();
+    write_file(
+        &mut fs,
+        "/project.json",
+        r#"
+{
+  "kind": "Project",
+  "format": 999,
+  "nodes": {}
+}
+"#,
+    );
+
+    let mut registry = ProjectRegistry::new();
+    let err = registry
+        .load_root(&fs, LpPath::new("/project.json"), Revision::new(1), &ctx)
+        .expect_err("mismatched format must be rejected");
+
+    assert_eq!(
+        err,
+        RegistryError::FormatVersion {
+            expected: PROJECT_FORMAT_VERSION,
+            found: Some(999),
+        }
+    );
+    assert!(err.to_string().contains("999"), "{err}");
 }

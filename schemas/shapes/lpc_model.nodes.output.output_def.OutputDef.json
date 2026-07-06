@@ -1,0 +1,47 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "endpoint",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 397552907,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "bindings",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 1885459118
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "options",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "ref": {
+                "id": 2660578566
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}
