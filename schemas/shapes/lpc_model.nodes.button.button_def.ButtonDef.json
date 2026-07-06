@@ -1,0 +1,60 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "bindings",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 1885459118
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "endpoint",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 397552907,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "id",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 3065358156,
+              "meta": {},
+              "ty": "u32"
+            }
+          }
+        }
+      },
+      {
+        "name": "stable_ms",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 3065358156,
+              "meta": {},
+              "ty": "u32"
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

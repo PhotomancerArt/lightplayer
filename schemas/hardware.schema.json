@@ -1,0 +1,183 @@
+{
+  "$defs": {
+    "HardwareBoardLabelFile": {
+      "description": "Board-silkscreen label discovered or recorded during board mapping.\n\nLabels are metadata for humans and tooling. They do not create claimable\nresources by themselves; resources come from [`HardwareResourceFile`].",
+      "properties": {
+        "gpio": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "note": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/HardwareBoardLabelStatus"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "label"
+      ],
+      "type": "object"
+    },
+    "HardwareBoardLabelStatus": {
+      "description": "Verification status for a board label in a manifest file.",
+      "enum": [
+        "unassigned",
+        "assigned",
+        "verified",
+        "not-found",
+        "skipped"
+      ],
+      "type": "string"
+    },
+    "HardwareResourceFile": {
+      "description": "Serializable resource entry in a board manifest file.\n\nGPIO resources are often grouped under `gpio` in TOML for readability, while\nnon-GPIO resources live under `resource`; both convert to [`HwResource`].",
+      "properties": {
+        "address": {
+          "type": "string"
+        },
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "capabilities": {
+          "items": {
+            "$ref": "#/$defs/HwCapability"
+          },
+          "type": "array"
+        },
+        "display_label": {
+          "type": "string"
+        },
+        "location": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reserved_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "address",
+        "display_label",
+        "capabilities"
+      ],
+      "type": "object"
+    },
+    "HardwareTarget": {
+      "description": "Build or runtime target that a board manifest describes.",
+      "enum": [
+        "esp32c6",
+        "rv32imac_emu"
+      ],
+      "type": "string"
+    },
+    "HwCapability": {
+      "description": "Capability advertised by a [`crate::HwResource`].\n\nDrivers check capabilities before claiming resources. A single resource may\nexpose multiple capabilities, such as a GPIO that can be used for input or\noutput.",
+      "oneOf": [
+        {
+          "const": "gpio-output",
+          "description": "GPIO can drive an output level or waveform.",
+          "type": "string"
+        },
+        {
+          "const": "gpio-input",
+          "description": "GPIO can be sampled as an input.",
+          "type": "string"
+        },
+        {
+          "const": "ws281x-output",
+          "description": "Timing resource can drive WS281x-class LED protocols.",
+          "type": "string"
+        },
+        {
+          "const": "rmt",
+          "description": "ESP-style remote-control timing peripheral.",
+          "type": "string"
+        },
+        {
+          "const": "radio",
+          "description": "Packet radio peripheral.",
+          "type": "string"
+        }
+      ]
+    }
+  },
+  "$id": "https://lightplayer.dev/schemas/hardware.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Serializable board manifest file (authored as JSON).\n\nThis is the serializable form checked into the repo for board profiles. Use\n[`HardwareManifestFile::to_manifest`] to validate and convert it into the\nruntime [`HwManifest`].",
+  "properties": {
+    "board_label": {
+      "items": {
+        "$ref": "#/$defs/HardwareBoardLabelFile"
+      },
+      "type": "array"
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "gpio": {
+      "items": {
+        "$ref": "#/$defs/HardwareResourceFile"
+      },
+      "type": "array"
+    },
+    "id": {
+      "type": "string"
+    },
+    "product": {
+      "type": "string"
+    },
+    "resource": {
+      "items": {
+        "$ref": "#/$defs/HardwareResourceFile"
+      },
+      "type": "array"
+    },
+    "target": {
+      "$ref": "#/$defs/HardwareTarget"
+    },
+    "url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "vendor": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id",
+    "target",
+    "vendor",
+    "product"
+  ],
+  "title": "HardwareManifestFile",
+  "type": "object"
+}

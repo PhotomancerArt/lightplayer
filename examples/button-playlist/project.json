@@ -1,5 +1,6 @@
 {
   "kind": "Project",
+  "format": 1,
   "name": "button-playlist",
   "nodes": {
     "button": {

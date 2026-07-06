@@ -1,0 +1,81 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "bindings",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 1885459118
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "time",
+        "semantics": {
+          "direction": "consumed"
+        },
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 2605450937,
+              "meta": {},
+              "ty": "f32"
+            }
+          }
+        }
+      },
+      {
+        "name": "idle_entry",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 3065358156,
+              "meta": {},
+              "ty": "u32"
+            }
+          }
+        }
+      },
+      {
+        "name": "default_fade",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": {
+                "number": {
+                  "min": 0.0
+                }
+              },
+              "id": 2960302901,
+              "meta": {},
+              "ty": "f32"
+            }
+          }
+        }
+      },
+      {
+        "name": "entries",
+        "shape": {
+          "map": {
+            "key": "u32",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 899201012
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

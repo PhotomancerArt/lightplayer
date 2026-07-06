@@ -22,11 +22,14 @@ futures-util = "0.3"
 egui = "0.30"
 eframe = "0.30"
 notify = "6"
-lpc-model = { path = "../lp-core/lpc-model" }
+# lp-cli is host-only tooling that nothing in the firmware graphs depends on,
+# so the (non-default) schema-gen features are safe to enable unconditionally.
+lpc-model = { path = "../lp-core/lpc-model", features = ["schema-gen"] }
 lpc-wire = { path = "../lp-core/lpc-wire" }
 lpa-server = { path = "../lp-app/lpa-server" }
 lpa-link = { path = "../lp-app/lpa-link", features = ["host-process", "host-serial-esp32"] }
-lpc-hardware = { path = "../lp-core/lpc-hardware" }
+lpc-hardware = { path = "../lp-core/lpc-hardware", features = ["schema-gen"] }
+schemars = { workspace = true }
 lpc-shared = { path = "../lp-core/lpc-shared" }
 lpfs = { path = "../lp-base/lpfs", features = ["std"] }
 lpc-view = { path = "../lp-core/lpc-view" }
@@ -52,6 +55,9 @@ pollster = "0.3"
 
 [dev-dependencies]
 tempfile = "3"
+# Corpus conformance test (tests/schema_conformance.rs); same pinning as
+# lpc-model's schema_gen dev-dep.
+jsonschema = { version = "0.46", default-features = false }
 lpc-engine = { path = "../lp-core/lpc-engine" }
 lpa-server = { path = "../lp-app/lpa-server" }
 lpc-hardware = { path = "../lp-core/lpc-hardware" }

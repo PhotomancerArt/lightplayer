@@ -328,6 +328,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "fluid": {
       "ref": "./fluid.json"
@@ -429,6 +430,7 @@ mod tests {
             br#"
 {
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "compute": {
       "ref": "./compute.json"

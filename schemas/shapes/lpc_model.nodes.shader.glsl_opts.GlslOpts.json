@@ -1,0 +1,85 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "add_sub",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": {
+                "dropdown": {
+                  "options": [
+                    {
+                      "label": "Saturating",
+                      "value": "saturating"
+                    },
+                    {
+                      "label": "Wrapping",
+                      "value": "wrapping"
+                    }
+                  ]
+                }
+              },
+              "id": 1838283229,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "mul",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": {
+                "dropdown": {
+                  "options": [
+                    {
+                      "label": "Saturating",
+                      "value": "saturating"
+                    },
+                    {
+                      "label": "Wrapping",
+                      "value": "wrapping"
+                    }
+                  ]
+                }
+              },
+              "id": 2912674014,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "div",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": {
+                "dropdown": {
+                  "options": [
+                    {
+                      "label": "Saturating",
+                      "value": "saturating"
+                    },
+                    {
+                      "label": "Reciprocal",
+                      "value": "reciprocal"
+                    }
+                  ]
+                }
+              },
+              "id": 1295061595,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

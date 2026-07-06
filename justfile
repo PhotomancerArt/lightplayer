@@ -426,6 +426,56 @@ studio-web: studio-web-build
     python3 -m http.server "${port}" --bind 127.0.0.1
 
 # ============================================================================
+# Schema artifacts (schemas/) - generated from the model shape catalog
+# ============================================================================
+
+# Regenerate the checked-in schemas/ tree (JSON Schemas + slot shape dumps).
+schema-gen:
+    cargo run -p lp-cli -- schema gen
+
+# Verify schemas/ matches the generator byte-for-byte (drift gate, CI-style).
+schema-check:
+    cargo run -p lp-cli -- schema gen --check
+
+# Snapshot the outgoing format into schemas/history/v<N>/ BEFORE bumping
+# PROJECT_FORMAT_VERSION (N = the current constant). Copies the schemas, the
+# slot shape dumps, and a few real authored artifacts as fixtures — the future
+# offline upgrader's build-time inputs. Prints the bump steps; it does NOT
+# edit the constant itself. See schemas/README.md for the full procedure.
+format-bump:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    const_file="lp-core/lpc-model/src/nodes/project/project_def.rs"
+    version=$(sed -n 's/^pub const PROJECT_FORMAT_VERSION: u32 = \([0-9][0-9]*\);.*$/\1/p' "$const_file")
+    if [[ -z "$version" ]]; then
+        echo "error: could not parse PROJECT_FORMAT_VERSION from $const_file" >&2
+        exit 1
+    fi
+    dest="schemas/history/v${version}"
+    if [[ -e "$dest" ]]; then
+        echo "error: $dest already exists — format v${version} was already snapshotted" >&2
+        exit 1
+    fi
+    just schema-check
+    mkdir -p "$dest/fixtures"
+    cp schemas/*.schema.json "$dest/"
+    cp -R schemas/shapes "$dest/shapes"
+    cp projects/test/fyeah-sign/project.json "$dest/fixtures/project.json"
+    cp projects/test/fyeah-sign/playlist.json "$dest/fixtures/playlist.json"
+    cp projects/test/fyeah-sign/blast.json "$dest/fixtures/blast.json"
+    echo
+    echo "Snapshotted format v${version} into ${dest}/."
+    echo
+    echo "Next steps:"
+    echo "  1. Bump PROJECT_FORMAT_VERSION in ${const_file}."
+    echo "  2. Make the format change; update authored project.json files"
+    echo "     (projects/, examples/, lp-fw/fw-browser/www/smoke-project)."
+    echo "  3. just schema-gen    # regenerate schemas/ for the new format"
+    echo "  4. just check         # drift gate + lints"
+    echo "  5. cargo test -p lp-cli   # conformance over the authored corpus"
+    echo "  6. Commit the ${dest}/ snapshot together with the bump."
+
+# ============================================================================
 # Build commands - Workspace-wide
 # ============================================================================
 
@@ -645,12 +695,16 @@ test-glsl-filetests:
 # ============================================================================
 
 [parallel]
-check: fmt-check clippy lint-serde-content
+check: fmt-check clippy lint-serde-content lint-schemars-fw schema-check
 
 # Guard against serde Content-machinery reintroduction (tag/untagged/flatten).
 # See docs/adr/2026-07-04-json-only-artifacts.md and the script's allowlist.
 lint-serde-content:
     ./scripts/check-serde-content.sh
+
+# Guard against schemars reaching the RV32 firmware graphs (schema generation is host-only; see script).
+lint-schemars-fw:
+    ./scripts/check-schemars-fw.sh
 
 # Build RV32 builtins before check/build/test so host crates that embed the
 # builtins ELF do not compile a stale "builtins missing" artifact.

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="JsonSchemaMappingsProjectConfiguration">
+    <state>
+      <map>
+        <entry key="LightPlayer hardware manifest">
+          <value>
+            <SchemaInfo>
+              <option name="name" value="LightPlayer hardware manifest" />
+              <option name="relativePathToSchema" value="schemas/hardware.schema.json" />
+              <option name="schemaVersion" value="JSON Schema version 2020-12" />
+              <option name="patterns">
+                <list>
+                  <Item>
+                    <option name="pattern" value="true" />
+                    <option name="path" value="lp-core/lpc-hardware/boards/**/*.json" />
+                  </Item>
+                </list>
+              </option>
+            </SchemaInfo>
+          </value>
+        </entry>
+        <entry key="LightPlayer node artifact">
+          <value>
+            <SchemaInfo>
+              <option name="name" value="LightPlayer node artifact" />
+              <option name="relativePathToSchema" value="schemas/node.schema.json" />
+              <option name="schemaVersion" value="JSON Schema version 2020-12" />
+              <option name="patterns">
+                <list>
+                  <Item>
+                    <option name="pattern" value="true" />
+                    <option name="path" value="projects/**/*.json" />
+                  </Item>
+                  <Item>
+                    <option name="pattern" value="true" />
+                    <option name="path" value="examples/**/*.json" />
+                  </Item>
+                  <Item>
+                    <option name="pattern" value="true" />
+                    <option name="path" value="lp-fw/fw-browser/www/smoke-project/*.json" />
+                  </Item>
+                </list>
+              </option>
+            </SchemaInfo>
+          </value>
+        </entry>
+        <entry key="LightPlayer project root">
+          <value>
+            <SchemaInfo>
+              <option name="name" value="LightPlayer project root" />
+              <option name="relativePathToSchema" value="schemas/project.schema.json" />
+              <option name="schemaVersion" value="JSON Schema version 2020-12" />
+              <option name="patterns">
+                <list>
+                  <Item>
+                    <option name="pattern" value="true" />
+                    <option name="path" value="projects/**/project.json" />
+                  </Item>
+                  <Item>
+                    <option name="pattern" value="true" />
+                    <option name="path" value="examples/**/project.json" />
+                  </Item>
+                  <Item>
+                    <option name="pattern" value="true" />
+                    <option name="path" value="lp-fw/fw-browser/www/smoke-project/project.json" />
+                  </Item>
+                </list>
+              </option>
+            </SchemaInfo>
+          </value>
+        </entry>
+      </map>
+    </state>
+  </component>
+</project>

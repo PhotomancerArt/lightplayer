@@ -72,6 +72,8 @@ holds the full context.
 | Host-serial ESP32 management; self-hosted/vendored browser esptool; raw LittleFS backup/restore; long-management cancel/retry | `2026-06-22-studio-link-management-workflow` | Host-serial support, offline builds, backup, or flash/erase recovery is prioritized |
 | Cancellation/retry affordances and section-aware Device activity | `2026-06-22-studio-device-ux-workflow`; `2026-06-22-studio-link-management-workflow` | Hardware workflows settle and need finer recovery control |
 | CI/browser tooling for `wasm-bindgen-test`/Playwright worker smoke | `2026-06-17-browser-firmware-runtime`; `2026-06-17-studio-link-and-local-runtimes` | Browser-runtime CI execution is provisioned |
+| Offline artifact upgrader (Studio/desktop) consuming `schemas/history/` shape dumps + fixtures | `2026-07-05-artifact-format-version-and-schema-snapshots` | Fielded devices hold old-format projects that must survive a breaking bump |
+| CI check that a `PROJECT_FORMAT_VERSION` bump lands with a `schemas/history/` snapshot | `2026-07-05-artifact-format-version-and-schema-snapshots` | The first real format bump |
 
 ## Relationship To Shared Planning
 

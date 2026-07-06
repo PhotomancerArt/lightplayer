@@ -19,7 +19,7 @@ pub use fixture::{
 pub use fluid::{FluidDef, FluidDefView, FluidEmitter, FluidState};
 pub use node_def::{
     ArtifactPathResolutionError, InvocationSite, NodeArtifact, NodeDef, NodeDefParseError,
-    NodeDefWriteError, resolve_artifact_specifier,
+    NodeDefWriteError, ProjectFormatProbe, read_project_format_json, resolve_artifact_specifier,
 };
 pub use output::{
     OutputDef, OutputDefView, OutputDriverOptionsConfig, OutputDriverOptionsConfigView,
@@ -28,7 +28,7 @@ pub use playlist::{
     PlaylistDef, PlaylistDefView, PlaylistEntry, PlaylistEntryView, PlaylistState,
     PlaylistStateView,
 };
-pub use project::{ProjectDef, ProjectDefView};
+pub use project::{PROJECT_FORMAT_VERSION, ProjectDef, ProjectDefView};
 pub use radio::{ControlRadioDef, ControlRadioDefView, ControlRadioState, ControlRadioStateView};
 pub use shader::{
     AddSubMode, ComputeShaderDef, ComputeShaderDefView, DivMode, GlslOpts, GlslOptsView, MulMode,

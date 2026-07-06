@@ -1,0 +1,463 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "render_size",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "dimensions",
+              "id": 2973013964,
+              "meta": {},
+              "ty": {
+                "struct": {
+                  "fields": [
+                    {
+                      "name": "width",
+                      "ty": "u32"
+                    },
+                    {
+                      "name": "height",
+                      "ty": "u32"
+                    }
+                  ],
+                  "name": "Dim2u"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "bindings",
+        "shape": {
+          "map": {
+            "key": "string",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 1885459118
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "sampling",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "plain",
+              "id": 1216569569,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "diagnostic_mode",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": {
+                "dropdown": {
+                  "options": [
+                    {
+                      "label": "Off",
+                      "value": "off"
+                    },
+                    {
+                      "label": "LED index",
+                      "value": "led_index"
+                    },
+                    {
+                      "label": "RGB groups of 10",
+                      "value": "groups_10"
+                    },
+                    {
+                      "label": "Path colors",
+                      "value": "path_colors"
+                    },
+                    {
+                      "label": "Chase",
+                      "value": "chase"
+                    }
+                  ]
+                }
+              },
+              "id": 4232169722,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "mapping",
+        "shape": {
+          "enum": {
+            "meta": {},
+            "variants": [
+              {
+                "name": "Unset",
+                "shape": {
+                  "unit": {
+                    "meta": {}
+                  }
+                }
+              },
+              {
+                "name": "PathPoints",
+                "shape": {
+                  "record": {
+                    "fields": [
+                      {
+                        "name": "paths",
+                        "shape": {
+                          "map": {
+                            "key": "u32",
+                            "meta": {},
+                            "value": {
+                              "enum": {
+                                "meta": {},
+                                "variants": [
+                                  {
+                                    "name": "RingArray",
+                                    "shape": {
+                                      "record": {
+                                        "fields": [
+                                          {
+                                            "name": "center",
+                                            "shape": {
+                                              "value": {
+                                                "shape": {
+                                                  "editor": "xy",
+                                                  "id": 1477692922,
+                                                  "meta": {},
+                                                  "ty": "vec2"
+                                                }
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "name": "diameter",
+                                            "shape": {
+                                              "value": {
+                                                "shape": {
+                                                  "editor": {
+                                                    "number": {
+                                                      "min": 0.0
+                                                    }
+                                                  },
+                                                  "id": 2960302901,
+                                                  "meta": {},
+                                                  "ty": "f32"
+                                                }
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "name": "start_ring_inclusive",
+                                            "shape": {
+                                              "value": {
+                                                "shape": {
+                                                  "editor": "plain",
+                                                  "id": 3065358156,
+                                                  "meta": {},
+                                                  "ty": "u32"
+                                                }
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "name": "end_ring_exclusive",
+                                            "shape": {
+                                              "value": {
+                                                "shape": {
+                                                  "editor": "plain",
+                                                  "id": 3065358156,
+                                                  "meta": {},
+                                                  "ty": "u32"
+                                                }
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "name": "ring_lamp_counts",
+                                            "shape": {
+                                              "map": {
+                                                "key": "u32",
+                                                "meta": {},
+                                                "value": {
+                                                  "value": {
+                                                    "shape": {
+                                                      "editor": "plain",
+                                                      "id": 3065358156,
+                                                      "meta": {},
+                                                      "ty": "u32"
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "name": "offset_angle",
+                                            "shape": {
+                                              "value": {
+                                                "shape": {
+                                                  "editor": "plain",
+                                                  "id": 2605450937,
+                                                  "meta": {},
+                                                  "ty": "f32"
+                                                }
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "name": "order",
+                                            "shape": {
+                                              "value": {
+                                                "shape": {
+                                                  "editor": {
+                                                    "dropdown": {
+                                                      "options": [
+                                                        {
+                                                          "label": "Inner first",
+                                                          "value": "inner_first"
+                                                        },
+                                                        {
+                                                          "label": "Outer first",
+                                                          "value": "outer_first"
+                                                        }
+                                                      ]
+                                                    }
+                                                  },
+                                                  "id": 2101432397,
+                                                  "meta": {},
+                                                  "ty": "string"
+                                                }
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "meta": {}
+                                      }
+                                    }
+                                  },
+                                  {
+                                    "name": "PointList",
+                                    "shape": {
+                                      "record": {
+                                        "fields": [
+                                          {
+                                            "name": "first_channel",
+                                            "shape": {
+                                              "value": {
+                                                "shape": {
+                                                  "editor": "plain",
+                                                  "id": 3065358156,
+                                                  "meta": {},
+                                                  "ty": "u32"
+                                                }
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "name": "points",
+                                            "shape": {
+                                              "map": {
+                                                "key": "u32",
+                                                "meta": {},
+                                                "value": {
+                                                  "value": {
+                                                    "shape": {
+                                                      "editor": "xy",
+                                                      "id": 1477692922,
+                                                      "meta": {},
+                                                      "ty": "vec2"
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "meta": {}
+                                      }
+                                    }
+                                  }
+                                ]
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "name": "sample_diameter",
+                        "shape": {
+                          "value": {
+                            "shape": {
+                              "editor": {
+                                "number": {
+                                  "min": 0.0
+                                }
+                              },
+                              "id": 2960302901,
+                              "meta": {},
+                              "ty": "f32"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "meta": {}
+                  }
+                }
+              },
+              {
+                "name": "SvgPath",
+                "shape": {
+                  "record": {
+                    "fields": [
+                      {
+                        "name": "source",
+                        "shape": {
+                          "custom": {
+                            "codec": 2355797192,
+                            "meta": {},
+                            "shape": {
+                              "value": {
+                                "shape": {
+                                  "editor": "plain",
+                                  "id": 177956922,
+                                  "meta": {},
+                                  "ty": "string"
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "name": "sample_diameter",
+                        "shape": {
+                          "value": {
+                            "shape": {
+                              "editor": {
+                                "number": {
+                                  "min": 0.0
+                                }
+                              },
+                              "id": 2960302901,
+                              "meta": {},
+                              "ty": "f32"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "meta": {}
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      {
+        "name": "color_order",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": {
+                "dropdown": {
+                  "options": [
+                    {
+                      "label": "RGB",
+                      "value": "rgb"
+                    },
+                    {
+                      "label": "GRB",
+                      "value": "grb"
+                    },
+                    {
+                      "label": "RBG",
+                      "value": "rbg"
+                    },
+                    {
+                      "label": "GBR",
+                      "value": "gbr"
+                    },
+                    {
+                      "label": "BRG",
+                      "value": "brg"
+                    },
+                    {
+                      "label": "BGR",
+                      "value": "bgr"
+                    }
+                  ]
+                }
+              },
+              "id": 1235394384,
+              "meta": {},
+              "ty": "string"
+            }
+          }
+        }
+      },
+      {
+        "name": "transform",
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "affine2d",
+              "id": 120141864,
+              "meta": {},
+              "ty": "mat3x3"
+            }
+          }
+        }
+      },
+      {
+        "name": "brightness",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 3065358156,
+                  "meta": {},
+                  "ty": "u32"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
+        "name": "gamma_correction",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 1196386242,
+                  "meta": {},
+                  "ty": "bool"
+                }
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}

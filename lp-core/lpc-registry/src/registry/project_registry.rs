@@ -9,10 +9,11 @@ use lpc_model::{
     ArtifactChangeSummary, ArtifactLocation, ArtifactOverlay, AssetBodyOverlay, CommitResult,
     LpValue, MutationBatchResults, MutationCmdBatch, MutationCmdBatchResult, MutationCmdResult,
     MutationEffect, MutationOp, MutationRejection, MutationRejectionReason, MutationResult,
-    NodeArtifact, NodeDef, NodeDefEntry, NodeDefLocation, NodeDefState, ProjectInventory,
-    ProjectOverlay, Revision, SlotAccess, SlotDataAccess, SlotEditOp, SlotPath, SlotPathSegment,
-    SlotPolicyResolution, SlotShapeLookup, StaticSlotShape, WithRevision, lookup_slot_data,
-    lp_value_matches_type, resolve_slot_policy_and_leaf,
+    NodeArtifact, NodeDef, NodeDefEntry, NodeDefLocation, NodeDefState, PROJECT_FORMAT_VERSION,
+    ProjectFormatProbe, ProjectInventory, ProjectOverlay, Revision, SlotAccess, SlotDataAccess,
+    SlotEditOp, SlotPath, SlotPathSegment, SlotPolicyResolution, SlotShapeLookup, StaticSlotShape,
+    WithRevision, lookup_slot_data, lp_value_matches_type, read_project_format_json,
+    resolve_slot_policy_and_leaf,
 };
 use lpfs::{FsEvent, FsEventKind, LpFs, LpPath};
 
@@ -51,6 +52,7 @@ impl ProjectRegistry {
     ) -> Result<LoadResult, RegistryError> {
         let artifact = self.artifacts.register_file(root_path.to_path_buf(), frame);
         let root = NodeDefLocation::artifact_root(artifact);
+        self.check_root_format(fs, &root)?;
         let before = ProjectInventory::new();
 
         self.root = Some(root.clone());
@@ -59,6 +61,36 @@ impl ProjectRegistry {
         self.inventory = after;
 
         Ok(LoadResult::new(root, changes))
+    }
+
+    /// Reject project roots whose authored `format` is missing or unsupported.
+    ///
+    /// The probe runs on the raw root bytes before anything parses, so a
+    /// future-format project fails with the dedicated error instead of a deep
+    /// parse failure. Unreadable, malformed, or non-`Project` roots skip the
+    /// check and keep their existing diagnostics.
+    fn check_root_format(
+        &mut self,
+        fs: &dyn LpFs,
+        root: &NodeDefLocation,
+    ) -> Result<(), RegistryError> {
+        let Ok(bytes) = self.artifacts.read_bytes(&root.artifact, fs) else {
+            return Ok(());
+        };
+        let Ok(text) = core::str::from_utf8(&bytes) else {
+            return Ok(());
+        };
+        let Ok(ProjectFormatProbe::Project { format }) = read_project_format_json(text) else {
+            return Ok(());
+        };
+        if format == Some(PROJECT_FORMAT_VERSION) {
+            Ok(())
+        } else {
+            Err(RegistryError::FormatVersion {
+                expected: PROJECT_FORMAT_VERSION,
+                found: format,
+            })
+        }
     }
 
     pub fn mutate(
@@ -1286,6 +1318,7 @@ mod tests {
             "/project.json",
             r#"{
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "clock": { "ref": "./clock.json" }
   }
@@ -1325,6 +1358,7 @@ mod tests {
             "/project.json",
             r#"{
   "kind": "Project",
+  "format": 1,
   "nodes": {
     "pixels": { "ref": "./fixture.json" }
   }

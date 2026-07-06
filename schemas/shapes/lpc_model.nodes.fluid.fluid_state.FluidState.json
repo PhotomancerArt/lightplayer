@@ -1,0 +1,29 @@
+{
+  "record": {
+    "fields": [
+      {
+        "name": "output",
+        "policy": {
+          "persistence": "transient",
+          "writable": false
+        },
+        "semantics": {
+          "direction": "produced"
+        },
+        "shape": {
+          "value": {
+            "shape": {
+              "editor": "visual_product",
+              "id": 689649576,
+              "meta": {},
+              "ty": {
+                "product": "visual"
+              }
+            }
+          }
+        }
+      }
+    ],
+    "meta": {}
+  }
+}
