@@ -42,6 +42,9 @@
     --studio-status-good-bg: #13241d;
     --studio-status-good-border: #365545;
     --studio-status-good-text: #7be0b2;
+    --studio-status-live-bg: #142330;
+    --studio-status-live-border: #3c5c78;
+    --studio-status-live-text: #9cc8ee;
     --studio-status-warning-bg: #292614;
     --studio-status-warning-border: #796c33;
     --studio-status-warning-text: #f0dc7a;
@@ -90,6 +93,21 @@ input,
 textarea,
 select {
     font: inherit;
+}
+
+/* Slot slider control (config slot editor). */
+
+.ux-slot-slider {
+    width: 110px;
+    min-width: 60px;
+    margin: 0;
+    accent-color: var(--studio-color-accent);
+    cursor: pointer;
+}
+
+.ux-slot-slider:disabled {
+    accent-color: var(--studio-color-border-strong);
+    cursor: default;
 }
 
 /* Transitional CSS for story-only editor and exploration surfaces.

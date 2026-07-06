@@ -1,7 +1,5 @@
 //! RV32I/M instruction encoding (32-bit little-endian).
 
-use alloc::vec::Vec;
-
 /// R-type: opcode | rd | funct3 | rs1 | rs2 | funct7
 #[inline]
 pub fn encode_r_type(opcode: u32, rd: u32, funct3: u32, rs1: u32, rs2: u32, funct7: u32) -> u32 {
@@ -365,24 +363,44 @@ pub fn encode_ret() -> u32 {
     encode_jalr(0, 1, 0)
 }
 
+/// Instruction words materializing a 32-bit constant: at most `lui` + `addi`.
+/// Fixed-size (no heap) — constants are frequent in Q32 shader code and this
+/// used to be one `Vec` allocation per materialization.
+pub struct Iconst32Seq {
+    words: [u32; 2],
+    len: u8,
+}
+
+impl IntoIterator for Iconst32Seq {
+    type Item = u32;
+    type IntoIter = core::iter::Take<core::array::IntoIter<u32, 2>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.words.into_iter().take(self.len as usize)
+    }
+}
+
 /// Encode instructions to load a signed 32-bit constant into `rd` (lui+addi or addi from x0).
-pub fn iconst32_sequence(rd: u32, value: i32) -> Vec<u32> {
-    let mut out = Vec::new();
+pub fn iconst32_sequence(rd: u32, value: i32) -> Iconst32Seq {
     if (-2048..2048).contains(&value) {
-        out.push(encode_addi(rd, 0, value));
-        return out;
+        return Iconst32Seq {
+            words: [encode_addi(rd, 0, value), 0],
+            len: 1,
+        };
     }
     let v = value as u32;
     let mut upper = (v >> 12) as i32;
     if (v & 0x800) != 0 {
         upper = upper.wrapping_add(1);
     }
-    out.push(encode_lui(rd, upper as u32 & 0xfffff));
+    let mut words = [encode_lui(rd, upper as u32 & 0xfffff), 0];
+    let mut len = 1u8;
     let lower = ((v & 0xfff) as i32) << 20 >> 20;
     if lower != 0 {
-        out.push(encode_addi(rd, rd, lower));
+        words[1] = encode_addi(rd, rd, lower);
+        len = 2;
     }
-    out
+    Iconst32Seq { words, len }
 }
 
 #[cfg(test)]

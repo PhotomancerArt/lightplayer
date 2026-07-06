@@ -143,6 +143,36 @@ per slot plus project-level `ProjectOp::{SaveOverlay, RevertAllEdits}`, all
 `ActionClass::Foreground` with the 6 s editor quiet-gap deadline
 (`PROJECT_EDITOR_ACTION_DEADLINE`).
 
+### D6 — Minimal-diff overlay normalization (added 2026-07-05)
+
+The overlay is a **minimal diff against saved state**: a `PutSlotEdit`
+assigning a value equal to the base (unoverlaid) value is not stored — the
+server normalizes it to removing any existing entry at that path
+(`normalize_assign_to_base` in `ProjectRegistry`; applies to both
+`mutate_batch` and the singular `mutate`). "Edited, then changed back"
+therefore reads Clean, converging on the same state as an explicit Revert.
+UX driver: choice-type values — select a diagnostic mode, use it, set it
+back to "Off"; the edited highlight must disappear.
+
+What this deliberately gives up: an overlay entry equal to the current base
+no longer *pins* the value against future base changes. For an editing
+surface, "I changed it back" means "no change" — pinning was an accident of
+the storage model, not a feature anyone asked for.
+
+Two load-bearing details:
+
+- **Ack fidelity.** The per-command result effect distinguishes
+  `OverlayChanged` from `NormalizedToRemoval`, and the client mirror applies
+  the **effect**, not the sent command
+  (`ProjectSync::apply_acked_edits` → `effective_mutation`). Without this
+  the mirror would show dirty while the server overlay is clean — and since
+  an elided edit may not advance the overlay revision, no corrective fetch
+  would ever fire.
+- **Exact equality.** Comparison is exact `LpValue` equality: a near-miss
+  float (1.0000001 vs 1.0) remains an edit. Predictable, and correct for
+  step-quantized controls; revisit only if a real near-miss annoyance
+  appears.
+
 ## Consequences
 
 - Reconnect and multi-client dirty state are free: one overlay read rebuilds
@@ -200,17 +230,29 @@ Per the deferred-decision convention, these are indexed in
   map entry add/remove, option some/none, and enum variant switching have
   real design decisions. **Revisit in** roadmap M3 — extend this ADR or add
   a note if M3 sets precedent.
+- **(f) Alternative dirty modes.** Minimal-diff normalization (D6) fixes
+  the dirty semantics to "differs from saved". If a use case for
+  touched-mode tracking or deliberate value pinning appears (e.g. holding a
+  slot against concurrent base changes), it would be an explicit per-edit
+  mode, not a return to the accidental pin. **Revisit when** such a use
+  case actually shows up.
 - **(d) Singular `ProjectRegistry::mutate` is unvalidated.** Only
   `mutate_batch` (the wire surface) enforces policy and type checks;
   `mutate` applies unconditionally. Acceptable today because no wire path
   reaches it. **Revisit when** any new caller of `mutate` appears — route it
   through the same validation or delete it.
-- **(e) BLOCKING for M2 — revert regresses effective-def revisions
-  (pre-existing server-side bug).** Clearing overlay edits (revert) moves
-  effective-def revisions *backwards*, so a `since`-gated project read skips
-  the reverted values: a connected client shows stale values after
-  `RevertAllEdits` until a full (`since = 0`) resync, while the runtime
-  itself reverts correctly. The e2e test works around it by reconnecting
-  (`studio_edit_e2e_tests.rs`). **Must be fixed before roadmap M2 ships
-  revert UX** — that milestone's revert affordance depends on the client
-  seeing the reverted value without a reconnect.
+- **(e) ~~BLOCKING for M2 — revert regresses effective-def revisions
+  (pre-existing server-side bug).~~ Fixed 2026-07-05.** Clearing overlay
+  edits (revert) moved effective-def revisions *backwards*, so a
+  `since`-gated project read skipped the reverted values: a connected client
+  showed stale values after a revert until a full (`since = 0`) resync,
+  while the runtime itself reverted correctly. Fixed by keeping revision
+  stamps monotonic: when an operation removes an artifact's overlay coverage
+  (`RemoveSlotEdit` emptying it, `Clear`, commit dropping persisted
+  entries), the registry stamps that artifact at the current frame
+  (`ProjectRegistry::stamp_artifacts_leaving_overlay` →
+  `ArtifactStore::mark_content_changed`), so the reverted defs' effective
+  revisions advance and gated reads deliver them. Guarded by the engine
+  contract test `reverted_slot_edit_resends_def_root` (M5 G6a suite),
+  registry-level revision tests, and the e2e tests in
+  `studio_edit_e2e_tests.rs`, which no longer reconnect after revert.

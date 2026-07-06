@@ -988,6 +988,7 @@ pub(crate) fn project_editor_summary(phase: ProjectSyncPhase) -> ProjectSyncSumm
     ProjectSyncSummary {
         phase,
         revision: 42,
+        overlay_revision: 7,
         node_count: 5,
         root_node_count: 1,
         slot_root_count: 10,

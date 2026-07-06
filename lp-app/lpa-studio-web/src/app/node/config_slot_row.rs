@@ -1,12 +1,27 @@
 //! Table row presentation for a single config slot.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiConfigSlot, UiConfigSlotBody, UiSlotFieldState, UiSlotOptionality};
+use lpa_studio_core::{
+    ProjectSlotAddress, UiAction, UiConfigSlot, UiConfigSlotBody, UiNodeDirtyState,
+    UiSlotFieldState, UiSlotOptionality,
+};
 
 use crate::app::node::{
-    SlotDetailButton, SlotRecordEditor, SlotValueEditor, primary_affordance, slot_row_class,
+    SlotDetailButton, SlotDetailRevert, SlotRecordEditor, SlotValueEditor, primary_affordance,
+    slot_row_class,
 };
 use crate::base::{StudioIcon, StudioIconName};
+
+/// Edit chrome for a touched slot row: persisted edits show as "unsaved"
+/// (amber badge + warning tint, counts toward Save), transient edits as
+/// "live" (blue tint only, applied to the running project and never written
+/// by Save). The per-slot Revert/Reset affordance lives in the slot detail
+/// popup, not on the row.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SlotEditChrome {
+    Unsaved,
+    Live,
+}
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -16,6 +31,7 @@ pub fn ConfigSlotRow(
     index: usize,
     #[props(default = false)] initially_open: bool,
     #[props(default = None)] initially_expanded: Option<bool>,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
     let child_record = match &slot.body {
         UiConfigSlotBody::Record(record) if !record.fields.is_empty() => Some(record.clone()),
@@ -29,7 +45,11 @@ pub fn ConfigSlotRow(
     let mut expanded = use_signal(|| initially_expanded.unwrap_or(depth > 0 || !has_children));
     let aspects = slot.visible_aspects();
     let primary = primary_affordance(&aspects);
-    let row_class = slot_row_class(primary, index);
+    let chrome = slot_edit_chrome(&slot.state);
+    let row_class = match chrome {
+        Some(SlotEditChrome::Live) if slot.state.invalid.is_none() => live_row_class(),
+        _ => slot_row_class(primary, index),
+    };
     let indent = depth * 14;
 
     rsx! {
@@ -60,15 +80,25 @@ pub fn ConfigSlotRow(
                     }
                 }
                 div { class: "tw:flex tw:min-w-0 tw:items-center tw:justify-end tw:gap-2 tw:text-sm tw:leading-tight tw:text-muted-foreground",
+                    if chrome == Some(SlotEditChrome::Unsaved) {
+                        UnsavedBadge {}
+                    }
                     if let Some(optionality) = slot.optionality {
                         OptionalSlotToggle { optionality }
                     }
-                    SlotBodyPreview { body: slot.body.clone(), state: slot.state.clone(), expanded: expanded() }
+                    SlotBodyPreview {
+                        body: slot.body.clone(),
+                        state: slot.state.clone(),
+                        expanded: expanded(),
+                        address: slot.address.clone(),
+                        on_action,
+                    }
                 }
                 SlotDetailButton {
                     label: slot.label.clone(),
                     aspects,
                     initially_open,
+                    revert: slot_detail_revert(chrome, slot.address.clone(), on_action),
                 }
             }
             if expanded() {
@@ -77,6 +107,7 @@ pub fn ConfigSlotRow(
                         record,
                         depth: depth + 1,
                         separated: true,
+                        on_action,
                     }
                 }
                 if let Some(asset) = child_asset {
@@ -112,15 +143,54 @@ fn OptionalSlotToggle(optionality: UiSlotOptionality) -> Element {
     }
 }
 
+/// Compact "unsaved" pill marking a touched persisted slot row. Live rows
+/// carry no badge: their tint plus the detail icon are the whole treatment.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SlotBodyPreview(body: UiConfigSlotBody, state: UiSlotFieldState, expanded: bool) -> Element {
+fn UnsavedBadge() -> Element {
+    rsx! {
+        span {
+            class: "tw:flex-none tw:rounded-pill tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-1.5 tw:py-0.5 tw:text-[0.64rem] tw:font-bold tw:uppercase tw:text-status-warning-foreground",
+            title: "Pending edit; Save writes it to the project files",
+            "unsaved"
+        }
+    }
+}
+
+/// The detail-popup revert affordance for a touched slot: "Revert" for
+/// unsaved (persisted) edits, "Reset" for live (transient) controls.
+fn slot_detail_revert(
+    chrome: Option<SlotEditChrome>,
+    address: Option<ProjectSlotAddress>,
+    on_action: Option<EventHandler<UiAction>>,
+) -> Option<SlotDetailRevert> {
+    let (label, title) = match chrome? {
+        SlotEditChrome::Unsaved => ("Revert", "Discard this pending edit"),
+        SlotEditChrome::Live => ("Reset", "Reset this live control to its authored value"),
+    };
+    Some(SlotDetailRevert {
+        label,
+        title,
+        address: address?,
+        on_action: on_action?,
+    })
+}
+
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn SlotBodyPreview(
+    body: UiConfigSlotBody,
+    state: UiSlotFieldState,
+    expanded: bool,
+    #[props(default = None)] address: Option<ProjectSlotAddress>,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+) -> Element {
     match body {
         UiConfigSlotBody::Empty => rsx! {
             span { class: "tw:text-subtle-foreground", "unset" }
         },
         UiConfigSlotBody::Value(value) => rsx! {
-            SlotValueEditor { value, state }
+            SlotValueEditor { value, state, address, on_action }
         },
         UiConfigSlotBody::Record(record) => {
             let label = if record.fields.len() == 1 {
@@ -161,6 +231,25 @@ fn AssetSlotEditor(asset: lpa_studio_core::UiSlotAsset) -> Element {
             }
         }
     }
+}
+
+/// The edit chrome for a row, when its slot has been touched.
+fn slot_edit_chrome(state: &UiSlotFieldState) -> Option<SlotEditChrome> {
+    if state.dirty == UiNodeDirtyState::Clean {
+        return None;
+    }
+    Some(if state.live {
+        SlotEditChrome::Live
+    } else {
+        SlotEditChrome::Unsaved
+    })
+}
+
+/// Row treatment for live-dirty rows: the dedicated live (blue) tint keeps a
+/// touched runtime control distinct from both the warning-tinted unsaved
+/// (persisted) rows and the good/success (green) treatments.
+fn live_row_class() -> &'static str {
+    "tw:grid tw:min-w-0 tw:grid-cols-[minmax(120px,0.4fr)_minmax(0,1fr)_32px] tw:items-center tw:gap-2 tw:bg-[linear-gradient(270deg,var(--studio-status-live-bg)_0%,var(--studio-status-live-bg)_34%,transparent_100%)] tw:px-2 tw:py-1.5"
 }
 
 fn record_summary_class(expanded: bool) -> &'static str {

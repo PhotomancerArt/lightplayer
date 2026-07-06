@@ -1158,6 +1158,114 @@ mod tests {
         );
     }
 
+    #[test]
+    fn reverted_slot_edit_resends_def_root() {
+        // Studio editing ADR follow-up (e): revision stamps are monotonic
+        // under revert. A slot mutation at R=2 makes the def root due for a
+        // since==1 read; *removing* that edit at R=3 reverts the effective
+        // def to its base content, which a since==2 read must also deliver —
+        // the reverted value is a change the client does not have. (The
+        // regression: clearing the overlay entry made the def revision fall
+        // back to the base artifact revision, so gated reads skipped the
+        // reverted value until a full since==0 resync.)
+        let mut engine = Engine::new(TreePath::parse("/t.show").expect("path"));
+        let mut registry = ProjectRegistry::new();
+        let mut fs = lpfs::LpFsMemory::new();
+        fs.write_file_mut(
+            lpfs::LpPath::new("/clock.json"),
+            br#"{ "kind": "Clock", "controls": { "rate": 1.0 } }"#,
+        )
+        .expect("write clock def");
+        let shapes = lpc_model::SlotShapeRegistry::default();
+        let ctx = lpc_registry::ParseCtx { shapes: &shapes };
+        registry
+            .load_root(
+                &fs,
+                lpfs::LpPath::new("/clock.json"),
+                Revision::new(1),
+                &ctx,
+            )
+            .expect("load clock project");
+
+        let root = engine.tree().root();
+        let cid = engine
+            .tree_mut()
+            .add_child(
+                root,
+                NodeName::parse("clock").expect("name"),
+                NodeName::parse("clock").expect("ty"),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                test_placeholder_spine(),
+                Revision::new(1),
+            )
+            .expect("add clock node");
+        engine
+            .tree_mut()
+            .get_mut(cid)
+            .expect("clock entry")
+            .def_location = Some(lpc_model::NodeDefLocation::artifact_root(
+            lpc_model::ArtifactLocation::file("/clock.json"),
+        ));
+
+        let clock = lpc_model::ArtifactLocation::file("/clock.json");
+        let rate = lpc_model::SlotPath::parse("controls.rate").expect("slot path");
+
+        // Settled at the load revision: nothing is due at since == 1.
+        assert!(
+            slot_root_names(&mut engine, &registry, Some(Revision::new(1))).is_empty(),
+            "no roots due before the edit"
+        );
+
+        // Mutate at R = 2: the def root is due for a since == 1 read.
+        registry
+            .mutate(
+                &fs,
+                lpc_model::MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: lpc_model::SlotEdit::assign_value(
+                        rate.clone(),
+                        lpc_model::LpValue::F32(2.0),
+                    ),
+                },
+                Revision::new(2),
+                &ctx,
+            )
+            .expect("mutate clock rate");
+        assert_eq!(
+            slot_root_names(&mut engine, &registry, Some(Revision::new(1))),
+            Vec::from([node_def_root_name(cid)]),
+            "the edited def root is delivered past its edit revision"
+        );
+
+        // Revert at R = 3: the reverted def root MUST be due for a
+        // since == 2 read.
+        registry
+            .mutate(
+                &fs,
+                lpc_model::MutationOp::RemoveSlotEdit {
+                    artifact: clock,
+                    path: rate,
+                },
+                Revision::new(3),
+                &ctx,
+            )
+            .expect("revert clock rate");
+        assert_eq!(
+            slot_root_names(&mut engine, &registry, Some(Revision::new(2))),
+            Vec::from([node_def_root_name(cid)]),
+            "the reverted def root is delivered — revert advances its revision"
+        );
+
+        // The stamp is stable: once the client has caught up to the revert
+        // revision, the root is quiet again.
+        assert!(
+            slot_root_names(&mut engine, &registry, Some(Revision::new(3))).is_empty(),
+            "no re-delivery after the client catches up to the revert"
+        );
+    }
+
     /// Collect the `name`s of every `SlotRoot` event from a nodes-detail read at
     /// the given `since`.
     fn slot_root_names(

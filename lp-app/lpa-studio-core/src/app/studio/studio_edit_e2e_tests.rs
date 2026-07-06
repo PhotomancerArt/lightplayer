@@ -77,7 +77,7 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
     }
     handle.tx.send(set_value_action(
         color_order_address.clone(),
-        LpValue::String("grb".to_string()),
+        LpValue::String("rgb".to_string()),
     ));
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("edits emit a snapshot");
@@ -94,7 +94,7 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
     let color_order = find_slot(&snapshot, "color_order");
     assert_eq!(color_order.state.dirty, UiNodeDirtyState::Dirty);
     assert!(!color_order.state.live);
-    assert_eq!(slot_value_display(color_order), "grb");
+    assert_eq!(slot_value_display(color_order), "rgb");
     assert_eq!(
         editor_dirty(&snapshot),
         (1, 1),
@@ -112,7 +112,7 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
 
     let fixture_json = read_project_file(&server, "fixture.json");
     assert!(
-        fixture_json.contains("\"color_order\":\"grb\""),
+        fixture_json.contains("\"color_order\":\"rgb\""),
         "fixture.json gained the persisted color-order edit: {fixture_json}"
     );
     let clock_json = read_project_file(&server, "clock.json");
@@ -131,12 +131,16 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
     assert_eq!(color_order.state.dirty, UiNodeDirtyState::Clean);
     assert_eq!(
         slot_value_display(color_order),
-        "grb",
+        "rgb",
         "committed value synced back"
     );
     assert_eq!(editor_dirty(&snapshot), (0, 1));
 
-    // Revert all: the overlay clears and every slot returns to Clean.
+    // Revert all: the overlay clears, every slot returns to Clean, and the
+    // *gated* refresh (since = last known revision) delivers the reverted
+    // def values directly — no reconnect/full resync. Reverting advances the
+    // effective def revisions monotonically (studio editing ADR follow-up
+    // (e)), so the delta read includes the reverted roots.
     handle.tx.send(project_action(ProjectOp::RevertAllEdits));
     drive(actor.run_one_batch_for_test());
     handle.tx.send(project_action(ProjectOp::RefreshProject));
@@ -145,37 +149,147 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
 
     let rate = find_slot(&snapshot, "controls.rate");
     assert_eq!(rate.state.dirty, UiNodeDirtyState::Clean);
+    assert_eq!(
+        slot_value_display(rate),
+        "1",
+        "rate reverted to the authored value through the gated refresh"
+    );
     let color_order = find_slot(&snapshot, "color_order");
     assert_eq!(color_order.state.dirty, UiNodeDirtyState::Clean);
+    assert_eq!(
+        slot_value_display(color_order),
+        "rgb",
+        "revert does not undo committed file changes"
+    );
     assert_eq!(editor_dirty(&snapshot), (0, 0));
+}
 
-    // Server truth after the revert: a full (since=0) resync via reconnect
-    // shows the clock rate back at its authored value. (A *gated* delta read
-    // does not deliver the reverted value: clearing the overlay regresses the
-    // effective def's revisions, which a `since`-gated read skips — a known
-    // server-side read-model nuance outside this client change.)
-    handle.tx.send(project_action(ProjectOp::DisconnectProject));
-    drive(actor.run_one_batch_for_test());
+#[test]
+fn per_slot_transient_reset_reverts_value_through_gated_refresh() {
+    // The per-slot Reset affordance on a transient control (the clock `rate`
+    // slider): SetValue then `SlotEditOp::Revert` must bring the DTO back to
+    // the authored default through a *gated* refresh, without a reconnect.
+    // The intermediate refresh below syncs the mutated def into the view
+    // first, so the final assertion can only pass if the refresh after the
+    // revert delivers the *reverted* def root (monotonic revisions, studio
+    // editing ADR follow-up (e)) — not because a stale mirror or buffer
+    // entry happened to shadow the right value.
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
     handle
         .tx
         .send(project_action(ProjectOp::ConnectRunningProject));
     drive(actor.run_one_batch_for_test());
-    let snapshot = view.try_recv().expect("reconnect emits a snapshot");
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let rate = find_slot(&snapshot, "controls.rate");
+    assert_eq!(slot_value_display(rate), "1");
+    let rate_address = rate.address.clone().expect("rate slot carries an address");
+
+    // Edit the transient control, then pull a gated refresh so the synced
+    // view itself holds the edited value.
+    handle
+        .tx
+        .send(set_value_action(rate_address.clone(), LpValue::F32(2.0)));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("edit + refresh emit a snapshot");
+    let rate = find_slot(&snapshot, "controls.rate");
+    assert_eq!(rate.state.dirty, UiNodeDirtyState::Dirty);
+    assert_eq!(slot_value_display(rate), "2");
+
+    // Per-slot reset: revert the rate edit, then a gated refresh must show
+    // the authored default again.
+    handle.tx.send(revert_action(rate_address));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("revert + refresh emit a snapshot");
 
     let rate = find_slot(&snapshot, "controls.rate");
     assert_eq!(rate.state.dirty, UiNodeDirtyState::Clean);
     assert_eq!(
         slot_value_display(rate),
         "1",
-        "rate reverted to the authored value"
+        "per-slot reset restores the authored default through the gated refresh"
     );
+}
+
+#[test]
+fn set_back_to_base_normalizes_to_clean_without_overlay_fetch() {
+    // Minimal-diff normalization, user scenario: pick a choice value
+    // (diagnostic-mode style), use it, set it back to the authored value —
+    // the edited highlight must clear. The server elides the base-equal
+    // assignment (NormalizedToRemoval) and the mirror must learn that from
+    // the ack alone: the overlay revision may not advance, so a corrective
+    // ReadOverlay would never fire.
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let sent = Rc::new(RefCell::new(Vec::new()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::clone(&sent),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let color_order = find_slot(&snapshot, "color_order");
+    assert_eq!(color_order.state.dirty, UiNodeDirtyState::Clean);
+    assert_eq!(slot_value_display(color_order), "grb", "authored default");
+    let address = color_order
+        .address
+        .clone()
+        .expect("color order slot carries an address");
+
+    // Change the choice: dirty, counted.
+    handle.tx.send(set_value_action(
+        address.clone(),
+        LpValue::String("rgb".to_string()),
+    ));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("edit emits a snapshot");
+    let color_order = find_slot(&snapshot, "color_order");
+    assert_eq!(color_order.state.dirty, UiNodeDirtyState::Dirty);
+    assert_eq!(editor_dirty(&snapshot), (1, 0));
+
+    // Set it back to the authored value: the highlight clears, no overlay
+    // fetch corrects the mirror — the ack effect alone must do it.
+    let overlay_reads_before = count_overlay_reads(&sent);
+    handle.tx.send(set_value_action(
+        address,
+        LpValue::String("grb".to_string()),
+    ));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("set-back emits a snapshot");
     let color_order = find_slot(&snapshot, "color_order");
     assert_eq!(
-        slot_value_display(color_order),
-        "grb",
-        "revert does not undo committed file changes"
+        color_order.state.dirty,
+        UiNodeDirtyState::Clean,
+        "setting a slot back to its base value clears the edited state"
     );
+    assert_eq!(slot_value_display(color_order), "grb");
     assert_eq!(editor_dirty(&snapshot), (0, 0));
+    assert_eq!(
+        count_overlay_reads(&sent) - overlay_reads_before,
+        0,
+        "the mirror is corrected by the ack effect, not a ReadOverlay"
+    );
 }
 
 // --- Harness ---------------------------------------------------------------
@@ -271,6 +385,13 @@ fn set_value_action(address: crate::ProjectSlotAddress, value: LpValue) -> Studi
     ))
 }
 
+fn revert_action(address: crate::ProjectSlotAddress) -> StudioCommand {
+    StudioCommand::Action(UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        SlotEditOp::Revert { address },
+    ))
+}
+
 fn count_mutations(sent: &Rc<RefCell<Vec<ClientMessage>>>) -> usize {
     sent.borrow()
         .iter()
@@ -279,6 +400,21 @@ fn count_mutations(sent: &Rc<RefCell<Vec<ClientMessage>>>) -> usize {
                 &message.msg,
                 ClientRequest::ProjectCommand {
                     command: WireProjectCommand::MutateOverlay { .. },
+                    ..
+                }
+            )
+        })
+        .count()
+}
+
+fn count_overlay_reads(sent: &Rc<RefCell<Vec<ClientMessage>>>) -> usize {
+    sent.borrow()
+        .iter()
+        .filter(|message| {
+            matches!(
+                &message.msg,
+                ClientRequest::ProjectCommand {
+                    command: WireProjectCommand::ReadOverlay { .. },
                     ..
                 }
             )

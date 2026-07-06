@@ -45,6 +45,9 @@
     --color-status-good-bg: var(--studio-status-good-bg);
     --color-status-good-border: var(--studio-status-good-border);
     --color-status-good-foreground: var(--studio-status-good-text);
+    --color-status-live-bg: var(--studio-status-live-bg);
+    --color-status-live-border: var(--studio-status-live-border);
+    --color-status-live-foreground: var(--studio-status-live-text);
     --color-status-warning-bg: var(--studio-status-warning-bg);
     --color-status-warning-border: var(--studio-status-warning-border);
     --color-status-warning-foreground: var(--studio-status-warning-text);

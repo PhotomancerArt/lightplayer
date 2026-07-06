@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 use std::rc::Rc;
 
 use lpc_model::{
-    ArtifactLocation, ArtifactOverlay, ControlDisplayLayout, MutationCmd, ProjectOverlay, Revision,
-    SlotEditOp, SlotPath,
+    ArtifactLocation, ArtifactOverlay, ControlDisplayLayout, MutationCmd, MutationEffect,
+    MutationOp, ProjectOverlay, Revision, SlotEditOp, SlotPath,
 };
 use lpc_view::{ApplyStatus, ProjectReadApplier, ProjectView};
 use lpc_wire::{
@@ -71,6 +71,7 @@ impl ProjectSync {
         ProjectSyncSummary {
             phase: self.phase,
             revision: self.view.revision.0,
+            overlay_revision: self.overlay_revision.0,
             node_count: self.view.tree.nodes.len(),
             root_node_count: self
                 .view
@@ -153,13 +154,25 @@ impl ProjectSync {
     /// mutation response. Per the editing model there is no follow-up fetch
     /// for the client's own edits: the ack is authoritative for them.
     ///
+    /// What is applied is each command's server-reported **effect**, not the
+    /// command as sent: the server normalizes a `PutSlotEdit` assigning the
+    /// base value into a removal (`MutationEffect::NormalizedToRemoval`), and
+    /// since a no-op normalization does not bump the overlay revision, a
+    /// mirror that applied the sent Put would read dirty forever with no
+    /// corrective fetch ever due.
+    ///
     /// If a foreign client mutated concurrently, the acked revision may skip
     /// states the mirror never saw; that is fine — the next pull's
     /// `overlay_changed_at` comparison self-corrects with a full fetch once
     /// the revision moves past our stamp.
-    pub fn apply_acked_edits(&mut self, batch: &[MutationCmd], overlay_revision: Revision) {
-        for command in batch {
-            self.overlay.apply_mutation(command.mutation.clone());
+    pub fn apply_acked_edits(
+        &mut self,
+        batch: &[(MutationCmd, MutationEffect)],
+        overlay_revision: Revision,
+    ) {
+        for (command, effect) in batch {
+            self.overlay
+                .apply_mutation(effective_mutation(command, effect));
         }
         self.overlay_revision = overlay_revision;
     }
@@ -376,6 +389,26 @@ impl ProjectSync {
 impl Default for ProjectSync {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// The mutation the server actually stored for an acked command.
+///
+/// A `NormalizedToRemoval` effect on a `PutSlotEdit` means the server dropped
+/// (or never created) the overlay entry at the edit's path, so the mirror
+/// applies the equivalent removal. Every other effect applies the command as
+/// sent. Removing an absent entry is a no-op, so the `changed: false` case
+/// needs no special handling.
+fn effective_mutation(command: &MutationCmd, effect: &MutationEffect) -> MutationOp {
+    match (effect, &command.mutation) {
+        (
+            MutationEffect::NormalizedToRemoval { .. },
+            MutationOp::PutSlotEdit { artifact, edit },
+        ) => MutationOp::RemoveSlotEdit {
+            artifact: artifact.clone(),
+            path: edit.path.clone(),
+        },
+        _ => command.mutation.clone(),
     }
 }
 
@@ -856,27 +889,33 @@ mod tests {
         SlotPath::parse("controls.rate").unwrap()
     }
 
-    fn put_cmd(id: u64, value: f32) -> MutationCmd {
-        MutationCmd {
-            id: lpc_model::MutationCmdId::new(id),
-            mutation: lpc_model::MutationOp::PutSlotEdit {
-                artifact: overlay_test_artifact(),
-                edit: lpc_model::SlotEdit::assign_value(
-                    overlay_test_path(),
-                    lpc_model::LpValue::F32(value),
-                ),
+    fn put_cmd(id: u64, value: f32) -> (MutationCmd, MutationEffect) {
+        (
+            MutationCmd {
+                id: lpc_model::MutationCmdId::new(id),
+                mutation: lpc_model::MutationOp::PutSlotEdit {
+                    artifact: overlay_test_artifact(),
+                    edit: lpc_model::SlotEdit::assign_value(
+                        overlay_test_path(),
+                        lpc_model::LpValue::F32(value),
+                    ),
+                },
             },
-        }
+            MutationEffect::OverlayChanged { changed: true },
+        )
     }
 
-    fn remove_cmd(id: u64) -> MutationCmd {
-        MutationCmd {
-            id: lpc_model::MutationCmdId::new(id),
-            mutation: lpc_model::MutationOp::RemoveSlotEdit {
-                artifact: overlay_test_artifact(),
-                path: overlay_test_path(),
+    fn remove_cmd(id: u64) -> (MutationCmd, MutationEffect) {
+        (
+            MutationCmd {
+                id: lpc_model::MutationCmdId::new(id),
+                mutation: lpc_model::MutationOp::RemoveSlotEdit {
+                    artifact: overlay_test_artifact(),
+                    path: overlay_test_path(),
+                },
             },
-        }
+            MutationEffect::OverlayChanged { changed: true },
+        )
     }
 
     /// Install a runtime status reporting `overlay_changed_at` on the view, as
@@ -933,6 +972,16 @@ mod tests {
     }
 
     #[test]
+    fn summary_reports_the_overlay_mirror_revision() {
+        let mut sync = ProjectSync::new();
+        assert_eq!(sync.summary().overlay_revision, 0);
+
+        sync.apply_acked_edits(&[put_cmd(1, 1.0)], Revision::new(6));
+
+        assert_eq!(sync.summary().overlay_revision, 6);
+    }
+
+    #[test]
     fn apply_overlay_read_replaces_mirror_and_revision() {
         let mut sync = ProjectSync::new();
         sync.apply_acked_edits(&[put_cmd(1, 1.0)], Revision::new(2));
@@ -977,6 +1026,43 @@ mod tests {
         );
         assert!(sync.overlay().is_empty());
         assert_eq!(sync.overlay_revision(), Revision::new(4));
+    }
+
+    #[test]
+    fn normalized_ack_removes_the_mirrored_entry_instead_of_applying_the_put() {
+        // Set-back-to-base: the sent command is a Put, but the server stored a
+        // removal. The mirror must apply the effect — applying the Put would
+        // leave the slot dirty forever (a no-op ack does not advance the
+        // overlay revision, so no corrective fetch is ever due).
+        let mut sync = ProjectSync::new();
+        sync.apply_acked_edits(&[put_cmd(1, 2.0)], Revision::new(3));
+        assert_eq!(sync.overlay_slot_edits().count(), 1);
+
+        let (put_back, _) = put_cmd(2, 1.0);
+        sync.apply_acked_edits(
+            &[(
+                put_back,
+                MutationEffect::NormalizedToRemoval { changed: true },
+            )],
+            Revision::new(4),
+        );
+
+        assert!(
+            sync.overlay().is_empty(),
+            "mirror mirrors the stored removal"
+        );
+        assert_eq!(sync.overlay_revision(), Revision::new(4));
+
+        // The no-op flavor (no prior entry) leaves the mirror clean too.
+        let (noop_put, _) = put_cmd(3, 1.0);
+        sync.apply_acked_edits(
+            &[(
+                noop_put,
+                MutationEffect::NormalizedToRemoval { changed: false },
+            )],
+            Revision::new(4),
+        );
+        assert!(sync.overlay().is_empty());
     }
 
     #[test]

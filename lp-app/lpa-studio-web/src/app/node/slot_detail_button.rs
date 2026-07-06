@@ -1,13 +1,32 @@
 //! Shared slot detail button and row treatment for node slot-like surfaces.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow};
+use lpa_studio_core::{
+    ProjectSlotAddress, UiAction, UiSlotAffordance, UiSlotAspect, UiSlotAspectKind, UiSlotAspectRow,
+};
 
+use crate::app::node::slot_edit_actions::slot_revert_action;
 use crate::app::node::{
     SlotShapeDisplay, SlotShapeDisplayMode, SlotUnitDisplay, SlotUnitDisplayMode,
     legacy_shape_from_parts,
 };
 use crate::base::{IconMenuButton, IconMenuTone, PopoverPlacement, StudioIcon, StudioIconName};
+
+/// Footer revert/reset affordance shown inside the slot detail popup for a
+/// touched editable slot. Lives in the popup rather than on the row so the
+/// main interface stays uncluttered (UX review).
+#[derive(Clone, PartialEq)]
+pub struct SlotDetailRevert {
+    /// Button label: "Revert" for unsaved persisted edits, "Reset" for live
+    /// (transient) controls.
+    pub label: &'static str,
+    /// Tooltip explaining what dispatching the revert discards.
+    pub title: &'static str,
+    /// Slot address the revert op targets.
+    pub address: ProjectSlotAddress,
+    /// Shared action conduit.
+    pub on_action: EventHandler<UiAction>,
+}
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -15,6 +34,7 @@ pub fn SlotDetailButton(
     label: String,
     aspects: Vec<UiSlotAspect>,
     #[props(default = false)] initially_open: bool,
+    #[props(default = None)] revert: Option<SlotDetailRevert>,
 ) -> Element {
     let affordance = primary_affordance(&aspects);
     let style = slot_affordance_style(affordance);
@@ -34,6 +54,36 @@ pub fn SlotDetailButton(
                 for aspect in aspects {
                     SlotDetailSection { aspect }
                 }
+                if let Some(revert) = revert {
+                    SlotDetailRevertRow { revert }
+                }
+            }
+        }
+    }
+}
+
+/// Popup footer row hosting the per-slot revert/reset button.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn SlotDetailRevertRow(revert: SlotDetailRevert) -> Element {
+    let SlotDetailRevert {
+        label,
+        title,
+        address,
+        on_action,
+    } = revert;
+
+    rsx! {
+        div { class: "tw:flex tw:justify-end tw:border-t tw:border-border-muted tw:px-3 tw:py-2",
+            button {
+                class: "tw:flex-none tw:cursor-pointer tw:appearance-none tw:rounded-xs tw:border tw:border-border-strong tw:bg-transparent tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:text-muted-foreground tw:hover:bg-card-muted tw:hover:text-strong-foreground",
+                r#type: "button",
+                title,
+                onclick: move |event| {
+                    event.stop_propagation();
+                    on_action.call(slot_revert_action(address.clone()));
+                },
+                "{label}"
             }
         }
     }

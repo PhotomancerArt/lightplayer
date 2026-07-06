@@ -123,20 +123,28 @@ chosen numeric strategy during emission.
 
 ```
 src/
-  lib.rs           public API, re-exports
-  types.rs         IrType, VReg, SlotId, FloatMode, CalleeRef
-  op.rs            Op enum (flat instruction stream)
-  module.rs        IrModule, IrFunction, ImportDecl, SlotDecl
-  builder.rs       ModuleBuilder / FunctionBuilder
-  print.rs         IrModule → text format
-  parse.rs         text format → IrModule
-  validate.rs      structural validation
-  interp.rs        tree-walking interpreter (ImportHandler trait)
-  glsl_metadata.rs GLSL type/param metadata carried alongside IrModule
-  tests/           roundtrip, interpreter, validation tests
+  lib.rs             public API, re-exports
+  types.rs           IrType, VReg, SlotId, FloatMode, CalleeRef
+  lpir_op.rs         LpirOp enum (flat instruction stream)
+  lpir_module.rs     LpirModule, IrFunction, ImportDecl, SlotDecl
+  builder.rs         ModuleBuilder / FunctionBuilder
+  compiler_config.rs compiler configuration carried through the pipeline
+  const_fold.rs      in-place constant folding
+  print.rs           LpirModule → text format
+  parse.rs           text format → LpirModule
+  validate.rs        structural validation
+  interp.rs          tree-walking interpreter (ImportHandler trait)
+  tests/             roundtrip, interpreter, validation tests
 ```
 
+GLSL type/param metadata travels alongside the IR as
+`lps_shared::LpsModuleSig` (it used to live in this crate).
+
 `#![no_std]` + alloc. No backend dependency. No GLSL parser dependency.
+
+Validation (`validate_module`) is a development invariant check: hosts, unit
+tests, and dev-profile filetest runs validate every lowered module, but
+release firmware compiles skip it (it re-walks the whole op stream).
 
 ## Documentation
 
