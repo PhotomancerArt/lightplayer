@@ -15,7 +15,7 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use super::{Collector, EmuCtx, FinishCtx, GateAction, HaltReason, SyscallAction};
+use super::{Collector, EmuCtx, FinishCtx, GateAction, HaltReason, PerfEvent, SyscallAction};
 use std::any::Any;
 
 #[cfg(test)]
@@ -108,6 +108,66 @@ mod tests {
     }
 
     #[test]
+    fn windowed_report_aggregates_by_perf_event_markers() {
+        use std::io::Write as _;
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let meta_path = dir.path().join("meta.json");
+        std::fs::write(
+            &meta_path,
+            r#"{ "collectors": { "alloc": { "heap_start": 0, "heap_size": 1024 } }, "symbols": [] }"#,
+        )
+        .expect("write meta");
+
+        let trace_path = dir.path().join("heap-trace.jsonl");
+        let mut f = std::fs::File::create(&trace_path).expect("create trace");
+        // One alloc outside any window, then a compile window with an alloc,
+        // a nested link window with a dealloc, and a second alloc after link.
+        for line in [
+            r#"{"t":"A","ptr":16,"sz":8,"ic":1,"frames":[],"free":0}"#,
+            r#"{"t":"P","name":"shader-compile","kind":"B","cycle":10,"ic":1}"#,
+            r#"{"t":"A","ptr":32,"sz":100,"ic":2,"frames":[],"free":0}"#,
+            r#"{"t":"P","name":"shader-link","kind":"B","cycle":20,"ic":2}"#,
+            r#"{"t":"D","ptr":16,"sz":8,"ic":3,"frames":[],"free":0}"#,
+            r#"{"t":"P","name":"shader-link","kind":"E","cycle":30,"ic":3}"#,
+            r#"{"t":"A","ptr":64,"sz":50,"ic":4,"frames":[],"free":0}"#,
+            r#"{"t":"P","name":"shader-compile","kind":"E","cycle":40,"ic":4}"#,
+            r#"{"t":"A","ptr":96,"sz":7,"ic":5,"frames":[],"free":0}"#,
+        ] {
+            writeln!(f, "{line}").expect("write line");
+        }
+        drop(f);
+
+        let report =
+            super::analyze_heap_trace(&trace_path, &meta_path, 20).expect("analyze");
+        let compile = report
+            .windows
+            .iter()
+            .find(|(n, _)| n == "shader-compile")
+            .map(|(_, w)| w)
+            .expect("compile window");
+        assert_eq!(compile.alloc_count, 2, "allocs inside compile window");
+        assert_eq!(compile.bytes_allocated, 150);
+        assert_eq!(compile.dealloc_count, 1, "nested link dealloc counts");
+
+        let link = report
+            .windows
+            .iter()
+            .find(|(n, _)| n == "shader-link")
+            .map(|(_, w)| w)
+            .expect("link window");
+        assert_eq!(link.alloc_count, 0);
+        assert_eq!(link.dealloc_count, 1);
+
+        // Whole-trace stats still include everything.
+        assert_eq!(report.stats.alloc_count, 4);
+
+        let body = report.render_body_without_header();
+        assert!(body.contains("--- Windows (by perf event) ---"), "{body}");
+        assert!(body.contains("shader-compile"), "{body}");
+    }
+
+    #[test]
     fn resolve_static_symbol_is_demangled_and_shortened() {
         // v0-mangled (symbol still encodes legacy crate `lp_engine`): FixtureRuntime in lpc_engine::legacy, NodeRuntime in lpc_runtime
         let mangled = "_RNvXs_NtNtNtCs3HTnIBYoJaQ_9lp_engine5nodes7fixture7runtimeNtB4_14FixtureRuntimeNtB8_11NodeRuntime6render";
@@ -149,6 +209,10 @@ pub struct AllocCollector {
     heap_size: u32,
     trace_path: PathBuf,
     enabled: bool,
+    /// Instruction count of the most recent alloc syscall; stamped on
+    /// perf-event marker rows for cross-referencing (windowing itself
+    /// relies on stream order, not on this value).
+    last_ic: u64,
 }
 
 impl AllocCollector {
@@ -162,6 +226,7 @@ impl AllocCollector {
             heap_size,
             trace_path,
             enabled: false,
+            last_ic: 0,
         })
     }
 
@@ -175,6 +240,25 @@ impl AllocCollector {
             self.event_count += 1;
         }
         Ok(())
+    }
+
+    /// Write a perf-event marker row (`"t":"P"`) into the trace stream.
+    ///
+    /// Markers delimit named windows (project-load, shader-compile, …) for
+    /// the per-window report sections. Window membership is determined by
+    /// stream order, which is exact: the trace file is chronological.
+    /// Markers do not count toward `event_count`.
+    fn write_marker(&mut self, evt: &PerfEvent) {
+        let line = serde_json::json!({
+            "t": "P",
+            "name": evt.name,
+            "kind": evt.kind.as_str(),
+            "cycle": evt.cycle,
+            "ic": self.last_ic,
+        });
+        if serde_json::to_writer(&mut self.writer, &line).is_ok() {
+            let _ = self.writer.write_all(b"\n");
+        }
     }
 }
 
@@ -207,6 +291,7 @@ impl Collector for AllocCollector {
             return SyscallAction::Pass;
         }
         let event_type = args.first().copied().unwrap_or(0) as i32;
+        self.last_ic = ctx.instruction_count;
         if !self.enabled && event_type != ALLOC_TRACE_OOM {
             return SyscallAction::Handled;
         }
@@ -273,6 +358,10 @@ impl Collector for AllocCollector {
         }
     }
 
+    fn on_perf_event(&mut self, evt: &PerfEvent) {
+        self.write_marker(evt);
+    }
+
     fn finish(&mut self, _ctx: &FinishCtx<'_>) -> io::Result<()> {
         self.writer.flush()
     }
@@ -315,9 +404,13 @@ const DEFAULT_REPORT_TOP: usize = 20;
 #[derive(Debug, Deserialize)]
 struct TraceEventOwned {
     t: String,
+    #[serde(default)]
     ptr: u32,
+    #[serde(default)]
     sz: u32,
+    #[serde(default)]
     ic: u64,
+    #[serde(default)]
     frames: Vec<u32>,
     #[serde(default)]
     free: u32,
@@ -325,6 +418,36 @@ struct TraceEventOwned {
     old_ptr: Option<u32>,
     #[serde(default)]
     old_sz: Option<u32>,
+    /// Perf-event marker fields (`"t":"P"` rows only).
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    kind: Option<String>,
+}
+
+/// Per-window aggregation for one named perf-event window (e.g. `shader-compile`).
+/// Repeated windows with the same name (e.g. `frame`) aggregate together.
+#[derive(Default)]
+struct WindowStats {
+    open_count: u64,
+    alloc_count: u64,
+    dealloc_count: u64,
+    realloc_count: u64,
+    bytes_allocated: u64,
+    bytes_freed: u64,
+    /// caller -> (alloc+realloc count, bytes)
+    site_stats: HashMap<String, (u64, u64)>,
+}
+
+impl WindowStats {
+    fn record_site(&mut self, frames: &[u32], sz: u32, resolver: &SymbolResolver) {
+        if frames.len() > 1 {
+            let caller = resolver.resolve(frames[1]);
+            let entry = self.site_stats.entry(caller.to_string()).or_default();
+            entry.0 += 1;
+            entry.1 += sz as u64;
+        }
+    }
 }
 
 struct LiveAllocation {
@@ -486,6 +609,10 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
     let mut peak_snapshot: HashMap<u32, LiveAllocation> = HashMap::new();
     let mut oom: Option<OomEvent> = None;
 
+    // Named windows in first-open order; `active` holds indices into `windows`.
+    let mut windows: Vec<(String, WindowStats)> = Vec::new();
+    let mut active: Vec<usize> = Vec::new();
+
     for line in lines {
         let line = line?;
         let line = line.trim();
@@ -503,6 +630,12 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
             "A" => {
                 stats.record_reported_free(event.free, event.ic);
                 stats.record_alloc(event.sz, event.ic, &event.frames, &resolver);
+                for &w in &active {
+                    let win = &mut windows[w].1;
+                    win.alloc_count += 1;
+                    win.bytes_allocated += event.sz as u64;
+                    win.record_site(&event.frames, event.sz, &resolver);
+                }
                 live.insert(
                     event.ptr,
                     LiveAllocation {
@@ -514,6 +647,11 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
             "D" => {
                 stats.record_reported_free(event.free, event.ic);
                 stats.record_dealloc(event.sz, event.ic, &event.frames);
+                for &w in &active {
+                    let win = &mut windows[w].1;
+                    win.dealloc_count += 1;
+                    win.bytes_freed += event.sz as u64;
+                }
                 live.remove(&event.ptr);
             }
             "R" => {
@@ -521,6 +659,13 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
                 let old_ptr = event.old_ptr.unwrap_or(0);
                 let old_sz = event.old_sz.unwrap_or(0);
                 stats.record_realloc(old_sz, event.sz, event.ic, &event.frames, &resolver);
+                for &w in &active {
+                    let win = &mut windows[w].1;
+                    win.realloc_count += 1;
+                    win.bytes_allocated += event.sz as u64;
+                    win.bytes_freed += old_sz as u64;
+                    win.record_site(&event.frames, event.sz, &resolver);
+                }
                 live.remove(&old_ptr);
                 live.insert(
                     event.ptr,
@@ -537,6 +682,32 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
                     frames: event.frames,
                 });
             }
+            "P" => {
+                let name = event.name.as_deref().unwrap_or("?");
+                match event.kind.as_deref() {
+                    Some("B") => {
+                        let idx = match windows.iter().position(|(n, _)| n == name) {
+                            Some(i) => i,
+                            None => {
+                                windows.push((name.to_string(), WindowStats::default()));
+                                windows.len() - 1
+                            }
+                        };
+                        windows[idx].1.open_count += 1;
+                        active.push(idx);
+                    }
+                    Some("E") => {
+                        // Close the innermost open window with this name.
+                        if let Some(pos) = active
+                            .iter()
+                            .rposition(|&w| windows[w].0 == name)
+                        {
+                            active.remove(pos);
+                        }
+                    }
+                    _ => {}
+                }
+            }
             _ => {}
         }
 
@@ -545,7 +716,10 @@ fn analyze_heap_trace(trace_path: &Path, meta_path: &Path, top: usize) -> io::Re
         }
     }
 
-    Ok(AllocReport::build(heap_size, &stats, live, peak_snapshot, oom, resolver).with_top(top))
+    Ok(
+        AllocReport::build(heap_size, &stats, live, peak_snapshot, oom, resolver, windows)
+            .with_top(top),
+    )
 }
 
 fn clone_live_map(live: &HashMap<u32, LiveAllocation>) -> HashMap<u32, LiveAllocation> {
@@ -571,6 +745,7 @@ struct AllocReport {
     peak_live: HashMap<u32, LiveAllocation>,
     oom: Option<OomEvent>,
     resolver: SymbolResolver,
+    windows: Vec<(String, WindowStats)>,
     top: usize,
 }
 
@@ -582,6 +757,7 @@ impl AllocReport {
         peak_live: HashMap<u32, LiveAllocation>,
         oom: Option<OomEvent>,
         resolver: SymbolResolver,
+        windows: Vec<(String, WindowStats)>,
     ) -> Self {
         Self {
             heap_size,
@@ -590,6 +766,7 @@ impl AllocReport {
             peak_live,
             oom,
             resolver,
+            windows,
             top: 20,
         }
     }
@@ -603,11 +780,52 @@ impl AllocReport {
         let mut out = String::new();
         self.write_oom(&mut out);
         self.write_overview(&mut out);
+        self.write_windows(&mut out);
         self.write_peak(&mut out);
         self.write_peak_breakdown(&mut out);
         self.write_live(&mut out);
         self.write_hotspots(&mut out);
         out
+    }
+
+    /// Per-perf-event-window breakdown (project-load, shader-compile, frames, …).
+    /// Windows with the same name aggregate; nested windows count events in
+    /// every enclosing window.
+    fn write_windows(&self, out: &mut String) {
+        if self.windows.is_empty() {
+            return;
+        }
+        writeln!(out, "--- Windows (by perf event) ---").unwrap();
+        for (name, win) in &self.windows {
+            let opens = if win.open_count > 1 {
+                format!(" (x{})", win.open_count)
+            } else {
+                String::new()
+            };
+            writeln!(
+                out,
+                "  {name}{opens}: alloc {} ({} bytes), dealloc {} ({} bytes), realloc {}",
+                fmt_num(win.alloc_count),
+                fmt_num(win.bytes_allocated),
+                fmt_num(win.dealloc_count),
+                fmt_num(win.bytes_freed),
+                fmt_num(win.realloc_count),
+            )
+            .unwrap();
+            let mut sites: Vec<_> = win.site_stats.iter().collect();
+            sites.sort_by(|a, b| b.1.0.cmp(&a.1.0));
+            for (site, (count, bytes)) in sites.iter().take(self.top.min(10)) {
+                writeln!(
+                    out,
+                    "    {:>7} allocs  {:>9} bytes  {}",
+                    fmt_num(*count),
+                    fmt_num(*bytes),
+                    site
+                )
+                .unwrap();
+            }
+        }
+        writeln!(out).unwrap();
     }
 
     fn write_oom(&self, out: &mut String) {
