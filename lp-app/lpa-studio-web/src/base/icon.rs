@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
     Asterisk, Boxes, Check, ChevronDown, ChevronRight, CircleAlert, CircleDot, CircleMinus,
-    FlaskConical, Info, Link2, Link2Off, Locate, LocateFixed, Pencil, Play, Save, SquareArrowRight,
-    TriangleAlert, Undo2, Usb,
+    FlaskConical, Funnel, Info, Link2, Link2Off, Locate, LocateFixed, Pencil, Play, Save, Settings,
+    SquareArrowRight, TriangleAlert, Undo2, Usb,
 };
 
 #[component]
@@ -38,6 +38,8 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::NodeSelected => rsx! { LocateFixed { size } },
         StudioIconName::Save => rsx! { Save { size } },
         StudioIconName::Revert => rsx! { Undo2 { size } },
+        StudioIconName::Settings => rsx! { Settings { size } },
+        StudioIconName::Filter => rsx! { Funnel { size } },
     }
 }
 
@@ -77,4 +79,8 @@ pub enum StudioIconName {
     NodeSelected,
     Save,
     Revert,
+    /// Gear: the console's device-settings popover trigger.
+    Settings,
+    /// Funnel: marks the console's display-level threshold as a filter.
+    Filter,
 }

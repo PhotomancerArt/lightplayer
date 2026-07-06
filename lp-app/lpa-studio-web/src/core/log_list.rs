@@ -1,6 +1,14 @@
 //! The console's scrolling log list: timestamped, per-level styled rows with
 //! sticky bottom autoscroll.
 //!
+//! Rows are **container-responsive**: the list is a CSS container
+//! (`@container`) and each row morphs on the container's own width, not the
+//! viewport. Below 560px (the console's usual home in the narrow device
+//! column) rows are two-line — a dim meta line (time · level · source) over a
+//! full-width message, with a colored left accent for warn/error. At 560px and
+//! wider the same DOM relayouts into the four-column time/level/source/message
+//! grid. One row markup, two layouts, switched by `grid-template-areas`.
+//!
 //! Timestamps render as `HH:MM:SS` in UTC rather than the browser's local
 //! zone: story-baseline PNGs and unit tests must be machine-independent, and
 //! an injectable timezone would have to thread through every shell story for
@@ -29,10 +37,11 @@ pub fn LogList(
     let visible_logs = log_tail(logs, max_entries);
     let mut log_element = use_signal(|| None::<Rc<MountedData>>);
     let mut stick_to_bottom = use_signal(|| true);
+    // `@container` makes rows respond to the list's own width (see module docs).
     let list_class = if framed {
-        "tw:m-0 tw:grid tw:max-h-80 tw:gap-0 tw:overflow-auto tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-0 tw:list-none"
+        "tw:@container tw:m-0 tw:grid tw:max-h-80 tw:gap-0 tw:overflow-auto tw:rounded-md tw:border tw:border-border tw:bg-card tw:p-0 tw:list-none"
     } else {
-        "tw:m-0 tw:grid tw:max-h-80 tw:gap-0 tw:overflow-auto tw:bg-transparent tw:p-0 tw:list-none"
+        "tw:@container tw:m-0 tw:grid tw:max-h-80 tw:gap-0 tw:overflow-auto tw:bg-transparent tw:p-0 tw:list-none"
     };
 
     use_after_render(move || {
@@ -67,26 +76,23 @@ pub fn LogList(
                 ));
             },
             if visible_logs.is_empty() {
-                li { class: "tw:grid tw:grid-cols-[64px_52px_minmax(72px,128px)_minmax(0,1fr)] tw:gap-2 tw:border-b tw:border-border-muted tw:px-3 tw:py-2 tw:text-sm tw:text-subtle-foreground",
-                    span { class: "tw:font-mono tw:text-xs tw:text-dim-foreground", "--:--:--" }
-                    span { class: "tw:font-mono tw:text-xs tw:uppercase", "idle" }
-                    strong { class: "tw:text-xs tw:text-dim-foreground", "studio" }
+                li { class: "tw:border-b tw:border-border-muted tw:px-3 tw:py-2 tw:text-sm tw:text-subtle-foreground",
                     p { class: "tw:m-0 tw:min-w-0 tw:break-words", "{empty_log_message(hidden_count)}" }
                 }
             } else {
                 for entry in visible_logs.iter() {
-                    li { class: log_class(entry.level),
-                        span { class: "tw:font-mono tw:text-xs tw:text-dim-foreground", "{format_log_time(entry.timestamp)}" }
-                        span { class: "tw:font-mono tw:text-xs tw:uppercase", "{log_level_label(entry.level)}" }
+                    li { class: row_class(entry.level),
+                        span { class: "{TIME_CELL}", "{format_log_time(entry.timestamp)}" }
+                        span { class: "{LEVEL_CELL}", "{log_level_label(entry.level)}" }
                         strong {
-                            class: "tw:min-w-0 tw:truncate tw:text-xs tw:text-dim-foreground",
+                            class: "{SOURCE_CELL}",
                             title: log_source_title(&entry.source),
                             "{entry.source.origin.label()}"
                             if let Some(detail) = entry.source.detail.as_ref() {
                                 span { class: "tw:font-normal tw:text-subtle-foreground", " · {detail}" }
                             }
                         }
-                        p { class: "tw:m-0 tw:min-w-0 tw:break-words", "{entry.message}" }
+                        p { class: "{MESSAGE_CELL}", "{entry.message}" }
                     }
                 }
             }
@@ -149,23 +155,44 @@ fn log_level_label(level: UiLogLevel) -> &'static str {
     }
 }
 
-fn log_class(level: UiLogLevel) -> &'static str {
-    match level {
-        // Trace reuses Debug's classes: the theme has no dimmer text token
-        // than `subtle-foreground`.
+/// Shared row geometry, switched by container width. Narrow (<560px): three
+/// auto columns with a `time level source` meta line over a full-width
+/// `message`, plus a 2px left accent bar. Wide (≥560px): the four-column
+/// `time level source message` grid with no left accent (the level tone moves
+/// to the bottom border, matching the pre-container design).
+const ROW_BASE: &str = "tw:grid tw:gap-x-2 tw:gap-y-0.5 tw:border-b tw:border-l-2 tw:px-3 tw:py-1.5 tw:text-sm \
+    tw:grid-cols-[auto_auto_minmax(0,1fr)] tw:[grid-template-areas:'time_level_source'_'message_message_message'] \
+    tw:@min-[560px]:grid-cols-[64px_52px_minmax(72px,128px)_minmax(0,1fr)] \
+    tw:@min-[560px]:[grid-template-areas:'time_level_source_message'] \
+    tw:@min-[560px]:gap-2 tw:@min-[560px]:border-l-0 tw:@min-[560px]:py-2";
+
+const TIME_CELL: &str = "tw:[grid-area:time] tw:font-mono tw:text-[11px] tw:text-dim-foreground tw:@min-[560px]:text-xs";
+const LEVEL_CELL: &str =
+    "tw:[grid-area:level] tw:font-mono tw:text-[11px] tw:uppercase tw:@min-[560px]:text-xs";
+const SOURCE_CELL: &str = "tw:[grid-area:source] tw:min-w-0 tw:truncate tw:text-[11px] tw:text-dim-foreground tw:@min-[560px]:text-xs";
+const MESSAGE_CELL: &str = "tw:[grid-area:message] tw:m-0 tw:min-w-0 tw:break-words";
+
+/// Per-level tone: text color (whole row), plus the narrow left accent and the
+/// wide bottom border. Warn/error carry the accent narrow and the colored
+/// bottom border wide; quieter levels stay on the muted border with no accent.
+fn row_class(level: UiLogLevel) -> String {
+    let tone = match level {
+        // Trace reuses Debug's tone: the theme has no dimmer text token than
+        // `subtle-foreground`.
         UiLogLevel::Trace | UiLogLevel::Debug => {
-            "tw:grid tw:grid-cols-[64px_52px_minmax(72px,128px)_minmax(0,1fr)] tw:gap-2 tw:border-b tw:border-border-muted tw:px-3 tw:py-2 tw:text-sm tw:text-subtle-foreground"
+            "tw:border-border-muted tw:border-l-transparent tw:text-subtle-foreground"
         }
         UiLogLevel::Info => {
-            "tw:grid tw:grid-cols-[64px_52px_minmax(72px,128px)_minmax(0,1fr)] tw:gap-2 tw:border-b tw:border-border-muted tw:px-3 tw:py-2 tw:text-sm tw:text-muted-foreground"
+            "tw:border-border-muted tw:border-l-transparent tw:text-muted-foreground"
         }
         UiLogLevel::Warn => {
-            "tw:grid tw:grid-cols-[64px_52px_minmax(72px,128px)_minmax(0,1fr)] tw:gap-2 tw:border-b tw:border-status-warning-border tw:px-3 tw:py-2 tw:text-sm tw:text-status-warning-foreground"
+            "tw:border-border-muted tw:border-l-status-warning-border tw:text-status-warning-foreground tw:@min-[560px]:border-b-status-warning-border"
         }
         UiLogLevel::Error => {
-            "tw:grid tw:grid-cols-[64px_52px_minmax(72px,128px)_minmax(0,1fr)] tw:gap-2 tw:border-b tw:border-status-error-border tw:px-3 tw:py-2 tw:text-sm tw:text-status-error-foreground"
+            "tw:border-border-muted tw:border-l-status-error-border tw:text-status-error-foreground tw:@min-[560px]:border-b-status-error-border"
         }
-    }
+    };
+    format!("{ROW_BASE} {tone}")
 }
 
 #[cfg(test)]
