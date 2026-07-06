@@ -226,6 +226,10 @@ fn validate_function_inner(
     validate_sret_function_invariants(func, fname, errs);
 
     let mut stack: Vec<StackEntry> = Vec::new();
+    // Reused across every Call op in the body: import calls are the most
+    // frequent call kind in scalarized shaders, and a fresh Vec per call was
+    // measurable allocator churn.
+    let mut import_param_scratch: Vec<IrType> = Vec::new();
 
     for (i, op) in func.body.iter().enumerate() {
         let op_i = Some(i);
@@ -389,7 +393,17 @@ fn validate_function_inner(
                 args,
                 results,
             } => {
-                validate_call(func, module, fname, op_i, *callee, *args, *results, errs);
+                validate_call(
+                    func,
+                    module,
+                    fname,
+                    op_i,
+                    *callee,
+                    *args,
+                    *results,
+                    &mut import_param_scratch,
+                    errs,
+                );
             }
             LpirOp::Return { values } => {
                 check_return_value_types(func, fname, op_i, *values, errs);
@@ -437,6 +451,10 @@ fn check_return_value_types(
     }
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "internal helper; takes caller-owned scratch to avoid per-call allocation"
+)]
 fn validate_call(
     func: &IrFunction,
     module: &LpirModule,
@@ -445,6 +463,7 @@ fn validate_call(
     callee: CalleeRef,
     args: VRegRange,
     results: VRegRange,
+    import_param_scratch: &mut Vec<IrType>,
     errs: &mut Vec<ValidationError>,
 ) {
     let arg_slice = func.pool_slice(args);
@@ -454,7 +473,6 @@ fn validate_call(
         return;
     }
 
-    let mut import_param_scratch: Vec<IrType> = Vec::new();
     let (param_tys, ret_tys): (&[IrType], &[IrType]) = match callee {
         CalleeRef::Import(ImportId(i)) => {
             let i = i as usize;

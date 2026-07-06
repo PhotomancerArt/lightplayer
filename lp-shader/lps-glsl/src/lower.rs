@@ -1,5 +1,5 @@
 use alloc::format;
-use alloc::string::{String, ToString};
+use alloc::string::String;
 use alloc::vec;
 use alloc::vec::Vec;
 use lp_collection::VecMap;
@@ -58,10 +58,16 @@ pub fn lower_hir(module: HirModule) -> Result<LoweredModule, Diagnostic> {
         mb.add_function(lowered);
     }
     let ir = mb.finish();
+    // Validation is a development invariant check on the lowering itself, not
+    // part of the product compile: release firmware skips it (decision
+    // 2026-07-05, compile-churn-p0 plan — it cost a 3-4x re-walk of the op
+    // stream on device). Host dev builds, unit tests, and dev-profile
+    // filetest runs still validate every compile.
+    #[cfg(debug_assertions)]
     if let Err(errors) = lpir::validate_module(&ir) {
         let message = errors.first().map_or_else(
             || String::from("unknown LPIR validation error"),
-            ToString::to_string,
+            alloc::string::ToString::to_string,
         );
         return Err(Diagnostic::error(
             Span::new(0, 0),
