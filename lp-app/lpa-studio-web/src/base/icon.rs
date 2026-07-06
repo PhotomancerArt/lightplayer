@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
     Asterisk, Boxes, Check, ChevronDown, ChevronRight, CircleAlert, CircleDot, CircleMinus,
-    FlaskConical, Info, Link2, Link2Off, Locate, LocateFixed, Pencil, Play, SquareArrowRight,
-    TriangleAlert, Usb,
+    FlaskConical, Info, Link2, Link2Off, Locate, LocateFixed, Pencil, Play, Save, SquareArrowRight,
+    TriangleAlert, Undo2, Usb,
 };
 
 #[component]
@@ -36,6 +36,8 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::Collapsed => rsx! { ChevronRight { size } },
         StudioIconName::NodeSelect => rsx! { Locate { size } },
         StudioIconName::NodeSelected => rsx! { LocateFixed { size } },
+        StudioIconName::Save => rsx! { Save { size } },
+        StudioIconName::Revert => rsx! { Undo2 { size } },
     }
 }
 
@@ -44,6 +46,8 @@ pub fn action_icon_name(icon: Option<&str>) -> Option<StudioIconName> {
         Some("play") => Some(StudioIconName::Play),
         Some("usb") => Some(StudioIconName::Usb),
         Some("test-tube") => Some(StudioIconName::Test),
+        Some("save") => Some(StudioIconName::Save),
+        Some("revert") => Some(StudioIconName::Revert),
         _ => None,
     }
 }
@@ -71,4 +75,6 @@ pub enum StudioIconName {
     Collapsed,
     NodeSelect,
     NodeSelected,
+    Save,
+    Revert,
 }

@@ -2,7 +2,6 @@ use dioxus::prelude::*;
 use lpa_studio_core::{DeviceController, UiAction, UiPaneView, UiStudioView, UiViewContent};
 
 use crate::app::layout::VersionBadge;
-use crate::app::project::ProjectSaveStrip;
 use crate::app::{ProjectNodeWorkspace, RuntimeLog};
 use crate::core::PaneView;
 
@@ -24,13 +23,6 @@ pub fn StudioShell(
         "tw:grid tw:grid-cols-[minmax(0,1fr)_minmax(300px,380px)] tw:gap-3.5 tw:max-[880px]:grid-cols-1"
     };
     let device_is_primary = main.is_empty();
-    let save_strip = project_editor.as_ref().map(|editor| {
-        (
-            editor.dirty,
-            editor.sync.overlay_revision,
-            editor.edits_in_flight,
-        )
-    });
 
     rsx! {
         main { class: "tw:mx-auto tw:min-h-screen tw:w-[min(1520px,100%)] tw:px-7 tw:pb-16 tw:pt-7 tw:max-[880px]:px-[18px] tw:max-[880px]:pb-[72px] tw:max-[880px]:pt-[18px]",
@@ -39,16 +31,6 @@ pub fn StudioShell(
                     p { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "LightPlayer Studio" }
                 }
                 VersionBadge {}
-                if let Some((dirty, overlay_revision, edits_in_flight)) = save_strip {
-                    div { class: "tw:ml-auto",
-                        ProjectSaveStrip {
-                            dirty,
-                            overlay_revision,
-                            edits_in_flight,
-                            on_action,
-                        }
-                    }
-                }
             }
 
             section { class: "{layout_class}",

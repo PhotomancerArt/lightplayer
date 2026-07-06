@@ -304,6 +304,9 @@
   .tw\:w-px {
     width: 1px;
   }
+  .tw\:max-w-\[320px\] {
+    max-width: 320px;
+  }
   .tw\:max-w-\[360px\] {
     max-width: 360px;
   }
@@ -372,8 +375,8 @@
   .tw\:grid-cols-3 {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
-  .tw\:grid-cols-\[18px_minmax\(0\,1fr\)_auto\] {
-    grid-template-columns: 18px minmax(0,1fr) auto;
+  .tw\:grid-cols-\[18px_minmax\(0\,1fr\)_auto_auto\] {
+    grid-template-columns: 18px minmax(0,1fr) auto auto;
   }
   .tw\:grid-cols-\[28px_minmax\(0\,1fr\)\] {
     grid-template-columns: 28px minmax(0,1fr);
@@ -737,6 +740,9 @@
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-error-bg\)\,transparent_66\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-error-bg),transparent 66%);
   }
+  .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-error-bg\)\,transparent_70\%\)\] {
+    background-image: linear-gradient(90deg,var(--studio-status-error-bg),transparent 70%);
+  }
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-error-bg\)_0\%\,transparent_72\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-error-bg) 0%,transparent 72%);
   }
@@ -752,6 +758,9 @@
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-live-bg\)\,transparent_62\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-live-bg),transparent 62%);
   }
+  .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-live-bg\)\,transparent_70\%\)\] {
+    background-image: linear-gradient(90deg,var(--studio-status-live-bg),transparent 70%);
+  }
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-live-bg\)_0\%\,transparent_72\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-live-bg) 0%,transparent 72%);
   }
@@ -763,6 +772,9 @@
   }
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-warning-bg\)\,transparent_62\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-warning-bg),transparent 62%);
+  }
+  .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-warning-bg\)\,transparent_70\%\)\] {
+    background-image: linear-gradient(90deg,var(--studio-status-warning-bg),transparent 70%);
   }
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-warning-bg\)_0\%\,transparent_72\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-warning-bg) 0%,transparent 72%);
@@ -942,6 +954,9 @@
   }
   .tw\:text-\[0\.64rem\] {
     font-size: 0.64rem;
+  }
+  .tw\:text-\[0\.65rem\] {
+    font-size: 0.65rem;
   }
   .tw\:text-\[0\.66rem\] {
     font-size: 0.66rem;
@@ -1291,11 +1306,6 @@
   .tw\:disabled\:cursor-not-allowed {
     &:disabled {
       cursor: not-allowed;
-    }
-  }
-  .tw\:disabled\:opacity-50 {
-    &:disabled {
-      opacity: 50%;
     }
   }
   .tw\:disabled\:opacity-60 {
