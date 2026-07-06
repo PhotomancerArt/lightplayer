@@ -136,6 +136,14 @@ impl LpFs for LpFsOpfs {
         self.shared.inner.borrow().write_file(path, data)
     }
 
+    fn append_file(&self, path: &LpPath, data: &[u8]) -> Result<(), FsError> {
+        self.shared.inner.borrow().append_file(path, data)
+    }
+
+    fn file_size(&self, path: &LpPath) -> Result<u64, FsError> {
+        self.shared.inner.borrow().file_size(path)
+    }
+
     fn file_exists(&self, path: &LpPath) -> Result<bool, FsError> {
         self.shared.inner.borrow().file_exists(path)
     }

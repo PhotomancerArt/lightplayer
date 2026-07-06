@@ -94,6 +94,67 @@ impl StudioServerClient {
     pub fn take_pending_logs(&mut self) -> Vec<UiLogDraft> {
         core::mem::take(&mut *self.pending_logs.borrow_mut())
     }
+
+    /// Pull files changed under a project since `since` (save-as-pull /
+    /// connect-as-pull; roadmap M2b). Returns updates + the next `since`.
+    pub async fn pull_changed_files(
+        &mut self,
+        project_id: &str,
+        since: lpc_model::FsVersion,
+    ) -> Result<PulledFiles, UiError> {
+        let outcome = self
+            .client
+            .pull_changed_files(project_id, since)
+            .await
+            .map_err(map_client_error)?;
+        let (updates, version) = outcome.value;
+        let mut logs = map_client_events(outcome.events);
+        logs.extend(self.take_pending_logs());
+        Ok(PulledFiles {
+            updates,
+            version,
+            logs,
+        })
+    }
+
+    /// Whole-project replace push (load-as-push / device push; M2b).
+    pub async fn replace_project_files(
+        &mut self,
+        project_id: &str,
+        files: impl IntoIterator<Item = lpa_client::project_deploy::ProjectDeployFile>,
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        let outcome = self
+            .client
+            .replace_project_files(project_id, files)
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(outcome.events);
+        logs.extend(self.take_pending_logs());
+        Ok(logs)
+    }
+
+    /// Canonical package hash of a project directory (push/pull verify).
+    pub async fn hash_package(
+        &mut self,
+        project_id: &str,
+    ) -> Result<(String, Vec<UiLogDraft>), UiError> {
+        let outcome = self
+            .client
+            .hash_package(project_id)
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(outcome.events);
+        logs.extend(self.take_pending_logs());
+        Ok((outcome.value, logs))
+    }
+}
+
+/// Result of a changed-files pull: reassembled updates, the fs version to
+/// use as the next pull's `since`, and protocol logs.
+pub struct PulledFiles {
+    pub updates: Vec<lpa_client::file_sync_ops::FileUpdate>,
+    pub version: lpc_model::FsVersion,
+    pub logs: Vec<UiLogDraft>,
 }
 
 pub struct LoadedDemoProject {

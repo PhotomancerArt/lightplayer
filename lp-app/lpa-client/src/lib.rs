@@ -8,6 +8,7 @@ pub mod client;
 pub mod client_error;
 pub mod client_event;
 pub mod client_io;
+pub mod file_sync_ops;
 #[cfg(feature = "host")]
 pub mod local;
 pub mod project_deploy;

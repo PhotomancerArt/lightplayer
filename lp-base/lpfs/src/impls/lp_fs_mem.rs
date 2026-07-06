@@ -205,6 +205,38 @@ impl LpFs for LpFsMemory {
         Ok(())
     }
 
+    fn file_size(&self, path: &LpPath) -> Result<u64, FsError> {
+        let normalized = path.to_path_buf();
+        self.validate_path(normalized.as_path())?;
+        self.files
+            .borrow()
+            .get(&normalized)
+            .map(|bytes| bytes.len() as u64)
+            .ok_or_else(|| FsError::NotFound(normalized.as_str().to_string()))
+    }
+
+    fn append_file(&self, path: &LpPath, data: &[u8]) -> Result<(), FsError> {
+        // Native append: extend the stored buffer in place (no whole-file copy)
+        self.validate_path(path)?;
+        let normalized = path.to_path_buf();
+        let mut files = self.files.borrow_mut();
+        let existed = files.contains_key(&normalized);
+        files
+            .entry(normalized.clone())
+            .or_default()
+            .extend_from_slice(data);
+        drop(files); // Release borrow before recording change
+
+        let kind = if existed {
+            FsEventKind::Modify
+        } else {
+            FsEventKind::Create
+        };
+        self.record_change(normalized.as_path(), kind);
+
+        Ok(())
+    }
+
     fn file_exists(&self, path: &LpPath) -> Result<bool, FsError> {
         let normalized = path.to_path_buf();
         self.validate_path(normalized.as_path())?;
@@ -457,6 +489,54 @@ mod tests {
         let mut fs = LpFsMemory::new();
         fs.write_file_mut("/test.txt".as_path(), b"hello").unwrap();
         assert_eq!(fs.read_file("/test.txt".as_path()).unwrap(), b"hello");
+    }
+
+    #[test]
+    fn test_append_file_extends_and_creates() {
+        let fs = LpFsMemory::new();
+        // create-on-append records Create
+        fs.append_file("/log.txt".as_path(), b"one").unwrap();
+        let events = fs.get_changes_since(FsVersion::new(1));
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, FsEventKind::Create);
+
+        // append to existing records Modify and extends in place
+        fs.append_file("/log.txt".as_path(), b" two").unwrap();
+        assert_eq!(fs.read_file("/log.txt".as_path()).unwrap(), b"one two");
+        let events = fs.get_changes_since(FsVersion::new(2));
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].kind, FsEventKind::Modify);
+    }
+
+    #[test]
+    fn test_append_matches_read_modify_write() {
+        // the native override must be observably identical to the trait default
+        let native = LpFsMemory::new();
+        native
+            .write_file("/a.bin".as_path(), &[0u8, 159, 146])
+            .unwrap();
+        native.append_file("/a.bin".as_path(), &[150, 255]).unwrap();
+
+        let rmw = LpFsMemory::new();
+        rmw.write_file("/a.bin".as_path(), &[0u8, 159, 146])
+            .unwrap();
+        let mut bytes = rmw.read_file("/a.bin".as_path()).unwrap();
+        bytes.extend_from_slice(&[150, 255]);
+        rmw.write_file("/a.bin".as_path(), &bytes).unwrap();
+
+        assert_eq!(
+            native.read_file("/a.bin".as_path()).unwrap(),
+            rmw.read_file("/a.bin".as_path()).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_append_through_chroot_view() {
+        let fs = LpFsMemory::new();
+        fs.write_file("/proj/f.txt".as_path(), b"a").unwrap();
+        let view = fs.chroot("/proj".as_path()).unwrap();
+        view.borrow().append_file("/f.txt".as_path(), b"b").unwrap();
+        assert_eq!(fs.read_file("/proj/f.txt".as_path()).unwrap(), b"ab");
     }
 
     #[test]

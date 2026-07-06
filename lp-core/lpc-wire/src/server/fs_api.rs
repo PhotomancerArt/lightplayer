@@ -3,8 +3,9 @@
 //! Defines request and response types for filesystem operations.
 
 use crate::serde_base64;
+use crate::server::file_chunk::FileChunk;
 use alloc::{string::String, vec::Vec};
-use lpc_model::LpPathBuf;
+use lpc_model::{FsVersion, LpPathBuf};
 use serde::{Deserialize, Serialize};
 
 /// Filesystem operation request
@@ -28,6 +29,39 @@ pub enum FsRequest {
     DeleteDir { path: LpPathBuf },
     /// List directory contents
     ListDir { path: LpPathBuf, recursive: bool },
+    /// Files changed under `prefix` since an fs revision (paginated).
+    ///
+    /// `since` is the last revision the client already has; the server
+    /// enumerates strictly newer changes. `since = FsVersion(0)` means
+    /// "everything": a full recursive enumeration, since the change log
+    /// need not cover files that predate tracking (the initial-pull path).
+    /// `cursor` resumes a paginated enumeration (`None` starts one); pass
+    /// the previous page's `next` after fully receiving it.
+    ChangesSince {
+        prefix: LpPathBuf,
+        since: FsVersion,
+        cursor: Option<crate::server::file_chunk::FileCursor>,
+    },
+    /// Append one chunk of a file (chunked upload for files larger than a
+    /// frame).
+    ///
+    /// Stateless per chunk: `offset == 0` creates/truncates; `offset > 0`
+    /// must equal the file's current length (appended via
+    /// `LpFs::append_file`), otherwise the response carries an error.
+    /// Completion is the sender's knowledge; verification is
+    /// [`FsRequest::HashPackage`].
+    WriteChunk {
+        path: LpPathBuf,
+        offset: u32,
+        #[serde(
+            serialize_with = "serde_base64::serialize_smart",
+            deserialize_with = "serde_base64::deserialize_smart"
+        )]
+        data: Vec<u8>,
+    },
+    /// Canonical package hash (lpc-history `lph1` spec) of the directory at
+    /// `prefix` — end-to-end verification for pushes and pulls.
+    HashPackage { prefix: LpPathBuf },
 }
 
 /// Filesystem operation response
@@ -66,6 +100,35 @@ pub enum FsResponse {
     ListDir {
         path: LpPathBuf,
         entries: Vec<LpPathBuf>,
+        error: Option<String>,
+    },
+    /// One page of a ChangesSince enumeration.
+    ///
+    /// `next` present → more pages remain (request again with `cursor =
+    /// next`); `next` absent → final page. `version` is the fs revision the
+    /// page's enumeration was current to. Clients must adopt the **first**
+    /// page's version as the next pull's `since`: changes landing during
+    /// pagination then re-surface on that pull (convergent, never lost).
+    Changes {
+        entries: Vec<FileChunk>,
+        next: Option<crate::server::file_chunk::FileCursor>,
+        version: Option<FsVersion>,
+        error: Option<String>,
+    },
+    /// Response to WriteChunk request (ack with the resulting extent).
+    WriteChunk {
+        path: LpPathBuf,
+        offset: u32,
+        written: u32,
+        error: Option<String>,
+    },
+    /// Response to HashPackage request.
+    ///
+    /// `hash` is the 64-char lowercase-hex canonical package hash (a plain
+    /// string so lpc-wire stays independent of lpc-history).
+    PackageHash {
+        prefix: LpPathBuf,
+        hash: String,
         error: Option<String>,
     },
 }
@@ -111,6 +174,170 @@ mod tests {
             }
             _ => panic!("Wrong variant"),
         }
+    }
+
+    #[test]
+    fn test_changes_since_request_committed_sample() {
+        let req = FsRequest::ChangesSince {
+            prefix: "/projects/x".as_path_buf(),
+            since: lpc_model::FsVersion::new(7),
+            cursor: None,
+        };
+        let json = crate::json::to_string(&req).unwrap();
+        // committed wire sample — changing this breaks peers; must be deliberate
+        assert_eq!(
+            json,
+            "{\"changesSince\":{\"prefix\":\"/projects/x\",\"since\":7,\"cursor\":null}}"
+        );
+        let back: FsRequest = crate::json::from_str(&json).unwrap();
+        match back {
+            FsRequest::ChangesSince {
+                prefix,
+                since,
+                cursor,
+            } => {
+                assert_eq!(prefix.as_str(), "/projects/x");
+                assert_eq!(since.as_i64(), 7);
+                assert_eq!(cursor, None);
+            }
+            _ => panic!("Wrong variant"),
+        }
+
+        // resuming cursor round-trips
+        let req = FsRequest::ChangesSince {
+            prefix: "/projects/x".as_path_buf(),
+            since: lpc_model::FsVersion::new(7),
+            cursor: Some(crate::server::file_chunk::FileCursor {
+                path: "/big.svg".as_path_buf(),
+                offset: 8192,
+            }),
+        };
+        let json = crate::json::to_string(&req).unwrap();
+        let back: FsRequest = crate::json::from_str(&json).unwrap();
+        match back {
+            FsRequest::ChangesSince {
+                cursor: Some(c), ..
+            } => {
+                assert_eq!(c.path.as_str(), "/big.svg");
+                assert_eq!(c.offset, 8192);
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[test]
+    fn test_write_chunk_and_hash_package_round_trip() {
+        let req = FsRequest::WriteChunk {
+            path: "/projects/x/big.svg".as_path_buf(),
+            offset: 4096,
+            data: b"<svg/>".to_vec(),
+        };
+        let json = crate::json::to_string(&req).unwrap();
+        let back: FsRequest = crate::json::from_str(&json).unwrap();
+        match back {
+            FsRequest::WriteChunk { path, offset, data } => {
+                assert_eq!(path.as_str(), "/projects/x/big.svg");
+                assert_eq!(offset, 4096);
+                assert_eq!(data, b"<svg/>".to_vec());
+            }
+            _ => panic!("Wrong variant"),
+        }
+
+        let req = FsRequest::HashPackage {
+            prefix: "/projects/x".as_path_buf(),
+        };
+        let json = crate::json::to_string(&req).unwrap();
+        assert_eq!(json, "{\"hashPackage\":{\"prefix\":\"/projects/x\"}}");
+    }
+
+    #[test]
+    fn test_changes_response_terminal_frame_carries_version() {
+        use crate::server::file_chunk::{FileChangeKind, FileChunk};
+        let resp = FsResponse::Changes {
+            entries: vec![FileChunk {
+                path: "/a.json".as_path_buf(),
+                kind: FileChangeKind::Upsert,
+                offset: 0,
+                total: 2,
+                data: b"{}".to_vec(),
+            }],
+            next: None,
+            version: Some(lpc_model::FsVersion::new(42)),
+            error: None,
+        };
+        let json = crate::json::to_string(&resp).unwrap();
+        let back: FsResponse = crate::json::from_str(&json).unwrap();
+        match back {
+            FsResponse::Changes {
+                entries,
+                next,
+                version,
+                error,
+            } => {
+                assert_eq!(entries.len(), 1);
+                assert_eq!(next, None);
+                assert_eq!(version, Some(lpc_model::FsVersion::new(42)));
+                assert_eq!(error, None);
+            }
+            _ => panic!("Wrong variant"),
+        }
+    }
+
+    #[cfg(feature = "ser-write-json")]
+    #[test]
+    fn test_maximal_changes_frame_fits_budget() {
+        use crate::budget::{
+            FILE_SYNC_PAGE_MAX_ENTRIES, FILE_SYNC_PAGE_RAW_BYTES, PROJECT_READ_FRAME_MAX_BYTES,
+        };
+        use crate::server::file_chunk::{FileChangeKind, FileChunk, FileCursor};
+        let long_path =
+            "/modules/plasma-mod_h7Kq9xY2mQ4tB8Wz/deeply/nested/dir/fixture-mapping-large.svg";
+        // worst case A: max entries, raw budget spread across them, long paths
+        let per_entry = FILE_SYNC_PAGE_RAW_BYTES / FILE_SYNC_PAGE_MAX_ENTRIES;
+        let resp = FsResponse::Changes {
+            entries: (0..FILE_SYNC_PAGE_MAX_ENTRIES)
+                .map(|i| FileChunk {
+                    path: long_path.as_path_buf(),
+                    kind: FileChangeKind::Upsert,
+                    offset: u32::MAX - i as u32,
+                    total: u32::MAX,
+                    data: alloc::vec![0xA5u8; per_entry],
+                })
+                .collect(),
+            next: Some(FileCursor {
+                path: long_path.as_path_buf(),
+                offset: u32::MAX,
+            }),
+            version: Some(lpc_model::FsVersion::new(i64::MAX)),
+            error: None,
+        };
+        let len = crate::ser_write::ser_write_json_len(&resp);
+        assert!(
+            len <= PROJECT_READ_FRAME_MAX_BYTES,
+            "maximal Changes page (many entries) is {len} bytes, budget is {PROJECT_READ_FRAME_MAX_BYTES}"
+        );
+
+        // worst case B: one entry carrying the whole raw budget
+        let resp = FsResponse::Changes {
+            entries: vec![FileChunk {
+                path: long_path.as_path_buf(),
+                kind: FileChangeKind::Upsert,
+                offset: u32::MAX - FILE_SYNC_PAGE_RAW_BYTES as u32,
+                total: u32::MAX,
+                data: alloc::vec![0xA5u8; FILE_SYNC_PAGE_RAW_BYTES],
+            }],
+            next: Some(FileCursor {
+                path: long_path.as_path_buf(),
+                offset: u32::MAX,
+            }),
+            version: Some(lpc_model::FsVersion::new(i64::MAX)),
+            error: None,
+        };
+        let len = crate::ser_write::ser_write_json_len(&resp);
+        assert!(
+            len <= PROJECT_READ_FRAME_MAX_BYTES,
+            "maximal Changes page (single big chunk) is {len} bytes, budget is {PROJECT_READ_FRAME_MAX_BYTES}"
+        );
     }
 
     #[test]
