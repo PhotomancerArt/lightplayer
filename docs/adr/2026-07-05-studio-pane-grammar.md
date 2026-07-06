@@ -98,27 +98,66 @@ Concretely: the project controller emits Save / Revert-to-saved on
 pending), and the web crate contains zero bespoke Save/Revert button wiring
 — the M2 save strip's custom buttons are gone with the strip.
 
-### Dirty bubbling feeds the chips
+### Dirty bubbling feeds the chrome
 
-The state chips are fed by `DirtySummary { persisted, transient, failed }`
+Dirty chrome is fed by `DirtySummary { persisted, transient, failed }`
 (`lpa-studio-core/src/app/project/dirty_summary.rs`), aggregated
 slot → node → project inside the same DTO-build walk that computes the
-per-field dirty affordances — one aggregation, so the chip on a node header,
-the tint on a sidebar tree item, and the project popup's counts can never
-disagree with the fields. Node panes render one chip per non-zero bucket
-("2 unsaved" / "1 live" / "1 failed"); the project pane keeps counts in its
-detail popup (gate feedback: too cramped for the header). All consumers
-derive the header tone from the dominant bucket (failed > unsaved > live),
-with an Error runtime status never masked by a dirty wash.
+per-field dirty affordances — one aggregation, so the affordance on a node
+header, the tint on a sidebar tree item, and the project popup's counts can
+never disagree with the fields. Counts render only inside the detail popups
+(node and project); headers and tree rows carry no count chips — they wear
+the merged affordance below. (`PaneChip` remains part of the pane's neutral
+vocabulary for consumers that need text chips; the dirty-state chips the P3
+node header briefly rendered were superseded by the affordance model.)
+
+### Affordance model
+
+Every hierarchy surface — node header, sidebar tree row, project pane —
+announces its state through exactly **one affordance** (glyph + tone),
+`UiAffordance` (`lpa-studio-core/src/app/project/ui_affordance.rs`):
+
+- **Vocabulary and priority** (later wins the merge):
+  `Info` < `Busy` < `Live` < `Unsaved` < `Error`.
+- **Priority merge, computed in core.** Each level's affordance is the max
+  of its own status projection and its subtree `DirtySummary` projection
+  (`UiAffordance::merged(UiStatusKind, &DirtySummary)`); children's edits
+  arrive through the bubbled summary. One function feeds every surface —
+  the same cannot-disagree principle as `DirtySummary` itself. The web side
+  has exactly one affordance → glyph/tone table
+  (`lpa-studio-web/src/app/affordance.rs`): quiet "i" for `Info`,
+  working-toned "i" for `Busy`, the edit pencil in blue/yellow for
+  `Live`/`Unsaved`, the red warning glyph for `Error`.
+- **Render rule.** The affordance renders only on the detail trigger (node
+  header, project pane) or as the tree row's small indicator — and the tree
+  shows it **only when announced** (not `Info`). All text — status words
+  ("Ready", "Running"), dirty counts — lives in popups (or, for tree rows,
+  the tooltip). Announced affordances also drive the header wash tone;
+  a silent pane falls back to its status tone.
+- **OK is not announced.** `Good` and `Neutral` statuses project to `Info`:
+  no checkmark, no status-colored trigger. A healthy, clean surface is
+  silent chrome.
+- **Busy is activity, not "running".** `Busy` maps only from genuine
+  in-flight work — a `Working` status (sync/save/provision/connect) or
+  buffered edits awaiting their ack. Steady-state "Running" is a `Good`
+  status (domain data, shown in the popup), never `Busy`. `Warning`
+  statuses join `Error` in the attention class (the affordance says "needs
+  attention"; the popup's status pill keeps the warn/error distinction).
+
+The slot rows' `UiSlotAffordance` (the model's reference implementation)
+keeps its richer slot-level vocabulary (`Bound`, `Invalid`, …); the
+hierarchy type is deliberately separate because the two levels announce
+different things, but both follow the same grammar: one priority-merged
+affordance on the detail trigger, text in the popup.
 
 ### Consumers
 
 Adopted by the node pane (P3: selection toggle in `primary`, tabs in
 `trailing`, merged status/dirty popup in `detail`) and the project pane
 (P4 + the M2a gate-feedback round: the whole project card is one pane —
-project name as title, the controller's pane status as the compact state
-chip, controller actions, node tree as the body; dirty counts and project
-stats live in the detail popup, dirty state washes the header tone).
+project name as title, controller actions, node tree as the body; the
+status word, dirty counts, and project stats live in the detail popup,
+and the merged affordance drives the trigger and the header wash).
 **The device pane is the intended third consumer**: its header should map status onto
 `PaneTone`, its detail popup onto `DetailPopover`, and its contextual
 operations onto `UiPaneAction`s the next time device-pane UX work is

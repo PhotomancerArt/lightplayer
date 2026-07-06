@@ -1,6 +1,6 @@
 //! Header metadata for a node pane.
 
-use crate::{DirtySummary, UiStatus};
+use crate::{DirtySummary, UiAffordance, UiStatus};
 
 /// Identity and runtime summary shown at the top of a node pane.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -67,5 +67,11 @@ impl UiNodeHeader {
     pub fn with_detail(mut self, detail: impl Into<String>) -> Self {
         self.detail = Some(detail.into());
         self
+    }
+
+    /// The node's one chrome affordance: the priority merge of its own
+    /// status and its subtree dirty summary, rendered on the detail trigger.
+    pub fn affordance(&self) -> UiAffordance {
+        UiAffordance::merged(self.status.kind, &self.dirty)
     }
 }

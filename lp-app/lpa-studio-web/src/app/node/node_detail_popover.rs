@@ -1,6 +1,8 @@
-//! Node detail affordance: the always-visible status icon opening the node's
-//! one detail popover — today's status content plus a dirty section (counts
-//! by kind) when the node's subtree carries edits.
+//! The node's detail popover behind its one header affordance: the merged
+//! affordance (status + subtree dirty, computed in core) is the trigger's
+//! glyph + tone; the popover carries all the text — identity, the status
+//! word, and the per-bucket dirty counts (their only home since the P6
+//! affordance model removed the header count chips).
 //!
 //! Rendered into the node pane's detail slot at the header's right edge; the
 //! header layout itself is the shared `StudioPane` component.
@@ -9,22 +11,8 @@ use dioxus::prelude::*;
 use lpa_studio_core::UiNodeHeader;
 use lpa_studio_core::core::status::UiStatusKind;
 
-use crate::app::layout::PaneTone;
-use crate::base::{
-    DetailPopover, DetailSectionTint, IconMenuTone, StudioIconName, detail_popover_section_class,
-};
-
-/// Map a node status kind onto the pane's neutral tone vocabulary (the
-/// consumer-side mapping required by the pane's layout-only contract).
-pub(crate) fn status_pane_tone(kind: UiStatusKind) -> PaneTone {
-    match kind {
-        UiStatusKind::Neutral => PaneTone::Neutral,
-        UiStatusKind::Working => PaneTone::Working,
-        UiStatusKind::Good => PaneTone::Good,
-        UiStatusKind::Warning => PaneTone::Warning,
-        UiStatusKind::Error => PaneTone::Error,
-    }
-}
+use crate::app::affordance::affordance_trigger_style;
+use crate::base::{DetailPopover, DetailSectionTint, detail_popover_section_class};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -33,13 +21,16 @@ pub(crate) fn NodeDetailPopover(
     #[props(default = false)] initially_open: bool,
 ) -> Element {
     let dirty = header.dirty;
+    let affordance = header.affordance();
+    let style = affordance_trigger_style(affordance);
     let label = format!("{} details", header.title);
 
     rsx! {
         DetailPopover {
-            icon: status_icon(header.status.kind),
+            icon: style.icon,
             label,
-            tone: status_menu_tone(header.status.kind),
+            tone: style.tone,
+            active: affordance.is_announced(),
             initially_open,
             section { class: detail_popover_section_class(DetailSectionTint::None),
                 div { class: "tw:flex tw:min-w-0 tw:items-start tw:justify-between tw:gap-4 tw:py-1",
@@ -107,34 +98,9 @@ fn NodeDirtyCountRow(label: &'static str, count: usize) -> Element {
     }
 }
 
-/// Detail-trigger glyph discipline (UX gate): the default trigger is the
-/// "i" info glyph matching slot rows — a Good/running status must not render
-/// a play triangle that reads as a button. Only genuinely attention-needing
-/// states (Warning/Error) keep their status glyphs; the status still shows
-/// through the trigger's tone.
-fn status_icon(kind: UiStatusKind) -> StudioIconName {
-    match kind {
-        UiStatusKind::Neutral | UiStatusKind::Working | UiStatusKind::Good => {
-            StudioIconName::InfoBare
-        }
-        UiStatusKind::Warning => StudioIconName::StepAttention,
-        UiStatusKind::Error => StudioIconName::StatusError,
-    }
-}
-
-/// Map a node status kind onto the icon-menu trigger tone so the status icon
-/// keeps its status coloring as the detail-popup trigger.
-fn status_menu_tone(kind: UiStatusKind) -> IconMenuTone {
-    match kind {
-        UiStatusKind::Neutral => IconMenuTone::Neutral,
-        UiStatusKind::Working => IconMenuTone::Working,
-        UiStatusKind::Good => IconMenuTone::Good,
-        UiStatusKind::Warning => IconMenuTone::Warning,
-        UiStatusKind::Error => IconMenuTone::Error,
-    }
-}
-
-fn node_status_label_class(kind: UiStatusKind) -> &'static str {
+/// Toned pill for the status word inside detail popups — the popup is where
+/// status text lives now that headers and tree rows only carry affordances.
+pub(crate) fn node_status_label_class(kind: UiStatusKind) -> &'static str {
     match kind {
         UiStatusKind::Neutral => {
             "tw:shrink-0 tw:rounded-pill tw:border tw:border-status-neutral-border tw:bg-status-neutral-bg tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:leading-none tw:text-status-neutral-foreground"

@@ -1,13 +1,12 @@
 use dioxus::prelude::*;
-use lpa_studio_core::core::status::UiStatusKind;
 use lpa_studio_core::{
     DirtySummary, UiAction, UiNodeSection, UiNodeTabBody, UiNodeView, UiSlotRecord,
 };
 
-use crate::app::layout::{PaneChip, PaneChrome, PaneCollapse, PaneTone, StudioPane};
+use crate::app::affordance::affordance_pane_tone;
+use crate::app::layout::{PaneChrome, PaneCollapse, StudioPane};
 use crate::app::node::{
     NodeChildren, NodeDetailPopover, ProducedProducts, ProducedValues, SlotRecordEditor,
-    status_pane_tone,
 };
 use crate::base::{StudioIcon, StudioIconName};
 
@@ -35,10 +34,13 @@ pub fn NodePane(
     let active_index = active_tab().min(view.tabs.len().saturating_sub(1));
     let active_body = view.tabs.get(active_index).map(|tab| tab.body.clone());
     let dirty = view.header.dirty;
+    // P6 affordance model: the header carries no count chips — the merged
+    // affordance on the detail trigger is the whole announcement, and the
+    // per-bucket counts live in the detail popup.
     let chrome = PaneChrome {
-        tone: node_pane_tone(view.header.status.kind, dirty),
+        tone: affordance_pane_tone(view.header.affordance(), view.header.status.kind),
         accent: view.focused,
-        chips: dirty_chips(dirty),
+        chips: Vec::new(),
     };
     let surface_class = pane_surface_tint_class(dirty_tint, dirty);
     let header = view.header.clone();
@@ -230,49 +232,6 @@ fn section_class(body_class: &'static str, first: bool) -> String {
     }
 }
 
-/// Header tone for a node pane: dirty state washes the header (failed >
-/// unsaved > live, per D6) and otherwise the runtime status tone shows —
-/// except an error status always keeps the error wash.
-fn node_pane_tone(status: UiStatusKind, dirty: DirtySummary) -> PaneTone {
-    if dirty.failed > 0 || status == UiStatusKind::Error {
-        PaneTone::Error
-    } else if dirty.persisted > 0 {
-        PaneTone::Warning
-    } else if dirty.transient > 0 {
-        PaneTone::Live
-    } else {
-        status_pane_tone(status)
-    }
-}
-
-/// Per-bucket dirty chips (D6: yellow = unsaved, blue = live, error accent
-/// when failed); an empty vec (clean node) renders no chip.
-fn dirty_chips(dirty: DirtySummary) -> Vec<PaneChip> {
-    let mut chips = Vec::new();
-    if dirty.persisted > 0 {
-        chips.push(PaneChip {
-            tone: PaneTone::Warning,
-            text: format!("{} unsaved", dirty.persisted),
-            title: "Unsaved persisted edits in this node's subtree".to_string(),
-        });
-    }
-    if dirty.transient > 0 {
-        chips.push(PaneChip {
-            tone: PaneTone::Live,
-            text: format!("{} live", dirty.transient),
-            title: "Touched live controls in this node's subtree".to_string(),
-        });
-    }
-    if dirty.failed > 0 {
-        chips.push(PaneChip {
-            tone: PaneTone::Error,
-            text: format!("{} failed", dirty.failed),
-            title: "Failed edits in this node's subtree need attention".to_string(),
-        });
-    }
-    chips
-}
-
 /// Wrapper class around the pane for the D7 full-surface variant: a
 /// `display: contents` wrapper that re-mixes the pane's card tokens with the
 /// dominant dirty status color so the whole pane (header and body) tints.
@@ -345,51 +304,39 @@ mod tests {
     }
 
     #[test]
-    fn clean_node_renders_no_chips_and_keeps_status_tone() {
-        assert!(dirty_chips(DirtySummary::clean()).is_empty());
+    fn header_tone_rides_the_shared_affordance_merge() {
+        use lpa_studio_core::{UiNodeHeader, UiStatus};
+
+        use crate::app::layout::PaneTone;
+
+        let tone = |status: UiStatus, dirty: DirtySummary| {
+            let header = UiNodeHeader::new("Clock", "Clock", "/clock")
+                .with_status(status)
+                .with_dirty(dirty);
+            affordance_pane_tone(header.affordance(), header.status.kind)
+        };
+
+        // A clean node keeps its runtime status tone on the wash.
         assert_eq!(
-            node_pane_tone(UiStatusKind::Good, DirtySummary::clean()),
+            tone(UiStatus::good("Running"), DirtySummary::clean()),
             PaneTone::Good
         );
+        // Dirty precedence: failed > unsaved > live.
         assert_eq!(
-            node_pane_tone(UiStatusKind::Neutral, DirtySummary::clean()),
-            PaneTone::Neutral
-        );
-    }
-
-    #[test]
-    fn dirty_chips_cover_each_nonzero_bucket_with_d6_tones() {
-        let chips = dirty_chips(dirty(3, 2, 1));
-        assert_eq!(chips.len(), 3);
-        assert_eq!(chips[0].tone, PaneTone::Warning);
-        assert_eq!(chips[0].text, "3 unsaved");
-        assert_eq!(chips[1].tone, PaneTone::Live);
-        assert_eq!(chips[1].text, "2 live");
-        assert_eq!(chips[2].tone, PaneTone::Error);
-        assert_eq!(chips[2].text, "1 failed");
-
-        let live_only = dirty_chips(dirty(0, 2, 0));
-        assert_eq!(live_only.len(), 1);
-        assert_eq!(live_only[0].tone, PaneTone::Live);
-    }
-
-    #[test]
-    fn header_tone_prefers_failed_then_unsaved_then_live() {
-        assert_eq!(
-            node_pane_tone(UiStatusKind::Good, dirty(2, 1, 1)),
+            tone(UiStatus::good("Running"), dirty(2, 1, 1)),
             PaneTone::Error
         );
         assert_eq!(
-            node_pane_tone(UiStatusKind::Good, dirty(2, 1, 0)),
+            tone(UiStatus::good("Running"), dirty(2, 1, 0)),
             PaneTone::Warning
         );
         assert_eq!(
-            node_pane_tone(UiStatusKind::Good, dirty(0, 1, 0)),
+            tone(UiStatus::good("Running"), dirty(0, 1, 0)),
             PaneTone::Live
         );
         // An error status is never masked by a dirty wash.
         assert_eq!(
-            node_pane_tone(UiStatusKind::Error, dirty(0, 1, 0)),
+            tone(UiStatus::error("Failed"), dirty(0, 1, 0)),
             PaneTone::Error
         );
     }

@@ -1399,6 +1399,14 @@ select {
     --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
 }
 
+.ux-popover-chrome-live {
+    --ux-popover-border-color: var(--studio-status-live-border);
+    --ux-popover-icon-color: var(--studio-status-live-text);
+    --ux-popover-trigger-fill-top: var(--studio-status-live-bg);
+    --ux-popover-trigger-fill-bottom: var(--studio-color-surface-raised);
+    --ux-popover-panel-fill-away: var(--studio-color-surface-raised);
+}
+
 .ux-popover-chrome-warning {
     --ux-popover-border-color: var(--studio-status-warning-border);
     --ux-popover-icon-color: var(--studio-status-warning-text);

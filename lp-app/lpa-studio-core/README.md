@@ -220,6 +220,10 @@ stateless views that dispatch ops and render DTOs. The model (recorded in
   child entries, sidebar tree items, and `ProjectEditorView.dirty` all carry
   it, and the project header's contextual Save/Revert actions surface as
   controller-produced `UiPaneAction`s on `ProjectEditorView.header_actions`.
+  Each hierarchy DTO also projects status + dirty into its one chrome
+  `UiAffordance` (`project/ui_affordance.rs`, priority merge
+  Error > Unsaved > Live > Busy > Info) — the glyph/tone every detail
+  trigger and tree-row indicator renders.
   `UiConfigSlot` carries its `ProjectSlotAddress` so fields can dispatch
   edits without extra lookup.
 

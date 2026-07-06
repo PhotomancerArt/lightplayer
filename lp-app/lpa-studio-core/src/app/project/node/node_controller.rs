@@ -417,12 +417,7 @@ impl NodeController {
     }
 
     fn ui_status(&self) -> UiStatus {
-        match self.status.tone {
-            ProjectNodeStatusTone::Neutral => UiStatus::neutral(self.status.label.clone()),
-            ProjectNodeStatusTone::Good => UiStatus::good(self.status.label.clone()),
-            ProjectNodeStatusTone::Warning => UiStatus::warning(self.status.label.clone()),
-            ProjectNodeStatusTone::Error => UiStatus::error(self.status.label.clone()),
-        }
+        UiStatus::new(self.status.label.clone(), self.status.tone.ui_status_kind())
     }
 
     fn product_tracking_state(&self) -> UiProductTrackingState {

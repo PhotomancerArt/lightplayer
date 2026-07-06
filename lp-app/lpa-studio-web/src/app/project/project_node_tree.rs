@@ -1,16 +1,19 @@
-//! Project sidebar node tree: rows carrying the dirty-tint affordance.
+//! Project sidebar node tree: rows carrying the one-glyph affordance.
 //!
-//! Dirty rows wear the node-header tint treatment (the P3 header-only
-//! gradient over the subtle card surface) — no count badges; counts live in
-//! the node/project detail popups. The dominant dirty status color is layered
-//! through a `--studio-tree-dirty-bg` CSS custom property so the selection
-//! highlight can *derive* from it: a selected dirty row color-mixes the dirty
-//! color into the selection background instead of flatly overriding the
-//! edited treatment.
+//! Each row renders its core-computed `UiAffordance` as a small indicator —
+//! only when announced (clean, healthy rows stay silent; no status words, no
+//! count badges: the breakdown lives in the row tooltip, the counts in the
+//! node/project detail popups). Dirty rows keep the node-header tint
+//! treatment (the P3 header-only gradient over the subtle card surface); the
+//! dominant dirty status color is layered through a `--studio-tree-dirty-bg`
+//! CSS custom property so the selection highlight can *derive* from it: a
+//! selected dirty row color-mixes the dirty color into the selection
+//! background instead of flatly overriding the edited treatment.
 
 use dioxus::prelude::*;
-use lpa_studio_core::{DirtySummary, ProjectNodeStatusTone, ProjectNodeTreeItem, UiAction};
+use lpa_studio_core::{DirtySummary, ProjectNodeStatusView, ProjectNodeTreeItem, UiAction};
 
+use crate::app::affordance::{affordance_indicator_class, affordance_trigger_style};
 use crate::base::{StudioIcon, StudioIconName};
 
 #[component]
@@ -49,14 +52,12 @@ fn ProjectNodeTreeItemView(
 ) -> Element {
     let focused = item.focused;
     let action = item.action.clone();
+    let affordance = item.affordance();
     let children = item.children;
     let dirty = item.dirty;
     let class = tree_item_row_class(focused, dirty);
-    let title = tree_item_title(&item.kind, dirty);
+    let title = tree_item_title(&item.kind, &item.status, dirty);
     let indent = depth * 14;
-    let status_class = node_status_class(item.status.tone);
-    let status_label = item.status.label;
-    let detail = item.status.detail;
     let label = item.label;
 
     rsx! {
@@ -75,10 +76,16 @@ fn ProjectNodeTreeItemView(
                     }
                 }
                 span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:text-sm tw:text-soft-foreground", "{label}" }
-                span { class: "{status_class}", "{status_label}" }
-            }
-            if let Some(detail) = detail.as_ref() {
-                p { class: "tw:m-0 tw:pl-2 tw:text-xs tw:text-subtle-foreground", "{detail}" }
+                // The one-glyph affordance indicator; silent when Info (the
+                // tooltip and the popups carry the words and counts).
+                if let Some(indicator_class) = affordance_indicator_class(affordance) {
+                    span { class: "{indicator_class}",
+                        StudioIcon {
+                            name: affordance_trigger_style(affordance).icon,
+                            size: 12,
+                        }
+                    }
+                }
             }
             if !children.is_empty() {
                 ol { class: "tw:m-0 tw:grid tw:list-none tw:gap-1 tw:p-0",
@@ -141,11 +148,16 @@ fn tree_item_dirty_var_class(dirty: DirtySummary) -> &'static str {
     }
 }
 
-/// Row tooltip: the node kind, plus the per-bucket dirty breakdown the
+/// Row tooltip: the node kind and status word (banished from the visible
+/// row by the affordance model), plus the per-bucket dirty breakdown the
 /// deleted count badge used to carry.
-fn tree_item_title(kind: &str, dirty: DirtySummary) -> String {
+fn tree_item_title(kind: &str, status: &ProjectNodeStatusView, dirty: DirtySummary) -> String {
+    let mut title = format!("{kind} — {}", status.label);
+    if let Some(detail) = status.detail.as_ref() {
+        title.push_str(&format!(": {detail}"));
+    }
     if dirty.is_clean() {
-        return kind.to_string();
+        return title;
     }
     let mut parts = Vec::new();
     if dirty.persisted > 0 {
@@ -157,24 +169,7 @@ fn tree_item_title(kind: &str, dirty: DirtySummary) -> String {
     if dirty.failed > 0 {
         parts.push(format!("{} failed", dirty.failed));
     }
-    format!("{kind} — edits in this subtree: {}", parts.join(", "))
-}
-
-fn node_status_class(tone: ProjectNodeStatusTone) -> &'static str {
-    match tone {
-        ProjectNodeStatusTone::Neutral => {
-            "tw:rounded-pill tw:border tw:border-status-neutral-border tw:bg-status-neutral-bg tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:text-status-neutral-foreground"
-        }
-        ProjectNodeStatusTone::Good => {
-            "tw:rounded-pill tw:border tw:border-status-good-border tw:bg-status-good-bg tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:text-status-good-foreground"
-        }
-        ProjectNodeStatusTone::Warning => {
-            "tw:rounded-pill tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:text-status-warning-foreground"
-        }
-        ProjectNodeStatusTone::Error => {
-            "tw:rounded-pill tw:border tw:border-status-error-border tw:bg-status-error-bg tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:text-status-error-foreground"
-        }
-    }
+    format!("{title} — edits in this subtree: {}", parts.join(", "))
 }
 
 #[cfg(test)]
@@ -238,15 +233,67 @@ mod tests {
     }
 
     #[test]
-    fn row_title_carries_the_per_bucket_breakdown_the_badge_used_to_show() {
-        assert_eq!(tree_item_title("Shader", DirtySummary::clean()), "Shader");
+    fn row_title_carries_the_status_word_and_the_dirty_breakdown() {
+        use lpa_studio_core::{ProjectNodeStatusTone, ProjectNodeStatusView};
+
+        let running = ProjectNodeStatusView::new("Running", None, ProjectNodeStatusTone::Good);
+        let warning = ProjectNodeStatusView::new(
+            "Warning",
+            Some("using fallback palette".to_string()),
+            ProjectNodeStatusTone::Warning,
+        );
+
         assert_eq!(
-            tree_item_title("Shader", dirty(2, 1, 0)),
-            "Shader — edits in this subtree: 2 unsaved, 1 live"
+            tree_item_title("Shader", &running, DirtySummary::clean()),
+            "Shader — Running"
         );
         assert_eq!(
-            tree_item_title("Output", dirty(0, 0, 3)),
-            "Output — edits in this subtree: 3 failed"
+            tree_item_title("Visual", &warning, DirtySummary::clean()),
+            "Visual — Warning: using fallback palette"
         );
+        assert_eq!(
+            tree_item_title("Shader", &running, dirty(2, 1, 0)),
+            "Shader — Running — edits in this subtree: 2 unsaved, 1 live"
+        );
+        assert_eq!(
+            tree_item_title("Output", &running, dirty(0, 0, 3)),
+            "Output — Running — edits in this subtree: 3 failed"
+        );
+    }
+
+    #[test]
+    fn rows_show_the_indicator_only_when_the_affordance_is_announced() {
+        use lpa_studio_core::{
+            ProjectNodeStatusTone, ProjectNodeStatusView, ProjectNodeTreeItem, UiAction,
+            UiAffordance,
+        };
+
+        let item = |tone: ProjectNodeStatusTone, dirty: DirtySummary| {
+            ProjectNodeTreeItem::new(
+                "n1",
+                "Clock",
+                "Clock",
+                ProjectNodeStatusView::new("Running", None, tone),
+                false,
+                UiAction::from_op(
+                    lpa_studio_core::ControllerId::new("story.project"),
+                    lpa_studio_core::ProjectEditorOp::Focus,
+                ),
+                Vec::new(),
+            )
+            .with_dirty(dirty)
+        };
+
+        // Clean + healthy: silent (no indicator element at all).
+        let clean = item(ProjectNodeStatusTone::Good, DirtySummary::clean());
+        assert_eq!(clean.affordance(), UiAffordance::Info);
+        assert!(affordance_indicator_class(clean.affordance()).is_none());
+
+        // Dirty and failing rows announce with the affordance glyph.
+        let unsaved = item(ProjectNodeStatusTone::Good, dirty(1, 0, 0));
+        assert_eq!(unsaved.affordance(), UiAffordance::Unsaved);
+        let warn = item(ProjectNodeStatusTone::Warning, DirtySummary::clean());
+        assert_eq!(warn.affordance(), UiAffordance::Error);
+        assert!(affordance_indicator_class(warn.affordance()).is_some());
     }
 }

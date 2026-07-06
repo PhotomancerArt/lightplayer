@@ -37,7 +37,7 @@ pub(crate) mod slot_value_editor_stories;
 
 pub use config_slot_row::ConfigSlotRow;
 pub use node_children::NodeChildren;
-pub(crate) use node_detail_popover::{NodeDetailPopover, status_pane_tone};
+pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};
 pub use node_pane::{NodeDirtyTint, NodePane, NodeSection};
 pub use produced_product_view::ProducedProductView;
 pub use produced_products::ProducedProducts;

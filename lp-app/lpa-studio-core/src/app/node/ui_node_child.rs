@@ -1,6 +1,6 @@
 //! Child nodes extracted from config slots.
 
-use crate::{DirtySummary, UiAction, UiNodeSection, UiStatus};
+use crate::{DirtySummary, UiAction, UiAffordance, UiNodeSection, UiStatus};
 
 /// A child node rendered outside its parent node pane.
 #[derive(Clone, Debug, PartialEq)]
@@ -70,5 +70,12 @@ impl UiNodeChild {
     pub fn with_children(mut self, children: Vec<UiNodeChild>) -> Self {
         self.children = children;
         self
+    }
+
+    /// The child's one chrome affordance: the priority merge of its own
+    /// status and its subtree dirty summary (same projection as the header
+    /// it becomes when rendered as a nested pane).
+    pub fn affordance(&self) -> UiAffordance {
+        UiAffordance::merged(self.status.kind, &self.dirty)
     }
 }

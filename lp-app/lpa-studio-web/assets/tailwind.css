@@ -656,6 +656,9 @@
   .tw\:border-status-live-border {
     border-color: var(--tw-color-status-live-border);
   }
+  .tw\:border-status-live-foreground {
+    border-color: var(--tw-color-status-live-foreground);
+  }
   .tw\:border-status-neutral-border {
     border-color: var(--tw-color-status-neutral-border);
   }
@@ -1205,6 +1208,13 @@
     &:hover {
       @media (hover: hover) {
         border-color: var(--tw-color-status-good-foreground);
+      }
+    }
+  }
+  .tw\:hover\:border-status-live-foreground {
+    &:hover {
+      @media (hover: hover) {
+        border-color: var(--tw-color-status-live-foreground);
       }
     }
   }

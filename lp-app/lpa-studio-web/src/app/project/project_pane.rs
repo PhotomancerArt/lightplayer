@@ -2,48 +2,38 @@
 //! feedback on D4/D5 — no second header above the node tree).
 //!
 //! Header: the project *name* as the title (never the literal word
-//! "project" — that is the kind label), the controller's pane status as a
-//! compact chip ("Ready", "Syncing", …), a dirty/status tone wash,
-//! contextual Save / Revert-to-saved icon actions supplied by the controller
+//! "project" — that is the kind label), a dirty/status tone wash, contextual
+//! Save / Revert-to-saved icon actions supplied by the controller
 //! (`ProjectEditorView.header_actions`), and a `DetailPopover` at the right
-//! edge. Dirty counts ("N unsaved" / "N live") are deliberately NOT header
-//! chips — too cramped; they live in the detail popup, together with the
-//! project stats that used to be a sidebar card.
+//! edge whose trigger renders the pane's one core-computed `UiAffordance`
+//! (P6 affordance model). No status chip and no count chips in the header:
+//! the status word ("Ready", "Syncing", …), the per-bucket dirty counts, and
+//! the project stats all live in the detail popup.
 //!
 //! Body: the node tree (plus any sync issue and the pane-level
 //! Refresh/Disconnect actions). The popup stays at M2's revision + counts
 //! detail level; the full "what changed" panel is M3.
 
 use dioxus::prelude::*;
-use lpa_studio_core::core::status::UiStatusKind;
-use lpa_studio_core::{DirtySummary, ProjectEditorView, UiAction, UiMetric, UiStatus};
+use lpa_studio_core::{
+    DirtySummary, ProjectEditorView, UiAction, UiAffordance, UiMetric, UiStatus,
+};
 
-use crate::app::layout::{PaneChip, PaneChrome, PaneTone, StudioPane};
-use crate::app::node::status_pane_tone;
+use crate::app::affordance::{affordance_pane_tone, affordance_trigger_style};
+use crate::app::layout::{PaneChrome, StudioPane};
+use crate::app::node::node_status_label_class;
 use crate::app::project::ProjectNodeTree;
 use crate::base::{
-    DetailPopover, DetailSectionTint, IconMenuTone, PopoverPlacement, StudioIconName,
-    detail_popover_section_class,
+    DetailPopover, DetailSectionTint, PopoverPlacement, detail_popover_section_class,
 };
 use crate::core::ActionStrip;
-
-/// Overall overlay state summarized by the header's detail trigger.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ProjectPaneState {
-    /// No pending persisted edits; nothing for Save to write.
-    Unchanged,
-    /// Persisted edits are pending in the overlay, not yet saved.
-    Uncommitted,
-    /// An edit or save operation is awaiting its server acknowledgement.
-    InProgress,
-}
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn ProjectPane(
     view: ProjectEditorView,
     /// Pane-level status from the project controller ("Ready", "Syncing", …),
-    /// shown as the header's compact state chip.
+    /// merged into the header affordance and shown as text in the popup.
     #[props(default = UiStatus::neutral("Project"))]
     status: UiStatus,
     /// Pane-level actions (Refresh / Disconnect) rendered at the body's foot.
@@ -57,17 +47,18 @@ pub fn ProjectPane(
 ) -> Element {
     let dirty = view.dirty;
     let edits_in_flight = view.edits_in_flight;
-    let state = project_pane_state(&dirty, edits_in_flight);
+    let affordance = view.affordance(status.kind);
     let chrome = PaneChrome {
-        tone: project_pane_tone(status.kind, &dirty, edits_in_flight),
+        tone: affordance_pane_tone(affordance, status.kind),
         accent: false,
-        chips: vec![project_status_chip(&status)],
+        chips: Vec::new(),
     };
     let overlay_revision = view.sync.overlay_revision;
     let sync_issue = view.sync.issue.clone();
     let stats = view.stats.clone();
     let roots = view.tree.roots.clone();
     let header_actions = view.header_actions.clone();
+    let project_name = view.project_name.clone();
 
     rsx! {
         StudioPane {
@@ -78,7 +69,9 @@ pub fn ProjectPane(
             on_action,
             detail: rsx! {
                 ProjectDetailPopover {
-                    state,
+                    affordance,
+                    project_name,
+                    status,
                     dirty,
                     overlay_revision,
                     edits_in_flight,
@@ -111,51 +104,47 @@ pub fn ProjectPane(
     }
 }
 
-/// The detail popup on the shared [`DetailPopover`] base: overlay revision,
-/// awaiting-ack, the per-bucket dirty counts with their status tints, and the
-/// project stats (moved here from the old sidebar MetricGrid card).
+/// The detail popup on the shared [`DetailPopover`] base: project identity
+/// with the status word (its only home — headers no longer carry a status
+/// chip), the pending-edit state, overlay revision, per-bucket dirty counts
+/// with their status tints, and the project stats (moved here from the old
+/// sidebar MetricGrid card).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn ProjectDetailPopover(
-    state: ProjectPaneState,
+    affordance: UiAffordance,
+    project_name: String,
+    status: UiStatus,
     dirty: DirtySummary,
     overlay_revision: i64,
     edits_in_flight: usize,
     stats: Vec<UiMetric>,
     #[props(default = false)] initially_open: bool,
 ) -> Element {
-    // Trigger icon discipline (UX gate): the default trigger is the "i"
-    // info glyph matching slot rows; only the genuinely attention-needing
-    // uncommitted state keeps its edited glyph. Status tones stay.
-    let (icon, tone, label) = match state {
-        ProjectPaneState::Unchanged => (
-            StudioIconName::InfoBare,
-            IconMenuTone::Quiet,
-            "Project details — no unsaved changes",
-        ),
-        ProjectPaneState::Uncommitted => (
-            StudioIconName::Edited,
-            IconMenuTone::Warning,
-            "Project has unsaved changes",
-        ),
-        ProjectPaneState::InProgress => (
-            StudioIconName::InfoBare,
-            IconMenuTone::Working,
-            "Edit in progress",
-        ),
-    };
+    let style = affordance_trigger_style(affordance);
+    let label = trigger_label(affordance);
+    let status_class = node_status_label_class(status.kind);
 
     rsx! {
         DetailPopover {
-            icon,
+            icon: style.icon,
             label: label.to_string(),
-            tone,
+            tone: style.tone,
             placement: PopoverPlacement::BottomEnd,
-            active: state != ProjectPaneState::Unchanged,
+            active: affordance.is_announced(),
             initially_open,
+            section { class: detail_popover_section_class(DetailSectionTint::None),
+                div { class: "tw:flex tw:min-w-0 tw:items-start tw:justify-between tw:gap-4 tw:py-1",
+                    div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
+                        strong { class: "tw:min-w-0 tw:text-sm tw:text-strong-foreground tw:break-words", "{project_name}" }
+                        span { class: "tw:text-xs tw:font-bold tw:text-subtle-foreground", "Project" }
+                    }
+                    span { class: status_class, "{status.label}" }
+                }
+            }
             section { class: "tw:grid tw:gap-1 tw:px-3 tw:py-2",
                 h3 { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "Pending edits" }
-                ProjectDetailRow { label: "State", value: state_label(state).to_string() }
+                ProjectDetailRow { label: "State", value: state_label(affordance).to_string() }
                 ProjectDetailRow { label: "Overlay revision", value: overlay_revision.to_string() }
                 if edits_in_flight > 0 {
                     ProjectDetailRow { label: "Awaiting ack", value: edits_in_flight.to_string() }
@@ -198,53 +187,25 @@ fn ProjectDetailRow(label: String, value: String) -> Element {
     }
 }
 
-fn project_pane_state(dirty: &DirtySummary, edits_in_flight: usize) -> ProjectPaneState {
-    if edits_in_flight > 0 {
-        ProjectPaneState::InProgress
-    } else if dirty.persisted > 0 {
-        ProjectPaneState::Uncommitted
-    } else {
-        ProjectPaneState::Unchanged
+/// Accessible trigger label for the pane's merged affordance.
+fn trigger_label(affordance: UiAffordance) -> &'static str {
+    match affordance {
+        UiAffordance::Info => "Project details — no unsaved changes",
+        UiAffordance::Busy => "Project activity in progress",
+        UiAffordance::Live => "Project has live-only edits",
+        UiAffordance::Unsaved => "Project has unsaved changes",
+        UiAffordance::Error => "Project needs attention",
     }
 }
 
-fn state_label(state: ProjectPaneState) -> &'static str {
-    match state {
-        ProjectPaneState::Unchanged => "unchanged",
-        ProjectPaneState::Uncommitted => "uncommitted",
-        ProjectPaneState::InProgress => "in progress",
-    }
-}
-
-/// Header tone: failed edits wash red (and an error status is never masked),
-/// an in-flight op washes working, otherwise the dominant dirty bucket
-/// (unsaved > live, per D6); a clean idle project keeps its status tone.
-fn project_pane_tone(
-    status: UiStatusKind,
-    dirty: &DirtySummary,
-    edits_in_flight: usize,
-) -> PaneTone {
-    if dirty.failed > 0 || status == UiStatusKind::Error {
-        PaneTone::Error
-    } else if edits_in_flight > 0 {
-        PaneTone::Working
-    } else if dirty.persisted > 0 {
-        PaneTone::Warning
-    } else if dirty.transient > 0 {
-        PaneTone::Live
-    } else {
-        status_pane_tone(status)
-    }
-}
-
-/// The header's one compact state chip: the controller's pane status
-/// ("Ready", "Syncing", …), toned like node status chips. Dirty counts stay
-/// out of the header (detail popup); dirty state shows as the header tone.
-fn project_status_chip(status: &UiStatus) -> PaneChip {
-    PaneChip {
-        tone: status_pane_tone(status.kind),
-        text: status.label.clone(),
-        title: format!("Project status: {}", status.label),
+/// The popup's "State" row wording for the merged affordance.
+fn state_label(affordance: UiAffordance) -> &'static str {
+    match affordance {
+        UiAffordance::Info => "unchanged",
+        UiAffordance::Busy => "in progress",
+        UiAffordance::Live => "live edits only",
+        UiAffordance::Unsaved => "uncommitted",
+        UiAffordance::Error => "needs attention",
     }
 }
 
@@ -271,6 +232,9 @@ fn live_section_tint(dirty: &DirtySummary) -> DetailSectionTint {
 
 #[cfg(test)]
 mod tests {
+    use lpa_studio_core::core::status::UiStatusKind;
+    use lpa_studio_core::{ProjectNodeTreeView, ProjectSyncSummary};
+
     use super::*;
 
     fn dirty(persisted: usize, transient: usize, failed: usize) -> DirtySummary {
@@ -281,63 +245,67 @@ mod tests {
         }
     }
 
-    #[test]
-    fn state_tracks_in_flight_then_persisted() {
-        assert_eq!(
-            project_pane_state(&dirty(0, 0, 0), 0),
-            ProjectPaneState::Unchanged
+    fn editor_view(dirty: DirtySummary, edits_in_flight: usize) -> ProjectEditorView {
+        let mut view = ProjectEditorView::new(
+            "p",
+            1,
+            ProjectSyncSummary::default(),
+            Vec::new(),
+            ProjectNodeTreeView::new(Vec::new(), 0),
+            Vec::new(),
         );
-        assert_eq!(
-            project_pane_state(&dirty(0, 2, 0), 0),
-            ProjectPaneState::Unchanged
-        );
-        assert_eq!(
-            project_pane_state(&dirty(1, 0, 0), 0),
-            ProjectPaneState::Uncommitted
-        );
-        assert_eq!(
-            project_pane_state(&dirty(1, 0, 0), 1),
-            ProjectPaneState::InProgress
-        );
+        view.dirty = dirty;
+        view.edits_in_flight = edits_in_flight;
+        view
     }
 
     #[test]
-    fn clean_idle_project_keeps_its_status_tone_and_status_chip() {
+    fn trigger_follows_the_core_merge_pencil_when_uncommitted_i_otherwise() {
+        // Clean + Ready: quiet "i".
+        let clean = editor_view(DirtySummary::clean(), 0).affordance(UiStatusKind::Good);
+        assert_eq!(clean, UiAffordance::Info);
+        assert_eq!(state_label(clean), "unchanged");
+
+        // Persisted edits: the edited pencil, even while an ack is pending
+        // (Unsaved outranks Busy in the shared priority).
+        let uncommitted = editor_view(dirty(1, 0, 0), 1).affordance(UiStatusKind::Good);
+        assert_eq!(uncommitted, UiAffordance::Unsaved);
+        assert_eq!(state_label(uncommitted), "uncommitted");
+
+        // In-flight only: genuine activity.
+        let busy = editor_view(dirty(0, 0, 0), 1).affordance(UiStatusKind::Good);
+        assert_eq!(busy, UiAffordance::Busy);
+        assert_eq!(state_label(busy), "in progress");
+
+        // Live-only edits stay distinct from unsaved.
+        let live = editor_view(dirty(0, 2, 0), 0).affordance(UiStatusKind::Good);
+        assert_eq!(live, UiAffordance::Live);
+    }
+
+    #[test]
+    fn header_tone_rides_the_shared_merge_and_error_is_never_masked() {
+        let tone = |dirty: DirtySummary, in_flight: usize, status: UiStatusKind| {
+            affordance_pane_tone(editor_view(dirty, in_flight).affordance(status), status)
+        };
+
+        use crate::app::layout::PaneTone;
         assert_eq!(
-            project_pane_tone(UiStatusKind::Good, &DirtySummary::clean(), 0),
+            tone(DirtySummary::clean(), 0, UiStatusKind::Good),
             PaneTone::Good
         );
+        assert_eq!(tone(dirty(1, 0, 1), 2, UiStatusKind::Good), PaneTone::Error);
         assert_eq!(
-            project_pane_tone(UiStatusKind::Neutral, &DirtySummary::clean(), 0),
-            PaneTone::Neutral
-        );
-
-        let chip = project_status_chip(&UiStatus::good("Ready"));
-        assert_eq!(chip.tone, PaneTone::Good);
-        assert_eq!(chip.text, "Ready");
-    }
-
-    #[test]
-    fn header_tone_prefers_failed_then_in_flight_then_unsaved_then_live() {
-        assert_eq!(
-            project_pane_tone(UiStatusKind::Good, &dirty(1, 0, 1), 2),
-            PaneTone::Error
-        );
-        assert_eq!(
-            project_pane_tone(UiStatusKind::Good, &dirty(1, 0, 0), 2),
-            PaneTone::Working
-        );
-        assert_eq!(
-            project_pane_tone(UiStatusKind::Good, &dirty(2, 1, 0), 0),
+            tone(dirty(2, 1, 0), 0, UiStatusKind::Good),
             PaneTone::Warning
         );
+        assert_eq!(tone(dirty(0, 1, 0), 0, UiStatusKind::Good), PaneTone::Live);
         assert_eq!(
-            project_pane_tone(UiStatusKind::Good, &dirty(0, 1, 0), 0),
-            PaneTone::Live
+            tone(dirty(0, 0, 0), 1, UiStatusKind::Good),
+            PaneTone::Working
         );
         // An error pane status is never masked by a dirty wash.
         assert_eq!(
-            project_pane_tone(UiStatusKind::Error, &dirty(0, 1, 0), 0),
+            tone(dirty(0, 1, 0), 0, UiStatusKind::Error),
             PaneTone::Error
         );
     }

@@ -78,7 +78,7 @@ pub(crate) fn error_node_view() -> UiNodeView {
 }
 
 /// Playlist node whose subtree carries unsaved (persisted) edits — drives the
-/// yellow dirty chip and D7 tint variants.
+/// yellow pencil affordance and D7 tint variants.
 pub(crate) fn unsaved_dirty_node_view() -> UiNodeView {
     let mut view = playlist_node_view();
     view.header.dirty = DirtySummary {
@@ -90,7 +90,7 @@ pub(crate) fn unsaved_dirty_node_view() -> UiNodeView {
 }
 
 /// Playlist node whose subtree carries live-only (transient) edits — drives
-/// the blue dirty chip and D7 tint variants.
+/// the blue (live) pencil affordance and D7 tint variants.
 pub(crate) fn live_dirty_node_view() -> UiNodeView {
     let mut view = playlist_node_view();
     view.header.dirty = DirtySummary {
@@ -102,7 +102,7 @@ pub(crate) fn live_dirty_node_view() -> UiNodeView {
 }
 
 /// Playlist node whose subtree carries a rejected edit — drives the red
-/// failed dirty chip and D7 tint variants.
+/// warning affordance and D7 tint variants.
 pub(crate) fn failed_dirty_node_view() -> UiNodeView {
     let mut view = playlist_node_view();
     view.header.dirty = DirtySummary {

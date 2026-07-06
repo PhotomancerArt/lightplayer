@@ -1,5 +1,6 @@
 use crate::{
-    DirtySummary, ProjectNodeTreeView, ProjectSyncSummary, UiMetric, UiNodeView, UiPaneAction,
+    DirtySummary, ProjectNodeTreeView, ProjectSyncSummary, UiAffordance, UiMetric, UiNodeView,
+    UiPaneAction, UiStatusKind,
 };
 
 #[derive(Clone, Debug, PartialEq)]
@@ -77,5 +78,49 @@ impl ProjectEditorView {
 
     pub fn is_empty(&self) -> bool {
         self.nodes.is_empty()
+    }
+
+    /// The project pane's one chrome affordance: the priority merge of the
+    /// controller's pane status, the project-level dirty summary, and Busy
+    /// while buffered edits await their acknowledgement (genuine activity).
+    pub fn affordance(&self, status: UiStatusKind) -> UiAffordance {
+        let busy = if self.edits_in_flight > 0 {
+            UiAffordance::Busy
+        } else {
+            UiAffordance::Info
+        };
+        UiAffordance::merged(status, &self.dirty).merge(busy)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn project_affordance_merges_status_dirty_and_in_flight_activity() {
+        let mut view = ProjectEditorView::new(
+            "p",
+            1,
+            ProjectSyncSummary::default(),
+            Vec::new(),
+            ProjectNodeTreeView::new(Vec::new(), 0),
+            Vec::new(),
+        );
+
+        // Clean + Ready: silent chrome.
+        assert_eq!(view.affordance(UiStatusKind::Good), UiAffordance::Info);
+        // A syncing status is genuine activity.
+        assert_eq!(view.affordance(UiStatusKind::Working), UiAffordance::Busy);
+
+        // Awaiting an ack is Busy, but unsaved edits outrank it.
+        view.edits_in_flight = 1;
+        assert_eq!(view.affordance(UiStatusKind::Good), UiAffordance::Busy);
+        view.dirty.persisted = 1;
+        assert_eq!(view.affordance(UiStatusKind::Good), UiAffordance::Unsaved);
+
+        // Failed edits and error statuses are never masked.
+        view.dirty.failed = 1;
+        assert_eq!(view.affordance(UiStatusKind::Good), UiAffordance::Error);
     }
 }

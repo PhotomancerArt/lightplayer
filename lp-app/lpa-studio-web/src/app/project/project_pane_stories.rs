@@ -13,7 +13,7 @@ use crate::app::project::ProjectPane;
 use crate::app::story_fixtures::{project_editor_fixture, project_ready_actions};
 
 #[story(
-    description = "Clean project: the project name as title, 'Project' kind label, Ready status chip, no action icons, quiet 'i' detail trigger; node tree as the pane body with pane actions at its foot."
+    description = "Clean project: the project name as title, 'Project' kind label, no chips and no action icons, quiet 'i' detail trigger (the status word lives in the popup); node tree as the pane body with pane actions at its foot."
 )]
 pub(crate) fn unchanged() -> Element {
     rsx! {
@@ -60,7 +60,7 @@ pub(crate) fn live_only() -> Element {
 }
 
 #[story(
-    description = "An edit awaiting its server ack: working wash and working-toned 'i' trigger; the awaiting-ack count is in the popup."
+    description = "An edit awaiting its server ack while persisted edits are pending: Unsaved outranks Busy in the shared priority, so the pencil trigger and yellow wash win; the awaiting-ack count is in the popup."
 )]
 pub(crate) fn in_progress() -> Element {
     rsx! {
@@ -77,7 +77,7 @@ pub(crate) fn in_progress() -> Element {
 }
 
 #[story(
-    description = "The detail popup: state, overlay revision, per-kind dirty counts with their tints, and the project stats section (moved from the old sidebar card)."
+    description = "The detail popup: project identity with the status pill, state, overlay revision, per-kind dirty counts with their tints, and the project stats section (moved from the old sidebar card)."
 )]
 pub(crate) fn detail_popup() -> Element {
     rsx! {

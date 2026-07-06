@@ -46,7 +46,7 @@ pub(crate) fn error_node() -> Element {
 }
 
 #[story(
-    description = "D7 variant (a), unsaved: header-only yellow tint plus the unsaved chip (the live default)."
+    description = "D7 variant (a), unsaved: header-only yellow tint; the yellow edit-pencil detail trigger is the whole announcement (no count chips — counts live in the popup)."
 )]
 pub(crate) fn dirty_unsaved_header_tint() -> Element {
     let mut view = unsaved_dirty_node_view();
@@ -78,7 +78,7 @@ pub(crate) fn dirty_unsaved_surface_tint() -> Element {
 }
 
 #[story(
-    description = "D7 variant (a), live-only: header-only blue tint plus the live chip (the live default)."
+    description = "D7 variant (a), live-only: header-only blue tint with the blue (live) pencil detail trigger (the live default)."
 )]
 pub(crate) fn dirty_live_header_tint() -> Element {
     let mut view = live_dirty_node_view();
@@ -110,7 +110,7 @@ pub(crate) fn dirty_live_surface_tint() -> Element {
 }
 
 #[story(
-    description = "D7 variant (a), failed: the error wash dominates the header and the red failed chip joins the unsaved chip (the live default)."
+    description = "D7 variant (a), failed: the error wash dominates the header and the detail trigger wears the red warning glyph (the live default)."
 )]
 pub(crate) fn dirty_failed_header_tint() -> Element {
     let mut view = failed_dirty_node_view();
@@ -142,7 +142,7 @@ pub(crate) fn dirty_failed_surface_tint() -> Element {
 }
 
 #[story(
-    description = "Dirty bubbling: a dirty grandchild's counts show on its own chip and on both ancestors' chips, so a collapsed parent still reveals a dirty descendant."
+    description = "Dirty bubbling: a dirty grandchild's affordance shows on its own detail trigger and on both ancestors' triggers (with the header tint), so a collapsed parent still reveals a dirty descendant; the clean sibling stays silent."
 )]
 pub(crate) fn nested_dirty_children() -> Element {
     let mut view = nested_dirty_node_view();

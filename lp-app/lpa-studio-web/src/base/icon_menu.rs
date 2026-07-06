@@ -48,6 +48,7 @@ fn icon_menu_chrome_class(tone: IconMenuTone) -> &'static str {
         IconMenuTone::Accent => "ux-popover-chrome-accent",
         IconMenuTone::Good => "ux-popover-chrome-good",
         IconMenuTone::Working => "ux-popover-chrome-working",
+        IconMenuTone::Live => "ux-popover-chrome-live",
         IconMenuTone::Warning => "ux-popover-chrome-warning",
         IconMenuTone::Error => "ux-popover-chrome-error",
     }
@@ -60,6 +61,8 @@ pub enum IconMenuTone {
     Accent,
     Good,
     Working,
+    /// Live-only (transient) edit state, blue.
+    Live,
     Warning,
     Error,
 }
@@ -109,6 +112,9 @@ fn icon_menu_class(tone: IconMenuTone, active: bool) -> &'static str {
         (IconMenuTone::Working, _) => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-working-border tw:bg-status-working-bg tw:p-0 tw:text-status-working-foreground tw:transition-colors tw:hover:border-status-working-foreground"
         }
+        (IconMenuTone::Live, _) => {
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-live-border tw:bg-status-live-bg tw:p-0 tw:text-status-live-foreground tw:transition-colors tw:hover:border-status-live-foreground"
+        }
         (IconMenuTone::Warning, _) => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:p-0 tw:text-status-warning-foreground tw:transition-colors tw:hover:border-status-warning-foreground"
         }
@@ -141,6 +147,9 @@ fn icon_menu_hover_class(tone: IconMenuTone, active: bool) -> &'static str {
         (IconMenuTone::Working, _) => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-working-foreground tw:bg-status-working-bg tw:p-0 tw:text-status-working-foreground tw:transition-colors"
         }
+        (IconMenuTone::Live, _) => {
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-live-foreground tw:bg-status-live-bg tw:p-0 tw:text-status-live-foreground tw:transition-colors"
+        }
         (IconMenuTone::Warning, _) => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-warning-foreground tw:bg-status-warning-bg tw:p-0 tw:text-status-warning-foreground tw:transition-colors"
         }
@@ -166,6 +175,9 @@ fn icon_menu_open_class(tone: IconMenuTone) -> &'static str {
         }
         IconMenuTone::Working => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-working-border tw:bg-status-working-bg tw:p-0 tw:text-status-working-foreground"
+        }
+        IconMenuTone::Live => {
+            "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-live-border tw:bg-status-live-bg tw:p-0 tw:text-status-live-foreground"
         }
         IconMenuTone::Warning => {
             "tw:inline-flex tw:h-8 tw:w-8 tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-status-warning-border tw:bg-status-warning-bg tw:p-0 tw:text-status-warning-foreground"

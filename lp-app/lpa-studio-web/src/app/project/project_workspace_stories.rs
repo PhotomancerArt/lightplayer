@@ -55,7 +55,7 @@ pub(crate) fn device_project_selection() -> Element {
 }
 
 #[story(
-    description = "The project pane with a dirty tree: uncommitted header with Save/Revert icons; the focused shader row's selection highlight mixes in the unsaved yellow, the palette row wears the live blue header tint, the root row the aggregate unsaved tint — no count badges (counts live in the popup)."
+    description = "The project pane with a dirty tree: uncommitted header with Save/Revert icons and the pencil trigger; the focused shader row's selection highlight mixes in the unsaved yellow, the palette row wears the live blue header tint, the root row the aggregate unsaved tint — rows carry only the small affordance glyph (no status words or count badges; the breakdown is in the tooltip, counts in the popup)."
 )]
 pub(crate) fn sidebar_dirty_tree() -> Element {
     let mut view = project_editor_fixture(ProjectSyncPhase::Ready);

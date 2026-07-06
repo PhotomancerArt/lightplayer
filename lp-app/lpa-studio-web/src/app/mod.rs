@@ -4,6 +4,7 @@
 //! projects, nodes, and the overall Studio shell. They compose `core`
 //! controls and `base` primitives into app-specific workflows.
 
+pub(crate) mod affordance;
 pub mod device;
 pub mod layout;
 pub mod node;

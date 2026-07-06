@@ -34,7 +34,7 @@ pub use app::project::{
     ProjectNodeTreeView, ProjectOp, ProjectProductSubscriptionIntent, ProjectRefreshOutcome,
     ProjectRuntimeSummary, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState,
     ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotController,
-    SlotControllerState, SlotEditOp, SlotKind,
+    SlotControllerState, SlotEditOp, SlotKind, UiAffordance,
 };
 pub use app::server::{
     LoadedDemoProject, LoadedProjectCatalog, ServerController, ServerFailureKind, ServerOp,
