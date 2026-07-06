@@ -98,42 +98,32 @@ pub(crate) fn compile_function_func_abi(
     }
 }
 
-pub(crate) fn compile_function_fold_constants(
-    state: &mut function_job::FunctionCompileState,
-    _session: &CompileSession,
-) {
-    let mut func_opt = state
-        .original
-        .as_ref()
-        .expect("const fold stage missing original function")
-        .clone();
-    let n_folded = lpir::const_fold::fold_constants(&mut func_opt);
+/// Const-fold a function in place. In the job path `func` is the function
+/// inside the job's own `LpirModule`; folding never changes signatures, so
+/// later lowering of other functions (which reads callee names only) is
+/// unaffected.
+pub(crate) fn compile_function_fold_constants(func: &mut IrFunction) {
+    let n_folded = lpir::const_fold::fold_constants(func);
     if n_folded > 0 {
         log::debug!(
             "[native-fa] compile_function: folded {n_folded} LPIR constants for {}",
-            state.name
+            func.name
         );
     }
-    state.optimized = Some(func_opt);
 }
 
 pub(crate) fn compile_function_lower_stage(
     state: &mut function_job::FunctionCompileState,
+    func: &IrFunction,
     ir: &LpirModule,
     session: &CompileSession,
 ) -> Result<(), NativeError> {
-    let Some(func_opt) = state.optimized.as_ref() else {
-        return Err(NativeError::Internal(format!(
-            "lower stage missing optimized function for {}",
-            state.name
-        )));
-    };
     let lower_opts = LowerOpts {
         float_mode: session.float_mode,
         q32: &session.options.config.q32,
     };
-    let lowered = crate::lower::lower_ops(func_opt, ir, &session.abi, &lower_opts)
-        .map_err(NativeError::Lower)?;
+    let lowered =
+        crate::lower::lower_ops(func, ir, &session.abi, &lower_opts).map_err(NativeError::Lower)?;
     log::debug!(
         "[native-fa] compile_function: lowered {} to {} vinsts",
         state.name,
@@ -206,22 +196,20 @@ pub(crate) fn compile_function_emit_stage(
 
 pub(crate) fn compile_function_debug_sections(
     state: &mut function_job::FunctionCompileState,
+    func: &IrFunction,
     ir: &LpirModule,
     session: &CompileSession,
 ) -> Result<(), NativeError> {
-    let Some(emitted) = state.emitted.as_ref() else {
+    // Take ownership: nothing reads `state.emitted` after this stage, so the
+    // machine code and relocs move into the CompiledFunction instead of being
+    // cloned (previously a transient 2x of every function's code).
+    let Some(emitted) = state.emitted.take() else {
         return Err(NativeError::Internal(format!(
             "debug stage missing emitted code for {}",
             state.name
         )));
     };
     let (debug_lines, debug_info) = if session.options.debug_info {
-        let Some(func_opt) = state.optimized.as_ref() else {
-            return Err(NativeError::Internal(format!(
-                "debug stage missing optimized function for {}",
-                state.name
-            )));
-        };
         let Some(lowered) = state.lowered.as_ref() else {
             return Err(NativeError::Internal(format!(
                 "debug stage missing lowered function for {}",
@@ -229,7 +217,7 @@ pub(crate) fn compile_function_debug_sections(
             )));
         };
         let sections = crate::debug::sections::build_debug_sections(
-            func_opt,
+            func,
             ir,
             lowered,
             &emitted.code,
@@ -240,14 +228,14 @@ pub(crate) fn compile_function_debug_sections(
         let debug_info = FunctionDebugInfo::new(&state.name)
             .with_inst_count(emitted.code.len() / 4)
             .with_sections(sections);
-        (Some(emitted.debug_lines.clone()), Some(debug_info))
+        (Some(emitted.debug_lines), Some(debug_info))
     } else {
         (None, None)
     };
     state.compiled = Some(CompiledFunction {
         name: state.name.clone(),
-        code: emitted.code.clone(),
-        relocs: emitted.relocs.clone(),
+        code: emitted.code,
+        relocs: emitted.relocs,
         debug_lines,
         debug_info,
     });
@@ -279,13 +267,17 @@ pub fn compile_function(
     );
 
     let func_abi = compile_function_func_abi(session, func, fn_sig);
-    let mut state = function_job::FunctionCompileState::new(0, func.clone(), func_abi);
-    compile_function_fold_constants(&mut state, session);
-    compile_function_lower_stage(&mut state, ir, session)?;
+    // Standalone path (host/tests): the caller's module is borrowed, so fold
+    // a local copy. The job path folds in place inside its owned module.
+    let mut folded = func.clone();
+    compile_function_fold_constants(&mut folded);
+    let mut state =
+        function_job::FunctionCompileState::new(0, lpir::FuncId(0), folded.name.clone(), func_abi);
+    compile_function_lower_stage(&mut state, &folded, ir, session)?;
     compile_function_peephole(&mut state)?;
     compile_function_regalloc_stage(&mut state, session)?;
     compile_function_emit_stage(&mut state, session)?;
-    compile_function_debug_sections(&mut state, ir, session)?;
+    compile_function_debug_sections(&mut state, &folded, ir, session)?;
     compile_function_finalize(&mut state)
 }
 

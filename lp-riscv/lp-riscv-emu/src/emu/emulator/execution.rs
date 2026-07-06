@@ -394,6 +394,8 @@ impl Riscv32Emulator {
                 {
                     Ok(StepResult::Syscall(syscall_info))
                 }
+            } else if syscall_info.number == lp_riscv_emu_shared::SYSCALL_ALLOC_TRACE {
+                self.handle_alloc_trace_syscall(&syscall_info)
             } else {
                 Ok(StepResult::Syscall(syscall_info))
             }

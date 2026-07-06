@@ -17,21 +17,28 @@ pub type TraceSink = crate::regalloc::trace::AllocTrace;
 #[cfg(not(feature = "debug"))]
 pub type TraceSink = ();
 
-/// Unified `push` for [`TraceSink`]: records entries in debug builds, no-op otherwise.
+/// Unified lazy `push` for [`TraceSink`]: records entries in debug builds,
+/// no-op otherwise.
+///
+/// Takes a closure so entry construction (`String::from` + `format!`) only
+/// happens when the `debug` feature is enabled. With the ZST sink the closure
+/// is never invoked and the formatting compiles away — this matters on
+/// device, where eagerly-built trace strings were the largest `format!`
+/// source in the compile path.
 pub trait TracePush {
-    fn push(&mut self, entry: TraceEntry);
+    fn push_with(&mut self, f: impl FnOnce() -> TraceEntry);
 }
 
 #[cfg(feature = "debug")]
 impl TracePush for TraceSink {
-    fn push(&mut self, entry: TraceEntry) {
-        self.entries.push(entry);
+    fn push_with(&mut self, f: impl FnOnce() -> TraceEntry) {
+        self.entries.push(f());
     }
 }
 
 #[cfg(not(feature = "debug"))]
 impl TracePush for TraceSink {
-    fn push(&mut self, _entry: TraceEntry) {}
+    fn push_with(&mut self, _f: impl FnOnce() -> TraceEntry) {}
 }
 
 /// New empty trace sink for allocator state.

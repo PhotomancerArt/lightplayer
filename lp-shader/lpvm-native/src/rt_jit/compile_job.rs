@@ -37,15 +37,12 @@ impl NativeJitCompileJob {
         isa: IsaTarget,
     ) -> Self {
         options.config = config;
-        let backend = NativeCompileJob::new(
-            ir.clone(),
-            meta.clone(),
-            options.float_mode,
-            options.clone(),
-            isa,
-        );
+        // Build entry info before handing `ir` to the backend so the module
+        // is moved, not cloned — the backend job owns the only IR copy.
         let entry_info = build_entry_info(&ir, &meta, isa)
             .expect("native jit compile job requires matching IR and module signatures");
+        let backend =
+            NativeCompileJob::new(ir, meta.clone(), options.float_mode, options.clone(), isa);
         Self {
             meta,
             builtin_table,
