@@ -108,6 +108,9 @@ where
                         events.push(event);
                     }
                 }
+                ResponseDisposition::StaleAbandoned { response_id } => {
+                    events.push(ClientEvent::StaleResponseDropped { response_id });
+                }
                 ResponseDisposition::Uncorrelated {
                     response_id,
                     expected_id,

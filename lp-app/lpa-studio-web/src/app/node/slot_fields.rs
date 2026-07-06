@@ -363,7 +363,9 @@ pub fn DropdownSlotField(
 /// with `oninput` semantics — a continuous flood composing the WHOLE `Vec2`,
 /// coalesced per address by the actor — and the raw-input detail popup offers
 /// exact x/y entry against the same slot path (`onchange`). The component
-/// readouts beside the pad stay read-only; exact entry lives in the popup.
+/// readouts beside the pad stay read-only and stacked (x above y) at a fixed
+/// tabular width, so nothing shifts while a drag floods new values; exact
+/// (unrounded) entry and display live in the popup.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn XySlotField(
@@ -421,9 +423,9 @@ pub fn XySlotField(
                 span { class: "tw:pointer-events-none tw:absolute tw:left-0 tw:top-1/2 tw:h-px tw:w-full tw:bg-border-muted" }
                 span { class: "tw:pointer-events-none tw:absolute tw:h-2 tw:w-2 tw:-translate-x-1/2 tw:-translate-y-1/2 tw:rounded-full tw:border tw:border-accent-border tw:bg-accent", style: "{point_style}" }
             }
-            VectorSlotField {
-                kind: UiSlotValueKind::Vec2(value),
-                state: state.clone(),
+            span { class: "tw:flex tw:min-w-0 tw:flex-col tw:justify-center tw:gap-1",
+                XyPadReadout { label: "x", value: value[0], state: state.clone() }
+                XyPadReadout { label: "y", value: value[1], state: state.clone() }
             }
             if let Some((address, handler)) = raw_input {
                 SlotRawInputPopover { initially_open: raw_initially_open,
@@ -437,6 +439,34 @@ pub fn XySlotField(
             }
         }
     }
+}
+
+/// One read-only component readout row beside the XY pad. The value is
+/// display-capped to three decimals at a fixed tabular/monospace width (sized
+/// for the sign in `-0.000`), so the row's width never changes while a drag
+/// floods new values. Exact values are never rounded on dispatch; the
+/// raw-input popup shows and edits them unrounded.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn XyPadReadout(label: &'static str, value: f32, state: UiSlotFieldState) -> Element {
+    rsx! {
+        span { class: numeric_field_class(&state),
+            small { class: "tw:text-[0.64rem] tw:font-bold tw:uppercase tw:text-subtle-foreground",
+                "{label}"
+            }
+            span { class: "tw:w-[6ch] tw:text-right tw:font-mono tw:tabular-nums",
+                "{format_xy_readout(value)}"
+            }
+        }
+    }
+}
+
+/// Fixed-width display format for the XY pad readouts: always exactly three
+/// decimals, so every value in the pad's domain renders at the same width
+/// (plus one leading char for the sign). Display-only — dispatched values
+/// are never rounded.
+pub(crate) fn format_xy_readout(value: f32) -> String {
+    format!("{value:.3}")
 }
 
 /// CSS pixel size of the square XY pad (`tw:h-14 tw:w-14` = 3.5rem at the
@@ -580,8 +610,21 @@ pub(crate) fn format_float(value: f32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_f32_input, parse_i32_input, parse_u32_input, xy_pad_value};
+    use super::{
+        format_xy_readout, parse_f32_input, parse_i32_input, parse_u32_input, xy_pad_value,
+    };
     use lpa_studio_core::LpValue;
+
+    #[test]
+    fn xy_readout_display_is_fixed_three_decimals() {
+        // Display-only cap: always exactly three decimals so the readout
+        // column never changes width during a drag.
+        assert_eq!(format_xy_readout(0.42), "0.420");
+        assert_eq!(format_xy_readout(0.0), "0.000");
+        assert_eq!(format_xy_readout(1.0), "1.000");
+        assert_eq!(format_xy_readout(-0.5), "-0.500");
+        assert_eq!(format_xy_readout(0.123_456), "0.123");
+    }
 
     #[test]
     fn parses_and_clamps_signed_integer_input() {

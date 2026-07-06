@@ -139,7 +139,7 @@ pub(crate) fn dropdown_field() -> Element {
 }
 
 #[story(
-    description = "The editable XY pad for Vec2 values: drag-to-edit pad, read-only component readouts, and the raw-input popup affordance."
+    description = "The editable XY pad for Vec2 values: drag-to-edit pad, stacked fixed-width read-only component readouts (3-decimal display cap), and the raw-input popup affordance."
 )]
 pub(crate) fn xy_field() -> Element {
     rsx! {
