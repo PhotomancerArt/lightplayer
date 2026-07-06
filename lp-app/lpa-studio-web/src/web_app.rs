@@ -22,6 +22,8 @@ use core::time::Duration;
 use std::rc::Rc;
 
 use crate::app::StudioShell;
+use crate::app::layout::LocalStoreBanner;
+use crate::local_store::{self, LocalStoreStatus};
 use crate::studio_url;
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
@@ -74,6 +76,24 @@ pub fn App() -> Element {
         }
     });
 
+    // Mount the local project store: request durability, take the library
+    // lock, load OPFS into memory, start the flusher. The simulator never
+    // sees this store (D19/D20 — the sim is an ephemeral place). Spawned
+    // from use_hook so it runs exactly once per app instance (a use_future
+    // here restarts with the render loop and would mount repeatedly).
+    let mut store_status = use_signal(|| LocalStoreStatus::Initializing);
+    use_hook(move || {
+        local_store::request_persist();
+        spawn(async move {
+            store_status.set(local_store::init_local_store().await);
+        });
+    });
+    let on_store_retry = move |_| {
+        spawn(async move {
+            store_status.set(local_store::init_local_store().await);
+        });
+    };
+
     let startup_intent = use_hook(studio_url::read_connection_intent);
     let startup_bridge = bridge.clone();
     let _startup_task = use_future(move || {
@@ -113,6 +133,12 @@ pub fn App() -> Element {
     rsx! {
         style { "{STYLE}" }
         document::Stylesheet { href: asset!("/assets/tailwind.css") }
+        div { class: "tw:mx-auto tw:w-[min(1520px,100%)] tw:px-7 tw:pt-4 tw:max-[880px]:px-[18px]",
+            LocalStoreBanner {
+                status: store_status.read().clone(),
+                on_retry: on_store_retry,
+            }
+        }
         StudioShell {
             view: view.read().clone(),
             running: false,

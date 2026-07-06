@@ -172,6 +172,18 @@ fw-browser-test: install-wasm32-target
     CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
         cargo test -p fw-browser --target wasm32-unknown-unknown
 
+# Local project store tests: real browser + real OPFS. Needs a chromedriver
+# matching the local Chrome major version; set CHROMEDRIVER to override.
+lpa-fs-opfs-test: install-wasm32-target
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v wasm-bindgen-test-runner >/dev/null 2>&1; then
+        echo "wasm-bindgen-test-runner not found. Install: cargo install wasm-bindgen-cli --version 0.2.114"
+        exit 1
+    fi
+    CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER=wasm-bindgen-test-runner \
+        cargo test -p lpa-fs-opfs --target wasm32-unknown-unknown
+
 fw-browser-smoke: fw-browser-build
     #!/usr/bin/env bash
     set -euo pipefail
