@@ -1,13 +1,14 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiNodeChild, UiNodeHeader, UiNodeTab, UiNodeView};
 
-use crate::app::node::NodePane;
+use crate::app::node::{NodeDirtyTint, NodePane};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn NodeChildren(
     items: Vec<UiNodeChild>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    #[props(default)] dirty_tint: NodeDirtyTint,
 ) -> Element {
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3 tw:border-l tw:border-border-muted tw:pl-4",
@@ -16,6 +17,7 @@ pub fn NodeChildren(
                     key: "{child.label}",
                     view: child_node_view(child),
                     on_action,
+                    dirty_tint,
                 }
             }
         }
@@ -28,7 +30,8 @@ fn child_node_view(child: UiNodeChild) -> UiNodeView {
         child.kind.clone(),
         child.detail.clone(),
     )
-    .with_status(child.status.clone());
+    .with_status(child.status.clone())
+    .with_dirty(child.dirty);
     let header = if let Some(summary) = child.summary {
         header.with_summary(summary)
     } else {

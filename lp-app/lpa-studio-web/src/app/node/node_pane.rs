@@ -1,28 +1,46 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiNodeSection, UiNodeTabBody, UiNodeView, UiSlotRecord};
+use lpa_studio_core::core::status::UiStatusKind;
+use lpa_studio_core::{
+    DirtySummary, UiAction, UiNodeSection, UiNodeTabBody, UiNodeView, UiSlotRecord,
+};
 
-use crate::app::layout::{PaneChrome, PaneCollapse, StudioPane};
+use crate::app::layout::{PaneChip, PaneChrome, PaneCollapse, PaneTone, StudioPane};
 use crate::app::node::{
-    NodeChildren, NodeStatusMenu, ProducedProducts, ProducedValues, SlotRecordEditor,
+    NodeChildren, NodeDetailPopover, ProducedProducts, ProducedValues, SlotRecordEditor,
     status_pane_tone,
 };
 use crate::base::{StudioIcon, StudioIconName};
+
+/// Which surface treatment a dirty node pane wears — the D7 tint experiment,
+/// story-selectable pending the user's P5 pick.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum NodeDirtyTint {
+    /// Dirty tint on the header strip only, plus the state chip (live
+    /// default).
+    #[default]
+    HeaderOnly,
+    /// Dirty tint re-mixed into the whole pane surface (header + body).
+    FullSurface,
+}
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn NodePane(
     view: UiNodeView,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    #[props(default)] dirty_tint: NodeDirtyTint,
 ) -> Element {
     let mut active_tab = use_signal(|| 0_usize);
     let mut collapsed = use_signal(|| view.collapsed);
     let active_index = active_tab().min(view.tabs.len().saturating_sub(1));
     let active_body = view.tabs.get(active_index).map(|tab| tab.body.clone());
+    let dirty = view.header.dirty;
     let chrome = PaneChrome {
-        tone: status_pane_tone(view.header.status.kind),
+        tone: node_pane_tone(view.header.status.kind, dirty),
         accent: view.focused,
-        chips: Vec::new(),
+        chips: dirty_chips(dirty),
     };
+    let surface_class = pane_surface_tint_class(dirty_tint, dirty);
     let header = view.header.clone();
     let title = view.header.title.clone();
     let tabs = view.tabs.clone();
@@ -33,84 +51,91 @@ pub fn NodePane(
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3",
-            StudioPane {
-                collapse: PaneCollapse {
-                    collapsed: collapsed(),
-                    expand_label: "Expand node".to_string(),
-                    collapse_label: "Collapse node".to_string(),
-                    on_toggle: EventHandler::new(move |()| collapsed.set(!collapsed())),
-                },
-                primary: rsx! {
-                    NodeStatusMenu { header }
-                },
-                title,
-                chrome,
-                trailing: rsx! {
-                    if tabs.len() > 1 {
-                        NodeTabs {
-                            tabs: tabs.clone(),
-                            active_index,
-                            on_select: move |index| active_tab.set(index),
-                        }
-                    }
-                    if let Some(action) = select_action {
-                        NodeSelectButton {
-                            action,
-                            focused,
-                            on_action,
-                        }
-                    }
-                },
-                body: rsx! {
-                    if !issues.is_empty() {
-                        ul { class: "tw:m-0 tw:grid tw:list-none tw:gap-1 tw:rounded-sm tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-3",
-                            for issue in issues.clone() {
-                                li { class: "tw:text-sm tw:text-status-error-foreground", "{issue}" }
+            div { class: surface_class,
+                StudioPane {
+                    collapse: PaneCollapse {
+                        collapsed: collapsed(),
+                        expand_label: "Expand node".to_string(),
+                        collapse_label: "Collapse node".to_string(),
+                        on_toggle: EventHandler::new(move |()| collapsed.set(!collapsed())),
+                    },
+                    primary: rsx! {
+                        if let Some(action) = select_action {
+                            NodeSelectButton {
+                                action,
+                                focused,
+                                on_action,
                             }
                         }
-                    }
-                    match active_body {
-                        Some(UiNodeTabBody::Sections(sections)) => rsx! {
-                            div { class: "tw:-mx-4 tw:-mb-4 tw:grid tw:min-w-0",
-                                for (index, section) in sections.into_iter().enumerate() {
-                                    NodeSection {
-                                        section,
-                                        first: index == 0,
-                                        focus_action: focus_action.clone(),
-                                        on_action,
+                    },
+                    title,
+                    chrome,
+                    trailing: rsx! {
+                        if tabs.len() > 1 {
+                            NodeTabs {
+                                tabs: tabs.clone(),
+                                active_index,
+                                on_select: move |index| active_tab.set(index),
+                            }
+                        }
+                    },
+                    detail: rsx! {
+                        NodeDetailPopover { header }
+                    },
+                    body: rsx! {
+                        if !issues.is_empty() {
+                            ul { class: "tw:m-0 tw:grid tw:list-none tw:gap-1 tw:rounded-sm tw:border tw:border-status-error-border tw:bg-status-error-bg tw:p-3",
+                                for issue in issues.clone() {
+                                    li { class: "tw:text-sm tw:text-status-error-foreground", "{issue}" }
+                                }
+                            }
+                        }
+                        match active_body {
+                            Some(UiNodeTabBody::Sections(sections)) => rsx! {
+                                div { class: "tw:-mx-4 tw:-mb-4 tw:grid tw:min-w-0",
+                                    for (index, section) in sections.into_iter().enumerate() {
+                                        NodeSection {
+                                            section,
+                                            first: index == 0,
+                                            focus_action: focus_action.clone(),
+                                            on_action,
+                                            dirty_tint,
+                                        }
                                     }
                                 }
-                            }
-                        },
-                        Some(UiNodeTabBody::Text { title, body }) => rsx! {
-                            section { class: "tw:grid tw:min-w-0 tw:gap-2",
-                                h4 { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "{title}" }
-                                pre { class: "tw:m-0 tw:max-h-80 tw:overflow-auto tw:rounded-sm tw:border tw:border-border-subtle tw:bg-page tw:p-3 tw:text-xs tw:leading-normal tw:text-muted-foreground",
-                                    code { "{body}" }
+                            },
+                            Some(UiNodeTabBody::Text { title, body }) => rsx! {
+                                section { class: "tw:grid tw:min-w-0 tw:gap-2",
+                                    h4 { class: "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading", "{title}" }
+                                    pre { class: "tw:m-0 tw:max-h-80 tw:overflow-auto tw:rounded-sm tw:border tw:border-border-subtle tw:bg-page tw:p-3 tw:text-xs tw:leading-normal tw:text-muted-foreground",
+                                        code { "{body}" }
+                                    }
                                 }
-                            }
-                        },
-                        None => rsx! {
-                            p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "No node tabs are available." }
-                        },
-                    }
-                },
+                            },
+                            None => rsx! {
+                                p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "No node tabs are available." }
+                            },
+                        }
+                    },
+                }
             }
             if !collapsed() && !view.children.is_empty() {
                 NodeChildren {
                     items: view.children.clone(),
                     on_action,
+                    dirty_tint,
                 }
             }
         }
     }
 }
 
-/// Dedicated select control in the node header's upper-right corner.
+/// Selection indicator/toggle in the pane's primary-affordance slot, left of
+/// the node name (D3).
 ///
 /// Selecting a node focuses it (probes ride the focused node), so body
 /// clicks stay inert and only this control dispatches the focus action —
-/// editing another node's slots no longer steals the selection.
+/// editing another node's slots never steals the selection.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 fn NodeSelectButton(
@@ -120,13 +145,13 @@ fn NodeSelectButton(
 ) -> Element {
     let (class, icon, label) = if focused {
         (
-            "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-accent",
+            "tw:inline-flex tw:h-8 tw:w-8 tw:shrink-0 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-accent-border tw:bg-transparent tw:p-0 tw:text-accent",
             StudioIconName::NodeSelected,
             "Node is selected; probes follow this node",
         )
     } else {
         (
-            "tw:inline-flex tw:h-full tw:min-h-[46px] tw:w-[34px] tw:items-center tw:justify-center tw:border-0 tw:border-l tw:border-border-muted tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:bg-card-subtle/60 tw:hover:text-accent",
+            "tw:inline-flex tw:h-8 tw:w-8 tw:shrink-0 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-border-subtle tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:border-accent-border tw:hover:text-accent",
             StudioIconName::NodeSelect,
             "Select this node so probes follow it",
         )
@@ -160,6 +185,7 @@ pub fn NodeSection(
     #[props(default = false)] first: bool,
     #[props(default)] focus_action: Option<UiAction>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    #[props(default)] dirty_tint: NodeDirtyTint,
 ) -> Element {
     match section {
         UiNodeSection::ProducedProducts(products) => rsx! {
@@ -190,7 +216,7 @@ pub fn NodeSection(
         },
         UiNodeSection::Children(children) => rsx! {
             section { class: section_class("tw:bg-card tw:px-4 tw:py-4", first),
-                NodeChildren { items: children, on_action }
+                NodeChildren { items: children, on_action, dirty_tint }
             }
         },
     }
@@ -201,6 +227,78 @@ fn section_class(body_class: &'static str, first: bool) -> String {
         format!("tw:min-w-0 {body_class}")
     } else {
         format!("tw:min-w-0 tw:border-t tw:border-border-muted {body_class}")
+    }
+}
+
+/// Header tone for a node pane: dirty state washes the header (failed >
+/// unsaved > live, per D6) and otherwise the runtime status tone shows —
+/// except an error status always keeps the error wash.
+fn node_pane_tone(status: UiStatusKind, dirty: DirtySummary) -> PaneTone {
+    if dirty.failed > 0 || status == UiStatusKind::Error {
+        PaneTone::Error
+    } else if dirty.persisted > 0 {
+        PaneTone::Warning
+    } else if dirty.transient > 0 {
+        PaneTone::Live
+    } else {
+        status_pane_tone(status)
+    }
+}
+
+/// Per-bucket dirty chips (D6: yellow = unsaved, blue = live, error accent
+/// when failed); an empty vec (clean node) renders no chip.
+fn dirty_chips(dirty: DirtySummary) -> Vec<PaneChip> {
+    let mut chips = Vec::new();
+    if dirty.persisted > 0 {
+        chips.push(PaneChip {
+            tone: PaneTone::Warning,
+            text: format!("{} unsaved", dirty.persisted),
+            title: "Unsaved persisted edits in this node's subtree".to_string(),
+        });
+    }
+    if dirty.transient > 0 {
+        chips.push(PaneChip {
+            tone: PaneTone::Live,
+            text: format!("{} live", dirty.transient),
+            title: "Touched live controls in this node's subtree".to_string(),
+        });
+    }
+    if dirty.failed > 0 {
+        chips.push(PaneChip {
+            tone: PaneTone::Error,
+            text: format!("{} failed", dirty.failed),
+            title: "Failed edits in this node's subtree need attention".to_string(),
+        });
+    }
+    chips
+}
+
+/// Wrapper class around the pane for the D7 full-surface variant: a
+/// `display: contents` wrapper that re-mixes the pane's card tokens with the
+/// dominant dirty status color so the whole pane (header and body) tints.
+///
+/// The override targets the Tailwind-level `--tw-color-card*` tokens: the
+/// Studio `--studio-color-*` custom properties are substituted into them at
+/// `:root`, so re-declaring the Studio tokens on a wrapper never reaches
+/// descendants' `bg-card*` utilities.
+///
+/// `HeaderOnly` (the live default) never re-mixes; `FullSurface` re-mixes on
+/// dirty panes and resets a clean pane back to the base surface tokens so a
+/// clean child nested inside a dirty parent's body is not tinted.
+fn pane_surface_tint_class(variant: NodeDirtyTint, dirty: DirtySummary) -> &'static str {
+    match variant {
+        NodeDirtyTint::HeaderOnly => "tw:contents",
+        NodeDirtyTint::FullSurface => {
+            if dirty.failed > 0 {
+                "tw:contents tw:[--tw-color-card:color-mix(in_oklab,var(--studio-status-error-bg)_55%,var(--studio-color-surface))] tw:[--tw-color-card-subtle:color-mix(in_oklab,var(--studio-status-error-bg)_55%,var(--studio-color-surface-subtle))] tw:[--tw-color-card-muted:color-mix(in_oklab,var(--studio-status-error-bg)_55%,var(--studio-color-surface-muted))]"
+            } else if dirty.persisted > 0 {
+                "tw:contents tw:[--tw-color-card:color-mix(in_oklab,var(--studio-status-warning-bg)_55%,var(--studio-color-surface))] tw:[--tw-color-card-subtle:color-mix(in_oklab,var(--studio-status-warning-bg)_55%,var(--studio-color-surface-subtle))] tw:[--tw-color-card-muted:color-mix(in_oklab,var(--studio-status-warning-bg)_55%,var(--studio-color-surface-muted))]"
+            } else if dirty.transient > 0 {
+                "tw:contents tw:[--tw-color-card:color-mix(in_oklab,var(--studio-status-live-bg)_55%,var(--studio-color-surface))] tw:[--tw-color-card-subtle:color-mix(in_oklab,var(--studio-status-live-bg)_55%,var(--studio-color-surface-subtle))] tw:[--tw-color-card-muted:color-mix(in_oklab,var(--studio-status-live-bg)_55%,var(--studio-color-surface-muted))]"
+            } else {
+                "tw:contents tw:[--tw-color-card:var(--studio-color-surface)] tw:[--tw-color-card-subtle:var(--studio-color-surface-subtle)] tw:[--tw-color-card-muted:var(--studio-color-surface-muted)]"
+            }
+        }
     }
 }
 
@@ -231,5 +329,87 @@ fn NodeTabs(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dirty(persisted: usize, transient: usize, failed: usize) -> DirtySummary {
+        DirtySummary {
+            persisted,
+            transient,
+            failed,
+        }
+    }
+
+    #[test]
+    fn clean_node_renders_no_chips_and_keeps_status_tone() {
+        assert!(dirty_chips(DirtySummary::clean()).is_empty());
+        assert_eq!(
+            node_pane_tone(UiStatusKind::Good, DirtySummary::clean()),
+            PaneTone::Good
+        );
+        assert_eq!(
+            node_pane_tone(UiStatusKind::Neutral, DirtySummary::clean()),
+            PaneTone::Neutral
+        );
+    }
+
+    #[test]
+    fn dirty_chips_cover_each_nonzero_bucket_with_d6_tones() {
+        let chips = dirty_chips(dirty(3, 2, 1));
+        assert_eq!(chips.len(), 3);
+        assert_eq!(chips[0].tone, PaneTone::Warning);
+        assert_eq!(chips[0].text, "3 unsaved");
+        assert_eq!(chips[1].tone, PaneTone::Live);
+        assert_eq!(chips[1].text, "2 live");
+        assert_eq!(chips[2].tone, PaneTone::Error);
+        assert_eq!(chips[2].text, "1 failed");
+
+        let live_only = dirty_chips(dirty(0, 2, 0));
+        assert_eq!(live_only.len(), 1);
+        assert_eq!(live_only[0].tone, PaneTone::Live);
+    }
+
+    #[test]
+    fn header_tone_prefers_failed_then_unsaved_then_live() {
+        assert_eq!(
+            node_pane_tone(UiStatusKind::Good, dirty(2, 1, 1)),
+            PaneTone::Error
+        );
+        assert_eq!(
+            node_pane_tone(UiStatusKind::Good, dirty(2, 1, 0)),
+            PaneTone::Warning
+        );
+        assert_eq!(
+            node_pane_tone(UiStatusKind::Good, dirty(0, 1, 0)),
+            PaneTone::Live
+        );
+        // An error status is never masked by a dirty wash.
+        assert_eq!(
+            node_pane_tone(UiStatusKind::Error, dirty(0, 1, 0)),
+            PaneTone::Error
+        );
+    }
+
+    #[test]
+    fn surface_tint_applies_only_in_full_surface_variant_on_dirty_panes() {
+        assert_eq!(
+            pane_surface_tint_class(NodeDirtyTint::HeaderOnly, dirty(2, 0, 0)),
+            "tw:contents"
+        );
+
+        let unsaved = pane_surface_tint_class(NodeDirtyTint::FullSurface, dirty(2, 0, 0));
+        assert!(unsaved.contains("--studio-status-warning-bg"));
+        let live = pane_surface_tint_class(NodeDirtyTint::FullSurface, dirty(0, 1, 0));
+        assert!(live.contains("--studio-status-live-bg"));
+        let failed = pane_surface_tint_class(NodeDirtyTint::FullSurface, dirty(1, 1, 1));
+        assert!(failed.contains("--studio-status-error-bg"));
+
+        let clean = pane_surface_tint_class(NodeDirtyTint::FullSurface, DirtySummary::clean());
+        assert!(!clean.contains("color-mix"));
+        assert!(clean.contains("--tw-color-card:var(--studio-color-surface)"));
     }
 }

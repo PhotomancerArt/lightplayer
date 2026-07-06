@@ -2,12 +2,13 @@
 
 use lpa_studio_core::{
     ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
-    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, Revision, UiAssetEditorKind,
-    UiBindingEndpoint, UiConfigSlot, UiControlProductPreview, UiControlSampleFormat, UiNodeChild,
-    UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView,
-    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductPreview,
-    UiProductTrackingState, UiSlotAsset, UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality,
-    UiSlotRecord, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus,
+    ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, DirtySummary, Revision,
+    UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiControlProductPreview,
+    UiControlSampleFormat, UiNodeChild, UiNodeDirtyState, UiNodeHeader, UiNodeSection, UiNodeTab,
+    UiNodeTabBody, UiNodeView, UiProducedBinding, UiProducedBindings, UiProducedProduct,
+    UiProducedValue, UiProductPreview, UiProductTrackingState, UiSlotAsset, UiSlotEditorHint,
+    UiSlotFieldState, UiSlotOptionality, UiSlotRecord, UiSlotSourceState, UiSlotUnit, UiSlotValue,
+    UiStatus,
 };
 
 const IDLE_GLSL: &str = r#"vec3 palette(float t) {
@@ -73,6 +74,83 @@ pub(crate) fn error_node_view() -> UiNodeView {
     )
     .with_node_id("shader-blast");
     view.issues = vec!["Shader compile failed".to_string()];
+    view
+}
+
+/// Playlist node whose subtree carries unsaved (persisted) edits — drives the
+/// yellow dirty chip and D7 tint variants.
+pub(crate) fn unsaved_dirty_node_view() -> UiNodeView {
+    let mut view = playlist_node_view();
+    view.header.dirty = DirtySummary {
+        persisted: 2,
+        transient: 0,
+        failed: 0,
+    };
+    view
+}
+
+/// Playlist node whose subtree carries live-only (transient) edits — drives
+/// the blue dirty chip and D7 tint variants.
+pub(crate) fn live_dirty_node_view() -> UiNodeView {
+    let mut view = playlist_node_view();
+    view.header.dirty = DirtySummary {
+        persisted: 0,
+        transient: 1,
+        failed: 0,
+    };
+    view
+}
+
+/// Three-level bubbling fixture: the grandchild carries the edits and every
+/// ancestor's summary includes them, exactly as the controller's aggregation
+/// walk produces (grandchild {1p,1t} → child {1p,1t} → parent adds one
+/// persisted edit of its own → {2p,1t}).
+pub(crate) fn nested_dirty_node_view() -> UiNodeView {
+    let bubbled = DirtySummary {
+        persisted: 1,
+        transient: 1,
+        failed: 0,
+    };
+
+    let mut grandchild =
+        UiNodeChild::new("flicker", "Shader", "./flicker.json").with_sections(vec![
+            UiNodeSection::ConfigSlots(vec![
+                UiConfigSlot::value(
+                    "rate",
+                    "Rate",
+                    UiSlotValue::f32(4.0).with_unit(UiSlotUnit::hertz()),
+                )
+                .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
+            ]),
+        ]);
+    grandchild.dirty = bubbled;
+
+    let mut child = UiNodeChild::new("idle", "Shader", "./idle.json")
+        .active("active, fade_after 0.12 s")
+        .with_sections(vec![UiNodeSection::ConfigSlots(vec![UiConfigSlot::value(
+            "shader",
+            "Shader",
+            UiSlotValue::string("idle.glsl"),
+        )])])
+        .with_children(vec![grandchild]);
+    child.dirty = bubbled;
+
+    let mut view = UiNodeView::new(
+        playlist_header(),
+        vec![UiNodeTab::main(vec![UiNodeSection::ConfigSlots(
+            config_slots_fixture(),
+        )])],
+    )
+    .with_node_id("playlist")
+    .with_children(vec![
+        child,
+        UiNodeChild::new("blast", "Shader", "./blast.json"),
+    ]);
+    view.header.dirty = bubbled.merge(DirtySummary {
+        persisted: 1,
+        transient: 0,
+        failed: 0,
+    });
     view
 }
 

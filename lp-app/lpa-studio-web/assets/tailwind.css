@@ -160,6 +160,9 @@
   .tw\:block {
     display: block;
   }
+  .tw\:contents {
+    display: contents;
+  }
   .tw\:flex {
     display: flex;
   }
@@ -734,17 +737,11 @@
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-error-bg\)\,transparent_66\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-error-bg),transparent 66%);
   }
-  .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-error-bg\)\,transparent_74\%\)\] {
-    background-image: linear-gradient(90deg,var(--studio-status-error-bg),transparent 74%);
-  }
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-error-bg\)_0\%\,transparent_72\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-error-bg) 0%,transparent 72%);
   }
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-good-bg\)\,transparent_62\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-good-bg),transparent 62%);
-  }
-  .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-good-bg\)\,transparent_74\%\)\] {
-    background-image: linear-gradient(90deg,var(--studio-status-good-bg),transparent 74%);
   }
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-good-bg\)\,transparent_90\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-good-bg),transparent 90%);
@@ -767,17 +764,11 @@
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-warning-bg\)\,transparent_62\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-warning-bg),transparent 62%);
   }
-  .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-warning-bg\)\,transparent_74\%\)\] {
-    background-image: linear-gradient(90deg,var(--studio-status-warning-bg),transparent 74%);
-  }
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-warning-bg\)_0\%\,transparent_72\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-warning-bg) 0%,transparent 72%);
   }
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-working-bg\)\,transparent_62\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-working-bg),transparent 62%);
-  }
-  .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-working-bg\)\,transparent_74\%\)\] {
-    background-image: linear-gradient(90deg,var(--studio-status-working-bg),transparent 74%);
   }
   .tw\:bg-\[linear-gradient\(90deg\,var\(--studio-status-working-bg\)_0\%\,transparent_72\%\)\] {
     background-image: linear-gradient(90deg,var(--studio-status-working-bg) 0%,transparent 72%);
@@ -1084,6 +1075,69 @@
   .tw\:duration-150 {
     --tw-duration: 150ms;
     transition-duration: 150ms;
+  }
+  .tw\:\[--tw-color-card-muted\:color-mix\(in_oklab\,var\(--studio-status-error-bg\)_55\%\,var\(--studio-color-surface-muted\)\)\] {
+    --tw-color-card-muted: var(--studio-status-error-bg);
+    @supports (color: color-mix(in lab, red, red)) {
+      --tw-color-card-muted: color-mix(in oklab,var(--studio-status-error-bg) 55%,var(--studio-color-surface-muted));
+    }
+  }
+  .tw\:\[--tw-color-card-muted\:color-mix\(in_oklab\,var\(--studio-status-live-bg\)_55\%\,var\(--studio-color-surface-muted\)\)\] {
+    --tw-color-card-muted: var(--studio-status-live-bg);
+    @supports (color: color-mix(in lab, red, red)) {
+      --tw-color-card-muted: color-mix(in oklab,var(--studio-status-live-bg) 55%,var(--studio-color-surface-muted));
+    }
+  }
+  .tw\:\[--tw-color-card-muted\:color-mix\(in_oklab\,var\(--studio-status-warning-bg\)_55\%\,var\(--studio-color-surface-muted\)\)\] {
+    --tw-color-card-muted: var(--studio-status-warning-bg);
+    @supports (color: color-mix(in lab, red, red)) {
+      --tw-color-card-muted: color-mix(in oklab,var(--studio-status-warning-bg) 55%,var(--studio-color-surface-muted));
+    }
+  }
+  .tw\:\[--tw-color-card-muted\:var\(--studio-color-surface-muted\)\] {
+    --tw-color-card-muted: var(--studio-color-surface-muted);
+  }
+  .tw\:\[--tw-color-card-subtle\:color-mix\(in_oklab\,var\(--studio-status-error-bg\)_55\%\,var\(--studio-color-surface-subtle\)\)\] {
+    --tw-color-card-subtle: var(--studio-status-error-bg);
+    @supports (color: color-mix(in lab, red, red)) {
+      --tw-color-card-subtle: color-mix(in oklab,var(--studio-status-error-bg) 55%,var(--studio-color-surface-subtle));
+    }
+  }
+  .tw\:\[--tw-color-card-subtle\:color-mix\(in_oklab\,var\(--studio-status-live-bg\)_55\%\,var\(--studio-color-surface-subtle\)\)\] {
+    --tw-color-card-subtle: var(--studio-status-live-bg);
+    @supports (color: color-mix(in lab, red, red)) {
+      --tw-color-card-subtle: color-mix(in oklab,var(--studio-status-live-bg) 55%,var(--studio-color-surface-subtle));
+    }
+  }
+  .tw\:\[--tw-color-card-subtle\:color-mix\(in_oklab\,var\(--studio-status-warning-bg\)_55\%\,var\(--studio-color-surface-subtle\)\)\] {
+    --tw-color-card-subtle: var(--studio-status-warning-bg);
+    @supports (color: color-mix(in lab, red, red)) {
+      --tw-color-card-subtle: color-mix(in oklab,var(--studio-status-warning-bg) 55%,var(--studio-color-surface-subtle));
+    }
+  }
+  .tw\:\[--tw-color-card-subtle\:var\(--studio-color-surface-subtle\)\] {
+    --tw-color-card-subtle: var(--studio-color-surface-subtle);
+  }
+  .tw\:\[--tw-color-card\:color-mix\(in_oklab\,var\(--studio-status-error-bg\)_55\%\,var\(--studio-color-surface\)\)\] {
+    --tw-color-card: var(--studio-status-error-bg);
+    @supports (color: color-mix(in lab, red, red)) {
+      --tw-color-card: color-mix(in oklab,var(--studio-status-error-bg) 55%,var(--studio-color-surface));
+    }
+  }
+  .tw\:\[--tw-color-card\:color-mix\(in_oklab\,var\(--studio-status-live-bg\)_55\%\,var\(--studio-color-surface\)\)\] {
+    --tw-color-card: var(--studio-status-live-bg);
+    @supports (color: color-mix(in lab, red, red)) {
+      --tw-color-card: color-mix(in oklab,var(--studio-status-live-bg) 55%,var(--studio-color-surface));
+    }
+  }
+  .tw\:\[--tw-color-card\:color-mix\(in_oklab\,var\(--studio-status-warning-bg\)_55\%\,var\(--studio-color-surface\)\)\] {
+    --tw-color-card: var(--studio-status-warning-bg);
+    @supports (color: color-mix(in lab, red, red)) {
+      --tw-color-card: color-mix(in oklab,var(--studio-status-warning-bg) 55%,var(--studio-color-surface));
+    }
+  }
+  .tw\:\[--tw-color-card\:var\(--studio-color-surface\)\] {
+    --tw-color-card: var(--studio-color-surface);
   }
   .tw\:first\:border-t-0 {
     &:first-child {
