@@ -101,6 +101,18 @@ pub(crate) fn live_dirty_node_view() -> UiNodeView {
     view
 }
 
+/// Playlist node whose subtree carries a rejected edit — drives the red
+/// failed dirty chip and D7 tint variants.
+pub(crate) fn failed_dirty_node_view() -> UiNodeView {
+    let mut view = playlist_node_view();
+    view.header.dirty = DirtySummary {
+        persisted: 1,
+        transient: 0,
+        failed: 1,
+    };
+    view
+}
+
 /// Three-level bubbling fixture: the grandchild carries the edits and every
 /// ancestor's summary includes them, exactly as the controller's aggregation
 /// walk produces (grandchild {1p,1t} → child {1p,1t} → parent adds one

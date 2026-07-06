@@ -3,8 +3,8 @@ use lpa_studio_core::{ControllerId, ProjectEditorOp, UiAction};
 use lpa_studio_web_story_macros::story;
 
 use crate::app::node::node_story_fixtures::{
-    error_node_view, live_dirty_node_view, nested_dirty_node_view, playlist_node_view,
-    unsaved_dirty_node_view,
+    error_node_view, failed_dirty_node_view, live_dirty_node_view, nested_dirty_node_view,
+    playlist_node_view, unsaved_dirty_node_view,
 };
 use crate::app::node::{NodeDetailPopover, NodeDirtyTint, NodePane};
 
@@ -98,6 +98,38 @@ pub(crate) fn dirty_live_header_tint() -> Element {
 )]
 pub(crate) fn dirty_live_surface_tint() -> Element {
     let mut view = live_dirty_node_view();
+    view.action = Some(story_focus_action());
+
+    rsx! {
+        NodePane {
+            view,
+            on_action: move |_| {},
+            dirty_tint: NodeDirtyTint::FullSurface,
+        }
+    }
+}
+
+#[story(
+    description = "D7 variant (a), failed: the error wash dominates the header and the red failed chip joins the unsaved chip (the live default)."
+)]
+pub(crate) fn dirty_failed_header_tint() -> Element {
+    let mut view = failed_dirty_node_view();
+    view.action = Some(story_focus_action());
+
+    rsx! {
+        NodePane {
+            view,
+            on_action: move |_| {},
+            dirty_tint: NodeDirtyTint::HeaderOnly,
+        }
+    }
+}
+
+#[story(
+    description = "D7 variant (b), failed: the error tint re-mixed into the whole pane surface."
+)]
+pub(crate) fn dirty_failed_surface_tint() -> Element {
+    let mut view = failed_dirty_node_view();
     view.action = Some(story_focus_action());
 
     rsx! {

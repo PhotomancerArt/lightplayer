@@ -57,6 +57,9 @@ holds the full context.
 | Composite edit semantics (map add/remove, option some/none, variant switch) — extend the editing-model ADR if precedent is set | `2026-07-04-studio-editing-model` (c) | Roadmap M3 |
 | Singular `ProjectRegistry::mutate` bypasses policy/type validation (only `mutate_batch` enforces) | `2026-07-04-studio-editing-model` (d) | Any new caller of `mutate` |
 | Alternative dirty modes (touched-mode / deliberate value pinning) — minimal-diff normalization fixed dirty to "differs from saved" | `2026-07-04-studio-editing-model` (f) | A concrete pinning/touched-mode use case appears |
+| Device-pane adoption of the pane grammar (`StudioPane`/`DetailPopover`/`UiPaneAction`) | `2026-07-05-studio-pane-grammar` (a) | Next device-pane UX work |
+| Save visibility while scrolling (project header scrolls with the sidebar; the strip was always visible) | `2026-07-05-studio-pane-grammar` (b) | The M2a UX gate or later use flags losing always-visible Save |
+| Tint-variant loser's story removal (D7 pick pending at the M2a gate) | `2026-07-05-studio-pane-grammar` (c) | The tint pick is recorded in the M2a plan notes |
 | Event-driven (postMessage/waker) receive so the poll-sleep loop retires (~50–100 line bridge across `browser_worker_client_io.rs`, `worker_handle.rs`, JS worker) | `2026-07-04-client-pull-loop-and-actor` (a); `2026-07-03-simulator-clock-ownership` | Poll latency shows up in traces, or battery/CPU cost matters |
 | Probe payload optimization (binary/compressed preview encoding, downscaled extents, delta frames) | `2026-07-04-client-pull-loop-and-actor` (b) | Steady-state tick cost is dominated by raw probe bytes; own design pass with measurements |
 | Native/tokio actor parity: `tokio::spawn`/`LocalSet` spawn helper + native timer factory | `2026-07-04-client-pull-loop-and-actor` (c) | A native Studio shell exists |
