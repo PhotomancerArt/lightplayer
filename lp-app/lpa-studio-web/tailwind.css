@@ -36,6 +36,9 @@
     --color-accent-hover: var(--studio-color-accent-hover);
     --color-accent-foreground: var(--studio-color-accent-text-on-fill);
 
+    --color-selection-border: var(--studio-color-selection-border);
+    --color-selection-bg: var(--studio-color-selection-bg);
+
     --color-status-neutral-bg: var(--studio-status-neutral-bg);
     --color-status-neutral-border: var(--studio-status-neutral-border);
     --color-status-neutral-foreground: var(--studio-status-neutral-text);

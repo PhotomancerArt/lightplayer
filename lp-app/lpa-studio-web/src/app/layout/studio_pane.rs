@@ -117,7 +117,9 @@ pub fn StudioPane(
 pub struct PaneChrome {
     /// Tone family washing the header strip.
     pub tone: PaneTone,
-    /// Draw the pane outline in the accent color (e.g. the focused node).
+    /// Draw the pane outline in the neutral selection color (e.g. the
+    /// focused node) — deliberately not a status color, so selection never
+    /// reads as semantic beside a dirty tint.
     pub accent: bool,
     /// State chips after the title; empty renders no chip.
     pub chips: Vec<PaneChip>,
@@ -239,7 +241,7 @@ fn PaneActionButton(
 
 fn pane_surface_class(accent: bool) -> String {
     let border_class = if accent {
-        "tw:border-accent-border"
+        "tw:border-selection-border"
     } else {
         "tw:border-border"
     };

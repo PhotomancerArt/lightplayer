@@ -50,6 +50,7 @@
     --tw-color-accent-border: var(--studio-color-accent-border);
     --tw-color-accent-hover: var(--studio-color-accent-hover);
     --tw-color-accent-foreground: var(--studio-color-accent-text-on-fill);
+    --tw-color-selection-border: var(--studio-color-selection-border);
     --tw-color-status-neutral-bg: var(--studio-status-neutral-bg);
     --tw-color-status-neutral-border: var(--studio-status-neutral-border);
     --tw-color-status-neutral-foreground: var(--studio-status-neutral-text);
@@ -641,6 +642,9 @@
   .tw\:border-panel-primary-border {
     border-color: var(--tw-color-panel-primary-border);
   }
+  .tw\:border-selection-border {
+    border-color: var(--tw-color-selection-border);
+  }
   .tw\:border-status-error-border {
     border-color: var(--tw-color-status-error-border);
   }
@@ -689,10 +693,10 @@
       background-color: color-mix(in oklab,var(--color-status-good-bg) 55%,var(--color-card));
     }
   }
-  .tw\:bg-\[color-mix\(in_oklab\,var\(--studio-tree-dirty-bg\,var\(--studio-status-good-bg\)\)_45\%\,var\(--studio-status-good-bg\)\)\] {
-    background-color: var(--studio-tree-dirty-bg,var(--studio-status-good-bg));
+  .tw\:bg-\[color-mix\(in_oklab\,var\(--studio-tree-dirty-bg\,var\(--studio-color-selection-bg\)\)_45\%\,var\(--studio-color-selection-bg\)\)\] {
+    background-color: var(--studio-tree-dirty-bg,var(--studio-color-selection-bg));
     @supports (color: color-mix(in lab, red, red)) {
-      background-color: color-mix(in oklab,var(--studio-tree-dirty-bg,var(--studio-status-good-bg)) 45%,var(--studio-status-good-bg));
+      background-color: color-mix(in oklab,var(--studio-tree-dirty-bg,var(--studio-color-selection-bg)) 45%,var(--studio-color-selection-bg));
     }
   }
   .tw\:bg-accent {

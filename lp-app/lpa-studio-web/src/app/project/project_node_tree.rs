@@ -112,7 +112,7 @@ fn ProjectNodeTreeItemView(
 /// - an unfocused dirty row paints the node-header tint: the same
 ///   `linear-gradient(90deg, <status bg>, transparent 62%)` over the subtle
 ///   card surface as the P3 header-only treatment;
-/// - the focused row keeps its accent border, and its highlight fill
+/// - the focused row keeps its neutral selection border, and its highlight fill
 ///   color-mixes the dirty color into the selection background so selection
 ///   adapts to (never erases) the edited treatment; on a clean focused row
 ///   the variable falls back to the selection color, mixing it with itself.
@@ -121,7 +121,7 @@ fn tree_item_row_class(focused: bool, dirty: DirtySummary) -> String {
     let dirty_var = tree_item_dirty_var_class(dirty);
     if focused {
         return format!(
-            "{BASE} {dirty_var} tw:border-accent-border tw:bg-[color-mix(in_oklab,var(--studio-tree-dirty-bg,var(--studio-status-good-bg))_45%,var(--studio-status-good-bg))]"
+            "{BASE} {dirty_var} tw:border-selection-border tw:bg-[color-mix(in_oklab,var(--studio-tree-dirty-bg,var(--studio-color-selection-bg))_45%,var(--studio-color-selection-bg))]"
         );
     }
     if dirty.is_clean() {
@@ -215,10 +215,10 @@ mod tests {
     #[test]
     fn focused_dirty_row_mixes_the_dirty_color_into_the_selection_highlight() {
         let class = tree_item_row_class(true, dirty(2, 0, 0));
-        assert!(class.contains("tw:border-accent-border"));
+        assert!(class.contains("tw:border-selection-border"));
         assert!(class.contains("--studio-tree-dirty-bg:var(--studio-status-warning-bg)"));
         assert!(class.contains(
-            "color-mix(in_oklab,var(--studio-tree-dirty-bg,var(--studio-status-good-bg))_45%,var(--studio-status-good-bg))"
+            "color-mix(in_oklab,var(--studio-tree-dirty-bg,var(--studio-color-selection-bg))_45%,var(--studio-color-selection-bg))"
         ));
         assert!(!class.contains("linear-gradient"));
     }
@@ -226,10 +226,10 @@ mod tests {
     #[test]
     fn focused_clean_row_falls_back_to_the_plain_selection_highlight() {
         let class = tree_item_row_class(true, DirtySummary::clean());
-        assert!(class.contains("tw:border-accent-border"));
-        // No variable set: the color-mix falls back to the selection color.
+        assert!(class.contains("tw:border-selection-border"));
+        // No variable set: the color-mix falls back to the neutral selection color.
         assert!(!class.contains("--studio-tree-dirty-bg:var"));
-        assert!(class.contains("var(--studio-tree-dirty-bg,var(--studio-status-good-bg))"));
+        assert!(class.contains("var(--studio-tree-dirty-bg,var(--studio-color-selection-bg))"));
     }
 
     #[test]

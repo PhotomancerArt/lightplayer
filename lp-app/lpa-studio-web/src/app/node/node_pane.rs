@@ -147,7 +147,7 @@ fn NodeSelectButton(
 ) -> Element {
     let (class, icon, label) = if focused {
         (
-            "tw:inline-flex tw:h-8 tw:w-8 tw:shrink-0 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-accent-border tw:bg-transparent tw:p-0 tw:text-accent",
+            "tw:inline-flex tw:h-8 tw:w-8 tw:shrink-0 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-selection-border tw:bg-transparent tw:p-0 tw:text-strong-foreground",
             StudioIconName::NodeSelected,
             "Node is selected; probes follow this node",
         )
