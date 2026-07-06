@@ -1,26 +1,29 @@
 use core::fmt::Write;
 
+use crate::app::studio::ui_console_view::UiConsoleView;
 use crate::{
-    ActionPriority, UiActivityView, UiLogEntry, UiPaneView, UiStatus, UiStepState, UiViewContent,
+    ActionPriority, UiActivityView, UiPaneView, UiStatus, UiStepState, UiViewContent,
     UxActivityTarget,
 };
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiStudioView {
     pub panes: Vec<UiPaneView>,
-    pub logs: Vec<UiLogEntry>,
+    /// The console slice: filtered log entries plus the filter state that
+    /// produced them.
+    pub console: UiConsoleView,
 }
 
 impl UiStudioView {
-    pub fn new(panes: Vec<UiPaneView>, logs: Vec<UiLogEntry>) -> Self {
-        Self { panes, logs }
+    pub fn new(panes: Vec<UiPaneView>, console: UiConsoleView) -> Self {
+        Self { panes, console }
     }
 
-    /// An empty view with no panes or logs. The web shell seeds its
-    /// `Signal<UiStudioView>` with this before the actor emits its first
-    /// change-gated snapshot.
+    /// An empty view with no panes and an empty default-filtered console. The
+    /// web shell seeds its `Signal<UiStudioView>` with this before the actor
+    /// emits its first change-gated snapshot.
     pub fn empty() -> Self {
-        Self::new(Vec::new(), Vec::new())
+        Self::new(Vec::new(), UiConsoleView::empty())
     }
 
     /// Apply a progressive activity update in place, so live pane/section
@@ -89,9 +92,9 @@ impl UiStudioView {
             }
             output.push('\n');
         }
-        if !self.logs.is_empty() {
+        if !self.console.entries.is_empty() {
             let _ = writeln!(output, "Runtime");
-            for log in self.logs.iter().rev().take(8) {
+            for log in self.console.entries.iter().rev().take(8) {
                 let _ = writeln!(output, "  {:?} {}: {}", log.level, log.source, log.message);
             }
         }

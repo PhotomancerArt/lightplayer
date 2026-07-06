@@ -92,7 +92,8 @@ pub(crate) fn update_for_action(action: &UiAction) {
         | DeviceOp::ResetDevice
         | DeviceOp::ProvisionFirmware
         | DeviceOp::ResetToBlank
-        | DeviceOp::RefreshConnections => {}
+        | DeviceOp::RefreshConnections
+        | DeviceOp::SetLogLevel { .. } => {}
     }
 }
 

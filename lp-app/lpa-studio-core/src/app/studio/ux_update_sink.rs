@@ -43,8 +43,8 @@ mod tests {
             }
         });
 
-        sink.emit(UxUpdate::View(UiStudioView::new(Vec::new(), Vec::new())));
-        sink.emit(UxUpdate::View(UiStudioView::new(Vec::new(), Vec::new())));
+        sink.emit(UxUpdate::View(UiStudioView::empty()));
+        sink.emit(UxUpdate::View(UiStudioView::empty()));
 
         assert_eq!(*count.borrow(), 2);
     }

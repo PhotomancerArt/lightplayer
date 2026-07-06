@@ -1,5 +1,7 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{DeviceController, UiAction, UiPaneView, UiStudioView, UiViewContent};
+use lpa_studio_core::{
+    ConsoleCommand, DeviceController, UiAction, UiPaneView, UiStudioView, UiViewContent,
+};
 
 use crate::app::layout::VersionBadge;
 use crate::app::{ProjectNodeWorkspace, RuntimeLog};
@@ -11,8 +13,9 @@ pub fn StudioShell(
     view: UiStudioView,
     running: bool,
     on_action: EventHandler<UiAction>,
+    on_console: EventHandler<ConsoleCommand>,
 ) -> Element {
-    let UiStudioView { panes, logs } = view;
+    let UiStudioView { panes, console } = view;
     let PaneGroups { main, device } = group_panes(panes);
     let project_editor = project_editor_view(&main);
     let layout_class = if project_editor.is_some() {
@@ -73,7 +76,7 @@ pub fn StudioShell(
                             on_action,
                         }
                     }
-                    RuntimeLog { logs }
+                    RuntimeLog { console, on_console }
                 }
             }
         }

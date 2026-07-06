@@ -85,6 +85,7 @@ pub fn handle_client_message(
         lpc_wire::ClientRequest::StopAllProjects => {
             handle_stop_all_projects(project_manager, memory_stats)?
         }
+        lpc_wire::ClientRequest::SetLogLevel { level } => handle_set_log_level(level),
     };
 
     Ok(WireServerMessage::new(id, response))
@@ -254,6 +255,36 @@ fn handle_list_loaded_projects(
     Ok(ServerMessagePayload::ListLoadedProjects { projects })
 }
 
+/// Handle a SetLogLevel request.
+///
+/// Applies the level process-globally via [`log::set_max_level`] — every
+/// platform that serves the protocol (ESP32, emulator, browser worker, host)
+/// routes its diagnostics through the `log` crate, so this one call is the
+/// runtime lever on all of them. Nothing is persisted: a device reboot
+/// reverts to the logger-init default (Info).
+fn handle_set_log_level(level: lpc_wire::server::api::LogLevel) -> ServerMessagePayload {
+    // Log before applying so the confirmation is visible under the *old*
+    // level even when the new level would suppress Info output.
+    log::info!("setting log level to {level:?}");
+    log::set_max_level(log_level_filter(level));
+    ServerMessagePayload::SetLogLevel
+}
+
+/// Wire [`lpc_wire::server::api::LogLevel`] → [`log::LevelFilter`].
+///
+/// Total by construction: the wire enum deliberately has no `Off`, so the
+/// client can never turn the device fully silent.
+fn log_level_filter(level: lpc_wire::server::api::LogLevel) -> log::LevelFilter {
+    use lpc_wire::server::api::LogLevel;
+    match level {
+        LogLevel::Trace => log::LevelFilter::Trace,
+        LogLevel::Debug => log::LevelFilter::Debug,
+        LogLevel::Info => log::LevelFilter::Info,
+        LogLevel::Warn => log::LevelFilter::Warn,
+        LogLevel::Error => log::LevelFilter::Error,
+    }
+}
+
 /// Handle a StopAllProjects request
 fn handle_stop_all_projects(
     project_manager: &mut ProjectManager,
@@ -266,4 +297,26 @@ fn handle_stop_all_projects(
     log_memory(memory_stats, "stop_all_projects after");
     log::info!("Stopped all projects");
     Ok(ServerMessagePayload::StopAllProjects)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `log::set_max_level` is process-global, so this single test exercises
+    /// several levels and restores the original value at the end, keeping it
+    /// robust under parallel test execution.
+    #[test]
+    fn set_log_level_applies_globally_and_acks() {
+        let original = log::max_level();
+
+        let ack = handle_set_log_level(lpc_wire::server::api::LogLevel::Trace);
+        assert!(matches!(ack, ServerMessagePayload::SetLogLevel));
+        assert_eq!(log::max_level(), log::LevelFilter::Trace);
+
+        handle_set_log_level(lpc_wire::server::api::LogLevel::Error);
+        assert_eq!(log::max_level(), log::LevelFilter::Error);
+
+        log::set_max_level(original);
+    }
 }

@@ -12,9 +12,9 @@ use crate::{
     ProjectInventorySummary, ProjectNodeAddress, ProjectNodeTreeItem, ProjectNodeTreeView,
     ProjectOp, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot, ProjectState, ProjectSync,
     ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp, StudioOverlayMutation,
-    StudioProjectReadOutcome, StudioServerClient, UiAction, UiError, UiIssue, UiLogEntry,
-    UiLogLevel, UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView, UiProductRef, UiResult,
-    UiStatus, UiViewContent, UxUpdateSink,
+    StudioProjectReadOutcome, StudioServerClient, UiAction, UiError, UiIssue, UiLogDraft,
+    UiLogLevel, UiLogOrigin, UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView,
+    UiProductRef, UiResult, UiStatus, UiViewContent, UxUpdateSink,
 };
 use lpc_model::{
     ArtifactLocation, LpValue, MutationCmd, MutationCmdBatch, MutationCmdId, MutationCmdStatus,
@@ -376,7 +376,7 @@ impl ProjectController {
     pub async fn load_demo_project(
         &mut self,
         server: &mut StudioServerClient,
-    ) -> Result<Vec<UiLogEntry>, UiError> {
+    ) -> Result<Vec<UiLogDraft>, UiError> {
         self.mark_loading_demo();
         let loaded = server.load_demo_project().await?;
         self.mark_ready(loaded.project_id, loaded.handle_id, loaded.inventory);
@@ -407,7 +407,7 @@ impl ProjectController {
         &mut self,
         server: &mut StudioServerClient,
         handle_id: u32,
-    ) -> Result<Vec<UiLogEntry>, UiError> {
+    ) -> Result<Vec<UiLogDraft>, UiError> {
         let choice = self.loaded_project_choice(handle_id)?;
         self.mark_connecting_running();
         let project = server.connect_loaded_project(choice).await?;
@@ -523,7 +523,7 @@ impl ProjectController {
         &mut self,
         server: &mut StudioServerClient,
         projects: Vec<LoadedProjectChoice>,
-        mut logs: Vec<UiLogEntry>,
+        mut logs: Vec<UiLogDraft>,
     ) -> Result<ProjectConnectResult, UiError> {
         match projects.as_slice() {
             [] => {
@@ -724,7 +724,7 @@ impl ProjectController {
         &mut self,
         server: &mut StudioServerClient,
         handle_id: u32,
-    ) -> Result<Vec<UiLogEntry>, UiError> {
+    ) -> Result<Vec<UiLogDraft>, UiError> {
         let products = self.subscribed_products();
         let request = self.sync_mut()?.initial_project_read_request(products);
         let read = server.project_read(handle_id, request).await?;
@@ -739,7 +739,7 @@ impl ProjectController {
         &mut self,
         server: &mut StudioServerClient,
         handle_id: u32,
-    ) -> Result<Vec<UiLogEntry>, UiError> {
+    ) -> Result<Vec<UiLogDraft>, UiError> {
         let products = self.subscribed_products();
         let request = self.sync_mut()?.refresh_project_read_request(products);
         let read = server.project_read(handle_id, request).await?;
@@ -754,7 +754,7 @@ impl ProjectController {
         server: &mut StudioServerClient,
         handle_id: u32,
         read: crate::StudioProjectRead,
-    ) -> Result<Vec<UiLogEntry>, UiError> {
+    ) -> Result<Vec<UiLogDraft>, UiError> {
         let mut logs = read.logs;
         match self.sync_mut()?.apply_project_read_events(read.events) {
             Ok(()) => {}
@@ -765,9 +765,9 @@ impl ProjectController {
             // rather than wedge on a corrupt delta.
             Err(UiError::Protocol(message)) => {
                 logs.extend(server.take_pending_logs());
-                logs.push(UiLogEntry::new(
+                logs.push(UiLogDraft::new(
                     UiLogLevel::Warn,
-                    "lpa-studio-core",
+                    UiLogOrigin::Studio,
                     format!(
                         "gated project read failed to apply ({message}); resyncing from since=0"
                     ),
@@ -799,7 +799,7 @@ impl ProjectController {
         &mut self,
         server: &mut StudioServerClient,
         handle_id: u32,
-    ) -> Result<Vec<UiLogEntry>, UiError> {
+    ) -> Result<Vec<UiLogDraft>, UiError> {
         if !self.sync_mut()?.overlay_fetch_needed() {
             return Ok(Vec::new());
         }
@@ -849,9 +849,9 @@ impl ProjectController {
         error: UiError,
     ) -> ProjectSyncRun {
         let mut logs = server.take_pending_logs();
-        logs.push(UiLogEntry::new(
+        logs.push(UiLogDraft::new(
             UiLogLevel::Error,
-            "lpa-studio-core",
+            UiLogOrigin::Studio,
             format!("project sync failed: {error}"),
         ));
         if let Some(sync) = &mut self.sync {
@@ -1138,7 +1138,7 @@ impl ProjectController {
 /// bounded log ring (mirrors the `ProjectSyncRun` pattern).
 pub struct ProjectEditRun {
     pub notices: UiNotices,
-    pub logs: Vec<UiLogEntry>,
+    pub logs: Vec<UiLogDraft>,
 }
 
 impl ProjectEditRun {

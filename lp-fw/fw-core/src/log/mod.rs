@@ -1,18 +1,12 @@
 //! Logging infrastructure for fw-core.
 //!
-//! Provides logger implementations for different environments:
-//! - Emulator: Routes to syscalls
-//! - ESP32: Routes to a provided print function (typically USB serial)
+//! Provides the emulator logger (routes to syscalls). The ESP32 target owns
+//! its own logger in `fw-esp32/src/logger.rs`; the retired `fw-core` ESP32
+//! logger duplicate was removed with ADR 2026-07-05-studio-logging-model.
 
 #[cfg(feature = "emu")]
 pub mod emu;
 
-#[cfg(feature = "esp32")]
-pub mod esp32;
-
 // Re-export initialization functions
 #[cfg(feature = "emu")]
 pub use emu::{init as init_emu_logger, lp_jit_host_log};
-
-#[cfg(feature = "esp32")]
-pub use esp32::{PrintFn, init as init_esp32_logger};

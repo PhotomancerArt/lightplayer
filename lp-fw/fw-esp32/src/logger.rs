@@ -10,6 +10,9 @@ use core::sync::atomic::{AtomicPtr, Ordering};
 use fw_core::serial::SerialIo;
 use log::{Level, LevelFilter, Log, Metadata, Record};
 
+/// Default for the process-global `log::max_level()` gate applied at init.
+/// The client can raise/lower it at runtime via the wire `SetLogLevel`
+/// command; a reboot reverts to this default.
 #[allow(dead_code, reason = "used in init function")]
 const LOG_LEVEL: LevelFilter = LevelFilter::Info;
 
@@ -23,7 +26,11 @@ pub fn init(write_fn: LogWriteFn) {
         set_log_write_fn(write_fn);
     }
 
-    let logger = alloc::boxed::Box::new(Esp32Logger::new(LOG_LEVEL));
+    // The logger itself is permissive (internal cap = Trace): the global
+    // `log::max_level()` — seeded to Info below and mutable at runtime via
+    // the wire `SetLogLevel` command — is the single effective gate. An
+    // internal Info cap here would silently mask a raised global level.
+    let logger = alloc::boxed::Box::new(Esp32Logger::new(LevelFilter::Trace));
     log::set_logger(alloc::boxed::Box::leak(logger))
         .map(|()| log::set_max_level(LOG_LEVEL))
         .expect("Failed to set ESP32 logger");
