@@ -58,7 +58,7 @@ editing pane as a header row over an optional body:
   `DetailPopover` (the shared popup base under both the slot detail popup
   and the project popup).
 - **body** — `None` renders a header-only pane (the same shape a collapsed
-  pane folds to); the project header is exactly this.
+  pane folds to).
 
 ### Layout, not config
 
@@ -104,19 +104,22 @@ The state chips are fed by `DirtySummary { persisted, transient, failed }`
 (`lpa-studio-core/src/app/project/dirty_summary.rs`), aggregated
 slot → node → project inside the same DTO-build walk that computes the
 per-field dirty affordances — one aggregation, so the chip on a node header,
-the badge on a sidebar tree item, and the project header's counts can never
-disagree with the fields. Consumers render one chip per non-zero bucket
-("2 unsaved" / "1 live" / "1 failed") and derive the header tone from the
-dominant bucket (failed > unsaved > live), with an Error runtime status
-never masked by a dirty wash.
+the tint on a sidebar tree item, and the project popup's counts can never
+disagree with the fields. Node panes render one chip per non-zero bucket
+("2 unsaved" / "1 live" / "1 failed"); the project pane keeps counts in its
+detail popup (gate feedback: too cramped for the header). All consumers
+derive the header tone from the dominant bucket (failed > unsaved > live),
+with an Error runtime status never masked by a dirty wash.
 
 ### Consumers
 
 Adopted by the node pane (P3: selection toggle in `primary`, tabs in
-`trailing`, merged status/dirty popup in `detail`) and the project header
-(P4: header-only pane atop the project sidebar, controller actions,
-persistent state chip — "unchanged" is a visible state). **The device pane
-is the intended third consumer**: its header should map status onto
+`trailing`, merged status/dirty popup in `detail`) and the project pane
+(P4 + the M2a gate-feedback round: the whole project card is one pane —
+project name as title, the controller's pane status as the compact state
+chip, controller actions, node tree as the body; dirty counts and project
+stats live in the detail popup, dirty state washes the header tone).
+**The device pane is the intended third consumer**: its header should map status onto
 `PaneTone`, its detail popup onto `DetailPopover`, and its contextual
 operations onto `UiPaneAction`s the next time device-pane UX work is
 scheduled (Follow-ups).

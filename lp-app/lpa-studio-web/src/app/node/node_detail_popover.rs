@@ -107,10 +107,16 @@ fn NodeDirtyCountRow(label: &'static str, count: usize) -> Element {
     }
 }
 
+/// Detail-trigger glyph discipline (UX gate): the default trigger is the
+/// "i" info glyph matching slot rows — a Good/running status must not render
+/// a play triangle that reads as a button. Only genuinely attention-needing
+/// states (Warning/Error) keep their status glyphs; the status still shows
+/// through the trigger's tone.
 fn status_icon(kind: UiStatusKind) -> StudioIconName {
     match kind {
-        UiStatusKind::Neutral => StudioIconName::StatusIdle,
-        UiStatusKind::Working | UiStatusKind::Good => StudioIconName::StatusRunning,
+        UiStatusKind::Neutral | UiStatusKind::Working | UiStatusKind::Good => {
+            StudioIconName::InfoBare
+        }
         UiStatusKind::Warning => StudioIconName::StepAttention,
         UiStatusKind::Error => StudioIconName::StatusError,
     }

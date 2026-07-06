@@ -5,6 +5,10 @@ use crate::{
 #[derive(Clone, Debug, PartialEq)]
 pub struct ProjectEditorView {
     pub project_id: String,
+    /// Human-readable project name shown as the project pane's title
+    /// (the synced root node's label; falls back to `project_id` until the
+    /// tree has synced).
+    pub project_name: String,
     pub handle_id: u32,
     pub sync: ProjectSyncSummary,
     pub stats: Vec<UiMetric>,
@@ -32,8 +36,10 @@ impl ProjectEditorView {
         tree: ProjectNodeTreeView,
         nodes: Vec<UiNodeView>,
     ) -> Self {
+        let project_id = project_id.into();
         Self {
-            project_id: project_id.into(),
+            project_name: project_id.clone(),
+            project_id,
             handle_id,
             sync,
             stats,
@@ -43,6 +49,12 @@ impl ProjectEditorView {
             header_actions: Vec::new(),
             edits_in_flight: 0,
         }
+    }
+
+    /// Attach the human-readable project name (pane title).
+    pub fn with_project_name(mut self, project_name: impl Into<String>) -> Self {
+        self.project_name = project_name.into();
+        self
     }
 
     /// Attach the project-level aggregate dirty summary.

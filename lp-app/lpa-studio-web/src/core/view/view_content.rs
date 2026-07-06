@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{UiAction, UiViewContent};
 
-use crate::app::ProjectSidebar;
+use crate::app::ProjectPane;
 use crate::core::{ActivityView, IssueView, MetricGrid, ProgressBar, StepsView};
 
 #[component]
@@ -35,8 +35,11 @@ pub fn ViewContent(
                 on_action,
             }
         },
+        // `PaneView` intercepts the project editor to attach the pane's
+        // status and actions to the ProjectPane header; this arm only
+        // serves direct `ViewContent` consumers and renders with defaults.
         UiViewContent::ProjectEditor(editor) => rsx! {
-            ProjectSidebar {
+            ProjectPane {
                 view: *editor,
                 running,
                 on_action,

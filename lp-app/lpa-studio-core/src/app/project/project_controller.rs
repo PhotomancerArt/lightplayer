@@ -281,9 +281,22 @@ impl ProjectController {
             self.node_tree_view(),
             nodes,
         )
+        .with_project_name(self.project_name(project_id))
         .with_dirty(dirty)
         .with_header_actions(project_header_actions(&dirty))
         .with_edits_in_flight(self.edits_in_flight())
+    }
+
+    /// Human-readable project name for the project pane title: the synced
+    /// root node's label, falling back to the project id until the tree has
+    /// synced (the pane's kind label already says "Project", so the title
+    /// carries the name).
+    fn project_name(&self, project_id: &str) -> String {
+        self.root_nodes
+            .first()
+            .map(|node| node.label().to_string())
+            .filter(|label| !label.is_empty())
+            .unwrap_or_else(|| project_id.to_string())
     }
 
     pub fn mark_connecting_running(&mut self) {
@@ -1922,6 +1935,9 @@ mod tests {
         let view = project.editor_view("studio-demo", 7, &inventory);
 
         assert_eq!(view.project_id, "studio-demo");
+        // The pane title carries the project name (the root node's label),
+        // never the literal project id or the word "project".
+        assert_eq!(view.project_name, "Demo");
         assert_eq!(view.handle_id, 7);
         assert_eq!(view.tree.total_count, 3);
         assert_eq!(view.tree.roots[0].label, "Demo");
@@ -1938,6 +1954,17 @@ mod tests {
                 NodeId::new(3),
             ))
         );
+    }
+
+    #[test]
+    fn editor_view_project_name_falls_back_to_the_id_before_the_tree_syncs() {
+        let mut project = ProjectController::new();
+        let inventory = ProjectInventorySummary::default();
+        project.mark_ready("studio-demo", 7, inventory.clone());
+
+        let view = project.editor_view("studio-demo", 7, &inventory);
+
+        assert_eq!(view.project_name, "studio-demo");
     }
 
     #[test]

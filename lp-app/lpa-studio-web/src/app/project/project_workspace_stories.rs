@@ -3,11 +3,11 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     ControllerId, DirtySummary, ProjectController, ProjectOp, ProjectSyncPhase, UiAction,
-    UiLogLevel, UiPaneAction,
+    UiLogLevel, UiPaneAction, UiStatus,
 };
 use lpa_studio_web_story_macros::story;
 
-use crate::app::project::ProjectSidebar;
+use crate::app::project::ProjectPane;
 use crate::app::story_fixtures::{
     device_project_empty_view, device_project_selection_view, project_editor_fixture,
     project_ready_state, project_ready_view, project_sync_failed_view, project_syncing_view,
@@ -55,7 +55,7 @@ pub(crate) fn device_project_selection() -> Element {
 }
 
 #[story(
-    description = "Sidebar with a dirty tree: project header uncommitted with Save/Revert icons; a dirty grandchild's counts bubble — unsaved yellow tint on the focused shader, live blue tint on the palette, aggregate badge on the root."
+    description = "The project pane with a dirty tree: uncommitted header with Save/Revert icons; the focused shader row's selection highlight mixes in the unsaved yellow, the palette row wears the live blue header tint, the root row the aggregate unsaved tint — no count badges (counts live in the popup)."
 )]
 pub(crate) fn sidebar_dirty_tree() -> Element {
     let mut view = project_editor_fixture(ProjectSyncPhase::Ready);
@@ -96,8 +96,9 @@ pub(crate) fn sidebar_dirty_tree() -> Element {
 
     rsx! {
         div { class: "tw:max-w-[320px]",
-            ProjectSidebar {
+            ProjectPane {
                 view,
+                status: UiStatus::good("Ready"),
                 running: false,
                 on_action: move |_| {},
             }
