@@ -5238,6 +5238,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpc-history"
+version = "40.0.0"
+dependencies = [
+ "log",
+ "lpfs",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "lpc-model"
 version = "40.0.0"
 dependencies = [

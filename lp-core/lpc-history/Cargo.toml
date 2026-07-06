@@ -1,0 +1,22 @@
+[package]
+name = "lpc-history"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Lite versioning with events: prefixed uids, content-addressed snapshots, per-project event log, lineage"
+
+[features]
+default = []
+std = []
+
+[dependencies]
+lpfs = { path = "../../lp-base/lpfs" }
+log = { workspace = true, default-features = false }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+
+[lints]
+workspace = true

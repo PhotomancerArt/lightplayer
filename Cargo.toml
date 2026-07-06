@@ -6,6 +6,7 @@ members = [
     "lp-base/lp-recovery",
     "lp-base/lpfs",
     # lp-app workspace members
+    "lp-core/lpc-history",
     "lp-core/lpc-engine",
     "lp-core/lpc-view",
     "lp-core/lpc-hardware",
@@ -68,6 +69,7 @@ default-members = [
     "lp-base/lp-recovery",
     "lp-base/lpfs",
     # lp-app workspace members
+    "lp-core/lpc-history",
     "lp-core/lpc-engine",
     "lp-core/lpc-view",
     "lp-core/lpc-hardware",
@@ -170,6 +172,7 @@ object = { version = "0.37.3", default-features = false, features = ['read_core'
 critical-section = { version = "1.2.0", default-features = false }
 spin = { version = "0.9", default-features = false, features = ["mutex", "spin_mutex"] }
 serde = { version = "1.0.228", default-features = false, features = ["alloc"] }
+sha2 = { version = "0.10", default-features = false }
 schemars = { version = "1.2.1", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0.80", default-features = false, features = ["alloc", "raw_value"] }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
