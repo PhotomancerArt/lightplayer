@@ -103,20 +103,24 @@ pub enum MutationCmdStatus {
 /// Observable effect of an accepted overlay mutation.
 ///
 /// The effect is what the server actually stored, which may differ from the
-/// sent command: minimal-diff normalization rewrites a `PutSlotEdit` assigning
-/// the base (unoverlaid) value into a removal of the overlay entry at that
-/// path. Clients that mirror the overlay from their own acks must apply the
-/// effect, not the sent command, or their mirror diverges from the server
-/// without a revision bump to correct it.
+/// sent command: minimal-diff normalization rewrites a `PutSlotEdit` that is
+/// a no-op against the base (unoverlaid) artifact — assigning the base value,
+/// `EnsurePresent` of a base-present target, or `Remove` of a base-absent
+/// target — into a removal of the overlay entry at that path. Clients that
+/// mirror the overlay from their own acks must apply the effect, not the sent
+/// command, or their mirror diverges from the server without a revision bump
+/// to correct it.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MutationEffect {
     /// The mutation was applied as sent; `changed` reports whether it changed
     /// canonical overlay state.
     OverlayChanged { changed: bool },
-    /// A `PutSlotEdit` assigning the base value was normalized to removing the
-    /// overlay entry at its path; `changed` reports whether an entry existed
-    /// to remove (`false`: the command was a complete no-op).
+    /// A `PutSlotEdit` that was a no-op against the base artifact (assigning
+    /// the base value, ensuring a base-present target, or removing a
+    /// base-absent one) was normalized to removing the overlay entry at its
+    /// path; `changed` reports whether an entry existed to remove (`false`:
+    /// the command was a complete no-op).
     NormalizedToRemoval { changed: bool },
 }
 
@@ -133,6 +137,9 @@ pub enum MutationRejectionReason {
     NotWritable,
     /// Mutation assigned a value that does not match the slot's value type.
     TypeMismatch,
+    /// Mutation assigned a value to a structural slot (record, map, option,
+    /// enum, unit) instead of a value leaf.
+    NotAValueLeaf,
     /// Mutation was well-formed but edit application failed.
     EditFailed,
     /// Mutation is not supported by the current registry implementation.

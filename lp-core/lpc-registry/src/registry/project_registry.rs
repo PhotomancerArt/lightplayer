@@ -102,7 +102,7 @@ impl ProjectRegistry {
     ) -> Result<MutationResult, EditApplyError> {
         let before = self.inventory.clone();
         let covered_before = self.overlay_covered_artifacts();
-        let (mutation, _) = self.normalize_assign_to_base(fs, mutation, ctx);
+        let (mutation, _) = self.normalize_edit_to_base(fs, mutation, ctx);
         let overlay_changed = self.overlay.get_mut().apply_mutation(mutation);
         if overlay_changed {
             self.overlay.mark_updated(frame);
@@ -135,7 +135,7 @@ impl ProjectRegistry {
             match self.validate_mutation(&command.mutation, ctx) {
                 Ok(()) => {
                     let (mutation, normalized) =
-                        self.normalize_assign_to_base(fs, command.mutation, ctx);
+                        self.normalize_edit_to_base(fs, command.mutation, ctx);
                     let changed = self.overlay.get_mut().apply_mutation(mutation);
                     any_changed |= changed;
                     let effect = if normalized {
@@ -493,8 +493,11 @@ impl ProjectRegistry {
     /// Slot policy applies to slot edits only:
     ///
     /// - `PutSlotEdit` requires a resolvable artifact and slot path, a
-    ///   writable policy at the path, and (for `AssignValue`) a value matching
-    ///   the leaf's value type.
+    ///   writable policy at the path, and (for `AssignValue`) a value-leaf
+    ///   target plus a value matching its value type. A structural target
+    ///   rejects as [`MutationRejectionReason::NotAValueLeaf`]: composite
+    ///   values are never assigned wholesale — gestures compose from
+    ///   `EnsurePresent`/`Remove` and leaf assignments (M3 plan, D1/D6).
     /// - `RemoveSlotEdit` requires only a resolvable artifact: removing
     ///   pending state must stay possible even when the shape changed under
     ///   the overlay, so a stale path is still allowed (it only shrinks the
@@ -525,14 +528,23 @@ impl ProjectRegistry {
                         format!("slot {} is not writable", edit.path),
                     ));
                 }
-                if let SlotEditOp::AssignValue(value) = &edit.op
-                    && let Some(leaf_type) = &resolution.leaf_type
-                    && !lp_value_matches_type(value, leaf_type)
-                {
-                    return Err(MutationRejection::new(
-                        MutationRejectionReason::TypeMismatch,
-                        format!("slot {} expects {leaf_type:?}, got {value:?}", edit.path),
-                    ));
+                if let SlotEditOp::AssignValue(value) = &edit.op {
+                    let Some(leaf_type) = &resolution.leaf_type else {
+                        return Err(MutationRejection::new(
+                            MutationRejectionReason::NotAValueLeaf,
+                            format!(
+                                "slot {} is a structural slot, not a value leaf; \
+                                 compose EnsurePresent/Remove and leaf assignments instead",
+                                edit.path
+                            ),
+                        ));
+                    };
+                    if !lp_value_matches_type(value, leaf_type) {
+                        return Err(MutationRejection::new(
+                            MutationRejectionReason::TypeMismatch,
+                            format!("slot {} expects {leaf_type:?}, got {value:?}", edit.path),
+                        ));
+                    }
                 }
                 Ok(())
             }
@@ -545,19 +557,30 @@ impl ProjectRegistry {
         }
     }
 
-    /// Minimal-diff overlay normalization: a `PutSlotEdit` assigning the value
-    /// the base (unoverlaid) artifact already carries at that path stores
+    /// Minimal-diff overlay normalization: a `PutSlotEdit` that would leave
+    /// the effective state identical to the base (unoverlaid) artifact stores
     /// nothing — it is rewritten to a removal of the overlay entry at the
-    /// path, so "edited then changed back" is indistinguishable from an
-    /// explicit revert and the overlay stays a minimal diff against saved
-    /// state (`docs/adr/2026-07-04-studio-editing-model.md`, D6). Returns the
-    /// operation to apply plus whether it was normalized, so batch results can
-    /// report [`MutationEffect::NormalizedToRemoval`] and ack-mirroring
-    /// clients apply what was stored rather than what was sent.
+    /// path, so "edited then changed back" (and add-then-remove of a map
+    /// entry) is indistinguishable from an explicit revert and the overlay
+    /// stays a minimal diff against saved state
+    /// (`docs/adr/2026-07-04-studio-editing-model.md`, D6; structural cases:
+    /// M3 plan, D2). Per-op rule against the base definition:
     ///
-    /// Only value assignments normalize; structural edits (`EnsurePresent`,
-    /// `Remove`) and whole-artifact ops pass through unchanged.
-    fn normalize_assign_to_base(
+    /// - `AssignValue`: the assigned value equals [`Self::base_slot_value`]
+    ///   at the path.
+    /// - `EnsurePresent`: the base already satisfies the path
+    ///   ([`Self::base_slot_presence`] is `Some(true)`: map key present,
+    ///   option `Some`, enum variant already active).
+    /// - `Remove`: the base does not contain the target
+    ///   ([`Self::base_slot_presence`] is `Some(false)`: map key absent,
+    ///   option already `None`).
+    ///
+    /// Returns the operation to apply plus whether it was normalized, so
+    /// batch results can report [`MutationEffect::NormalizedToRemoval`] and
+    /// ack-mirroring clients apply what was stored rather than what was sent.
+    /// Whole-artifact ops pass through unchanged, and nothing normalizes when
+    /// the base bytes cannot be read or parsed (conservative: keep the edit).
+    fn normalize_edit_to_base(
         &mut self,
         fs: &dyn LpFs,
         mutation: MutationOp,
@@ -567,13 +590,18 @@ impl ProjectRegistry {
             MutationOp::PutSlotEdit { artifact, edit } => (artifact, edit),
             other => return (other, false),
         };
-        let assigns_base = match &edit.op {
+        let matches_base = match &edit.op {
             SlotEditOp::AssignValue(value) => self
                 .base_slot_value(fs, &artifact, &edit.path, ctx)
                 .is_some_and(|base| base == *value),
-            _ => false,
+            SlotEditOp::EnsurePresent => {
+                self.base_slot_presence(fs, &artifact, &edit.path, ctx) == Some(true)
+            }
+            SlotEditOp::Remove => {
+                self.base_slot_presence(fs, &artifact, &edit.path, ctx) == Some(false)
+            }
         };
-        if assigns_base {
+        if matches_base {
             (
                 MutationOp::RemoveSlotEdit {
                     artifact,
@@ -608,8 +636,7 @@ impl ProjectRegistry {
         path: &SlotPath,
         ctx: &ParseCtx<'_>,
     ) -> Option<LpValue> {
-        let bytes = self.artifacts.read_bytes(artifact, fs).ok()?;
-        let def = crate::overlay::parse_def_bytes(&bytes, ctx).ok()?;
+        let def = self.parse_base_def(fs, artifact, ctx)?;
         let path = match path.segments().split_first() {
             Some((SlotPathSegment::Field(name), tail))
                 if NodeDef::is_variant_name(name.as_str()) =>
@@ -625,6 +652,64 @@ impl ProjectRegistry {
             SlotDataAccess::Value(value) => Some(value.value()),
             _ => None,
         }
+    }
+
+    /// Presence of the structural target at `path` in the base (unoverlaid)
+    /// definition of `artifact`.
+    ///
+    /// - `Some(true)`: the base already satisfies the path — every segment
+    ///   resolves (map keys present, options `Some`, enum variant segments
+    ///   matching the active variant) and a path terminating at an option
+    ///   finds it `Some`. An `EnsurePresent` here is a no-op vs base.
+    /// - `Some(false)`: the base does not contain the target — a segment
+    ///   fails to resolve (map key absent, option `None`, inactive enum
+    ///   variant) or a terminal option is `None`. A `Remove` here is a no-op
+    ///   vs base.
+    /// - `None`: the base bytes cannot be read or parsed, so presence is
+    ///   unknowable and the caller must not normalize in either direction.
+    ///
+    /// Same base-def seam as [`Self::base_slot_value`], including the
+    /// variant-prefixed path rule: a prefix naming a variant other than the
+    /// base's makes the target absent (a variant switch is a real diff).
+    fn base_slot_presence(
+        &mut self,
+        fs: &dyn LpFs,
+        artifact: &ArtifactLocation,
+        path: &SlotPath,
+        ctx: &ParseCtx<'_>,
+    ) -> Option<bool> {
+        let def = self.parse_base_def(fs, artifact, ctx)?;
+        let path = match path.segments().split_first() {
+            Some((SlotPathSegment::Field(name), tail))
+                if NodeDef::is_variant_name(name.as_str()) =>
+            {
+                if def.variant_name() != name.as_str() {
+                    return Some(false);
+                }
+                SlotPath::from_segments(tail.to_vec())
+            }
+            _ => path.clone(),
+        };
+        let Ok(data) = lookup_slot_data(&def, ctx.shapes, &path) else {
+            return Some(false);
+        };
+        Some(match data {
+            SlotDataAccess::Option(option) => option.data().is_some(),
+            _ => true,
+        })
+    }
+
+    /// Parse the base (unoverlaid) definition of `artifact` from its
+    /// canonical bytes. See [`Self::base_slot_value`] for the seam rationale
+    /// (one targeted re-parse per normalized command is in the noise).
+    fn parse_base_def(
+        &mut self,
+        fs: &dyn LpFs,
+        artifact: &ArtifactLocation,
+        ctx: &ParseCtx<'_>,
+    ) -> Option<NodeDef> {
+        let bytes = self.artifacts.read_bytes(artifact, fs).ok()?;
+        crate::overlay::parse_def_bytes(&bytes, ctx).ok()
     }
 
     fn def_entry_for_mutation(
@@ -1311,6 +1396,304 @@ mod tests {
         assert_eq!(*effective_clock_def(&registry).controls.rate.value(), 1.0);
     }
 
+    #[test]
+    fn ensure_present_then_remove_of_a_new_map_entry_cancels_to_a_clean_overlay() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = clock_project(&shapes);
+        let clock = clock_artifact();
+        let speed = SlotPath::parse("bindings[speed]").unwrap();
+
+        // Base authors no `speed` binding: adding it is a real diff.
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::PutSlotEdit {
+                artifact: clock.clone(),
+                edit: SlotEdit::ensure_present(speed.clone()),
+            }],
+        );
+        assert_accepted(&results[0], true);
+        assert!(
+            effective_clock_def(&registry)
+                .bindings
+                .entries()
+                .contains_key(&String::from("speed"))
+        );
+
+        // Removing it again is a no-op vs base: the pair cancels to a clean
+        // overlay (no phantom dirty) and the revision still advances.
+        let results = mutate_batch_at(
+            &fs,
+            &mut registry,
+            &shapes,
+            Revision::new(12),
+            vec![MutationOp::PutSlotEdit {
+                artifact: clock.clone(),
+                edit: SlotEdit::remove(speed),
+            }],
+        );
+        assert_normalized(&results[0], true);
+        assert!(registry.overlay().get().is_empty());
+        assert_eq!(registry.overlay().changed_at(), Revision::new(12));
+        assert_eq!(
+            registry
+                .def(&NodeDefLocation::artifact_root(clock))
+                .expect("clock def")
+                .revision,
+            Revision::new(12),
+            "cancelling the pair must advance the def revision"
+        );
+        assert!(
+            !effective_clock_def(&registry)
+                .bindings
+                .entries()
+                .contains_key(&String::from("speed"))
+        );
+    }
+
+    #[test]
+    fn remove_of_a_base_present_entry_stores_and_re_adding_normalizes_the_pair_away() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = bound_clock_project(&shapes);
+        let clock = clock_artifact();
+        let speed = SlotPath::parse("bindings[speed]").unwrap();
+
+        // Base authors the entry: removing it is a real diff and stores.
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::PutSlotEdit {
+                artifact: clock.clone(),
+                edit: SlotEdit::remove(speed.clone()),
+            }],
+        );
+        assert_accepted(&results[0], true);
+        assert!(
+            !effective_clock_def(&registry)
+                .bindings
+                .entries()
+                .contains_key(&String::from("speed"))
+        );
+
+        // Re-adding a base-present entry is a no-op vs base: the stored
+        // removal drops and the project is back to clean.
+        let results = mutate_batch_at(
+            &fs,
+            &mut registry,
+            &shapes,
+            Revision::new(12),
+            vec![MutationOp::PutSlotEdit {
+                artifact: clock.clone(),
+                edit: SlotEdit::ensure_present(speed),
+            }],
+        );
+        assert_normalized(&results[0], true);
+        assert!(registry.overlay().get().is_empty());
+        assert!(
+            effective_clock_def(&registry)
+                .bindings
+                .entries()
+                .contains_key(&String::from("speed"))
+        );
+    }
+
+    #[test]
+    fn ensure_present_on_a_base_present_path_is_a_normalized_noop() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = bound_clock_project(&shapes);
+
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::PutSlotEdit {
+                artifact: clock_artifact(),
+                edit: SlotEdit::ensure_present(SlotPath::parse("bindings[speed]").unwrap()),
+            }],
+        );
+
+        assert_normalized(&results[0], false);
+        assert!(registry.overlay().get().is_empty());
+        assert_eq!(
+            registry.overlay().changed_at(),
+            Revision::default(),
+            "a no-op normalization must not bump the overlay revision"
+        );
+    }
+
+    #[test]
+    fn option_edits_normalize_against_base_presence() {
+        // The authored `speed` binding has `value` Some and `target` None in
+        // base (BindingDef options default to None).
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = bound_clock_project(&shapes);
+        let clock = clock_artifact();
+
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![
+                // EnsurePresent on a base-Some option: no-op, normalized.
+                MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: SlotEdit::ensure_present(
+                        SlotPath::parse("bindings[speed].value").unwrap(),
+                    ),
+                },
+                // Remove of a base-None option: no-op, normalized.
+                MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: SlotEdit::remove(SlotPath::parse("bindings[speed].target").unwrap()),
+                },
+                // EnsurePresent on a base-None option: real diff, stores.
+                MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: SlotEdit::ensure_present(
+                        SlotPath::parse("bindings[speed].target").unwrap(),
+                    ),
+                },
+                // Remove of a base-Some option: real diff, stores.
+                MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: SlotEdit::remove(SlotPath::parse("bindings[speed].value").unwrap()),
+                },
+            ],
+        );
+
+        assert_normalized(&results[0], false);
+        assert_normalized(&results[1], false);
+        assert_accepted(&results[2], true);
+        assert_accepted(&results[3], true);
+
+        let def = effective_clock_def(&registry);
+        let binding = def
+            .bindings
+            .entries()
+            .get(&String::from("speed"))
+            .expect("speed binding");
+        assert!(binding.target.data.is_some(), "ensured option is Some");
+        assert!(binding.value.data.is_none(), "removed option is None");
+    }
+
+    #[test]
+    fn enum_variant_ensure_present_normalizes_only_for_the_active_variant() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = fixture_project(&shapes);
+        let fixture = fixture_artifact();
+
+        // Base authors no mapping, so the active variant is the default
+        // `Unset`: re-selecting it is a no-op.
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::PutSlotEdit {
+                artifact: fixture.clone(),
+                edit: SlotEdit::ensure_present(SlotPath::parse("mapping.Unset").unwrap()),
+            }],
+        );
+        assert_normalized(&results[0], false);
+        assert!(registry.overlay().get().is_empty());
+
+        // Selecting a different variant is a real diff and stores.
+        let results = mutate_batch_at(
+            &fs,
+            &mut registry,
+            &shapes,
+            Revision::new(12),
+            vec![MutationOp::PutSlotEdit {
+                artifact: fixture.clone(),
+                edit: SlotEdit::ensure_present(SlotPath::parse("mapping.PathPoints").unwrap()),
+            }],
+        );
+        assert_accepted(&results[0], true);
+        assert!(matches!(
+            effective_fixture_def(&registry).mapping.value(),
+            lpc_model::MappingConfig::PathPoints { .. }
+        ));
+    }
+
+    #[test]
+    fn singular_mutate_normalizes_structural_ops_like_the_batch_path() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = clock_project(&shapes);
+        let clock = clock_artifact();
+        let speed = SlotPath::parse("bindings[speed]").unwrap();
+        let ctx = ParseCtx { shapes: &shapes };
+
+        registry
+            .mutate(
+                &fs,
+                MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: SlotEdit::ensure_present(speed.clone()),
+                },
+                Revision::new(10),
+                &ctx,
+            )
+            .unwrap();
+        assert!(!registry.overlay().get().is_empty());
+
+        let result = registry
+            .mutate(
+                &fs,
+                MutationOp::PutSlotEdit {
+                    artifact: clock,
+                    edit: SlotEdit::remove(speed),
+                },
+                Revision::new(12),
+                &ctx,
+            )
+            .unwrap();
+
+        assert!(result.overlay_changed);
+        assert!(registry.overlay().get().is_empty());
+    }
+
+    #[test]
+    fn assign_value_to_a_structural_target_rejects_as_not_a_value_leaf() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = clock_project(&shapes);
+        let clock = clock_artifact();
+
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![
+                MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: SlotEdit::assign_value(
+                        SlotPath::parse("controls").unwrap(),
+                        LpValue::F32(1.0),
+                    ),
+                },
+                MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: SlotEdit::assign_value(
+                        SlotPath::parse("controls.rate").unwrap(),
+                        LpValue::F32(2.0),
+                    ),
+                },
+            ],
+        );
+
+        assert_eq!(
+            rejection_reason(&results[0]),
+            &MutationRejectionReason::NotAValueLeaf
+        );
+        assert!(
+            rejection_message(&results[0]).contains("value leaf"),
+            "{}",
+            rejection_message(&results[0])
+        );
+        assert_accepted(&results[1], true);
+        assert_eq!(*effective_clock_def(&registry).controls.rate.value(), 2.0);
+    }
+
     fn clock_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
         let mut fs = LpFsMemory::new();
         crate::test::fixtures::write_file(
@@ -1347,6 +1730,44 @@ mod tests {
 
     fn clock_artifact() -> ArtifactLocation {
         ArtifactLocation::file("/clock.json")
+    }
+
+    /// Clock project whose base def authors a `speed` binding with a bound
+    /// `value` (`bindings[speed].value` is Some in base; `target` stays the
+    /// BindingDef default None).
+    fn bound_clock_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
+        let mut fs = LpFsMemory::new();
+        crate::test::fixtures::write_file(
+            &mut fs,
+            "/project.json",
+            r#"{
+  "kind": "Project",
+  "format": 1,
+  "nodes": {
+    "clock": { "ref": "./clock.json" }
+  }
+}"#,
+        );
+        crate::test::fixtures::write_file(
+            &mut fs,
+            "/clock.json",
+            r#"{
+  "kind": "Clock",
+  "bindings": { "speed": { "value": 0.25 } },
+  "controls": { "rate": 1.0 }
+}"#,
+        );
+
+        let mut registry = ProjectRegistry::new();
+        registry
+            .load_root(
+                &fs,
+                lpfs::LpPath::new("/project.json"),
+                Revision::new(1),
+                &ParseCtx { shapes },
+            )
+            .unwrap();
+        (fs, registry)
     }
 
     /// Project with one fixture def whose persisted `color_order` slot is
@@ -1457,6 +1878,17 @@ mod tests {
             .expect("clock def loaded")
             .as_clock()
             .expect("clock def")
+    }
+
+    fn effective_fixture_def(registry: &ProjectRegistry) -> &lpc_model::FixtureDef {
+        registry
+            .def(&NodeDefLocation::artifact_root(fixture_artifact()))
+            .expect("fixture def entry")
+            .state
+            .loaded_def()
+            .expect("fixture def loaded")
+            .as_fixture()
+            .expect("fixture def")
     }
 
     fn assert_accepted(result: &MutationCmdResult, expected_changed: bool) {

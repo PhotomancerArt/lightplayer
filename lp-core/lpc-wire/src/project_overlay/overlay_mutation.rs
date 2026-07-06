@@ -37,7 +37,7 @@ mod tests {
     use alloc::vec;
     use lpc_model::{
         ArtifactLocation, AssetBodyOverlay, MutationCmd, MutationCmdId, MutationCmdResult,
-        MutationEffect, MutationOp, SlotEdit, SlotPath,
+        MutationEffect, MutationOp, MutationRejection, MutationRejectionReason, SlotEdit, SlotPath,
     };
 
     #[test]
@@ -110,5 +110,28 @@ mod tests {
 
         assert_eq!(decoded, response);
         assert!(json.contains("normalized_to_removal"));
+    }
+
+    #[test]
+    fn not_a_value_leaf_rejection_round_trips() {
+        // Structural `AssignValue` targets reject with a reason distinct from
+        // `type_mismatch` (M3 plan, D6); the variant must survive the wire so
+        // clients can tell "wrong value" from "wrong kind of target".
+        let response = WireOverlayMutationResponse::new(
+            MutationCmdBatchResult::new(vec![MutationCmdResult::rejected(
+                MutationCmdId::new(1),
+                MutationRejection::new(
+                    MutationRejectionReason::NotAValueLeaf,
+                    "slot mapping is a structural slot, not a value leaf".into(),
+                ),
+            )]),
+            Revision::new(13),
+        );
+
+        let json = serde_json::to_string(&response).unwrap();
+        let decoded: WireOverlayMutationResponse = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(decoded, response);
+        assert!(json.contains("not_a_value_leaf"));
     }
 }
