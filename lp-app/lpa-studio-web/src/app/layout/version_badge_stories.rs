@@ -35,6 +35,7 @@ fn loaded_info() -> VersionInfo {
             sha: Some("1de1f392c0a1b2c3".to_string()),
             dirty: Some(false),
             r#ref: Some("main".to_string()),
+            repository: Some("light-player/lightplayer".to_string()),
         },
         build: VersionBuild {
             generated_at: Some("2026-07-04T13:47:00Z".to_string()),

@@ -1066,6 +1066,15 @@
   .tw\:no-underline {
     text-decoration-line: none;
   }
+  .tw\:underline {
+    text-decoration-line: underline;
+  }
+  .tw\:decoration-dotted {
+    text-decoration-style: dotted;
+  }
+  .tw\:underline-offset-2 {
+    text-underline-offset: 2px;
+  }
   .tw\:opacity-0 {
     opacity: 0%;
   }
