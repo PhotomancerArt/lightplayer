@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
-    Asterisk, Boxes, Check, ChevronDown, ChevronRight, CircleAlert, CircleDot, CircleMinus,
+    Asterisk, Boxes, Check, ChevronDown, ChevronRight, CircleAlert, CircleDot, CircleMinus, Eraser,
     FlaskConical, Funnel, Info, Link2, Link2Off, Locate, LocateFixed, Pencil, Play, Save, Settings,
     SquareArrowRight, TriangleAlert, Undo2, Usb,
 };
@@ -40,6 +40,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::Revert => rsx! { Undo2 { size } },
         StudioIconName::Settings => rsx! { Settings { size } },
         StudioIconName::Filter => rsx! { Funnel { size } },
+        StudioIconName::Eraser => rsx! { Eraser { size } },
     }
 }
 
@@ -83,4 +84,6 @@ pub enum StudioIconName {
     Settings,
     /// Funnel: marks the console's display-level threshold as a filter.
     Filter,
+    /// Eraser: the console's Clear control.
+    Eraser,
 }

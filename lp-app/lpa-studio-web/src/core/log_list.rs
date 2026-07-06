@@ -32,6 +32,11 @@ pub fn LogList(
     /// visible rows means "filtered empty", not "nothing ever logged".
     #[props(default = 0)]
     hidden_count: usize,
+    /// The active display threshold, used to name it in the filtered-empty
+    /// message ("No messages at Debug or above."). `None` in standalone
+    /// stories that don't model a filter.
+    #[props(default = None)]
+    min_level: Option<UiLogLevel>,
     #[props(default = true)] framed: bool,
 ) -> Element {
     let visible_logs = log_tail(logs, max_entries);
@@ -76,8 +81,16 @@ pub fn LogList(
                 ));
             },
             if visible_logs.is_empty() {
-                li { class: "tw:border-b tw:border-border-muted tw:px-3 tw:py-2 tw:text-sm tw:text-subtle-foreground",
-                    p { class: "tw:m-0 tw:min-w-0 tw:break-words", "{empty_log_message(hidden_count)}" }
+                {
+                    let (primary, hint) = empty_log_state(hidden_count, min_level);
+                    rsx! {
+                        li { class: "tw:flex tw:flex-col tw:items-center tw:gap-1 tw:px-4 tw:py-8 tw:text-center",
+                            p { class: "tw:m-0 tw:text-sm tw:text-muted-foreground", "{primary}" }
+                            if let Some(hint) = hint {
+                                p { class: "tw:m-0 tw:text-xs tw:text-dim-foreground", "{hint}" }
+                            }
+                        }
+                    }
                 }
             } else {
                 for entry in visible_logs.iter() {
@@ -109,13 +122,40 @@ fn is_log_near_bottom(scroll_top: f64, scroll_height: i32, client_height: i32) -
     f64::from(scroll_height) - scroll_top - f64::from(client_height) <= LOG_STICKY_THRESHOLD_PX
 }
 
-/// The empty-state row text: an empty ring reads differently from a ring
-/// whose every entry is filtered out by the current level/origin filter.
-fn empty_log_message(hidden_count: usize) -> &'static str {
-    if hidden_count > 0 {
-        "No messages at this level."
-    } else {
-        "No messages yet."
+/// The empty-state text: a primary line plus an optional dim hint. An empty
+/// ring ("nothing logged yet") reads differently from a ring whose entries are
+/// all hidden by the filter, and a level threshold is named when it is the
+/// thing doing the hiding.
+fn empty_log_state(
+    hidden_count: usize,
+    min_level: Option<UiLogLevel>,
+) -> (String, Option<&'static str>) {
+    if hidden_count == 0 {
+        return ("No messages yet.".to_string(), None);
+    }
+    match min_level {
+        // Threshold above the floor: the level filter is (at least partly) why
+        // the list is empty, so name it.
+        Some(level) if level > UiLogLevel::Trace => (
+            format!("No messages at {} or above.", level_display_name(level)),
+            Some("Lower the level filter to see more."),
+        ),
+        // Everything is shown by level, so the hiding is entirely by source.
+        _ => (
+            "No messages from the enabled sources.".to_string(),
+            Some("Enable more sources to see them."),
+        ),
+    }
+}
+
+/// Title-case level name for prose (the row labels use lowercase).
+fn level_display_name(level: UiLogLevel) -> &'static str {
+    match level {
+        UiLogLevel::Trace => "Trace",
+        UiLogLevel::Debug => "Debug",
+        UiLogLevel::Info => "Info",
+        UiLogLevel::Warn => "Warn",
+        UiLogLevel::Error => "Error",
     }
 }
 
@@ -226,9 +266,18 @@ mod tests {
     }
 
     #[test]
-    fn empty_log_message_distinguishes_filtered_from_truly_empty() {
-        assert_eq!(empty_log_message(0), "No messages yet.");
-        assert_eq!(empty_log_message(3), "No messages at this level.");
+    fn empty_log_state_distinguishes_truly_empty_from_filtered() {
+        assert_eq!(
+            empty_log_state(0, Some(UiLogLevel::Info)),
+            ("No messages yet.".to_string(), None)
+        );
+        // A threshold above the floor names the level.
+        let (primary, hint) = empty_log_state(3, Some(UiLogLevel::Debug));
+        assert_eq!(primary, "No messages at Debug or above.");
+        assert!(hint.is_some());
+        // At the floor, the hiding must be by source.
+        let (primary, _) = empty_log_state(3, Some(UiLogLevel::Trace));
+        assert_eq!(primary, "No messages from the enabled sources.");
     }
 
     #[test]

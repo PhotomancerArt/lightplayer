@@ -59,23 +59,19 @@ pub fn RuntimeLog(console: UiConsoleView, on_console: EventHandler<ConsoleComman
                     SourcesPopover { origins, on_console }
                     DeviceSettingsPopover { device_log_level, on_console }
                     button {
-                        class: "tw:inline-flex tw:h-7 tw:items-center tw:rounded-sm tw:border tw:border-border-strong tw:bg-transparent tw:px-2 tw:text-xs tw:text-muted-foreground tw:hover:bg-card-muted",
+                        class: "tw:inline-flex tw:h-7 tw:w-7 tw:items-center tw:justify-center tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-muted tw:p-0 tw:text-muted-foreground tw:hover:text-soft-foreground",
                         r#type: "button",
-                        title: "Empty the console log",
+                        title: "Clear the console",
                         onclick: move |_| on_console.call(ConsoleCommand::Clear),
-                        "Clear"
+                        StudioIcon { name: StudioIconName::Eraser, size: 13 }
                     }
-                }
-            }
-            if hidden_count > 0 {
-                div { class: "tw:px-3 tw:pb-1 tw:text-right tw:text-[11px] tw:text-dim-foreground",
-                    "{hidden_count} hidden"
                 }
             }
             LogList {
                 logs: entries,
                 max_entries: RENDERED_LOG_TAIL,
                 hidden_count,
+                min_level: Some(min_level),
                 framed: false,
             }
         }
@@ -92,11 +88,11 @@ fn DisplayFilterSelect(min_level: UiLogLevel, on_console: EventHandler<ConsoleCo
         span {
             class: "tw:relative tw:inline-flex tw:h-7 tw:items-center tw:rounded-sm tw:border tw:border-border-strong tw:bg-card-muted tw:text-xs tw:text-muted-foreground",
             title: "Hide messages below this level (display filter only)",
-            span { class: "tw:pointer-events-none tw:absolute tw:left-1.5 tw:flex tw:text-dim-foreground",
-                StudioIcon { name: StudioIconName::Filter, size: 11 }
+            span { class: "tw:pointer-events-none tw:absolute tw:left-2 tw:flex tw:text-dim-foreground",
+                StudioIcon { name: StudioIconName::Filter, size: 12 }
             }
             select {
-                class: "tw:h-7 tw:appearance-none tw:bg-transparent tw:pl-6 tw:pr-5 tw:text-xs tw:text-muted-foreground tw:focus:outline-none",
+                class: "tw:h-7 tw:appearance-none tw:rounded-sm tw:border-0 tw:bg-transparent tw:pl-7 tw:pr-6 tw:text-xs tw:text-muted-foreground tw:focus:outline-none",
                 aria_label: "Minimum displayed log level",
                 value: "{level_option_value(min_level)}",
                 onchange: move |event| {
@@ -112,7 +108,9 @@ fn DisplayFilterSelect(min_level: UiLogLevel, on_console: EventHandler<ConsoleCo
                     }
                 }
             }
-            span { class: "tw:pointer-events-none tw:absolute tw:right-1.5 tw:text-[9px] tw:text-dim-foreground", "▾" }
+            span { class: "tw:pointer-events-none tw:absolute tw:right-1.5 tw:flex tw:text-dim-foreground",
+                StudioIcon { name: StudioIconName::Expanded, size: 12 }
+            }
         }
     }
 }
@@ -141,7 +139,9 @@ pub(crate) fn SourcesPopover(
                 if hidden > 0 {
                     span { class: "tw:rounded-full tw:bg-status-warning-bg tw:px-1 tw:text-[10px] tw:font-bold tw:text-status-warning-foreground", "{hidden}" }
                 }
-                span { class: "tw:text-[9px] tw:text-dim-foreground", "▾" }
+                span { class: "tw:flex tw:text-dim-foreground",
+                    StudioIcon { name: StudioIconName::Expanded, size: 12 }
+                }
             },
             for (origin, enabled) in origins.iter().copied() {
                 button {
