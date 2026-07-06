@@ -15,6 +15,7 @@
     --tw-text-lg--line-height: calc(1.75 / 1.125);
     --tw-text-xl: 1.25rem;
     --tw-text-xl--line-height: calc(1.75 / 1.25);
+    --tw-font-weight-normal: 400;
     --tw-font-weight-medium: 500;
     --tw-font-weight-semibold: 600;
     --tw-font-weight-bold: 700;
@@ -74,6 +75,12 @@
   }
 }
 @layer utilities {
+  .tw\:\@container {
+    container-type: inline-size;
+  }
+  .tw\:pointer-events-none {
+    pointer-events: none;
+  }
   .tw\:invisible {
     visibility: hidden;
   }
@@ -95,11 +102,17 @@
   .tw\:top-1\/2 {
     top: calc(1/2 * 100%);
   }
+  .tw\:right-1\.5 {
+    right: calc(var(--tw-spacing) * 1.5);
+  }
   .tw\:left-0 {
     left: calc(var(--tw-spacing) * 0);
   }
   .tw\:left-1\/2 {
     left: calc(1/2 * 100%);
+  }
+  .tw\:left-2 {
+    left: calc(var(--tw-spacing) * 2);
   }
   .tw\:z-\[70\] {
     z-index: 70;
@@ -185,6 +198,9 @@
   .tw\:h-2 {
     height: calc(var(--tw-spacing) * 2);
   }
+  .tw\:h-3\.5 {
+    height: calc(var(--tw-spacing) * 3.5);
+  }
   .tw\:h-4 {
     height: calc(var(--tw-spacing) * 4);
   }
@@ -199,6 +215,9 @@
   }
   .tw\:h-14 {
     height: calc(var(--tw-spacing) * 14);
+  }
+  .tw\:h-56 {
+    height: calc(var(--tw-spacing) * 56);
   }
   .tw\:h-\[15px\] {
     height: 15px;
@@ -278,6 +297,9 @@
   .tw\:w-2 {
     width: calc(var(--tw-spacing) * 2);
   }
+  .tw\:w-3\.5 {
+    width: calc(var(--tw-spacing) * 3.5);
+  }
   .tw\:w-4 {
     width: calc(var(--tw-spacing) * 4);
   }
@@ -301,6 +323,12 @@
   }
   .tw\:w-24 {
     width: calc(var(--tw-spacing) * 24);
+  }
+  .tw\:w-44 {
+    width: calc(var(--tw-spacing) * 44);
+  }
+  .tw\:w-56 {
+    width: calc(var(--tw-spacing) * 56);
   }
   .tw\:w-\[15px\] {
     width: 15px;
@@ -412,9 +440,6 @@
   .tw\:grid-cols-\[34px_minmax\(0\,1fr\)_auto\] {
     grid-template-columns: 34px minmax(0,1fr) auto;
   }
-  .tw\:grid-cols-\[52px_72px_minmax\(0\,1fr\)\] {
-    grid-template-columns: 52px 72px minmax(0,1fr);
-  }
   .tw\:grid-cols-\[64px_minmax\(0\,1fr\)\] {
     grid-template-columns: 64px minmax(0,1fr);
   }
@@ -429,6 +454,9 @@
   }
   .tw\:grid-cols-\[260px_minmax\(0\,1fr\)\] {
     grid-template-columns: 260px minmax(0,1fr);
+  }
+  .tw\:grid-cols-\[auto_auto_minmax\(0\,1fr\)\] {
+    grid-template-columns: auto auto minmax(0,1fr);
   }
   .tw\:grid-cols-\[minmax\(0\,1fr\)_auto\] {
     grid-template-columns: minmax(0,1fr) auto;
@@ -459,6 +487,9 @@
   }
   .tw\:grid-rows-\[1fr\] {
     grid-template-rows: 1fr;
+  }
+  .tw\:flex-col {
+    flex-direction: column;
   }
   .tw\:flex-wrap {
     flex-wrap: wrap;
@@ -642,6 +673,9 @@
     border-left-style: var(--tw-border-style);
     border-left-width: 2px;
   }
+  .tw\:border-accent {
+    border-color: var(--tw-color-accent);
+  }
   .tw\:border-accent-border {
     border-color: var(--tw-color-accent-border);
   }
@@ -701,6 +735,15 @@
   }
   .tw\:border-transparent {
     border-color: transparent;
+  }
+  .tw\:border-l-status-error-border {
+    border-left-color: var(--tw-color-status-error-border);
+  }
+  .tw\:border-l-status-warning-border {
+    border-left-color: var(--tw-color-status-warning-border);
+  }
+  .tw\:border-l-transparent {
+    border-left-color: transparent;
   }
   .tw\:bg-\[color-mix\(in_oklab\,var\(--color-accent-bg\)_60\%\,var\(--color-card\)\)\] {
     background-color: var(--color-accent-bg);
@@ -840,6 +883,9 @@
   .tw\:p-0 {
     padding: calc(var(--tw-spacing) * 0);
   }
+  .tw\:p-1 {
+    padding: calc(var(--tw-spacing) * 1);
+  }
   .tw\:p-2 {
     padding: calc(var(--tw-spacing) * 2);
   }
@@ -854,6 +900,9 @@
   }
   .tw\:p-\[22px\] {
     padding: 22px;
+  }
+  .tw\:px-1 {
+    padding-inline: calc(var(--tw-spacing) * 1);
   }
   .tw\:px-1\.5 {
     padding-inline: calc(var(--tw-spacing) * 1.5);
@@ -894,6 +943,9 @@
   .tw\:py-4 {
     padding-block: calc(var(--tw-spacing) * 4);
   }
+  .tw\:py-8 {
+    padding-block: calc(var(--tw-spacing) * 8);
+  }
   .tw\:pt-0\.5 {
     padding-top: calc(var(--tw-spacing) * 0.5);
   }
@@ -918,17 +970,23 @@
   .tw\:pt-16 {
     padding-top: calc(var(--tw-spacing) * 16);
   }
+  .tw\:pr-6 {
+    padding-right: calc(var(--tw-spacing) * 6);
+  }
   .tw\:pr-24 {
     padding-right: calc(var(--tw-spacing) * 24);
   }
   .tw\:pb-0\.5 {
     padding-bottom: calc(var(--tw-spacing) * 0.5);
   }
+  .tw\:pb-1 {
+    padding-bottom: calc(var(--tw-spacing) * 1);
+  }
   .tw\:pb-1\.5 {
     padding-bottom: calc(var(--tw-spacing) * 1.5);
   }
-  .tw\:pb-3 {
-    padding-bottom: calc(var(--tw-spacing) * 3);
+  .tw\:pb-2 {
+    padding-bottom: calc(var(--tw-spacing) * 2);
   }
   .tw\:pb-6 {
     padding-bottom: calc(var(--tw-spacing) * 6);
@@ -944,6 +1002,9 @@
   }
   .tw\:pl-4 {
     padding-left: calc(var(--tw-spacing) * 4);
+  }
+  .tw\:pl-7 {
+    padding-left: calc(var(--tw-spacing) * 7);
   }
   .tw\:pl-\[18px\] {
     padding-left: 18px;
@@ -998,6 +1059,15 @@
   .tw\:text-\[1\.04rem\] {
     font-size: 1.04rem;
   }
+  .tw\:text-\[9px\] {
+    font-size: 9px;
+  }
+  .tw\:text-\[10px\] {
+    font-size: 10px;
+  }
+  .tw\:text-\[11px\] {
+    font-size: 11px;
+  }
   .tw\:leading-none {
     --tw-leading: 1;
     line-height: 1;
@@ -1025,6 +1095,10 @@
   .tw\:font-medium {
     --tw-font-weight: var(--tw-font-weight-medium);
     font-weight: var(--tw-font-weight-medium);
+  }
+  .tw\:font-normal {
+    --tw-font-weight: var(--tw-font-weight-normal);
+    font-weight: var(--tw-font-weight-normal);
   }
   .tw\:font-semibold {
     --tw-font-weight: var(--tw-font-weight-semibold);
@@ -1089,6 +1163,9 @@
   }
   .tw\:no-underline {
     text-decoration-line: none;
+  }
+  .tw\:underline {
+    text-decoration-line: underline;
   }
   .tw\:decoration-dotted {
     text-decoration-style: dotted;
@@ -1203,6 +1280,21 @@
   }
   .tw\:\[--tw-color-card\:var\(--studio-color-surface\)\] {
     --tw-color-card: var(--studio-color-surface);
+  }
+  .tw\:\[grid-area\:level\] {
+    grid-area: level;
+  }
+  .tw\:\[grid-area\:message\] {
+    grid-area: message;
+  }
+  .tw\:\[grid-area\:source\] {
+    grid-area: source;
+  }
+  .tw\:\[grid-area\:time\] {
+    grid-area: time;
+  }
+  .tw\:\[grid-template-areas\:\'time_level_source\'_\'message_message_message\'\] {
+    grid-template-areas: 'time level source' 'message message message';
   }
   .tw\:first\:border-t-0 {
     &:first-child {
@@ -1329,6 +1421,13 @@
       }
     }
   }
+  .tw\:hover\:text-soft-foreground {
+    &:hover {
+      @media (hover: hover) {
+        color: var(--tw-color-soft-foreground);
+      }
+    }
+  }
   .tw\:hover\:text-status-good-foreground {
     &:hover {
       @media (hover: hover) {
@@ -1348,6 +1447,12 @@
       @media (hover: hover) {
         text-decoration-line: underline;
       }
+    }
+  }
+  .tw\:focus\:outline-none {
+    &:focus {
+      --tw-outline-style: none;
+      outline-style: none;
     }
   }
   .tw\:focus-visible\:outline {
@@ -1422,6 +1527,48 @@
   .tw\:max-\[880px\]\:pb-\[72px\] {
     @media (width < 880px) {
       padding-bottom: 72px;
+    }
+  }
+  .tw\:\@min-\[560px\]\:grid-cols-\[64px_52px_minmax\(72px\,128px\)_minmax\(0\,1fr\)\] {
+    @container (width >= 560px) {
+      grid-template-columns: 64px 52px minmax(72px,128px) minmax(0,1fr);
+    }
+  }
+  .tw\:\@min-\[560px\]\:gap-2 {
+    @container (width >= 560px) {
+      gap: calc(var(--tw-spacing) * 2);
+    }
+  }
+  .tw\:\@min-\[560px\]\:border-l-0 {
+    @container (width >= 560px) {
+      border-left-style: var(--tw-border-style);
+      border-left-width: 0px;
+    }
+  }
+  .tw\:\@min-\[560px\]\:border-b-status-error-border {
+    @container (width >= 560px) {
+      border-bottom-color: var(--tw-color-status-error-border);
+    }
+  }
+  .tw\:\@min-\[560px\]\:border-b-status-warning-border {
+    @container (width >= 560px) {
+      border-bottom-color: var(--tw-color-status-warning-border);
+    }
+  }
+  .tw\:\@min-\[560px\]\:py-2 {
+    @container (width >= 560px) {
+      padding-block: calc(var(--tw-spacing) * 2);
+    }
+  }
+  .tw\:\@min-\[560px\]\:text-xs {
+    @container (width >= 560px) {
+      font-size: var(--tw-text-xs);
+      line-height: var(--tw-leading, var(--tw-text-xs--line-height));
+    }
+  }
+  .tw\:\@min-\[560px\]\:\[grid-template-areas\:\'time_level_source_message\'\] {
+    @container (width >= 560px) {
+      grid-template-areas: 'time level source message';
     }
   }
 }

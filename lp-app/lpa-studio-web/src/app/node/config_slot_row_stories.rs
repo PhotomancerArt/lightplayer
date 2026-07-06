@@ -807,7 +807,7 @@ pub(crate) fn option_toggle_on_off() -> Element {
 
 #[story(
     label = "Enum Variant Switched",
-    description = "An enum row after a variant switch: the variant dropdown lists the declared idents verbatim, the row shows the pending structural edit, and the payload renders below."
+    description = "An enum row after a variant switch: the variant dropdown lists the declared idents verbatim, the row shows the pending structural edit, and the active variant's payload fields render directly below — no variant-level row (the payload addresses keep the variant segment)."
 )]
 pub(crate) fn enum_variant_switched() -> Element {
     rsx! {
@@ -816,14 +816,19 @@ pub(crate) fn enum_variant_switched() -> Element {
                 "mapping",
                 "Mapping",
                 vec![
-                    UiConfigSlot::record(
-                        "mapping.PathPoints",
-                        "PathPoints",
-                        vec![
-                            u32_map_slot(&[], "0"),
-                        ],
+                    UiConfigSlot::record("mapping.PathPoints.paths", "Paths", vec![])
+                        .with_address(story_slot_address("mapping.PathPoints.paths"))
+                        .with_composite(UiSlotComposite::Map(UiSlotMapComposite {
+                            key_kind: UiSlotMapKeyKind::U32,
+                            suggested_key: "0".to_string(),
+                        }))
+                        .with_state(UiSlotFieldState::editable()),
+                    UiConfigSlot::value(
+                        "mapping.PathPoints.sample_diameter",
+                        "Sample diameter",
+                        UiSlotValue::f32(1.5),
                     )
-                    .with_address(story_slot_address("mapping.PathPoints"))
+                    .with_address(story_slot_address("mapping.PathPoints.sample_diameter"))
                     .with_state(UiSlotFieldState::editable()),
                 ],
             )

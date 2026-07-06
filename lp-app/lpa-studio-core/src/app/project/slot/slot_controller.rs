@@ -736,21 +736,55 @@ impl SlotController {
                 let value = edits.value_shadow(&self.address).unwrap_or(value);
                 UiConfigSlotBody::Value(self.ui_slot_value(value))
             }
-            SlotControllerBody::Record
-            | SlotControllerBody::Map { .. }
-            | SlotControllerBody::Enum { .. } => UiConfigSlotBody::Record(UiSlotRecord::new(
-                self.children
-                    .iter()
-                    .filter(|child| !child.is_internal_config_slot())
-                    .map(|child| child.ui_config_slot(edits))
-                    .collect(),
-            )),
+            SlotControllerBody::Record | SlotControllerBody::Map { .. } => {
+                UiConfigSlotBody::Record(UiSlotRecord::new(
+                    self.children
+                        .iter()
+                        .filter(|child| !child.is_internal_config_slot())
+                        .map(|child| child.ui_config_slot(edits))
+                        .collect(),
+                ))
+            }
+            SlotControllerBody::Enum { .. } => {
+                UiConfigSlotBody::Record(UiSlotRecord::new(self.ui_enum_children(edits)))
+            }
             SlotControllerBody::Option { present } if *present => {
                 self.ui_present_option_body(edits)
             }
             SlotControllerBody::Option { .. } | SlotControllerBody::Issue => {
                 UiConfigSlotBody::Empty
             }
+        }
+    }
+
+    /// Flattened child rows for an enum row. The variant level is the enum's
+    /// VALUE (the dropdown on the enum row already shows and controls it),
+    /// not a container, so no row is emitted for the variant itself:
+    ///
+    /// - a record payload contributes its fields directly (their dirty state
+    ///   and revert targets are their own; the variant-switch entry already
+    ///   surfaces on the enum row via the prefix join and
+    ///   [`Self::edit_entry_address`]),
+    /// - a unit payload contributes nothing,
+    /// - any other payload (e.g. a newtype value variant) keeps its single
+    ///   payload row: that row carries the payload address and editor, which
+    ///   would otherwise have nowhere to render.
+    ///
+    /// Only the DTO nesting collapses — slot addresses and wire paths keep
+    /// the variant segment (`mapping.PathPoints.paths`) unchanged.
+    fn ui_enum_children(&self, edits: &SlotEditJoin<'_>) -> Vec<UiConfigSlot> {
+        let Some(child) = self.children.first() else {
+            return Vec::new();
+        };
+        match &child.body {
+            SlotControllerBody::Record => child
+                .children
+                .iter()
+                .filter(|field| !field.is_internal_config_slot())
+                .map(|field| field.ui_config_slot(edits))
+                .collect(),
+            SlotControllerBody::Empty => Vec::new(),
+            _ => vec![child.ui_config_slot(edits)],
         }
     }
 
@@ -946,7 +980,8 @@ impl SlotController {
     /// (`enum_path.Variant`, never the enum's own path) — the variant child
     /// address carrying an entry (the active variant first, so the enum row
     /// where the variant select lives offers the Revert that undoes the
-    /// switch; the payload row's exact-match revert targets the same entry).
+    /// switch; no rendered row carries the variant address itself, since the
+    /// variant level is flattened out of the DTO tree).
     /// `None` for rows whose dirty state is prefix-only (edits strictly under
     /// a composite): their per-entry revert lives in the save panel, and a
     /// row-level Revert at the composite's own path would be a no-op.
@@ -1269,8 +1304,8 @@ fn child_count_detail(count: usize, noun: &str) -> String {
 #[cfg(test)]
 mod tests {
     use lpc_model::{
-        LpType, LpValue, SlotEnumEncoding, SlotMapDyn, SlotMeta, SlotShape, SlotShapeRegistry,
-        SlotVariantShape, WithRevision,
+        LpType, LpValue, SlotEnumEncoding, SlotFieldShape, SlotMapDyn, SlotMeta, SlotRecord,
+        SlotShape, SlotShapeRegistry, SlotVariantShape, WithRevision,
     };
 
     use crate::{PendingEdit, ProjectNodeAddress, app::project::slot::SlotEditJoin};
@@ -1578,8 +1613,42 @@ mod tests {
         );
     }
 
-    /// Enum shape shared by the variant-switch revert-target tests:
-    /// `Unset` (unit) / `PathPoints` (f32) / `SvgPath` (string).
+    /// Inner path enum shape mirroring `PathSpec`, for the recursive
+    /// flattening test: `RingArray` (record) / `PointList` (record).
+    fn path_spec_enum_shape() -> SlotShape {
+        SlotShape::Enum {
+            meta: SlotMeta::empty(),
+            encoding: SlotEnumEncoding::default(),
+            variants: vec![
+                SlotVariantShape::new(
+                    "RingArray",
+                    SlotShape::Record {
+                        meta: SlotMeta::empty(),
+                        fields: vec![
+                            SlotFieldShape::new("diameter", SlotShape::value(LpType::F32)).unwrap(),
+                        ],
+                    },
+                )
+                .unwrap(),
+                SlotVariantShape::new(
+                    "PointList",
+                    SlotShape::Record {
+                        meta: SlotMeta::empty(),
+                        fields: vec![
+                            SlotFieldShape::new("first_channel", SlotShape::value(LpType::U32))
+                                .unwrap(),
+                        ],
+                    },
+                )
+                .unwrap(),
+            ],
+        }
+    }
+
+    /// Enum shape mirroring the fixture `MappingConfig`, shared by the
+    /// flattening and variant-switch revert-target tests: `Unset` (unit) /
+    /// `PathPoints` (record with a nested path-enum map) / `SvgPath`
+    /// (record).
     fn mapping_enum_shape() -> SlotShape {
         SlotShape::Enum {
             meta: SlotMeta::empty(),
@@ -1592,10 +1661,82 @@ mod tests {
                     },
                 )
                 .unwrap(),
-                SlotVariantShape::new("PathPoints", SlotShape::value(LpType::F32)).unwrap(),
-                SlotVariantShape::new("SvgPath", SlotShape::value(LpType::String)).unwrap(),
+                SlotVariantShape::new(
+                    "PathPoints",
+                    SlotShape::Record {
+                        meta: SlotMeta::empty(),
+                        fields: vec![
+                            SlotFieldShape::new(
+                                "paths",
+                                SlotShape::Map {
+                                    meta: SlotMeta::empty(),
+                                    key: SlotMapKeyShape::U32,
+                                    value: Box::new(path_spec_enum_shape()),
+                                },
+                            )
+                            .unwrap(),
+                            SlotFieldShape::new("sample_diameter", SlotShape::value(LpType::F32))
+                                .unwrap(),
+                        ],
+                    },
+                )
+                .unwrap(),
+                SlotVariantShape::new(
+                    "SvgPath",
+                    SlotShape::Record {
+                        meta: SlotMeta::empty(),
+                        fields: vec![
+                            SlotFieldShape::new("source", SlotShape::value(LpType::String))
+                                .unwrap(),
+                            SlotFieldShape::new("sample_diameter", SlotShape::value(LpType::F32))
+                                .unwrap(),
+                        ],
+                    },
+                )
+                .unwrap(),
             ],
         }
+    }
+
+    /// `SvgPath` payload data matching [`mapping_enum_shape`].
+    fn svg_path_payload() -> SlotData {
+        SlotData::Record(SlotRecord::with_revision(
+            Revision::new(1),
+            vec![
+                SlotData::Value(WithRevision::new(
+                    Revision::new(1),
+                    LpValue::String("mask.svg".to_string()),
+                )),
+                SlotData::Value(WithRevision::new(Revision::new(1), LpValue::F32(2.0))),
+            ],
+        ))
+    }
+
+    /// `PathPoints` payload data matching [`mapping_enum_shape`], with one
+    /// `RingArray` path entry at key 0.
+    fn path_points_payload() -> SlotData {
+        let mut paths = SlotMapDyn::with_revision(Revision::new(1), Default::default());
+        paths.entries.insert(
+            SlotMapKey::U32(0),
+            SlotData::Enum(lpc_model::SlotEnum::with_version(
+                Revision::new(1),
+                SlotName::parse("RingArray").unwrap(),
+                SlotData::Record(SlotRecord::with_revision(
+                    Revision::new(1),
+                    vec![SlotData::Value(WithRevision::new(
+                        Revision::new(1),
+                        LpValue::F32(10.0),
+                    ))],
+                )),
+            )),
+        );
+        SlotData::Record(SlotRecord::with_revision(
+            Revision::new(1),
+            vec![
+                SlotData::Map(paths),
+                SlotData::Value(WithRevision::new(Revision::new(1), LpValue::F32(1.5))),
+            ],
+        ))
     }
 
     fn mapping_enum_controller(active: &str, payload: SlotData) -> SlotController {
@@ -1615,19 +1756,22 @@ mod tests {
         )
     }
 
+    /// The record fields of a projected slot body, or a panic with `context`.
+    fn record_fields(slot: &UiConfigSlot, context: &str) -> Vec<UiConfigSlot> {
+        let UiConfigSlotBody::Record(record) = &slot.body else {
+            panic!("expected a record body for {context}");
+        };
+        record.fields.clone()
+    }
+
     #[test]
     fn enum_row_projects_the_variant_switch_entry_as_its_revert_target() {
         // After a variant switch round-trips, the overlay entry lives at the
         // variant child path (`mapping.SvgPath`), never at the enum's own
         // path — the enum row (where the variant select sits) must still
-        // offer it as its revert target.
-        let controller = mapping_enum_controller(
-            "SvgPath",
-            SlotData::Value(WithRevision::new(
-                Revision::new(1),
-                LpValue::String("mask.svg".to_string()),
-            )),
-        );
+        // offer it as its revert target. No rendered row carries the variant
+        // address itself: the variant level is flattened out of the DTO.
+        let controller = mapping_enum_controller("SvgPath", svg_path_payload());
         let (buffer, overlay) =
             overlay_join(&[("mapping.SvgPath", lpc_model::SlotEditOp::EnsurePresent)]);
         let join = SlotEditJoin::new(&buffer, overlay, Default::default());
@@ -1644,13 +1788,20 @@ mod tests {
             Some(slot_address("mapping.SvgPath")),
             "the enum row's revert targets the variant-switch entry"
         );
-        let UiConfigSlotBody::Record(record) = &slot.body else {
-            panic!("expected the enum body to project its payload row");
-        };
+        let fields = record_fields(&slot, "the flattened enum row");
         assert_eq!(
-            record.fields[0].edit_entry_address,
-            Some(slot_address("mapping.SvgPath")),
-            "the payload row's exact-match revert targets the same entry"
+            fields
+                .iter()
+                .map(|field| field.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["mapping.SvgPath.source", "mapping.SvgPath.sample_diameter"],
+            "the enum row's children are the payload fields, not a variant row"
+        );
+        assert!(
+            fields
+                .iter()
+                .all(|field| field.edit_entry_address.is_none()),
+            "the switch entry belongs to the enum row, not the payload fields"
         );
     }
 
@@ -1659,10 +1810,7 @@ mod tests {
         // Ack-to-refresh window: the view's active variant still lags the
         // acked switch, so the entry is at a non-active declared variant's
         // path — the declared-variant scan must still find it.
-        let controller = mapping_enum_controller(
-            "PathPoints",
-            SlotData::Value(WithRevision::new(Revision::new(1), LpValue::F32(0.0))),
-        );
+        let controller = mapping_enum_controller("PathPoints", path_points_payload());
         let (buffer, overlay) =
             overlay_join(&[("mapping.SvgPath", lpc_model::SlotEditOp::EnsurePresent)]);
         let join = SlotEditJoin::new(&buffer, overlay, Default::default());
@@ -1680,13 +1828,9 @@ mod tests {
     fn enum_row_with_only_payload_edits_offers_no_revert_target() {
         // Edits strictly under the variant path are ordinary prefix-dirty:
         // the enum row must not offer a revert that would not revert them.
-        let controller = mapping_enum_controller(
-            "SvgPath",
-            SlotData::Value(WithRevision::new(
-                Revision::new(1),
-                LpValue::String("mask.svg".to_string()),
-            )),
-        );
+        // The edited payload FIELD row (hoisted directly under the enum row)
+        // carries the exact-match dirty state and revert target itself.
+        let controller = mapping_enum_controller("SvgPath", svg_path_payload());
         let (buffer, overlay) = overlay_join(&[(
             "mapping.SvgPath.sample_diameter",
             lpc_model::SlotEditOp::AssignValue(LpValue::F32(3.0)),
@@ -1703,6 +1847,147 @@ mod tests {
         assert_eq!(
             slot.edit_entry_address, None,
             "prefix-only dirty enum rows offer no row-level revert target"
+        );
+        let fields = record_fields(&slot, "the flattened enum row");
+        let diameter = fields
+            .iter()
+            .find(|field| field.key == "mapping.SvgPath.sample_diameter")
+            .expect("the edited payload field row is a direct enum child");
+        assert_eq!(
+            diameter.state.dirty,
+            crate::UiNodeDirtyState::Dirty,
+            "the payload edit shows on its own field row"
+        );
+        assert_eq!(
+            diameter.edit_entry_address,
+            Some(slot_address("mapping.SvgPath.sample_diameter")),
+            "the payload field row reverts its own edit"
+        );
+    }
+
+    #[test]
+    fn enum_row_flattens_the_record_payload_into_field_rows() {
+        // The variant level is the enum's value, not a container: a record
+        // payload's fields render directly under the enum row, with their
+        // full addresses (the variant segment stays in the path).
+        let controller = mapping_enum_controller("PathPoints", path_points_payload());
+
+        let slot = controller.ui_config_slot(&SlotEditJoin::empty());
+
+        assert_eq!(slot.detail.as_deref(), Some("variant PathPoints"));
+        let fields = record_fields(&slot, "the flattened enum row");
+        assert_eq!(
+            fields
+                .iter()
+                .map(|field| (field.key.as_str(), field.label.as_str()))
+                .collect::<Vec<_>>(),
+            vec![
+                ("mapping.PathPoints.paths", "Paths"),
+                ("mapping.PathPoints.sample_diameter", "Sample diameter"),
+            ],
+            "no row is emitted for the PathPoints variant itself"
+        );
+    }
+
+    #[test]
+    fn unit_variant_enum_row_projects_no_children() {
+        let controller = mapping_enum_controller(
+            "Unset",
+            SlotData::Unit {
+                revision: Revision::new(1),
+            },
+        );
+
+        let slot = controller.ui_config_slot(&SlotEditJoin::empty());
+
+        assert_eq!(slot.detail.as_deref(), Some("variant Unset"));
+        assert!(
+            record_fields(&slot, "the unit-variant enum row").is_empty(),
+            "a unit variant contributes no child rows"
+        );
+        assert!(
+            matches!(&slot.composite, Some(UiSlotComposite::Enum(_))),
+            "the dropdown composite still carries the variant selection"
+        );
+    }
+
+    #[test]
+    fn nested_enum_in_map_entry_flattens_recursively() {
+        // Mapping → Paths → 0 → ring fields: the map entry row IS the inner
+        // path enum row (its dropdown says RingArray), and its children are
+        // the RingArray payload fields — the same flattening, one level down.
+        let controller = mapping_enum_controller("PathPoints", path_points_payload());
+
+        let slot = controller.ui_config_slot(&SlotEditJoin::empty());
+
+        let fields = record_fields(&slot, "the flattened enum row");
+        let paths = &fields[0];
+        let entries = record_fields(paths, "the paths map row");
+        assert_eq!(entries.len(), 1);
+        let entry = &entries[0];
+        assert_eq!(entry.key, "mapping.PathPoints.paths[0]");
+        assert_eq!(
+            entry.composite,
+            Some(UiSlotComposite::Enum(UiSlotEnumComposite {
+                active: "RingArray".to_string(),
+                variants: vec!["RingArray".to_string(), "PointList".to_string()],
+            })),
+            "the map entry row is the inner enum row"
+        );
+        assert_eq!(
+            record_fields(entry, "the flattened inner enum entry row")
+                .iter()
+                .map(|field| field.key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["mapping.PathPoints.paths[0].RingArray.diameter"],
+            "the inner variant level flattens away too"
+        );
+    }
+
+    #[test]
+    fn newtype_value_variant_keeps_its_single_payload_row() {
+        // A non-record payload has no fields to hoist: the payload row stays
+        // (it carries the payload address and value editor), only record
+        // payloads flatten.
+        let registry = SlotShapeRegistry::default();
+        let shape = SlotShape::Enum {
+            meta: SlotMeta::empty(),
+            encoding: SlotEnumEncoding::default(),
+            variants: vec![
+                SlotVariantShape::new(
+                    "Unset",
+                    SlotShape::Unit {
+                        meta: SlotMeta::empty(),
+                    },
+                )
+                .unwrap(),
+                SlotVariantShape::new("Ref", SlotShape::value(LpType::String)).unwrap(),
+            ],
+        };
+        let data = SlotData::Enum(lpc_model::SlotEnum::with_version(
+            Revision::new(1),
+            SlotName::parse("Ref").unwrap(),
+            SlotData::Value(WithRevision::new(
+                Revision::new(1),
+                LpValue::String("./fixture.json".to_string()),
+            )),
+        ));
+        let controller = SlotController::from_slot_data(
+            slot_address("invocation"),
+            "Invocation".to_string(),
+            &data,
+            SlotShapeView::Dynamic(&shape),
+            &registry,
+        );
+
+        let slot = controller.ui_config_slot(&SlotEditJoin::empty());
+
+        let fields = record_fields(&slot, "the newtype-variant enum row");
+        assert_eq!(fields.len(), 1);
+        assert_eq!(fields[0].key, "invocation.Ref");
+        assert!(
+            matches!(&fields[0].body, UiConfigSlotBody::Value(value) if value.display == "./fixture.json"),
+            "the payload value row survives with its editor"
         );
     }
 

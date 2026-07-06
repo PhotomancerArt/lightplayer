@@ -2524,6 +2524,8 @@ mod tests {
         let UiConfigSlotBody::Record(mode) = &config[0].body else {
             panic!("expected enum as record body");
         };
+        // `manual` is a newtype VALUE variant: it keeps its single payload
+        // row (record-payload variants flatten their fields instead).
         assert_eq!(mode.fields[0].label, "Manual");
 
         assert!(matches!(config[1].body, UiConfigSlotBody::Empty));
