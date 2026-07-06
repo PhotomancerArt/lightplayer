@@ -142,7 +142,8 @@ pub use slot::{
     ColorOrderSlot, ColorOrderValue, ControlProductSlot, Dim2u, Dim2uSlot, FromLpValue, OrderedF32,
     PositiveF32, PositiveF32Slot, Ratio, RatioSlot, RelativeNodeRefSlot, RenderOrder,
     RenderOrderSlot, ResourceRefSlot, SlotEnumOption, SlotMapValueAccess, SlotValue,
-    SlotValueShape, ToLpValue, ValueEditorHint, ValueRootError, VisualProductSlot, Xy, XySlot,
+    SlotValueShape, ToLpValue, U32List, U32ListSlot, ValueEditorHint, ValueRootError,
+    VisualProductSlot, Xy, XySlot,
 };
 pub use slot::{
     DynamicSlotObject, EnumSlot, FieldSlot, FieldSlotMut, MapSlot, MapSlotAccess, MapSlotAccessMut,

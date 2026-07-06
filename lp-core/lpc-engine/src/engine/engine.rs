@@ -1984,18 +1984,33 @@ mod tests {
     }
 
     #[test]
-    fn nested_consumed_slot_semantics_reach_playlist_entry_trigger() {
+    fn playlist_root_trigger_semantics_are_consumed_by_key() {
         let registry = SlotShapeRegistry::default();
         let shape = <lpc_model::PlaylistDef as lpc_model::StaticSlotShape>::slot_shape();
         let semantics = slot_path_semantics(
             SlotShapeView::Dynamic(&shape),
             &registry,
-            &SlotPath::parse("entries[2].trigger").expect("trigger path"),
+            &SlotPath::parse("trigger").expect("trigger path"),
         )
         .expect("trigger semantics");
 
         assert_eq!(semantics.direction, SlotDirection::Consumed);
         assert_eq!(semantics.merge, SlotMerge::ByKey);
+    }
+
+    #[test]
+    fn nested_slot_semantics_walk_map_entries() {
+        let registry = SlotShapeRegistry::default();
+        let shape = <lpc_model::PlaylistDef as lpc_model::StaticSlotShape>::slot_shape();
+        let semantics = slot_path_semantics(
+            SlotShapeView::Dynamic(&shape),
+            &registry,
+            &SlotPath::parse("entries[2].trigger_ids").expect("trigger_ids path"),
+        )
+        .expect("trigger_ids semantics");
+
+        assert_eq!(semantics.direction, SlotDirection::Local);
+        assert_eq!(semantics.merge, SlotMerge::Latest);
     }
 
     #[test]

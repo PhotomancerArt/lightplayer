@@ -3,6 +3,9 @@
   "bindings": {
     "time": {
       "source": "bus#time.seconds"
+    },
+    "trigger": {
+      "source": "bus#trigger"
     }
   },
   "time": 0,
@@ -17,12 +20,10 @@
       }
     },
     "2": {
-      "bindings": {
-        "trigger": {
-          "source": "bus#trigger"
-        }
-      },
       "name": "active",
+      "trigger_ids": [
+        1
+      ],
       "duration": 4,
       "fade_after": 0.8,
       "node": {

@@ -724,14 +724,7 @@ impl ProjectLoader {
             if node.kind != NodeKind::Playlist {
                 continue;
             }
-            let (
-                idle_entry,
-                default_fade,
-                entries,
-                time_source,
-                output_target,
-                entry_trigger_sources,
-            ) = {
+            let (idle_entry, default_fade, entries, time_source, output_target, trigger_source) = {
                 let NodeDef::Playlist(config) = projected_node_config(registry, node)? else {
                     continue;
                 };
@@ -745,7 +738,9 @@ impl ProjectLoader {
                     binding_target(&config.bindings, "output")
                         .map(|target| binding_target_endpoint(projected_nodes, node, target))
                         .transpose()?,
-                    playlist_entry_trigger_sources(projected_nodes, node, config)?,
+                    binding_source(&config.bindings, "trigger")
+                        .map(|source| binding_source_endpoint(projected_nodes, node, source))
+                        .transpose()?,
                 )
             };
             if let Some(source) = time_source {
@@ -755,6 +750,16 @@ impl ProjectLoader {
                     "time",
                     source,
                     SlotPath::parse("time").expect("playlist time slot"),
+                    frame,
+                )?;
+            }
+            if let Some(source) = trigger_source {
+                register_source_binding_at_path(
+                    runtime,
+                    node,
+                    "trigger",
+                    source,
+                    SlotPath::parse("trigger").expect("playlist trigger slot"),
                     frame,
                 )?;
             }
@@ -780,21 +785,6 @@ impl ProjectLoader {
             }
             if output_target.is_none() {
                 add_visual_default_output_binding(runtime, node, frame)?;
-            }
-            for (entry_index, source) in entry_trigger_sources {
-                let target_slot = SlotPath::parse(&format!("entries[{entry_index}].trigger"))
-                    .map_err(|e| ProjectLoadError::InvalidProjectReference {
-                        path: node_label(node),
-                        reason: format!("invalid playlist entry trigger path: {e}"),
-                    })?;
-                register_source_binding_at_path(
-                    runtime,
-                    node,
-                    "trigger",
-                    source,
-                    target_slot,
-                    frame,
-                )?;
             }
             runtime
                 .attach_runtime_node(
@@ -1073,28 +1063,16 @@ fn playlist_runtime_entries(
                     .get(&entry)
                     .and_then(|entry| entry.fade_after.data.as_ref())
                     .map(|fade| fade.value().0),
+                trigger_ids: config
+                    .entries
+                    .entries
+                    .get(&entry)
+                    .and_then(|entry| entry.trigger_ids.data.as_ref())
+                    .map(|ids| ids.value().0.clone()),
             }),
             _ => None,
         })
         .collect()
-}
-
-fn playlist_entry_trigger_sources(
-    projected_nodes: &[ProjectedNode],
-    current: &ProjectedNode,
-    config: &PlaylistDef,
-) -> Result<Vec<(u32, BindingSource)>, ProjectLoadError> {
-    let mut sources = Vec::new();
-    for (entry_index, entry) in &config.entries.entries {
-        let Some(source) = binding_source(&entry.bindings, "trigger") else {
-            continue;
-        };
-        sources.push((
-            *entry_index,
-            binding_source_endpoint(projected_nodes, current, source)?,
-        ));
-    }
-    Ok(sources)
 }
 
 fn resolve_fixture_mapping(
@@ -1790,6 +1768,11 @@ mod tests {
 {
   "kind": "Playlist",
   "default_fade": 0.35,
+  "bindings": {
+    "trigger": {
+      "source": "bus#trigger"
+    }
+  },
   "entries": {
     "1": {
       "name": "idle",
@@ -1799,14 +1782,10 @@ mod tests {
     },
     "2": {
       "name": "active",
+      "trigger_ids": [1],
       "duration": 4.0,
       "node": {
         "ref": "./active.json"
-      },
-      "bindings": {
-        "trigger": {
-          "source": "bus#trigger"
-        }
       }
     }
   }
@@ -1918,6 +1897,9 @@ mod tests {
   "bindings": {
     "time": {
       "source": "bus#time.seconds"
+    },
+    "trigger": {
+      "source": "bus#trigger"
     }
   },
   "entries": {
@@ -1929,14 +1911,10 @@ mod tests {
     },
     "2": {
       "name": "active",
+      "trigger_ids": [1],
       "duration": 4.0,
       "node": {
         "ref": "./active.json"
-      },
-      "bindings": {
-        "trigger": {
-          "source": "bus#trigger"
-        }
       }
     }
   }
@@ -2365,7 +2343,7 @@ mod tests {
     }
 
     #[test]
-    fn playlist_entries_load_as_children_and_bind_entry_trigger() {
+    fn playlist_entries_load_as_children_and_bind_root_trigger() {
         let fs = playlist_project_fs();
         let services = EngineServices::new(TreePath::parse("/playlist.show").expect("path"));
         let rt = ProjectLoader::load_from_root(&fs, services).expect("load playlist");
@@ -2396,7 +2374,7 @@ mod tests {
                     BindingTarget::ConsumedSlot { node, slot },
                 ) if source.0 == "trigger"
                     && *node == playlist
-                    && slot == &SlotPath::parse("entries[2].trigger").expect("trigger")
+                    && slot == &SlotPath::parse("trigger").expect("trigger")
                     && binding.priority == BindingPriority::authored()
             )
         }));
@@ -2459,6 +2437,106 @@ mod tests {
             resolve_playlist_f32(&mut rt, playlist, "entry_progress"),
             -1.0
         );
+    }
+
+    #[test]
+    fn playlist_duplicate_trigger_id_claims_resolve_to_lowest_entry_index() {
+        let fs = button_playlist_project_fs();
+        fs.write_file(
+            "/playlist.json".as_path(),
+            br#"
+{
+  "kind": "Playlist",
+  "default_fade": 0.35,
+  "bindings": {
+    "time": {
+      "source": "bus#time.seconds"
+    },
+    "trigger": {
+      "source": "bus#trigger"
+    }
+  },
+  "entries": {
+    "1": {
+      "name": "idle",
+      "node": {
+        "ref": "./idle.json"
+      }
+    },
+    "2": {
+      "name": "active",
+      "trigger_ids": [1],
+      "duration": 4.0,
+      "node": {
+        "ref": "./active.json"
+      }
+    },
+    "3": {
+      "name": "second",
+      "trigger_ids": [1],
+      "duration": 4.0,
+      "node": {
+        "ref": "./active.json"
+      }
+    }
+  }
+}
+"#,
+        )
+        .expect("playlist.json");
+        let (mut rt, playlist, control) = load_button_playlist(&fs);
+
+        assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 1);
+        control.set_pressed(HwAddress::gpio(20), true);
+        let _ = resolve_playlist_u32(&mut rt, playlist, "active_entry");
+        assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 2);
+    }
+
+    #[test]
+    fn playlist_trigger_id_not_claimed_by_any_entry_does_nothing() {
+        let fs = button_playlist_project_fs();
+        fs.write_file(
+            "/playlist.json".as_path(),
+            br#"
+{
+  "kind": "Playlist",
+  "default_fade": 0.35,
+  "bindings": {
+    "time": {
+      "source": "bus#time.seconds"
+    },
+    "trigger": {
+      "source": "bus#trigger"
+    }
+  },
+  "entries": {
+    "1": {
+      "name": "idle",
+      "node": {
+        "ref": "./idle.json"
+      }
+    },
+    "2": {
+      "name": "active",
+      "trigger_ids": [9],
+      "duration": 4.0,
+      "node": {
+        "ref": "./active.json"
+      }
+    }
+  }
+}
+"#,
+        )
+        .expect("playlist.json");
+        let (mut rt, playlist, control) = load_button_playlist(&fs);
+
+        assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 1);
+        control.set_pressed(HwAddress::gpio(20), true);
+        let _ = resolve_playlist_u32(&mut rt, playlist, "active_entry");
+        assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 1);
+        rt.tick(1000).expect("advance time");
+        assert_eq!(resolve_playlist_u32(&mut rt, playlist, "active_entry"), 1);
     }
 
     #[test]
@@ -3396,6 +3474,26 @@ mod tests {
             panic!("slot {slot} should be a visual product");
         };
         *product
+    }
+
+    fn load_button_playlist(
+        fs: &LpFsMemory,
+    ) -> (LoadedProjectRuntime, NodeId, VirtualButtonDriver) {
+        let registry = Rc::new(HwRegistry::new(default_esp32c6_hardware_manifest()));
+        let driver = VirtualButtonDriver::new(Rc::clone(&registry));
+        let control = driver.clone();
+        let mut hardware = HardwareSystem::new(registry);
+        hardware.add_button_driver(Box::new(driver));
+        let hardware = Rc::new(hardware);
+        let button_service: Rc<dyn ButtonService> = hardware.clone();
+        let mut services = EngineServices::new(TreePath::parse("/button_playlist.show").unwrap());
+        services.set_button_service(Some(button_service));
+        let rt = ProjectLoader::load_from_root(fs, services).expect("load playlist");
+        let playlist = rt
+            .tree()
+            .lookup_sibling(rt.tree().root(), NodeName::parse("playlist").unwrap())
+            .expect("playlist");
+        (rt, playlist, control)
     }
 
     fn resolve_playlist_u32(rt: &mut LoadedProjectRuntime, playlist: NodeId, slot: &str) -> u32 {

@@ -32,6 +32,7 @@ pub use ratio::{Ratio, RatioSlot};
 pub use relative_node_ref::RelativeNodeRefSlot;
 pub use render_order::{RenderOrder, RenderOrderSlot};
 pub use resource_ref::ResourceRefSlot;
+pub use u32_list::{U32List, U32ListSlot};
 pub use visual_product::VisualProductSlot;
 pub use xy::{Xy, XySlot};
 

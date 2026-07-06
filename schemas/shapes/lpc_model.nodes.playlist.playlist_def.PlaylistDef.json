@@ -32,6 +32,24 @@
         }
       },
       {
+        "name": "trigger",
+        "semantics": {
+          "direction": "consumed",
+          "merge": "by_key"
+        },
+        "shape": {
+          "map": {
+            "key": "u32",
+            "meta": {},
+            "value": {
+              "ref": {
+                "id": 2014621053
+              }
+            }
+          }
+        }
+      },
+      {
         "name": "idle_entry",
         "shape": {
           "value": {

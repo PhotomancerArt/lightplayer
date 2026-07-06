@@ -138,12 +138,6 @@
     "lpc_model::nodes::playlist::playlist_entry::PlaylistEntry": {
       "additionalProperties": false,
       "properties": {
-        "bindings": {
-          "additionalProperties": {
-            "$ref": "#/$defs/lpc_model::binding::binding_def::BindingDef"
-          },
-          "type": "object"
-        },
         "duration": {
           "description": "Intended non-negative float (not enforced on read).",
           "type": "number"
@@ -184,14 +178,13 @@
             }
           ]
         },
-        "trigger": {
-          "additionalProperties": {
-            "$ref": "#/$defs/lp::control::Message"
+        "trigger_ids": {
+          "items": {
+            "maximum": 4294967295,
+            "minimum": 0,
+            "type": "integer"
           },
-          "propertyNames": {
-            "pattern": "^\\+?[0-9]+$"
-          },
-          "type": "object"
+          "type": "array"
         }
       },
       "type": "object"
@@ -693,6 +686,15 @@
         },
         "time": {
           "type": "number"
+        },
+        "trigger": {
+          "additionalProperties": {
+            "$ref": "#/$defs/lp::control::Message"
+          },
+          "propertyNames": {
+            "pattern": "^\\+?[0-9]+$"
+          },
+          "type": "object"
         }
       },
       "required": [

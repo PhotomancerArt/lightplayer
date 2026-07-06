@@ -26,6 +26,9 @@ pub struct PlaylistRuntimeEntry {
     pub output_slot: SlotPath,
     pub duration: Option<f32>,
     pub fade_after: Option<f32>,
+    /// Trigger message ids that start or restart this entry; `None` means the
+    /// entry is never triggered.
+    pub trigger_ids: Option<Vec<u32>>,
 }
 
 pub struct PlaylistNode {
@@ -40,7 +43,7 @@ pub struct PlaylistNode {
     switch_time: f32,
     transition_start_time: f32,
     transition_duration: f32,
-    last_seen_triggers: VecMap<(u32, u32), u32>,
+    last_seen_triggers: VecMap<u32, u32>,
 }
 
 impl PlaylistNode {
@@ -388,30 +391,40 @@ pub fn playlist_output_path() -> SlotPath {
 fn detect_triggered_entry(
     ctx: &mut TickContext<'_>,
     entries: &[PlaylistRuntimeEntry],
-    last_seen: &mut VecMap<(u32, u32), u32>,
+    last_seen: &mut VecMap<u32, u32>,
 ) -> Result<Option<u32>, NodeError> {
-    let mut triggered = None;
-    for entry in entries {
-        let slot = SlotPath::parse(&format!("entries[{}].trigger", entry.index)).unwrap();
-        let production = ctx
-            .resolve(QueryKey::ConsumedSlot {
-                node: ctx.node_id(),
-                slot,
-            })
-            .map_err(|e| NodeError::msg(format!("resolve entry trigger: {e:?}")))?;
-        let SlotData::Map(map) = production.data() else {
+    let production = ctx
+        .resolve(QueryKey::ConsumedSlot {
+            node: ctx.node_id(),
+            slot: SlotPath::parse("trigger").expect("playlist trigger slot"),
+        })
+        .map_err(|e| NodeError::msg(format!("resolve playlist trigger: {e:?}")))?;
+    let SlotData::Map(map) = production.data() else {
+        return Ok(None);
+    };
+    let mut triggered: Option<u32> = None;
+    for data in map.entries.values() {
+        let Some(message) = control_message_from_slot_data(data)? else {
             continue;
         };
-        for data in map.entries.values() {
-            let Some(message) = control_message_from_slot_data(data)? else {
-                continue;
-            };
-            let key = (entry.index, message.id());
-            let previous = last_seen.insert(key, message.seq());
-            if previous != Some(message.seq()) && triggered.is_none() {
-                triggered = Some(entry.index);
-            }
+        let previous = last_seen.insert(message.id(), message.seq());
+        if previous == Some(message.seq()) {
+            continue;
         }
+        let entry = entries
+            .iter()
+            .filter(|entry| {
+                entry
+                    .trigger_ids
+                    .as_ref()
+                    .is_some_and(|ids| ids.contains(&message.id()))
+            })
+            .map(|entry| entry.index)
+            .min();
+        triggered = match (triggered, entry) {
+            (Some(current), Some(candidate)) => Some(current.min(candidate)),
+            (current, candidate) => current.or(candidate),
+        };
     }
     Ok(triggered)
 }
