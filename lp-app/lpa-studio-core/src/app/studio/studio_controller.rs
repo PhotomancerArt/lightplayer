@@ -9,15 +9,17 @@ use lpa_link::{
     LinkProviderKind,
 };
 
+use crate::app::studio::console_command::ConsoleCommand;
 use crate::app::studio::refresh_cadence::RefreshCadence;
-use crate::core::log::LogRing;
+use crate::app::studio::ui_console_view::UiConsoleView;
+use crate::core::log::{LogClock, LogFilter, LogRing};
 use crate::core::notice::UiNotices;
 use crate::{
     ConnectedLink, Controller, ControllerContext, DeviceController, DeviceOp, LinkOpenOutcome,
     NodeRevertOp, ProjectConnectResult, ProjectController, ProjectEditRun, ProjectOp,
     ProjectRefreshOutcome, ProjectState, ProjectSyncRun, SlotEditOp, StudioSnapshot, UiAction,
-    UiActions, UiActivityView, UiError, UiLogEntry, UiLogLevel, UiNotice, UiResult, UiStatus,
-    UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
+    UiActions, UiActivityView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin, UiNotice,
+    UiResult, UiStatus, UiStudioView, UiViewContent, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 pub struct StudioController {
@@ -26,6 +28,18 @@ pub struct StudioController {
     /// Bounded, chronological log buffer. Capped in core (P3/Q5) rather than in
     /// the web crate's retired 80-entry mirror.
     logs: LogRing,
+    /// The console's display filter (min level + origin toggles), mutated by
+    /// [`ConsoleCommand`]s. Display-side only: the ring keeps everything, the
+    /// filter shapes the emitted [`UiConsoleView`].
+    log_filter: LogFilter,
+    /// The injected wall clock that stamps [`UiLogDraft`]s at push time.
+    /// Producers never stamp — see the `core::log` module docs.
+    now_secs: LogClock,
+    /// Optional per-entry mirror hook, invoked for **every** stamped entry as
+    /// it enters the ring — independent of the display filter (which only
+    /// shapes the emitted console view). The web shell installs its JS-console
+    /// mirror here (P4), making ring entry the single mirroring point.
+    on_entry: Option<Box<dyn Fn(&UiLogEntry)>>,
     /// The project revision reflected in the last emitted view. `view()` is
     /// change-gated via [`Self::view_if_changed`]: a snapshot is only rebuilt
     /// and emitted when an applied read advanced this revision or a local
@@ -38,14 +52,51 @@ pub struct StudioController {
 }
 
 impl StudioController {
-    pub fn new() -> Self {
+    /// Create a controller with the platform's wall clock.
+    ///
+    /// `now_secs` returns seconds since the Unix epoch as `f64`; the web
+    /// shell passes `|| js_sys::Date::now() / 1000.0`, tests pass fixed or
+    /// stepping fakes. Core takes the closure instead of reading a clock so
+    /// the crate stays platform-free (P1).
+    pub fn new(now_secs: impl Fn() -> f64 + 'static) -> Self {
         Self {
             device: DeviceController::new(),
             project: ProjectController::new(),
             logs: LogRing::new(),
+            log_filter: LogFilter::default(),
+            now_secs: Rc::new(now_secs),
+            on_entry: None,
             applied_revision: None,
             // The first view is always new to the UI, so start dirty.
             dirty: true,
+        }
+    }
+
+    /// The controller's shared stamping clock, for the actor's progressive
+    /// log updates (which stamp `UxUpdate::Log` drafts outside `push_log`).
+    pub(crate) fn clock(&self) -> LogClock {
+        Rc::clone(&self.now_secs)
+    }
+
+    /// Install a hook invoked for **every** stamped entry entering the log
+    /// ring, regardless of the console display filter.
+    ///
+    /// Install it before the actor takes ownership of the controller. The web
+    /// shell uses this as the single JS-console mirroring point: every entry
+    /// — hand-built drafts, batch-recorded producer drafts, and drained
+    /// `log::` sink records — reaches the browser console exactly once.
+    /// Progressive live-view entries (the actor's `UxUpdate::Log` path) are
+    /// deliberately *not* mirrored there: their drafts are buffered by the
+    /// producers and enter the ring — and therefore this hook — when the
+    /// controller records them.
+    pub fn set_on_entry(&mut self, hook: impl Fn(&UiLogEntry) + 'static) {
+        self.on_entry = Some(Box::new(hook));
+    }
+
+    /// Invoke the mirror hook (if installed) for one entry entering the ring.
+    fn notify_entry(&self, entry: &UiLogEntry) {
+        if let Some(hook) = &self.on_entry {
+            hook(entry);
         }
     }
 
@@ -82,7 +133,17 @@ impl StudioController {
         } else {
             vec![device_view]
         };
-        UiStudioView::new(panes, self.logs.to_vec())
+        UiStudioView::new(panes, self.console_view())
+    }
+
+    /// The console slice of the view: ring entries passing the display
+    /// filter, plus the hidden count and the filter state for the toolbar.
+    /// Carries the connected server's last-requested log level (or `None`
+    /// while disconnected) for the device-level selector.
+    fn console_view(&self) -> UiConsoleView {
+        let mut console = UiConsoleView::from_ring(&self.logs, &self.log_filter);
+        console.device_log_level = self.device.server.requested_log_level();
+        console
     }
 
     /// The current project revision, or `None` before any sync.
@@ -114,17 +175,57 @@ impl StudioController {
         self.dirty = true;
     }
 
-    /// Append one entry to the bounded log ring and mark the view dirty.
+    /// Stamp one draft with the injected clock, append it to the bounded log
+    /// ring, and mark the view dirty.
     ///
-    /// The actor routes action-outcome and error logs here so the cap lives in
-    /// core (Q5). The web crate's JS-console sink is fed separately in P4.
-    pub fn push_log(&mut self, entry: UiLogEntry) {
+    /// The actor routes action-outcome, error, and drained `log::` sink logs
+    /// here so the cap lives in core (Q5) and stamping happens in exactly one
+    /// place (P1). The mirror hook (see [`Self::set_on_entry`]) fires for the
+    /// stamped entry.
+    pub fn push_log(&mut self, draft: UiLogDraft) {
+        let entry = draft.stamp((self.now_secs)());
+        self.notify_entry(&entry);
         self.logs.push(entry);
         self.mark_dirty();
     }
 
-    /// The current bounded log entries, oldest-first. Exposed for the actor and
-    /// tests; the view already carries a copy.
+    /// Stamp a batch of producer drafts (all with one clock read — they
+    /// arrived together) into the ring and mark the view dirty. No-op for an
+    /// empty batch so a quiet passive refresh stays change-gated out. The
+    /// mirror hook fires once per stamped entry.
+    fn record_logs(&mut self, drafts: Vec<UiLogDraft>) {
+        if drafts.is_empty() {
+            return;
+        }
+        let timestamp = (self.now_secs)();
+        for draft in drafts {
+            let entry = draft.stamp(timestamp);
+            self.notify_entry(&entry);
+            self.logs.push(entry);
+        }
+        self.mark_dirty();
+    }
+
+    /// Apply a console command (from [`StudioCommand::Console`]): mutate the
+    /// display filter or clear the ring, and mark the view dirty so the next
+    /// gate emits the reshaped console.
+    pub fn apply_console_command(&mut self, command: ConsoleCommand) {
+        match command {
+            ConsoleCommand::SetMinLevel(level) => self.log_filter.min_level = level,
+            ConsoleCommand::SetOriginEnabled(origin, enabled) => {
+                self.log_filter.set_origin_enabled(origin, enabled);
+            }
+            ConsoleCommand::Clear => self.logs.clear(),
+            // Converted into a `DeviceOp::SetLogLevel` action at actor intake
+            // (`CommandPlan::from_batch`); a stray direct call is a no-op
+            // rather than a panic.
+            ConsoleCommand::SetDeviceLogLevel(_) => return,
+        }
+        self.mark_dirty();
+    }
+
+    /// The current bounded log entries (unfiltered), oldest-first. Exposed for
+    /// the actor and tests; the view carries the filtered console slice.
     pub fn logs(&self) -> Vec<UiLogEntry> {
         self.logs.to_vec()
     }
@@ -235,6 +336,7 @@ impl StudioController {
         match op {
             DeviceOp::DisconnectDevice => self.disconnect_device().await,
             DeviceOp::DisconnectLightPlayer => self.disconnect_lightplayer().await,
+            DeviceOp::SetLogLevel { level } => self.set_device_log_level(level).await,
             DeviceOp::ResetDevice => self.reset_device(updates).await,
             DeviceOp::ConnectLightPlayer => self.connect_server_from_link(updates).await,
             DeviceOp::ProvisionFirmware => self.provision_firmware(updates).await,
@@ -344,7 +446,7 @@ impl StudioController {
         connected: ConnectedLink,
         updates: UxUpdateSink,
     ) -> UiResult {
-        self.logs.extend(connected.logs);
+        self.record_logs(connected.logs);
         self.connect_server_connection(&connected.connection, updates)
             .await
     }
@@ -371,7 +473,7 @@ impl StudioController {
                 Ok(UiNotices::new().with_notice(UiNotice::info(message)))
             }
             LinkOpenOutcome::Connected(connected) => {
-                self.logs.extend(connected.logs);
+                self.record_logs(connected.logs);
                 updates.emit(UxUpdate::View(self.view()));
                 Ok(UiNotices::new().with_notice(UiNotice::info("Device opened for flashing")))
             }
@@ -438,12 +540,12 @@ impl StudioController {
                     Ok(auto_connect) => auto_connect,
                     Err(error) => {
                         let pending_logs = self.device.server.take_pending_logs();
-                        self.logs.extend(pending_logs);
+                        self.record_logs(pending_logs);
                         self.project.reset();
                         if matches!(error, UiError::NoFirmwareDetected(_)) {
-                            self.logs.push(UiLogEntry::new(
+                            self.push_log(UiLogDraft::new(
                                 UiLogLevel::Info,
-                                "lpa-studio-core",
+                                UiLogOrigin::Studio,
                                 "No LightPlayer firmware detected during server readiness",
                             ));
                             self.device.server.fail_no_firmware();
@@ -451,9 +553,9 @@ impl StudioController {
                                 "No LightPlayer firmware detected; flash firmware onto the selected ESP32",
                             )));
                         }
-                        self.logs.push(UiLogEntry::new(
+                        self.push_log(UiLogDraft::new(
                             UiLogLevel::Error,
-                            "lpa-studio-core",
+                            UiLogOrigin::Studio,
                             format!("server readiness probe failed: {error}"),
                         ));
                         self.device.server.fail(error.to_string());
@@ -500,7 +602,7 @@ impl StudioController {
         };
         match result {
             Ok(ProjectConnectResult::Connected { logs }) => {
-                self.logs.extend(logs);
+                self.record_logs(logs);
                 let sync = self.sync_project_after_attach(updates).await?;
                 Ok(UiNotices::new().with_notice(project_sync_notice(
                     sync.synced,
@@ -509,17 +611,17 @@ impl StudioController {
                 )))
             }
             Ok(ProjectConnectResult::SelectionRequired { logs }) => {
-                self.logs.extend(logs);
+                self.record_logs(logs);
                 Ok(UiNotices::new().with_notice(UiNotice::info("Choose running project")))
             }
             Ok(ProjectConnectResult::NotFound { logs }) => {
-                self.logs.extend(logs);
+                self.record_logs(logs);
                 Ok(UiNotices::new().with_notice(UiNotice::info("No running project found")))
             }
             Err(error) => {
-                self.logs.push(UiLogEntry::new(
+                self.push_log(UiLogDraft::new(
                     UiLogLevel::Error,
-                    "lpa-studio-core",
+                    UiLogOrigin::Studio,
                     error.to_string(),
                 ));
                 self.project.fail(error.to_string());
@@ -547,18 +649,18 @@ impl StudioController {
         };
         match result? {
             ProjectConnectResult::Connected { logs } => {
-                self.logs.extend(logs);
+                self.record_logs(logs);
                 let sync = self.sync_project_after_attach(updates).await?;
                 Ok(AutoProjectConnect::Connected {
                     synced: sync.synced,
                 })
             }
             ProjectConnectResult::SelectionRequired { logs } => {
-                self.logs.extend(logs);
+                self.record_logs(logs);
                 Ok(AutoProjectConnect::SelectionRequired)
             }
             ProjectConnectResult::NotFound { logs } => {
-                self.logs.extend(logs);
+                self.record_logs(logs);
                 Ok(AutoProjectConnect::NotFound)
             }
         }
@@ -578,7 +680,7 @@ impl StudioController {
         };
         match result {
             Ok(logs) => {
-                self.logs.extend(logs);
+                self.record_logs(logs);
                 let sync = self.sync_project_after_attach(updates).await?;
                 Ok(UiNotices::new().with_notice(project_sync_notice(
                     sync.synced,
@@ -587,9 +689,9 @@ impl StudioController {
                 )))
             }
             Err(error) => {
-                self.logs.push(UiLogEntry::new(
+                self.push_log(UiLogDraft::new(
                     UiLogLevel::Error,
-                    "lpa-studio-core",
+                    UiLogOrigin::Studio,
                     error.to_string(),
                 ));
                 self.project.fail(error.to_string());
@@ -612,7 +714,7 @@ impl StudioController {
         };
         match result {
             Ok(logs) => {
-                self.logs.extend(logs);
+                self.record_logs(logs);
                 let sync = self.sync_project_after_attach(updates).await?;
                 Ok(UiNotices::new().with_notice(project_sync_notice(
                     sync.synced,
@@ -621,9 +723,9 @@ impl StudioController {
                 )))
             }
             Err(error) => {
-                self.logs.push(UiLogEntry::new(
+                self.push_log(UiLogDraft::new(
                     UiLogLevel::Error,
-                    "lpa-studio-core",
+                    UiLogOrigin::Studio,
                     error.to_string(),
                 ));
                 self.project.fail(error.to_string());
@@ -681,12 +783,10 @@ impl StudioController {
     }
 
     fn record_project_sync_run(&mut self, sync: &ProjectSyncRun) {
-        if !sync.logs.is_empty() {
-            self.logs.extend(sync.logs.clone());
-            // New log lines are a local change the next gate should surface even
-            // if the project revision did not move.
-            self.mark_dirty();
-        }
+        // New log lines are a local change the next gate should surface even
+        // if the project revision did not move; `record_logs` marks dirty and
+        // no-ops on an empty batch.
+        self.record_logs(sync.logs.clone());
     }
 
     async fn disconnect_device(&mut self) -> UiResult {
@@ -700,6 +800,28 @@ impl StudioController {
         self.project.reset();
         self.device.server.disconnect();
         Ok(UiNotices::new().with_notice(UiNotice::info("LightPlayer disconnected")))
+    }
+
+    /// Ask the connected server to apply `level` at runtime and record the
+    /// confirmation as a Server-origin log entry. The requested level is
+    /// tracked optimistically on the server controller (no wire read-back)
+    /// so the console's device selector reflects it; failure surfaces
+    /// through the normal action error path.
+    async fn set_device_log_level(&mut self, level: UiLogLevel) -> UiResult {
+        let mut logs = self
+            .device
+            .server
+            .client_mut()?
+            .set_log_level(level)
+            .await?;
+        logs.push(UiLogDraft::new(
+            UiLogLevel::Info,
+            UiLogOrigin::Server,
+            format!("device log level set to {}", level.label()),
+        ));
+        self.record_logs(logs);
+        self.device.server.set_requested_log_level(level);
+        Ok(UiNotices::new())
     }
 
     async fn reset_device(&mut self, updates: UxUpdateSink) -> UiResult {
@@ -730,7 +852,7 @@ impl StudioController {
             }
         };
         self.record_logs(core::mem::take(&mut *captured_logs.borrow_mut()));
-        self.logs.extend(management.logs);
+        self.record_logs(management.logs);
 
         let mut outcome = UiNotices::new().with_notice(UiNotice::info("Device reset"));
         emit_activity(
@@ -747,9 +869,9 @@ impl StudioController {
                     Ok(outcome)
                 }
                 Err(error) => {
-                    self.logs.push(UiLogEntry::new(
+                    self.push_log(UiLogDraft::new(
                         UiLogLevel::Warn,
-                        "lpa-studio-core",
+                        UiLogOrigin::Studio,
                         format!("device reset but server reconnect failed: {error}"),
                     ));
                     self.device.server.fail(error.to_string());
@@ -759,9 +881,9 @@ impl StudioController {
                 }
             },
             Err(error) => {
-                self.logs.push(UiLogEntry::new(
+                self.push_log(UiLogDraft::new(
                     UiLogLevel::Warn,
-                    "lpa-studio-core",
+                    UiLogOrigin::Studio,
                     format!("device reset but serial reopen failed: {error}"),
                 ));
                 self.device.server.fail(error.to_string());
@@ -799,7 +921,7 @@ impl StudioController {
                 return Err(error);
             }
         };
-        self.logs.extend(management.logs);
+        self.record_logs(management.logs);
         let mut outcome = UiNotices::new().with_notice(provision_notice(&management.result));
         emit_activity(
             &updates,
@@ -815,9 +937,9 @@ impl StudioController {
                     Ok(outcome)
                 }
                 Err(error) => {
-                    self.logs.push(UiLogEntry::new(
+                    self.push_log(UiLogDraft::new(
                         UiLogLevel::Warn,
-                        "lpa-studio-core",
+                        UiLogOrigin::Studio,
                         format!("firmware flashed but server reconnect failed: {error}"),
                     ));
                     self.device.server.fail(error.to_string());
@@ -827,9 +949,9 @@ impl StudioController {
                 }
             },
             Err(error) => {
-                self.logs.push(UiLogEntry::new(
+                self.push_log(UiLogDraft::new(
                     UiLogLevel::Warn,
-                    "lpa-studio-core",
+                    UiLogOrigin::Studio,
                     format!("firmware flashed but serial reopen failed: {error}"),
                 ));
                 self.device.server.fail(error.to_string());
@@ -867,7 +989,7 @@ impl StudioController {
                 return Err(error);
             }
         };
-        self.logs.extend(management.logs);
+        self.record_logs(management.logs);
         let mut outcome = UiNotices::new().with_notice(reset_notice(&management.result));
         emit_activity(
             &updates,
@@ -883,9 +1005,9 @@ impl StudioController {
                     Ok(outcome)
                 }
                 Err(error) => {
-                    self.logs.push(UiLogEntry::new(
+                    self.push_log(UiLogDraft::new(
                         UiLogLevel::Warn,
-                        "lpa-studio-core",
+                        UiLogOrigin::Studio,
                         format!("device wiped but server reconnect failed: {error}"),
                     ));
                     self.device.server.fail(error.to_string());
@@ -895,9 +1017,9 @@ impl StudioController {
                 }
             },
             Err(error) => {
-                self.logs.push(UiLogEntry::new(
+                self.push_log(UiLogDraft::new(
                     UiLogLevel::Warn,
-                    "lpa-studio-core",
+                    UiLogOrigin::Studio,
                     format!("device wiped but serial reopen failed: {error}"),
                 ));
                 self.device.server.fail(error.to_string());
@@ -910,13 +1032,6 @@ impl StudioController {
 
     fn project_is_loaded(&self) -> bool {
         matches!(self.project.snapshot().state, ProjectState::Ready { .. })
-    }
-
-    fn record_logs(&mut self, logs: Vec<UiLogEntry>) {
-        if logs.is_empty() {
-            return;
-        }
-        self.logs.extend(logs);
     }
 }
 
@@ -931,7 +1046,7 @@ impl StudioController {
         use crate::{ConnectedDeviceSummary, LinkState, ProjectInventorySummary};
         use lpa_link::LinkProviderKind;
 
-        let mut studio = Self::new();
+        let mut studio = Self::new(|| 0.0);
         studio.device.link.set_state(LinkState::Connected {
             device: ConnectedDeviceSummary::new(
                 LinkProviderKind::Fake,
@@ -950,12 +1065,6 @@ impl StudioController {
     /// Apply a project view into the owned tree (drives probe scoping).
     pub(crate) fn apply_project_view_for_test(&mut self, view: &lpc_view::ProjectView) {
         self.project.apply_project_view(view).unwrap();
-    }
-}
-
-impl Default for StudioController {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -1020,7 +1129,7 @@ fn retarget_activity_updates(updates: UxUpdateSink, target: UxActivityTarget) ->
 
 fn capture_log_updates(
     updates: UxUpdateSink,
-    captured_logs: Rc<RefCell<Vec<UiLogEntry>>>,
+    captured_logs: Rc<RefCell<Vec<UiLogDraft>>>,
 ) -> UxUpdateSink {
     UxUpdateSink::new(move |update| {
         if let UxUpdate::Log(log) = &update {
@@ -1141,7 +1250,7 @@ mod tests {
 
     #[test]
     fn initial_snapshot_selects_provider() {
-        let studio = StudioController::new();
+        let studio = StudioController::new(|| 0.0);
 
         assert!(matches!(
             studio.snapshot().link.state,
@@ -1150,8 +1259,109 @@ mod tests {
     }
 
     #[test]
+    fn push_log_stamps_drafts_with_the_injected_clock() {
+        use std::cell::Cell;
+
+        // A stepping fake clock: each read advances one second.
+        let ticks = Rc::new(Cell::new(0_u32));
+        let mut studio = StudioController::new({
+            let ticks = Rc::clone(&ticks);
+            move || {
+                ticks.set(ticks.get() + 1);
+                100.0 + f64::from(ticks.get())
+            }
+        });
+
+        studio.push_log(UiLogDraft::new(
+            UiLogLevel::Info,
+            UiLogOrigin::Studio,
+            "first",
+        ));
+        studio.push_log(UiLogDraft::new(
+            UiLogLevel::Warn,
+            crate::UiLogSource::with_detail(UiLogOrigin::Link, "browser-serial"),
+            "second",
+        ));
+
+        let logs = studio.logs();
+        assert_eq!(logs[0].timestamp, 101.0);
+        assert_eq!(logs[1].timestamp, 102.0);
+        assert_eq!(logs[1].source.detail.as_deref(), Some("browser-serial"));
+    }
+
+    #[test]
+    fn console_commands_reshape_the_emitted_console_view() {
+        let mut studio = StudioController::new(|| 7.5);
+        studio.push_log(UiLogDraft::new(
+            UiLogLevel::Debug,
+            UiLogOrigin::Server,
+            "heartbeat frame=1",
+        ));
+        studio.push_log(UiLogDraft::new(
+            UiLogLevel::Info,
+            UiLogOrigin::Studio,
+            "connected",
+        ));
+
+        // Default filter: Info+ shows only the studio line; the debug
+        // heartbeat is counted, not dropped.
+        let console = studio.view().console;
+        assert_eq!(console.entries.len(), 1);
+        assert_eq!(console.hidden_count, 1);
+
+        // Lowering the threshold reveals the retained history.
+        studio.apply_console_command(ConsoleCommand::SetMinLevel(UiLogLevel::Trace));
+        let console = studio.view().console;
+        assert_eq!(console.entries.len(), 2);
+        assert_eq!(console.hidden_count, 0);
+        assert_eq!(console.min_level, UiLogLevel::Trace);
+
+        // Disabling an origin hides its entries.
+        studio.apply_console_command(ConsoleCommand::SetOriginEnabled(UiLogOrigin::Server, false));
+        let console = studio.view().console;
+        assert_eq!(console.entries.len(), 1);
+        assert_eq!(console.hidden_count, 1);
+
+        // Clear empties the ring itself.
+        studio.apply_console_command(ConsoleCommand::Clear);
+        assert!(studio.logs().is_empty());
+        let console = studio.view().console;
+        assert!(console.entries.is_empty());
+        assert_eq!(console.hidden_count, 0);
+    }
+
+    #[test]
+    fn on_entry_hook_sees_every_ring_entry_once_regardless_of_filter() {
+        let seen: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+        let mut studio = StudioController::new(|| 42.0);
+        studio.set_on_entry({
+            let seen = Rc::clone(&seen);
+            move |entry| seen.borrow_mut().push(entry.message.clone())
+        });
+        // Hide everything from the *display*: the hook must still fire.
+        studio.apply_console_command(ConsoleCommand::SetMinLevel(UiLogLevel::Error));
+        studio.apply_console_command(ConsoleCommand::SetOriginEnabled(UiLogOrigin::Link, false));
+
+        studio.push_log(UiLogDraft::new(UiLogLevel::Debug, UiLogOrigin::Link, "one"));
+        studio.record_logs(vec![
+            UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Studio, "two"),
+            UiLogDraft::new(UiLogLevel::Warn, UiLogOrigin::Server, "three"),
+        ]);
+
+        assert!(
+            studio.view().console.entries.is_empty(),
+            "the display filter hides all three entries"
+        );
+        assert_eq!(
+            *seen.borrow(),
+            vec!["one".to_string(), "two".to_string(), "three".to_string()],
+            "the hook fires exactly once per entry, in ring order"
+        );
+    }
+
+    #[test]
     fn initial_actions_target_device_node() {
-        let studio = StudioController::new();
+        let studio = StudioController::new(|| 0.0);
 
         let actions = studio.actions();
 
@@ -1164,7 +1374,7 @@ mod tests {
 
     #[test]
     fn initial_view_exposes_device_pane() {
-        let studio = StudioController::new();
+        let studio = StudioController::new(|| 0.0);
 
         let view = studio.view();
 
@@ -1429,7 +1639,7 @@ mod tests {
 
     #[test]
     fn open_provider_for_recovery_skips_server_attach() {
-        let mut studio = StudioController::new();
+        let mut studio = StudioController::new(|| 0.0);
         studio.device.link = LinkController::with_registry(registry_with_fake_endpoint());
 
         let outcome = block_on_ready(
@@ -1577,6 +1787,52 @@ mod tests {
     }
 
     #[test]
+    fn set_device_log_level_sends_request_and_records_confirmation() {
+        let sent = Rc::new(RefCell::new(Vec::new()));
+        let io = ScriptedClientIo::new(
+            Rc::clone(&sent),
+            vec![WireServerMessage::new(1, WireServerMsgBody::SetLogLevel)],
+        );
+        let mut studio = connected_studio_with_client(io);
+        let action = UiAction::from_op(
+            ControllerId::new(DeviceController::NODE_ID),
+            DeviceOp::SetLogLevel {
+                level: UiLogLevel::Debug,
+            },
+        );
+
+        block_on_ready(studio.dispatch(action)).unwrap();
+
+        {
+            let sent = sent.borrow();
+            assert_eq!(sent.len(), 1);
+            let ClientRequest::SetLogLevel { level } = &sent[0].msg else {
+                panic!("expected a SetLogLevel request, got {:?}", sent[0].msg);
+            };
+            assert_eq!(*level, lpc_wire::server::api::LogLevel::Debug);
+        }
+
+        assert!(
+            studio.logs().iter().any(|entry| {
+                entry.source.origin == UiLogOrigin::Server
+                    && entry.message == "device log level set to debug"
+            }),
+            "success should record a Server-origin confirmation entry"
+        );
+        assert_eq!(
+            studio.view().console.device_log_level,
+            Some(UiLogLevel::Debug),
+            "the console's device selector shows the requested level"
+        );
+    }
+
+    #[test]
+    fn device_log_level_is_absent_while_disconnected() {
+        let mut studio = StudioController::new(|| 0.0);
+        assert_eq!(studio.view().console.device_log_level, None);
+    }
+
+    #[test]
     fn refresh_project_dispatch_reads_project_and_updates_sync_summary() {
         let sent = Rc::new(RefCell::new(Vec::new()));
         let io = ScriptedClientIo::new(
@@ -1626,7 +1882,7 @@ mod tests {
 
     #[test]
     fn project_descendant_action_dispatch_routes_to_project_ux() {
-        let mut studio = StudioController::new();
+        let mut studio = StudioController::new(|| 0.0);
         let target = ProjectEditorTarget::node_tree();
         let action = UiAction::from_op(target.node_id(), ProjectEditorOp::Focus);
 
@@ -1668,7 +1924,7 @@ mod tests {
 
     #[test]
     fn unknown_top_level_dispatch_fails_clearly() {
-        let mut studio = StudioController::new();
+        let mut studio = StudioController::new(|| 0.0);
         let action = UiAction::from_op(ControllerId::new("studio|unknown"), ProjectEditorOp::Focus);
 
         let result = block_on_ready(studio.dispatch(action));
@@ -1682,7 +1938,7 @@ mod tests {
 
     #[test]
     fn unknown_project_descendant_dispatch_fails_as_project_target() {
-        let mut studio = StudioController::new();
+        let mut studio = StudioController::new(|| 0.0);
         let action = UiAction::from_op(
             ControllerId::new("studio|project|unknown"),
             ProjectEditorOp::Focus,
@@ -1699,7 +1955,7 @@ mod tests {
 
     #[test]
     fn project_descendant_dispatch_rejects_wrong_op_type() {
-        let mut studio = StudioController::new();
+        let mut studio = StudioController::new(|| 0.0);
         let action = UiAction::from_op(
             ProjectEditorTarget::node_tree().node_id(),
             ProjectOp::LoadDemoProject,
@@ -1716,7 +1972,7 @@ mod tests {
 
     #[test]
     fn failed_link_dispatch_emits_final_failed_view_after_activity() {
-        let mut studio = StudioController::new();
+        let mut studio = StudioController::new(|| 0.0);
         studio.device.link = LinkController::with_registry(registry_with_fake_connect_error(
             "Failed to open serial port.",
         ));
@@ -1832,7 +2088,7 @@ mod tests {
     }
 
     fn link_connected_studio() -> StudioController {
-        let mut studio = StudioController::new();
+        let mut studio = StudioController::new(|| 0.0);
         studio.device.link.set_state(LinkState::Connected {
             device: ConnectedDeviceSummary::new(
                 LinkProviderKind::Fake,

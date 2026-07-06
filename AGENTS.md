@@ -62,6 +62,27 @@ Do NOT disable the compiler. The compiler is the product.
   features are for *removing* pieces (e.g. `no-shader-compile` for stripped
   test builds), not for *adding* the compiler.
 
+## Sans-IO core
+
+The core is IO-free state machines; async belongs to platform edges. See
+`docs/adr/2026-07-06-sans-io-core.md` for the full decision. The checklist:
+
+- **Core crates** (`lp-base/*`, `lp-core/*`, `lp-shader/*`, `lp-riscv/*`)
+  take effects by injection. They never read clocks, generate randomness,
+  perform ambient IO, or depend on an executor/reactor. Edges are
+  `lpa-*`, `fw-*`, `lp-cli`.
+- Adding embassy, tokio, `wasm-bindgen-futures`, `futures-executor`, or
+  similar to a core crate's `Cargo.toml` is a red flag — stop and re-read
+  the ADR.
+- `async fn` in core is allowed **only** as a runtime-neutral future: no
+  spawning, no executor-flavored sleeps; any edge must be able to drive
+  it. If it needs a particular executor to make progress, it belongs in
+  an edge crate.
+- Timestamps are caller-supplied f64 epoch seconds; random bytes are
+  caller-supplied (see `lpc-history` uid minting).
+- Tests count as edges: a null-waker `block_on` loop is fine in tests
+  driving immediately-ready futures, and nowhere else.
+
 ## Wire/protocol compatibility
 
 - **During heavy development, wire/protocol compatibility is NOT maintained.**

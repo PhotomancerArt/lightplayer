@@ -10,7 +10,7 @@ use lpc_wire::{
     WireProjectCommand, WireProjectCommandResponse, WireProjectHandle,
     WireProjectInventoryReadRequest, WireProjectInventoryReadResponse, WireServerMessage,
     WireServerMsgBody,
-    server::{AvailableProject, FsResponse, LoadedProject},
+    server::{AvailableProject, FsResponse, LoadedProject, api::LogLevel},
 };
 
 use crate::client_error::{ClientError, ClientResult};
@@ -443,6 +443,25 @@ where
         }
     }
 
+    /// Set the server/device global log level at runtime.
+    ///
+    /// Applied process-globally on the serving side; not persisted (the
+    /// device reverts to its init default on reboot). Resolves on the
+    /// server's ack.
+    pub async fn set_log_level(&mut self, level: LogLevel) -> ClientResult<ClientOutcome<()>> {
+        let response = self
+            .send_request(ClientRequest::SetLogLevel { level })
+            .await?;
+        let events = response.events;
+        match response.value.msg {
+            WireServerMsgBody::SetLogLevel => Ok(ClientOutcome::new((), events)),
+            other => Err(ClientError::unexpected_response(
+                "server.set_log_level",
+                other,
+            )),
+        }
+    }
+
     pub async fn push_project_files(
         &mut self,
         project_id: &str,
@@ -570,6 +589,45 @@ mod tests {
             error,
             ClientError::UnexpectedResponse {
                 operation: "project.read",
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn set_log_level_sends_request_and_resolves_on_ack() {
+        let io = ScriptedClientIo::new([WireServerMessage::new(1, WireServerMsgBody::SetLogLevel)]);
+        let mut client = LpClient::new(io);
+
+        let outcome = client
+            .set_log_level(LogLevel::Debug)
+            .await
+            .expect("set log level");
+
+        assert!(outcome.events.is_empty());
+        let io = client.into_io();
+        assert_eq!(io.sent.len(), 1);
+        assert_eq!(io.sent[0].id, 1);
+        let ClientRequest::SetLogLevel { level } = &io.sent[0].msg else {
+            panic!("expected a SetLogLevel request");
+        };
+        assert_eq!(*level, LogLevel::Debug);
+    }
+
+    #[tokio::test]
+    async fn set_log_level_rejects_unexpected_response() {
+        let io = ScriptedClientIo::new([WireServerMessage::new(
+            1,
+            WireServerMsgBody::StopAllProjects,
+        )]);
+        let mut client = LpClient::new(io);
+
+        let error = client.set_log_level(LogLevel::Trace).await.unwrap_err();
+
+        assert!(matches!(
+            error,
+            ClientError::UnexpectedResponse {
+                operation: "server.set_log_level",
                 ..
             }
         ));

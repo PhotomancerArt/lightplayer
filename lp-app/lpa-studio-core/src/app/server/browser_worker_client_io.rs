@@ -13,8 +13,9 @@ use lpc_wire::{ClientMessage, TransportError, WireServerMessage, json};
 use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 
+use super::browser_worker_log::{worker_log_draft, worker_status_draft};
 use super::pending_server_messages::{BatchItem, PendingServerMessages};
-use crate::{SharedLinkRegistry, UiLogEntry, UiLogLevel};
+use crate::{SharedLinkRegistry, UiLogDraft};
 
 const RESPONSE_POLL_LIMIT: usize = 240;
 
@@ -27,7 +28,7 @@ impl BrowserWorkerClientIo {
     pub fn new(
         registry: SharedLinkRegistry,
         session_id: LinkSessionId,
-        logs: Rc<RefCell<Vec<UiLogEntry>>>,
+        logs: Rc<RefCell<Vec<UiLogDraft>>>,
     ) -> Self {
         Self {
             state: Rc::new(RefCell::new(BrowserWorkerClientState {
@@ -99,7 +100,7 @@ impl ClientIo for BrowserWorkerClientIo {
 struct BrowserWorkerClientState {
     registry: SharedLinkRegistry,
     session_id: LinkSessionId,
-    logs: Rc<RefCell<Vec<UiLogEntry>>>,
+    logs: Rc<RefCell<Vec<UiLogDraft>>>,
 }
 
 impl BrowserWorkerClientState {
@@ -138,35 +139,21 @@ fn browser_worker_provider_mut(
     }
 }
 
-fn worker_output_to_log(output: BrowserOutputEnvelope) -> Option<UiLogEntry> {
+/// Map a worker output envelope to a console draft. The logging policy —
+/// level parsing (trace preserved), target-as-detail, status labeling —
+/// lives in the host-testable [`super::browser_worker_log`] module.
+fn worker_output_to_log(output: BrowserOutputEnvelope) -> Option<UiLogDraft> {
     match output {
         BrowserOutputEnvelope::Status {
             status, message, ..
-        } => Some(UiLogEntry::new(
-            UiLogLevel::Info,
-            "fw-browser",
-            message.unwrap_or(status),
-        )),
+        } => Some(worker_status_draft(status, message)),
         BrowserOutputEnvelope::Log {
             level,
             target,
             message,
             ..
-        } => Some(UiLogEntry::new(
-            parse_worker_log_level(&level),
-            target,
-            message,
-        )),
+        } => Some(worker_log_draft(&level, target, message)),
         BrowserOutputEnvelope::ProtocolOut { .. } => None,
-    }
-}
-
-fn parse_worker_log_level(level: &str) -> UiLogLevel {
-    match level {
-        "trace" | "debug" => UiLogLevel::Debug,
-        "warn" => UiLogLevel::Warn,
-        "error" => UiLogLevel::Error,
-        _ => UiLogLevel::Info,
     }
 }
 

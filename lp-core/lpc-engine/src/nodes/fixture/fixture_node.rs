@@ -294,6 +294,16 @@ impl NodeRuntime for FixtureNode {
     }
 }
 
+/// Def path for the authored `PathPoints` sample diameter. Enum variant path
+/// segments are the raw variant idents (`PathPoints`, `RingArray`), not
+/// snake_case — see `SlotEnumAccess::variant` and the shape variant names.
+const MAPPING_SAMPLE_DIAMETER_DEF_PATH: &str = "mapping.PathPoints.sample_diameter";
+
+/// Def path prefix for one authored `RingArray` path spec.
+fn ring_array_def_prefix(path_key: u32) -> alloc::string::String {
+    alloc::format!("mapping.PathPoints.paths[{path_key}].RingArray")
+}
+
 fn sync_mapping_config_from_def(
     mapping: &mut MappingConfig,
     ctx: &mut TickContext<'_>,
@@ -307,7 +317,7 @@ fn sync_mapping_config_from_def(
             ..
         } => {
             let Some(next_sample_diameter) =
-                try_read_def_value(ctx, "mapping.path_points.sample_diameter")?
+                try_read_def_value(ctx, MAPPING_SAMPLE_DIAMETER_DEF_PATH)?
             else {
                 return Ok(());
             };
@@ -340,7 +350,7 @@ fn sync_path_spec_from_def(
             order,
             ..
         } => {
-            let prefix = alloc::format!("mapping.path_points.paths[{path_key}].ring_array");
+            let prefix = ring_array_def_prefix(path_key);
             let Some(next_center) = try_read_def_value(ctx, &alloc::format!("{prefix}.center"))?
             else {
                 return Ok(());
@@ -404,10 +414,17 @@ fn try_read_def_value<T: lpc_model::FromLpValue>(
     })?;
     let production = match ctx.resolve(QueryKey::ConsumedSlot {
         node: ctx.node_id(),
-        slot,
+        slot: slot.clone(),
     }) {
         Ok(production) => production,
-        Err(_) => return Ok(None),
+        Err(e) => {
+            // "Absent" (no def loaded, inactive enum variant, option none) is
+            // expected and reads as None; a path that cannot exist in the
+            // FixtureDef shape is a code bug and must not be swallowed.
+            ensure_path_exists_in_fixture_def_shape(ctx.slot_shapes(), &slot)?;
+            log::debug!("[fixture] def path {path} unavailable: {}", e.message);
+            return Ok(None);
+        }
     };
     let value = production
         .value_leaf()
@@ -415,6 +432,25 @@ fn try_read_def_value<T: lpc_model::FromLpValue>(
     T::from_lp_value(value.value())
         .map(Some)
         .map_err(|e| NodeError::msg(alloc::format!("fixture path {path:?}: {e}")))
+}
+
+/// Shape-only check that `slot` addresses a declared `FixtureDef` slot. The
+/// walk tolerates inactive enum variants and unpopulated map keys, so it only
+/// rejects paths that can never resolve (e.g. a misspelled variant segment).
+fn ensure_path_exists_in_fixture_def_shape(
+    shapes: &SlotShapeRegistry,
+    slot: &SlotPath,
+) -> Result<(), NodeError> {
+    use lpc_model::{SlotShapeLookup, StaticSlotShape};
+    let shape = shapes
+        .get_shape(lpc_model::nodes::FixtureDef::SHAPE_ID)
+        .ok_or_else(|| NodeError::msg("FixtureDef slot shape is not registered"))?;
+    if lpc_model::resolve_slot_policy(shape, shapes, slot).is_none() {
+        return Err(NodeError::msg(alloc::format!(
+            "fixture def path {slot} does not exist in the FixtureDef shape"
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy)]
@@ -2344,5 +2380,208 @@ mod tests {
         assert_eq!(batch.points.len(), 1);
         assert_eq!(batch.points[0].u_q16, 16384);
         assert_eq!(batch.points[0].v_q16, 40960);
+    }
+
+    /// Every def path the fixture sync reads. Shared by the resolution tests
+    /// so a path added to the sync code without coverage here still fails the
+    /// shape check at runtime.
+    fn fixture_sync_def_paths() -> Vec<alloc::string::String> {
+        let prefix = ring_array_def_prefix(0);
+        vec![
+            alloc::string::String::from("diagnostic_mode"),
+            alloc::string::String::from(MAPPING_SAMPLE_DIAMETER_DEF_PATH),
+            format!("{prefix}.center"),
+            format!("{prefix}.diameter"),
+            format!("{prefix}.start_ring_inclusive"),
+            format!("{prefix}.end_ring_exclusive"),
+            format!("{prefix}.ring_lamp_counts[0]"),
+            format!("{prefix}.offset_angle"),
+            format!("{prefix}.order"),
+        ]
+    }
+
+    /// The def read paths must resolve against an authored `FixtureDef` with
+    /// a `PathPoints` mapping — the same data+shape walk the engine performs
+    /// in `read_authored_def_product`. Guards against variant-segment
+    /// mismatches (e.g. `path_points` instead of `PathPoints`) that would
+    /// silently make every mapping def read return `None`.
+    #[test]
+    fn fixture_def_sync_paths_resolve_against_authored_path_points_def() {
+        use lpc_model::nodes::FixtureDef;
+        use lpc_model::{EnumSlot, lookup_slot_data};
+
+        let def = FixtureDef {
+            mapping: EnumSlot::new(MappingConfig::path_points_vec(
+                vec![PathSpec::ring_array_counts(
+                    [0.5, 0.5],
+                    1.0,
+                    0,
+                    1,
+                    &[12],
+                    0.0,
+                    RingOrder::InnerFirst,
+                )],
+                2.0,
+            )),
+            ..FixtureDef::default()
+        };
+        let shapes = SlotShapeRegistry::default();
+
+        for path in fixture_sync_def_paths() {
+            let slot = SlotPath::parse(&path).expect("parse path");
+            ensure_path_exists_in_fixture_def_shape(&shapes, &slot)
+                .unwrap_or_else(|e| panic!("shape walk {path}: {e:?}"));
+            lookup_slot_data(&def, &shapes, &slot)
+                .unwrap_or_else(|e| panic!("data walk {path}: {e}"));
+        }
+
+        // Snake-cased variant segments (the original bug) must be rejected by
+        // the shape check instead of silently reading as "absent".
+        let wrong = SlotPath::parse("mapping.path_points.sample_diameter").unwrap();
+        assert!(ensure_path_exists_in_fixture_def_shape(&shapes, &wrong).is_err());
+    }
+
+    /// Authored mapping values must actually reach the runtime mapping: the
+    /// constructor mapping has 2 lamps, the def slots say 12, so a synced
+    /// fixture renders all 12 diagnostic lamps. Before the variant-segment
+    /// paths were fixed the def reads silently returned `None` and this
+    /// rendered only 2 lamps.
+    #[test]
+    fn fixture_sync_reads_path_points_mapping_from_def_slots() {
+        use lpc_model::{PositiveF32, Xy};
+
+        let mut engine = Engine::new(TreePath::parse("/show.t").unwrap());
+        let registry = ProjectRegistry::new();
+        let frame = Revision::new(1);
+        let root = engine.tree().root();
+        let spine = test_placeholder_spine();
+        let mapping = MappingConfig::path_points_vec(
+            vec![PathSpec::ring_array_counts(
+                [0.5, 0.5],
+                1.0,
+                0,
+                1,
+                &[2],
+                0.0,
+                RingOrder::InnerFirst,
+            )],
+            2.0,
+        );
+
+        let fix_id = engine
+            .tree_mut()
+            .add_child(
+                root,
+                lpc_model::NodeName::parse("fx").unwrap(),
+                lpc_model::NodeName::parse("fixture").unwrap(),
+                WireChildKind::Input {
+                    source: WireSlotIndex(0),
+                },
+                spine,
+                frame,
+            )
+            .unwrap();
+
+        engine
+            .attach_runtime_node(
+                fix_id,
+                Box::new(FixtureNode::new(
+                    fix_id,
+                    mapping,
+                    FixtureSamplingConfig::TextureArea,
+                    frame,
+                )),
+                frame,
+            )
+            .unwrap();
+        bind_fixture_def_defaults(&mut engine, fix_id, frame);
+        bind_fixture_def_slot(
+            &mut engine,
+            fix_id,
+            frame,
+            "diagnostic_mode",
+            FixtureDiagnosticMode::LedIndex.to_lp_value(),
+        );
+        bind_fixture_def_slot(
+            &mut engine,
+            fix_id,
+            frame,
+            MAPPING_SAMPLE_DIAMETER_DEF_PATH,
+            PositiveF32(2.0).to_lp_value(),
+        );
+        let prefix = ring_array_def_prefix(0);
+        bind_fixture_def_slot(
+            &mut engine,
+            fix_id,
+            frame,
+            &format!("{prefix}.center"),
+            Xy([0.5, 0.5]).to_lp_value(),
+        );
+        bind_fixture_def_slot(
+            &mut engine,
+            fix_id,
+            frame,
+            &format!("{prefix}.diameter"),
+            PositiveF32(1.0).to_lp_value(),
+        );
+        bind_fixture_def_slot(
+            &mut engine,
+            fix_id,
+            frame,
+            &format!("{prefix}.start_ring_inclusive"),
+            LpValue::U32(0),
+        );
+        bind_fixture_def_slot(
+            &mut engine,
+            fix_id,
+            frame,
+            &format!("{prefix}.end_ring_exclusive"),
+            LpValue::U32(1),
+        );
+        bind_fixture_def_slot(
+            &mut engine,
+            fix_id,
+            frame,
+            &format!("{prefix}.ring_lamp_counts[0]"),
+            LpValue::U32(12),
+        );
+        bind_fixture_def_slot(
+            &mut engine,
+            fix_id,
+            frame,
+            &format!("{prefix}.offset_angle"),
+            LpValue::F32(0.0),
+        );
+        bind_fixture_def_slot(
+            &mut engine,
+            fix_id,
+            frame,
+            &format!("{prefix}.order"),
+            RingOrder::InnerFirst.to_lp_value(),
+        );
+
+        engine.add_demand_root(fix_id);
+        engine.tick(&registry, 10).unwrap();
+
+        let extent = ControlExtent::new(1, 36);
+        let request = ControlRenderRequest::unorm16(extent);
+        let mut samples = vec![0u16; extent.sample_count() as usize];
+        let target = ControlRenderTarget::new(extent, ControlSampleFormat::Unorm16, &mut samples);
+        let layout = engine
+            .render_control_for_test(
+                &registry,
+                ControlProduct::new(fix_id, 0, extent),
+                &request,
+                target,
+            )
+            .expect("control render");
+
+        // All 12 def-authored lamps render, not just the 2 constructor lamps.
+        assert_eq!(layout.spans.len(), 1);
+        assert_eq!(layout.spans[0].len, 36);
+        assert!(
+            samples[6..36].iter().any(|sample| *sample != 0),
+            "lamps beyond the constructor mapping should be lit: {samples:?}"
+        );
     }
 }

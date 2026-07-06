@@ -17,6 +17,8 @@ dioxus-icons = "0.1"
 futures-util = "0.3"
 gloo-net = { version = "0.6", features = ["http"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
+js-sys = "0.3"
+log = { workspace = true }
 lpa-studio-core = { path = "../lpa-studio-core", features = ["browser-worker", "browser-serial-esp32"] }
 lpa-studio-web-story-macros = { path = "../lpa-studio-web-story-macros", optional = true }
 serde = { version = "1", features = ["derive"] }

@@ -14,6 +14,7 @@ lpa-link = { path = "../lpa-link" }
 lpc-model = { path = "../../lp-core/lpc-model" }
 lpc-view = { path = "../../lp-core/lpc-view" }
 lpc-wire = { path = "../../lp-core/lpc-wire" }
+log = { workspace = true }
 async-trait = { version = "0.1", optional = true }
 js-sys = { version = "0.3", optional = true }
 wasm-bindgen = { version = "0.2", optional = true }

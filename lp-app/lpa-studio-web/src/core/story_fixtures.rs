@@ -4,9 +4,13 @@ use lpa_studio_core::core::view::activity_view::{UiActivityStep, UiActivityStepS
 use lpa_studio_core::core::view::steps_view::{UiStepState, UiStepView};
 use lpa_studio_core::{
     ActionClass, ActionConfirmation, ActionMeta, ActionPriority, ControllerId, ControllerOp,
-    PROJECT_ACTION_DEADLINE, UiAction, UiActivityView, UiIssue, UiLogEntry, UiLogLevel, UiMetric,
-    UiPaneView, UiProgress, UiStatus, UiStepsView, UiTerminalLine, UiViewContent,
+    PROJECT_ACTION_DEADLINE, UiAction, UiActivityView, UiIssue, UiLogEntry, UiLogLevel,
+    UiLogOrigin, UiLogSource, UiMetric, UiPaneView, UiProgress, UiStatus, UiStepsView,
+    UiTerminalLine, UiViewContent,
 };
+
+/// Timestamp shared by the core story log fixtures (deterministic stories).
+const STORY_LOG_TIMESTAMP: f64 = 1_720_000_000.0;
 
 pub(crate) fn story_actions() -> Vec<UiAction> {
     vec![
@@ -40,16 +44,47 @@ pub(crate) fn story_metrics() -> Vec<UiMetric> {
     ]
 }
 
+/// Every level and origin, with and without source detail, at fixed
+/// timestamps stepping across a minute boundary (so the rendered `HH:MM:SS`
+/// column shows visible variation while staying deterministic).
 pub(crate) fn story_logs() -> Vec<UiLogEntry> {
     vec![
-        UiLogEntry::new(UiLogLevel::Info, "studio", "Simulator is running"),
-        UiLogEntry::new(UiLogLevel::Debug, "lp-server", "heartbeat frame=42"),
         UiLogEntry::new(
+            STORY_LOG_TIMESTAMP,
+            UiLogLevel::Info,
+            UiLogOrigin::Studio,
+            "Simulator is running",
+        ),
+        UiLogEntry::new(
+            STORY_LOG_TIMESTAMP + 1.0,
+            UiLogLevel::Trace,
+            UiLogSource::with_detail(UiLogOrigin::Link, "browser-serial"),
+            "read 512 bytes",
+        ),
+        UiLogEntry::new(
+            STORY_LOG_TIMESTAMP + 2.0,
+            UiLogLevel::Debug,
+            UiLogOrigin::Server,
+            "heartbeat frame=42",
+        ),
+        UiLogEntry::new(
+            STORY_LOG_TIMESTAMP + 3.0,
             UiLogLevel::Warn,
-            "lpa-link",
+            UiLogOrigin::Link,
             "firmware flashing is available",
         ),
-        UiLogEntry::new(UiLogLevel::Error, "studio", "project sync failed"),
+        UiLogEntry::new(
+            STORY_LOG_TIMESTAMP + 63.0,
+            UiLogLevel::Info,
+            UiLogSource::with_detail(UiLogOrigin::Device, "fw_core::project::project_loader"),
+            "project loaded in 84 ms",
+        ),
+        UiLogEntry::new(
+            STORY_LOG_TIMESTAMP + 64.0,
+            UiLogLevel::Error,
+            UiLogOrigin::Studio,
+            "project sync failed",
+        ),
     ]
 }
 

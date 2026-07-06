@@ -64,3 +64,29 @@ This increases baseline count and disk usage, but keeps responsive regressions
 visible while the editor shell, node tree, and device rail are still taking
 shape. The same `oxipng` normalization remains required for baseline and check
 modes.
+
+## 2026-07-05 Addendum: Deterministic Captures + Pixel-Tolerance Check
+
+Byte-for-byte comparison flapped on icon-heavy stories. Diff analysis showed
+the dominant cause was not anti-aliasing but CSS transitions
+(`transition-colors` and friends) racing the capture: stories settle state
+right after mount and screenshots landed at a different transition phase each
+run, producing uniform-delta blobs up to channel delta ~180. The capture page
+now injects `transition: none; animation: none; caret-color: transparent`
+before the app mounts, which made back-to-back captures of the same build
+byte-identical across the full story matrix.
+
+Check mode additionally compares pixels with a small tolerance for residual
+jitter. Even with transitions frozen, anti-aliasing and sub-pixel text layout
+move a handful of glyph-edge pixels between captures of the same build (e.g.
+the project-pane detail popover's description text shifts ~1px, ~0.014% of the
+image at high per-channel delta). Rather than gate on the single worst pixel —
+which one high-contrast edge pixel trips — the check counts pixels whose
+per-channel delta exceeds `STUDIO_STORY_MAX_CHANNEL_DELTA` (default `64`, above
+anti-aliasing noise) and fails only when that count exceeds
+`STUDIO_STORY_MAX_DIFF_PIXEL_RATIO` of the image (default `0.0005` = 0.05%),
+pixelmatch-style. This leaves a small noise floor: changes below the ratio
+don't fail the check, but they still surface as a baseline image diff in the
+PR. Dimension changes and undecodable images always fail. Byte-unequal images
+within tolerance are reported informationally. Baseline generation is unchanged
+and still commits exact captures.

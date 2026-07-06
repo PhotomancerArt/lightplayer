@@ -121,6 +121,7 @@ pub fn request_label(request: &ClientRequest) -> &'static str {
         ClientRequest::ListAvailableProjects => "project.list_available",
         ClientRequest::ListLoadedProjects => "project.list_loaded",
         ClientRequest::StopAllProjects => "project.stop_all",
+        ClientRequest::SetLogLevel { .. } => "server.set_log_level",
     }
 }
 

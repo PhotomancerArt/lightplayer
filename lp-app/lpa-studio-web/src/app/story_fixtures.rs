@@ -15,23 +15,59 @@ use lpa_studio_core::{
     ProjectEditorOp, ProjectEditorView, ProjectInventorySummary, ProjectNodeStatusTone,
     ProjectNodeStatusView, ProjectNodeTreeItem, ProjectNodeTreeView, ProjectOp,
     ProjectRuntimeSummary, ProjectState, ProjectSyncPhase, ProjectSyncSummary, UiAction,
-    UiActivityView, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiIssue, UiLogEntry,
-    UiLogLevel, UiMetric, UiNodeChild, UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView,
-    UiPaneView, UiProducedProduct, UiProducedValue, UiProgress, UiSlotAsset, UiSlotSourceState,
-    UiSlotValue, UiStatus, UiStepsView, UiStudioView, UiTerminalLine, UiViewContent,
+    UiActivityView, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot, UiConsoleView, UiIssue,
+    UiLogEntry, UiLogLevel, UiLogOrigin, UiLogSource, UiMetric, UiNodeChild, UiNodeHeader,
+    UiNodeSection, UiNodeTab, UiNodeView, UiPaneView, UiProducedProduct, UiProducedValue,
+    UiProgress, UiSlotAsset, UiSlotSourceState, UiSlotValue, UiStatus, UiStepsView, UiStudioView,
+    UiTerminalLine, UiViewContent,
 };
+
+/// Timestamp shared by every story log fixture, so stories stay
+/// deterministic. P2 renders the timestamp column; until then it is unused by
+/// the row rendering.
+pub(crate) const STORY_LOG_TIMESTAMP: f64 = 1_720_000_000.0;
+
+/// A studio view whose console shows exactly `logs`. Fixtures assign the
+/// entries directly (bypassing the display filter) so story rendering matches
+/// the retired `logs` field byte-for-byte, debug entries included.
+fn story_view(panes: Vec<UiPaneView>, logs: Vec<UiLogEntry>) -> UiStudioView {
+    let mut console = UiConsoleView::empty();
+    console.entries = logs;
+    UiStudioView::new(panes, console)
+}
+
+/// A console view with explicit toolbar state for RuntimeLog stories:
+/// `entries` are shown as-is; `hidden_count`, `min_level`, and the disabled
+/// origins drive the toolbar affordances.
+pub(crate) fn story_console(
+    entries: Vec<UiLogEntry>,
+    hidden_count: usize,
+    min_level: UiLogLevel,
+    disabled_origins: &[UiLogOrigin],
+) -> UiConsoleView {
+    let mut console = UiConsoleView::empty();
+    console.entries = entries;
+    console.hidden_count = hidden_count;
+    console.min_level = min_level;
+    console.origins = UiLogOrigin::ALL
+        .into_iter()
+        .map(|origin| (origin, !disabled_origins.contains(&origin)))
+        .collect();
+    console
+}
 
 pub(crate) fn shell_story(
     mut view: UiStudioView,
     running: bool,
     story_logs: Vec<UiLogEntry>,
 ) -> Element {
-    view.logs.extend(story_logs);
+    view.console.entries.extend(story_logs);
     rsx! {
         StudioShell {
             view,
             running,
             on_action: move |_| {},
+            on_console: move |_| {},
         }
     }
 }
@@ -254,15 +290,15 @@ pub(crate) fn MobileEditorTabsPane() -> Element {
 }
 
 pub(crate) fn studio_log(level: UiLogLevel, message: impl Into<String>) -> UiLogEntry {
-    UiLogEntry::new(level, "studio", message)
+    UiLogEntry::new(STORY_LOG_TIMESTAMP, level, UiLogOrigin::Studio, message)
 }
 
 pub(crate) fn idle_view() -> UiStudioView {
-    UiStudioView::new(vec![idle_device_view()], Vec::new())
+    story_view(vec![idle_device_view()], Vec::new())
 }
 
 pub(crate) fn browser_serial_canceled_view() -> UiStudioView {
-    UiStudioView::new(
+    story_view(
         vec![idle_device_view()],
         vec![studio_log(UiLogLevel::Info, "Port selection canceled")],
     )
@@ -276,43 +312,61 @@ pub(crate) fn browser_serial_open_failed_view() -> UiStudioView {
 }
 
 pub(crate) fn endpoint_view() -> UiStudioView {
-    UiStudioView::new(vec![endpoint_device_view()], Vec::new())
+    story_view(vec![endpoint_device_view()], Vec::new())
 }
 
 pub(crate) fn starting_view() -> UiStudioView {
-    UiStudioView::new(
+    story_view(
         vec![starting_device_view()],
         vec![UiLogEntry::new(
+            STORY_LOG_TIMESTAMP,
             UiLogLevel::Info,
-            "lpa-link",
+            UiLogOrigin::Link,
             "browser worker session created",
         )],
     )
 }
 
 pub(crate) fn simulator_ready_view() -> UiStudioView {
-    UiStudioView::new(
+    story_view(
         vec![project_synced_pane_view(), simulator_ready_device_view()],
         vec![
-            UiLogEntry::new(UiLogLevel::Info, "fw-browser", "ready"),
             UiLogEntry::new(
+                STORY_LOG_TIMESTAMP,
                 UiLogLevel::Info,
-                "lpa-link",
+                UiLogSource::with_detail(UiLogOrigin::Device, "fw-browser"),
+                "ready",
+            ),
+            UiLogEntry::new(
+                STORY_LOG_TIMESTAMP,
+                UiLogLevel::Info,
+                UiLogOrigin::Link,
                 "browser worker session owns Worker lifecycle in lpa-link",
             ),
-            UiLogEntry::new(UiLogLevel::Info, "fw-browser", "project loaded"),
+            UiLogEntry::new(
+                STORY_LOG_TIMESTAMP,
+                UiLogLevel::Info,
+                UiLogSource::with_detail(UiLogOrigin::Device, "fw-browser"),
+                "project loaded",
+            ),
         ],
     )
 }
 
 pub(crate) fn project_ready_view() -> UiStudioView {
-    UiStudioView::new(
+    story_view(
         vec![project_synced_pane_view(), simulator_ready_device_view()],
         vec![
-            UiLogEntry::new(UiLogLevel::Info, "fw-browser", "project loaded"),
             UiLogEntry::new(
+                STORY_LOG_TIMESTAMP,
+                UiLogLevel::Info,
+                UiLogSource::with_detail(UiLogOrigin::Device, "fw-browser"),
+                "project loaded",
+            ),
+            UiLogEntry::new(
+                STORY_LOG_TIMESTAMP,
                 UiLogLevel::Debug,
-                "lp-server",
+                UiLogOrigin::Server,
                 "heartbeat frame=42 uptime_ms=700",
             ),
         ],
@@ -320,32 +374,34 @@ pub(crate) fn project_ready_view() -> UiStudioView {
 }
 
 pub(crate) fn project_syncing_view() -> UiStudioView {
-    UiStudioView::new(
+    story_view(
         vec![project_syncing_pane_view(), simulator_ready_device_view()],
         vec![UiLogEntry::new(
+            STORY_LOG_TIMESTAMP,
             UiLogLevel::Info,
-            "lpa-studio-core",
+            UiLogOrigin::Studio,
             "syncing project",
         )],
     )
 }
 
 pub(crate) fn project_sync_failed_view() -> UiStudioView {
-    UiStudioView::new(
+    story_view(
         vec![
             project_sync_failed_pane_view(),
             simulator_ready_device_view(),
         ],
         vec![UiLogEntry::new(
+            STORY_LOG_TIMESTAMP,
             UiLogLevel::Error,
-            "lpa-studio-core",
+            UiLogOrigin::Studio,
             "project sync failed: protocol timeout",
         )],
     )
 }
 
 pub(crate) fn lightplayer_disconnected_view() -> UiStudioView {
-    UiStudioView::new(
+    story_view(
         vec![device_view(
             UiStatus::good("Simulator connected"),
             vec![
@@ -365,15 +421,16 @@ pub(crate) fn lightplayer_disconnected_view() -> UiStudioView {
             vec!["[lpa-studio-core] LightPlayer protocol detached; device session remains open"],
         )],
         vec![UiLogEntry::new(
+            STORY_LOG_TIMESTAMP,
             UiLogLevel::Info,
-            "lpa-studio-core",
+            UiLogOrigin::Studio,
             "LightPlayer protocol detached; device session remains open",
         )],
     )
 }
 
 pub(crate) fn open_for_flashing_view() -> UiStudioView {
-    UiStudioView::new(
+    story_view(
         vec![device_view(
             UiStatus::good("ESP32 over USB"),
             vec![
@@ -392,41 +449,54 @@ pub(crate) fn open_for_flashing_view() -> UiStudioView {
             vec!["[lpa-link] ESP32 opened for flashing"],
         )],
         vec![UiLogEntry::new(
+            STORY_LOG_TIMESTAMP,
             UiLogLevel::Info,
-            "lpa-studio-core",
+            UiLogOrigin::Studio,
             "Device opened for flashing",
         )],
     )
 }
 
 pub(crate) fn provision_ready_view() -> UiStudioView {
-    UiStudioView::new(
+    story_view(
         vec![blank_device_view(
             UiStatus::warning("Ready to flash"),
             UiViewContent::text("No LightPlayer firmware is running on this ESP32."),
             false,
         )],
         vec![UiLogEntry::new(
+            STORY_LOG_TIMESTAMP,
             UiLogLevel::Warn,
-            "lpa-studio-core",
+            UiLogOrigin::Studio,
             "server protocol is unavailable; firmware flashing is available",
         )],
     )
 }
 
 pub(crate) fn browser_serial_blank_firmware_view() -> UiStudioView {
-    UiStudioView::new(
+    story_view(
         vec![blank_device_view(
             UiStatus::warning("Ready to flash"),
             UiViewContent::Activity(blank_firmware_activity()),
             false,
         )],
         vec![
-            UiLogEntry::new(UiLogLevel::Info, "fw-esp32", "ESP-ROM:esp32c6-20220919"),
-            UiLogEntry::new(UiLogLevel::Info, "fw-esp32", "invalid header: 0xffffffff"),
             UiLogEntry::new(
+                STORY_LOG_TIMESTAMP,
+                UiLogLevel::Info,
+                UiLogSource::with_detail(UiLogOrigin::Device, "fw-esp32"),
+                "ESP-ROM:esp32c6-20220919",
+            ),
+            UiLogEntry::new(
+                STORY_LOG_TIMESTAMP,
+                UiLogLevel::Info,
+                UiLogSource::with_detail(UiLogOrigin::Device, "fw-esp32"),
+                "invalid header: 0xffffffff",
+            ),
+            UiLogEntry::new(
+                STORY_LOG_TIMESTAMP,
                 UiLogLevel::Warn,
-                "lpa-studio-core",
+                UiLogOrigin::Studio,
                 "no LightPlayer firmware detected; firmware flashing is available",
             ),
         ],
@@ -434,7 +504,7 @@ pub(crate) fn browser_serial_blank_firmware_view() -> UiStudioView {
 }
 
 pub(crate) fn provisioning_view() -> UiStudioView {
-    UiStudioView::new(
+    story_view(
         vec![device_view(
             UiStatus::working("Flashing"),
             vec![
@@ -455,15 +525,16 @@ pub(crate) fn provisioning_view() -> UiStudioView {
             ],
         )],
         vec![UiLogEntry::new(
+            STORY_LOG_TIMESTAMP,
             UiLogLevel::Info,
-            "lpa-link",
+            UiLogOrigin::Link,
             "Connected to ESP32 bootloader",
         )],
     )
 }
 
 pub(crate) fn provision_failed_view() -> UiStudioView {
-    UiStudioView::new(
+    story_view(
         vec![device_view(
             UiStatus::error("Needs attention"),
             vec![
@@ -487,15 +558,16 @@ pub(crate) fn provision_failed_view() -> UiStudioView {
             ],
         )],
         vec![UiLogEntry::new(
+            STORY_LOG_TIMESTAMP,
             UiLogLevel::Error,
-            "lpa-link",
+            UiLogOrigin::Link,
             "failed to write firmware image",
         )],
     )
 }
 
 pub(crate) fn resetting_to_blank_view() -> UiStudioView {
-    UiStudioView::new(
+    story_view(
         vec![device_view(
             UiStatus::working("Resetting"),
             vec![
@@ -515,23 +587,25 @@ pub(crate) fn resetting_to_blank_view() -> UiStudioView {
             ],
         )],
         vec![UiLogEntry::new(
+            STORY_LOG_TIMESTAMP,
             UiLogLevel::Info,
-            "lpa-link",
+            UiLogOrigin::Link,
             "Erasing device flash",
         )],
     )
 }
 
 pub(crate) fn reset_complete_view() -> UiStudioView {
-    UiStudioView::new(
+    story_view(
         vec![blank_device_view(
             UiStatus::warning("Blank ESP32"),
             UiViewContent::text("The device has been erased and can be flashed again."),
             true,
         )],
         vec![UiLogEntry::new(
+            STORY_LOG_TIMESTAMP,
             UiLogLevel::Info,
-            "lpa-link",
+            UiLogOrigin::Link,
             "Chip erase completed successfully",
         )],
     )
@@ -545,7 +619,7 @@ pub(crate) fn error_view() -> UiStudioView {
 }
 
 pub(crate) fn picker_issue_view(message: &'static str, log_message: &'static str) -> UiStudioView {
-    UiStudioView::new(
+    story_view(
         vec![device_view(
             UiStatus::error("Needs attention"),
             vec![stack_section(
