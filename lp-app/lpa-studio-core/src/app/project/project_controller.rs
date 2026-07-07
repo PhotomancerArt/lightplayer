@@ -779,12 +779,20 @@ impl ProjectController {
 
     fn node_tree_view(&self) -> ProjectNodeTreeView {
         let edits = self.slot_edit_join();
+        // Flat-root: the project root is the project pane, not a tree row —
+        // its children are the tree's top-level items, matching the workspace
+        // (which renders `root_nodes.flat_map(children)` as the top panes).
         ProjectNodeTreeView::new(
             self.root_nodes
                 .iter()
+                .flat_map(NodeController::children)
                 .map(|node| self.node_tree_item(node, &edits))
                 .collect(),
-            self.root_nodes.iter().map(count_nodes).sum(),
+            self.root_nodes
+                .iter()
+                .flat_map(NodeController::children)
+                .map(count_nodes)
+                .sum(),
         )
     }
 
@@ -2318,16 +2326,16 @@ mod tests {
         // never the literal project id or the word "project".
         assert_eq!(view.project_name, "Demo");
         assert_eq!(view.handle_id, 7);
-        assert_eq!(view.tree.total_count, 3);
-        assert_eq!(view.tree.roots[0].label, "Demo");
-        assert_eq!(view.tree.roots[0].children[1].label, "Orbit");
-        // Flat-root workspace: the root is never a card — its child panes
-        // are the top-level workspace entries.
+        // Flat-root: the tree omits the project root too — its children are
+        // the tree's top-level items, matching the workspace cards.
+        assert_eq!(view.tree.total_count, 2);
+        assert_eq!(view.tree.roots[0].label, "Clock");
+        assert_eq!(view.tree.roots[1].label, "Orbit");
         assert_eq!(view.nodes.len(), 2);
         assert_eq!(view.nodes[0].header.title, "Clock");
         assert_eq!(view.nodes[1].header.title, "Orbit");
 
-        let target = ProjectEditorTarget::parse(&view.tree.roots[0].children[1].action.node_id())
+        let target = ProjectEditorTarget::parse(&view.tree.roots[1].action.node_id())
             .expect("tree action should be typed");
         assert_eq!(
             target,
@@ -4559,7 +4567,9 @@ mod tests {
             .find(|slot| slot.label == "Entries")
             .expect("root settings carry the map row");
         assert_eq!(entries.state.dirty, UiNodeDirtyState::Dirty);
-        assert_eq!(editor.tree.roots[0].dirty, expected);
+        // Flat-root: a childless root has no tree rows; its own dirt shows on
+        // the project pane (editor.dirty + root_slots above), not the tree.
+        assert!(editor.tree.roots.is_empty());
     }
 
     #[test]
@@ -5117,11 +5127,15 @@ mod tests {
         );
 
         let editor = project.editor_view("demo", 1, &ProjectInventorySummary::default());
-        let root_item = &editor.tree.roots[0];
-        assert_eq!(root_item.dirty, one_persisted);
-        assert_eq!(root_item.children[0].dirty, one_persisted);
-        assert_eq!(root_item.children[0].children[0].dirty, one_persisted);
-        assert!(root_item.children[1].dirty.is_clean());
+        // Flat-root: the tree's top-level items are the project root's
+        // children (the root is the project pane, not a tree row).
+        let roots = &editor.tree.roots;
+        assert_eq!(roots[0].dirty, one_persisted, "group bubbles the edit");
+        assert_eq!(
+            roots[0].children[0].dirty, one_persisted,
+            "grandchild carries its own edit"
+        );
+        assert!(roots[1].dirty.is_clean(), "sibling branch stays clean");
         assert_eq!(editor.dirty, one_persisted);
         assert_eq!(project.dirty_summary(), one_persisted);
     }
@@ -5160,7 +5174,8 @@ mod tests {
             .find(|slot| slot.label == "Brightness")
             .expect("root settings carry the brightness row");
         assert_eq!(brightness.state.dirty, UiNodeDirtyState::Error);
-        assert_eq!(editor.tree.roots[0].dirty, expected);
+        // Flat-root: root-own dirt is on the project pane, not the tree.
+        assert!(editor.tree.roots.is_empty());
         assert!(
             editor.header_actions.is_empty(),
             "failed edits alone do not surface Save/Revert"
@@ -5184,7 +5199,8 @@ mod tests {
                 .iter()
                 .all(|slot| slot.state.dirty == UiNodeDirtyState::Clean)
         );
-        assert!(editor.tree.roots[0].dirty.is_clean());
+        // Flat-root: a childless root contributes no tree rows.
+        assert!(editor.tree.roots.is_empty());
         assert!(editor.header_actions.is_empty());
     }
 
@@ -5265,10 +5281,14 @@ mod tests {
             transient: 1,
             failed: 0,
         };
+        // editor.dirty, the standalone walk, and dirty_summary agree — one
+        // aggregation over everything. The tree (like the cards) excludes the
+        // root, so with both edits root-own the tree contributes nothing;
+        // dirty_grandchild_bubbles covers the tree-carries-non-root-dirt case.
         let tree_sum: DirtySummary = editor.tree.roots.iter().map(|root| root.dirty).sum();
         assert_eq!(editor.dirty, expected);
         assert_eq!(project.dirty_summary(), expected);
-        assert_eq!(tree_sum, expected);
+        assert!(tree_sum.is_clean(), "root-own edits are not tree rows");
         assert!(editor.nodes.is_empty(), "root-own edits have no card");
     }
 
