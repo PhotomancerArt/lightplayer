@@ -65,4 +65,4 @@ pub use core::{
     UiStepsView, UiStudioView, UiTerminalLine, UiViewContent, UxNodePath,
 };
 
-pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/basic";
+pub const STUDIO_DEMO_PROJECT_ID: &str = "examples/fyeah-sign";
