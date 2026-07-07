@@ -214,6 +214,11 @@ impl SlotController {
         .with_state(self.ui_field_state(edits));
 
         if let Some(address) = self.edit_entry_address(edits) {
+            // The row's own entry carries the saved value it replaces, when
+            // the mirror's base-value map knows it (old-value display).
+            if let Some(old_value) = edits.base_display(&address) {
+                slot = slot.with_old_value(old_value);
+            }
             slot = slot.with_edit_entry_address(address);
         }
         if let Some(detail) = self.ui_detail() {
@@ -242,6 +247,9 @@ impl SlotController {
             .with_source(self.ui_source())
             .with_state(self.ui_field_state(edits));
         if let Some(address) = self.edit_entry_address(edits) {
+            if let Some(old_value) = edits.base_display(&address) {
+                slot = slot.with_old_value(old_value);
+            }
             slot = slot.with_edit_entry_address(address);
         }
         if let Some(detail) = self.ui_detail() {
@@ -1527,6 +1535,73 @@ mod tests {
         let slot = controller.ui_config_slot(&join);
 
         assert_eq!(slot.edit_entry_address, Some(slot_address("brightness")));
+    }
+
+    #[test]
+    fn own_edit_entry_projects_its_base_display_as_the_old_value() {
+        let registry = SlotShapeRegistry::default();
+        let shape = SlotShape::value(LpType::U32);
+        let controller = SlotController::from_slot_data(
+            slot_address("brightness"),
+            "Brightness".to_string(),
+            &SlotData::Value(WithRevision::new(Revision::new(1), LpValue::U32(255))),
+            SlotShapeView::Dynamic(&shape),
+            &registry,
+        );
+        let (buffer, overlay) = overlay_join(&[(
+            "brightness",
+            lpc_model::SlotEditOp::AssignValue(LpValue::U32(64)),
+        )]);
+        let join = SlotEditJoin::new(&buffer, overlay, Default::default()).with_base_values(
+            std::collections::BTreeMap::from([(slot_address("brightness"), "255".to_string())]),
+        );
+
+        let slot = controller.ui_config_slot(&join);
+
+        assert_eq!(slot.old_value.as_deref(), Some("255"));
+
+        // Without an annotation the row degrades to no old value.
+        let (buffer, overlay) = overlay_join(&[(
+            "brightness",
+            lpc_model::SlotEditOp::AssignValue(LpValue::U32(64)),
+        )]);
+        let join = SlotEditJoin::new(&buffer, overlay, Default::default());
+        assert_eq!(controller.ui_config_slot(&join).old_value, None);
+    }
+
+    #[test]
+    fn present_option_projects_the_interior_entry_old_value() {
+        let registry = SlotShapeRegistry::default();
+        let shape = option_u32_shape();
+        let data = SlotData::Option(lpc_model::SlotOptionDyn::some_with_version(
+            Revision::new(1),
+            SlotData::Value(WithRevision::new(Revision::new(1), LpValue::U32(255))),
+        ));
+        let controller = SlotController::from_slot_data(
+            slot_address("brightness"),
+            "Brightness".to_string(),
+            &data,
+            SlotShapeView::Dynamic(&shape),
+            &registry,
+        );
+        let (buffer, overlay) = overlay_join(&[(
+            "brightness.some",
+            lpc_model::SlotEditOp::AssignValue(LpValue::U32(64)),
+        )]);
+        let join = SlotEditJoin::new(&buffer, overlay, Default::default()).with_base_values(
+            std::collections::BTreeMap::from([(
+                slot_address("brightness.some"),
+                "255".to_string(),
+            )]),
+        );
+
+        let slot = controller.ui_config_slot(&join);
+
+        assert_eq!(
+            slot.old_value.as_deref(),
+            Some("255"),
+            "the old value follows the interior edit entry, not the row address"
+        );
     }
 
     #[test]

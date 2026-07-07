@@ -3,12 +3,14 @@
 use lpa_studio_core::{
     ColorOrder, ControlDisplayLayout, ControlExtent, ControlLamp2d, ControlLayout2d,
     ControlSampleEncoding, ControlSampleLayout, ControlSampleSpan, ControllerId, DirtySummary,
-    NodeRevertOp, ProjectNodeAddress, Revision, UiAction, UiAssetEditorKind, UiBindingEndpoint,
-    UiConfigSlot, UiControlProductPreview, UiControlSampleFormat, UiNodeChild, UiNodeDirtyState,
-    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiPaneAction,
-    UiProducedBinding, UiProducedBindings, UiProducedProduct, UiProducedValue, UiProductPreview,
-    UiProductTrackingState, UiSlotAsset, UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality,
-    UiSlotRecord, UiSlotSourceState, UiSlotUnit, UiSlotValue, UiStatus,
+    NodeRevertOp, ProjectNodeAddress, ProjectSlotAddress, ProjectSlotRoot, Revision, SlotEditOp,
+    SlotPath, UiAction, UiAssetEditorKind, UiBindingEndpoint, UiConfigSlot,
+    UiControlProductPreview, UiControlSampleFormat, UiNodeChild, UiNodeDirtyState, UiNodeHeader,
+    UiNodeSection, UiNodeTab, UiNodeTabBody, UiNodeView, UiPaneAction, UiPendingEdit,
+    UiPendingEditKind, UiPendingEditPhase, UiProducedBinding, UiProducedBindings,
+    UiProducedProduct, UiProducedValue, UiProductPreview, UiProductTrackingState, UiSlotAsset,
+    UiSlotEditorHint, UiSlotFieldState, UiSlotOptionality, UiSlotRecord, UiSlotSourceState,
+    UiSlotUnit, UiSlotValue, UiStatus,
 };
 
 const IDLE_GLSL: &str = r#"vec3 palette(float t) {
@@ -119,6 +121,81 @@ pub(crate) fn live_dirty_node_view() -> UiNodeView {
     };
     view.header_actions = vec![node_revert_pane_action()];
     view
+}
+
+/// The editor-level change list the dirty playlist popup stories thread in:
+/// the playlist's OWN edits (two persisted plus one live control, matching
+/// the dirty-fixture counts) and one edit addressed to ANOTHER node that the
+/// popover must filter out of its list.
+pub(crate) fn playlist_pending_edits() -> Vec<UiPendingEdit> {
+    let mut time_edit = story_pending_edit(
+        "/fyeah_sign.show/playlist.playlist",
+        "Playlist",
+        "input.time",
+        UiPendingEditKind::Assign {
+            value_display: "0.25".to_string(),
+        },
+        UiPendingEditPhase::Persisted,
+    );
+    // One entry with a known saved value: the row reads old → new.
+    time_edit.old_value = Some("0.0".to_string());
+    vec![
+        time_edit,
+        story_pending_edit(
+            "/fyeah_sign.show/playlist.playlist",
+            "Playlist",
+            "entries[blast]",
+            UiPendingEditKind::Added,
+            UiPendingEditPhase::Persisted,
+        ),
+        story_pending_edit(
+            "/fyeah_sign.show/playlist.playlist",
+            "Playlist",
+            "controls.rate",
+            UiPendingEditKind::Assign {
+                value_display: "2.0".to_string(),
+            },
+            UiPendingEditPhase::Live,
+        ),
+        story_pending_edit(
+            "/fyeah_sign.show/other.shader",
+            "Other shader",
+            "brightness",
+            UiPendingEditKind::Assign {
+                value_display: "0.5".to_string(),
+            },
+            UiPendingEditPhase::Persisted,
+        ),
+    ]
+}
+
+/// One change-list entry with the same per-entry revert action the project
+/// controller produces.
+fn story_pending_edit(
+    node: &str,
+    node_label: &str,
+    path: &str,
+    kind: UiPendingEditKind,
+    phase: UiPendingEditPhase,
+) -> UiPendingEdit {
+    let address = ProjectSlotAddress::new(
+        ProjectNodeAddress::parse(node).expect("valid story node address"),
+        ProjectSlotRoot::def(),
+        SlotPath::parse(path).expect("valid story slot path"),
+    );
+    let node_path = address.node.to_string();
+    UiPendingEdit {
+        node_label: node_label.to_string(),
+        node_path,
+        slot_path_display: path.to_string(),
+        kind,
+        old_value: None,
+        phase,
+        revert: Some(UiAction::from_op(
+            ControllerId::new("story.project"),
+            SlotEditOp::Revert { address },
+        )),
+    }
 }
 
 /// Playlist node whose subtree carries a rejected edit — drives the red

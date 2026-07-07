@@ -20,13 +20,14 @@ pub fn PaneView(
         ..
     } = view;
     match body {
-        // The project editor is one StudioPane carrying the pane's status
-        // and actions in its own header — no PaneFrame (no second header).
+        // The project editor is one StudioPane carrying the pane's status in
+        // its own header — no PaneFrame (no second header) and no pane-level
+        // button strip (P6 sidebar tidy: a ready project produces no pane
+        // actions; recovery states render through the generic branch below).
         UiViewContent::ProjectEditor(editor) => rsx! {
             ProjectPane {
                 view: *editor,
                 status,
-                pane_actions: actions,
                 running,
                 on_action,
             }

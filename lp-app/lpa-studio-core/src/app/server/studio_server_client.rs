@@ -11,7 +11,7 @@ use lpa_client::{
 use lpa_link::{LinkConnection, LinkConnectionKind};
 use lpc_model::{
     ArtifactLocation, CommitResult, MutationCmdBatch, MutationCmdBatchResult, NodeId,
-    ProjectOverlay, Revision,
+    ProjectOverlay, Revision, SlotPath,
 };
 use lpc_wire::{
     ProjectReadEvent, ProjectReadRequest, WireOverlayMutationRequest, WireProjectHandle,
@@ -131,6 +131,9 @@ pub struct StudioProjectRead {
 pub struct StudioOverlayRead {
     pub overlay: ProjectOverlay,
     pub revision: Revision,
+    /// Base (saved) value display strings for the overlay's pending paths
+    /// (the wire's parallel list; paths absent in base are omitted).
+    pub base_values: Vec<(ArtifactLocation, SlotPath, String)>,
     pub logs: Vec<UiLogDraft>,
 }
 
@@ -237,6 +240,7 @@ impl StudioServerClient {
         Ok(StudioOverlayRead {
             overlay: read.value.overlay,
             revision: read.value.revision,
+            base_values: read.value.base_values,
             logs,
         })
     }

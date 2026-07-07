@@ -56,7 +56,6 @@ holds the full context.
 | Host-process `lpa-server` stdout capture into the Studio console (terminal-only today) | `2026-07-05-studio-logging-model` | Host-process workflow needs in-console server logs |
 | Console filter persistence and text search (session-only, no search today) | `2026-07-05-studio-logging-model` | Console usage patterns make refiltering per session annoying |
 | Per-item overlay gating (fetch-full-on-change assumes small overlays) | `2026-07-04-studio-editing-model` (a) | Measured overlay fetch cost matters |
-| Save-panel before/after value DTOs (M3's `UiPendingEdit` lists labeled entries with current-value display strings only) | `2026-07-04-studio-editing-model` (b) | Display strings prove insufficient in the save panel |
 | Singular `ProjectRegistry::mutate` bypasses policy/type validation (only `mutate_batch` enforces) | `2026-07-04-studio-editing-model` (d) | Any new caller of `mutate` |
 | Alternative dirty modes (touched-mode / deliberate value pinning) — minimal-diff normalization fixed dirty to "differs from saved" | `2026-07-04-studio-editing-model` (f) | A concrete pinning/touched-mode use case appears |
 | Device-pane adoption of the pane grammar (`StudioPane`/`DetailPopover`/`UiPaneAction`) | `2026-07-05-studio-pane-grammar` (a) | Next device-pane UX work |
