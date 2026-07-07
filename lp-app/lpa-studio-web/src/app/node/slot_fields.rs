@@ -423,9 +423,9 @@ pub fn XySlotField(
                 span { class: "tw:pointer-events-none tw:absolute tw:left-0 tw:top-1/2 tw:h-px tw:w-full tw:bg-border-muted" }
                 span { class: "tw:pointer-events-none tw:absolute tw:h-2 tw:w-2 tw:-translate-x-1/2 tw:-translate-y-1/2 tw:rounded-full tw:border tw:border-accent-border tw:bg-accent", style: "{point_style}" }
             }
-            span { class: "tw:flex tw:min-w-0 tw:flex-col tw:justify-center tw:gap-1",
-                XyPadReadout { label: "x", value: value[0], state: state.clone() }
-                XyPadReadout { label: "y", value: value[1], state: state.clone() }
+            span { class: "{numeric_field_class(&state)} tw:flex-col tw:items-stretch tw:justify-center tw:gap-0.5 tw:self-center",
+                XyPadReadout { label: "x", value: value[0] }
+                XyPadReadout { label: "y", value: value[1] }
             }
             if let Some((address, handler)) = raw_input {
                 SlotRawInputPopover { initially_open: raw_initially_open,
@@ -441,16 +441,18 @@ pub fn XySlotField(
     }
 }
 
-/// One read-only component readout row beside the XY pad. The value is
-/// display-capped to three decimals at a fixed tabular/monospace width (sized
-/// for the sign in `-0.000`), so the row's width never changes while a drag
-/// floods new values. Exact values are never rounded on dispatch; the
-/// raw-input popup shows and edits them unrounded.
+/// One read-only component readout row inside the XY pad's single shared
+/// readout box (the box wears the field chrome; rows are chrome-less so the
+/// pair stays no taller than the pad). The value is display-capped to three
+/// decimals at a fixed tabular/monospace width (sized for the sign in
+/// `-0.000`), so the row's width never changes while a drag floods new
+/// values. Exact values are never rounded on dispatch; the raw-input popup
+/// shows and edits them unrounded.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn XyPadReadout(label: &'static str, value: f32, state: UiSlotFieldState) -> Element {
+fn XyPadReadout(label: &'static str, value: f32) -> Element {
     rsx! {
-        span { class: numeric_field_class(&state),
+        span { class: "tw:flex tw:items-baseline tw:justify-between tw:gap-1",
             small { class: "tw:text-[0.64rem] tw:font-bold tw:uppercase tw:text-subtle-foreground",
                 "{label}"
             }
