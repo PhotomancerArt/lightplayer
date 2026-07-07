@@ -8,11 +8,27 @@
 //! actions ahead of ticks and coalesces redundant ticks (see the actor loop).
 
 use crate::UiAction;
+use crate::app::library::LibraryStore;
 use crate::app::studio::console_command::ConsoleCommand;
+
+/// A mounted library store riding the command queue (Debug-opaque: the
+/// store holds an fs handle and an rng closure).
+#[derive(Clone)]
+pub struct LibraryAttachment(pub LibraryStore);
+
+impl core::fmt::Debug for LibraryAttachment {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("LibraryAttachment(..)")
+    }
+}
 
 /// A single input to the studio actor's command queue.
 #[derive(Clone, Debug)]
 pub enum StudioCommand {
+    /// Attach the mounted local library (sent by the platform shell once
+    /// the store is ready, before any project action). Applied
+    /// synchronously by the actor ahead of the batch's actions.
+    AttachLibrary(LibraryAttachment),
     /// A user-invoked action. Dispatched through the controller; its
     /// [`ActionClass`](crate::ActionClass) decides whether it preempts an
     /// in-flight passive pull.

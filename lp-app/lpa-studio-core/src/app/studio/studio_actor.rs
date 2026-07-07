@@ -175,6 +175,9 @@ where
         // final snapshot reflects the reshaped console. Actions run next
         // (preemption-as-priority); the coalesced tick runs after. Shutdown
         // only ends the loop after the batch is processed.
+        if let Some(attachment) = plan.attach_library {
+            self.controller.attach_library(attachment.0);
+        }
         for command in plan.console {
             self.controller.apply_console_command(command);
         }
@@ -369,6 +372,9 @@ struct CommandPlan {
     actions: Vec<UiAction>,
     tick: bool,
     shutdown: bool,
+    /// A library attachment to install before actions (at most one; the
+    /// shell sends it once, ahead of any project action).
+    attach_library: Option<crate::app::studio::studio_command::LibraryAttachment>,
 }
 
 impl CommandPlan {
@@ -377,8 +383,10 @@ impl CommandPlan {
         let mut actions = Vec::new();
         let mut tick = false;
         let mut shutdown = false;
+        let mut attach_library = None;
         for command in batch {
             match command {
+                StudioCommand::AttachLibrary(attachment) => attach_library = Some(attachment),
                 StudioCommand::Action(action) => push_action_coalesced(&mut actions, action),
                 // Not a local console mutation: a device-level change is a
                 // server round-trip, so convert it into the equivalent device
@@ -406,6 +414,7 @@ impl CommandPlan {
             actions,
             tick,
             shutdown,
+            attach_library,
         }
     }
 }
@@ -488,7 +497,11 @@ fn command_preempts_passive(command: &StudioCommand) -> bool {
         // A queued console command, tick, or shutdown does not preempt an
         // in-flight pull: console mutations are display-side and can wait for
         // the batch after the pull completes.
-        StudioCommand::Console(_) | StudioCommand::RefreshTick | StudioCommand::Shutdown => false,
+        // An attachment is synchronous installation work, same as console.
+        StudioCommand::AttachLibrary(_)
+        | StudioCommand::Console(_)
+        | StudioCommand::RefreshTick
+        | StudioCommand::Shutdown => false,
     }
 }
 

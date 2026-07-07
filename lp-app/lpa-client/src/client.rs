@@ -554,6 +554,36 @@ where
         Ok(ClientOutcome::new((), events))
     }
 
+    /// Whole-project replace, then load: StopAll → clear dir → chunked
+    /// writes → LoadProject. The open-a-library-project primitive
+    /// (load-as-push, D19).
+    pub async fn replace_and_load_project(
+        &mut self,
+        project_id: &str,
+        files: &[(String, Vec<u8>)],
+    ) -> ClientResult<ClientOutcome<WireProjectHandle>> {
+        let mut events = Vec::new();
+        let stop = self.send_request(ClientRequest::StopAllProjects).await?;
+        events.extend(stop.events);
+        validate_project_deploy_response(&ClientRequest::StopAllProjects, &stop.value.msg)?;
+
+        let deploy_files: Vec<ProjectDeployFile> = files
+            .iter()
+            .map(|(path, bytes)| ProjectDeployFile::new(path.clone(), bytes.clone()))
+            .collect();
+        let replace = self.replace_project_files(project_id, deploy_files).await?;
+        events.extend(replace.events);
+
+        let request = ClientRequest::LoadProject {
+            path: crate::project_deploy::project_load_path(project_id),
+        };
+        let outcome = self.send_request(request.clone()).await?;
+        events.extend(outcome.events);
+        let handle = validate_project_deploy_response(&request, &outcome.value.msg)?
+            .ok_or_else(|| ClientError::Protocol("load did not return a handle".into()))?;
+        Ok(ClientOutcome::new(handle, events))
+    }
+
     /// Canonical package hash of a project directory (push/pull verify).
     pub async fn hash_package(&mut self, project_id: &str) -> ClientResult<ClientOutcome<String>> {
         let outcome = self

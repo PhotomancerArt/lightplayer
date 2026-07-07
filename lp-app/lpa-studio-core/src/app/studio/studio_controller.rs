@@ -209,6 +209,13 @@ impl StudioController {
     /// Apply a console command (from [`StudioCommand::Console`]): mutate the
     /// display filter or clear the ring, and mark the view dirty so the next
     /// gate emits the reshaped console.
+    /// Install the mounted library into the project flows (load-as-push /
+    /// save-as-pull — roadmap M3). Shares the controller's stamping clock.
+    pub fn attach_library(&mut self, store: crate::app::library::LibraryStore) {
+        let clock = std::rc::Rc::clone(&self.now_secs);
+        self.project.set_library(store, clock);
+    }
+
     pub fn apply_console_command(&mut self, command: ConsoleCommand) {
         match command {
             ConsoleCommand::SetMinLevel(level) => self.log_filter.min_level = level,

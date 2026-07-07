@@ -20,6 +20,24 @@
         }
       },
       {
+        "name": "uid",
+        "shape": {
+          "option": {
+            "meta": {},
+            "some": {
+              "value": {
+                "shape": {
+                  "editor": "plain",
+                  "id": 2612013983,
+                  "meta": {},
+                  "ty": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      {
         "name": "name",
         "shape": {
           "option": {

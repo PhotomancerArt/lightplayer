@@ -24,6 +24,7 @@ lpa-studio-web-story-macros = { path = "../lpa-studio-web-story-macros", optiona
 serde = { version = "1", features = ["derive"] }
 wasm-bindgen = "0.2"
 web-sys = { version = "0.3", features = [
+    "Crypto",
     "Event",
     "EventTarget",
     "History",
@@ -36,6 +37,7 @@ web-sys = { version = "0.3", features = [
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 lpa-fs-opfs = { path = "../lpa-fs-opfs" }
+lpfs = { path = "../../lp-base/lpfs" }
 wasm-bindgen-futures = "0.4"
 
 [build-dependencies]

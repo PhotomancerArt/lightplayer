@@ -44,6 +44,24 @@ pub struct ProjectController {
     def_artifacts: BTreeMap<NodeId, ArtifactLocation>,
     /// Monotonic correlation-id source for overlay mutation commands.
     next_mutation_cmd_id: u64,
+    /// The local library, when the platform mounted a store (browser).
+    /// Absent on host tests — flows degrade to the legacy deploy path.
+    library: Option<LibraryContext>,
+}
+
+/// Library wiring for load-as-push / save-as-pull (roadmap M3).
+struct LibraryContext {
+    store: crate::app::library::LibraryStore,
+    now_secs: std::rc::Rc<dyn Fn() -> f64>,
+    active: Option<ActiveLibraryProject>,
+}
+
+/// The open library package backing the running project.
+struct ActiveLibraryProject {
+    handle: crate::app::library::PackageHandle,
+    /// Runtime fs revision the library is synced to (advances on each
+    /// successful save-as-pull).
+    last_synced: lpc_model::FsVersion,
 }
 
 impl ProjectController {
@@ -59,7 +77,21 @@ impl ProjectController {
             edit_buffer: BTreeMap::new(),
             def_artifacts: BTreeMap::new(),
             next_mutation_cmd_id: 1,
+            library: None,
         }
+    }
+
+    /// Attach the mounted library (browser shell, after the store mounts).
+    pub fn set_library(
+        &mut self,
+        store: crate::app::library::LibraryStore,
+        now_secs: std::rc::Rc<dyn Fn() -> f64>,
+    ) {
+        self.library = Some(LibraryContext {
+            store,
+            now_secs,
+            active: None,
+        });
     }
 
     pub fn set_state(&mut self, state: ProjectState) {
@@ -378,10 +410,121 @@ impl ProjectController {
         server: &mut StudioServerClient,
     ) -> Result<Vec<UiLogDraft>, UiError> {
         self.mark_loading_demo();
+        if self.library.is_some() {
+            return self.open_seeded_demo_from_library(server).await;
+        }
+        // legacy path (host tests, storeless platforms): deploy the bundled
+        // files directly — no persistence
         let loaded = server.load_demo_project().await?;
         self.mark_ready(loaded.project_id, loaded.handle_id, loaded.inventory);
         self.def_artifacts = loaded.node_def_artifacts;
         Ok(loaded.logs)
+    }
+
+    /// Load-as-push (D19): seed the demo into the library once, then open
+    /// the library copy by replacing the sim's project with the library
+    /// head. A page refresh re-pushes the head — it never reseeds.
+    async fn open_seeded_demo_from_library(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Result<Vec<UiLogDraft>, UiError> {
+        use crate::app::library::PackageProvenance;
+        use crate::app::project::demo_project::{DEMO_PROJECT_ID, demo_project_deploy_files};
+
+        let context = self.library.as_mut().expect("checked by caller");
+        let now = (context.now_secs)();
+        let summary = match context
+            .store
+            .find_seeded_from(DEMO_PROJECT_ID)
+            .map_err(library_ui_error)?
+        {
+            Some(existing) => existing,
+            None => {
+                let files: Vec<(String, Vec<u8>)> = demo_project_deploy_files()
+                    .iter()
+                    .map(|f| (f.relative_path().to_string(), f.bytes().to_vec()))
+                    .collect();
+                context
+                    .store
+                    .install_package(
+                        "Basic",
+                        &files,
+                        PackageProvenance::SeededFrom {
+                            source: DEMO_PROJECT_ID.to_string(),
+                        },
+                        now,
+                    )
+                    .map_err(library_ui_error)?
+            }
+        };
+
+        let handle = context.store.open(summary.uid).map_err(library_ui_error)?;
+        let files = handle.read_all_files().map_err(library_ui_error)?;
+        let expected_hash = handle.content_hash().map_err(library_ui_error)?.to_string();
+
+        let loaded = server.open_library_project(&files, &expected_hash).await?;
+        context.active = Some(ActiveLibraryProject {
+            handle,
+            last_synced: loaded.synced_version,
+        });
+        self.mark_ready(summary.name, loaded.handle_id, loaded.inventory);
+        self.def_artifacts = loaded.node_def_artifacts;
+        Ok(loaded.logs)
+    }
+
+    /// Save-as-pull (D20/D8): after a successful commit, pull the changed
+    /// files into the library copy and record a `Saved` event. A failure
+    /// here never fails the user's save — the runtime committed fine; we
+    /// surface a warning and retry on the next save (`last_synced` only
+    /// advances on full success).
+    async fn pull_committed_changes_into_library(
+        &mut self,
+        server: &mut StudioServerClient,
+    ) -> Result<Option<UiNotice>, UiError> {
+        let Some(context) = self.library.as_mut() else {
+            return Ok(None);
+        };
+        let Some(active) = context.active.as_mut() else {
+            return Ok(None);
+        };
+        let now = (context.now_secs)();
+
+        let pulled = server
+            .pull_changed_files(
+                crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID,
+                active.last_synced,
+            )
+            .await?;
+        if pulled.updates.is_empty() {
+            active.last_synced = pulled.version;
+            return Ok(None);
+        }
+        for update in &pulled.updates {
+            let path = format!("/{}", update.path.trim_start_matches('/'));
+            active
+                .handle
+                .apply_update(lpc_model::LpPath::new(&path), update.content.as_deref())
+                .map_err(library_ui_error)?;
+        }
+        active.handle.record_save(now).map_err(library_ui_error)?;
+        active.last_synced = pulled.version;
+
+        // corruption tripwire: library copy must now match the runtime
+        let local = active
+            .handle
+            .content_hash()
+            .map_err(library_ui_error)?
+            .to_string();
+        let (remote, _) = server
+            .hash_package(crate::app::project::demo_project::DEMO_PROJECT_STORAGE_ID)
+            .await?;
+        if local != remote {
+            log::error!("library/runtime hash mismatch after save: {local} vs {remote}");
+            return Ok(Some(UiNotice::warning(
+                "Saved, but the library copy differs from the simulator — please report this",
+            )));
+        }
+        Ok(None)
     }
 
     pub async fn connect_running_project(
@@ -907,10 +1050,21 @@ impl ProjectController {
         } else {
             UiNotice::info(format!("Saved {written} project file(s)"))
         };
-        Ok(ProjectEditRun {
-            notices: UiNotices::new().with_notice(notice),
-            logs,
-        })
+        let mut notices = UiNotices::new().with_notice(notice);
+        if written > 0 {
+            // save-as-pull: the library copy tracks every committed save
+            match self.pull_committed_changes_into_library(server).await {
+                Ok(Some(warning)) => notices = notices.with_notice(warning),
+                Ok(None) => {}
+                Err(e) => {
+                    log::warn!("save-as-pull failed (will retry on next save): {e:?}");
+                    notices = notices.with_notice(UiNotice::warning(
+                        "Saved to the simulator, but not yet to your library — will retry on the next save",
+                    ));
+                }
+            }
+        }
+        Ok(ProjectEditRun { notices, logs })
     }
 
     /// Discard every pending edit: the local edit buffer clears immediately
@@ -1402,6 +1556,10 @@ fn format_bytes(bytes: u64) -> String {
     } else {
         format!("{bytes} B")
     }
+}
+
+fn library_ui_error(e: crate::app::library::LibraryError) -> UiError {
+    UiError::MissingSession(format!("library: {e}"))
 }
 
 #[cfg(test)]

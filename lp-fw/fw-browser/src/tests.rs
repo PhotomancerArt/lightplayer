@@ -435,6 +435,79 @@ fn file_sync_round_trips_over_the_protocol() {
     );
 }
 
+#[wasm_bindgen_test]
+fn load_project_tolerates_library_artifacts() {
+    // M3 pushes add a uid field to project.json and a /.lp/meta.json
+    // sidecar; loading must tolerate both (A/B to isolate failures).
+    fw_browser_init_exports(wasm_bindgen::exports());
+
+    let case = |label: &str, add_uid: bool, add_sidecar: bool| {
+        let runtime_id = create_runtime(label).expect("create runtime");
+        let mut next_id = 1u64;
+        let project_fs = build_smoke_project();
+        for (path, mut content) in collect_project_files(&project_fs.borrow()) {
+            if add_uid && path == "project.json" {
+                // canonical insertion: kind stays first (streaming codec)
+                let text = String::from_utf8(content).unwrap();
+                let patched = text.replacen(
+                    "\"kind\": \"Project\",",
+                    "\"kind\": \"Project\",\n  \"uid\": \"prj_0000000000000042\",",
+                    1,
+                );
+                assert_ne!(patched, text, "kind anchor not found in manifest");
+                content = patched.into_bytes();
+            }
+            let full_path = format!("/projects/{label}/{path}").as_path_buf();
+            let responses = send_protocol_request(
+                runtime_id,
+                next_request_id(&mut next_id),
+                ClientRequest::Filesystem(FsRequest::Write {
+                    path: full_path,
+                    data: content,
+                }),
+                1,
+            );
+            assert!(!responses.is_empty(), "{label}: write got no response");
+        }
+        if add_sidecar {
+            let responses = send_protocol_request(
+                runtime_id,
+                next_request_id(&mut next_id),
+                ClientRequest::Filesystem(FsRequest::Write {
+                    path: format!("/projects/{label}/.lp/meta.json").as_path_buf(),
+                    data: br#"{"provenance":{"seededFrom":{"source":"examples/basic"}},"createdAt":1.0}"#.to_vec(),
+                }),
+                1,
+            );
+            assert!(
+                !responses.is_empty(),
+                "{label}: sidecar write got no response"
+            );
+        }
+        let responses = send_protocol_request(
+            runtime_id,
+            next_request_id(&mut next_id),
+            ClientRequest::LoadProject {
+                path: label.to_string(),
+            },
+            1,
+        );
+        assert!(
+            !responses.is_empty(),
+            "{label}: LoadProject got NO response (worker would hang)"
+        );
+        match &responses[0].msg {
+            WireServerMsgBody::LoadProject { .. } => {}
+            other => panic!("{label}: LoadProject failed: {other:?}"),
+        }
+    };
+
+    case("lib-plain", false, false);
+    case("lib-uid", true, false);
+    case("lib-sidecar", false, true);
+    case("lib-both", true, true);
+}
+
 fn next_request_id(next_id: &mut u64) -> u64 {
     let id = *next_id;
     *next_id += 1;

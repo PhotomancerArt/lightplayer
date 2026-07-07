@@ -76,33 +76,39 @@ pub fn App() -> Element {
         }
     });
 
-    // Mount the local project store: request durability, take the library
-    // lock, load OPFS into memory, start the flusher. The simulator never
-    // sees this store (D19/D20 — the sim is an ephemeral place). Spawned
-    // from use_hook so it runs exactly once per app instance (a use_future
-    // here restarts with the render loop and would mount repeatedly).
+    // The local project store: mounted in the startup hook below (which
+    // also attaches the library and only then fires the connect action).
     let mut store_status = use_signal(|| LocalStoreStatus::Initializing);
-    use_hook(move || {
-        local_store::request_persist();
-        spawn(async move {
-            store_status.set(local_store::init_local_store().await);
-        });
-    });
     let on_store_retry = move |_| {
         spawn(async move {
             store_status.set(local_store::init_local_store().await);
         });
     };
 
+    // Startup ordering matters: the library must attach before the connect
+    // action runs, or the demo would load through the legacy (storeless)
+    // path on first paint. The store mount is awaited here; the sim still
+    // starts (without persistence) if the store is unavailable.
     let startup_intent = use_hook(studio_url::read_connection_intent);
     let startup_bridge = bridge.clone();
-    let _startup_task = use_future(move || {
+    use_hook(move || {
         let startup_bridge = startup_bridge.clone();
-        async move {
+        spawn(async move {
+            local_store::request_persist();
+            let status = local_store::init_local_store().await;
+            #[cfg(target_arch = "wasm32")]
+            if status == LocalStoreStatus::Ready {
+                if let Some(library) = local_store::library_store() {
+                    startup_bridge.tx.send(StudioCommand::AttachLibrary(
+                        lpa_studio_core::app::studio::studio_command::LibraryAttachment(library),
+                    ));
+                }
+            }
+            store_status.set(status);
             if let Some(action) = startup_intent.and_then(|intent| intent.startup_action()) {
                 startup_bridge.tx.send(StudioCommand::Action(action));
             }
-        }
+        });
     });
 
     let refresh_bridge = bridge.clone();

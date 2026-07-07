@@ -62,6 +62,33 @@ mod wasm {
         LOCAL_STORE.with(|s| s.borrow().clone())
     }
 
+    /// The library layer over the mounted store, with browser randomness
+    /// (crypto.getRandomValues) injected for uid minting.
+    pub fn library_store() -> Option<lpa_studio_core::app::library::LibraryStore> {
+        let store = local_store()?;
+        let fs: std::rc::Rc<std::cell::RefCell<dyn lpfs::LpFs>> =
+            std::rc::Rc::new(std::cell::RefCell::new(store));
+        Some(lpa_studio_core::app::library::LibraryStore::new(
+            fs,
+            std::rc::Rc::new(random_bytes),
+        ))
+    }
+
+    fn random_bytes() -> [u8; 16] {
+        let mut bytes = [0u8; 16];
+        let filled = web_sys::window()
+            .and_then(|w| w.crypto().ok())
+            .and_then(|c| c.get_random_values_with_u8_array(&mut bytes).ok())
+            .is_some();
+        if !filled {
+            // last-resort fallback; uids only need uniqueness, not secrecy
+            for b in bytes.iter_mut() {
+                *b = (js_sys::Math::random() * 256.0) as u8;
+            }
+        }
+        bytes
+    }
+
     /// Request best-effort storage durability; fire-and-forget, logged.
     pub fn request_persist() {
         let Some(window) = web_sys::window() else {
@@ -118,10 +145,8 @@ mod wasm {
     }
 }
 
-// `wasm::local_store()` (the mounted-store accessor) is deliberately not
-// re-exported yet: its consumer is the places layer (roadmap M3).
 #[cfg(target_arch = "wasm32")]
-pub use wasm::{init_local_store, request_persist};
+pub use wasm::{init_local_store, library_store, request_persist};
 
 /// Host builds run unit tests only and never mount a store.
 #[cfg(not(target_arch = "wasm32"))]
