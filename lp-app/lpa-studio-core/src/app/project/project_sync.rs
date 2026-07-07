@@ -62,8 +62,16 @@ impl ProjectSync {
     }
 
     pub fn begin_initial_sync(&mut self) {
+        // Reset per-read data (mirror, previews, overlay) but preserve the
+        // binding-graph subscription: it is a UI preference (the bus pane
+        // ships with every loaded project, set at `mark_ready`), not
+        // per-read state. Without this, the reset here wipes the
+        // subscription that `mark_ready` just set, and the bus pane never
+        // gets its probe — showing "Reading" forever.
+        let binding_graph_subscribed = self.binding_graph_subscribed;
         *self = Self {
             phase: ProjectSyncPhase::SyncingProject,
+            binding_graph_subscribed,
             ..Self::new()
         };
     }
@@ -781,6 +789,30 @@ mod tests {
         assert_eq!(sync.binding_graph(), None);
         let request = sync.refresh_project_read_request(Vec::new());
         assert!(request.probes.is_empty());
+    }
+
+    #[test]
+    fn binding_graph_subscription_survives_begin_initial_sync() {
+        // Regression: the demo flow sets the subscription at `mark_ready`,
+        // then `sync_loaded_project` calls `begin_initial_sync`, which resets
+        // per-read state. The subscription is a UI preference, not read data,
+        // so it must survive — otherwise the initial read omits the probe and
+        // the bus pane shows "Reading" forever.
+        let mut sync = ProjectSync::new();
+        sync.set_binding_graph_subscribed(true);
+
+        sync.begin_initial_sync();
+
+        let request = sync.initial_project_read_request(Vec::new());
+        assert_eq!(
+            request.probes,
+            vec![ProjectProbeRequest::BindingGraph(
+                BindingGraphProbeRequest {
+                    include_values: true,
+                }
+            )],
+            "binding-graph probe must ride the initial read after begin_initial_sync"
+        );
     }
 
     #[test]
