@@ -29,8 +29,12 @@
 //! [`log::Log::enabled`] always returns `true`: the runtime gate is
 //! `log::set_max_level` (enforced by the `log::` macros before they reach the
 //! sink) and the *display* gate is the console's
-//! [`LogFilter`](super::LogFilter). The sink captures everything the macros
-//! let through so relaxing the console filter reveals retained history.
+//! [`LogFilter`](super::LogFilter). The web shell keeps `set_max_level` in
+//! step with the console filter's `min_level`, so the level threshold gates
+//! *capture*, not just display: producers below the floor short-circuit at the
+//! macro and are never queued. Lowering the threshold therefore reveals only
+//! forward output at the newly captured levels; the origin toggles, which
+//! never touch capture, still reveal retained history.
 //!
 //! # Installation and drain contract
 //!
