@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiNodeChild, UiNodeHeader, UiNodeTab, UiNodeView};
+use lpa_studio_core::{UiAction, UiNodeChild, UiNodeHeader, UiNodeTab, UiNodeView, UiPendingEdit};
 
 use crate::app::node::{NodeDirtyTint, NodePane};
 
@@ -8,6 +8,10 @@ use crate::app::node::{NodeDirtyTint, NodePane};
 pub fn NodeChildren(
     items: Vec<UiNodeChild>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    /// The editor-level pending-edit list, threaded into every child pane
+    /// (each pane's detail popover filters it to its own node).
+    #[props(default)]
+    pending_edits: Vec<UiPendingEdit>,
     #[props(default)] dirty_tint: NodeDirtyTint,
 ) -> Element {
     rsx! {
@@ -17,6 +21,7 @@ pub fn NodeChildren(
                     key: "{child.label}",
                     view: child_node_view(child),
                     on_action,
+                    pending_edits: pending_edits.clone(),
                     dirty_tint,
                 }
             }

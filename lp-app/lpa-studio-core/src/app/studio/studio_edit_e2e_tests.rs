@@ -54,6 +54,27 @@ fn simulator_session_edit_save_and_revert_end_to_end() {
     drive(actor.run_one_batch_for_test());
     let snapshot = view.try_recv().expect("connect emits a snapshot");
 
+    // Flat-root workspace over the real wire: the project root renders no
+    // card (the clock and fixture panes are the top-level entries) and the
+    // root's own slots ride `root_slots` with the `read_only_persisted`
+    // policy on `format`/`nodes` intact; `name` stays editable.
+    let editor = project_editor(&snapshot);
+    assert_eq!(editor.nodes.len(), 2, "two child panes, no root card");
+    let root_slot = |path: &str| {
+        editor
+            .root_slots
+            .iter()
+            .find(|slot| {
+                slot.address
+                    .as_ref()
+                    .is_some_and(|address| address.path.to_string() == path)
+            })
+            .unwrap_or_else(|| panic!("root settings should carry {path}"))
+    };
+    assert!(!root_slot("format").state.editable);
+    assert!(!root_slot("nodes").state.editable);
+    assert!(root_slot("name").state.editable);
+
     let rate = find_slot(&snapshot, "controls.rate");
     assert_eq!(rate.state.dirty, UiNodeDirtyState::Clean);
     assert!(rate.state.live, "clock rate is a transient (live) control");
@@ -1004,15 +1025,19 @@ fn count_overlay_reads(sent: &Rc<RefCell<Vec<ClientMessage>>>) -> usize {
         .count()
 }
 
-fn editor_dirty(view: &UiStudioView) -> (usize, usize) {
-    let editor = view
-        .panes
+/// The project editor DTO from a studio snapshot.
+fn project_editor(view: &UiStudioView) -> &crate::ProjectEditorView {
+    view.panes
         .iter()
         .find_map(|pane| match &pane.body {
-            UiViewContent::ProjectEditor(editor) => Some(editor),
+            UiViewContent::ProjectEditor(editor) => Some(&**editor),
             _ => None,
         })
-        .expect("project editor pane");
+        .expect("project editor pane")
+}
+
+fn editor_dirty(view: &UiStudioView) -> (usize, usize) {
+    let editor = project_editor(view);
     (editor.dirty.persisted, editor.dirty.transient)
 }
 
@@ -1022,15 +1047,11 @@ fn find_slot<'a>(view: &'a UiStudioView, path: &str) -> &'a UiConfigSlot {
 }
 
 /// Like [`find_slot`], but `None` when no row carries the address path.
+///
+/// Walks the workspace cards (the root's child panes under the flat-root
+/// model) and, for root-own slots, the project popup's `root_slots` rows.
 fn try_find_slot<'a>(view: &'a UiStudioView, path: &str) -> Option<&'a UiConfigSlot> {
-    let editor = view
-        .panes
-        .iter()
-        .find_map(|pane| match &pane.body {
-            UiViewContent::ProjectEditor(editor) => Some(editor),
-            _ => None,
-        })
-        .expect("project editor pane");
+    let editor = project_editor(view);
 
     fn in_slots<'a>(slots: &'a [UiConfigSlot], path: &str) -> Option<&'a UiConfigSlot> {
         for slot in slots {
@@ -1065,15 +1086,19 @@ fn try_find_slot<'a>(view: &'a UiStudioView, path: &str) -> Option<&'a UiConfigS
         })
     }
 
-    editor.nodes.iter().find_map(|node| {
-        node.tabs
-            .iter()
-            .find_map(|tab| match &tab.body {
-                UiNodeTabBody::Sections(sections) => in_sections(sections, path),
-                _ => None,
-            })
-            .or_else(|| in_children(&node.children, path))
-    })
+    editor
+        .nodes
+        .iter()
+        .find_map(|node| {
+            node.tabs
+                .iter()
+                .find_map(|tab| match &tab.body {
+                    UiNodeTabBody::Sections(sections) => in_sections(sections, path),
+                    _ => None,
+                })
+                .or_else(|| in_children(&node.children, path))
+        })
+        .or_else(|| in_slots(&editor.root_slots, path))
 }
 
 fn slot_value_display(slot: &UiConfigSlot) -> &str {

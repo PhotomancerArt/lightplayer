@@ -1603,9 +1603,12 @@ mod tests {
 
         let actions = view_actions(&studio.view());
 
-        assert!(actions.iter().any(|action| matches!(
+        // Sidebar tidy (P6): a ready project pane renders no
+        // Refresh/Disconnect buttons — the ops stay dispatchable, but no
+        // pane offers them. Device management recovery stays visible.
+        assert!(!actions.iter().any(|action| matches!(
             action.op_as::<ProjectOp>(),
-            Some(ProjectOp::DisconnectProject)
+            Some(ProjectOp::DisconnectProject | ProjectOp::RefreshProject)
         )));
         assert!(actions.iter().any(|action| matches!(
             action.op_as::<DeviceOp>(),

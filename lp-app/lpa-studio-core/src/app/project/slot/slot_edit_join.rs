@@ -43,6 +43,13 @@ pub(in crate::app::project) struct SlotEditJoin<'a> {
     /// (`lpc_model::resolve_slot_policy`), which works on data-less paths —
     /// so a removed entry with no surviving row still classifies correctly.
     persistence: BTreeMap<ProjectSlotAddress, SlotPersistence>,
+    /// Saved (base) display strings for overlay entries, reverse-mapped from
+    /// the mirror's `(artifact, path)` base-value map exactly like `overlay`
+    /// itself — so a key here always has an overlay entry, never a
+    /// buffer-only one (the mirror only learns base values from acks and
+    /// overlay reads). Feeds `UiPendingEdit::old_value` and
+    /// `UiConfigSlot::old_value`.
+    base_values: BTreeMap<ProjectSlotAddress, String>,
 }
 
 /// Aggregate state of the edits strictly under a composite slot's path,
@@ -91,6 +98,7 @@ impl<'a> SlotEditJoin<'a> {
             buffer: None,
             overlay: BTreeMap::new(),
             persistence: BTreeMap::new(),
+            base_values: BTreeMap::new(),
         }
     }
 
@@ -103,7 +111,27 @@ impl<'a> SlotEditJoin<'a> {
             buffer: Some(buffer),
             overlay,
             persistence,
+            base_values: BTreeMap::new(),
         }
+    }
+
+    /// Attach the saved (base) display strings for overlay entries.
+    pub(in crate::app::project) fn with_base_values(
+        mut self,
+        base_values: BTreeMap<ProjectSlotAddress, String>,
+    ) -> Self {
+        self.base_values = base_values;
+        self
+    }
+
+    /// Display string of the saved (base) value the edit entry at `address`
+    /// replaces, when the mirror knows it. `None` degrades to the entry's
+    /// kind-only display.
+    pub(in crate::app::project) fn base_display(
+        &self,
+        address: &ProjectSlotAddress,
+    ) -> Option<&str> {
+        self.base_values.get(address).map(String::as_str)
     }
 
     /// The buffered (un-acked) edit for `address`, if any.
@@ -389,5 +417,24 @@ mod tests {
         assert!(!join.overlay_dirty(&at("entries[a]")));
         assert_eq!(join.state_under(&at("entries")), None);
         assert!(join.dirty_summary_for_node(&node()).is_clean());
+    }
+
+    #[test]
+    fn base_display_answers_only_annotated_addresses() {
+        let buffer = BTreeMap::new();
+        let overlay = BTreeMap::from([
+            (at("brightness"), SlotEditOp::AssignValue(LpValue::F32(0.9))),
+            (at("entries[a]"), SlotEditOp::Remove),
+        ]);
+        let join = SlotEditJoin::new(&buffer, overlay, BTreeMap::new())
+            .with_base_values(BTreeMap::from([(at("brightness"), "0.75".to_string())]));
+
+        assert_eq!(join.base_display(&at("brightness")), Some("0.75"));
+        assert_eq!(
+            join.base_display(&at("entries[a]")),
+            None,
+            "unannotated entries degrade to kind-only display"
+        );
+        assert_eq!(SlotEditJoin::empty().base_display(&at("brightness")), None);
     }
 }

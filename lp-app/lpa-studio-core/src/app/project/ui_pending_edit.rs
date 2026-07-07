@@ -9,19 +9,35 @@ use crate::UiAction;
 /// edit-state join `DirtySummary` counting uses, so the list length per
 /// [`UiPendingEditPhase`] equals the summary's bucket counts by construction
 /// (one entry per buffer/overlay address, never per slot row — a removed map
-/// entry with no surviving row is still listed). No before/after values
-/// (editing-model ADR follow-up (b) stays deferred).
+/// entry with no surviving row is still listed). Entries carry the saved
+/// (base) value they replace where the mirror knows it ([`Self::old_value`]
+/// — editing-model ADR follow-up (b), display half).
 #[derive(Clone, Debug, PartialEq)]
 pub struct UiPendingEdit {
     /// Label of the node the edit addresses. Overlay entries whose artifact
     /// no longer reverse-maps to a synced node (stale) carry the artifact
     /// path here instead of being dropped from the list.
     pub node_label: String,
+    /// Stable address string of the node the edit targets — the same string
+    /// `UiNodeView::node_id` / `UiNodeHeader::path` carry, so per-node
+    /// surfaces (the node detail popup) can filter the editor-level list
+    /// exactly instead of matching the (non-unique) label. Stale entries
+    /// carry their artifact file path here (no node address exists), which
+    /// never collides with a synced node's address.
+    pub node_path: String,
     /// Human-readable slot path within the node's def root (the root name
     /// itself for root-path edits).
     pub slot_path_display: String,
     /// What the edit does, with the display string for assigned values.
     pub kind: UiPendingEditKind,
+    /// Display string of the saved (base) value this edit replaces, from the
+    /// overlay mirror's base-value map (`ProjectSync::base_value_at`):
+    /// formatted leaf values, capped compact JSON for composites. `None`
+    /// when the base holds nothing at the path (a structural add), when the
+    /// edit is still buffered (no ack has annotated it yet), or when the
+    /// server could not derive a display — rows degrade to their kind-only
+    /// form.
+    pub old_value: Option<String>,
     /// Which save-panel section the entry belongs to — matches the entry's
     /// [`crate::DirtySummary`] bucket exactly.
     pub phase: UiPendingEditPhase,

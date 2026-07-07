@@ -161,9 +161,20 @@ impl Project {
             .map_err(|e| ServerError::Core(format!("{e}")))
     }
 
-    pub fn read_overlay(&self) -> WireOverlayReadResponse {
+    pub fn read_overlay(&mut self) -> WireOverlayReadResponse {
+        // Base-value display strings ride the read as a parallel list (P2):
+        // one base parse per overlaid artifact annotates every pending path,
+        // so reconnecting clients and foreign-edit fetches restore "old
+        // value" displays without extra requests.
+        let shapes = self.engine().slot_shapes().clone();
+        let ctx = ParseCtx { shapes: &shapes };
+        let base_values = {
+            let fs_ref = self.fs.borrow();
+            self.registry.overlay_base_displays(&*fs_ref, &ctx)
+        };
         let overlay = self.registry.overlay();
         WireOverlayReadResponse::new(overlay.get().clone(), overlay.changed_at())
+            .with_base_values(base_values)
     }
 
     pub fn read_inventory(&self) -> WireProjectInventoryReadResponse {

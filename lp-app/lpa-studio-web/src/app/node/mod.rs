@@ -26,6 +26,9 @@ mod slot_fields;
 mod slot_gesture_fields;
 mod slot_issue_list;
 mod slot_matrix_field;
+mod slot_option_presence;
+#[cfg(feature = "stories")]
+pub(crate) mod slot_option_presence_stories;
 mod slot_raw_input_popover;
 mod slot_record_editor;
 #[cfg(feature = "stories")]
@@ -59,10 +62,13 @@ pub use slot_fields::{
     StringSlotField, UIntSlotField, XySlotField,
 };
 pub use slot_gesture_fields::{
-    EnumVariantField, MapAddEntry, MapEntryKeyField, MapEntryRemoveButton, OptionToggleField,
+    EnumVariantField, MapAddEntry, MapEntryKeyField, MapEntryRemoveButton,
 };
 pub use slot_issue_list::SlotIssueList;
 pub use slot_matrix_field::MatrixSlotField;
+pub use slot_option_presence::{
+    OptionPresenceActionButton, OptionPresenceCell, OptionPresenceCheckbox, OptionPresenceStyle,
+};
 pub use slot_raw_input_popover::SlotRawInputPopover;
 pub use slot_record_editor::SlotRecordEditor;
 pub(crate) use slot_shape_display::{

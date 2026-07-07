@@ -950,7 +950,8 @@ pub(crate) fn project_synced_pane_view() -> UiPaneView {
         "Project",
         UiStatus::good("Ready"),
         UiViewContent::ProjectEditor(Box::new(project_editor_fixture(ProjectSyncPhase::Ready))),
-        project_ready_actions(),
+        // P6 sidebar tidy: a ready project produces no pane-level actions.
+        Vec::new(),
     )
 }
 
@@ -974,7 +975,8 @@ pub(crate) fn project_sync_failed_pane_view() -> UiPaneView {
         UiViewContent::ProjectEditor(Box::new(project_editor_empty_fixture(
             ProjectSyncPhase::Failed,
         ))),
-        project_ready_actions(),
+        // P6 sidebar tidy: a ready project produces no pane-level actions.
+        Vec::new(),
     )
 }
 
@@ -1038,9 +1040,10 @@ pub(crate) fn project_editor_fixture(phase: ProjectSyncPhase) -> ProjectEditorVi
         summary,
         project_synced_metrics(),
         ProjectNodeTreeView::new(vec![project], 5),
-        vec![project_root_node()],
+        project_workspace_nodes(),
     )
     .with_project_name("Demo")
+    .with_root_slots(project_root_slots())
 }
 
 pub(crate) fn project_editor_empty_fixture(phase: ProjectSyncPhase) -> ProjectEditorView {
@@ -1110,24 +1113,60 @@ pub(crate) fn project_focus_action(runtime_id: u32, path: &str, label: &str) -> 
     .with_label(format!("Focus {label}"))
 }
 
-fn project_root_node() -> UiNodeView {
-    UiNodeView::new(
-        UiNodeHeader::new("Demo", "Project", "/demo.project")
-            .with_status(UiStatus::good("Running"))
-            .with_summary("4 child nodes")
-            .with_detail("Root composition node."),
-        vec![UiNodeTab::main(vec![UiNodeSection::ConfigSlots(vec![
-            UiConfigSlot::value("name", "Name", UiSlotValue::string("studio-demo")),
-            UiConfigSlot::value("enabled", "Enabled", UiSlotValue::bool(true)),
-        ])])],
+/// Flat-root workspace nodes (P6): the project root renders no card — its
+/// child panes are the top-level entries; the root's own slots live in
+/// [`project_root_slots`].
+pub(crate) fn project_workspace_nodes() -> Vec<UiNodeView> {
+    vec![
+        workspace_node(clock_node_child()),
+        workspace_node(orbit_shader_child()),
+        workspace_node(palette_node_child()),
+        workspace_node(output_node_child()),
+    ]
+}
+
+/// The project root's own config rows for the project popup's settings
+/// section: `name` editable, `format`/`nodes` read-only (Q3 policy).
+pub(crate) fn project_root_slots() -> Vec<UiConfigSlot> {
+    use lpa_studio_core::UiSlotFieldState;
+    vec![
+        UiConfigSlot::value("name", "Name", UiSlotValue::string("Demo")),
+        UiConfigSlot::value("format", "Format", UiSlotValue::u32(1))
+            .with_state(UiSlotFieldState::readonly()),
+        UiConfigSlot::record(
+            "nodes",
+            "Nodes",
+            vec![
+                UiConfigSlot::value("clock", "clock", UiSlotValue::string("./clock.json"))
+                    .with_state(UiSlotFieldState::readonly()),
+                UiConfigSlot::value("orbit", "orbit", UiSlotValue::string("./orbit.json"))
+                    .with_state(UiSlotFieldState::readonly()),
+            ],
+        )
+        .with_detail("2 nodes")
+        .with_state(UiSlotFieldState::readonly()),
+    ]
+}
+
+/// One top-level workspace pane built from a child fixture (the same
+/// projection `NodeChildren` applies when a child renders as a nested pane).
+fn workspace_node(child: UiNodeChild) -> UiNodeView {
+    let mut header = UiNodeHeader::new(
+        child.label.clone(),
+        child.kind.clone(),
+        child.detail.clone(),
     )
-    .with_node_id("/demo.project")
-    .with_children(vec![
-        clock_node_child(),
-        orbit_shader_child(),
-        palette_node_child(),
-        output_node_child(),
-    ])
+    .with_status(child.status.clone())
+    .with_dirty(child.dirty);
+    if let Some(summary) = child.summary {
+        header = header.with_summary(summary);
+    }
+    let mut view = UiNodeView::new(header, vec![UiNodeTab::main(child.sections)])
+        .with_node_id(child.detail.clone())
+        .with_children(child.children);
+    view.focused = child.focused || child.active;
+    view.action = child.action;
+    view
 }
 
 fn clock_node_child() -> UiNodeChild {
@@ -1281,13 +1320,6 @@ pub(crate) fn project_synced_metrics() -> Vec<UiMetric> {
         UiMetric::new("Frame", 512),
         UiMetric::new("Runtime buffers", 2),
         UiMetric::new("Memory free", "232 KB"),
-    ]
-}
-
-pub(crate) fn project_ready_actions() -> Vec<UiAction> {
-    vec![
-        project_action(ProjectOp::RefreshProject),
-        project_action(ProjectOp::DisconnectProject),
     ]
 }
 

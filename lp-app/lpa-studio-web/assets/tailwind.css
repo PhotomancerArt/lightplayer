@@ -28,6 +28,7 @@
     --tw-font-weight-semibold: 600;
     --tw-font-weight-bold: 700;
     --tw-font-weight-extrabold: 800;
+    --tw-tracking-wide: 0.025em;
     --tw-leading-tight: 1.25;
     --tw-leading-snug: 1.375;
     --tw-leading-normal: 1.5;
@@ -139,6 +140,9 @@
   }
   .tw\:m-0 {
     margin: calc(var(--tw-spacing) * 0);
+  }
+  .tw\:-mx-3 {
+    margin-inline: calc(var(--tw-spacing) * -3);
   }
   .tw\:-mx-4 {
     margin-inline: calc(var(--tw-spacing) * -4);
@@ -401,6 +405,15 @@
   .tw\:min-w-10 {
     min-width: calc(var(--tw-spacing) * 10);
   }
+  .tw\:min-w-32 {
+    min-width: calc(var(--tw-spacing) * 32);
+  }
+  .tw\:min-w-44 {
+    min-width: calc(var(--tw-spacing) * 44);
+  }
+  .tw\:min-w-56 {
+    min-width: calc(var(--tw-spacing) * 56);
+  }
   .tw\:min-w-\[2ch\] {
     min-width: 2ch;
   }
@@ -553,6 +566,9 @@
   .tw\:justify-start {
     justify-content: flex-start;
   }
+  .tw\:justify-items-stretch {
+    justify-items: stretch;
+  }
   .tw\:gap-0 {
     gap: calc(var(--tw-spacing) * 0);
   }
@@ -701,6 +717,10 @@
   .tw\:border-l-2 {
     border-left-style: var(--tw-border-style);
     border-left-width: 2px;
+  }
+  .tw\:border-dashed {
+    --tw-border-style: dashed;
+    border-style: dashed;
   }
   .tw\:border-accent {
     border-color: var(--tw-color-accent);
@@ -984,6 +1004,9 @@
   .tw\:px-\[18px\] {
     padding-inline: 18px;
   }
+  .tw\:py-0 {
+    padding-block: calc(var(--tw-spacing) * 0);
+  }
   .tw\:py-0\.5 {
     padding-block: calc(var(--tw-spacing) * 0.5);
   }
@@ -1040,9 +1063,6 @@
   }
   .tw\:pr-24 {
     padding-right: calc(var(--tw-spacing) * 24);
-  }
-  .tw\:pb-0\.5 {
-    padding-bottom: calc(var(--tw-spacing) * 0.5);
   }
   .tw\:pb-1 {
     padding-bottom: calc(var(--tw-spacing) * 1);
@@ -1168,6 +1188,10 @@
   .tw\:font-semibold {
     --tw-font-weight: var(--tw-font-weight-semibold);
     font-weight: var(--tw-font-weight-semibold);
+  }
+  .tw\:tracking-wide {
+    --tw-tracking: var(--tw-tracking-wide);
+    letter-spacing: var(--tw-tracking-wide);
   }
   .tw\:break-words {
     overflow-wrap: break-word;
@@ -1702,6 +1726,10 @@
   syntax: "*";
   inherits: false;
 }
+@property --tw-tracking {
+  syntax: "*";
+  inherits: false;
+}
 @property --tw-ordinal {
   syntax: "*";
   inherits: false;
@@ -1806,6 +1834,7 @@
       --tw-border-style: solid;
       --tw-leading: initial;
       --tw-font-weight: initial;
+      --tw-tracking: initial;
       --tw-ordinal: initial;
       --tw-slashed-zero: initial;
       --tw-numeric-figure: initial;

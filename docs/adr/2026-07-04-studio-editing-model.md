@@ -321,6 +321,37 @@ the option row without projecting the interior's gesture facts
 affordances. No such shape exists in any demo project today; revisit when
 one appears (tracked in the M3 plan notes as future work).
 
+### D8 — Base (saved) values ride the wire for old→new display (added 2026-07-07)
+
+Resolving follow-up (b). The client holds the *effective* value (synced
+view) and the *new* value (overlay), but not the *saved base* — so "what
+was it before?" needs a server-derived annotation.
+
+- **Derivation is server-side and single-parse.** `normalize_edit_to_base`
+  already parses the base def and computes the base value during every
+  mutation, so ack-time annotation is nearly free; the overlay-read path
+  parses each overlaid artifact once (`overlay_base_displays`). Values are
+  **display strings**, not `LpValue`s: leaves format with the shared
+  convention, composite bases degrade to capped (~120-char) compact JSON
+  via the dynamic slot writer (transient fields omitted — "saved value"
+  semantics), absent bases to `None`.
+- **Two surfaces, because dirty must survive reconnect (D1 spirit).**
+  Mutation-ack effects (`MutationEffect::{OverlayChanged,
+  NormalizedToRemoval}` and `StoredSlotEdit::Put`) carry an optional
+  `base_display` for the client's own edits with no extra fetch;
+  `WireOverlayReadResponse.base_values` carries them for reconnect and
+  foreign edits. Both are `skip_if_none`/`skip_if_empty`, so firmware wire
+  cost is zero when unannotated. `ProjectOverlay` itself is untouched.
+- **Mirror invariant.** `ProjectSync` keeps a parallel `(artifact, path) →
+  String` map pruned to the overlay's edit paths after every replay, so
+  canonicalization side effects (cleared descendants, sibling/counteracting
+  sweeps) drop base values without duplicating server logic: the map is
+  always a subset of the overlay's paths.
+- **Display.** The slot detail popup's edited section, the node popup list,
+  and the save panel render `old → new`; the per-entry revert lives inside
+  the edited section (with the shared revert icon), not floating at the
+  popup foot.
+
 ## Consequences
 
 - Reconnect and multi-client dirty state are free: one overlay read rebuilds
@@ -371,13 +402,12 @@ Per the deferred-decision convention, these are indexed in
 - **(a) Per-item overlay gating.** Fetch-full-on-change assumes small
   overlays. **Revisit when** measured overlay fetch cost matters (large
   overlays or chatty editing sessions on slow links).
-- **(b) Save-panel diff DTOs.** Partially superseded by M3: the save panel
-  now lists labeled per-entry changes (`UiPendingEdit` — node label, slot
-  path, op description, **current** value display string, phase, per-entry
-  revert), built from the same join enumeration as the dirty counts. What
-  remains deferred is before/after value DTOs (old value alongside new).
-  **Revisit when** display strings prove insufficient — e.g. a real "what
-  was it before?" need in the save panel.
+- **(b) ~~Save-panel diff DTOs.~~ Resolved 2026-07-07** by the post-M4
+  polish work — see **D8** below. Base (saved) values now ride the wire as
+  optional display strings on both the mutation-ack and overlay-read
+  surfaces, are mirrored beside the overlay, and render as `old → new` in
+  the slot detail popup, the node popup, and the save panel; composite
+  bases degrade to capped compact JSON, absent bases to "—".
 - **(c) ~~Composite edit semantics.~~ Resolved 2026-07-06** by M3 — see
   **D7** above (gestures-are-wire-ops, base-relative structural
   normalization, prefix-aware dirty, one-address-per-leaf,
