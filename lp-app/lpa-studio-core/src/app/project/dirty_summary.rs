@@ -5,7 +5,7 @@ use core::ops::{Add, AddAssign};
 
 use lpc_model::slot::SlotPersistence;
 
-use crate::{PendingEdit, PendingEditPhase};
+use crate::{PendingAssetEdit, PendingEdit, PendingEditPhase};
 
 /// Counts of edits that need a dirty affordance, aggregated bottom-up.
 ///
@@ -75,6 +75,26 @@ impl DirtySummary {
             },
             Some(_) => Self::for_persistence(persistence),
             None if overlay_dirty => Self::for_persistence(persistence),
+            None => Self::default(),
+        }
+    }
+
+    /// Classify one asset body edit entry's join state (same order as
+    /// [`Self::for_slot`]: buffered edit first, then the overlay mirror, else
+    /// clean). Asset body edits are always **persisted**-class — they are
+    /// written to their artifact files on save — so there is no transient
+    /// bucket for them.
+    pub(in crate::app::project) fn for_asset(
+        pending: Option<&PendingAssetEdit>,
+        overlay_dirty: bool,
+    ) -> Self {
+        match pending {
+            Some(edit) if edit.is_failed() => Self {
+                failed: 1,
+                ..Self::default()
+            },
+            Some(_) => Self::for_persistence(SlotPersistence::Persisted),
+            None if overlay_dirty => Self::for_persistence(SlotPersistence::Persisted),
             None => Self::default(),
         }
     }
@@ -176,6 +196,30 @@ mod tests {
             }
         );
         assert!(DirtySummary::for_slot(None, false, SlotPersistence::Persisted).is_clean());
+    }
+
+    #[test]
+    fn asset_edit_counts_persisted_unless_failed() {
+        let pending = PendingAssetEdit::pending(b"body".to_vec());
+        let failed = PendingAssetEdit::failed(b"body".to_vec(), "too large");
+        let one_persisted = DirtySummary {
+            persisted: 1,
+            transient: 0,
+            failed: 0,
+        };
+        let one_failed = DirtySummary {
+            persisted: 0,
+            transient: 0,
+            failed: 1,
+        };
+
+        assert_eq!(
+            DirtySummary::for_asset(Some(&pending), false),
+            one_persisted
+        );
+        assert_eq!(DirtySummary::for_asset(None, true), one_persisted);
+        assert_eq!(DirtySummary::for_asset(Some(&failed), true), one_failed);
+        assert!(DirtySummary::for_asset(None, false).is_clean());
     }
 
     #[test]

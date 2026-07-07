@@ -352,6 +352,54 @@ was it before?" needs a server-derived annotation.
   the edited section (with the shared revert icon), not floating at the
   popup foot.
 
+### D9 — Asset bodies ride the same overlay; unapplied editor text is the one client-local exception (added 2026-07-06)
+
+The studio-authoring roadmap's M1 (GLSL asset editing) extends the model to
+whole-file asset bodies with **overlay parity**: an applied edit stages one
+`MutationOp::SetArtifactBody { artifact, edit: ReplaceBody(bytes) }`,
+mirrored as `ArtifactOverlay::Asset` — so D1 (overlay-derived dirty), D4
+(the overlay ride-along), and the ack lifecycle of D5 all hold unchanged.
+An artifact-keyed pending buffer
+(`lpa-studio-core/src/app/project/asset/`) sits beside the slot buffer with
+the same phases; per-entry revert is `MutationOp::ClearArtifact`. Asset
+edits are persisted-class (no transient bucket); a `.glsl` artifact that
+maps to no synced node still counts into the project dirty summary
+(`SlotEditJoin::unmapped_asset_dirty_summary`), since it must enable Save.
+
+The editor renders **inline in the asset slot row** (`UiAssetEditor` on
+`UiSlotAsset.inline_editor`, resolved per editable asset slot in the node
+walk), not as a node-pane tab: the output stays visible beside it, and any
+editable asset anywhere in the slot tree gets an editor for free (the shape
+the M3 SVG mapping work wants). An earlier node-pane-tab rendering was
+replaced (checkpoint tag `checkpoint/asset-editor-tab`).
+
+Four deliberate points:
+
+- **Unapplied editor text is client-local — the one exception to D1.** Text
+  typed into the code editor exists only in the editor component until the
+  user explicitly applies it (button or Mod-Enter). It is announced by
+  editor-local chrome only (a neutral "Modified" chip + Apply enablement),
+  never by `DirtySummary`/`UiAffordance` — deliberately outside the
+  unsaved-yellow/live-blue color language, because it is neither. The
+  editor's clean baseline reconciles against the controller's effective
+  content: an ack that catches the external content up to the user's text
+  clears the modified state (no imperative "mark clean" call sites).
+- **Explicit Apply, no auto-apply.** A mid-keystroke bad compile currently
+  stops the node's rendering (no old-shader-keeps-rendering until the
+  compiler-robustness budgeted driver lands); revisit auto-apply after
+  that.
+- **Client-side size guard, no chunking.** `MAX_ASSET_BODY_BYTES` (10 KB)
+  parks oversize applies as failed entries client-side; mutations stay
+  single-frame under the 16 KB wire budget (`lpc-wire/src/budget.rs`).
+  Chunked mutations are recorded future work.
+- **Compile errors are presentation-parsed, not wire-structured.** The
+  engine's `NodeRuntimeStatus::Error(String)` keeps carrying one rendered
+  string; the client best-effort parses the rustc-style
+  ` --> <shader>:LINE:COL` marker (`UiShaderError`) into an error strip and
+  editor gutter marker. Positions refer to the last applied text and are
+  never remapped while the user types — the Modified chip is the honesty
+  signal. Structured diagnostics on the wire are recorded future work.
+
 ## Consequences
 
 - Reconnect and multi-client dirty state are free: one overlay read rebuilds

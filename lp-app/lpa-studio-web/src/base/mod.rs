@@ -4,6 +4,9 @@
 //! generic controls and display primitives that Studio could plausibly get
 //! from a design-system package.
 
+pub mod code_editor;
+#[cfg(feature = "stories")]
+pub(crate) mod code_editor_stories;
 pub mod detail_popover;
 #[cfg(feature = "stories")]
 pub(crate) mod detail_popover_stories;
@@ -17,6 +20,7 @@ pub mod popover;
 pub(crate) mod popover_stories;
 pub mod tabs;
 
+pub use code_editor::{CodeEditor, CodeEditorDiagnostic, CodeEditorLanguage};
 pub use detail_popover::{
     DetailPopover, DetailSection, DetailSectionTint, detail_popover_section_class,
 };

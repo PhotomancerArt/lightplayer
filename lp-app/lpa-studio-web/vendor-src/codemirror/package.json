@@ -1,0 +1,22 @@
+{
+  "name": "lp-codemirror-bundle",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Builds the vendored CodeMirror 6 bundle committed at ../../public/vendor/codemirror/. npm is needed only to regenerate the bundle, never to build or run the studio app.",
+  "type": "module",
+  "scripts": {
+    "build": "esbuild entry.mjs --bundle --format=iife --global-name=LpCodeMirror --minify --target=es2020 --outfile=../../public/vendor/codemirror/codemirror.js"
+  },
+  "dependencies": {
+    "@codemirror/commands": "6.8.0",
+    "@codemirror/language": "6.10.8",
+    "@codemirror/legacy-modes": "6.4.2",
+    "@codemirror/lint": "6.8.4",
+    "@codemirror/state": "6.5.2",
+    "@codemirror/view": "6.36.4",
+    "@lezer/highlight": "1.2.1"
+  },
+  "devDependencies": {
+    "esbuild": "0.24.2"
+  }
+}

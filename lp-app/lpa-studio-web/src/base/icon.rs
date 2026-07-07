@@ -54,6 +54,7 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         },
         StudioIconName::Save => rsx! { Save { size } },
         StudioIconName::Revert => rsx! { Undo2 { size } },
+        StudioIconName::Apply => rsx! { Zap { size } },
         StudioIconName::Settings => rsx! { Settings { size } },
         StudioIconName::Filter => rsx! { Funnel { size } },
         StudioIconName::Eraser => rsx! { Eraser { size } },
@@ -70,6 +71,7 @@ pub fn action_icon_name(icon: Option<&str>) -> Option<StudioIconName> {
         Some("test-tube") => Some(StudioIconName::Test),
         Some("save") => Some(StudioIconName::Save),
         Some("revert") => Some(StudioIconName::Revert),
+        Some("apply") => Some(StudioIconName::Apply),
         _ => None,
     }
 }
@@ -101,6 +103,8 @@ pub enum StudioIconName {
     NodeKind(NodeKindIcon),
     Save,
     Revert,
+    /// Lightning bolt: apply the edited asset body to the running project.
+    Apply,
     /// Gear: the console's device-settings popover trigger.
     Settings,
     /// Funnel: marks the console's display-level threshold as a filter.

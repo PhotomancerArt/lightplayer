@@ -21,7 +21,8 @@ pub struct UiNodeChild {
     pub focused: bool,
     /// Action that focuses this child node as the current Studio selection.
     pub action: Option<UiAction>,
-    /// Compact body sections for expanded child display.
+    /// Compact body sections for expanded child display (asset slots carry
+    /// their own inline editor data on [`crate::UiSlotAsset::inline_editor`]).
     pub sections: Vec<UiNodeSection>,
     /// Nested child nodes extracted below this child.
     pub children: Vec<UiNodeChild>,

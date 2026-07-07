@@ -56,6 +56,7 @@ pub fn NodePane(
     let select_kind = view.header.kind.clone();
     let focus_action = view.action.clone();
     let issues = view.issues.clone();
+    let header_actions = view.header_actions.clone();
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3",
@@ -79,7 +80,7 @@ pub fn NodePane(
                     },
                     title,
                     chrome,
-                    actions: view.header_actions.clone(),
+                    actions: header_actions,
                     on_action,
                     trailing: rsx! {
                         if tabs.len() > 1 {

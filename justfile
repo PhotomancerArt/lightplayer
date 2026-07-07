@@ -197,6 +197,16 @@ fw-browser-smoke: fw-browser-build
 # Studio web app
 # ============================================================================
 
+# Regenerate the vendored CodeMirror bundle committed at
+# lp-app/lpa-studio-web/public/vendor/codemirror/. Needs npm; the app build
+# itself never does (the committed bundle is the artifact).
+studio-codemirror-bundle:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd lp-app/lpa-studio-web/vendor-src/codemirror
+    npm ci
+    npm run build
+
 studio-fw-browser-sidecar profile="debug": install-wasm32-target
     #!/usr/bin/env bash
     set -euo pipefail

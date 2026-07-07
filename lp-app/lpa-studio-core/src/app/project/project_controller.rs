@@ -5,24 +5,29 @@ use std::collections::{BTreeMap, BTreeSet};
 use lpa_client::{CancelSignal, ProgressDeadline};
 
 use crate::app::project::format_lp_value;
-use crate::app::project::slot::{SlotEditEntry, SlotEditEntrySource, SlotEditJoin};
+use crate::app::project::slot::{
+    AssetEditEntry, AssetEditKey, AssetEditState, SlotEditEntry, SlotEditEntrySource, SlotEditJoin,
+};
 use crate::core::notice::UiNotices;
 use crate::{
-    Controller, ControllerId, DirtySummary, LoadedProjectChoice, PendingEdit, PendingEditOp,
-    PendingEditPhase, ProgressState, ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget,
-    ProjectEditorView, ProjectInventorySummary, ProjectNodeAddress, ProjectNodeTreeItem,
+    AssetEditOp, Controller, ControllerId, DirtySummary, LoadedProjectChoice, MAX_ASSET_BODY_BYTES,
+    PendingAssetEdit, PendingEdit, PendingEditOp, PendingEditPhase, ProgressState,
+    ProjectConnectResult, ProjectEditorOp, ProjectEditorTarget, ProjectEditorView,
+    ProjectInventorySummary, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeTreeItem,
     ProjectNodeTreeView, ProjectOp, ProjectSlotAddress, ProjectSlotRoot, ProjectSnapshot,
     ProjectState, ProjectSync, ProjectSyncPhase, ProjectSyncRun, ProjectSyncSummary, SlotEditOp,
-    StudioOverlayMutation, StudioProjectReadOutcome, StudioServerClient, UiAction, UiError,
-    UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin, UiMetric, UiNodeView, UiNotice, UiPaneAction,
-    UiPaneView, UiPendingEdit, UiPendingEditKind, UiPendingEditPhase, UiProductRef, UiResult,
-    UiStatus, UiViewContent, UxUpdateSink,
+    StudioOverlayMutation, StudioProjectReadOutcome, StudioServerClient, UiAction, UiAssetContent,
+    UiAssetContentBody, UiAssetEditor, UiError, UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin,
+    UiMetric, UiNodeView, UiNotice, UiPaneAction, UiPaneView, UiPendingEdit, UiPendingEditKind,
+    UiPendingEditPhase, UiProductRef, UiResult, UiShaderError, UiSlotAsset, UiStatus,
+    UiViewContent, UxUpdateSink,
 };
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
-    ArtifactLocation, MutationCmd, MutationCmdBatch, MutationCmdId, MutationCmdStatus,
-    MutationEffect, MutationOp, MutationRejection, NodeId, SlotEdit, SlotPolicy, SlotShapeId,
-    SlotShapeLookup, SlotShapeRegistry, TreePath, resolve_slot_policy,
+    ArtifactLocation, ArtifactSpec, AssetBodyOverlay, MutationCmd, MutationCmdBatch, MutationCmdId,
+    MutationCmdStatus, MutationEffect, MutationOp, MutationRejection, NodeId, SlotEdit, SlotPolicy,
+    SlotShapeId, SlotShapeLookup, SlotShapeRegistry, TreePath, resolve_artifact_specifier,
+    resolve_slot_policy,
 };
 use lpc_view::ProjectView;
 
@@ -42,6 +47,21 @@ pub struct ProjectController {
     /// Un-acked local slot edits, keyed by address and held until the server
     /// acknowledges them (state machine on [`PendingEdit`]).
     edit_buffer: BTreeMap<ProjectSlotAddress, PendingEdit>,
+    /// Un-acked local asset body edits, the artifact-keyed sibling of
+    /// [`Self::edit_buffer`] with the same ack lifecycle (state machine on
+    /// [`PendingAssetEdit`]).
+    asset_edit_buffer: BTreeMap<ArtifactLocation, PendingAssetEdit>,
+    /// Base file bodies fetched through the server filesystem for asset
+    /// editor content ([`Self::asset_content`]), fetched on demand and
+    /// invalidated after commit acks (save rewrites files) and overlay
+    /// clears (revert).
+    asset_base_bodies: BTreeMap<ArtifactLocation, Vec<u8>>,
+    /// The connected project's **server** filesystem root (e.g.
+    /// `/projects/studio`), from the connect flow. Artifact locations are
+    /// project-relative; the base-body fetch ([`Self::asset_content`])
+    /// resolves them against this root because `FsRequest::Read` is a
+    /// server-root surface.
+    project_fs_root: Option<lpc_model::LpPathBuf>,
     /// Runtime node id → containing def artifact, installed from the
     /// connect-time inventory read. Wire mutations target
     /// `(ArtifactLocation, SlotPath)`, so slot edits resolve through this map.
@@ -68,6 +88,9 @@ impl ProjectController {
             sync: None,
             root_nodes: Vec::new(),
             edit_buffer: BTreeMap::new(),
+            asset_edit_buffer: BTreeMap::new(),
+            asset_base_bodies: BTreeMap::new(),
+            project_fs_root: None,
             def_artifacts: BTreeMap::new(),
             slot_shapes: SlotShapeRegistry::default(),
             root_shape_ids: BTreeMap::new(),
@@ -103,11 +126,58 @@ impl ProjectController {
     pub fn ui_nodes(&self) -> Vec<UiNodeView> {
         let product_preview =
             |product: &UiProductRef| self.sync.as_ref()?.product_preview(product).cloned();
+        let asset_editor =
+            |node: &NodeController, asset: &UiSlotAsset| self.asset_editor(node, asset);
         let edits = self.slot_edit_join();
         self.root_nodes
             .iter()
-            .map(|node| node.ui_node_with_product_previews(&product_preview, &edits))
+            .map(|node| node.ui_node_with_product_previews(&product_preview, &edits, &asset_editor))
             .collect()
+    }
+
+    /// Resolve one node's asset slot into its editor-tab DTO, or `None` when
+    /// the artifact cannot be resolved (no known def artifact, or a source
+    /// path escaping the filesystem root) — unresolvable assets keep their
+    /// read-only slot row and get no editor.
+    ///
+    /// The slot's source path resolves against the node's **def artifact**
+    /// exactly like the server resolves def asset references
+    /// (`lpc_model::resolve_artifact_specifier`), so Apply targets the same
+    /// artifact the engine reads.
+    fn asset_editor(&self, node: &NodeController, asset: &UiSlotAsset) -> Option<UiAssetEditor> {
+        let def_artifact = self.def_artifacts.get(&node.target().node_id)?;
+        let path = resolve_artifact_specifier(
+            def_artifact.file_path().as_path(),
+            &ArtifactSpec::path(asset.source.as_str()),
+        )
+        .ok()?;
+        let artifact = ArtifactLocation::file(path);
+        let pending = self.asset_edit_buffer.get(&artifact);
+        let in_flight = matches!(
+            pending.map(|edit| &edit.phase),
+            Some(PendingEditPhase::Pending | PendingEditPhase::InFlight { .. })
+        );
+        let failure = pending
+            .and_then(PendingAssetEdit::failure_reason)
+            .map(str::to_string);
+        // The node's error status, parsed for the editor's error strip.
+        // Best-effort by design (QC5): compile errors carry a rustc-style
+        // location marker; anything else degrades to a location-less strip.
+        let shader_error = match node.status() {
+            status if status.tone == ProjectNodeStatusTone::Error => {
+                status.detail.as_deref().map(UiShaderError::parse)
+            }
+            _ => None,
+        };
+        Some(UiAssetEditor {
+            content: self.asset_content_cached(&artifact),
+            artifact,
+            kind: asset.editor,
+            source: asset.source.clone(),
+            in_flight,
+            failure,
+            shader_error,
+        })
     }
 
     /// Project-level aggregate [`DirtySummary`], derived per node from the
@@ -119,24 +189,36 @@ impl ProjectController {
     /// serves callers that need only the aggregate.
     pub fn dirty_summary(&self) -> DirtySummary {
         let edits = self.slot_edit_join();
-        self.root_nodes
+        let node_sum: DirtySummary = self
+            .root_nodes
             .iter()
             .map(|node| node.dirty_summary(&edits))
-            .sum()
+            .sum();
+        // Asset edits whose artifact maps to no synced node (e.g. a shader's
+        // `.glsl`, which is not a def artifact) still count toward the
+        // project totals — they are persisted-class and must enable Save.
+        node_sum + edits.unmapped_asset_dirty_summary()
     }
 
     /// Buffered edits still awaiting a server acknowledgement
-    /// (`Pending`/`InFlight`); `Failed` entries are parked, not in flight.
+    /// (`Pending`/`InFlight`), slot and asset alike; `Failed` entries are
+    /// parked, not in flight.
     pub fn edits_in_flight(&self) -> usize {
+        let in_flight = |phase: &PendingEditPhase| {
+            matches!(
+                phase,
+                PendingEditPhase::Pending | PendingEditPhase::InFlight { .. }
+            )
+        };
         self.edit_buffer
             .values()
-            .filter(|edit| {
-                matches!(
-                    edit.phase,
-                    PendingEditPhase::Pending | PendingEditPhase::InFlight { .. }
-                )
-            })
+            .filter(|edit| in_flight(&edit.phase))
             .count()
+            + self
+                .asset_edit_buffer
+                .values()
+                .filter(|edit| in_flight(&edit.phase))
+                .count()
     }
 
     /// The save panel's labeled change list (D5): one [`UiPendingEdit`] per
@@ -147,6 +229,10 @@ impl ProjectController {
     /// reverse-maps to a synced node are appended with the artifact path as
     /// their label rather than being dropped (no revert — there is no node
     /// address to dispatch through); they are not part of any node's counts.
+    /// Asset body edits follow as file rows ([`UiPendingEditKind::AssetBody`],
+    /// one per join asset entry): node-mapped first, then artifact-labeled
+    /// unmapped ones — every asset row carries a revert, which needs only the
+    /// artifact ([`AssetEditOp::Revert`]).
     pub fn pending_edits(&self) -> Vec<UiPendingEdit> {
         let join = self.slot_edit_join();
         let mut edits: Vec<UiPendingEdit> = join
@@ -158,7 +244,62 @@ impl ProjectController {
             })
             .collect();
         edits.extend(self.stale_pending_edits());
+        edits.extend(
+            join.asset_entries()
+                .into_iter()
+                .map(|entry| self.ui_pending_asset_edit(&entry)),
+        );
         edits
+    }
+
+    /// Project one join asset entry into its change-list DTO: a file row
+    /// whose path display is the artifact path, with the byte-size detail
+    /// and a per-entry revert dispatching [`AssetEditOp::Revert`]
+    /// (`ClearArtifact`). Like slot entries, the phase derives from the
+    /// entry's own [`DirtySummary`] classification, so list and counts
+    /// cannot drift.
+    fn ui_pending_asset_edit(&self, entry: &AssetEditEntry<'_>) -> UiPendingEdit {
+        let node_label = entry
+            .node
+            .and_then(|address| self.node(address))
+            .map(|node| node.label().to_string())
+            .unwrap_or_else(|| entry.artifact.file_path().as_str().to_string());
+        let detail = match entry.body_len() {
+            Some(len) => asset_body_size_display(len),
+            None => "deleted".to_string(),
+        };
+        let phase = if entry.summary.failed > 0 {
+            UiPendingEditPhase::Failed {
+                reason: entry
+                    .pending
+                    .and_then(PendingAssetEdit::failure_reason)
+                    .unwrap_or_default()
+                    .to_string(),
+            }
+        } else {
+            UiPendingEditPhase::Persisted
+        };
+        UiPendingEdit {
+            node_label,
+            // Asset artifacts are not def artifacts, so they reverse-map to
+            // no node; the row lists at the project level (no node popover
+            // claims it). When a mapped node exists, use its path.
+            node_path: entry
+                .node
+                .map(ToString::to_string)
+                .unwrap_or_else(|| entry.artifact.file_path().as_str().to_string()),
+            slot_path_display: entry.artifact.file_path().as_str().to_string(),
+            kind: UiPendingEditKind::AssetBody { detail },
+            // Whole-file replace: no meaningful saved-value display.
+            old_value: None,
+            phase,
+            revert: Some(UiAction::from_op(
+                ControllerId::new(Self::NODE_ID),
+                AssetEditOp::Revert {
+                    artifact: entry.artifact.clone(),
+                },
+            )),
+        }
     }
 
     /// Project one join entry into its change-list DTO. The phase derives
@@ -248,12 +389,17 @@ impl ProjectController {
     /// `(artifact, path)` to slot addresses through the def-artifact map (an
     /// artifact shared by several node uses marks each of them dirty), plus
     /// each entry's persistence classification for the join's per-entry
-    /// [`DirtySummary`] counting.
+    /// [`DirtySummary`] counting. Asset body edits (buffer + overlay
+    /// `ArtifactOverlay::Asset` mirror) join alongside, reverse-mapped
+    /// through the same def-artifact map; artifacts that map to no node join
+    /// under the unmapped key (they still list and count — see
+    /// `SlotEditJoin::unmapped_asset_dirty_summary`).
     fn slot_edit_join(&self) -> SlotEditJoin<'_> {
+        let nodes_by_artifact = self.nodes_by_def_artifact();
         let mut overlay = BTreeMap::new();
+        let mut assets: BTreeMap<AssetEditKey, AssetEditState<'_>> = BTreeMap::new();
         let mut base_values = BTreeMap::new();
         if let Some(sync) = &self.sync {
-            let nodes_by_artifact = self.nodes_by_def_artifact();
             for (artifact, path, op) in sync.overlay_slot_edits() {
                 // Unmapped (stale) artifacts have no slot address; they stay
                 // out of the join and are listed by `stale_pending_edits`.
@@ -272,6 +418,16 @@ impl ProjectController {
                     overlay.insert(address, op.clone());
                 }
             }
+            for (artifact, body) in sync.overlay_asset_edits() {
+                for key in asset_edit_keys(&nodes_by_artifact, artifact) {
+                    assets.entry(key).or_default().acked = Some(body);
+                }
+            }
+        }
+        for (artifact, pending) in &self.asset_edit_buffer {
+            for key in asset_edit_keys(&nodes_by_artifact, artifact) {
+                assets.entry(key).or_default().pending = Some(pending);
+            }
         }
         let persistence = self
             .edit_buffer
@@ -279,7 +435,9 @@ impl ProjectController {
             .chain(overlay.keys())
             .map(|address| (address.clone(), self.resolve_edit_persistence(address)))
             .collect();
-        SlotEditJoin::new(&self.edit_buffer, overlay, persistence).with_base_values(base_values)
+        SlotEditJoin::new(&self.edit_buffer, overlay, persistence)
+            .with_assets(assets)
+            .with_base_values(base_values)
     }
 
     /// Classify the persistence governing an edit entry's path through the
@@ -436,18 +594,24 @@ impl ProjectController {
         let summary = self.sync_summary().unwrap_or_default();
         let product_preview =
             |product: &UiProductRef| self.sync.as_ref()?.product_preview(product).cloned();
+        let asset_editor =
+            |node: &NodeController, asset: &UiSlotAsset| self.asset_editor(node, asset);
         let edits = self.slot_edit_join();
         let nodes = self
             .root_nodes
             .iter()
             .flat_map(NodeController::children)
-            .map(|node| node.ui_node_with_product_previews(&product_preview, &edits))
+            .map(|node| node.ui_node_with_product_previews(&product_preview, &edits, &asset_editor))
             .collect::<Vec<_>>();
+        // Node dirty covers slot + node-mapped asset edits across the subtree;
+        // asset edits whose artifact maps to no node (a shader's `.glsl`) are
+        // added on top so they still count toward Save (see `dirty_summary`).
         let dirty = self
             .root_nodes
             .iter()
             .map(|node| node.dirty_summary(&edits))
-            .sum::<DirtySummary>();
+            .sum::<DirtySummary>()
+            + edits.unmapped_asset_dirty_summary();
         let root_slots = self
             .root_nodes
             .first()
@@ -562,6 +726,7 @@ impl ProjectController {
         self.mark_loading_demo();
         let loaded = server.load_demo_project().await?;
         self.mark_ready(loaded.project_id, loaded.handle_id, loaded.inventory);
+        self.project_fs_root = loaded.fs_root;
         self.def_artifacts = loaded.node_def_artifacts;
         Ok(loaded.logs)
     }
@@ -595,6 +760,7 @@ impl ProjectController {
         let project = server.connect_loaded_project(choice).await?;
         let logs = server.take_pending_logs();
         self.mark_ready(project.project_id, project.handle_id, project.inventory);
+        self.project_fs_root = Some(project.fs_root);
         self.def_artifacts = project.node_def_artifacts;
         Ok(logs)
     }
@@ -716,6 +882,7 @@ impl ProjectController {
                 let loaded = server.connect_loaded_project(project.clone()).await?;
                 logs.extend(server.take_pending_logs());
                 self.mark_ready(loaded.project_id, loaded.handle_id, loaded.inventory);
+                self.project_fs_root = Some(loaded.fs_root);
                 self.def_artifacts = loaded.node_def_artifacts;
                 Ok(ProjectConnectResult::Connected { logs })
             }
@@ -1009,6 +1176,9 @@ impl ProjectController {
         self.sync = None;
         self.root_nodes.clear();
         self.edit_buffer.clear();
+        self.asset_edit_buffer.clear();
+        self.asset_base_bodies.clear();
+        self.project_fs_root = None;
         self.def_artifacts.clear();
         self.slot_shapes = SlotShapeRegistry::default();
         self.root_shape_ids.clear();
@@ -1140,6 +1310,9 @@ impl ProjectController {
         logs.extend(read.logs);
         self.sync_mut()?
             .apply_overlay_read(read.overlay, read.base_values, read.revision);
+        // The commit rewrote persisted artifacts, so every cached base body
+        // is suspect; drop them all and let the next editor open re-fetch.
+        self.asset_base_bodies.clear();
 
         let changes = &commit.result.artifact_changes;
         let written = changes.added.len() + changes.changed.len() + changes.removed.len();
@@ -1162,6 +1335,10 @@ impl ProjectController {
     ) -> Result<ProjectEditRun, UiError> {
         let handle_id = self.ready_handle_id()?;
         self.edit_buffer.clear();
+        self.asset_edit_buffer.clear();
+        // Every artifact's overlay entry clears with the batch, so cached
+        // base bodies re-fetch on the next editor open (invalidate-on-clear).
+        self.asset_base_bodies.clear();
         let batch = MutationCmdBatch::new(vec![MutationCmd {
             id: self.allocate_mutation_cmd_id(),
             mutation: MutationOp::Clear,
@@ -1476,6 +1653,250 @@ impl ProjectController {
         }
     }
 
+    // --- Asset body edit ops: apply, revert, ack handling, content -----------
+
+    /// Execute an [`AssetEditOp`] against the loaded project's overlay — the
+    /// asset counterpart of [`Self::apply_slot_edit`].
+    pub async fn apply_asset_edit(
+        &mut self,
+        server: &mut StudioServerClient,
+        op: AssetEditOp,
+    ) -> Result<ProjectEditRun, UiError> {
+        match op {
+            AssetEditOp::ApplyBody { artifact, bytes } => {
+                self.apply_asset_body(server, artifact, bytes).await
+            }
+            AssetEditOp::Revert { artifact } => self.revert_asset_edit(server, artifact).await,
+        }
+    }
+
+    /// Stage `bytes` as the pending body for `artifact` and send it as a
+    /// one-command `SetArtifactBody` (`ReplaceBody`) batch, correlating the
+    /// ack through the [`PendingAssetEdit`] state machine (the asset
+    /// counterpart of [`Self::stage_and_send_mutation`]). Bodies above
+    /// [`MAX_ASSET_BODY_BYTES`] park as `Failed` client-side — an
+    /// over-budget mutation frame is never sent.
+    pub async fn apply_asset_body(
+        &mut self,
+        server: &mut StudioServerClient,
+        artifact: ArtifactLocation,
+        bytes: Vec<u8>,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        if bytes.len() > MAX_ASSET_BODY_BYTES {
+            // Client-side size guard: mutations are single-frame on the wire
+            // (see MAX_ASSET_BODY_BYTES), so the body is parked as Failed
+            // with its bytes preserved and nothing is sent.
+            let reason = format!(
+                "shader too large to send (limit {} KB)",
+                MAX_ASSET_BODY_BYTES / 1024
+            );
+            let notice = format!(
+                "Edit on {} was not sent: {reason}",
+                artifact.file_path().as_str()
+            );
+            self.asset_edit_buffer
+                .insert(artifact, PendingAssetEdit::failed(bytes, reason));
+            return Ok(ProjectEditRun::notice(UiNotice::warning(notice)));
+        }
+
+        // apply → Pending: stage the body so DTOs reflect it (and a stale
+        // Failed entry from an earlier attempt is replaced).
+        self.asset_edit_buffer
+            .insert(artifact.clone(), PendingAssetEdit::pending(bytes.clone()));
+        let cmd_id = self.allocate_mutation_cmd_id();
+        if let Some(edit) = self.asset_edit_buffer.get_mut(&artifact) {
+            // op sends → InFlight { cmd_id }.
+            edit.phase = PendingEditPhase::InFlight { cmd_id };
+        }
+        let batch = MutationCmdBatch::new(vec![MutationCmd {
+            id: cmd_id,
+            mutation: MutationOp::SetArtifactBody {
+                artifact: artifact.clone(),
+                edit: AssetBodyOverlay::ReplaceBody(bytes),
+            },
+        }]);
+        let mutation = match server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await
+        {
+            Ok(mutation) => mutation,
+            Err(error) => {
+                // op error/timeout → Failed { transport reason }; the applied
+                // body stays visible with the Error affordance.
+                self.fail_pending_asset_edit(&artifact, error.to_string());
+                return Err(error);
+            }
+        };
+        let rejections = self.apply_asset_mutation_acks(&batch, &mutation, &[(cmd_id, artifact)]);
+        Ok(ProjectEditRun {
+            notices: rejection_notices(&rejections),
+            logs: mutation.logs,
+        })
+    }
+
+    /// Discard the pending asset edit for `artifact`: the local entry clears
+    /// immediately (typically a parked Failed body) and a `ClearArtifact`
+    /// mutation removes the server overlay entry (mirrored on ack). The
+    /// cached base body is dropped so the next editor open re-reads the
+    /// saved file.
+    pub async fn revert_asset_edit(
+        &mut self,
+        server: &mut StudioServerClient,
+        artifact: ArtifactLocation,
+    ) -> Result<ProjectEditRun, UiError> {
+        let handle_id = self.ready_handle_id()?;
+        self.asset_edit_buffer.remove(&artifact);
+        self.asset_base_bodies.remove(&artifact);
+        let batch = MutationCmdBatch::new(vec![MutationCmd {
+            id: self.allocate_mutation_cmd_id(),
+            mutation: MutationOp::ClearArtifact {
+                artifact: artifact.clone(),
+            },
+        }]);
+        let mutation = server
+            .project_overlay_mutate(handle_id, batch.clone())
+            .await?;
+        let rejections = self.apply_asset_mutation_acks(&batch, &mutation, &[]);
+        Ok(ProjectEditRun {
+            notices: rejection_notices(&rejections),
+            logs: mutation.logs,
+        })
+    }
+
+    /// Apply a mutation response to the asset edit buffer and the overlay
+    /// mirror — the artifact-keyed counterpart of
+    /// [`Self::apply_mutation_acks`]. Accepted commands fold into the mirror
+    /// via [`ProjectSync::apply_acked_edits`] (whole-artifact ops apply as
+    /// sent — the server never normalizes them, so no `AwaitingRefresh`
+    /// bridging is needed) and release their staged entries; rejected
+    /// commands park their entries in `Failed` with the rejection reason.
+    fn apply_asset_mutation_acks(
+        &mut self,
+        batch: &MutationCmdBatch,
+        mutation: &StudioOverlayMutation,
+        staged: &[(MutationCmdId, ArtifactLocation)],
+    ) -> Vec<MutationRejection> {
+        let mut accepted = Vec::new();
+        let mut rejections = Vec::new();
+        for result in &mutation.result.results {
+            let command = batch
+                .commands
+                .iter()
+                .find(|command| command.id == result.id);
+            let artifact = staged
+                .iter()
+                .find(|(id, _)| *id == result.id)
+                .map(|(_, artifact)| artifact);
+            match &result.status {
+                MutationCmdStatus::Accepted { effect } => {
+                    if let Some(command) = command {
+                        accepted.push((command.clone(), effect.clone()));
+                    }
+                    // ack accepted → entry removed; the asset now reads dirty
+                    // from the overlay mirror.
+                    if let Some(artifact) = artifact {
+                        self.asset_edit_buffer.remove(artifact);
+                    }
+                }
+                MutationCmdStatus::Rejected { rejection } => {
+                    // ack rejected → Failed { reason }; feeds the failed bucket.
+                    if let Some(artifact) = artifact {
+                        self.fail_pending_asset_edit(artifact, rejection_text(rejection));
+                    }
+                    rejections.push(rejection.clone());
+                }
+            }
+        }
+        if !accepted.is_empty()
+            && let Some(sync) = &mut self.sync
+        {
+            sync.apply_acked_edits(&accepted, mutation.overlay_revision);
+        }
+        rejections
+    }
+
+    fn fail_pending_asset_edit(&mut self, artifact: &ArtifactLocation, reason: String) {
+        if let Some(edit) = self.asset_edit_buffer.get_mut(artifact) {
+            edit.phase = PendingEditPhase::Failed { reason };
+        }
+    }
+
+    /// Resolve the effective editor content for an asset artifact:
+    ///
+    /// 1. the un-acked **buffered** body (including a parked Failed body, so
+    ///    a rejected or oversize apply keeps the user's text visible);
+    /// 2. else the overlay mirror's **`ReplaceBody`** bytes (already local —
+    ///    they ride every overlay read and every apply ack);
+    /// 3. else the **base file** body, fetched through the server filesystem
+    ///    on demand and cached; the cache invalidates after commit acks
+    ///    ([`Self::save_overlay`] — save rewrites files) and overlay clears
+    ///    ([`Self::revert_asset_edit`] / [`Self::revert_all_edits`]).
+    ///
+    /// Non-UTF-8 bodies resolve to the binary/read-only signal
+    /// ([`UiAssetContentBody::Binary`]), never a lossy string.
+    pub async fn asset_content(
+        &mut self,
+        server: &mut StudioServerClient,
+        artifact: &ArtifactLocation,
+    ) -> Result<ProjectAssetContentRun, UiError> {
+        if let Some(content) = self.asset_content_cached(artifact) {
+            return Ok(ProjectAssetContentRun::without_logs(content));
+        }
+        // Artifact locations are project-relative; `FsRequest::Read` is a
+        // server-root surface, so resolve against the connected project's
+        // filesystem root.
+        let root = self.project_fs_root.as_ref().ok_or_else(|| {
+            UiError::Project(
+                "the connected project's filesystem root is unknown; cannot fetch the asset body"
+                    .to_string(),
+            )
+        })?;
+        let server_path = root.join(artifact.file_path().as_str().trim_start_matches('/'));
+        let read = server.fs_read(&server_path).await?;
+        let logs = read.logs;
+        self.asset_base_bodies.insert(artifact.clone(), read.data);
+        let content = self
+            .asset_content_cached(artifact)
+            .expect("base body cached by the insert above");
+        Ok(ProjectAssetContentRun { content, logs })
+    }
+
+    /// [`Self::asset_content`]'s synchronous slice: resolve the effective
+    /// content from what is already local (pending buffer → overlay mirror →
+    /// cached base body), or `None` when only a base-body fetch could answer.
+    /// The DTO build uses this so views embed editor content without IO; the
+    /// editor dispatches [`crate::AssetContentFetchOp`] to fill the gap.
+    pub fn asset_content_cached(&self, artifact: &ArtifactLocation) -> Option<UiAssetContent> {
+        let revision = self
+            .sync
+            .as_ref()
+            .map(|sync| sync.overlay_revision().0)
+            .unwrap_or_default();
+        if let Some(pending) = self.asset_edit_buffer.get(artifact) {
+            return Some(UiAssetContent::from_bytes(&pending.bytes, true, revision));
+        }
+        if let Some(body) = self
+            .sync
+            .as_ref()
+            .and_then(|sync| sync.overlay_asset_edit_at(artifact))
+        {
+            return Some(match body {
+                AssetBodyOverlay::ReplaceBody(bytes) => {
+                    UiAssetContent::from_bytes(bytes, true, revision)
+                }
+                AssetBodyOverlay::Delete => UiAssetContent {
+                    body: UiAssetContentBody::Deleted,
+                    dirty: true,
+                    revision,
+                },
+            });
+        }
+        self.asset_base_bodies
+            .get(artifact)
+            .map(|bytes| UiAssetContent::from_bytes(bytes, false, revision))
+    }
+
     fn allocate_mutation_cmd_id(&mut self) -> MutationCmdId {
         let id = MutationCmdId::new(self.next_mutation_cmd_id);
         self.next_mutation_cmd_id += 1;
@@ -1498,6 +1919,12 @@ impl ProjectController {
     ) {
         self.edit_buffer.insert(address, edit);
     }
+
+    pub(crate) fn asset_edit_buffer_for_test(
+        &self,
+    ) -> &BTreeMap<ArtifactLocation, PendingAssetEdit> {
+        &self.asset_edit_buffer
+    }
 }
 
 /// Outcome of one edit op: user-facing notices plus server log lines for the
@@ -1511,6 +1938,23 @@ impl ProjectEditRun {
     fn notice(notice: UiNotice) -> Self {
         Self {
             notices: UiNotices::new().with_notice(notice),
+            logs: Vec::new(),
+        }
+    }
+}
+
+/// Outcome of one asset content resolution
+/// ([`ProjectController::asset_content`]): the resolved editor content plus
+/// server log lines from the base-body fetch, when one was issued.
+pub struct ProjectAssetContentRun {
+    pub content: UiAssetContent,
+    pub logs: Vec<UiLogDraft>,
+}
+
+impl ProjectAssetContentRun {
+    fn without_logs(content: UiAssetContent) -> Self {
+        Self {
+            content,
             logs: Vec::new(),
         }
     }
@@ -1633,6 +2077,32 @@ fn map_key_display(key: &lpc_model::SlotMapKey) -> String {
     lpc_model::SlotPath::root()
         .child_key(key.clone())
         .to_string()
+}
+
+/// Join keys for one asset artifact's edit state: one per owning node when
+/// the artifact reverse-maps through the def-artifact map (an artifact shared
+/// by several node uses joins once per use, like slot overlay edits), else
+/// the single unmapped key.
+fn asset_edit_keys(
+    nodes_by_artifact: &BTreeMap<&ArtifactLocation, Vec<ProjectNodeAddress>>,
+    artifact: &ArtifactLocation,
+) -> Vec<AssetEditKey> {
+    match nodes_by_artifact.get(artifact) {
+        Some(nodes) => nodes
+            .iter()
+            .map(|node| (Some(node.clone()), artifact.clone()))
+            .collect(),
+        None => vec![(None, artifact.clone())],
+    }
+}
+
+/// Human-readable byte size for an asset body row ("824 B", "3.2 KB").
+fn asset_body_size_display(len: usize) -> String {
+    if len < 1024 {
+        format!("{len} B")
+    } else {
+        format!("{:.1} KB", len as f64 / 1024.0)
+    }
 }
 
 /// Human-readable slot path for a change-list entry: the path display, or
@@ -3499,8 +3969,16 @@ mod tests {
         install_mixed_policy_slots(&mut view, 1, Revision::new(2));
         project.apply_project_view(&view).unwrap();
         project.set_node_def_artifacts(BTreeMap::from([(NodeId::new(1), edit_artifact())]));
+        // What a connect flow would have installed: the project's server
+        // filesystem root, which base-body fetches resolve against.
+        project.project_fs_root = Some(lpc_model::LpPathBuf::from(TEST_PROJECT_FS_ROOT));
         (project, client, sent)
     }
+
+    /// Server filesystem root the scripted fixtures pretend the project
+    /// lives under (project-relative `/shader.glsl` reads as
+    /// `/projects/edit-fixture/shader.glsl` on the wire).
+    const TEST_PROJECT_FS_ROOT: &str = "/projects/edit-fixture";
 
     fn install_mixed_policy_slots(view: &mut ProjectView, node_id: u32, revision: Revision) {
         view.slots.root_shapes.clear();
@@ -5083,6 +5561,587 @@ mod tests {
             config_slot(&nodes, "Rate").state.dirty,
             UiNodeDirtyState::Clean
         );
+    }
+
+    // --- Asset body edit ops (P2 GLSL asset editing) -------------------------
+
+    use lpc_model::LpPathBuf;
+    use lpc_wire::server::FsResponse;
+
+    /// The demo layout's shader source: an asset artifact that is **not** a
+    /// def artifact, so it reverse-maps to no node (the normal GLSL case).
+    fn glsl_artifact() -> ArtifactLocation {
+        ArtifactLocation::file("/shader.glsl")
+    }
+
+    fn fs_read_response(id: u64, path: &str, data: &[u8]) -> WireServerMessage {
+        WireServerMessage::new(
+            id,
+            WireServerMsgBody::Filesystem(FsResponse::Read {
+                path: LpPathBuf::from(path),
+                data: Some(data.to_vec()),
+                error: None,
+            }),
+        )
+    }
+
+    /// Seed the mirror with an acked body replacement, as an earlier apply
+    /// (or a foreign client's, delivered by an overlay read) would.
+    fn seed_acked_asset_body(
+        project: &mut ProjectController,
+        artifact: ArtifactLocation,
+        body: &[u8],
+    ) {
+        project.sync_mut().unwrap().apply_acked_edits(
+            &[(
+                MutationCmd {
+                    id: MutationCmdId::new(90),
+                    mutation: MutationOp::SetArtifactBody {
+                        artifact,
+                        edit: AssetBodyOverlay::ReplaceBody(body.to_vec()),
+                    },
+                },
+                MutationEffect::OverlayChanged {
+                    changed: true,
+                    base_display: None,
+                },
+            )],
+            Revision::new(3),
+        );
+    }
+
+    #[test]
+    fn accepted_asset_body_releases_buffer_and_reads_dirty_from_mirror() {
+        let (mut project, mut client, sent) =
+            editable_project_with_scripted_client(vec![mutation_response(1, vec![accepted(1)], 3)]);
+
+        let run = block_on_ready(project.apply_asset_body(
+            &mut client,
+            glsl_artifact(),
+            b"void main() {}".to_vec(),
+        ))
+        .unwrap();
+
+        assert!(
+            run.notices.notices.is_empty(),
+            "accepted apply needs no notice"
+        );
+        // Entry gone: dirty now derives from the overlay mirror.
+        assert!(project.asset_edit_buffer_for_test().is_empty());
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(sync.overlay_revision(), Revision::new(3));
+        assert_eq!(
+            sync.overlay_asset_edit_at(&glsl_artifact()),
+            Some(&AssetBodyOverlay::ReplaceBody(b"void main() {}".to_vec()))
+        );
+
+        // The wire mutation is the whole-body replacement at the artifact.
+        let sent = sent.borrow();
+        let ClientRequest::ProjectCommand {
+            command: WireProjectCommand::MutateOverlay { request },
+            ..
+        } = &sent[0].msg
+        else {
+            panic!("expected an overlay mutation");
+        };
+        assert_eq!(request.batch.commands.len(), 1);
+        assert!(matches!(
+            &request.batch.commands[0].mutation,
+            MutationOp::SetArtifactBody { artifact, edit: AssetBodyOverlay::ReplaceBody(bytes) }
+                if *artifact == glsl_artifact() && bytes == b"void main() {}"
+        ));
+        drop(sent);
+
+        // The GLSL artifact maps to no node, but the edit is persisted-class
+        // and must count toward Save at the project level.
+        let expected = DirtySummary {
+            persisted: 1,
+            transient: 0,
+            failed: 0,
+        };
+        assert_eq!(project.dirty_summary(), expected);
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        assert_eq!(editor.dirty, expected);
+        assert_eq!(
+            editor.header_actions.len(),
+            2,
+            "a pending asset body enables Save/Revert"
+        );
+        assert_eq!(pending_edits_by_phase(&editor.pending_edits), editor.dirty);
+    }
+
+    #[test]
+    fn mapped_asset_body_counts_on_its_owning_node() {
+        let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
+        // A whole-body replacement of the def artifact itself reverse-maps to
+        // the node using it, exactly like slot overlay edits do.
+        seed_acked_asset_body(&mut project, edit_artifact(), b"{}");
+
+        let expected = DirtySummary {
+            persisted: 1,
+            transient: 0,
+            failed: 0,
+        };
+        assert_eq!(project.dirty_summary(), expected);
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+        // The fixture's single node is the project root (flat-root hoists it
+        // out of `nodes`/`tree` into `root_slots`), so its dirty surfaces
+        // through the project total and the pending-edit row rather than a
+        // node/tree item.
+        assert_eq!(editor.dirty, expected);
+        assert_eq!(editor.pending_edits.len(), 1);
+        assert_eq!(
+            editor.pending_edits[0].node_label, "Orbit",
+            "mapped asset rows carry the owning node's label"
+        );
+        assert_eq!(
+            editor.pending_edits[0].slot_path_display,
+            "/orbit.shader.json"
+        );
+    }
+
+    #[test]
+    fn rejected_asset_body_parks_failed_entry_with_reason() {
+        let (mut project, mut client, _sent) =
+            editable_project_with_scripted_client(vec![mutation_response(
+                1,
+                vec![MutationCmdResult::rejected(
+                    MutationCmdId::new(1),
+                    MutationRejection::new(
+                        MutationRejectionReason::UnknownSlotPath,
+                        "artifact is not editable".to_string(),
+                    ),
+                )],
+                0,
+            )]);
+
+        let run = block_on_ready(project.apply_asset_body(
+            &mut client,
+            glsl_artifact(),
+            b"void main() {}".to_vec(),
+        ))
+        .unwrap();
+
+        assert_eq!(run.notices.notices.len(), 1);
+        assert_eq!(run.notices.notices[0].level, UiNoticeLevel::Warning);
+        let edit = project
+            .asset_edit_buffer_for_test()
+            .get(&glsl_artifact())
+            .expect("failed entry parked");
+        assert!(edit.is_failed());
+        assert_eq!(edit.failure_reason(), Some("artifact is not editable"));
+        assert_eq!(edit.bytes, b"void main() {}", "body preserved for display");
+        assert!(project.sync.as_ref().unwrap().overlay().is_empty());
+        assert_eq!(
+            project.dirty_summary(),
+            DirtySummary {
+                persisted: 0,
+                transient: 0,
+                failed: 1,
+            }
+        );
+
+        // The change list shows the failed row with its reason.
+        let pending = project.pending_edits();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(
+            pending[0].phase,
+            UiPendingEditPhase::Failed {
+                reason: "artifact is not editable".to_string()
+            }
+        );
+
+        // The parked body stays resolvable as editor content (rubber-band
+        // protection for the rejected text).
+        let run = block_on_ready(project.asset_content(&mut client, &glsl_artifact())).unwrap();
+        assert_eq!(run.content.text(), Some("void main() {}"));
+        assert!(run.content.dirty);
+    }
+
+    #[test]
+    fn oversize_asset_body_fails_client_side_and_sends_nothing() {
+        let (mut project, mut client, sent) = editable_project_with_scripted_client(Vec::new());
+        let oversize = vec![b'x'; crate::MAX_ASSET_BODY_BYTES + 1];
+
+        let run = block_on_ready(project.apply_asset_body(
+            &mut client,
+            glsl_artifact(),
+            oversize.clone(),
+        ))
+        .unwrap();
+
+        assert!(sent.borrow().is_empty(), "no mutation is sent");
+        assert_eq!(run.notices.notices.len(), 1);
+        assert_eq!(run.notices.notices[0].level, UiNoticeLevel::Warning);
+        let edit = project
+            .asset_edit_buffer_for_test()
+            .get(&glsl_artifact())
+            .expect("oversize entry parked as failed");
+        assert_eq!(
+            edit.failure_reason(),
+            Some("shader too large to send (limit 10 KB)")
+        );
+        assert_eq!(edit.bytes, oversize, "the user's text is not lost");
+        assert_eq!(
+            project.dirty_summary(),
+            DirtySummary {
+                persisted: 0,
+                transient: 0,
+                failed: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn asset_revert_clears_local_entry_and_server_overlay() {
+        let (mut project, mut client, sent) =
+            editable_project_with_scripted_client(vec![mutation_response(1, vec![accepted(1)], 4)]);
+        // A parked failed body plus a mirrored (acked) body for the artifact.
+        block_on_ready(project.apply_asset_body(
+            &mut client,
+            glsl_artifact(),
+            vec![b'x'; crate::MAX_ASSET_BODY_BYTES + 1],
+        ))
+        .unwrap();
+        seed_acked_asset_body(&mut project, glsl_artifact(), b"live body");
+        assert!(!project.dirty_summary().is_clean());
+
+        let run = block_on_ready(project.revert_asset_edit(&mut client, glsl_artifact())).unwrap();
+
+        assert!(run.notices.notices.is_empty());
+        assert!(project.asset_edit_buffer_for_test().is_empty());
+        let sync = project.sync.as_ref().unwrap();
+        assert_eq!(sync.overlay_asset_edit_at(&glsl_artifact()), None);
+        assert_eq!(sync.overlay_revision(), Revision::new(4));
+        assert!(project.dirty_summary().is_clean());
+        assert!(matches!(
+            &sent.borrow()[0].msg,
+            ClientRequest::ProjectCommand {
+                command: WireProjectCommand::MutateOverlay { request },
+                ..
+            } if matches!(
+                &request.batch.commands[0].mutation,
+                MutationOp::ClearArtifact { artifact } if *artifact == glsl_artifact()
+            )
+        ));
+    }
+
+    #[test]
+    fn asset_pending_edit_rows_carry_file_path_size_detail_and_revert() {
+        let (mut project, _client, _sent) = editable_project_with_scripted_client(Vec::new());
+        seed_acked_asset_body(&mut project, glsl_artifact(), &vec![b'x'; 3277]);
+
+        let editor = project.editor_view("loaded-project", 7, &ProjectInventorySummary::default());
+
+        assert_eq!(editor.pending_edits.len(), 1);
+        let row = &editor.pending_edits[0];
+        assert_eq!(
+            row.node_label, "/shader.glsl",
+            "unmapped asset rows are file-labeled"
+        );
+        assert_eq!(row.slot_path_display, "/shader.glsl");
+        assert_eq!(
+            row.kind,
+            UiPendingEditKind::AssetBody {
+                detail: "3.2 KB".to_string()
+            }
+        );
+        assert_eq!(row.phase, UiPendingEditPhase::Persisted);
+        let revert = row.revert.as_ref().expect("asset rows carry revert");
+        assert!(revert.is_for_node(ProjectController::NODE_ID));
+        assert_eq!(
+            revert.op_as::<crate::AssetEditOp>(),
+            Some(&crate::AssetEditOp::Revert {
+                artifact: glsl_artifact()
+            })
+        );
+        assert_eq!(pending_edits_by_phase(&editor.pending_edits), editor.dirty);
+    }
+
+    // --- Asset effective-content resolution ---------------------------------
+
+    #[test]
+    fn asset_content_prefers_overlay_bytes_and_skips_the_fetch() {
+        let (mut project, mut client, sent) = editable_project_with_scripted_client(Vec::new());
+        seed_acked_asset_body(&mut project, glsl_artifact(), b"live body");
+
+        let run = block_on_ready(project.asset_content(&mut client, &glsl_artifact())).unwrap();
+
+        assert!(sent.borrow().is_empty(), "overlay bytes need no fs read");
+        assert_eq!(run.content.text(), Some("live body"));
+        assert!(run.content.dirty);
+        assert_eq!(
+            run.content.revision, 3,
+            "content stamps the overlay mirror revision it was resolved at"
+        );
+    }
+
+    #[test]
+    fn asset_content_fetches_the_base_body_once_and_caches_it() {
+        let (mut project, mut client, sent) =
+            editable_project_with_scripted_client(vec![fs_read_response(
+                1,
+                "/shader.glsl",
+                b"base body",
+            )]);
+
+        let first = block_on_ready(project.asset_content(&mut client, &glsl_artifact())).unwrap();
+        let second = block_on_ready(project.asset_content(&mut client, &glsl_artifact())).unwrap();
+
+        assert_eq!(first.content.text(), Some("base body"));
+        assert!(!first.content.dirty);
+        assert_eq!(second.content, first.content);
+        let sent = sent.borrow();
+        assert_eq!(sent.len(), 1, "the second resolution serves the cache");
+        assert!(
+            matches!(
+                &sent[0].msg,
+                ClientRequest::Filesystem(lpc_wire::FsRequest::Read { path })
+                    if path.as_str() == "/projects/edit-fixture/shader.glsl"
+            ),
+            "the wire read resolves the project-relative artifact against the project fs root"
+        );
+    }
+
+    #[test]
+    fn asset_content_refetches_after_save_invalidates_the_cache() {
+        let (mut project, mut client, sent) = editable_project_with_scripted_client(vec![
+            fs_read_response(1, "/shader.glsl", b"old body"),
+            commit_response(2, vec![glsl_artifact()], 5),
+            overlay_read_response(3, ProjectOverlay::new(), 5),
+            fs_read_response(4, "/shader.glsl", b"new body"),
+        ]);
+
+        let before = block_on_ready(project.asset_content(&mut client, &glsl_artifact())).unwrap();
+        assert_eq!(before.content.text(), Some("old body"));
+
+        // Save rewrites artifact files, so the cached base body is dropped
+        // and the next resolution re-reads the committed content.
+        block_on_ready(project.save_overlay(&mut client)).unwrap();
+        let after = block_on_ready(project.asset_content(&mut client, &glsl_artifact())).unwrap();
+
+        assert_eq!(after.content.text(), Some("new body"));
+        assert!(!after.content.dirty);
+        assert_eq!(sent.borrow().len(), 4, "commit + re-read + two fetches");
+    }
+
+    #[test]
+    fn asset_revert_invalidates_the_cached_base_body() {
+        let (mut project, mut client, _sent) = editable_project_with_scripted_client(vec![
+            fs_read_response(1, "/shader.glsl", b"old body"),
+            mutation_response(2, vec![accepted(1)], 4),
+            fs_read_response(3, "/shader.glsl", b"fresh body"),
+        ]);
+        let before = block_on_ready(project.asset_content(&mut client, &glsl_artifact())).unwrap();
+        assert_eq!(before.content.text(), Some("old body"));
+
+        block_on_ready(project.revert_asset_edit(&mut client, glsl_artifact())).unwrap();
+        let after = block_on_ready(project.asset_content(&mut client, &glsl_artifact())).unwrap();
+
+        assert_eq!(
+            after.content.text(),
+            Some("fresh body"),
+            "overlay clears invalidate the cached base body"
+        );
+    }
+
+    #[test]
+    fn non_utf8_asset_content_reads_binary_never_lossy() {
+        let (mut project, mut client, _sent) = editable_project_with_scripted_client(Vec::new());
+        seed_acked_asset_body(&mut project, glsl_artifact(), &[0xff, 0xfe, 0x00]);
+
+        let run = block_on_ready(project.asset_content(&mut client, &glsl_artifact())).unwrap();
+
+        assert_eq!(
+            run.content.body,
+            crate::UiAssetContentBody::Binary { len: 3 }
+        );
+        assert_eq!(run.content.text(), None);
+        assert!(run.content.dirty);
+    }
+
+    // --- Editor tab projection (P3) ------------------------------------------
+
+    /// Def slots with one file-referencing asset field
+    /// (`source = "shader.glsl"`), the editor-tab shape of a shader def.
+    fn install_asset_source_slot(view: &mut ProjectView, node_id: u32, revision: Revision) {
+        let def_shape = SlotShapeId::new(600 + node_id);
+        view.slots
+            .registry
+            .register_dynamic_shape(
+                def_shape,
+                SlotShape::Record {
+                    meta: SlotMeta::empty(),
+                    fields: vec![
+                        SlotFieldShape::new("source", SlotShape::value(LpType::String)).unwrap(),
+                    ],
+                },
+            )
+            .unwrap();
+        view.slots
+            .root_shapes
+            .insert(format!("node.{node_id}.def"), def_shape);
+        view.slots.roots.insert(
+            format!("node.{node_id}.def"),
+            SlotData::Record(SlotRecord::with_revision(
+                revision,
+                vec![SlotData::Value(WithRevision::new(
+                    revision,
+                    LpValue::String("shader.glsl".to_string()),
+                ))],
+            )),
+        );
+    }
+
+    /// Ready project whose single node's def references `shader.glsl`
+    /// relative to the def artifact (`/orbit.shader.json` → `/shader.glsl`).
+    fn glsl_editor_project(
+        responses: Vec<WireServerMessage>,
+    ) -> (
+        ProjectController,
+        StudioServerClient,
+        Rc<RefCell<Vec<ClientMessage>>>,
+    ) {
+        let (mut project, client, sent) = ready_project_with_scripted_client(responses);
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_asset_source_slot(&mut view, 1, Revision::new(2));
+        project.apply_project_view(&view).unwrap();
+        project.set_node_def_artifacts(BTreeMap::from([(NodeId::new(1), edit_artifact())]));
+        project.project_fs_root = Some(lpc_model::LpPathBuf::from(TEST_PROJECT_FS_ROOT));
+        (project, client, sent)
+    }
+
+    /// Find the inline editor embedded on the first editable asset slot in a
+    /// node's sections (recursing records for nested assets) — the inline
+    /// replacement for the old node-pane editor tab.
+    fn node_asset_editor(node: &crate::UiNodeView) -> Option<&crate::UiAssetEditor> {
+        node.tabs.iter().find_map(|tab| match &tab.body {
+            UiNodeTabBody::Sections(sections) => find_asset_editor(sections),
+            _ => None,
+        })
+    }
+
+    fn find_asset_editor(sections: &[crate::UiNodeSection]) -> Option<&crate::UiAssetEditor> {
+        fn in_slots(slots: &[crate::UiConfigSlot]) -> Option<&crate::UiAssetEditor> {
+            slots.iter().find_map(|slot| match &slot.body {
+                crate::UiConfigSlotBody::Asset(asset) => asset.inline_editor.as_ref(),
+                crate::UiConfigSlotBody::Record(record) => in_slots(&record.fields),
+                _ => None,
+            })
+        }
+        sections.iter().find_map(|section| match section {
+            crate::UiNodeSection::AssetSlots(slots) | crate::UiNodeSection::ConfigSlots(slots) => {
+                in_slots(slots)
+            }
+            _ => None,
+        })
+    }
+
+    #[test]
+    fn inline_editor_projects_file_backed_glsl_assets() {
+        let (mut project, mut client, _sent) =
+            glsl_editor_project(vec![fs_read_response(1, "/shader.glsl", b"base body")]);
+
+        // Before any fetch: the asset slot carries an inline editor with the
+        // resolved artifact and no content (the web dispatches the fetch op
+        // when it sees `None`). The node keeps its single main tab.
+        let nodes = project.ui_nodes();
+        assert_eq!(nodes[0].tabs.len(), 1);
+        let editor = node_asset_editor(&nodes[0]).expect("inline editor present");
+        assert_eq!(editor.artifact, glsl_artifact());
+        assert_eq!(editor.kind, UiAssetEditorKind::Glsl);
+        assert_eq!(editor.source, "shader.glsl");
+        assert_eq!(editor.content, None);
+        assert!(!editor.in_flight);
+        assert_eq!(editor.failure, None);
+
+        // The fetch caches the base body; the next projection embeds it
+        // clean, without further IO.
+        block_on_ready(project.asset_content(&mut client, &glsl_artifact())).unwrap();
+        let nodes = project.ui_nodes();
+        let content = node_asset_editor(&nodes[0])
+            .and_then(|editor| editor.content.as_ref())
+            .expect("content resolved");
+        assert_eq!(content.text(), Some("base body"));
+        assert!(!content.dirty);
+    }
+
+    #[test]
+    fn inline_editor_reflects_overlay_content_and_failed_applies() {
+        let (mut project, mut client, _sent) = glsl_editor_project(vec![mutation_response(
+            1,
+            vec![MutationCmdResult::rejected(
+                MutationCmdId::new(1),
+                MutationRejection::new(
+                    MutationRejectionReason::UnknownSlotPath,
+                    "artifact is not editable".to_string(),
+                ),
+            )],
+            0,
+        )]);
+        seed_acked_asset_body(&mut project, glsl_artifact(), b"live body");
+
+        // Applied (dirty): the overlay body is the effective content and the
+        // revision stamps the mirror generation (the editor's resync marker).
+        let nodes = project.ui_nodes();
+        let editor = node_asset_editor(&nodes[0]).expect("inline editor present");
+        let content = editor.content.as_ref().expect("overlay content resolves");
+        assert_eq!(content.text(), Some("live body"));
+        assert!(content.dirty);
+        assert_eq!(content.revision, 3);
+        assert_eq!(editor.failure, None);
+
+        // A rejected apply parks Failed: the editor carries the reason and the
+        // parked bytes stay visible as content (rubber-band protection).
+        block_on_ready(project.apply_asset_body(&mut client, glsl_artifact(), b"broken".to_vec()))
+            .unwrap();
+        let nodes = project.ui_nodes();
+        let editor = node_asset_editor(&nodes[0]).expect("inline editor present");
+        assert_eq!(editor.failure.as_deref(), Some("artifact is not editable"));
+        assert!(!editor.in_flight);
+        assert_eq!(
+            editor.content.as_ref().and_then(|content| content.text()),
+            Some("broken")
+        );
+    }
+
+    #[test]
+    fn inline_editor_projects_on_child_nodes() {
+        let (mut project, _client, _sent) = ready_project_with_scripted_client(Vec::new());
+        let mut view = tree_view();
+        install_asset_source_slot(&mut view, 3, Revision::new(2));
+        project.apply_project_view(&view).unwrap();
+        project.set_node_def_artifacts(BTreeMap::from([(NodeId::new(3), edit_artifact())]));
+
+        let nodes = project.ui_nodes();
+        let shader_child = &nodes[0].children[1];
+        let editor = find_asset_editor(&shader_child.sections).expect("child inline editor");
+        assert_eq!(editor.artifact, glsl_artifact());
+        assert!(
+            find_asset_editor(&nodes[0].children[0].sections).is_none(),
+            "the clock child has no editable asset"
+        );
+    }
+
+    #[test]
+    fn inline_and_artifactless_assets_get_no_inline_editor() {
+        // Inline GLSL (content on the row): no artifact to edit.
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_ui_projection_slots(&mut view, 1, Revision::new(4));
+        let mut project = ProjectController::new();
+        project.apply_project_view(&view).unwrap();
+        assert!(
+            node_asset_editor(&project.ui_nodes()[0]).is_none(),
+            "inline assets carry no artifact editor"
+        );
+
+        // File-referencing asset without a known def artifact: unresolvable,
+        // so the read-only row stays and no editor is offered.
+        let (mut project, _client, _sent) = ready_project_with_scripted_client(Vec::new());
+        let mut view = single_node_view(1, NodeRuntimeStatus::Ok);
+        install_asset_source_slot(&mut view, 1, Revision::new(2));
+        project.apply_project_view(&view).unwrap();
+        assert!(node_asset_editor(&project.ui_nodes()[0]).is_none());
     }
 
     // --- Dirty summary aggregation + header action contract tests -----------

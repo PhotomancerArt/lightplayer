@@ -16,6 +16,13 @@
             :root { color-scheme: dark; }
             html, body { margin: 0; background: #101317; }
         </style>
+        <!--
+          Vendored CodeMirror bundle (globalThis.LpCodeMirror), regenerated
+          via `just studio-codemirror-bundle`; see vendor-src/codemirror/.
+          The CodeEditor component polls for the global, so load order vs
+          the wasm bundle does not matter.
+        -->
+        <script defer src="/vendor/codemirror/codemirror.js"></script>
     </head>
     <body>
         <div id="main"></div>

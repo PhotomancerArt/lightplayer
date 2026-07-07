@@ -263,6 +263,26 @@ stateless views that dispatch ops and render DTOs. The model (recorded in
   not as a workspace card); `format`/`nodes` are `read_only_persisted`,
   `name` stays writable.
 
+**Asset bodies** (ADR D8) extend the same model to whole files
+(`project/asset/`): `AssetEditOp::{ApplyBody, Revert}` stage
+`SetArtifactBody` / `ClearArtifact` mutations through an artifact-keyed
+sibling buffer with the identical ack lifecycle, joined into the same dirty
+summaries and save-panel rows (`UiPendingEditKind::AssetBody`; a `.glsl`
+that maps to no synced node still counts via
+`unmapped_asset_dirty_summary`). `ApplyBody` enforces the client-side
+`MAX_ASSET_BODY_BYTES` (10 KB) guard under the 16 KB wire frame budget.
+Effective editor content resolves buffer → overlay mirror → cached base
+body (`asset_content`, fetched via `StudioFsRead` on demand and invalidated
+by save/revert); the per-slot editor DTO is `UiAssetEditor`, embedded on
+`UiSlotAsset.inline_editor` for every editable asset slot in the node walk
+(`embed_asset_editors`, recursing records for nested assets), so an editor
+appears inline wherever an editable asset does. `apply_action(text)` is the
+Apply mutation; the current text and modified flag are the one deliberately
+editor-local piece of state (the web component owns them — see the ADR).
+Compile-error status text parses best-effort into `UiShaderError`
+(message + optional `line:col` from the rustc-style marker) for the
+editor's error strip and gutter.
+
 Project attach behavior is core-owned:
 
 - zero loaded projects: once LightPlayer is connected, offer to load the demo
