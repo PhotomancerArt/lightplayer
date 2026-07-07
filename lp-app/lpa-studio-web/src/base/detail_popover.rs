@@ -11,8 +11,9 @@ use crate::base::{IconMenuButton, IconMenuTone, PopoverPlacement, StudioIconName
 ///
 /// The base owns the trigger (via [`IconMenuButton`]), placement, and card
 /// chrome; content is arbitrary, but section rows should use
-/// [`detail_popover_section_class`] so dividers and status tints stay
-/// consistent across consumers.
+/// [`DetailSection`] (or [`detail_popover_section_class`] for bespoke
+/// section markup) so dividers, titles, and status tints stay consistent
+/// across consumers.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn DetailPopover(
@@ -35,6 +36,44 @@ pub fn DetailPopover(
             active,
             initially_open,
             popup_class: detail_popover_card_class().to_string(),
+            {children}
+        }
+    }
+}
+
+/// One section of the detail card: standard padding, top divider, optional
+/// title row, optional status tint.
+///
+/// The tint convention (user, editing-polish item 2): **a section carrying an
+/// affordance wears its color on the TITLE** — the title text takes the
+/// tint's foreground token while an untinted section keeps the standard
+/// heading color. The section surface keeps the same left-edge status wash
+/// as edited/live slot rows ([`detail_popover_section_class`]).
+///
+/// `meta` is an optional right-aligned annotation on the title row (counts,
+/// mostly), rendered in the same mono/muted style as detail value cells.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub fn DetailSection(
+    #[props(default)] title: Option<String>,
+    #[props(default)] meta: Option<String>,
+    #[props(default)] tint: DetailSectionTint,
+    children: Element,
+) -> Element {
+    rsx! {
+        section { class: detail_popover_section_class(tint),
+            if title.is_some() || meta.is_some() {
+                div { class: "tw:flex tw:items-baseline tw:justify-between tw:gap-3",
+                    if let Some(title) = title {
+                        h3 { class: detail_section_title_class(tint), "{title}" }
+                    }
+                    if let Some(meta) = meta {
+                        span { class: "tw:font-mono tw:text-xs tw:leading-snug tw:text-muted-foreground",
+                            "{meta}"
+                        }
+                    }
+                }
+            }
             {children}
         }
     }
@@ -85,6 +124,33 @@ pub fn detail_popover_section_class(tint: DetailSectionTint) -> &'static str {
         }
         DetailSectionTint::Bound => {
             "tw:grid tw:gap-0.5 tw:border-t tw:border-border-muted tw:bg-[linear-gradient(90deg,var(--studio-status-bound-bg)_0%,transparent_72%)] tw:px-3 tw:py-1.5 tw:first:border-t-0"
+        }
+    }
+}
+
+/// Title styling for a [`DetailSection`]: the standard section heading, with
+/// the text color carrying the section's affordance tint (the "color on the
+/// TITLE" convention) — untinted sections keep the heading token.
+fn detail_section_title_class(tint: DetailSectionTint) -> &'static str {
+    match tint {
+        DetailSectionTint::None => "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-heading",
+        DetailSectionTint::Good => {
+            "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-status-good-foreground"
+        }
+        DetailSectionTint::Working => {
+            "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-status-working-foreground"
+        }
+        DetailSectionTint::Warning => {
+            "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-status-warning-foreground"
+        }
+        DetailSectionTint::Error => {
+            "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-status-error-foreground"
+        }
+        DetailSectionTint::Live => {
+            "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-status-live-foreground"
+        }
+        DetailSectionTint::Bound => {
+            "tw:m-0 tw:text-xs tw:font-bold tw:uppercase tw:text-status-bound-foreground"
         }
     }
 }

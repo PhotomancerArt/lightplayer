@@ -9,6 +9,11 @@ use crate::{
 pub struct ServerController {
     state: ServerState,
     client: Option<StudioServerClient>,
+    /// The last log level Studio asked the connected server to apply, shown
+    /// optimistically in the console's device-level selector (there is no
+    /// read-back on the wire). Reset to the device's init default (`Info`)
+    /// whenever a connection is (re)established, since a reboot reverts it.
+    requested_log_level: crate::UiLogLevel,
 }
 
 impl ServerController {
@@ -18,6 +23,7 @@ impl ServerController {
         Self {
             state: ServerState::Disconnected,
             client: None,
+            requested_log_level: crate::UiLogLevel::Info,
         }
     }
 
@@ -30,6 +36,19 @@ impl ServerController {
         let protocol = client.protocol().to_string();
         self.client = Some(client);
         self.state = ServerState::Connected { protocol };
+        self.requested_log_level = crate::UiLogLevel::Info;
+    }
+
+    /// The log level Studio last requested from the connected server, or
+    /// `None` when no server is connected (the console's device-level
+    /// selector disables itself on `None`).
+    pub fn requested_log_level(&self) -> Option<crate::UiLogLevel> {
+        self.is_connected().then_some(self.requested_log_level)
+    }
+
+    /// Record a successfully applied device log level for optimistic display.
+    pub fn set_requested_log_level(&mut self, level: crate::UiLogLevel) {
+        self.requested_log_level = level;
     }
 
     pub fn snapshot(&self) -> ServerSnapshot {
@@ -76,6 +95,9 @@ impl ServerController {
         let protocol = client.protocol().to_string();
         self.client = Some(client);
         self.state = ServerState::Connected { protocol };
+        // A fresh connection means a fresh server process/boot: its effective
+        // log level is back at the init default.
+        self.requested_log_level = crate::UiLogLevel::Info;
         Ok(())
     }
 
@@ -85,7 +107,7 @@ impl ServerController {
             .ok_or_else(|| UiError::MissingSession("server client is not connected".to_string()))
     }
 
-    pub fn take_pending_logs(&mut self) -> Vec<crate::UiLogEntry> {
+    pub fn take_pending_logs(&mut self) -> Vec<crate::UiLogDraft> {
         self.client
             .as_mut()
             .map(StudioServerClient::take_pending_logs)

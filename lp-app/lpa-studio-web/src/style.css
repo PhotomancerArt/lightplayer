@@ -2029,74 +2029,6 @@ select {
     background-size: 16px 16px;
 }
 
-.ux-slot-optional-toggle {
-    position: relative;
-    display: inline-flex;
-    min-width: 0;
-    flex: none;
-    align-items: center;
-    gap: 0.4rem;
-    color: var(--studio-color-text-subtle);
-    font-size: 0.68rem;
-    font-weight: 600;
-    line-height: 1;
-    cursor: pointer;
-    user-select: none;
-}
-
-.ux-slot-optional-toggle-input {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0 0 0 0);
-    white-space: nowrap;
-    border: 0;
-}
-
-.ux-slot-optional-toggle-track {
-    position: relative;
-    width: 1.85rem;
-    height: 1rem;
-    flex: none;
-    border: 1px solid var(--studio-color-border-subtle);
-    border-radius: var(--studio-radius-pill);
-    background: var(--studio-color-surface-muted);
-    transition: border-color 120ms ease, background-color 120ms ease;
-}
-
-.ux-slot-optional-toggle-thumb {
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: calc(1rem - 6px);
-    height: calc(1rem - 6px);
-    border-radius: 999px;
-    background: var(--studio-color-text-subtle);
-    transition: transform 120ms ease, background-color 120ms ease;
-}
-
-.ux-slot-optional-toggle-input:checked + .ux-slot-optional-toggle-track {
-    border-color: var(--studio-color-accent-border);
-    background: var(--studio-status-good-bg);
-}
-
-.ux-slot-optional-toggle-input:checked + .ux-slot-optional-toggle-track .ux-slot-optional-toggle-thumb {
-    transform: translateX(0.85rem);
-    background: var(--studio-color-accent);
-}
-
-.ux-slot-optional-toggle-input:focus-visible + .ux-slot-optional-toggle-track {
-    outline: 1px solid var(--studio-color-border-strong);
-    outline-offset: 2px;
-}
-
-.ux-slot-optional-toggle-input:disabled + .ux-slot-optional-toggle-track,
-.ux-slot-optional-toggle-input:disabled ~ .ux-slot-optional-toggle-label {
-    opacity: 0.55;
-}
-
 @keyframes ux-progress-sweep {
     0% {
         transform: translateX(-110%);
@@ -2176,10 +2108,6 @@ select {
     .ux-node-ui-row-value,
     .ux-node-ui-nested {
         grid-column: 2;
-    }
-
-    .ux-slot-optional-toggle-label {
-        display: none;
     }
 
     .ux-node-ui-header {

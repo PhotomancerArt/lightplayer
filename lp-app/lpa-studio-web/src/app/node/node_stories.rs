@@ -4,7 +4,7 @@ use lpa_studio_web_story_macros::story;
 
 use crate::app::node::node_story_fixtures::{
     error_node_view, failed_dirty_node_view, live_dirty_node_view, nested_dirty_node_view,
-    playlist_node_view, unsaved_dirty_node_view,
+    playlist_node_view, playlist_pending_edits, unsaved_dirty_node_view,
 };
 use crate::app::node::{NodeDetailPopover, NodeDirtyTint, NodePane};
 
@@ -154,7 +154,7 @@ pub(crate) fn nested_dirty_children() -> Element {
 }
 
 #[story(
-    description = "The merged node detail popup open: status content plus the per-kind dirty count sections."
+    description = "The merged node detail popup open: status content plus the per-bucket dirty sections as tinted-title change lists — the node's OWN pending edits with per-entry reverts (subtree counts ride the title rows; the other node's edit in the threaded list is filtered out)."
 )]
 pub(crate) fn dirty_detail_popup() -> Element {
     let mut view = unsaved_dirty_node_view();
@@ -164,6 +164,8 @@ pub(crate) fn dirty_detail_popup() -> Element {
         div { class: "tw:flex tw:min-h-[620px] tw:justify-end",
             NodeDetailPopover {
                 header: view.header,
+                pending_edits: playlist_pending_edits(),
+                on_action: move |_| {},
                 initially_open: true,
             }
         }

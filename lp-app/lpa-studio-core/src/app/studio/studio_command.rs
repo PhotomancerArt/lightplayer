@@ -8,6 +8,7 @@
 //! actions ahead of ticks and coalesces redundant ticks (see the actor loop).
 
 use crate::UiAction;
+use crate::app::studio::console_command::ConsoleCommand;
 
 /// A single input to the studio actor's command queue.
 #[derive(Clone, Debug)]
@@ -16,6 +17,10 @@ pub enum StudioCommand {
     /// [`ActionClass`](crate::ActionClass) decides whether it preempts an
     /// in-flight passive pull.
     Action(UiAction),
+    /// A console mutation (filter change or clear). Applied synchronously by
+    /// the actor ahead of the batch's actions; never coalesced away, unlike
+    /// `RefreshTick`, because each is a distinct user gesture.
+    Console(ConsoleCommand),
     /// A timer-driven passive refresh tick. Coalescable and droppable: the actor
     /// keeps at most one pending tick and drops a tick that would run behind a
     /// pending action.

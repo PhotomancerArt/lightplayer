@@ -26,13 +26,17 @@ pub enum PopoverPlacement {
     BottomEnd,
 }
 
+/// A popover with an arbitrary trigger. The `trigger` element becomes the
+/// content of the toggle button; `class`/`open_class` style that button. The
+/// panel floats in the browser top layer, so it escapes any `overflow` on the
+/// trigger's ancestors. Use [`IconPopoverButton`] when the trigger is just an
+/// icon.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn IconPopoverButton(
+pub fn PopoverButton(
     class: String,
     open_class: String,
-    icon: StudioIconName,
-    icon_size: u32,
+    trigger: Element,
     label: String,
     title: String,
     popup_class: String,
@@ -122,10 +126,7 @@ pub fn IconPopoverButton(
                     event.stop_propagation();
                     open.toggle();
                 },
-                StudioIcon {
-                    name: icon,
-                    size: icon_size,
-                }
+                {trigger}
             }
             if open() {
                 div {
@@ -194,6 +195,41 @@ pub fn IconPopoverButton(
                     }
                 }
             }
+        }
+    }
+}
+
+/// A [`PopoverButton`] whose trigger is a single [`StudioIcon`]. Thin wrapper
+/// preserved so existing icon-only callers are unchanged.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+pub fn IconPopoverButton(
+    class: String,
+    open_class: String,
+    icon: StudioIconName,
+    icon_size: u32,
+    label: String,
+    title: String,
+    popup_class: String,
+    #[props(default = String::new())] chrome_class: String,
+    #[props(default = PopoverPlacement::BottomEnd)] placement: PopoverPlacement,
+    #[props(default = false)] initially_open: bool,
+    children: Element,
+) -> Element {
+    rsx! {
+        PopoverButton {
+            class,
+            open_class,
+            trigger: rsx! {
+                StudioIcon { name: icon, size: icon_size }
+            },
+            label,
+            title,
+            popup_class,
+            chrome_class,
+            placement,
+            initially_open,
+            {children}
         }
     }
 }

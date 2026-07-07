@@ -163,6 +163,9 @@ impl TokioLpClient {
                         events.push(event);
                     }
                 }
+                ResponseDisposition::StaleAbandoned { response_id } => {
+                    events.push(ClientEvent::StaleResponseDropped { response_id });
+                }
                 ResponseDisposition::Uncorrelated {
                     response_id,
                     expected_id,
@@ -440,6 +443,18 @@ impl TokioLpClient {
         }
     }
 
+    /// Set the server/device global log level at runtime (not persisted;
+    /// the device reverts to its init default on reboot).
+    pub async fn set_log_level(&self, level: LogLevel) -> Result<()> {
+        let response = self
+            .send_request(ClientRequest::SetLogLevel { level })
+            .await?;
+        match response.value.msg {
+            WireServerMsgBody::SetLogLevel => Ok(()),
+            other => Err(unexpected_response("set_log_level", other)),
+        }
+    }
+
     pub async fn push_project_files(
         &self,
         project_id: &str,
@@ -508,6 +523,11 @@ impl TokioLpClient {
                         "Received non-correlated message (id: {response_id}, expected: {expected_id})"
                     );
                 }
+                ClientEvent::StaleResponseDropped { response_id } => {
+                    // Expected discard of a response for a request this client
+                    // abandoned (cancelled/timed-out pull); not a warning.
+                    log::debug!("Dropped stale response for abandoned request {response_id}");
+                }
                 _ => {}
             }
         }
@@ -556,6 +576,7 @@ impl PullIo for LockedTransportIo<'_> {
 
 fn server_log_level(level: &LogLevel) -> log::Level {
     match level {
+        LogLevel::Trace => log::Level::Trace,
         LogLevel::Debug => log::Level::Debug,
         LogLevel::Info => log::Level::Info,
         LogLevel::Warn => log::Level::Warn,

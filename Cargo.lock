@@ -5203,6 +5203,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpa-fs-opfs"
+version = "40.0.0"
+dependencies = [
+ "gloo-timers",
+ "js-sys",
+ "log",
+ "lpc-history",
+ "lpfs",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm-bindgen-test",
+ "web-sys",
+]
+
+[[package]]
 name = "lpa-link"
 version = "40.0.0"
 dependencies = [
@@ -5244,6 +5259,7 @@ version = "40.0.0"
 dependencies = [
  "async-trait",
  "js-sys",
+ "log",
  "lpa-client",
  "lpa-link",
  "lpa-server",
@@ -5266,11 +5282,15 @@ dependencies = [
  "futures-util",
  "gloo-net",
  "gloo-timers",
+ "js-sys",
+ "log",
+ "lpa-fs-opfs",
  "lpa-studio-core",
  "lpa-studio-web-story-macros",
  "serde",
  "syn 2.0.117",
  "wasm-bindgen",
+ "wasm-bindgen-futures",
  "web-sys",
 ]
 
@@ -5327,6 +5347,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpc-history"
+version = "40.0.0"
+dependencies = [
+ "log",
+ "lpfs",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "lpc-model"
 version = "40.0.0"
 dependencies = [
@@ -5347,6 +5378,7 @@ dependencies = [
 name = "lpc-registry"
 version = "40.0.0"
 dependencies = [
+ "libm",
  "lp-collection 1.0.0",
  "lpc-model",
  "lpc-wire",

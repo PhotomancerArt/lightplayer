@@ -7,7 +7,7 @@ use alloc::vec::Vec;
 use lpc_model::slot::SlotPersistence;
 use lpc_model::{
     ArtifactChangeSummary, ArtifactLocation, ArtifactOverlay, AssetBodyOverlay, CommitResult,
-    LpValue, MutationBatchResults, MutationCmdBatch, MutationCmdBatchResult, MutationCmdResult,
+    MutationBatchResults, MutationCmdBatch, MutationCmdBatchResult, MutationCmdResult,
     MutationEffect, MutationOp, MutationRejection, MutationRejectionReason, MutationResult,
     NodeArtifact, NodeDef, NodeDefEntry, NodeDefLocation, NodeDefState, PROJECT_FORMAT_VERSION,
     ProjectFormatProbe, ProjectInventory, ProjectOverlay, Revision, SlotAccess, SlotDataAccess,
@@ -20,6 +20,7 @@ use lpfs::{FsEvent, FsEventKind, LpFs, LpPath};
 
 use crate::overlay::inventory_change_summary::change_summary_between;
 use crate::overlay::project_inventory_derivation::derive_effective_inventory;
+use crate::registry::base_value_display;
 use crate::{
     ArtifactStore, CommitError, LoadResult, ParseCtx, RegistryError,
     asset::{AssetBytes, AssetReadError, AssetText},
@@ -122,7 +123,12 @@ impl ProjectRegistry {
             mutation => {
                 let structural_remove = is_structural_remove(&mutation);
                 let variant_siblings = self.variant_switch_sibling_paths(&mutation, ctx);
-                let (mutation, normalized) = self.normalize_edit_to_base(fs, mutation, ctx);
+                let ensure_scope = self.structural_ensure_scope(&mutation, ctx);
+                let NormalizedEdit {
+                    mutation,
+                    normalized,
+                    base_display: _,
+                } = self.normalize_edit_to_base(fs, mutation, ctx);
                 match mutation {
                     // A structural `Remove` that normalized away must also
                     // clear the overlay entries stranded under it (see
@@ -146,6 +152,18 @@ impl ProjectRegistry {
                             | self
                                 .clear_variant_sibling_subtrees(&artifact, &variant_siblings)
                                 .1
+                    }
+                    // A structural `EnsurePresent` that normalized away must
+                    // also clear a pending counteracting `Remove` within its
+                    // scope (see `Self::structural_ensure_scope`): the sweep
+                    // runs at the effective scope, which for an
+                    // `EnsurePresent opt.some` is the option path where the
+                    // toggle-off stored its `Remove`.
+                    MutationOp::RemoveSlotEdit { artifact, path: _ }
+                        if normalized && ensure_scope.is_some() =>
+                    {
+                        let scope = ensure_scope.as_ref().expect("guarded by the arm");
+                        self.remove_slot_edit_subtree(&artifact, scope).1
                     }
                     // A variant-selecting `EnsurePresent` that stores (switch
                     // away from base) replaces any previous pending switch
@@ -212,8 +230,12 @@ impl ProjectRegistry {
                     let structural_remove = is_structural_remove(&command.mutation);
                     let variant_siblings =
                         self.variant_switch_sibling_paths(&command.mutation, ctx);
-                    let (mutation, normalized) =
-                        self.normalize_edit_to_base(fs, command.mutation, ctx);
+                    let ensure_scope = self.structural_ensure_scope(&command.mutation, ctx);
+                    let NormalizedEdit {
+                        mutation,
+                        normalized,
+                        base_display,
+                    } = self.normalize_edit_to_base(fs, command.mutation, ctx);
                     let effect = match mutation {
                         // A structural `Remove` that normalized away must
                         // also clear the overlay entries stranded under it
@@ -235,12 +257,15 @@ impl ProjectRegistry {
                                 MutationEffect::Materialized {
                                     edits: removed
                                         .into_iter()
-                                        .map(|path| StoredSlotEdit::Removed { path })
+                                        .map(StoredSlotEdit::removed)
                                         .collect(),
                                     changed,
                                 }
                             } else {
-                                MutationEffect::NormalizedToRemoval { changed }
+                                MutationEffect::NormalizedToRemoval {
+                                    changed,
+                                    base_display,
+                                }
                             }
                         }
                         // A variant-selecting `EnsurePresent` that normalized
@@ -258,14 +283,50 @@ impl ProjectRegistry {
                             changed |= siblings_changed;
                             any_changed |= changed;
                             if cleared.is_empty() {
-                                MutationEffect::NormalizedToRemoval { changed }
+                                MutationEffect::NormalizedToRemoval {
+                                    changed,
+                                    base_display,
+                                }
                             } else {
                                 MutationEffect::Materialized {
                                     edits: core::iter::once(path)
                                         .chain(cleared)
-                                        .map(|path| StoredSlotEdit::Removed { path })
+                                        .map(StoredSlotEdit::removed)
                                         .collect(),
                                     changed,
+                                }
+                            }
+                        }
+                        // A structural `EnsurePresent` that normalized away
+                        // must also clear a pending counteracting `Remove`
+                        // within its scope (see
+                        // `Self::structural_ensure_scope`): the sweep runs at
+                        // the effective scope — for `EnsurePresent opt.some`
+                        // the option path where the toggle-off stored its
+                        // `Remove`. When the sweep touched any path other
+                        // than the sent one, the ack must say so via
+                        // `Materialized` (a plain `NormalizedToRemoval` would
+                        // point ack-mirroring clients at the sent path only,
+                        // leaving the counteracting entry in the mirror).
+                        MutationOp::RemoveSlotEdit { artifact, path }
+                            if normalized && ensure_scope.is_some() =>
+                        {
+                            let scope = ensure_scope.as_ref().expect("guarded by the arm");
+                            let (removed, changed) =
+                                self.remove_slot_edit_subtree(&artifact, scope);
+                            any_changed |= changed;
+                            if changed && removed.iter().any(|removed| *removed != path) {
+                                MutationEffect::Materialized {
+                                    edits: removed
+                                        .into_iter()
+                                        .map(StoredSlotEdit::removed)
+                                        .collect(),
+                                    changed,
+                                }
+                            } else {
+                                MutationEffect::NormalizedToRemoval {
+                                    changed,
+                                    base_display,
                                 }
                             }
                         }
@@ -290,16 +351,18 @@ impl ProjectRegistry {
                             changed |= siblings_changed;
                             any_changed |= changed;
                             if cleared.is_empty() {
-                                MutationEffect::OverlayChanged { changed }
+                                MutationEffect::OverlayChanged {
+                                    changed,
+                                    base_display,
+                                }
                             } else {
                                 MutationEffect::Materialized {
-                                    edits: core::iter::once(StoredSlotEdit::Put { edit })
-                                        .chain(
-                                            cleared
-                                                .into_iter()
-                                                .map(|path| StoredSlotEdit::Removed { path }),
-                                        )
-                                        .collect(),
+                                    edits: core::iter::once(StoredSlotEdit::put_with_base_display(
+                                        edit,
+                                        base_display,
+                                    ))
+                                    .chain(cleared.into_iter().map(StoredSlotEdit::removed))
+                                    .collect(),
                                     changed,
                                 }
                             }
@@ -308,9 +371,15 @@ impl ProjectRegistry {
                             let changed = self.overlay.get_mut().apply_mutation(mutation);
                             any_changed |= changed;
                             if normalized {
-                                MutationEffect::NormalizedToRemoval { changed }
+                                MutationEffect::NormalizedToRemoval {
+                                    changed,
+                                    base_display,
+                                }
                             } else {
-                                MutationEffect::OverlayChanged { changed }
+                                MutationEffect::OverlayChanged {
+                                    changed,
+                                    base_display,
+                                }
                             }
                         }
                     };
@@ -813,10 +882,10 @@ impl ProjectRegistry {
     /// through [`ProjectOverlay::put_slot_edit`]'s canonicalization on both
     /// server and mirror already.
     ///
-    /// Known base-relative edge (accepted, same family as ADR D7's): a
-    /// synthesized `Remove` under `to` that nulls out a fresh default (a
-    /// typed default with a `Some` option or non-empty map) normalizes away
-    /// against a base-absent target; no such typed default exists today.
+    /// Known base-relative edge (accepted): a synthesized `Remove` under
+    /// `to` that nulls out a fresh default (a typed default with a `Some`
+    /// option or non-empty map) normalizes away against a base-absent
+    /// target; no such typed default exists today.
     fn apply_move_slot_entry(
         &mut self,
         fs: &dyn LpFs,
@@ -849,7 +918,11 @@ impl ProjectRegistry {
         let mut stored = Vec::with_capacity(synthesized.len());
         let mut changed = false;
         for edit in synthesized {
-            let (mutation, normalized) = self.normalize_edit_to_base(
+            let NormalizedEdit {
+                mutation,
+                normalized,
+                base_display,
+            } = self.normalize_edit_to_base(
                 fs,
                 MutationOp::PutSlotEdit {
                     artifact: artifact.clone(),
@@ -863,21 +936,17 @@ impl ProjectRegistry {
                         .overlay
                         .get_mut()
                         .put_slot_edit(artifact.clone(), edit.clone());
-                    stored.push(StoredSlotEdit::Put { edit });
+                    stored.push(StoredSlotEdit::put_with_base_display(edit, base_display));
                 }
                 MutationOp::RemoveSlotEdit { path, .. } => {
                     if normalized && path == *from {
                         let (removed, subtree_changed) =
                             self.remove_slot_edit_subtree(artifact, &path);
                         changed |= subtree_changed;
-                        stored.extend(
-                            removed
-                                .into_iter()
-                                .map(|path| StoredSlotEdit::Removed { path }),
-                        );
+                        stored.extend(removed.into_iter().map(StoredSlotEdit::removed));
                     } else {
                         changed |= self.overlay.get_mut().remove_slot_edit(artifact, &path);
-                        stored.push(StoredSlotEdit::Removed { path });
+                        stored.push(StoredSlotEdit::removed(path));
                     }
                 }
                 other => unreachable!(
@@ -975,6 +1044,44 @@ impl ProjectRegistry {
         enum_variant_sibling_paths(def, &edit.path, ctx)
     }
 
+    /// The overlay scope a structural `EnsurePresent` must sweep when it
+    /// normalizes away against the base, or `None` when the mutation is no
+    /// such edit.
+    ///
+    /// A normalized structural `EnsurePresent` can leave a **counteracting**
+    /// overlay entry behind: toggling a base-present option off stores
+    /// `Remove` at the *option* path, while toggling it back on sends
+    /// `EnsurePresent opt.some` — which normalizes away (the base is already
+    /// `Some`) at a *different* path, so removing only the entry at the sent
+    /// path would strand the stored `Remove` and the gesture would do
+    /// nothing. The counteracting-entry rule (the option/map twin of
+    /// [`Self::variant_switch_sibling_paths`]): a structural `EnsurePresent`
+    /// that normalizes away also clears the overlay subtree at its
+    /// *effective scope* — the parent option path when the terminal segment
+    /// is an option's `some` (per the same shape walk that validates and
+    /// applies the edit), the ensure path itself otherwise (map entries,
+    /// options ensured at their own path). Sweeping the subtree covers both
+    /// the counteracting `Remove` and any stale edits under it.
+    fn structural_ensure_scope(
+        &self,
+        mutation: &MutationOp,
+        ctx: &ParseCtx<'_>,
+    ) -> Option<SlotPath> {
+        let MutationOp::PutSlotEdit { artifact, edit } = mutation else {
+            return None;
+        };
+        if !matches!(edit.op, SlotEditOp::EnsurePresent) {
+            return None;
+        }
+        let Ok(def) = self.loaded_def_for_mutation(artifact) else {
+            // No loaded definition to walk: the ensure path itself is the
+            // conservative scope (identical to the pre-rule behavior plus
+            // the subtree sweep).
+            return Some(edit.path.clone());
+        };
+        Some(ensure_effective_scope(def, &edit.path, ctx))
+    }
+
     /// Clear the overlay subtree ([`Self::remove_slot_edit_subtree`]) at each
     /// sibling variant path that actually carries overlay entries, returning
     /// the removed paths (per sibling: entry first, then descendants) and
@@ -1006,24 +1113,31 @@ impl ProjectRegistry {
     /// (`docs/adr/2026-07-04-studio-editing-model.md`, D6; structural cases:
     /// M3 plan, D2). Per-op rule against the base definition:
     ///
-    /// - `AssignValue`: the assigned value equals [`Self::base_slot_value`]
-    ///   at the path.
+    /// - `AssignValue`: the assigned value equals
+    ///   [`base_value_display::base_value_in_def`] at the path.
     /// - `EnsurePresent`: the base already satisfies the path
-    ///   ([`Self::base_slot_presence`] is `Some(true)`: map key present,
-    ///   option `Some`, enum variant already active).
+    ///   ([`base_value_display::base_presence_in_def`] is `true`: map key
+    ///   present, option `Some`, enum variant already active).
     /// - `Remove`: the base does not contain the target
-    ///   ([`Self::base_slot_presence`] is `Some(false)`: map key absent,
-    ///   option already `None`).
+    ///   ([`base_value_display::base_presence_in_def`] is `false`: map key
+    ///   absent, option already `None`).
     ///
-    /// Returns the operation to apply plus whether it was normalized, so
-    /// batch results can report [`MutationEffect::NormalizedToRemoval`] and
-    /// ack-mirroring clients apply what was stored rather than what was sent.
-    /// Whole-artifact ops pass through unchanged, and nothing normalizes when
-    /// the base bytes cannot be read or parsed (conservative: keep the edit).
+    /// Returns the operation to apply, whether it was normalized, and the
+    /// base-value display annotation derived from the same base parse
+    /// ([`NormalizedEdit`]), so batch results can report
+    /// [`MutationEffect::NormalizedToRemoval`] — and carry the "old value"
+    /// display string — and ack-mirroring clients apply what was stored
+    /// rather than what was sent. Whole-artifact ops pass through unchanged,
+    /// and nothing normalizes when the base bytes cannot be read or parsed
+    /// (conservative: keep the edit).
     ///
     /// Callers applying a normalized structural `Remove` must clear the
     /// whole overlay subtree at its path, not just the entry
-    /// ([`Self::remove_slot_edit_subtree`]); callers processing a
+    /// ([`Self::remove_slot_edit_subtree`]); callers applying a normalized
+    /// structural `EnsurePresent` must clear the overlay subtree at its
+    /// effective scope, which for an `EnsurePresent opt.some` is the *option*
+    /// path holding any counteracting `Remove`
+    /// ([`Self::structural_ensure_scope`]); and callers processing a
     /// variant-selecting `EnsurePresent` must clear the sibling variant
     /// subtrees whether or not it normalized
     /// ([`Self::variant_switch_sibling_paths`]).
@@ -1032,72 +1146,45 @@ impl ProjectRegistry {
         fs: &dyn LpFs,
         mutation: MutationOp,
         ctx: &ParseCtx<'_>,
-    ) -> (MutationOp, bool) {
+    ) -> NormalizedEdit {
         let (artifact, edit) = match mutation {
             MutationOp::PutSlotEdit { artifact, edit } => (artifact, edit),
-            other => return (other, false),
+            other => return NormalizedEdit::passthrough(other),
         };
+        // One base parse serves both the normalization decision and the
+        // base-display annotation the ack effects carry (P2): recomputing the
+        // display later would re-parse the same bytes.
+        let def = self.parse_base_def(fs, &artifact, ctx);
+        let base_display = def
+            .as_ref()
+            .and_then(|def| base_value_display::base_display_in_def(def, &edit.path, ctx));
         let matches_base = match &edit.op {
-            SlotEditOp::AssignValue(value) => self
-                .base_slot_value(fs, &artifact, &edit.path, ctx)
+            SlotEditOp::AssignValue(value) => def
+                .as_ref()
+                .and_then(|def| base_value_display::base_value_in_def(def, &edit.path, ctx))
                 .is_some_and(|base| base == *value),
-            SlotEditOp::EnsurePresent => {
-                self.base_slot_presence(fs, &artifact, &edit.path, ctx) == Some(true)
-            }
-            SlotEditOp::Remove => {
-                self.base_slot_presence(fs, &artifact, &edit.path, ctx) == Some(false)
-            }
+            SlotEditOp::EnsurePresent => def
+                .as_ref()
+                .is_some_and(|def| base_value_display::base_presence_in_def(def, &edit.path, ctx)),
+            SlotEditOp::Remove => def
+                .as_ref()
+                .is_some_and(|def| !base_value_display::base_presence_in_def(def, &edit.path, ctx)),
         };
         if matches_base {
-            (
-                MutationOp::RemoveSlotEdit {
+            NormalizedEdit {
+                mutation: MutationOp::RemoveSlotEdit {
                     artifact,
                     path: edit.path,
                 },
-                true,
-            )
-        } else {
-            (MutationOp::PutSlotEdit { artifact, edit }, false)
-        }
-    }
-
-    /// Base (unoverlaid) value at `path` in `artifact`, or `None` when the
-    /// path does not resolve to a value leaf in the base definition.
-    ///
-    /// Seam: the base definition is re-parsed from the artifact's canonical
-    /// bytes ([`ArtifactStore::read_bytes`]) — the same read the inventory
-    /// derivation starts from before applying the overlay. The registry keeps
-    /// no cached base parse (the inventory holds only the *effective* def),
-    /// and the derivation that follows every mutation re-parses every def
-    /// anyway, so one targeted parse per assignment is in the noise. Absent
-    /// authored fields default from the shape on parse, so "authored default"
-    /// and "unauthored default" compare identically. Variant-prefixed paths
-    /// (see [`resolve_edit_policy`]) resolve only when the base definition is
-    /// already that variant; a variant-switching edit never equals base.
-    /// Comparison at the caller is exact [`LpValue`] equality — a near-miss
-    /// float (`1.000_000_1` vs `1.0`) stays an edit.
-    fn base_slot_value(
-        &mut self,
-        fs: &dyn LpFs,
-        artifact: &ArtifactLocation,
-        path: &SlotPath,
-        ctx: &ParseCtx<'_>,
-    ) -> Option<LpValue> {
-        let def = self.parse_base_def(fs, artifact, ctx)?;
-        let path = match path.segments().split_first() {
-            Some((SlotPathSegment::Field(name), tail))
-                if NodeDef::is_variant_name(name.as_str()) =>
-            {
-                if def.variant_name() != name.as_str() {
-                    return None;
-                }
-                SlotPath::from_segments(tail.to_vec())
+                normalized: true,
+                base_display,
             }
-            _ => path.clone(),
-        };
-        match lookup_slot_data(&def, ctx.shapes, &path).ok()? {
-            SlotDataAccess::Value(value) => Some(value.value()),
-            _ => None,
+        } else {
+            NormalizedEdit {
+                mutation: MutationOp::PutSlotEdit { artifact, edit },
+                normalized: false,
+                base_display,
+            }
         }
     }
 
@@ -1115,7 +1202,7 @@ impl ProjectRegistry {
     /// - `None`: the base bytes cannot be read or parsed, so presence is
     ///   unknowable and the caller must not normalize in either direction.
     ///
-    /// Same base-def seam as [`Self::base_slot_value`], including the
+    /// Same base-def seam as [`Self::parse_base_def`], including the
     /// variant-prefixed path rule: a prefix naming a variant other than the
     /// base's makes the target absent (a variant switch is a real diff).
     fn base_slot_presence(
@@ -1126,29 +1213,59 @@ impl ProjectRegistry {
         ctx: &ParseCtx<'_>,
     ) -> Option<bool> {
         let def = self.parse_base_def(fs, artifact, ctx)?;
-        let path = match path.segments().split_first() {
-            Some((SlotPathSegment::Field(name), tail))
-                if NodeDef::is_variant_name(name.as_str()) =>
-            {
-                if def.variant_name() != name.as_str() {
-                    return Some(false);
+        Some(base_value_display::base_presence_in_def(&def, path, ctx))
+    }
+
+    /// Base-value display strings for every pending slot-edit path in the
+    /// overlay, as `(artifact, path, display)` — the overlay-read annotation
+    /// (P2). One base parse per overlaid artifact annotates all of its
+    /// entries via [`base_value_display::base_display_in_def`]; paths whose
+    /// base target is absent (or whose artifact fails to parse) are simply
+    /// omitted, and the client renders them as "not set".
+    pub fn overlay_base_displays(
+        &mut self,
+        fs: &dyn LpFs,
+        ctx: &ParseCtx<'_>,
+    ) -> Vec<(ArtifactLocation, SlotPath, String)> {
+        let per_artifact: Vec<(ArtifactLocation, Vec<SlotPath>)> = self
+            .overlay
+            .get()
+            .iter()
+            .filter_map(|(artifact, overlay)| {
+                overlay.as_slot().map(|slot| {
+                    (
+                        artifact.clone(),
+                        slot.edits.iter().map(|(path, _)| path.clone()).collect(),
+                    )
+                })
+            })
+            .collect();
+
+        let mut displays = Vec::new();
+        for (artifact, paths) in per_artifact {
+            let Some(def) = self.parse_base_def(fs, &artifact, ctx) else {
+                continue;
+            };
+            for path in paths {
+                if let Some(display) = base_value_display::base_display_in_def(&def, &path, ctx) {
+                    displays.push((artifact.clone(), path, display));
                 }
-                SlotPath::from_segments(tail.to_vec())
             }
-            _ => path.clone(),
-        };
-        let Ok(data) = lookup_slot_data(&def, ctx.shapes, &path) else {
-            return Some(false);
-        };
-        Some(match data {
-            SlotDataAccess::Option(option) => option.data().is_some(),
-            _ => true,
-        })
+        }
+        displays
     }
 
     /// Parse the base (unoverlaid) definition of `artifact` from its
-    /// canonical bytes. See [`Self::base_slot_value`] for the seam rationale
-    /// (one targeted re-parse per normalized command is in the noise).
+    /// canonical bytes.
+    ///
+    /// Seam: the base definition is re-parsed from the artifact's canonical
+    /// bytes ([`ArtifactStore::read_bytes`]) — the same read the inventory
+    /// derivation starts from before applying the overlay. The registry keeps
+    /// no cached base parse (the inventory holds only the *effective* def),
+    /// and the derivation that follows every mutation re-parses every def
+    /// anyway, so one targeted parse per normalized command is in the noise.
+    /// Absent authored fields default from the shape on parse, so "authored
+    /// default" and "unauthored default" compare identically.
     fn parse_base_def(
         &mut self,
         fs: &dyn LpFs,
@@ -1190,6 +1307,27 @@ impl ProjectRegistry {
                     ),
                 )
             })
+    }
+}
+
+/// Result of [`ProjectRegistry::normalize_edit_to_base`]: the operation to
+/// apply, whether normalization rewrote it, and the base-value display
+/// annotation derived from the same base parse (`None` when the target is
+/// absent in the base, the base is unreadable, or the op was no `PutSlotEdit`).
+struct NormalizedEdit {
+    mutation: MutationOp,
+    normalized: bool,
+    base_display: Option<String>,
+}
+
+impl NormalizedEdit {
+    /// A mutation the normalization pass does not touch (whole-artifact ops).
+    fn passthrough(mutation: MutationOp) -> Self {
+        Self {
+            mutation,
+            normalized: false,
+            base_display: None,
+        }
     }
 }
 
@@ -1259,6 +1397,44 @@ fn enum_variant_sibling_paths(def: &NodeDef, path: &SlotPath, ctx: &ParseCtx<'_>
         siblings.push(parent_path.child(name));
     }
     siblings
+}
+
+/// Effective sweep scope of a structural `EnsurePresent` at `path`
+/// ([`ProjectRegistry::structural_ensure_scope`]): the parent option path
+/// when the terminal segment is an option's `some`, `path` itself otherwise.
+///
+/// The root shape follows [`resolve_edit_policy`]'s rule and the walk to the
+/// parent is shape-only ([`shape_at_path`]), matching how the edit is
+/// validated and applied — including the segment-resolution precedence, so a
+/// record field literally named `some` stays a field terminal, not an option
+/// interior. Unresolvable paths keep `path` as the scope (conservative: the
+/// sweep degrades to the plain entry removal plus its own subtree).
+fn ensure_effective_scope(def: &NodeDef, path: &SlotPath, ctx: &ParseCtx<'_>) -> SlotPath {
+    let Some((SlotPathSegment::Field(terminal), parent)) = path.segments().split_last() else {
+        return path.clone();
+    };
+    if terminal.as_str() != "some" {
+        return path.clone();
+    }
+    let root_shape_id = match path.segments().first() {
+        Some(SlotPathSegment::Field(name)) if NodeDef::is_variant_name(name.as_str()) => {
+            NodeArtifact::SHAPE_ID
+        }
+        _ => def.shape_id(),
+    };
+    let Some(root) = ctx.shapes.get_shape(root_shape_id) else {
+        return path.clone();
+    };
+    let Some(parent_shape) = shape_at_path(root, ctx, parent) else {
+        return path.clone();
+    };
+    let is_option_some = parent_shape.record_field_by_name(terminal).is_none()
+        && parent_shape.option_some().is_some();
+    if is_option_some {
+        SlotPath::from_segments(parent.to_vec())
+    } else {
+        path.clone()
+    }
 }
 
 /// Shape at `segments` under `shape`: the same shape-only walk as
@@ -1353,9 +1529,10 @@ fn effective_map_entry_presence(
 ///
 /// When such an edit normalizes away against the base, the caller must clear
 /// the overlay entries stranded under its path
-/// ([`ProjectRegistry::remove_slot_edit_subtree`]); no other normalized op
-/// strands descendants (a normalized `EnsurePresent` leaves base-relative
-/// descendant edits fully applicable).
+/// ([`ProjectRegistry::remove_slot_edit_subtree`]). A normalized structural
+/// `EnsurePresent` has its own counterpart rule — the sweep at its effective
+/// scope ([`ProjectRegistry::structural_ensure_scope`]) — and a normalized
+/// `AssignValue` strands nothing.
 fn is_structural_remove(mutation: &MutationOp) -> bool {
     matches!(
         mutation,
@@ -1425,6 +1602,70 @@ mod tests {
         let def = effective_clock_def(&registry);
         assert!(!*def.controls.running.value());
         assert_eq!(*def.controls.rate.value(), 1.0);
+    }
+
+    #[test]
+    fn project_root_format_and_nodes_reject_writes_but_name_stays_writable() {
+        // P6 flat-root policy: `ProjectDef.format` and `ProjectDef.nodes` are
+        // `read_only_persisted` — only the loader format gate / future
+        // upgrader (format) and dedicated project ops (nodes, Studio
+        // authoring M2) own them. The policy inherits into the subtree (map
+        // entries, option interior); `name` stays writable (project rename
+        // is legitimate).
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = clock_project(&shapes);
+        let project = ArtifactLocation::file("/project.json");
+
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![
+                MutationOp::PutSlotEdit {
+                    artifact: project.clone(),
+                    edit: SlotEdit::assign_value(
+                        SlotPath::parse("format.some").unwrap(),
+                        LpValue::U32(2),
+                    ),
+                },
+                MutationOp::PutSlotEdit {
+                    artifact: project.clone(),
+                    edit: SlotEdit::ensure_present(SlotPath::parse("nodes[strip]").unwrap()),
+                },
+                MutationOp::PutSlotEdit {
+                    artifact: project.clone(),
+                    edit: SlotEdit::remove(SlotPath::parse("nodes[clock]").unwrap()),
+                },
+                MutationOp::PutSlotEdit {
+                    artifact: project.clone(),
+                    edit: SlotEdit::assign_value(
+                        SlotPath::parse("name.some").unwrap(),
+                        LpValue::String("Renamed".into()),
+                    ),
+                },
+            ],
+        );
+
+        for rejected in &results[0..3] {
+            assert_eq!(
+                rejection_reason(rejected),
+                &MutationRejectionReason::NotWritable
+            );
+        }
+        assert_accepted(&results[3], true);
+
+        let def = registry
+            .def(&NodeDefLocation::artifact_root(project))
+            .expect("project def entry")
+            .state
+            .loaded_def()
+            .expect("project def loaded")
+            .as_project()
+            .expect("project def");
+        assert_eq!(def.name(), Some("Renamed"));
+        assert_eq!(def.format(), Some(1), "format edit never applied");
+        assert!(def.nodes.entries.contains_key("clock"));
+        assert!(!def.nodes.entries.contains_key("strip"));
     }
 
     #[test]
@@ -2286,6 +2527,144 @@ mod tests {
     }
 
     #[test]
+    fn option_toggled_off_then_on_via_some_ends_clean() {
+        // The dead-click repro: toggling a base-present option OFF stores
+        // `Remove` at the option path; toggling it back ON dispatches
+        // `EnsurePresent opt.some`, which normalizes away against base at a
+        // DIFFERENT path. The counteracting-entry sweep must clear the stored
+        // `Remove` at the option path, and the ack must list it
+        // (`Materialized`) so ack-mirroring clients follow without a fetch.
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = bound_clock_project(&shapes);
+        let clock = clock_artifact();
+        let value = SlotPath::parse("bindings[speed].value").unwrap();
+        let value_some = SlotPath::parse("bindings[speed].value.some").unwrap();
+
+        // Toggle off: removing a base-Some option is a real diff and stores.
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::PutSlotEdit {
+                artifact: clock.clone(),
+                edit: SlotEdit::remove(value.clone()),
+            }],
+        );
+        assert_accepted(&results[0], true);
+        assert!(
+            effective_clock_def(&registry)
+                .bindings
+                .entries()
+                .get(&String::from("speed"))
+                .expect("speed binding")
+                .value
+                .data
+                .is_none(),
+            "the toggle-off removed the option"
+        );
+
+        // Toggle back on via the gesture path.
+        let results = mutate_batch_at(
+            &fs,
+            &mut registry,
+            &shapes,
+            Revision::new(12),
+            vec![MutationOp::PutSlotEdit {
+                artifact: clock.clone(),
+                edit: SlotEdit::ensure_present(value_some),
+            }],
+        );
+        let edits = assert_materialized(&results[0], true);
+        assert_eq!(
+            edits,
+            &[StoredSlotEdit::Removed { path: value }],
+            "the ack lists the cleared counteracting Remove at the option path"
+        );
+        assert!(
+            registry.overlay().get().is_empty(),
+            "off-then-on ends with an empty overlay"
+        );
+        assert_eq!(registry.overlay().changed_at(), Revision::new(12));
+        assert!(
+            effective_clock_def(&registry)
+                .bindings
+                .entries()
+                .get(&String::from("speed"))
+                .expect("speed binding")
+                .value
+                .data
+                .is_some(),
+            "the effective option is back to the base Some"
+        );
+    }
+
+    #[test]
+    fn ensure_via_some_with_no_pending_remove_stays_a_plain_normalized_noop() {
+        // Nothing to counteract: the sweep finds nothing, so the ack stays
+        // the plain `NormalizedToRemoval` (no `Materialized` widening) and
+        // the overlay revision does not bump.
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = bound_clock_project(&shapes);
+
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::PutSlotEdit {
+                artifact: clock_artifact(),
+                edit: SlotEdit::ensure_present(
+                    SlotPath::parse("bindings[speed].value.some").unwrap(),
+                ),
+            }],
+        );
+
+        assert_normalized(&results[0], false);
+        assert!(registry.overlay().get().is_empty());
+        assert_eq!(registry.overlay().changed_at(), Revision::default());
+    }
+
+    #[test]
+    fn singular_mutate_clears_the_counteracting_option_remove() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = bound_clock_project(&shapes);
+        let clock = clock_artifact();
+        let ctx = ParseCtx { shapes: &shapes };
+
+        registry
+            .mutate(
+                &fs,
+                MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: SlotEdit::remove(SlotPath::parse("bindings[speed].value").unwrap()),
+                },
+                Revision::new(10),
+                &ctx,
+            )
+            .unwrap();
+        assert!(!registry.overlay().get().is_empty());
+
+        let result = registry
+            .mutate(
+                &fs,
+                MutationOp::PutSlotEdit {
+                    artifact: clock,
+                    edit: SlotEdit::ensure_present(
+                        SlotPath::parse("bindings[speed].value.some").unwrap(),
+                    ),
+                },
+                Revision::new(12),
+                &ctx,
+            )
+            .unwrap();
+
+        assert!(result.overlay_changed);
+        assert!(
+            registry.overlay().get().is_empty(),
+            "the singular path must clear the counteracting Remove like the batch path"
+        );
+    }
+
+    #[test]
     fn enum_variant_ensure_present_normalizes_only_for_the_active_variant() {
         let shapes = SlotShapeRegistry::default();
         let (fs, mut registry) = fixture_project(&shapes);
@@ -2630,24 +3009,24 @@ mod tests {
         // The move materializes into the ordinary edit vocabulary: create
         // the target entry, assign the one leaf where the moved value
         // diverges from a fresh entry's default (12 vs 0), remove the source.
+        // Base-value annotations ride per stored edit: the base-absent target
+        // paths carry none; the removed source key exists in base, so its
+        // stored remove carries the base leaf's display string.
         let edits = assert_materialized(&results[0], true);
         assert_eq!(
             edits,
             &[
-                StoredSlotEdit::Put {
-                    edit: SlotEdit::ensure_present(
-                        SlotPath::parse(&format!("{counts}[2]")).unwrap()
-                    ),
-                },
-                StoredSlotEdit::Put {
-                    edit: SlotEdit::assign_value(
-                        SlotPath::parse(&format!("{counts}[2]")).unwrap(),
-                        LpValue::U32(12),
-                    ),
-                },
-                StoredSlotEdit::Put {
-                    edit: SlotEdit::remove(SlotPath::parse(&format!("{counts}[1]")).unwrap()),
-                },
+                StoredSlotEdit::put(SlotEdit::ensure_present(
+                    SlotPath::parse(&format!("{counts}[2]")).unwrap()
+                )),
+                StoredSlotEdit::put(SlotEdit::assign_value(
+                    SlotPath::parse(&format!("{counts}[2]")).unwrap(),
+                    LpValue::U32(12),
+                )),
+                StoredSlotEdit::put_with_base_display(
+                    SlotEdit::remove(SlotPath::parse(&format!("{counts}[1]")).unwrap()),
+                    Some("12".to_string()),
+                ),
             ]
         );
 
@@ -2700,7 +3079,7 @@ mod tests {
         // is the factory default), so the materialization must carry the
         // variant selection, the diverged leaves, and the nested map add.
         let edits = assert_materialized(&results[0], true);
-        let put = |edit: SlotEdit| StoredSlotEdit::Put { edit };
+        let put = StoredSlotEdit::put;
         assert_eq!(
             edits.first(),
             Some(&put(SlotEdit::ensure_present(
@@ -2726,12 +3105,21 @@ mod tests {
             ))),
             "nested map entries must be re-created: {edits:?}"
         );
-        assert_eq!(
-            edits.last(),
-            Some(&put(SlotEdit::remove(
-                SlotPath::parse(&format!("{paths}[3]")).unwrap()
-            )))
-        );
+        // The removed source entry exists in base as a composite subtree, so
+        // its stored remove carries the capped compact-JSON base display.
+        match edits.last() {
+            Some(StoredSlotEdit::Put {
+                edit,
+                base_display: Some(display),
+            }) => {
+                assert_eq!(
+                    edit,
+                    &SlotEdit::remove(SlotPath::parse(&format!("{paths}[3]")).unwrap())
+                );
+                assert!(display.contains("PointList"), "{display}");
+            }
+            other => panic!("expected annotated remove of the source entry, got {other:?}"),
+        }
 
         let def = effective_fixture_def(&registry);
         let lpc_model::MappingConfig::PathPoints { paths, .. } = def.mapping.value() else {
@@ -2919,6 +3307,126 @@ mod tests {
             )
             .unwrap_err();
         assert!(matches!(error, EditApplyError::InvalidPath { .. }));
+    }
+
+    #[test]
+    fn ack_effects_carry_base_display_annotations() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = clock_project(&shapes);
+        let clock = clock_artifact();
+        let rate = SlotPath::parse("controls.rate").unwrap();
+
+        // A stored leaf assignment annotates with the base value's display.
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::PutSlotEdit {
+                artifact: clock.clone(),
+                edit: SlotEdit::assign_value(rate.clone(), LpValue::F32(2.0)),
+            }],
+        );
+        assert_accepted(&results[0], true);
+        assert_eq!(accepted_base_display(&results[0]), Some("1.0"));
+
+        // Setting back to base normalizes away; the annotation still names
+        // the base value the slot reverted to.
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::PutSlotEdit {
+                artifact: clock.clone(),
+                edit: SlotEdit::assign_value(rate.clone(), LpValue::F32(1.0)),
+            }],
+        );
+        assert_normalized(&results[0], true);
+        assert_eq!(accepted_base_display(&results[0]), Some("1.0"));
+
+        // A base-absent target (adding a map entry) has no old value.
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::PutSlotEdit {
+                artifact: clock.clone(),
+                edit: SlotEdit::ensure_present(SlotPath::parse("bindings[speed]").unwrap()),
+            }],
+        );
+        assert_accepted(&results[0], true);
+        assert_eq!(accepted_base_display(&results[0]), None);
+
+        // A client-sent explicit revert carries no annotation either.
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::RemoveSlotEdit {
+                artifact: clock.clone(),
+                path: rate,
+            }],
+        );
+        assert_accepted(&results[0], false);
+        assert_eq!(accepted_base_display(&results[0]), None);
+    }
+
+    #[test]
+    fn structural_remove_of_a_base_present_entry_annotates_composite_json() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = path_points_fixture_project(&shapes);
+
+        // Removing a base-present composite map entry stores a Remove edit;
+        // the annotation is the entry's compact-JSON base rendering.
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![MutationOp::PutSlotEdit {
+                artifact: fixture_artifact(),
+                edit: SlotEdit::remove(SlotPath::parse("mapping.PathPoints.paths[0]").unwrap()),
+            }],
+        );
+
+        assert_accepted(&results[0], true);
+        let display = accepted_base_display(&results[0]).expect("composite base display");
+        assert!(display.starts_with('{'), "{display}");
+        assert!(display.contains("RingArray"), "{display}");
+    }
+
+    #[test]
+    fn overlay_base_displays_annotate_every_resolvable_pending_path() {
+        let shapes = SlotShapeRegistry::default();
+        let (fs, mut registry) = clock_project(&shapes);
+        let clock = clock_artifact();
+        let rate = SlotPath::parse("controls.rate").unwrap();
+        let binding = SlotPath::parse("bindings[speed]").unwrap();
+
+        let results = mutate_batch(
+            &fs,
+            &mut registry,
+            &shapes,
+            vec![
+                MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: SlotEdit::assign_value(rate.clone(), LpValue::F32(2.0)),
+                },
+                MutationOp::PutSlotEdit {
+                    artifact: clock.clone(),
+                    edit: SlotEdit::ensure_present(binding.clone()),
+                },
+            ],
+        );
+        assert_accepted(&results[0], true);
+        assert_accepted(&results[1], true);
+
+        let displays = registry.overlay_base_displays(&fs, &ParseCtx { shapes: &shapes });
+
+        assert_eq!(
+            displays,
+            vec![(clock, rate, "1.0".to_string())],
+            "one base parse annotates the resolvable path; the base-absent \
+             binding entry is omitted"
+        );
     }
 
     fn clock_project(shapes: &SlotShapeRegistry) -> (LpFsMemory, ProjectRegistry) {
@@ -3174,9 +3682,22 @@ mod tests {
     fn assert_accepted(result: &MutationCmdResult, expected_changed: bool) {
         match &result.status {
             MutationCmdStatus::Accepted {
-                effect: MutationEffect::OverlayChanged { changed },
+                effect: MutationEffect::OverlayChanged { changed, .. },
             } => assert_eq!(*changed, expected_changed),
             status => panic!("expected accepted command, got {status:?}"),
+        }
+    }
+
+    /// Base-display annotation of an accepted `OverlayChanged` or
+    /// `NormalizedToRemoval` effect.
+    fn accepted_base_display(result: &MutationCmdResult) -> Option<&str> {
+        match &result.status {
+            MutationCmdStatus::Accepted {
+                effect:
+                    MutationEffect::OverlayChanged { base_display, .. }
+                    | MutationEffect::NormalizedToRemoval { base_display, .. },
+            } => base_display.as_deref(),
+            status => panic!("expected accepted command with base display, got {status:?}"),
         }
     }
 
@@ -3198,7 +3719,7 @@ mod tests {
     fn assert_normalized(result: &MutationCmdResult, expected_changed: bool) {
         match &result.status {
             MutationCmdStatus::Accepted {
-                effect: MutationEffect::NormalizedToRemoval { changed },
+                effect: MutationEffect::NormalizedToRemoval { changed, .. },
             } => assert_eq!(*changed, expected_changed),
             status => panic!("expected normalized-to-removal command, got {status:?}"),
         }

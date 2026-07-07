@@ -134,6 +134,12 @@ ack rejected   ──► Failed { value, reason }    # feeds UiSlotFieldState
 op error/timeout ─► Failed { value, transport reason }
 ```
 
+Keying the buffer by address (not by field) is what allows **many controls
+per value**: M4's raw-input detail popups exercise this — a slider or XY pad
+(`oninput`) and its exact-numeric-entry popup (`onchange`) are two stateless
+views reading the same DTO value and dispatching to the same address, kept
+coherent by the one buffer entry.
+
 While an entry exists, the DTO shows the buffered value (shadowing the
 synced value) and the phase maps to the dirty affordance:
 `Pending`/`InFlight`/`AwaitingRefresh` → `Saving`, `Failed` → `Error` +
@@ -273,24 +279,29 @@ in use" on the row. Client op: `SlotEditOp::MoveEntry { address(map),
 from_key, to_key }` — structural (never coalesces, coalescing barrier),
 staged at the map's own address, released by the ack like any gesture.
 
-**Known base-relative edge (accepted).** Normalization compares against
-base, not against the effective def, and the overlay stores one op per
-path. Toggling a base-present option **off** stores `Remove opt` (a real
-diff); toggling it back **on** dispatches `EnsurePresent opt.some`, which
-normalizes away against the base (`.some` is base-present) *at a different
-path* — the stored `Remove opt` survives, so off-then-on does **not**
-restore the value or any prior interior edits. Recovery is explicit and
-always available: **Revert** on the row — the stored entry is at the option
-row's own path — or the save panel's per-entry revert. This is the
-deliberate consequence of "the overlay is a minimal diff against saved
-state" — the gesture pair is not an undo stack. The UI keeps honest through
-it: the option toggle is a controlled control whose visual state only
-follows the DTO's effective presence, so a normalized no-op gesture leaves
-the toggle visibly unchanged rather than desynced.
+**Option off-then-on (fixed 2026-07-06).** Normalization compares against
+base and the overlay stores one op per path, which used to leave a
+counteracting entry behind: toggling a base-present option **off** stores
+`Remove opt` (a real diff); toggling it back **on** dispatches
+`EnsurePresent opt.some`, which normalizes away against the base (`.some`
+is base-present) *at a different path* — the stored `Remove opt` survived
+and the toggle-on click did nothing. The **counteracting-entry rule**
+closes this: a structural `EnsurePresent` that normalizes away also clears
+the overlay subtree at its *effective scope*
+(`ProjectRegistry::structural_ensure_scope` — the parent option path when
+the terminal segment is an option's `some` per the shape walk, the ensure
+path itself otherwise, e.g. a map-entry re-add cancelling a stored
+`Remove map[k]`). The sweep covers both the counteracting `Remove` and any
+stale edits under it, and the registry reports the cleared entries through
+`MutationEffect::Materialized` so ack-mirroring clients follow without a
+fetch. Re-enabling a base-present option therefore *is* a clean cancel of
+a pending toggle-off. The option toggle stays a controlled control whose
+visual state only follows the DTO's effective presence, so its rendering
+can never desync from the stored overlay either way.
 
-Enum variant switches do **not** share this edge: a structural
-`EnsurePresent` whose terminal segment names a declared variant of the
-parent enum (a shape-walk check in
+Enum variant switches follow the same shape of rule via the sibling sweep:
+a structural `EnsurePresent` whose terminal segment names a declared
+variant of the parent enum (a shape-walk check in
 `ProjectRegistry::variant_switch_sibling_paths`) clears the overlay entries
 at every *sibling* variant path and their subtrees as it is processed —
 selecting a variant replaces any pending switch to another variant. When
@@ -309,6 +320,37 @@ the option row without projecting the interior's gesture facts
 (`ui_composite` reads the option's own body), losing the add-entry/variant
 affordances. No such shape exists in any demo project today; revisit when
 one appears (tracked in the M3 plan notes as future work).
+
+### D8 — Base (saved) values ride the wire for old→new display (added 2026-07-07)
+
+Resolving follow-up (b). The client holds the *effective* value (synced
+view) and the *new* value (overlay), but not the *saved base* — so "what
+was it before?" needs a server-derived annotation.
+
+- **Derivation is server-side and single-parse.** `normalize_edit_to_base`
+  already parses the base def and computes the base value during every
+  mutation, so ack-time annotation is nearly free; the overlay-read path
+  parses each overlaid artifact once (`overlay_base_displays`). Values are
+  **display strings**, not `LpValue`s: leaves format with the shared
+  convention, composite bases degrade to capped (~120-char) compact JSON
+  via the dynamic slot writer (transient fields omitted — "saved value"
+  semantics), absent bases to `None`.
+- **Two surfaces, because dirty must survive reconnect (D1 spirit).**
+  Mutation-ack effects (`MutationEffect::{OverlayChanged,
+  NormalizedToRemoval}` and `StoredSlotEdit::Put`) carry an optional
+  `base_display` for the client's own edits with no extra fetch;
+  `WireOverlayReadResponse.base_values` carries them for reconnect and
+  foreign edits. Both are `skip_if_none`/`skip_if_empty`, so firmware wire
+  cost is zero when unannotated. `ProjectOverlay` itself is untouched.
+- **Mirror invariant.** `ProjectSync` keeps a parallel `(artifact, path) →
+  String` map pruned to the overlay's edit paths after every replay, so
+  canonicalization side effects (cleared descendants, sibling/counteracting
+  sweeps) drop base values without duplicating server logic: the map is
+  always a subset of the overlay's paths.
+- **Display.** The slot detail popup's edited section, the node popup list,
+  and the save panel render `old → new`; the per-entry revert lives inside
+  the edited section (with the shared revert icon), not floating at the
+  popup foot.
 
 ## Consequences
 
@@ -360,13 +402,12 @@ Per the deferred-decision convention, these are indexed in
 - **(a) Per-item overlay gating.** Fetch-full-on-change assumes small
   overlays. **Revisit when** measured overlay fetch cost matters (large
   overlays or chatty editing sessions on slow links).
-- **(b) Save-panel diff DTOs.** Partially superseded by M3: the save panel
-  now lists labeled per-entry changes (`UiPendingEdit` — node label, slot
-  path, op description, **current** value display string, phase, per-entry
-  revert), built from the same join enumeration as the dirty counts. What
-  remains deferred is before/after value DTOs (old value alongside new).
-  **Revisit when** display strings prove insufficient — e.g. a real "what
-  was it before?" need in the save panel.
+- **(b) ~~Save-panel diff DTOs.~~ Resolved 2026-07-07** by the post-M4
+  polish work — see **D8** below. Base (saved) values now ride the wire as
+  optional display strings on both the mutation-ack and overlay-read
+  surfaces, are mirrored beside the overlay, and render as `old → new` in
+  the slot detail popup, the node popup, and the save panel; composite
+  bases degrade to capped compact JSON, absent bases to "—".
 - **(c) ~~Composite edit semantics.~~ Resolved 2026-07-06** by M3 — see
   **D7** above (gestures-are-wire-ops, base-relative structural
   normalization, prefix-aware dirty, one-address-per-leaf,

@@ -1,8 +1,8 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{
-    Asterisk, Boxes, Check, ChevronDown, ChevronRight, CircleAlert, CircleDot, CircleMinus,
-    FlaskConical, Info, Link2, Link2Off, Locate, LocateFixed, Pencil, Play, Save, SquareArrowRight,
-    TriangleAlert, Undo2, Usb,
+    Asterisk, Boxes, Check, ChevronDown, ChevronRight, CircleAlert, CircleDot, CircleMinus, Eraser,
+    FlaskConical, Funnel, Info, Link2, Link2Off, Locate, LocateFixed, Pencil, Play, Plus, Save,
+    Settings, SquareArrowRight, Trash2, TriangleAlert, Undo2, Usb, X,
 };
 
 #[component]
@@ -38,6 +38,12 @@ pub fn StudioIcon(name: StudioIconName, size: u32) -> Element {
         StudioIconName::NodeSelected => rsx! { LocateFixed { size } },
         StudioIconName::Save => rsx! { Save { size } },
         StudioIconName::Revert => rsx! { Undo2 { size } },
+        StudioIconName::Settings => rsx! { Settings { size } },
+        StudioIconName::Filter => rsx! { Funnel { size } },
+        StudioIconName::Eraser => rsx! { Eraser { size } },
+        StudioIconName::Add => rsx! { Plus { size } },
+        StudioIconName::Remove => rsx! { Trash2 { size } },
+        StudioIconName::Cancel => rsx! { X { size } },
     }
 }
 
@@ -77,4 +83,18 @@ pub enum StudioIconName {
     NodeSelected,
     Save,
     Revert,
+    /// Gear: the console's device-settings popover trigger.
+    Settings,
+    /// Funnel: marks the console's display-level threshold as a filter.
+    Filter,
+    /// Eraser: the console's Clear control.
+    Eraser,
+    /// Plus: set/add affordances (option-presence set; composite add).
+    Add,
+    /// Trash: remove/clear affordances (option-presence clear; entry
+    /// removal — the P5 gesture-button glyph direction).
+    Remove,
+    /// X: dismiss/cancel affordances (the map add-entry key input's cancel
+    /// gesture) — distinct from [`Self::Remove`], which destroys a value.
+    Cancel,
 }

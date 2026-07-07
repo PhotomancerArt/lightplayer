@@ -95,6 +95,9 @@ impl ProjectReadStream {
                     ProjectReadStreamStep::Continue,
                     ProjectReadStreamStep::Event,
                 )),
+            ResponseDisposition::StaleAbandoned { response_id } => Ok(
+                ProjectReadStreamStep::Event(ClientEvent::StaleResponseDropped { response_id }),
+            ),
             ResponseDisposition::Uncorrelated {
                 response_id,
                 expected_id,

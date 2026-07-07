@@ -96,9 +96,10 @@ where
 /// Explicit, not drop-based: the loop observes `is_cancelled()` between
 /// `receive()` calls and returns [`PullOutcome::Cancelled`] at a frame boundary,
 /// leaving the transport in a consistent state instead of abandoning a
-/// half-consumed frame stream mid-`receive`. The receive adapters already
-/// tolerate a caller stopping at a boundary: they discard any stale frames left
-/// buffered from the abandoned request on the next request.
+/// half-consumed frame stream mid-`receive`. The abandoned request id is
+/// recorded on the [`ProtocolSession`], so any of its frames still in flight
+/// classify as expected stale drops on later requests (quiet, not the
+/// uncorrelated-response warning reserved for genuinely unknown ids).
 pub trait CancelSignal {
     fn is_cancelled(&self) -> bool;
 }
@@ -277,8 +278,12 @@ where
 
     loop {
         // Cancellation is observed at the frame boundary, before we commit to
-        // another receive, so the transport is never abandoned mid-frame.
+        // another receive, so the transport is never abandoned mid-frame. The
+        // walked-away-from request id is recorded on the session: the server
+        // may still deliver its remaining frames during a later request, and
+        // those must classify as expected stale drops, not protocol warnings.
         if cancel.is_cancelled() {
+            protocol.abandon_request(request_id);
             return PullOutcome::Cancelled;
         }
 
@@ -295,7 +300,12 @@ where
             ReceiveOutcome::Received(Err(error)) => {
                 return PullOutcome::Failed(ClientError::from(error));
             }
-            ReceiveOutcome::DeadlineElapsed => return PullOutcome::TimedOut,
+            ReceiveOutcome::DeadlineElapsed => {
+                // Same contract as cancellation: the request is abandoned and
+                // its frames may still trickle in late.
+                protocol.abandon_request(request_id);
+                return PullOutcome::TimedOut;
+            }
         }
     }
 }
@@ -673,6 +683,123 @@ mod tests {
         );
         // Two reads were sent on the one transport.
         assert_eq!(io.sent.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn late_frames_of_a_cancelled_read_are_quiet_stale_drops() {
+        // First read (id 1) is cancelled after one frame; the cancel records
+        // the abandoned id on the session. Its remaining frame is delivered
+        // late, during the second read (id 2): the designed stale-drop. It
+        // must surface as a quiet StaleResponseDropped event — never as the
+        // UncorrelatedResponse warning — and the second read still completes.
+        let cancel_flag = Cell::new(false);
+        let cancel = || cancel_flag.get();
+
+        let mut io = ScriptedClientIo::new([ReceiveStep::Message(frame(
+            1,
+            0,
+            false,
+            [ProjectReadEvent::Begin {
+                revision: Revision::new(1),
+            }],
+        ))]);
+        let mut protocol = ProtocolSession::new();
+
+        // Flip cancel from the timer factory: it runs after the first frame
+        // is accepted, so the loop cancels at the next boundary.
+        let deadline = ProgressDeadline::new(Duration::from_secs(60), |_budget| {
+            cancel_flag.set(true);
+            core::future::pending::<()>()
+        });
+        let outcome = run_project_read(
+            &mut io,
+            &mut protocol,
+            WireProjectHandle::new(1),
+            empty_request(),
+            deadline,
+            &cancel,
+        )
+        .await;
+        assert!(
+            matches!(outcome, PullOutcome::Cancelled),
+            "expected Cancelled, got {outcome:?}"
+        );
+
+        // The abandoned read's final frame arrives late, then the new read's.
+        cancel_flag.set(false);
+        io.steps.push_back(ReceiveStep::Message(frame(
+            1,
+            1,
+            true,
+            [ProjectReadEvent::End {
+                revision: Revision::new(1),
+            }],
+        )));
+        io.steps.push_back(ReceiveStep::Message(frame(
+            2,
+            0,
+            true,
+            [
+                ProjectReadEvent::Begin {
+                    revision: Revision::new(9),
+                },
+                ProjectReadEvent::End {
+                    revision: Revision::new(9),
+                },
+            ],
+        )));
+        let deadline = ProgressDeadline::new(Duration::from_secs(60), never_timer());
+        let outcome = run_project_read(
+            &mut io,
+            &mut protocol,
+            WireProjectHandle::new(1),
+            empty_request(),
+            deadline,
+            &NeverCancel,
+        )
+        .await;
+
+        let PullOutcome::Completed { observed, .. } = outcome else {
+            panic!("second read must complete past the stale frame, got {outcome:?}");
+        };
+        assert_eq!(observed.len(), 1, "one stale drop observed: {observed:?}");
+        assert!(
+            matches!(
+                observed[0],
+                ClientEvent::StaleResponseDropped { response_id: 1 }
+            ),
+            "late frame of the cancelled read is a stale drop, got {observed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn timed_out_read_abandons_its_request_id() {
+        // A progress-deadline timeout walks away from the request exactly like
+        // a cancel: its id is recorded so late frames classify as stale.
+        let mut io = ScriptedClientIo::new([ReceiveStep::Stall]);
+        let mut protocol = ProtocolSession::new();
+        let deadline = ProgressDeadline::new(Duration::from_secs(5), immediate_timer());
+
+        let outcome = run_project_read(
+            &mut io,
+            &mut protocol,
+            WireProjectHandle::new(3),
+            empty_request(),
+            deadline,
+            &NeverCancel,
+        )
+        .await;
+        assert!(
+            matches!(outcome, PullOutcome::TimedOut),
+            "expected TimedOut, got {outcome:?}"
+        );
+
+        // A late frame for the timed-out id 1 is stale for the next request.
+        let late_frame = frame(1, 0, true, []);
+        assert!(matches!(
+            protocol.response_disposition(&late_frame, 2),
+            crate::protocol_session::ResponseDisposition::StaleAbandoned { response_id: 1 }
+        ));
     }
 
     #[tokio::test]

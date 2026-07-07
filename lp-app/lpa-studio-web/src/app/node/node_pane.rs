@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
-    DirtySummary, UiAction, UiNodeSection, UiNodeTabBody, UiNodeView, UiSlotRecord,
+    DirtySummary, UiAction, UiNodeSection, UiNodeTabBody, UiNodeView, UiPendingEdit, UiSlotRecord,
 };
 
 use crate::app::affordance::affordance_pane_tone;
@@ -27,6 +27,11 @@ pub enum NodeDirtyTint {
 pub fn NodePane(
     view: UiNodeView,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    /// The editor-level pending-edit list, threaded to every pane's detail
+    /// popover (which filters it to its own node) and down through nested
+    /// child panes.
+    #[props(default)]
+    pending_edits: Vec<UiPendingEdit>,
     #[props(default)] dirty_tint: NodeDirtyTint,
 ) -> Element {
     let mut active_tab = use_signal(|| 0_usize);
@@ -84,7 +89,11 @@ pub fn NodePane(
                         }
                     },
                     detail: rsx! {
-                        NodeDetailPopover { header }
+                        NodeDetailPopover {
+                            header,
+                            pending_edits: pending_edits.clone(),
+                            on_action,
+                        }
                     },
                     body: rsx! {
                         if !issues.is_empty() {
@@ -103,6 +112,7 @@ pub fn NodePane(
                                             first: index == 0,
                                             focus_action: focus_action.clone(),
                                             on_action,
+                                            pending_edits: pending_edits.clone(),
                                             dirty_tint,
                                         }
                                     }
@@ -127,6 +137,7 @@ pub fn NodePane(
                 NodeChildren {
                     items: view.children.clone(),
                     on_action,
+                    pending_edits,
                     dirty_tint,
                 }
             }
@@ -189,6 +200,10 @@ pub fn NodeSection(
     #[props(default = false)] first: bool,
     #[props(default)] focus_action: Option<UiAction>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    /// The editor-level pending-edit list, threaded through extracted child
+    /// sections into their nested panes' detail popovers.
+    #[props(default)]
+    pending_edits: Vec<UiPendingEdit>,
     #[props(default)] dirty_tint: NodeDirtyTint,
 ) -> Element {
     match section {
@@ -220,7 +235,12 @@ pub fn NodeSection(
         },
         UiNodeSection::Children(children) => rsx! {
             section { class: section_class("tw:bg-card tw:px-4 tw:py-4", first),
-                NodeChildren { items: children, on_action, dirty_tint }
+                NodeChildren {
+                    items: children,
+                    on_action,
+                    pending_edits,
+                    dirty_tint,
+                }
             }
         },
     }

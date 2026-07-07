@@ -15,9 +15,10 @@ use crate::base::{
     detail_popover_section_class,
 };
 
-/// Footer revert/reset affordance shown inside the slot detail popup for a
-/// touched editable slot. Lives in the popup rather than on the row so the
-/// main interface stays uncluttered (UX review).
+/// Revert/reset affordance rendered INSIDE the slot detail popup's edited
+/// (edit-state) section for a touched editable slot — beside the state and
+/// old-value rows it acts on, like the save panel's per-entry revert rows
+/// (the row's inline icon stays the quick path).
 #[derive(Clone, PartialEq)]
 pub struct SlotDetailRevert {
     /// Button label: "Revert" for unsaved persisted edits, "Reset" for live
@@ -54,20 +55,26 @@ pub fn SlotDetailButton(
                 active: style.active,
                 initially_open,
                 for aspect in aspects {
-                    SlotDetailSection { aspect }
-                }
-                if let Some(revert) = revert {
-                    SlotDetailRevertRow { revert }
+                    SlotDetailSection {
+                        // The revert lives INSIDE the edited (edit-state)
+                        // section it acts on — no floating popup footer.
+                        revert: (aspect.kind == UiSlotAspectKind::EditState)
+                            .then(|| revert.clone())
+                            .flatten(),
+                        aspect,
+                    }
                 }
             }
         }
     }
 }
 
-/// Popup footer row hosting the per-slot revert/reset button.
+/// The in-section revert/reset button: the shared revert icon plus the verb,
+/// right-aligned under the edited section's rows (mirroring the save panel's
+/// per-entry revert buttons).
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SlotDetailRevertRow(revert: SlotDetailRevert) -> Element {
+fn SlotDetailRevertButton(revert: SlotDetailRevert) -> Element {
     let SlotDetailRevert {
         label,
         title,
@@ -76,16 +83,20 @@ fn SlotDetailRevertRow(revert: SlotDetailRevert) -> Element {
     } = revert;
 
     rsx! {
-        div { class: "tw:flex tw:justify-end tw:border-t tw:border-border-muted tw:px-3 tw:py-2",
+        div { class: "tw:flex tw:justify-end tw:pt-1",
             button {
-                class: "tw:flex-none tw:cursor-pointer tw:appearance-none tw:rounded-xs tw:border tw:border-border-strong tw:bg-transparent tw:px-2 tw:py-1 tw:text-xs tw:font-bold tw:text-muted-foreground tw:hover:bg-card-muted tw:hover:text-strong-foreground",
+                class: "tw:inline-flex tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:gap-1 tw:rounded-xs tw:border tw:border-border-strong tw:bg-transparent tw:px-1.5 tw:py-0.5 tw:text-[0.68rem] tw:font-bold tw:text-muted-foreground tw:hover:bg-card-muted tw:hover:text-strong-foreground",
                 r#type: "button",
                 title,
                 onclick: move |event| {
                     event.stop_propagation();
                     on_action.call(slot_revert_action(address.clone()));
                 },
-                "{label}"
+                StudioIcon {
+                    name: StudioIconName::Revert,
+                    size: 12,
+                }
+                span { "{label}" }
             }
         }
     }
@@ -124,7 +135,10 @@ pub(crate) fn primary_affordance(aspects: &[UiSlotAspect]) -> UiSlotAffordance {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn SlotDetailSection(aspect: UiSlotAspect) -> Element {
+fn SlotDetailSection(
+    aspect: UiSlotAspect,
+    #[props(default = None)] revert: Option<SlotDetailRevert>,
+) -> Element {
     let summary = aspect_summary(&aspect);
     let section_class = detail_popover_section_class(aspect_section_tint(summary.highlight));
     let heading_class = aspect_heading_class(summary.tone);
@@ -171,6 +185,9 @@ fn SlotDetailSection(aspect: UiSlotAspect) -> Element {
                         SlotDetailRow { row }
                     }
                 }
+            }
+            if let Some(revert) = revert {
+                SlotDetailRevertButton { revert }
             }
         }
     }

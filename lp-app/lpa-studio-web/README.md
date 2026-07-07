@@ -138,6 +138,21 @@ writes the packaged firmware and then attempts to reconnect to the LightPlayer
 server after reset. Flashing renders live progress in the active Device step
 and raw esptool output in the Console below the Device panel.
 
+The Console panel (`app/device/runtime_log.rs`) renders the filtered
+`UiConsoleView` from core. Its compact toolbar carries a funnel-marked
+threshold select (`Level+`, default Info+ — the **display filter**), a
+"Sources" popover of per-origin checkboxes with a hidden-source badge, a gear
+popover holding the **device log level** select (what the connected device
+emits, distinct from the display filter; disabled while disconnected), and
+Clear; a right-aligned "N hidden" sliver appears only when the filter hides
+entries. Rows are **container-responsive** (`app/../core/log_list.rs`): the
+list is a CSS `@container`, so below 560px of its own width rows are two-line
+(a dim `time · level · source` meta line over a full-width message, warn/error
+marked by a left accent bar) and at 560px+ the same DOM relayouts into the
+four-column time/level/source/message grid. Timestamps are UTC `HH:MM:SS`;
+rendering caps at a 250-row tail of the filtered entries while the core ring
+retains 1000.
+
 During the initial browser-serial server attach, the Device pane shows a
 stepped readiness activity while raw boot lines stream into the Console below
 the Device panel. Blank or erased devices are recognized from ESP32 ROM output
@@ -246,6 +261,21 @@ losslessly normalized. Install it with `brew install oxipng` or
 `cargo install oxipng`. The capture script defaults to one Chrome page for
 stable baseline/check output; set `STUDIO_STORY_PNGS_CONCURRENCY` for faster
 scratch runs when needed.
+
+Captures disable CSS transitions and animations before the app mounts so
+every screenshot shows the settled end state; without this, captures raced
+150ms transitions and landed at a different phase each run. Check mode also
+compares pixels with a small tolerance for residual jitter (anti-aliasing and
+sub-pixel text layout, which move a handful of glyph-edge pixels between
+captures of the same build). A pixel counts as significantly different when
+its per-channel delta exceeds `STUDIO_STORY_MAX_CHANNEL_DELTA` (default `64`,
+above anti-aliasing noise); an image fails only when the fraction of such
+pixels exceeds `STUDIO_STORY_MAX_DIFF_PIXEL_RATIO` (default `0.0005`, i.e.
+0.05%). This gives the check a small noise floor — changes below the ratio
+don't fail it, but they still show up as a baseline image diff in the PR.
+Dimension changes and undecodable PNGs always fail. Images that differ in
+bytes but stay within tolerance are listed informationally, and the summary
+line reports how many baselines were byte-identical.
 
 The baseline set intentionally reflects the active view-driven UX surface,
 including the semantic project workspace, rather than the old provisioning

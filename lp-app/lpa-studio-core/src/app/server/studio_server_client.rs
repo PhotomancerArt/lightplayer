@@ -11,7 +11,7 @@ use lpa_client::{
 use lpa_link::{LinkConnection, LinkConnectionKind};
 use lpc_model::{
     ArtifactLocation, CommitResult, MutationCmdBatch, MutationCmdBatchResult, NodeId,
-    ProjectOverlay, Revision,
+    ProjectOverlay, Revision, SlotPath,
 };
 use lpc_wire::{
     ProjectReadEvent, ProjectReadRequest, WireOverlayMutationRequest, WireProjectHandle,
@@ -22,14 +22,14 @@ use crate::app::project::demo_project::{
     DEMO_PROJECT_ID, DEMO_PROJECT_STORAGE_ID, demo_project_deploy_files,
 };
 use crate::{
-    LoadedProjectChoice, ProjectInventorySummary, SharedLinkRegistry, UiError, UiLogEntry,
-    UiLogLevel, UxUpdateSink,
+    LoadedProjectChoice, ProjectInventorySummary, SharedLinkRegistry, UiError, UiLogDraft,
+    UiLogLevel, UiLogOrigin, UxUpdateSink,
 };
 
 pub struct StudioServerClient {
     client: LpClient<Box<dyn ClientIo>>,
     protocol: String,
-    pending_logs: Rc<RefCell<Vec<UiLogEntry>>>,
+    pending_logs: Rc<RefCell<Vec<UiLogDraft>>>,
 }
 
 impl StudioServerClient {
@@ -91,7 +91,7 @@ impl StudioServerClient {
         })
     }
 
-    pub fn take_pending_logs(&mut self) -> Vec<UiLogEntry> {
+    pub fn take_pending_logs(&mut self) -> Vec<UiLogDraft> {
         core::mem::take(&mut *self.pending_logs.borrow_mut())
     }
 }
@@ -104,12 +104,12 @@ pub struct LoadedDemoProject {
     /// inventory read. Wire mutations target `(ArtifactLocation, SlotPath)`,
     /// so slot edits resolve their artifact through this map.
     pub node_def_artifacts: BTreeMap<NodeId, ArtifactLocation>,
-    pub logs: Vec<UiLogEntry>,
+    pub logs: Vec<UiLogDraft>,
 }
 
 pub struct LoadedProjectCatalog {
     pub projects: Vec<LoadedProjectChoice>,
-    pub logs: Vec<UiLogEntry>,
+    pub logs: Vec<UiLogDraft>,
 }
 
 pub struct LoadedRunningProject {
@@ -123,7 +123,7 @@ pub struct LoadedRunningProject {
 
 pub struct StudioProjectRead {
     pub events: Vec<ProjectReadEvent>,
-    pub logs: Vec<UiLogEntry>,
+    pub logs: Vec<UiLogDraft>,
 }
 
 /// Full pending-edit overlay pulled from the server, with the revision at
@@ -131,7 +131,10 @@ pub struct StudioProjectRead {
 pub struct StudioOverlayRead {
     pub overlay: ProjectOverlay,
     pub revision: Revision,
-    pub logs: Vec<UiLogEntry>,
+    /// Base (saved) value display strings for the overlay's pending paths
+    /// (the wire's parallel list; paths absent in base are omitted).
+    pub base_values: Vec<(ArtifactLocation, SlotPath, String)>,
+    pub logs: Vec<UiLogDraft>,
 }
 
 /// Per-command results of an overlay mutation batch, with the post-mutation
@@ -139,17 +142,32 @@ pub struct StudioOverlayRead {
 pub struct StudioOverlayMutation {
     pub result: MutationCmdBatchResult,
     pub overlay_revision: Revision,
-    pub logs: Vec<UiLogEntry>,
+    pub logs: Vec<UiLogDraft>,
 }
 
 /// Result of an overlay commit, with the post-commit overlay revision.
 pub struct StudioOverlayCommit {
     pub result: CommitResult,
     pub overlay_revision: Revision,
-    pub logs: Vec<UiLogEntry>,
+    pub logs: Vec<UiLogDraft>,
 }
 
 impl StudioServerClient {
+    /// Ask the connected server to apply `level` as its process-global log
+    /// level (via the wire `SetLogLevel` command). Not persisted device-side;
+    /// a reboot reverts to the logger-init default. Returns the log drafts
+    /// carried by the exchange, which the caller records like any other op.
+    pub async fn set_log_level(&mut self, level: UiLogLevel) -> Result<Vec<UiLogDraft>, UiError> {
+        let outcome = self
+            .client
+            .set_log_level(wire_log_level(level))
+            .await
+            .map_err(map_client_error)?;
+        let mut logs = map_client_events(outcome.events);
+        logs.extend(self.take_pending_logs());
+        Ok(logs)
+    }
+
     pub async fn list_loaded_projects(&mut self) -> Result<LoadedProjectCatalog, UiError> {
         let loaded = self
             .client
@@ -222,6 +240,7 @@ impl StudioServerClient {
         Ok(StudioOverlayRead {
             overlay: read.value.overlay,
             revision: read.value.revision,
+            base_values: read.value.base_values,
             logs,
         })
     }
@@ -339,7 +358,7 @@ fn node_def_artifacts(
 fn server_io_from_link_connection(
     _registry: SharedLinkRegistry,
     connection: &LinkConnection,
-    _pending_logs: Rc<RefCell<Vec<UiLogEntry>>>,
+    _pending_logs: Rc<RefCell<Vec<UiLogDraft>>>,
     _updates: UxUpdateSink,
 ) -> Result<Box<dyn ClientIo>, UiError> {
     match &connection.kind {
@@ -391,16 +410,26 @@ fn connection_protocol(kind: &LinkConnectionKind) -> String {
     }
 }
 
-fn map_client_events(events: Vec<ClientEvent>) -> Vec<UiLogEntry> {
+/// Map side-channel client events to console log drafts.
+///
+/// Healthy heartbeats are telemetry, not log content: they arrive every
+/// second and were the dominant console noise, so they produce no entry at
+/// all (P3 ingestion hygiene; the user decision was full removal, not a
+/// Trace demotion). Heartbeats reporting a recovery condition — safe mode or
+/// a non-green recovery level — still surface as Warn/Error entries, and
+/// server log lines pass through unchanged.
+///
+/// Response-correlation events split by intent: a stale drop (late response
+/// for a request the client itself abandoned — routine when edit-op
+/// preemption cancels a pull mid-stream during an input flood) is a
+/// debug-level note, while a genuinely uncorrelated id (never issued or
+/// abandoned by this session: from the future, or a duplicate delivery)
+/// remains a warning.
+fn map_client_events(events: Vec<ClientEvent>) -> Vec<UiLogDraft> {
     events
         .into_iter()
-        .map(|event| match event {
-            ClientEvent::Heartbeat {
-                frame_count,
-                uptime_ms,
-                recovery,
-                ..
-            } => match recovery {
+        .filter_map(|event| match event {
+            ClientEvent::Heartbeat { recovery, .. } => match recovery {
                 Some(recovery)
                     if recovery.safe_mode
                         || recovery.level != lpc_wire::server::RecoveryLevelWire::Green =>
@@ -422,25 +451,28 @@ fn map_client_events(events: Vec<ClientEvent>) -> Vec<UiLogEntry> {
                         message
                             .push_str(&format!("; last crash: {} at {}", crash.cause, crash.path));
                     }
-                    UiLogEntry::new(ui_level, "lp-server", message)
+                    Some(UiLogDraft::new(ui_level, UiLogOrigin::Server, message))
                 }
-                _ => UiLogEntry::new(
-                    UiLogLevel::Debug,
-                    "lp-server",
-                    format!("heartbeat frame={frame_count} uptime_ms={uptime_ms}"),
-                ),
+                _ => None,
             },
-            ClientEvent::Log { level, message } => {
-                UiLogEntry::new(map_server_log_level(level), "lp-server", message)
-            }
+            ClientEvent::Log { level, message } => Some(UiLogDraft::new(
+                map_server_log_level(level),
+                UiLogOrigin::Server,
+                message,
+            )),
             ClientEvent::UncorrelatedResponse {
                 response_id,
                 expected_id,
-            } => UiLogEntry::new(
+            } => Some(UiLogDraft::new(
                 UiLogLevel::Warn,
-                "lp-server",
+                UiLogOrigin::Server,
                 format!("uncorrelated response {response_id}; expected {expected_id}"),
-            ),
+            )),
+            ClientEvent::StaleResponseDropped { response_id } => Some(UiLogDraft::new(
+                UiLogLevel::Debug,
+                UiLogOrigin::Server,
+                format!("dropped stale response {response_id} for a request abandoned by client"),
+            )),
         })
         .collect()
 }
@@ -463,6 +495,7 @@ fn map_client_error(error: ClientError) -> UiError {
 
 fn map_server_log_level(level: lpc_wire::server::api::LogLevel) -> UiLogLevel {
     match level {
+        lpc_wire::server::api::LogLevel::Trace => UiLogLevel::Trace,
         lpc_wire::server::api::LogLevel::Debug => UiLogLevel::Debug,
         lpc_wire::server::api::LogLevel::Info => UiLogLevel::Info,
         lpc_wire::server::api::LogLevel::Warn => UiLogLevel::Warn,
@@ -470,8 +503,22 @@ fn map_server_log_level(level: lpc_wire::server::api::LogLevel) -> UiLogLevel {
     }
 }
 
+/// Inverse of [`map_server_log_level`], for the `SetLogLevel` request. Total:
+/// both enums carry exactly Trace..Error (the wire deliberately has no `Off`).
+fn wire_log_level(level: UiLogLevel) -> lpc_wire::server::api::LogLevel {
+    match level {
+        UiLogLevel::Trace => lpc_wire::server::api::LogLevel::Trace,
+        UiLogLevel::Debug => lpc_wire::server::api::LogLevel::Debug,
+        UiLogLevel::Info => lpc_wire::server::api::LogLevel::Info,
+        UiLogLevel::Warn => lpc_wire::server::api::LogLevel::Warn,
+        UiLogLevel::Error => lpc_wire::server::api::LogLevel::Error,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use lpc_wire::server::{CrashSummaryWire, RecoveryLevelWire, RecoveryStatus, SampleStats};
+
     use super::super::browser_serial_readiness::NO_FIRMWARE_DETECTED_PREFIX;
     use super::*;
 
@@ -482,5 +529,144 @@ mod tests {
         )));
 
         assert!(matches!(error, UiError::NoFirmwareDetected(_)));
+    }
+
+    #[test]
+    fn healthy_heartbeats_produce_no_log_entries() {
+        let events = vec![
+            heartbeat_event(None),
+            heartbeat_event(Some(recovery_status(RecoveryLevelWire::Green, false, None))),
+        ];
+
+        assert!(map_client_events(events).is_empty());
+    }
+
+    #[test]
+    fn red_recovery_heartbeat_still_logs_an_error() {
+        let crash = CrashSummaryWire {
+            cause: "panic".to_string(),
+            path: "node:nodes/fire".to_string(),
+            message: "boom".to_string(),
+            boots_ago: 0,
+        };
+        let events = vec![heartbeat_event(Some(recovery_status(
+            RecoveryLevelWire::Red,
+            false,
+            Some(crash),
+        )))];
+
+        let logs = map_client_events(events);
+
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].level, UiLogLevel::Error);
+        assert_eq!(logs[0].source, UiLogOrigin::Server.into());
+        assert!(logs[0].message.contains("recovery level Red"));
+        assert!(
+            logs[0]
+                .message
+                .contains("last crash: panic at node:nodes/fire")
+        );
+    }
+
+    #[test]
+    fn safe_mode_heartbeat_still_logs_a_warning() {
+        let events = vec![heartbeat_event(Some(recovery_status(
+            RecoveryLevelWire::Green,
+            true,
+            None,
+        )))];
+
+        let logs = map_client_events(events);
+
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].level, UiLogLevel::Warn);
+        assert!(logs[0].message.contains("(SAFE MODE)"));
+    }
+
+    #[test]
+    fn yellow_recovery_heartbeat_still_logs_a_warning() {
+        let events = vec![heartbeat_event(Some(recovery_status(
+            RecoveryLevelWire::Yellow,
+            false,
+            None,
+        )))];
+
+        let logs = map_client_events(events);
+
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].level, UiLogLevel::Warn);
+        assert!(logs[0].message.contains("recovery level Yellow"));
+    }
+
+    #[test]
+    fn server_logs_and_uncorrelated_responses_still_map() {
+        // A genuinely unknown response id (never issued or abandoned by the
+        // session) is a real protocol anomaly and keeps its warning.
+        let events = vec![
+            ClientEvent::Log {
+                level: lpc_wire::server::api::LogLevel::Warn,
+                message: "flash almost full".to_string(),
+            },
+            ClientEvent::UncorrelatedResponse {
+                response_id: 9,
+                expected_id: 7,
+            },
+        ];
+
+        let logs = map_client_events(events);
+
+        assert_eq!(logs.len(), 2);
+        assert_eq!(logs[0].level, UiLogLevel::Warn);
+        assert_eq!(logs[0].message, "flash almost full");
+        assert_eq!(logs[1].level, UiLogLevel::Warn);
+        assert_eq!(logs[1].message, "uncorrelated response 9; expected 7");
+    }
+
+    #[test]
+    fn stale_drops_for_client_abandoned_requests_are_debug_not_warn() {
+        // A late response for a request the client itself cancelled/superseded
+        // (edit-op preemption during a drag flood) is the designed stale-drop:
+        // it must not fill the console with warnings.
+        let events = vec![ClientEvent::StaleResponseDropped { response_id: 5 }];
+
+        let logs = map_client_events(events);
+
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].level, UiLogLevel::Debug);
+        assert_eq!(
+            logs[0].message,
+            "dropped stale response 5 for a request abandoned by client"
+        );
+    }
+
+    fn heartbeat_event(recovery: Option<RecoveryStatus>) -> ClientEvent {
+        ClientEvent::Heartbeat {
+            fps: SampleStats {
+                avg: 60.0,
+                sdev: 0.0,
+                min: 60.0,
+                max: 60.0,
+            },
+            frame_count: 1,
+            loaded_projects: Vec::new(),
+            uptime_ms: 1_000,
+            memory: None,
+            recovery,
+        }
+    }
+
+    fn recovery_status(
+        level: RecoveryLevelWire,
+        safe_mode: bool,
+        last_crash: Option<CrashSummaryWire>,
+    ) -> RecoveryStatus {
+        RecoveryStatus {
+            level,
+            reset_reason: "power-on".to_string(),
+            boot_count: 1,
+            safe_mode,
+            last_crash,
+            paths: Vec::new(),
+        }
     }
 }

@@ -1,5 +1,6 @@
-//! Composite gesture field renderers: map entry add/remove, option some/none
-//! toggle, and enum variant switch.
+//! Composite gesture field renderers: map entry add/remove and enum variant
+//! switch, plus the shared gesture icon-button treatment (P5) used by every
+//! row gesture (option set/clear included — `slot_option_presence.rs`).
 //!
 //! Gestures ARE the wire ops (M3 decision D1): each control dispatches one
 //! `SlotEditOp::EnsurePresent`/`RemoveValue` at the target address and the
@@ -10,13 +11,17 @@
 use dioxus::prelude::*;
 use lpa_studio_core::{
     ProjectSlotAddress, SlotMapKey, SlotPath, SlotPathSegment, UiAction, UiSlotEnumComposite,
-    UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind, UiSlotOptionality,
+    UiSlotFieldState, UiSlotMapComposite, UiSlotMapKeyKind,
 };
 
 use crate::app::node::slot_edit_actions::{
     slot_ensure_present_action, slot_move_entry_action, slot_remove_value_action,
 };
 use crate::app::node::slot_fields::{dropdown_field_class, field_class, field_wiring};
+use crate::base::{StudioIcon, StudioIconName};
+
+/// Glyph size inside the fixed `h-6 w-6` gesture icon buttons.
+pub(crate) const GESTURE_ICON_SIZE: u32 = 14;
 
 /// Variant switcher for an enum composite row. Selecting a variant dispatches
 /// `EnsurePresent enum_path.variant` (RAW declared ident, verbatim); the
@@ -68,12 +73,13 @@ pub fn EnumVariantField(
 
 /// Add-entry affordance for a map composite row (M3 UX gate rework).
 ///
-/// Numeric-keyed maps add **immediately**: "+" dispatches
+/// Numeric-keyed maps add **immediately**: the add (plus) button dispatches
 /// `EnsurePresent map_path[first free index]` (the gap-filling suggested key
 /// from the DTO — the server constructs the entry default; no inline value
-/// entry), and a compact secondary "#" affordance opens the key input as an
-/// optional override. String-keyed maps keep the key input as the primary
-/// flow ("+" opens it) — string keys cannot be guessed.
+/// entry), and a compact secondary "at key…" text button opens the key input
+/// as an optional override (P5: self-explanatory replacement for the opaque
+/// "#"). String-keyed maps keep the key input as the primary flow (the add
+/// button opens it) — string keys cannot be guessed.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn MapAddEntry(
@@ -99,7 +105,7 @@ pub fn MapAddEntry(
             return rsx! {
                 span { class: "tw:inline-flex tw:flex-none tw:items-center tw:gap-1",
                     button {
-                        class: gesture_button_class(),
+                        class: gesture_icon_button_class(false),
                         r#type: "button",
                         title: "{add_title}",
                         aria_label: "{add_title}",
@@ -107,10 +113,10 @@ pub fn MapAddEntry(
                             event.stop_propagation();
                             dispatch_map_add(key_kind, &add_key, &add_address, &handler);
                         },
-                        "+"
+                        StudioIcon { name: StudioIconName::Add, size: GESTURE_ICON_SIZE }
                     }
                     button {
-                        class: gesture_button_class(),
+                        class: gesture_text_button_class(),
                         r#type: "button",
                         title: "Add entry at a chosen key",
                         aria_label: "Add entry at a chosen key",
@@ -119,14 +125,14 @@ pub fn MapAddEntry(
                             draft.set(suggested.clone());
                             open.set(true);
                         },
-                        "#"
+                        "at key\u{2026}"
                     }
                 }
             };
         }
         return rsx! {
             button {
-                class: gesture_button_class(),
+                class: gesture_icon_button_class(false),
                 r#type: "button",
                 title: "Add entry",
                 aria_label: "Add entry",
@@ -135,7 +141,7 @@ pub fn MapAddEntry(
                     draft.set(suggested.clone());
                     open.set(true);
                 },
-                "+"
+                StudioIcon { name: StudioIconName::Add, size: GESTURE_ICON_SIZE }
             }
         };
     }
@@ -162,7 +168,7 @@ pub fn MapAddEntry(
                 },
             }
             button {
-                class: gesture_button_class(),
+                class: gesture_icon_button_class(false),
                 r#type: "button",
                 title: "Add entry with this key",
                 aria_label: "Confirm add entry",
@@ -172,10 +178,10 @@ pub fn MapAddEntry(
                         open.set(false);
                     }
                 },
-                "+"
+                StudioIcon { name: StudioIconName::Add, size: GESTURE_ICON_SIZE }
             }
             button {
-                class: gesture_button_class(),
+                class: gesture_icon_button_class(false),
                 r#type: "button",
                 title: "Cancel adding an entry",
                 aria_label: "Cancel add entry",
@@ -183,7 +189,7 @@ pub fn MapAddEntry(
                     event.stop_propagation();
                     open.set(false);
                 },
-                "\u{00d7}"
+                StudioIcon { name: StudioIconName::Cancel, size: GESTURE_ICON_SIZE }
             }
         }
     }
@@ -287,7 +293,7 @@ pub fn MapEntryRemoveButton(
 ) -> Element {
     rsx! {
         button {
-            class: gesture_button_class(),
+            class: gesture_icon_button_class(false),
             r#type: "button",
             title: "Remove this entry",
             aria_label: "Remove this entry",
@@ -295,66 +301,7 @@ pub fn MapEntryRemoveButton(
                 event.stop_propagation();
                 on_action.call(slot_remove_value_action(address.clone()));
             },
-            "\u{00d7}"
-        }
-    }
-}
-
-/// Some/none toggle for an option row. On dispatches
-/// `EnsurePresent opt_path.some` (server default value); off dispatches
-/// `RemoveValue opt_path`.
-///
-/// The checkbox is **controlled**: the DTO's effective presence is the only
-/// writer of its visual state, so the click handler prevents the browser's
-/// native flip and only dispatches the gesture. Without this, a gesture that
-/// normalizes to a no-op against base (the D2 base-relative edge — e.g.
-/// toggling a base-present option off, then on) leaves the self-flipped DOM
-/// checkbox permanently desynced from the DTO, because Dioxus sees no
-/// attribute change to patch.
-#[component]
-#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn OptionToggleField(
-    optionality: UiSlotOptionality,
-    #[props(default = None)] address: Option<ProjectSlotAddress>,
-    #[props(default)] on_action: Option<EventHandler<UiAction>>,
-) -> Element {
-    let included = optionality.included;
-    let wired = if optionality.can_toggle {
-        address.zip(on_action)
-    } else {
-        None
-    };
-    let disabled = wired.is_none();
-    let title = if included {
-        "Optional value enabled"
-    } else {
-        "Optional value disabled"
-    };
-
-    rsx! {
-        label { class: "ux-slot-optional-toggle", title,
-            input {
-                class: "ux-slot-optional-toggle-input",
-                r#type: "checkbox",
-                checked: included,
-                disabled,
-                aria_label: title,
-                onclick: move |event| {
-                    event.prevent_default();
-                    let Some((address, handler)) = wired.clone() else {
-                        return;
-                    };
-                    if included {
-                        handler.call(slot_remove_value_action(address));
-                    } else if let Some(some) = address.child_field("some") {
-                        handler.call(slot_ensure_present_action(some));
-                    }
-                },
-            }
-            span { class: "ux-slot-optional-toggle-track",
-                span { class: "ux-slot-optional-toggle-thumb" }
-            }
-            span { class: "ux-slot-optional-toggle-label", "enabled" }
+            StudioIcon { name: StudioIconName::Remove, size: GESTURE_ICON_SIZE }
         }
     }
 }
@@ -404,9 +351,28 @@ fn dispatch_map_add(
     true
 }
 
-/// Compact square button shared by the add/remove/cancel gesture controls.
-fn gesture_button_class() -> &'static str {
-    "tw:inline-flex tw:h-6 tw:w-6 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page tw:p-0 tw:text-sm tw:font-bold tw:text-muted-foreground tw:hover:text-strong-foreground"
+/// The one small themed icon-button style for row gestures (P5): map add,
+/// entry remove, add-key confirm/cancel, and option set/clear all share it.
+/// Same sizing/radius family as the inline revert icon button (`h-6 w-6
+/// rounded-xs border`), but in a NEUTRAL-until-hover tone — gestures are
+/// available actions, not status, so they never borrow the warning/live
+/// status families. The disabled variant keeps the identical footprint on
+/// the muted surface (non-wireable rows stay anchored, just inert).
+pub(crate) fn gesture_icon_button_class(disabled: bool) -> &'static str {
+    if disabled {
+        "tw:inline-flex tw:h-6 tw:w-6 tw:flex-none tw:appearance-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-muted tw:bg-card-muted tw:p-0 tw:text-subtle-foreground"
+    } else {
+        "tw:inline-flex tw:h-6 tw:w-6 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:justify-center tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page tw:p-0 tw:text-muted-foreground tw:transition-colors tw:hover:border-border-strong tw:hover:text-strong-foreground"
+    }
+}
+
+/// Compact text variant of the gesture button family, for the rare gesture
+/// that needs a word instead of a glyph — the numeric map's "at key…"
+/// key-override opener (P5: the self-explanatory replacement for "#"). Same
+/// height, radius, border, and neutral-until-hover tone as
+/// [`gesture_icon_button_class`]; only the width is content-sized.
+pub(crate) fn gesture_text_button_class() -> &'static str {
+    "tw:inline-flex tw:h-6 tw:flex-none tw:cursor-pointer tw:appearance-none tw:items-center tw:rounded-xs tw:border tw:border-border-subtle tw:bg-page tw:px-1.5 tw:py-0 tw:text-xs tw:font-medium tw:text-muted-foreground tw:transition-colors tw:hover:border-border-strong tw:hover:text-strong-foreground"
 }
 
 fn key_input_class(key_kind: UiSlotMapKeyKind) -> &'static str {
@@ -458,6 +424,34 @@ mod tests {
             ProjectSlotRoot::def(),
         );
         assert_eq!(split_map_entry(&root), None);
+    }
+
+    #[test]
+    fn gesture_buttons_share_the_revert_footprint_in_a_neutral_tone() {
+        // One gesture-button family (P5): the revert icon-button's sizing and
+        // radius (`h-6 w-6 rounded-xs border`), in a neutral-until-hover tone
+        // — never a status family, so gestures don't read as state.
+        for disabled in [false, true] {
+            let class = gesture_icon_button_class(disabled);
+            for token in [
+                "tw:h-6",
+                "tw:w-6",
+                "tw:flex-none",
+                "tw:rounded-xs",
+                "tw:border",
+            ] {
+                assert!(class.contains(token), "{token} missing: {class}");
+            }
+            assert!(
+                !class.contains("status"),
+                "gestures never wear status families: {class}"
+            );
+        }
+        let text = gesture_text_button_class();
+        for token in ["tw:h-6", "tw:flex-none", "tw:rounded-xs", "tw:border"] {
+            assert!(text.contains(token), "{token} missing: {text}");
+        }
+        assert!(!text.contains("status"), "{text}");
     }
 
     #[test]

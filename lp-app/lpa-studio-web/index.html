@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <!-- Title text is injected by dx from `[web.app] title` in Dioxus.toml. -->
+        <title></title>
+        <meta content="text/html;charset=utf-8" http-equiv="Content-Type">
+        <meta name="viewport" content="width=device-width, initial-scale=1">
+        <meta charset="UTF-8">
+        <!--
+          Critical pre-paint styling. Studio's real theme (src/style.css) is
+          injected by the wasm bundle only after it boots, so without this the
+          browser paints the default white page for a beat first. Keep these
+          values in sync with `--studio-color-bg` / `color-scheme` in style.css.
+        -->
+        <style>
+            :root { color-scheme: dark; }
+            html, body { margin: 0; background: #101317; }
+        </style>
+    </head>
+    <body>
+        <div id="main"></div>
+    </body>
+</html>

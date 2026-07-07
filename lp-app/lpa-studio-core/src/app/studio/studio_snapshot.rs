@@ -1,6 +1,6 @@
 use crate::{LinkSnapshot, ProjectSnapshot, ServerSnapshot, UiLogEntry};
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct StudioSnapshot {
     pub link: LinkSnapshot,
     pub server: ServerSnapshot,

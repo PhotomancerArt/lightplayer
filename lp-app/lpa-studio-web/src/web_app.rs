@@ -2,22 +2,35 @@
 //!
 //! All update logic (the pull loop, command queue, preemption, timeouts,
 //! backoff, log cap, change-gating) lives in `lpa-client` / `lpa-studio-core`
-//! after M7. This module keeps only browser concerns: spawn the actor, drive a
+//! after M7. This module keeps only browser concerns: install the global
+//! `log::` sink and the JS-console mirror hook, spawn the actor, drive a
 //! `Signal<UiStudioView>` from its change-gated view channel, run a timer that
-//! enqueues `RefreshTick` commands at the core-owned cadence, forward UI actions
-//! as `Action` commands, render, and mirror new logs to the JS console.
+//! enqueues `RefreshTick` commands at the core-owned cadence, forward UI
+//! actions as `Action` commands, and render.
+//!
+//! # JS-console mirroring (P4)
+//!
+//! The controller's `on_entry` hook — installed here before the actor spawns
+//! — is the **single** mirroring point: every entry entering the core log
+//! ring (hand-built drafts, batch-recorded producer drafts, and drained
+//! `log::` records) reaches the browser console exactly once, independent of
+//! the console pane's display filter. The old view-diff mirror here and the
+//! raw-serial-line mirror in `browser_serial_client_io.rs` are gone.
 
 use core::cell::Cell;
 use core::time::Duration;
 use std::rc::Rc;
 
 use crate::app::StudioShell;
+use crate::app::layout::LocalStoreBanner;
+use crate::local_store::{self, LocalStoreStatus};
 use crate::studio_url;
 use dioxus::prelude::*;
 use gloo_timers::future::TimeoutFuture;
 use lpa_studio_core::app::studio::studio_view_channel::CommandSender;
 use lpa_studio_core::{
-    StudioActor, StudioCommand, StudioController, UiAction, UiLogEntry, UiLogLevel, UiStudioView,
+    ConsoleCommand, STUDIO_LOG_SINK, StudioActor, StudioCommand, StudioController, UiAction,
+    UiLogEntry, UiLogLevel, UiStudioView,
 };
 
 const STYLE: &str = include_str!("style.css");
@@ -42,16 +55,17 @@ pub fn App() -> Element {
     }
 
     let mut view = use_signal(UiStudioView::empty);
-    // Spawn the actor once and drive the view signal from its change-gated
-    // channel, mirroring newly-arrived logs to the JS console.
+    // Install the global `log::` sink and the JS-console mirror hook, then
+    // spawn the actor once and drive the view signal from its change-gated
+    // channel.
     let bridge = use_hook(|| {
-        let (actor, handle) = StudioActor::new(StudioController::new(), make_pull_timer);
+        install_log_sink();
+        let mut controller = StudioController::new(now_secs);
+        controller.set_on_entry(log_to_js_console);
+        let (actor, handle) = StudioActor::new(controller, make_pull_timer);
         let mut view_rx = handle.view;
         spawn(async move {
             while let Some(next) = view_rx.recv().await {
-                for log in new_logs(&view.peek(), &next) {
-                    log_to_js_console(&log);
-                }
                 view.set(next);
             }
         });
@@ -61,6 +75,24 @@ pub fn App() -> Element {
             delay: handle.delay,
         }
     });
+
+    // Mount the local project store: request durability, take the library
+    // lock, load OPFS into memory, start the flusher. The simulator never
+    // sees this store (D19/D20 — the sim is an ephemeral place). Spawned
+    // from use_hook so it runs exactly once per app instance (a use_future
+    // here restarts with the render loop and would mount repeatedly).
+    let mut store_status = use_signal(|| LocalStoreStatus::Initializing);
+    use_hook(move || {
+        local_store::request_persist();
+        spawn(async move {
+            store_status.set(local_store::init_local_store().await);
+        });
+    });
+    let on_store_retry = move |_| {
+        spawn(async move {
+            store_status.set(local_store::init_local_store().await);
+        });
+    };
 
     let startup_intent = use_hook(studio_url::read_connection_intent);
     let startup_bridge = bridge.clone();
@@ -91,13 +123,27 @@ pub fn App() -> Element {
         action_bridge.tx.send(StudioCommand::Action(action));
     };
 
+    // Console toolbar gestures ride the same ordered command queue as
+    // actions; the actor applies them synchronously and never coalesces them.
+    let console_bridge = bridge.clone();
+    let on_console = move |command: ConsoleCommand| {
+        console_bridge.tx.send(StudioCommand::Console(command));
+    };
+
     rsx! {
         style { "{STYLE}" }
         document::Stylesheet { href: asset!("/assets/tailwind.css") }
+        div { class: "tw:mx-auto tw:w-[min(1520px,100%)] tw:px-7 tw:pt-4 tw:max-[880px]:px-[18px]",
+            LocalStoreBanner {
+                status: store_status.read().clone(),
+                on_retry: on_store_retry,
+            }
+        }
         StudioShell {
             view: view.read().clone(),
             running: false,
             on_action,
+            on_console,
         }
     }
 }
@@ -109,28 +155,53 @@ fn make_pull_timer(delay: Duration) -> TimeoutFuture {
     TimeoutFuture::new(delay.as_millis() as u32)
 }
 
-/// The log entries in `next` that arrived since `previous`, so the shell mirrors
-/// only newly-appended logs to the JS console. Logs are appended into a bounded
-/// core ring; the new entries are the suffix of `next.logs` after the last entry
-/// shared with `previous.logs` (found by scanning back), which stays correct even
-/// when the ring wraps.
-fn new_logs(previous: &UiStudioView, next: &UiStudioView) -> Vec<UiLogEntry> {
-    let Some(last_seen) = previous.logs.last() else {
-        return next.logs.clone();
-    };
-    match next.logs.iter().rposition(|log| log == last_seen) {
-        Some(index) => next.logs[index + 1..].to_vec(),
-        None => next.logs.clone(),
+/// The controller's log-stamping clock on wasm: seconds since the Unix epoch
+/// from `Date.now()`. Core takes the closure so it stays platform-free.
+#[cfg(target_arch = "wasm32")]
+fn now_secs() -> f64 {
+    js_sys::Date::now() / 1000.0
+}
+
+/// Host builds of this crate only run unit tests and never spawn the actor,
+/// so the clock stub mirrors the JS-console stubs below.
+#[cfg(not(target_arch = "wasm32"))]
+fn now_secs() -> f64 {
+    0.0
+}
+
+/// Install the studio `log::Log` sink as the global logger, before the actor
+/// spawns, so `log::` macros anywhere on the wasm side are captured and later
+/// drained into the console ring by the actor.
+///
+/// `Debug` is the runtime max (bumping to `Trace` is a cheap follow-up; this
+/// avoids paying for hot-path `trace!` in dependencies) — the console pane's
+/// filter is the *display* gate. An already-installed logger is tolerated
+/// with a JS-console warning, never a panic.
+fn install_log_sink() {
+    match log::set_logger(&STUDIO_LOG_SINK) {
+        Ok(()) => log::set_max_level(log::LevelFilter::Debug),
+        Err(_) => console_warn("studio log sink not installed: a global logger is already set"),
     }
 }
 
+/// Mirror one ring entry to the JS console (the controller `on_entry` hook).
 fn log_to_js_console(log: &UiLogEntry) {
-    let message = format!("[{}] {}", log.source, log.message);
+    let message = console_line(log);
     match log.level {
-        UiLogLevel::Debug => console_debug(&message),
+        UiLogLevel::Trace | UiLogLevel::Debug => console_debug(&message),
         UiLogLevel::Info => console_info(&message),
         UiLogLevel::Warn => console_warn(&message),
         UiLogLevel::Error => console_error(&message),
+    }
+}
+
+/// The mirrored line, rebuilt from the structured entry: origin label plus
+/// detail (module path, endpoint id, transport label) when present, then the
+/// message. Severity is conveyed by the console method, not the text.
+fn console_line(log: &UiLogEntry) -> String {
+    match log.source.detail.as_deref() {
+        Some(detail) => format!("[{}/{detail}] {}", log.source.origin.label(), log.message),
+        None => format!("[{}] {}", log.source.origin.label(), log.message),
     }
 }
 
@@ -165,43 +236,24 @@ fn console_error(_message: &str) {}
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpa_studio_core::UiLogLevel;
+    use lpa_studio_core::{UiLogOrigin, UiLogSource};
 
-    fn view_with_logs(messages: &[&str]) -> UiStudioView {
-        let logs = messages
-            .iter()
-            .map(|message| UiLogEntry::new(UiLogLevel::Info, "studio", *message))
-            .collect();
-        UiStudioView::new(Vec::new(), logs)
+    #[test]
+    fn console_line_renders_origin_label_without_detail() {
+        let entry = UiLogEntry::new(0.0, UiLogLevel::Info, UiLogOrigin::Studio, "connected");
+
+        assert_eq!(console_line(&entry), "[studio] connected");
     }
 
     #[test]
-    fn new_logs_returns_appended_tail() {
-        let previous = view_with_logs(&["a", "b"]);
-        let next = view_with_logs(&["a", "b", "c", "d"]);
+    fn console_line_renders_origin_and_detail() {
+        let entry = UiLogEntry::new(
+            0.0,
+            UiLogLevel::Debug,
+            UiLogSource::with_detail(UiLogOrigin::Device, "fw_core::server"),
+            "boot ok",
+        );
 
-        let new = new_logs(&previous, &next);
-        assert_eq!(new.len(), 2);
-        assert_eq!(new[0].message, "c");
-        assert_eq!(new[1].message, "d");
-    }
-
-    #[test]
-    fn new_logs_handles_ring_wrap_by_anchoring_on_last_seen() {
-        // The ring dropped "a"; the shared anchor "c" still locates the new tail.
-        let previous = view_with_logs(&["a", "b", "c"]);
-        let next = view_with_logs(&["b", "c", "d"]);
-
-        let new = new_logs(&previous, &next);
-        assert_eq!(new.len(), 1);
-        assert_eq!(new[0].message, "d");
-    }
-
-    #[test]
-    fn new_logs_returns_all_when_previous_empty() {
-        let previous = view_with_logs(&[]);
-        let next = view_with_logs(&["a", "b"]);
-
-        assert_eq!(new_logs(&previous, &next).len(), 2);
+        assert_eq!(console_line(&entry), "[device/fw_core::server] boot ok");
     }
 }

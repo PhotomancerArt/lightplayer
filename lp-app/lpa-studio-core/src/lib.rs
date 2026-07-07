@@ -46,11 +46,12 @@ pub use app::server::{
     StudioProjectRead, StudioProjectReadOutcome, StudioServerClient,
 };
 pub use app::studio::{
-    DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY, LogRing, RefreshCadence,
-    SIMULATOR_REFRESH_INTERVAL, StudioActor, StudioCommand, StudioController, StudioHandle,
-    StudioSnapshot, StudioViewReceiver, StudioViewSender, UiError, UiLogEntry, UiLogLevel,
-    UiNotice, UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink, ViewPublisher,
-    studio_view_channel,
+    ConsoleCommand, DEVICE_REFRESH_INTERVAL, LOG_RING_CAPACITY, LogClock, LogFilter, LogRing,
+    RefreshCadence, SIMULATOR_REFRESH_INTERVAL, STUDIO_LOG_SINK, StudioActor, StudioCommand,
+    StudioController, StudioHandle, StudioLogSink, StudioSnapshot, StudioViewReceiver,
+    StudioViewSender, UiConsoleView, UiError, UiLogDraft, UiLogEntry, UiLogLevel, UiLogOrigin,
+    UiLogSource, UiNotice, UiNoticeLevel, UiResult, UxActivityTarget, UxUpdate, UxUpdateSink,
+    ViewPublisher, studio_view_channel,
 };
 pub use core::notice::UiNotices;
 pub use core::view::activity_view::UiActivityStep;

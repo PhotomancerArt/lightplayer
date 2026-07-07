@@ -75,6 +75,28 @@ where
     Ok(writer.into_inner())
 }
 
+/// Write one slot subtree as compact JSON against an explicit shape.
+///
+/// The subtree-writer seam for base-value display strings: interior shapes
+/// reached by walking a path (e.g. via
+/// [`crate::lookup_slot_data_and_shape`]) have no registered [`SlotShapeId`]
+/// of their own, so [`write_slot_data_json_value`]'s id-based entry point
+/// cannot serialize them. `registry` still resolves `Ref` indirections and
+/// custom codecs inside the subtree.
+pub fn write_slot_subtree_json<W>(
+    registry: &SlotShapeRegistry,
+    shape: &SlotShape,
+    data: SlotDataAccess<'_>,
+    out: W,
+) -> Result<W, SlotWriteError<W::Error>>
+where
+    W: SlotWrite,
+{
+    let mut writer = SlotWriter::new(out);
+    write_shape_json(writer.value(), shape, data, registry)?;
+    Ok(writer.into_inner())
+}
+
 pub fn write_slot_data_json_value<W>(
     registry: &SlotShapeRegistry,
     id: SlotShapeId,

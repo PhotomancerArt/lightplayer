@@ -9,17 +9,18 @@ use lpa_link::providers::browser_serial_esp32::BrowserSerialEsp32Provider;
 use lpa_link::providers::{LinkProviderInstance, LinkProviderRegistry};
 use lpa_link::{LinkProvider, LinkProviderKind};
 use lpc_wire::{ClientMessage, TransportError, WireServerMessage, json};
-use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
+use wasm_bindgen::JsValue;
 use wasm_bindgen_futures::JsFuture;
 
 use super::browser_serial_readiness::{
     BrowserSerialReadinessClassifier, BrowserSerialReadinessFailure,
 };
+use super::device_log_line::parse_device_log_line;
 use super::pending_server_messages::{BatchItem, PendingServerMessages};
 use crate::core::view::activity_view::{UiActivityStep, UiActivityStepState};
 use crate::{
-    ControllerId, ServerController, SharedLinkRegistry, UiActivityView, UiLogEntry, UiLogLevel,
-    UiStatus, UxActivityTarget, UxUpdate, UxUpdateSink,
+    ControllerId, ServerController, SharedLinkRegistry, UiActivityView, UiLogDraft, UiLogLevel,
+    UiLogOrigin, UiLogSource, UiStatus, UxActivityTarget, UxUpdate, UxUpdateSink,
 };
 
 const RESPONSE_POLL_LIMIT: usize = 500;
@@ -41,7 +42,7 @@ impl BrowserSerialClientIo {
     pub fn new(
         registry: SharedLinkRegistry,
         session_id: LinkSessionId,
-        logs: Rc<RefCell<Vec<UiLogEntry>>>,
+        logs: Rc<RefCell<Vec<UiLogDraft>>>,
         updates: UxUpdateSink,
     ) -> Self {
         let readiness_activity = initial_readiness_activity();
@@ -115,11 +116,9 @@ impl BrowserSerialClientIo {
                 let mut state = self.state.borrow_mut();
                 state.protocol_ready = true;
                 state.mark_protocol_ready();
-                state.push_log(
-                    UiLogLevel::Info,
-                    "browser-serial",
-                    "server protocol stream is ready",
-                );
+                // Pure diagnostic (P4): rides the global `log::` sink into the
+                // ring (origin Studio, module target as detail).
+                log::info!("server protocol stream is ready");
                 return Ok(());
             }
 
@@ -137,7 +136,7 @@ impl BrowserSerialClientIo {
             .mark_protocol_failed(&message, no_firmware);
         self.state
             .borrow()
-            .push_log(UiLogLevel::Warn, "browser-serial", message.clone());
+            .push_log(UiLogLevel::Warn, message.clone());
         Err(TransportError::Other(message))
     }
 
@@ -157,22 +156,19 @@ impl BrowserSerialClientIo {
     fn readiness_error(&self, error: String) -> TransportError {
         let message = format!("browser serial error while waiting for server readiness: {error}");
         if let Some(no_firmware_message) = self.detect_readiness_failure() {
-            console_warn(&format!(
-                "[browser-serial] {message}; treating as no firmware"
-            ));
-            self.state
-                .borrow()
-                .push_log(UiLogLevel::Warn, "browser-serial", message);
+            // Pure diagnostic (P4, was a direct console_warn): the buffered
+            // Warn draft below carries the error itself.
+            log::debug!("treating readiness error as no firmware: {message}");
+            self.state.borrow().push_log(UiLogLevel::Warn, message);
             self.state
                 .borrow_mut()
                 .mark_protocol_failed(&no_firmware_message, true);
             return TransportError::Other(no_firmware_message);
         }
 
-        console_error(&format!("[browser-serial] {message}"));
         self.state
             .borrow()
-            .push_log(UiLogLevel::Error, "browser-serial", message.clone());
+            .push_log(UiLogLevel::Error, message.clone());
         self.state
             .borrow_mut()
             .mark_protocol_failed(&message, false);
@@ -196,10 +192,11 @@ impl BrowserSerialClientIo {
                 let issue = format!("{error}; json={snippet}");
                 self.record_malformed_frame(issue.clone());
                 if let Some(next_frame) = nested_protocol_frame(json_frame) {
-                    console_warn(&format!(
-                        "[browser-serial] attempting resync at nested M! frame while {}",
+                    // Pure diagnostic (P4, was a direct console_warn).
+                    log::warn!(
+                        "attempting resync at nested M! frame while {}",
                         self.wait_context()
-                    ));
+                    );
                     self.handle_line(next_frame.to_string())
                 } else {
                     Ok(None)
@@ -208,21 +205,34 @@ impl BrowserSerialClientIo {
         }
     }
 
+    /// Record a non-protocol serial line: parse the firmware logger format
+    /// into a structured draft (level, module path as detail, message
+    /// remainder) and feed the full raw line to the readiness classifier
+    /// (which matches boot-ROM and server-start markers against unstripped
+    /// text). JS-console mirroring happens once, structurally, when the draft
+    /// enters the controller ring (the web shell's `on_entry` hook, P4) — the
+    /// old raw-line `log_device_line` mirror is gone.
     fn record_device_line(&self, line: &str) {
-        let level = device_line_level(line);
-        let message = line_snippet(line, DEVICE_LOG_SNIPPET_LIMIT);
-        log_device_line(level, &message);
+        let parsed = parse_device_log_line(line);
+        let raw_line = line_snippet(line, DEVICE_LOG_SNIPPET_LIMIT);
+        let draft = UiLogDraft::new(
+            parsed.level,
+            match parsed.module {
+                Some(module) => UiLogSource::with_detail(UiLogOrigin::Device, module),
+                None => UiLogSource::new(UiLogOrigin::Device),
+            },
+            line_snippet(parsed.message, DEVICE_LOG_SNIPPET_LIMIT),
+        );
         self.state
             .borrow_mut()
-            .record_readiness_device_line(level, message);
+            .record_readiness_device_line(draft, raw_line);
     }
 
     fn record_malformed_frame(&self, issue: String) {
         let message = format!("malformed M! frame while {}: {issue}", self.wait_context());
-        console_warn(&format!("[browser-serial] {message}"));
         let mut state = self.state.borrow_mut();
         state.last_protocol_issue = Some(issue);
-        state.push_log(UiLogLevel::Warn, "browser-serial", message);
+        state.push_log(UiLogLevel::Warn, message);
     }
 
     fn wait_context(&self) -> String {
@@ -249,17 +259,11 @@ impl ClientIo for BrowserSerialClientIo {
             state.last_protocol_issue = None;
         }
 
-        console_debug(&format!(
-            "[browser-serial] tx request id={request_id} kind={label} json_bytes={}",
+        // Pure diagnostic transport chatter (P4): migrated from a hand-built
+        // Debug draft + duplicate console_debug to one `log::` record.
+        log::debug!(
+            "tx request id={request_id} kind={label} json_bytes={}",
             frame.len()
-        ));
-        self.state.borrow().push_log(
-            UiLogLevel::Debug,
-            "browser-serial",
-            format!(
-                "tx request id={request_id} kind={label} json_bytes={}",
-                frame.len()
-            ),
         );
 
         let (registry, session_id) = {
@@ -302,10 +306,9 @@ impl ClientIo for BrowserSerialClientIo {
                     "browser serial error while {}: {error}",
                     self.wait_context()
                 );
-                console_error(&format!("[browser-serial] {message}"));
                 self.state
                     .borrow()
-                    .push_log(UiLogLevel::Error, "browser-serial", message.clone());
+                    .push_log(UiLogLevel::Error, message.clone());
                 return Err(TransportError::Other(message));
             }
 
@@ -342,7 +345,7 @@ impl ClientIo for BrowserSerialClientIo {
         }
         self.state
             .borrow()
-            .push_log(UiLogLevel::Warn, "browser-serial", message.clone());
+            .push_log(UiLogLevel::Warn, message.clone());
         Err(TransportError::Other(message))
     }
 
@@ -362,7 +365,7 @@ impl ClientIo for BrowserSerialClientIo {
 struct BrowserSerialClientState {
     registry: SharedLinkRegistry,
     session_id: LinkSessionId,
-    logs: Rc<RefCell<Vec<UiLogEntry>>>,
+    logs: Rc<RefCell<Vec<UiLogDraft>>>,
     updates: UxUpdateSink,
     readiness_activity: UiActivityView,
     readiness_classifier: BrowserSerialReadinessClassifier,
@@ -373,17 +376,26 @@ struct BrowserSerialClientState {
 }
 
 impl BrowserSerialClientState {
-    fn push_log(&self, level: UiLogLevel, source: impl Into<String>, message: impl Into<String>) {
-        let entry = UiLogEntry::new(level, source, message);
-        self.logs.borrow_mut().push(entry.clone());
-        self.updates.emit(UxUpdate::Log(entry));
+    /// Buffer a transport-level draft (origin `Link`, detail `browser-serial`)
+    /// and mirror it as a progressive `UxUpdate::Log`. Drafts are stamped by
+    /// the controller when it drains the buffer.
+    fn push_log(&self, level: UiLogLevel, message: impl Into<String>) {
+        let draft = UiLogDraft::new(
+            level,
+            UiLogSource::with_detail(UiLogOrigin::Link, "browser-serial"),
+            message,
+        );
+        self.logs.borrow_mut().push(draft.clone());
+        self.updates.emit(UxUpdate::Log(draft));
     }
 
-    fn record_readiness_device_line(&mut self, level: UiLogLevel, message: String) {
-        self.readiness_classifier.observe_line(message.clone());
-        let entry = UiLogEntry::new(level, "fw-esp32", message.clone());
-        self.logs.borrow_mut().push(entry.clone());
-        self.updates.emit(UxUpdate::Log(entry));
+    /// Buffer a parsed device-line draft and advance the readiness activity.
+    /// The classifier observes `raw_line` (the unstripped serial line) so its
+    /// substring markers keep matching regardless of log-prefix parsing.
+    fn record_readiness_device_line(&mut self, draft: UiLogDraft, raw_line: String) {
+        self.readiness_classifier.observe_line(raw_line);
+        self.logs.borrow_mut().push(draft.clone());
+        self.updates.emit(UxUpdate::Log(draft));
         if !self.boot_output_seen {
             self.boot_output_seen = true;
             self.readiness_activity
@@ -489,28 +501,6 @@ fn link_error_to_transport(error: lpa_link::LinkError) -> TransportError {
     TransportError::Other(error.to_string())
 }
 
-fn device_line_level(line: &str) -> UiLogLevel {
-    if line.starts_with("[ERROR]") {
-        UiLogLevel::Error
-    } else if line.starts_with("[WARN]") {
-        UiLogLevel::Warn
-    } else if line.starts_with("[DEBUG]") || line.starts_with("[TRACE]") {
-        UiLogLevel::Debug
-    } else {
-        UiLogLevel::Info
-    }
-}
-
-fn log_device_line(level: UiLogLevel, message: &str) {
-    let message = format!("[fw-esp32] {message}");
-    match level {
-        UiLogLevel::Error => console_error(&message),
-        UiLogLevel::Warn => console_warn(&message),
-        UiLogLevel::Debug => console_debug(&message),
-        UiLogLevel::Info => console_log(&message),
-    }
-}
-
 fn nested_protocol_frame(json_frame: &str) -> Option<&str> {
     json_frame
         .find("M!")
@@ -549,19 +539,4 @@ async fn sleep_ms(ms: i32) -> Result<(), TransportError> {
         .await
         .map(|_| ())
         .map_err(|error| TransportError::Other(format!("{error:?}")))
-}
-
-#[wasm_bindgen]
-extern "C" {
-    #[wasm_bindgen(js_namespace = console, js_name = log)]
-    fn console_log(message: &str);
-
-    #[wasm_bindgen(js_namespace = console, js_name = debug)]
-    fn console_debug(message: &str);
-
-    #[wasm_bindgen(js_namespace = console, js_name = warn)]
-    fn console_warn(message: &str);
-
-    #[wasm_bindgen(js_namespace = console, js_name = error)]
-    fn console_error(message: &str);
 }

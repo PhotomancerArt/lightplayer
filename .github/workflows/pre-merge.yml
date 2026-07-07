@@ -4,7 +4,13 @@ on:
   pull_request:
     branches: ["main", "feature/*"]
   push:
-    branches: ["main", "feature/*"]
+    branches: ["main"]
+
+# Cancel stale in-flight runs when new commits land on the same ref, except on
+# main where every push should be validated.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   RUST_BACKTRACE: 1
@@ -97,18 +103,16 @@ jobs:
       - name: Install RISC-V target
         run: rustup target add ${{ env.RISC_V_TARGET }}
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+      # The previous actions/cache config listed `target/` at the workspace
+      # root, but the repo checks out into `lp2025/`, so build artifacts were
+      # never cached and every run was a full cold build. rust-cache handles
+      # the cargo registry + the workspace target dir, keys on Cargo.lock and
+      # rustc version, and prunes stale artifacts so the cache doesn't grow
+      # unboundedly.
+      - name: Cache cargo registry and build artifacts
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
-          key: ${{ runner.os }}-${{ runner.arch }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-${{ runner.arch }}-cargo-
+          workspaces: lp2025 -> target
 
       - name: Install just
         uses: extractions/setup-just@v3

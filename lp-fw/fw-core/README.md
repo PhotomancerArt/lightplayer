@@ -29,6 +29,14 @@ Targets still decide how to boot, yield, sleep, schedule autorun, expose logs,
 and manage hardware. This keeps `fw-core` useful without turning it into a
 browser, host, or ESP32 abstraction layer.
 
+## Logging
+
+Firmware targets log through the `log` crate. Loggers are constructed
+permissive; the process-global `log::max_level()` — seeded to `Info` at init —
+is the single runtime gate. Clients can change it at runtime via the wire
+`SetLogLevel` command (handled in `lpa-server`); the change is not persisted,
+so a reboot reverts to `Info`. See ADR `2026-07-05-studio-logging-model`.
+
 ## Features
 
 - `std`: enables host-side support for tests and logging dependencies.

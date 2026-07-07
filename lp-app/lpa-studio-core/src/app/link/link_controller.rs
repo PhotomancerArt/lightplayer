@@ -13,8 +13,8 @@ use lpc_model::DEFAULT_SERIAL_BAUD_RATE;
 use crate::{
     ActionPriority, ConnectedDeviceSummary, Controller, ControllerId, EndpointChoice, LinkOp,
     LinkSnapshot, LinkState, ProgressState, ProviderChoice, UiAction, UiActivityView, UiError,
-    UiIssue, UiLogEntry, UiLogLevel, UiMetric, UiPaneView, UiProgress, UiStatus, UiViewContent,
-    UxUpdate, UxUpdateSink,
+    UiIssue, UiLogDraft, UiLogLevel, UiLogOrigin, UiLogSource, UiMetric, UiPaneView, UiProgress,
+    UiStatus, UiViewContent, UxUpdate, UxUpdateSink,
 };
 use lpa_link::{LinkManagementEvent, LinkManagementEventSink};
 
@@ -502,7 +502,7 @@ impl Controller for LinkController {
 
 pub struct ConnectedLink {
     pub connection: LinkConnection,
-    pub logs: Vec<UiLogEntry>,
+    pub logs: Vec<UiLogDraft>,
 }
 
 pub enum LinkOpenOutcome {
@@ -513,7 +513,7 @@ pub enum LinkOpenOutcome {
 
 pub struct LinkManagementOutcome {
     pub result: LinkManagementResult,
-    pub logs: Vec<UiLogEntry>,
+    pub logs: Vec<UiLogDraft>,
 }
 
 impl Default for LinkController {
@@ -590,16 +590,18 @@ fn link_body(state: &LinkState) -> UiViewContent {
     }
 }
 
-fn management_result_logs(result: &LinkManagementResult) -> Vec<UiLogEntry> {
+fn management_result_logs(result: &LinkManagementResult) -> Vec<UiLogDraft> {
     match result {
         LinkManagementResult::FlashFirmware(result) => {
             let mut logs = result
                 .logs
                 .iter()
-                .map(|message| UiLogEntry::new(UiLogLevel::Info, "lpa-link", message.clone()))
+                .map(|message| {
+                    UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Link, message.clone())
+                })
                 .collect::<Vec<_>>();
             logs.extend(result.progress.iter().map(|progress| {
-                UiLogEntry::new(UiLogLevel::Info, "lpa-link", progress.label.clone())
+                UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Link, progress.label.clone())
             }));
             logs
         }
@@ -607,10 +609,12 @@ fn management_result_logs(result: &LinkManagementResult) -> Vec<UiLogEntry> {
             let mut logs = result
                 .logs
                 .iter()
-                .map(|message| UiLogEntry::new(UiLogLevel::Info, "lpa-link", message.clone()))
+                .map(|message| {
+                    UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Link, message.clone())
+                })
                 .collect::<Vec<_>>();
             logs.extend(result.progress.iter().map(|progress| {
-                UiLogEntry::new(UiLogLevel::Info, "lpa-link", progress.label.clone())
+                UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Link, progress.label.clone())
             }));
             logs
         }
@@ -618,17 +622,19 @@ fn management_result_logs(result: &LinkManagementResult) -> Vec<UiLogEntry> {
             let mut logs = result
                 .logs
                 .iter()
-                .map(|message| UiLogEntry::new(UiLogLevel::Info, "lpa-link", message.clone()))
+                .map(|message| {
+                    UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Link, message.clone())
+                })
                 .collect::<Vec<_>>();
             logs.extend(result.progress.iter().map(|progress| {
-                UiLogEntry::new(UiLogLevel::Info, "lpa-link", progress.label.clone())
+                UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Link, progress.label.clone())
             }));
             logs
         }
         LinkManagementResult::ResetRuntime => {
-            vec![UiLogEntry::new(
+            vec![UiLogDraft::new(
                 UiLogLevel::Info,
-                "lpa-link",
+                UiLogOrigin::Link,
                 "runtime reset completed",
             )]
         }
@@ -675,10 +681,10 @@ fn apply_management_event(activity: &mut UiActivityView, event: LinkManagementEv
     }
 }
 
-fn management_event_log(event: &LinkManagementEvent) -> Option<UiLogEntry> {
+fn management_event_log(event: &LinkManagementEvent) -> Option<UiLogDraft> {
     match event {
         LinkManagementEvent::Log { message } if !message.trim().is_empty() => Some(
-            UiLogEntry::new(UiLogLevel::Info, "lpa-link", message.clone()),
+            UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Link, message.clone()),
         ),
         _ => None,
     }
@@ -736,7 +742,7 @@ async fn open_connected_provider(
     provider_id: LinkProviderKind,
     provider: &mut LinkProviderInstance,
     endpoint_id: &LinkEndpointId,
-) -> Result<(LinkSession, LinkConnection, Vec<UiLogEntry>), UiError> {
+) -> Result<(LinkSession, LinkConnection, Vec<UiLogDraft>), UiError> {
     let session = provider
         .connect(endpoint_id)
         .await
@@ -810,12 +816,12 @@ fn provider_action_priority(kind: LinkProviderKind) -> ActionPriority {
 fn link_session_logs(
     provider: &lpa_link::providers::LinkProviderInstance,
     session_id: &lpa_link::LinkSessionId,
-) -> Result<Vec<UiLogEntry>, UiError> {
+) -> Result<Vec<UiLogDraft>, UiError> {
     let mut logs = provider
         .logs(session_id)
         .map_err(map_link_error)?
         .into_iter()
-        .map(|entry| UiLogEntry::new(map_link_log_level(entry.level), "lpa-link", entry.message))
+        .map(link_log_draft)
         .collect::<Vec<_>>();
     logs.extend(
         provider
@@ -823,9 +829,9 @@ fn link_session_logs(
             .map_err(map_link_error)?
             .into_iter()
             .map(|diagnostic| {
-                UiLogEntry::new(
+                UiLogDraft::new(
                     map_diagnostic_level(diagnostic.severity),
-                    "lpa-link",
+                    UiLogOrigin::Link,
                     diagnostic.message,
                 )
             }),
@@ -844,9 +850,28 @@ fn map_link_error(error: LinkError) -> UiError {
     }
 }
 
+/// Map a provider log entry to a console draft: origin `Link`, the endpoint
+/// id as display-only detail.
+///
+/// The session id is deliberately omitted from the detail: providers derive
+/// session ids from the endpoint id plus a counter (`{endpoint}:{n}`), and
+/// the studio drives at most one session per endpoint, so an
+/// `endpoint/session` detail would only repeat the endpoint stem and widen
+/// the console's source column.
+fn link_log_draft(entry: lpa_link::LinkLogEntry) -> UiLogDraft {
+    UiLogDraft::new(
+        map_link_log_level(entry.level),
+        UiLogSource::with_detail(UiLogOrigin::Link, entry.endpoint_id.as_str()),
+        entry.message,
+    )
+}
+
+/// Link log levels map one-to-one; `Trace` is preserved (it collapsed to
+/// `Debug` before the console gained a Trace level).
 fn map_link_log_level(level: LinkLogLevel) -> UiLogLevel {
     match level {
-        LinkLogLevel::Trace | LinkLogLevel::Debug => UiLogLevel::Debug,
+        LinkLogLevel::Trace => UiLogLevel::Trace,
+        LinkLogLevel::Debug => UiLogLevel::Debug,
         LinkLogLevel::Info => UiLogLevel::Info,
         LinkLogLevel::Warn => UiLogLevel::Warn,
         LinkLogLevel::Error => UiLogLevel::Error,
@@ -1011,9 +1036,37 @@ mod tests {
         let log = management_event_log(&event).expect("log event should produce a UX log");
         apply_management_event(&mut activity, event);
 
-        assert_eq!(log.source, "lpa-link");
+        assert_eq!(log.source, UiLogSource::new(UiLogOrigin::Link));
         assert_eq!(log.message, "Writing at 0x10000... (42%)");
         assert!(activity.terminal.is_empty());
+    }
+
+    #[test]
+    fn link_log_drafts_preserve_trace_and_carry_endpoint_detail() {
+        let entry = lpa_link::LinkLogEntry::new(
+            "usb-serial-0",
+            Some(LinkSessionId::new("usb-serial-0:1")),
+            LinkLogLevel::Trace,
+            "probe ok",
+        );
+
+        let draft = link_log_draft(entry);
+
+        assert_eq!(draft.level, UiLogLevel::Trace);
+        assert_eq!(
+            draft.source,
+            UiLogSource::with_detail(UiLogOrigin::Link, "usb-serial-0")
+        );
+        assert_eq!(draft.message, "probe ok");
+    }
+
+    #[test]
+    fn link_log_levels_map_one_to_one() {
+        assert_eq!(map_link_log_level(LinkLogLevel::Trace), UiLogLevel::Trace);
+        assert_eq!(map_link_log_level(LinkLogLevel::Debug), UiLogLevel::Debug);
+        assert_eq!(map_link_log_level(LinkLogLevel::Info), UiLogLevel::Info);
+        assert_eq!(map_link_log_level(LinkLogLevel::Warn), UiLogLevel::Warn);
+        assert_eq!(map_link_log_level(LinkLogLevel::Error), UiLogLevel::Error);
     }
 
     #[test]

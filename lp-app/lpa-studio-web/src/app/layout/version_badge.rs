@@ -12,8 +12,17 @@
 //! [`VersionBadge`] wrapper owns the fetches and drives that component.
 
 use dioxus::prelude::*;
+use dioxus_icons::lucide::{GitBranch, GitPullRequest};
 
 use crate::base::{IconPopoverButton, PopoverPlacement, StudioIconName};
+
+/// GitHub slug used when no deploy `version.json` is present (local dev builds),
+/// so the repo link and copyright still resolve.
+const DEFAULT_REPO: &str = "light-player/lightplayer";
+/// Studio is authored by Yona Appletree / photomancer.art.
+const AUTHOR: &str = "Yona Appletree";
+const AUTHOR_URL: &str = "https://photomancer.art";
+const COPYRIGHT_YEAR: &str = "2026";
 
 /// Subset of the deploy `version.json` schema (v1) that the UI renders.
 ///
@@ -39,6 +48,9 @@ pub struct VersionSource {
     pub dirty: Option<bool>,
     #[serde(default)]
     pub r#ref: Option<String>,
+    /// GitHub `owner/name` slug, used to build repo/commit/PR links.
+    #[serde(default)]
+    pub repository: Option<String>,
 }
 
 /// `build` block of `version.json`.
@@ -131,6 +143,7 @@ pub fn VersionBadge() -> Element {
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn VersionDetails(info: Option<VersionInfo>, changelog: Vec<ChangelogEntry>) -> Element {
+    let repo = repo_slug(info.as_ref());
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3 tw:p-3",
             div { class: "tw:grid tw:min-w-0 tw:gap-0.5",
@@ -144,7 +157,11 @@ pub fn VersionDetails(info: Option<VersionInfo>, changelog: Vec<ChangelogEntry>)
                     dl { class: "tw:m-0 tw:grid tw:min-w-0 tw:gap-2 tw:text-xs",
                         VersionDetailRow { label: "version", value: display_or(info.version.as_deref(), "unknown") }
                         VersionDetailRow { label: "channel", value: display_or(info.channel.as_deref(), "—") }
-                        VersionDetailRow { label: "commit", value: commit_display(&info.source) }
+                        VersionDetailRow {
+                            label: "commit",
+                            value: commit_display(&info.source),
+                            href: commit_url(&repo, &info.source),
+                        }
                         VersionDetailRow { label: "built", value: display_or(info.build.generated_at.as_deref(), "—") }
                     }
                 },
@@ -155,7 +172,37 @@ pub fn VersionDetails(info: Option<VersionInfo>, changelog: Vec<ChangelogEntry>)
                 },
             }
             if !changelog.is_empty() {
-                RecentUpdates { changelog }
+                RecentUpdates { changelog, repo: repo.clone() }
+            }
+            VersionFooter { repo }
+        }
+    }
+}
+
+/// Repo link + copyright. Always rendered, so even a local dev build (no
+/// `version.json`) surfaces the source and attribution.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn VersionFooter(repo: String) -> Element {
+    rsx! {
+        footer { class: "tw:grid tw:min-w-0 tw:gap-1.5 tw:border-t tw:border-border-subtle tw:pt-2.5",
+            a {
+                class: "tw:inline-flex tw:min-w-0 tw:items-center tw:gap-1.5 tw:text-xs tw:font-bold tw:text-subtle-foreground tw:hover:text-accent",
+                href: "{repo_url(&repo)}",
+                target: "_blank",
+                rel: "noopener noreferrer",
+                GitBranch { size: 13 }
+                span { class: "tw:min-w-0 tw:overflow-hidden tw:text-ellipsis tw:whitespace-nowrap tw:font-mono", "{repo}" }
+            }
+            span { class: "tw:text-[0.68rem] tw:text-subtle-foreground",
+                "© {COPYRIGHT_YEAR} {AUTHOR} · "
+                a {
+                    class: "tw:text-subtle-foreground tw:underline tw:decoration-dotted tw:underline-offset-2 tw:hover:text-accent",
+                    href: "{AUTHOR_URL}",
+                    target: "_blank",
+                    rel: "noopener noreferrer",
+                    "photomancer.art"
+                }
             }
         }
     }
@@ -163,7 +210,7 @@ pub fn VersionDetails(info: Option<VersionInfo>, changelog: Vec<ChangelogEntry>)
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn RecentUpdates(changelog: Vec<ChangelogEntry>) -> Element {
+fn RecentUpdates(changelog: Vec<ChangelogEntry>, repo: String) -> Element {
     rsx! {
         section { class: "tw:grid tw:min-w-0 tw:gap-1.5 tw:border-t tw:border-border-subtle tw:pt-2.5",
             span { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground", "Recent updates" }
@@ -176,7 +223,14 @@ fn RecentUpdates(changelog: Vec<ChangelogEntry>) -> Element {
                                 span { class: "tw:text-[0.68rem] tw:text-subtle-foreground", "{date}" }
                             }
                             if let Some(pr) = entry.pr {
-                                span { class: "tw:ml-auto tw:shrink-0 tw:font-mono tw:text-[0.68rem] tw:text-subtle-foreground", "#{pr}" }
+                                a {
+                                    class: "tw:ml-auto tw:inline-flex tw:shrink-0 tw:items-center tw:gap-1 tw:self-center tw:font-mono tw:text-[0.68rem] tw:text-subtle-foreground tw:hover:text-accent",
+                                    href: "{pr_url(&repo, pr)}",
+                                    target: "_blank",
+                                    rel: "noopener noreferrer",
+                                    GitPullRequest { size: 12 }
+                                    "#{pr}"
+                                }
                             }
                         }
                         if let Some(summary) = entry.summary.as_deref() {
@@ -191,11 +245,24 @@ fn RecentUpdates(changelog: Vec<ChangelogEntry>) -> Element {
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-fn VersionDetailRow(label: &'static str, value: String) -> Element {
+fn VersionDetailRow(label: &'static str, value: String, href: Option<String>) -> Element {
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:grid-cols-[64px_minmax(0,1fr)] tw:gap-2",
             dt { class: "tw:text-[0.68rem] tw:font-bold tw:uppercase tw:text-subtle-foreground", "{label}" }
-            dd { class: "tw:m-0 tw:min-w-0 tw:font-mono tw:text-muted-foreground tw:break-words", "{value}" }
+            dd { class: "tw:m-0 tw:min-w-0 tw:font-mono tw:text-muted-foreground tw:break-words",
+                match href {
+                    Some(href) => rsx! {
+                        a {
+                            class: "tw:text-muted-foreground tw:underline tw:decoration-dotted tw:underline-offset-2 tw:hover:text-accent",
+                            href: "{href}",
+                            target: "_blank",
+                            rel: "noopener noreferrer",
+                            "{value}"
+                        }
+                    },
+                    None => rsx! { "{value}" },
+                }
+            }
         }
     }
 }
@@ -234,6 +301,33 @@ fn display_or(value: Option<&str>, fallback: &str) -> String {
     }
 }
 
+/// The GitHub `owner/name` slug for this build, falling back to [`DEFAULT_REPO`]
+/// so links resolve even when no `version.json` was fetched.
+fn repo_slug(info: Option<&VersionInfo>) -> String {
+    info.and_then(|info| info.source.repository.as_deref())
+        .filter(|repo| !repo.is_empty())
+        .unwrap_or(DEFAULT_REPO)
+        .to_string()
+}
+
+fn repo_url(repo: &str) -> String {
+    format!("https://github.com/{repo}")
+}
+
+fn pr_url(repo: &str, pr: u64) -> String {
+    format!("https://github.com/{repo}/pull/{pr}")
+}
+
+/// Link to the exact commit on GitHub, or `None` when no sha is known (so the
+/// commit row renders as plain text rather than a dead link).
+fn commit_url(repo: &str, source: &VersionSource) -> Option<String> {
+    source
+        .sha
+        .as_deref()
+        .filter(|sha| !sha.is_empty())
+        .map(|sha| format!("https://github.com/{repo}/commit/{sha}"))
+}
+
 /// Short commit sha with a `(dirty)` marker when the deploy was built from a
 /// dirty tree.
 fn commit_display(source: &VersionSource) -> String {
@@ -259,6 +353,7 @@ mod tests {
             sha: Some("0123456789abcdef".to_string()),
             dirty: Some(true),
             r#ref: None,
+            repository: None,
         };
         assert_eq!(commit_display(&source), "01234567 (dirty)");
     }
@@ -269,6 +364,7 @@ mod tests {
             sha: Some("0123456789abcdef".to_string()),
             dirty: Some(false),
             r#ref: None,
+            repository: None,
         };
         assert_eq!(commit_display(&source), "01234567");
     }
@@ -290,5 +386,46 @@ mod tests {
     #[test]
     fn trigger_label_unavailable_is_dev_build() {
         assert_eq!(trigger_label(&VersionState::Unavailable), "dev build");
+    }
+
+    #[test]
+    fn repo_slug_falls_back_to_default_when_absent() {
+        assert_eq!(repo_slug(None), DEFAULT_REPO);
+        let info = VersionInfo::default();
+        assert_eq!(repo_slug(Some(&info)), DEFAULT_REPO);
+    }
+
+    #[test]
+    fn repo_slug_uses_deploy_repository_when_present() {
+        let info = VersionInfo {
+            source: VersionSource {
+                repository: Some("acme/widgets".to_string()),
+                ..VersionSource::default()
+            },
+            ..VersionInfo::default()
+        };
+        assert_eq!(repo_slug(Some(&info)), "acme/widgets");
+    }
+
+    #[test]
+    fn link_helpers_build_github_urls() {
+        assert_eq!(repo_url("acme/widgets"), "https://github.com/acme/widgets");
+        assert_eq!(
+            pr_url("acme/widgets", 42),
+            "https://github.com/acme/widgets/pull/42"
+        );
+        let source = VersionSource {
+            sha: Some("0123456789abcdef".to_string()),
+            ..VersionSource::default()
+        };
+        assert_eq!(
+            commit_url("acme/widgets", &source),
+            Some("https://github.com/acme/widgets/commit/0123456789abcdef".to_string())
+        );
+    }
+
+    #[test]
+    fn commit_url_is_none_without_sha() {
+        assert_eq!(commit_url("acme/widgets", &VersionSource::default()), None);
     }
 }

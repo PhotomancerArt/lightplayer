@@ -17,9 +17,11 @@ pub mod popover;
 pub(crate) mod popover_stories;
 pub mod tabs;
 
-pub use detail_popover::{DetailPopover, DetailSectionTint, detail_popover_section_class};
+pub use detail_popover::{
+    DetailPopover, DetailSection, DetailSectionTint, detail_popover_section_class,
+};
 pub use field_row::FieldRow;
 pub use icon::{StudioIcon, StudioIconName, action_icon_name};
 pub use icon_menu::{IconMenuButton, IconMenuTone, IconMenuVisualState};
-pub use popover::{IconPopoverButton, PopoverPlacement};
+pub use popover::{IconPopoverButton, PopoverButton, PopoverPlacement};
 pub use tabs::{TabItem, Tabs};

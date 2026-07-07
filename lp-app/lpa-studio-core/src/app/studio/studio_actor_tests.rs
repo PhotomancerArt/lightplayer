@@ -22,7 +22,7 @@ use lpc_wire::{
 
 use crate::{
     ControllerId, ProjectController, ProjectEditorOp, ProjectEditorTarget, ProjectOp,
-    StudioServerClient, UiAction, UiLogEntry, UiLogLevel,
+    StudioServerClient, UiAction, UiLogDraft, UiLogLevel, UiLogOrigin,
 };
 
 /// A future that returns `Pending` (re-waking) on its first poll and `Ready`
@@ -373,7 +373,7 @@ fn view_gate_suppresses_redundant_snapshot() {
     // No change -> gated out.
     assert!(controller.view_if_changed().is_none());
     // A pushed log is a local change -> emits again.
-    controller.push_log(UiLogEntry::new(UiLogLevel::Info, "test", "hello"));
+    controller.push_log(UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Studio, "hello"));
     assert!(controller.view_if_changed().is_some());
     assert!(controller.view_if_changed().is_none());
 }
@@ -503,12 +503,120 @@ fn focus_action_issues_no_read() {
 fn controller_log_ring_wraps_at_cap() {
     let (mut controller, _handle) = connected_controller();
     for i in 0..(crate::LOG_RING_CAPACITY + 10) {
-        controller.push_log(UiLogEntry::new(UiLogLevel::Info, "test", format!("m{i}")));
+        controller.push_log(UiLogDraft::new(UiLogLevel::Info, UiLogOrigin::Studio, format!("m{i}")));
     }
     let logs = controller.logs();
     assert_eq!(logs.len(), crate::LOG_RING_CAPACITY);
     // Oldest ten evicted; front is m10.
     assert_eq!(logs.first().unwrap().message, "m10");
+}
+
+// ---------------------------------------------------------------------------
+// P1 (console logging): console commands are applied synchronously by the
+// actor, mark the view dirty, and reshape the emitted console view.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn console_set_min_level_through_the_actor_reveals_filtered_entries() {
+    let (mut controller, _handle) = connected_controller();
+    controller.push_log(UiLogDraft::new(
+        UiLogLevel::Debug,
+        UiLogOrigin::Server,
+        "heartbeat frame=1",
+    ));
+    let (actor, studio_handle) = StudioActor::new(controller, immediate_timer());
+    let StudioHandle { tx, mut view, .. } = studio_handle;
+
+    tx.send(StudioCommand::Console(ConsoleCommand::SetMinLevel(
+        UiLogLevel::Trace,
+    )));
+    tx.send(StudioCommand::Shutdown);
+    drive(actor.run());
+
+    // The command marked the view dirty, so the batch emitted a snapshot with
+    // the reshaped console: the debug heartbeat is now visible.
+    let final_view = view.try_recv().expect("console command must emit a view");
+    assert_eq!(final_view.console.min_level, UiLogLevel::Trace);
+    assert_eq!(final_view.console.hidden_count, 0);
+    assert!(
+        final_view
+            .console
+            .entries
+            .iter()
+            .any(|entry| entry.message == "heartbeat frame=1")
+    );
+}
+
+#[test]
+fn console_toggle_origin_through_the_actor_hides_and_counts_entries() {
+    let (mut controller, _handle) = connected_controller();
+    controller.push_log(UiLogDraft::new(
+        UiLogLevel::Error,
+        UiLogOrigin::Server,
+        "server exploded",
+    ));
+    let (actor, studio_handle) = StudioActor::new(controller, immediate_timer());
+    let StudioHandle { tx, mut view, .. } = studio_handle;
+
+    tx.send(StudioCommand::Console(ConsoleCommand::SetOriginEnabled(
+        UiLogOrigin::Server,
+        false,
+    )));
+    tx.send(StudioCommand::Shutdown);
+    drive(actor.run());
+
+    let final_view = view.try_recv().expect("console command must emit a view");
+    assert!(final_view.console.entries.is_empty());
+    assert_eq!(final_view.console.hidden_count, 1);
+    assert!(
+        final_view
+            .console
+            .origins
+            .contains(&(UiLogOrigin::Server, false))
+    );
+}
+
+#[test]
+fn console_clear_through_the_actor_empties_the_ring() {
+    let (mut controller, _handle) = connected_controller();
+    controller.push_log(UiLogDraft::new(
+        UiLogLevel::Info,
+        UiLogOrigin::Studio,
+        "connected",
+    ));
+    let (actor, studio_handle) = StudioActor::new(controller, immediate_timer());
+    let StudioHandle { tx, mut view, .. } = studio_handle;
+
+    tx.send(StudioCommand::Console(ConsoleCommand::Clear));
+    tx.send(StudioCommand::Shutdown);
+    drive(actor.run());
+
+    let final_view = view.try_recv().expect("console command must emit a view");
+    assert!(final_view.console.entries.is_empty());
+    assert_eq!(final_view.console.hidden_count, 0);
+}
+
+#[test]
+fn console_commands_are_never_coalesced_and_keep_their_order() {
+    // Two level changes with a Clear between them: the plan must keep all
+    // three, in order (ticks coalesce; console commands never do).
+    let plan = CommandPlan::from_batch(vec![
+        StudioCommand::Console(ConsoleCommand::SetMinLevel(UiLogLevel::Trace)),
+        StudioCommand::RefreshTick,
+        StudioCommand::Console(ConsoleCommand::Clear),
+        StudioCommand::RefreshTick,
+        StudioCommand::Console(ConsoleCommand::SetMinLevel(UiLogLevel::Warn)),
+    ]);
+
+    assert_eq!(
+        plan.console,
+        vec![
+            ConsoleCommand::SetMinLevel(UiLogLevel::Trace),
+            ConsoleCommand::Clear,
+            ConsoleCommand::SetMinLevel(UiLogLevel::Warn),
+        ]
+    );
+    assert!(plan.tick, "ticks still coalesce to one");
 }
 
 // ---------------------------------------------------------------------------
@@ -699,5 +807,117 @@ fn other_project_ops_are_coalescing_barriers() {
     assert_eq!(
         planned_slot_ops(&plan)[0],
         ("controls.rate".to_string(), Some(1.0))
+    );
+}
+
+// ---------------------------------------------------------------------------
+// P4: global `log::` sink drain, drop accounting, and the mirror hook.
+// ---------------------------------------------------------------------------
+
+/// Push one record through the real sink entry point ([`log::Log::log`] on
+/// [`crate::STUDIO_LOG_SINK`]), as the `log::` macros would after the
+/// max-level gate. The thread-local queue keeps parallel tests isolated:
+/// libtest runs each test on its own thread.
+fn sink_log(level: log::Level, target: &str, message: &str) {
+    use log::Log as _;
+
+    crate::STUDIO_LOG_SINK.log(
+        &log::Record::builder()
+            .level(level)
+            .target(target)
+            .args(format_args!("{message}"))
+            .build(),
+    );
+}
+
+#[test]
+fn sink_records_drain_into_the_ring_with_studio_origin_and_target_detail() {
+    let (controller, _handle) = connected_controller();
+    let (actor, studio_handle) = StudioActor::new(controller, immediate_timer());
+    let StudioHandle { tx, mut view, .. } = studio_handle;
+
+    sink_log(log::Level::Info, "lpa_link::providers::serial", "first");
+    sink_log(log::Level::Warn, "fw_glue::worker", "second");
+
+    tx.send(StudioCommand::Shutdown);
+    drive(actor.run());
+
+    let final_view = view.try_recv().expect("drained records must emit a view");
+    let entries = &final_view.console.entries;
+    assert_eq!(entries.len(), 2, "both records pass the default Info filter");
+    assert_eq!(entries[0].message, "first");
+    assert_eq!(entries[0].level, UiLogLevel::Info);
+    assert_eq!(entries[0].source.origin, UiLogOrigin::Studio);
+    assert_eq!(
+        entries[0].source.detail.as_deref(),
+        Some("lpa_link::providers::serial")
+    );
+    assert_eq!(entries[1].message, "second", "capture order is preserved");
+    assert_eq!(entries[1].level, UiLogLevel::Warn);
+    assert_eq!(entries[1].source.detail.as_deref(), Some("fw_glue::worker"));
+}
+
+#[test]
+fn sink_overflow_surfaces_one_warn_drop_count_entry_on_drain() {
+    let (controller, _handle) = connected_controller();
+    let (actor, studio_handle) = StudioActor::new(controller, immediate_timer());
+    let StudioHandle { tx, mut view, .. } = studio_handle;
+
+    let capacity = crate::core::log::LOG_SINK_PENDING_CAPACITY;
+    for i in 0..(capacity + 5) {
+        sink_log(log::Level::Info, "t", &format!("r{i}"));
+    }
+
+    tx.send(StudioCommand::Shutdown);
+    drive(actor.run());
+
+    let final_view = view.try_recv().expect("drained records must emit a view");
+    let entries = &final_view.console.entries;
+    // The ring keeps its own cap; the drop-count warn is the newest entry.
+    assert_eq!(entries.len(), crate::LOG_RING_CAPACITY);
+    let last = entries.last().unwrap();
+    assert_eq!(last.message, "log sink dropped 5 records");
+    assert_eq!(last.level, UiLogLevel::Warn);
+    assert_eq!(last.source.origin, UiLogOrigin::Studio);
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|entry| entry.message.starts_with("log sink dropped"))
+            .count(),
+        1,
+        "exactly one drop-count entry per drain"
+    );
+    // The oldest sink records (r0..r4) were dropped by the sink itself; the
+    // newest retained record precedes the warn entry.
+    assert_eq!(entries[entries.len() - 2].message, format!("r{}", capacity + 4));
+}
+
+#[test]
+fn mirror_hook_sees_hand_pushed_and_sink_drained_entries_exactly_once() {
+    let (mut controller, _handle) = connected_controller();
+    let seen: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
+    controller.set_on_entry({
+        let seen = Rc::clone(&seen);
+        move |entry| seen.borrow_mut().push(entry.message.clone())
+    });
+    // Both entries are Debug — hidden by the default Info display filter — so
+    // this also proves the hook is independent of the console filter.
+    controller.push_log(UiLogDraft::new(
+        UiLogLevel::Debug,
+        UiLogOrigin::Studio,
+        "hand",
+    ));
+    sink_log(log::Level::Debug, "module::path", "sunk");
+    let (actor, studio_handle) = StudioActor::new(controller, immediate_timer());
+    let StudioHandle { tx, mut view, .. } = studio_handle;
+
+    tx.send(StudioCommand::Shutdown);
+    drive(actor.run());
+
+    assert_eq!(*seen.borrow(), vec!["hand".to_string(), "sunk".to_string()]);
+    let final_view = view.try_recv().expect("dirty ring must emit a view");
+    assert!(
+        final_view.console.entries.is_empty(),
+        "the filter hid both entries from the view; the hook still saw them"
     );
 }
