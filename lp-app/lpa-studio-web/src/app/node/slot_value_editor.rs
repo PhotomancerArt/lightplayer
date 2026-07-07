@@ -1,9 +1,11 @@
 //! Typed value dispatcher for config slot field components.
 //!
 //! Every scalar, vector, and matrix value kind resolves to an editor when
-//! the slot is editable and addressed. Composite bodies (`Array`, `Struct`,
-//! `Enum`) stay with the composite gesture machinery (M3 P4); `Resource` and
-//! `Product` references are explicitly read-only displays.
+//! the slot is editable and addressed, and the specialized hints (`Xy`,
+//! `Dimensions`, `Affine2d`) resolve to their rich editors (M4). Composite
+//! bodies (`Array`, `Struct`, `Enum`) stay with the composite gesture
+//! machinery (M3 P4); `Resource` and `Product` references are explicitly
+//! read-only displays.
 
 use dioxus::prelude::*;
 use lpa_studio_core::{
@@ -11,9 +13,11 @@ use lpa_studio_core::{
     UiSlotValueKind,
 };
 
+use crate::app::node::slot_dimensions_field::dimensions_parts;
 use crate::app::node::{
-    BoolSlotField, DropdownSlotField, FloatSlotField, IntSlotField, MatrixSlotField,
-    SliderSlotField, StringSlotField, UIntSlotField, VectorSlotField, XySlotField,
+    Affine2dSlotField, BoolSlotField, DimensionsSlotField, DropdownSlotField, FloatSlotField,
+    IntSlotField, MatrixSlotField, SliderSlotField, StringSlotField, UIntSlotField,
+    VectorSlotField, XySlotField,
 };
 
 #[component]
@@ -39,9 +43,38 @@ pub fn SlotValueEditor(
         },
         UiSlotEditorHint::Xy => match value.kind.clone() {
             UiSlotValueKind::Vec2(value) => rsx! {
-                XySlotField { value, state }
+                XySlotField { value, state, address, on_action }
             },
             _ => fallback_value(value, state),
+        },
+        UiSlotEditorHint::Dimensions => match &value.kind {
+            kind if dimensions_parts(kind).is_some() => {
+                let kind = kind.clone();
+                rsx! {
+                    DimensionsSlotField { kind, state, address, on_action }
+                }
+            }
+            _ => auto_value(
+                value,
+                state,
+                unit,
+                address,
+                on_action,
+                NumberBounds::default(),
+            ),
+        },
+        UiSlotEditorHint::Affine2d => match value.kind.clone() {
+            kind @ UiSlotValueKind::Mat3x3(_) => rsx! {
+                Affine2dSlotField { kind, state, address, on_action }
+            },
+            _ => auto_value(
+                value,
+                state,
+                unit,
+                address,
+                on_action,
+                NumberBounds::default(),
+            ),
         },
         UiSlotEditorHint::Slider { min, max, step } => match value.kind.clone() {
             UiSlotValueKind::F32(value) => rsx! {

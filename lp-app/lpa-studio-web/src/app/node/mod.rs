@@ -18,12 +18,15 @@ mod produced_products;
 pub(crate) mod produced_value_stories;
 mod produced_value_view;
 mod produced_values;
+mod slot_affine2d_field;
 mod slot_detail_button;
+mod slot_dimensions_field;
 mod slot_edit_actions;
 mod slot_fields;
 mod slot_gesture_fields;
 mod slot_issue_list;
 mod slot_matrix_field;
+mod slot_raw_input_popover;
 mod slot_record_editor;
 #[cfg(feature = "stories")]
 pub(crate) mod slot_record_editor_stories;
@@ -46,9 +49,11 @@ pub use produced_product_view::ProducedProductView;
 pub use produced_products::ProducedProducts;
 pub use produced_value_view::ProducedValueView;
 pub use produced_values::ProducedValues;
+pub use slot_affine2d_field::Affine2dSlotField;
 pub(crate) use slot_detail_button::{
     SlotDetailButton, SlotDetailRevert, primary_affordance, slot_row_class,
 };
+pub use slot_dimensions_field::DimensionsSlotField;
 pub use slot_fields::{
     BoolSlotField, DropdownSlotField, FloatSlotField, IntSlotField, SliderSlotField,
     StringSlotField, UIntSlotField, XySlotField,
@@ -58,6 +63,7 @@ pub use slot_gesture_fields::{
 };
 pub use slot_issue_list::SlotIssueList;
 pub use slot_matrix_field::MatrixSlotField;
+pub use slot_raw_input_popover::SlotRawInputPopover;
 pub use slot_record_editor::SlotRecordEditor;
 pub(crate) use slot_shape_display::{
     SlotShapeDisplay, SlotShapeDisplayMode, legacy_shape_from_parts,

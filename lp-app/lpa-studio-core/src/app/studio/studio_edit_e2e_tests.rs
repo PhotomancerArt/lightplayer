@@ -29,7 +29,7 @@ use lpfs::LpFsMemory;
 use crate::{
     ControllerId, ProjectController, ProjectOp, SlotEditOp, StudioActor, StudioCommand,
     StudioController, StudioServerClient, UiAction, UiConfigSlot, UiConfigSlotBody,
-    UiNodeDirtyState, UiNodeSection, UiNodeTabBody, UiStudioView, UiViewContent,
+    UiNodeDirtyState, UiNodeSection, UiNodeTabBody, UiSlotEditorHint, UiStudioView, UiViewContent,
 };
 
 #[test]
@@ -727,6 +727,130 @@ fn removing_an_added_and_edited_entry_ends_clean_from_the_ack_alone() {
     );
 }
 
+#[test]
+fn special_editor_values_round_trip_save_and_revert() {
+    // M4 special editors: the fixture's `render_size` (Dim2u, `Dimensions`
+    // hint) and `transform` (Affine2d, wire `Mat3x3`, `Affine2d` hint) reach
+    // the DTO with their specialized editor hints, and whole-value writes
+    // composed exactly the way the editors compose them (struct name and
+    // field order preserved; the inactive Mat3x3 row fixed to [0, 0, 1])
+    // round-trip through save and revert.
+    let server = Rc::new(RefCell::new(edit_e2e_server()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::new(RefCell::new(Vec::new())),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    let render_size = find_slot(&snapshot, "render_size");
+    assert_eq!(
+        slot_editor_hint(render_size),
+        &UiSlotEditorHint::Dimensions,
+        "render_size carries the Dimensions editor hint"
+    );
+    let render_size_address = render_size
+        .address
+        .clone()
+        .expect("render_size slot carries an address");
+    let transform = find_slot(&snapshot, "transform");
+    assert_eq!(
+        slot_editor_hint(transform),
+        &UiSlotEditorHint::Affine2d,
+        "transform carries the Affine2d editor hint"
+    );
+    let transform_address = transform
+        .address
+        .clone()
+        .expect("transform slot carries an address");
+
+    // Whole-value writes as the editors dispatch them.
+    handle.tx.send(set_value_action(
+        render_size_address.clone(),
+        LpValue::Struct {
+            name: Some("Dim2u".to_string()),
+            fields: vec![
+                ("width".to_string(), LpValue::U32(12)),
+                ("height".to_string(), LpValue::U32(10)),
+            ],
+        },
+    ));
+    handle.tx.send(set_value_action(
+        transform_address,
+        LpValue::Mat3x3([[1.0, 0.0, 4.5], [0.0, 1.0, -2.0], [0.0, 0.0, 1.0]]),
+    ));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("edits emit a snapshot");
+
+    let render_size = find_slot(&snapshot, "render_size");
+    assert_eq!(render_size.state.dirty, UiNodeDirtyState::Dirty);
+    assert!(!render_size.state.live, "render_size is a persisted slot");
+    let transform = find_slot(&snapshot, "transform");
+    assert_eq!(transform.state.dirty, UiNodeDirtyState::Dirty);
+    assert_eq!(editor_dirty(&snapshot), (2, 0));
+
+    // Save: both persisted edits materialize into fixture.json.
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("save + refresh emit a snapshot");
+
+    let fixture_json = read_project_file(&server, "fixture.json");
+    assert!(
+        fixture_json.contains("\"width\":12"),
+        "fixture.json gained the dimensions edit: {fixture_json}"
+    );
+    assert!(
+        fixture_json.contains("\"transform\":[[1,0,4.5],[0,1,-2],[0,0,1]]"),
+        "fixture.json gained the affine transform edit: {fixture_json}"
+    );
+    let render_size = find_slot(&snapshot, "render_size");
+    assert_eq!(render_size.state.dirty, UiNodeDirtyState::Clean);
+    assert!(slot_value_display(render_size).contains("12"));
+    let transform = find_slot(&snapshot, "transform");
+    assert_eq!(transform.state.dirty, UiNodeDirtyState::Clean);
+    assert!(slot_value_display(transform).contains("4.5"));
+    assert_eq!(editor_dirty(&snapshot), (0, 0));
+
+    // Revert: a fresh edit on top of the saved values is discarded and the
+    // gated refresh restores the saved (committed) values.
+    handle.tx.send(set_value_action(
+        render_size_address,
+        LpValue::Struct {
+            name: Some("Dim2u".to_string()),
+            fields: vec![
+                ("width".to_string(), LpValue::U32(20)),
+                ("height".to_string(), LpValue::U32(10)),
+            ],
+        },
+    ));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RevertAllEdits));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("revert emits a snapshot");
+
+    let render_size = find_slot(&snapshot, "render_size");
+    assert_eq!(render_size.state.dirty, UiNodeDirtyState::Clean);
+    assert!(
+        slot_value_display(render_size).contains("12"),
+        "revert restores the saved dimensions, not the fresh edit: {}",
+        slot_value_display(render_size)
+    );
+    assert_eq!(editor_dirty(&snapshot), (0, 0));
+}
+
 // --- Harness ---------------------------------------------------------------
 
 const PROJECT_DIR: &str = "/projects/edit-e2e";
@@ -957,6 +1081,13 @@ fn slot_value_display(slot: &UiConfigSlot) -> &str {
         panic!("expected a value body for {}", slot.label);
     };
     &value.display
+}
+
+fn slot_editor_hint(slot: &UiConfigSlot) -> &UiSlotEditorHint {
+    let UiConfigSlotBody::Value(value) = &slot.body else {
+        panic!("expected a value body for {}", slot.label);
+    };
+    &value.editor
 }
 
 /// `ClientIo` that pumps each client message through the in-process server's

@@ -13,9 +13,10 @@ use lpa_studio_core::{
     LpValue, ProjectSlotAddress, UiAction, UiSlotFieldState, UiSlotOption, UiSlotUnit,
     UiSlotValueKind,
 };
+use wasm_bindgen::JsCast;
 
 use crate::app::node::slot_edit_actions::slot_set_value_action;
-use crate::app::node::{SlotUnitSuffix, VectorSlotField};
+use crate::app::node::{SlotRawInputPopover, SlotUnitSuffix, VectorSlotField};
 
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
@@ -242,6 +243,9 @@ fn BoolOptionButton(
 ///
 /// Dispatches `SlotEditOp::SetValue` on `oninput`, so the running project
 /// re-paces while the user drags; the actor coalesces the flood per address.
+/// Wired sliders also carry the raw-input detail popup — exact numeric entry
+/// against the same slot path (`onchange` semantics), the second view onto
+/// the one path-keyed buffer entry.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
 pub fn SliderSlotField(
@@ -253,8 +257,12 @@ pub fn SliderSlotField(
     #[props(default = None)] unit: Option<UiSlotUnit>,
     #[props(default = None)] address: Option<ProjectSlotAddress>,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    /// Open the raw-input popup on first render (stories).
+    #[props(default = false)]
+    raw_initially_open: bool,
 ) -> Element {
     let wired = field_wiring(&state, &address, on_action);
+    let raw_input = wired.clone();
     let disabled = wired.is_none();
     let step = step.map_or_else(|| "any".to_string(), |step| step.to_string());
     let invalid_title = state.invalid.clone().unwrap_or_default();
@@ -280,7 +288,18 @@ pub fn SliderSlotField(
                 },
             }
             span { class: "tw:min-w-10 tw:text-right tw:font-mono", "{format_float(value)}" }
-            SlotUnitSuffix { unit, reserve: true }
+            SlotUnitSuffix { unit: unit.clone(), reserve: true }
+            if let Some((address, handler)) = raw_input {
+                SlotRawInputPopover { initially_open: raw_initially_open,
+                    FloatSlotField {
+                        value,
+                        state: state.clone(),
+                        unit,
+                        address: Some(address),
+                        on_action: Some(handler),
+                    }
+                }
+            }
         }
     }
 }
@@ -339,28 +358,145 @@ pub fn DropdownSlotField(
     }
 }
 
-/// Display-only XY pad for `Vec2` slots with an `Xy` editor hint (rich XY
-/// editing is roadmap M4); the component readouts render read-only.
+/// XY pad for `Vec2` slots with an `Xy` editor hint. When the slot is
+/// editable and addressed, dragging the pad dispatches `SlotEditOp::SetValue`
+/// with `oninput` semantics — a continuous flood composing the WHOLE `Vec2`,
+/// coalesced per address by the actor — and the raw-input detail popup offers
+/// exact x/y entry against the same slot path (`onchange`). The component
+/// readouts beside the pad stay read-only and stacked (x above y) at a fixed
+/// tabular width, so nothing shifts while a drag floods new values; exact
+/// (unrounded) entry and display live in the popup.
 #[component]
 #[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
-pub fn XySlotField(value: [f32; 2], state: UiSlotFieldState) -> Element {
+pub fn XySlotField(
+    value: [f32; 2],
+    state: UiSlotFieldState,
+    #[props(default = None)] address: Option<ProjectSlotAddress>,
+    #[props(default)] on_action: Option<EventHandler<UiAction>>,
+    /// Open the raw-input popup on first render (stories).
+    #[props(default = false)]
+    raw_initially_open: bool,
+) -> Element {
     let x = value[0].clamp(0.0, 1.0) * 100.0;
     let y = (1.0 - value[1].clamp(0.0, 1.0)) * 100.0;
     let point_style = format!("left: {x:.1}%; top: {y:.1}%;");
     let pad_class = xy_pad_class(&state);
+    let wired = field_wiring(&state, &address, on_action);
+    let raw_input = wired.clone();
+    let down_wiring = wired.clone();
+    let move_wiring = wired.clone();
+    let mut dragging = use_signal(|| false);
 
     rsx! {
         span { class: "tw:flex tw:min-w-0 tw:items-center tw:gap-2",
-            span { class: pad_class,
-                span { class: "tw:absolute tw:left-1/2 tw:top-0 tw:h-full tw:w-px tw:bg-border-muted" }
-                span { class: "tw:absolute tw:left-0 tw:top-1/2 tw:h-px tw:w-full tw:bg-border-muted" }
-                span { class: "tw:absolute tw:h-2 tw:w-2 tw:-translate-x-1/2 tw:-translate-y-1/2 tw:rounded-full tw:border tw:border-accent-border tw:bg-accent", style: "{point_style}" }
+            span {
+                class: pad_class,
+                // Keep touch drags on the pad instead of scrolling the pane.
+                style: if wired.is_some() { "touch-action: none; cursor: crosshair;" } else { "" },
+                onpointerdown: move |event| {
+                    let Some((address, handler)) = down_wiring.clone() else {
+                        return;
+                    };
+                    capture_pad_pointer(&event);
+                    dragging.set(true);
+                    let point = event.data().element_coordinates();
+                    handler.call(slot_set_value_action(address, xy_pad_value(point.x, point.y)));
+                },
+                onpointermove: move |event| {
+                    if !dragging() {
+                        return;
+                    }
+                    if event.data().held_buttons().is_empty() {
+                        // Missed release (no pointer capture): stop the drag.
+                        dragging.set(false);
+                        return;
+                    }
+                    let Some((address, handler)) = move_wiring.clone() else {
+                        return;
+                    };
+                    let point = event.data().element_coordinates();
+                    handler.call(slot_set_value_action(address, xy_pad_value(point.x, point.y)));
+                },
+                onpointerup: move |_| dragging.set(false),
+                onpointercancel: move |_| dragging.set(false),
+                span { class: "tw:pointer-events-none tw:absolute tw:left-1/2 tw:top-0 tw:h-full tw:w-px tw:bg-border-muted" }
+                span { class: "tw:pointer-events-none tw:absolute tw:left-0 tw:top-1/2 tw:h-px tw:w-full tw:bg-border-muted" }
+                span { class: "tw:pointer-events-none tw:absolute tw:h-2 tw:w-2 tw:-translate-x-1/2 tw:-translate-y-1/2 tw:rounded-full tw:border tw:border-accent-border tw:bg-accent", style: "{point_style}" }
             }
-            VectorSlotField {
-                kind: UiSlotValueKind::Vec2(value),
-                state,
+            span { class: "{numeric_field_class(&state)} tw:flex-col tw:items-stretch tw:justify-center tw:gap-0.5 tw:self-center",
+                XyPadReadout { label: "x", value: value[0] }
+                XyPadReadout { label: "y", value: value[1] }
+            }
+            if let Some((address, handler)) = raw_input {
+                SlotRawInputPopover { initially_open: raw_initially_open,
+                    VectorSlotField {
+                        kind: UiSlotValueKind::Vec2(value),
+                        state: state.clone(),
+                        address: Some(address),
+                        on_action: Some(handler),
+                    }
+                }
             }
         }
+    }
+}
+
+/// One read-only component readout row inside the XY pad's single shared
+/// readout box (the box wears the field chrome; rows are chrome-less so the
+/// pair stays no taller than the pad). The value is display-capped to three
+/// decimals at a fixed tabular/monospace width (sized for the sign in
+/// `-0.000`), so the row's width never changes while a drag floods new
+/// values. Exact values are never rounded on dispatch; the raw-input popup
+/// shows and edits them unrounded.
+#[component]
+#[allow(non_snake_case, reason = "Dioxus components use PascalCase")]
+fn XyPadReadout(label: &'static str, value: f32) -> Element {
+    rsx! {
+        span { class: "tw:flex tw:items-baseline tw:justify-between tw:gap-1",
+            small { class: "tw:text-[0.64rem] tw:font-bold tw:uppercase tw:text-subtle-foreground",
+                "{label}"
+            }
+            span { class: "tw:w-[6ch] tw:text-right tw:font-mono tw:tabular-nums",
+                "{format_xy_readout(value)}"
+            }
+        }
+    }
+}
+
+/// Fixed-width display format for the XY pad readouts: always exactly three
+/// decimals, so every value in the pad's domain renders at the same width
+/// (plus one leading char for the sign). Display-only — dispatched values
+/// are never rounded.
+pub(crate) fn format_xy_readout(value: f32) -> String {
+    format!("{value:.3}")
+}
+
+/// CSS pixel size of the square XY pad (`tw:h-14 tw:w-14` = 3.5rem at the
+/// 16px root), used to normalize pad-relative pointer offsets into the
+/// pad's 0..=1 value domain.
+const XY_PAD_SIZE_PX: f64 = 56.0;
+
+/// Compose the WHOLE `Vec2` value for a pad-relative pointer position:
+/// x maps left→right onto 0..=1, y maps bottom→top (screen y is inverted),
+/// both clamped so drags past the pad edge pin to the domain boundary.
+pub(crate) fn xy_pad_value(x: f64, y: f64) -> LpValue {
+    let fx = (x / XY_PAD_SIZE_PX).clamp(0.0, 1.0) as f32;
+    let fy = (1.0 - y / XY_PAD_SIZE_PX).clamp(0.0, 1.0) as f32;
+    LpValue::Vec2([fx, fy])
+}
+
+/// Route subsequent pointer events to the pad for the duration of the drag
+/// (pointer capture), so a drag can leave the small pad and keep updating
+/// with edge-clamped values. No-op outside a real browser event.
+fn capture_pad_pointer(event: &Event<PointerData>) {
+    use dioxus::web::WebEventExt;
+
+    if let Some(web_event) = event.data().try_as_web_event()
+        && let Some(target) = web_event
+            .target()
+            .and_then(|target| target.dyn_into::<web_sys::Element>().ok())
+    {
+        let _ = target.set_pointer_capture(web_event.pointer_id());
     }
 }
 
@@ -476,7 +612,21 @@ pub(crate) fn format_float(value: f32) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{parse_f32_input, parse_i32_input, parse_u32_input};
+    use super::{
+        format_xy_readout, parse_f32_input, parse_i32_input, parse_u32_input, xy_pad_value,
+    };
+    use lpa_studio_core::LpValue;
+
+    #[test]
+    fn xy_readout_display_is_fixed_three_decimals() {
+        // Display-only cap: always exactly three decimals so the readout
+        // column never changes width during a drag.
+        assert_eq!(format_xy_readout(0.42), "0.420");
+        assert_eq!(format_xy_readout(0.0), "0.000");
+        assert_eq!(format_xy_readout(1.0), "1.000");
+        assert_eq!(format_xy_readout(-0.5), "-0.500");
+        assert_eq!(format_xy_readout(0.123_456), "0.123");
+    }
 
     #[test]
     fn parses_and_clamps_signed_integer_input() {
@@ -505,5 +655,20 @@ mod tests {
         assert_eq!(parse_f32_input("NaN"), None);
         assert_eq!(parse_f32_input("abc"), None);
         assert_eq!(parse_f32_input(""), None);
+    }
+
+    #[test]
+    fn xy_pad_composes_whole_vec2_with_inverted_y() {
+        // Pad center → (0.5, 0.5); top-left corner → (0, 1) in value space.
+        assert_eq!(xy_pad_value(28.0, 28.0), LpValue::Vec2([0.5, 0.5]));
+        assert_eq!(xy_pad_value(0.0, 0.0), LpValue::Vec2([0.0, 1.0]));
+        assert_eq!(xy_pad_value(56.0, 56.0), LpValue::Vec2([1.0, 0.0]));
+    }
+
+    #[test]
+    fn xy_pad_clamps_out_of_pad_drags_to_the_domain_edge() {
+        // Captured-pointer drags past the pad edge pin to 0..=1.
+        assert_eq!(xy_pad_value(-20.0, 80.0), LpValue::Vec2([0.0, 0.0]));
+        assert_eq!(xy_pad_value(90.0, -14.0), LpValue::Vec2([1.0, 1.0]));
     }
 }

@@ -536,6 +536,112 @@ pub(crate) fn rejected_edit() -> Element {
     }
 }
 
+/// A `Dim2u`-shaped struct value wearing the `Dimensions` editor hint.
+fn dim2u_value(width: u32, height: u32) -> UiSlotValue {
+    UiSlotValue::struct_value(
+        Some("Dim2u".to_string()),
+        vec![
+            ("width".to_string(), UiSlotValue::u32(width)),
+            ("height".to_string(), UiSlotValue::u32(height)),
+        ],
+    )
+    .with_editor(UiSlotEditorHint::Dimensions)
+}
+
+fn affine2d_value(matrix: [[f32; 3]; 3]) -> UiSlotValue {
+    UiSlotValue::mat3x3(matrix).with_editor(UiSlotEditorHint::Affine2d)
+}
+
+#[story(
+    label = "Special Editor Rows",
+    description = "Clean wired rows for the M4 special editors: Dimensions (width × height), Affine2d (six-parameter grid), and the drag-to-edit XY pad with its raw-input affordance."
+)]
+pub(crate) fn special_editor_rows() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:divide-y tw:divide-border-muted",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("render_size", "Render size", dim2u_value(32, 18))
+                    .with_address(story_slot_address("render_size"))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 0,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "transform",
+                    "Transform",
+                    affine2d_value([[1.0, 0.25, 12.0], [-0.5, 2.0, -8.0], [0.0, 0.0, 1.0]]),
+                )
+                    .with_address(story_slot_address("transform"))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 1,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "origin",
+                    "Origin",
+                    UiSlotValue::vec2([0.42, 0.58]).with_editor(UiSlotEditorHint::Xy),
+                )
+                    .with_address(story_slot_address("origin"))
+                    .with_state(UiSlotFieldState::editable()),
+                depth: 0,
+                index: 2,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
+#[story(
+    label = "Special Editor States",
+    description = "Dirty and invalid chrome on the M4 special editors: unsaved Dimensions and XY pad edits, and an Affine2d validation failure."
+)]
+pub(crate) fn special_editor_states() -> Element {
+    rsx! {
+        div { class: "tw:grid tw:min-w-0 tw:overflow-hidden tw:divide-y tw:divide-border-muted",
+            ConfigSlotRow {
+                slot: UiConfigSlot::value("render_size", "Render size", dim2u_value(64, 18))
+                    .with_address(story_slot_address("render_size"))
+                    .with_edit_entry_address(story_slot_address("render_size"))
+                    .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
+                depth: 0,
+                index: 0,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "transform",
+                    "Transform",
+                    affine2d_value([[0.0, 0.0, 12.0], [0.0, 0.0, -8.0], [0.0, 0.0, 1.0]]),
+                )
+                    .with_address(story_slot_address("transform"))
+                    .with_state(
+                        UiSlotFieldState::editable().with_invalid("transform must be invertible"),
+                    ),
+                depth: 0,
+                index: 1,
+                on_action: move |_| {},
+            }
+            ConfigSlotRow {
+                slot: UiConfigSlot::value(
+                    "origin",
+                    "Origin",
+                    UiSlotValue::vec2([0.9, 0.1]).with_editor(UiSlotEditorHint::Xy),
+                )
+                    .with_address(story_slot_address("origin"))
+                    .with_edit_entry_address(story_slot_address("origin"))
+                    .with_state(UiSlotFieldState::editable().with_dirty(UiNodeDirtyState::Dirty)),
+                depth: 0,
+                index: 2,
+                on_action: move |_| {},
+            }
+        }
+    }
+}
+
 #[story(description = "A row with no direct value or binding.")]
 pub(crate) fn unset_value() -> Element {
     rsx! {

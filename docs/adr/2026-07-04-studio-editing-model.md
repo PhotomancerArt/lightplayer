@@ -134,6 +134,12 @@ ack rejected   ──► Failed { value, reason }    # feeds UiSlotFieldState
 op error/timeout ─► Failed { value, transport reason }
 ```
 
+Keying the buffer by address (not by field) is what allows **many controls
+per value**: M4's raw-input detail popups exercise this — a slider or XY pad
+(`oninput`) and its exact-numeric-entry popup (`onchange`) are two stateless
+views reading the same DTO value and dispatching to the same address, kept
+coherent by the one buffer entry.
+
 While an entry exists, the DTO shows the buffered value (shadowing the
 synced value) and the phase maps to the dirty affordance:
 `Pending`/`InFlight`/`AwaitingRefresh` → `Saving`, `Failed` → `Error` +

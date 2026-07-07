@@ -413,8 +413,14 @@ fn connection_protocol(kind: &LinkConnectionKind) -> String {
 /// all (P3 ingestion hygiene; the user decision was full removal, not a
 /// Trace demotion). Heartbeats reporting a recovery condition — safe mode or
 /// a non-green recovery level — still surface as Warn/Error entries, and
-/// server log lines and uncorrelated-response warnings pass through
-/// unchanged.
+/// server log lines pass through unchanged.
+///
+/// Response-correlation events split by intent: a stale drop (late response
+/// for a request the client itself abandoned — routine when edit-op
+/// preemption cancels a pull mid-stream during an input flood) is a
+/// debug-level note, while a genuinely uncorrelated id (never issued or
+/// abandoned by this session: from the future, or a duplicate delivery)
+/// remains a warning.
 fn map_client_events(events: Vec<ClientEvent>) -> Vec<UiLogDraft> {
     events
         .into_iter()
@@ -457,6 +463,11 @@ fn map_client_events(events: Vec<ClientEvent>) -> Vec<UiLogDraft> {
                 UiLogLevel::Warn,
                 UiLogOrigin::Server,
                 format!("uncorrelated response {response_id}; expected {expected_id}"),
+            )),
+            ClientEvent::StaleResponseDropped { response_id } => Some(UiLogDraft::new(
+                UiLogLevel::Debug,
+                UiLogOrigin::Server,
+                format!("dropped stale response {response_id} for a request abandoned by client"),
             )),
         })
         .collect()
@@ -585,6 +596,8 @@ mod tests {
 
     #[test]
     fn server_logs_and_uncorrelated_responses_still_map() {
+        // A genuinely unknown response id (never issued or abandoned by the
+        // session) is a real protocol anomaly and keeps its warning.
         let events = vec![
             ClientEvent::Log {
                 level: lpc_wire::server::api::LogLevel::Warn,
@@ -603,6 +616,23 @@ mod tests {
         assert_eq!(logs[0].message, "flash almost full");
         assert_eq!(logs[1].level, UiLogLevel::Warn);
         assert_eq!(logs[1].message, "uncorrelated response 9; expected 7");
+    }
+
+    #[test]
+    fn stale_drops_for_client_abandoned_requests_are_debug_not_warn() {
+        // A late response for a request the client itself cancelled/superseded
+        // (edit-op preemption during a drag flood) is the designed stale-drop:
+        // it must not fill the console with warnings.
+        let events = vec![ClientEvent::StaleResponseDropped { response_id: 5 }];
+
+        let logs = map_client_events(events);
+
+        assert_eq!(logs.len(), 1);
+        assert_eq!(logs[0].level, UiLogLevel::Debug);
+        assert_eq!(
+            logs[0].message,
+            "dropped stale response 5 for a request abandoned by client"
+        );
     }
 
     fn heartbeat_event(recovery: Option<RecoveryStatus>) -> ClientEvent {

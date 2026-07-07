@@ -275,8 +275,14 @@
   .tw\:min-h-32 {
     min-height: calc(var(--tw-spacing) * 32);
   }
+  .tw\:min-h-44 {
+    min-height: calc(var(--tw-spacing) * 44);
+  }
   .tw\:min-h-48 {
     min-height: calc(var(--tw-spacing) * 48);
+  }
+  .tw\:min-h-52 {
+    min-height: calc(var(--tw-spacing) * 52);
   }
   .tw\:min-h-56 {
     min-height: calc(var(--tw-spacing) * 56);
@@ -329,6 +335,9 @@
   .tw\:w-10 {
     width: calc(var(--tw-spacing) * 10);
   }
+  .tw\:w-12 {
+    width: calc(var(--tw-spacing) * 12);
+  }
   .tw\:w-14 {
     width: calc(var(--tw-spacing) * 14);
   }
@@ -343,6 +352,9 @@
   }
   .tw\:w-56 {
     width: calc(var(--tw-spacing) * 56);
+  }
+  .tw\:w-\[6ch\] {
+    width: 6ch;
   }
   .tw\:w-\[15px\] {
     width: 15px;
@@ -1226,8 +1238,15 @@
   .tw\:text-subtle-foreground {
     color: var(--tw-color-subtle-foreground);
   }
+  .tw\:lowercase {
+    text-transform: lowercase;
+  }
   .tw\:uppercase {
     text-transform: uppercase;
+  }
+  .tw\:tabular-nums {
+    --tw-numeric-spacing: tabular-nums;
+    font-variant-numeric: var(--tw-ordinal,) var(--tw-slashed-zero,) var(--tw-numeric-figure,) var(--tw-numeric-spacing,) var(--tw-numeric-fraction,);
   }
   .tw\:no-underline {
     text-decoration-line: none;
@@ -1683,6 +1702,26 @@
   syntax: "*";
   inherits: false;
 }
+@property --tw-ordinal {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-slashed-zero {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-numeric-figure {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-numeric-spacing {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-numeric-fraction {
+  syntax: "*";
+  inherits: false;
+}
 @property --tw-shadow {
   syntax: "*";
   inherits: false;
@@ -1767,6 +1806,11 @@
       --tw-border-style: solid;
       --tw-leading: initial;
       --tw-font-weight: initial;
+      --tw-ordinal: initial;
+      --tw-slashed-zero: initial;
+      --tw-numeric-figure: initial;
+      --tw-numeric-spacing: initial;
+      --tw-numeric-fraction: initial;
       --tw-shadow: 0 0 #0000;
       --tw-shadow-color: initial;
       --tw-shadow-alpha: 100%;
