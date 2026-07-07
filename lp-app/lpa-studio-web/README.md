@@ -281,6 +281,27 @@ The baseline set intentionally reflects the active view-driven UX surface,
 including the semantic project workspace, rather than the old provisioning
 journey fixtures alone.
 
+## Code Editor (vendored CodeMirror)
+
+The GLSL/SVG asset editor is CodeMirror 6, the app's one third-party JS
+widget. The bundle is **committed** at `public/vendor/codemirror/` and
+loaded by a plain `<script defer>` tag in `index.html`
+(`globalThis.LpCodeMirror`); building and running the app never touches
+npm. Regenerate with `just studio-codemirror-bundle` (needs npm; sources,
+pins, and the façade contract live in `vendor-src/codemirror/` — see its
+README).
+
+`src/base/code_editor.rs` wraps it as the `CodeEditor` leaf component. The
+ownership rules are documented on the module and matter when touching it:
+the component owns its DOM subtree (Dioxus never diffs inside the
+container), the `doc` prop is the external truth reconciled against the
+editor's modified state, callbacks route through signals into the Dioxus
+runtime, and the container carries `data-story-wait` until CodeMirror has
+initialized so story PNG capture waits for it. The node pane's editor tab
+(`src/app/node/asset_editor_tab.rs`) builds on it; its editor-local
+text/modified state deliberately lives in `NodePane` so the header Apply
+action can carry both.
+
 ## Boundary
 
 - `lpa-studio-core` owns Studio product state, `StudioView` panes, stack views,

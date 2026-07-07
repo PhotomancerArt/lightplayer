@@ -5,6 +5,8 @@
   :root, :host {
     --tw-font-mono: var(--studio-font-mono);
     --tw-spacing: 0.25rem;
+    --tw-container-xl: 36rem;
+    --tw-container-2xl: 42rem;
     --tw-text-xs: 0.75rem;
     --tw-text-xs--line-height: calc(1 / 0.75);
     --tw-text-sm: 0.875rem;
@@ -219,6 +221,12 @@
   .tw\:h-56 {
     height: calc(var(--tw-spacing) * 56);
   }
+  .tw\:h-64 {
+    height: calc(var(--tw-spacing) * 64);
+  }
+  .tw\:h-80 {
+    height: calc(var(--tw-spacing) * 80);
+  }
   .tw\:h-\[15px\] {
     height: 15px;
   }
@@ -354,6 +362,9 @@
   .tw\:w-px {
     width: 1px;
   }
+  .tw\:max-w-2xl {
+    max-width: var(--tw-container-2xl);
+  }
   .tw\:max-w-\[320px\] {
     max-width: 320px;
   }
@@ -368,6 +379,9 @@
   }
   .tw\:max-w-full {
     max-width: 100%;
+  }
+  .tw\:max-w-xl {
+    max-width: var(--tw-container-xl);
   }
   .tw\:min-w-0 {
     min-width: calc(var(--tw-spacing) * 0);

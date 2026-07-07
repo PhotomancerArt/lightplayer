@@ -1,5 +1,8 @@
 //! Studio node UI components and colocated node UI stories.
 
+mod asset_editor_tab;
+#[cfg(feature = "stories")]
+pub(crate) mod asset_editor_tab_stories;
 mod config_slot_row;
 #[cfg(feature = "stories")]
 pub(crate) mod config_slot_row_stories;
@@ -38,10 +41,12 @@ mod slot_value_editor;
 pub(crate) mod slot_value_editor_stories;
 mod slot_vector_fields;
 
+pub use asset_editor_tab::AssetEditorTab;
 pub use config_slot_row::ConfigSlotRow;
 pub use node_children::NodeChildren;
 pub(crate) use node_detail_popover::{NodeDetailPopover, node_status_label_class};
 pub use node_pane::{NodeDirtyTint, NodePane, NodeSection};
+pub(crate) use node_pane::{NodePaneActiveTab, NodePaneTab};
 pub use produced_product_view::ProducedProductView;
 pub use produced_products::ProducedProducts;
 pub use produced_value_view::ProducedValueView;

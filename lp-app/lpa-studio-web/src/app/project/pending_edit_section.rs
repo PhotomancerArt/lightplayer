@@ -46,6 +46,7 @@ fn kind_display(kind: &UiPendingEditKind) -> String {
         UiPendingEditKind::Added => "added".to_string(),
         UiPendingEditKind::Removed => "removed".to_string(),
         UiPendingEditKind::Moved { from, to } => format!("key {from} \u{2192} {to}"),
+        UiPendingEditKind::AssetBody { detail } => format!("body \u{2192} {detail}"),
     }
 }
 

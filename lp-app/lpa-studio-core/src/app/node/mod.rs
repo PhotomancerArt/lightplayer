@@ -12,6 +12,7 @@
 //! browser-local state. Those belong to the project controller tree and the web
 //! component tree respectively.
 
+mod ui_asset_editor_tab;
 mod ui_config_slot;
 mod ui_node_binding;
 mod ui_node_child;
@@ -33,6 +34,7 @@ mod ui_slot_source_state;
 mod ui_slot_unit;
 mod ui_slot_value;
 
+pub use ui_asset_editor_tab::UiAssetEditorTab;
 pub use ui_config_slot::{UiConfigSlot, UiConfigSlotBody, UiSlotOptionality};
 pub use ui_node_binding::{UiBindingEndpoint, UiProducedBinding, UiProducedBindings};
 pub use ui_node_child::UiNodeChild;

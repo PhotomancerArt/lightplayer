@@ -256,6 +256,23 @@ stateless views that dispatch ops and render DTOs. The model (recorded in
   persisted/live/failed, per-entry revert action), built from the same join
   enumeration the counts sum — list and counts cannot drift.
 
+**Asset bodies** (ADR D8) extend the same model to whole files
+(`project/asset/`): `AssetEditOp::{ApplyBody, Revert}` stage
+`SetArtifactBody` / `ClearArtifact` mutations through an artifact-keyed
+sibling buffer with the identical ack lifecycle, joined into the same dirty
+summaries and save-panel rows (`UiPendingEditKind::AssetBody`; a `.glsl`
+that maps to no synced node still counts via
+`unmapped_asset_dirty_summary`). `ApplyBody` enforces the client-side
+`MAX_ASSET_BODY_BYTES` (10 KB) guard under the 16 KB wire frame budget.
+Effective editor content resolves buffer → overlay mirror → cached base
+body (`asset_content`, fetched via `StudioFsRead` on demand and invalidated
+by save/revert); the node pane's editor tab DTO is `UiAssetEditorTab`
+(Apply as a core-assembled `UiPaneAction`; the current text and modified
+flag are the one deliberately editor-local piece of state — see the ADR).
+Compile-error status text parses best-effort into `UiShaderError`
+(message + optional `line:col` from the rustc-style marker) for the
+editor's error strip and gutter.
+
 Project attach behavior is core-owned:
 
 - zero loaded projects: once LightPlayer is connected, offer to load the demo

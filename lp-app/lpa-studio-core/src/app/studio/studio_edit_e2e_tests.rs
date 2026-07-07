@@ -729,6 +729,337 @@ fn removing_an_added_and_edited_entry_ends_clean_from_the_ack_alone() {
 
 // --- Harness ---------------------------------------------------------------
 
+#[test]
+fn shader_asset_editor_fetch_apply_save_and_revert_end_to_end() {
+    let server = Rc::new(RefCell::new(asset_e2e_server()));
+    let sent = Rc::new(RefCell::new(Vec::new()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::clone(&sent),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+
+    // The shader node's editor tab exists but its content is unresolved
+    // until the editor dispatches the fetch (base bodies are not pulled
+    // eagerly for every asset in the project).
+    let tab = find_asset_editor(&snapshot);
+    assert_eq!(tab.source, "shader.glsl");
+    assert!(tab.content.is_none(), "content resolves only on fetch");
+
+    // Fetch → the effective content is the base file body, clean.
+    handle.tx.send(StudioCommand::Action(tab.fetch_action()));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("fetch emits a snapshot");
+    let tab = find_asset_editor(&snapshot);
+    let content = tab.content.as_ref().expect("fetched content");
+    assert!(!content.dirty);
+    assert_eq!(content.text(), Some(ASSET_SHADER_V1));
+    assert_eq!(editor_dirty(&snapshot), (0, 0));
+
+    // Apply an edited body: overlay-backed dirty (persisted-class), the
+    // effective content shadows to the applied text, save panel lists it.
+    handle
+        .tx
+        .send(StudioCommand::Action(tab.apply_action(ASSET_SHADER_V2)));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("apply emits a snapshot");
+    let tab = find_asset_editor(&snapshot);
+    let content = tab.content.as_ref().expect("applied content");
+    assert!(content.dirty, "applied body is overlay-dirty");
+    assert_eq!(content.text(), Some(ASSET_SHADER_V2));
+    assert_eq!(
+        editor_dirty(&snapshot),
+        (1, 0),
+        "asset edits are persisted-class"
+    );
+
+    // Save: the .glsl on disk gains the applied source and dirty clears.
+    handle.tx.send(project_action(ProjectOp::SaveOverlay));
+    drive(actor.run_one_batch_for_test());
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("save + refresh emit a snapshot");
+    let saved = read_project_file(&server, "shader.glsl");
+    assert!(
+        saved.contains("v2marker"),
+        "shader.glsl gained the applied body: {saved}"
+    );
+    assert_eq!(editor_dirty(&snapshot), (0, 0));
+
+    // The save invalidated the cached base body; the editor re-fetches and
+    // sees the committed text, clean.
+    let tab = find_asset_editor(&snapshot);
+    assert!(tab.content.is_none(), "save invalidates the cached body");
+    handle.tx.send(StudioCommand::Action(tab.fetch_action()));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("re-fetch emits a snapshot");
+    let tab = find_asset_editor(&snapshot);
+    let content = tab.content.as_ref().expect("re-fetched content");
+    assert!(!content.dirty);
+    assert_eq!(content.text(), Some(ASSET_SHADER_V2));
+
+    // Apply again, then per-entry revert: the overlay entry clears, dirty
+    // returns to zero, and the re-fetched content is the saved body.
+    handle
+        .tx
+        .send(StudioCommand::Action(tab.apply_action(ASSET_SHADER_V3)));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("second apply emits a snapshot");
+    assert_eq!(editor_dirty(&snapshot), (1, 0));
+    let tab = find_asset_editor(&snapshot);
+    let revert = UiAction::from_op(
+        ControllerId::new(ProjectController::NODE_ID),
+        crate::AssetEditOp::Revert {
+            artifact: tab.artifact.clone(),
+        },
+    );
+    handle.tx.send(StudioCommand::Action(revert));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("revert emits a snapshot");
+    assert_eq!(editor_dirty(&snapshot), (0, 0));
+    let tab = find_asset_editor(&snapshot);
+    handle.tx.send(StudioCommand::Action(tab.fetch_action()));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("post-revert fetch emits a snapshot");
+    let tab = find_asset_editor(&snapshot);
+    let content = tab.content.as_ref().expect("post-revert content");
+    assert!(!content.dirty);
+    assert_eq!(
+        content.text(),
+        Some(ASSET_SHADER_V2),
+        "revert returns to the saved body, not the pre-save one"
+    );
+}
+
+#[test]
+fn successive_shader_applies_each_reach_the_engine() {
+    // Regression: an overlay→overlay body change (second Apply before any
+    // Save) must recompile just like the first (base→overlay) one. Observed
+    // live 2026-07-06: the engine kept reporting the first apply's compile
+    // error after later applies.
+    let server = Rc::new(RefCell::new(asset_e2e_server()));
+    let sent = Rc::new(RefCell::new(Vec::new()));
+    let io = InProcessServerIo {
+        server: Rc::clone(&server),
+        inbox: Rc::new(RefCell::new(VecDeque::new())),
+        sent: Rc::clone(&sent),
+    };
+    let client = StudioServerClient::from_io_for_test("in-process", Box::new(io));
+    let controller = StudioController::connected_with_client_for_test(client);
+    let (mut actor, handle) = StudioActor::new(controller, |_| core::future::ready(()));
+    let mut view = handle.view;
+
+    handle
+        .tx
+        .send(project_action(ProjectOp::ConnectRunningProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("connect emits a snapshot");
+    let tab = find_asset_editor(&snapshot);
+
+    // First apply: an unknown identifier. Frames advance between edits in
+    // production; mirror that here — the mutation must stamp a revision
+    // strictly newer than the last compile's, and the engine compiles
+    // lazily on render, so tick before and after.
+    server.borrow_mut().advance_frame(16).expect("tick");
+    handle.tx.send(StudioCommand::Action(tab.apply_action(
+        "vec4 render(vec2 pos) { return vec4(first_bad, 0.0, 0.0, 1.0); }",
+    )));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv();
+    server.borrow_mut().advance_frame(16).expect("tick");
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("refresh emits a snapshot");
+    let error = find_asset_editor(&snapshot)
+        .shader_error
+        .expect("first bad apply surfaces a compile error");
+    assert!(
+        error.raw.contains("first_bad"),
+        "engine error names the first bad identifier: {}",
+        error.raw
+    );
+
+    // Second apply while the first is still pending in the overlay: the new
+    // body must recompile and the error must move to the new identifier.
+    let snapshot_tab = find_asset_editor(&snapshot);
+    server.borrow_mut().advance_frame(16).expect("tick");
+    handle
+        .tx
+        .send(StudioCommand::Action(snapshot_tab.apply_action(
+            "vec4 render(vec2 pos) { return vec4(second_bad, 0.0, 0.0, 1.0); }",
+        )));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv();
+    server.borrow_mut().advance_frame(16).expect("tick");
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("second refresh emits a snapshot");
+    let error = find_asset_editor(&snapshot)
+        .shader_error
+        .expect("second bad apply surfaces a compile error");
+    assert!(
+        error.raw.contains("second_bad"),
+        "the second applied body reached the engine: {}",
+        error.raw
+    );
+
+    // And a valid third apply recovers: the error clears.
+    let snapshot_tab = find_asset_editor(&snapshot);
+    server.borrow_mut().advance_frame(16).expect("tick");
+    handle.tx.send(StudioCommand::Action(
+        snapshot_tab.apply_action(ASSET_SHADER_V1),
+    ));
+    drive(actor.run_one_batch_for_test());
+    let _ = view.try_recv();
+    server.borrow_mut().advance_frame(16).expect("tick");
+    handle.tx.send(project_action(ProjectOp::RefreshProject));
+    drive(actor.run_one_batch_for_test());
+    let snapshot = view.try_recv().expect("third refresh emits a snapshot");
+    assert_eq!(
+        find_asset_editor(&snapshot).shader_error,
+        None,
+        "a valid re-apply clears the compile error"
+    );
+}
+
+const ASSET_SHADER_V1: &str =
+    "uniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.x, pos.y, 0.5, 1.0);\n}\n";
+const ASSET_SHADER_V2: &str = "// v2marker\nuniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(pos.y, pos.x, 0.25, 1.0);\n}\n";
+const ASSET_SHADER_V3: &str = "// v3marker\nuniform float time;\n\nvec4 render(vec2 pos) {\n    return vec4(0.1, 0.2, 0.3, 1.0);\n}\n";
+
+/// Find the shader node's asset editor tab anywhere in the editor DTO tree
+/// (root node tabs or child-node projections).
+fn find_asset_editor(view: &UiStudioView) -> crate::UiAssetEditorTab {
+    let editor = view
+        .panes
+        .iter()
+        .find_map(|pane| match &pane.body {
+            UiViewContent::ProjectEditor(editor) => Some(editor),
+            _ => None,
+        })
+        .expect("project editor pane");
+
+    fn in_children(children: &[crate::UiNodeChild]) -> Option<crate::UiAssetEditorTab> {
+        children.iter().find_map(|child| {
+            child
+                .editor
+                .clone()
+                .or_else(|| in_children(&child.children))
+        })
+    }
+
+    editor
+        .nodes
+        .iter()
+        .find_map(|node| {
+            node.tabs
+                .iter()
+                .find_map(|tab| match &tab.body {
+                    UiNodeTabBody::AssetEditor(editor) => Some(editor.clone()),
+                    _ => None,
+                })
+                .or_else(|| in_children(&node.children))
+        })
+        .expect("shader node exposes an asset editor tab")
+}
+
+fn asset_e2e_server() -> LpServer {
+    let output_provider = Rc::new(RefCell::new(MemoryOutputProvider::new()));
+    let graphics: Arc<dyn LpGraphics> = Arc::new(Graphics::new());
+    let mut server = LpServer::new(
+        output_provider,
+        Box::new(LpFsMemory::new()),
+        "projects".as_path(),
+        None,
+        None,
+        graphics,
+    );
+
+    // The shader publishes to the visual bus and a fixture consumes it —
+    // without a consumer the shader never renders, so it would never
+    // (re)compile and compile errors would never surface.
+    let shader_json = r#"{
+  "kind": "Shader",
+  "source": "shader.glsl",
+  "bindings": {
+    "output": { "target": "bus#visual.out" }
+  },
+  "consumed": {
+    "time": {
+      "kind": "value",
+      "value": "f32",
+      "default": 0,
+      "label": "Time",
+      "description": "Project clock time in seconds"
+    }
+  }
+}"#;
+    let fixture_json = r#"{
+  "kind": "Fixture",
+  "render_size": { "width": 4, "height": 4 },
+  "bindings": {
+    "input": { "source": "bus#visual.out" },
+    "output": { "target": "bus#control.out" }
+  }
+}"#;
+    // The output node drives the demand chain (output pulls control →
+    // fixture pulls visual → shader renders/compiles); the memory output
+    // provider accepts any authored endpoint.
+    let output_json = r#"{
+  "kind": "Output",
+  "endpoint": "ws281x:rmt:D10",
+  "bindings": {
+    "input": { "source": "bus#control.out" }
+  }
+}"#;
+    let project_json = r#"{
+  "kind": "Project",
+  "format": 1,
+  "nodes": {
+    "clock": { "ref": "./clock.json" },
+    "shader": { "ref": "./shader.json" },
+    "pixels": { "ref": "./fixture.json" },
+    "output": { "ref": "./output.json" }
+  }
+}"#;
+    let clock_json = r#"{
+  "kind": "Clock",
+  "controls": {
+    "running": true,
+    "rate": 1.0
+  }
+}"#;
+    let files: &[(&str, &str)] = &[
+        ("project.json", project_json),
+        ("clock.json", clock_json),
+        ("shader.json", shader_json),
+        ("fixture.json", fixture_json),
+        ("output.json", output_json),
+        ("shader.glsl", ASSET_SHADER_V1),
+    ];
+    for (name, body) in files {
+        server
+            .base_fs_mut()
+            .write_file(format!("{PROJECT_DIR}/{name}").as_path(), body.as_bytes())
+            .expect("write project file");
+    }
+    server
+        .load_project(PROJECT_DIR.as_path())
+        .expect("load asset-e2e project");
+    server.advance_frame(16).expect("tick");
+    server
+}
+
 const PROJECT_DIR: &str = "/projects/edit-e2e";
 
 /// A real server with a loaded clock + fixture project (no shader, so the

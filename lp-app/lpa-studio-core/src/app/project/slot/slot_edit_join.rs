@@ -7,8 +7,12 @@ use lpc_model::LpValue;
 // distinct from the client's `crate::SlotEditOp` action enum.
 use lpc_model::SlotEditOp;
 use lpc_model::slot::SlotPersistence;
+use lpc_model::{ArtifactLocation, AssetBodyOverlay};
 
-use crate::{DirtySummary, PendingEdit, PendingEditPhase, ProjectNodeAddress, ProjectSlotAddress};
+use crate::{
+    DirtySummary, PendingAssetEdit, PendingEdit, PendingEditPhase, ProjectNodeAddress,
+    ProjectSlotAddress,
+};
 
 /// Per-address edit state consulted while projecting config-slot DTOs.
 ///
@@ -43,6 +47,62 @@ pub(in crate::app::project) struct SlotEditJoin<'a> {
     /// (`lpc_model::resolve_slot_policy`), which works on data-less paths —
     /// so a removed entry with no surviving row still classifies correctly.
     persistence: BTreeMap<ProjectSlotAddress, SlotPersistence>,
+    /// Asset body edits (buffer + overlay `ArtifactOverlay::Asset` mirror),
+    /// keyed per owning node so [`Self::dirty_summary_for_node`] counts them
+    /// alongside slot entries. See [`AssetEditKey`].
+    assets: BTreeMap<AssetEditKey, AssetEditState<'a>>,
+}
+
+/// Join key for one asset body edit entry: the owning node when the edit's
+/// artifact reverse-maps to one through the def-artifact map (an artifact
+/// shared by several node uses joins once per use, like slot overlay edits),
+/// else `None`. Unmapped entries — asset files that are not themselves a def
+/// artifact, e.g. a shader's `.glsl` — have no node to count under, so they
+/// aggregate at the project level instead
+/// ([`SlotEditJoin::unmapped_asset_dirty_summary`]).
+pub(in crate::app::project) type AssetEditKey = (Option<ProjectNodeAddress>, ArtifactLocation);
+
+/// Join state for one [`AssetEditKey`]: the un-acked buffered edit and/or the
+/// overlay mirror's acked body edit (the buffered state wins classification
+/// on overlap, matching [`DirtySummary::for_asset`]'s join order).
+#[derive(Default)]
+pub(in crate::app::project) struct AssetEditState<'a> {
+    /// The buffered (un-acked) asset edit, if any — carries the failure
+    /// reason for `Failed` entries.
+    pub pending: Option<&'a PendingAssetEdit>,
+    /// The server-acked body edit from the overlay mirror, if any.
+    pub acked: Option<&'a AssetBodyOverlay>,
+}
+
+/// One asset edit entry of the join ([`SlotEditJoin::asset_entries`]): the
+/// unit asset [`DirtySummary`] counting and the save panel's asset rows are
+/// built from, mirroring [`SlotEditEntry`] for slots.
+pub(in crate::app::project) struct AssetEditEntry<'a> {
+    /// The owning node, when the artifact reverse-maps to one.
+    pub node: Option<&'a ProjectNodeAddress>,
+    /// The artifact whose body is edited.
+    pub artifact: &'a ArtifactLocation,
+    /// The buffered (un-acked) edit at the artifact, if any.
+    pub pending: Option<&'a PendingAssetEdit>,
+    /// The server-acked body edit from the overlay mirror, if any.
+    pub acked: Option<&'a AssetBodyOverlay>,
+    /// The entry's [`DirtySummary`] classification (exactly one bucket).
+    pub summary: DirtySummary,
+}
+
+impl AssetEditEntry<'_> {
+    /// The replacement body's byte length for display: the buffered bytes
+    /// when an entry is buffered, else the acked `ReplaceBody` bytes. `None`
+    /// for an acked `Delete`, which carries no body.
+    pub fn body_len(&self) -> Option<usize> {
+        if let Some(pending) = self.pending {
+            return Some(pending.bytes.len());
+        }
+        match self.acked? {
+            AssetBodyOverlay::ReplaceBody(bytes) => Some(bytes.len()),
+            AssetBodyOverlay::Delete => None,
+        }
+    }
 }
 
 /// Aggregate state of the edits strictly under a composite slot's path,
@@ -91,6 +151,7 @@ impl<'a> SlotEditJoin<'a> {
             buffer: None,
             overlay: BTreeMap::new(),
             persistence: BTreeMap::new(),
+            assets: BTreeMap::new(),
         }
     }
 
@@ -103,7 +164,18 @@ impl<'a> SlotEditJoin<'a> {
             buffer: Some(buffer),
             overlay,
             persistence,
+            assets: BTreeMap::new(),
         }
+    }
+
+    /// Attach the asset body edit side of the join (buffer + overlay asset
+    /// mirror, keyed per owning node by `ProjectController`).
+    pub(in crate::app::project) fn with_assets(
+        mut self,
+        assets: BTreeMap<AssetEditKey, AssetEditState<'a>>,
+    ) -> Self {
+        self.assets = assets;
+        self
     }
 
     /// The buffered (un-acked) edit for `address`, if any.
@@ -232,9 +304,55 @@ impl<'a> SlotEditJoin<'a> {
         &self,
         node: &ProjectNodeAddress,
     ) -> DirtySummary {
-        self.entries()
+        let slots: DirtySummary = self
+            .entries()
             .into_iter()
             .filter(|entry| entry.address.node == *node)
+            .map(|entry| entry.summary)
+            .sum();
+        let assets: DirtySummary = self
+            .asset_entries()
+            .into_iter()
+            .filter(|entry| entry.node == Some(node))
+            .map(|entry| entry.summary)
+            .sum();
+        slots + assets
+    }
+
+    /// Enumerate every asset body edit entry in the join — the single
+    /// enumeration asset [`DirtySummary`] counting and the save panel's
+    /// asset rows consume, mirroring [`Self::entries`] for slots.
+    ///
+    /// Stable order: node-mapped entries first (by node, then artifact),
+    /// then unmapped entries (by artifact) — matching the save panel's
+    /// convention of appending artifact-labeled rows after node rows.
+    pub(in crate::app::project) fn asset_entries(&self) -> Vec<AssetEditEntry<'_>> {
+        let mut entries: Vec<AssetEditEntry<'_>> = self
+            .assets
+            .iter()
+            .map(|((node, artifact), state)| AssetEditEntry {
+                node: node.as_ref(),
+                artifact,
+                pending: state.pending,
+                acked: state.acked,
+                summary: DirtySummary::for_asset(state.pending, state.acked.is_some()),
+            })
+            .collect();
+        // `Option` orders `None` first; a stable sort moves unmapped entries
+        // to the back while keeping the map's (node, artifact) order intact.
+        entries.sort_by_key(|entry| entry.node.is_none());
+        entries
+    }
+
+    /// The [`DirtySummary`] of every asset edit entry whose artifact maps to
+    /// **no** synced node. These entries appear in the save panel with the
+    /// artifact path as their label and must still count toward the project
+    /// totals (an asset edit is persisted-class: it enables Save), so
+    /// project-level aggregation adds this to the per-node sums.
+    pub(in crate::app::project) fn unmapped_asset_dirty_summary(&self) -> DirtySummary {
+        self.asset_entries()
+            .into_iter()
+            .filter(|entry| entry.node.is_none())
             .map(|entry| entry.summary)
             .sum()
     }
@@ -389,5 +507,93 @@ mod tests {
         assert!(!join.overlay_dirty(&at("entries[a]")));
         assert_eq!(join.state_under(&at("entries")), None);
         assert!(join.dirty_summary_for_node(&node()).is_clean());
+        assert!(join.asset_entries().is_empty());
+        assert!(join.unmapped_asset_dirty_summary().is_clean());
+    }
+
+    #[test]
+    fn mapped_asset_edits_count_for_their_node_and_unmapped_for_the_project() {
+        let buffer = BTreeMap::new();
+        let glsl = ArtifactLocation::file("/shader.glsl");
+        let def = ArtifactLocation::file("/orbit.shader.json");
+        let mapped_body = AssetBodyOverlay::ReplaceBody(b"void main() {}".to_vec());
+        let unmapped_body = AssetBodyOverlay::ReplaceBody(b"vec3 c;".to_vec());
+        let assets = BTreeMap::from([
+            (
+                (Some(node()), def.clone()),
+                AssetEditState {
+                    pending: None,
+                    acked: Some(&mapped_body),
+                },
+            ),
+            (
+                (None, glsl.clone()),
+                AssetEditState {
+                    pending: None,
+                    acked: Some(&unmapped_body),
+                },
+            ),
+        ]);
+        let join = SlotEditJoin::new(&buffer, BTreeMap::new(), BTreeMap::new()).with_assets(assets);
+
+        let one_persisted = DirtySummary {
+            persisted: 1,
+            transient: 0,
+            failed: 0,
+        };
+        assert_eq!(join.dirty_summary_for_node(&node()), one_persisted);
+        assert_eq!(join.unmapped_asset_dirty_summary(), one_persisted);
+        assert!(
+            join.dirty_summary_for_node(
+                &ProjectNodeAddress::parse("/demo.project/clock.clock").unwrap()
+            )
+            .is_clean(),
+            "asset entries only count for their owning node"
+        );
+
+        // Stable order: mapped entries first, unmapped appended.
+        let entries = join.asset_entries();
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].artifact, &def);
+        assert_eq!(entries[0].node, Some(&node()));
+        assert_eq!(entries[0].body_len(), Some(14));
+        assert_eq!(entries[1].artifact, &glsl);
+        assert_eq!(entries[1].node, None);
+        assert_eq!(entries[1].body_len(), Some(7));
+    }
+
+    #[test]
+    fn failed_buffered_asset_edit_outranks_the_acked_overlay_state() {
+        let buffer = BTreeMap::new();
+        let glsl = ArtifactLocation::file("/shader.glsl");
+        let acked = AssetBodyOverlay::ReplaceBody(b"old".to_vec());
+        let failed = PendingAssetEdit::failed(b"too big".to_vec(), "shader too large");
+        let assets = BTreeMap::from([(
+            (Some(node()), glsl.clone()),
+            AssetEditState {
+                pending: Some(&failed),
+                acked: Some(&acked),
+            },
+        )]);
+        let join = SlotEditJoin::new(&buffer, BTreeMap::new(), BTreeMap::new()).with_assets(assets);
+
+        assert_eq!(
+            join.dirty_summary_for_node(&node()),
+            DirtySummary {
+                persisted: 0,
+                transient: 0,
+                failed: 1,
+            }
+        );
+        let entries = join.asset_entries();
+        assert_eq!(
+            entries[0].body_len(),
+            Some(7),
+            "the buffered bytes win the display length on overlap"
+        );
+        assert_eq!(
+            entries[0].pending.unwrap().failure_reason(),
+            Some("shader too large")
+        );
     }
 }

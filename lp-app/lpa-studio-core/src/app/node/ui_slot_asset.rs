@@ -51,11 +51,26 @@ impl UiSlotAsset {
 
     /// Compact editor label for slot detail popups.
     pub fn editor_label(&self) -> &'static str {
-        match self.editor {
-            UiAssetEditorKind::Text => "Text asset",
-            UiAssetEditorKind::Glsl => "GLSL asset",
-            UiAssetEditorKind::Svg => "SVG asset",
-            UiAssetEditorKind::Binary => "Binary asset",
+        self.editor.editor_label()
+    }
+}
+
+impl UiAssetEditorKind {
+    /// Whether Studio offers the node-pane Editor tab for assets of this
+    /// kind. This is the data-driven gate for the tab: GLSL only today;
+    /// `Svg` joins in M3 by extending this match (nothing else keys on the
+    /// kind).
+    pub fn supports_editor_tab(self) -> bool {
+        matches!(self, Self::Glsl)
+    }
+
+    /// Compact editor label shared by slot detail popups and the editor tab.
+    pub fn editor_label(self) -> &'static str {
+        match self {
+            Self::Text => "Text asset",
+            Self::Glsl => "GLSL asset",
+            Self::Svg => "SVG asset",
+            Self::Binary => "Binary asset",
         }
     }
 }

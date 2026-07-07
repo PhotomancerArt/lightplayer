@@ -18,7 +18,9 @@ pub struct UiPendingEdit {
     /// path here instead of being dropped from the list.
     pub node_label: String,
     /// Human-readable slot path within the node's def root (the root name
-    /// itself for root-path edits).
+    /// itself for root-path edits). Asset body rows
+    /// ([`UiPendingEditKind::AssetBody`]) carry the artifact file path here
+    /// instead — they are file rows, not slot rows.
     pub slot_path_display: String,
     /// What the edit does, with the display string for assigned values.
     pub kind: UiPendingEditKind,
@@ -54,6 +56,14 @@ pub enum UiPendingEditKind {
         from: String,
         /// Display string of the key the entry moves to.
         to: String,
+    },
+    /// A whole asset body replacement (`SetArtifactBody`), listed as a file
+    /// row: the entry's path display is the artifact path, and its revert
+    /// dispatches `AssetEditOp::Revert` (`ClearArtifact`).
+    AssetBody {
+        /// Human-readable size of the replacement body (e.g. "3.2 KB"), or
+        /// "deleted" for a pending body deletion.
+        detail: String,
     },
 }
 

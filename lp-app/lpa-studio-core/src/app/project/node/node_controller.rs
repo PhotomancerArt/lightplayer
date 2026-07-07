@@ -8,9 +8,10 @@ use crate::app::project::slot::SlotEditJoin;
 use crate::{
     ControllerId, DirtySummary, NodeRevertOp, ProjectController, ProjectEditorOp,
     ProjectEditorTarget, ProjectNodeAddress, ProjectNodeStatusTone, ProjectNodeStatusView,
-    ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController, UiAction, UiNodeChild,
-    UiNodeHeader, UiNodeSection, UiNodeTab, UiNodeView, UiPaneAction, UiProductPreview,
-    UiProductRef, UiProductTrackingState, UiStatus,
+    ProjectNodeTarget, ProjectSlotAddress, ProjectSlotRoot, SlotController, UiAction,
+    UiAssetEditorTab, UiConfigSlotBody, UiNodeChild, UiNodeHeader, UiNodeSection, UiNodeTab,
+    UiNodeTabBody, UiNodeView, UiPaneAction, UiProductPreview, UiProductRef,
+    UiProductTrackingState, UiSlotAsset, UiStatus,
 };
 
 /// User/controller intent for product subscriptions owned by a node.
@@ -160,7 +161,7 @@ impl NodeController {
 
     /// Project this controller and its slot controllers into the node-pane DTO.
     pub fn ui_node(&self) -> UiNodeView {
-        self.ui_node_with_product_previews(&|_| None, &SlotEditJoin::empty())
+        self.ui_node_with_product_previews(&|_| None, &SlotEditJoin::empty(), &|_, _| None)
     }
 
     /// Project this controller into a node-pane DTO with product preview state.
@@ -168,12 +169,18 @@ impl NodeController {
     /// The dirty aggregation rides the same walk: child DTOs are built first
     /// (each carrying its subtree summary), and the header summary merges the
     /// node's own slot summaries with the children's — no second traversal.
+    ///
+    /// `asset_editor` resolves the node's editable text asset (if any) into
+    /// the editor-tab DTO; like `product_preview` it closes over project
+    /// state the node walk has no access to (def artifacts, edit buffer,
+    /// content caches).
     pub(in crate::app::project) fn ui_node_with_product_previews(
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
         edits: &SlotEditJoin<'_>,
+        asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditorTab>,
     ) -> UiNodeView {
-        let children = self.ui_children_with_product_previews(product_preview, edits);
+        let children = self.ui_children_with_product_previews(product_preview, edits, asset_editor);
         let dirty = self.own_slots_dirty_summary(edits)
             + children
                 .iter()
@@ -187,15 +194,16 @@ impl NodeController {
         .with_status(self.ui_status())
         .with_dirty(dirty);
 
-        let mut view = UiNodeView::new(
-            header,
-            vec![UiNodeTab::main(
-                self.ui_sections_with_product_previews(product_preview, edits),
-            )],
-        )
-        .with_node_id(self.address.to_string())
-        .with_header_actions(node_header_actions(&self.address, &dirty))
-        .with_children(children);
+        let sections = self.ui_sections_with_product_previews(product_preview, edits);
+        let editor = editor_tab_asset(&sections).and_then(|asset| asset_editor(self, asset));
+        let mut tabs = vec![UiNodeTab::main(sections)];
+        if let Some(editor) = editor {
+            tabs.push(UiNodeTab::new("editor", UiNodeTabBody::AssetEditor(editor)));
+        }
+        let mut view = UiNodeView::new(header, tabs)
+            .with_node_id(self.address.to_string())
+            .with_header_actions(node_header_actions(&self.address, &dirty))
+            .with_children(children);
         view.focused = self.state.focused;
         view.action = Some(node_focus_action(self));
         view.collapsed = self.state.collapsed;
@@ -368,6 +376,7 @@ impl NodeController {
         &self,
         product_preview: &impl Fn(&UiProductRef) -> Option<UiProductPreview>,
         edits: &SlotEditJoin<'_>,
+        asset_editor: &impl Fn(&NodeController, &UiSlotAsset) -> Option<UiAssetEditorTab>,
     ) -> Vec<UiNodeChild> {
         self.children
             .iter()
@@ -382,7 +391,10 @@ impl NodeController {
                 view.focused = child.state.focused;
                 view.action = Some(node_focus_action(child));
                 view.sections = child.ui_sections_with_product_previews(product_preview, edits);
-                view.children = child.ui_children_with_product_previews(product_preview, edits);
+                view.editor =
+                    editor_tab_asset(&view.sections).and_then(|asset| asset_editor(child, asset));
+                view.children =
+                    child.ui_children_with_product_previews(product_preview, edits, asset_editor);
                 view.dirty = child.own_slots_dirty_summary(edits)
                     + view
                         .children
@@ -459,6 +471,27 @@ fn node_focus_action(node: &NodeController) -> UiAction {
     )
     .with_label(format!("Focus {}", node.label()))
     .with_summary(format!("Focus node {}.", node.address()))
+}
+
+/// The node's editor-tab candidate: the first asset slot row whose kind
+/// passes the editor-tab gate and whose source is a file reference (inline
+/// assets carry their content on the row and have no artifact to edit).
+/// Scanning the just-built sections keeps the tab keyed to exactly what the
+/// asset rows show.
+fn editor_tab_asset(sections: &[UiNodeSection]) -> Option<&UiSlotAsset> {
+    sections.iter().find_map(|section| {
+        let UiNodeSection::AssetSlots(slots) = section else {
+            return None;
+        };
+        slots.iter().find_map(|slot| match &slot.body {
+            UiConfigSlotBody::Asset(asset)
+                if asset.editor.supports_editor_tab() && asset.content.is_none() =>
+            {
+                Some(asset)
+            }
+            _ => None,
+        })
+    })
 }
 
 enum RootSlotApply<'a> {

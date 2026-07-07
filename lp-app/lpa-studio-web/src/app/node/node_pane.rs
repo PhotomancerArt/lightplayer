@@ -6,9 +6,27 @@ use lpa_studio_core::{
 use crate::app::affordance::affordance_pane_tone;
 use crate::app::layout::{PaneChrome, PaneCollapse, StudioPane};
 use crate::app::node::{
-    NodeChildren, NodeDetailPopover, ProducedProducts, ProducedValues, SlotRecordEditor,
+    AssetEditorTab, NodeChildren, NodeDetailPopover, ProducedProducts, ProducedValues,
+    SlotRecordEditor,
 };
 use crate::base::{StudioIcon, StudioIconName};
+
+/// Which node tab is active. `Editor` addresses the asset editor tab by
+/// role rather than position, so the "open in editor" affordance on asset
+/// slot rows needs no index bookkeeping; it resolves to the tab's current
+/// position at render (falling back to the main tab when no editor exists).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum NodePaneTab {
+    Index(usize),
+    Editor,
+}
+
+/// Context provided by every [`NodePane`] so descendants rendered inside its
+/// body (currently the asset slot row's "open in editor" affordance) can
+/// switch the pane's active tab without prop-threading through the generic
+/// slot editors.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) struct NodePaneActiveTab(pub(crate) Signal<NodePaneTab>);
 
 /// Which surface treatment a dirty node pane wears — the D7 tint experiment,
 /// story-selectable pending the user's P5 pick.
@@ -28,10 +46,35 @@ pub fn NodePane(
     view: UiNodeView,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
     #[props(default)] dirty_tint: NodeDirtyTint,
+    /// Tab active on first render (stories; defaults to the main tab).
+    #[props(default)]
+    initial_tab: Option<usize>,
+    /// Seed the editor-local "modified" chrome on first render (stories
+    /// only — a live editor derives it from typing).
+    #[props(default = false)]
+    initially_editor_modified: bool,
 ) -> Element {
-    let mut active_tab = use_signal(|| 0_usize);
+    let mut active_tab = use_signal(|| NodePaneTab::Index(initial_tab.unwrap_or(0)));
+    use_context_provider(|| NodePaneActiveTab(active_tab));
     let mut collapsed = use_signal(|| view.collapsed);
-    let active_index = active_tab().min(view.tabs.len().saturating_sub(1));
+    // Editor-local state for the asset editor tab (see `AssetEditorTab`'s
+    // module docs): the pane owns it because the Apply header action needs
+    // the current text and modified flag while rendering the header.
+    let editor_text = use_signal(String::new);
+    let editor_modified = use_signal(|| initially_editor_modified);
+    let editor_index = view
+        .tabs
+        .iter()
+        .position(|tab| matches!(tab.body, UiNodeTabBody::AssetEditor(_)));
+    let editor_tab = view.tabs.iter().find_map(|tab| match &tab.body {
+        UiNodeTabBody::AssetEditor(editor) => Some(editor.clone()),
+        _ => None,
+    });
+    let active_index = match active_tab() {
+        NodePaneTab::Index(index) => index.min(view.tabs.len().saturating_sub(1)),
+        NodePaneTab::Editor => editor_index.unwrap_or(0),
+    };
+    let editor_active = editor_index == Some(active_index);
     let active_body = view.tabs.get(active_index).map(|tab| tab.body.clone());
     let dirty = view.header.dirty;
     // P6 affordance model: the header carries no count chips — the merged
@@ -50,6 +93,14 @@ pub fn NodePane(
     let select_action = view.action.clone();
     let focus_action = view.action.clone();
     let issues = view.issues.clone();
+    // The Apply action joins the header's controller-produced actions only
+    // while the editor tab is active; it is assembled through the DTO's
+    // helper so icon/label/enablement rules stay in core — the web only
+    // threads in the two editor-local inputs (text, modified).
+    let mut header_actions = view.header_actions.clone();
+    if editor_active && let Some(editor) = &editor_tab {
+        header_actions.push(editor.apply_pane_action(&editor_text(), editor_modified()));
+    }
 
     rsx! {
         div { class: "tw:grid tw:min-w-0 tw:gap-3",
@@ -72,14 +123,14 @@ pub fn NodePane(
                     },
                     title,
                     chrome,
-                    actions: view.header_actions.clone(),
+                    actions: header_actions,
                     on_action,
                     trailing: rsx! {
                         if tabs.len() > 1 {
                             NodeTabs {
                                 tabs: tabs.clone(),
                                 active_index,
-                                on_select: move |index| active_tab.set(index),
+                                on_select: move |index| active_tab.set(NodePaneTab::Index(index)),
                             }
                         }
                     },
@@ -116,9 +167,27 @@ pub fn NodePane(
                                     }
                                 }
                             },
+                            // Rendered by the persistent editor block below
+                            // (kept mounted across tab switches so unapplied
+                            // editor text survives).
+                            Some(UiNodeTabBody::AssetEditor(_)) => rsx! {},
                             None => rsx! {
                                 p { class: "tw:m-0 tw:text-sm tw:text-subtle-foreground", "No node tabs are available." }
                             },
+                        }
+                        // The editor tab body mounts once and hides when
+                        // inactive: the CodeMirror leaf owns unapplied user
+                        // text, and unmounting it on a tab switch would
+                        // destroy that text.
+                        if let Some(editor) = editor_tab {
+                            div { class: if editor_active { "tw:-mx-4 tw:-mb-4 tw:grid tw:min-w-0" } else { "tw:hidden" },
+                                AssetEditorTab {
+                                    tab: editor,
+                                    text: editor_text,
+                                    modified: editor_modified,
+                                    on_action,
+                                }
+                            }
                         }
                     },
                 }

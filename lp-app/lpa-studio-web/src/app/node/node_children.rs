@@ -1,5 +1,5 @@
 use dioxus::prelude::*;
-use lpa_studio_core::{UiAction, UiNodeChild, UiNodeHeader, UiNodeTab, UiNodeView};
+use lpa_studio_core::{UiAction, UiNodeChild, UiNodeHeader, UiNodeTab, UiNodeTabBody, UiNodeView};
 
 use crate::app::node::{NodeDirtyTint, NodePane};
 
@@ -37,7 +37,11 @@ fn child_node_view(child: UiNodeChild) -> UiNodeView {
     } else {
         header
     };
-    let mut view = UiNodeView::new(header, vec![UiNodeTab::main(child.sections)])
+    let mut tabs = vec![UiNodeTab::main(child.sections)];
+    if let Some(editor) = child.editor {
+        tabs.push(UiNodeTab::new("editor", UiNodeTabBody::AssetEditor(editor)));
+    }
+    let mut view = UiNodeView::new(header, tabs)
         .with_node_id(format!("child:{}", child.label))
         .with_header_actions(child.header_actions)
         .with_children(child.children);

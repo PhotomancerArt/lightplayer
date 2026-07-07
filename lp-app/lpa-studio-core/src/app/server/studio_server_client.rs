@@ -78,13 +78,28 @@ impl StudioServerClient {
             .project_inventory_read(handle)
             .await
             .map_err(map_client_error)?;
+        // The demo's display identity (`DEMO_PROJECT_ID`) is not its server
+        // filesystem path — resolve the real path by handle so server-root
+        // file reads (asset editor base bodies) can target it.
+        let loaded = self
+            .client
+            .project_list_loaded()
+            .await
+            .map_err(map_client_error)?;
+        let fs_root = loaded
+            .value
+            .iter()
+            .find(|project| project.handle == handle)
+            .map(|project| project.path.clone());
         let mut logs = map_client_events(deploy.events);
         logs.extend(map_client_events(inventory.events));
+        logs.extend(map_client_events(loaded.events));
         logs.extend(self.take_pending_logs());
 
         Ok(LoadedDemoProject {
             project_id: DEMO_PROJECT_ID.to_string(),
             handle_id: handle.id(),
+            fs_root,
             inventory: ProjectInventorySummary::from(&inventory.value),
             node_def_artifacts: node_def_artifacts(&inventory.value),
             logs,
@@ -99,6 +114,10 @@ impl StudioServerClient {
 pub struct LoadedDemoProject {
     pub project_id: String,
     pub handle_id: u32,
+    /// The project's server filesystem root (from the loaded-projects list;
+    /// `None` if the deployed handle was unexpectedly absent from it).
+    /// Server-root file reads (asset base bodies) resolve against this.
+    pub fs_root: Option<lpc_model::LpPathBuf>,
     pub inventory: ProjectInventorySummary,
     /// Runtime node id → containing def artifact, from the connect-time
     /// inventory read. Wire mutations target `(ArtifactLocation, SlotPath)`,
@@ -115,6 +134,9 @@ pub struct LoadedProjectCatalog {
 pub struct LoadedRunningProject {
     pub project_id: String,
     pub handle_id: u32,
+    /// The project's server filesystem root. Catalog choices are built from
+    /// the wire `LoadedProject.path`, so the connect id doubles as the path.
+    pub fs_root: lpc_model::LpPathBuf,
     pub inventory: ProjectInventorySummary,
     /// Runtime node id → containing def artifact (see
     /// [`LoadedDemoProject::node_def_artifacts`]).
@@ -146,6 +168,12 @@ pub struct StudioOverlayMutation {
 pub struct StudioOverlayCommit {
     pub result: CommitResult,
     pub overlay_revision: Revision,
+    pub logs: Vec<UiLogDraft>,
+}
+
+/// A file body read through the server filesystem (`FsRequest::Read`).
+pub struct StudioFsRead {
+    pub data: Vec<u8>,
     pub logs: Vec<UiLogDraft>,
 }
 
@@ -196,6 +224,7 @@ impl StudioServerClient {
             .borrow_mut()
             .extend(map_client_events(inventory.events));
         Ok(LoadedRunningProject {
+            fs_root: lpc_model::LpPathBuf::from(choice.project_id.as_str()),
             project_id: choice.project_id,
             handle_id: choice.handle_id,
             inventory: ProjectInventorySummary::from(&inventory.value),
@@ -261,6 +290,19 @@ impl StudioServerClient {
         Ok(StudioOverlayMutation {
             result: response.value.result,
             overlay_revision: response.value.overlay_revision,
+            logs,
+        })
+    }
+
+    /// Read a file body through the server filesystem (`FsRequest::Read`) —
+    /// the base-body fetch for asset editor content
+    /// (`ProjectController::asset_content`).
+    pub async fn fs_read(&mut self, path: &lpc_model::LpPath) -> Result<StudioFsRead, UiError> {
+        let read = self.client.fs_read(path).await.map_err(map_client_error)?;
+        let mut logs = map_client_events(read.events);
+        logs.extend(self.take_pending_logs());
+        Ok(StudioFsRead {
+            data: read.value,
             logs,
         })
     }
