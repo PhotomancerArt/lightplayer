@@ -8,7 +8,7 @@ use crate::app::layout::{PaneChrome, PaneCollapse, StudioPane};
 use crate::app::node::{
     NodeChildren, NodeDetailPopover, ProducedProducts, ProducedValues, SlotRecordEditor,
 };
-use crate::base::{StudioIcon, StudioIconName};
+use crate::base::{StudioIcon, node_kind_icon};
 
 /// Which surface treatment a dirty node pane wears — the D7 tint experiment,
 /// story-selectable pending the user's P5 pick.
@@ -53,6 +53,7 @@ pub fn NodePane(
     let tabs = view.tabs.clone();
     let focused = view.focused;
     let select_action = view.action.clone();
+    let select_kind = view.header.kind.clone();
     let focus_action = view.action.clone();
     let issues = view.issues.clone();
 
@@ -71,6 +72,7 @@ pub fn NodePane(
                             NodeSelectButton {
                                 action,
                                 focused,
+                                kind: select_kind,
                                 on_action,
                             }
                         }
@@ -156,18 +158,19 @@ pub fn NodePane(
 fn NodeSelectButton(
     action: UiAction,
     focused: bool,
+    /// The node's kind label — its glyph doubles as the select control.
+    kind: String,
     #[props(default)] on_action: Option<EventHandler<UiAction>>,
 ) -> Element {
-    let (class, icon, label) = if focused {
+    let icon = node_kind_icon(&kind);
+    let (class, label) = if focused {
         (
             "tw:inline-flex tw:h-8 tw:w-8 tw:shrink-0 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-selection-border tw:bg-transparent tw:p-0 tw:text-strong-foreground",
-            StudioIconName::NodeSelected,
             "Node is selected; probes follow this node",
         )
     } else {
         (
             "tw:inline-flex tw:h-8 tw:w-8 tw:shrink-0 tw:items-center tw:justify-center tw:rounded-full tw:border tw:border-border-subtle tw:bg-transparent tw:p-0 tw:text-subtle-foreground tw:hover:border-accent-border tw:hover:text-accent",
-            StudioIconName::NodeSelect,
             "Select this node so probes follow it",
         )
     };
